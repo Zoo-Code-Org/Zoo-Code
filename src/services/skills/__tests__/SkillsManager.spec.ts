@@ -616,6 +616,446 @@ Instructions here...`
 			expect(skills[0].source).toBe("global")
 		})
 
+		it("should discover skills from symlinked container directory with multiple skills", async () => {
+			// Simulates: ln -s ../../REPO/skills .roo/skills/
+			// This creates .roo/skills/skills -> ../../REPO/skills
+			// Inside REPO/skills/ there are skill subdirectories: skill-a/ and skill-b/
+			const containerDir = p(globalSkillsDir, "skills") // the symlinked container
+			const repoSkillsDir = p("/repo", "skills") // the actual target
+			const skillADir = p(repoSkillsDir, "skill-a")
+			const skillAMd = p(skillADir, "SKILL.md")
+			const skillBDir = p(repoSkillsDir, "skill-b")
+			const skillBMd = p(skillBDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir || dir === containerDir
+			})
+
+			mockRealpath.mockImplementation(async (pathArg: string) => {
+				if (pathArg === globalSkillsDir) return globalSkillsDir
+				if (pathArg === containerDir) return repoSkillsDir
+				return pathArg
+			})
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["skills"] // the symlinked container entry
+				if (dir === repoSkillsDir) return ["skill-a", "skill-b"]
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerDir) return { isDirectory: () => true }
+				if (pathArg === skillADir) return { isDirectory: () => true }
+				if (pathArg === skillBDir) return { isDirectory: () => true }
+				throw new Error("Not found")
+			})
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				return file === skillAMd || file === skillBMd
+			})
+
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === skillAMd) {
+					return `---
+name: skill-a
+description: First skill from symlinked repo
+---
+
+# Skill A`
+				}
+				if (file === skillBMd) {
+					return `---
+name: skill-b
+description: Second skill from symlinked repo
+---
+
+# Skill B`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(2)
+			const names = skills.map((s) => s.name).sort()
+			expect(names).toEqual(["skill-a", "skill-b"])
+			expect(skills.every((s) => s.source === "global")).toBe(true)
+		})
+
+		it("should discover skills from nested container directories", async () => {
+			// Simulates a deeper nesting: .roo/skills/repo/category/my-skill/SKILL.md
+			const repoDir = p(globalSkillsDir, "repo")
+			const categoryDir = p(repoDir, "category")
+			const skillDir = p(categoryDir, "nested-skill")
+			const skillMd = p(skillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return [globalSkillsDir, repoDir, categoryDir].includes(dir)
+			})
+
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["repo"]
+				if (dir === repoDir) return ["category"]
+				if (dir === categoryDir) return ["nested-skill"]
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if ([repoDir, categoryDir, skillDir].includes(pathArg)) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				return file === skillMd
+			})
+
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === skillMd) {
+					return `---
+name: nested-skill
+description: A deeply nested skill
+---
+
+# Nested Skill`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(1)
+			expect(skills[0].name).toBe("nested-skill")
+		})
+
+		it.each([
+			["nested container listed first", ["a-repo", "my-skill"]],
+			["direct-root skill listed first", ["my-skill", "z-repo"]],
+		])(
+			"should prefer a direct-root skill over a nested skill with the same identity (%s)",
+			async (_label, rootEntries) => {
+				// Layout within one root:
+				//   skills/my-skill/SKILL.md          (direct-root, depth 0)
+				//   skills/<repo>/my-skill/SKILL.md   (nested, depth 1)
+				// Both share name/source/mode key. The direct-root skill must win
+				// regardless of the order the filesystem returns entries in.
+				const containerName = rootEntries.find((e) => e !== "my-skill")!
+				const containerDir = p(globalSkillsDir, containerName)
+				const directSkillDir = p(globalSkillsDir, "my-skill")
+				const directSkillMd = p(directSkillDir, "SKILL.md")
+				const nestedSkillDir = p(containerDir, "my-skill")
+				const nestedSkillMd = p(nestedSkillDir, "SKILL.md")
+
+				mockDirectoryExists.mockImplementation(async (dir: string) => {
+					return dir === globalSkillsDir || dir === containerDir
+				})
+
+				mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+
+				mockReaddir.mockImplementation(async (dir: string) => {
+					if (dir === globalSkillsDir) return rootEntries
+					if (dir === containerDir) return ["my-skill"]
+					return []
+				})
+
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if ([containerDir, directSkillDir, nestedSkillDir].includes(pathArg)) {
+						return { isDirectory: () => true }
+					}
+					throw new Error("Not found")
+				})
+
+				mockFileExists.mockImplementation(async (file: string) => {
+					return file === directSkillMd || file === nestedSkillMd
+				})
+
+				mockReadFile.mockImplementation(async (file: string) => {
+					if (file === directSkillMd || file === nestedSkillMd) {
+						return `---
+name: my-skill
+description: ${file === directSkillMd ? "Direct" : "Nested"} skill
+---
+
+# My Skill`
+					}
+					throw new Error("File not found")
+				})
+
+				const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+				await skillsManager.discoverSkills()
+
+				const skills = skillsManager.getAllSkills()
+				expect(skills).toHaveLength(1)
+				expect(skills[0].path).toBe(directSkillMd)
+				expect(skills[0].description).toBe("Direct skill")
+				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("is shadowed by"))
+
+				warnSpy.mockRestore()
+			},
+		)
+
+		it("should stop scanning at max depth to prevent circular symlinks", async () => {
+			// Simulate a directory structure that goes deeper than MAX_SCAN_DEPTH (5)
+			// Each level is a directory without SKILL.md, forcing recursion
+			const levels: string[] = [globalSkillsDir]
+			for (let i = 0; i < 8; i++) {
+				levels.push(p(levels[levels.length - 1], `level-${i}`))
+			}
+			// Put a skill at the deepest level (beyond max depth)
+			const deepSkillDir = p(levels[levels.length - 1], "deep-skill")
+			const deepSkillMd = p(deepSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return levels.includes(dir)
+			})
+
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				const idx = levels.indexOf(dir)
+				if (idx >= 0 && idx < levels.length - 1) {
+					// Return the next level directory name
+					const nextLevel = levels[idx + 1]
+					return [path.basename(nextLevel)]
+				}
+				if (dir === levels[levels.length - 1]) {
+					return ["deep-skill"]
+				}
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (levels.includes(pathArg) || pathArg === deepSkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				return file === deepSkillMd
+			})
+
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === deepSkillMd) {
+					return `---
+name: deep-skill
+description: A skill too deep to find
+---
+
+# Deep Skill`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			// The skill should NOT be found because it's beyond max depth
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(0)
+		})
+
+		it("should discover a skill in a container scanned at the inclusive max depth boundary", async () => {
+			// The top-level skills directory is scanned at depth 0. Each nested
+			// container without a SKILL.md increments the depth. A container that
+			// is scanned at depth === MAX_SCAN_DEPTH (5) should still be scanned
+			// (the guard only stops when depth > MAX_SCAN_DEPTH), so a skill
+			// inside it must be discovered. This distinguishes the inclusive
+			// depth-5 boundary from a `>=` guard that would stop one level early.
+			//
+			// Layout (depth at which scanSkillsDirectory runs on each dir):
+			//   globalSkillsDir (0) -> level-0 (1) -> level-1 (2) -> level-2 (3)
+			//     -> level-3 (4) -> level-4 (5) -> boundary-skill/SKILL.md
+			const containers: string[] = [globalSkillsDir]
+			for (let i = 0; i < 5; i++) {
+				containers.push(p(containers[containers.length - 1], `level-${i}`))
+			}
+			// containers[5] (level-4) is the container scanned at depth 5.
+			const boundarySkillDir = p(containers[containers.length - 1], "boundary-skill")
+			const boundarySkillMd = p(boundarySkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return containers.includes(dir)
+			})
+
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				const idx = containers.indexOf(dir)
+				if (idx >= 0 && idx < containers.length - 1) {
+					return [path.basename(containers[idx + 1])]
+				}
+				if (dir === containers[containers.length - 1]) {
+					return ["boundary-skill"]
+				}
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (containers.includes(pathArg) || pathArg === boundarySkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				return file === boundarySkillMd
+			})
+
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === boundarySkillMd) {
+					return `---
+name: boundary-skill
+description: A skill located exactly at the max scan depth boundary
+---
+
+# Boundary Skill`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			// The skill IS found because its container is scanned at depth === 5,
+			// which is within the inclusive limit.
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(1)
+			expect(skills[0].name).toBe("boundary-skill")
+		})
+
+		it("should not scan the same real directory twice within a single scan", async () => {
+			// A container holds two entries whose symlinks resolve (via realpath)
+			// to the same real directory. The scanner should only scan that real
+			// directory once, so its single skill is discovered exactly once and
+			// readdir is not invoked repeatedly for the deduplicated real path.
+			const containerDir = p(globalSkillsDir, "repo-skills")
+			const linkA = p(containerDir, "link-a")
+			const linkB = p(containerDir, "link-b")
+			const sharedRealDir = p(containerDir, "shared-container")
+			const sharedSkillDir = p(sharedRealDir, "shared-skill")
+			const sharedSkillMd = p(sharedSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return (
+					dir === globalSkillsDir ||
+					dir === containerDir ||
+					dir === linkA ||
+					dir === linkB ||
+					dir === sharedRealDir
+				)
+			})
+
+			// Both link-a and link-b resolve to the same shared real directory.
+			mockRealpath.mockImplementation(async (pathArg: string) => {
+				if (pathArg === linkA || pathArg === linkB) return sharedRealDir
+				return pathArg
+			})
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["repo-skills"]
+				if (dir === containerDir) return ["link-a", "link-b"]
+				if (dir === sharedRealDir) return ["shared-skill"]
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (
+					pathArg === containerDir ||
+					pathArg === linkA ||
+					pathArg === linkB ||
+					pathArg === sharedSkillDir
+				) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				return file === sharedSkillMd
+			})
+
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === sharedSkillMd) {
+					return `---
+name: shared-skill
+description: A skill reachable through two symlinks to the same directory
+---
+
+# Shared Skill`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(1)
+			expect(skills[0].name).toBe("shared-skill")
+
+			// The shared real directory should only be read once despite being
+			// reachable through two different symlinks.
+			const sharedReaddirCalls = mockReaddir.mock.calls.filter((call) => call[0] === sharedRealDir)
+			expect(sharedReaddirCalls).toHaveLength(1)
+		})
+
+		it("should handle broken symlinks in container directories gracefully", async () => {
+			// Simulate a container directory with a broken symlink entry
+			const containerDir = p(globalSkillsDir, "repo-skills")
+			const brokenDir = p(containerDir, "broken-link")
+			const validSkillDir = p(containerDir, "valid-skill")
+			const validSkillMd = p(validSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir || dir === containerDir
+			})
+
+			mockRealpath.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerDir) return containerDir
+				return pathArg
+			})
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["repo-skills"]
+				if (dir === containerDir) return ["broken-link", "valid-skill"]
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === p(globalSkillsDir, "repo-skills")) return { isDirectory: () => true }
+				if (pathArg === brokenDir) throw new Error("ENOENT: no such file or directory")
+				if (pathArg === validSkillDir) return { isDirectory: () => true }
+				throw new Error("Not found")
+			})
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				return file === validSkillMd
+			})
+
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === validSkillMd) {
+					return `---
+name: valid-skill
+description: A valid skill next to a broken symlink
+---
+
+# Valid Skill`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			// Should still find the valid skill despite the broken symlink
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(1)
+			expect(skills[0].name).toBe("valid-skill")
+		})
+
 		it("should discover skills from global .agents directory", async () => {
 			const agentSkillDir = p(globalAgentsSkillsDir, "agent-skill")
 			const agentSkillMd = p(agentSkillDir, "SKILL.md")
@@ -1297,6 +1737,66 @@ Instructions`)
 				"already exists",
 			)
 		})
+
+		it("should reject a name already discovered in a nested container", async () => {
+			// A skill with the same name was discovered inside a symlinked container
+			// (e.g., skills/repo/my-skill/SKILL.md). createSkill must reject the
+			// collision instead of creating a second skill that shares the same
+			// name/source/mode key, which would let scan order decide the winner.
+			const containerDir = p(globalSkillsDir, "repo")
+			const nestedSkillDir = p(containerDir, "my-skill")
+			const nestedSkillMd = p(nestedSkillDir, "SKILL.md")
+			// The direct-root location createSkill would write to.
+			const directSkillMd = p(globalSkillsDir, "my-skill", "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir || dir === containerDir
+			})
+
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["repo"]
+				if (dir === containerDir) return ["my-skill"]
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerDir || pathArg === nestedSkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				// The nested skill has a SKILL.md so it is discovered as a skill.
+				if (file === nestedSkillMd) return true
+				// The direct-root target does NOT exist on disk, so the on-disk
+				// check alone would not catch the collision.
+				if (file === directSkillMd) return false
+				return false
+			})
+
+			mockReadFile.mockResolvedValue(`---
+name: my-skill
+description: A nested skill
+---
+Instructions`)
+
+			await skillsManager.discoverSkills()
+
+			// Confirm the nested skill was discovered at its container path.
+			const discovered = skillsManager.getSkill("my-skill", "global")
+			expect(discovered).toBeDefined()
+			expect(discovered?.path).toBe(nestedSkillMd)
+
+			await expect(skillsManager.createSkill("my-skill", "global", "Description")).rejects.toThrow(
+				"already exists",
+			)
+
+			// The skill was never written because the collision was rejected.
+			expect(mockWriteFile).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("deleteSkill", () => {
@@ -1754,6 +2254,66 @@ Instructions`)
 
 			// Verify directory was NOT cleaned up (still has other skills)
 			expect(mockRmdir).not.toHaveBeenCalled()
+		})
+
+		it("should move a nested skill from its discovered path", async () => {
+			// The skill was discovered nested inside a symlinked container
+			// (e.g., skills/repo/my-skill/SKILL.md). moveSkill must rename from the
+			// discovered path, not a rebuilt skills/my-skill path that does not exist.
+			const containerDir = p(globalSkillsDir, "repo")
+			const nestedSkillDir = p(containerDir, "my-skill")
+			const nestedSkillMd = p(nestedSkillDir, "SKILL.md")
+			const destSkillsDir = p(GLOBAL_ROO_DIR, "skills-code")
+			const destDir = p(destSkillsDir, "my-skill")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir || dir === containerDir
+			})
+
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["repo"]
+				if (dir === containerDir) return ["my-skill"]
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerDir || pathArg === nestedSkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				if (file === nestedSkillMd) return true
+				// Skill does not exist at destination
+				if (file === p(destDir, "SKILL.md")) return false
+				return false
+			})
+
+			mockReadFile.mockResolvedValue(`---
+name: my-skill
+description: A nested skill
+---
+Instructions`)
+
+			mockMkdir.mockResolvedValue(undefined)
+			mockRename.mockResolvedValue(undefined)
+			mockRmdir.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+
+			// Confirm the skill was discovered at its nested container path.
+			const discovered = skillsManager.getSkill("my-skill", "global")
+			expect(discovered?.path).toBe(nestedSkillMd)
+
+			// Move with an undefined current mode; the source must come from the
+			// discovered path (nestedSkillDir), not skills/my-skill.
+			await skillsManager.moveSkill("my-skill", "global", undefined, "code")
+
+			expect(mockMkdir).toHaveBeenCalledWith(destSkillsDir, { recursive: true })
+			expect(mockRename).toHaveBeenCalledWith(nestedSkillDir, destDir)
 		})
 	})
 })

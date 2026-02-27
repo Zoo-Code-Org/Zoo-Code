@@ -45,17 +45,60 @@ export class SkillsManager {
 		const skillsDirs = await this.getSkillsDirectories()
 
 		for (const { dir, source, mode } of skillsDirs) {
-			await this.scanSkillsDirectory(dir, source, mode)
+			// Use a fresh visited set and claim map for each top-level scan so
+			// traversal is deduplicated within a single root without sharing
+			// state across different source or mode roots. Later roots still
+			// override earlier ones (e.g. .roo over .agents) via Map.set.
+			await this.scanSkillsDirectory(dir, source, mode, 0, new Set<string>(), new Map<string, number>())
 		}
 	}
 
 	/**
+	 * Maximum depth for recursive scanning of skill container directories.
+	 * Prevents infinite loops from circular symlinks.
+	 */
+	private static readonly MAX_SCAN_DEPTH = 5
+
+	/**
 	 * Scan a skills directory for skill subdirectories.
-	 * Handles two symlink cases:
+	 * Handles symlink cases:
 	 * 1. The skills directory itself is a symlink (resolved by directoryExists using realpath)
 	 * 2. Individual skill subdirectories are symlinks
+	 * 3. Symlinked container directories that contain skill subdirectories (e.g., ln -s ../../repo/skills .roo/skills/)
+	 *
+	 * A directory that contains a SKILL.md is treated as a skill. A directory
+	 * without one is treated as a container and scanned recursively (up to
+	 * {@link MAX_SCAN_DEPTH}) so skills nested inside a symlinked container are
+	 * discovered.
+	 *
+	 * Symlinks are followed even when they point outside the configured skills
+	 * root. This is not a security concern: the user controls these directories
+	 * and could place skill files there directly, so a symlink is just a
+	 * convenient way to share a skills repo (the point of issue #1842).
+	 *
+	 * Within a single root, skills sharing the same identity (name, source and
+	 * mode key) are resolved deterministically rather than by scan order: the
+	 * shallowest skill wins (so a direct-root skill beats one nested inside a
+	 * container), and ties at the same depth are broken by sorted entry name
+	 * (first wins).
+	 *
+	 * @param visited - Real paths already scanned in this run, used to avoid
+	 *   redundant work and infinite loops from circular symlinks.
+	 * @param claimedDepths - Skill keys discovered in this root, mapped to the
+	 *   depth at which they were found.
 	 */
-	private async scanSkillsDirectory(dirPath: string, source: "global" | "project", mode?: string): Promise<void> {
+	private async scanSkillsDirectory(
+	 dirPath: string,
+	 source: "global" | "project",
+	 mode: string | undefined,
+	 depth: number = 0,
+	 visited: Set<string> = new Set<string>(),
+	 claimedDepths: Map<string, number> = new Map<string, number>(),
+	): Promise<void> {
+		if (depth > SkillsManager.MAX_SCAN_DEPTH) {
+			return
+		}
+
 		if (!(await directoryExists(dirPath))) {
 			return
 		}
@@ -64,8 +107,16 @@ export class SkillsManager {
 			// Get the real path (resolves if dirPath is a symlink)
 			const realDirPath = await fs.realpath(dirPath)
 
-			// Read directory entries
-			const entries = await fs.readdir(realDirPath)
+			// Skip directories we've already visited (by real path) to avoid
+			// redundant scanning and infinite loops from circular symlinks.
+			if (visited.has(realDirPath)) {
+				return
+			}
+			visited.add(realDirPath)
+
+			// Read directory entries, sorted so same-depth collisions resolve
+			// deterministically regardless of filesystem ordering.
+			const entries = [...(await fs.readdir(realDirPath))].sort()
 
 			for (const entryName of entries) {
 				const entryPath = path.join(realDirPath, entryName)
@@ -74,8 +125,17 @@ export class SkillsManager {
 				const stats = await fs.stat(entryPath).catch(() => null)
 				if (!stats?.isDirectory()) continue
 
-				// Load skill metadata - the skill name comes from the entry name (symlink name if symlinked)
-				await this.loadSkillMetadata(entryPath, source, mode, entryName)
+				// Check if this directory contains a SKILL.md (i.e., it's a skill directory)
+				const skillMdPath = path.join(entryPath, "SKILL.md")
+				if (await fileExists(skillMdPath)) {
+					// Load skill metadata - the skill name comes from the entry name (symlink name if symlinked)
+					await this.loadSkillMetadata(entryPath, source, mode, entryName, depth, claimedDepths)
+				} else {
+					// No SKILL.md found - this might be a container directory (e.g., a symlinked repo of skills)
+					// Recursively scan it for skill subdirectories, sharing the same
+					// visited set so traversal stays deduplicated and bounded.
+					await this.scanSkillsDirectory(entryPath, source, mode, depth + 1, visited, claimedDepths)
+				}
 			}
 		} catch {
 			// Directory doesn't exist or can't be read - this is fine
@@ -88,12 +148,16 @@ export class SkillsManager {
 	 * @param source - Whether this is a global or project skill
 	 * @param mode - The mode this skill is specific to (undefined for generic skills)
 	 * @param skillName - The skill name (from symlink name if symlinked, otherwise from directory name)
+	 * @param depth - Depth within the current root at which the skill was found
+	 * @param claimedDepths - Skill keys already discovered in the current root and their depths
 	 */
 	private async loadSkillMetadata(
-		skillDir: string,
-		source: "global" | "project",
-		mode?: string,
-		skillName?: string,
+	 skillDir: string,
+	 source: "global" | "project",
+	 mode: string | undefined,
+	 skillName?: string,
+	 depth: number = 0,
+	 claimedDepths?: Map<string, number>,
 	): Promise<void> {
 		const skillMdPath = path.join(skillDir, "SKILL.md")
 		if (!(await fileExists(skillMdPath))) return
@@ -161,6 +225,23 @@ export class SkillsManager {
 			// For backward compatibility, use first mode slug or undefined for the key
 			const primaryMode = modeSlugs?.[0]
 			const skillKey = this.getSkillKey(effectiveSkillName, source, primaryMode)
+
+			// Within the same root, a skill already found at the same or a
+			// shallower depth takes priority (direct-root beats nested).
+			const claimedDepth = claimedDepths?.get(skillKey)
+			if (claimedDepth !== undefined) {
+				const existingPath = this.skills.get(skillKey)?.path ?? "another skill"
+				if (claimedDepth <= depth) {
+					console.warn(
+						`Skill "${effectiveSkillName}" at ${skillMdPath} is shadowed by ${existingPath} with the same identity`,
+					)
+					return
+				}
+				console.warn(
+					`Skill "${effectiveSkillName}" at ${existingPath} is shadowed by ${skillMdPath} with the same identity`,
+				)
+			}
+			claimedDepths?.set(skillKey, depth)
 
 			this.skills.set(skillKey, {
 				name: effectiveSkillName,
@@ -380,9 +461,19 @@ export class SkillsManager {
 		const skillDir = path.join(skillsDir, name)
 		const skillMdPath = path.join(skillDir, "SKILL.md")
 
-		// Check if skill already exists
+		// Check if skill already exists on disk at the direct location
 		if (await fileExists(skillMdPath)) {
 			throw new Error(t("skills:errors.already_exists", { name, path: skillMdPath }))
+		}
+
+		// Check if a skill with the same identity was already discovered elsewhere
+		// (e.g., nested inside a symlinked container directory). Creating another
+		// skill with the same name/source/mode key would let scan order decide
+		// which skill remains available, so reject the collision explicitly.
+		const primaryMode = modeSlugs?.[0]
+		const existingSkill = this.getSkill(name, source, primaryMode)
+		if (existingSkill) {
+			throw new Error(t("skills:errors.already_exists", { name, path: existingSkill.path }))
 		}
 
 		// Create the skill directory
@@ -484,10 +575,13 @@ Add your skill instructions here.
 			baseDir = path.join(provider.cwd, ".roo")
 		}
 
-		// Determine source and destination directories
-		const sourceDirName = currentMode ? `skills-${currentMode}` : "skills"
+		// Determine source and destination directories.
+		// Derive the source directory from the discovered skill's path rather than
+		// rebuilding it from the name, so nested skills (e.g., discovered inside a
+		// symlinked container like skills/repo/my-skill) move from their actual
+		// on-disk location instead of a non-existent skills/my-skill path.
 		const destDirName = newMode ? `skills-${newMode}` : "skills"
-		const sourceDir = path.join(baseDir, sourceDirName, name)
+		const sourceDir = path.dirname(skill.path)
 		const destSkillsDir = path.join(baseDir, destDirName)
 		const destDir = path.join(destSkillsDir, name)
 		const destSkillMdPath = path.join(destDir, "SKILL.md")
@@ -503,8 +597,10 @@ Add your skill instructions here.
 		// Move the skill directory
 		await fs.rename(sourceDir, destDir)
 
-		// Clean up empty source skills directory
-		const sourceSkillsDir = path.join(baseDir, sourceDirName)
+		// Clean up the now-empty source parent directory (e.g., the emptied
+		// skills-{mode} directory). Uses the actual parent of the moved skill so
+		// nested skills clean up their real container rather than an assumed path.
+		const sourceSkillsDir = path.dirname(sourceDir)
 		try {
 			const entries = await fs.readdir(sourceSkillsDir)
 			if (entries.length === 0) {
