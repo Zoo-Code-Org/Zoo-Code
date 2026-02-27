@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Bidang wajib tidak ada: skillName atau source",
 		"manager_unavailable": "Manajer skill tidak tersedia",
 		"missing_delete_fields": "Bidang wajib tidak ada: skillName atau source",
-		"skill_not_found": "Skill \"{{name}}\" tidak ditemukan"
+		"skill_not_found": "Skill \"{{name}}\" tidak ditemukan",
+		"container_skill_read_only": "Skill \"{{name}}\" berasal dari folder skill yang di-symlink ({{path}}) dan tidak bisa dipindahkan atau dihapus di sini. Ubah di folder sumbernya.",
+		"symlink_escapes_skill": "Tidak bisa memindahkan skill: symlink {{link}} mengarah ke luar folder skill dan akan rusak di lokasi baru."
 	}
 }

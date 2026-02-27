@@ -2,6 +2,7 @@ import * as path from "path"
 
 // Use vi.hoisted to ensure mocks are available during hoisting
 const {
+	mockReadlink,
 	mockStat,
 	mockReadFile,
 	mockReaddir,
@@ -14,7 +15,12 @@ const {
 	mockRm,
 	mockRename,
 	mockRmdir,
+	mockCp,
+	mockLstat,
 } = vi.hoisted(() => ({
+	mockReadlink: vi.fn(),
+	mockCp: vi.fn(),
+	mockLstat: vi.fn(),
 	mockStat: vi.fn(),
 	mockReadFile: vi.fn(),
 	mockReaddir: vi.fn(),
@@ -38,6 +44,13 @@ const SHARED_DIR = process.platform === "win32" ? "C:\\shared\\skills" : "/share
 // Helper to create platform-appropriate paths
 const p = (...segments: string[]) => path.join(...segments)
 
+// Make fs.lstat report the given paths as symlinks
+const mockSymlinks = (...paths: string[]) =>
+	mockLstat.mockImplementation(async (pathArg: string) => ({ isSymbolicLink: () => paths.includes(pathArg) }))
+
+// A real not-found error, as fs throws for a missing path or broken symlink
+const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+
 // Mock fs/promises module
 vi.mock("fs/promises", () => ({
 	default: {
@@ -50,6 +63,9 @@ vi.mock("fs/promises", () => ({
 		rm: mockRm,
 		rename: mockRename,
 		rmdir: mockRmdir,
+		cp: mockCp,
+		lstat: mockLstat,
+		readlink: mockReadlink,
 	},
 	stat: mockStat,
 	readFile: mockReadFile,
@@ -60,6 +76,9 @@ vi.mock("fs/promises", () => ({
 	rm: mockRm,
 	rename: mockRename,
 	rmdir: mockRmdir,
+	cp: mockCp,
+	lstat: mockLstat,
+	readlink: mockReadlink,
 }))
 
 // Mock os module
@@ -109,6 +128,7 @@ vi.mock("../../../i18n", () => ({
 	},
 }))
 
+import * as vscode from "vscode"
 import { SkillsManager } from "../SkillsManager"
 import { ClineProvider } from "../../../core/webview/ClineProvider"
 
@@ -130,6 +150,7 @@ describe("SkillsManager", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockLstat.mockReset()
 		mockHomedir.mockReturnValue(HOME_DIR)
 
 		// Create mock provider
@@ -614,6 +635,840 @@ Instructions here...`
 			expect(skills).toHaveLength(1)
 			expect(skills[0].name).toBe("my-alias")
 			expect(skills[0].source).toBe("global")
+		})
+
+		it("should discover skills from symlinked container directory with multiple skills", async () => {
+			// .roo/skills/skills -> /repo/skills, containing skill-a/ and skill-b/
+			const containerDir = p(globalSkillsDir, "skills") // the symlinked container
+			const repoSkillsDir = p("/repo", "skills") // the actual target
+			const skillADir = p(repoSkillsDir, "skill-a")
+			const skillAMd = p(skillADir, "SKILL.md")
+			const skillBDir = p(repoSkillsDir, "skill-b")
+			const skillBMd = p(skillBDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => {
+				return dir === globalSkillsDir || dir === containerDir
+			})
+
+			mockRealpath.mockImplementation(async (pathArg: string) => {
+				if (pathArg === globalSkillsDir) return globalSkillsDir
+				if (pathArg === containerDir) return repoSkillsDir
+				return pathArg
+			})
+
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["skills"] // the symlinked container entry
+				if (dir === repoSkillsDir) return ["skill-a", "skill-b"]
+				return []
+			})
+
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerDir) return { isDirectory: () => true }
+				if (pathArg === skillADir) return { isDirectory: () => true }
+				if (pathArg === skillBDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockSymlinks(containerDir)
+
+			mockFileExists.mockImplementation(async (file: string) => {
+				return file === skillAMd || file === skillBMd
+			})
+
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === skillAMd) {
+					return `---
+name: skill-a
+description: First skill from symlinked repo
+---
+
+# Skill A`
+				}
+				if (file === skillBMd) {
+					return `---
+name: skill-b
+description: Second skill from symlinked repo
+---
+
+# Skill B`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(2)
+			const names = skills.map((s) => s.name).sort()
+			expect(names).toEqual(["skill-a", "skill-b"])
+			expect(skills.every((s) => s.source === "global")).toBe(true)
+		})
+
+		it("should not treat ordinary (non-symlinked) nested directories as containers", async () => {
+			// .roo/skills/group/nested-skill/SKILL.md where "group" is a real directory
+			const groupDir = p(globalSkillsDir, "group")
+			const skillDir = p(groupDir, "nested-skill")
+			const skillMd = p(skillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["group"]
+				if (dir === groupDir) return ["nested-skill"]
+				return []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === groupDir || pathArg === skillDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue(`---
+name: nested-skill
+description: A nested skill
+---
+Instructions`)
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getAllSkills()).toHaveLength(0)
+			expect(mockReaddir).not.toHaveBeenCalledWith(groupDir)
+		})
+
+		it("should only scan one level into a symlinked container", async () => {
+			// .roo/skills/shared -> /shared/skills, which contains another container "inner"
+			const containerEntry = p(globalSkillsDir, "shared")
+			const innerDir = p(SHARED_DIR, "inner")
+			const innerSkillDir = p(innerDir, "inner-skill")
+			const innerSkillMd = p(innerSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) =>
+				pathArg === containerEntry ? SHARED_DIR : pathArg,
+			)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["shared"]
+				if (dir === SHARED_DIR) return ["inner"]
+				if (dir === innerDir) return ["inner-skill"]
+				return []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if ([containerEntry, innerDir, innerSkillDir].includes(pathArg)) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockSymlinks(containerEntry, innerDir)
+			mockFileExists.mockImplementation(async (file: string) => file === innerSkillMd)
+			mockReadFile.mockResolvedValue(`---
+name: inner-skill
+description: Too deep
+---
+Instructions`)
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getAllSkills()).toHaveLength(0)
+			expect(mockReaddir).not.toHaveBeenCalledWith(innerDir)
+		})
+
+		it.each([
+			["container listed first", ["a-repo", "my-skill"]],
+			["direct skill listed first", ["my-skill", "z-repo"]],
+		])(
+			"should prefer a direct skill over a container skill with the same identity (%s)",
+			async (_label, rootEntries) => {
+				const containerName = rootEntries.find((e) => e !== "my-skill")!
+				const containerDir = p(globalSkillsDir, containerName)
+				const directSkillDir = p(globalSkillsDir, "my-skill")
+				const directSkillMd = p(directSkillDir, "SKILL.md")
+				const nestedSkillDir = p(containerDir, "my-skill")
+				const nestedSkillMd = p(nestedSkillDir, "SKILL.md")
+
+				mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+				mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+				mockReaddir.mockImplementation(async (dir: string) => {
+					if (dir === globalSkillsDir) return rootEntries
+					if (dir === containerDir) return ["my-skill"]
+					return []
+				})
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if ([containerDir, directSkillDir, nestedSkillDir].includes(pathArg)) {
+						return { isDirectory: () => true }
+					}
+					throw enoent()
+				})
+				mockSymlinks(containerDir)
+				mockFileExists.mockImplementation(
+					async (file: string) => file === directSkillMd || file === nestedSkillMd,
+				)
+				mockReadFile.mockImplementation(async (file: string) => {
+					if (file === directSkillMd || file === nestedSkillMd) {
+						return `---
+name: my-skill
+description: ${file === directSkillMd ? "Direct" : "Nested"} skill
+---
+
+# My Skill`
+					}
+					throw new Error("File not found")
+				})
+
+				await skillsManager.discoverSkills()
+
+				const skills = skillsManager.getAllSkills()
+				expect(skills).toHaveLength(1)
+				expect(skills[0].path).toBe(directSkillMd)
+				expect(skills[0].description).toBe("Direct skill")
+			},
+		)
+
+		it("should prefer the alphabetically first container on collisions regardless of readdir order", async () => {
+			const aRepoDir = p(globalSkillsDir, "a-repo")
+			const bRepoDir = p(globalSkillsDir, "b-repo")
+			const aSkillDir = p(aRepoDir, "my-skill")
+			const bSkillDir = p(bRepoDir, "my-skill")
+			const aSkillMd = p(aSkillDir, "SKILL.md")
+			const bSkillMd = p(bSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["b-repo", "a-repo"]
+				if (dir === aRepoDir || dir === bRepoDir) return ["my-skill"]
+				return []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if ([aRepoDir, bRepoDir, aSkillDir, bSkillDir].includes(pathArg)) {
+					return { isDirectory: () => true }
+				}
+				throw enoent()
+			})
+			mockSymlinks(aRepoDir, bRepoDir)
+			mockFileExists.mockImplementation(async (file: string) => file === aSkillMd || file === bSkillMd)
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === aSkillMd || file === bSkillMd) {
+					return `---
+name: my-skill
+description: ${file === aSkillMd ? "From a-repo" : "From b-repo"}
+---
+
+# My Skill`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(1)
+			expect(skills[0].path).toBe(aSkillMd)
+		})
+
+		it("should handle broken symlinks in container directories gracefully", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const containerDir = p(globalSkillsDir, "repo-skills")
+			const brokenDir = p(containerDir, "broken-link")
+			const validSkillDir = p(containerDir, "valid-skill")
+			const validSkillMd = p(validSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["repo-skills"]
+				if (dir === containerDir) return ["broken-link", "valid-skill"]
+				return []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerDir) return { isDirectory: () => true }
+				if (pathArg === brokenDir) throw enoent()
+				if (pathArg === validSkillDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockSymlinks(containerDir)
+			mockFileExists.mockImplementation(async (file: string) => file === validSkillMd)
+			mockReadFile.mockResolvedValue(`---
+name: valid-skill
+description: A valid skill next to a broken symlink
+---
+
+# Valid Skill`)
+
+			await skillsManager.discoverSkills()
+
+			const skills = skillsManager.getAllSkills()
+			expect(skills).toHaveLength(1)
+			expect(skills[0].name).toBe("valid-skill")
+			expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+				expect.stringContaining(`Failed to stat skill entry ${brokenDir}`),
+				expect.anything(),
+			)
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("should log an error when a symlinked container cannot be read", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const containerDir = p(globalSkillsDir, "repo-skills")
+			const readError = new Error("EACCES: permission denied")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["repo-skills"]
+				if (dir === containerDir) throw readError
+				return []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockSymlinks(containerDir)
+			mockFileExists.mockResolvedValue(false)
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getAllSkills()).toHaveLength(0)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(`Failed to scan skills container ${containerDir}:`, readError)
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("should log an error when checking for a symlink fails", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const entryDir = p(globalSkillsDir, "not-a-skill")
+			const lstatError = new Error("EIO: i/o error")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["not-a-skill"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === entryDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockLstat.mockRejectedValue(lstatError)
+			mockFileExists.mockResolvedValue(false)
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getAllSkills()).toHaveLength(0)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				`Failed to check whether ${entryDir} is a symlink:`,
+				lstatError,
+			)
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("should keep scanning the other entries when checking one SKILL.md fails unexpectedly", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			// "a-broken" sorts first, so before the fix its error dropped every later entry
+			const brokenDir = p(globalSkillsDir, "a-broken")
+			const brokenMd = p(brokenDir, "SKILL.md")
+			const validDir = p(globalSkillsDir, "b-valid")
+			const validMd = p(validDir, "SKILL.md")
+			const accessError = Object.assign(new Error("permission denied"), { code: "EACCES" })
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) =>
+				dir === globalSkillsDir ? ["a-broken", "b-valid"] : [],
+			)
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === brokenDir || pathArg === validDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => {
+				if (file === brokenMd) throw accessError
+				return file === validMd
+			})
+			mockReadFile.mockResolvedValue(`---
+name: b-valid
+description: Still discovered
+---
+Instructions`)
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getAllSkills().map((s) => s.name)).toEqual(["b-valid"])
+			expect(consoleErrorSpy).toHaveBeenCalledWith(`Failed to check skill entry ${brokenDir}:`, accessError)
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("should skip hidden entries such as the staging and trash dirs of a move", async () => {
+			const hiddenNames = [".my-skill.moving-1-2-abc", ".my-skill.removing-1-2-abc"]
+			const hiddenDirs = hiddenNames.map((name) => p(globalSkillsDir, name))
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? hiddenNames : []))
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockResolvedValue(true)
+			mockReadFile.mockResolvedValue(`---
+name: my-skill
+description: A hidden copy
+---
+Instructions`)
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getAllSkills()).toHaveLength(0)
+			for (const dir of hiddenDirs) {
+				expect(mockStat).not.toHaveBeenCalledWith(dir)
+			}
+		})
+
+		it("should run discovery passes one at a time", async () => {
+			let active = 0
+			let maxActive = 0
+			let releaseFirst: () => void = () => {}
+			const firstBlocked = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			let calls = 0
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir !== globalSkillsDir) return []
+				active++
+				maxActive = Math.max(maxActive, active)
+				calls++
+				if (calls === 1) await firstBlocked
+				active--
+				return []
+			})
+
+			const first = skillsManager.discoverSkills()
+			const second = skillsManager.discoverSkills()
+			// Let the first pass reach the blocked readdir
+			await vi.waitFor(() => expect(calls).toBe(1))
+			releaseFirst()
+			await Promise.all([first, second])
+
+			expect(calls).toBe(2)
+			expect(maxActive).toBe(1)
+		})
+
+		it("should keep running later passes after a pass fails", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			// Reading the workspace path fails once, so the first pass rejects
+			let failNext = true
+			Object.defineProperty(mockProvider, "cwd", {
+				configurable: true,
+				get: () => {
+					if (failNext) {
+						failNext = false
+						throw new Error("boom")
+					}
+					return PROJECT_DIR
+				},
+			})
+
+			await expect(skillsManager.discoverSkills()).rejects.toThrow("boom")
+			await expect(skillsManager.discoverSkills()).resolves.toBeUndefined()
+			expect(mockDirectoryExists).toHaveBeenCalledWith(projectSkillsDir)
+		})
+
+		describe("incomplete passes", () => {
+			const containerEntry = p(globalSkillsDir, "shared")
+			const sharedSkillDir = p(SHARED_DIR, "shared-skill")
+			const sharedSkillMd = p(sharedSkillDir, "SKILL.md")
+			const directSkillDir = p(globalSkillsDir, "direct-skill")
+			const directSkillMd = p(directSkillDir, "SKILL.md")
+			const newSkillDir = p(globalSkillsDir, "new-skill")
+			const newSkillMd = p(newSkillDir, "SKILL.md")
+
+			let containerReadError: Error | undefined
+			let rootEntries: string[]
+
+			beforeEach(() => {
+				containerReadError = undefined
+				rootEntries = ["direct-skill", "shared"]
+
+				mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+				mockRealpath.mockImplementation(async (pathArg: string) =>
+					pathArg === containerEntry ? SHARED_DIR : pathArg,
+				)
+				mockReaddir.mockImplementation(async (dir: string) => {
+					if (dir === globalSkillsDir) return rootEntries
+					if (dir === SHARED_DIR) {
+						if (containerReadError) throw containerReadError
+						return ["shared-skill"]
+					}
+					return []
+				})
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if ([containerEntry, sharedSkillDir, directSkillDir, newSkillDir].includes(pathArg)) {
+						return { isDirectory: () => true }
+					}
+					throw enoent()
+				})
+				mockSymlinks(containerEntry)
+				mockFileExists.mockImplementation(async (file: string) =>
+					[sharedSkillMd, directSkillMd, newSkillMd].includes(file),
+				)
+				mockReadFile.mockImplementation(async (file: string) => {
+					const name = path.basename(path.dirname(file))
+					return `---\nname: ${name}\ndescription: ${name} description\n---\nInstructions`
+				})
+			})
+
+			const skillNames = () =>
+				skillsManager
+					.getAllSkills()
+					.map((s) => s.name)
+					.sort()
+
+			it("should keep the skills that a transient read error hid, until a complete pass", async () => {
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill", "shared-skill"])
+
+				// The container can't be read for a moment. Its skill must stay available,
+				// and must stay read-only.
+				containerReadError = Object.assign(new Error("i/o error"), { code: "EIO" })
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill", "shared-skill"])
+				await expect(skillsManager.getSkillContent("shared-skill")).resolves.toMatchObject({
+					name: "shared-skill",
+				})
+				await expect(skillsManager.deleteSkill("shared-skill", "global")).rejects.toThrow(
+					"container_skill_read_only",
+				)
+
+				// The container is really gone now, so a complete pass drops its skill
+				containerReadError = Object.assign(new Error("no such file or directory"), { code: "ENOENT" })
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill"])
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should keep a container skill whose entry can't be inspected, until a complete pass", async () => {
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill", "shared-skill"])
+
+				let statError: Error = Object.assign(new Error("i/o error"), { code: "EIO" })
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if (pathArg === sharedSkillDir) throw statError
+					if ([containerEntry, directSkillDir].includes(pathArg)) return { isDirectory: () => true }
+					throw Object.assign(new Error("no such file or directory"), { code: "ENOENT" })
+				})
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill", "shared-skill"])
+				await expect(skillsManager.deleteSkill("shared-skill", "global")).rejects.toThrow(
+					"container_skill_read_only",
+				)
+
+				// The entry is really gone now (e.g. a broken symlink), so a complete pass drops it
+				statError = Object.assign(new Error("no such file or directory"), { code: "ENOENT" })
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill"])
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should keep a skill whose SKILL.md can't be read, until a complete pass", async () => {
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill", "shared-skill"])
+
+				let skillMdError: Error = Object.assign(new Error("permission denied"), { code: "EACCES" })
+				mockFileExists.mockImplementation(async (file: string) => {
+					if (file === sharedSkillMd) throw skillMdError
+					return file === directSkillMd
+				})
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill", "shared-skill"])
+
+				// A transient readFile failure is handled the same way
+				mockFileExists.mockImplementation(async (file: string) => [sharedSkillMd, directSkillMd].includes(file))
+				mockReadFile.mockImplementation(async (file: string) => {
+					if (file === sharedSkillMd) throw Object.assign(new Error("i/o error"), { code: "EIO" })
+					const name = path.basename(path.dirname(file))
+					return `---\nname: ${name}\ndescription: ${name} description\n---\nInstructions`
+				})
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill", "shared-skill"])
+
+				// SKILL.md is really gone now, so a complete pass drops the skill
+				skillMdError = Object.assign(new Error("no such file or directory"), { code: "ENOENT" })
+				mockFileExists.mockImplementation(async (file: string) => {
+					if (file === sharedSkillMd) throw skillMdError
+					return file === directSkillMd
+				})
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["direct-skill"])
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should still publish changes found by an incomplete pass", async () => {
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await skillsManager.discoverSkills()
+
+				containerReadError = Object.assign(new Error("i/o error"), { code: "EIO" })
+				rootEntries = ["new-skill", "shared"]
+				mockReadFile.mockImplementation(async (file: string) => {
+					const name = path.basename(path.dirname(file))
+					return `---\nname: ${name}\ndescription: updated ${name}\n---\nInstructions`
+				})
+				await skillsManager.discoverSkills()
+
+				// New skills appear, and skills removed outside the failed container disappear.
+				// Kept skills keep their old metadata, since they weren't re-read.
+				expect(skillNames()).toEqual(["new-skill", "shared-skill"])
+				expect(skillsManager.getSkill("new-skill", "global")?.description).toBe("updated new-skill")
+				expect(skillsManager.getSkill("shared-skill", "global")?.description).toBe("shared-skill description")
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should keep the skills of a symlinked root that fails to resolve, until it resolves again", async () => {
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				const rootTarget = p(SHARED_DIR, "root-target")
+				const skillDir = p(rootTarget, "root-skill")
+				mockRealpath.mockImplementation(async (pathArg: string) =>
+					pathArg === globalSkillsDir ? rootTarget : pathArg,
+				)
+				mockReaddir.mockImplementation(async (dir: string) => (dir === rootTarget ? ["root-skill"] : []))
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if (pathArg === skillDir) return { isDirectory: () => true }
+					throw enoent()
+				})
+				mockFileExists.mockImplementation(async (file: string) => file === p(skillDir, "SKILL.md"))
+
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["root-skill"])
+
+				const ioError = Object.assign(new Error("i/o error"), { code: "EIO" })
+				mockDirectoryExists.mockImplementation(async (dir: string) => {
+					if (dir === globalSkillsDir) throw ioError
+					return false
+				})
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["root-skill"])
+
+				mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+				mockRealpath.mockRejectedValue(ioError)
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual(["root-skill"])
+
+				// The root is really gone now, so a pass that reads it drops the skill
+				mockDirectoryExists.mockResolvedValue(false)
+				await skillsManager.discoverSkills()
+				expect(skillNames()).toEqual([])
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should drop a deleted skill while an unrelated entry fails persistently", async () => {
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				await skillsManager.discoverSkills()
+
+				containerReadError = Object.assign(new Error("permission denied"), { code: "EACCES" })
+				mockRm.mockImplementation(async () => {
+					rootEntries = ["shared"]
+				})
+				await skillsManager.deleteSkill("direct-skill", "global")
+
+				expect(skillNames()).toEqual(["shared-skill"])
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should keep the published skills visible while a pass is running", async () => {
+				await skillsManager.discoverSkills()
+
+				let releaseScan: () => void = () => {}
+				const scanBlocked = new Promise<void>((resolve) => {
+					releaseScan = resolve
+				})
+				let blocked = false
+				mockReaddir.mockImplementation(async (dir: string) => {
+					if (dir === globalSkillsDir) {
+						blocked = true
+						await scanBlocked
+						return []
+					}
+					return []
+				})
+
+				const run = skillsManager.discoverSkills()
+				await vi.waitFor(() => expect(blocked).toBe(true))
+				expect(skillNames()).toEqual(["direct-skill", "shared-skill"])
+
+				releaseScan()
+				await run
+				expect(skillNames()).toEqual([])
+			})
+
+			it("should not publish a pass that finishes after dispose", async () => {
+				let releaseScan: () => void = () => {}
+				const scanBlocked = new Promise<void>((resolve) => {
+					releaseScan = resolve
+				})
+				let blocked = false
+				mockReaddir.mockImplementation(async (dir: string) => {
+					if (dir === globalSkillsDir) {
+						blocked = true
+						await scanBlocked
+						return rootEntries
+					}
+					return dir === SHARED_DIR ? ["shared-skill"] : []
+				})
+
+				const run = skillsManager.discoverSkills()
+				await vi.waitFor(() => expect(blocked).toBe(true))
+				await skillsManager.dispose()
+				releaseScan()
+				await run
+
+				expect(skillsManager.getAllSkills()).toEqual([])
+			})
+		})
+
+		describe("container watchers", () => {
+			const containerEntry = p(globalSkillsDir, "shared")
+
+			beforeEach(() => {
+				// Watchers are disabled under NODE_ENV=test
+				vi.stubEnv("NODE_ENV", "development")
+
+				mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+				mockRealpath.mockImplementation(async (pathArg: string) =>
+					pathArg === containerEntry ? SHARED_DIR : pathArg,
+				)
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if (pathArg === containerEntry) return { isDirectory: () => true }
+					throw enoent()
+				})
+				mockSymlinks(containerEntry)
+				mockFileExists.mockResolvedValue(false)
+			})
+
+			afterEach(() => {
+				vi.unstubAllEnvs()
+			})
+
+			const containerWatcherCalls = () =>
+				vi.mocked(vscode.RelativePattern).mock.calls.filter((call) => call[0] === SHARED_DIR)
+
+			it("should watch a discovered container's real path once and dispose it when the container is gone", async () => {
+				let linked = true
+				mockReaddir.mockImplementation(async (dir: string) => {
+					if (dir === globalSkillsDir) return linked ? ["shared"] : []
+					return []
+				})
+
+				await skillsManager.discoverSkills()
+				await skillsManager.discoverSkills()
+
+				expect(containerWatcherCalls()).toEqual([[SHARED_DIR, "{*,*/SKILL.md}"]])
+				const createWatcher = vi.mocked(vscode.workspace.createFileSystemWatcher)
+				const watcherIndex = vi
+					.mocked(vscode.RelativePattern)
+					.mock.calls.findIndex((call) => call[0] === SHARED_DIR)
+				const watcher = createWatcher.mock.results[watcherIndex].value as { dispose: ReturnType<typeof vi.fn> }
+				expect(watcher.dispose).not.toHaveBeenCalled()
+
+				linked = false
+				await skillsManager.discoverSkills()
+
+				expect(watcher.dispose).toHaveBeenCalledTimes(1)
+			})
+
+			it("should keep a container watcher when a later pass can't read the tree", async () => {
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				let readError: Error | undefined
+				mockReaddir.mockImplementation(async (dir: string) => {
+					if (dir !== globalSkillsDir) return []
+					if (readError) throw readError
+					return ["shared"]
+				})
+
+				await skillsManager.discoverSkills()
+				const watcherIndex = vi
+					.mocked(vscode.RelativePattern)
+					.mock.calls.findIndex((call) => call[0] === SHARED_DIR)
+				const watcher = vi.mocked(vscode.workspace.createFileSystemWatcher).mock.results[watcherIndex]
+					.value as { dispose: ReturnType<typeof vi.fn> }
+
+				// A transient error hides the container, so its watcher must survive
+				readError = Object.assign(new Error("i/o error"), { code: "EIO" })
+				await skillsManager.discoverSkills()
+				expect(watcher.dispose).not.toHaveBeenCalled()
+
+				// The root is really gone now, so the watcher is disposed
+				readError = Object.assign(new Error("no such file or directory"), { code: "ENOENT" })
+				await skillsManager.discoverSkills()
+				expect(watcher.dispose).toHaveBeenCalledTimes(1)
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should keep a container's skills and watcher when checking for the symlink fails unexpectedly", async () => {
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				const sharedSkillDir = p(SHARED_DIR, "shared-skill")
+				const sharedSkillMd = p(sharedSkillDir, "SKILL.md")
+				mockReaddir.mockImplementation(async (dir: string) => {
+					if (dir === globalSkillsDir) return ["shared"]
+					if (dir === SHARED_DIR) return ["shared-skill"]
+					return []
+				})
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if ([containerEntry, sharedSkillDir].includes(pathArg)) return { isDirectory: () => true }
+					throw Object.assign(new Error("no such file or directory"), { code: "ENOENT" })
+				})
+				mockFileExists.mockImplementation(async (file: string) => file === sharedSkillMd)
+				mockReadFile.mockResolvedValue(`---\nname: shared-skill\ndescription: Shared skill\n---\nInstructions`)
+
+				await skillsManager.discoverSkills()
+				expect(skillsManager.getAllSkills().map((s) => s.name)).toEqual(["shared-skill"])
+				const watcherIndex = vi
+					.mocked(vscode.RelativePattern)
+					.mock.calls.findIndex((call) => call[0] === SHARED_DIR)
+				const watcher = vi.mocked(vscode.workspace.createFileSystemWatcher).mock.results[watcherIndex]
+					.value as { dispose: ReturnType<typeof vi.fn> }
+
+				// A transient lstat error hides that the entry is a container
+				mockLstat.mockRejectedValue(Object.assign(new Error("i/o error"), { code: "EIO" }))
+				await skillsManager.discoverSkills()
+				expect(skillsManager.getAllSkills().map((s) => s.name)).toEqual(["shared-skill"])
+				expect(watcher.dispose).not.toHaveBeenCalled()
+
+				// The entry is really gone now, so a complete pass drops the skill and the watcher
+				mockLstat.mockRejectedValue(Object.assign(new Error("no such file or directory"), { code: "ENOENT" }))
+				await skillsManager.discoverSkills()
+				expect(skillsManager.getAllSkills()).toEqual([])
+				expect(watcher.dispose).toHaveBeenCalledTimes(1)
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should not rediscover skills for events on hidden staging or trash paths", async () => {
+				mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["shared"] : []))
+				await skillsManager.discoverSkills()
+
+				const watcherIndex = vi
+					.mocked(vscode.RelativePattern)
+					.mock.calls.findIndex((call) => call[0] === SHARED_DIR)
+				const watcher = vi.mocked(vscode.workspace.createFileSystemWatcher).mock.results[watcherIndex]
+					.value as { onDidCreate: ReturnType<typeof vi.fn> }
+				const onCreate = watcher.onDidCreate.mock.calls[0][0] as (uri: { fsPath: string }) => Promise<void>
+				const discoverSpy = vi.spyOn(skillsManager, "discoverSkills")
+
+				await onCreate({ fsPath: p(SHARED_DIR, ".my-skill.moving-1-2-abc") })
+				await onCreate({ fsPath: p(SHARED_DIR, ".my-skill.removing-1-2-abc", "SKILL.md") })
+				expect(discoverSpy).not.toHaveBeenCalled()
+
+				await onCreate({ fsPath: p(SHARED_DIR, "my-skill", "SKILL.md") })
+				expect(discoverSpy).toHaveBeenCalledTimes(1)
+			})
+
+			it("should dispose container watchers on dispose", async () => {
+				mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["shared"] : []))
+
+				await skillsManager.discoverSkills()
+				const watcher = vi.mocked(vscode.workspace.createFileSystemWatcher).mock.results[0].value as {
+					dispose: ReturnType<typeof vi.fn>
+				}
+
+				await skillsManager.dispose()
+
+				expect(watcher.dispose).toHaveBeenCalledTimes(1)
+			})
 		})
 
 		it("should discover skills from global .agents directory", async () => {
@@ -1297,6 +2152,36 @@ Instructions`)
 				"already exists",
 			)
 		})
+
+		it("should allow creating a .roo skill when the duplicate lives in the lower-priority .agents root", async () => {
+			const agentsSkillDir = p(globalAgentsSkillsDir, "my-skill")
+			const agentsSkillMd = p(agentsSkillDir, "SKILL.md")
+			const rooSkillMd = p(globalSkillsDir, "my-skill", "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalAgentsSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalAgentsSkillsDir ? ["my-skill"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === agentsSkillDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === agentsSkillMd)
+			mockReadFile.mockResolvedValue(`---
+name: my-skill
+description: An agents skill
+---
+Instructions`)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkill("my-skill", "global")?.path).toBe(agentsSkillMd)
+
+			const created = await skillsManager.createSkill("my-skill", "global", "Description")
+
+			expect(created).toBe(rooSkillMd)
+			expect(mockWriteFile).toHaveBeenCalledWith(rooSkillMd, expect.any(String), "utf-8")
+		})
 	})
 
 	describe("deleteSkill", () => {
@@ -1357,9 +2242,70 @@ Instructions`)
 
 			await expect(skillsManager.deleteSkill("non-existent", "global")).rejects.toThrow("not found")
 		})
+
+		it("should refuse to delete a skill from a symlinked container", async () => {
+			const containerEntry = p(globalSkillsDir, "shared")
+			const sharedSkillDir = p(SHARED_DIR, "my-skill")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) =>
+				pathArg === containerEntry ? SHARED_DIR : pathArg,
+			)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["shared"]
+				if (dir === SHARED_DIR) return ["my-skill"]
+				return []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerEntry || pathArg === sharedSkillDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockSymlinks(containerEntry)
+			mockFileExists.mockImplementation(async (file: string) => file === p(sharedSkillDir, "SKILL.md"))
+			mockReadFile.mockResolvedValue(`---
+name: my-skill
+description: A shared skill
+---
+Instructions`)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkill("my-skill", "global")).toBeDefined()
+
+			await expect(skillsManager.deleteSkill("my-skill", "global")).rejects.toThrow(
+				"skills:errors.container_skill_read_only",
+			)
+			expect(mockRm).not.toHaveBeenCalled()
+
+			// Changing its modes would rewrite the shared SKILL.md, so that is refused too
+			await expect(skillsManager.updateSkillModes("my-skill", "global", ["code"])).rejects.toThrow(
+				"skills:errors.container_skill_read_only",
+			)
+			expect(mockWriteFile).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("moveSkill", () => {
+		it("should report an unreadable source root instead of 'not found'", async () => {
+			const sourceDir = p(globalSkillsDir, "test-skill")
+			const accessError = Object.assign(new Error("permission denied"), { code: "EACCES" })
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["test-skill"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === sourceDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === p(sourceDir, "SKILL.md"))
+			mockReadFile.mockResolvedValue(`---\nname: test-skill\ndescription: A test skill\n---\nInstructions`)
+
+			await skillsManager.discoverSkills()
+			mockRealpath.mockRejectedValue(accessError)
+
+			await expect(skillsManager.moveSkill("test-skill", "global", undefined, "code")).rejects.toBe(accessError)
+			expect(mockRename).not.toHaveBeenCalled()
+		})
+
 		it("should move a skill from generic to mode-specific directory", async () => {
 			const sourceDir = p(globalSkillsDir, "test-skill")
 			const testSkillMd = p(sourceDir, "SKILL.md")
@@ -1754,6 +2700,420 @@ Instructions`)
 
 			// Verify directory was NOT cleaned up (still has other skills)
 			expect(mockRmdir).not.toHaveBeenCalled()
+		})
+
+		it("should refuse to move a skill from a symlinked container", async () => {
+			const containerDir = p(globalSkillsDir, "repo")
+			const nestedSkillDir = p(containerDir, "my-skill")
+			const nestedSkillMd = p(nestedSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalSkillsDir) return ["repo"]
+				if (dir === containerDir) return ["my-skill"]
+				return []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === containerDir || pathArg === nestedSkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw enoent()
+			})
+			mockSymlinks(containerDir)
+			mockFileExists.mockImplementation(async (file: string) => file === nestedSkillMd)
+			mockReadFile.mockResolvedValue(`---
+name: my-skill
+description: A container skill
+---
+Instructions`)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkill("my-skill", "global")?.path).toBe(nestedSkillMd)
+
+			await expect(skillsManager.moveSkill("my-skill", "global", undefined, "code")).rejects.toThrow(
+				"skills:errors.container_skill_read_only",
+			)
+			expect(mockMkdir).not.toHaveBeenCalled()
+			expect(mockRename).not.toHaveBeenCalled()
+			expect(mockCp).not.toHaveBeenCalled()
+		})
+
+		it("should refuse to move a skill that exists only under .agents", async () => {
+			const agentsSkillDir = p(globalAgentsSkillsCodeDir, "test-skill")
+			const agentsSkillMd = p(agentsSkillDir, "SKILL.md")
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalAgentsSkillsCodeDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => {
+				if (pathArg === p(GLOBAL_ROO_DIR, "skills-code")) {
+					throw Object.assign(new Error("no such file or directory"), { code: "ENOENT" })
+				}
+				return pathArg
+			})
+			mockReaddir.mockImplementation(async (dir: string) =>
+				dir === globalAgentsSkillsCodeDir ? ["test-skill"] : [],
+			)
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === agentsSkillDir) return { isDirectory: () => true }
+				throw enoent()
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === agentsSkillMd)
+			mockReadFile.mockResolvedValue(`---
+name: test-skill
+description: A shared agents skill
+---
+Instructions`)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkill("test-skill", "global", "code")?.path).toBe(agentsSkillMd)
+
+			await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).rejects.toThrow(
+				"not found",
+			)
+			expect(mockMkdir).not.toHaveBeenCalled()
+			expect(mockRename).not.toHaveBeenCalled()
+			expect(mockCp).not.toHaveBeenCalled()
+		})
+
+		describe("cross-filesystem and cleanup safety", () => {
+			const sourceSkillsDir = p(GLOBAL_ROO_DIR, "skills-code")
+			const sourceDir = p(sourceSkillsDir, "test-skill")
+			const destDir = p(GLOBAL_ROO_DIR, "skills-architect", "test-skill")
+
+			const setupCodeSkill = () => {
+				mockDirectoryExists.mockImplementation(async (dir: string) => dir === sourceSkillsDir)
+				mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+				mockReaddir.mockImplementation(async (dir: string) => (dir === sourceSkillsDir ? ["test-skill"] : []))
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if (pathArg === sourceDir) return { isDirectory: () => true }
+					throw enoent()
+				})
+				mockFileExists.mockImplementation(async (file: string) => file === p(sourceDir, "SKILL.md"))
+				mockReadFile.mockResolvedValue(`---
+name: test-skill
+description: A test skill
+---
+Instructions`)
+				mockMkdir.mockResolvedValue(undefined)
+				mockRm.mockResolvedValue(undefined)
+				mockRmdir.mockResolvedValue(undefined)
+			}
+
+			const exdevError = () => Object.assign(new Error("cross-device link not permitted"), { code: "EXDEV" })
+			const enoentError = () => Object.assign(new Error("no such file or directory"), { code: "ENOENT" })
+
+			// Direct rename from source to dest fails across devices; same-device renames succeed.
+			const setupExdevRename = () => {
+				mockRename.mockImplementation(async (from: string, to: string) => {
+					if (from === sourceDir && to === destDir) {
+						throw exdevError()
+					}
+				})
+			}
+
+			const getStagingDir = (): string => {
+				const call = mockCp.mock.calls[0]
+				expect(call).toBeDefined()
+				return call[1] as string
+			}
+
+			// The hidden dir the source is renamed aside to before promoting the staging copy
+			const getTrashDir = (): string => {
+				const call = mockRename.mock.calls.find(([from, to]) => from === sourceDir && to !== destDir)
+				expect(call).toBeDefined()
+				return call![1] as string
+			}
+
+			it("should fall back to copy into a staging dir and promote it when rename fails with EXDEV", async () => {
+				setupCodeSkill()
+				setupExdevRename()
+				mockCp.mockResolvedValue(undefined)
+				mockLstat.mockRejectedValue(enoentError())
+
+				await skillsManager.discoverSkills()
+				await skillsManager.moveSkill("test-skill", "global", "code", "architect")
+
+				expect(mockRename).toHaveBeenCalledWith(sourceDir, destDir)
+				const stagingDir = getStagingDir()
+				expect(stagingDir).not.toBe(destDir)
+				expect(path.dirname(stagingDir)).toBe(path.dirname(destDir))
+				expect(mockCp).toHaveBeenCalledWith(sourceDir, stagingDir, {
+					recursive: true,
+					errorOnExist: true,
+					force: false,
+					verbatimSymlinks: true,
+				})
+				const trashDir = getTrashDir()
+				expect(path.dirname(trashDir)).toBe(path.dirname(sourceDir))
+				expect(path.basename(trashDir).startsWith(".")).toBe(true)
+
+				// The source is moved aside before the staging copy is promoted
+				const renameTargets = mockRename.mock.calls.map(([, to]) => to)
+				expect(renameTargets.indexOf(trashDir)).toBeLessThan(renameTargets.lastIndexOf(destDir))
+				expect(mockRename).toHaveBeenLastCalledWith(stagingDir, destDir)
+
+				expect(mockRm).toHaveBeenCalledWith(trashDir, { recursive: true, force: true })
+				expect(mockRm).not.toHaveBeenCalledWith(sourceDir, expect.anything())
+				expect(mockRm).not.toHaveBeenCalledWith(destDir, expect.anything())
+			})
+
+			it("should resolve and keep a single discoverable copy when deleting the old source fails after promotion", async () => {
+				setupCodeSkill()
+				setupExdevRename()
+				mockCp.mockResolvedValue(undefined)
+				mockLstat.mockRejectedValue(enoentError())
+				mockRm.mockImplementation(async (target: string) => {
+					if (target !== getStagingDir()) {
+						throw Object.assign(new Error("permission denied"), { code: "EACCES" })
+					}
+				})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await skillsManager.discoverSkills()
+				await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).resolves.toBe(
+					undefined,
+				)
+
+				const trashDir = getTrashDir()
+				expect(mockRename).toHaveBeenLastCalledWith(getStagingDir(), destDir)
+				expect(mockRm).toHaveBeenCalledWith(trashDir, { recursive: true, force: true })
+				// The original source path no longer holds the skill, so no duplicate remains
+				expect(mockRename).not.toHaveBeenCalledWith(trashDir, sourceDir)
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining(trashDir),
+					expect.objectContaining({ code: "EACCES" }),
+				)
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should restore the source when promoting the staging copy fails after moving the source aside", async () => {
+				setupCodeSkill()
+				mockRename.mockImplementation(async (from: string, to: string) => {
+					if (from === sourceDir && to === destDir) {
+						throw exdevError()
+					}
+					if (to === destDir) {
+						throw Object.assign(new Error("directory not empty"), { code: "ENOTEMPTY" })
+					}
+				})
+				mockCp.mockResolvedValue(undefined)
+				mockLstat.mockRejectedValue(enoentError())
+
+				await skillsManager.discoverSkills()
+				await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).rejects.toThrow(
+					"directory not empty",
+				)
+
+				const trashDir = getTrashDir()
+				expect(mockRename).toHaveBeenCalledWith(trashDir, sourceDir)
+				expect(mockRm).toHaveBeenCalledWith(getStagingDir(), { recursive: true, force: true })
+				expect(mockRm).not.toHaveBeenCalledWith(trashDir, expect.anything())
+				expect(mockRm).not.toHaveBeenCalledWith(sourceDir, expect.anything())
+				expect(mockRm).not.toHaveBeenCalledWith(destDir, expect.anything())
+			})
+
+			it("should not promote the staging copy when moving the source aside fails", async () => {
+				setupCodeSkill()
+				mockRename.mockImplementation(async (from: string, to: string) => {
+					if (from === sourceDir && to === destDir) {
+						throw exdevError()
+					}
+					if (from === sourceDir) {
+						throw Object.assign(new Error("resource busy"), { code: "EBUSY" })
+					}
+				})
+				mockCp.mockResolvedValue(undefined)
+				mockLstat.mockRejectedValue(enoentError())
+
+				await skillsManager.discoverSkills()
+				await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).rejects.toThrow(
+					"resource busy",
+				)
+
+				const stagingDir = getStagingDir()
+				expect(mockRename).not.toHaveBeenCalledWith(stagingDir, destDir)
+				expect(mockRm).toHaveBeenCalledWith(stagingDir, { recursive: true, force: true })
+				expect(mockRm).not.toHaveBeenCalledWith(sourceDir, expect.anything())
+			})
+
+			it("should not touch an existing destination directory when the EXDEV fallback finds it", async () => {
+				setupCodeSkill()
+				setupExdevRename()
+				mockCp.mockResolvedValue(undefined)
+				// destDir exists (e.g., contains unrelated files but no SKILL.md)
+				mockLstat.mockResolvedValue({ isDirectory: () => true })
+
+				await skillsManager.discoverSkills()
+				await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).rejects.toThrow(
+					"Destination already exists",
+				)
+
+				const stagingDir = getStagingDir()
+				expect(mockRename).not.toHaveBeenCalledWith(stagingDir, destDir)
+				expect(mockRm).toHaveBeenCalledWith(stagingDir, { recursive: true, force: true })
+				expect(mockRm).not.toHaveBeenCalledWith(destDir, expect.anything())
+				expect(mockRm).not.toHaveBeenCalledWith(sourceDir, expect.anything())
+			})
+
+			it("should clean up only the staging dir when promoting the copy fails", async () => {
+				setupCodeSkill()
+				mockRename.mockImplementation(async (from: string, to: string) => {
+					if (from === sourceDir && to === destDir) {
+						throw exdevError()
+					}
+					if (to === destDir) {
+						throw Object.assign(new Error("directory not empty"), { code: "ENOTEMPTY" })
+					}
+				})
+				mockCp.mockResolvedValue(undefined)
+				mockLstat.mockRejectedValue(enoentError())
+
+				await skillsManager.discoverSkills()
+				await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).rejects.toThrow(
+					"directory not empty",
+				)
+
+				const stagingDir = getStagingDir()
+				expect(mockRm).toHaveBeenCalledWith(stagingDir, { recursive: true, force: true })
+				expect(mockRm).not.toHaveBeenCalledWith(destDir, expect.anything())
+				expect(mockRm).not.toHaveBeenCalledWith(sourceDir, expect.anything())
+			})
+
+			it("should not copy when rename succeeds on the same filesystem", async () => {
+				setupCodeSkill()
+				mockRename.mockResolvedValue(undefined)
+
+				await skillsManager.discoverSkills()
+				await skillsManager.moveSkill("test-skill", "global", "code", "architect")
+
+				expect(mockCp).not.toHaveBeenCalled()
+				expect(mockRm).not.toHaveBeenCalled()
+			})
+
+			it("should remove only the partial staging copy and keep the source when the EXDEV copy fails", async () => {
+				setupCodeSkill()
+				setupExdevRename()
+				mockCp.mockRejectedValue(new Error("copy failed"))
+
+				await skillsManager.discoverSkills()
+				await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).rejects.toThrow(
+					"copy failed",
+				)
+
+				const stagingDir = getStagingDir()
+				expect(mockRm).toHaveBeenCalledWith(stagingDir, { recursive: true, force: true })
+				expect(mockRm).not.toHaveBeenCalledWith(destDir, expect.anything())
+				expect(mockRm).not.toHaveBeenCalledWith(sourceDir, expect.anything())
+			})
+
+			// Directory entry for readdir({ withFileTypes: true })
+			const dirent = (name: string, kind: "dir" | "link" | "file") => ({
+				name,
+				isDirectory: () => kind === "dir",
+				isSymbolicLink: () => kind === "link",
+			})
+
+			// The link lives at <skill>/refs/shared, so these resolve outside the skill dir
+			it.each([
+				["a parent-relative link", "../../_shared/f"],
+				["a link to the skill dir's parent", "../.."],
+			])(
+				"should fail while the source still exists when the copy has %s escaping the skill",
+				async (_label, target) => {
+					setupCodeSkill()
+					setupExdevRename()
+					mockCp.mockResolvedValue(undefined)
+					mockLstat.mockRejectedValue(enoentError())
+					mockReaddir.mockImplementation(async (dir: string, options?: { withFileTypes?: boolean }) => {
+						if (!options?.withFileTypes) return dir === sourceSkillsDir ? ["test-skill"] : []
+						if (dir === getStagingDir()) return [dirent("refs", "dir"), dirent("SKILL.md", "file")]
+						if (dir === p(getStagingDir(), "refs")) return [dirent("shared", "link")]
+						return []
+					})
+					mockReadlink.mockResolvedValue(target)
+
+					await skillsManager.discoverSkills()
+					await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).rejects.toThrow(
+						"skills:errors.symlink_escapes_skill",
+					)
+
+					const stagingDir = getStagingDir()
+					expect(mockReadlink).toHaveBeenCalledWith(p(stagingDir, "refs", "shared"))
+					// The source is never moved aside and the staging copy is removed
+					expect(mockRename).toHaveBeenCalledTimes(1)
+					expect(mockRename).not.toHaveBeenCalledWith(stagingDir, destDir)
+					expect(mockRm).toHaveBeenCalledWith(stagingDir, { recursive: true, force: true })
+					expect(mockRm).not.toHaveBeenCalledWith(sourceDir, expect.anything())
+				},
+			)
+
+			it("should allow relative links that stay inside the skill and absolute links", async () => {
+				setupCodeSkill()
+				setupExdevRename()
+				mockCp.mockResolvedValue(undefined)
+				mockLstat.mockRejectedValue(enoentError())
+				mockReaddir.mockImplementation(async (dir: string, options?: { withFileTypes?: boolean }) => {
+					if (!options?.withFileTypes) return dir === sourceSkillsDir ? ["test-skill"] : []
+					if (dir === getStagingDir()) return [dirent("docs", "dir"), dirent("abs", "link")]
+					if (dir === p(getStagingDir(), "docs")) return [dirent("inner", "link")]
+					return []
+				})
+				mockReadlink.mockImplementation(async (link: string) =>
+					link.endsWith("abs") ? p(SHARED_DIR, "f") : p("..", "SKILL.md"),
+				)
+
+				await skillsManager.discoverSkills()
+				await skillsManager.moveSkill("test-skill", "global", "code", "architect")
+
+				expect(mockReadlink).toHaveBeenCalledTimes(2)
+				expect(mockRename).toHaveBeenLastCalledWith(getStagingDir(), destDir)
+			})
+
+			it("should rethrow non-EXDEV rename errors without copying", async () => {
+				setupCodeSkill()
+				mockRename.mockRejectedValue(Object.assign(new Error("permission denied"), { code: "EACCES" }))
+
+				await skillsManager.discoverSkills()
+				await expect(skillsManager.moveSkill("test-skill", "global", "code", "architect")).rejects.toThrow(
+					"permission denied",
+				)
+
+				expect(mockCp).not.toHaveBeenCalled()
+			})
+
+			it("should not remove a symlinked skills directory after moving its last skill out", async () => {
+				// skills-code -> /shared/skills
+				const sharedSkillDir = p(SHARED_DIR, "test-skill")
+				mockDirectoryExists.mockImplementation(async (dir: string) => dir === sourceSkillsDir)
+				mockRealpath.mockImplementation(async (pathArg: string) =>
+					pathArg === sourceSkillsDir ? SHARED_DIR : pathArg,
+				)
+				let discovering = true
+				mockReaddir.mockImplementation(async (dir: string) =>
+					dir === SHARED_DIR && discovering ? ["test-skill"] : [],
+				)
+				mockStat.mockImplementation(async (pathArg: string) => {
+					if (pathArg === sharedSkillDir) return { isDirectory: () => true }
+					throw enoent()
+				})
+				mockSymlinks(sourceSkillsDir)
+				mockFileExists.mockImplementation(async (file: string) => file === p(sharedSkillDir, "SKILL.md"))
+				mockReadFile.mockResolvedValue(`---
+name: test-skill
+description: A test skill
+---
+Instructions`)
+				mockMkdir.mockResolvedValue(undefined)
+				mockRename.mockResolvedValue(undefined)
+				mockRmdir.mockResolvedValue(undefined)
+
+				await skillsManager.discoverSkills()
+				discovering = false
+				await skillsManager.moveSkill("test-skill", "global", "code", "architect")
+
+				expect(mockRename).toHaveBeenCalledWith(sharedSkillDir, destDir)
+				expect(mockRmdir).not.toHaveBeenCalled()
+			})
 		})
 	})
 })

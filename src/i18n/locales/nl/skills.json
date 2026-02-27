@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "Vereiste velden ontbreken: skillName of source",
 		"manager_unavailable": "Vaardigheidenbeheerder niet beschikbaar",
 		"missing_delete_fields": "Vereiste velden ontbreken: skillName of source",
-		"skill_not_found": "Vaardigheid \"{{name}}\" niet gevonden"
+		"skill_not_found": "Vaardigheid \"{{name}}\" niet gevonden",
+		"container_skill_read_only": "Vaardigheid \"{{name}}\" komt uit een via symlink gekoppelde vaardighedenmap ({{path}}) en kan hier niet worden verplaatst of verwijderd. Wijzig hem in de bronmap.",
+		"symlink_escapes_skill": "Kan de vaardigheid niet verplaatsen: de symlink {{link}} wijst naar buiten de vaardighedenmap en zou op de nieuwe locatie niet meer werken."
 	}
 }

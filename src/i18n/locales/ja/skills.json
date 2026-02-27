@@ -11,6 +11,8 @@
 		"missing_update_modes_fields": "必須フィールドが不足しています：skillNameまたはsource",
 		"manager_unavailable": "スキルマネージャーが利用できません",
 		"missing_delete_fields": "必須フィールドが不足しています：skillNameまたはsource",
-		"skill_not_found": "スキル「{{name}}」が見つかりません"
+		"skill_not_found": "スキル「{{name}}」が見つかりません",
+		"container_skill_read_only": "スキル「{{name}}」はシンボリックリンクされたスキルフォルダー（{{path}}）にあるため、ここでは移動も削除もできません。元のフォルダーで変更してください。",
+		"symlink_escapes_skill": "スキルを移動できません：シンボリックリンク {{link}} がスキルフォルダーの外を指しているため、新しい場所では壊れてしまいます。"
 	}
 }
