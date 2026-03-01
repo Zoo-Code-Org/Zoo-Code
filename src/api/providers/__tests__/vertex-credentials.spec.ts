@@ -2,7 +2,13 @@
 
 // Mock vscode first to avoid import errors when the provider stack pulls
 // transitive vscode-dependent modules during construction.
-vitest.mock("vscode", () => ({}))
+vitest.mock("vscode", () => ({
+	workspace: {
+		getConfiguration: vitest.fn().mockReturnValue({
+			get: vitest.fn().mockReturnValue(undefined),
+		}),
+	},
+}))
 
 vitest.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
