@@ -1,11 +1,12 @@
 name: Deploy roocode.com
 
 on:
-    push:
-        branches:
-            - main
-        paths:
-            - 'apps/web-roo-code/**'
+    # Temporarily disabled automatic production website deploys.
+    # push:
+    #     branches:
+    #         - main
+    #     paths:
+    #         - 'apps/web-roo-code/**'
     workflow_dispatch:
 
 concurrency:

@@ -1,8 +1,9 @@
 name: Nightly Publish
 
 on:
-  push:
-    branches: [main]
+  # Temporarily disabled automatic nightly publishes on pushes to main.
+  # push:
+  #   branches: [main]
   workflow_dispatch: # Allows manual triggering.
 
 jobs:
