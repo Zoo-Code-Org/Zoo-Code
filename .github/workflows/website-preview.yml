@@ -1,14 +1,7 @@
 name: Preview roocode.com
 
 on:
-    push:
-        branches-ignore:
-            - main
-        paths:
-            - "apps/web-roo-code/**"
-    pull_request:
-        paths:
-            - "apps/web-roo-code/**"
+    # Temporarily disabled automatic preview website deploys.
     workflow_dispatch:
 
 concurrency:
