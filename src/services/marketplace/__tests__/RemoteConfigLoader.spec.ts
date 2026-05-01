@@ -1,78 +1,74 @@
 // npx vitest services/marketplace/__tests__/RemoteConfigLoader.spec.ts
 
-import axios from "axios"
+import * as fs from "fs/promises"
+import * as path from "path"
+
 import { RemoteConfigLoader } from "../RemoteConfigLoader"
 import type { MarketplaceItemType } from "@roo-code/types"
 
-// Mock axios
-vi.mock("axios")
-const mockedAxios = axios as any
-
-// Mock the cloud config
-vi.mock("@roo-code/cloud", () => ({
-	getRooCodeApiUrl: () => "https://test.api.com",
+vi.mock("fs/promises", () => ({
+	readFile: vi.fn(),
 }))
+
+const mockedReadFile = vi.mocked(fs.readFile)
 
 describe("RemoteConfigLoader", () => {
 	let loader: RemoteConfigLoader
+	const extensionPath = path.join("/test", "extension")
 
 	beforeEach(() => {
-		loader = new RemoteConfigLoader()
+		loader = new RemoteConfigLoader(extensionPath)
 		vi.clearAllMocks()
-		// Clear any existing cache
 		loader.clearCache()
 	})
 
 	describe("loadAllItems", () => {
-		it("should fetch and combine modes and MCPs from API", async () => {
+		it("should load and combine modes and MCPs from local marketplace assets", async () => {
 			const mockModesYaml = `items:
-  - id: "test-mode"
-    name: "Test Mode"
-    description: "A test mode"
-    content: "customModes:\\n  - slug: test\\n    name: Test"`
+	  - id: "test-mode"
+	    name: "Test Mode"
+	    description: "A test mode"
+	    content: "customModes:\\n  - slug: test\\n    name: Test"
+	  - id: "second-mode"
+	    name: "Second Mode"
+	    description: "Another test mode"
+	    content: "customModes:\\n  - slug: second\\n    name: Second"`.replace(/^\t/gm, "")
 
 			const mockMcpsYaml = `items:
-  - id: "test-mcp"
-    name: "Test MCP"
-    description: "A test MCP"
-    url: "https://github.com/test/test-mcp"
-    content: '{"command": "test"}'`
+	  - id: "test-mcp"
+	    name: "Test MCP"
+	    description: "A test MCP"
+	    url: "https://github.com/test/test-mcp"
+	    content: '{"command": "test"}'
+	  - id: "second-mcp"
+	    name: "Second MCP"
+	    description: "Another test MCP"
+	    url: "https://github.com/test/second-mcp"
+	    content: '{"command": "second-test"}'`.replace(/^\t/gm, "")
 
-			mockedAxios.get.mockImplementation((url: string) => {
-				if (url.includes("/modes")) {
-					return Promise.resolve({ data: mockModesYaml })
+			mockedReadFile.mockImplementation(async (filePath) => {
+				if (String(filePath).endsWith("modes.yml")) {
+					return mockModesYaml
 				}
-				if (url.includes("/mcps")) {
-					return Promise.resolve({ data: mockMcpsYaml })
+				if (String(filePath).endsWith("mcps.yml")) {
+					return mockMcpsYaml
 				}
-				return Promise.reject(new Error("Unknown URL"))
+				throw new Error(`Unknown file: ${String(filePath)}`)
 			})
 
 			const items = await loader.loadAllItems()
 
-			expect(mockedAxios.get).toHaveBeenCalledTimes(2)
-			expect(mockedAxios.get).toHaveBeenCalledWith(
-				"https://test.api.com/api/marketplace/modes",
-				expect.objectContaining({
-					timeout: 10000,
-					headers: {
-						Accept: "application/json",
-						"Content-Type": "application/json",
-					},
-				}),
+			expect(mockedReadFile).toHaveBeenCalledTimes(2)
+			expect(mockedReadFile).toHaveBeenCalledWith(
+				path.join(extensionPath, "assets", "marketplace", "modes.yml"),
+				"utf-8",
 			)
-			expect(mockedAxios.get).toHaveBeenCalledWith(
-				"https://test.api.com/api/marketplace/mcps",
-				expect.objectContaining({
-					timeout: 10000,
-					headers: {
-						Accept: "application/json",
-						"Content-Type": "application/json",
-					},
-				}),
+			expect(mockedReadFile).toHaveBeenCalledWith(
+				path.join(extensionPath, "assets", "marketplace", "mcps.yml"),
+				"utf-8",
 			)
 
-			expect(items).toHaveLength(2)
+			expect(items).toHaveLength(4)
 			expect(items[0]).toEqual({
 				type: "mode",
 				id: "test-mode",
@@ -81,12 +77,27 @@ describe("RemoteConfigLoader", () => {
 				content: "customModes:\n  - slug: test\n    name: Test",
 			})
 			expect(items[1]).toEqual({
+				type: "mode",
+				id: "second-mode",
+				name: "Second Mode",
+				description: "Another test mode",
+				content: "customModes:\n  - slug: second\n    name: Second",
+			})
+			expect(items[2]).toEqual({
 				type: "mcp",
 				id: "test-mcp",
 				name: "Test MCP",
 				description: "A test MCP",
 				url: "https://github.com/test/test-mcp",
 				content: '{"command": "test"}',
+			})
+			expect(items[3]).toEqual({
+				type: "mcp",
+				id: "second-mcp",
+				name: "Second MCP",
+				description: "Another test MCP",
+				url: "https://github.com/test/second-mcp",
+				content: '{"command": "second-test"}',
 			})
 		})
 
@@ -104,73 +115,23 @@ describe("RemoteConfigLoader", () => {
     url: "https://github.com/test/test-mcp"
     content: "test content"`
 
-			mockedAxios.get.mockImplementation((url: string) => {
-				if (url.includes("/modes")) {
-					return Promise.resolve({ data: mockModesYaml })
+			mockedReadFile.mockImplementation(async (filePath) => {
+				if (String(filePath).endsWith("modes.yml")) {
+					return mockModesYaml
 				}
-				if (url.includes("/mcps")) {
-					return Promise.resolve({ data: mockMcpsYaml })
+				if (String(filePath).endsWith("mcps.yml")) {
+					return mockMcpsYaml
 				}
-				return Promise.reject(new Error("Unknown URL"))
+				throw new Error(`Unknown file: ${String(filePath)}`)
 			})
 
-			// First call - should hit API
 			const items1 = await loader.loadAllItems()
-			expect(mockedAxios.get).toHaveBeenCalledTimes(2)
+			expect(mockedReadFile).toHaveBeenCalledTimes(2)
 
-			// Second call - should use cache
 			const items2 = await loader.loadAllItems()
-			expect(mockedAxios.get).toHaveBeenCalledTimes(2) // Still 2, not 4
+			expect(mockedReadFile).toHaveBeenCalledTimes(2)
 
 			expect(items1).toEqual(items2)
-		})
-
-		it("should retry on network failures", async () => {
-			const mockModesYaml = `items:
-  - id: "test-mode"
-    name: "Test Mode"
-    description: "A test mode"
-    content: "test content"`
-
-			const mockMcpsYaml = `items: []`
-
-			// Mock modes endpoint to fail twice then succeed
-			let modesCallCount = 0
-			mockedAxios.get.mockImplementation((url: string) => {
-				if (url.includes("/modes")) {
-					modesCallCount++
-					if (modesCallCount <= 2) {
-						return Promise.reject(new Error("Network error"))
-					}
-					return Promise.resolve({ data: mockModesYaml })
-				}
-				if (url.includes("/mcps")) {
-					return Promise.resolve({ data: mockMcpsYaml })
-				}
-				return Promise.reject(new Error("Unknown URL"))
-			})
-
-			const items = await loader.loadAllItems()
-
-			// Should have retried modes endpoint 3 times (2 failures + 1 success)
-			expect(modesCallCount).toBe(3)
-			expect(items).toHaveLength(1)
-			expect(items[0].type).toBe("mode")
-		})
-
-		it("should throw error after max retries", async () => {
-			mockedAxios.get.mockRejectedValue(new Error("Persistent network error"))
-
-			await expect(loader.loadAllItems()).rejects.toThrow("Persistent network error")
-
-			// Both endpoints will be called with retries since Promise.all starts both promises
-			// Each endpoint retries 3 times, but due to Promise.all behavior, one might fail faster
-			expect(mockedAxios.get).toHaveBeenCalledWith(
-				expect.stringContaining("/api/marketplace/"),
-				expect.any(Object),
-			)
-			// Verify we got at least some retry attempts (should be at least 2 calls)
-			expect(mockedAxios.get.mock.calls.length).toBeGreaterThanOrEqual(2)
 		})
 
 		it("should handle invalid data gracefully", async () => {
@@ -185,17 +146,16 @@ describe("RemoteConfigLoader", () => {
     url: "https://github.com/test/test-mcp"
     content: "test content"`
 
-			mockedAxios.get.mockImplementation((url: string) => {
-				if (url.includes("/modes")) {
-					return Promise.resolve({ data: invalidModesYaml })
+			mockedReadFile.mockImplementation(async (filePath) => {
+				if (String(filePath).endsWith("modes.yml")) {
+					return invalidModesYaml
 				}
-				if (url.includes("/mcps")) {
-					return Promise.resolve({ data: validMcpsYaml })
+				if (String(filePath).endsWith("mcps.yml")) {
+					return validMcpsYaml
 				}
-				return Promise.reject(new Error("Unknown URL"))
+				throw new Error(`Unknown file: ${String(filePath)}`)
 			})
 
-			// Should throw validation error for invalid modes
 			await expect(loader.loadAllItems()).rejects.toThrow()
 		})
 	})
@@ -215,14 +175,14 @@ describe("RemoteConfigLoader", () => {
     url: "https://github.com/test/test-mcp"
     content: "test content"`
 
-			mockedAxios.get.mockImplementation((url: string) => {
-				if (url.includes("/modes")) {
-					return Promise.resolve({ data: mockModesYaml })
+			mockedReadFile.mockImplementation(async (filePath) => {
+				if (String(filePath).endsWith("modes.yml")) {
+					return mockModesYaml
 				}
-				if (url.includes("/mcps")) {
-					return Promise.resolve({ data: mockMcpsYaml })
+				if (String(filePath).endsWith("mcps.yml")) {
+					return mockMcpsYaml
 				}
-				return Promise.reject(new Error("Unknown URL"))
+				throw new Error(`Unknown file: ${String(filePath)}`)
 			})
 
 			const modeItem = await loader.getItem("target-mode", "mode" as MarketplaceItemType)
@@ -260,30 +220,26 @@ describe("RemoteConfigLoader", () => {
 
 			const mockMcpsYaml = `items: []`
 
-			mockedAxios.get.mockImplementation((url: string) => {
-				if (url.includes("/modes")) {
-					return Promise.resolve({ data: mockModesYaml })
+			mockedReadFile.mockImplementation(async (filePath) => {
+				if (String(filePath).endsWith("modes.yml")) {
+					return mockModesYaml
 				}
-				if (url.includes("/mcps")) {
-					return Promise.resolve({ data: mockMcpsYaml })
+				if (String(filePath).endsWith("mcps.yml")) {
+					return mockMcpsYaml
 				}
-				return Promise.reject(new Error("Unknown URL"))
+				throw new Error(`Unknown file: ${String(filePath)}`)
 			})
 
-			// First call
 			await loader.loadAllItems()
-			expect(mockedAxios.get).toHaveBeenCalledTimes(2)
+			expect(mockedReadFile).toHaveBeenCalledTimes(2)
 
-			// Second call - should use cache
 			await loader.loadAllItems()
-			expect(mockedAxios.get).toHaveBeenCalledTimes(2)
+			expect(mockedReadFile).toHaveBeenCalledTimes(2)
 
-			// Clear cache
 			loader.clearCache()
 
-			// Third call - should hit API again
 			await loader.loadAllItems()
-			expect(mockedAxios.get).toHaveBeenCalledTimes(4)
+			expect(mockedReadFile).toHaveBeenCalledTimes(4)
 		})
 	})
 
@@ -297,38 +253,32 @@ describe("RemoteConfigLoader", () => {
 
 			const mockMcpsYaml = `items: []`
 
-			mockedAxios.get.mockImplementation((url: string) => {
-				if (url.includes("/modes")) {
-					return Promise.resolve({ data: mockModesYaml })
+			mockedReadFile.mockImplementation(async (filePath) => {
+				if (String(filePath).endsWith("modes.yml")) {
+					return mockModesYaml
 				}
-				if (url.includes("/mcps")) {
-					return Promise.resolve({ data: mockMcpsYaml })
+				if (String(filePath).endsWith("mcps.yml")) {
+					return mockMcpsYaml
 				}
-				return Promise.reject(new Error("Unknown URL"))
+				throw new Error(`Unknown file: ${String(filePath)}`)
 			})
 
-			// Mock Date.now to control time
 			const originalDateNow = Date.now
 			let currentTime = 1000000
 
 			Date.now = vi.fn(() => currentTime)
 
-			// First call
 			await loader.loadAllItems()
-			expect(mockedAxios.get).toHaveBeenCalledTimes(2)
+			expect(mockedReadFile).toHaveBeenCalledTimes(2)
 
-			// Second call immediately - should use cache
 			await loader.loadAllItems()
-			expect(mockedAxios.get).toHaveBeenCalledTimes(2)
+			expect(mockedReadFile).toHaveBeenCalledTimes(2)
 
-			// Advance time by 6 minutes (360,000 ms)
 			currentTime += 6 * 60 * 1000
 
-			// Third call - cache should be expired
 			await loader.loadAllItems()
-			expect(mockedAxios.get).toHaveBeenCalledTimes(4)
+			expect(mockedReadFile).toHaveBeenCalledTimes(4)
 
-			// Restore original Date.now
 			Date.now = originalDateNow
 		})
 	})

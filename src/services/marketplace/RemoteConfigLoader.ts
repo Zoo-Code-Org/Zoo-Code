@@ -1,4 +1,5 @@
-import axios from "axios"
+import * as fs from "fs/promises"
+import * as path from "path"
 import * as yaml from "yaml"
 import { z } from "zod"
 
@@ -8,7 +9,6 @@ import {
 	modeMarketplaceItemSchema,
 	mcpMarketplaceItemSchema,
 } from "@roo-code/types"
-import { getRooCodeApiUrl } from "@roo-code/cloud"
 
 const modeMarketplaceResponse = z.object({
 	items: z.array(modeMarketplaceItemSchema),
@@ -19,24 +19,17 @@ const mcpMarketplaceResponse = z.object({
 })
 
 export class RemoteConfigLoader {
-	private apiBaseUrl: string
+	private readonly marketplacePath: string
 	private cache: Map<string, { data: MarketplaceItem[]; timestamp: number }> = new Map()
 	private cacheDuration = 5 * 60 * 1000 // 5 minutes
 
-	constructor() {
-		this.apiBaseUrl = getRooCodeApiUrl()
+	constructor(extensionPath: string) {
+		this.marketplacePath = path.join(extensionPath, "assets", "marketplace")
 	}
 
-	async loadAllItems(hideMarketplaceMcps = false): Promise<MarketplaceItem[]> {
-		const items: MarketplaceItem[] = []
-
-		const modesPromise = this.fetchModes()
-		const mcpsPromise = hideMarketplaceMcps ? Promise.resolve([]) : this.fetchMcps()
-
-		const [modes, mcps] = await Promise.all([modesPromise, mcpsPromise])
-
-		items.push(...modes, ...mcps)
-		return items
+	async loadAllItems(): Promise<MarketplaceItem[]> {
+		const [modes, mcps] = await Promise.all([this.fetchModes(), this.fetchMcps()])
+		return [...modes, ...mcps]
 	}
 
 	private async fetchModes(): Promise<MarketplaceItem[]> {
@@ -47,7 +40,7 @@ export class RemoteConfigLoader {
 			return cached
 		}
 
-		const data = await this.fetchWithRetry<string>(`${this.apiBaseUrl}/api/marketplace/modes`)
+		const data = await this.readMarketplaceFile("modes.yml")
 
 		const yamlData = yaml.parse(data)
 		const validated = modeMarketplaceResponse.parse(yamlData)
@@ -69,7 +62,7 @@ export class RemoteConfigLoader {
 			return cached
 		}
 
-		const data = await this.fetchWithRetry<string>(`${this.apiBaseUrl}/api/marketplace/mcps`)
+		const data = await this.readMarketplaceFile("mcps.yml")
 
 		const yamlData = yaml.parse(data)
 		const validated = mcpMarketplaceResponse.parse(yamlData)
@@ -83,30 +76,8 @@ export class RemoteConfigLoader {
 		return items
 	}
 
-	private async fetchWithRetry<T>(url: string, maxRetries = 3): Promise<T> {
-		let lastError: Error
-
-		for (let i = 0; i < maxRetries; i++) {
-			try {
-				const response = await axios.get(url, {
-					timeout: 10000, // 10 second timeout
-					headers: {
-						Accept: "application/json",
-						"Content-Type": "application/json",
-					},
-				})
-				return response.data as T
-			} catch (error) {
-				lastError = error as Error
-				if (i < maxRetries - 1) {
-					// Exponential backoff: 1s, 2s, 4s
-					const delay = Math.pow(2, i) * 1000
-					await new Promise((resolve) => setTimeout(resolve, delay))
-				}
-			}
-		}
-
-		throw lastError!
+	private async readMarketplaceFile(fileName: string): Promise<string> {
+		return fs.readFile(path.join(this.marketplacePath, fileName), "utf-8")
 	}
 
 	async getItem(id: string, type: MarketplaceItemType): Promise<MarketplaceItem | null> {
