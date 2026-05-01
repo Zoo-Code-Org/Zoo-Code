@@ -10,8 +10,8 @@
       - Issue number
       
       For example, from https://github.com/Zoo-Code-Org/Zoo-Code/issues/123:
-      - Owner: RooCodeInc
-      - Repo: Roo-Code
+      - Owner: Zoo-Code-Org
+      - Repo: Zoo-Code
       - Issue: 123
       
       Then retrieve the issue:
