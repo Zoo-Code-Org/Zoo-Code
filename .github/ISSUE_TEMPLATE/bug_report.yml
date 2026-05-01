@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thank you for your report! Please search existing issues first:
-        https://github.com/RooCodeInc/Roo-Code/issues
+        https://github.com/Zoo-Code-Org/Zoo-Code/issues
 
   - type: textarea
     id: problem

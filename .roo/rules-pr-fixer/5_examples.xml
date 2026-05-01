@@ -5,7 +5,7 @@
     </scenario>
     
     <user_request>
-      Fix PR #4365 in RooCodeInc/Roo-Code.
+      Fix PR #4365 in Zoo-Code-Org/Zoo-Code.
     </user_request>
 
     <workflow>
@@ -13,7 +13,7 @@
         <description>Get PR details and review comments.</description>
         <tool_use>
 <execute_command>
-<command>gh pr view 4365 --repo RooCodeInc/Roo-Code --json number,title,author,state,body,url,headRefName,baseRefName,files,additions,deletions,changedFiles,comments,reviews,mergeable,mergeStateStatus</command>
+<command>gh pr view 4365 --repo Zoo-Code-Org/Zoo-Code --json number,title,author,state,body,url,headRefName,baseRefName,files,additions,deletions,changedFiles,comments,reviews,mergeable,mergeStateStatus</command>
 </execute_command>
         </tool_use>
         <expected_outcome>Get the branch name, list of review comments, and check for mergeability.</expected_outcome>
@@ -23,7 +23,7 @@
         <description>Check CI status.</description>
         <tool_use>
 <execute_command>
-<command>gh pr checks 4365 --repo RooCodeInc/Roo-Code</command>
+<command>gh pr checks 4365 --repo Zoo-Code-Org/Zoo-Code</command>
 </execute_command>
         </tool_use>
         <analysis>Identify which check is failing.</analysis>
@@ -33,7 +33,7 @@
         <description>Get logs for the failing check.</description>
         <tool_use>
 <execute_command>
-<command>gh run list --pr 4365 --repo RooCodeInc/Roo-Code</command>
+<command>gh run list --pr 4365 --repo Zoo-Code-Org/Zoo-Code</command>
 </execute_command>
         </tool_use>
         <analysis>Get the run ID of the failing workflow.</analysis>
@@ -43,7 +43,7 @@
         <description>View the failed logs.</description>
         <tool_use>
 <execute_command>
-<command>gh run view [run_id] --repo RooCodeInc/Roo-Code --log-failed</command>
+<command>gh run view [run_id] --repo Zoo-Code-Org/Zoo-Code --log-failed</command>
 </execute_command>
         </tool_use>
         <analysis>Find the specific error message causing the test to fail.</analysis>
@@ -53,7 +53,7 @@
         <description>Check out the pull request branch.</description>
         <tool_use>
           <execute_command>
-            <command>gh pr checkout 4365 --repo RooCodeInc/Roo-Code --force</command>
+            <command>gh pr checkout 4365 --repo Zoo-Code-Org/Zoo-Code --force</command>
           </execute_command>
         </tool_use>
         <analysis>The PR branch is now ready for local edits.</analysis>
@@ -76,7 +76,7 @@
        <description>After pushing the changes, monitor PR checks in real-time.</description>
        <tool_use>
          <execute_command>
-           <command>gh pr checks 4365 --repo RooCodeInc/Roo-Code --watch</command>
+           <command>gh pr checks 4365 --repo Zoo-Code-Org/Zoo-Code --watch</command>
          </execute_command>
        </tool_use>
        <analysis>Monitor checks continuously until all complete. The --watch flag provides real-time updates as check statuses change.</analysis>
@@ -96,7 +96,7 @@
     </scenario>
     
     <user_request>
-      Fix PR #1234 in RooCodeInc/Roo-Code - the reviewer asked to change button text and there are some failing tests.
+      Fix PR #1234 in Zoo-Code-Org/Zoo-Code - the reviewer asked to change button text and there are some failing tests.
     </user_request>
 
     <workflow>
@@ -104,7 +104,7 @@
         <description>Get PR details and analyze changes.</description>
         <tool_use>
 <execute_command>
-<command>gh pr view 1234 --repo RooCodeInc/Roo-Code --json number,title,author,state,body,url,headRefName,baseRefName,files,additions,deletions,changedFiles,comments,reviews</command>
+<command>gh pr view 1234 --repo Zoo-Code-Org/Zoo-Code --json number,title,author,state,body,url,headRefName,baseRefName,files,additions,deletions,changedFiles,comments,reviews</command>
 </execute_command>
         </tool_use>
         <expected_outcome>Identify the files changed and review feedback requiring UI text modifications.</expected_outcome>
@@ -114,7 +114,7 @@
         <description>Check out PR and apply the requested changes.</description>
         <tool_use>
 <execute_command>
-<command>gh pr checkout 1234 --repo RooCodeInc/Roo-Code --force</command>
+<command>gh pr checkout 1234 --repo Zoo-Code-Org/Zoo-Code --force</command>
 </execute_command>
         </tool_use>
         <analysis>Make the requested button text changes in the UI components.</analysis>
@@ -165,7 +165,7 @@ Ensure consistency across all language files and maintain the same context and t
         <description>Check if PR is from a fork and push to correct remote.</description>
         <tool_use>
 <execute_command>
-<command>gh pr view 1234 --repo RooCodeInc/Roo-Code --json isCrossRepository,headRepositoryOwner,headRefName</command>
+<command>gh pr view 1234 --repo Zoo-Code-Org/Zoo-Code --json isCrossRepository,headRepositoryOwner,headRefName</command>
 </execute_command>
         </tool_use>
         <analysis>Determine if this is a cross-repository PR to know which remote to push to.</analysis>
@@ -185,7 +185,7 @@ Ensure consistency across all language files and maintain the same context and t
         <description>Monitor CI status in real-time.</description>
         <tool_use>
 <execute_command>
-<command>gh pr checks 1234 --repo RooCodeInc/Roo-Code --watch</command>
+<command>gh pr checks 1234 --repo Zoo-Code-Org/Zoo-Code --watch</command>
 </execute_command>
         </tool_use>
         <analysis>Watch CI checks continuously until all tests pass. The --watch flag provides automatic updates as check statuses change.</analysis>
@@ -207,7 +207,7 @@ Ensure consistency across all language files and maintain the same context and t
     </scenario>
     
     <user_request>
-      Fix PR #5678 in RooCodeInc/Roo-Code - it has merge conflicts and failing tests.
+      Fix PR #5678 in Zoo-Code-Org/Zoo-Code - it has merge conflicts and failing tests.
     </user_request>
 
     <workflow>
@@ -215,7 +215,7 @@ Ensure consistency across all language files and maintain the same context and t
         <description>Get PR details and check merge status.</description>
         <tool_use>
 <execute_command>
-<command>gh pr view 5678 --repo RooCodeInc/Roo-Code --json number,title,author,state,body,url,headRefName,baseRefName,mergeable,mergeStateStatus</command>
+<command>gh pr view 5678 --repo Zoo-Code-Org/Zoo-Code --json number,title,author,state,body,url,headRefName,baseRefName,mergeable,mergeStateStatus</command>
 </execute_command>
         </tool_use>
         <expected_outcome>Identify that mergeable is false and mergeStateStatus is CONFLICTING.</expected_outcome>
@@ -236,7 +236,7 @@ Ensure consistency across all language files and maintain the same context and t
         <description>After merge-resolver completes, check PR status again.</description>
         <tool_use>
 <execute_command>
-<command>gh pr view 5678 --repo RooCodeInc/Roo-Code --json mergeable,mergeStateStatus</command>
+<command>gh pr view 5678 --repo Zoo-Code-Org/Zoo-Code --json mergeable,mergeStateStatus</command>
 </execute_command>
         </tool_use>
         <analysis>Verify that the PR is now mergeable after conflict resolution.</analysis>
@@ -246,7 +246,7 @@ Ensure consistency across all language files and maintain the same context and t
         <description>Check CI status for any remaining failures.</description>
         <tool_use>
 <execute_command>
-<command>gh pr checks 5678 --repo RooCodeInc/Roo-Code</command>
+<command>gh pr checks 5678 --repo Zoo-Code-Org/Zoo-Code</command>
 </execute_command>
         </tool_use>
         <analysis>Identify any tests that are still failing after the merge conflict resolution.</analysis>
@@ -256,7 +256,7 @@ Ensure consistency across all language files and maintain the same context and t
         <description>If tests are still failing, proceed with fixing them.</description>
         <tool_use>
 <execute_command>
-<command>gh pr checkout 5678 --repo RooCodeInc/Roo-Code --force</command>
+<command>gh pr checkout 5678 --repo Zoo-Code-Org/Zoo-Code --force</command>
 </execute_command>
         </tool_use>
         <analysis>Now that conflicts are resolved, we can focus on fixing the failing tests.</analysis>
@@ -286,7 +286,7 @@ Ensure consistency across all language files and maintain the same context and t
         <description>Monitor CI checks in real-time.</description>
         <tool_use>
 <execute_command>
-<command>gh pr checks 5678 --repo RooCodeInc/Roo-Code --watch</command>
+<command>gh pr checks 5678 --repo Zoo-Code-Org/Zoo-Code --watch</command>
 </execute_command>
         </tool_use>
         <analysis>Watch CI checks continuously until all tests pass.</analysis>

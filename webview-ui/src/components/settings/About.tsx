@@ -52,7 +52,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<Trans
 							i18nKey="settings:footer.telemetry.description"
 							components={{
-								privacyLink: <VSCodeLink href="https://roocode.com/privacy" />,
+								privacyLink: <VSCodeLink href="https://zoocode.dev/privacy" />,
 							}}
 						/>
 					</p>
@@ -66,7 +66,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<Bug className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							{t("settings:about.bugReport.label")}{" "}
-							<VSCodeLink href="https://github.com/RooCodeInc/Roo-Code/issues/new?template=bug_report.yml">
+							<VSCodeLink href="https://github.com/Zoo-Code-Org/Zoo-Code">
 								{t("settings:about.bugReport.link")}
 							</VSCodeLink>
 						</span>
@@ -75,7 +75,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<Lightbulb className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							{t("settings:about.featureRequest.label")}{" "}
-							<VSCodeLink href="https://github.com/RooCodeInc/Roo-Code/issues/new?template=feature_request.yml">
+							<VSCodeLink href="https://github.com/Zoo-Code-Org/Zoo-Code">
 								{t("settings:about.featureRequest.link")}
 							</VSCodeLink>
 						</span>
@@ -84,7 +84,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<Shield className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							{t("settings:about.securityIssue.label")}{" "}
-							<VSCodeLink href="https://github.com/RooCodeInc/Roo-Code/security/policy">
+							<VSCodeLink href="https://github.com/Zoo-Code-Org/Zoo-Code">
 								{t("settings:about.securityIssue.link")}
 							</VSCodeLink>
 						</span>

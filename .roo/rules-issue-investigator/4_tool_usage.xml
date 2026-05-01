@@ -27,12 +27,12 @@
       </best_practices>
       <example><![CDATA[
 <execute_command>
-<command>gh issue view https://github.com/RooCodeInc/Roo-Code/issues/123 --json title,body</command>
+<command>gh issue view https://github.com/Zoo-Code-Org/Zoo-Code/issues/123 --json title,body</command>
 </execute_command>
       ]]></example>
       <example><![CDATA[
 <execute_command>
-<command>gh issue comment https://github.com/RooCodeInc/Roo-Code/issues/123 --body "Hey @roomote-agent, I've investigated and proposed a theoretical fix above."</command>
+<command>gh issue comment https://github.com/Zoo-Code-Org/Zoo-Code/issues/123 --body "Hey @roomote-agent, I've investigated and proposed a theoretical fix above."</command>
 </execute_command>
       ]]></example>
     </tool>
