@@ -4,8 +4,8 @@ import ignore, { Ignore } from "ignore"
 export const SHIELD_SYMBOL = "\u{1F6E1}"
 
 /**
- * Controls write access to Roo configuration files by enforcing protection patterns.
- * Prevents auto-approved modifications to sensitive Roo configuration files.
+ * Controls write access to Zoo and Roo configuration files by enforcing protection patterns.
+ * Prevents auto-approved modifications to sensitive Zoo and Roo configuration files.
  */
 export class RooProtectedController {
 	private cwd: string
@@ -13,10 +13,13 @@ export class RooProtectedController {
 
 	// Predefined list of protected Roo configuration patterns
 	private static readonly PROTECTED_PATTERNS = [
+		".zooignore",
 		".rooignore",
+		".zoomodes",
 		".roomodes",
 		".roorules*",
 		".clinerules*",
+		".zoo/**",
 		".roo/**",
 		".vscode/**",
 		"*.code-workspace",
@@ -91,7 +94,7 @@ export class RooProtectedController {
 	 * Get display message for protected file operations
 	 */
 	getProtectionMessage(): string {
-		return "This is a Roo configuration file and requires approval for modifications"
+		return "This is a Zoo or Roo configuration file and requires approval for modifications"
 	}
 
 	/**
@@ -100,7 +103,7 @@ export class RooProtectedController {
 	 */
 	getInstructions(): string {
 		const patterns = RooProtectedController.PROTECTED_PATTERNS.join(", ")
-		return `# Protected Files\n\n(The following Roo configuration file patterns are write-protected and always require approval for modifications, regardless of autoapproval settings. When using list_files, you'll notice a ${SHIELD_SYMBOL} next to files that are write-protected.)\n\nProtected patterns: ${patterns}`
+		return `# Protected Files\n\n(The following Zoo and Roo configuration file patterns are write-protected and always require approval for modifications, regardless of autoapproval settings. When using list_files, you'll notice a ${SHIELD_SYMBOL} next to files that are write-protected.)\n\nProtected patterns: ${patterns}`
 	}
 
 	/**

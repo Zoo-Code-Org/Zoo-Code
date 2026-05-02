@@ -10,6 +10,10 @@ describe("RooProtectedController", () => {
 	})
 
 	describe("isWriteProtected", () => {
+		it("should protect .zooignore file", () => {
+			expect(controller.isWriteProtected(".zooignore")).toBe(true)
+		})
+
 		it("should protect .rooignore file", () => {
 			expect(controller.isWriteProtected(".rooignore")).toBe(true)
 		})
@@ -20,12 +24,22 @@ describe("RooProtectedController", () => {
 			expect(controller.isWriteProtected(".roo/modes/custom.json")).toBe(true)
 		})
 
+		it("should protect files in .zoo directory", () => {
+			expect(controller.isWriteProtected(".zoo/config.json")).toBe(true)
+			expect(controller.isWriteProtected(".zoo/settings/user.json")).toBe(true)
+			expect(controller.isWriteProtected(".zoo/modes/custom.json")).toBe(true)
+		})
+
 		it("should protect .rooprotected file", () => {
 			expect(controller.isWriteProtected(".rooprotected")).toBe(true)
 		})
 
 		it("should protect .roomodes files", () => {
 			expect(controller.isWriteProtected(".roomodes")).toBe(true)
+		})
+
+		it("should protect .zoomodes files", () => {
+			expect(controller.isWriteProtected(".zoomodes")).toBe(true)
 		})
 
 		it("should protect .roorules* files", () => {
@@ -76,8 +90,11 @@ describe("RooProtectedController", () => {
 		})
 
 		it("should handle nested paths correctly", () => {
+			expect(controller.isWriteProtected(".zoo/config.json")).toBe(true) // .zoo/** matches at root
 			expect(controller.isWriteProtected(".roo/config.json")).toBe(true) // .roo/** matches at root
+			expect(controller.isWriteProtected("nested/.zooignore")).toBe(true) // .zooignore matches anywhere by default
 			expect(controller.isWriteProtected("nested/.rooignore")).toBe(true) // .rooignore matches anywhere by default
+			expect(controller.isWriteProtected("nested/.zoomodes")).toBe(true) // .zoomodes matches anywhere by default
 			expect(controller.isWriteProtected("nested/.roomodes")).toBe(true) // .roomodes matches anywhere by default
 			expect(controller.isWriteProtected("nested/.roorules.md")).toBe(true) // .roorules* matches anywhere by default
 		})
@@ -134,7 +151,7 @@ describe("RooProtectedController", () => {
 	describe("getProtectionMessage", () => {
 		it("should return appropriate protection message", () => {
 			const message = controller.getProtectionMessage()
-			expect(message).toBe("This is a Roo configuration file and requires approval for modifications")
+			expect(message).toBe("This is a Zoo or Roo configuration file and requires approval for modifications")
 		})
 	})
 
@@ -144,7 +161,11 @@ describe("RooProtectedController", () => {
 
 			expect(instructions).toContain("# Protected Files")
 			expect(instructions).toContain("write-protected")
+			expect(instructions).toContain("Zoo and Roo configuration file patterns")
+			expect(instructions).toContain(".zooignore")
 			expect(instructions).toContain(".rooignore")
+			expect(instructions).toContain(".zoomodes")
+			expect(instructions).toContain(".zoo/**")
 			expect(instructions).toContain(".roo/**")
 			expect(instructions).toContain("\u{1F6E1}") // Shield symbol
 		})
@@ -155,10 +176,13 @@ describe("RooProtectedController", () => {
 			const patterns = RooProtectedController.getProtectedPatterns()
 
 			expect(patterns).toEqual([
+				".zooignore",
 				".rooignore",
+				".zoomodes",
 				".roomodes",
 				".roorules*",
 				".clinerules*",
+				".zoo/**",
 				".roo/**",
 				".vscode/**",
 				"*.code-workspace",

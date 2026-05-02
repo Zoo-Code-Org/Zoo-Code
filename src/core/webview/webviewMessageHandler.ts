@@ -2,7 +2,12 @@ import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
 import * as os from "os"
 import * as fs from "fs/promises"
-import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
+import {
+	getCanonicalGlobalConfigDirectory,
+	getCanonicalProjectConfigDirectoryForCwd,
+	getRooDirectoriesForCwd,
+	resolveProjectMcpFileForCwd,
+} from "../../services/roo-config/index.js"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
@@ -1315,14 +1320,18 @@ export const webviewMessageHandler = async (
 			}
 
 			const workspaceFolder = getCurrentCwd()
-			const rooDir = path.join(workspaceFolder, ".roo")
-			const mcpPath = path.join(rooDir, "mcp.json")
+			const projectMcpResolution = await resolveProjectMcpFileForCwd(workspaceFolder)
+			const zooDir = path.dirname(projectMcpResolution.canonicalPath)
+			const mcpPath = projectMcpResolution.canonicalPath
 
 			try {
-				await fs.mkdir(rooDir, { recursive: true })
+				await fs.mkdir(zooDir, { recursive: true })
 				const exists = await fileExistsAtPath(mcpPath)
 
-				if (!exists) {
+				if (projectMcpResolution.shouldBootstrapCanonicalFromLegacy) {
+					const legacyContent = await fs.readFile(projectMcpResolution.legacyPath, "utf-8")
+					await safeWriteJson(mcpPath, JSON.parse(legacyContent), { prettyPrint: true })
+				} else if (!exists) {
 					await safeWriteJson(mcpPath, { mcpServers: {} }, { prettyPrint: true })
 				}
 
@@ -1996,14 +2005,16 @@ export const webviewMessageHandler = async (
 				if (scope === "project") {
 					const workspacePath = getWorkspacePath()
 					if (workspacePath) {
-						rulesFolderPath = path.join(workspacePath, ".roo", `rules-${message.slug}`)
+						rulesFolderPath = path.join(
+							getCanonicalProjectConfigDirectoryForCwd(workspacePath),
+							`rules-${message.slug}`,
+						)
 					} else {
-						rulesFolderPath = path.join(".roo", `rules-${message.slug}`)
+						rulesFolderPath = path.join(".zoo", `rules-${message.slug}`)
 					}
 				} else {
 					// Global scope - use OS home directory
-					const homeDir = os.homedir()
-					rulesFolderPath = path.join(homeDir, ".roo", `rules-${message.slug}`)
+					rulesFolderPath = path.join(getCanonicalGlobalConfigDirectory(), `rules-${message.slug}`)
 				}
 
 				// Check if the rules folder exists
@@ -3044,7 +3055,7 @@ export const webviewMessageHandler = async (
 				// Determine the commands directory based on source
 				let commandsDir: string
 				if (source === "global") {
-					const globalConfigDir = path.join(os.homedir(), ".roo")
+					const globalConfigDir = getCanonicalGlobalConfigDirectory()
 					commandsDir = path.join(globalConfigDir, "commands")
 				} else {
 					if (!vscode.workspace.workspaceFolders?.length) {
@@ -3057,7 +3068,7 @@ export const webviewMessageHandler = async (
 						vscode.window.showErrorMessage(t("common:errors.no_workspace_for_project_command"))
 						break
 					}
-					commandsDir = path.join(workspaceRoot, ".roo", "commands")
+					commandsDir = path.join(getCanonicalProjectConfigDirectoryForCwd(workspaceRoot), "commands")
 				}
 
 				// Ensure the commands directory exists

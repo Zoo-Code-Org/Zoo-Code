@@ -27,19 +27,54 @@ vi.mock("../../search/file-search", () => ({
 }))
 
 import {
+	getCanonicalGlobalConfigDirectory,
+	getLegacyGlobalConfigDirectory,
 	getGlobalRooDirectory,
+	resolveGlobalConfigDirectory,
 	getGlobalAgentsDirectory,
+	getCanonicalProjectConfigDirectoryForCwd,
+	getLegacyProjectConfigDirectoryForCwd,
 	getProjectRooDirectoryForCwd,
+	resolveProjectConfigDirectoryForCwd,
+	getCanonicalProjectCustomModesFileForCwd,
+	getLegacyProjectCustomModesFileForCwd,
+	resolveProjectCustomModesFileForCwd,
+	getCanonicalProjectIgnoreFileForCwd,
+	getLegacyProjectIgnoreFileForCwd,
+	resolveProjectIgnoreFileForCwd,
 	getProjectAgentsDirectoryForCwd,
+	getConfigDirectoriesForCwd,
+	getAllConfigDirectoriesForCwd,
 	directoryExists,
 	fileExists,
 	readFileIfExists,
 	getRooDirectoriesForCwd,
 	getAllRooDirectoriesForCwd,
 	getAgentsDirectoriesForCwd,
+	discoverSubfolderConfigDirectories,
 	discoverSubfolderRooDirectories,
 	loadConfiguration,
 } from "../index"
+
+function createFsError(code: string) {
+	const error = new Error(code) as any
+	error.code = code
+	return error
+}
+
+function mockExistingPaths({ directories = [], files = [] }: { directories?: string[]; files?: string[] }) {
+	mockStat.mockImplementation(async (targetPath: string) => {
+		if (directories.includes(targetPath)) {
+			return { isDirectory: () => true, isFile: () => false } as any
+		}
+
+		if (files.includes(targetPath)) {
+			return { isDirectory: () => false, isFile: () => true } as any
+		}
+
+		throw createFsError("ENOENT")
+	})
+}
 
 describe("RooConfigService", () => {
 	beforeEach(() => {
@@ -61,6 +96,133 @@ describe("RooConfigService", () => {
 			mockHomedir.mockReturnValue("/different/home")
 			const result = getGlobalRooDirectory()
 			expect(result).toBe(path.join("/different/home", ".roo"))
+		})
+	})
+
+	describe("Zoo/Roo path resolution helpers", () => {
+		it("should return canonical and legacy global config directory paths", () => {
+			expect(getCanonicalGlobalConfigDirectory()).toBe(path.join("/mock/home", ".zoo"))
+			expect(getLegacyGlobalConfigDirectory()).toBe(path.join("/mock/home", ".roo"))
+		})
+
+		it("should prefer canonical global config directory when both canonical and legacy exist", async () => {
+			const canonicalPath = path.join("/mock/home", ".zoo")
+			const legacyPath = path.join("/mock/home", ".roo")
+			mockExistingPaths({ directories: [canonicalPath, legacyPath] })
+
+			await expect(resolveGlobalConfigDirectory()).resolves.toEqual({
+				canonicalPath,
+				legacyPath,
+				activePath: canonicalPath,
+				canonicalExists: true,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: false,
+			})
+		})
+
+		it("should fall back to legacy global config directory when canonical does not exist", async () => {
+			const canonicalPath = path.join("/mock/home", ".zoo")
+			const legacyPath = path.join("/mock/home", ".roo")
+			mockExistingPaths({ directories: [legacyPath] })
+
+			await expect(resolveGlobalConfigDirectory()).resolves.toEqual({
+				canonicalPath,
+				legacyPath,
+				activePath: legacyPath,
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			})
+		})
+
+		it("should return canonical global config directory when neither path exists", async () => {
+			const canonicalPath = path.join("/mock/home", ".zoo")
+			const legacyPath = path.join("/mock/home", ".roo")
+			mockExistingPaths({})
+
+			await expect(resolveGlobalConfigDirectory()).resolves.toEqual({
+				canonicalPath,
+				legacyPath,
+				activePath: canonicalPath,
+				canonicalExists: false,
+				legacyExists: false,
+				activeExists: false,
+				shouldBootstrapCanonicalFromLegacy: false,
+			})
+		})
+
+		it("should return canonical and legacy project config directory paths", () => {
+			const cwd = "/custom/project/path"
+
+			expect(getCanonicalProjectConfigDirectoryForCwd(cwd)).toBe(path.join(cwd, ".zoo"))
+			expect(getLegacyProjectConfigDirectoryForCwd(cwd)).toBe(path.join(cwd, ".roo"))
+		})
+
+		it("should fall back to legacy project config directory when canonical does not exist", async () => {
+			const cwd = "/custom/project/path"
+			const canonicalPath = path.join(cwd, ".zoo")
+			const legacyPath = path.join(cwd, ".roo")
+			mockExistingPaths({ directories: [legacyPath] })
+
+			await expect(resolveProjectConfigDirectoryForCwd(cwd)).resolves.toEqual({
+				canonicalPath,
+				legacyPath,
+				activePath: legacyPath,
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			})
+		})
+
+		it("should return canonical and legacy project custom modes file paths", () => {
+			const cwd = "/custom/project/path"
+
+			expect(getCanonicalProjectCustomModesFileForCwd(cwd)).toBe(path.join(cwd, ".zoomodes"))
+			expect(getLegacyProjectCustomModesFileForCwd(cwd)).toBe(path.join(cwd, ".roomodes"))
+		})
+
+		it("should resolve project custom modes file with legacy fallback", async () => {
+			const cwd = "/custom/project/path"
+			const canonicalPath = path.join(cwd, ".zoomodes")
+			const legacyPath = path.join(cwd, ".roomodes")
+			mockExistingPaths({ files: [legacyPath] })
+
+			await expect(resolveProjectCustomModesFileForCwd(cwd)).resolves.toEqual({
+				canonicalPath,
+				legacyPath,
+				activePath: legacyPath,
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			})
+		})
+
+		it("should return canonical and legacy project ignore file paths", () => {
+			const cwd = "/custom/project/path"
+
+			expect(getCanonicalProjectIgnoreFileForCwd(cwd)).toBe(path.join(cwd, ".zooignore"))
+			expect(getLegacyProjectIgnoreFileForCwd(cwd)).toBe(path.join(cwd, ".rooignore"))
+		})
+
+		it("should resolve project ignore file with canonical preference", async () => {
+			const cwd = "/custom/project/path"
+			const canonicalPath = path.join(cwd, ".zooignore")
+			const legacyPath = path.join(cwd, ".rooignore")
+			mockExistingPaths({ files: [canonicalPath, legacyPath] })
+
+			await expect(resolveProjectIgnoreFileForCwd(cwd)).resolves.toEqual({
+				canonicalPath,
+				legacyPath,
+				activePath: canonicalPath,
+				canonicalExists: true,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: false,
+			})
 		})
 	})
 
@@ -248,9 +410,10 @@ describe("RooConfigService", () => {
 
 	describe("loadConfiguration", () => {
 		it("should load global configuration only when project does not exist", async () => {
-			const error = new Error("ENOENT") as any
-			error.code = "ENOENT"
-			mockReadFile.mockResolvedValueOnce("global content").mockRejectedValueOnce(error)
+			mockExistingPaths({
+				directories: [path.join("/mock/home", ".zoo")],
+			})
+			mockReadFile.mockResolvedValueOnce("global content").mockRejectedValueOnce(createFsError("ENOENT"))
 
 			const result = await loadConfiguration("rules/rules.md", "/project/path")
 
@@ -262,9 +425,10 @@ describe("RooConfigService", () => {
 		})
 
 		it("should load project configuration only when global does not exist", async () => {
-			const error = new Error("ENOENT") as any
-			error.code = "ENOENT"
-			mockReadFile.mockRejectedValueOnce(error).mockResolvedValueOnce("project content")
+			mockExistingPaths({
+				directories: [path.join("/project/path", ".zoo")],
+			})
+			mockReadFile.mockRejectedValueOnce(createFsError("ENOENT")).mockResolvedValueOnce("project content")
 
 			const result = await loadConfiguration("rules/rules.md", "/project/path")
 
@@ -276,6 +440,9 @@ describe("RooConfigService", () => {
 		})
 
 		it("should merge global and project configurations with project overriding global", async () => {
+			mockExistingPaths({
+				directories: [path.join("/mock/home", ".zoo"), path.join("/project/path", ".zoo")],
+			})
 			mockReadFile.mockResolvedValueOnce("global content").mockResolvedValueOnce("project content")
 
 			const result = await loadConfiguration("rules/rules.md", "/project/path")
@@ -288,9 +455,8 @@ describe("RooConfigService", () => {
 		})
 
 		it("should return empty merged content when neither exists", async () => {
-			const error = new Error("ENOENT") as any
-			error.code = "ENOENT"
-			mockReadFile.mockRejectedValueOnce(error).mockRejectedValueOnce(error)
+			mockExistingPaths({})
+			mockReadFile.mockRejectedValueOnce(createFsError("ENOENT")).mockRejectedValueOnce(createFsError("ENOENT"))
 
 			const result = await loadConfiguration("rules/rules.md", "/project/path")
 
@@ -302,6 +468,9 @@ describe("RooConfigService", () => {
 		})
 
 		it("should propagate unexpected errors from global file read", async () => {
+			mockExistingPaths({
+				directories: [path.join("/mock/home", ".zoo")],
+			})
 			const error = new Error("Permission denied") as any
 			error.code = "EACCES"
 			mockReadFile.mockRejectedValueOnce(error)
@@ -310,8 +479,10 @@ describe("RooConfigService", () => {
 		})
 
 		it("should propagate unexpected errors from project file read", async () => {
-			const globalError = new Error("ENOENT") as any
-			globalError.code = "ENOENT"
+			mockExistingPaths({
+				directories: [path.join("/project/path", ".zoo")],
+			})
+			const globalError = createFsError("ENOENT")
 			const projectError = new Error("Permission denied") as any
 			projectError.code = "EACCES"
 
@@ -320,13 +491,93 @@ describe("RooConfigService", () => {
 			await expect(loadConfiguration("rules/rules.md", "/project/path")).rejects.toThrow("Permission denied")
 		})
 
-		it("should use correct file paths", async () => {
+		it("should use canonical Zoo file paths when no legacy fallback is needed", async () => {
+			mockExistingPaths({
+				directories: [path.join("/mock/home", ".zoo"), path.join("/project/path", ".zoo")],
+			})
 			mockReadFile.mockResolvedValue("content")
+
+			await loadConfiguration("rules/rules.md", "/project/path")
+
+			expect(mockReadFile).toHaveBeenCalledWith(path.join("/mock/home", ".zoo", "rules/rules.md"), "utf-8")
+			expect(mockReadFile).toHaveBeenCalledWith(path.join("/project/path", ".zoo", "rules/rules.md"), "utf-8")
+		})
+
+		it("should fall back to legacy Roo directories for reads when canonical Zoo directories do not exist", async () => {
+			mockExistingPaths({
+				directories: [path.join("/mock/home", ".roo"), path.join("/project/path", ".roo")],
+			})
+			mockReadFile.mockResolvedValue("legacy content")
 
 			await loadConfiguration("rules/rules.md", "/project/path")
 
 			expect(mockReadFile).toHaveBeenCalledWith(path.join("/mock/home", ".roo", "rules/rules.md"), "utf-8")
 			expect(mockReadFile).toHaveBeenCalledWith(path.join("/project/path", ".roo", "rules/rules.md"), "utf-8")
+		})
+	})
+
+	describe("Zoo-first config directory helpers", () => {
+		it("should return active global and project config directories with canonical preference", async () => {
+			const cwd = "/project/path"
+			mockExistingPaths({
+				directories: [path.join("/mock/home", ".zoo"), path.join(cwd, ".zoo")],
+			})
+
+			await expect(getConfigDirectoriesForCwd(cwd)).resolves.toEqual([
+				path.join("/mock/home", ".zoo"),
+				path.join(cwd, ".zoo"),
+			])
+		})
+
+		it("should return active global and project config directories with Roo fallback", async () => {
+			const cwd = "/project/path"
+			mockExistingPaths({
+				directories: [path.join("/mock/home", ".roo"), path.join(cwd, ".roo")],
+			})
+
+			await expect(getConfigDirectoriesForCwd(cwd)).resolves.toEqual([
+				path.join("/mock/home", ".roo"),
+				path.join(cwd, ".roo"),
+			])
+		})
+
+		it("should discover subfolder config directories with Zoo-first preference", async () => {
+			const cwd = "/workspace"
+			mockExistingPaths({
+				directories: [
+					path.join(cwd, "packages/app", ".zoo"),
+					path.join(cwd, "packages/app", ".roo"),
+					path.join(cwd, "packages/lib", ".roo"),
+				],
+			})
+			mockExecuteRipgrep.mockResolvedValue([
+				{ path: "packages/app/.zoo/rules/rules.md" },
+				{ path: "packages/app/.roo/rules/rules.md" },
+				{ path: "packages/lib/.roo/rules/rules.md" },
+			])
+
+			await expect(discoverSubfolderConfigDirectories(cwd)).resolves.toEqual([
+				path.join(cwd, "packages/app", ".zoo"),
+				path.join(cwd, "packages/lib", ".roo"),
+			])
+		})
+
+		it("should include active subfolder config directories after global and project directories", async () => {
+			const cwd = "/workspace"
+			mockExistingPaths({
+				directories: [
+					path.join("/mock/home", ".zoo"),
+					path.join(cwd, ".roo"),
+					path.join(cwd, "packages/lib", ".roo"),
+				],
+			})
+			mockExecuteRipgrep.mockResolvedValue([{ path: "packages/lib/.roo/rules/rules.md" }])
+
+			await expect(getAllConfigDirectoriesForCwd(cwd)).resolves.toEqual([
+				path.join("/mock/home", ".zoo"),
+				path.join(cwd, ".roo"),
+				path.join(cwd, "packages/lib", ".roo"),
+			])
 		})
 	})
 

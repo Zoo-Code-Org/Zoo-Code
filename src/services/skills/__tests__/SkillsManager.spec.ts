@@ -10,10 +10,13 @@ const {
 	mockFileExists,
 	mockRealpath,
 	mockMkdir,
+	mockCp,
 	mockWriteFile,
 	mockRm,
 	mockRename,
 	mockRmdir,
+	mockResolveGlobalConfigDirectory,
+	mockResolveProjectConfigDirectoryForCwd,
 } = vi.hoisted(() => ({
 	mockStat: vi.fn(),
 	mockReadFile: vi.fn(),
@@ -23,10 +26,13 @@ const {
 	mockFileExists: vi.fn(),
 	mockRealpath: vi.fn(),
 	mockMkdir: vi.fn(),
+	mockCp: vi.fn(),
 	mockWriteFile: vi.fn(),
 	mockRm: vi.fn(),
 	mockRename: vi.fn(),
 	mockRmdir: vi.fn(),
+	mockResolveGlobalConfigDirectory: vi.fn(),
+	mockResolveProjectConfigDirectoryForCwd: vi.fn(),
 }))
 
 // Platform-agnostic test paths
@@ -46,6 +52,7 @@ vi.mock("fs/promises", () => ({
 		readdir: mockReaddir,
 		realpath: mockRealpath,
 		mkdir: mockMkdir,
+		cp: mockCp,
 		writeFile: mockWriteFile,
 		rm: mockRm,
 		rename: mockRename,
@@ -56,6 +63,7 @@ vi.mock("fs/promises", () => ({
 	readdir: mockReaddir,
 	realpath: mockRealpath,
 	mkdir: mockMkdir,
+	cp: mockCp,
 	writeFile: mockWriteFile,
 	rm: mockRm,
 	rename: mockRename,
@@ -80,15 +88,21 @@ vi.mock("vscode", () => ({
 	RelativePattern: vi.fn(),
 }))
 
-// Global roo directory - computed once
-const GLOBAL_ROO_DIR = p(HOME_DIR, ".roo")
+// Global config directories - computed once
+const GLOBAL_ROO_DIR = p(HOME_DIR, ".zoo")
+const LEGACY_GLOBAL_ROO_DIR = p(HOME_DIR, ".roo")
 const GLOBAL_AGENTS_DIR = p(HOME_DIR, ".agents")
 
 // Mock roo-config
 vi.mock("../../roo-config", () => ({
-	getGlobalRooDirectory: () => GLOBAL_ROO_DIR,
+	getCanonicalGlobalConfigDirectory: () => GLOBAL_ROO_DIR,
+	getCanonicalProjectConfigDirectoryForCwd: (cwd: string) => p(cwd, ".zoo"),
 	getGlobalAgentsDirectory: () => GLOBAL_AGENTS_DIR,
+	getLegacyGlobalConfigDirectory: () => LEGACY_GLOBAL_ROO_DIR,
+	getLegacyProjectConfigDirectoryForCwd: (cwd: string) => p(cwd, ".roo"),
 	getProjectAgentsDirectoryForCwd: (cwd: string) => p(cwd, ".agents"),
+	resolveGlobalConfigDirectory: mockResolveGlobalConfigDirectory,
+	resolveProjectConfigDirectoryForCwd: mockResolveProjectConfigDirectoryForCwd,
 	directoryExists: mockDirectoryExists,
 	fileExists: mockFileExists,
 }))
@@ -120,7 +134,9 @@ describe("SkillsManager", () => {
 	const globalSkillsDir = p(GLOBAL_ROO_DIR, "skills")
 	const globalSkillsCodeDir = p(GLOBAL_ROO_DIR, "skills-code")
 	const globalSkillsArchitectDir = p(GLOBAL_ROO_DIR, "skills-architect")
-	const projectRooDir = p(PROJECT_DIR, ".roo")
+	const globalLegacySkillsDir = p(LEGACY_GLOBAL_ROO_DIR, "skills")
+	const projectRooDir = p(PROJECT_DIR, ".zoo")
+	const legacyProjectRooDir = p(PROJECT_DIR, ".roo")
 	const projectSkillsDir = p(projectRooDir, "skills")
 	// .agents directory paths
 	const globalAgentsSkillsDir = p(GLOBAL_AGENTS_DIR, "skills")
@@ -131,6 +147,24 @@ describe("SkillsManager", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mockHomedir.mockReturnValue(HOME_DIR)
+		mockResolveGlobalConfigDirectory.mockResolvedValue({
+			canonicalPath: GLOBAL_ROO_DIR,
+			legacyPath: LEGACY_GLOBAL_ROO_DIR,
+			activePath: GLOBAL_ROO_DIR,
+			canonicalExists: true,
+			legacyExists: false,
+			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		})
+		mockResolveProjectConfigDirectoryForCwd.mockImplementation(async (cwd: string) => ({
+			canonicalPath: p(cwd, ".zoo"),
+			legacyPath: p(cwd, ".roo"),
+			activePath: p(cwd, ".zoo"),
+			canonicalExists: true,
+			legacyExists: false,
+			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		}))
 
 		// Create mock provider
 		mockProvider = {
@@ -717,7 +751,7 @@ Instructions here...`
 			expect(skills[0].source).toBe("project")
 		})
 
-		it("should prioritize .roo skills over .agents skills with same name", async () => {
+		it("should prioritize active config-root skills over .agents skills with same name", async () => {
 			const agentSkillDir = p(globalAgentsSkillsDir, "common-skill")
 			const agentSkillMd = p(agentSkillDir, "SKILL.md")
 			const rooSkillDir = p(globalSkillsDir, "common-skill")
@@ -772,8 +806,60 @@ description: Roo version (should take priority)
 			const skills = skillsManager.getSkillsForMode("code")
 			const commonSkill = skills.find((s) => s.name === "common-skill")
 			expect(commonSkill).toBeDefined()
-			// .roo should override .agents
+			// Active config-root skills should override .agents
 			expect(commonSkill?.description).toBe("Roo version (should take priority)")
+		})
+
+		it("should fall back to legacy Roo skills when Zoo config roots are absent", async () => {
+			const legacySkillDir = p(globalLegacySkillsDir, "legacy-skill")
+			const legacySkillMd = p(legacySkillDir, "SKILL.md")
+
+			mockResolveGlobalConfigDirectory.mockResolvedValue({
+				canonicalPath: GLOBAL_ROO_DIR,
+				legacyPath: LEGACY_GLOBAL_ROO_DIR,
+				activePath: LEGACY_GLOBAL_ROO_DIR,
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			})
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalLegacySkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) => {
+				if (dir === globalLegacySkillsDir) {
+					return ["legacy-skill"]
+				}
+				return []
+			})
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === legacySkillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === legacySkillMd)
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === legacySkillMd) {
+					return `---
+name: legacy-skill
+description: Legacy Roo fallback skill
+---
+
+# Legacy Skill`
+				}
+				throw new Error("File not found")
+			})
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getAllSkills()).toEqual([
+				expect.objectContaining({
+					name: "legacy-skill",
+					source: "global",
+					description: "Legacy Roo fallback skill",
+				}),
+			])
 		})
 
 		it("should discover mode-specific skills from .agents directory", async () => {
@@ -1243,7 +1329,44 @@ Instructions`)
 
 			const createdPath = await skillsManager.createSkill("project-skill", "project", "A project skill")
 
-			expect(createdPath).toBe(p(PROJECT_DIR, ".roo", "skills", "project-skill", "SKILL.md"))
+			expect(createdPath).toBe(p(PROJECT_DIR, ".zoo", "skills", "project-skill", "SKILL.md"))
+		})
+
+		it("should bootstrap legacy Roo skills before creating a canonical Zoo skill", async () => {
+			mockResolveGlobalConfigDirectory.mockResolvedValue({
+				canonicalPath: GLOBAL_ROO_DIR,
+				legacyPath: LEGACY_GLOBAL_ROO_DIR,
+				activePath: LEGACY_GLOBAL_ROO_DIR,
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			})
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue(["skills", "skills-code", "other-dir"])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockCp.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			const createdPath = await skillsManager.createSkill("new-skill", "global", "A new skill description")
+
+			expect(createdPath).toBe(p(GLOBAL_ROO_DIR, "skills", "new-skill", "SKILL.md"))
+			expect(mockCp).toHaveBeenCalledWith(p(LEGACY_GLOBAL_ROO_DIR, "skills"), p(GLOBAL_ROO_DIR, "skills"), {
+				recursive: true,
+				force: false,
+				errorOnExist: false,
+			})
+			expect(mockCp).toHaveBeenCalledWith(
+				p(LEGACY_GLOBAL_ROO_DIR, "skills-code"),
+				p(GLOBAL_ROO_DIR, "skills-code"),
+				{
+					recursive: true,
+					force: false,
+					errorOnExist: false,
+				},
+			)
 		})
 
 		it("should throw error for invalid skill name", async () => {

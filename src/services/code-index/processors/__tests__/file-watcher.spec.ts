@@ -135,6 +135,31 @@ describe("FileWatcher", () => {
 	})
 
 	describe("file filtering", () => {
+		it("should report Zoo/Roo ignore reason when access is blocked by the project ignore controller", async () => {
+			const blockingIgnoreController = {
+				validateAccess: vi.fn().mockReturnValue(false),
+			} as any
+
+			const watcherWithBlockedAccess = new FileWatcher(
+				"/mock/workspace",
+				mockContext,
+				mockCacheManager,
+				mockEmbedder,
+				mockVectorStore,
+				mockIgnoreInstance,
+				blockingIgnoreController,
+			)
+
+			const result = await watcherWithBlockedAccess.processFile("/mock/workspace/src/secret.ts")
+
+			expect(result).toEqual({
+				path: "/mock/workspace/src/secret.ts",
+				status: "skipped",
+				reason: "File is ignored by .zooignore/.rooignore or .gitignore",
+			})
+			expect(blockingIgnoreController.validateAccess).toHaveBeenCalledWith("/mock/workspace/src/secret.ts")
+		})
+
 		it("should ignore files in hidden directories on create events", async () => {
 			// Initialize the file watcher
 			await fileWatcher.initialize()

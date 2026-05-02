@@ -291,7 +291,7 @@ async function getFileOrFolderContentWithMetadata(
 				return {
 					type: "file",
 					path: mentionPath,
-					content: `[read_file for '${mentionPath}']\nNote: File is ignored by .rooignore.`,
+					content: `[read_file for '${mentionPath}']\nNote: File is ignored by the project ignore file (.zooignore preferred, .rooignore fallback).`,
 				}
 			}
 			try {

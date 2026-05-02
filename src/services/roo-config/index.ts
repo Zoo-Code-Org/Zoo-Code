@@ -2,8 +2,81 @@ import * as path from "path"
 import * as os from "os"
 import fs from "fs/promises"
 
+const ZOO_CONFIG_DIRECTORY_NAME = ".zoo"
+const ROO_CONFIG_DIRECTORY_NAME = ".roo"
+const ZOO_CUSTOM_MODES_FILENAME = ".zoomodes"
+const ROO_CUSTOM_MODES_FILENAME = ".roomodes"
+const ZOO_IGNORE_FILENAME = ".zooignore"
+const ROO_IGNORE_FILENAME = ".rooignore"
+const MCP_SETTINGS_FILENAME = "mcp.json"
+
+type ZooPathEntityType = "directory" | "file"
+
+export interface ZooPathResolution {
+	canonicalPath: string
+	legacyPath: string
+	activePath: string
+	canonicalExists: boolean
+	legacyExists: boolean
+	activeExists: boolean
+	shouldBootstrapCanonicalFromLegacy: boolean
+}
+
+async function pathExistsForEntity(pathToCheck: string, entityType: ZooPathEntityType): Promise<boolean> {
+	return entityType === "directory" ? directoryExists(pathToCheck) : fileExists(pathToCheck)
+}
+
+async function resolveZooPathPair(
+	canonicalPath: string,
+	legacyPath: string,
+	entityType: ZooPathEntityType,
+): Promise<ZooPathResolution> {
+	const [canonicalExists, legacyExists] = await Promise.all([
+		pathExistsForEntity(canonicalPath, entityType),
+		pathExistsForEntity(legacyPath, entityType),
+	])
+
+	const activePath = !canonicalExists && legacyExists ? legacyPath : canonicalPath
+	const shouldBootstrapCanonicalFromLegacy = !canonicalExists && legacyExists
+
+	return {
+		canonicalPath,
+		legacyPath,
+		activePath,
+		canonicalExists,
+		legacyExists,
+		activeExists: canonicalExists || legacyExists,
+		shouldBootstrapCanonicalFromLegacy,
+	}
+}
+
 /**
- * Gets the global .roo directory path based on the current platform
+ * Gets the canonical global Zoo configuration directory path based on the current platform.
+ */
+export function getCanonicalGlobalConfigDirectory(): string {
+	const homeDir = os.homedir()
+	return path.join(homeDir, ZOO_CONFIG_DIRECTORY_NAME)
+}
+
+/**
+ * Gets the legacy global Roo configuration directory path based on the current platform.
+ *
+ * Preserved as the backward-compatible meaning behind older Roo-named helpers.
+ */
+export function getLegacyGlobalConfigDirectory(): string {
+	const homeDir = os.homedir()
+	return path.join(homeDir, ROO_CONFIG_DIRECTORY_NAME)
+}
+
+/**
+ * Resolves the active global configuration directory using Zoo-first / Roo-fallback semantics.
+ */
+export async function resolveGlobalConfigDirectory(): Promise<ZooPathResolution> {
+	return resolveZooPathPair(getCanonicalGlobalConfigDirectory(), getLegacyGlobalConfigDirectory(), "directory")
+}
+
+/**
+ * Gets the legacy global .roo directory path based on the current platform
  *
  * @returns The absolute path to the global .roo directory
  *
@@ -23,10 +96,7 @@ import fs from "fs/promises"
  * // Returns: "C:\\Users\\john\\.roo" (on Windows)
  * ```
  */
-export function getGlobalRooDirectory(): string {
-	const homeDir = os.homedir()
-	return path.join(homeDir, ".roo")
-}
+export const getGlobalRooDirectory = getLegacyGlobalConfigDirectory
 
 /**
  * Gets the global .agents directory path based on the current platform.
@@ -73,6 +143,98 @@ export function getProjectAgentsDirectoryForCwd(cwd: string): string {
 }
 
 /**
+ * Gets the canonical project-local Zoo configuration directory path for a given cwd.
+ */
+export function getCanonicalProjectConfigDirectoryForCwd(cwd: string): string {
+	return path.join(cwd, ZOO_CONFIG_DIRECTORY_NAME)
+}
+
+/**
+ * Gets the legacy project-local Roo configuration directory path for a given cwd.
+ */
+export function getLegacyProjectConfigDirectoryForCwd(cwd: string): string {
+	return path.join(cwd, ROO_CONFIG_DIRECTORY_NAME)
+}
+
+/**
+ * Resolves the active project configuration directory using Zoo-first / Roo-fallback semantics.
+ */
+export async function resolveProjectConfigDirectoryForCwd(cwd: string): Promise<ZooPathResolution> {
+	return resolveZooPathPair(
+		getCanonicalProjectConfigDirectoryForCwd(cwd),
+		getLegacyProjectConfigDirectoryForCwd(cwd),
+		"directory",
+	)
+}
+
+/**
+ * Gets the canonical project-local custom modes file path for a given cwd.
+ */
+export function getCanonicalProjectCustomModesFileForCwd(cwd: string): string {
+	return path.join(cwd, ZOO_CUSTOM_MODES_FILENAME)
+}
+
+/**
+ * Gets the legacy project-local custom modes file path for a given cwd.
+ */
+export function getLegacyProjectCustomModesFileForCwd(cwd: string): string {
+	return path.join(cwd, ROO_CUSTOM_MODES_FILENAME)
+}
+
+/**
+ * Resolves the active project custom modes file using Zoo-first / Roo-fallback semantics.
+ */
+export async function resolveProjectCustomModesFileForCwd(cwd: string): Promise<ZooPathResolution> {
+	return resolveZooPathPair(
+		getCanonicalProjectCustomModesFileForCwd(cwd),
+		getLegacyProjectCustomModesFileForCwd(cwd),
+		"file",
+	)
+}
+
+/**
+ * Gets the canonical project-local ignore file path for a given cwd.
+ */
+export function getCanonicalProjectIgnoreFileForCwd(cwd: string): string {
+	return path.join(cwd, ZOO_IGNORE_FILENAME)
+}
+
+/**
+ * Gets the legacy project-local ignore file path for a given cwd.
+ */
+export function getLegacyProjectIgnoreFileForCwd(cwd: string): string {
+	return path.join(cwd, ROO_IGNORE_FILENAME)
+}
+
+/**
+ * Resolves the active project ignore file using Zoo-first / Roo-fallback semantics.
+ */
+export async function resolveProjectIgnoreFileForCwd(cwd: string): Promise<ZooPathResolution> {
+	return resolveZooPathPair(getCanonicalProjectIgnoreFileForCwd(cwd), getLegacyProjectIgnoreFileForCwd(cwd), "file")
+}
+
+/**
+ * Gets the canonical project-local MCP settings file path for a given cwd.
+ */
+export function getCanonicalProjectMcpFileForCwd(cwd: string): string {
+	return path.join(getCanonicalProjectConfigDirectoryForCwd(cwd), MCP_SETTINGS_FILENAME)
+}
+
+/**
+ * Gets the legacy project-local MCP settings file path for a given cwd.
+ */
+export function getLegacyProjectMcpFileForCwd(cwd: string): string {
+	return path.join(getLegacyProjectConfigDirectoryForCwd(cwd), MCP_SETTINGS_FILENAME)
+}
+
+/**
+ * Resolves the active project MCP settings file using Zoo-first / Roo-fallback semantics.
+ */
+export async function resolveProjectMcpFileForCwd(cwd: string): Promise<ZooPathResolution> {
+	return resolveZooPathPair(getCanonicalProjectMcpFileForCwd(cwd), getLegacyProjectMcpFileForCwd(cwd), "file")
+}
+
+/**
  * Gets the project-local .roo directory path for a given cwd
  *
  * @param cwd - Current working directory (project path)
@@ -101,9 +263,7 @@ export function getProjectAgentsDirectoryForCwd(cwd: string): string {
  * └── package.json
  * ```
  */
-export function getProjectRooDirectoryForCwd(cwd: string): string {
-	return path.join(cwd, ".roo")
-}
+export const getProjectRooDirectoryForCwd = getLegacyProjectConfigDirectoryForCwd
 
 /**
  * Checks if a directory exists
@@ -239,6 +399,75 @@ export async function discoverSubfolderRooDirectories(cwd: string): Promise<stri
 }
 
 /**
+ * Discovers active configuration directories in subdirectories of the workspace
+ * using Zoo-first / Roo-fallback semantics.
+ */
+export async function discoverSubfolderConfigDirectories(cwd: string): Promise<string[]> {
+	try {
+		const { executeRipgrep } = await import("../search/file-search")
+
+		const args = [
+			"--files",
+			"--hidden",
+			"--follow",
+			"-g",
+			"**/.zoo/**",
+			"-g",
+			"**/.roo/**",
+			"-g",
+			"!node_modules/**",
+			"-g",
+			"!.git/**",
+			cwd,
+		]
+
+		const results = await executeRipgrep({ args, workspacePath: cwd })
+		const directoryTypeByParent = new Map<string, "zoo" | "roo">()
+
+		for (const result of results) {
+			const match = result.path.match(/^(.+?)[/\\]\.(zoo|roo)[/\\]/)
+			if (match) {
+				const parentDir = path.join(cwd, match[1])
+				const configType = match[2] as "zoo" | "roo"
+
+				if (configType === "zoo" || !directoryTypeByParent.has(parentDir)) {
+					directoryTypeByParent.set(parentDir, configType)
+				}
+			}
+		}
+
+		return Array.from(directoryTypeByParent.entries())
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([parentDir, configType]) => path.join(parentDir, configType === "zoo" ? ".zoo" : ".roo"))
+	} catch (error) {
+		return []
+	}
+}
+
+/**
+ * Gets the ordered list of active configuration directories to check (global first, then project-local)
+ * using Zoo-first / Roo-fallback semantics.
+ */
+export async function getConfigDirectoriesForCwd(cwd: string): Promise<string[]> {
+	const [globalResolution, projectResolution] = await Promise.all([
+		resolveGlobalConfigDirectory(),
+		resolveProjectConfigDirectoryForCwd(cwd),
+	])
+
+	return [globalResolution.activePath, projectResolution.activePath]
+}
+
+/**
+ * Gets the ordered list of all active configuration directories including subdirectories.
+ */
+export async function getAllConfigDirectoriesForCwd(cwd: string): Promise<string[]> {
+	const directories = await getConfigDirectoriesForCwd(cwd)
+	const subfolderDirectories = await discoverSubfolderConfigDirectories(cwd)
+
+	return [...directories, ...subfolderDirectories]
+}
+
+/**
  * Gets the ordered list of .roo directories to check (global first, then project-local)
  *
  * @param cwd - Current working directory (project path)
@@ -275,10 +504,10 @@ export function getRooDirectoriesForCwd(cwd: string): string[] {
 	const directories: string[] = []
 
 	// Add global directory first
-	directories.push(getGlobalRooDirectory())
+	directories.push(getLegacyGlobalConfigDirectory())
 
 	// Add project-local directory second
-	directories.push(getProjectRooDirectoryForCwd(cwd))
+	directories.push(getLegacyProjectConfigDirectoryForCwd(cwd))
 
 	return directories
 }
@@ -306,10 +535,10 @@ export async function getAllRooDirectoriesForCwd(cwd: string): Promise<string[]>
 	const directories: string[] = []
 
 	// Add global directory first
-	directories.push(getGlobalRooDirectory())
+	directories.push(getLegacyGlobalConfigDirectory())
 
 	// Add project-local directory second
-	directories.push(getProjectRooDirectoryForCwd(cwd))
+	directories.push(getLegacyProjectConfigDirectoryForCwd(cwd))
 
 	// Discover and add subfolder .roo directories
 	const subfolderDirs = await discoverSubfolderRooDirectories(cwd)
@@ -336,8 +565,8 @@ export async function getAgentsDirectoriesForCwd(cwd: string): Promise<string[]>
 	// Always include the root directory
 	directories.push(cwd)
 
-	// Get all subfolder .roo directories
-	const subfolderRooDirs = await discoverSubfolderRooDirectories(cwd)
+	// Get all subfolder active configuration directories
+	const subfolderRooDirs = await discoverSubfolderConfigDirectories(cwd)
 
 	// Extract parent directories (remove .roo from path)
 	for (const rooDir of subfolderRooDirs) {
@@ -407,8 +636,8 @@ export async function loadConfiguration(
 	project: string | null
 	merged: string
 }> {
-	const globalDir = getGlobalRooDirectory()
-	const projectDir = getProjectRooDirectoryForCwd(cwd)
+	const globalDir = (await resolveGlobalConfigDirectory()).activePath
+	const projectDir = (await resolveProjectConfigDirectoryForCwd(cwd)).activePath
 
 	const globalFilePath = path.join(globalDir, relativePath)
 	const projectFilePath = path.join(projectDir, relativePath)

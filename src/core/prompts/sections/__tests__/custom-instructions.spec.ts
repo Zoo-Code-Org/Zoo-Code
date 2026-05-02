@@ -3,6 +3,19 @@
 // Mock fs/promises
 vi.mock("fs/promises")
 
+const { mockGetConfigDirectoriesForCwd, mockGetAllConfigDirectoriesForCwd, mockGetAgentsDirectoriesForCwd } =
+	vi.hoisted(() => ({
+		mockGetConfigDirectoriesForCwd: vi.fn(),
+		mockGetAllConfigDirectoriesForCwd: vi.fn(),
+		mockGetAgentsDirectoriesForCwd: vi.fn(),
+	}))
+
+vi.mock("../../../../services/roo-config", () => ({
+	getConfigDirectoriesForCwd: mockGetConfigDirectoriesForCwd,
+	getAllConfigDirectoriesForCwd: mockGetAllConfigDirectoriesForCwd,
+	getAgentsDirectoriesForCwd: mockGetAgentsDirectoriesForCwd,
+}))
+
 // Mock path.resolve and path.join to be predictable in tests
 vi.mock("path", async () => ({
 	...(await vi.importActual("path")),
@@ -85,6 +98,9 @@ afterAll(() => {
 describe("loadRuleFiles", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockGetConfigDirectoriesForCwd.mockResolvedValue(["/fake/path/.roo"])
+		mockGetAllConfigDirectoriesForCwd.mockResolvedValue(["/fake/path/.roo"])
+		mockGetAgentsDirectoriesForCwd.mockResolvedValue(["/fake/path"])
 	})
 
 	it("should read and trim file content", async () => {

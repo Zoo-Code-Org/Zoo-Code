@@ -529,7 +529,7 @@ export class FileWatcher implements IFileWatcher {
 				return {
 					path: filePath,
 					status: "skipped" as const,
-					reason: "File is ignored by .rooignore or .gitignore",
+					reason: "File is ignored by .zooignore/.rooignore or .gitignore",
 				}
 			}
 

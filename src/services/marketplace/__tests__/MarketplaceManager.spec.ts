@@ -1,6 +1,13 @@
 // npx vitest services/marketplace/__tests__/MarketplaceManager.spec.ts
 
+const rooConfigMocks = vi.hoisted(() => ({
+	resolveProjectCustomModesFileForCwd: vi.fn(),
+	resolveProjectMcpFileForCwd: vi.fn(),
+}))
+
 import type { MarketplaceItem } from "@roo-code/types"
+import * as fs from "fs/promises"
+import * as yaml from "yaml"
 
 import { MarketplaceManager } from "../MarketplaceManager"
 
@@ -67,10 +74,18 @@ const mockContext = {
 
 // Mock fs
 vi.mock("fs/promises", () => ({
+	default: {
+		readFile: vi.fn(),
+		access: vi.fn(),
+		writeFile: vi.fn(),
+		mkdir: vi.fn(),
+		stat: vi.fn(),
+	},
 	readFile: vi.fn(),
 	access: vi.fn(),
 	writeFile: vi.fn(),
 	mkdir: vi.fn(),
+	stat: vi.fn(),
 }))
 
 // Mock yaml
@@ -79,12 +94,36 @@ vi.mock("yaml", () => ({
 	stringify: vi.fn(),
 }))
 
+vi.mock("../../roo-config", () => ({
+	resolveProjectCustomModesFileForCwd: rooConfigMocks.resolveProjectCustomModesFileForCwd,
+	resolveProjectMcpFileForCwd: rooConfigMocks.resolveProjectMcpFileForCwd,
+}))
+
 describe("MarketplaceManager", () => {
 	let manager: MarketplaceManager
 
 	beforeEach(() => {
 		manager = new MarketplaceManager(mockContext)
 		vi.clearAllMocks()
+		vi.mocked(fs.stat).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+		rooConfigMocks.resolveProjectCustomModesFileForCwd.mockResolvedValue({
+			canonicalPath: "/test/workspace/.zoomodes",
+			legacyPath: "/test/workspace/.roomodes",
+			activePath: "/test/workspace/.zoomodes",
+			canonicalExists: true,
+			legacyExists: false,
+			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		})
+		rooConfigMocks.resolveProjectMcpFileForCwd.mockResolvedValue({
+			canonicalPath: "/test/workspace/.zoo/mcp.json",
+			legacyPath: "/test/workspace/.roo/mcp.json",
+			activePath: "/test/workspace/.zoo/mcp.json",
+			canonicalExists: true,
+			legacyExists: false,
+			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		})
 	})
 
 	describe("filterItems", () => {
@@ -315,14 +354,14 @@ describe("MarketplaceManager", () => {
 
 			// Mock the installer
 			vi.spyOn(manager["installer"], "installItem").mockResolvedValue({
-				filePath: "/test/path/.roomodes",
+				filePath: "/test/path/.zoomodes",
 				line: 5,
 			})
 
 			const result = await manager.installMarketplaceItem(item)
 
 			expect(manager["installer"].installItem).toHaveBeenCalledWith(item, { target: "project" })
-			expect(result).toBe("/test/path/.roomodes")
+			expect(result).toBe("/test/path/.zoomodes")
 		})
 
 		it("should install an MCP item", async () => {
@@ -337,14 +376,52 @@ describe("MarketplaceManager", () => {
 
 			// Mock the installer
 			vi.spyOn(manager["installer"], "installItem").mockResolvedValue({
-				filePath: "/test/path/.roo/mcp.json",
+				filePath: "/test/path/.zoo/mcp.json",
 				line: 3,
 			})
 
 			const result = await manager.installMarketplaceItem(item)
 
 			expect(manager["installer"].installItem).toHaveBeenCalledWith(item, { target: "project" })
-			expect(result).toBe("/test/path/.roo/mcp.json")
+			expect(result).toBe("/test/path/.zoo/mcp.json")
+		})
+	})
+
+	describe("getInstallationMetadata", () => {
+		it("prefers canonical Zoo project config files when both Zoo and Roo project installs exist", async () => {
+			vi.mocked(fs.stat).mockImplementation(async (filePath: any) => {
+				if (filePath === "/test/workspace/.zoomodes" || filePath === "/test/workspace/.zoo/mcp.json") {
+					return { isFile: () => true } as any
+				}
+
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			vi.mocked(fs.readFile).mockImplementation(async (filePath: any) => {
+				if (filePath === "/test/workspace/.zoomodes") {
+					return "zoo-modes"
+				}
+
+				if (filePath === "/test/workspace/.zoo/mcp.json") {
+					return JSON.stringify({ mcpServers: { "zoo-server": { command: "node", args: [] } } })
+				}
+
+				throw new Error(`Unexpected file read: ${filePath}`)
+			})
+
+			vi.mocked(yaml.parse).mockImplementation((content: string) => {
+				if (content === "zoo-modes") {
+					return { customModes: [{ slug: "zoo-mode" }] }
+				}
+
+				return { customModes: [] }
+			})
+
+			const metadata = await manager.getInstallationMetadata()
+
+			expect(metadata.project).toEqual({
+				"zoo-mode": { type: "mode" },
+				"zoo-server": { type: "mcp" },
+			})
 		})
 	})
 

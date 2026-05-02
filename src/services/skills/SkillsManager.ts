@@ -4,8 +4,19 @@ import * as vscode from "vscode"
 import matter from "gray-matter"
 
 import type { ClineProvider } from "../../core/webview/ClineProvider"
-import { getGlobalRooDirectory, getGlobalAgentsDirectory, getProjectAgentsDirectoryForCwd } from "../roo-config"
-import { directoryExists, fileExists } from "../roo-config"
+import {
+	type ZooPathResolution,
+	getCanonicalGlobalConfigDirectory,
+	getCanonicalProjectConfigDirectoryForCwd,
+	getGlobalAgentsDirectory,
+	getLegacyGlobalConfigDirectory,
+	getLegacyProjectConfigDirectoryForCwd,
+	getProjectAgentsDirectoryForCwd,
+	resolveGlobalConfigDirectory,
+	resolveProjectConfigDirectoryForCwd,
+	directoryExists,
+	fileExists,
+} from "../roo-config"
 import { SkillMetadata, SkillContent } from "../../shared/skills"
 import { modes, getAllModes } from "../../shared/modes"
 import {
@@ -311,6 +322,66 @@ export class SkillsManager {
 		return undefined
 	}
 
+	private async resolveConfigDirectory(source: "global" | "project"): Promise<ZooPathResolution> {
+		if (source === "global") {
+			return resolveGlobalConfigDirectory()
+		}
+
+		const provider = this.providerRef.deref()
+		if (!provider?.cwd) {
+			throw new Error(t("skills:errors.no_workspace"))
+		}
+
+		return resolveProjectConfigDirectoryForCwd(provider.cwd)
+	}
+
+	private async bootstrapLegacySkillsDirectories(resolution: ZooPathResolution): Promise<void> {
+		if (!resolution.shouldBootstrapCanonicalFromLegacy) {
+			return
+		}
+
+		await fs.mkdir(resolution.canonicalPath, { recursive: true })
+
+		let entries: string[] = []
+		try {
+			entries = await fs.readdir(resolution.legacyPath)
+		} catch {
+			return
+		}
+
+		for (const entry of entries) {
+			if (entry === "skills" || entry.startsWith("skills-")) {
+				await fs.cp(path.join(resolution.legacyPath, entry), path.join(resolution.canonicalPath, entry), {
+					recursive: true,
+					force: false,
+					errorOnExist: false,
+				})
+			}
+		}
+	}
+
+	private async ensureCanonicalConfigDirectoryForWrite(source: "global" | "project"): Promise<string> {
+		const resolution = await this.resolveConfigDirectory(source)
+		await this.bootstrapLegacySkillsDirectories(resolution)
+		return resolution.canonicalPath
+	}
+
+	private async getCanonicalSkillPathForMutation(skill: SkillMetadata): Promise<string> {
+		const resolution = await this.resolveConfigDirectory(skill.source)
+
+		if (skill.path.startsWith(resolution.canonicalPath)) {
+			return skill.path
+		}
+
+		await this.bootstrapLegacySkillsDirectories(resolution)
+
+		if (skill.path.startsWith(resolution.legacyPath)) {
+			return path.join(resolution.canonicalPath, path.relative(resolution.legacyPath, skill.path))
+		}
+
+		return skill.path
+	}
+
 	/**
 	 * Validate skill name per agentskills.io spec using shared validation.
 	 * Converts error codes to user-friendly error messages.
@@ -363,17 +434,7 @@ export class SkillsManager {
 			throw new Error(t("skills:errors.description_length", { length: trimmedDescription.length }))
 		}
 
-		// Determine base directory
-		let baseDir: string
-		if (source === "global") {
-			baseDir = getGlobalRooDirectory()
-		} else {
-			const provider = this.providerRef.deref()
-			if (!provider?.cwd) {
-				throw new Error(t("skills:errors.no_workspace"))
-			}
-			baseDir = path.join(provider.cwd, ".roo")
-		}
+		const baseDir = await this.ensureCanonicalConfigDirectoryForWrite(source)
 
 		// Always use the generic skills directory (mode info stored in frontmatter now)
 		const skillsDir = path.join(baseDir, "skills")
@@ -438,7 +499,8 @@ Add your skill instructions here.
 		}
 
 		// Get the skill directory (parent of SKILL.md)
-		const skillDir = path.dirname(skill.path)
+		const skillPath = await this.getCanonicalSkillPathForMutation(skill)
+		const skillDir = path.dirname(skillPath)
 
 		// Delete the entire skill directory
 		await fs.rm(skillDir, { recursive: true, force: true })
@@ -472,22 +534,12 @@ Add your skill instructions here.
 			throw new Error(t("skills:errors.not_found", { name, source, modeInfo }))
 		}
 
-		// Determine base directory
-		let baseDir: string
-		if (source === "global") {
-			baseDir = getGlobalRooDirectory()
-		} else {
-			const provider = this.providerRef.deref()
-			if (!provider?.cwd) {
-				throw new Error(t("skills:errors.no_workspace"))
-			}
-			baseDir = path.join(provider.cwd, ".roo")
-		}
+		const baseDir = await this.ensureCanonicalConfigDirectoryForWrite(source)
+		const sourceSkillMdPath = await this.getCanonicalSkillPathForMutation(skill)
 
 		// Determine source and destination directories
-		const sourceDirName = currentMode ? `skills-${currentMode}` : "skills"
 		const destDirName = newMode ? `skills-${newMode}` : "skills"
-		const sourceDir = path.join(baseDir, sourceDirName, name)
+		const sourceDir = path.dirname(sourceSkillMdPath)
 		const destSkillsDir = path.join(baseDir, destDirName)
 		const destDir = path.join(destSkillsDir, name)
 		const destSkillMdPath = path.join(destDir, "SKILL.md")
@@ -504,7 +556,7 @@ Add your skill instructions here.
 		await fs.rename(sourceDir, destDir)
 
 		// Clean up empty source skills directory
-		const sourceSkillsDir = path.join(baseDir, sourceDirName)
+		const sourceSkillsDir = path.dirname(sourceDir)
 		try {
 			const entries = await fs.readdir(sourceSkillsDir)
 			if (entries.length === 0) {
@@ -539,7 +591,8 @@ Add your skill instructions here.
 		}
 
 		// Read the current SKILL.md file
-		const fileContent = await fs.readFile(skill.path, "utf-8")
+		const skillPath = await this.getCanonicalSkillPathForMutation(skill)
+		const fileContent = await fs.readFile(skillPath, "utf-8")
 		const { data: frontmatter, content: body } = matter(fileContent)
 
 		// Update the frontmatter with new modeSlugs
@@ -555,7 +608,7 @@ Add your skill instructions here.
 
 		// Serialize back to SKILL.md format
 		const newContent = matter.stringify(body, frontmatter)
-		await fs.writeFile(skill.path, newContent, "utf-8")
+		await fs.writeFile(skillPath, newContent, "utf-8")
 
 		// Refresh skills list
 		await this.discoverSkills()
@@ -572,10 +625,12 @@ Add your skill instructions here.
 		}>
 	> {
 		const dirs: Array<{ dir: string; source: "global" | "project"; mode?: string }> = []
-		const globalRooDir = getGlobalRooDirectory()
 		const globalAgentsDir = getGlobalAgentsDirectory()
 		const provider = this.providerRef.deref()
-		const projectRooDir = provider?.cwd ? path.join(provider.cwd, ".roo") : null
+		const globalConfigDir = (await resolveGlobalConfigDirectory()).activePath
+		const projectConfigDir = provider?.cwd
+			? (await resolveProjectConfigDirectoryForCwd(provider.cwd)).activePath
+			: null
 		const projectAgentsDir = provider?.cwd ? getProjectAgentsDirectoryForCwd(provider.cwd) : null
 
 		// Get list of modes to check for mode-specific skills
@@ -587,8 +642,8 @@ Add your skill instructions here.
 		//    (via Map.set replacement during discovery - same source+mode+name key gets replaced)
 		//
 		// Processing order (later directories override earlier ones at the same source level):
-		// - Global: .agents/skills first, then .roo/skills (so .roo wins)
-		// - Project: .agents/skills first, then .roo/skills (so .roo wins)
+		// - Global: .agents/skills first, then active config-root skills (so Zoo/Roo config wins)
+		// - Project: .agents/skills first, then active config-root skills (so Zoo/Roo config wins)
 
 		// Global .agents directories (lowest priority - shared across agents)
 		dirs.push({ dir: path.join(globalAgentsDir, "skills"), source: "global" })
@@ -604,17 +659,17 @@ Add your skill instructions here.
 			}
 		}
 
-		// Global .roo directories (Roo-specific, higher priority than .agents)
-		dirs.push({ dir: path.join(globalRooDir, "skills"), source: "global" })
+		// Global active configuration directories (Zoo-first with Roo fallback)
+		dirs.push({ dir: path.join(globalConfigDir, "skills"), source: "global" })
 		for (const mode of modesList) {
-			dirs.push({ dir: path.join(globalRooDir, `skills-${mode}`), source: "global", mode })
+			dirs.push({ dir: path.join(globalConfigDir, `skills-${mode}`), source: "global", mode })
 		}
 
-		// Project .roo directories (highest priority)
-		if (projectRooDir) {
-			dirs.push({ dir: path.join(projectRooDir, "skills"), source: "project" })
+		// Project active configuration directories (highest priority)
+		if (projectConfigDir) {
+			dirs.push({ dir: path.join(projectConfigDir, "skills"), source: "project" })
 			for (const mode of modesList) {
-				dirs.push({ dir: path.join(projectRooDir, `skills-${mode}`), source: "project", mode })
+				dirs.push({ dir: path.join(projectConfigDir, `skills-${mode}`), source: "project", mode })
 			}
 		}
 
@@ -655,16 +710,24 @@ Add your skill instructions here.
 		if (!provider?.cwd) return
 
 		// Watch for changes in skills directories
-		const globalRooDir = getGlobalRooDirectory()
+		const globalZooDir = getCanonicalGlobalConfigDirectory()
+		const globalRooDir = getLegacyGlobalConfigDirectory()
 		const globalAgentsDir = getGlobalAgentsDirectory()
-		const projectRooDir = path.join(provider.cwd, ".roo")
+		const projectZooDir = getCanonicalProjectConfigDirectoryForCwd(provider.cwd)
+		const projectRooDir = getLegacyProjectConfigDirectoryForCwd(provider.cwd)
 		const projectAgentsDir = getProjectAgentsDirectoryForCwd(provider.cwd)
+
+		// Watch global .zoo skills directory
+		this.watchDirectory(path.join(globalZooDir, "skills"))
 
 		// Watch global .roo skills directory
 		this.watchDirectory(path.join(globalRooDir, "skills"))
 
 		// Watch global .agents skills directory
 		this.watchDirectory(path.join(globalAgentsDir, "skills"))
+
+		// Watch project .zoo skills directory
+		this.watchDirectory(path.join(projectZooDir, "skills"))
 
 		// Watch project .roo skills directory
 		this.watchDirectory(path.join(projectRooDir, "skills"))
@@ -675,6 +738,10 @@ Add your skill instructions here.
 		// Watch mode-specific directories for all available modes
 		const modesList = await this.getAvailableModes()
 		for (const mode of modesList) {
+			// .zoo mode-specific
+			this.watchDirectory(path.join(globalZooDir, `skills-${mode}`))
+			this.watchDirectory(path.join(projectZooDir, `skills-${mode}`))
+
 			// .roo mode-specific
 			this.watchDirectory(path.join(globalRooDir, `skills-${mode}`))
 			this.watchDirectory(path.join(projectRooDir, `skills-${mode}`))

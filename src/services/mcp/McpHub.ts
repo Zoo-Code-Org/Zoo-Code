@@ -43,6 +43,7 @@ import { arePathsEqual, getWorkspacePath } from "../../utils/path"
 import { injectVariables } from "../../utils/config"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { sanitizeMcpName, toolNamesMatch } from "../../utils/mcp-name"
+import { resolveProjectMcpFileForCwd } from "../roo-config"
 
 // Discriminated union for connection states
 export type ConnectedMcpConnection = {
@@ -157,7 +158,7 @@ export class McpHub {
 	private disposables: vscode.Disposable[] = []
 	private settingsWatcher?: vscode.FileSystemWatcher
 	private fileWatchers: Map<string, FSWatcher[]> = new Map()
-	private projectMcpWatcher?: vscode.FileSystemWatcher
+	private projectMcpWatchers: vscode.FileSystemWatcher[] = []
 	private isDisposed: boolean = false
 	connections: McpConnection[] = []
 	isConnecting: boolean = false
@@ -332,7 +333,15 @@ export class McpHub {
 
 	private async handleConfigFileChange(filePath: string, source: "global" | "project"): Promise<void> {
 		try {
-			const content = await fs.readFile(filePath, "utf-8")
+			const resolvedPath = source === "project" ? await this.getProjectMcpPath() : filePath
+			if (!resolvedPath) {
+				await this.cleanupProjectMcpServers()
+				await this.notifyWebviewOfServerChanges()
+				vscode.window.showInformationMessage(t("mcp:info.project_config_deleted"))
+				return
+			}
+
+			const content = await fs.readFile(resolvedPath, "utf-8")
 			let config: any
 
 			try {
@@ -355,13 +364,18 @@ export class McpHub {
 			}
 
 			await this.updateServerConnections(result.data.mcpServers || {}, source)
-		} catch (error) {
+		} catch (error: any) {
 			// Check if the error is because the file doesn't exist
 			if (error.code === "ENOENT" && source === "project") {
-				// File was deleted, clean up project MCP servers
-				await this.cleanupProjectMcpServers()
-				await this.notifyWebviewOfServerChanges()
-				vscode.window.showInformationMessage(t("mcp:info.project_config_deleted"))
+				const activeProjectPath = await this.getProjectMcpPath()
+				if (!activeProjectPath) {
+					await this.cleanupProjectMcpServers()
+					await this.notifyWebviewOfServerChanges()
+					vscode.window.showInformationMessage(t("mcp:info.project_config_deleted"))
+				} else {
+					await this.updateProjectMcpServers()
+					await this.notifyWebviewOfServerChanges()
+				}
 			} else {
 				this.showErrorMessage(t("mcp:errors.failed_update_project"), error)
 			}
@@ -375,9 +389,9 @@ export class McpHub {
 		}
 
 		// Clean up existing project MCP watcher if it exists
-		if (this.projectMcpWatcher) {
-			this.projectMcpWatcher.dispose()
-			this.projectMcpWatcher = undefined
+		if (this.projectMcpWatchers.length > 0) {
+			this.projectMcpWatchers.forEach((watcher) => watcher.dispose())
+			this.projectMcpWatchers = []
 		}
 
 		if (!vscode.workspace.workspaceFolders?.length) {
@@ -385,38 +399,36 @@ export class McpHub {
 		}
 
 		const workspaceFolder = this.providerRef.deref()?.cwd ?? getWorkspacePath()
-		const projectMcpPattern = new vscode.RelativePattern(workspaceFolder, ".roo/mcp.json")
+		const watcherDisposables: vscode.Disposable[] = []
 
-		// Create a file system watcher for the project MCP file pattern
-		this.projectMcpWatcher = vscode.workspace.createFileSystemWatcher(projectMcpPattern)
+		for (const pattern of [".zoo/mcp.json", ".roo/mcp.json"]) {
+			const projectMcpPattern = new vscode.RelativePattern(workspaceFolder, pattern)
+			const watcher = vscode.workspace.createFileSystemWatcher(projectMcpPattern)
+			this.projectMcpWatchers.push(watcher)
 
-		// Watch for file changes
-		const changeDisposable = this.projectMcpWatcher.onDidChange((uri) => {
-			this.debounceConfigChange(uri.fsPath, "project")
-		})
+			watcherDisposables.push(
+				watcher.onDidChange((uri: vscode.Uri) => {
+					this.debounceConfigChange(uri.fsPath, "project")
+				}),
+				watcher.onDidCreate((uri: vscode.Uri) => {
+					this.debounceConfigChange(uri.fsPath, "project")
+				}),
+				watcher.onDidDelete((uri: vscode.Uri) => {
+					this.debounceConfigChange(uri.fsPath, "project")
+				}),
+			)
+		}
 
-		// Watch for file creation
-		const createDisposable = this.projectMcpWatcher.onDidCreate((uri) => {
-			this.debounceConfigChange(uri.fsPath, "project")
-		})
-
-		// Watch for file deletion
-		const deleteDisposable = this.projectMcpWatcher.onDidDelete(async () => {
-			// Clean up all project MCP servers when the file is deleted
-			await this.cleanupProjectMcpServers()
-			await this.notifyWebviewOfServerChanges()
-			vscode.window.showInformationMessage(t("mcp:info.project_config_deleted"))
-		})
-
-		this.disposables.push(
-			vscode.Disposable.from(changeDisposable, createDisposable, deleteDisposable, this.projectMcpWatcher),
-		)
+		this.disposables.push(vscode.Disposable.from(...watcherDisposables, ...this.projectMcpWatchers))
 	}
 
 	private async updateProjectMcpServers(): Promise<void> {
 		try {
 			const projectMcpPath = await this.getProjectMcpPath()
-			if (!projectMcpPath) return
+			if (!projectMcpPath) {
+				await this.cleanupProjectMcpServers()
+				return
+			}
 
 			const content = await fs.readFile(projectMcpPath, "utf-8")
 			let config: any
@@ -504,14 +516,7 @@ export class McpHub {
 		)
 		const fileExists = await fileExistsAtPath(mcpSettingsFilePath)
 		if (!fileExists) {
-			await fs.writeFile(
-				mcpSettingsFilePath,
-				`{
-  "mcpServers": {
-
-  }
-}`,
-			)
+			await safeWriteJson(mcpSettingsFilePath, { mcpServers: {} }, { prettyPrint: true })
 		}
 		return mcpSettingsFilePath
 	}
@@ -599,18 +604,39 @@ export class McpHub {
 		await this.initializeMcpServers("global")
 	}
 
+	private getProjectWorkspacePath(): string {
+		return this.providerRef.deref()?.cwd ?? getWorkspacePath()
+	}
+
+	private async getProjectMcpResolution() {
+		return resolveProjectMcpFileForCwd(this.getProjectWorkspacePath())
+	}
+
 	// Get project-level MCP configuration path
 	private async getProjectMcpPath(): Promise<string | null> {
-		const workspacePath = this.providerRef.deref()?.cwd ?? getWorkspacePath()
-		const projectMcpDir = path.join(workspacePath, ".roo")
-		const projectMcpPath = path.join(projectMcpDir, "mcp.json")
+		const resolution = await this.getProjectMcpResolution()
+		return resolution.activeExists ? resolution.activePath : null
+	}
 
-		try {
-			await fs.access(projectMcpPath)
-			return projectMcpPath
-		} catch {
-			return null
+	private async ensureWritableProjectMcpPath(): Promise<string> {
+		const resolution = await this.getProjectMcpResolution()
+		await fs.mkdir(path.dirname(resolution.canonicalPath), { recursive: true })
+
+		if (resolution.shouldBootstrapCanonicalFromLegacy) {
+			const legacyContent = await fs.readFile(resolution.legacyPath, "utf-8")
+			await safeWriteJson(resolution.canonicalPath, JSON.parse(legacyContent), { prettyPrint: true })
+			return resolution.canonicalPath
 		}
+
+		if (!resolution.canonicalExists) {
+			await safeWriteJson(resolution.canonicalPath, { mcpServers: {} }, { prettyPrint: true })
+		}
+
+		return resolution.canonicalPath
+	}
+
+	async ensureProjectMcpSettingsFilePath(): Promise<string> {
+		return this.ensureWritableProjectMcpPath()
 	}
 
 	// Initialize project-level MCP servers
@@ -1928,7 +1954,7 @@ export class McpHub {
 		// Determine which config file to read
 		let configPath: string
 		if (source === "project") {
-			const projectMcpPath = await this.getProjectMcpPath()
+			const projectMcpPath = await this.ensureWritableProjectMcpPath()
 			if (!projectMcpPath) {
 				throw new Error("Project MCP configuration file not found")
 			}
@@ -1980,7 +2006,7 @@ export class McpHub {
 		// Determine which config file to update
 		let configPath: string
 		if (source === "project") {
-			const projectMcpPath = await this.getProjectMcpPath()
+			const projectMcpPath = await this.ensureWritableProjectMcpPath()
 			if (!projectMcpPath) {
 				throw new Error("Project MCP configuration file not found")
 			}
@@ -2085,7 +2111,7 @@ export class McpHub {
 
 			if (isProjectServer) {
 				// Get project MCP config path
-				const projectMcpPath = await this.getProjectMcpPath()
+				const projectMcpPath = await this.ensureWritableProjectMcpPath()
 				if (!projectMcpPath) {
 					throw new Error("Project MCP configuration file not found")
 				}
@@ -2283,7 +2309,7 @@ export class McpHub {
 		let configPath: string
 		if (source === "project") {
 			// Get project MCP config path
-			const projectMcpPath = await this.getProjectMcpPath()
+			const projectMcpPath = await this.ensureWritableProjectMcpPath()
 			if (!projectMcpPath) {
 				throw new Error("Project MCP configuration file not found")
 			}
@@ -2482,9 +2508,9 @@ export class McpHub {
 			this.settingsWatcher = undefined
 		}
 
-		if (this.projectMcpWatcher) {
-			this.projectMcpWatcher.dispose()
-			this.projectMcpWatcher = undefined
+		if (this.projectMcpWatchers.length > 0) {
+			this.projectMcpWatchers.forEach((watcher) => watcher.dispose())
+			this.projectMcpWatchers = []
 		}
 
 		this.disposables.forEach((d) => d.dispose())

@@ -6,6 +6,8 @@ import type { MarketplaceItem, MarketplaceItemType, InstallMarketplaceItemOption
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { ensureSettingsDirectoryExists } from "../../utils/globalContext"
 import type { CustomModesManager } from "../../core/config/CustomModesManager"
+import { safeWriteJson } from "../../utils/safeWriteJson"
+import { resolveProjectCustomModesFileForCwd, resolveProjectMcpFileForCwd } from "../roo-config"
 
 export interface InstallOptions extends InstallMarketplaceItemOptions {
 	target: "project" | "global"
@@ -102,7 +104,7 @@ export class SimpleInstaller {
 				existingData = { customModes: [] }
 			} else if (error.name === "YAMLParseError" || error.message?.includes("YAML")) {
 				// YAML parsing error - don't overwrite the file!
-				const fileName = target === "project" ? ".roomodes" : "custom-modes.yaml"
+				const fileName = target === "project" ? ".zoomodes" : "custom-modes.yaml"
 				throw new Error(
 					`Cannot install mode: The ${fileName} file contains invalid YAML. ` +
 						`Please fix the syntax errors in the file before installing new modes.`,
@@ -237,7 +239,7 @@ export class SimpleInstaller {
 				existingData = { mcpServers: {} }
 			} else if (error instanceof SyntaxError) {
 				// JSON parsing error - don't overwrite the file!
-				const fileName = target === "project" ? ".roo/mcp.json" : "mcp-settings.json"
+				const fileName = target === "project" ? ".zoo/mcp.json" : "mcp-settings.json"
 				throw new Error(
 					`Cannot install MCP server: The ${fileName} file contains invalid JSON. ` +
 						`Please fix the syntax errors in the file before installing new servers.`,
@@ -262,7 +264,7 @@ export class SimpleInstaller {
 		// Write back to file
 		await fs.mkdir(path.dirname(filePath), { recursive: true })
 		const jsonContent = JSON.stringify(existingData, null, 2)
-		await fs.writeFile(filePath, jsonContent, "utf-8")
+		await safeWriteJson(filePath, existingData, { prettyPrint: true })
 
 		// Calculate approximate line number where the new server was added
 		let line: number | undefined
@@ -349,7 +351,7 @@ export class SimpleInstaller {
 				delete existingData.mcpServers[serverName]
 
 				// Always write back the file, even if empty
-				await fs.writeFile(filePath, JSON.stringify(existingData, null, 2), "utf-8")
+				await safeWriteJson(filePath, existingData, { prettyPrint: true })
 			}
 		} catch (error) {
 			// File doesn't exist or other error, nothing to remove
@@ -362,7 +364,13 @@ export class SimpleInstaller {
 			if (!workspaceFolder) {
 				throw new Error("No workspace folder found")
 			}
-			return path.join(workspaceFolder.uri.fsPath, ".roomodes")
+
+			const resolution = await resolveProjectCustomModesFileForCwd(workspaceFolder.uri.fsPath)
+			if (resolution.shouldBootstrapCanonicalFromLegacy) {
+				await fs.writeFile(resolution.canonicalPath, await fs.readFile(resolution.legacyPath, "utf-8"), "utf-8")
+			}
+
+			return resolution.canonicalPath
 		} else {
 			const globalSettingsPath = await ensureSettingsDirectoryExists(this.context)
 			return path.join(globalSettingsPath, GlobalFileNames.customModes)
@@ -375,7 +383,17 @@ export class SimpleInstaller {
 			if (!workspaceFolder) {
 				throw new Error("No workspace folder found")
 			}
-			return path.join(workspaceFolder.uri.fsPath, ".roo", "mcp.json")
+
+			const resolution = await resolveProjectMcpFileForCwd(workspaceFolder.uri.fsPath)
+			if (resolution.shouldBootstrapCanonicalFromLegacy) {
+				await safeWriteJson(
+					resolution.canonicalPath,
+					JSON.parse(await fs.readFile(resolution.legacyPath, "utf-8")),
+					{ prettyPrint: true },
+				)
+			}
+
+			return resolution.canonicalPath
 		} else {
 			const globalSettingsPath = await ensureSettingsDirectoryExists(this.context)
 			return path.join(globalSettingsPath, GlobalFileNames.mcpSettings)

@@ -8,6 +8,7 @@
 import * as vscode from "vscode"
 import * as path from "path"
 import * as os from "os"
+import { getCanonicalGlobalConfigDirectory } from "../../../services/roo-config"
 
 import type {
 	WorktreeResult,
@@ -226,8 +227,7 @@ export async function handleGetWorktreeDefaults(provider: ClineProvider): Promis
 	const workspaceFolders = vscode.workspace.workspaceFolders
 	const projectName = workspaceFolders?.[0]?.name || "project"
 
-	const dotRooPath = path.join(os.homedir(), ".roo")
-	const suggestedPath = path.join(dotRooPath, "worktrees", `${projectName}-${suffix}`)
+	const suggestedPath = path.join(getCanonicalGlobalConfigDirectory(), "worktrees", `${projectName}-${suffix}`)
 
 	return {
 		suggestedBranch: `worktree/roo-${suffix}`,

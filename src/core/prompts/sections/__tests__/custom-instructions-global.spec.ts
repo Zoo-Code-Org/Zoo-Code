@@ -7,20 +7,18 @@ const {
 	mockReadFile,
 	mockReaddir,
 	mockLstat,
-	mockGetRooDirectoriesForCwd,
-	mockGetAllRooDirectoriesForCwd,
+	mockGetConfigDirectoriesForCwd,
+	mockGetAllConfigDirectoriesForCwd,
 	mockGetAgentsDirectoriesForCwd,
-	mockGetGlobalRooDirectory,
 } = vi.hoisted(() => ({
 	mockHomedir: vi.fn(),
 	mockStat: vi.fn(),
 	mockReadFile: vi.fn(),
 	mockReaddir: vi.fn(),
 	mockLstat: vi.fn(),
-	mockGetRooDirectoriesForCwd: vi.fn(),
-	mockGetAllRooDirectoriesForCwd: vi.fn(),
+	mockGetConfigDirectoriesForCwd: vi.fn(),
+	mockGetAllConfigDirectoriesForCwd: vi.fn(),
 	mockGetAgentsDirectoriesForCwd: vi.fn(),
-	mockGetGlobalRooDirectory: vi.fn(),
 }))
 
 // Mock os module
@@ -43,29 +41,28 @@ vi.mock("fs/promises", () => ({
 
 // Mock the roo-config service
 vi.mock("../../../../services/roo-config", () => ({
-	getRooDirectoriesForCwd: mockGetRooDirectoriesForCwd,
-	getAllRooDirectoriesForCwd: mockGetAllRooDirectoriesForCwd,
+	getConfigDirectoriesForCwd: mockGetConfigDirectoriesForCwd,
+	getAllConfigDirectoriesForCwd: mockGetAllConfigDirectoriesForCwd,
 	getAgentsDirectoriesForCwd: mockGetAgentsDirectoriesForCwd,
-	getGlobalRooDirectory: mockGetGlobalRooDirectory,
 }))
 
 import { loadRuleFiles, addCustomInstructions } from "../custom-instructions"
 
-describe("custom-instructions global .roo support", () => {
+describe("custom-instructions global Zoo/Roo support", () => {
 	const mockCwd = "/mock/project"
 	const mockHomeDir = "/mock/home"
+	const globalZooDir = path.join(mockHomeDir, ".zoo")
+	const projectZooDir = path.join(mockCwd, ".zoo")
 	const globalRooDir = path.join(mockHomeDir, ".roo")
 	const projectRooDir = path.join(mockCwd, ".roo")
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mockHomedir.mockReturnValue(mockHomeDir)
-		mockGetRooDirectoriesForCwd.mockReturnValue([globalRooDir, projectRooDir])
-		// getAllRooDirectoriesForCwd is now async and returns the same directories by default
-		mockGetAllRooDirectoriesForCwd.mockResolvedValue([globalRooDir, projectRooDir])
-		// getAgentsDirectoriesForCwd returns parent directories (without .roo)
+		mockGetConfigDirectoriesForCwd.mockResolvedValue([globalZooDir, projectZooDir])
+		mockGetAllConfigDirectoriesForCwd.mockResolvedValue([globalZooDir, projectZooDir])
+		// getAgentsDirectoriesForCwd returns parent directories (without config root)
 		mockGetAgentsDirectoriesForCwd.mockResolvedValue([mockCwd])
-		mockGetGlobalRooDirectory.mockReturnValue(globalRooDir)
 		// Default lstat to reject (file not found)
 		mockLstat.mockRejectedValue(new Error("ENOENT"))
 	})
@@ -90,6 +87,7 @@ describe("custom-instructions global .roo support", () => {
 					name: "rules.md",
 					isFile: () => true,
 					isSymbolicLink: () => false,
+					parentPath: path.join(globalZooDir, "rules"),
 				} as any,
 			])
 
@@ -116,6 +114,7 @@ describe("custom-instructions global .roo support", () => {
 					name: "rules.md",
 					isFile: () => true,
 					isSymbolicLink: () => false,
+					parentPath: path.join(projectZooDir, "rules"),
 				} as any,
 			])
 
@@ -146,6 +145,7 @@ describe("custom-instructions global .roo support", () => {
 						name: "global.md",
 						isFile: () => true,
 						isSymbolicLink: () => false,
+						parentPath: path.join(globalZooDir, "rules"),
 					} as any,
 				])
 				.mockResolvedValueOnce([
@@ -153,6 +153,7 @@ describe("custom-instructions global .roo support", () => {
 						name: "project.md",
 						isFile: () => true,
 						isSymbolicLink: () => false,
+						parentPath: path.join(projectZooDir, "rules"),
 					} as any,
 				])
 
@@ -173,7 +174,7 @@ describe("custom-instructions global .roo support", () => {
 			expect(globalIndex).toBeLessThan(projectIndex)
 		})
 
-		it("should fall back to legacy .roorules file when no .roo/rules directories exist", async () => {
+		it("should fall back to legacy .roorules file when no active config rule directories exist", async () => {
 			// Mock directory existence - neither exist
 			mockStat
 				.mockRejectedValueOnce(new Error("ENOENT")) // global rules dir doesn't exist
@@ -186,6 +187,31 @@ describe("custom-instructions global .roo support", () => {
 
 			expect(result).toContain("# Rules from .roorules:")
 			expect(result).toContain("legacy rule content")
+		})
+
+		it("should fall back to legacy Roo rules directories when Zoo roots are absent", async () => {
+			mockGetConfigDirectoriesForCwd.mockResolvedValue([globalRooDir, projectRooDir])
+
+			mockStat
+				.mockResolvedValueOnce({ isDirectory: () => true } as any)
+				.mockResolvedValueOnce({ isFile: () => true } as any)
+				.mockRejectedValueOnce(new Error("ENOENT"))
+
+			mockReaddir.mockResolvedValueOnce([
+				{
+					name: "legacy.md",
+					isFile: () => true,
+					isSymbolicLink: () => false,
+					parentPath: path.join(globalRooDir, "rules"),
+				} as any,
+			])
+
+			mockReadFile.mockResolvedValueOnce("legacy global rule content")
+
+			const result = await loadRuleFiles(mockCwd)
+
+			expect(result).toContain("legacy global rule content")
+			expect(result).toContain(".roo")
 		})
 
 		it("should return empty string when no rules exist anywhere", async () => {
@@ -227,6 +253,7 @@ describe("custom-instructions global .roo support", () => {
 						name: "global-mode.md",
 						isFile: () => true,
 						isSymbolicLink: () => false,
+						parentPath: path.join(globalZooDir, `rules-${mode}`),
 					} as any,
 				])
 				.mockResolvedValueOnce([
@@ -234,6 +261,7 @@ describe("custom-instructions global .roo support", () => {
 						name: "project-mode.md",
 						isFile: () => true,
 						isSymbolicLink: () => false,
+						parentPath: path.join(projectZooDir, `rules-${mode}`),
 					} as any,
 				])
 
@@ -252,6 +280,36 @@ describe("custom-instructions global .roo support", () => {
 			expect(result).toContain("global mode rule content")
 			expect(result).toContain("project-mode.md:")
 			expect(result).toContain("project mode rule content")
+		})
+
+		it("prefers Zoo mode-specific rule directories over legacy file fallback", async () => {
+			const mode = "code"
+
+			mockStat
+				.mockResolvedValueOnce({ isDirectory: () => true } as any)
+				.mockResolvedValueOnce({ isFile: () => true } as any)
+				.mockRejectedValueOnce(new Error("ENOENT"))
+				.mockRejectedValueOnce(new Error("ENOENT"))
+
+			mockReaddir.mockResolvedValueOnce([
+				{
+					name: "zoo-mode.md",
+					isFile: () => true,
+					isSymbolicLink: () => false,
+					parentPath: path.join(globalZooDir, `rules-${mode}`),
+				} as any,
+			])
+
+			mockReadFile
+				.mockResolvedValueOnce("zoo mode content")
+				.mockResolvedValueOnce("")
+				.mockResolvedValueOnce("")
+				.mockResolvedValueOnce("")
+
+			const result = await addCustomInstructions("", "", mockCwd, mode)
+
+			expect(result).toContain("zoo mode content")
+			expect(result).not.toContain("# Rules from .roorules-code:")
 		})
 
 		it("should fall back to legacy mode-specific files when no mode directories exist", async () => {

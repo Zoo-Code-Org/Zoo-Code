@@ -1,5 +1,10 @@
 // npx vitest services/marketplace/__tests__/SimpleInstaller.spec.ts
 
+const rooConfigMocks = vi.hoisted(() => ({
+	resolveProjectCustomModesFileForCwd: vi.fn(),
+	resolveProjectMcpFileForCwd: vi.fn(),
+}))
+
 import { SimpleInstaller } from "../SimpleInstaller"
 import * as fs from "fs/promises"
 import * as yaml from "yaml"
@@ -9,13 +14,24 @@ import type { MarketplaceItem } from "@roo-code/types"
 import type { CustomModesManager } from "../../../core/config/CustomModesManager"
 import * as path from "path"
 import { fileExistsAtPath } from "../../../utils/fs"
+import { safeWriteJson } from "../../../utils/safeWriteJson"
 
-vi.mock("fs/promises", () => ({
-	readFile: vi.fn(),
-	writeFile: vi.fn(),
-	mkdir: vi.fn(),
-	rm: vi.fn(),
-}))
+vi.mock("fs/promises", () => {
+	const readFile = vi.fn()
+	const writeFile = vi.fn()
+	const mkdir = vi.fn()
+	const rm = vi.fn()
+	const stat = vi.fn()
+
+	return {
+		default: { readFile, writeFile, mkdir, rm, stat },
+		readFile,
+		writeFile,
+		mkdir,
+		rm,
+		stat,
+	}
+})
 vi.mock("os")
 vi.mock("vscode", () => ({
 	workspace: {
@@ -30,6 +46,13 @@ vi.mock("vscode", () => ({
 }))
 vi.mock("../../../utils/globalContext")
 vi.mock("../../../utils/fs")
+vi.mock("../../../utils/safeWriteJson", () => ({
+	safeWriteJson: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock("../../roo-config", () => ({
+	resolveProjectCustomModesFileForCwd: rooConfigMocks.resolveProjectCustomModesFileForCwd,
+	resolveProjectMcpFileForCwd: rooConfigMocks.resolveProjectMcpFileForCwd,
+}))
 
 const mockFs = vi.mocked(fs)
 
@@ -56,6 +79,24 @@ describe("SimpleInstaller", () => {
 		vi.mocked(os.homedir).mockReturnValue("/home/user")
 		// Mock fileExistsAtPath to return false by default
 		vi.mocked(fileExistsAtPath).mockResolvedValue(false)
+		rooConfigMocks.resolveProjectCustomModesFileForCwd.mockResolvedValue({
+			canonicalPath: "/test/workspace/.zoomodes",
+			legacyPath: "/test/workspace/.roomodes",
+			activePath: "/test/workspace/.zoomodes",
+			canonicalExists: false,
+			legacyExists: false,
+			activeExists: false,
+			shouldBootstrapCanonicalFromLegacy: false,
+		})
+		rooConfigMocks.resolveProjectMcpFileForCwd.mockResolvedValue({
+			canonicalPath: "/test/workspace/.zoo/mcp.json",
+			legacyPath: "/test/workspace/.roo/mcp.json",
+			activePath: "/test/workspace/.zoo/mcp.json",
+			canonicalExists: false,
+			legacyExists: false,
+			activeExists: false,
+			shouldBootstrapCanonicalFromLegacy: false,
+		})
 	})
 
 	describe("installMode", () => {
@@ -80,7 +121,7 @@ describe("SimpleInstaller", () => {
 
 			const result = await installer.installItem(mockModeItem, { target: "project" })
 
-			expect(result.filePath).toBe(path.join("/test/workspace", ".roomodes"))
+			expect(result.filePath).toBe(path.join("/test/workspace", ".zoomodes"))
 			expect(mockCustomModesManager.importModeWithRules).toHaveBeenCalled()
 
 			// Verify the import was called with correct YAML structure
@@ -133,7 +174,7 @@ describe("SimpleInstaller", () => {
 
 			const result = await installerWithoutManager.installItem(mockModeItem, { target: "project" })
 
-			expect(result.filePath).toBe(path.join("/test/workspace", ".roomodes"))
+			expect(result.filePath).toBe(path.join("/test/workspace", ".zoomodes"))
 			expect(mockFs.writeFile).toHaveBeenCalled()
 		})
 	})
@@ -155,16 +196,14 @@ describe("SimpleInstaller", () => {
 			const notFoundError = new Error("File not found") as any
 			notFoundError.code = "ENOENT"
 			mockFs.readFile.mockRejectedValueOnce(notFoundError)
-			mockFs.writeFile.mockResolvedValueOnce(undefined as any)
 
 			const result = await installer.installItem(mockMcpItem, { target: "project" })
 
-			expect(result.filePath).toBe(path.join("/test/workspace", ".roo", "mcp.json"))
-			expect(mockFs.writeFile).toHaveBeenCalled()
+			expect(result.filePath).toBe(path.join("/test/workspace", ".zoo", "mcp.json"))
+			expect(safeWriteJson).toHaveBeenCalled()
 
 			// Verify the written content contains the new server
-			const writtenContent = mockFs.writeFile.mock.calls[0][1] as string
-			const writtenData = JSON.parse(writtenContent)
+			const writtenData = vi.mocked(safeWriteJson).mock.calls[0][1] as Record<string, any>
 			expect(writtenData.mcpServers["test-mcp"]).toBeDefined()
 		})
 
@@ -174,11 +213,11 @@ describe("SimpleInstaller", () => {
 			mockFs.readFile.mockResolvedValueOnce(invalidJson)
 
 			await expect(installer.installItem(mockMcpItem, { target: "project" })).rejects.toThrow(
-				"Cannot install MCP server: The .roo/mcp.json file contains invalid JSON",
+				"Cannot install MCP server: The .zoo/mcp.json file contains invalid JSON",
 			)
 
 			// Should NOT write to file
-			expect(mockFs.writeFile).not.toHaveBeenCalled()
+			expect(safeWriteJson).not.toHaveBeenCalled()
 		})
 
 		it("should install MCP when mcp.json contains valid JSON", async () => {
@@ -189,17 +228,50 @@ describe("SimpleInstaller", () => {
 			})
 
 			mockFs.readFile.mockResolvedValueOnce(existingContent)
-			mockFs.writeFile.mockResolvedValueOnce(undefined as any)
 
 			await installer.installItem(mockMcpItem, { target: "project" })
 
-			const writtenContent = mockFs.writeFile.mock.calls[0][1] as string
-			const writtenData = JSON.parse(writtenContent)
+			const writtenData = vi.mocked(safeWriteJson).mock.calls[0][1] as Record<string, any>
 
 			// Should contain both existing and new server
 			expect(Object.keys(writtenData.mcpServers)).toHaveLength(2)
 			expect(writtenData.mcpServers["existing-server"]).toBeDefined()
 			expect(writtenData.mcpServers["test-mcp"]).toBeDefined()
+		})
+
+		it("bootstraps legacy Roo MCP content into canonical Zoo path before project installs", async () => {
+			const canonicalPath = path.join("/test/workspace", ".zoo", "mcp.json")
+			const legacyPath = path.join("/test/workspace", ".roo", "mcp.json")
+
+			rooConfigMocks.resolveProjectMcpFileForCwd.mockResolvedValue({
+				canonicalPath,
+				legacyPath,
+				activePath: legacyPath,
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			})
+			mockFs.readFile.mockResolvedValueOnce(
+				JSON.stringify({
+					mcpServers: {
+						legacyServer: { command: "legacy", args: [] },
+					},
+				}),
+			)
+
+			const filePath = await (installer as any).getMcpFilePath("project")
+
+			expect(filePath).toBe(canonicalPath)
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				canonicalPath,
+				{
+					mcpServers: {
+						legacyServer: { command: "legacy", args: [] },
+					},
+				},
+				{ prettyPrint: true },
+			)
 		})
 	})
 

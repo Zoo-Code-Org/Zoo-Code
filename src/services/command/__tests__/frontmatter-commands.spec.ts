@@ -3,11 +3,16 @@ import * as path from "path"
 
 import { getCommand, getCommands } from "../commands"
 
+const { mockResolveGlobalConfigDirectory, mockResolveProjectConfigDirectoryForCwd } = vi.hoisted(() => ({
+	mockResolveGlobalConfigDirectory: vi.fn(),
+	mockResolveProjectConfigDirectoryForCwd: vi.fn(),
+}))
+
 // Mock fs and path modules
 vi.mock("fs/promises")
-vi.mock("../roo-config", () => ({
-	getGlobalRooDirectory: vi.fn(() => "/mock/global/.roo"),
-	getProjectRooDirectoryForCwd: vi.fn(() => "/mock/project/.roo"),
+vi.mock("../../roo-config", () => ({
+	resolveGlobalConfigDirectory: mockResolveGlobalConfigDirectory,
+	resolveProjectConfigDirectoryForCwd: mockResolveProjectConfigDirectoryForCwd,
 }))
 vi.mock("../built-in-commands", () => ({
 	getBuiltInCommands: vi.fn(() => Promise.resolve([])),
@@ -20,6 +25,8 @@ const mockFs = vi.mocked(fs)
 describe("Command loading with frontmatter", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockResolveGlobalConfigDirectory.mockResolvedValue({ activePath: "/mock/global/.zoo" })
+		mockResolveProjectConfigDirectoryForCwd.mockResolvedValue({ activePath: "/test/cwd/.zoo" })
 	})
 
 	describe("getCommand with frontmatter", () => {
@@ -46,7 +53,7 @@ npm run build
 				name: "setup",
 				content: "# Setup Command\n\nRun the following commands:\n```bash\nnpm install\nnpm run build\n```",
 				source: "project",
-				filePath: path.join("/test/cwd", ".roo", "commands", "setup.md"),
+				filePath: path.join("/test/cwd", ".zoo", "commands", "setup.md"),
 				description: "Sets up the development environment",
 				argumentHint: undefined,
 				mode: undefined,
@@ -71,7 +78,7 @@ npm run build
 				name: "setup",
 				content: "# Setup Command\n\nRun the following commands:\n```bash\nnpm install\nnpm run build\n```",
 				source: "project",
-				filePath: path.join("/test/cwd", ".roo", "commands", "setup.md"),
+				filePath: path.join("/test/cwd", ".zoo", "commands", "setup.md"),
 				description: undefined,
 				argumentHint: undefined,
 				mode: undefined,
@@ -115,7 +122,7 @@ Command content here.`
 				name: "setup",
 				content: commandContent.trim(),
 				source: "project",
-				filePath: path.join("/test/cwd", ".roo", "commands", "setup.md"),
+				filePath: path.join("/test/cwd", ".zoo", "commands", "setup.md"),
 				description: undefined,
 				argumentHint: undefined,
 				mode: undefined,
@@ -151,7 +158,7 @@ Global setup instructions.`
 				name: "setup",
 				content: "# Project Setup\n\nProject-specific setup instructions.",
 				source: "project",
-				filePath: path.join("/test/cwd", ".roo", "commands", "setup.md"),
+				filePath: path.join("/test/cwd", ".zoo", "commands", "setup.md"),
 				description: "Project-specific setup",
 				argumentHint: undefined,
 				mode: undefined,
@@ -179,11 +186,30 @@ Global setup instructions.`
 				name: "setup",
 				content: "# Global Setup\n\nGlobal setup instructions.",
 				source: "global",
-				filePath: expect.stringContaining(path.join(".roo", "commands", "setup.md")),
+				filePath: expect.stringContaining(path.join(".zoo", "commands", "setup.md")),
 				description: "Global setup command",
 				argumentHint: undefined,
 				mode: undefined,
 			})
+		})
+
+		it("should fall back to Roo command directories when Zoo roots are absent", async () => {
+			mockResolveGlobalConfigDirectory.mockResolvedValue({ activePath: "/mock/global/.roo" })
+			mockResolveProjectConfigDirectoryForCwd.mockResolvedValue({ activePath: "/test/cwd/.roo" })
+
+			const projectCommandContent = `---
+description: Legacy project setup
+---
+
+# Legacy Setup`
+
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+			mockFs.readFile = vi.fn().mockResolvedValue(projectCommandContent)
+
+			const result = await getCommand("/test/cwd", "setup")
+
+			expect(result?.filePath).toBe(path.join("/test/cwd", ".roo", "commands", "setup.md"))
+			expect(result?.description).toBe("Legacy project setup")
 		})
 	})
 
@@ -207,7 +233,7 @@ Create a new release.`
 				name: "release",
 				content: "# Release Command\n\nCreate a new release.",
 				source: "project",
-				filePath: path.join("/test/cwd", ".roo", "commands", "release.md"),
+				filePath: path.join("/test/cwd", ".zoo", "commands", "release.md"),
 				description: "Create a new release of the Roo Code extension",
 				argumentHint: "patch | minor | major",
 				mode: undefined,
@@ -234,7 +260,7 @@ Deploy the application.`
 				name: "deploy",
 				content: "# Deploy Command\n\nDeploy the application.",
 				source: "project",
-				filePath: path.join("/test/cwd", ".roo", "commands", "deploy.md"),
+				filePath: path.join("/test/cwd", ".zoo", "commands", "deploy.md"),
 				description: "Deploy application to environment",
 				argumentHint: "staging | production",
 				mode: undefined,
@@ -314,7 +340,7 @@ Start debugging.`
 				name: "debug-app",
 				content: "# Debug Command\n\nStart debugging.",
 				source: "project",
-				filePath: path.join("/test/cwd", ".roo", "commands", "debug-app.md"),
+				filePath: path.join("/test/cwd", ".zoo", "commands", "debug-app.md"),
 				description: "Debug the application",
 				argumentHint: undefined,
 				mode: "debug",
@@ -359,7 +385,7 @@ Deploy the application.`
 				name: "deploy",
 				content: "# Deploy Command\n\nDeploy the application.",
 				source: "project",
-				filePath: path.join("/test/cwd", ".roo", "commands", "deploy.md"),
+				filePath: path.join("/test/cwd", ".zoo", "commands", "deploy.md"),
 				description: "Deploy to environment",
 				argumentHint: "staging | production",
 				mode: "code",

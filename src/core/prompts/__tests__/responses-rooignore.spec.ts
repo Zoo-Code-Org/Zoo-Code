@@ -56,8 +56,9 @@ describe("RooIgnore Response Formatting", () => {
 			expect(parsed.status).toBe("error")
 			expect(parsed.type).toBe("access_denied")
 			expect(parsed.path).toBe("secrets/api-keys.json")
+			expect(parsed.message).toContain("project ignore file")
 			expect(parsed.suggestion).toContain("continue without this file")
-			expect(parsed.suggestion).toContain("update the .rooignore file")
+			expect(parsed.suggestion).toContain("update the project ignore file")
 		})
 
 		/**
@@ -213,7 +214,7 @@ describe("RooIgnore Response Formatting", () => {
 		/**
 		 * Tests the instructions format
 		 */
-		it("should format .rooignore instructions for the LLM", async () => {
+		it("should format project ignore instructions for the LLM", async () => {
 			// Create controller
 			const controller = new RooIgnoreController(TEST_CWD)
 			await controller.initialize()
@@ -222,12 +223,13 @@ describe("RooIgnore Response Formatting", () => {
 			const instructions = controller.getInstructions()
 
 			// Verify format and content
-			expect(instructions).toContain("# .rooignore")
+			expect(instructions).toContain("# .zooignore")
 			expect(instructions).toContain(LOCK_TEXT_SYMBOL)
 			expect(instructions).toContain("node_modules")
 			expect(instructions).toContain(".git")
 			expect(instructions).toContain("secrets/**")
 			expect(instructions).toContain("*.log")
+			expect(instructions).toContain(".zooignore")
 
 			// Should explain what the lock symbol means
 			expect(instructions).toContain("you'll notice a")

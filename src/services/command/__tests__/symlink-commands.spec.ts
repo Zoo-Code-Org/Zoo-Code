@@ -3,11 +3,16 @@ import * as path from "path"
 
 import { getCommand, getCommands } from "../commands"
 
+const { mockResolveGlobalConfigDirectory, mockResolveProjectConfigDirectoryForCwd } = vi.hoisted(() => ({
+	mockResolveGlobalConfigDirectory: vi.fn(),
+	mockResolveProjectConfigDirectoryForCwd: vi.fn(),
+}))
+
 // Mock fs and path modules
 vi.mock("fs/promises")
-vi.mock("../roo-config", () => ({
-	getGlobalRooDirectory: vi.fn(() => "/mock/global/.roo"),
-	getProjectRooDirectoryForCwd: vi.fn(() => "/mock/project/.roo"),
+vi.mock("../../roo-config", () => ({
+	resolveGlobalConfigDirectory: mockResolveGlobalConfigDirectory,
+	resolveProjectConfigDirectoryForCwd: mockResolveProjectConfigDirectoryForCwd,
 }))
 vi.mock("../built-in-commands", () => ({
 	getBuiltInCommands: vi.fn(() => Promise.resolve([])),
@@ -20,6 +25,8 @@ const mockFs = vi.mocked(fs)
 describe("Symlink command support", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockResolveGlobalConfigDirectory.mockResolvedValue({ activePath: "/mock/global/.zoo" })
+		mockResolveProjectConfigDirectoryForCwd.mockResolvedValue({ activePath: "/test/cwd/.zoo" })
 	})
 
 	describe("getCommand with symlinks", () => {

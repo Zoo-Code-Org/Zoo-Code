@@ -4,6 +4,7 @@ import fs from "fs/promises"
 import fsSync from "fs"
 import ignore, { Ignore } from "ignore"
 import * as vscode from "vscode"
+import { getCanonicalProjectIgnoreFileForCwd, getLegacyProjectIgnoreFileForCwd } from "../../services/roo-config"
 
 export const LOCK_TEXT_SYMBOL = "\u{1F512}"
 
@@ -16,13 +17,15 @@ export class RooIgnoreController {
 	private cwd: string
 	private ignoreInstance: Ignore
 	private disposables: vscode.Disposable[] = []
+	private activeIgnoreFilePath: string | undefined
 	rooIgnoreContent: string | undefined
 
 	constructor(cwd: string) {
 		this.cwd = cwd
 		this.ignoreInstance = ignore()
+		this.activeIgnoreFilePath = undefined
 		this.rooIgnoreContent = undefined
-		// Set up file watcher for .rooignore
+		// Set up file watchers for canonical and legacy ignore files
 		this.setupFileWatcher()
 	}
 
@@ -35,48 +38,64 @@ export class RooIgnoreController {
 	}
 
 	/**
-	 * Set up the file watcher for .rooignore changes
+	 * Set up file watchers for project ignore file changes.
 	 */
 	private setupFileWatcher(): void {
-		const rooignorePattern = new vscode.RelativePattern(this.cwd, ".rooignore")
-		const fileWatcher = vscode.workspace.createFileSystemWatcher(rooignorePattern)
+		for (const pattern of [".zooignore", ".rooignore"]) {
+			const ignorePattern = new vscode.RelativePattern(this.cwd, pattern)
+			const fileWatcher = vscode.workspace.createFileSystemWatcher(ignorePattern)
 
-		// Watch for changes and updates
-		this.disposables.push(
-			fileWatcher.onDidChange(() => {
-				this.loadRooIgnore()
-			}),
-			fileWatcher.onDidCreate(() => {
-				this.loadRooIgnore()
-			}),
-			fileWatcher.onDidDelete(() => {
-				this.loadRooIgnore()
-			}),
-		)
+			this.disposables.push(
+				fileWatcher.onDidChange(() => {
+					this.loadRooIgnore()
+				}),
+				fileWatcher.onDidCreate(() => {
+					this.loadRooIgnore()
+				}),
+				fileWatcher.onDidDelete(() => {
+					this.loadRooIgnore()
+				}),
+			)
 
-		// Add fileWatcher itself to disposables
-		this.disposables.push(fileWatcher)
+			this.disposables.push(fileWatcher)
+		}
+	}
+
+	private getActiveIgnoreFileName(): string | undefined {
+		return this.activeIgnoreFilePath ? path.basename(this.activeIgnoreFilePath) : undefined
 	}
 
 	/**
-	 * Load custom patterns from .rooignore if it exists
+	 * Load custom patterns from the active project ignore file if it exists.
 	 */
 	private async loadRooIgnore(): Promise<void> {
 		try {
 			// Reset ignore instance to prevent duplicate patterns
 			this.ignoreInstance = ignore()
-			const ignorePath = path.join(this.cwd, ".rooignore")
-			if (await fileExistsAtPath(ignorePath)) {
+			this.activeIgnoreFilePath = undefined
+
+			const canonicalPath = getCanonicalProjectIgnoreFileForCwd(this.cwd)
+			const legacyPath = getLegacyProjectIgnoreFileForCwd(this.cwd)
+			const canonicalExists = await fileExistsAtPath(canonicalPath)
+			const ignorePath = canonicalExists
+				? canonicalPath
+				: (await fileExistsAtPath(legacyPath))
+					? legacyPath
+					: undefined
+
+			if (ignorePath) {
 				const content = await fs.readFile(ignorePath, "utf8")
+				this.activeIgnoreFilePath = ignorePath
 				this.rooIgnoreContent = content
 				this.ignoreInstance.add(content)
+				this.ignoreInstance.add(".zooignore")
 				this.ignoreInstance.add(".rooignore")
 			} else {
 				this.rooIgnoreContent = undefined
 			}
 		} catch (error) {
 			// Should never happen: reading file failed even though it exists
-			console.error("Unexpected error loading .rooignore:", error)
+			console.error("Unexpected error loading project ignore file:", error)
 		}
 	}
 
@@ -208,6 +227,8 @@ export class RooIgnoreController {
 			return undefined
 		}
 
-		return `# .rooignore\n\n(The following is provided by a root-level .rooignore file where the user has specified files and directories that should not be accessed. When using list_files, you'll notice a ${LOCK_TEXT_SYMBOL} next to files that are blocked. Attempting to access the file's contents e.g. through read_file will result in an error.)\n\n${this.rooIgnoreContent}\n.rooignore`
+		const activeIgnoreFileName = this.getActiveIgnoreFileName() || ".zooignore"
+
+		return `# ${activeIgnoreFileName}\n\n(The following is provided by a root-level project ignore file where the user has specified files and directories that should not be accessed. Zoo prefers .zooignore and falls back to .rooignore when needed. When using list_files, you'll notice a ${LOCK_TEXT_SYMBOL} next to files that are blocked. Attempting to access the file's contents e.g. through read_file will result in an error.)\n\n${this.rooIgnoreContent}\n${activeIgnoreFileName}`
 	}
 }
