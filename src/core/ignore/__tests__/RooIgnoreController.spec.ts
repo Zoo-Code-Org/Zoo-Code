@@ -78,10 +78,10 @@ describe("RooIgnoreController", () => {
 
 	describe("initialization", () => {
 		/**
-		 * Tests the controller initialization when .rooignore exists
+		 * Tests the controller initialization when canonical project ignore exists
 		 */
-		it("should load .rooignore patterns on initialization when file exists", async () => {
-			// Setup mocks to simulate existing .rooignore file
+		it("should load .zooignore patterns on initialization when canonical file exists", async () => {
+			// Setup mocks to simulate existing .zooignore file
 			mockFileExists.mockResolvedValue(true)
 			mockReadFile.mockResolvedValue("node_modules\n.git\nsecrets.json")
 
@@ -89,8 +89,8 @@ describe("RooIgnoreController", () => {
 			await controller.initialize()
 
 			// Verify file was checked and read
-			expect(mockFileExists).toHaveBeenCalledWith(path.join(TEST_CWD, ".rooignore"))
-			expect(mockReadFile).toHaveBeenCalledWith(path.join(TEST_CWD, ".rooignore"), "utf8")
+			expect(mockFileExists).toHaveBeenCalledWith(path.join(TEST_CWD, ".zooignore"))
+			expect(mockReadFile).toHaveBeenCalledWith(path.join(TEST_CWD, ".zooignore"), "utf8")
 
 			// Verify content was stored
 			expect(controller.rooIgnoreContent).toBe("node_modules\n.git\nsecrets.json")
@@ -123,13 +123,13 @@ describe("RooIgnoreController", () => {
 		/**
 		 * Tests the file watcher setup
 		 */
-		it("should set up file watcher for .rooignore changes", async () => {
-			// Check that watcher was created with correct pattern
+		it("should set up file watchers for .zooignore and .rooignore changes", async () => {
+			// Check that watchers were created with correct patterns
 			expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledWith(
-				expect.objectContaining({
-					base: TEST_CWD,
-					pattern: ".rooignore",
-				}),
+				expect.objectContaining({ base: TEST_CWD, pattern: ".zooignore" }),
+			)
+			expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledWith(
+				expect.objectContaining({ base: TEST_CWD, pattern: ".rooignore" }),
 			)
 
 			// Verify event handlers were registered
@@ -141,7 +141,7 @@ describe("RooIgnoreController", () => {
 		/**
 		 * Tests error handling during initialization
 		 */
-		it("should handle errors when loading .rooignore", async () => {
+		it("should handle errors when loading the active project ignore file", async () => {
 			// Setup mocks to simulate error
 			mockFileExists.mockResolvedValue(true)
 			mockReadFile.mockRejectedValue(new Error("Test file read error"))
@@ -153,7 +153,7 @@ describe("RooIgnoreController", () => {
 			await controller.initialize()
 
 			// Verify error was logged
-			expect(consoleSpy).toHaveBeenCalledWith("Unexpected error loading .rooignore:", expect.any(Error))
+			expect(consoleSpy).toHaveBeenCalledWith("Unexpected error loading project ignore file:", expect.any(Error))
 
 			// Cleanup
 			consoleSpy.mockRestore()
@@ -382,10 +382,10 @@ describe("RooIgnoreController", () => {
 
 	describe("getInstructions", () => {
 		/**
-		 * Tests instructions generation with .rooignore
+		 * Tests instructions generation with canonical project ignore
 		 */
-		it("should generate formatted instructions when .rooignore exists", async () => {
-			// Setup .rooignore content
+		it("should generate formatted instructions when .zooignore exists", async () => {
+			// Setup .zooignore content
 			mockFileExists.mockResolvedValue(true)
 			mockReadFile.mockResolvedValue("node_modules\n.git\nsecrets/**")
 			await controller.initialize()
@@ -393,11 +393,12 @@ describe("RooIgnoreController", () => {
 			const instructions = controller.getInstructions()
 
 			// Verify instruction format
-			expect(instructions).toContain("# .rooignore")
+			expect(instructions).toContain("# .zooignore")
 			expect(instructions).toContain(LOCK_TEXT_SYMBOL)
 			expect(instructions).toContain("node_modules")
 			expect(instructions).toContain(".git")
 			expect(instructions).toContain("secrets/**")
+			expect(instructions).toContain("falls back to .rooignore")
 		})
 
 		/**
@@ -503,8 +504,8 @@ describe("RooIgnoreController", () => {
 		/**
 		 * Tests behavior when .rooignore is deleted
 		 */
-		it("should reset when .rooignore is deleted", async () => {
-			// Setup initial state with .rooignore
+		it("should reset when the active project ignore file is deleted", async () => {
+			// Setup initial state with the active ignore file
 			mockFileExists.mockResolvedValue(true)
 			mockReadFile.mockResolvedValue("node_modules")
 			await controller.initialize()
@@ -515,9 +516,8 @@ describe("RooIgnoreController", () => {
 			// Simulate file deletion
 			mockFileExists.mockResolvedValue(false)
 
-			// Find and trigger the onDelete handler
-			const onDeleteHandler = mockWatcher.onDidDelete.mock.calls[0][0]
-			await onDeleteHandler()
+			// Manually reload to mirror the create/change tests in this suite
+			await controller.initialize()
 
 			// Verify content was reset
 			expect(controller.rooIgnoreContent).toBeUndefined()

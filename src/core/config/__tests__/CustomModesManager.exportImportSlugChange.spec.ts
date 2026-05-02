@@ -49,6 +49,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 	const mockStoragePath = `${path.sep}mock${path.sep}settings`
 	const mockSettingsPath = path.join(mockStoragePath, "settings", GlobalFileNames.customModes)
 	const mockWorkspacePath = path.resolve("/mock/workspace")
+	const mockZoomodes = path.join(mockWorkspacePath, ".zoomodes")
 	const mockRoomodes = path.join(mockWorkspacePath, ".roomodes")
 
 	beforeEach(() => {
@@ -229,6 +230,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 			let writtenFiles: Record<string, string> = {}
 			let createdDirs: string[] = []
 
+			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 				if (path === mockSettingsPath) {
 					return yaml.stringify({ customModes: [] })
@@ -288,6 +290,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 
 			let writtenFiles: Record<string, string> = {}
 
+			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 				if (path === mockSettingsPath) {
 					return yaml.stringify({ customModes: [] })
@@ -348,6 +351,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 
 			let writtenFiles: Record<string, string> = {}
 
+			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 				if (path === mockSettingsPath) {
 					return yaml.stringify({ customModes: [] })
@@ -424,7 +428,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 
 			// Step 5: Verify the rule file was placed in the new slug folder
 			const ruleFilePath = Object.keys(writtenFiles).find(
-				(p) => p.includes("rule.md") && !p.includes(".roomodes"),
+				(p) => p.includes("rule.md") && !p.includes(".zoomodes"),
 			)
 			expect(ruleFilePath).toBeDefined()
 			expect(ruleFilePath).toContain(path.join(".roo", "rules-renamed-mode", "rule.md"))

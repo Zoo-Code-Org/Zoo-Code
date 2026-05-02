@@ -49,6 +49,7 @@ describe("CustomModesManager", () => {
 	const mockStoragePath = `${path.sep}mock${path.sep}settings`
 	const mockSettingsPath = path.join(mockStoragePath, "settings", GlobalFileNames.customModes)
 	const mockWorkspacePath = path.resolve("/mock/workspace")
+	const mockZoomodes = path.join(mockWorkspacePath, ".zoomodes")
 	const mockRoomodes = path.join(mockWorkspacePath, ".roomodes")
 
 	beforeEach(() => {
@@ -517,7 +518,7 @@ describe("CustomModesManager", () => {
 			expect(mockOnUpdate).toHaveBeenCalled()
 		})
 
-		it("creates .roomodes file when adding project-specific mode", async () => {
+		it("creates .zoomodes file when adding project-specific mode", async () => {
 			const projectMode: ModeConfig = {
 				slug: "project-mode",
 				name: "Project Mode",
@@ -526,8 +527,8 @@ describe("CustomModesManager", () => {
 				source: "project",
 			}
 
-			// Mock .roomodes to not exist initially
-			let roomodesContent: any = null
+			// Mock project custom modes files to not exist initially so writes go to canonical .zoomodes
+			let zoomodesContent: any = null
 			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
 				return path === mockSettingsPath
 			})
@@ -535,24 +536,24 @@ describe("CustomModesManager", () => {
 				if (path === mockSettingsPath) {
 					return yaml.stringify({ customModes: [] })
 				}
-				if (path === mockRoomodes) {
-					if (!roomodesContent) {
+				if (path === mockZoomodes) {
+					if (!zoomodesContent) {
 						throw new Error("File not found")
 					}
-					return yaml.stringify(roomodesContent)
+					return yaml.stringify(zoomodesContent)
 				}
 				throw new Error("File not found")
 			})
 			;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
-				if (path === mockRoomodes) {
-					roomodesContent = yaml.parse(content)
+				if (path === mockZoomodes) {
+					zoomodesContent = yaml.parse(content)
 				}
 				return Promise.resolve()
 			})
 
 			await manager.updateCustomMode("project-mode", projectMode)
 
-			// Verify .roomodes was created with the project mode
+			// Verify .zoomodes was created with the project mode
 			expect(fs.writeFile).toHaveBeenCalledWith(
 				expect.any(String), // Don't check exact path as it may have different separators on different platforms
 				expect.stringContaining("project-mode"),
@@ -561,10 +562,10 @@ describe("CustomModesManager", () => {
 
 			// Verify the path is correct regardless of separators
 			const writeCall = (fs.writeFile as Mock).mock.calls[0]
-			expect(path.normalize(writeCall[0])).toBe(path.normalize(mockRoomodes))
+			expect(path.normalize(writeCall[0])).toBe(path.normalize(mockZoomodes))
 
-			// Verify the content written to .roomodes
-			expect(roomodesContent).toEqual({
+			// Verify the content written to .zoomodes
+			expect(zoomodesContent).toEqual({
 				customModes: [
 					expect.objectContaining({
 						slug: "project-mode",
@@ -850,19 +851,20 @@ describe("CustomModesManager", () => {
 					],
 				})
 
-				let roomodesContent: any = null
+				let zoomodesContent: any = null
+				;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 				;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 					if (path === mockSettingsPath) {
 						return yaml.stringify({ customModes: [] })
 					}
-					if (path === mockRoomodes && roomodesContent) {
-						return yaml.stringify(roomodesContent)
+					if (path === mockZoomodes && zoomodesContent) {
+						return yaml.stringify(zoomodesContent)
 					}
 					throw new Error("File not found")
 				})
 				;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
-					if (path === mockRoomodes) {
-						roomodesContent = yaml.parse(content)
+					if (path === mockZoomodes) {
+						zoomodesContent = yaml.parse(content)
 					}
 					return Promise.resolve()
 				})
@@ -871,7 +873,7 @@ describe("CustomModesManager", () => {
 
 				expect(result.success).toBe(true)
 				expect(fs.writeFile).toHaveBeenCalledWith(
-					expect.stringContaining(".roomodes"),
+					expect.stringContaining(".zoomodes"),
 					expect.stringContaining("imported-mode"),
 					"utf-8",
 				)
@@ -899,20 +901,21 @@ describe("CustomModesManager", () => {
 					],
 				})
 
-				let roomodesContent: any = null
+				let zoomodesContent: any = null
 				let writtenFiles: Record<string, string> = {}
+				;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 				;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 					if (path === mockSettingsPath) {
 						return yaml.stringify({ customModes: [] })
 					}
-					if (path === mockRoomodes && roomodesContent) {
-						return yaml.stringify(roomodesContent)
+					if (path === mockZoomodes && zoomodesContent) {
+						return yaml.stringify(zoomodesContent)
 					}
 					throw new Error("File not found")
 				})
 				;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
-					if (path === mockRoomodes) {
-						roomodesContent = yaml.parse(content)
+					if (path === mockZoomodes) {
+						zoomodesContent = yaml.parse(content)
 					} else {
 						writtenFiles[path] = content
 					}
@@ -926,7 +929,7 @@ describe("CustomModesManager", () => {
 
 				// Verify mode was imported
 				expect(fs.writeFile).toHaveBeenCalledWith(
-					expect.stringContaining(".roomodes"),
+					expect.stringContaining(".zoomodes"),
 					expect.stringContaining("imported-mode"),
 					"utf-8",
 				)
@@ -971,19 +974,20 @@ describe("CustomModesManager", () => {
 					],
 				})
 
-				let roomodesContent: any = null
+				let zoomodesContent: any = null
+				;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 				;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 					if (path === mockSettingsPath) {
 						return yaml.stringify({ customModes: [] })
 					}
-					if (path === mockRoomodes && roomodesContent) {
-						return yaml.stringify(roomodesContent)
+					if (path === mockZoomodes && zoomodesContent) {
+						return yaml.stringify(zoomodesContent)
 					}
 					throw new Error("File not found")
 				})
 				;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
-					if (path === mockRoomodes) {
-						roomodesContent = yaml.parse(content)
+					if (path === mockZoomodes) {
+						zoomodesContent = yaml.parse(content)
 					}
 					return Promise.resolve()
 				})
@@ -991,9 +995,9 @@ describe("CustomModesManager", () => {
 				const result = await manager.importModeWithRules(importYaml)
 
 				expect(result.success).toBe(true)
-				expect(roomodesContent.customModes).toHaveLength(2)
-				expect(roomodesContent.customModes[0].slug).toBe("mode1")
-				expect(roomodesContent.customModes[1].slug).toBe("mode2")
+				expect(zoomodesContent.customModes).toHaveLength(2)
+				expect(zoomodesContent.customModes[0].slug).toBe("mode1")
+				expect(zoomodesContent.customModes[1].slug).toBe("mode2")
 			})
 
 			it("should handle import errors gracefully", async () => {
@@ -1074,6 +1078,7 @@ describe("CustomModesManager", () => {
 					writtenFiles.push(path)
 					return Promise.resolve()
 				})
+				;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 				;(fs.mkdir as Mock).mockResolvedValue(undefined)
 
 				const result = await manager.importModeWithRules(maliciousYaml)
@@ -1082,7 +1087,7 @@ describe("CustomModesManager", () => {
 
 				// Verify that no files were written outside the .roo directory
 				const mockWorkspacePath = path.resolve("/mock/workspace")
-				const writtenRuleFiles = writtenFiles.filter((p) => !p.includes(".roomodes"))
+				const writtenRuleFiles = writtenFiles.filter((p) => !p.includes(".zoomodes"))
 				writtenRuleFiles.forEach((filePath) => {
 					const normalizedPath = path.normalize(filePath)
 					const expectedBasePath = path.normalize(path.join(mockWorkspacePath, ".roo"))
@@ -1142,19 +1147,20 @@ describe("CustomModesManager", () => {
 					],
 				})
 
-				let roomodesContent: any = null
+				let zoomodesContent: any = null
+				;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 				;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 					if (path === mockSettingsPath) {
 						return yaml.stringify({ customModes: [] })
 					}
-					if (path === mockRoomodes && roomodesContent) {
-						return yaml.stringify(roomodesContent)
+					if (path === mockZoomodes && zoomodesContent) {
+						return yaml.stringify(zoomodesContent)
 					}
 					throw new Error("File not found")
 				})
 				;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
-					if (path === mockRoomodes) {
-						roomodesContent = yaml.parse(content)
+					if (path === mockZoomodes) {
+						zoomodesContent = yaml.parse(content)
 					}
 					return Promise.resolve()
 				})
@@ -1172,7 +1178,7 @@ describe("CustomModesManager", () => {
 
 				// Verify mode was imported
 				expect(fs.writeFile).toHaveBeenCalledWith(
-					expect.stringContaining(".roomodes"),
+					expect.stringContaining(".zoomodes"),
 					expect.stringContaining("test-mode"),
 					"utf-8",
 				)
@@ -1196,20 +1202,21 @@ describe("CustomModesManager", () => {
 					],
 				})
 
-				let roomodesContent: any = null
+				let zoomodesContent: any = null
 				let writtenFiles: Record<string, string> = {}
+				;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => path === mockSettingsPath)
 				;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 					if (path === mockSettingsPath) {
 						return yaml.stringify({ customModes: [] })
 					}
-					if (path === mockRoomodes && roomodesContent) {
-						return yaml.stringify(roomodesContent)
+					if (path === mockZoomodes && zoomodesContent) {
+						return yaml.stringify(zoomodesContent)
 					}
 					throw new Error("File not found")
 				})
 				;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
-					if (path === mockRoomodes) {
-						roomodesContent = yaml.parse(content)
+					if (path === mockZoomodes) {
+						zoomodesContent = yaml.parse(content)
 					} else {
 						writtenFiles[path] = content
 					}

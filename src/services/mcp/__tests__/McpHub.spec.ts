@@ -10,32 +10,26 @@ import { ServerConfigSchema, McpHub } from "../McpHub"
 import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
 import { t } from "../../../i18n"
 
-// Mock fs/promises before importing anything that uses it
-vi.mock("fs/promises", () => ({
-	default: {
-		access: vi.fn().mockResolvedValue(undefined),
-		writeFile: vi.fn().mockResolvedValue(undefined),
-		readFile: vi.fn().mockResolvedValue("{}"),
-		unlink: vi.fn().mockResolvedValue(undefined),
-		rename: vi.fn().mockResolvedValue(undefined),
-		lstat: vi.fn().mockImplementation(() =>
-			Promise.resolve({
-				isDirectory: () => true,
-			}),
-		),
-		mkdir: vi.fn().mockResolvedValue(undefined),
-	},
+const fsMocks = vi.hoisted(() => ({
 	access: vi.fn().mockResolvedValue(undefined),
+	stat: vi.fn().mockResolvedValue({
+		isFile: () => true,
+		isDirectory: () => false,
+	}),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	readFile: vi.fn().mockResolvedValue("{}"),
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rename: vi.fn().mockResolvedValue(undefined),
-	lstat: vi.fn().mockImplementation(() =>
-		Promise.resolve({
-			isDirectory: () => true,
-		}),
-	),
+	lstat: vi.fn().mockResolvedValue({
+		isDirectory: () => true,
+	}),
 	mkdir: vi.fn().mockResolvedValue(undefined),
+}))
+
+// Mock fs/promises before importing anything that uses it
+vi.mock("fs/promises", () => ({
+	default: fsMocks,
+	...fsMocks,
 }))
 
 // Import safeWriteJson to use in mocks
@@ -93,7 +87,6 @@ vi.mock("vscode", () => ({
 		from: vi.fn(),
 	},
 }))
-vi.mock("fs/promises")
 vi.mock("../../../core/webview/ClineProvider")
 
 // Mock the MCP SDK modules
@@ -192,6 +185,10 @@ describe("McpHub", () => {
 				},
 			}),
 		)
+		;(fs as any).stat.mockResolvedValue({
+			isFile: () => true,
+			isDirectory: () => false,
+		})
 
 		mcpHub = new McpHub(mockProvider as ClineProvider)
 	})
