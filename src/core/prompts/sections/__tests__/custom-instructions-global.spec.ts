@@ -9,6 +9,9 @@ const {
 	mockLstat,
 	mockGetConfigDirectoriesForCwd,
 	mockGetAllConfigDirectoriesForCwd,
+	mockGetConfigDirectoryResolutionsForCwd,
+	mockGetAllConfigDirectoryResolutionsForCwd,
+	mockResolveConfigChildDirectoryWithLegacyFallback,
 	mockGetAgentsDirectoriesForCwd,
 } = vi.hoisted(() => ({
 	mockHomedir: vi.fn(),
@@ -18,6 +21,9 @@ const {
 	mockLstat: vi.fn(),
 	mockGetConfigDirectoriesForCwd: vi.fn(),
 	mockGetAllConfigDirectoriesForCwd: vi.fn(),
+	mockGetConfigDirectoryResolutionsForCwd: vi.fn(),
+	mockGetAllConfigDirectoryResolutionsForCwd: vi.fn(),
+	mockResolveConfigChildDirectoryWithLegacyFallback: vi.fn(),
 	mockGetAgentsDirectoriesForCwd: vi.fn(),
 }))
 
@@ -43,6 +49,9 @@ vi.mock("fs/promises", () => ({
 vi.mock("../../../../services/roo-config", () => ({
 	getConfigDirectoriesForCwd: mockGetConfigDirectoriesForCwd,
 	getAllConfigDirectoriesForCwd: mockGetAllConfigDirectoriesForCwd,
+	getConfigDirectoryResolutionsForCwd: mockGetConfigDirectoryResolutionsForCwd,
+	getAllConfigDirectoryResolutionsForCwd: mockGetAllConfigDirectoryResolutionsForCwd,
+	resolveConfigChildDirectoryWithLegacyFallback: mockResolveConfigChildDirectoryWithLegacyFallback,
 	getAgentsDirectoriesForCwd: mockGetAgentsDirectoriesForCwd,
 }))
 
@@ -55,12 +64,71 @@ describe("custom-instructions global Zoo/Roo support", () => {
 	const projectZooDir = path.join(mockCwd, ".zoo")
 	const globalRooDir = path.join(mockHomeDir, ".roo")
 	const projectRooDir = path.join(mockCwd, ".roo")
+	const defaultZooResolutions = [
+		{
+			canonicalPath: globalZooDir,
+			legacyPath: globalRooDir,
+			activePath: globalZooDir,
+			canonicalExists: true,
+			legacyExists: false,
+			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		},
+		{
+			canonicalPath: projectZooDir,
+			legacyPath: projectRooDir,
+			activePath: projectZooDir,
+			canonicalExists: true,
+			legacyExists: false,
+			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		},
+	]
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mockHomedir.mockReturnValue(mockHomeDir)
 		mockGetConfigDirectoriesForCwd.mockResolvedValue([globalZooDir, projectZooDir])
 		mockGetAllConfigDirectoriesForCwd.mockResolvedValue([globalZooDir, projectZooDir])
+		mockGetConfigDirectoryResolutionsForCwd.mockResolvedValue(defaultZooResolutions)
+		mockGetAllConfigDirectoryResolutionsForCwd.mockResolvedValue(defaultZooResolutions)
+		mockResolveConfigChildDirectoryWithLegacyFallback.mockImplementation(
+			async (resolution: any, relativePath: string) => {
+				const canonicalPath = path.join(resolution.canonicalPath, relativePath)
+				const legacyPath = path.join(resolution.legacyPath, relativePath)
+
+				if (resolution.canonicalExists) {
+					try {
+						const canonicalStats = await mockStat(canonicalPath)
+						if (canonicalStats.isDirectory()) {
+							return canonicalPath
+						}
+					} catch {}
+
+					if (resolution.legacyExists) {
+						try {
+							const legacyStats = await mockStat(legacyPath)
+							if (legacyStats.isDirectory()) {
+								return legacyPath
+							}
+						} catch {}
+					}
+
+					return null
+				}
+
+				if (resolution.legacyExists) {
+					try {
+						const legacyStats = await mockStat(legacyPath)
+						if (legacyStats.isDirectory()) {
+							return legacyPath
+						}
+					} catch {}
+				}
+
+				return null
+			},
+		)
 		// getAgentsDirectoriesForCwd returns parent directories (without config root)
 		mockGetAgentsDirectoriesForCwd.mockResolvedValue([mockCwd])
 		// Default lstat to reject (file not found)
@@ -191,6 +259,26 @@ describe("custom-instructions global Zoo/Roo support", () => {
 
 		it("should fall back to legacy Roo rules directories when Zoo roots are absent", async () => {
 			mockGetConfigDirectoriesForCwd.mockResolvedValue([globalRooDir, projectRooDir])
+			mockGetConfigDirectoryResolutionsForCwd.mockResolvedValue([
+				{
+					canonicalPath: globalZooDir,
+					legacyPath: globalRooDir,
+					activePath: globalRooDir,
+					canonicalExists: false,
+					legacyExists: true,
+					activeExists: true,
+					shouldBootstrapCanonicalFromLegacy: true,
+				},
+				{
+					canonicalPath: projectZooDir,
+					legacyPath: projectRooDir,
+					activePath: projectRooDir,
+					canonicalExists: false,
+					legacyExists: true,
+					activeExists: true,
+					shouldBootstrapCanonicalFromLegacy: true,
+				},
+			])
 
 			mockStat
 				.mockResolvedValueOnce({ isDirectory: () => true } as any)

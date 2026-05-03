@@ -27,14 +27,24 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-vi.mock("fs/promises", () => ({
-	mkdir: vi.fn(),
-	readFile: vi.fn(),
-	writeFile: vi.fn(),
-	stat: vi.fn(),
-	readdir: vi.fn(),
-	rm: vi.fn(),
-}))
+vi.mock("fs/promises", () => {
+	const mkdir = vi.fn()
+	const readFile = vi.fn()
+	const writeFile = vi.fn()
+	const stat = vi.fn()
+	const readdir = vi.fn()
+	const rm = vi.fn()
+
+	return {
+		default: { mkdir, readFile, writeFile, stat, readdir, rm },
+		mkdir,
+		readFile,
+		writeFile,
+		stat,
+		readdir,
+		rm,
+	}
+})
 
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")
@@ -258,8 +268,8 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 			expect(rule2Path).toBeDefined()
 
 			// Check that files are in rules-new-slug-name folder
-			expect(rule1Path).toContain(path.join(".roo", "rules-new-slug-name", "rule1.md"))
-			expect(rule2Path).toContain(path.join(".roo", "rules-new-slug-name", "subfolder", "rule2.md"))
+			expect(rule1Path).toContain(path.join(".zoo", "rules-new-slug-name", "rule1.md"))
+			expect(rule2Path).toContain(path.join(".zoo", "rules-new-slug-name", "subfolder", "rule2.md"))
 
 			// Verify directories were created with new slug
 			expect(createdDirs.some((dir) => dir.includes("rules-new-slug-name"))).toBe(true)
@@ -314,8 +324,8 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 			expect(rule2Path).toBeDefined()
 
 			// Check that files are in rules-new-slug-name folder (not rules-old-slug)
-			expect(rule1Path).toContain(path.join(".roo", "rules-new-slug-name", "rule1.md"))
-			expect(rule2Path).toContain(path.join(".roo", "rules-new-slug-name", "subfolder", "rule2.md"))
+			expect(rule1Path).toContain(path.join(".zoo", "rules-new-slug-name", "rule1.md"))
+			expect(rule2Path).toContain(path.join(".zoo", "rules-new-slug-name", "subfolder", "rule2.md"))
 
 			// Ensure old slug folder was NOT created
 			expect(rule1Path).not.toContain("rules-old-slug")
@@ -372,9 +382,9 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 			const newFormatPath = Object.keys(writtenFiles).find((p) => p.includes("new-format.md"))
 			const nestedPath = Object.keys(writtenFiles).find((p) => p.includes(path.join("nested", "file.md")))
 
-			expect(oldFormatPath).toContain(path.join(".roo", "rules-mixed-mode", "old-format.md"))
-			expect(newFormatPath).toContain(path.join(".roo", "rules-mixed-mode", "new-format.md"))
-			expect(nestedPath).toContain(path.join(".roo", "rules-mixed-mode", "nested", "file.md"))
+			expect(oldFormatPath).toContain(path.join(".zoo", "rules-mixed-mode", "old-format.md"))
+			expect(newFormatPath).toContain(path.join(".zoo", "rules-mixed-mode", "new-format.md"))
+			expect(nestedPath).toContain(path.join(".zoo", "rules-mixed-mode", "nested", "file.md"))
 		})
 	})
 
@@ -431,7 +441,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 				(p) => p.includes("rule.md") && !p.includes(".zoomodes"),
 			)
 			expect(ruleFilePath).toBeDefined()
-			expect(ruleFilePath).toContain(path.join(".roo", "rules-renamed-mode", "rule.md"))
+			expect(ruleFilePath).toContain(path.join(".zoo", "rules-renamed-mode", "rule.md"))
 			expect(ruleFilePath).not.toContain("rules-original-mode")
 
 			// Verify content was preserved

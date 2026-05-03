@@ -2,6 +2,7 @@
 
 import type { Mock } from "vitest"
 
+import * as os from "os"
 import * as path from "path"
 import * as fs from "fs/promises"
 
@@ -46,6 +47,13 @@ vi.mock("fs/promises", () => {
 	}
 })
 
+vi.mock("os", () => ({
+	default: {
+		homedir: vi.fn(() => "/mock/home"),
+	},
+	homedir: vi.fn(() => "/mock/home"),
+}))
+
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")
 
@@ -56,6 +64,9 @@ describe("CustomModesManager", () => {
 	let mockWorkspaceFolders: { uri: { fsPath: string } }[]
 
 	// Use path.sep to ensure correct path separators for the current platform
+	const mockHomeDir = os.homedir()
+	const mockGlobalZooDir = path.join(mockHomeDir, ".zoo")
+	const mockGlobalRooDir = path.join(mockHomeDir, ".roo")
 	const mockStoragePath = `${path.sep}mock${path.sep}settings`
 	const mockSettingsPath = path.join(mockStoragePath, "settings", GlobalFileNames.customModes)
 	const mockWorkspacePath = path.resolve("/mock/workspace")
@@ -1627,13 +1638,13 @@ describe("CustomModesManager", () => {
 				return []
 			})
 			;(fs.stat as Mock).mockImplementation(async (targetPath: string) => {
-				if (targetPath === "/Users/taltas/.roo") {
+				if (targetPath === mockGlobalRooDir) {
 					return { isDirectory: () => true, isFile: () => false }
 				}
-				if (targetPath === "/Users/taltas/.zoo/rules-global-test-mode/rule1.md") {
+				if (targetPath === path.join(mockGlobalZooDir, "rules-global-test-mode", "rule1.md")) {
 					return { isFile: () => true, isDirectory: () => false }
 				}
-				if (targetPath === "/Users/taltas/.roo/rules-global-test-mode/rule1.md") {
+				if (targetPath === path.join(mockGlobalRooDir, "rules-global-test-mode", "rule1.md")) {
 					return { isFile: () => true, isDirectory: () => false }
 				}
 				if (targetPath.includes("rules-global-test-mode")) {
@@ -1724,13 +1735,13 @@ describe("CustomModesManager", () => {
 				return []
 			})
 			;(fs.stat as Mock).mockImplementation(async (targetPath: string) => {
-				if (targetPath === "/Users/taltas/.roo") {
+				if (targetPath === mockGlobalRooDir) {
 					return { isDirectory: () => true, isFile: () => false }
 				}
-				if (targetPath === "/Users/taltas/.zoo/rules-global-test-mode/rule1.md") {
+				if (targetPath === path.join(mockGlobalZooDir, "rules-global-test-mode", "rule1.md")) {
 					return { isFile: () => true, isDirectory: () => false }
 				}
-				if (targetPath === "/Users/taltas/.roo/rules-global-test-mode/rule1.md") {
+				if (targetPath === path.join(mockGlobalRooDir, "rules-global-test-mode", "rule1.md")) {
 					return { isFile: () => true, isDirectory: () => false }
 				}
 				if (targetPath.includes("rules-global-test-mode")) {
