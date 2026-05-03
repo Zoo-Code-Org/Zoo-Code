@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "Mô tả phải có tối đa 1024 ký tự"
 		},
 		"footer": "Tạo các skill của riêng bạn với chế độ Skill Writer, có sẵn tại <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "Nhận API Key của bạn tại"
 	}
 }

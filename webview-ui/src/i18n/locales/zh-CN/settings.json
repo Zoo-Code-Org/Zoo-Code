@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "描述不得超过1024个字符"
 		},
 		"footer": "使用技能编写器模式创建您自己的技能，可在 <MarketplaceLink>模式市集</MarketplaceLink> 中获得。"
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "在此处获取您的 API Key"
 	}
 }

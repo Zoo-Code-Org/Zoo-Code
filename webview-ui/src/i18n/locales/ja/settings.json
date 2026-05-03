@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "説明は1024文字以内である必要があります"
 		},
 		"footer": "スキルライターモードで独自のスキルを作成します。<MarketplaceLink>モードマーケットプレイス</MarketplaceLink>で入手可能です。"
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "API Keyはこちらで取得できます"
 	}
 }

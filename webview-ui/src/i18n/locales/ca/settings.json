@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "La descripció ha de tenir com a màxim 1024 caràcters"
 		},
 		"footer": "Crea les teves pròpies skills amb el mode Skill Writer, disponible al <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "Obteniu la vostra clau API a"
 	}
 }

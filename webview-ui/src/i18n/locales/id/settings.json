@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "Deskripsi harus 1024 karakter atau kurang"
 		},
 		"footer": "Buat skills Anda sendiri dengan mode Skill Writer, tersedia di <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "Dapatkan API Key Anda di"
 	}
 }

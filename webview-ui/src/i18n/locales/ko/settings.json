@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "설명은 1024자 이하여야 합니다"
 		},
 		"footer": "스킬 작성자 모드로 자신만의 스킬을 만들 수 있습니다. <MarketplaceLink>모드 마켓플레이스</MarketplaceLink>에서 사용 가능합니다."
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "API Key를 여기서 받으세요"
 	}
 }

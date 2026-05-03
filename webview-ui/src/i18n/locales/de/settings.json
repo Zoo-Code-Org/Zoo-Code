@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "Beschreibung muss 1024 Zeichen oder weniger sein"
 		},
 		"footer": "Erstelle deine eigenen Skills mit dem Skill Writer Modus, verfügbar im <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "Holen Sie sich Ihren API Key unter"
 	}
 }

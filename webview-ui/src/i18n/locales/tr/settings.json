@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "Açıklama en fazla 1024 karakter olmalıdır"
 		},
 		"footer": "Skill Writer modu ile kendi becerilerinizi oluşturun. <MarketplaceLink>Modes Marketplace</MarketplaceLink>'de mevcut."
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "API Key'inizi şuradan alın"
 	}
 }

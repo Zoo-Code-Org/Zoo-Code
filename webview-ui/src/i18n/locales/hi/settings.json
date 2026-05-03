@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "विवरण 1024 वर्णों से अधिक नहीं होना चाहिए"
 		},
 		"footer": "Skill Writer मोड के साथ अपने स्वयं के Skills बनाएं, <MarketplaceLink>Modes Marketplace</MarketplaceLink> में उपलब्ध।"
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "अपनी API Key यहाँ प्राप्त करें"
 	}
 }

@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "Beschrijving moet maximaal 1024 tekens zijn"
 		},
 		"footer": "Maak je eigen skills met de Skill Writer modus, beschikbaar in de <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "Haal uw API Key op bij"
 	}
 }

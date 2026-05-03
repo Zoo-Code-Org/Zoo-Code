@@ -1007,5 +1007,10 @@
 			"descriptionTooLong": "Opis musi mieć maksymalnie 1024 znaki"
 		},
 		"footer": "Twórz własne umiejętności za pomocą trybu Skill Writer, dostępnego w <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "Uzyskaj swój API Key na"
 	}
 }
