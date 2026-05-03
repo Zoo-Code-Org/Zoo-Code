@@ -1007,5 +1007,10 @@
 			"output": "Output",
 			"cacheReads": "Cache reads"
 		}
+	},
+	"zooCodeSubscription": {
+		"sectionTitle": "Zoo Code Subscription",
+		"apiKeyLabel": "API Key",
+		"apiKeyDescription": "Get your API key at"
 	}
 }

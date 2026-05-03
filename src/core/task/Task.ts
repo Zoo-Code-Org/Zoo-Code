@@ -571,6 +571,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							listFilesCountAbove:
 								savedProcessorSettings.listFilesCountAbove ??
 								DEFAULT_PROCESSOR_CONFIG.thresholds.listFilesCountAbove,
+							executeCommandCharsAbove:
+								savedProcessorSettings.executeCommandCharsAbove ??
+								DEFAULT_PROCESSOR_CONFIG.thresholds.executeCommandCharsAbove,
 						},
 					}
 				: {}),
@@ -1087,6 +1090,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	async overwriteApiConversationHistory(newHistory: ApiMessage[]) {
 		this.apiConversationHistory = newHistory
+		this.lastEnvironmentSections = null
 		await this.saveApiConversationHistory()
 	}
 

@@ -935,11 +935,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 						{/* Zoo Code Subscription Section */}
 						{renderTab === "about" && (
 							<div>
-								<SectionHeader>Zoo Code Subscription</SectionHeader>
+								<SectionHeader>{t("settings:zooCodeSubscription.sectionTitle")}</SectionHeader>
 
 								<Section>
 									<div>
-										<label className="block font-medium mb-1">API Key</label>
+										<label className="block font-medium mb-1">
+											{t("settings:zooCodeSubscription.apiKeyLabel")}
+										</label>
 										<VSCodeTextField
 											value={(cachedState as any).zooCodeApiKey ?? ""}
 											onInput={(e: any) => setZooCodeApiKey(e.target.value)}
@@ -948,7 +950,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 											type="password"
 										/>
 										<p className="text-vscode-descriptionForeground text-xs mt-1">
-											Get your API key at{" "}
+											{t("settings:zooCodeSubscription.apiKeyDescription")}{" "}
 											<a
 												href="https://zoocode.dev/dashboard/api-tokens"
 												target="_blank"

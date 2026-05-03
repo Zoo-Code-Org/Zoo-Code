@@ -17,6 +17,8 @@ export interface ToolResultProcessorConfig {
 		searchMatchesAbove: number
 		/** Compress list_files results above this many paths (default: 100) */
 		listFilesCountAbove: number
+		/** Compress execute_command results above this many characters (default: 1500) */
+		executeCommandCharsAbove: number
 	}
 }
 
@@ -27,5 +29,6 @@ export const DEFAULT_PROCESSOR_CONFIG: ToolResultProcessorConfig = {
 		readFileCharsAbove: 1500,
 		searchMatchesAbove: 20,
 		listFilesCountAbove: 100,
+		executeCommandCharsAbove: 1500,
 	},
 }

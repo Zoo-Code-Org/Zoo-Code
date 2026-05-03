@@ -240,13 +240,15 @@ export const globalSettingsSchema = z.object({
 	toolResultProcessorSettings: z
 		.object({
 			/** Master switch — false disables all compression */
-			enabled: z.boolean(),
+			enabled: z.boolean().optional(),
 			/** Compress read_file results above this many characters (default: 1500) */
-			readFileCharsAbove: z.number(),
+			readFileCharsAbove: z.number().optional(),
 			/** Compress search_files results above this many matches (default: 20) */
-			searchMatchesAbove: z.number(),
+			searchMatchesAbove: z.number().optional(),
 			/** Compress list_files results above this many paths (default: 100) */
-			listFilesCountAbove: z.number(),
+			listFilesCountAbove: z.number().optional(),
+			/** Compress execute_command results above this many characters (default: 1500) */
+			executeCommandCharsAbove: z.number().optional(),
 		})
 		.optional(),
 

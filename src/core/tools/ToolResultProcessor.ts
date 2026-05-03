@@ -158,7 +158,7 @@ export class ToolResultProcessor {
 				return this._countPaths(rawResult) > thresholds.listFilesCountAbove
 
 			case "execute_command":
-				return rawResult.length > thresholds.readFileCharsAbove
+				return rawResult.length > thresholds.executeCommandCharsAbove
 
 			default:
 				return false

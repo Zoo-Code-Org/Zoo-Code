@@ -34,11 +34,18 @@ export class CompletionPostProcessor {
 			const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: resultText }] }]
 
 			let output = ""
+			let hadError = false
 			const stream = this.apiHandler.createMessage(systemPrompt, messages as any)
 			for await (const chunk of stream) {
 				if (chunk.type === "text") {
 					output += chunk.text
+				} else if (chunk.type === "error") {
+					hadError = true
 				}
+			}
+
+			if (hadError) {
+				return resultText
 			}
 
 			return output.trim() || resultText

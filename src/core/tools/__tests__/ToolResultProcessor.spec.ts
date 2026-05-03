@@ -62,7 +62,12 @@ describe("ToolResultProcessor.shouldCompress", () => {
 		const config = makeConfig({
 			enabled: true,
 			isSubscriber: true,
-			thresholds: { readFileCharsAbove: 1500, searchMatchesAbove: 20, listFilesCountAbove: 100 },
+			thresholds: {
+				readFileCharsAbove: 1500,
+				searchMatchesAbove: 20,
+				listFilesCountAbove: 100,
+				executeCommandCharsAbove: 1500,
+			},
 		})
 		const bigResult = repeat("x", 1501)
 		expect(processor.shouldCompress("read_file", bigResult, config)).toBe(true)
@@ -72,7 +77,12 @@ describe("ToolResultProcessor.shouldCompress", () => {
 		const config = makeConfig({
 			enabled: true,
 			isSubscriber: true,
-			thresholds: { readFileCharsAbove: 1500, searchMatchesAbove: 20, listFilesCountAbove: 100 },
+			thresholds: {
+				readFileCharsAbove: 1500,
+				searchMatchesAbove: 20,
+				listFilesCountAbove: 100,
+				executeCommandCharsAbove: 1500,
+			},
 		})
 		const smallResult = repeat("x", 1000)
 		expect(processor.shouldCompress("read_file", smallResult, config)).toBe(false)
@@ -82,7 +92,12 @@ describe("ToolResultProcessor.shouldCompress", () => {
 		const config = makeConfig({
 			enabled: true,
 			isSubscriber: true,
-			thresholds: { readFileCharsAbove: 1500, searchMatchesAbove: 20, listFilesCountAbove: 100 },
+			thresholds: {
+				readFileCharsAbove: 1500,
+				searchMatchesAbove: 20,
+				listFilesCountAbove: 100,
+				executeCommandCharsAbove: 1500,
+			},
 		})
 		const exactResult = repeat("x", 1500)
 		expect(processor.shouldCompress("read_file", exactResult, config)).toBe(false)
@@ -122,7 +137,12 @@ describe("ToolResultProcessor.shouldCompress", () => {
 		const config = makeConfig({
 			enabled: true,
 			isSubscriber: true,
-			thresholds: { readFileCharsAbove: 1500, searchMatchesAbove: 20, listFilesCountAbove: 100 },
+			thresholds: {
+				readFileCharsAbove: 1500,
+				searchMatchesAbove: 20,
+				listFilesCountAbove: 100,
+				executeCommandCharsAbove: 1500,
+			},
 		})
 		const bigOutput = repeat("x", 1501)
 		expect(processor.shouldCompress("execute_command", bigOutput, config)).toBe(true)
@@ -132,7 +152,12 @@ describe("ToolResultProcessor.shouldCompress", () => {
 		const config = makeConfig({
 			enabled: true,
 			isSubscriber: true,
-			thresholds: { readFileCharsAbove: 1500, searchMatchesAbove: 20, listFilesCountAbove: 100 },
+			thresholds: {
+				readFileCharsAbove: 1500,
+				searchMatchesAbove: 20,
+				listFilesCountAbove: 100,
+				executeCommandCharsAbove: 1500,
+			},
 		})
 		const smallOutput = repeat("x", 100)
 		expect(processor.shouldCompress("execute_command", smallOutput, config)).toBe(false)

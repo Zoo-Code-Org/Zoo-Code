@@ -55,7 +55,9 @@ export class ZooGatewayApiHandler extends BaseProvider {
 
 			if (response.ok) {
 				const data = await response.json()
-				compressed = data.compressed ?? rawResult
+				if (typeof data?.compressed === "string") {
+					compressed = data.compressed
+				}
 			}
 		} catch (err) {
 			// Network error, timeout, etc. — gracefully fall back to raw
