@@ -17,7 +17,44 @@
 		"title": "Einstellungen",
 		"saveButtonTooltip": "Änderungen speichern",
 		"nothingChangedTooltip": "Nichts geändert",
-		"doneButtonTooltip": "Ungespeicherte Änderungen verwerfen und Einstellungsbereich schließen"
+		"doneButtonTooltip": "Ungespeicherte Änderungen verwerfen und zur Aufgabenansicht zurückkehren"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Roo-Dateien nach Zoo kopieren",
+			"running": "Roo-Dateien werden nach Zoo kopiert..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Veraltete Roo-Dateien erkannt",
+			"preservedTitle": "Zoo ist aktiv und Roo-Dateien wurden beibehalten",
+			"partialRiskTitle": "Gemischte Zoo- und Roo-Dateien müssen überprüft werden",
+			"zooCanonical": "Zoo ist der maßgebliche Speicherort für neue app-verwaltete Änderungen.",
+			"rooDetectedMigratable": "Veraltete Roo-Dateien wurden erkannt. Du kannst berechtigte dateibasierte Bereiche gezielt nach Zoo kopieren, ohne vorhandene Zoo-Dateien zu überschreiben.",
+			"rooDetectedPreserved": "Veraltete Roo-Dateien wurden erkannt und beibehalten. Vorhandene Zoo-Dateien bleiben maßgeblich, und Roo-Dateien werden nicht automatisch gelöscht.",
+			"partialRiskBody": "Einige maßgebliche Zoo-Pfade existieren bereits, während zugehörige Inhalte nur in Roo noch vorhanden sind. Es erfolgt keine automatische Zusammenführung, also prüfe beide Speicherorte, wenn das Verhalten unvollständig wirkt.",
+			"storageBackedGlobal": "Speichergestützte globale Einstellungen sind von der Roo-Dateimigration im Home-Ordner getrennt, daher betrifft diese Aktion nur dateibasierte Roo/Zoo-Bereiche."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Dateibasierte Konfigurationswurzel im Home-Ordner",
+			"projectConfigRoot": "Konfigurationswurzel des Workspaces",
+			"projectCustomModes": "Datei für benutzerdefinierte Workspace-Modi",
+			"projectIgnore": "Ignore-Datei des Workspaces",
+			"projectMcp": "MCP-Datei des Workspaces"
+		},
+		"result": {
+			"summary": "Migrationsergebnisse: {{copiedCount}} kopiert, {{skippedCount}} übersprungen, {{failedCount}} fehlgeschlagen. Veraltete Roo-Dateien wurden beibehalten und nicht automatisch gelöscht.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "kopiert",
+				"skipped": "übersprungen",
+				"failed": "fehlgeschlagen"
+			},
+			"reason": {
+				"canonical-exists": "Zoo hatte bereits ein maßgebliches Ziel, daher wurde nichts überschrieben.",
+				"legacy-missing": "Es war keine veraltete Roo-Quelle zum Kopieren verfügbar.",
+				"not-eligible": "Dieser Bereich ist in seinem aktuellen Zustand nicht für eine Copy-only-Migration geeignet."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Ungespeicherte Änderungen",

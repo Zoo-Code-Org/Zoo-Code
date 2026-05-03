@@ -17,7 +17,44 @@
 		"title": "Configuración",
 		"saveButtonTooltip": "Guardar cambios",
 		"nothingChangedTooltip": "Nada ha cambiado",
-		"doneButtonTooltip": "Descartar cambios no guardados y cerrar el panel de configuración"
+		"doneButtonTooltip": "Descartar los cambios no guardados y volver a la vista de tareas"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Copiar archivos de Roo a Zoo",
+			"running": "Copiando archivos de Roo a Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Se detectaron archivos Roo heredados",
+			"preservedTitle": "Zoo está activo y se conservaron los archivos Roo",
+			"partialRiskTitle": "Los archivos mezclados de Zoo y Roo necesitan revisión",
+			"zooCanonical": "Zoo es la ubicación canónica para los nuevos cambios gestionados por la aplicación.",
+			"rooDetectedMigratable": "Se detectaron archivos Roo heredados. Puedes copiar explícitamente a Zoo las superficies aptas basadas en archivos sin sobrescribir los archivos de Zoo existentes.",
+			"rooDetectedPreserved": "Se detectaron y conservaron archivos Roo heredados. Los archivos de Zoo existentes siguen siendo canónicos y los archivos Roo no se eliminan automáticamente.",
+			"partialRiskBody": "Algunas rutas canónicas de Zoo ya existen mientras todavía hay contenido relacionado solo en Roo. No se realizará ninguna fusión automática, así que revisa ambas ubicaciones si el comportamiento parece incompleto.",
+			"storageBackedGlobal": "La configuración global respaldada por almacenamiento es independiente de la migración de archivos Roo de la carpeta personal, así que esta acción solo afecta a las superficies Roo/Zoo respaldadas por archivos."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Raíz de configuración respaldada por archivos de la carpeta personal",
+			"projectConfigRoot": "Raíz de configuración del espacio de trabajo",
+			"projectCustomModes": "Archivo de modos personalizados del espacio de trabajo",
+			"projectIgnore": "Archivo de ignorados del espacio de trabajo",
+			"projectMcp": "Archivo MCP del espacio de trabajo"
+		},
+		"result": {
+			"summary": "Resultados de la migración: {{copiedCount}} copiados, {{skippedCount}} omitidos, {{failedCount}} fallidos. Los archivos Roo heredados se conservaron y no se eliminaron automáticamente.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "copiado",
+				"skipped": "omitido",
+				"failed": "fallido"
+			},
+			"reason": {
+				"canonical-exists": "Zoo ya tenía un destino canónico, así que no se realizó ninguna sobrescritura.",
+				"legacy-missing": "No había ninguna fuente heredada de Roo disponible para copiar.",
+				"not-eligible": "Esta superficie no es apta para una migración de solo copia en su estado actual."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Cambios no guardados",

@@ -3,16 +3,28 @@
 // Mock fs/promises
 vi.mock("fs/promises")
 
-const { mockGetConfigDirectoriesForCwd, mockGetAllConfigDirectoriesForCwd, mockGetAgentsDirectoriesForCwd } =
-	vi.hoisted(() => ({
-		mockGetConfigDirectoriesForCwd: vi.fn(),
-		mockGetAllConfigDirectoriesForCwd: vi.fn(),
-		mockGetAgentsDirectoriesForCwd: vi.fn(),
-	}))
+const {
+	mockGetConfigDirectoriesForCwd,
+	mockGetAllConfigDirectoriesForCwd,
+	mockGetConfigDirectoryResolutionsForCwd,
+	mockGetAllConfigDirectoryResolutionsForCwd,
+	mockResolveConfigChildDirectoryWithLegacyFallback,
+	mockGetAgentsDirectoriesForCwd,
+} = vi.hoisted(() => ({
+	mockGetConfigDirectoriesForCwd: vi.fn(),
+	mockGetAllConfigDirectoriesForCwd: vi.fn(),
+	mockGetConfigDirectoryResolutionsForCwd: vi.fn(),
+	mockGetAllConfigDirectoryResolutionsForCwd: vi.fn(),
+	mockResolveConfigChildDirectoryWithLegacyFallback: vi.fn(),
+	mockGetAgentsDirectoriesForCwd: vi.fn(),
+}))
 
 vi.mock("../../../../services/roo-config", () => ({
 	getConfigDirectoriesForCwd: mockGetConfigDirectoriesForCwd,
 	getAllConfigDirectoriesForCwd: mockGetAllConfigDirectoriesForCwd,
+	getConfigDirectoryResolutionsForCwd: mockGetConfigDirectoryResolutionsForCwd,
+	getAllConfigDirectoryResolutionsForCwd: mockGetAllConfigDirectoryResolutionsForCwd,
+	resolveConfigChildDirectoryWithLegacyFallback: mockResolveConfigChildDirectoryWithLegacyFallback,
 	getAgentsDirectoriesForCwd: mockGetAgentsDirectoriesForCwd,
 }))
 
@@ -100,6 +112,65 @@ describe("loadRuleFiles", () => {
 		vi.clearAllMocks()
 		mockGetConfigDirectoriesForCwd.mockResolvedValue(["/fake/path/.roo"])
 		mockGetAllConfigDirectoriesForCwd.mockResolvedValue(["/fake/path/.roo"])
+		mockGetConfigDirectoryResolutionsForCwd.mockResolvedValue([
+			{
+				canonicalPath: "/fake/path/.zoo",
+				legacyPath: "/fake/path/.roo",
+				activePath: "/fake/path/.roo",
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			},
+		])
+		mockGetAllConfigDirectoryResolutionsForCwd.mockResolvedValue([
+			{
+				canonicalPath: "/fake/path/.zoo",
+				legacyPath: "/fake/path/.roo",
+				activePath: "/fake/path/.roo",
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			},
+		])
+		mockResolveConfigChildDirectoryWithLegacyFallback.mockImplementation(
+			async (resolution: any, relativePath: string) => {
+				const canonicalPath = `${resolution.canonicalPath}/${relativePath}`.replace(/\\/g, "/")
+				const legacyPath = `${resolution.legacyPath}/${relativePath}`.replace(/\\/g, "/")
+
+				if (resolution.canonicalExists) {
+					try {
+						const canonicalStats = await statMock(canonicalPath)
+						if (canonicalStats.isDirectory()) {
+							return canonicalPath
+						}
+					} catch {}
+
+					if (resolution.legacyExists) {
+						try {
+							const legacyStats = await statMock(legacyPath)
+							if (legacyStats.isDirectory()) {
+								return legacyPath
+							}
+						} catch {}
+					}
+
+					return null
+				}
+
+				if (resolution.legacyExists) {
+					try {
+						const legacyStats = await statMock(legacyPath)
+						if (legacyStats.isDirectory()) {
+							return legacyPath
+						}
+					} catch {}
+				}
+
+				return null
+			},
+		)
 		mockGetAgentsDirectoriesForCwd.mockResolvedValue(["/fake/path"])
 	})
 
@@ -367,6 +438,40 @@ describe("loadRuleFiles", () => {
 
 		const result = await loadRuleFiles("/fake/path")
 		expect(result).toBe("\n# Rules from .roorules:\nroo rules content\n")
+	})
+
+	it("should fall back to legacy rules directory when a canonical root exists without canonical rules", async () => {
+		mockGetConfigDirectoryResolutionsForCwd.mockResolvedValue([
+			{
+				canonicalPath: "/fake/path/.zoo",
+				legacyPath: "/fake/path/.roo",
+				activePath: "/fake/path/.zoo",
+				canonicalExists: true,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: false,
+			},
+		])
+
+		statMock.mockImplementation((targetPath) => {
+			const normalizedPath = targetPath.toString().replace(/\\/g, "/")
+			if (normalizedPath === "/fake/path/.roo/rules") {
+				return Promise.resolve({ isDirectory: vi.fn().mockReturnValue(true) })
+			}
+			if (normalizedPath === "/fake/path/.roo/rules/file1.txt") {
+				return Promise.resolve({ isFile: vi.fn().mockReturnValue(true) })
+			}
+			return Promise.reject({ code: "ENOENT" })
+		})
+		readdirMock.mockResolvedValueOnce([
+			{ name: "file1.txt", isFile: () => true, isSymbolicLink: () => false, parentPath: "/fake/path/.roo/rules" },
+		] as any)
+		readFileMock.mockResolvedValueOnce("legacy rules content")
+
+		const result = await loadRuleFiles("/fake/path")
+
+		expect(result).toContain("# Rules from .roo/rules/file1.txt:")
+		expect(result).toContain("legacy rules content")
 	})
 
 	it("should handle errors when reading directory", async () => {
@@ -953,6 +1058,50 @@ describe("addCustomInstructions", () => {
 		expect(result).not.toContain("Rules from .clinerules-test-mode")
 	})
 
+	it("should fall back to legacy mode rules directory when a canonical root exists without canonical mode rules", async () => {
+		mockGetConfigDirectoryResolutionsForCwd.mockResolvedValue([
+			{
+				canonicalPath: "/fake/path/.zoo",
+				legacyPath: "/fake/path/.roo",
+				activePath: "/fake/path/.zoo",
+				canonicalExists: true,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: false,
+			},
+		])
+
+		statMock.mockImplementation((targetPath) => {
+			const normalizedPath = targetPath.toString().replace(/\\/g, "/")
+			if (normalizedPath === "/fake/path/.roo/rules-test-mode") {
+				return Promise.resolve({ isDirectory: vi.fn().mockReturnValue(true) })
+			}
+			if (normalizedPath === "/fake/path/.roo/rules-test-mode/rule1.txt") {
+				return Promise.resolve({ isFile: vi.fn().mockReturnValue(true) })
+			}
+			return Promise.reject({ code: "ENOENT" })
+		})
+		readdirMock.mockResolvedValueOnce([
+			{
+				name: "rule1.txt",
+				isFile: () => true,
+				isSymbolicLink: () => false,
+				parentPath: "/fake/path/.roo/rules-test-mode",
+			},
+		] as any)
+		readFileMock.mockResolvedValueOnce("legacy mode rule content")
+
+		const result = await addCustomInstructions(
+			"mode instructions",
+			"global instructions",
+			"/fake/path",
+			"test-mode",
+		)
+
+		expect(result).toContain("legacy mode rule content")
+		expect(result).toContain("# Rules from .roo/rules-test-mode/rule1.txt:")
+	})
+
 	it("should handle unknown language codes properly", async () => {
 		// Simulate no .roo/rules-test-mode directory
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
@@ -1081,6 +1230,8 @@ describe("addCustomInstructions", () => {
 		// Verify absolute paths were used internally
 		const expectedAbsTestModeDir =
 			process.platform === "win32" ? "\\fake\\path\\.roo\\rules-test-mode" : "/fake/path/.roo/rules-test-mode"
+		const expectedCanonicalTestModeDir =
+			process.platform === "win32" ? "\\fake\\path\\.zoo\\rules-test-mode" : "/fake/path/.zoo/rules-test-mode"
 		const expectedAbsRule1Path =
 			process.platform === "win32"
 				? "\\fake\\path\\.roo\\rules-test-mode\\rule1.txt"
@@ -1090,7 +1241,7 @@ describe("addCustomInstructions", () => {
 				? "\\fake\\path\\.roo\\rules-test-mode\\rule2.txt"
 				: "/fake/path/.roo/rules-test-mode/rule2.txt"
 
-		expect(statMock).toHaveBeenCalledWith(expectedAbsTestModeDir)
+		expect(statMock).toHaveBeenCalledWith(expectedCanonicalTestModeDir)
 		expect(statMock).toHaveBeenCalledWith(expectedAbsRule1Path)
 		expect(statMock).toHaveBeenCalledWith(expectedAbsRule2Path)
 		expect(readFileMock).toHaveBeenCalledWith(expectedAbsRule1Path, "utf-8")
@@ -1230,7 +1381,10 @@ describe("Directory existence checks", () => {
 
 		// Verify stat was called to check directory existence
 		const expectedRulesDir = process.platform === "win32" ? "\\fake\\path\\.roo\\rules" : "/fake/path/.roo/rules"
-		expect(statMock).toHaveBeenCalledWith(expectedRulesDir)
+		const expectedCanonicalRulesDir =
+			process.platform === "win32" ? "\\fake\\path\\.zoo\\rules" : "/fake/path/.zoo/rules"
+		expect(statMock).toHaveBeenCalledWith(expectedCanonicalRulesDir)
+		expect(statMock).not.toHaveBeenCalledWith(expectedRulesDir)
 	})
 
 	it("should handle when directory does not exist", async () => {

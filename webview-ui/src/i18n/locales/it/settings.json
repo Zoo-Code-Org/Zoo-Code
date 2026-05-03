@@ -17,7 +17,44 @@
 		"title": "Impostazioni",
 		"saveButtonTooltip": "Salva modifiche",
 		"nothingChangedTooltip": "Nessuna modifica",
-		"doneButtonTooltip": "Scarta le modifiche non salvate e chiudi il pannello delle impostazioni"
+		"doneButtonTooltip": "Scarta le modifiche non salvate e torna alla vista attività"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Copia i file Roo in Zoo",
+			"running": "Copia dei file Roo in Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Rilevati file Roo legacy",
+			"preservedTitle": "Zoo è attivo e i file Roo sono stati conservati",
+			"partialRiskTitle": "I file Zoo e Roo misti richiedono una revisione",
+			"zooCanonical": "Zoo è la posizione canonica per le nuove modifiche gestite dall'app.",
+			"rooDetectedMigratable": "Sono stati rilevati file Roo legacy. Puoi copiare esplicitamente in Zoo le superfici idonee basate su file senza sovrascrivere i file Zoo esistenti.",
+			"rooDetectedPreserved": "Sono stati rilevati e conservati file Roo legacy. I file Zoo esistenti restano canonici e i file Roo non vengono eliminati automaticamente.",
+			"partialRiskBody": "Alcuni percorsi canonici di Zoo esistono già mentre sono ancora presenti contenuti correlati solo in Roo. Non verrà eseguita alcuna unione automatica, quindi controlla entrambe le posizioni se il comportamento sembra incompleto.",
+			"storageBackedGlobal": "Le impostazioni globali basate su archiviazione sono separate dalla migrazione dei file Roo nella cartella home, quindi questa azione interessa solo le superfici Roo/Zoo basate su file."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Radice di configurazione basata su file della cartella home",
+			"projectConfigRoot": "Radice di configurazione dello workspace",
+			"projectCustomModes": "File delle modalità personalizzate dello workspace",
+			"projectIgnore": "File ignore dello workspace",
+			"projectMcp": "File MCP dello workspace"
+		},
+		"result": {
+			"summary": "Risultati della migrazione: {{copiedCount}} copiati, {{skippedCount}} saltati, {{failedCount}} falliti. I file Roo legacy sono stati conservati e non eliminati automaticamente.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "copiato",
+				"skipped": "saltato",
+				"failed": "fallito"
+			},
+			"reason": {
+				"canonical-exists": "Zoo aveva già una destinazione canonica, quindi non è stata eseguita alcuna sovrascrittura.",
+				"legacy-missing": "Nessuna origine Roo legacy disponibile da copiare.",
+				"not-eligible": "Questa superficie non è idonea per una migrazione di sola copia nello stato attuale."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Modifiche non salvate",

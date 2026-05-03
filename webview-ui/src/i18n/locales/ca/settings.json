@@ -17,7 +17,44 @@
 		"title": "Configuració",
 		"saveButtonTooltip": "Desar canvis",
 		"nothingChangedTooltip": "No s'ha canviat res",
-		"doneButtonTooltip": "Descartar els canvis no desats i tancar el panell de configuració"
+		"doneButtonTooltip": "Descarta els canvis no desats i torna a la vista de tasques"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Copia els fitxers de Roo a Zoo",
+			"running": "S'estan copiant els fitxers de Roo a Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "S'han detectat fitxers Roo heretats",
+			"preservedTitle": "Zoo està actiu i s'han conservat els fitxers Roo",
+			"partialRiskTitle": "Els fitxers barrejats de Zoo i Roo necessiten revisió",
+			"zooCanonical": "Zoo és la ubicació canònica per als canvis nous gestionats per l'aplicació.",
+			"rooDetectedMigratable": "S'han detectat fitxers Roo heretats. Pots copiar explícitament les superfícies aptes basades en fitxers a Zoo sense sobreescriure els fitxers de Zoo existents.",
+			"rooDetectedPreserved": "S'han detectat i conservat fitxers Roo heretats. Els fitxers de Zoo existents continuen sent canònics i els fitxers Roo no s'eliminen automàticament.",
+			"partialRiskBody": "Alguns camins canònics de Zoo ja existeixen mentre encara hi ha contingut relacionat només a Roo. No es farà cap fusió automàtica, així que revisa ambdues ubicacions si el comportament sembla incomplet.",
+			"storageBackedGlobal": "La configuració global basada en emmagatzematge és independent de la migració dels fitxers Roo de la carpeta personal, de manera que aquesta acció només afecta les superfícies Roo/Zoo basades en fitxers."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Arrel de configuració basada en fitxers de la carpeta personal",
+			"projectConfigRoot": "Arrel de configuració de l'espai de treball",
+			"projectCustomModes": "Fitxer de modes personalitzats de l'espai de treball",
+			"projectIgnore": "Fitxer d'ignorats de l'espai de treball",
+			"projectMcp": "Fitxer MCP de l'espai de treball"
+		},
+		"result": {
+			"summary": "Resultats de la migració: {{copiedCount}} copiats, {{skippedCount}} omesos, {{failedCount}} fallits. Els fitxers Roo heretats s'han conservat i no s'han eliminat automàticament.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "copiat",
+				"skipped": "omès",
+				"failed": "fallit"
+			},
+			"reason": {
+				"canonical-exists": "Zoo ja tenia una destinació canònica, així que no s'ha sobreescrit res.",
+				"legacy-missing": "No hi havia cap origen Roo heretat disponible per copiar.",
+				"not-eligible": "Aquesta superfície no és apta per a una migració només de còpia en l'estat actual."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Canvis no desats",

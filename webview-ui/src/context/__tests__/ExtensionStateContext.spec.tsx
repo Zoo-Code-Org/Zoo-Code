@@ -11,14 +11,21 @@ import {
 import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
 
 const TestComponent = () => {
-	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
-		useExtensionState()
+	const {
+		allowedCommands,
+		setAllowedCommands,
+		soundEnabled,
+		showRooIgnoredFiles,
+		setShowRooIgnoredFiles,
+		showWelcome,
+	} = useExtensionState()
 
 	return (
 		<div>
 			<div data-testid="allowed-commands">{JSON.stringify(allowedCommands)}</div>
 			<div data-testid="sound-enabled">{JSON.stringify(soundEnabled)}</div>
 			<div data-testid="show-rooignored-files">{JSON.stringify(showRooIgnoredFiles)}</div>
+			<div data-testid="show-welcome">{JSON.stringify(showWelcome)}</div>
 			<button data-testid="update-button" onClick={() => setAllowedCommands(["npm install", "git status"])}>
 				Update Commands
 			</button>
@@ -26,6 +33,17 @@ const TestComponent = () => {
 				Update Commands
 			</button>
 		</div>
+	)
+}
+
+function postStateMessage(state: Partial<ExtensionState>) {
+	window.dispatchEvent(
+		new MessageEvent("message", {
+			data: {
+				type: "state",
+				state,
+			},
+		}),
 	)
 }
 
@@ -104,6 +122,111 @@ describe("ExtensionStateContext", () => {
 		})
 
 		expect(JSON.parse(screen.getByTestId("allowed-commands").textContent!)).toEqual(["npm install", "git status"])
+	})
+
+	it("shows welcome when provider config is missing and no legacy migration assets exist", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			postStateMessage({ apiConfiguration: {} })
+		})
+
+		expect(JSON.parse(screen.getByTestId("show-welcome").textContent!)).toBe(true)
+	})
+
+	it("hides welcome when legacy migration assets exist even without provider config", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			postStateMessage({
+				apiConfiguration: {},
+				zooMigrationState: {
+					globalFileBacked: {
+						configRoot: {
+							canonicalPath: "/home/.zoo",
+							legacyPath: "/home/.roo",
+							activePath: "/home/.roo",
+							canonicalExists: false,
+							legacyExists: true,
+							activeExists: true,
+							shouldBootstrapCanonicalFromLegacy: true,
+							activeSource: "legacy",
+							bootstrapEligible: true,
+							copyOnlyMigrationActionAvailable: true,
+							partialCanonicalRiskDetected: false,
+						},
+						partialCanonicalRiskDetected: false,
+						copyOnlyMigrationActionAvailable: true,
+					},
+					project: {
+						configRoot: {
+							canonicalPath: "/workspace/.zoo",
+							legacyPath: "/workspace/.roo",
+							activePath: "/workspace/.roo",
+							canonicalExists: false,
+							legacyExists: true,
+							activeExists: true,
+							shouldBootstrapCanonicalFromLegacy: true,
+							activeSource: "legacy",
+							bootstrapEligible: true,
+							copyOnlyMigrationActionAvailable: true,
+							partialCanonicalRiskDetected: false,
+						},
+						customModes: {
+							canonicalPath: "/workspace/.zoomodes",
+							legacyPath: "/workspace/.roomodes",
+							activePath: "/workspace/.roomodes",
+							canonicalExists: false,
+							legacyExists: true,
+							activeExists: true,
+							shouldBootstrapCanonicalFromLegacy: true,
+							activeSource: "legacy",
+							bootstrapEligible: true,
+							copyOnlyMigrationActionAvailable: true,
+							partialCanonicalRiskDetected: false,
+						},
+						ignore: {
+							canonicalPath: "/workspace/.zooignore",
+							legacyPath: "/workspace/.rooignore",
+							activePath: "/workspace/.rooignore",
+							canonicalExists: false,
+							legacyExists: true,
+							activeExists: true,
+							shouldBootstrapCanonicalFromLegacy: true,
+							activeSource: "legacy",
+							bootstrapEligible: true,
+							copyOnlyMigrationActionAvailable: true,
+							partialCanonicalRiskDetected: false,
+						},
+						mcp: {
+							canonicalPath: "/workspace/.zoo/mcp.json",
+							legacyPath: "/workspace/.roo/mcp.json",
+							activePath: "/workspace/.roo/mcp.json",
+							canonicalExists: false,
+							legacyExists: true,
+							activeExists: true,
+							shouldBootstrapCanonicalFromLegacy: true,
+							activeSource: "legacy",
+							bootstrapEligible: true,
+							copyOnlyMigrationActionAvailable: true,
+							partialCanonicalRiskDetected: false,
+						},
+						partialCanonicalRiskDetected: false,
+						copyOnlyMigrationActionAvailable: true,
+					},
+				},
+			})
+		})
+
+		expect(JSON.parse(screen.getByTestId("show-welcome").textContent!)).toBe(false)
 	})
 
 	it("throws error when used outside provider", () => {

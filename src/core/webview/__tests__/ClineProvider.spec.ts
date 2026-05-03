@@ -51,6 +51,91 @@ vi.mock("axios", () => ({
 
 vi.mock("../../../utils/safeWriteJson")
 
+vi.mock("../../../services/roo-config/index.js", async () => {
+	const actual = await vi.importActual<typeof import("../../../services/roo-config/index.js")>(
+		"../../../services/roo-config/index.js",
+	)
+
+	return {
+		...actual,
+		getZooMigrationStateSummaryForCwd: vi.fn().mockResolvedValue({
+			globalFileBacked: {
+				configRoot: {
+					canonicalPath: "/test/home/.zoo",
+					legacyPath: "/test/home/.roo",
+					activePath: "/test/home/.zoo",
+					canonicalExists: true,
+					legacyExists: false,
+					activeExists: true,
+					shouldBootstrapCanonicalFromLegacy: false,
+					activeSource: "canonical",
+					bootstrapEligible: false,
+					copyOnlyMigrationActionAvailable: false,
+					partialCanonicalRiskDetected: false,
+				},
+				partialCanonicalRiskDetected: false,
+				copyOnlyMigrationActionAvailable: false,
+			},
+			project: {
+				configRoot: {
+					canonicalPath: "/test/path/.zoo",
+					legacyPath: "/test/path/.roo",
+					activePath: "/test/path/.zoo",
+					canonicalExists: true,
+					legacyExists: false,
+					activeExists: true,
+					shouldBootstrapCanonicalFromLegacy: false,
+					activeSource: "canonical",
+					bootstrapEligible: false,
+					copyOnlyMigrationActionAvailable: false,
+					partialCanonicalRiskDetected: false,
+				},
+				customModes: {
+					canonicalPath: "/test/path/.zoomodes",
+					legacyPath: "/test/path/.roomodes",
+					activePath: "/test/path/.zoomodes",
+					canonicalExists: false,
+					legacyExists: false,
+					activeExists: false,
+					shouldBootstrapCanonicalFromLegacy: false,
+					activeSource: "none",
+					bootstrapEligible: false,
+					copyOnlyMigrationActionAvailable: false,
+					partialCanonicalRiskDetected: false,
+				},
+				ignore: {
+					canonicalPath: "/test/path/.zooignore",
+					legacyPath: "/test/path/.rooignore",
+					activePath: "/test/path/.zooignore",
+					canonicalExists: false,
+					legacyExists: false,
+					activeExists: false,
+					shouldBootstrapCanonicalFromLegacy: false,
+					activeSource: "none",
+					bootstrapEligible: false,
+					copyOnlyMigrationActionAvailable: false,
+					partialCanonicalRiskDetected: false,
+				},
+				mcp: {
+					canonicalPath: "/test/path/.zoo/mcp.json",
+					legacyPath: "/test/path/.roo/mcp.json",
+					activePath: "/test/path/.zoo/mcp.json",
+					canonicalExists: false,
+					legacyExists: false,
+					activeExists: false,
+					shouldBootstrapCanonicalFromLegacy: false,
+					activeSource: "none",
+					bootstrapEligible: false,
+					copyOnlyMigrationActionAvailable: false,
+					partialCanonicalRiskDetected: false,
+				},
+				partialCanonicalRiskDetected: false,
+				copyOnlyMigrationActionAvailable: false,
+			},
+		}),
+	}
+})
+
 vi.mock("../../../utils/storage", () => ({
 	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
@@ -562,6 +647,18 @@ describe("ClineProvider", () => {
 		await provider.postMessageToWebview(message)
 
 		expect(mockPostMessage).toHaveBeenCalledWith(message)
+	})
+
+	test("getStateToPostToWebview includes zoo migration state when cwd is available", async () => {
+		vi.spyOn(provider, "cwd", "get").mockReturnValue("/test/path")
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.zooMigrationState).toEqual(
+			expect.objectContaining({
+				globalFileBacked: expect.any(Object),
+				project: expect.any(Object),
+			}),
+		)
 	})
 
 	test("postMessageToWebview does not throw when webview is disposed", async () => {

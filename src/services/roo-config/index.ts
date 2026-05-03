@@ -1,6 +1,13 @@
 import * as path from "path"
 import * as os from "os"
+import { constants as fsConstants } from "fs"
 import fs from "fs/promises"
+import type {
+	ZooMigrationCopyOnlyResult,
+	ZooMigrationCopyOnlySkippedReason,
+	ZooMigrationCopyOnlySurfaceResult,
+	ZooMigrationSurfaceId,
+} from "@roo-code/types"
 
 const ZOO_CONFIG_DIRECTORY_NAME = ".zoo"
 const ROO_CONFIG_DIRECTORY_NAME = ".roo"
@@ -20,6 +27,54 @@ export interface ZooPathResolution {
 	legacyExists: boolean
 	activeExists: boolean
 	shouldBootstrapCanonicalFromLegacy: boolean
+}
+
+export type ZooMigrationActiveSource = "canonical" | "legacy" | "none"
+
+export type ZooBootstrapSkippedReason = "canonical-exists" | "legacy-missing"
+
+export interface ZooBootstrapResult {
+	before: ZooPathResolution
+	after: ZooPathResolution
+	copied: boolean
+	copySourcePath: string | null
+	copyDestinationPath: string | null
+	skippedReason: ZooBootstrapSkippedReason | null
+}
+
+export interface ZooMigrationSurfaceState extends ZooPathResolution {
+	activeSource: ZooMigrationActiveSource
+	bootstrapEligible: boolean
+	copyOnlyMigrationActionAvailable: boolean
+	partialCanonicalRiskDetected: boolean
+}
+
+export interface GlobalFileBackedZooMigrationState {
+	configRoot: ZooMigrationSurfaceState
+	partialCanonicalRiskDetected: boolean
+	copyOnlyMigrationActionAvailable: boolean
+}
+
+export interface ProjectZooMigrationState {
+	configRoot: ZooMigrationSurfaceState
+	customModes: ZooMigrationSurfaceState
+	ignore: ZooMigrationSurfaceState
+	mcp: ZooMigrationSurfaceState
+	partialCanonicalRiskDetected: boolean
+	copyOnlyMigrationActionAvailable: boolean
+}
+
+export interface ZooMigrationStateSummary {
+	globalFileBacked: GlobalFileBackedZooMigrationState
+	project: ProjectZooMigrationState
+}
+
+export interface GetGlobalFileBackedZooMigrationStateOptions {
+	additionalMigrationSensitiveResolutions?: ZooPathResolution[]
+}
+
+export interface GetProjectZooMigrationStateOptions {
+	additionalRootMigrationSensitiveResolutions?: ZooPathResolution[]
 }
 
 async function pathExistsForEntity(pathToCheck: string, entityType: ZooPathEntityType): Promise<boolean> {
@@ -50,6 +105,113 @@ async function resolveZooPathPair(
 	}
 }
 
+function getActiveSourceForResolution(resolution: ZooPathResolution): ZooMigrationActiveSource {
+	if (resolution.canonicalExists) {
+		return "canonical"
+	}
+
+	if (resolution.legacyExists) {
+		return "legacy"
+	}
+
+	return "none"
+}
+
+async function bootstrapCanonicalPathFromLegacy(
+	resolution: ZooPathResolution,
+	entityType: ZooPathEntityType,
+): Promise<ZooBootstrapResult> {
+	if (!resolution.shouldBootstrapCanonicalFromLegacy) {
+		return {
+			before: resolution,
+			after: resolution,
+			copied: false,
+			copySourcePath: null,
+			copyDestinationPath: null,
+			skippedReason: resolution.canonicalExists ? "canonical-exists" : "legacy-missing",
+		}
+	}
+
+	await fs.mkdir(path.dirname(resolution.canonicalPath), { recursive: true })
+
+	if (entityType === "directory") {
+		await fs.cp(resolution.legacyPath, resolution.canonicalPath, {
+			recursive: true,
+			force: false,
+			errorOnExist: true,
+		})
+	} else {
+		await fs.copyFile(resolution.legacyPath, resolution.canonicalPath, fsConstants.COPYFILE_EXCL)
+	}
+
+	return {
+		before: resolution,
+		after: await resolveZooPathPair(resolution.canonicalPath, resolution.legacyPath, entityType),
+		copied: true,
+		copySourcePath: resolution.legacyPath,
+		copyDestinationPath: resolution.canonicalPath,
+		skippedReason: null,
+	}
+}
+
+export async function bootstrapCanonicalConfigRootFromLegacy(
+	resolution: ZooPathResolution,
+): Promise<ZooBootstrapResult> {
+	return bootstrapCanonicalPathFromLegacy(resolution, "directory")
+}
+
+export async function ensureCanonicalConfigRootForWrite(resolution: ZooPathResolution): Promise<ZooPathResolution> {
+	if (resolution.canonicalExists) {
+		return resolution
+	}
+
+	if (resolution.shouldBootstrapCanonicalFromLegacy) {
+		return (await bootstrapCanonicalConfigRootFromLegacy(resolution)).after
+	}
+
+	await fs.mkdir(resolution.canonicalPath, { recursive: true })
+
+	return {
+		canonicalPath: resolution.canonicalPath,
+		legacyPath: resolution.legacyPath,
+		activePath: resolution.canonicalPath,
+		canonicalExists: true,
+		legacyExists: resolution.legacyExists,
+		activeExists: true,
+		shouldBootstrapCanonicalFromLegacy: false,
+	}
+}
+
+export async function bootstrapCanonicalDotfileFromLegacy(resolution: ZooPathResolution): Promise<ZooBootstrapResult> {
+	return bootstrapCanonicalPathFromLegacy(resolution, "file")
+}
+
+export function detectPartialCanonicalRootRisk(
+	rootResolution: ZooPathResolution,
+	migrationSensitiveResolutions: ZooPathResolution[],
+): boolean {
+	if (!rootResolution.canonicalExists || !rootResolution.legacyExists) {
+		return false
+	}
+
+	return migrationSensitiveResolutions.some((resolution) => !resolution.canonicalExists && resolution.legacyExists)
+}
+
+export function summarizeZooMigrationPathState(
+	resolution: ZooPathResolution,
+	options?: { partialCanonicalRiskDetected?: boolean },
+): ZooMigrationSurfaceState {
+	const bootstrapEligible = resolution.shouldBootstrapCanonicalFromLegacy
+
+	return {
+		...resolution,
+		activeSource: getActiveSourceForResolution(resolution),
+		bootstrapEligible,
+		copyOnlyMigrationActionAvailable: bootstrapEligible,
+		partialCanonicalRiskDetected: options?.partialCanonicalRiskDetected ?? false,
+	}
+}
+
 /**
  * Gets the canonical global Zoo configuration directory path based on the current platform.
  */
@@ -73,6 +235,10 @@ export function getLegacyGlobalConfigDirectory(): string {
  */
 export async function resolveGlobalConfigDirectory(): Promise<ZooPathResolution> {
 	return resolveZooPathPair(getCanonicalGlobalConfigDirectory(), getLegacyGlobalConfigDirectory(), "directory")
+}
+
+export async function ensureCanonicalGlobalConfigRootForWrite(): Promise<ZooPathResolution> {
+	return ensureCanonicalConfigRootForWrite(await resolveGlobalConfigDirectory())
 }
 
 /**
@@ -167,6 +333,10 @@ export async function resolveProjectConfigDirectoryForCwd(cwd: string): Promise<
 	)
 }
 
+export async function ensureCanonicalProjectConfigRootForCwd(cwd: string): Promise<ZooPathResolution> {
+	return ensureCanonicalConfigRootForWrite(await resolveProjectConfigDirectoryForCwd(cwd))
+}
+
 /**
  * Gets the canonical project-local custom modes file path for a given cwd.
  */
@@ -232,6 +402,178 @@ export function getLegacyProjectMcpFileForCwd(cwd: string): string {
  */
 export async function resolveProjectMcpFileForCwd(cwd: string): Promise<ZooPathResolution> {
 	return resolveZooPathPair(getCanonicalProjectMcpFileForCwd(cwd), getLegacyProjectMcpFileForCwd(cwd), "file")
+}
+
+export async function getGlobalFileBackedZooMigrationState(
+	options?: GetGlobalFileBackedZooMigrationStateOptions,
+): Promise<GlobalFileBackedZooMigrationState> {
+	const configRootResolution = await resolveGlobalConfigDirectory()
+	const partialCanonicalRiskDetected = detectPartialCanonicalRootRisk(
+		configRootResolution,
+		options?.additionalMigrationSensitiveResolutions ?? [],
+	)
+	const configRoot = summarizeZooMigrationPathState(configRootResolution, { partialCanonicalRiskDetected })
+
+	return {
+		configRoot,
+		partialCanonicalRiskDetected,
+		copyOnlyMigrationActionAvailable: configRoot.copyOnlyMigrationActionAvailable,
+	}
+}
+
+export async function getProjectZooMigrationStateForCwd(
+	cwd: string,
+	options?: GetProjectZooMigrationStateOptions,
+): Promise<ProjectZooMigrationState> {
+	const [configRootResolution, customModesResolution, ignoreResolution, mcpResolution] = await Promise.all([
+		resolveProjectConfigDirectoryForCwd(cwd),
+		resolveProjectCustomModesFileForCwd(cwd),
+		resolveProjectIgnoreFileForCwd(cwd),
+		resolveProjectMcpFileForCwd(cwd),
+	])
+
+	const partialCanonicalRiskDetected = detectPartialCanonicalRootRisk(configRootResolution, [
+		mcpResolution,
+		...(options?.additionalRootMigrationSensitiveResolutions ?? []),
+	])
+
+	const configRoot = summarizeZooMigrationPathState(configRootResolution, { partialCanonicalRiskDetected })
+	const customModes = summarizeZooMigrationPathState(customModesResolution)
+	const ignore = summarizeZooMigrationPathState(ignoreResolution)
+	const mcp = summarizeZooMigrationPathState(mcpResolution)
+
+	return {
+		configRoot,
+		customModes,
+		ignore,
+		mcp,
+		partialCanonicalRiskDetected,
+		copyOnlyMigrationActionAvailable: [configRoot, customModes, ignore, mcp].some(
+			(surface) => surface.copyOnlyMigrationActionAvailable,
+		),
+	}
+}
+
+export async function getZooMigrationStateSummaryForCwd(cwd: string): Promise<ZooMigrationStateSummary> {
+	const [globalFileBacked, project] = await Promise.all([
+		getGlobalFileBackedZooMigrationState(),
+		getProjectZooMigrationStateForCwd(cwd),
+	])
+
+	return {
+		globalFileBacked,
+		project,
+	}
+}
+
+function createSkippedCopyOnlySurfaceResult(
+	surface: ZooMigrationSurfaceId,
+	resolution: ZooPathResolution,
+	reason: ZooMigrationCopyOnlySkippedReason,
+): ZooMigrationCopyOnlySurfaceResult {
+	return {
+		surface,
+		status: "skipped",
+		sourcePath: resolution.legacyExists ? resolution.legacyPath : null,
+		destinationPath: resolution.canonicalPath,
+		reason,
+	}
+}
+
+async function runCopyOnlyMigrationForSurface(
+	surface: ZooMigrationSurfaceId,
+	resolution: ZooPathResolution,
+	entityType: ZooPathEntityType,
+): Promise<ZooMigrationCopyOnlySurfaceResult> {
+	if (!resolution.shouldBootstrapCanonicalFromLegacy) {
+		const reason: ZooMigrationCopyOnlySkippedReason = resolution.canonicalExists
+			? "canonical-exists"
+			: resolution.legacyExists
+				? "not-eligible"
+				: "legacy-missing"
+
+		return createSkippedCopyOnlySurfaceResult(surface, resolution, reason)
+	}
+
+	try {
+		const result =
+			entityType === "directory"
+				? await bootstrapCanonicalConfigRootFromLegacy(resolution)
+				: await bootstrapCanonicalDotfileFromLegacy(resolution)
+
+		if (!result.copied) {
+			return createSkippedCopyOnlySurfaceResult(surface, resolution, result.skippedReason ?? "not-eligible")
+		}
+
+		return {
+			surface,
+			status: "copied",
+			sourcePath: result.copySourcePath,
+			destinationPath: result.copyDestinationPath,
+		}
+	} catch (error) {
+		return {
+			surface,
+			status: "failed",
+			sourcePath: resolution.legacyExists ? resolution.legacyPath : null,
+			destinationPath: resolution.canonicalPath,
+			error: error instanceof Error ? error.message : String(error),
+		}
+	}
+}
+
+function markResolutionCanonical(resolution: ZooPathResolution): ZooPathResolution {
+	return {
+		canonicalPath: resolution.canonicalPath,
+		legacyPath: resolution.legacyPath,
+		activePath: resolution.canonicalPath,
+		canonicalExists: true,
+		legacyExists: resolution.legacyExists,
+		activeExists: true,
+		shouldBootstrapCanonicalFromLegacy: false,
+	}
+}
+
+export async function runZooMigrationCopyOnlyForCwd(cwd: string): Promise<ZooMigrationCopyOnlyResult> {
+	const [globalResolution, projectRootResolution, customModesResolution, ignoreResolution, mcpResolution] =
+		await Promise.all([
+			resolveGlobalConfigDirectory(),
+			resolveProjectConfigDirectoryForCwd(cwd),
+			resolveProjectCustomModesFileForCwd(cwd),
+			resolveProjectIgnoreFileForCwd(cwd),
+			resolveProjectMcpFileForCwd(cwd),
+		])
+
+	const globalRootResult = await runCopyOnlyMigrationForSurface(
+		"globalFileBacked.configRoot",
+		globalResolution,
+		"directory",
+	)
+	const projectRootResult = await runCopyOnlyMigrationForSurface(
+		"project.configRoot",
+		projectRootResolution,
+		"directory",
+	)
+	const effectiveMcpResolution =
+		projectRootResult.status === "copied" ? markResolutionCanonical(mcpResolution) : mcpResolution
+
+	const nestedResults = await Promise.all([
+		runCopyOnlyMigrationForSurface("project.customModes", customModesResolution, "file"),
+		runCopyOnlyMigrationForSurface("project.ignore", ignoreResolution, "file"),
+		runCopyOnlyMigrationForSurface("project.mcp", effectiveMcpResolution, "file"),
+	])
+
+	const results = [globalRootResult, projectRootResult, ...nestedResults]
+
+	const summary = await getZooMigrationStateSummaryForCwd(cwd)
+
+	return {
+		results,
+		summary,
+		copiedCount: results.filter((result) => result.status === "copied").length,
+		skippedCount: results.filter((result) => result.status === "skipped").length,
+		failedCount: results.filter((result) => result.status === "failed").length,
+	}
 }
 
 /**
@@ -313,6 +655,68 @@ export async function readFileIfExists(filePath: string): Promise<string | null>
 		// Re-throw unexpected errors (permission, I/O, etc.)
 		throw error
 	}
+}
+
+/**
+ * Reads a child file from a config root using canonical-first semantics, with a
+ * same-scope legacy fallback only when a canonical root already exists but the
+ * specific child file does not.
+ */
+export async function readConfigChildFileWithLegacyFallback(
+	rootResolution: ZooPathResolution,
+	relativeFilePath: string,
+): Promise<string | null> {
+	if (rootResolution.canonicalExists) {
+		const canonicalContent = await readFileIfExists(path.join(rootResolution.canonicalPath, relativeFilePath))
+		if (canonicalContent !== null) {
+			return canonicalContent
+		}
+
+		if (rootResolution.legacyExists) {
+			return readFileIfExists(path.join(rootResolution.legacyPath, relativeFilePath))
+		}
+
+		return null
+	}
+
+	if (rootResolution.legacyExists) {
+		return readFileIfExists(path.join(rootResolution.legacyPath, relativeFilePath))
+	}
+
+	return null
+}
+
+/**
+ * Resolves a child directory from a config root using canonical-first semantics,
+ * with a same-scope legacy fallback only when a canonical root already exists
+ * but the specific child directory does not.
+ */
+export async function resolveConfigChildDirectoryWithLegacyFallback(
+	rootResolution: ZooPathResolution,
+	relativeDirectoryPath: string,
+): Promise<string | null> {
+	if (rootResolution.canonicalExists) {
+		const canonicalDirectory = path.join(rootResolution.canonicalPath, relativeDirectoryPath)
+		if (await directoryExists(canonicalDirectory)) {
+			return canonicalDirectory
+		}
+
+		if (rootResolution.legacyExists) {
+			const legacyDirectory = path.join(rootResolution.legacyPath, relativeDirectoryPath)
+			if (await directoryExists(legacyDirectory)) {
+				return legacyDirectory
+			}
+		}
+
+		return null
+	}
+
+	if (rootResolution.legacyExists) {
+		const legacyDirectory = path.join(rootResolution.legacyPath, relativeDirectoryPath)
+		return (await directoryExists(legacyDirectory)) ? legacyDirectory : null
+	}
+
+	return null
 }
 
 /**
@@ -445,16 +849,92 @@ export async function discoverSubfolderConfigDirectories(cwd: string): Promise<s
 }
 
 /**
+ * Discovers active/canonical subfolder configuration root resolutions using
+ * Zoo-first / Roo-fallback semantics.
+ */
+export async function discoverSubfolderConfigDirectoryResolutions(cwd: string): Promise<ZooPathResolution[]> {
+	try {
+		const { executeRipgrep } = await import("../search/file-search")
+
+		const args = [
+			"--files",
+			"--hidden",
+			"--follow",
+			"-g",
+			"**/.zoo/**",
+			"-g",
+			"**/.roo/**",
+			"-g",
+			"!node_modules/**",
+			"-g",
+			"!.git/**",
+			cwd,
+		]
+
+		const results = await executeRipgrep({ args, workspacePath: cwd })
+		const presenceByParent = new Map<string, { canonicalExists: boolean; legacyExists: boolean }>()
+
+		for (const result of results) {
+			const match = result.path.match(/^(.+?)[/\\]\.(zoo|roo)[/\\]/)
+			if (!match) {
+				continue
+			}
+
+			const parentDir = path.join(cwd, match[1])
+			const configType = match[2] as "zoo" | "roo"
+			const current = presenceByParent.get(parentDir) ?? { canonicalExists: false, legacyExists: false }
+
+			if (configType === "zoo") {
+				current.canonicalExists = true
+			} else {
+				current.legacyExists = true
+			}
+
+			presenceByParent.set(parentDir, current)
+		}
+
+		return Array.from(presenceByParent.entries())
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([parentDir, presence]) => {
+				const canonicalPath = path.join(parentDir, ZOO_CONFIG_DIRECTORY_NAME)
+				const legacyPath = path.join(parentDir, ROO_CONFIG_DIRECTORY_NAME)
+				const activePath = !presence.canonicalExists && presence.legacyExists ? legacyPath : canonicalPath
+
+				return {
+					canonicalPath,
+					legacyPath,
+					activePath,
+					canonicalExists: presence.canonicalExists,
+					legacyExists: presence.legacyExists,
+					activeExists: presence.canonicalExists || presence.legacyExists,
+					shouldBootstrapCanonicalFromLegacy: !presence.canonicalExists && presence.legacyExists,
+				}
+			})
+	} catch (error) {
+		return []
+	}
+}
+
+/**
  * Gets the ordered list of active configuration directories to check (global first, then project-local)
  * using Zoo-first / Roo-fallback semantics.
  */
 export async function getConfigDirectoriesForCwd(cwd: string): Promise<string[]> {
+	const resolutions = await getConfigDirectoryResolutionsForCwd(cwd)
+	return resolutions.map((resolution) => resolution.activePath)
+}
+
+/**
+ * Gets the ordered list of active configuration root resolutions to check
+ * (global first, then project-local).
+ */
+export async function getConfigDirectoryResolutionsForCwd(cwd: string): Promise<ZooPathResolution[]> {
 	const [globalResolution, projectResolution] = await Promise.all([
 		resolveGlobalConfigDirectory(),
 		resolveProjectConfigDirectoryForCwd(cwd),
 	])
 
-	return [globalResolution.activePath, projectResolution.activePath]
+	return [globalResolution, projectResolution]
 }
 
 /**
@@ -463,6 +943,16 @@ export async function getConfigDirectoriesForCwd(cwd: string): Promise<string[]>
 export async function getAllConfigDirectoriesForCwd(cwd: string): Promise<string[]> {
 	const directories = await getConfigDirectoriesForCwd(cwd)
 	const subfolderDirectories = await discoverSubfolderConfigDirectories(cwd)
+
+	return [...directories, ...subfolderDirectories]
+}
+
+/**
+ * Gets the ordered list of all configuration root resolutions including subdirectories.
+ */
+export async function getAllConfigDirectoryResolutionsForCwd(cwd: string): Promise<ZooPathResolution[]> {
+	const directories = await getConfigDirectoryResolutionsForCwd(cwd)
+	const subfolderDirectories = await discoverSubfolderConfigDirectoryResolutions(cwd)
 
 	return [...directories, ...subfolderDirectories]
 }
@@ -636,17 +1126,17 @@ export async function loadConfiguration(
 	project: string | null
 	merged: string
 }> {
-	const globalDir = (await resolveGlobalConfigDirectory()).activePath
-	const projectDir = (await resolveProjectConfigDirectoryForCwd(cwd)).activePath
+	const [globalResolution, projectResolution] = await Promise.all([
+		resolveGlobalConfigDirectory(),
+		resolveProjectConfigDirectoryForCwd(cwd),
+	])
 
-	const globalFilePath = path.join(globalDir, relativePath)
-	const projectFilePath = path.join(projectDir, relativePath)
-
-	// Read global configuration
-	const globalContent = await readFileIfExists(globalFilePath)
-
-	// Read project-local configuration
-	const projectContent = await readFileIfExists(projectFilePath)
+	// Read global and project-local configuration with same-scope legacy fallback
+	// for partial canonical roots created by historical app-managed writes.
+	const [globalContent, projectContent] = await Promise.all([
+		readConfigChildFileWithLegacyFallback(globalResolution, relativePath),
+		readConfigChildFileWithLegacyFallback(projectResolution, relativePath),
+	])
 
 	// Merge configurations - project overrides global
 	let merged = ""

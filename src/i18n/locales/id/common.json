@@ -163,6 +163,9 @@
 		"public_share_link_copied": "Tautan berbagi publik disalin ke clipboard!",
 		"mode_exported": "Mode '{{mode}}' berhasil diekspor",
 		"mode_imported": "Mode berhasil diimpor",
+		"zooMigration": {
+			"completed": "Migrasi Zoo selesai: {{copiedCount}} disalin, {{skippedCount}} dilewati, {{failedCount}} gagal. Aset Roo lama dipertahankan dan tidak dihapus secara otomatis. Pengaturan global berbasis penyimpanan terpisah dari migrasi file ini."
+		},
 		"roo": {
 			"signInUnavailable": "Masuk ke Roo Code Cloud saat ini tidak tersedia. Konfigurasikan penyedia lain untuk melanjutkan."
 		}

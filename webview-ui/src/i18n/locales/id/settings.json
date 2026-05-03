@@ -17,7 +17,44 @@
 		"title": "Pengaturan",
 		"saveButtonTooltip": "Simpan perubahan",
 		"nothingChangedTooltip": "Tidak ada yang berubah",
-		"doneButtonTooltip": "Buang perubahan yang belum disimpan dan tutup panel pengaturan"
+		"doneButtonTooltip": "Buang perubahan yang belum disimpan dan kembali ke tampilan tugas"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Salin file Roo ke Zoo",
+			"running": "Menyalin file Roo ke Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "File Roo lama terdeteksi",
+			"preservedTitle": "Zoo aktif dan file Roo dipertahankan",
+			"partialRiskTitle": "File Zoo dan Roo campuran perlu ditinjau",
+			"zooCanonical": "Zoo adalah lokasi kanonis untuk perubahan baru yang dikelola aplikasi.",
+			"rooDetectedMigratable": "File Roo lama terdeteksi. Kamu bisa menyalin secara eksplisit permukaan berbasis file yang memenuhi syarat ke Zoo tanpa menimpa file Zoo yang sudah ada.",
+			"rooDetectedPreserved": "File Roo lama terdeteksi dan dipertahankan. File Zoo yang ada tetap menjadi kanonis, dan file Roo tidak dihapus secara otomatis.",
+			"partialRiskBody": "Beberapa path Zoo kanonis sudah ada sementara konten terkait yang hanya ada di Roo masih tetap ada. Tidak akan ada penggabungan otomatis, jadi tinjau kedua lokasi jika perilakunya terlihat tidak lengkap.",
+			"storageBackedGlobal": "Pengaturan global berbasis penyimpanan terpisah dari migrasi file Roo di folder home, jadi tindakan ini hanya memengaruhi permukaan Roo/Zoo berbasis file."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Root konfigurasi berbasis file di folder home",
+			"projectConfigRoot": "Root konfigurasi workspace",
+			"projectCustomModes": "File mode kustom workspace",
+			"projectIgnore": "File ignore workspace",
+			"projectMcp": "File MCP workspace"
+		},
+		"result": {
+			"summary": "Hasil migrasi: {{copiedCount}} disalin, {{skippedCount}} dilewati, {{failedCount}} gagal. File Roo lama dipertahankan dan tidak dihapus secara otomatis.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "disalin",
+				"skipped": "dilewati",
+				"failed": "gagal"
+			},
+			"reason": {
+				"canonical-exists": "Zoo sudah memiliki tujuan kanonis, jadi tidak ada penimpaan yang dilakukan.",
+				"legacy-missing": "Tidak ada sumber Roo lama yang tersedia untuk disalin.",
+				"not-eligible": "Permukaan ini tidak memenuhi syarat untuk migrasi salin-saja dalam kondisi saat ini."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Perubahan Belum Disimpan",

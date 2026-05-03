@@ -17,7 +17,44 @@
 		"title": "Ayarlar",
 		"saveButtonTooltip": "Değişiklikleri kaydet",
 		"nothingChangedTooltip": "Hiçbir şey değişmedi",
-		"doneButtonTooltip": "Kaydedilmemiş değişiklikleri at ve ayarlar panelini kapat"
+		"doneButtonTooltip": "Kaydedilmemiş değişiklikleri at ve görev görünümüne dön"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Roo dosyalarını Zoo'ya kopyala",
+			"running": "Roo dosyaları Zoo'ya kopyalanıyor..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Eski Roo dosyaları tespit edildi",
+			"preservedTitle": "Zoo etkin ve Roo dosyaları korundu",
+			"partialRiskTitle": "Karışık Zoo ve Roo dosyalarının gözden geçirilmesi gerekiyor",
+			"zooCanonical": "Uygulama tarafından yönetilen yeni değişiklikler için kanonik konum Zoo'dur.",
+			"rooDetectedMigratable": "Eski Roo dosyaları tespit edildi. Uygun dosya tabanlı yüzeyleri, mevcut Zoo dosyalarının üzerine yazmadan açıkça Zoo'ya kopyalayabilirsin.",
+			"rooDetectedPreserved": "Eski Roo dosyaları tespit edildi ve korundu. Mevcut Zoo dosyaları kanonik olmaya devam eder ve Roo dosyaları otomatik olarak silinmez.",
+			"partialRiskBody": "Bazı kanonik Zoo yolları zaten mevcutken, ilgili yalnızca Roo içeriği hâlâ duruyor. Otomatik bir birleştirme yapılmayacak, bu yüzden davranış eksik görünüyorsa iki konumu da gözden geçir.",
+			"storageBackedGlobal": "Depolama tabanlı genel ayarlar, ana klasördeki Roo dosya geçişinden ayrıdır; bu yüzden bu eylem yalnızca dosya tabanlı Roo/Zoo yüzeylerini etkiler."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Ana klasör dosya tabanlı yapılandırma kökü",
+			"projectConfigRoot": "Çalışma alanı yapılandırma kökü",
+			"projectCustomModes": "Çalışma alanı özel mod dosyası",
+			"projectIgnore": "Çalışma alanı ignore dosyası",
+			"projectMcp": "Çalışma alanı MCP dosyası"
+		},
+		"result": {
+			"summary": "Geçiş sonuçları: {{copiedCount}} kopyalandı, {{skippedCount}} atlandı, {{failedCount}} başarısız oldu. Eski Roo dosyaları korundu ve otomatik olarak silinmedi.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "kopyalandı",
+				"skipped": "atlandı",
+				"failed": "başarısız oldu"
+			},
+			"reason": {
+				"canonical-exists": "Zoo'nun zaten kanonik bir hedefi vardı, bu yüzden üzerine yazma yapılmadı.",
+				"legacy-missing": "Kopyalanabilecek eski bir Roo kaynağı yoktu.",
+				"not-eligible": "Bu yüzey, mevcut durumunda yalnızca kopyalama geçişi için uygun değil."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Kaydedilmemiş Değişiklikler",

@@ -47,6 +47,13 @@ vi.mock("@src/components/settings/SettingsView", () => ({
 	},
 }))
 
+vi.mock("@src/components/welcome/WelcomeViewProvider", () => ({
+	__esModule: true,
+	default: function WelcomeView() {
+		return <div data-testid="welcome-view">Welcome View</div>
+	},
+}))
+
 vi.mock("@src/components/history/HistoryView", () => ({
 	__esModule: true,
 	default: function HistoryView({ onDone }: { onDone: () => void }) {
@@ -188,6 +195,22 @@ describe("App", () => {
 		expect(chatView).toBeInTheDocument()
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 	}, 10000)
+
+	it("renders welcome view when showWelcome is true", () => {
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("chat-view")).not.toBeInTheDocument()
+	})
 
 	it("switches to settings view when receiving settingsButtonClicked action", async () => {
 		render(<AppWithProviders />)

@@ -163,6 +163,9 @@
 		"public_share_link_copied": "¡Enlace de compartición pública copiado al portapapeles!",
 		"mode_exported": "Modo '{{mode}}' exportado correctamente",
 		"mode_imported": "Modo importado correctamente",
+		"zooMigration": {
+			"completed": "Migración a Zoo completada: {{copiedCount}} copiados, {{skippedCount}} omitidos, {{failedCount}} con error. Los recursos heredados de Roo se conservaron y no se eliminaron automáticamente. La configuración global almacenada fuera de estos archivos es independiente de esta migración de archivos."
+		},
 		"roo": {
 			"signInUnavailable": "El inicio de sesión de Roo Code Cloud no está disponible en este momento. Configura otro proveedor para continuar."
 		}

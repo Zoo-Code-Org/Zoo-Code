@@ -73,6 +73,7 @@ import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { MarketplaceManager } from "../../services/marketplace"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
 import { CodeIndexManager } from "../../services/code-index/manager"
+import { getZooMigrationStateSummaryForCwd } from "../../services/roo-config/index.js"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
@@ -2156,6 +2157,7 @@ export class ClineProvider
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
 		const currentTask = this.getCurrentTask()
+		const zooMigrationState = cwd ? await getZooMigrationStateSummaryForCwd(cwd) : undefined
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
@@ -2215,6 +2217,7 @@ export class ClineProvider
 			maxOpenTabsContext: maxOpenTabsContext ?? 20,
 			maxWorkspaceFiles: maxWorkspaceFiles ?? 200,
 			cwd,
+			zooMigrationState,
 			disabledTools,
 			telemetrySetting,
 			telemetryKey,

@@ -163,6 +163,9 @@
 		"public_share_link_copied": "Publiczny link udostępniania skopiowany do schowka!",
 		"mode_exported": "Tryb '{{mode}}' pomyślnie wyeksportowany",
 		"mode_imported": "Tryb pomyślnie zaimportowany",
+		"zooMigration": {
+			"completed": "Migracja do Zoo zakończona: {{copiedCount}} skopiowano, {{skippedCount}} pominięto, {{failedCount}} nie powiodło się. Dotychczasowe zasoby Roo zostały zachowane i nie zostały automatycznie usunięte. Globalne ustawienia przechowywane w magazynie danych są oddzielone od tej migracji plików."
+		},
 		"roo": {
 			"signInUnavailable": "Logowanie do Roo Code Cloud jest obecnie niedostępne. Skonfiguruj innego dostawcę, aby kontynuować."
 		}

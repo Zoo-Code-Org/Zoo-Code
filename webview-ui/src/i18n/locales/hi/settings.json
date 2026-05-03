@@ -17,7 +17,44 @@
 		"title": "सेटिंग्स",
 		"saveButtonTooltip": "परिवर्तन सहेजें",
 		"nothingChangedTooltip": "कुछ भी नहीं बदला",
-		"doneButtonTooltip": "असहेजे परिवर्तनों को छोड़ें और सेटिंग्स पैनल बंद करें"
+		"doneButtonTooltip": "असहेजे गए बदलाव छोड़ें और टास्क्स व्यू पर वापस जाएँ"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Roo फ़ाइलों को Zoo में कॉपी करें",
+			"running": "Roo फ़ाइलों को Zoo में कॉपी किया जा रहा है..."
+		},
+		"notice": {
+			"copyAvailableTitle": "पुरानी Roo फ़ाइलें मिलीं",
+			"preservedTitle": "Zoo सक्रिय है और Roo फ़ाइलें सुरक्षित रखी गईं",
+			"partialRiskTitle": "मिली-जुली Zoo और Roo फ़ाइलों की समीक्षा चाहिए",
+			"zooCanonical": "ऐप द्वारा प्रबंधित नए बदलावों के लिए Zoo canonical स्थान है।",
+			"rooDetectedMigratable": "पुरानी Roo फ़ाइलें मिलीं। आप योग्य फ़ाइल-आधारित सतहों को मौजूदा Zoo फ़ाइलों को ओवरराइट किए बिना स्पष्ट रूप से Zoo में कॉपी कर सकते हैं।",
+			"rooDetectedPreserved": "पुरानी Roo फ़ाइलें मिलीं और सुरक्षित रखी गईं। मौजूदा Zoo फ़ाइलें canonical बनी रहती हैं, और Roo फ़ाइलें अपने-आप नहीं हटाई जातीं।",
+			"partialRiskBody": "कुछ canonical Zoo पाथ पहले से मौजूद हैं जबकि उनसे संबंधित केवल-Roo सामग्री अब भी मौजूद है। कोई स्वचालित मर्ज नहीं होगा, इसलिए अगर व्यवहार अधूरा लगे तो दोनों स्थानों की समीक्षा करें।",
+			"storageBackedGlobal": "स्टोरेज-आधारित वैश्विक सेटिंग्स, होम-फ़ोल्डर Roo फ़ाइल माइग्रेशन से अलग हैं, इसलिए यह कार्रवाई केवल फ़ाइल-आधारित Roo/Zoo सतहों को प्रभावित करती है।"
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "होम-फ़ोल्डर फ़ाइल-आधारित कॉन्फ़िग रूट",
+			"projectConfigRoot": "वर्कस्पेस कॉन्फ़िग रूट",
+			"projectCustomModes": "वर्कस्पेस कस्टम मोड्स फ़ाइल",
+			"projectIgnore": "वर्कस्पेस इग्नोर फ़ाइल",
+			"projectMcp": "वर्कस्पेस MCP फ़ाइल"
+		},
+		"result": {
+			"summary": "माइग्रेशन परिणाम: {{copiedCount}} कॉपी हुईं, {{skippedCount}} छोड़ी गईं, {{failedCount}} विफल रहीं। पुरानी Roo फ़ाइलें सुरक्षित रखी गईं और अपने-आप नहीं हटाई गईं।",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "कॉपी हुई",
+				"skipped": "छोड़ी गई",
+				"failed": "विफल"
+			},
+			"reason": {
+				"canonical-exists": "Zoo में पहले से canonical गंतव्य मौजूद था, इसलिए कोई ओवरराइट नहीं किया गया।",
+				"legacy-missing": "कॉपी करने के लिए कोई पुराना Roo स्रोत उपलब्ध नहीं था।",
+				"not-eligible": "यह सतह अपनी मौजूदा स्थिति में केवल-कॉपी माइग्रेशन के लिए योग्य नहीं है।"
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "असहेजे परिवर्तन",

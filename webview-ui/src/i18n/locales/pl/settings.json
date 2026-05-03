@@ -17,7 +17,44 @@
 		"title": "Ustawienia",
 		"saveButtonTooltip": "Zapisz zmiany",
 		"nothingChangedTooltip": "Nic się nie zmieniło",
-		"doneButtonTooltip": "Odrzuć niezapisane zmiany i zamknij panel ustawień"
+		"doneButtonTooltip": "Odrzuć niezapisane zmiany i wróć do widoku zadań"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Skopiuj pliki Roo do Zoo",
+			"running": "Kopiowanie plików Roo do Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Wykryto starsze pliki Roo",
+			"preservedTitle": "Zoo jest aktywne, a pliki Roo zostały zachowane",
+			"partialRiskTitle": "Mieszane pliki Zoo i Roo wymagają przeglądu",
+			"zooCanonical": "Zoo jest kanoniczną lokalizacją dla nowych zmian zarządzanych przez aplikację.",
+			"rooDetectedMigratable": "Wykryto starsze pliki Roo. Możesz jawnie skopiować kwalifikujące się powierzchnie oparte na plikach do Zoo bez nadpisywania istniejących plików Zoo.",
+			"rooDetectedPreserved": "Wykryto i zachowano starsze pliki Roo. Istniejące pliki Zoo pozostają kanoniczne, a pliki Roo nie są usuwane automatycznie.",
+			"partialRiskBody": "Niektóre kanoniczne ścieżki Zoo już istnieją, a jednocześnie nadal są obecne powiązane treści dostępne tylko w Roo. Nie dojdzie do automatycznego scalenia, więc sprawdź obie lokalizacje, jeśli działanie wygląda na niepełne.",
+			"storageBackedGlobal": "Globalne ustawienia oparte na pamięci są oddzielone od migracji plików Roo w folderze domowym, więc ta akcja wpływa tylko na powierzchnie Roo/Zoo oparte na plikach."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Główny katalog konfiguracji oparty na plikach w folderze domowym",
+			"projectConfigRoot": "Główny katalog konfiguracji obszaru roboczego",
+			"projectCustomModes": "Plik niestandardowych trybów obszaru roboczego",
+			"projectIgnore": "Plik ignorowania obszaru roboczego",
+			"projectMcp": "Plik MCP obszaru roboczego"
+		},
+		"result": {
+			"summary": "Wyniki migracji: skopiowano {{copiedCount}}, pominięto {{skippedCount}}, nie powiodło się {{failedCount}}. Starsze pliki Roo zostały zachowane i nie zostały automatycznie usunięte.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "skopiowano",
+				"skipped": "pominięto",
+				"failed": "nie powiodło się"
+			},
+			"reason": {
+				"canonical-exists": "Zoo miało już kanoniczny cel, więc niczego nie nadpisano.",
+				"legacy-missing": "Nie było dostępnego starszego źródła Roo do skopiowania.",
+				"not-eligible": "Ta powierzchnia w obecnym stanie nie kwalifikuje się do migracji polegającej wyłącznie na kopiowaniu."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Niezapisane zmiany",

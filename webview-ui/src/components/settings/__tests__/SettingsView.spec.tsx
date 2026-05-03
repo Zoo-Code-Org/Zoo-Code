@@ -1,6 +1,6 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/settings/__tests__/SettingsView.spec.tsx
 
-import { render, screen, fireEvent, within } from "@/utils/test-utils"
+import { render, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { vscode } from "@/utils/vscode"
@@ -280,6 +280,7 @@ const mockPostMessage = (state: any) => {
 				ttsSpeed: 1,
 				soundEnabled: false,
 				soundVolume: 0.5,
+				zooMigrationState: undefined,
 				...state,
 			},
 		},
@@ -410,6 +411,419 @@ describe("SettingsView - Sound Settings", () => {
 				}),
 			}),
 		)
+	})
+
+	it("renders zoo migration notice and triggers copy-only action", async () => {
+		renderSettingsView()
+
+		mockPostMessage({
+			zooMigrationState: {
+				globalFileBacked: {
+					configRoot: {
+						canonicalPath: "/home/.zoo",
+						legacyPath: "/home/.roo",
+						activePath: "/home/.roo",
+						canonicalExists: false,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: true,
+						activeSource: "legacy",
+						bootstrapEligible: true,
+						copyOnlyMigrationActionAvailable: true,
+						partialCanonicalRiskDetected: false,
+					},
+					partialCanonicalRiskDetected: false,
+					copyOnlyMigrationActionAvailable: true,
+				},
+				project: {
+					configRoot: {
+						canonicalPath: "/workspace/.zoo",
+						legacyPath: "/workspace/.roo",
+						activePath: "/workspace/.roo",
+						canonicalExists: false,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: true,
+						activeSource: "legacy",
+						bootstrapEligible: true,
+						copyOnlyMigrationActionAvailable: true,
+						partialCanonicalRiskDetected: false,
+					},
+					customModes: {
+						canonicalPath: "/workspace/.zoomodes",
+						legacyPath: "/workspace/.roomodes",
+						activePath: "/workspace/.roomodes",
+						canonicalExists: false,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: true,
+						activeSource: "legacy",
+						bootstrapEligible: true,
+						copyOnlyMigrationActionAvailable: true,
+						partialCanonicalRiskDetected: false,
+					},
+					ignore: {
+						canonicalPath: "/workspace/.zooignore",
+						legacyPath: "/workspace/.rooignore",
+						activePath: "/workspace/.zooignore",
+						canonicalExists: false,
+						legacyExists: false,
+						activeExists: false,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "none",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					mcp: {
+						canonicalPath: "/workspace/.zoo/mcp.json",
+						legacyPath: "/workspace/.roo/mcp.json",
+						activePath: "/workspace/.roo/mcp.json",
+						canonicalExists: false,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: true,
+						activeSource: "legacy",
+						bootstrapEligible: true,
+						copyOnlyMigrationActionAvailable: true,
+						partialCanonicalRiskDetected: false,
+					},
+					partialCanonicalRiskDetected: false,
+					copyOnlyMigrationActionAvailable: true,
+				},
+			},
+		})
+
+		await waitFor(() => {
+			expect(screen.getByTestId("zoo-migration-notice")).toBeInTheDocument()
+		})
+
+		fireEvent.click(screen.getByTestId("zoo-migration-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "runZooMigrationCopyOnly" })
+	})
+
+	it("renders partial-risk migration notice without copy action and keeps storage-backed messaging separate", async () => {
+		renderSettingsView()
+
+		mockPostMessage({
+			zooMigrationState: {
+				globalFileBacked: {
+					configRoot: {
+						canonicalPath: "/home/.zoo",
+						legacyPath: "/home/.roo",
+						activePath: "/home/.zoo",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: true,
+					},
+					partialCanonicalRiskDetected: true,
+					copyOnlyMigrationActionAvailable: false,
+				},
+				project: {
+					configRoot: {
+						canonicalPath: "/workspace/.zoo",
+						legacyPath: "/workspace/.roo",
+						activePath: "/workspace/.zoo",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: true,
+					},
+					customModes: {
+						canonicalPath: "/workspace/.zoomodes",
+						legacyPath: "/workspace/.roomodes",
+						activePath: "/workspace/.zoomodes",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					ignore: {
+						canonicalPath: "/workspace/.zooignore",
+						legacyPath: "/workspace/.rooignore",
+						activePath: "/workspace/.zooignore",
+						canonicalExists: true,
+						legacyExists: false,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					mcp: {
+						canonicalPath: "/workspace/.zoo/mcp.json",
+						legacyPath: "/workspace/.roo/mcp.json",
+						activePath: "/workspace/.roo/mcp.json",
+						canonicalExists: false,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: true,
+						activeSource: "legacy",
+						bootstrapEligible: true,
+						copyOnlyMigrationActionAvailable: true,
+						partialCanonicalRiskDetected: false,
+					},
+					partialCanonicalRiskDetected: true,
+					copyOnlyMigrationActionAvailable: false,
+				},
+			},
+		})
+
+		await waitFor(() => {
+			expect(screen.getByTestId("zoo-migration-notice-title")).toHaveTextContent(
+				"settings:zooMigration.notice.partialRiskTitle",
+			)
+		})
+		expect(screen.getByText(/settings:zooMigration.notice.storageBackedGlobal/)).toBeInTheDocument()
+		expect(screen.queryByTestId("zoo-migration-button")).not.toBeInTheDocument()
+	})
+
+	it("renders zoo migration result messaging when a result message arrives", async () => {
+		renderSettingsView()
+
+		mockPostMessage({
+			zooMigrationState: {
+				globalFileBacked: {
+					configRoot: {
+						canonicalPath: "/home/.zoo",
+						legacyPath: "/home/.roo",
+						activePath: "/home/.zoo",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					partialCanonicalRiskDetected: false,
+					copyOnlyMigrationActionAvailable: false,
+				},
+				project: {
+					configRoot: {
+						canonicalPath: "/workspace/.zoo",
+						legacyPath: "/workspace/.roo",
+						activePath: "/workspace/.zoo",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					customModes: {
+						canonicalPath: "/workspace/.zoomodes",
+						legacyPath: "/workspace/.roomodes",
+						activePath: "/workspace/.zoomodes",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					ignore: {
+						canonicalPath: "/workspace/.zooignore",
+						legacyPath: "/workspace/.rooignore",
+						activePath: "/workspace/.zooignore",
+						canonicalExists: true,
+						legacyExists: false,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					mcp: {
+						canonicalPath: "/workspace/.zoo/mcp.json",
+						legacyPath: "/workspace/.roo/mcp.json",
+						activePath: "/workspace/.zoo/mcp.json",
+						canonicalExists: true,
+						legacyExists: false,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					partialCanonicalRiskDetected: false,
+					copyOnlyMigrationActionAvailable: false,
+				},
+			},
+		})
+
+		window.postMessage(
+			{
+				type: "zooMigrationResult",
+				zooMigrationResult: {
+					results: [
+						{
+							surface: "project.customModes",
+							status: "copied",
+							sourcePath: "/workspace/.roomodes",
+							destinationPath: "/workspace/.zoomodes",
+						},
+					],
+					summary: {},
+					copiedCount: 1,
+					skippedCount: 0,
+					failedCount: 0,
+				},
+			},
+			"*",
+		)
+
+		await waitFor(() => {
+			expect(screen.getByTestId("zoo-migration-result")).toBeInTheDocument()
+		})
+		expect(screen.getByText(/settings:zooMigration.result.summary/)).toBeInTheDocument()
+	})
+
+	it("renders skipped and failed migration result details", async () => {
+		renderSettingsView()
+
+		mockPostMessage({
+			zooMigrationState: {
+				globalFileBacked: {
+					configRoot: {
+						canonicalPath: "/home/.zoo",
+						legacyPath: "/home/.roo",
+						activePath: "/home/.zoo",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					partialCanonicalRiskDetected: false,
+					copyOnlyMigrationActionAvailable: false,
+				},
+				project: {
+					configRoot: {
+						canonicalPath: "/workspace/.zoo",
+						legacyPath: "/workspace/.roo",
+						activePath: "/workspace/.zoo",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					customModes: {
+						canonicalPath: "/workspace/.zoomodes",
+						legacyPath: "/workspace/.roomodes",
+						activePath: "/workspace/.zoomodes",
+						canonicalExists: true,
+						legacyExists: true,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					ignore: {
+						canonicalPath: "/workspace/.zooignore",
+						legacyPath: "/workspace/.rooignore",
+						activePath: "/workspace/.zooignore",
+						canonicalExists: true,
+						legacyExists: false,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					mcp: {
+						canonicalPath: "/workspace/.zoo/mcp.json",
+						legacyPath: "/workspace/.roo/mcp.json",
+						activePath: "/workspace/.zoo/mcp.json",
+						canonicalExists: true,
+						legacyExists: false,
+						activeExists: true,
+						shouldBootstrapCanonicalFromLegacy: false,
+						activeSource: "canonical",
+						bootstrapEligible: false,
+						copyOnlyMigrationActionAvailable: false,
+						partialCanonicalRiskDetected: false,
+					},
+					partialCanonicalRiskDetected: false,
+					copyOnlyMigrationActionAvailable: false,
+				},
+			},
+		})
+
+		window.postMessage(
+			{
+				type: "zooMigrationResult",
+				zooMigrationResult: {
+					results: [
+						{
+							surface: "project.configRoot",
+							status: "skipped",
+							sourcePath: "/workspace/.roo",
+							destinationPath: "/workspace/.zoo",
+							reason: "canonical-exists",
+						},
+						{
+							surface: "project.ignore",
+							status: "skipped",
+							sourcePath: null,
+							destinationPath: "/workspace/.zooignore",
+							reason: "legacy-missing",
+						},
+						{
+							surface: "project.mcp",
+							status: "failed",
+							sourcePath: "/workspace/.roo/mcp.json",
+							destinationPath: "/workspace/.zoo/mcp.json",
+							error: "copy failed",
+						},
+					],
+					summary: {},
+					copiedCount: 0,
+					skippedCount: 2,
+					failedCount: 1,
+				},
+			},
+			"*",
+		)
+
+		await waitFor(() => {
+			expect(screen.getByTestId("zoo-migration-result")).toBeInTheDocument()
+		})
+		expect(screen.getByText(/settings:zooMigration.result.reason.canonical-exists/)).toBeInTheDocument()
+		expect(screen.getByText(/settings:zooMigration.result.reason.legacy-missing/)).toBeInTheDocument()
+		expect(screen.getByText(/copy failed/)).toBeInTheDocument()
 	})
 
 	it("shows tts slider when sound is enabled", () => {

@@ -17,7 +17,44 @@
 		"title": "設定",
 		"saveButtonTooltip": "変更を保存",
 		"nothingChangedTooltip": "変更なし",
-		"doneButtonTooltip": "未保存の変更を破棄して設定パネルを閉じる"
+		"doneButtonTooltip": "未保存の変更を破棄してタスクビューに戻る"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Roo ファイルを Zoo にコピー",
+			"running": "Roo ファイルを Zoo にコピーしています..."
+		},
+		"notice": {
+			"copyAvailableTitle": "従来の Roo ファイルが見つかりました",
+			"preservedTitle": "Zoo は有効で、Roo ファイルは保持されました",
+			"partialRiskTitle": "Zoo と Roo の混在ファイルを確認する必要があります",
+			"zooCanonical": "Zoo は、アプリが管理する新しい変更の正規の保存場所です。",
+			"rooDetectedMigratable": "従来の Roo ファイルが見つかりました。既存の Zoo ファイルを上書きせずに、対象となるファイルベースの領域を明示的に Zoo へコピーできます。",
+			"rooDetectedPreserved": "従来の Roo ファイルが見つかり、保持されました。既存の Zoo ファイルは引き続き正規の保存先であり、Roo ファイルが自動的に削除されることはありません。",
+			"partialRiskBody": "一部の正規の Zoo パスはすでに存在していますが、関連する Roo のみの内容もまだ残っています。自動マージは行われないため、動作が不完全に見える場合は両方の場所を確認してください。",
+			"storageBackedGlobal": "ストレージベースのグローバル設定は、ホームフォルダー内の Roo ファイル移行とは別です。そのため、この操作が影響するのはファイルベースの Roo/Zoo 領域のみです。"
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "ホームフォルダー内のファイルベース設定ルート",
+			"projectConfigRoot": "ワークスペース設定ルート",
+			"projectCustomModes": "ワークスペースカスタムモードファイル",
+			"projectIgnore": "ワークスペース ignore ファイル",
+			"projectMcp": "ワークスペース MCP ファイル"
+		},
+		"result": {
+			"summary": "移行結果: {{copiedCount}} 件コピー、{{skippedCount}} 件スキップ、{{failedCount}} 件失敗。従来の Roo ファイルは保持され、自動的には削除されませんでした。",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "コピー済み",
+				"skipped": "スキップ",
+				"failed": "失敗"
+			},
+			"reason": {
+				"canonical-exists": "Zoo にはすでに正規の保存先があったため、上書きは行われませんでした。",
+				"legacy-missing": "コピーできる従来の Roo ソースがありませんでした。",
+				"not-eligible": "この領域は現在の状態ではコピーのみの移行対象ではありません。"
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "未保存の変更",

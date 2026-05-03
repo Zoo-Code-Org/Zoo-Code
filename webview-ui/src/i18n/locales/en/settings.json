@@ -15,6 +15,43 @@
 		"nothingChangedTooltip": "Nothing changed",
 		"doneButtonTooltip": "Discard unsaved changes and go back to tasks view"
 	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Copy Roo files into Zoo",
+			"running": "Copying Roo files into Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Legacy Roo files detected",
+			"preservedTitle": "Zoo is active and Roo files were preserved",
+			"partialRiskTitle": "Mixed Zoo and Roo files need review",
+			"zooCanonical": "Zoo is the canonical location for new app-managed changes.",
+			"rooDetectedMigratable": "Legacy Roo files were detected. You can explicitly copy eligible file-backed surfaces into Zoo without overwriting existing Zoo files.",
+			"rooDetectedPreserved": "Legacy Roo files were detected and preserved. Existing Zoo files remain canonical, and Roo files are not deleted automatically.",
+			"partialRiskBody": "Some canonical Zoo paths already exist while related Roo-only content is still present. No automatic merge will occur, so review both locations if behavior looks incomplete.",
+			"storageBackedGlobal": "Storage-backed global settings are separate from home-folder Roo file migration, so this action only affects file-backed Roo/Zoo surfaces."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Home-folder file-backed config root",
+			"projectConfigRoot": "Workspace config root",
+			"projectCustomModes": "Workspace custom modes file",
+			"projectIgnore": "Workspace ignore file",
+			"projectMcp": "Workspace MCP file"
+		},
+		"result": {
+			"summary": "Migration results: {{copiedCount}} copied, {{skippedCount}} skipped, {{failedCount}} failed. Legacy Roo files were preserved and not deleted automatically.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "copied",
+				"skipped": "skipped",
+				"failed": "failed"
+			},
+			"reason": {
+				"canonical-exists": "Zoo already had a canonical destination, so no overwrite was performed.",
+				"legacy-missing": "No legacy Roo source was available to copy.",
+				"not-eligible": "This surface is not eligible for copy-only migration in its current state."
+			}
+		}
+	},
 	"search": {
 		"placeholder": "Search settings...",
 		"noResults": "No settings found"

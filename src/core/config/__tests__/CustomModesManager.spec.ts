@@ -27,14 +27,24 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-vi.mock("fs/promises", () => ({
-	mkdir: vi.fn(),
-	readFile: vi.fn(),
-	writeFile: vi.fn(),
-	stat: vi.fn(),
-	readdir: vi.fn(),
-	rm: vi.fn(),
-}))
+vi.mock("fs/promises", () => {
+	const mkdir = vi.fn()
+	const readFile = vi.fn()
+	const writeFile = vi.fn()
+	const stat = vi.fn()
+	const readdir = vi.fn()
+	const rm = vi.fn()
+
+	return {
+		default: { mkdir, readFile, writeFile, stat, readdir, rm },
+		mkdir,
+		readFile,
+		writeFile,
+		stat,
+		readdir,
+		rm,
+	}
+})
 
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")
@@ -1090,7 +1100,7 @@ describe("CustomModesManager", () => {
 				const writtenRuleFiles = writtenFiles.filter((p) => !p.includes(".zoomodes"))
 				writtenRuleFiles.forEach((filePath) => {
 					const normalizedPath = path.normalize(filePath)
-					const expectedBasePath = path.normalize(path.join(mockWorkspacePath, ".roo"))
+					const expectedBasePath = path.normalize(path.join(mockWorkspacePath, ".zoo"))
 					expect(normalizedPath.startsWith(expectedBasePath)).toBe(true)
 				})
 
@@ -1170,8 +1180,8 @@ describe("CustomModesManager", () => {
 
 				expect(result.success).toBe(true)
 
-				// Verify that fs.rm was called to remove the existing rules folder
-				expect(fs.rm).toHaveBeenCalledWith(expect.stringContaining(path.join(".roo", "rules-test-mode")), {
+				// Verify that fs.rm was called to remove the existing canonical rules folder
+				expect(fs.rm).toHaveBeenCalledWith(expect.stringContaining(path.join(".zoo", "rules-test-mode")), {
 					recursive: true,
 					force: true,
 				})
@@ -1229,8 +1239,8 @@ describe("CustomModesManager", () => {
 
 				expect(result.success).toBe(true)
 
-				// Verify that fs.rm was called to remove the existing rules folder
-				expect(fs.rm).toHaveBeenCalledWith(expect.stringContaining(path.join(".roo", "rules-test-mode")), {
+				// Verify that fs.rm was called to remove the existing canonical rules folder
+				expect(fs.rm).toHaveBeenCalledWith(expect.stringContaining(path.join(".zoo", "rules-test-mode")), {
 					recursive: true,
 					force: true,
 				})
@@ -1431,7 +1441,7 @@ describe("CustomModesManager", () => {
 				}
 				throw new Error("File not found")
 			})
-			;(fs.stat as Mock).mockRejectedValue(new Error("Directory not found"))
+			;(fs.stat as Mock).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
 			const result = await manager.exportModeWithRules("test-mode")
 
@@ -1616,6 +1626,21 @@ describe("CustomModesManager", () => {
 				}
 				return []
 			})
+			;(fs.stat as Mock).mockImplementation(async (targetPath: string) => {
+				if (targetPath === "/Users/taltas/.roo") {
+					return { isDirectory: () => true, isFile: () => false }
+				}
+				if (targetPath === "/Users/taltas/.zoo/rules-global-test-mode/rule1.md") {
+					return { isFile: () => true, isDirectory: () => false }
+				}
+				if (targetPath === "/Users/taltas/.roo/rules-global-test-mode/rule1.md") {
+					return { isFile: () => true, isDirectory: () => false }
+				}
+				if (targetPath.includes("rules-global-test-mode")) {
+					return { isDirectory: () => true, isFile: () => false }
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
 
 			const result = await freshManager.exportModeWithRules("global-test-mode")
 
@@ -1647,7 +1672,7 @@ describe("CustomModesManager", () => {
 			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
 				return path === mockSettingsPath
 			})
-			;(fs.stat as Mock).mockRejectedValue(new Error("Directory not found"))
+			;(fs.stat as Mock).mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
 
 			const result = await freshManager.exportModeWithRules("global-test-mode")
 
@@ -1698,6 +1723,21 @@ describe("CustomModesManager", () => {
 				}
 				return []
 			})
+			;(fs.stat as Mock).mockImplementation(async (targetPath: string) => {
+				if (targetPath === "/Users/taltas/.roo") {
+					return { isDirectory: () => true, isFile: () => false }
+				}
+				if (targetPath === "/Users/taltas/.zoo/rules-global-test-mode/rule1.md") {
+					return { isFile: () => true, isDirectory: () => false }
+				}
+				if (targetPath === "/Users/taltas/.roo/rules-global-test-mode/rule1.md") {
+					return { isFile: () => true, isDirectory: () => false }
+				}
+				if (targetPath.includes("rules-global-test-mode")) {
+					return { isDirectory: () => true, isFile: () => false }
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
 
 			const result = await freshManager.exportModeWithRules("global-test-mode")
 
@@ -1705,6 +1745,55 @@ describe("CustomModesManager", () => {
 			expect(result.success).toBe(true)
 			expect(result.yaml).toContain("global-test-mode")
 			expect(result.yaml).toContain("Global rule content")
+		})
+
+		it("should read legacy project rules when a canonical root exists without canonical mode rules", async () => {
+			const roomodesContent = {
+				customModes: [{ slug: "test-mode", name: "Test Mode", roleDefinition: "Test Role", groups: ["read"] }],
+			}
+
+			;(fileExistsAtPath as Mock).mockImplementation(async (targetPath: string) => {
+				return targetPath === mockRoomodes || targetPath === mockSettingsPath
+			})
+			;(fs.readFile as Mock).mockImplementation(async (targetPath: string) => {
+				if (targetPath === mockRoomodes) {
+					return yaml.stringify(roomodesContent)
+				}
+				if (targetPath === mockSettingsPath) {
+					return yaml.stringify({ customModes: [] })
+				}
+				if (targetPath.includes(path.join(".roo", "rules-test-mode", "rule1.md"))) {
+					return "Legacy rule content"
+				}
+				throw new Error("File not found")
+			})
+			;(fs.stat as Mock).mockImplementation(async (targetPath: string) => {
+				const normalizedPath = path.normalize(targetPath)
+				if (
+					normalizedPath === path.normalize(path.join(mockWorkspacePath, ".zoo")) ||
+					normalizedPath === path.normalize(path.join(mockWorkspacePath, ".roo")) ||
+					normalizedPath === path.normalize(path.join(mockWorkspacePath, ".roo", "rules-test-mode"))
+				) {
+					return { isDirectory: () => true }
+				}
+				if (
+					normalizedPath ===
+					path.normalize(path.join(mockWorkspacePath, ".roo", "rules-test-mode", "rule1.md"))
+				) {
+					return { isFile: () => true, isDirectory: () => false }
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+			;(fs.readdir as Mock).mockResolvedValue([{ name: "rule1.md", isFile: () => true }])
+
+			const result = await manager.exportModeWithRules("test-mode")
+
+			expect(result.success).toBe(true)
+			expect(result.yaml).toContain("Legacy rule content")
+			expect(fs.readFile).toHaveBeenCalledWith(
+				expect.stringContaining(path.join(".roo", "rules-test-mode", "rule1.md")),
+				"utf-8",
+			)
 		})
 
 		it("should normalize paths to use forward slashes in exported YAML", async () => {

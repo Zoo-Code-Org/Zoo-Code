@@ -8,9 +8,10 @@ import type { SystemPromptSettings } from "../types"
 
 import { LANGUAGES } from "../../../shared/language"
 import {
-	getConfigDirectoriesForCwd,
-	getAllConfigDirectoriesForCwd,
+	getConfigDirectoryResolutionsForCwd,
+	getAllConfigDirectoryResolutionsForCwd,
 	getAgentsDirectoriesForCwd,
+	resolveConfigChildDirectoryWithLegacyFallback,
 } from "../../../services/roo-config"
 
 /**
@@ -205,13 +206,13 @@ export async function loadRuleFiles(cwd: string, enableSubfolderRules: boolean =
 	const rules: string[] = []
 	// Use recursive discovery only if enableSubfolderRules is true
 	const configDirectories = enableSubfolderRules
-		? await getAllConfigDirectoriesForCwd(cwd)
-		: await getConfigDirectoriesForCwd(cwd)
+		? await getAllConfigDirectoryResolutionsForCwd(cwd)
+		: await getConfigDirectoryResolutionsForCwd(cwd)
 
 	// Check for active config root rules directories in order (global, project-local, and optionally subfolders)
 	for (const configDir of configDirectories) {
-		const rulesDir = path.join(configDir, "rules")
-		if (await directoryExists(rulesDir)) {
+		const rulesDir = await resolveConfigChildDirectoryWithLegacyFallback(configDir, "rules")
+		if (rulesDir) {
 			const files = await readTextFilesFromDirectory(rulesDir)
 			if (files.length > 0) {
 				const content = formatDirectoryContent(files, cwd)
@@ -404,13 +405,13 @@ export async function addCustomInstructions(
 		let usedModeRuleDirectories = false
 		// Use recursive discovery only if enableSubfolderRules is true
 		const configDirectories = enableSubfolderRules
-			? await getAllConfigDirectoriesForCwd(cwd)
-			: await getConfigDirectoriesForCwd(cwd)
+			? await getAllConfigDirectoryResolutionsForCwd(cwd)
+			: await getConfigDirectoryResolutionsForCwd(cwd)
 
 		// Check for rules-${mode}/ directories in order (global, project-local, and optionally subfolders)
 		for (const configDir of configDirectories) {
-			const modeRulesDir = path.join(configDir, `rules-${mode}`)
-			if (await directoryExists(modeRulesDir)) {
+			const modeRulesDir = await resolveConfigChildDirectoryWithLegacyFallback(configDir, `rules-${mode}`)
+			if (modeRulesDir) {
 				const files = await readTextFilesFromDirectory(modeRulesDir)
 				if (files.length > 0) {
 					const content = formatDirectoryContent(files, cwd)

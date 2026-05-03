@@ -6,6 +6,7 @@ import matter from "gray-matter"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import {
 	type ZooPathResolution,
+	ensureCanonicalConfigRootForWrite,
 	getCanonicalGlobalConfigDirectory,
 	getCanonicalProjectConfigDirectoryForCwd,
 	getGlobalAgentsDirectory,
@@ -335,45 +336,17 @@ export class SkillsManager {
 		return resolveProjectConfigDirectoryForCwd(provider.cwd)
 	}
 
-	private async bootstrapLegacySkillsDirectories(resolution: ZooPathResolution): Promise<void> {
-		if (!resolution.shouldBootstrapCanonicalFromLegacy) {
-			return
-		}
-
-		await fs.mkdir(resolution.canonicalPath, { recursive: true })
-
-		let entries: string[] = []
-		try {
-			entries = await fs.readdir(resolution.legacyPath)
-		} catch {
-			return
-		}
-
-		for (const entry of entries) {
-			if (entry === "skills" || entry.startsWith("skills-")) {
-				await fs.cp(path.join(resolution.legacyPath, entry), path.join(resolution.canonicalPath, entry), {
-					recursive: true,
-					force: false,
-					errorOnExist: false,
-				})
-			}
-		}
-	}
-
 	private async ensureCanonicalConfigDirectoryForWrite(source: "global" | "project"): Promise<string> {
 		const resolution = await this.resolveConfigDirectory(source)
-		await this.bootstrapLegacySkillsDirectories(resolution)
-		return resolution.canonicalPath
+		return (await ensureCanonicalConfigRootForWrite(resolution)).canonicalPath
 	}
 
 	private async getCanonicalSkillPathForMutation(skill: SkillMetadata): Promise<string> {
-		const resolution = await this.resolveConfigDirectory(skill.source)
+		const resolution = await ensureCanonicalConfigRootForWrite(await this.resolveConfigDirectory(skill.source))
 
 		if (skill.path.startsWith(resolution.canonicalPath)) {
 			return skill.path
 		}
-
-		await this.bootstrapLegacySkillsDirectories(resolution)
 
 		if (skill.path.startsWith(resolution.legacyPath)) {
 			return path.join(resolution.canonicalPath, path.relative(resolution.legacyPath, skill.path))

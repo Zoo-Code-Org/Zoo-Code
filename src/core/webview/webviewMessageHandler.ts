@@ -3,9 +3,11 @@ import * as path from "path"
 import * as os from "os"
 import * as fs from "fs/promises"
 import {
-	getCanonicalGlobalConfigDirectory,
-	getCanonicalProjectConfigDirectoryForCwd,
+	ensureCanonicalGlobalConfigRootForWrite,
+	ensureCanonicalProjectConfigRootForCwd,
 	getRooDirectoriesForCwd,
+	getZooMigrationStateSummaryForCwd,
+	runZooMigrationCopyOnlyForCwd,
 	resolveProjectMcpFileForCwd,
 } from "../../services/roo-config/index.js"
 import pWaitFor from "p-wait-for"
@@ -69,7 +71,6 @@ import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
 import { openMention } from "../mentions"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
-import { getWorkspacePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Mode, defaultModeSlug } from "../../shared/modes"
 import { getModels, flushModels } from "../../api/providers/fetchers/modelCache"
@@ -107,6 +108,14 @@ export const webviewMessageHandler = async (
 
 	const getCurrentCwd = () => {
 		return provider.getCurrentTask()?.cwd || provider.cwd
+	}
+
+	const getZooMigrationToastMessage = (copiedCount: number, skippedCount: number, failedCount: number) => {
+		return t("common:info.zooMigration.completed", {
+			copiedCount,
+			skippedCount,
+			failedCount,
+		})
 	}
 
 	const isCloudServiceAvailable = () => CloudService.hasInstance()
@@ -627,6 +636,51 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		case "requestZooMigrationState": {
+			const cwd = getCurrentCwd()
+			if (!cwd) {
+				break
+			}
+
+			await provider.postMessageToWebview({
+				type: "state",
+				state: { zooMigrationState: await getZooMigrationStateSummaryForCwd(cwd) },
+			})
+			break
+		}
+		case "runZooMigrationCopyOnly": {
+			const cwd = getCurrentCwd()
+			if (!cwd) {
+				break
+			}
+
+			const zooMigrationResult = await runZooMigrationCopyOnlyForCwd(cwd)
+
+			await provider.postStateToWebview()
+			await provider.postMessageToWebview({
+				type: "zooMigrationResult",
+				zooMigrationResult,
+			})
+
+			if (zooMigrationResult.failedCount > 0) {
+				vscode.window.showErrorMessage(
+					getZooMigrationToastMessage(
+						zooMigrationResult.copiedCount,
+						zooMigrationResult.skippedCount,
+						zooMigrationResult.failedCount,
+					),
+				)
+			} else {
+				vscode.window.showInformationMessage(
+					getZooMigrationToastMessage(
+						zooMigrationResult.copiedCount,
+						zooMigrationResult.skippedCount,
+						zooMigrationResult.failedCount,
+					),
+				)
+			}
+			break
+		}
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
@@ -1320,18 +1374,14 @@ export const webviewMessageHandler = async (
 			}
 
 			const workspaceFolder = getCurrentCwd()
+			await ensureCanonicalProjectConfigRootForCwd(workspaceFolder)
 			const projectMcpResolution = await resolveProjectMcpFileForCwd(workspaceFolder)
-			const zooDir = path.dirname(projectMcpResolution.canonicalPath)
 			const mcpPath = projectMcpResolution.canonicalPath
 
 			try {
-				await fs.mkdir(zooDir, { recursive: true })
 				const exists = await fileExistsAtPath(mcpPath)
 
-				if (projectMcpResolution.shouldBootstrapCanonicalFromLegacy) {
-					const legacyContent = await fs.readFile(projectMcpResolution.legacyPath, "utf-8")
-					await safeWriteJson(mcpPath, JSON.parse(legacyContent), { prettyPrint: true })
-				} else if (!exists) {
+				if (!exists) {
 					await safeWriteJson(mcpPath, { mcpServers: {} }, { prettyPrint: true })
 				}
 
@@ -1999,57 +2049,26 @@ export const webviewMessageHandler = async (
 
 				// Determine the scope based on source (project or global)
 				const scope = modeToDelete.source || "global"
-
-				// Determine the rules folder path
-				let rulesFolderPath: string
-				if (scope === "project") {
-					const workspacePath = getWorkspacePath()
-					if (workspacePath) {
-						rulesFolderPath = path.join(
-							getCanonicalProjectConfigDirectoryForCwd(workspacePath),
-							`rules-${message.slug}`,
-						)
-					} else {
-						rulesFolderPath = path.join(".zoo", `rules-${message.slug}`)
-					}
-				} else {
-					// Global scope - use OS home directory
-					rulesFolderPath = path.join(getCanonicalGlobalConfigDirectory(), `rules-${message.slug}`)
-				}
-
-				// Check if the rules folder exists
-				const rulesFolderExists = await fileExistsAtPath(rulesFolderPath)
+				const rulesFolderPath = await provider.customModesManager.getCustomModeRulesFolderPath(
+					message.slug,
+					scope,
+					{
+						canonicalOnly: true,
+					},
+				)
 
 				// If this is a check request, send back the folder info
 				if (message.checkOnly) {
 					await provider.postMessageToWebview({
 						type: "deleteCustomModeCheck",
 						slug: message.slug,
-						rulesFolderPath: rulesFolderExists ? rulesFolderPath : undefined,
+						rulesFolderPath,
 					})
 					break
 				}
 
 				// Delete the mode
 				await provider.customModesManager.deleteCustomMode(message.slug)
-
-				// Delete the rules folder if it exists
-				if (rulesFolderExists) {
-					try {
-						await fs.rm(rulesFolderPath, { recursive: true, force: true })
-						provider.log(`Deleted rules folder for mode ${message.slug}: ${rulesFolderPath}`)
-					} catch (error) {
-						provider.log(`Failed to delete rules folder for mode ${message.slug}: ${error}`)
-						// Notify the user about the failure
-						vscode.window.showErrorMessage(
-							t("common:errors.delete_rules_folder_failed", {
-								rulesFolderPath,
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						)
-						// Continue with mode deletion even if folder deletion fails
-					}
-				}
 
 				// Switch back to default mode after deletion
 				await updateGlobalState("mode", defaultModeSlug)
@@ -3055,8 +3074,8 @@ export const webviewMessageHandler = async (
 				// Determine the commands directory based on source
 				let commandsDir: string
 				if (source === "global") {
-					const globalConfigDir = getCanonicalGlobalConfigDirectory()
-					commandsDir = path.join(globalConfigDir, "commands")
+					const globalConfigDir = await ensureCanonicalGlobalConfigRootForWrite()
+					commandsDir = path.join(globalConfigDir.canonicalPath, "commands")
 				} else {
 					if (!vscode.workspace.workspaceFolders?.length) {
 						vscode.window.showErrorMessage(t("common:errors.no_workspace"))
@@ -3068,7 +3087,8 @@ export const webviewMessageHandler = async (
 						vscode.window.showErrorMessage(t("common:errors.no_workspace_for_project_command"))
 						break
 					}
-					commandsDir = path.join(getCanonicalProjectConfigDirectoryForCwd(workspaceRoot), "commands")
+					const projectConfigDir = await ensureCanonicalProjectConfigRootForCwd(workspaceRoot)
+					commandsDir = path.join(projectConfigDir.canonicalPath, "commands")
 				}
 
 				// Ensure the commands directory exists

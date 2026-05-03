@@ -163,6 +163,9 @@
 		"public_share_link_copied": "Öffentlicher Freigabelink in die Zwischenablage kopiert!",
 		"mode_exported": "Modus '{{mode}}' erfolgreich exportiert",
 		"mode_imported": "Modus erfolgreich importiert",
+		"zooMigration": {
+			"completed": "Zoo-Migration abgeschlossen: {{copiedCount}} kopiert, {{skippedCount}} übersprungen, {{failedCount}} fehlgeschlagen. Vorhandene Roo-Ressourcen wurden beibehalten und nicht automatisch gelöscht. Global gespeicherte Einstellungen sind von dieser Dateimigration getrennt."
+		},
 		"roo": {
 			"signInUnavailable": "Die Anmeldung bei Roo Code Cloud ist derzeit nicht verfügbar. Konfiguriere einen anderen Anbieter, um fortzufahren."
 		}

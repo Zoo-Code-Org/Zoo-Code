@@ -43,7 +43,7 @@ import { arePathsEqual, getWorkspacePath } from "../../utils/path"
 import { injectVariables } from "../../utils/config"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { sanitizeMcpName, toolNamesMatch } from "../../utils/mcp-name"
-import { resolveProjectMcpFileForCwd } from "../roo-config"
+import { ensureCanonicalProjectConfigRootForCwd, resolveProjectMcpFileForCwd } from "../roo-config"
 
 // Discriminated union for connection states
 export type ConnectedMcpConnection = {
@@ -619,20 +619,15 @@ export class McpHub {
 	}
 
 	private async ensureWritableProjectMcpPath(): Promise<string> {
-		const resolution = await this.getProjectMcpResolution()
-		await fs.mkdir(path.dirname(resolution.canonicalPath), { recursive: true })
-
-		if (resolution.shouldBootstrapCanonicalFromLegacy) {
-			const legacyContent = await fs.readFile(resolution.legacyPath, "utf-8")
-			await safeWriteJson(resolution.canonicalPath, JSON.parse(legacyContent), { prettyPrint: true })
-			return resolution.canonicalPath
-		}
+		const cwd = this.getProjectWorkspacePath()
+		const configRoot = await ensureCanonicalProjectConfigRootForCwd(cwd)
+		const resolution = await resolveProjectMcpFileForCwd(cwd)
 
 		if (!resolution.canonicalExists) {
 			await safeWriteJson(resolution.canonicalPath, { mcpServers: {} }, { prettyPrint: true })
 		}
 
-		return resolution.canonicalPath
+		return path.join(configRoot.canonicalPath, path.basename(resolution.canonicalPath))
 	}
 
 	async ensureProjectMcpSettingsFilePath(): Promise<string> {

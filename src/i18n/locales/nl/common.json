@@ -163,6 +163,9 @@
 		"public_share_link_copied": "Openbare deel-link gekopieerd naar klembord!",
 		"mode_exported": "Modus '{{mode}}' succesvol geëxporteerd",
 		"mode_imported": "Modus succesvol geïmporteerd",
+		"zooMigration": {
+			"completed": "Zoo-migratie voltooid: {{copiedCount}} gekopieerd, {{skippedCount}} overgeslagen, {{failedCount}} mislukt. Bestaande Roo-assets zijn bewaard en niet automatisch verwijderd. Globale instellingen die in opslag worden bewaard staan los van deze bestandsmigratie."
+		},
 		"roo": {
 			"signInUnavailable": "Inloggen bij Roo Code Cloud is momenteel niet beschikbaar. Configureer een andere provider om door te gaan."
 		}

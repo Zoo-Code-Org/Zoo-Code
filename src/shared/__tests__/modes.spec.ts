@@ -9,7 +9,8 @@ vi.mock("../../core/prompts/sections/custom-instructions", () => ({
 	addCustomInstructions: vi.fn().mockResolvedValue("Combined instructions"),
 }))
 
-import { FileRestrictionError, getFullModeDetails, modes, getModeSelection } from "../modes"
+import { FileRestrictionError, modes, getModeSelection } from "../modes"
+import { getFullModeDetails } from "../modes-node"
 import { isToolAllowedForMode } from "../../core/tools/validateToolUse"
 import { addCustomInstructions } from "../../core/prompts/sections/custom-instructions"
 

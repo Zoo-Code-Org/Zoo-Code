@@ -17,7 +17,44 @@
 		"title": "设置",
 		"saveButtonTooltip": "保存更改",
 		"nothingChangedTooltip": "暂无更改",
-		"doneButtonTooltip": "放弃未保存的更改并关闭设置面板"
+		"doneButtonTooltip": "放弃未保存的更改并返回任务视图"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "将 Roo 文件复制到 Zoo",
+			"running": "正在将 Roo 文件复制到 Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "检测到旧版 Roo 文件",
+			"preservedTitle": "Zoo 已启用，Roo 文件已保留",
+			"partialRiskTitle": "混合的 Zoo 和 Roo 文件需要检查",
+			"zooCanonical": "Zoo 是新的应用托管变更的规范位置。",
+			"rooDetectedMigratable": "检测到旧版 Roo 文件。你可以在不覆盖现有 Zoo 文件的情况下，手动将符合条件的文件型位置复制到 Zoo。",
+			"rooDetectedPreserved": "检测到旧版 Roo 文件，且已保留。现有 Zoo 文件仍是规范位置，Roo 文件不会自动删除。",
+			"partialRiskBody": "某些规范的 Zoo 路径已存在，同时相关的仅 Roo 内容仍然存在。不会自动合并，因此如果行为看起来不完整，请检查这两个位置。",
+			"storageBackedGlobal": "基于存储的全局设置与主文件夹中的 Roo 文件迁移相互独立，因此此操作只影响基于文件的 Roo/Zoo 位置。"
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "主文件夹中的文件型配置根目录",
+			"projectConfigRoot": "工作区配置根目录",
+			"projectCustomModes": "工作区自定义模式文件",
+			"projectIgnore": "工作区 ignore 文件",
+			"projectMcp": "工作区 MCP 文件"
+		},
+		"result": {
+			"summary": "迁移结果：已复制 {{copiedCount}} 项，已跳过 {{skippedCount}} 项，失败 {{failedCount}} 项。旧版 Roo 文件已保留，不会自动删除。",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "已复制",
+				"skipped": "已跳过",
+				"failed": "失败"
+			},
+			"reason": {
+				"canonical-exists": "Zoo 已有规范目标位置，因此未执行覆盖。",
+				"legacy-missing": "没有可供复制的旧版 Roo 源。",
+				"not-eligible": "此位置在当前状态下不符合仅复制迁移的条件。"
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "未保存的更改",

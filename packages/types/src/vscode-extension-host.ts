@@ -23,6 +23,70 @@ import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-lim
 import type { SkillMetadata } from "./skills.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
 
+export type ZooMigrationActiveSource = "canonical" | "legacy" | "none"
+
+export type ZooMigrationCopyOnlyResultStatus = "copied" | "skipped" | "failed"
+
+export type ZooMigrationCopyOnlySkippedReason = "canonical-exists" | "legacy-missing" | "not-eligible"
+
+export type ZooMigrationSurfaceId =
+	| "globalFileBacked.configRoot"
+	| "project.configRoot"
+	| "project.customModes"
+	| "project.ignore"
+	| "project.mcp"
+
+export interface ZooMigrationSurfaceState {
+	canonicalPath: string
+	legacyPath: string
+	activePath: string
+	canonicalExists: boolean
+	legacyExists: boolean
+	activeExists: boolean
+	shouldBootstrapCanonicalFromLegacy: boolean
+	activeSource: ZooMigrationActiveSource
+	bootstrapEligible: boolean
+	copyOnlyMigrationActionAvailable: boolean
+	partialCanonicalRiskDetected: boolean
+}
+
+export interface GlobalFileBackedZooMigrationState {
+	configRoot: ZooMigrationSurfaceState
+	partialCanonicalRiskDetected: boolean
+	copyOnlyMigrationActionAvailable: boolean
+}
+
+export interface ProjectZooMigrationState {
+	configRoot: ZooMigrationSurfaceState
+	customModes: ZooMigrationSurfaceState
+	ignore: ZooMigrationSurfaceState
+	mcp: ZooMigrationSurfaceState
+	partialCanonicalRiskDetected: boolean
+	copyOnlyMigrationActionAvailable: boolean
+}
+
+export interface ZooMigrationStateSummary {
+	globalFileBacked: GlobalFileBackedZooMigrationState
+	project: ProjectZooMigrationState
+}
+
+export interface ZooMigrationCopyOnlySurfaceResult {
+	surface: ZooMigrationSurfaceId
+	status: ZooMigrationCopyOnlyResultStatus
+	sourcePath: string | null
+	destinationPath: string | null
+	reason?: ZooMigrationCopyOnlySkippedReason
+	error?: string
+}
+
+export interface ZooMigrationCopyOnlyResult {
+	results: ZooMigrationCopyOnlySurfaceResult[]
+	summary: ZooMigrationStateSummary
+	copiedCount: number
+	skippedCount: number
+	failedCount: number
+}
+
 /**
  * ExtensionMessage
  * Extension -> Webview | CLI
@@ -90,6 +154,7 @@ export interface ExtensionMessage {
 		| "organizationSwitchResult"
 		| "interactionRequired"
 		| "customToolsResult"
+		| "zooMigrationResult"
 		| "modes"
 		| "taskWithAggregatedCosts"
 		| "openAiCodexRateLimits"
@@ -178,6 +243,7 @@ export interface ExtensionMessage {
 	list?: string[] // For dismissedUpsells
 	organizationId?: string | null // For organizationSwitchResult
 	tools?: SerializedCustomToolDefinition[] // For customToolsResult
+	zooMigrationResult?: ZooMigrationCopyOnlyResult
 	skills?: SkillMetadata[] // For skills response
 	modes?: { slug: string; name: string }[] // For modes response
 	aggregatedCosts?: {
@@ -325,6 +391,7 @@ export type ExtensionState = Pick<
 	maxOpenTabsContext: number // Maximum number of VSCode open tabs to include in context (0-500)
 	maxWorkspaceFiles: number // Maximum number of files to include in current working directory details (0-500)
 	showRooIgnoredFiles: boolean // Whether to show .rooignore'd files in listings
+	zooMigrationState?: ZooMigrationStateSummary
 	enableSubfolderRules: boolean // Whether to load rules from subdirectories
 	maxReadFileLine?: number // Maximum line limit for read_file tool (-1 for default)
 	maxImageFileSize: number // Maximum size of image files to process in MB
@@ -560,6 +627,8 @@ export interface WebviewMessage {
 		| "requestModes"
 		| "switchMode"
 		| "debugSetting"
+		| "requestZooMigrationState"
+		| "runZooMigrationCopyOnly"
 		// Worktree messages
 		| "listWorktrees"
 		| "createWorktree"

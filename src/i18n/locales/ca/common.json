@@ -167,6 +167,9 @@
 		"public_share_link_copied": "Enllaç de compartició pública copiat al porta-retalls!",
 		"mode_exported": "Mode '{{mode}}' exportat correctament",
 		"mode_imported": "Mode importat correctament",
+		"zooMigration": {
+			"completed": "La migració a Zoo s'ha completat: {{copiedCount}} copiats, {{skippedCount}} omesos, {{failedCount}} fallits. Els recursos heretats de Roo s'han conservat i no s'han suprimit automàticament. La configuració global emmagatzemada fora dels fitxers és independent d'aquesta migració de fitxers."
+		},
 		"roo": {
 			"signInUnavailable": "L'inici de sessió de Roo Code Cloud no està disponible en aquest moment. Configura un altre proveïdor per continuar."
 		}

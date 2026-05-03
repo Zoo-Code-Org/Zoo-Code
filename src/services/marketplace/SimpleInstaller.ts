@@ -7,7 +7,11 @@ import { GlobalFileNames } from "../../shared/globalFileNames"
 import { ensureSettingsDirectoryExists } from "../../utils/globalContext"
 import type { CustomModesManager } from "../../core/config/CustomModesManager"
 import { safeWriteJson } from "../../utils/safeWriteJson"
-import { resolveProjectCustomModesFileForCwd, resolveProjectMcpFileForCwd } from "../roo-config"
+import {
+	ensureCanonicalProjectConfigRootForCwd,
+	resolveProjectCustomModesFileForCwd,
+	resolveProjectMcpFileForCwd,
+} from "../roo-config"
 
 export interface InstallOptions extends InstallMarketplaceItemOptions {
 	target: "project" | "global"
@@ -384,14 +388,8 @@ export class SimpleInstaller {
 				throw new Error("No workspace folder found")
 			}
 
+			await ensureCanonicalProjectConfigRootForCwd(workspaceFolder.uri.fsPath)
 			const resolution = await resolveProjectMcpFileForCwd(workspaceFolder.uri.fsPath)
-			if (resolution.shouldBootstrapCanonicalFromLegacy) {
-				await safeWriteJson(
-					resolution.canonicalPath,
-					JSON.parse(await fs.readFile(resolution.legacyPath, "utf-8")),
-					{ prettyPrint: true },
-				)
-			}
 
 			return resolution.canonicalPath
 		} else {

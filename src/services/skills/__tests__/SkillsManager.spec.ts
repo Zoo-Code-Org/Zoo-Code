@@ -17,6 +17,7 @@ const {
 	mockRmdir,
 	mockResolveGlobalConfigDirectory,
 	mockResolveProjectConfigDirectoryForCwd,
+	mockEnsureCanonicalConfigRootForWrite,
 } = vi.hoisted(() => ({
 	mockStat: vi.fn(),
 	mockReadFile: vi.fn(),
@@ -33,6 +34,7 @@ const {
 	mockRmdir: vi.fn(),
 	mockResolveGlobalConfigDirectory: vi.fn(),
 	mockResolveProjectConfigDirectoryForCwd: vi.fn(),
+	mockEnsureCanonicalConfigRootForWrite: vi.fn(),
 }))
 
 // Platform-agnostic test paths
@@ -103,6 +105,7 @@ vi.mock("../../roo-config", () => ({
 	getProjectAgentsDirectoryForCwd: (cwd: string) => p(cwd, ".agents"),
 	resolveGlobalConfigDirectory: mockResolveGlobalConfigDirectory,
 	resolveProjectConfigDirectoryForCwd: mockResolveProjectConfigDirectoryForCwd,
+	ensureCanonicalConfigRootForWrite: mockEnsureCanonicalConfigRootForWrite,
 	directoryExists: mockDirectoryExists,
 	fileExists: mockFileExists,
 }))
@@ -163,6 +166,13 @@ describe("SkillsManager", () => {
 			canonicalExists: true,
 			legacyExists: false,
 			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		}))
+		mockEnsureCanonicalConfigRootForWrite.mockImplementation(async (resolution: any) => ({
+			...resolution,
+			canonicalExists: true,
+			activeExists: true,
+			activePath: resolution.canonicalPath,
 			shouldBootstrapCanonicalFromLegacy: false,
 		}))
 
@@ -1332,7 +1342,39 @@ Instructions`)
 			expect(createdPath).toBe(p(PROJECT_DIR, ".zoo", "skills", "project-skill", "SKILL.md"))
 		})
 
-		it("should bootstrap legacy Roo skills before creating a canonical Zoo skill", async () => {
+		it("should use shared whole-root bootstrap before creating a project Zoo skill", async () => {
+			mockResolveProjectConfigDirectoryForCwd.mockResolvedValue({
+				canonicalPath: p(PROJECT_DIR, ".zoo"),
+				legacyPath: p(PROJECT_DIR, ".roo"),
+				activePath: p(PROJECT_DIR, ".roo"),
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			})
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			const createdPath = await skillsManager.createSkill("project-skill", "project", "A project skill")
+
+			expect(createdPath).toBe(p(PROJECT_DIR, ".zoo", "skills", "project-skill", "SKILL.md"))
+			expect(mockEnsureCanonicalConfigRootForWrite).toHaveBeenCalledWith({
+				canonicalPath: p(PROJECT_DIR, ".zoo"),
+				legacyPath: p(PROJECT_DIR, ".roo"),
+				activePath: p(PROJECT_DIR, ".roo"),
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
+			})
+			expect(mockCp).not.toHaveBeenCalled()
+		})
+
+		it("should use shared whole-root bootstrap before creating a canonical Zoo skill", async () => {
 			mockResolveGlobalConfigDirectory.mockResolvedValue({
 				canonicalPath: GLOBAL_ROO_DIR,
 				legacyPath: LEGACY_GLOBAL_ROO_DIR,
@@ -1344,29 +1386,23 @@ Instructions`)
 			})
 			mockDirectoryExists.mockResolvedValue(false)
 			mockRealpath.mockImplementation(async (p: string) => p)
-			mockReaddir.mockResolvedValue(["skills", "skills-code", "other-dir"])
 			mockFileExists.mockResolvedValue(false)
 			mockMkdir.mockResolvedValue(undefined)
-			mockCp.mockResolvedValue(undefined)
 			mockWriteFile.mockResolvedValue(undefined)
 
 			const createdPath = await skillsManager.createSkill("new-skill", "global", "A new skill description")
 
 			expect(createdPath).toBe(p(GLOBAL_ROO_DIR, "skills", "new-skill", "SKILL.md"))
-			expect(mockCp).toHaveBeenCalledWith(p(LEGACY_GLOBAL_ROO_DIR, "skills"), p(GLOBAL_ROO_DIR, "skills"), {
-				recursive: true,
-				force: false,
-				errorOnExist: false,
+			expect(mockEnsureCanonicalConfigRootForWrite).toHaveBeenCalledWith({
+				canonicalPath: GLOBAL_ROO_DIR,
+				legacyPath: LEGACY_GLOBAL_ROO_DIR,
+				activePath: LEGACY_GLOBAL_ROO_DIR,
+				canonicalExists: false,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: true,
 			})
-			expect(mockCp).toHaveBeenCalledWith(
-				p(LEGACY_GLOBAL_ROO_DIR, "skills-code"),
-				p(GLOBAL_ROO_DIR, "skills-code"),
-				{
-					recursive: true,
-					force: false,
-					errorOnExist: false,
-				},
-			)
+			expect(mockCp).not.toHaveBeenCalled()
 		})
 
 		it("should throw error for invalid skill name", async () => {

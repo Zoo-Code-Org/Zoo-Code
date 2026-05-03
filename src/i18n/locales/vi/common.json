@@ -163,6 +163,9 @@
 		"public_share_link_copied": "Liên kết chia sẻ công khai đã được sao chép vào clipboard!",
 		"mode_exported": "Chế độ '{{mode}}' đã được xuất thành công",
 		"mode_imported": "Chế độ đã được nhập thành công",
+		"zooMigration": {
+			"completed": "Quá trình di chuyển sang Zoo đã hoàn tất: {{copiedCount}} đã sao chép, {{skippedCount}} đã bỏ qua, {{failedCount}} thất bại. Các tài nguyên Roo cũ đã được giữ lại và không tự động xóa. Các cài đặt toàn cục được lưu trữ riêng không thuộc quá trình di chuyển tệp này."
+		},
 		"roo": {
 			"signInUnavailable": "Đăng nhập Roo Code Cloud hiện không khả dụng. Hãy cấu hình nhà cung cấp khác để tiếp tục."
 		}

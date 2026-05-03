@@ -26,14 +26,24 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-vi.mock("fs/promises", () => ({
-	mkdir: vi.fn(),
-	readFile: vi.fn(),
-	writeFile: vi.fn(),
-	stat: vi.fn(),
-	readdir: vi.fn(),
-	rm: vi.fn(),
-}))
+vi.mock("fs/promises", () => {
+	const mkdir = vi.fn()
+	const readFile = vi.fn()
+	const writeFile = vi.fn()
+	const stat = vi.fn()
+	const readdir = vi.fn()
+	const rm = vi.fn()
+
+	return {
+		default: { mkdir, readFile, writeFile, stat, readdir, rm },
+		mkdir,
+		readFile,
+		writeFile,
+		stat,
+		readdir,
+		rm,
+	}
+})
 
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")
@@ -164,5 +174,57 @@ describe("CustomModesManager Zoo migration", () => {
 		expect(roomodesData.customModes).toEqual([
 			expect.objectContaining({ slug: "legacy-mode", name: "Legacy Mode" }),
 		])
+	})
+
+	it("writes imported project rules to canonical [.zoo](src/services/roo-config/index.ts:310) rules folders after [.roomodes](src/core/config/__tests__/CustomModesManager.zooMigration.spec.ts:50) fallback", async () => {
+		existingPaths.add(path.join(mockWorkspacePath, ".roo"))
+		existingPaths.add(mockRoomodes)
+		fileContents[mockRoomodes] = yaml.stringify({ customModes: [] })
+
+		const importYaml = yaml.stringify({
+			customModes: [
+				{
+					slug: "test-mode",
+					name: "Test Mode",
+					roleDefinition: "Test Role",
+					groups: ["read"],
+					rulesFiles: [{ relativePath: "rule.md", content: "Rule content" }],
+				},
+			],
+		})
+
+		await manager.importModeWithRules(importYaml)
+
+		expect(
+			(fs.writeFile as Mock).mock.calls.some(
+				([filePath]) => filePath === path.join(mockWorkspacePath, ".zoo", "rules-test-mode", "rule.md"),
+			),
+		).toBe(true)
+		expect(
+			(fs.rm as Mock).mock.calls.some(
+				([filePath]) => filePath === path.join(mockWorkspacePath, ".zoo", "rules-test-mode"),
+			),
+		).toBe(true)
+	})
+
+	it("deletes only canonical Zoo rules folders and preserves legacy Roo rules folders", async () => {
+		existingPaths.add(mockRoomodes)
+		fileContents[mockRoomodes] = yaml.stringify({
+			customModes: [
+				{ slug: "legacy-mode", name: "Legacy Mode", roleDefinition: "Legacy Role", groups: ["read"] },
+			],
+		})
+
+		await manager.deleteCustomMode("legacy-mode")
+
+		expect(fs.rm).toHaveBeenCalledWith(path.join(mockWorkspacePath, ".zoo", "rules-legacy-mode"), {
+			recursive: true,
+			force: true,
+		})
+		expect(
+			(fs.rm as Mock).mock.calls.some(
+				([filePath]) => filePath === path.join(mockWorkspacePath, ".roo", "rules-legacy-mode"),
+			),
+		).toBe(false)
 	})
 })

@@ -163,6 +163,9 @@
 		"public_share_link_copied": "Herkese açık paylaşım bağlantısı panoya kopyalandı!",
 		"mode_exported": "'{{mode}}' modu başarıyla dışa aktarıldı",
 		"mode_imported": "Mod başarıyla içe aktarıldı",
+		"zooMigration": {
+			"completed": "Zoo geçişi tamamlandı: {{copiedCount}} kopyalandı, {{skippedCount}} atlandı, {{failedCount}} başarısız oldu. Eski Roo varlıkları korundu ve otomatik olarak silinmedi. Depolama tabanlı genel ayarlar bu dosya geçişinden ayrıdır."
+		},
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud girişi şu anda kullanılamıyor. Devam etmek için farklı bir sağlayıcı yapılandırın."
 		}

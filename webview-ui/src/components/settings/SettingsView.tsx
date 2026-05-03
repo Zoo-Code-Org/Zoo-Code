@@ -37,6 +37,8 @@ import {
 	type TelemetrySetting,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	ImageGenerationProvider,
+	type ZooMigrationCopyOnlyResult,
+	type ZooMigrationSurfaceId,
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
@@ -125,11 +127,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { t } = useAppTranslation()
 
 	const extensionState = useExtensionState()
-	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt } = extensionState
+	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, zooMigrationState } = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	const [isChangeDetected, setChangeDetected] = useState(false)
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
+	const [isZooMigrationRunning, setIsZooMigrationRunning] = useState(false)
+	const [zooMigrationResult, setZooMigrationResult] = useState<ZooMigrationCopyOnlyResult>()
 	const [activeTab, setActiveTab] = useState<SectionName>(
 		targetSection && sectionNames.includes(targetSection as SectionName)
 			? (targetSection as SectionName)
@@ -226,6 +230,25 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			setChangeDetected(false)
 		}
 	}, [settingsImportedAt, extensionState])
+
+	useEffect(() => {
+		vscode.postMessage({ type: "requestZooMigrationState" })
+	}, [])
+
+	useEffect(() => {
+		const handleZooMigrationResult = (event: MessageEvent) => {
+			if (event.data?.type === "zooMigrationResult") {
+				setZooMigrationResult(event.data.zooMigrationResult)
+				setIsZooMigrationRunning(false)
+			}
+		}
+
+		window.addEventListener("message", handleZooMigrationResult)
+
+		return () => {
+			window.removeEventListener("message", handleZooMigrationResult)
+		}
+	}, [])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {
@@ -357,6 +380,71 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	}, [])
 
 	const isSettingValid = !errorMessage
+
+	const zooMigrationNotice = useMemo(() => {
+		if (!zooMigrationState) {
+			return null
+		}
+
+		const surfaces = [
+			zooMigrationState.globalFileBacked.configRoot,
+			zooMigrationState.project.configRoot,
+			zooMigrationState.project.customModes,
+			zooMigrationState.project.ignore,
+			zooMigrationState.project.mcp,
+		]
+
+		const legacyDetected = surfaces.some((surface) => surface.legacyExists)
+		if (!legacyDetected) {
+			return null
+		}
+
+		const canonicalDetected = surfaces.some((surface) => surface.canonicalExists)
+		const copyAvailable =
+			zooMigrationState.globalFileBacked.copyOnlyMigrationActionAvailable ||
+			zooMigrationState.project.copyOnlyMigrationActionAvailable
+		const partialRisk =
+			zooMigrationState.globalFileBacked.partialCanonicalRiskDetected ||
+			zooMigrationState.project.partialCanonicalRiskDetected
+
+		const toneClass = partialRisk
+			? "border-vscode-errorForeground/60 bg-vscode-inputValidation-errorBackground"
+			: copyAvailable
+				? "border-vscode-focusBorder/60 bg-vscode-textBlockQuote-background"
+				: "border-vscode-descriptionForeground/50 bg-vscode-editor-inactiveSelectionBackground"
+
+		const icon = partialRisk ? AlertTriangle : Info
+		const titleKey = partialRisk
+			? "settings:zooMigration.notice.partialRiskTitle"
+			: copyAvailable && !canonicalDetected
+				? "settings:zooMigration.notice.copyAvailableTitle"
+				: "settings:zooMigration.notice.preservedTitle"
+
+		return { toneClass, icon, titleKey, copyAvailable, partialRisk }
+	}, [zooMigrationState])
+
+	const getZooMigrationSurfaceLabel = useCallback(
+		(surface: ZooMigrationSurfaceId) => {
+			const keyBySurface: Record<ZooMigrationSurfaceId, string> = {
+				"globalFileBacked.configRoot": "settings:zooMigration.surfaces.globalFileBackedConfigRoot",
+				"project.configRoot": "settings:zooMigration.surfaces.projectConfigRoot",
+				"project.customModes": "settings:zooMigration.surfaces.projectCustomModes",
+				"project.ignore": "settings:zooMigration.surfaces.projectIgnore",
+				"project.mcp": "settings:zooMigration.surfaces.projectMcp",
+			}
+
+			return t(keyBySurface[surface])
+		},
+		[t],
+	)
+
+	const handleZooMigration = useCallback(() => {
+		setZooMigrationResult(undefined)
+		setIsZooMigrationRunning(true)
+		vscode.postMessage({ type: "runZooMigrationCopyOnly" })
+	}, [])
+
+	const ZooMigrationNoticeIcon = zooMigrationNotice?.icon
 
 	const handleSubmit = () => {
 		if (isSettingValid) {
@@ -737,6 +825,100 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 						{renderTab === "providers" && (
 							<div>
 								<SectionHeader>{t("settings:sections.providers")}</SectionHeader>
+
+								{zooMigrationNotice && (
+									<Section>
+										<div
+											data-testid="zoo-migration-notice"
+											className={cn(
+												"mb-4 rounded-md border p-4 text-sm text-vscode-foreground",
+												zooMigrationNotice.toneClass,
+											)}>
+											<div className="flex items-start gap-3">
+												{ZooMigrationNoticeIcon && (
+													<ZooMigrationNoticeIcon className="mt-0.5 h-4 w-4 shrink-0" />
+												)}
+												<div className="min-w-0 flex-1">
+													<div
+														className="font-medium"
+														data-testid="zoo-migration-notice-title">
+														{t(zooMigrationNotice.titleKey)}
+													</div>
+													<p className="mb-2 mt-2">
+														{t("settings:zooMigration.notice.zooCanonical")}
+													</p>
+													<p className="mb-2">
+														{t(
+															zooMigrationNotice.copyAvailable
+																? "settings:zooMigration.notice.rooDetectedMigratable"
+																: "settings:zooMigration.notice.rooDetectedPreserved",
+														)}
+													</p>
+													{zooMigrationNotice.partialRisk && (
+														<p className="mb-2">
+															{t("settings:zooMigration.notice.partialRiskBody")}
+														</p>
+													)}
+													<p className="mb-0">
+														{t("settings:zooMigration.notice.storageBackedGlobal")}
+													</p>
+												</div>
+											</div>
+
+											{zooMigrationNotice.copyAvailable && (
+												<div className="mt-3">
+													<Button
+														data-testid="zoo-migration-button"
+														onClick={handleZooMigration}
+														disabled={isZooMigrationRunning}>
+														{t(
+															isZooMigrationRunning
+																? "settings:zooMigration.actions.running"
+																: "settings:zooMigration.actions.copyOnly",
+														)}
+													</Button>
+												</div>
+											)}
+
+											{zooMigrationResult && (
+												<div
+													data-testid="zoo-migration-result"
+													className="mt-3 rounded border border-vscode-panel-border bg-vscode-editor-background p-3">
+													<div className="font-medium">
+														{t("settings:zooMigration.result.summary", {
+															copiedCount: zooMigrationResult.copiedCount,
+															skippedCount: zooMigrationResult.skippedCount,
+															failedCount: zooMigrationResult.failedCount,
+														})}
+													</div>
+													<ul className="mb-0 mt-2 list-disc pl-5">
+														{zooMigrationResult.results.map((result) => (
+															<li key={result.surface}>
+																{t("settings:zooMigration.result.surfaceLine", {
+																	surface: getZooMigrationSurfaceLabel(
+																		result.surface,
+																	),
+																	status: t(
+																		`settings:zooMigration.result.status.${result.status}`,
+																	),
+																})}
+																{result.reason && (
+																	<span>
+																		{" "}
+																		{t(
+																			`settings:zooMigration.result.reason.${result.reason}`,
+																		)}
+																	</span>
+																)}
+																{result.error && <span>{` (${result.error})`}</span>}
+															</li>
+														))}
+													</ul>
+												</div>
+											)}
+										</div>
+									</Section>
+								)}
 
 								<Section>
 									<ApiConfigManager

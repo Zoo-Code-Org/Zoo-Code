@@ -17,7 +17,44 @@
 		"title": "Configurações",
 		"saveButtonTooltip": "Salvar alterações",
 		"nothingChangedTooltip": "Nada alterado",
-		"doneButtonTooltip": "Descartar alterações não salvas e fechar o painel de configurações"
+		"doneButtonTooltip": "Descartar alterações não salvas e voltar para a visualização de tarefas"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Copiar arquivos do Roo para o Zoo",
+			"running": "Copiando arquivos do Roo para o Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Arquivos legados do Roo detectados",
+			"preservedTitle": "Zoo está ativo e os arquivos do Roo foram preservados",
+			"partialRiskTitle": "Arquivos mistos do Zoo e do Roo precisam de revisão",
+			"zooCanonical": "Zoo é o local canônico para novas alterações gerenciadas pelo app.",
+			"rooDetectedMigratable": "Foram detectados arquivos legados do Roo. Você pode copiar explicitamente para o Zoo as superfícies elegíveis baseadas em arquivos sem sobrescrever arquivos existentes do Zoo.",
+			"rooDetectedPreserved": "Foram detectados e preservados arquivos legados do Roo. Os arquivos existentes do Zoo continuam canônicos, e os arquivos do Roo não são excluídos automaticamente.",
+			"partialRiskBody": "Alguns caminhos canônicos do Zoo já existem enquanto ainda há conteúdo relacionado presente apenas no Roo. Nenhuma mesclagem automática será feita, então revise os dois locais se o comportamento parecer incompleto.",
+			"storageBackedGlobal": "As configurações globais baseadas em armazenamento são separadas da migração dos arquivos do Roo na pasta pessoal, então esta ação afeta apenas superfícies Roo/Zoo baseadas em arquivos."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Raiz de configuração baseada em arquivos da pasta pessoal",
+			"projectConfigRoot": "Raiz de configuração do workspace",
+			"projectCustomModes": "Arquivo de modos personalizados do workspace",
+			"projectIgnore": "Arquivo ignore do workspace",
+			"projectMcp": "Arquivo MCP do workspace"
+		},
+		"result": {
+			"summary": "Resultados da migração: {{copiedCount}} copiados, {{skippedCount}} ignorados, {{failedCount}} falharam. Os arquivos legados do Roo foram preservados e não foram excluídos automaticamente.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "copiado",
+				"skipped": "ignorado",
+				"failed": "falhou"
+			},
+			"reason": {
+				"canonical-exists": "O Zoo já tinha um destino canônico, então nenhuma sobrescrita foi feita.",
+				"legacy-missing": "Não havia nenhuma origem legada do Roo disponível para copiar.",
+				"not-eligible": "Esta superfície não está qualificada para uma migração somente de cópia no estado atual."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Alterações não salvas",

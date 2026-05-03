@@ -163,6 +163,9 @@
 		"image_saved": "Image saved to {{path}}",
 		"mode_exported": "Mode '{{mode}}' exported successfully",
 		"mode_imported": "Mode imported successfully",
+		"zooMigration": {
+			"completed": "Zoo migration finished: {{copiedCount}} copied, {{skippedCount}} skipped, {{failedCount}} failed. Legacy Roo assets were preserved and not deleted automatically. Storage-backed global settings are separate from this file migration."
+		},
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud sign-in is currently unavailable. Configure another provider to continue."
 		}

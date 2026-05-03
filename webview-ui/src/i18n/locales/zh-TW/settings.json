@@ -15,6 +15,43 @@
 		"nothingChangedTooltip": "無任何變更",
 		"doneButtonTooltip": "捨棄未儲存的變更並回到工作檢視"
 	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "將 Roo 檔案複製到 Zoo",
+			"running": "正在將 Roo 檔案複製到 Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "偵測到舊版 Roo 檔案",
+			"preservedTitle": "Zoo 已啟用，Roo 檔案已保留",
+			"partialRiskTitle": "混合的 Zoo 與 Roo 檔案需要檢查",
+			"zooCanonical": "Zoo 是新應用程式管理變更的標準位置。",
+			"rooDetectedMigratable": "偵測到舊版 Roo 檔案。你可以明確將符合條件的檔案型項目複製到 Zoo，而不會覆寫現有的 Zoo 檔案。",
+			"rooDetectedPreserved": "偵測到舊版 Roo 檔案，且已保留。現有的 Zoo 檔案仍是標準位置，Roo 檔案不會自動刪除。",
+			"partialRiskBody": "某些標準 Zoo 路徑已存在，同時相關的僅 Roo 內容仍然存在。系統不會自動合併，因此如果行為看起來不完整，請檢查這兩個位置。",
+			"storageBackedGlobal": "以儲存體為基礎的全域設定與家目錄中的 Roo 檔案移轉是分開的，因此此操作只會影響以檔案為基礎的 Roo/Zoo 項目。"
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "家目錄中的檔案型設定根目錄",
+			"projectConfigRoot": "工作區設定根目錄",
+			"projectCustomModes": "工作區自訂模式檔案",
+			"projectIgnore": "工作區 ignore 檔案",
+			"projectMcp": "工作區 MCP 檔案"
+		},
+		"result": {
+			"summary": "移轉結果：已複製 {{copiedCount}} 項、已略過 {{skippedCount}} 項、失敗 {{failedCount}} 項。舊版 Roo 檔案已保留，不會自動刪除。",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "已複製",
+				"skipped": "已略過",
+				"failed": "失敗"
+			},
+			"reason": {
+				"canonical-exists": "Zoo 已經有標準目的地，因此未執行覆寫。",
+				"legacy-missing": "沒有可供複製的舊版 Roo 來源。",
+				"not-eligible": "此項目在目前狀態下不符合僅複製移轉的資格。"
+			}
+		}
+	},
 	"search": {
 		"placeholder": "搜尋設定...",
 		"noResults": "找不到設定"

@@ -17,7 +17,44 @@
 		"title": "Paramètres",
 		"saveButtonTooltip": "Enregistrer les modifications",
 		"nothingChangedTooltip": "Rien n'a changé",
-		"doneButtonTooltip": "Ignorer les modifications non enregistrées et fermer le panneau des paramètres"
+		"doneButtonTooltip": "Ignorer les modifications non enregistrées et revenir à la vue des tâches"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Copier les fichiers Roo dans Zoo",
+			"running": "Copie des fichiers Roo vers Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Anciens fichiers Roo détectés",
+			"preservedTitle": "Zoo est actif et les fichiers Roo ont été conservés",
+			"partialRiskTitle": "Les fichiers Zoo et Roo mélangés doivent être vérifiés",
+			"zooCanonical": "Zoo est l'emplacement canonique pour les nouvelles modifications gérées par l'application.",
+			"rooDetectedMigratable": "D'anciens fichiers Roo ont été détectés. Tu peux copier explicitement dans Zoo les éléments éligibles basés sur des fichiers sans écraser les fichiers Zoo existants.",
+			"rooDetectedPreserved": "D'anciens fichiers Roo ont été détectés et conservés. Les fichiers Zoo existants restent canoniques, et les fichiers Roo ne sont pas supprimés automatiquement.",
+			"partialRiskBody": "Certains chemins canoniques Zoo existent déjà alors que du contenu associé uniquement à Roo est encore présent. Aucune fusion automatique ne sera effectuée, alors vérifie les deux emplacements si le comportement semble incomplet.",
+			"storageBackedGlobal": "Les paramètres globaux stockés séparément sont distincts de la migration des fichiers Roo du dossier personnel. Cette action n'affecte donc que les éléments Roo/Zoo basés sur des fichiers."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Racine de configuration basée sur des fichiers dans le dossier personnel",
+			"projectConfigRoot": "Racine de configuration de l'espace de travail",
+			"projectCustomModes": "Fichier des modes personnalisés de l'espace de travail",
+			"projectIgnore": "Fichier d'exclusion de l'espace de travail",
+			"projectMcp": "Fichier MCP de l'espace de travail"
+		},
+		"result": {
+			"summary": "Résultats de la migration : {{copiedCount}} copiés, {{skippedCount}} ignorés, {{failedCount}} en échec. Les anciens fichiers Roo ont été conservés et n'ont pas été supprimés automatiquement.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "copié",
+				"skipped": "ignoré",
+				"failed": "en échec"
+			},
+			"reason": {
+				"canonical-exists": "Zoo avait déjà une destination canonique, donc aucun écrasement n'a été effectué.",
+				"legacy-missing": "Aucune source Roo héritée n'était disponible pour la copie.",
+				"not-eligible": "Cet élément n'est pas éligible à une migration par copie seule dans son état actuel."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Modifications non enregistrées",

@@ -17,7 +17,44 @@
 		"title": "Cài đặt",
 		"saveButtonTooltip": "Lưu thay đổi",
 		"nothingChangedTooltip": "Không có gì thay đổi",
-		"doneButtonTooltip": "Hủy thay đổi chưa lưu và đóng bảng cài đặt"
+		"doneButtonTooltip": "Hủy các thay đổi chưa lưu và quay lại chế độ xem tác vụ"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Sao chép tệp Roo vào Zoo",
+			"running": "Đang sao chép tệp Roo vào Zoo..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Đã phát hiện tệp Roo cũ",
+			"preservedTitle": "Zoo đang hoạt động và các tệp Roo đã được giữ lại",
+			"partialRiskTitle": "Các tệp Zoo và Roo lẫn lộn cần được xem lại",
+			"zooCanonical": "Zoo là vị trí chuẩn cho các thay đổi mới do ứng dụng quản lý.",
+			"rooDetectedMigratable": "Đã phát hiện các tệp Roo cũ. Bạn có thể chủ động sao chép các bề mặt dựa trên tệp đủ điều kiện vào Zoo mà không ghi đè các tệp Zoo hiện có.",
+			"rooDetectedPreserved": "Đã phát hiện và giữ lại các tệp Roo cũ. Các tệp Zoo hiện có vẫn là chuẩn, và các tệp Roo không bị xóa tự động.",
+			"partialRiskBody": "Một số đường dẫn Zoo chuẩn đã tồn tại trong khi nội dung liên quan chỉ có ở Roo vẫn còn. Sẽ không có thao tác hợp nhất tự động, vì vậy hãy xem lại cả hai vị trí nếu hành vi có vẻ chưa đầy đủ.",
+			"storageBackedGlobal": "Các cài đặt toàn cục dựa trên bộ nhớ lưu trữ tách biệt với việc di chuyển tệp Roo trong thư mục home, vì vậy hành động này chỉ ảnh hưởng đến các bề mặt Roo/Zoo dựa trên tệp."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Gốc cấu hình dựa trên tệp của thư mục home",
+			"projectConfigRoot": "Gốc cấu hình workspace",
+			"projectCustomModes": "Tệp chế độ tùy chỉnh của workspace",
+			"projectIgnore": "Tệp ignore của workspace",
+			"projectMcp": "Tệp MCP của workspace"
+		},
+		"result": {
+			"summary": "Kết quả di chuyển: đã sao chép {{copiedCount}}, đã bỏ qua {{skippedCount}}, thất bại {{failedCount}}. Các tệp Roo cũ đã được giữ lại và không bị xóa tự động.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "đã sao chép",
+				"skipped": "đã bỏ qua",
+				"failed": "thất bại"
+			},
+			"reason": {
+				"canonical-exists": "Zoo đã có sẵn đích chuẩn nên không thực hiện ghi đè.",
+				"legacy-missing": "Không có nguồn Roo cũ nào để sao chép.",
+				"not-eligible": "Bề mặt này không đủ điều kiện cho kiểu di chuyển chỉ sao chép trong trạng thái hiện tại."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Thay đổi chưa lưu",

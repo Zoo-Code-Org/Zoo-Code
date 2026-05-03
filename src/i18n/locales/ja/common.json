@@ -163,6 +163,9 @@
 		"public_share_link_copied": "公開共有リンクがクリップボードにコピーされました！",
 		"mode_exported": "モード「{{mode}}」が正常にエクスポートされました",
 		"mode_imported": "モードが正常にインポートされました",
+		"zooMigration": {
+			"completed": "Zoo への移行が完了しました: {{copiedCount}} 件をコピー、{{skippedCount}} 件をスキップ、{{failedCount}} 件が失敗しました。従来の Roo アセットは保持され、自動では削除されませんでした。ストレージに保存されるグローバル設定は、このファイル移行とは別です。"
+		},
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud へのサインインは現在利用できません。続行するには別のプロバイダーを設定してください。"
 		}

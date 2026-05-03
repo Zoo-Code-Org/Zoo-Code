@@ -17,7 +17,44 @@
 		"title": "Instellingen",
 		"saveButtonTooltip": "Wijzigingen opslaan",
 		"nothingChangedTooltip": "Niets gewijzigd",
-		"doneButtonTooltip": "Niet-opgeslagen wijzigingen negeren en instellingen sluiten"
+		"doneButtonTooltip": "Niet-opgeslagen wijzigingen negeren en teruggaan naar de takenweergave"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Roo-bestanden naar Zoo kopiëren",
+			"running": "Roo-bestanden worden naar Zoo gekopieerd..."
+		},
+		"notice": {
+			"copyAvailableTitle": "Verouderde Roo-bestanden gedetecteerd",
+			"preservedTitle": "Zoo is actief en Roo-bestanden zijn behouden",
+			"partialRiskTitle": "Gemengde Zoo- en Roo-bestanden moeten worden gecontroleerd",
+			"zooCanonical": "Zoo is de canonieke locatie voor nieuwe door de app beheerde wijzigingen.",
+			"rooDetectedMigratable": "Verouderde Roo-bestanden zijn gedetecteerd. Je kunt geschikte bestandsgebaseerde onderdelen expliciet naar Zoo kopiëren zonder bestaande Zoo-bestanden te overschrijven.",
+			"rooDetectedPreserved": "Verouderde Roo-bestanden zijn gedetecteerd en behouden. Bestaande Zoo-bestanden blijven canoniek en Roo-bestanden worden niet automatisch verwijderd.",
+			"partialRiskBody": "Sommige canonieke Zoo-paden bestaan al, terwijl gerelateerde inhoud die alleen in Roo staat nog aanwezig is. Er vindt geen automatische samenvoeging plaats, dus controleer beide locaties als het gedrag onvolledig lijkt.",
+			"storageBackedGlobal": "Opslaggebaseerde globale instellingen staan los van de migratie van Roo-bestanden in de thuismap, dus deze actie heeft alleen invloed op bestandsgebaseerde Roo/Zoo-onderdelen."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "Bestandsgebaseerde configuratieroot in de thuismap",
+			"projectConfigRoot": "Configuratieroot van de werkruimte",
+			"projectCustomModes": "Bestand met aangepaste modi van de werkruimte",
+			"projectIgnore": "Ignore-bestand van de werkruimte",
+			"projectMcp": "MCP-bestand van de werkruimte"
+		},
+		"result": {
+			"summary": "Migratieresultaten: {{copiedCount}} gekopieerd, {{skippedCount}} overgeslagen, {{failedCount}} mislukt. Verouderde Roo-bestanden zijn behouden en niet automatisch verwijderd.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "gekopieerd",
+				"skipped": "overgeslagen",
+				"failed": "mislukt"
+			},
+			"reason": {
+				"canonical-exists": "Zoo had al een canonieke bestemming, dus er is niets overschreven.",
+				"legacy-missing": "Er was geen verouderde Roo-bron beschikbaar om te kopiëren.",
+				"not-eligible": "Dit onderdeel komt in de huidige staat niet in aanmerking voor een alleen-kopiëren-migratie."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "Niet-opgeslagen wijzigingen",

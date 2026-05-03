@@ -17,7 +17,44 @@
 		"title": "설정",
 		"saveButtonTooltip": "변경 사항 저장",
 		"nothingChangedTooltip": "변경 사항 없음",
-		"doneButtonTooltip": "저장되지 않은 변경 사항을 버리고 설정 패널 닫기"
+		"doneButtonTooltip": "저장되지 않은 변경 사항을 버리고 작업 보기로 돌아가기"
+	},
+	"zooMigration": {
+		"actions": {
+			"copyOnly": "Roo 파일을 Zoo로 복사",
+			"running": "Roo 파일을 Zoo로 복사하는 중..."
+		},
+		"notice": {
+			"copyAvailableTitle": "레거시 Roo 파일이 감지됨",
+			"preservedTitle": "Zoo가 활성화되어 있고 Roo 파일이 보존됨",
+			"partialRiskTitle": "섞여 있는 Zoo 및 Roo 파일을 검토해야 함",
+			"zooCanonical": "Zoo는 앱이 관리하는 새 변경 사항의 기준 위치입니다.",
+			"rooDetectedMigratable": "레거시 Roo 파일이 감지되었습니다. 기존 Zoo 파일을 덮어쓰지 않고, 자격이 있는 파일 기반 항목을 명시적으로 Zoo로 복사할 수 있습니다.",
+			"rooDetectedPreserved": "레거시 Roo 파일이 감지되어 보존되었습니다. 기존 Zoo 파일은 계속 기준 위치로 유지되며 Roo 파일은 자동으로 삭제되지 않습니다.",
+			"partialRiskBody": "일부 기준 Zoo 경로가 이미 존재하는 동안 관련된 Roo 전용 콘텐츠도 아직 남아 있습니다. 자동 병합은 수행되지 않으므로 동작이 불완전해 보이면 두 위치를 모두 검토하세요.",
+			"storageBackedGlobal": "저장소 기반 전역 설정은 홈 폴더 Roo 파일 마이그레이션과 별개이므로, 이 작업은 파일 기반 Roo/Zoo 항목에만 영향을 줍니다."
+		},
+		"surfaces": {
+			"globalFileBackedConfigRoot": "홈 폴더 파일 기반 구성 루트",
+			"projectConfigRoot": "워크스페이스 구성 루트",
+			"projectCustomModes": "워크스페이스 사용자 지정 모드 파일",
+			"projectIgnore": "워크스페이스 ignore 파일",
+			"projectMcp": "워크스페이스 MCP 파일"
+		},
+		"result": {
+			"summary": "마이그레이션 결과: {{copiedCount}}개 복사됨, {{skippedCount}}개 건너뜀, {{failedCount}}개 실패. 레거시 Roo 파일은 보존되었으며 자동으로 삭제되지 않았습니다.",
+			"surfaceLine": "{{surface}} — {{status}}",
+			"status": {
+				"copied": "복사됨",
+				"skipped": "건너뜀",
+				"failed": "실패"
+			},
+			"reason": {
+				"canonical-exists": "Zoo에 이미 기준 대상이 있었기 때문에 덮어쓰지 않았습니다.",
+				"legacy-missing": "복사할 레거시 Roo 원본이 없었습니다.",
+				"not-eligible": "이 항목은 현재 상태에서 복사 전용 마이그레이션 대상이 아닙니다."
+			}
+		}
 	},
 	"unsavedChangesDialog": {
 		"title": "저장되지 않은 변경 사항",

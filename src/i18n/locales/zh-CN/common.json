@@ -168,6 +168,9 @@
 		"public_share_link_copied": "公开分享链接已复制到剪贴板！",
 		"mode_exported": "模式 '{{mode}}' 已成功导出",
 		"mode_imported": "模式已成功导入",
+		"zooMigration": {
+			"completed": "Zoo 迁移已完成：已复制 {{copiedCount}} 项，已跳过 {{skippedCount}} 项，失败 {{failedCount}} 项。旧版 Roo 资源已保留，不会自动删除。基于存储的全局设置与此次文件迁移相互独立。"
+		},
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud 登录当前不可用。请配置其他提供商以继续。"
 		}

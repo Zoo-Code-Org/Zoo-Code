@@ -31,6 +31,29 @@ import { experimentDefault } from "@roo/experiments"
 import { vscode } from "@src/utils/vscode"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
 
+const hasLegacyZooMigrationAssets = (zooMigrationState?: ExtensionState["zooMigrationState"]) => {
+	if (!zooMigrationState) {
+		return false
+	}
+
+	const surfaces = [
+		zooMigrationState.globalFileBacked.configRoot,
+		zooMigrationState.project.configRoot,
+		zooMigrationState.project.customModes,
+		zooMigrationState.project.ignore,
+		zooMigrationState.project.mcp,
+	]
+
+	return surfaces.some((surface) => surface.legacyExists)
+}
+
+const shouldShowWelcomeForState = (extensionState: Partial<ExtensionState>) => {
+	return (
+		!checkExistKey(extensionState.apiConfiguration) &&
+		!hasLegacyZooMigrationAssets(extensionState.zooMigrationState)
+	)
+}
+
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
 	didHydrateState: boolean
@@ -266,7 +289,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 	})
 
 	const [didHydrateState, setDidHydrateState] = useState(false)
-	const [showWelcome, setShowWelcome] = useState(false)
 	const [theme, setTheme] = useState<any>(undefined)
 	const [filePaths, setFilePaths] = useState<string[]>([])
 	const [openedTabs, setOpenedTabs] = useState<Array<{ label: string; isActive: boolean; path?: string }>>([])
@@ -285,6 +307,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(true)
 	const [includeCurrentTime, setIncludeCurrentTime] = useState(true)
 	const [includeCurrentCost, setIncludeCurrentCost] = useState(true)
+	const showWelcome = shouldShowWelcomeForState(state)
 
 	const setListApiConfigMeta = useCallback(
 		(value: ProviderSettingsEntry[]) => setState((prevState) => ({ ...prevState, listApiConfigMeta: value })),
@@ -308,7 +331,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 				case "state": {
 					const newState = message.state ?? {}
 					setState((prevState) => mergeExtensionState(prevState, newState))
-					setShowWelcome(!checkExistKey(newState.apiConfiguration))
 					setDidHydrateState(true)
 					// Update alwaysAllowFollowupQuestions if present in state message
 					if ((newState as any).alwaysAllowFollowupQuestions !== undefined) {

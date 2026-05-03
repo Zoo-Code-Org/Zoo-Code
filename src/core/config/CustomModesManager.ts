@@ -1,7 +1,6 @@
 import * as vscode from "vscode"
 import * as path from "path"
 import * as fs from "fs/promises"
-import * as os from "os"
 
 import * as yaml from "yaml"
 import stripBom from "strip-bom"
@@ -12,9 +11,14 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { getWorkspacePath } from "../../utils/path"
 import {
 	type ZooPathResolution,
+	directoryExists,
+	ensureCanonicalGlobalConfigRootForWrite,
+	ensureCanonicalProjectConfigRootForCwd,
 	getCanonicalProjectCustomModesFileForCwd,
-	getGlobalRooDirectory,
 	getLegacyProjectCustomModesFileForCwd,
+	resolveConfigChildDirectoryWithLegacyFallback,
+	resolveGlobalConfigDirectory,
+	resolveProjectConfigDirectoryForCwd,
 } from "../../services/roo-config"
 import { logger } from "../../utils/logging"
 import { GlobalFileNames } from "../../shared/globalFileNames"
@@ -161,6 +165,52 @@ export class CustomModesManager {
 		}
 
 		return resolution.canonicalPath
+	}
+
+	private async resolveRulesConfigRoot(
+		source: "global" | "project",
+		forWrite: boolean = false,
+	): Promise<ZooPathResolution | undefined> {
+		if (source === "global") {
+			return forWrite ? ensureCanonicalGlobalConfigRootForWrite() : resolveGlobalConfigDirectory()
+		}
+
+		const workspacePath = getWorkspacePath()
+		if (!workspacePath) {
+			return undefined
+		}
+
+		return forWrite
+			? ensureCanonicalProjectConfigRootForCwd(workspacePath)
+			: resolveProjectConfigDirectoryForCwd(workspacePath)
+	}
+
+	public async getCustomModeRulesFolderPath(
+		slug: string,
+		source: "global" | "project",
+		options: { forWrite?: boolean; canonicalOnly?: boolean } = {},
+	): Promise<string | undefined> {
+		const rootResolution = await this.resolveRulesConfigRoot(source, options.forWrite === true)
+		if (!rootResolution) {
+			return undefined
+		}
+
+		const relativeRulesPath = `rules-${slug}`
+
+		if (options.forWrite) {
+			return path.join(rootResolution.canonicalPath, relativeRulesPath)
+		}
+
+		try {
+			if (options.canonicalOnly) {
+				const canonicalRulesPath = path.join(rootResolution.canonicalPath, relativeRulesPath)
+				return (await directoryExists(canonicalRulesPath)) ? canonicalRulesPath : undefined
+			}
+
+			return (await resolveConfigChildDirectoryWithLegacyFallback(rootResolution, relativeRulesPath)) ?? undefined
+		} catch (error) {
+			return undefined
+		}
 	}
 
 	/**
@@ -591,26 +641,14 @@ export class CustomModesManager {
 	 */
 	private async deleteRulesFolder(slug: string, mode: ModeConfig, fromMarketplace = false): Promise<void> {
 		try {
-			// Determine the scope based on source (project or global)
 			const scope = mode.source || "global"
-
-			// Determine the rules folder path
-			let rulesFolderPath: string
-			if (scope === "project") {
-				const workspacePath = getWorkspacePath()
-				if (workspacePath) {
-					rulesFolderPath = path.join(workspacePath, ".roo", `rules-${slug}`)
-				} else {
-					return // No workspace, can't delete project rules
-				}
-			} else {
-				// Global scope - use OS home directory
-				const homeDir = os.homedir()
-				rulesFolderPath = path.join(homeDir, ".roo", `rules-${slug}`)
+			const rulesFolderPath = await this.getCustomModeRulesFolderPath(slug, scope, { canonicalOnly: true })
+			if (!rulesFolderPath) {
+				return
 			}
 
-			// Check if the rules folder exists and delete it
-			const rulesFolderExists = await fileExistsAtPath(rulesFolderPath)
+			// Delete canonical rules only. Legacy Roo assets are never deleted automatically.
+			const rulesFolderExists = await directoryExists(rulesFolderPath)
 			if (rulesFolderExists) {
 				try {
 					await fs.rm(rulesFolderPath, { recursive: true, force: true })
@@ -684,20 +722,10 @@ export class CustomModesManager {
 			}
 
 			// Determine the correct rules directory based on mode source
-			let modeRulesDir: string
 			const isGlobalMode = mode?.source === "global"
-
-			if (isGlobalMode) {
-				// For global modes, check in global .roo directory
-				const globalRooDir = getGlobalRooDirectory()
-				modeRulesDir = path.join(globalRooDir, `rules-${slug}`)
-			} else {
-				// For project modes, check in workspace .roo directory
-				const workspacePath = getWorkspacePath()
-				if (!workspacePath) {
-					return false
-				}
-				modeRulesDir = path.join(workspacePath, ".roo", `rules-${slug}`)
+			const modeRulesDir = await this.getCustomModeRulesFolderPath(slug, isGlobalMode ? "global" : "project")
+			if (!modeRulesDir) {
+				return false
 			}
 
 			try {
@@ -785,30 +813,20 @@ export class CustomModesManager {
 				}
 			}
 
-			// Determine the base directory based on mode source
 			const isGlobalMode = mode.source === "global"
-			let baseDir: string
-			if (isGlobalMode) {
-				// For global modes, use the global .roo directory
-				baseDir = getGlobalRooDirectory()
-			} else {
-				// For project modes, use the workspace directory
-				const workspacePath = getWorkspacePath()
-				if (!workspacePath) {
-					return { success: false, error: "No workspace found" }
-				}
-				baseDir = workspacePath
-			}
-
-			// Check for .roo/rules-{slug}/ directory (or rules-{slug}/ for global)
-			const modeRulesDir = isGlobalMode
-				? path.join(baseDir, `rules-${slug}`)
-				: path.join(baseDir, ".roo", `rules-${slug}`)
+			const modeRulesDir = await this.getCustomModeRulesFolderPath(slug, isGlobalMode ? "global" : "project")
 
 			let rulesFiles: RuleFile[] = []
-			try {
-				const stats = await fs.stat(modeRulesDir)
-				if (stats.isDirectory()) {
+			if (modeRulesDir) {
+				try {
+					const stats = await fs.stat(modeRulesDir)
+					if (!stats.isDirectory()) {
+						return {
+							success: true,
+							yaml: yaml.stringify({ customModes: [{ ...mode, source: "project" as const }] }),
+						}
+					}
+
 					// Extract content specific to this mode by looking for the mode-specific rules
 					const entries = await fs.readdir(modeRulesDir, { withFileTypes: true })
 
@@ -827,9 +845,9 @@ export class CustomModesManager {
 							}
 						}
 					}
+				} catch (error) {
+					// Directory doesn't exist or cannot be read, which is fine - mode might not have rules
 				}
-			} catch (error) {
-				// Directory doesn't exist, which is fine - mode might not have rules
 			}
 
 			// Create an export mode with rules files preserved
@@ -878,21 +896,13 @@ export class CustomModesManager {
 		rulesFiles: RuleFile[],
 		source: "global" | "project",
 	): Promise<void> {
-		// Determine base directory and rules folder path based on source
-		let baseDir: string
-		let rulesFolderPath: string
-
-		if (source === "global") {
-			baseDir = getGlobalRooDirectory()
-			rulesFolderPath = path.join(baseDir, `rules-${importMode.slug}`)
-		} else {
-			const workspacePath = getWorkspacePath()
-			baseDir = path.join(workspacePath, ".roo")
-			rulesFolderPath = path.join(baseDir, `rules-${importMode.slug}`)
+		const rulesFolderPath = await this.getCustomModeRulesFolderPath(importMode.slug, source, { forWrite: true })
+		if (!rulesFolderPath) {
+			throw new Error("No workspace found")
 		}
 
-		// Always remove the existing rules folder for this mode if it exists
-		// This ensures that if the imported mode has no rules, the folder is cleaned up
+		// Always remove the existing canonical rules folder for this mode if it exists.
+		// Legacy Roo assets are never deleted automatically.
 		try {
 			await fs.rm(rulesFolderPath, { recursive: true, force: true })
 			logger.info(`Removed existing ${source} rules folder for mode ${importMode.slug}`)

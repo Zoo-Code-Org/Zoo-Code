@@ -1,6 +1,7 @@
 // npx vitest services/marketplace/__tests__/SimpleInstaller.spec.ts
 
 const rooConfigMocks = vi.hoisted(() => ({
+	ensureCanonicalProjectConfigRootForCwd: vi.fn(),
 	resolveProjectCustomModesFileForCwd: vi.fn(),
 	resolveProjectMcpFileForCwd: vi.fn(),
 }))
@@ -50,6 +51,7 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 	safeWriteJson: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock("../../roo-config", () => ({
+	ensureCanonicalProjectConfigRootForCwd: rooConfigMocks.ensureCanonicalProjectConfigRootForCwd,
 	resolveProjectCustomModesFileForCwd: rooConfigMocks.resolveProjectCustomModesFileForCwd,
 	resolveProjectMcpFileForCwd: rooConfigMocks.resolveProjectMcpFileForCwd,
 }))
@@ -95,6 +97,15 @@ describe("SimpleInstaller", () => {
 			canonicalExists: false,
 			legacyExists: false,
 			activeExists: false,
+			shouldBootstrapCanonicalFromLegacy: false,
+		})
+		rooConfigMocks.ensureCanonicalProjectConfigRootForCwd.mockResolvedValue({
+			canonicalPath: "/test/workspace/.zoo",
+			legacyPath: "/test/workspace/.roo",
+			activePath: "/test/workspace/.zoo",
+			canonicalExists: true,
+			legacyExists: false,
+			activeExists: true,
 			shouldBootstrapCanonicalFromLegacy: false,
 		})
 	})
@@ -239,39 +250,33 @@ describe("SimpleInstaller", () => {
 			expect(writtenData.mcpServers["test-mcp"]).toBeDefined()
 		})
 
-		it("bootstraps legacy Roo MCP content into canonical Zoo path before project installs", async () => {
+		it("uses whole-root bootstrap before resolving the canonical project MCP path", async () => {
 			const canonicalPath = path.join("/test/workspace", ".zoo", "mcp.json")
-			const legacyPath = path.join("/test/workspace", ".roo", "mcp.json")
 
-			rooConfigMocks.resolveProjectMcpFileForCwd.mockResolvedValue({
-				canonicalPath,
-				legacyPath,
-				activePath: legacyPath,
-				canonicalExists: false,
+			rooConfigMocks.ensureCanonicalProjectConfigRootForCwd.mockResolvedValueOnce({
+				canonicalPath: path.join("/test/workspace", ".zoo"),
+				legacyPath: path.join("/test/workspace", ".roo"),
+				activePath: path.join("/test/workspace", ".zoo"),
+				canonicalExists: true,
 				legacyExists: true,
 				activeExists: true,
-				shouldBootstrapCanonicalFromLegacy: true,
+				shouldBootstrapCanonicalFromLegacy: false,
 			})
-			mockFs.readFile.mockResolvedValueOnce(
-				JSON.stringify({
-					mcpServers: {
-						legacyServer: { command: "legacy", args: [] },
-					},
-				}),
-			)
+			rooConfigMocks.resolveProjectMcpFileForCwd.mockResolvedValueOnce({
+				canonicalPath,
+				legacyPath: path.join("/test/workspace", ".roo", "mcp.json"),
+				activePath: canonicalPath,
+				canonicalExists: true,
+				legacyExists: true,
+				activeExists: true,
+				shouldBootstrapCanonicalFromLegacy: false,
+			})
 
 			const filePath = await (installer as any).getMcpFilePath("project")
 
 			expect(filePath).toBe(canonicalPath)
-			expect(safeWriteJson).toHaveBeenCalledWith(
-				canonicalPath,
-				{
-					mcpServers: {
-						legacyServer: { command: "legacy", args: [] },
-					},
-				},
-				{ prettyPrint: true },
-			)
+			expect(rooConfigMocks.ensureCanonicalProjectConfigRootForCwd).toHaveBeenCalledWith("/test/workspace")
+			expect(safeWriteJson).not.toHaveBeenCalled()
 		})
 	})
 

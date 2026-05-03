@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "vscode"
 
 const rooConfigMocks = vi.hoisted(() => ({
+	ensureCanonicalProjectConfigRootForCwd: vi.fn(),
 	resolveProjectMcpFileForCwd: vi.fn(),
 }))
 
@@ -35,6 +36,7 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 }))
 
 vi.mock("../../roo-config", () => ({
+	ensureCanonicalProjectConfigRootForCwd: rooConfigMocks.ensureCanonicalProjectConfigRootForCwd,
 	resolveProjectMcpFileForCwd: rooConfigMocks.resolveProjectMcpFileForCwd,
 }))
 
@@ -121,6 +123,15 @@ describe("[McpHub.zooMigration.spec.ts](src/services/mcp/__tests__/McpHub.zooMig
 			activeExists: true,
 			shouldBootstrapCanonicalFromLegacy: false,
 		})
+		rooConfigMocks.ensureCanonicalProjectConfigRootForCwd.mockResolvedValue({
+			canonicalPath: "/test/workspace/.zoo",
+			legacyPath: "/test/workspace/.roo",
+			activePath: "/test/workspace/.zoo",
+			canonicalExists: true,
+			legacyExists: false,
+			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		})
 	})
 
 	it("prefers canonical Zoo project MCP path for reads", async () => {
@@ -145,15 +156,24 @@ describe("[McpHub.zooMigration.spec.ts](src/services/mcp/__tests__/McpHub.zooMig
 		await expect((hub as any).getProjectMcpPath()).resolves.toBe("/test/workspace/.roo/mcp.json")
 	})
 
-	it("bootstraps legacy Roo MCP content into canonical Zoo file before canonical writes", async () => {
-		rooConfigMocks.resolveProjectMcpFileForCwd.mockResolvedValue({
-			canonicalPath: "/test/workspace/.zoo/mcp.json",
-			legacyPath: "/test/workspace/.roo/mcp.json",
-			activePath: "/test/workspace/.roo/mcp.json",
-			canonicalExists: false,
+	it("uses whole-root bootstrap before canonical project MCP writes", async () => {
+		rooConfigMocks.ensureCanonicalProjectConfigRootForCwd.mockResolvedValueOnce({
+			canonicalPath: "/test/workspace/.zoo",
+			legacyPath: "/test/workspace/.roo",
+			activePath: "/test/workspace/.zoo",
+			canonicalExists: true,
 			legacyExists: true,
 			activeExists: true,
-			shouldBootstrapCanonicalFromLegacy: true,
+			shouldBootstrapCanonicalFromLegacy: false,
+		})
+		rooConfigMocks.resolveProjectMcpFileForCwd.mockResolvedValueOnce({
+			canonicalPath: "/test/workspace/.zoo/mcp.json",
+			legacyPath: "/test/workspace/.roo/mcp.json",
+			activePath: "/test/workspace/.zoo/mcp.json",
+			canonicalExists: true,
+			legacyExists: true,
+			activeExists: true,
+			shouldBootstrapCanonicalFromLegacy: false,
 		})
 		fsMocks.readFile.mockImplementation(async (filePath: any) => {
 			if (filePath === "/test/workspace/.roo/mcp.json" || filePath === "/test/workspace/.zoo/mcp.json") {
@@ -166,22 +186,12 @@ describe("[McpHub.zooMigration.spec.ts](src/services/mcp/__tests__/McpHub.zooMig
 		const hub = new McpHub(provider)
 		await (hub as any).updateServerConfig("legacyServer", { disabled: true }, "project")
 
+		expect(rooConfigMocks.ensureCanonicalProjectConfigRootForCwd).toHaveBeenCalledWith("/test/workspace")
 		const canonicalWrites = safeWriteJsonMock.mock.calls.filter(
 			([filePath]) => filePath === "/test/workspace/.zoo/mcp.json",
 		)
+		expect(canonicalWrites).toHaveLength(1)
 		expect(canonicalWrites[0]).toEqual([
-			"/test/workspace/.zoo/mcp.json",
-			{
-				mcpServers: {
-					legacyServer: {
-						command: "node",
-						args: ["legacy.js"],
-					},
-				},
-			},
-			{ prettyPrint: true },
-		])
-		expect(canonicalWrites[1]).toEqual([
 			"/test/workspace/.zoo/mcp.json",
 			{
 				mcpServers: {
