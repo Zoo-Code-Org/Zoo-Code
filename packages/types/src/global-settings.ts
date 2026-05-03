@@ -232,9 +232,44 @@ export const globalSettingsSchema = z.object({
 	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
+
+	/**
+	 * Settings for the ToolResultProcessor (tool output compression).
+	 * Controls thresholds for when compression kicks in.
+	 */
+	toolResultProcessorSettings: z
+		.object({
+			/** Master switch — false disables all compression */
+			enabled: z.boolean(),
+			/** Compress read_file results above this many characters (default: 1500) */
+			readFileCharsAbove: z.number(),
+			/** Compress search_files results above this many matches (default: 20) */
+			searchMatchesAbove: z.number(),
+			/** Compress list_files results above this many paths (default: 100) */
+			listFilesCountAbove: z.number(),
+		})
+		.optional(),
+
+	/**
+	 * Zoo Code API key for subscription features (smart compression).
+	 * Stored in VS Code SecretStorage — never in global state.
+	 * Generate at https://zoocode.dev/dashboard/api-tokens
+	 */
+	zooCodeApiKey: z.string().optional(),
+
+	/**
+	 * Zoo Code API base URL for subscription features (smart compression).
+	 * Defaults to "https://zoocode.dev". Override for dev/staging.
+	 */
+	zooCodeBaseUrl: z.string().optional(),
 })
 
 export type GlobalSettings = z.infer<typeof globalSettingsSchema>
+
+/**
+ * Settings for the ToolResultProcessor, extracted from GlobalSettings for convenience.
+ */
+export type ToolResultProcessorSettings = NonNullable<GlobalSettings["toolResultProcessorSettings"]>
 
 export const GLOBAL_SETTINGS_KEYS = globalSettingsSchema.keyof().options
 
@@ -285,6 +320,7 @@ export const SECRET_STATE_KEYS = [
 // Global secrets that are part of GlobalSettings (not ProviderSettings)
 export const GLOBAL_SECRET_KEYS = [
 	"openRouterImageApiKey", // For image generation
+	"zooCodeApiKey", // Zoo Code subscription API key
 ] as const
 
 // Type for the actual secret storage keys

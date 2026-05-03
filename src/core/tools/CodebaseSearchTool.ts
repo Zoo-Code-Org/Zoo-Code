@@ -9,6 +9,7 @@ import { VectorStoreSearchResult } from "../../services/code-index/interfaces"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { compressAndPushToolResult } from "./compressAndPush"
 
 interface CodebaseSearchParams {
 	query: string
@@ -122,7 +123,7 @@ Code Chunk: ${result.codeChunk}
 	)
 	.join("\n")}`
 
-			pushToolResult(output)
+			await compressAndPushToolResult("codebase_search", output, query, task, callbacks.pushToolResult)
 		} catch (error: any) {
 			await handleError("codebase_search", error)
 		}

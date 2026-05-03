@@ -414,6 +414,16 @@
 					"default": false,
 					"description": "%settings.debugProxy.tlsInsecure.description%",
 					"markdownDescription": "%settings.debugProxy.tlsInsecure.description%"
+				},
+				"roo-cline.zooCodeApiKey": {
+					"type": "string",
+					"default": "",
+					"description": "Zoo Code API key for subscription features (smart compression). Generate at https://zoocode.dev/dashboard/api-tokens"
+				},
+				"roo-cline.zooCodeBaseUrl": {
+					"type": "string",
+					"default": "https://zoocode.dev",
+					"description": "Zoo Code API base URL (for development/staging overrides)"
 				}
 			}
 		}

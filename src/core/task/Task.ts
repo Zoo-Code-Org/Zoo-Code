@@ -14,7 +14,6 @@ import delay from "delay"
 import pWaitFor from "p-wait-for"
 import { serializeError } from "serialize-error"
 import { Package } from "../../shared/package"
-import { formatToolInvocation } from "../tools/helpers/toolResultFormatting"
 
 import {
 	type TaskLike,
@@ -98,6 +97,10 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
+import { ToolResultProcessor } from "../tools/ToolResultProcessor"
+import { DEFAULT_PROCESSOR_CONFIG, type ToolResultProcessorConfig } from "../tools/ToolResultProcessorConfig"
+import { resolveCompressionHandler } from "../tools/resolveCompressionHandler"
+import { CompletionPostProcessor } from "../tools/CompletionPostProcessor"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -105,6 +108,7 @@ import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { manageContext, willManageContext } from "../context-management"
+import { compressOldToolResults } from "../context-management/compressToolResults"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
@@ -116,6 +120,11 @@ import {
 	taskMetadata,
 } from "../task-persistence"
 import { getEnvironmentDetails } from "../environment/getEnvironmentDetails"
+import {
+	parseEnvironmentSections,
+	diffEnvironmentDetails,
+	assembleEnvironmentDetails,
+} from "../environment/environmentDiff"
 import { checkContextWindowExceededError } from "../context/context-management/context-error-handling"
 import {
 	type CheckpointDiffOptions,
@@ -295,6 +304,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	toolRepetitionDetector: ToolRepetitionDetector
+	public toolResultProcessor: ToolResultProcessor
+	public toolResultProcessorConfig: ToolResultProcessorConfig
+	public completionPostProcessor: CompletionPostProcessor
 	rooIgnoreController?: RooIgnoreController
 	rooProtectedController?: RooProtectedController
 	fileContextTracker: FileContextTracker
@@ -304,6 +316,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	diffViewProvider: DiffViewProvider
 	diffStrategy?: DiffStrategy
 	didEditFile: boolean = false
+
+	// Environment details diffing — tracks last-sent sections to avoid
+	// resending unchanged content on every turn.
+	private lastEnvironmentSections: Map<string, string> | null = null
 
 	// LLM Messages & Chat Messages
 	apiConversationHistory: ApiMessage[] = []
@@ -535,6 +551,50 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy()
 
 		this.toolRepetitionDetector = new ToolRepetitionDetector(this.consecutiveMistakeLimit)
+
+		// Build toolResultProcessorConfig by merging user settings over the defaults.
+		// Note: isSubscriber is intentionally NOT sourced from user settings — it comes
+		// from subscription status (always false until the subscription proxy lands).
+		const savedProcessorSettings = provider.getValue?.("toolResultProcessorSettings")
+		this.toolResultProcessorConfig = {
+			...DEFAULT_PROCESSOR_CONFIG,
+			...(savedProcessorSettings !== undefined
+				? {
+						enabled: savedProcessorSettings.enabled,
+						thresholds: {
+							readFileCharsAbove:
+								savedProcessorSettings.readFileCharsAbove ??
+								DEFAULT_PROCESSOR_CONFIG.thresholds.readFileCharsAbove,
+							searchMatchesAbove:
+								savedProcessorSettings.searchMatchesAbove ??
+								DEFAULT_PROCESSOR_CONFIG.thresholds.searchMatchesAbove,
+							listFilesCountAbove:
+								savedProcessorSettings.listFilesCountAbove ??
+								DEFAULT_PROCESSOR_CONFIG.thresholds.listFilesCountAbove,
+						},
+					}
+				: {}),
+		}
+
+		// Initialize processors with null (no compression) immediately — updated async below
+		this.toolResultProcessor = new ToolResultProcessor(null)
+		this.completionPostProcessor = new CompletionPostProcessor(null)
+
+		// Resolve compression handler asynchronously (checks subscription via Zoo Code API)
+		const zooCodeApiKey = provider.contextProxy?.getSecret("zooCodeApiKey") as string | undefined
+		const zooCodeBaseUrl = (provider.getValue?.("zooCodeBaseUrl") as string | undefined) ?? "https://zoocode.dev"
+
+		resolveCompressionHandler(zooCodeApiKey, zooCodeBaseUrl)
+			.then((handler) => {
+				this.toolResultProcessor = new ToolResultProcessor(handler)
+				this.completionPostProcessor = new CompletionPostProcessor(handler)
+				if (handler) {
+					this.toolResultProcessorConfig = { ...this.toolResultProcessorConfig, isSubscriber: true }
+				}
+			})
+			.catch(() => {
+				// Keep null processors on error — graceful degradation
+			})
 
 		// Initialize todo list if provided
 		if (initialTodos && initialTodos.length > 0) {
@@ -2624,7 +2684,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
-			const environmentDetails = await getEnvironmentDetails(this, currentIncludeFileDetails)
+			const rawEnvironmentDetails = await getEnvironmentDetails(this, currentIncludeFileDetails)
+
+			// Diff environment details to avoid resending unchanged sections on turn 2+.
+			const currentSections = parseEnvironmentSections(rawEnvironmentDetails)
+			const { sections: filteredSections, wasFiltered } = diffEnvironmentDetails(
+				this.lastEnvironmentSections,
+				currentSections,
+			)
+			this.lastEnvironmentSections = currentSections
+			const environmentDetails = assembleEnvironmentDetails(filteredSections, wasFiltered)
 
 			// Remove any existing environment_details blocks before adding fresh ones.
 			// This prevents duplicate environment details when resuming tasks,
@@ -4274,12 +4343,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 
-		// The provider accepts reasoning items alongside standard messages; cast to the expected parameter type.
-		const stream = this.api.createMessage(
-			systemPrompt,
+		// Before the API call, compress old tool results for token savings.
+		// We compress a copy (cleanConversationHistory is already derived from the stored history),
+		// so this.apiConversationHistory remains intact for the UI and persistence.
+		const compressedHistory = compressOldToolResults(
 			cleanConversationHistory as unknown as Anthropic.Messages.MessageParam[],
-			metadata,
 		)
+
+		// The provider accepts reasoning items alongside standard messages; cast to the expected parameter type.
+		const stream = this.api.createMessage(systemPrompt, compressedHistory, metadata)
 		const iterator = stream[Symbol.asyncIterator]()
 
 		// Set up abort handling - when the signal is aborted, clean up the controller reference

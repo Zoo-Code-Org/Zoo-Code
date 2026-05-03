@@ -31,6 +31,8 @@ import {
 	GraduationCap,
 } from "lucide-react"
 
+import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+
 import {
 	type ProviderSettings,
 	type ExperimentId,
@@ -332,6 +334,16 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		})
 	}, [])
 
+	const setZooCodeApiKey = useCallback((apiKey: string) => {
+		setCachedState((prevState) => {
+			if ((prevState as any).zooCodeApiKey !== apiKey) {
+				setChangeDetected(true)
+			}
+
+			return { ...prevState, zooCodeApiKey: apiKey }
+		})
+	}, [])
+
 	const setImageGenerationSelectedModel = useCallback((model: string) => {
 		setCachedState((prevState) => {
 			if (prevState.openRouterImageGenerationSelectedModel !== model) {
@@ -420,6 +432,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					imageGenerationProvider,
 					openRouterImageApiKey,
 					openRouterImageGenerationSelectedModel,
+					zooCodeApiKey: (cachedState as any).zooCodeApiKey,
 					experiments,
 					customSupportPrompts,
 				},
@@ -919,14 +932,42 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<LanguageSettings language={language || "en"} setCachedStateField={setCachedStateField} />
 						)}
 
-						{/* About Section */}
+						{/* Zoo Code Subscription Section */}
 						{renderTab === "about" && (
-							<About
-								telemetrySetting={telemetrySetting}
-								setTelemetrySetting={setTelemetrySetting}
-								debug={cachedState.debug}
-								setDebug={setDebug}
-							/>
+							<div>
+								<SectionHeader>Zoo Code Subscription</SectionHeader>
+
+								<Section>
+									<div>
+										<label className="block font-medium mb-1">API Key</label>
+										<VSCodeTextField
+											value={(cachedState as any).zooCodeApiKey ?? ""}
+											onInput={(e: any) => setZooCodeApiKey(e.target.value)}
+											placeholder="zoo_sk_..."
+											className="w-full"
+											type="password"
+										/>
+										<p className="text-vscode-descriptionForeground text-xs mt-1">
+											Get your API key at{" "}
+											<a
+												href="https://zoocode.dev/dashboard/api-tokens"
+												target="_blank"
+												rel="noopener noreferrer"
+												className="text-vscode-textLink-foreground hover:text-vscode-textLink-activeForeground">
+												zoocode.dev/dashboard/api-tokens
+											</a>
+										</p>
+									</div>
+								</Section>
+
+								{/* About Section */}
+								<About
+									telemetrySetting={telemetrySetting}
+									setTelemetrySetting={setTelemetrySetting}
+									debug={cachedState.debug}
+									setDebug={setDebug}
+								/>
+							</div>
 						)}
 					</SearchIndexProvider>
 				</TabContent>

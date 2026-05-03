@@ -9,6 +9,7 @@ import { regexSearchFiles } from "../../services/ripgrep"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { compressAndPushToolResult } from "./compressAndPush"
 
 interface SearchFilesParams {
 	path: string
@@ -65,7 +66,7 @@ export class SearchFilesTool extends BaseTool<"search_files"> {
 				return
 			}
 
-			pushToolResult(results)
+			await compressAndPushToolResult("search_files", results, regex, task, callbacks.pushToolResult)
 		} catch (error) {
 			await handleError("searching files", error as Error)
 		}

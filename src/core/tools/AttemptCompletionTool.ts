@@ -78,7 +78,13 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 			task.consecutiveMistakeCount = 0
 
-			await task.say("completion_result", result, undefined, false)
+			// Post-process the result for display only (display-only, does not affect history).
+			// The original `result` is preserved for pushToolResult / conversation history.
+			const displayResult = task.completionPostProcessor?.isAvailable
+				? await task.completionPostProcessor.postProcess(result)
+				: result
+
+			await task.say("completion_result", displayResult, undefined, false)
 
 			// Check for subtask using parentTaskId (metadata-driven delegation)
 			if (task.parentTaskId) {

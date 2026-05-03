@@ -76,6 +76,7 @@ import { getCommand } from "../../utils/commands"
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
 import { MarketplaceManager, MarketplaceItemType } from "../../services/marketplace"
+import { clearSubscriptionCache } from "../tools/resolveCompressionHandler"
 import { setPendingTodoList } from "../tools/UpdateTodoListTool"
 import {
 	handleListWorktrees,
@@ -750,6 +751,10 @@ export const webviewMessageHandler = async (
 					}
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+
+					if (key === "zooCodeApiKey") {
+						clearSubscriptionCache()
+					}
 				}
 
 				await provider.postStateToWebview()

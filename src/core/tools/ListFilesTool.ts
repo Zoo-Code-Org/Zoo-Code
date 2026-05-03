@@ -10,6 +10,7 @@ import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { compressAndPushToolResult } from "./compressAndPush"
 
 interface ListFilesParams {
 	path: string
@@ -62,7 +63,7 @@ export class ListFilesTool extends BaseTool<"list_files"> {
 				return
 			}
 
-			pushToolResult(result)
+			await compressAndPushToolResult("list_files", result, relDirPath, task, callbacks.pushToolResult)
 		} catch (error) {
 			await handleError("listing files", error)
 		}

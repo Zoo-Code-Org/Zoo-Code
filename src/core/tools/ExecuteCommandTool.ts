@@ -20,6 +20,7 @@ import { Package } from "../../shared/package"
 import { t } from "../../i18n"
 import { getTaskDirectoryPath } from "../../utils/storage"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { compressAndPushToolResult } from "./compressAndPush"
 
 class ShellIntegrationError extends Error {}
 
@@ -114,7 +115,17 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					task.didRejectTool = true
 				}
 
-				pushToolResult(result)
+				if (typeof result === "string") {
+					await compressAndPushToolResult(
+						"execute_command",
+						result,
+						canonicalCommand,
+						task,
+						callbacks.pushToolResult,
+					)
+				} else {
+					pushToolResult(result)
+				}
 			} catch (error: unknown) {
 				const status: CommandExecutionStatus = { executionId, status: "fallback" }
 				provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
@@ -133,7 +144,17 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 						task.didRejectTool = true
 					}
 
-					pushToolResult(result)
+					if (typeof result === "string") {
+						await compressAndPushToolResult(
+							"execute_command",
+							result,
+							canonicalCommand,
+							task,
+							callbacks.pushToolResult,
+						)
+					} else {
+						pushToolResult(result)
+					}
 				} else {
 					pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
 				}

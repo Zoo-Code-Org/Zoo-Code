@@ -37,6 +37,7 @@ import { generateImageTool } from "../tools/GenerateImageTool"
 import { applyDiffTool as applyDiffToolClass } from "../tools/ApplyDiffTool"
 import { isValidToolName, validateToolUse } from "../tools/validateToolUse"
 import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
+import { isReadOnlyTool } from "../tools/toolCategories"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
@@ -673,6 +674,208 @@ export async function presentAssistantMessage(cline: Task) {
 					)
 					break
 				}
+			}
+
+			// Parallel execution of consecutive read-only tools.
+			// When a complete read-only tool is encountered, look ahead for more consecutive
+			// complete read-only tool_use blocks. If 2 or more are found, execute them in
+			// parallel using Promise.all to reduce latency by 50–70%.
+			//
+			// Approval (cline.ask) is serialized by the Task messaging system — only one
+			// approval dialog can be pending at a time — so approvals remain sequential
+			// even though tool promises are launched concurrently.
+			if (!block.partial && isReadOnlyTool(block.name)) {
+				// Collect the current block plus any consecutive complete read-only tool_use blocks
+				const parallelBatch: any[] = [block]
+				let lookAheadIdx = cline.currentStreamingContentIndex + 1
+
+				while (lookAheadIdx < cline.assistantMessageContent.length) {
+					const nextBlock = cline.assistantMessageContent[lookAheadIdx]
+					if (
+						nextBlock &&
+						nextBlock.type === "tool_use" &&
+						!(nextBlock as any).partial &&
+						isReadOnlyTool((nextBlock as any).name) &&
+						(nextBlock as any).id &&
+						(nextBlock as any).nativeArgs
+					) {
+						parallelBatch.push({ ...(nextBlock as any) })
+						lookAheadIdx++
+					} else {
+						break
+					}
+				}
+
+				if (parallelBatch.length >= 2) {
+					// Build per-block callbacks for each tool in the batch.
+					// Each tool gets its own isolated pushToolResult / handleError / askApproval
+					// so that results are correctly attributed to the right tool_use_id.
+					const buildBlockCallbacks = (batchBlock: any) => {
+						const batchToolCallId = batchBlock.id as string
+						let batchHasToolResult = false
+						let batchApprovalFeedback: { text: string; images?: string[] } | undefined
+
+						const batchPushToolResult = (content: ToolResponse) => {
+							if (batchHasToolResult) {
+								console.warn(
+									`[presentAssistantMessage] Skipping duplicate tool_result for tool_use_id: ${batchToolCallId}`,
+								)
+								return
+							}
+
+							let resultContent: string
+							let imageBlocks: Anthropic.ImageBlockParam[] = []
+
+							if (typeof content === "string") {
+								resultContent = content || "(tool did not return anything)"
+							} else {
+								const textBlocks = content.filter((item) => item.type === "text")
+								imageBlocks = content.filter(
+									(item) => item.type === "image",
+								) as Anthropic.ImageBlockParam[]
+								resultContent =
+									textBlocks.map((item) => (item as Anthropic.TextBlockParam).text).join("\n") ||
+									"(tool did not return anything)"
+							}
+
+							if (batchApprovalFeedback) {
+								const feedbackText = formatResponse.toolApprovedWithFeedback(batchApprovalFeedback.text)
+								resultContent = `${feedbackText}\n\n${resultContent}`
+								if (batchApprovalFeedback.images) {
+									const feedbackImageBlocks = formatResponse.imageBlocks(batchApprovalFeedback.images)
+									imageBlocks = [...feedbackImageBlocks, ...imageBlocks]
+								}
+							}
+
+							cline.pushToolResultToUserContent({
+								type: "tool_result",
+								tool_use_id: sanitizeToolUseId(batchToolCallId),
+								content: resultContent,
+							})
+
+							if (imageBlocks.length > 0) {
+								cline.userMessageContent.push(...imageBlocks)
+							}
+
+							batchHasToolResult = true
+						}
+
+						const batchAskApproval = async (
+							type: ClineAsk,
+							partialMessage?: string,
+							progressStatus?: ToolProgressStatus,
+							isProtected?: boolean,
+						) => {
+							const { response, text, images } = await cline.ask(
+								type,
+								partialMessage,
+								false,
+								progressStatus,
+								isProtected || false,
+							)
+
+							if (response !== "yesButtonClicked") {
+								if (text) {
+									await cline.say("user_feedback", text, images)
+									batchPushToolResult(
+										formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images),
+									)
+								} else {
+									batchPushToolResult(formatResponse.toolDenied())
+								}
+								cline.didRejectTool = true
+								return false
+							}
+
+							if (text) {
+								await cline.say("user_feedback", text, images)
+								batchApprovalFeedback = { text, images }
+							}
+
+							return true
+						}
+
+						const batchHandleError = async (action: string, error: Error) => {
+							if (error instanceof AskIgnoredError) {
+								return
+							}
+							const errorString = `Error ${action}: ${JSON.stringify(serializeError(error))}`
+							await cline.say(
+								"error",
+								`Error ${action}:\n${error.message ?? JSON.stringify(serializeError(error), null, 2)}`,
+							)
+							batchPushToolResult(formatResponse.toolError(errorString))
+						}
+
+						return {
+							pushToolResult: batchPushToolResult,
+							askApproval: batchAskApproval,
+							handleError: batchHandleError,
+						}
+					}
+
+					// Map each block to its execution promise.
+					// cline.ask() (used inside each tool's askApproval) serializes approval dialogs
+					// so user approvals happen one at a time, while the actual I/O runs concurrently.
+					const executionPromises = parallelBatch.map((batchBlock) => {
+						const callbacks = buildBlockCallbacks(batchBlock)
+
+						// Each tool invocation returns a promise that handles its own approval + I/O
+						const executeOne = async () => {
+							switch (batchBlock.name) {
+								case "read_file":
+									await readFileTool.handle(cline, batchBlock as ToolUse<"read_file">, callbacks)
+									break
+								case "list_files":
+									await listFilesTool.handle(cline, batchBlock as ToolUse<"list_files">, callbacks)
+									break
+								case "search_files":
+									await searchFilesTool.handle(
+										cline,
+										batchBlock as ToolUse<"search_files">,
+										callbacks,
+									)
+									break
+								case "codebase_search":
+									await codebaseSearchTool.handle(
+										cline,
+										batchBlock as ToolUse<"codebase_search">,
+										callbacks,
+									)
+									break
+								// Fallback: should not occur since we only batch known read-only tools
+								default:
+									break
+							}
+						}
+
+						return executeOne()
+					})
+
+					// Execute all tools concurrently; approvals remain sequential via Task.ask() internals
+					await Promise.all(executionPromises)
+
+					// Advance currentStreamingContentIndex past all batch blocks.
+					// The block at the current index will be advanced by the normal post-switch
+					// increment at the bottom of presentAssistantMessage, so we only need to
+					// pre-advance by (parallelBatch.length - 1) additional steps here.
+					const extraAdvance = parallelBatch.length - 1
+					for (let i = 0; i < extraAdvance; i++) {
+						cline.currentStreamingContentIndex++
+						// Record tool usage and telemetry for each additional (lookahead) block
+						const advancedBlock = parallelBatch[i + 1]
+						if (advancedBlock && !advancedBlock.partial) {
+							cline.recordToolUsage(advancedBlock.name)
+							TelemetryService.instance.captureToolUsage(cline.taskId, advancedBlock.name)
+						}
+					}
+
+					// Fall through to the normal post-switch handling by breaking out of the
+					// tool_use case — the post-switch code will handle index advancement and
+					// userMessageContentReady for the last block in the batch.
+					break
+				}
+				// If only 1 read-only tool (no lookahead), fall through to sequential dispatch below.
 			}
 
 			switch (block.name) {

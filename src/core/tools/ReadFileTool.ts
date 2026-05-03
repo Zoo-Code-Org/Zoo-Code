@@ -25,6 +25,8 @@ import { readWithIndentation, readWithSlice } from "../../integrations/misc/inde
 import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
 import type { ToolUse, PushToolResult } from "../../shared/tools"
 
+import { compressAndPushToolResult } from "./compressAndPush"
+
 import {
 	DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
 	DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
@@ -240,7 +242,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				task.didToolFailInCurrentTurn = true
 			}
 
-			this.buildAndPushResult(task, fileResults, pushToolResult)
+			await this.buildAndPushResult(task, fileResults, pushToolResult, filePath)
 		} catch (error) {
 			const relPath = filePath || "unknown"
 			const errorMsg = error instanceof Error ? error.message : String(error)
@@ -569,7 +571,12 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	/**
 	 * Build and push the final result to the tool output.
 	 */
-	private buildAndPushResult(task: Task, fileResults: FileResult[], pushToolResult: PushToolResult): void {
+	private async buildAndPushResult(
+		task: Task,
+		fileResults: FileResult[],
+		pushToolResult: PushToolResult,
+		context: string,
+	): Promise<void> {
 		const finalResult = fileResults
 			.filter((r) => r.nativeContent)
 			.map((r) => r.nativeContent)
@@ -616,7 +623,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				}
 			}
 		} else {
-			pushToolResult(finalResult)
+			await compressAndPushToolResult("read_file", finalResult, context, task, pushToolResult)
 		}
 	}
 
@@ -806,7 +813,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		}
 
 		// Push combined results
-		pushToolResult(results.join("\n\n---\n\n"))
+		const context = fileEntries.map((e) => e.path).join(", ")
+		await compressAndPushToolResult("read_file", results.join("\n\n---\n\n"), context, task, pushToolResult)
 	}
 }
 

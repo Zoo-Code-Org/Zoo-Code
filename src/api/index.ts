@@ -46,8 +46,9 @@ export interface ApiHandlerCreateMessageMetadata {
 	 * Task ID used for tracking and provider-specific features:
 	 * - Roo: Sent as X-Roo-Task-ID header
 	 * - Requesty: Sent as trace_id
+	 * Optional — not required for internal compression calls (ZooGatewayApiHandler).
 	 */
-	taskId: string
+	taskId?: string
 	/**
 	 * Current mode slug for provider-specific tracking:
 	 * - Requesty: Sent in extra metadata
@@ -87,6 +88,12 @@ export interface ApiHandlerCreateMessageMetadata {
 	 * Only applies to providers that support function calling restrictions (e.g., Gemini).
 	 */
 	allowedFunctionNames?: string[]
+	/**
+	 * Name of the tool that produced the result being compressed.
+	 * Used by ZooGatewayApiHandler to pass the originating tool name
+	 * to the compression endpoint for logging and prompt tuning.
+	 */
+	toolName?: string
 }
 
 export interface ApiHandler {
