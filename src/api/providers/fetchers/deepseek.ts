@@ -37,8 +37,6 @@ export async function getDeepSeekModels(baseUrl?: string, apiKey?: string): Prom
 				signal: controller.signal,
 			})
 
-			clearTimeout(timeoutId)
-
 			if (!response.ok) {
 				let errorBody = ""
 				try {
