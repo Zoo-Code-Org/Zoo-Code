@@ -242,7 +242,11 @@ describe("DeepSeekHandler", () => {
 
 		it("should NOT have preserveReasoning enabled for deepseek-chat", () => {
 			// deepseek-chat doesn't use thinking mode, so no need to preserve reasoning
-			const model = handler.getModel()
+			const chatHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-chat",
+			})
+			const model = chatHandler.getModel()
 			// Cast to ModelInfo to access preserveReasoning which is an optional property
 			expect((model.info as ModelInfo).preserveReasoning).toBeUndefined()
 		})
@@ -255,10 +259,14 @@ describe("DeepSeekHandler", () => {
 			const model = handlerWithInvalidModel.getModel()
 			expect(model.id).toBe("invalid-model") // Returns provided ID
 			expect(model.info).toBeDefined()
-			// With the current implementation, it's the same object reference when using default model info
-			expect(model.info).toBe(handler.getModel().info)
+			// Should fall back to the default model (deepseek-v4-pro)
+			const defaultHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: undefined,
+			})
+			expect(model.info).toBe(defaultHandler.getModel().info)
 			// Should have the same base properties
-			expect(model.info.contextWindow).toBe(handler.getModel().info.contextWindow)
+			expect(model.info.contextWindow).toBe(defaultHandler.getModel().info.contextWindow)
 			// And should have supportsPromptCache set to true
 			expect(model.info.supportsPromptCache).toBe(true)
 		})

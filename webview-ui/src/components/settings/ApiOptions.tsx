@@ -613,7 +613,10 @@ const ApiOptions = ({
 						<DeepSeek
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
 							simplifySettings={fromWelcomeView}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
 						/>
 					)}
 

@@ -17,7 +17,9 @@ import { convertToR1Format } from "../transform/r1-format"
 import { OpenAiHandler } from "./openai"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 
-// Custom interface for DeepSeek params to support thinking mode
+// Custom interface for DeepSeek params to support thinking mode.
+// The OpenAI Node.js SDK passes unknown fields through to the API,
+// so we can add `thinking` directly in the body.
 type DeepSeekChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParamsStreaming & {
 	thinking?: { type: "enabled" | "disabled" }
 }
@@ -55,12 +57,14 @@ export class DeepSeekHandler extends OpenAiHandler {
 		const modelId = this.options.apiModelId ?? deepSeekDefaultModelId
 		const { info: modelInfo } = this.getModel()
 
-		// Check if this is a thinking-enabled model (deepseek-reasoner)
-		const isThinkingModel = modelId.includes("deepseek-reasoner")
+		// Check if this is a thinking-enabled model using the preserveReasoning flag.
+		// This covers deepseek-reasoner, deepseek-v4-pro, deepseek-v4-flash, and any
+		// future models that support thinking mode.
+		const isThinkingModel = "preserveReasoning" in modelInfo && modelInfo.preserveReasoning === true
 
 		// Convert messages to R1 format (merges consecutive same-role messages)
 		// This is required for DeepSeek which does not support successive messages with the same role
-		// For thinking models (deepseek-reasoner), enable mergeToolResultText to preserve reasoning_content
+		// For thinking models, enable mergeToolResultText to preserve reasoning_content
 		// during tool call sequences. Without this, environment_details text after tool_results would
 		// create user messages that cause DeepSeek to drop all previous reasoning_content.
 		// See: https://api-docs.deepseek.com/guides/thinking_mode
@@ -74,7 +78,7 @@ export class DeepSeekHandler extends OpenAiHandler {
 			messages: convertedMessages,
 			stream: true as const,
 			stream_options: { include_usage: true },
-			// Enable thinking mode for deepseek-reasoner or when tools are used with thinking model
+			// Enable thinking mode for models that support it (deepseek-reasoner, v4-pro, v4-flash)
 			...(isThinkingModel && { thinking: { type: "enabled" } }),
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,

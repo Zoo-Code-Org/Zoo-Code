@@ -232,9 +232,11 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case "deepseek": {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = deepSeekModels[id as keyof typeof deepSeekModels]
-			return { id, info }
+			const id = getValidatedModelId(apiConfiguration.apiModelId, routerModels.deepseek, defaultModelId)
+			const routerInfo = routerModels.deepseek?.[id]
+			const staticInfo = deepSeekModels[id as keyof typeof deepSeekModels]
+			// Prefer dynamic router models, fall back to static models
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case "moonshot": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId

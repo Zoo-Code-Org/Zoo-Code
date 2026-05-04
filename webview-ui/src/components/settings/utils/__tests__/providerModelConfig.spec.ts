@@ -182,7 +182,6 @@ describe("providerModelConfig", () => {
 			expect(shouldUseGenericModelPicker("anthropic")).toBe(true)
 			expect(shouldUseGenericModelPicker("bedrock")).toBe(true)
 			expect(shouldUseGenericModelPicker("gemini")).toBe(true)
-			expect(shouldUseGenericModelPicker("deepseek")).toBe(true)
 		})
 
 		it("returns false for providers with custom model UI", () => {
@@ -190,6 +189,7 @@ describe("providerModelConfig", () => {
 			expect(shouldUseGenericModelPicker("ollama")).toBe(false)
 			expect(shouldUseGenericModelPicker("lmstudio")).toBe(false)
 			expect(shouldUseGenericModelPicker("vscode-lm")).toBe(false)
+			expect(shouldUseGenericModelPicker("deepseek")).toBe(false)
 		})
 
 		it("returns false for providers without static models", () => {
