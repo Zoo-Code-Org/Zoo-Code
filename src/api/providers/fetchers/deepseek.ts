@@ -3,6 +3,21 @@ import { deepSeekModels, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
 import { DEFAULT_HEADERS } from "../constants"
 
+// Reserved keys that could be used for prototype pollution
+const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"])
+
+/**
+ * Validates and sanitizes a model ID to prevent prototype pollution.
+ * Returns the sanitized string, or null if the key is invalid.
+ */
+function sanitizeModelId(raw: unknown): string | null {
+	const id = String(raw)
+	if (!id || RESERVED_KEYS.has(id)) {
+		return null
+	}
+	return id
+}
+
 /**
  * Fetches available models from the DeepSeek API and merges them with known specs.
  *
@@ -62,11 +77,11 @@ export async function getDeepSeekModels(baseUrl?: string, apiKey?: string): Prom
 				throw new Error("Failed to fetch DeepSeek models: Unexpected response format.")
 			}
 
-			const models: ModelRecord = {}
+			// Use null-prototype object to prevent prototype pollution
+			const models: ModelRecord = Object.create(null)
 
 			for (const model of data.data) {
-				const modelId = model.id as string
-
+				const modelId = sanitizeModelId(model.id)
 				if (!modelId) continue
 
 				// If we have known specs for this model, use them
