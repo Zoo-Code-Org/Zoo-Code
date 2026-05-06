@@ -2,18 +2,16 @@ import * as vscode from "vscode"
 
 import { getRouterUnavailableSignInMessage } from "../core/config/routerRemoval"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import { handleAuthCallback as handleZooCodeAuthCallback, setZooCodeUserInfo } from "../services/zoo-code-auth"
 
 export const handleUri = async (uri: vscode.Uri) => {
 	const path = uri.path
 	const query = new URLSearchParams(uri.query.replace(/\+/g, "%2B"))
 	const visibleProvider = ClineProvider.getVisibleInstance()
 
-	if (!visibleProvider) {
-		return
-	}
-
 	switch (path) {
 		case "/openrouter": {
+			if (!visibleProvider) return
 			const code = query.get("code")
 			if (code) {
 				await visibleProvider.handleOpenRouterCallback(code)
@@ -21,6 +19,7 @@ export const handleUri = async (uri: vscode.Uri) => {
 			break
 		}
 		case "/requesty": {
+			if (!visibleProvider) return
 			const code = query.get("code")
 			const baseUrl = query.get("baseUrl")
 			if (code) {
@@ -30,6 +29,33 @@ export const handleUri = async (uri: vscode.Uri) => {
 		}
 		case "/auth/clerk/callback": {
 			vscode.window.showInformationMessage(getRouterUnavailableSignInMessage())
+			break
+		}
+		case "/auth-callback": {
+			const token = query.get("token")
+			if (token) {
+				// Extract user info from callback URL params with proper URL decoding
+				const name = query.get("name") ? decodeURIComponent(query.get("name")!.replace(/\+/g, " ")) : undefined
+				const email = query.get("email")
+					? decodeURIComponent(query.get("email")!.replace(/\+/g, " "))
+					: undefined
+				const image = query.get("image") ? decodeURIComponent(query.get("image")!) : undefined
+
+				// Store user info if provided
+				if (name || email || image) {
+					await setZooCodeUserInfo({
+						name,
+						email,
+						image,
+					})
+				}
+
+				const success = await handleZooCodeAuthCallback(token)
+				if (success && visibleProvider) {
+					// Update the active API configuration to use zoo-code with the new token
+					await visibleProvider.handleZooCodeCallback(token)
+				}
+			}
 			break
 		}
 		default:

@@ -240,8 +240,9 @@ export class ClineProvider
 
 			// Create named listener functions so we can remove them later.
 			const onTaskStarted = () => this.emit(RooCodeEventName.TaskStarted, instance.taskId)
-			const onTaskCompleted = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) =>
+			const onTaskCompleted = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) => {
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
+			}
 			const onTaskAborted = async () => {
 				this.emit(RooCodeEventName.TaskAborted, instance.taskId)
 
@@ -1681,6 +1682,15 @@ export class ClineProvider
 		await this.upsertProviderProfile(currentApiConfigName, newConfiguration)
 	}
 
+	// Zoo Code Auth (for observability telemetry)
+
+	async handleZooCodeCallback(token: string) {
+		const { handleAuthCallback } = await import("../../services/zoo-code-auth")
+		await handleAuthCallback(token)
+		// Refresh webview state to show updated auth status
+		await this.postStateToWebview()
+	}
+
 	// Requesty
 
 	async handleRequestyCallback(code: string, baseUrl: string | null) {
@@ -2277,6 +2287,31 @@ export class ClineProvider
 					return await openAiCodexOAuthManager.isAuthenticated()
 				} catch {
 					return false
+				}
+			})(),
+			zooCodeIsAuthenticated: await (async () => {
+				try {
+					const { isZooCodeAuthenticated } = await import("../../services/zoo-code-auth")
+					return await isZooCodeAuthenticated()
+				} catch {
+					return false
+				}
+			})(),
+			...(() => {
+				try {
+					const { getCachedZooCodeUserInfo } = require("../../services/zoo-code-auth")
+					const userInfo = getCachedZooCodeUserInfo()
+					return {
+						zooCodeUserName: userInfo.name,
+						zooCodeUserEmail: userInfo.email,
+						zooCodeUserImage: userInfo.image,
+					}
+				} catch {
+					return {
+						zooCodeUserName: undefined,
+						zooCodeUserEmail: undefined,
+						zooCodeUserImage: undefined,
+					}
 				}
 			})(),
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),

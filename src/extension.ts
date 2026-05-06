@@ -49,6 +49,7 @@ import {
 } from "./activate"
 import { initializeI18n } from "./i18n"
 import { initializeModelCacheRefresh } from "./api/providers/fetchers/modelCache"
+import { initZooCodeAuth } from "./services/zoo-code-auth"
 
 /**
  * Built using https://github.com/microsoft/vscode-webview-ui-toolkit
@@ -157,6 +158,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize OpenAI Codex OAuth manager for ChatGPT subscription-based access.
 	openAiCodexOAuthManager.initialize(context, (message) => outputChannel.appendLine(message))
+
+	// Initialize Zoo Code auth service for extension session token management.
+	initZooCodeAuth(context)
 
 	// Get default commands from configuration.
 	const defaultCommands = vscode.workspace.getConfiguration(Package.name).get<string[]>("allowedCommands") || []
