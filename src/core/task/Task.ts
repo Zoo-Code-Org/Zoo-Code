@@ -9,7 +9,6 @@ import { AskIgnoredError } from "./AskIgnoredError"
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
-import debounce from "lodash.debounce"
 import delay from "delay"
 import pWaitFor from "p-wait-for"
 import { serializeError } from "serialize-error"
@@ -64,10 +63,7 @@ import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 
 // shared
 import { findLastIndex } from "../../shared/array"
-import { combineApiRequests } from "../../shared/combineApiRequests"
-import { combineCommandSequences } from "../../shared/combineCommandSequences"
 import { t } from "../../i18n"
-import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import { DiffStrategy, type ToolUse, type ToolParamName, toolParamNames } from "../../shared/tools"
@@ -132,6 +128,7 @@ import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
+import { UsageTracker } from "./UsageTracker"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -323,7 +320,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	consecutiveMistakeCountForEditFile: Map<string, number> = new Map()
 	consecutiveNoToolUseCount: number = 0
 	consecutiveNoAssistantMessagesCount: number = 0
-	toolUsage: ToolUsage = {}
 
 	// Checkpoints
 	enableCheckpoints: boolean
@@ -397,16 +393,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// This prevents excessive getModel() calls during tool execution
 	cachedStreamingModel?: { id: string; info: ModelInfo }
 
-	// Token Usage Cache
-	private tokenUsageSnapshot?: TokenUsage
-	private tokenUsageSnapshotAt?: number
-
-	// Tool Usage Cache
-	private toolUsageSnapshot?: ToolUsage
-
-	// Token Usage Throttling - Debounced emit function
-	private readonly TOKEN_USAGE_EMIT_INTERVAL_MS = 2000 // 2 seconds
-	private debouncedEmitTokenUsage: ReturnType<typeof debounce>
+	private usageTracker: UsageTracker
 
 	// Historical cloud sync tracking retained only to avoid task resume churn.
 	private cloudSyncedMessageTimestamps: Set<number> = new Set()
@@ -541,27 +528,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.todoList = initialTodos
 		}
 
-		// Initialize debounced token usage emit function
-		// Uses debounce with maxWait to achieve throttle-like behavior:
-		// - leading: true  - Emit immediately on first call
-		// - trailing: true - Emit final state when updates stop
-		// - maxWait        - Ensures at most one emit per interval during rapid updates (throttle behavior)
-		this.debouncedEmitTokenUsage = debounce(
-			(tokenUsage: TokenUsage, toolUsage: ToolUsage) => {
-				const tokenChanged = hasTokenUsageChanged(tokenUsage, this.tokenUsageSnapshot)
-				const toolChanged = hasToolUsageChanged(toolUsage, this.toolUsageSnapshot)
-
-				if (tokenChanged || toolChanged) {
-					this.emit(RooCodeEventName.TaskTokenUsageUpdated, this.taskId, tokenUsage, toolUsage)
-					this.tokenUsageSnapshot = tokenUsage
-					this.tokenUsageSnapshotAt = this.clineMessages.at(-1)?.ts
-					// Deep copy tool usage for snapshot
-					this.toolUsageSnapshot = JSON.parse(JSON.stringify(toolUsage))
-				}
-			},
-			this.TOKEN_USAGE_EMIT_INTERVAL_MS,
-			{ leading: true, trailing: true, maxWait: this.TOKEN_USAGE_EMIT_INTERVAL_MS },
-		)
+		this.usageTracker = new UsageTracker({
+			taskId: this.taskId,
+			getMessages: () => this.clineMessages,
+			getLastMessageTs: () => this.clineMessages.at(-1)?.ts,
+			emit: (event, ...args) => (this.emit as any)(event, ...args),
+		})
 
 		onCreated?.(this)
 
@@ -1238,7 +1210,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// - Immediate first emit (leading: true)
 			// - At most one emit per interval during rapid updates (maxWait)
 			// - Final state is emitted when updates stop (trailing: true)
-			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
+			this.usageTracker.emitTokenUsageUpdate(tokenUsage)
 
 			await this.providerRef.deref()?.updateTaskHistory(historyItem)
 			return true
@@ -2249,9 +2221,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Triggers the debounce with current values and immediately flushes to ensure emit.
 	 */
 	public emitFinalTokenUsageUpdate(): void {
-		const tokenUsage = this.getTokenUsage()
-		this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
-		this.debouncedEmitTokenUsage.flush()
+		this.usageTracker.emitFinalTokenUsageUpdate()
 	}
 
 	public async abortTask(isAbandoned = false) {
@@ -4638,31 +4608,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Metrics
 
 	public combineMessages(messages: ClineMessage[]) {
-		return combineApiRequests(combineCommandSequences(messages))
+		return this.usageTracker.combineMessages(messages)
 	}
 
 	public getTokenUsage(): TokenUsage {
-		return getApiMetrics(this.combineMessages(this.clineMessages.slice(1)))
+		return this.usageTracker.getTokenUsage()
 	}
 
 	public recordToolUsage(toolName: ToolName) {
-		if (!this.toolUsage[toolName]) {
-			this.toolUsage[toolName] = { attempts: 0, failures: 0 }
-		}
-
-		this.toolUsage[toolName].attempts++
+		this.usageTracker.recordToolUsage(toolName)
 	}
 
 	public recordToolError(toolName: ToolName, error?: string) {
-		if (!this.toolUsage[toolName]) {
-			this.toolUsage[toolName] = { attempts: 0, failures: 0 }
-		}
-
-		this.toolUsage[toolName].failures++
-
-		if (error) {
-			this.emit(RooCodeEventName.TaskToolFailed, this.taskId, toolName, error)
-		}
+		this.usageTracker.recordToolError(toolName, error)
 	}
 
 	// Getters
@@ -4692,14 +4650,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public get tokenUsage(): TokenUsage | undefined {
-		if (this.tokenUsageSnapshot && this.tokenUsageSnapshotAt) {
-			return this.tokenUsageSnapshot
-		}
+		return this.usageTracker.tokenUsage
+	}
 
-		this.tokenUsageSnapshot = this.getTokenUsage()
-		this.tokenUsageSnapshotAt = this.clineMessages.at(-1)?.ts
+	public get toolUsage(): ToolUsage {
+		return this.usageTracker.toolUsage
+	}
 
-		return this.tokenUsageSnapshot
+	public set toolUsage(toolUsage: ToolUsage) {
+		this.usageTracker.toolUsage = toolUsage
 	}
 
 	public get cwd() {
