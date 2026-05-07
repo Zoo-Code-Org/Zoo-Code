@@ -9,6 +9,7 @@ export interface PendingEditOperation {
 }
 
 export type PendingEditOperationInput = Omit<PendingEditOperation, "timeoutId" | "createdAt">
+export type PendingEditOperationView = Omit<PendingEditOperation, "timeoutId" | "createdAt">
 
 export class PendingEditOperationStore {
 	private readonly operations = new Map<string, PendingEditOperation>()
@@ -23,7 +24,7 @@ export class PendingEditOperationStore {
 
 		const timeoutId = setTimeout(() => {
 			this.clear(operationId)
-			this.log(`[setPendingEditOperation] Automatically cleared stale pending operation: ${operationId}`)
+			this.log(`[PendingEditOperationStore.set] Automatically cleared stale pending operation: ${operationId}`)
 		}, this.timeoutMs)
 
 		this.operations.set(operationId, {
@@ -32,11 +33,22 @@ export class PendingEditOperationStore {
 			createdAt: Date.now(),
 		})
 
-		this.log(`[setPendingEditOperation] Set pending operation: ${operationId}`)
+		this.log(`[PendingEditOperationStore.set] Set pending operation: ${operationId}`)
 	}
 
-	get(operationId: string): PendingEditOperation | undefined {
-		return this.operations.get(operationId)
+	get(operationId: string): PendingEditOperationView | undefined {
+		const operation = this.operations.get(operationId)
+		if (!operation) {
+			return undefined
+		}
+
+		return {
+			messageTs: operation.messageTs,
+			editedContent: operation.editedContent,
+			images: operation.images,
+			messageIndex: operation.messageIndex,
+			apiConversationHistoryIndex: operation.apiConversationHistoryIndex,
+		}
 	}
 
 	clear(operationId: string): boolean {
@@ -47,7 +59,7 @@ export class PendingEditOperationStore {
 
 		clearTimeout(operation.timeoutId)
 		this.operations.delete(operationId)
-		this.log(`[clearPendingEditOperation] Cleared pending operation: ${operationId}`)
+		this.log(`[PendingEditOperationStore.clear] Cleared pending operation: ${operationId}`)
 		return true
 	}
 
@@ -57,6 +69,6 @@ export class PendingEditOperationStore {
 		}
 
 		this.operations.clear()
-		this.log("[clearAllPendingEditOperations] Cleared all pending operations")
+		this.log("[PendingEditOperationStore.clearAll] Cleared all pending operations")
 	}
 }
