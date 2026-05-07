@@ -2334,6 +2334,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		try {
+			this.usageTracker.dispose()
+		} catch (error) {
+			console.error("Error disposing usage tracker:", error)
+		}
+
+		try {
 			// If we're not streaming then `abortStream` won't be called.
 			if (this.isStreaming && this.diffViewProvider.isEditing) {
 				this.diffViewProvider.revertChanges().catch(console.error)

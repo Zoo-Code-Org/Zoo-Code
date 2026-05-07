@@ -141,6 +141,14 @@ describe("Task dispose method", () => {
 		consoleLogSpy.mockRestore()
 	})
 
+	test("should dispose usage tracker to cancel pending usage emissions", () => {
+		const usageTrackerDisposeSpy = vi.spyOn((task as any).usageTracker, "dispose")
+
+		task.dispose()
+
+		expect(usageTrackerDisposeSpy).toHaveBeenCalledOnce()
+	})
+
 	test("should prevent memory leaks by removing listeners before other cleanup", () => {
 		// Add multiple listeners of different types using type assertion for testing
 		const listeners = {

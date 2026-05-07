@@ -74,6 +74,10 @@ export class UsageTracker {
 		this.debouncedEmitTokenUsage.flush()
 	}
 
+	public dispose(): void {
+		this.debouncedEmitTokenUsage.cancel()
+	}
+
 	public recordToolUsage(toolName: ToolName): void {
 		const usage = this.ensureToolUsageEntry(toolName)
 		usage.attempts++
