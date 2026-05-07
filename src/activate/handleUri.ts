@@ -34,24 +34,22 @@ export const handleUri = async (uri: vscode.Uri) => {
 		case "/auth-callback": {
 			const token = query.get("token")
 			if (token) {
-				// Extract user info from callback URL params with proper URL decoding
-				const name = query.get("name") ? decodeURIComponent(query.get("name")!.replace(/\+/g, " ")) : undefined
-				const email = query.get("email")
-					? decodeURIComponent(query.get("email")!.replace(/\+/g, " "))
-					: undefined
-				const image = query.get("image") ? decodeURIComponent(query.get("image")!) : undefined
-
-				// Store user info if provided
-				if (name || email || image) {
-					await setZooCodeUserInfo({
-						name,
-						email,
-						image,
-					})
-				}
+				// Extract user info from callback URL params
+				// URLSearchParams.get() already decodes percent-encoded values - no need for decodeURIComponent
+				const name = query.get("name") ?? undefined
+				const email = query.get("email") ?? undefined
+				const image = query.get("image") ?? undefined
 
 				const success = await handleZooCodeAuthCallback(token)
 				if (success && visibleProvider) {
+					// Store user info only after successful auth validation
+					if (name || email || image) {
+						await setZooCodeUserInfo({
+							name,
+							email,
+							image,
+						})
+					}
 					// Update the active API configuration to use zoo-code with the new token
 					await visibleProvider.handleZooCodeCallback(token)
 				}

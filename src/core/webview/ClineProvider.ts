@@ -1684,10 +1684,10 @@ export class ClineProvider
 
 	// Zoo Code Auth (for observability telemetry)
 
-	async handleZooCodeCallback(token: string) {
-		const { handleAuthCallback } = await import("../../services/zoo-code-auth")
-		await handleAuthCallback(token)
-		// Refresh webview state to show updated auth status
+	async handleZooCodeCallback(_token: string) {
+		// Auth mutation (token storage, subscription check, success toast) was already
+		// performed by handleAuthCallback() in handleUri.ts before this method was called.
+		// This method only needs to refresh the webview state to reflect the new auth status.
 		await this.postStateToWebview()
 	}
 
@@ -2299,18 +2299,20 @@ export class ClineProvider
 			})(),
 			...(() => {
 				try {
-					const { getCachedZooCodeUserInfo } = require("../../services/zoo-code-auth")
+					const { getCachedZooCodeUserInfo, getZooCodeBaseUrl } = require("../../services/zoo-code-auth")
 					const userInfo = getCachedZooCodeUserInfo()
 					return {
 						zooCodeUserName: userInfo.name,
 						zooCodeUserEmail: userInfo.email,
 						zooCodeUserImage: userInfo.image,
+						zooCodeBaseUrl: getZooCodeBaseUrl(),
 					}
 				} catch {
 					return {
 						zooCodeUserName: undefined,
 						zooCodeUserEmail: undefined,
 						zooCodeUserImage: undefined,
+						zooCodeBaseUrl: "https://www.zoocode.dev",
 					}
 				}
 			})(),

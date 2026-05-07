@@ -12,12 +12,13 @@ export function getRequestyAuthUrl(uriScheme?: string) {
 	return `https://app.requesty.ai/oauth/authorize?callback_url=${getCallbackUrl("requesty", uriScheme)}`
 }
 
-const ZOO_CODE_BASE_URL = "https://www.zoocode.dev"
+const ZOO_CODE_DEFAULT_BASE_URL = "https://www.zoocode.dev"
 
-export function getZooCodeAuthUrl(uriScheme?: string) {
+export function getZooCodeAuthUrl(uriScheme?: string, baseUrl?: string) {
+	const resolvedBaseUrl = baseUrl || ZOO_CODE_DEFAULT_BASE_URL
 	const callbackUri = getCallbackUrl("auth-callback", uriScheme)
 	const deviceName = encodeURIComponent("VS Code")
 	const editor = encodeURIComponent("VS Code")
 	const version = Package.version
-	return `${ZOO_CODE_BASE_URL}/dashboard/connect?device=${deviceName}&editor=${editor}&version=${version}&callback_uri=${callbackUri}`
+	return `${resolvedBaseUrl}/dashboard/connect?device=${deviceName}&editor=${editor}&version=${version}&callback_uri=${callbackUri}`
 }

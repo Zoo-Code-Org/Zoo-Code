@@ -33,10 +33,8 @@ function getInitials(name?: string, email?: string): string {
 	return "?"
 }
 
-const ZOO_CODE_BASE_URL = "https://www.zoocode.dev"
-
 export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className }) => {
-	const { zooCodeIsAuthenticated, zooCodeUserName, zooCodeUserEmail, zooCodeUserImage, uriScheme } =
+	const { zooCodeIsAuthenticated, zooCodeUserName, zooCodeUserEmail, zooCodeUserImage, zooCodeBaseUrl, uriScheme } =
 		useExtensionState()
 	const [isOpen, setIsOpen] = useState(false)
 	const [imageError, setImageError] = useState(false)
@@ -58,7 +56,7 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 		setImageError(false)
 	}, [zooCodeUserImage])
 
-	const authUrl = getZooCodeAuthUrl(uriScheme)
+	const authUrl = getZooCodeAuthUrl(uriScheme, zooCodeBaseUrl)
 
 	const showImage = zooCodeIsAuthenticated && zooCodeUserImage && !imageError
 	const avatarColor = getAvatarColor(zooCodeUserEmail || zooCodeUserName || "ZC")
@@ -87,7 +85,8 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 					fontSize: zooCodeIsAuthenticated && !showImage ? 9 : 14,
 					fontWeight: 600,
 					background: zooCodeIsAuthenticated ? (showImage ? "transparent" : avatarColor) : undefined,
-					color: zooCodeIsAuthenticated && !showImage ? "#ffffff" : undefined,
+					color:
+						zooCodeIsAuthenticated && !showImage ? "var(--vscode-button-foreground, #ffffff)" : undefined,
 				}}
 				title={zooCodeIsAuthenticated ? `Zoo Code: ${zooCodeUserEmail || "Connected"}` : "Sign in to Zoo Code"}>
 				{zooCodeIsAuthenticated ? (
@@ -134,8 +133,8 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 						"overflow-hidden",
 					)}
 					style={{
-						background: "#1e1e1e",
-						border: "1px solid #3c3c3c",
+						background: "var(--vscode-menu-background)",
+						border: "1px solid var(--vscode-menu-border, var(--vscode-widget-border, #3c3c3c))",
 						zIndex: 9999,
 					}}>
 					{!zooCodeIsAuthenticated ? (
@@ -144,9 +143,11 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 							onClick={() => setIsOpen(false)}
 							className={cn("block px-3.5 py-2.5", "text-[13px]", "no-underline cursor-pointer")}
 							style={{
-								color: "#cccccc",
+								color: "var(--vscode-menu-foreground)",
 							}}
-							onMouseEnter={(e) => (e.currentTarget.style.background = "#094771")}
+							onMouseEnter={(e) =>
+								(e.currentTarget.style.background = "var(--vscode-menu-selectionBackground)")
+							}
 							onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
 							Sign in to Zoo Code
 						</a>
@@ -160,20 +161,23 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 										"pointer-events-none select-none",
 									)}
 									style={{
-										color: "#858585",
-										borderBottom: "1px solid #3c3c3c",
+										color: "var(--vscode-descriptionForeground)",
+										borderBottom:
+											"1px solid var(--vscode-menu-separatorBackground, var(--vscode-widget-border, #3c3c3c))",
 									}}>
 									{zooCodeUserEmail}
 								</div>
 							)}
 							<a
-								href={`${ZOO_CODE_BASE_URL}/dashboard`}
+								href={`${zooCodeBaseUrl || "https://www.zoocode.dev"}/dashboard`}
 								onClick={() => setIsOpen(false)}
 								className={cn("block px-3.5 py-2.5", "text-[13px]", "no-underline cursor-pointer")}
 								style={{
-									color: "#cccccc",
+									color: "var(--vscode-menu-foreground)",
 								}}
-								onMouseEnter={(e) => (e.currentTarget.style.background = "#094771")}
+								onMouseEnter={(e) =>
+									(e.currentTarget.style.background = "var(--vscode-menu-selectionBackground)")
+								}
 								onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
 								Go to Dashboard
 							</a>
@@ -186,9 +190,11 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 									"text-left cursor-pointer",
 								)}
 								style={{
-									color: "#f14c4c",
+									color: "var(--vscode-errorForeground)",
 								}}
-								onMouseEnter={(e) => (e.currentTarget.style.background = "#094771")}
+								onMouseEnter={(e) =>
+									(e.currentTarget.style.background = "var(--vscode-menu-selectionBackground)")
+								}
 								onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
 								Sign out
 							</button>

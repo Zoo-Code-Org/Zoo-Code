@@ -20,6 +20,11 @@ let _lastSubscriptionCheck: number = 0
 const SUBSCRIPTION_CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise<void> {
+	if (!context.secrets) {
+		// Secret storage unavailable (e.g. test environment without secrets mock).
+		// Treat as unauthenticated startup — all cached values remain undefined.
+		return
+	}
 	secretStorage = context.secrets
 
 	// Pre-load the token and user info into memory on init so ZooCodeHandler can access them synchronously
@@ -234,6 +239,7 @@ export async function verifyZooCodeToken(): Promise<boolean> {
 	try {
 		const response = await fetch(`${baseUrl}/api/extension/auth/verify`, {
 			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(10_000),
 		})
 
 		if (!response.ok) {
@@ -242,6 +248,9 @@ export async function verifyZooCodeToken(): Promise<boolean> {
 		}
 
 		const data = (await response.json()) as { valid?: boolean }
+		if (!data.valid) {
+			await clearZooCodeToken()
+		}
 		return data.valid === true
 	} catch {
 		return false
@@ -263,6 +272,7 @@ export async function disconnectZooCode(): Promise<void> {
 		await fetch(`${baseUrl}/api/extension/auth/revoke`, {
 			method: "POST",
 			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(10_000),
 		})
 	} catch {
 		// Ignore errors during revocation

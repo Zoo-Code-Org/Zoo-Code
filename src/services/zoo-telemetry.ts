@@ -55,6 +55,7 @@ export async function sendLlmTelemetry(payload: LlmTelemetryPayload): Promise<vo
 			Authorization: `Bearer ${token}`,
 		},
 		body: JSON.stringify(body),
+		signal: AbortSignal.timeout(10_000),
 	}).catch(() => {
 		// Silently ignore errors - telemetry should never impact user experience
 	})
