@@ -11,7 +11,6 @@ type EmitTaskEvent = (event: RooCodeEventName, ...args: any[]) => boolean
 export interface UsageTrackerOptions {
 	taskId: string
 	getMessages: () => ClineMessage[]
-	getLastMessageTs: () => number | undefined
 	emit: EmitTaskEvent
 	emitIntervalMs?: number
 }
@@ -21,25 +20,21 @@ const DEFAULT_TOKEN_USAGE_EMIT_INTERVAL_MS = 2000
 export class UsageTracker {
 	private readonly taskId: string
 	private readonly getMessages: () => ClineMessage[]
-	private readonly getLastMessageTs: () => number | undefined
 	private readonly emit: EmitTaskEvent
 	private readonly debouncedEmitTokenUsage: ReturnType<typeof debounce>
 
 	private tokenUsageSnapshot?: TokenUsage
-	private tokenUsageSnapshotAt?: number
 	private toolUsageSnapshot?: ToolUsage
 	private currentToolUsage: ToolUsage = {}
 
 	constructor({
 		taskId,
 		getMessages,
-		getLastMessageTs,
 		emit,
 		emitIntervalMs = DEFAULT_TOKEN_USAGE_EMIT_INTERVAL_MS,
 	}: UsageTrackerOptions) {
 		this.taskId = taskId
 		this.getMessages = getMessages
-		this.getLastMessageTs = getLastMessageTs
 		this.emit = emit
 
 		// Uses debounce with maxWait to achieve throttle-like behavior:
@@ -54,7 +49,6 @@ export class UsageTracker {
 				if (tokenChanged || toolChanged) {
 					this.emit(RooCodeEventName.TaskTokenUsageUpdated, this.taskId, tokenUsage, toolUsage)
 					this.tokenUsageSnapshot = tokenUsage
-					this.tokenUsageSnapshotAt = this.getLastMessageTs()
 					this.toolUsageSnapshot = JSON.parse(JSON.stringify(toolUsage))
 				}
 			},
@@ -102,15 +96,8 @@ export class UsageTracker {
 		this.currentToolUsage = toolUsage
 	}
 
-	public get tokenUsage(): TokenUsage | undefined {
-		if (this.tokenUsageSnapshot && this.tokenUsageSnapshotAt) {
-			return this.tokenUsageSnapshot
-		}
-
-		this.tokenUsageSnapshot = this.getTokenUsage()
-		this.tokenUsageSnapshotAt = this.getLastMessageTs()
-
-		return this.tokenUsageSnapshot
+	public get tokenUsage(): TokenUsage {
+		return this.getTokenUsage()
 	}
 
 	private ensureToolUsageEntry(toolName: ToolName): { attempts: number; failures: number } {

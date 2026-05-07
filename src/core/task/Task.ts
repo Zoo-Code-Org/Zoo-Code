@@ -531,7 +531,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.usageTracker = new UsageTracker({
 			taskId: this.taskId,
 			getMessages: () => this.clineMessages,
-			getLastMessageTs: () => this.clineMessages.at(-1)?.ts,
 			emit: (event, ...args) => (this.emit as any)(event, ...args),
 		})
 
@@ -4649,7 +4648,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this.messageQueueService.messages
 	}
 
-	public get tokenUsage(): TokenUsage | undefined {
+	public get tokenUsage(): TokenUsage {
 		return this.usageTracker.tokenUsage
 	}
 
