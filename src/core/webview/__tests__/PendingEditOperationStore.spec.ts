@@ -58,6 +58,17 @@ describe("PendingEditOperationStore", () => {
 		expect(operation).not.toHaveProperty("createdAt")
 	})
 
+	it("protects stored images from external mutation", () => {
+		const images = ["before.png"]
+		store.set("op", { ...editData, images })
+
+		images.push("input-mutation.png")
+		const operation = store.get("op")
+		operation?.images?.push("output-mutation.png")
+
+		expect(store.get("op")?.images).toEqual(["before.png"])
+	})
+
 	it("auto-clears after timeoutMs and logs", () => {
 		store.set("op", editData)
 

@@ -29,6 +29,7 @@ export class PendingEditOperationStore {
 
 		this.operations.set(operationId, {
 			...editData,
+			images: editData.images ? [...editData.images] : undefined,
 			timeoutId,
 			createdAt: Date.now(),
 		})
@@ -45,7 +46,7 @@ export class PendingEditOperationStore {
 		return {
 			messageTs: operation.messageTs,
 			editedContent: operation.editedContent,
-			images: operation.images,
+			images: operation.images ? [...operation.images] : undefined,
 			messageIndex: operation.messageIndex,
 			apiConversationHistoryIndex: operation.apiConversationHistoryIndex,
 		}
