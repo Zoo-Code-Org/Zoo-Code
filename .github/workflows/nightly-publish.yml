@@ -53,7 +53,11 @@ jobs:
           EOF
 
       - name: Build workspace packages
-        run: pnpm --filter @roo-code/build build
+        env:
+          PKG_RELEASE_CHANNEL: prerelease
+        run: |
+          pnpm --filter @roo-code/build build
+          pnpm --filter @roo-code/vscode-webview build
 
       - name: Package pre-release VSIX
         env:
@@ -62,6 +66,17 @@ jobs:
         run: |
           mkdir -p bin
           pnpm --filter ./src exec vsce package --pre-release --no-dependencies --out ../bin
+
+      - name: Verify VSIX contents
+        env:
+          VERSION_NUMBER: ${{ steps.version.outputs.number }}
+        run: |
+          vsix_path="bin/zoo-code-${VERSION_NUMBER}.vsix"
+          unzip -l "$vsix_path" > /tmp/zoo-code-vsix-contents.txt
+          grep -q "extension/package.json" /tmp/zoo-code-vsix-contents.txt
+          grep -q "extension/dist/extension.js" /tmp/zoo-code-vsix-contents.txt
+          grep -q "extension/webview-ui/build/assets/index.js" /tmp/zoo-code-vsix-contents.txt
+          grep -q "extension/webview-ui/audio/celebration.wav" /tmp/zoo-code-vsix-contents.txt
 
       # Open VSX is intentionally excluded: it has no pre-release channel concept,
       # so pre-release builds would surface as the latest stable version for all users.

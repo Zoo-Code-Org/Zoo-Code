@@ -41,7 +41,9 @@ jobs:
           fi
 
       - name: Build workspace packages
-        run: pnpm --filter @roo-code/build build
+        run: |
+          pnpm --filter @roo-code/build build
+          pnpm --filter @roo-code/vscode-webview build
 
       - name: Package extension
         env:
