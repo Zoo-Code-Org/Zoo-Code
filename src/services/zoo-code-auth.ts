@@ -191,7 +191,6 @@ export async function clearZooCodeToken(): Promise<void> {
 	_cachedToken = undefined
 	_cachedSubscriptionStatus = "unknown"
 	_lastSubscriptionCheck = 0
-	await clearZooCodeUserInfo()
 }
 
 export function getZooCodeBaseUrl(): string {
@@ -271,20 +270,21 @@ export async function isZooCodeAuthenticated(): Promise<boolean> {
 
 export async function disconnectZooCode(): Promise<void> {
 	const token = await getZooCodeToken()
-	if (!token) return
+	if (token) {
+		const baseUrl = getZooCodeBaseUrl()
 
-	const baseUrl = getZooCodeBaseUrl()
+		try {
+			await fetch(`${baseUrl}/api/extension/auth/revoke`, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${token}` },
+				signal: AbortSignal.timeout(10_000),
+			})
+		} catch {
+			// Ignore errors during revocation
+		}
 
-	try {
-		await fetch(`${baseUrl}/api/extension/auth/revoke`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${token}` },
-			signal: AbortSignal.timeout(10_000),
-		})
-	} catch {
-		// Ignore errors during revocation
+		await clearZooCodeToken()
 	}
-
-	await clearZooCodeToken()
+	await clearZooCodeUserInfo()
 	vscode.window.showInformationMessage("Zoo Code: Disconnected successfully.")
 }
