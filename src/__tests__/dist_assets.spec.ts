@@ -6,7 +6,7 @@ import * as yaml from "yaml"
 
 describe("dist assets", () => {
 	const distPath = path.join(__dirname, "../dist")
-	const marketplaceAssetsPath = path.join(__dirname, "../assets/marketplace")
+	const marketplaceAssetsPath = path.join(distPath, "assets/marketplace")
 
 	describe("tiktoken", () => {
 		it("should have tiktoken wasm file", () => {

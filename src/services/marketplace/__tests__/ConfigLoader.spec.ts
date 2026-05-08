@@ -1,9 +1,9 @@
-// npx vitest services/marketplace/__tests__/RemoteConfigLoader.spec.ts
+// npx vitest services/marketplace/__tests__/ConfigLoader.spec.ts
 
 import * as fs from "fs/promises"
 import * as path from "path"
 
-import { RemoteConfigLoader } from "../RemoteConfigLoader"
+import { ConfigLoader } from "../ConfigLoader"
 import type { MarketplaceItemType } from "@roo-code/types"
 
 vi.mock("fs/promises", () => ({
@@ -12,14 +12,13 @@ vi.mock("fs/promises", () => ({
 
 const mockedReadFile = vi.mocked(fs.readFile)
 
-describe("RemoteConfigLoader", () => {
-	let loader: RemoteConfigLoader
+describe("ConfigLoader", () => {
+	let loader: ConfigLoader
 	const extensionPath = path.join("/test", "extension")
 
 	beforeEach(() => {
-		loader = new RemoteConfigLoader(extensionPath)
+		loader = new ConfigLoader(extensionPath)
 		vi.clearAllMocks()
-		loader.clearCache()
 	})
 
 	describe("loadAllItems", () => {
@@ -101,7 +100,7 @@ describe("RemoteConfigLoader", () => {
 			})
 		})
 
-		it("should use cache on subsequent calls", async () => {
+		it("should read bundled files on each load", async () => {
 			const mockModesYaml = `items:
   - id: "test-mode"
     name: "Test Mode"
@@ -129,7 +128,7 @@ describe("RemoteConfigLoader", () => {
 			expect(mockedReadFile).toHaveBeenCalledTimes(2)
 
 			const items2 = await loader.loadAllItems()
-			expect(mockedReadFile).toHaveBeenCalledTimes(2)
+			expect(mockedReadFile).toHaveBeenCalledTimes(4)
 
 			expect(items1).toEqual(items2)
 		})
@@ -210,76 +209,4 @@ describe("RemoteConfigLoader", () => {
 		})
 	})
 
-	describe("clearCache", () => {
-		it("should clear cache and force fresh API calls", async () => {
-			const mockModesYaml = `items:
-  - id: "test-mode"
-    name: "Test Mode"
-    description: "A test mode"
-    content: "test content"`
-
-			const mockMcpsYaml = `items: []`
-
-			mockedReadFile.mockImplementation(async (filePath) => {
-				if (String(filePath).endsWith("modes.yml")) {
-					return mockModesYaml
-				}
-				if (String(filePath).endsWith("mcps.yml")) {
-					return mockMcpsYaml
-				}
-				throw new Error(`Unknown file: ${String(filePath)}`)
-			})
-
-			await loader.loadAllItems()
-			expect(mockedReadFile).toHaveBeenCalledTimes(2)
-
-			await loader.loadAllItems()
-			expect(mockedReadFile).toHaveBeenCalledTimes(2)
-
-			loader.clearCache()
-
-			await loader.loadAllItems()
-			expect(mockedReadFile).toHaveBeenCalledTimes(4)
-		})
-	})
-
-	describe("cache expiration", () => {
-		it("should expire cache after 5 minutes", async () => {
-			const mockModesYaml = `items:
-  - id: "test-mode"
-    name: "Test Mode"
-    description: "A test mode"
-    content: "test content"`
-
-			const mockMcpsYaml = `items: []`
-
-			mockedReadFile.mockImplementation(async (filePath) => {
-				if (String(filePath).endsWith("modes.yml")) {
-					return mockModesYaml
-				}
-				if (String(filePath).endsWith("mcps.yml")) {
-					return mockMcpsYaml
-				}
-				throw new Error(`Unknown file: ${String(filePath)}`)
-			})
-
-			const originalDateNow = Date.now
-			let currentTime = 1000000
-
-			Date.now = vi.fn(() => currentTime)
-
-			await loader.loadAllItems()
-			expect(mockedReadFile).toHaveBeenCalledTimes(2)
-
-			await loader.loadAllItems()
-			expect(mockedReadFile).toHaveBeenCalledTimes(2)
-
-			currentTime += 6 * 60 * 1000
-
-			await loader.loadAllItems()
-			expect(mockedReadFile).toHaveBeenCalledTimes(4)
-
-			Date.now = originalDateNow
-		})
-	})
 })

@@ -309,13 +309,8 @@ describe("MarketplaceManager", () => {
 	})
 
 	describe("cleanup", () => {
-		it("should clear API cache", async () => {
-			// Mock the clearCache method
-			vi.spyOn(manager["configLoader"], "clearCache")
-
-			await manager.cleanup()
-
-			expect(manager["configLoader"].clearCache).toHaveBeenCalled()
+		it("should complete without runtime cleanup for bundled config", async () => {
+			await expect(manager.cleanup()).resolves.toBeUndefined()
 		})
 	})
 })

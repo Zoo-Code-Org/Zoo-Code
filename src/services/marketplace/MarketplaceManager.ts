@@ -12,7 +12,7 @@ import { ensureSettingsDirectoryExists } from "../../utils/globalContext"
 import { t } from "../../i18n"
 import type { CustomModesManager } from "../../core/config/CustomModesManager"
 
-import { RemoteConfigLoader } from "./RemoteConfigLoader"
+import { ConfigLoader } from "./ConfigLoader"
 import { SimpleInstaller } from "./SimpleInstaller"
 
 export interface MarketplaceItemsResponse {
@@ -22,14 +22,14 @@ export interface MarketplaceItemsResponse {
 }
 
 export class MarketplaceManager {
-	private configLoader: RemoteConfigLoader
+	private configLoader: ConfigLoader
 	private installer: SimpleInstaller
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly customModesManager?: CustomModesManager,
 	) {
-		this.configLoader = new RemoteConfigLoader(context.extensionUri.fsPath)
+		this.configLoader = new ConfigLoader(context.extensionUri.fsPath)
 		this.installer = new SimpleInstaller(context, customModesManager)
 	}
 
@@ -180,8 +180,7 @@ export class MarketplaceManager {
 	}
 
 	async cleanup(): Promise<void> {
-		// Clear API cache if needed
-		this.configLoader.clearCache()
+		// Bundled marketplace config has no runtime resources to release.
 	}
 
 	/**
