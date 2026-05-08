@@ -2306,6 +2306,7 @@ export class ClineProvider
 						zooCodeUserEmail: userInfo.email,
 						zooCodeUserImage: userInfo.image,
 						zooCodeBaseUrl: getZooCodeBaseUrl(),
+						deviceName: os.hostname(),
 					}
 				} catch {
 					return {
@@ -2313,6 +2314,7 @@ export class ClineProvider
 						zooCodeUserEmail: undefined,
 						zooCodeUserImage: undefined,
 						zooCodeBaseUrl: "https://www.zoocode.dev",
+						deviceName: os.hostname(),
 					}
 				}
 			})(),

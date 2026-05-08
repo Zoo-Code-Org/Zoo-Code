@@ -1,5 +1,4 @@
 import * as vscode from "vscode"
-import os from "os"
 
 import { Package } from "../shared/package"
 
@@ -200,22 +199,30 @@ export function getZooCodeBaseUrl(): string {
 	return config.get<string>("baseUrl") || process.env.ZOO_CODE_BASE_URL || "https://www.zoocode.dev"
 }
 
-export async function startZooCodeAuth(): Promise<void> {
-	const baseUrl = getZooCodeBaseUrl()
-	const deviceName = os.hostname()
-	const editor = "VS Code"
-	const version = Package.version
-
-	const callbackUri = await vscode.env.asExternalUri(vscode.Uri.parse("vscode://zoo-code.zoo-code/auth-callback"))
-
-	const authUrl = `${baseUrl}/dashboard/connect?device=${encodeURIComponent(deviceName)}&editor=${encodeURIComponent(editor)}&version=${encodeURIComponent(version)}&callback_uri=${encodeURIComponent(callbackUri.toString())}`
-
-	await vscode.env.openExternal(vscode.Uri.parse(authUrl))
-}
-
 export async function handleAuthCallback(token: string): Promise<boolean> {
 	if (!token || !token.startsWith("zoo_ext_")) {
 		vscode.window.showErrorMessage("Zoo Code: Invalid authentication token received.")
+		return false
+	}
+
+	// Verify token with backend before storing
+	const baseUrl = getZooCodeBaseUrl()
+	try {
+		const response = await fetch(`${baseUrl}/api/extension/auth/verify`, {
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(10_000),
+		})
+		if (!response.ok) {
+			vscode.window.showErrorMessage("Zoo Code: Token verification failed.")
+			return false
+		}
+		const data = (await response.json()) as { valid?: boolean }
+		if (!data.valid) {
+			vscode.window.showErrorMessage("Zoo Code: Invalid token.")
+			return false
+		}
+	} catch {
+		vscode.window.showErrorMessage("Zoo Code: Could not verify token.")
 		return false
 	}
 

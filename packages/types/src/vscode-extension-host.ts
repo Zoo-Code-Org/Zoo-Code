@@ -377,6 +377,7 @@ export type ExtensionState = Pick<
 	zooCodeUserEmail?: string
 	zooCodeUserImage?: string
 	zooCodeBaseUrl?: string
+	deviceName?: string
 	debug?: boolean
 
 	/**

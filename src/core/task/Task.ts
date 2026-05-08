@@ -3158,21 +3158,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 								// Zoo Code observability telemetry
 								import("../../services/zoo-telemetry")
-									.then(({ sendLlmTelemetry }) =>
-										sendLlmTelemetry({
+									.then(async ({ sendLlmTelemetry }) => {
+										const mode = await this.getTaskMode().catch(() => "unknown")
+										return sendLlmTelemetry({
 											taskId: this.taskId,
 											provider: this.apiConfiguration?.apiProvider ?? "unknown",
 											model: this.apiConfiguration
 												? (getModelId(this.apiConfiguration) ?? "unknown")
 												: "unknown",
-											mode: this.taskMode,
+											mode,
 											inputTokens: costResult.totalInputTokens,
 											outputTokens: costResult.totalOutputTokens,
 											cacheReadTokens: tokens.cacheRead ?? 0,
 											cacheWriteTokens: tokens.cacheWrite ?? 0,
 											totalCost: tokens.total ?? costResult.totalCost,
-										}).catch(() => {}),
-									)
+										}).catch(() => {})
+									})
 									.catch(() => {})
 							}
 						}

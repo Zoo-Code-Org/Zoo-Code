@@ -34,8 +34,15 @@ function getInitials(name?: string, email?: string): string {
 }
 
 export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className }) => {
-	const { zooCodeIsAuthenticated, zooCodeUserName, zooCodeUserEmail, zooCodeUserImage, zooCodeBaseUrl, uriScheme } =
-		useExtensionState()
+	const {
+		zooCodeIsAuthenticated,
+		zooCodeUserName,
+		zooCodeUserEmail,
+		zooCodeUserImage,
+		zooCodeBaseUrl,
+		uriScheme,
+		deviceName,
+	} = useExtensionState()
 	const [isOpen, setIsOpen] = useState(false)
 	const [imageError, setImageError] = useState(false)
 	const ref = useRef<HTMLDivElement>(null)
@@ -56,7 +63,7 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 		setImageError(false)
 	}, [zooCodeUserImage])
 
-	const authUrl = getZooCodeAuthUrl(uriScheme, zooCodeBaseUrl)
+	const authUrl = getZooCodeAuthUrl(uriScheme, zooCodeBaseUrl, deviceName)
 
 	const showImage = zooCodeIsAuthenticated && zooCodeUserImage && !imageError
 	const avatarColor = getAvatarColor(zooCodeUserEmail || zooCodeUserName || "ZC")

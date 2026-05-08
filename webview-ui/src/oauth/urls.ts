@@ -14,11 +14,11 @@ export function getRequestyAuthUrl(uriScheme?: string) {
 
 const ZOO_CODE_DEFAULT_BASE_URL = "https://www.zoocode.dev"
 
-export function getZooCodeAuthUrl(uriScheme?: string, baseUrl?: string) {
+export function getZooCodeAuthUrl(uriScheme?: string, baseUrl?: string, deviceName?: string) {
 	const resolvedBaseUrl = baseUrl || ZOO_CODE_DEFAULT_BASE_URL
 	const callbackUri = getCallbackUrl("auth-callback", uriScheme)
-	const deviceName = encodeURIComponent("VS Code")
+	const resolvedDeviceName = encodeURIComponent(deviceName || "VS Code")
 	const editor = encodeURIComponent("VS Code")
 	const version = Package.version
-	return `${resolvedBaseUrl}/dashboard/connect?device=${deviceName}&editor=${editor}&version=${version}&callback_uri=${callbackUri}`
+	return `${resolvedBaseUrl}/dashboard/connect?device=${resolvedDeviceName}&editor=${editor}&version=${version}&callback_uri=${callbackUri}`
 }
