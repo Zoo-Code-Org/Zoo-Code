@@ -332,8 +332,8 @@
 		"title": "Zoo Code {{version}} 已发布",
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"handoff": {
-			"heading": "Zoo Code 回来了，现在以社区维护的 Zoo Code 插件之名继续前进！！",
-			"description": "如果你还没关注到，Zoo Code 团队最近宣布将逐步停止 Zoo Code 的开发，并归档他们已经完成的工作。但别担心，社区已经站了出来，以全新的名称和新家园延续 Zoo Code 的传承！我们不再只是一个单独的“Roo”，而是一个社区，一个“Zoo”。Zoo Code 是一个由社区维护的插件，在 Zoo Code 停下的地方继续前进。我们会继续保留 Roo 的精神，同时带来新功能和改进。我们也要向整个 Zoo Code 团队致以诚挚感谢，感谢他们的卓越工作，打造出这样一款出色的开发者工具。我们很高兴能在他们打下的基础上继续建设，也期待看到社区未来会把 Zoo Code 带到哪里！",
+			"heading": "Roo Code 回来了！现在以社区维护的 Zoo Code 插件之名继续前进！！",
+			"description": "如果你还没关注到，Roo Code 团队最近宣布将逐步停止 Roo Code 的开发，并归档他们已经完成的工作。但别担心，社区已经站了出来，以全新的名称和新家园延续 Roo Code 的传承！我们不再只是一个单独的“Roo”，而是一个社区，一个“Zoo”。Zoo Code 是一个由社区维护的插件，在 Zoo Code 停下的地方继续前进。我们会继续保留 Roo 的精神，同时带来新功能和改进。我们也要向整个 Roo Code 团队致以诚挚感谢，感谢他们的卓越工作，打造出这样一款出色的开发者工具。我们很高兴能在他们打下的基础上继续建设，也期待看到社区未来会把 Zoo Code 带到哪里！",
 			"readMore": "查看 Zoo Code 的新主页并阅读完整公告"
 		},
 		"release": {

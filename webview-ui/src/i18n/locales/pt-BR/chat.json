@@ -331,8 +331,8 @@
 		"title": "Zoo Code {{version}} lançado",
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"handoff": {
-			"heading": "O Zoo Code está de volta, agora como um plugin mantido pela comunidade chamado Zoo Code!!",
-			"description": "Se você não acompanhou, a equipe do Zoo Code anunciou recentemente que vai encerrar o desenvolvimento do Zoo Code e arquivar o trabalho que fez. Mas não se preocupe: a comunidade assumiu para continuar o legado do Zoo Code com um novo nome e um novo lar! Não somos mais apenas um único \"Roo\" — somos uma comunidade, um \"Zoo\", por assim dizer. O Zoo Code é um plugin mantido pela comunidade que continua de onde o Zoo Code parou, e estamos comprometidos em manter vivo o espírito do Roo enquanto também trazemos novos recursos e melhorias. Queremos deixar um enorme agradecimento a toda a equipe do Zoo Code pelo trabalho incrível e por criar uma ferramenta tão fantástica para desenvolvedores. Estamos animados para continuar construindo sobre essa base e ver até onde a comunidade levará o Zoo Code no futuro!",
+			"heading": "O Roo Code está de volta, agora como um plugin mantido pela comunidade chamado Zoo Code!!",
+			"description": "Se você não acompanhou, a equipe do Roo Code anunciou recentemente que vai encerrar o desenvolvimento do Roo Code e arquivar o trabalho que fez. Mas não se preocupe: a comunidade assumiu para continuar o legado do Roo Code com um novo nome e um novo lar! Não somos mais apenas um único \"Roo\" — somos uma comunidade, um \"Zoo\", por assim dizer. O Zoo Code é um plugin mantido pela comunidade que continua de onde o Zoo Code parou, e estamos comprometidos em manter vivo o espírito do Roo enquanto também trazemos novos recursos e melhorias. Queremos deixar um enorme agradecimento a toda a equipe do Roo Code pelo trabalho incrível e por criar uma ferramenta tão fantástica para desenvolvedores. Estamos animados para continuar construindo sobre essa base e ver até onde a comunidade levará o Zoo Code no futuro!",
 			"readMore": "Veja a nova página inicial do Zoo Code e leia o anúncio completo"
 		},
 		"release": {

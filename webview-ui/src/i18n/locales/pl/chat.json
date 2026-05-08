@@ -331,8 +331,8 @@
 		"title": "Zoo Code {{version}} wydany",
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"handoff": {
-			"heading": "Zoo Code wraca — teraz jako wtyczka utrzymywana przez społeczność pod nazwą Zoo Code!!",
-			"description": "Jeśli nie jesteś na bieżąco, zespół Zoo Code niedawno ogłosił, że wygasza rozwój Zoo Code i archiwizuje dotychczasową pracę. Ale bez obaw — społeczność ruszyła do działania, aby kontynuować dziedzictwo Zoo Code pod nową nazwą i w nowym domu! Nie jesteśmy już tylko jednym „Roo” — jesteśmy społecznością, czyli „Zoo”, jeśli wolisz. Zoo Code to wtyczka utrzymywana przez społeczność, która przejmuje pałeczkę tam, gdzie Zoo Code skończył, i zobowiązujemy się zachować ducha Roo, jednocześnie wprowadzając nowe funkcje i ulepszenia. Chcemy też ogromnie podziękować całemu zespołowi Zoo Code za ich niesamowitą pracę i stworzenie tak świetnego narzędzia dla deweloperów. Cieszymy się, że możemy rozwijać ich dorobek i zobaczyć, dokąd społeczność zaprowadzi Zoo Code w przyszłości!",
+			"heading": "Roo Code wraca! Teraz jako wtyczka utrzymywana przez społeczność pod nazwą Zoo Code!!",
+			"description": "Jeśli nie jesteś na bieżąco, zespół Roo Code niedawno ogłosił, że wygasza rozwój Roo Code i archiwizuje dotychczasową pracę. Ale bez obaw — społeczność ruszyła do działania, aby kontynuować dziedzictwo Roo Code pod nową nazwą i w nowym domu! Nie jesteśmy już tylko jednym „Roo” — jesteśmy społecznością, czyli „Zoo”, jeśli wolisz. Zoo Code to wtyczka utrzymywana przez społeczność, która przejmuje pałeczkę tam, gdzie Zoo Code skończył, i zobowiązujemy się zachować ducha Roo, jednocześnie wprowadzając nowe funkcje i ulepszenia. Chcemy też ogromnie podziękować całemu zespołowi Roo Code za ich niesamowitą pracę i stworzenie tak świetnego narzędzia dla deweloperów. Cieszymy się, że możemy rozwijać ich dorobek i zobaczyć, dokąd społeczność zaprowadzi Zoo Code w przyszłości!",
 			"readMore": "Zobacz nową stronę główną Zoo Code i przeczytaj pełne ogłoszenie"
 		},
 		"release": {

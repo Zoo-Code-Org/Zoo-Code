@@ -928,6 +928,7 @@ export const webviewMessageHandler = async (
 						lmstudio: {},
 						roo: {},
 						poe: {},
+						deepseek: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -993,6 +994,21 @@ export const webviewMessageHandler = async (
 				candidates.push({
 					key: "poe",
 					options: { provider: "poe", apiKey: poeApiKey, baseUrl: poeBaseUrl },
+				})
+			}
+
+			// DeepSeek is conditional on apiKey
+			const deepSeekApiKey = message?.values?.deepSeekApiKey ?? apiConfiguration.deepSeekApiKey
+			const deepSeekBaseUrl = message?.values?.deepSeekBaseUrl ?? apiConfiguration.deepSeekBaseUrl
+
+			if (deepSeekApiKey) {
+				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
+					await flushModels({ provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl }, true)
+				}
+
+				candidates.push({
+					key: "deepseek",
+					options: { provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
 				})
 			}
 

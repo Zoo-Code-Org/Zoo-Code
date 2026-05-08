@@ -42,6 +42,7 @@ export const dynamicProviders = [
 	"roo",
 	"unbound",
 	"poe",
+	"deepseek",
 ] as const
 
 export type DynamicProvider = (typeof dynamicProviders)[number]
