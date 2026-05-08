@@ -73,6 +73,7 @@ async function main() {
 							["../.env", ".env", { optional: true }],
 							["node_modules/vscode-material-icons/generated", "assets/vscode-material-icons"],
 							["../webview-ui/audio", "webview-ui/audio"],
+							["assets/marketplace", "dist/assets/marketplace"],
 						],
 						srcDir,
 						buildDir,
