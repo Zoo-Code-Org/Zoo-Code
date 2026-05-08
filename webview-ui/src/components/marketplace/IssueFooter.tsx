@@ -7,7 +7,7 @@ export const IssueFooter: React.FC = () => {
 		<div className="text-xs text-vscode-descriptionForeground p-3">
 			<Trans i18nKey="marketplace:footer.issueText">
 				<VSCodeLink
-					href="https://github.com/Zoo-Code-Org/Zoo-Code"
+					href="https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose"
 					style={{ display: "inline", fontSize: "inherit" }}>
 					Open a GitHub issue
 				</VSCodeLink>
