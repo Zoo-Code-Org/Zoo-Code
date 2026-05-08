@@ -35,7 +35,7 @@ describe("prepareApiConversationMessage", () => {
 		])
 	})
 
-	it("prepends non-Anthropic reasoning blocks without dead summary fallback", () => {
+	it("preserves non-Anthropic reasoning block shape", () => {
 		const result = prepareApiConversationMessage({
 			message: { role: "assistant", content: "answer" },
 			reasoning: "visible reasoning",
@@ -45,10 +45,9 @@ describe("prepareApiConversationMessage", () => {
 		}) as any
 
 		expect(result.content).toEqual([
-			{ type: "reasoning", text: "visible reasoning" },
+			{ type: "reasoning", text: "visible reasoning", summary: [] },
 			{ type: "text", text: "answer" },
 		])
-		expect(result.content[0]).not.toHaveProperty("summary")
 	})
 
 	it("preserves encrypted reasoning content", () => {
