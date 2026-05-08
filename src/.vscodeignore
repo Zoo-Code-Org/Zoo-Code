@@ -32,6 +32,3 @@
 !assets/icons/**
 !assets/images/**
 !assets/marketplace/**
-
-# Include .env file for telemetry
-!.env
