@@ -6,6 +6,7 @@ import {
 	deepSeekDefaultModelId,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
+	type ModelInfo,
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
@@ -18,8 +19,45 @@ import { OpenAiHandler } from "./openai"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 
 // Custom interface for DeepSeek params to support thinking mode
-type DeepSeekChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParamsStreaming & {
+type DeepSeekChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsStreaming, "reasoning_effort"> & {
 	thinking?: { type: "enabled" | "disabled" }
+	reasoning_effort?: "high" | "max"
+}
+
+const deepSeekV4ThinkingModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro"])
+const supportsDeepSeekThinkingToggle = (modelId: string) => deepSeekV4ThinkingModels.has(modelId)
+
+// Only known V4 models and the legacy reasoner alias support DeepSeek's
+// thinking fields. Custom model IDs still fall back to default metadata, but
+// should not receive V4-only request parameters.
+const isDeepSeekThinkingEnabled = (modelId: string, options: ApiHandlerOptions) => {
+	if (options.enableReasoningEffort === false || options.reasoningEffort === "disable") {
+		return false
+	}
+
+	return modelId === "deepseek-reasoner" || supportsDeepSeekThinkingToggle(modelId)
+}
+
+const normalizeDeepSeekReasoningEffort = (reasoningEffort?: string): "high" | "max" | undefined => {
+	if (!reasoningEffort || reasoningEffort === "disable") {
+		return undefined
+	}
+
+	// DeepSeek currently maps low/medium to high and xhigh to max in thinking mode.
+	return reasoningEffort === "xhigh" ? "max" : "high"
+}
+
+// Use the computed maxTokens from getModelParams rather than raw model metadata.
+// V4 advertises a 384K maximum output, but the project convention caps most
+// models to 20% of context unless the user explicitly overrides modelMaxTokens.
+const addDeepSeekMaxTokensIfNeeded = (
+	requestOptions: DeepSeekChatCompletionParams,
+	options: ApiHandlerOptions,
+	computedMaxTokens?: number,
+) => {
+	if (options.includeMaxTokens === true) {
+		requestOptions.max_completion_tokens = options.modelMaxTokens || computedMaxTokens
+	}
 }
 
 export class DeepSeekHandler extends OpenAiHandler {
@@ -53,14 +91,19 @@ export class DeepSeekHandler extends OpenAiHandler {
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const modelId = this.options.apiModelId ?? deepSeekDefaultModelId
-		const { info: modelInfo } = this.getModel()
+		const { info: modelInfo, temperature, reasoningEffort, maxTokens } = this.getModel()
 
-		// Check if this is a thinking-enabled model (deepseek-reasoner)
-		const isThinkingModel = modelId.includes("deepseek-reasoner")
+		const isThinkingModel = isDeepSeekThinkingEnabled(modelId, this.options)
+		const thinking = supportsDeepSeekThinkingToggle(modelId)
+			? ({ type: isThinkingModel ? "enabled" : "disabled" } as const)
+			: isThinkingModel
+				? ({ type: "enabled" } as const)
+				: undefined
+		const deepSeekReasoningEffort = isThinkingModel ? normalizeDeepSeekReasoningEffort(reasoningEffort) : undefined
 
 		// Convert messages to R1 format (merges consecutive same-role messages)
 		// This is required for DeepSeek which does not support successive messages with the same role
-		// For thinking models (deepseek-reasoner), enable mergeToolResultText to preserve reasoning_content
+		// For thinking models, enable mergeToolResultText to preserve reasoning_content
 		// during tool call sequences. Without this, environment_details text after tool_results would
 		// create user messages that cause DeepSeek to drop all previous reasoning_content.
 		// See: https://api-docs.deepseek.com/guides/thinking_mode
@@ -70,19 +113,18 @@ export class DeepSeekHandler extends OpenAiHandler {
 
 		const requestOptions: DeepSeekChatCompletionParams = {
 			model: modelId,
-			temperature: this.options.modelTemperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE,
+			...(!isThinkingModel && { temperature: temperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE }),
 			messages: convertedMessages,
 			stream: true as const,
 			stream_options: { include_usage: true },
-			// Enable thinking mode for deepseek-reasoner or when tools are used with thinking model
-			...(isThinkingModel && { thinking: { type: "enabled" } }),
+			...(thinking && { thinking }),
+			...(deepSeekReasoningEffort && { reasoning_effort: deepSeekReasoningEffort }),
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
-		// Add max_tokens if needed
-		this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+		addDeepSeekMaxTokensIfNeeded(requestOptions, this.options, maxTokens)
 
 		// Check if base URL is Azure AI Inference (for DeepSeek via Azure)
 		const isAzureAiInference = this._isAzureAiInference(this.options.deepSeekBaseUrl)
@@ -90,7 +132,7 @@ export class DeepSeekHandler extends OpenAiHandler {
 		let stream
 		try {
 			stream = await this.client.chat.completions.create(
-				requestOptions,
+				requestOptions as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
 				isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
 			)
 		} catch (error) {

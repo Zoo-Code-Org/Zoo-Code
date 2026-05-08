@@ -332,8 +332,8 @@
 		"title": "Zoo Code {{version}} đã phát hành",
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"handoff": {
-			"heading": "Zoo Code đã trở lại, giờ là plugin do cộng đồng duy trì với tên gọi Zoo Code!!",
-			"description": "Nếu bạn chưa theo dõi, đội ngũ Zoo Code gần đây đã thông báo họ sẽ dừng phát triển Zoo Code và lưu trữ lại những gì họ đã xây dựng. Nhưng đừng lo, cộng đồng đã đứng ra tiếp nối di sản của Zoo Code với một cái tên mới và một mái nhà mới! Chúng ta không còn chỉ là một \"Roo\" nữa, mà là cả một cộng đồng, một \"Zoo\" đúng nghĩa. Zoo Code là plugin do cộng đồng duy trì, tiếp nối từ nơi Zoo Code dừng lại, và chúng tôi cam kết giữ vững tinh thần của Roo đồng thời mang đến các tính năng và cải tiến mới. Chúng tôi cũng muốn gửi lời cảm ơn sâu sắc đến toàn bộ đội ngũ Zoo Code vì công sức tuyệt vời của họ và vì đã tạo ra một công cụ tuyệt vời cho các nhà phát triển. Chúng tôi rất háo hức được tiếp tục phát triển trên nền tảng đó và chờ xem cộng đồng sẽ đưa Zoo Code tiến xa đến đâu trong tương lai!",
+			"heading": "Roo Code đã trở lại, giờ là plugin do cộng đồng duy trì với tên gọi Zoo Code!!",
+			"description": "Nếu bạn chưa theo dõi, đội ngũ Roo Code gần đây đã thông báo họ sẽ dừng phát triển Roo Code và lưu trữ lại những gì họ đã xây dựng. Nhưng đừng lo, cộng đồng đã đứng ra tiếp nối di sản của Roo Code với một cái tên mới và một mái nhà mới! Chúng ta không còn chỉ là một \"Roo\" nữa, mà là cả một cộng đồng, một \"Zoo\" đúng nghĩa. Zoo Code là plugin do cộng đồng duy trì, tiếp nối từ nơi Zoo Code dừng lại, và chúng tôi cam kết giữ vững tinh thần của Roo đồng thời mang đến các tính năng và cải tiến mới. Chúng tôi cũng muốn gửi lời cảm ơn sâu sắc đến toàn bộ đội ngũ Roo Code vì công sức tuyệt vời của họ và vì đã tạo ra một công cụ tuyệt vời cho các nhà phát triển. Chúng tôi rất háo hức được tiếp tục phát triển trên nền tảng đó và chờ xem cộng đồng sẽ đưa Zoo Code tiến xa đến đâu trong tương lai!",
 			"readMore": "Xem trang chủ mới của Zoo Code và đọc toàn bộ thông báo"
 		},
 		"release": {

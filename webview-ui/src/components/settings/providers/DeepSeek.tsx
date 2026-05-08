@@ -11,7 +11,6 @@ import { inputEventTransform } from "../transforms"
 type DeepSeekProps = {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
-	simplifySettings?: boolean
 }
 
 export const DeepSeek = ({ apiConfiguration, setApiConfigurationField }: DeepSeekProps) => {
