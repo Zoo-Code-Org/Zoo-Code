@@ -109,8 +109,8 @@ describe("generatePackageJson", () => {
 			},
 			overrideJson: {
 				name: "zoo-code-nightly",
-				displayName: "Roo Code Nightly",
-				publisher: "RooVeterinaryInc",
+				displayName: "Zoo Code Nightly",
+				publisher: "ZooCodeOrganization",
 				version: "0.0.1",
 				icon: "assets/icons/icon-nightly.png",
 				scripts: {},
@@ -120,9 +120,9 @@ describe("generatePackageJson", () => {
 
 		expect(generatedPackageJson).toStrictEqual({
 			name: "zoo-code-nightly",
-			displayName: "Roo Code Nightly",
+			displayName: "Zoo Code Nightly",
 			description: "%extension.description%",
-			publisher: "RooVeterinaryInc",
+			publisher: "ZooCodeOrganization",
 			version: "0.0.1",
 			icon: "assets/icons/icon-nightly.png",
 			contributes: {
