@@ -41,8 +41,8 @@ export const handleUri = async (uri: vscode.Uri) => {
 				const image = query.get("image") ?? undefined
 
 				const success = await handleZooCodeAuthCallback(token)
-				if (success && visibleProvider) {
-					// Store user info only after successful auth validation
+				if (success) {
+					// Store user info after successful auth validation (regardless of webview visibility)
 					if (name || email || image) {
 						await setZooCodeUserInfo({
 							name,
@@ -50,8 +50,10 @@ export const handleUri = async (uri: vscode.Uri) => {
 							image,
 						})
 					}
-					// Update the active API configuration to use zoo-code with the new token
-					await visibleProvider.handleZooCodeCallback(token)
+					// Refresh webview state if a panel is currently open
+					if (visibleProvider) {
+						await visibleProvider.handleZooCodeCallback(token)
+					}
 				}
 			}
 			break
