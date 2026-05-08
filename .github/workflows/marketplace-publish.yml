@@ -40,6 +40,9 @@ jobs:
             exit 1
           fi
 
+      - name: Build workspace packages
+        run: pnpm --filter @roo-code/build build
+
       - name: Package extension
         env:
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}

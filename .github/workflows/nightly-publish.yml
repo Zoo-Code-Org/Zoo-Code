@@ -19,8 +19,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Node.js and pnpm
         uses: ./.github/actions/setup-node-pnpm
@@ -45,7 +43,7 @@ jobs:
           const pkgPath = "src/package.json"
           const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"))
           const [major, minor] = pkg.version.split(".").map(Number)
-          const prereleaseMinor = minor % 2 === 0 ? minor + 1 : minor
+          const prereleaseMinor = minor % 2 === 0 ? minor + 1 : minor + 2
           const patch = 100000 + Number(process.env.RUN_NUMBER)
 
           pkg.version = `${major}.${prereleaseMinor}.${patch}`
@@ -54,14 +52,19 @@ jobs:
           console.log(`Pre-release version set to ${pkg.version}`)
           EOF
 
+      - name: Build workspace packages
+        run: pnpm --filter @roo-code/build build
+
       - name: Package pre-release VSIX
         env:
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
           PKG_RELEASE_CHANNEL: prerelease
         run: |
-          pnpm --filter ./src bundle --production
-          npx @vscode/vsce package --pre-release --no-dependencies --cwd src --out ../bin
+          mkdir -p bin
+          pnpm --filter ./src exec vsce package --pre-release --no-dependencies --out ../bin
 
+      # Open VSX is intentionally excluded: it has no pre-release channel concept,
+      # so pre-release builds would surface as the latest stable version for all users.
       - name: Publish pre-release to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
