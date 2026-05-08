@@ -80,6 +80,8 @@ describe("UsageTracker", () => {
 		expect(emit).toHaveBeenCalledTimes(1)
 
 		tracker.dispose()
+		tracker.emitTokenUsageUpdate(tracker.getTokenUsage())
+		tracker.emitFinalTokenUsageUpdate()
 		vi.advanceTimersByTime(1000)
 
 		expect(emit).toHaveBeenCalledTimes(1)

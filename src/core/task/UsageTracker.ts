@@ -18,6 +18,8 @@ export interface UsageTrackerOptions {
 const DEFAULT_TOKEN_USAGE_EMIT_INTERVAL_MS = 2000
 
 export class UsageTracker {
+	private disposed = false
+
 	private readonly taskId: string
 	private readonly getMessages: () => ClineMessage[]
 	private readonly emit: EmitTaskEvent
@@ -66,15 +68,24 @@ export class UsageTracker {
 	}
 
 	public emitTokenUsageUpdate(tokenUsage: TokenUsage): void {
+		if (this.disposed) {
+			return
+		}
+
 		this.debouncedEmitTokenUsage(tokenUsage, this.currentToolUsage)
 	}
 
 	public emitFinalTokenUsageUpdate(): void {
+		if (this.disposed) {
+			return
+		}
+
 		this.emitTokenUsageUpdate(this.getTokenUsage())
 		this.debouncedEmitTokenUsage.flush()
 	}
 
 	public dispose(): void {
+		this.disposed = true
 		this.debouncedEmitTokenUsage.cancel()
 	}
 
