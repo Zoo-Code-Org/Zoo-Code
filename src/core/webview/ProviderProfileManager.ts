@@ -136,6 +136,8 @@ export class ProviderProfileManager {
 
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
+		await this.getProviderSettingsManager().deleteConfig(profileToDelete.name)
+
 		await this.contextProxy.setValues({
 			...globalSettings,
 			currentApiConfigName: profileToActivate,
