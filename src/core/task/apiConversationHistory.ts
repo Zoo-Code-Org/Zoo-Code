@@ -77,6 +77,7 @@ function prepareAssistantMessage(
 		const reasoningBlock = {
 			type: "reasoning",
 			text: reasoning,
+			summary: [] as any[],
 		}
 
 		prependContentBlock(messageWithTs, reasoningBlock)
