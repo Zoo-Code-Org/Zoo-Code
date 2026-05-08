@@ -48,7 +48,7 @@ export async function sendLlmTelemetry(payload: LlmTelemetryPayload): Promise<vo
 		editor: "vscode",
 	}
 
-	await fetch(`${baseUrl}/api/observability/events`, {
+	void fetch(`${baseUrl}/api/observability/events`, {
 		method: "POST",
 		headers: {
 			"Content-Type": "application/json",
