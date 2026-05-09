@@ -422,7 +422,9 @@
 		"lint": "eslint . --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
 		"pretest": "turbo run bundle --cwd ..",
+		"pretest:coverage": "turbo run bundle --cwd ..",
 		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
 		"format": "prettier --write .",
 		"bundle": "node esbuild.mjs",
 		"vscode:prepublish": "pnpm bundle --production",
@@ -563,6 +565,7 @@
 		"rimraf": "^6.0.1",
 		"tsup": "^8.4.0",
 		"tsx": "^4.19.3",
+		"@vitest/coverage-v8": "^3.2.3",
 		"vitest": "^3.2.3",
 		"zod-to-ts": "^1.2.0"
 	}

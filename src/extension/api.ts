@@ -285,6 +285,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		await this.sidebarProvider.postMessageToWebview({ type: "invoke", invoke: "secondaryButtonClick" })
 	}
 
+	public async approveCurrentAsk() {
+		this.sidebarProvider.getCurrentTask()?.approveAsk()
+	}
+
 	public isReady() {
 		return this.sidebarProvider.viewLaunched
 	}

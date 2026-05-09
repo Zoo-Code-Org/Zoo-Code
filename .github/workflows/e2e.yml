@@ -1,0 +1,30 @@
+name: E2E Tests (Mocked)
+
+on:
+    workflow_dispatch:
+    pull_request:
+        types: [opened, reopened, ready_for_review, synchronize]
+        branches: [main]
+        paths:
+            - "src/**"
+            - "webview-ui/**"
+            - "apps/vscode-e2e/**"
+            - "packages/core/**"
+            - "package.json"
+            - "pnpm-lock.yaml"
+            - "turbo.json"
+            - ".github/actions/setup-node-pnpm/**"
+
+jobs:
+    e2e-mock:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+            - name: Install xvfb
+              run: sudo apt-get install -y xvfb
+            - name: Run mocked E2E tests
+              run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:ci:mock

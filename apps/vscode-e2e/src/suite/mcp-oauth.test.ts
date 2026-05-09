@@ -201,17 +201,9 @@ suite("Roo Code MCP OAuth", function () {
 		const rooDir = path.join(workspaceDir, ".roo")
 		await fs.mkdir(rooDir, { recursive: true })
 
-		const mcpConfig = {
-			mcpServers: {
-				"test-oauth-server": {
-					type: "streamable-http",
-					url: `http://localhost:${mockServerPort}/mcp`,
-				},
-			},
-		}
-
 		testFiles = { mcpConfig: path.join(rooDir, "mcp.json") }
-		await fs.writeFile(testFiles.mcpConfig, JSON.stringify(mcpConfig, null, 2))
+		// Config is written by each test to control when the connection starts,
+		// ensuring all endpoint hits are captured after endpointsHit is cleared.
 
 		console.log("[TEST] Mock server port:", mockServerPort)
 		console.log("[TEST] MCP config:", testFiles.mcpConfig)
@@ -272,7 +264,7 @@ suite("Roo Code MCP OAuth", function () {
 	})
 
 	test("Should complete the full OAuth flow when connecting to an OAuth-protected MCP server", async function () {
-		// Re-write the config to trigger the file watcher and force a reconnect.
+		// Write the config to trigger the initial connection attempt.
 		const workspaceDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || tempDir
 		const mcpConfigPath = path.join(workspaceDir, ".roo", "mcp.json")
 
@@ -328,16 +320,41 @@ suite("Roo Code MCP OAuth", function () {
 		console.log("[TEST] MCP OAuth flow completed successfully. Endpoints hit:", [...endpointsHit])
 	})
 
-	test("Should reuse stored token on reconnect without re-running the full OAuth flow", async function () {
-		// Ensure a token is in SecretStorage before testing reuse — this makes the
-		// test self-contained regardless of execution order.
-		await waitFor(() => endpointsHit.has("token"), { timeout: 30_000 })
-
-		// Clear hit tracking so we can assert the token endpoint is NOT re-hit.
-		endpointsHit.clear()
-
+	// Ensure a valid token is stored in SecretStorage. Uses timeout: 45 (not the
+	// McpHub default of 60) so this write always constitutes a config change that
+	// triggers a reconnect, regardless of what previous tests may have set.
+	// Waits for mcp-authed without requiring mcp-401: if no token is cached the
+	// full OAuth flow runs; if a token is already stored it is reused directly.
+	async function ensureOAuthTokenCached() {
 		const workspaceDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || tempDir
 		const mcpConfigPath = path.join(workspaceDir, ".roo", "mcp.json")
+
+		await fs.writeFile(
+			mcpConfigPath,
+			JSON.stringify(
+				{
+					mcpServers: {
+						"test-oauth-server": {
+							type: "streamable-http",
+							url: `http://localhost:${mockServerPort}/mcp`,
+							timeout: 45,
+						},
+					},
+				},
+				null,
+				2,
+			),
+		)
+
+		await waitFor(() => endpointsHit.has("mcp-authed"), { timeout: 45_000 })
+	}
+
+	test("Should reuse stored token on reconnect without re-running the full OAuth flow", async function () {
+		const workspaceDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || tempDir
+		const mcpConfigPath = path.join(workspaceDir, ".roo", "mcp.json")
+
+		await ensureOAuthTokenCached()
+		endpointsHit.clear()
 
 		// Slightly modify the config to force a reconnect
 		await fs.writeFile(
@@ -363,9 +380,9 @@ suite("Roo Code MCP OAuth", function () {
 		console.log("[TEST] Token reuse: MCP server got authenticated request")
 
 		// The full OAuth flow should NOT have re-run (token was cached in SecretStorage)
-		assert.ok(endpointsHit.has("mcp-authed"), "Reconnect should use cached token")
 		assert.ok(!endpointsHit.has("mcp-401"), "Should not get 401 when token is cached")
 		assert.ok(!endpointsHit.has("register"), "Should not re-register client when token is cached")
+		assert.ok(!endpointsHit.has("token"), "Should not re-exchange token when token is cached")
 
 		console.log("[TEST] Token reuse test passed. Endpoints hit:", [...endpointsHit])
 	})

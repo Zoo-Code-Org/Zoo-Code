@@ -1,0 +1,18 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "Use the `switch_mode` tool to switch to ask mode."
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "switch_mode",
+						"arguments": "{\"mode_slug\":\"ask\",\"reason\":\"User requested to switch to ask mode.\"}",
+						"id": "call_modes_switch_001"
+					}
+				]
+			}
+		}
+	]
+}
