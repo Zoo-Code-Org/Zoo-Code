@@ -209,6 +209,27 @@ describe("AnthropicHandler", () => {
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("context-1m-2025-08-07")
 		})
+
+		it("should omit temperature for Claude Opus 4.7 requests", async () => {
+			const opus47Handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+			})
+
+			const stream = opus47Handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestParams = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestParams?.temperature).toBeUndefined()
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -318,6 +339,18 @@ describe("AnthropicHandler", () => {
 			expect(model.info.maxTokens).toBe(64000)
 			expect(model.info.contextWindow).toBe(200000)
 			expect(model.info.supportsReasoningBudget).toBe(true)
+		})
+
+		it("should handle Claude Opus 4.7 model correctly", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-opus-4-7")
+			expect(model.info.maxTokens).toBe(128000)
+			expect(model.info.contextWindow).toBe(1000000)
+			expect(model.info.supportsTemperature).toBe(false)
 		})
 
 		it("should enable 1M context for Claude 4.5 Sonnet when beta flag is set", () => {
