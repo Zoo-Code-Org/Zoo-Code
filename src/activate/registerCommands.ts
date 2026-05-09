@@ -62,6 +62,41 @@ export type RegisterCommandOptions = {
 	provider: ClineProvider
 }
 
+export async function handleImportRooHandoff(
+	handoffPath: string | undefined,
+	context: vscode.ExtensionContext,
+	outputChannel: vscode.OutputChannel,
+) {
+	const visibleProvider = await ClineProvider.getInstance()
+	if (!visibleProvider) {
+		return undefined
+	}
+
+	const importOptions = {
+		context,
+		providerSettingsManager: visibleProvider.providerSettingsManager,
+		contextProxy: visibleProvider.contextProxy,
+		customModesManager: visibleProvider.customModesManager,
+		outputChannel,
+	}
+
+	try {
+		const result = handoffPath
+			? await importRooHandoffFromPath(handoffPath, importOptions)
+			: await promptAndImportRooHandoff(importOptions)
+
+		if (result) {
+			await visibleProvider.postStateToWebview()
+		}
+
+		return result
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		outputChannel.appendLine(`[Roo Import] Failed: ${message}`)
+		return undefined
+	}
+}
+
 export const registerCommands = (options: RegisterCommandOptions) => {
 	const { context } = options
 
@@ -145,36 +180,7 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			filePath,
 		)
 	},
-	importRooHandoff: async (handoffPath?: string) => {
-		const visibleProvider = await ClineProvider.getInstance()
-		if (!visibleProvider) {
-			return undefined
-		}
-
-		const importOptions = {
-			context,
-			providerSettingsManager: visibleProvider.providerSettingsManager,
-			contextProxy: visibleProvider.contextProxy,
-			customModesManager: visibleProvider.customModesManager,
-			outputChannel,
-		}
-
-		try {
-			const result = handoffPath
-				? await importRooHandoffFromPath(handoffPath, importOptions)
-				: await promptAndImportRooHandoff(importOptions)
-
-			if (result) {
-				await visibleProvider.postStateToWebview()
-			}
-
-			return result
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error)
-			outputChannel.appendLine(`[Roo Import] Failed: ${message}`)
-			return undefined
-		}
-	},
+	importRooHandoff: (handoffPath?: string) => handleImportRooHandoff(handoffPath, context, outputChannel),
 	focusInput: async () => {
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
