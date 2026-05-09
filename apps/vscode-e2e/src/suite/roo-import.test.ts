@@ -36,6 +36,7 @@ suite("Roo Import", function () {
 	setDefaultSuiteTimeout(this)
 
 	let tmpDir: string
+	const importedTaskIds: string[] = []
 
 	suiteSetup(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "zoo-e2e-roo-import-"))
@@ -43,6 +44,15 @@ suite("Roo Import", function () {
 
 	suiteTeardown(async () => {
 		await fs.rm(tmpDir, { recursive: true, force: true })
+
+		const storagePath = globalThis.api?.storagePath
+		if (storagePath) {
+			await Promise.all(
+				importedTaskIds.map((id) =>
+					fs.rm(path.join(storagePath, "tasks", id), { recursive: true, force: true }),
+				),
+			)
+		}
 	})
 
 	test("importRooHandoff command is registered", async () => {
@@ -61,6 +71,7 @@ suite("Roo Import", function () {
 		const handoffDir = path.join(tmpDir, "handoff")
 		const tasksSource = path.join(handoffDir, "data", "tasks")
 		const taskId = `e2e-test-task-${Date.now()}`
+		importedTaskIds.push(taskId)
 		await fs.mkdir(path.join(tasksSource, taskId), { recursive: true })
 		await fs.writeFile(path.join(tasksSource, taskId, "history_item.json"), JSON.stringify({ id: taskId }))
 
@@ -83,7 +94,7 @@ suite("Roo Import", function () {
 		assert.strictEqual(contents.id, taskId, "Task file content should match what was exported")
 	})
 
-	test("skips import when handoff was already imported", async () => {
+	test("re-runs import with an explicit path without throwing", async () => {
 		const handoffPath = path.join(tmpDir, "handoff-duplicate.json")
 		const createdAt = new Date().toISOString()
 		await fs.writeFile(handoffPath, JSON.stringify(makeHandoff({ createdAt })))

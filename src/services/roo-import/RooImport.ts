@@ -241,11 +241,11 @@ export async function importRooHandoffFromPath(
 
 					const currentProviderName = merged.currentApiConfigName
 					const currentProvider = merged.apiConfigs[currentProviderName]
-					contextProxy.setValue("currentApiConfigName", currentProviderName)
+					await contextProxy.setValue("currentApiConfigName", currentProviderName)
 					if (currentProvider) {
 						await contextProxy.setProviderSettings(currentProvider)
 					}
-					contextProxy.setValue("listApiConfigMeta", await providerSettingsManager.listConfig())
+					await contextProxy.setValue("listApiConfigMeta", await providerSettingsManager.listConfig())
 
 					log("Imported provider profiles")
 				} else {

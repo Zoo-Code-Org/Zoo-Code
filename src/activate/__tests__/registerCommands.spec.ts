@@ -127,6 +127,14 @@ describe("handleImportRooHandoff", () => {
 		expect(mockProvider.postStateToWebview).not.toHaveBeenCalled()
 	})
 
+	it("does not call postStateToWebview when import fails", async () => {
+		vi.mocked(RooImport.promptAndImportRooHandoff).mockResolvedValue({ success: false, error: "invalid handoff" })
+
+		await handleImportRooHandoff(undefined, mockContext, mockOutputChannel)
+
+		expect(mockProvider.postStateToWebview).not.toHaveBeenCalled()
+	})
+
 	it("logs and returns undefined when the import throws", async () => {
 		vi.mocked(RooImport.importRooHandoffFromPath).mockRejectedValue(new Error("disk full"))
 

@@ -85,7 +85,7 @@ export async function handleImportRooHandoff(
 			? await importRooHandoffFromPath(handoffPath, importOptions)
 			: await promptAndImportRooHandoff(importOptions)
 
-		if (result) {
+		if (result?.success) {
 			await visibleProvider.postStateToWebview()
 		}
 
