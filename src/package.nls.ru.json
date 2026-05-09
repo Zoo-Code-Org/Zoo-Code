@@ -19,7 +19,7 @@
 	"command.focusInput.title": "Фокус на поле ввода",
 	"command.setCustomStoragePath.title": "Указать путь хранения",
 	"command.importSettings.title": "Импортировать настройки",
-	"command.importRooHandoff.title": "Import Roo Code Migration Handoff",
+	"command.importRooHandoff.title": "Импорт передачи миграции Roo Code",
 	"command.terminal.addToContext.title": "Добавить содержимое терминала в контекст",
 	"command.terminal.fixCommand.title": "Исправить эту команду",
 	"command.terminal.explainCommand.title": "Объяснить эту команду",

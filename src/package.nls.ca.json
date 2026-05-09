@@ -10,7 +10,7 @@
 	"command.focusInput.title": "Enfocar Camp d'Entrada",
 	"command.setCustomStoragePath.title": "Establir Ruta d'Emmagatzematge Personalitzada",
 	"command.importSettings.title": "Importar Configuració",
-	"command.importRooHandoff.title": "Import Roo Code Migration Handoff",
+	"command.importRooHandoff.title": "Importar el traspàs de migració de Roo Code",
 	"command.terminal.addToContext.title": "Afegir Contingut del Terminal al Context",
 	"command.terminal.fixCommand.title": "Corregir Aquesta Ordre",
 	"command.terminal.explainCommand.title": "Explicar Aquesta Ordre",
