@@ -1204,6 +1204,27 @@ export class McpHub {
 			// Register in _oauthWatchers so deleteConnection() and dispose() can clean up
 			this._oauthWatchers.set(watcherKey, { unsubscribe, abortHandle: timeoutHandle })
 
+			// In test mode, skip user interaction and proceed directly to complete the OAuth flow.
+			if (process.env.MCP_OAUTH_TEST_MODE === "true") {
+				void (async () => {
+					cleanup()
+					try {
+						await this._completeOAuthFlow(
+							authProvider,
+							transport,
+							connection,
+							name,
+							source,
+							cancellationToken,
+						)
+					} catch {
+						// _completeOAuthFlow handles its own error state
+					}
+					resolve()
+				})()
+				return
+			}
+
 			// Non-modal toast — fires once. If dismissed without clicking Authenticate,
 			// the flow stays alive via the persistent progress bar (Cancel to abort).
 			const authenticateLabel = t("mcp:oauth.flow.authenticateButton")
