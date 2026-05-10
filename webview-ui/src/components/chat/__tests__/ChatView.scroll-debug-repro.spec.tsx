@@ -1,5 +1,5 @@
 import React, { useEffect, useImperativeHandle, useRef } from "react"
-import { act, fireEvent, render, waitFor } from "@/utils/test-utils"
+import { act, fireEvent, render } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import type { ClineMessage } from "@roo-code/types"
@@ -205,8 +205,6 @@ const props: ChatViewProps = {
 	hideAnnouncement: () => {},
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms))
-
 const buildMessages = (baseTs: number): ClineMessage[] => [
 	{ type: "say", say: "text", ts: baseTs, text: "task" },
 	{ type: "say", say: "text", ts: baseTs + 1, text: "row-1" },
@@ -269,45 +267,70 @@ const renderView = () =>
 		</ExtensionStateContextProvider>,
 	)
 
+const flushEffects = async () => {
+	await act(async () => {
+		await Promise.resolve()
+		await Promise.resolve()
+	})
+}
+
 const hydrate = async (atBottomAfterCalls: number, clineMessages = buildMessages(Date.now() - 3_000)) => {
 	harness.atBottomAfterCalls = atBottomAfterCalls
 	renderView()
-	await act(async () => {
-		await Promise.resolve()
-	})
+	await flushEffects()
 	await act(async () => {
 		postState(clineMessages)
 	})
-	await waitFor(() => {
-		const list = document.querySelector("[data-testid='virtuoso-item-list']")
-		expect(list).toBeTruthy()
-		expect(list?.getAttribute("data-count")).toBe(String(Math.max(0, clineMessages.length - 1)))
+	await flushEffects()
+
+	const list = document.querySelector("[data-testid='virtuoso-item-list']")
+	expect(list).toBeTruthy()
+	expect(list?.getAttribute("data-count")).toBe(String(Math.max(0, clineMessages.length - 1)))
+}
+
+const advanceTimers = async (ms: number) => {
+	await act(async () => {
+		await vi.advanceTimersByTimeAsync(ms)
 	})
 }
 
-const waitForCalls = async (min: number, timeout = 1_500) => {
-	await waitFor(() => expect(harness.scrollCalls).toBeGreaterThanOrEqual(min), { timeout })
+const expectChevronVisible = async () => {
+	await flushEffects()
+	expect(document.querySelector(".codicon-chevron-down")).toBeTruthy()
 }
 
-const waitForCallsSettled = async (idleMs = 80, timeoutMs = 2_000) => {
-	const deadline = Date.now() + timeoutMs
+const expectChevronHidden = async () => {
+	await flushEffects()
+	expect(document.querySelector(".codicon-chevron-down")).toBeNull()
+}
+
+const waitForCalls = async (min: number, stepMs = 100, maxSteps = 20) => {
+	for (let i = 0; i < maxSteps; i += 1) {
+		if (harness.scrollCalls >= min) {
+			return
+		}
+
+		await advanceTimers(stepMs)
+	}
+
+	throw new Error(`Expected at least ${min} scroll calls, last count: ${harness.scrollCalls}`)
+}
+
+const waitForCallsSettled = async () => {
 	let lastSeen = harness.scrollCalls
 
-	while (Date.now() < deadline) {
-		await sleep(idleMs)
+	for (let i = 0; i < 20; i += 1) {
+		await advanceTimers(100)
 		const current = harness.scrollCalls
 
 		if (current === lastSeen) {
-			await sleep(idleMs)
-			if (harness.scrollCalls === current) {
-				return
-			}
+			return
 		}
 
 		lastSeen = current
 	}
 
-	throw new Error(`Expected scroll calls to settle within ${timeoutMs}ms, last count: ${harness.scrollCalls}`)
+	throw new Error(`Expected scroll calls to settle, last count: ${harness.scrollCalls}`)
 }
 
 const getScrollable = (): HTMLElement => {
@@ -343,6 +366,7 @@ const getScrollToCheckpointButton = (): HTMLButtonElement => {
 
 describe("ChatView scroll behavior regression coverage", () => {
 	beforeEach(() => {
+		vi.useFakeTimers()
 		harness.scrollCalls = 0
 		harness.scrollToIndexArgs = []
 		harness.atBottomAfterCalls = Number.POSITIVE_INFINITY
@@ -354,6 +378,11 @@ describe("ChatView scroll behavior regression coverage", () => {
 		harness.emitAtBottom = () => {}
 	})
 
+	afterEach(() => {
+		vi.clearAllTimers()
+		vi.useRealTimers()
+	})
+
 	it("existing-task entry does not set a top-most initial anchor", async () => {
 		await hydrate(2)
 		expect(harness.initialTopMostItemIndex).toBeUndefined()
@@ -361,7 +390,7 @@ describe("ChatView scroll behavior regression coverage", () => {
 
 	it("rehydration uses bounded bottom pinning", async () => {
 		await hydrate(2)
-		await waitForCalls(2, 1_200)
+		await waitForCalls(2)
 		await waitForCallsSettled()
 		expect(harness.scrollCalls).toBe(2)
 		expect(resolveFollowOutput(false)).toBe("auto")
@@ -370,7 +399,7 @@ describe("ChatView scroll behavior regression coverage", () => {
 
 	it("transient hydration-time not-at-bottom signals do not disable sticky follow", async () => {
 		await hydrate(2)
-		await waitForCalls(1, 1_200)
+		await waitForCalls(1)
 		expect(resolveFollowOutput(false)).toBe("auto")
 		expect(document.querySelector(".codicon-chevron-down")).toBeNull()
 
@@ -381,7 +410,7 @@ describe("ChatView scroll behavior regression coverage", () => {
 		expect(resolveFollowOutput(false)).toBe("auto")
 		expect(document.querySelector(".codicon-chevron-down")).toBeNull()
 
-		await waitForCalls(2, 1_200)
+		await waitForCalls(2)
 		await waitForCallsSettled()
 		expect(harness.scrollCalls).toBe(2)
 		expect(resolveFollowOutput(false)).toBe("auto")
@@ -390,9 +419,9 @@ describe("ChatView scroll behavior regression coverage", () => {
 	it("delayed last-row growth during hydration keeps anchored follow with one bounded repin", async () => {
 		harness.delayedGrowthMs = 320
 		await hydrate(3)
-		await waitForCalls(1, 1_200)
+		await waitForCalls(1)
 
-		await sleep(950)
+		await advanceTimers(950)
 
 		expect(harness.scrollCalls).toBe(2)
 		expect(resolveFollowOutput(false)).toBe("auto")
@@ -401,11 +430,13 @@ describe("ChatView scroll behavior regression coverage", () => {
 
 	it("user escape hatch during hydration prevents repinning", async () => {
 		await hydrate(Number.POSITIVE_INFINITY)
-		await waitForCalls(1, 1_200)
+		await waitForCalls(1)
 
 		await act(async () => {
 			fireEvent.keyDown(window, { key: "PageUp" })
 		})
+
+		await advanceTimers(100)
 
 		expect(resolveFollowOutput(false)).toBe(false)
 
@@ -415,9 +446,7 @@ describe("ChatView scroll behavior regression coverage", () => {
 
 		expect(resolveFollowOutput(false)).toBe(false)
 
-		await waitFor(() => expect(document.querySelector(".codicon-chevron-down")).toBeTruthy(), {
-			timeout: 1_200,
-		})
+		await expectChevronVisible()
 	})
 
 	it("non-wheel upward intent disengages sticky follow", async () => {
@@ -477,14 +506,12 @@ describe("ChatView scroll behavior regression coverage", () => {
 		})
 
 		expect(resolveFollowOutput(false)).toBe(false)
-		await waitFor(() => expect(document.querySelector(".codicon-chevron-down")).toBeTruthy(), {
-			timeout: 1_200,
-		})
+		await expectChevronVisible()
 	})
 
 	it("hydration completion cannot override user escape hatch", async () => {
 		await hydrate(Number.POSITIVE_INFINITY)
-		await waitForCalls(1, 1_200)
+		await waitForCalls(1)
 
 		await act(async () => {
 			fireEvent.keyDown(window, { key: "PageUp" })
@@ -492,12 +519,10 @@ describe("ChatView scroll behavior regression coverage", () => {
 
 		expect(resolveFollowOutput(false)).toBe(false)
 
-		await sleep(700)
+		await advanceTimers(700)
 
 		expect(resolveFollowOutput(false)).toBe(false)
-		await waitFor(() => expect(document.querySelector(".codicon-chevron-down")).toBeTruthy(), {
-			timeout: 1_200,
-		})
+		await expectChevronVisible()
 	})
 
 	it("scroll-to-bottom CTA re-anchors with one interaction", async () => {
@@ -511,9 +536,8 @@ describe("ChatView scroll behavior regression coverage", () => {
 		})
 
 		expect(resolveFollowOutput(false)).toBe(false)
-		await waitFor(() => expect(document.querySelector(".codicon-chevron-down")).toBeTruthy(), {
-			timeout: 1_200,
-		})
+		await advanceTimers(100)
+		await expectChevronVisible()
 
 		const callsBeforeClick = harness.scrollCalls
 		harness.atBottomAfterCalls = callsBeforeClick + 2
@@ -523,10 +547,10 @@ describe("ChatView scroll behavior regression coverage", () => {
 		})
 
 		expect(resolveFollowOutput(false)).toBe("auto")
-		await waitFor(() => expect(harness.scrollCalls).toBe(callsBeforeClick + 2), {
-			timeout: 1_200,
-		})
-		await waitFor(() => expect(document.querySelector(".codicon-chevron-down")).toBeNull(), { timeout: 1_200 })
+		await waitForCalls(callsBeforeClick + 2)
+		await waitForCallsSettled()
+		expect(harness.scrollCalls).toBe(callsBeforeClick + 2)
+		await expectChevronHidden()
 	})
 
 	it("shows jump-to-checkpoint button and scrolls to latest checkpoint", async () => {
@@ -538,9 +562,8 @@ describe("ChatView scroll behavior regression coverage", () => {
 			fireEvent.keyDown(window, { key: "PageUp" })
 		})
 
-		await waitFor(() => expect(document.querySelector(".codicon-chevron-down")).toBeTruthy(), {
-			timeout: 1_200,
-		})
+		await advanceTimers(100)
+		await expectChevronVisible()
 
 		const checkpointButton = document.querySelector("button[aria-label='chat:scrollToLatestCheckpoint']")
 		expect(checkpointButton).toBeInstanceOf(HTMLButtonElement)
@@ -568,9 +591,8 @@ describe("ChatView scroll behavior regression coverage", () => {
 			fireEvent.keyDown(window, { key: "PageUp" })
 		})
 
-		await waitFor(() => expect(document.querySelector(".codicon-chevron-down")).toBeTruthy(), {
-			timeout: 1_200,
-		})
+		await advanceTimers(100)
+		await expectChevronVisible()
 
 		const checkpointButton = getScrollToCheckpointButton()
 

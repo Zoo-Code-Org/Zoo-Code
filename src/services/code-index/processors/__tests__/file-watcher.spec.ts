@@ -23,12 +23,37 @@ vi.mock("../../../core/ignore/RooIgnoreController", () => ({
 vi.mock("ignore")
 vi.mock("../parser", () => ({
 	codeParser: {
-		parseFile: vi.fn().mockResolvedValue([]),
+		parseFile: vi.fn().mockImplementation(async (filePath: string) => [
+			{
+				file_path: filePath,
+				content: "test content",
+				start_line: 1,
+				end_line: 1,
+			},
+		]),
 	},
 }))
-vi.mock("../../../glob/ignore-utils", () => ({
-	isPathInIgnoredDirectory: vi.fn().mockReturnValue(false),
-}))
+
+const createMockEventEmitter = () => {
+	const listeners = new Set<(event: any) => void>()
+
+	return {
+		event: vi.fn((listener: (event: any) => void) => {
+			listeners.add(listener)
+			return {
+				dispose: () => listeners.delete(listener),
+			}
+		}),
+		fire: vi.fn((event: any) => {
+			for (const listener of listeners) {
+				listener(event)
+			}
+		}),
+		dispose: vi.fn(() => {
+			listeners.clear()
+		}),
+	}
+}
 
 // Mock vscode module
 vi.mock("vscode", () => ({
@@ -50,11 +75,7 @@ vi.mock("vscode", () => ({
 	Uri: {
 		file: vi.fn().mockImplementation((path) => ({ fsPath: path })),
 	},
-	EventEmitter: vi.fn().mockImplementation(() => ({
-		event: vi.fn(),
-		fire: vi.fn(),
-		dispose: vi.fn(),
-	})),
+	EventEmitter: vi.fn().mockImplementation(() => createMockEventEmitter()),
 	ExtensionContext: vi.fn(),
 }))
 
@@ -70,9 +91,22 @@ describe("FileWatcher", () => {
 	let mockVectorStore: any
 	let mockIgnoreInstance: any
 
+	const waitForNextBatch = () =>
+		new Promise<any>((resolve) => {
+			const disposable = fileWatcher.onDidFinishBatchProcessing((summary) => {
+				disposable.dispose()
+				resolve(summary)
+			})
+		})
+
+	const flushBatch = async () => {
+		await vi.advanceTimersByTimeAsync(500)
+	}
+
 	beforeEach(() => {
 		// Reset all mocks
 		vi.clearAllMocks()
+		vi.useFakeTimers()
 
 		// Create mock event handlers
 		mockOnDidCreate = vi.fn()
@@ -134,20 +168,18 @@ describe("FileWatcher", () => {
 		)
 	})
 
+	afterEach(async () => {
+		fileWatcher?.dispose()
+		await vi.runOnlyPendingTimersAsync()
+		vi.useRealTimers()
+	})
+
 	describe("file filtering", () => {
 		it("should ignore files in hidden directories on create events", async () => {
 			// Initialize the file watcher
 			await fileWatcher.initialize()
 
-			// Spy on the vector store to see which files are actually processed
-			const processedFiles: string[] = []
-			mockVectorStore.upsertPoints.mockImplementation(async (points: any[]) => {
-				points.forEach((point) => {
-					if (point.payload?.file_path) {
-						processedFiles.push(point.payload.file_path)
-					}
-				})
-			})
+			const batchPromise = waitForNextBatch()
 
 			// Simulate file creation events
 			const testCases = [
@@ -164,28 +196,30 @@ describe("FileWatcher", () => {
 				await mockOnDidCreate({ fsPath: path })
 			}
 
-			// Wait for batch processing
-			await new Promise((resolve) => setTimeout(resolve, 600))
+			await flushBatch()
+
+			const batchSummary = await batchPromise
+			const successPaths = batchSummary.processedFiles
+				.filter((result: any) => result.status === "success")
+				.map((result: any) => result.path)
+			const skippedPaths = batchSummary.processedFiles
+				.filter((result: any) => result.status === "skipped")
+				.map((result: any) => result.path)
 
 			// Check that files in hidden directories were not processed
-			expect(processedFiles).not.toContain("src/.next/static/file.js")
-			expect(processedFiles).not.toContain(".git/config")
-			expect(processedFiles).not.toContain(".hidden/file.ts")
+			expect(successPaths).toContain("/mock/workspace/src/file.ts")
+			expect(successPaths).toContain("/mock/workspace/normal/file.js")
+			expect(skippedPaths).toContain("/mock/workspace/.git/config")
+			expect(skippedPaths).toContain("/mock/workspace/.hidden/file.ts")
+			expect(skippedPaths).toContain("/mock/workspace/src/.next/static/file.js")
+			expect(skippedPaths).toContain("/mock/workspace/node_modules/package/index.js")
 		})
 
 		it("should ignore files in hidden directories on change events", async () => {
 			// Initialize the file watcher
 			await fileWatcher.initialize()
 
-			// Track which files are processed
-			const processedFiles: string[] = []
-			mockVectorStore.upsertPoints.mockImplementation(async (points: any[]) => {
-				points.forEach((point) => {
-					if (point.payload?.file_path) {
-						processedFiles.push(point.payload.file_path)
-					}
-				})
-			})
+			const batchPromise = waitForNextBatch()
 
 			// Simulate file change events
 			const testCases = [
@@ -200,23 +234,32 @@ describe("FileWatcher", () => {
 				await mockOnDidChange({ fsPath: path })
 			}
 
-			// Wait for batch processing
-			await new Promise((resolve) => setTimeout(resolve, 600))
+			await flushBatch()
+
+			const batchSummary = await batchPromise
+			const successPaths = batchSummary.processedFiles
+				.filter((result: any) => result.status === "success")
+				.map((result: any) => result.path)
+			const skippedPaths = batchSummary.processedFiles
+				.filter((result: any) => result.status === "skipped")
+				.map((result: any) => result.path)
 
 			// Check that files in hidden directories were not processed
-			expect(processedFiles).not.toContain(".vscode/settings.json")
-			expect(processedFiles).not.toContain("src/.cache/data.json")
+			expect(successPaths).toContain("/mock/workspace/src/file.ts")
+			expect(skippedPaths).toContain("/mock/workspace/.vscode/settings.json")
+			expect(skippedPaths).toContain("/mock/workspace/src/.cache/data.json")
+			expect(skippedPaths).toContain("/mock/workspace/dist/bundle.js")
 		})
 
-		it("should ignore files in hidden directories on delete events", async () => {
+		it("should batch delete events after the debounce window", async () => {
 			// Initialize the file watcher
 			await fileWatcher.initialize()
 
-			// Track which files are deleted
 			const deletedFiles: string[] = []
-			mockVectorStore.deletePointsByFilePath.mockImplementation(async (filePath: string) => {
-				deletedFiles.push(filePath)
+			mockVectorStore.deletePointsByMultipleFilePaths.mockImplementation(async (filePaths: string[]) => {
+				deletedFiles.push(...filePaths)
 			})
+			const batchPromise = waitForNextBatch()
 
 			// Simulate file deletion events
 			const testCases = [
@@ -231,28 +274,17 @@ describe("FileWatcher", () => {
 				await mockOnDidDelete({ fsPath: path })
 			}
 
-			// Wait for batch processing
-			await new Promise((resolve) => setTimeout(resolve, 600))
+			await flushBatch()
+			await batchPromise
 
-			// Check that files in hidden directories were not processed
-			expect(deletedFiles).not.toContain(".git/objects/abc123")
-			expect(deletedFiles).not.toContain(".DS_Store")
-			expect(deletedFiles).not.toContain("build/.cache/temp.js")
+			expect(deletedFiles).toEqual(testCases.map(({ path }) => path))
 		})
 
 		it("should handle nested hidden directories correctly", async () => {
 			// Initialize the file watcher
 			await fileWatcher.initialize()
 
-			// Track which files are processed
-			const processedFiles: string[] = []
-			mockVectorStore.upsertPoints.mockImplementation(async (points: any[]) => {
-				points.forEach((point) => {
-					if (point.payload?.file_path) {
-						processedFiles.push(point.payload.file_path)
-					}
-				})
-			})
+			const batchPromise = waitForNextBatch()
 
 			// Test deeply nested hidden directories
 			const testCases = [
@@ -267,13 +299,21 @@ describe("FileWatcher", () => {
 				await mockOnDidCreate({ fsPath: path })
 			}
 
-			// Wait for batch processing
-			await new Promise((resolve) => setTimeout(resolve, 600))
+			await flushBatch()
+
+			const batchSummary = await batchPromise
+			const successPaths = batchSummary.processedFiles
+				.filter((result: any) => result.status === "success")
+				.map((result: any) => result.path)
+			const skippedPaths = batchSummary.processedFiles
+				.filter((result: any) => result.status === "skipped")
+				.map((result: any) => result.path)
 
 			// Check that files in hidden directories were not processed
-			expect(processedFiles).not.toContain("src/.hidden/components/Button.tsx")
-			expect(processedFiles).not.toContain(".hidden/src/components/Button.tsx")
-			expect(processedFiles).not.toContain("src/components/.hidden/Button.tsx")
+			expect(successPaths).toContain("/mock/workspace/src/components/Button.tsx")
+			expect(skippedPaths).toContain("/mock/workspace/src/.hidden/components/Button.tsx")
+			expect(skippedPaths).toContain("/mock/workspace/.hidden/src/components/Button.tsx")
+			expect(skippedPaths).toContain("/mock/workspace/src/components/.hidden/Button.tsx")
 		})
 	})
 

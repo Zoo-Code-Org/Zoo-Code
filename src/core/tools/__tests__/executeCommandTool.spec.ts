@@ -53,6 +53,7 @@ describe("executeCommandTool", () => {
 	beforeEach(() => {
 		// Reset mocks
 		vitest.clearAllMocks()
+		vitest.useRealTimers()
 
 		// Spy on executeCommandInTerminal and mock its return value
 		vitest.spyOn(executeCommandModule, "executeCommandInTerminal").mockResolvedValue([false, "Command executed"])
@@ -109,6 +110,7 @@ describe("executeCommandTool", () => {
 
 	afterEach(() => {
 		process.env.ROO_CLI_RUNTIME = originalCliRuntime
+		vitest.useRealTimers()
 	})
 
 	/**

@@ -14,7 +14,10 @@ async function main() {
 
 	// Record mode always needs aimock running (to capture traffic).
 	// Replay mode starts aimock when no real API key is present or USE_MOCK is forced.
-	const useMock = isRecord || !process.env.OPENROUTER_API_KEY || process.env.USE_MOCK === "true"
+	const useMock =
+		isRecord ||
+		(!process.env.OPENROUTER_API_KEY && !process.env.ANTHROPIC_API_KEY) ||
+		process.env.USE_MOCK === "true"
 
 	let mock: InstanceType<typeof LLMock> | undefined
 
@@ -39,7 +42,11 @@ async function main() {
 						// OpenRouter is OpenAI-compatible; aimock proxies using the openai provider key.
 						// Use /api (not /api/v1) — aimock appends the request path (/v1/chat/completions)
 						// so including /v1 here would produce a doubled /v1/v1 upstream URL.
-						providers: { openai: "https://openrouter.ai/api" },
+						providers: {
+							openai: "https://openrouter.ai/api",
+							// aimock forwards the x-api-key header from the Anthropic SDK to the real API.
+							anthropic: "https://api.anthropic.com",
+						},
 						fixturePath: fixturesDir,
 					},
 				}),
