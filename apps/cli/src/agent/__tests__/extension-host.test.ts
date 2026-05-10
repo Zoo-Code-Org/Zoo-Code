@@ -4,6 +4,7 @@ import { EventEmitter } from "events"
 import fs from "fs"
 
 import type { ExtensionMessage, WebviewMessage } from "@roo-code/types"
+import { setRuntimeConfigValues } from "@roo-code/vscode-shim"
 
 import { DEFAULT_FLAGS } from "@/types/index.js"
 
@@ -253,6 +254,14 @@ describe("ExtensionHost", () => {
 						(call[1] as WebviewMessage).type === "updateSettings",
 				)
 				expect(updateSettingsCall).toBeDefined()
+			})
+
+			it("should seed runtime config under the extension namespace", () => {
+				const host = createTestHost()
+
+				host.markWebviewReady()
+
+				expect(setRuntimeConfigValues).toHaveBeenCalledWith("zoo-code", expect.any(Object))
 			})
 
 			it("should force terminalShellIntegrationDisabled when terminalShell is provided", () => {
