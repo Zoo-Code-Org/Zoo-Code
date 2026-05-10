@@ -19,10 +19,6 @@ export async function run() {
 	const aimockUrl = process.env.AIMOCK_URL
 	const isRecord = process.env.AIMOCK_RECORD === "true"
 
-	if (isRecord && !process.env.OPENROUTER_API_KEY) {
-		throw new Error("AIMOCK_RECORD=true requires OPENROUTER_API_KEY")
-	}
-
 	await api.setConfiguration({
 		apiProvider: "openrouter" as const,
 		// In record mode, forward the real key so aimock can proxy it to OpenRouter.
