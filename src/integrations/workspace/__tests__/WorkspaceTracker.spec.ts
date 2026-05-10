@@ -91,6 +91,12 @@ describe("WorkspaceTracker", () => {
 		expect(registeredTabChangeCallback).not.toBeNull()
 	})
 
+	afterEach(() => {
+		workspaceTracker.dispose()
+		vitest.runOnlyPendingTimers()
+		vitest.useRealTimers()
+	})
+
 	it("should initialize with workspace files", async () => {
 		const mockFiles = [["/test/workspace/file1.ts", "/test/workspace/file2.ts"], false]
 		;(listFiles as Mock).mockResolvedValue(mockFiles)

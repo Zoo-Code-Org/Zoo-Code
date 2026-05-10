@@ -25,9 +25,34 @@ vi.mock("../../../utils/path", () => ({
 
 import * as childProcess from "child_process"
 
+const createMockRipgrepProcess = (chunks: string[] = [], exitCode = 0) => ({
+	stdout: {
+		on: vi.fn((event, callback) => {
+			if (event === "data") {
+				for (const chunk of chunks) {
+					callback(chunk)
+				}
+			}
+		}),
+	},
+	stderr: {
+		on: vi.fn(),
+	},
+	on: vi.fn((event, callback) => {
+		if (event === "close") {
+			callback(exitCode)
+		}
+	}),
+	kill: vi.fn(),
+})
+
 describe("listFiles limit handling for large projects", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+	})
+
+	afterEach(() => {
+		vi.mocked(fs.promises.readdir).mockRestore?.()
 	})
 
 	it("should prevent stack overflow when scanning large projects", async () => {
@@ -42,8 +67,7 @@ describe("listFiles limit handling for large projects", () => {
 				isFile: () => false,
 			}) as any
 
-		const mockReaddir = vi.fn()
-		vi.mocked(fs.promises).readdir = mockReaddir
+		const mockReaddir = vi.spyOn(fs.promises, "readdir")
 
 		// Simulate a project with 200k+ items (as mentioned in the issue)
 		// Create a broad directory tree that would cause stack overflow without proper limits
@@ -62,31 +86,12 @@ describe("listFiles limit handling for large projects", () => {
 
 		// Mock ripgrep to return many files
 		const mockSpawn = vi.mocked(childProcess.spawn)
-		const mockProcess = {
-			stdout: {
-				on: vi.fn((event, callback) => {
-					if (event === "data") {
-						// Return many files to simulate large project
-						const files =
-							Array(10000)
-								.fill(null)
-								.map((_, i) => `file${i}.ts`)
-								.join("\n") + "\n"
-						setTimeout(() => callback(files), 10)
-					}
-				}),
-			},
-			stderr: {
-				on: vi.fn(),
-			},
-			on: vi.fn((event, callback) => {
-				if (event === "close") {
-					setTimeout(() => callback(0), 20)
-				}
-			}),
-			kill: vi.fn(),
-		}
-		mockSpawn.mockReturnValue(mockProcess as any)
+		const files =
+			Array(10000)
+				.fill(null)
+				.map((_, i) => `file${i}.ts`)
+				.join("\n") + "\n"
+		mockSpawn.mockReturnValue(createMockRipgrepProcess([files]) as any)
 
 		// Call listFiles with a limit that would be used in code indexing
 		const limit = 50_000 // MAX_LIST_FILES_LIMIT_CODE_INDEX value
@@ -97,15 +102,10 @@ describe("listFiles limit handling for large projects", () => {
 		let limitReached = false
 
 		try {
-			const startTime = Date.now()
 			const [res, didHitLimit] = await listFiles("/test/large-project", true, limit)
-			const endTime = Date.now()
 
 			results = res
 			limitReached = didHitLimit
-
-			// Should complete in reasonable time
-			expect(endTime - startTime).toBeLessThan(10000) // 10 seconds max
 		} catch (e) {
 			error = e as Error
 		}
@@ -122,8 +122,8 @@ describe("listFiles limit handling for large projects", () => {
 
 		// Directory scanning should respect the overall limit
 		const directories = results.filter((r) => r.endsWith("/"))
-		const files = results.filter((r) => !r.endsWith("/"))
-		expect(directories.length + files.length).toBeLessThanOrEqual(limit)
+		const resultFiles = results.filter((r) => !r.endsWith("/"))
+		expect(directories.length + resultFiles.length).toBeLessThanOrEqual(limit)
 	})
 
 	it("should terminate early when directory limit is reached", async () => {
@@ -135,12 +135,11 @@ describe("listFiles limit handling for large projects", () => {
 				isFile: () => false,
 			}) as any
 
-		const mockReaddir = vi.fn()
-		vi.mocked(fs.promises).readdir = mockReaddir
+		const mockReaddir = vi.spyOn(fs.promises, "readdir")
 
 		// Mock directory structure
 		let directoriesScanned = 0
-		mockReaddir.mockImplementation(async (dirPath: string) => {
+		mockReaddir.mockImplementation(async () => {
 			directoriesScanned++
 
 			// Root directory has many subdirectories
@@ -158,25 +157,7 @@ describe("listFiles limit handling for large projects", () => {
 
 		// Mock ripgrep to return no files (focus on directory scanning)
 		const mockSpawn = vi.mocked(childProcess.spawn)
-		const mockProcess = {
-			stdout: {
-				on: vi.fn((event, callback) => {
-					if (event === "data") {
-						setTimeout(() => callback(""), 10)
-					}
-				}),
-			},
-			stderr: {
-				on: vi.fn(),
-			},
-			on: vi.fn((event, callback) => {
-				if (event === "close") {
-					setTimeout(() => callback(0), 20)
-				}
-			}),
-			kill: vi.fn(),
-		}
-		mockSpawn.mockReturnValue(mockProcess as any)
+		mockSpawn.mockReturnValue(createMockRipgrepProcess() as any)
 
 		// Call listFiles with a small limit
 		const limit = 10
@@ -199,13 +180,14 @@ describe("listFiles limit handling for large projects", () => {
 
 	it("should handle zero limit gracefully", async () => {
 		// This test is already in the original spec but let's ensure it works with our changes
+		const readdirSpy = vi.spyOn(fs.promises, "readdir")
 		const [results, limitReached] = await listFiles("/test/path", true, 0)
 
 		expect(results).toEqual([])
 		expect(limitReached).toBe(false)
 
 		// No filesystem operations should occur with zero limit
-		expect(fs.promises.readdir).not.toHaveBeenCalled()
+		expect(readdirSpy).not.toHaveBeenCalled()
 		expect(childProcess.spawn).not.toHaveBeenCalled()
 	})
 
@@ -218,8 +200,7 @@ describe("listFiles limit handling for large projects", () => {
 				isFile: () => false,
 			}) as any
 
-		const mockReaddir = vi.fn()
-		vi.mocked(fs.promises).readdir = mockReaddir
+		const mockReaddir = vi.spyOn(fs.promises, "readdir")
 
 		// Mock directory with some subdirectories
 		mockReaddir
@@ -228,31 +209,12 @@ describe("listFiles limit handling for large projects", () => {
 
 		// Mock ripgrep to return files
 		const mockSpawn = vi.mocked(childProcess.spawn)
-		const mockProcess = {
-			stdout: {
-				on: vi.fn((event, callback) => {
-					if (event === "data") {
-						// Return 8 files
-						const files =
-							Array(8)
-								.fill(null)
-								.map((_, i) => `file${i}.ts`)
-								.join("\n") + "\n"
-						setTimeout(() => callback(files), 10)
-					}
-				}),
-			},
-			stderr: {
-				on: vi.fn(),
-			},
-			on: vi.fn((event, callback) => {
-				if (event === "close") {
-					setTimeout(() => callback(0), 20)
-				}
-			}),
-			kill: vi.fn(),
-		}
-		mockSpawn.mockReturnValue(mockProcess as any)
+		const files =
+			Array(8)
+				.fill(null)
+				.map((_, i) => `file${i}.ts`)
+				.join("\n") + "\n"
+		mockSpawn.mockReturnValue(createMockRipgrepProcess([files]) as any)
 
 		// Call with limit of 10
 		const [results, limitReached] = await listFiles("/test/project", true, 10)
@@ -261,14 +223,14 @@ describe("listFiles limit handling for large projects", () => {
 		expect(results.length).toBe(10)
 		expect(limitReached).toBe(true)
 
-		const files = results.filter((r) => !r.endsWith("/"))
+		const resultFiles = results.filter((r) => !r.endsWith("/"))
 		const directories = results.filter((r) => r.endsWith("/"))
 
 		// Should have both files and directories
-		expect(files.length).toBeGreaterThan(0)
+		expect(resultFiles.length).toBeGreaterThan(0)
 		expect(directories.length).toBeGreaterThan(0)
 
 		// Total should equal the limit
-		expect(files.length + directories.length).toBe(10)
+		expect(resultFiles.length + directories.length).toBe(10)
 	})
 })

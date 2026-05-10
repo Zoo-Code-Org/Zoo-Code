@@ -25,6 +25,27 @@ vi.mock("../../path", () => ({
 import { listFiles } from "../list-files"
 import * as childProcess from "child_process"
 
+const createMockRipgrepProcess = (chunks: string[] = [], exitCode = 0) => ({
+	stdout: {
+		on: vi.fn((event, callback) => {
+			if (event === "data") {
+				for (const chunk of chunks) {
+					callback(chunk)
+				}
+			}
+		}),
+	},
+	stderr: {
+		on: vi.fn(),
+	},
+	on: vi.fn((event, callback) => {
+		if (event === "close") {
+			callback(exitCode)
+		}
+	}),
+	kill: vi.fn(),
+})
+
 describe("list-files gitignore support", () => {
 	let tempDir: string
 	let originalCwd: string
@@ -62,27 +83,7 @@ describe("list-files gitignore support", () => {
 
 		// Mock ripgrep to return only non-ignored files
 		const mockSpawn = vi.mocked(childProcess.spawn)
-		const mockProcess = {
-			stdout: {
-				on: vi.fn((event, callback) => {
-					if (event === "data") {
-						// Ripgrep should respect .gitignore and only return src/index.ts
-						setTimeout(() => callback(`${path.join(tempDir, "src", "index.ts")}\n`), 10)
-					}
-				}),
-			},
-			stderr: {
-				on: vi.fn(),
-			},
-			on: vi.fn((event, callback) => {
-				if (event === "close") {
-					setTimeout(() => callback(0), 20)
-				}
-			}),
-			kill: vi.fn(),
-		}
-
-		mockSpawn.mockReturnValue(mockProcess as any)
+		mockSpawn.mockReturnValue(createMockRipgrepProcess([`${path.join(tempDir, "src", "index.ts")}\n`]) as any)
 
 		// Call listFiles in recursive mode
 		const [files, didHitLimit] = await listFiles(tempDir, true, 100)
@@ -112,26 +113,7 @@ describe("list-files gitignore support", () => {
 
 		// Mock ripgrep
 		const mockSpawn = vi.mocked(childProcess.spawn)
-		const mockProcess = {
-			stdout: {
-				on: vi.fn((event, callback) => {
-					if (event === "data") {
-						setTimeout(() => callback(""), 10)
-					}
-				}),
-			},
-			stderr: {
-				on: vi.fn(),
-			},
-			on: vi.fn((event, callback) => {
-				if (event === "close") {
-					setTimeout(() => callback(0), 20)
-				}
-			}),
-			kill: vi.fn(),
-		}
-
-		mockSpawn.mockReturnValue(mockProcess as any)
+		mockSpawn.mockReturnValue(createMockRipgrepProcess() as any)
 
 		// Call listFiles in recursive mode
 		const [files, didHitLimit] = await listFiles(tempDir, true, 100)

@@ -22,14 +22,27 @@ Record mode uses **record-on-miss**: if an existing fixture already matches a re
 
     The `-x` flag is required because `openai-*.json` files are gitignored — `git clean -f` alone silently skips them.
 
-3. Record fixtures (requires an OpenRouter API key with credits):
+3. Record fixtures. Use an OpenRouter key (default) or an Anthropic key (for tests that use the
+   Anthropic provider directly):
 
     ```sh
+    # OpenRouter (default — most tests)
     OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:record
+
+    # Anthropic provider (tests that call api.setConfiguration({ apiProvider: "anthropic" }))
+    # OPENROUTER_API_KEY is still required — the harness always initialises with OpenRouter.
+    OPENROUTER_API_KEY=<or-key> ANTHROPIC_API_KEY=<key> TEST_FILE=my-anthropic-test.test.js pnpm --filter @roo-code/vscode-e2e test:record
     ```
 
-    This proxies unmatched requests to OpenRouter and writes `fixtures/openai-*.json`. Background
-    calls from the extension will also be recorded here — that's expected, ignore them.
+    To avoid re-recording unrelated tests, filter to just your file:
+
+    ```sh
+    OPENROUTER_API_KEY=<key> TEST_FILE=my-feature.test.js pnpm --filter @roo-code/vscode-e2e test:record
+    ```
+
+    This proxies unmatched requests to the real API and writes `fixtures/openai-*.json` (OpenRouter)
+    or `fixtures/anthropic-*.json` (Anthropic). Background calls from the extension will also be
+    recorded — that's expected, ignore them.
 
 4. Find the auto-recorded file for your test:
 
@@ -85,6 +98,23 @@ Background API calls from the extension (usage collection, initialization) hit a
 | `pnpm --filter @roo-code/vscode-e2e test:ci:mock`                         | Replay mode — no API key needed, uses fixtures                     |
 | `OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:record` | Record mode — proxies to real API, writes `openai-*.json`          |
 | `OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:ci`     | Real-API mode — runs against live OpenRouter (for drift detection) |
+
+## Tests that use a non-default provider
+
+If your test calls `api.setConfiguration({ apiProvider: "anthropic", ... })`, point aimock at the
+Anthropic endpoint by passing `anthropicBaseUrl: aimockUrl` (without a `/v1` suffix — aimock
+appends the path itself):
+
+```typescript
+await api.setConfiguration({
+	apiProvider: "anthropic" as const,
+	apiKey: aimockUrl && !isRecord ? "mock-key" : process.env.ANTHROPIC_API_KEY!,
+	apiModelId: "claude-opus-4-7",
+	...(aimockUrl && { anthropicBaseUrl: aimockUrl }),
+})
+```
+
+Always restore the default OpenRouter config in `suiteTeardown` so subsequent suites are unaffected.
 
 ## Programmatic fixtures (regex matching)
 
