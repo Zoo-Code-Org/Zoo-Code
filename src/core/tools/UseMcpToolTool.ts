@@ -283,6 +283,9 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 					return ""
 				}
 				if (item.type === "resource_link") {
+					if (typeof item.name !== "string" || typeof item.uri !== "string") {
+						return ""
+					}
 					const parts = [`Resource Link: ${item.name} (${item.uri})`]
 					if (item.description) {
 						parts.push(`  Description: ${item.description}`)
