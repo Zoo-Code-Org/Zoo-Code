@@ -13,6 +13,7 @@
 		"lint": "eslint src --ext .ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
 		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
 		"test:integration": "tsx scripts/integration/run.ts",
 		"build": "tsup",
 		"build:extension": "pnpm --filter roo-cline bundle",
@@ -45,6 +46,7 @@
 		"ink-testing-library": "^4.0.0",
 		"rimraf": "^6.0.1",
 		"tsup": "^8.4.0",
+		"@vitest/coverage-v8": "^3.2.3",
 		"vitest": "^3.2.3"
 	}
 }

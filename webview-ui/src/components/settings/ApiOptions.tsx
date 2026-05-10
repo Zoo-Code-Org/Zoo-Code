@@ -613,7 +613,6 @@ const ApiOptions = ({
 						<DeepSeek
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
-							simplifySettings={fromWelcomeView}
 						/>
 					)}
 

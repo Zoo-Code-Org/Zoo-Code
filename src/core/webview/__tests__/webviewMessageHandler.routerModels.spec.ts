@@ -133,7 +133,106 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(routerModels).toHaveProperty("openrouter")
 		expect(routerModels).toHaveProperty("roo")
 		expect(routerModels).toHaveProperty("requesty")
+		expect(routerModels).toHaveProperty("deepseek")
 		expect(routerModels.roo).toEqual({})
+		expect(routerModels.deepseek).toEqual({})
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "deepseek" }))
+	})
+
+	it("fetches DeepSeek models when stored DeepSeek credentials exist", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				deepSeekApiKey: "stored-deepseek-key",
+				deepSeekBaseUrl: "https://deepseek.example.com",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options: any) => {
+			if (options?.provider === "deepseek") {
+				return { "deepseek-chat": { contextWindow: 128000, supportsPromptCache: true } }
+			}
+
+			switch (options?.provider) {
+				case "openrouter":
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case "requesty":
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "vercel-ai-gateway":
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "litellm":
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(
+			mockProvider as any,
+			{
+				type: "requestRouterModels",
+			} as any,
+		)
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: "deepseek",
+			apiKey: "stored-deepseek-key",
+			baseUrl: "https://deepseek.example.com",
+		})
+
+		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
+			(c: any[]) => c[0]?.type === "routerModels",
+		)
+		expect(call).toBeTruthy()
+		expect(call[0].routerModels.deepseek).toEqual({
+			"deepseek-chat": { contextWindow: 128000, supportsPromptCache: true },
+		})
+	})
+
+	it("posts a DeepSeek provider error and keeps an empty aggregate entry when DeepSeek fetch fails", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				deepSeekApiKey: "stored-deepseek-key",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options: any) => {
+			if (options?.provider === "deepseek") {
+				throw new Error("DeepSeek API error")
+			}
+
+			switch (options?.provider) {
+				case "openrouter":
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case "requesty":
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "vercel-ai-gateway":
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "litellm":
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(
+			mockProvider as any,
+			{
+				type: "requestRouterModels",
+			} as any,
+		)
+
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "singleRouterModelFetchResponse",
+			success: false,
+			error: "DeepSeek API error",
+			values: { provider: "deepseek" },
+		})
+
+		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
+			(c: any[]) => c[0]?.type === "routerModels",
+		)
+		expect(call).toBeTruthy()
+		expect(call[0].routerModels.deepseek).toEqual({})
 	})
 
 	it("supports filtering another single provider ('openrouter')", async () => {

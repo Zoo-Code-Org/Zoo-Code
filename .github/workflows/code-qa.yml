@@ -49,12 +49,34 @@ jobs:
                 include:
                     - os: ubuntu-latest
                       name: ubuntu-latest
+                      codecov-flag: ubuntu
                     - os: windows-latest
                       name: windows-latest
+                      codecov-flag: windows
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
-            - name: Run unit tests
-              run: pnpm test
+            - name: Cache Turbo
+              uses: actions/cache@v4
+              with:
+                  path: .turbo/cache
+                  key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}
+                  restore-keys: |
+                      ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-
+                      ${{ runner.os }}-turbo-
+            - name: Run unit tests with coverage
+              run: pnpm test:coverage
+            - name: Upload coverage to Codecov
+              uses: codecov/codecov-action@v4
+              with:
+                  files: >-
+                      src/coverage/lcov.info,
+                      webview-ui/coverage/lcov.info,
+                      packages/core/coverage/lcov.info,
+                      packages/cloud/coverage/lcov.info,
+                      packages/telemetry/coverage/lcov.info,
+                      apps/cli/coverage/lcov.info
+                  flags: ${{ matrix.codecov-flag }}
+                  token: ${{ secrets.CODECOV_TOKEN }}

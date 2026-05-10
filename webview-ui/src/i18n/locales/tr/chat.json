@@ -332,8 +332,8 @@
 		"title": "Zoo Code {{version}} yayınlandı",
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"handoff": {
-			"heading": "Zoo Code geri döndü; artık Zoo Code adlı, topluluk tarafından sürdürülen bir eklenti!!",
-			"description": "Takip etmiyorsan kaçırmış olabilirsin: Zoo Code ekibi kısa süre önce Zoo Code geliştirmesini aşamalı olarak sonlandırdığını ve yaptıkları çalışmaları arşivlediğini duyurdu. Ama endişelenme; topluluk, Zoo Code mirasını yeni bir ad ve yeni bir yuva ile sürdürmek için öne çıktı! Artık sadece tek bir \"Roo\" değiliz; bir topluluğuz, istersen bir \"Zoo\" diyebilirsin. Zoo Code, Zoo Code'un bıraktığı yerden devam eden, topluluk tarafından sürdürülen bir eklenti ve Roo'nun ruhunu korurken yeni özellikler ve iyileştirmeler sunmaya kararlıyız. Geliştiriciler için böylesine harika bir araç yarattıkları ve yaptıkları inanılmaz iş için tüm Zoo Code ekibine kocaman bir teşekkür göndermek istiyoruz. Onların temeli üzerine inşa etmeyi sürdürmekten ve topluluğun gelecekte Zoo Code'u nereye taşıyacağını görmekten heyecan duyuyoruz!",
+			"heading": "Roo Code geri döndü! Artık Zoo Code adlı, topluluk tarafından sürdürülen bir eklenti!!",
+			"description": "Takip etmiyorsan kaçırmış olabilirsin: Roo Code ekibi kısa süre önce Roo Code geliştirmesini aşamalı olarak sonlandırdığını ve yaptıkları çalışmaları arşivlediğini duyurdu. Ama endişelenme; topluluk, Roo Code mirasını yeni bir ad ve yeni bir yuva ile sürdürmek için öne çıktı! Artık sadece tek bir \"Roo\" değiliz; bir topluluğuz, istersen bir \"Zoo\" diyebilirsin. Zoo Code, Zoo Code'un bıraktığı yerden devam eden, topluluk tarafından sürdürülen bir eklenti ve Roo'nun ruhunu korurken yeni özellikler ve iyileştirmeler sunmaya kararlıyız. Geliştiriciler için böylesine harika bir araç yarattıkları ve yaptıkları inanılmaz iş için tüm Roo Code ekibine kocaman bir teşekkür göndermek istiyoruz. Onların temeli üzerine inşa etmeyi sürdürmekten ve topluluğun gelecekte Zoo Code'u nereye taşıyacağını görmekten heyecan duyuyoruz!",
 			"readMore": "Zoo Code'un yeni ana sayfasına göz at ve tam duyuruyu oku"
 		},
 		"release": {

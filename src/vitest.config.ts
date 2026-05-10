@@ -14,6 +14,19 @@ export default defineConfig({
 		testTimeout: 20_000,
 		hookTimeout: 20_000,
 		onConsoleLog,
+		coverage: {
+			provider: "v8",
+			reporter: ["text", "lcov"],
+			exclude: [
+				"**/*.test.ts",
+				"**/*.test.tsx",
+				"**/*.spec.ts",
+				"**/*.spec.tsx",
+				"**/vitest.setup.ts",
+				"**/vitest.config.ts",
+				"**/__mocks__/**",
+			],
+		},
 	},
 	resolve: {
 		alias: {
