@@ -2166,6 +2166,38 @@ export class ClineProvider
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
 		const currentTask = this.getCurrentTask()
+		let zooCodeState: {
+			zooCodeIsAuthenticated: boolean
+			zooCodeUserName: string | undefined
+			zooCodeUserEmail: string | undefined
+			zooCodeUserImage: string | undefined
+			zooCodeBaseUrl: string
+			deviceName: string
+		} = {
+			zooCodeIsAuthenticated: false,
+			zooCodeUserName: undefined,
+			zooCodeUserEmail: undefined,
+			zooCodeUserImage: undefined,
+			zooCodeBaseUrl: "https://www.zoocode.dev",
+			deviceName: os.hostname(),
+		}
+
+		try {
+			const { isZooCodeAuthenticated, getCachedZooCodeUserInfo, getZooCodeBaseUrl } = await import(
+				"../../services/zoo-code-auth"
+			)
+			const userInfo = getCachedZooCodeUserInfo()
+			zooCodeState = {
+				zooCodeIsAuthenticated: await isZooCodeAuthenticated(),
+				zooCodeUserName: userInfo.name,
+				zooCodeUserEmail: userInfo.email,
+				zooCodeUserImage: userInfo.image,
+				zooCodeBaseUrl: getZooCodeBaseUrl(),
+				deviceName: os.hostname(),
+			}
+		} catch {
+			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
+		}
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
@@ -2289,35 +2321,7 @@ export class ClineProvider
 					return false
 				}
 			})(),
-			zooCodeIsAuthenticated: await (async () => {
-				try {
-					const { isZooCodeAuthenticated } = await import("../../services/zoo-code-auth")
-					return await isZooCodeAuthenticated()
-				} catch {
-					return false
-				}
-			})(),
-			...(() => {
-				try {
-					const { getCachedZooCodeUserInfo, getZooCodeBaseUrl } = require("../../services/zoo-code-auth")
-					const userInfo = getCachedZooCodeUserInfo()
-					return {
-						zooCodeUserName: userInfo.name,
-						zooCodeUserEmail: userInfo.email,
-						zooCodeUserImage: userInfo.image,
-						zooCodeBaseUrl: getZooCodeBaseUrl(),
-						deviceName: os.hostname(),
-					}
-				} catch {
-					return {
-						zooCodeUserName: undefined,
-						zooCodeUserEmail: undefined,
-						zooCodeUserImage: undefined,
-						zooCodeBaseUrl: "https://www.zoocode.dev",
-						deviceName: os.hostname(),
-					}
-				}
-			})(),
+			...zooCodeState,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
 		}
 	}

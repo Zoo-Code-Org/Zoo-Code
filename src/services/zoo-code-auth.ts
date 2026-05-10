@@ -32,9 +32,14 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 	_cachedUserEmail = await secretStorage.get(ZOO_CODE_USER_EMAIL_KEY)
 	_cachedUserImage = await secretStorage.get(ZOO_CODE_USER_IMAGE_KEY)
 
-	// Check subscription status on init if authenticated
+	// Validate persisted auth state on init before reporting the user as connected.
 	if (_cachedToken) {
-		checkSubscriptionStatus().catch(() => {})
+		const isValid = await verifyZooCodeToken().catch(() => false)
+		if (!isValid) {
+			await clearZooCodeUserInfo()
+		} else {
+			void checkSubscriptionStatus().catch(() => {})
+		}
 	}
 
 	// Watch for secret changes and update cache
@@ -194,7 +199,7 @@ export async function clearZooCodeToken(): Promise<void> {
 }
 
 export function getZooCodeBaseUrl(): string {
-	const config = vscode.workspace.getConfiguration("zoo-code")
+	const config = vscode.workspace.getConfiguration(Package.name)
 	return config.get<string>("baseUrl") || process.env.ZOO_CODE_BASE_URL || "https://www.zoocode.dev"
 }
 
@@ -282,9 +287,8 @@ export async function disconnectZooCode(): Promise<void> {
 		} catch {
 			// Ignore errors during revocation
 		}
-
-		await clearZooCodeToken()
 	}
+	await clearZooCodeToken()
 	await clearZooCodeUserInfo()
 	vscode.window.showInformationMessage("Zoo Code: Disconnected successfully.")
 }
