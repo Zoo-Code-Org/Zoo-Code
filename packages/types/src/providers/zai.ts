@@ -151,6 +151,21 @@ export const internationalZAiModels = {
 		description:
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. It delivers top-tier reasoning, coding, and agentic performance.",
 	},
+	"glm-5-turbo": {
+		maxTokens: 16_384,
+		contextWindow: 202_752,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 1.2,
+		outputPrice: 4.0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.24,
+		description:
+			"GLM-5-Turbo is Zhipu's OpenClaw-optimized model with built-in thinking capabilities. It improves tool use, instruction following, and long-running agent workflows while keeping fast response times.",
+	},
 	"glm-4.7-flash": {
 		maxTokens: 16_384,
 		contextWindow: 200_000,
@@ -341,6 +356,21 @@ export const mainlandZAiModels = {
 		cacheReadsPrice: 0.13,
 		description:
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. It delivers top-tier reasoning, coding, and agentic performance.",
+	},
+	"glm-5-turbo": {
+		maxTokens: 16_384,
+		contextWindow: 202_752,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 0.35,
+		outputPrice: 1.43,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.07,
+		description:
+			"GLM-5-Turbo is Zhipu's OpenClaw-optimized model with built-in thinking capabilities. It improves tool use, instruction following, and long-running agent workflows while keeping fast response times.",
 	},
 	"glm-4.7-flash": {
 		maxTokens: 16_384,
