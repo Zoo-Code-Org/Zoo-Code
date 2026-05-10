@@ -49,12 +49,12 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 							<Trans i18nKey="chat:announcement.handoff.description" components={{ bold: <strong /> }} />
 						</p>
 						<VSCodeLink
-							href="https://x.com/mattrubens/status/2046636598859559114"
+							href="https://www.zoocode.dev?utm_source=zoocode&utm_medium=announcement&utm_campaign=community_handoff"
 							onClick={(e) => {
 								e.preventDefault()
 								vscode.postMessage({
 									type: "openExternal",
-									url: "https://x.com/mattrubens/status/2046636598859559114",
+									url: "https://www.zoocode.dev?utm_source=zoocode&utm_medium=announcement&utm_campaign=community_handoff",
 								})
 							}}>
 							{t("chat:announcement.handoff.readMore")}

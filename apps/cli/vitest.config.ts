@@ -13,5 +13,10 @@ export default defineConfig({
 		watch: false,
 		testTimeout: 120_000, // 2m for integration tests.
 		include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+		coverage: {
+			provider: "v8",
+			reporter: ["text", "lcov"],
+			exclude: ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx", "**/vitest.config.ts"],
+		},
 	},
 })

@@ -174,7 +174,7 @@ export const openAiCodexModels = {
 	},
 	"gpt-5.5": {
 		maxTokens: 128000,
-		contextWindow: 1_050_000,
+		contextWindow: 400000,
 		includedTools: ["apply_patch"],
 		excludedTools: ["apply_diff", "write_to_file"],
 		supportsImages: true,
