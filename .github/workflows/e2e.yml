@@ -4,7 +4,6 @@ on:
     workflow_dispatch:
     pull_request:
         types: [opened, reopened, ready_for_review, synchronize]
-        branches: [main]
         paths:
             - "src/**"
             - "webview-ui/**"
