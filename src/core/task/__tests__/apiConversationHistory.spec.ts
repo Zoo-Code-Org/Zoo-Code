@@ -50,6 +50,22 @@ describe("prepareApiConversationMessage", () => {
 		])
 	})
 
+	it("falls back to generic reasoning blocks for Anthropic messages without thought signatures", () => {
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			reasoning: "private reasoning",
+			api: {} as any,
+			apiConfiguration: { apiProvider: "anthropic", apiModelId: "claude-3-5-sonnet" } as any,
+			apiConversationHistory: [],
+		}) as any
+
+		expect(result.content).toEqual([
+			{ type: "reasoning", text: "private reasoning", summary: [] },
+			{ type: "text", text: "answer" },
+		])
+		expect(result.ts).toBe(Date.now())
+	})
+
 	it("preserves encrypted reasoning content", () => {
 		const result = prepareApiConversationMessage({
 			message: { role: "assistant", content: [{ type: "text", text: "answer" }] },
@@ -101,6 +117,27 @@ describe("prepareApiConversationMessage", () => {
 		}) as any
 
 		expect(result.content).toEqual([{ type: "tool_result", tool_use_id: "tool-1", content: "done" }])
+		expect(result.ts).toBe(Date.now())
+	})
+
+	it("converts user tool_result blocks to text when the last effective message is not assistant", () => {
+		const result = prepareApiConversationMessage({
+			message: {
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: "tool-1", content: "done" },
+					{ type: "text", text: "next step" },
+				],
+			},
+			api: {} as any,
+			apiConfiguration: { apiProvider: "openrouter", openRouterModelId: "openai/gpt-4" } as any,
+			apiConversationHistory: [{ role: "user", content: "previous user message" } as any],
+		}) as any
+
+		expect(result.content).toEqual([
+			{ type: "text", text: "Tool result:\ndone" },
+			{ type: "text", text: "next step" },
+		])
 		expect(result.ts).toBe(Date.now())
 	})
 })
