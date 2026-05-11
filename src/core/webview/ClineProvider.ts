@@ -3379,7 +3379,7 @@ export class ClineProvider
 
 		// 3) Close child instance if still open (single-open-task invariant).
 		//    This MUST happen BEFORE updating the child's status to "completed" because
-		//    removeClineFromStack() → abortTask(true) → saveClineMessages() writes
+		//    removeClineFromStack() → abortTask(true) → ClineMessagesStore.save() writes
 		//    the historyItem with initialStatus (typically "active"), which would
 		//    overwrite a "completed" status set earlier.
 		const current = this.getCurrentTask()
@@ -3389,7 +3389,7 @@ export class ClineProvider
 
 		// 4) Update child metadata to "completed" status.
 		//    This runs after the abort so it overwrites the stale "active" status
-		//    that saveClineMessages() may have written during step 3.
+		//    that ClineMessagesStore.save() may have written during step 3.
 		try {
 			const { historyItem: childHistory } = await this.getTaskWithId(childTaskId)
 			await this.updateTaskHistory({

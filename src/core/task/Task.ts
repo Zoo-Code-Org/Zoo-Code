@@ -36,7 +36,6 @@ import {
 	type ClineApiReqCancelReason,
 	type ClineApiReqInfo,
 	RooCodeEventName,
-	TelemetryEventName,
 	TaskStatus,
 	TodoItem,
 	getApiProtocol,
@@ -55,7 +54,6 @@ import {
 	countEnabledMcpTools,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
-import { CloudService } from "@roo-code/cloud"
 
 // api
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
@@ -111,9 +109,6 @@ import {
 	type ApiMessage,
 	readApiMessages,
 	saveApiMessages,
-	readTaskMessages,
-	saveTaskMessages,
-	taskMetadata,
 } from "../task-persistence"
 import { getEnvironmentDetails } from "../environment/getEnvironmentDetails"
 import { checkContextWindowExceededError } from "../context/context-management/context-error-handling"
@@ -132,6 +127,7 @@ import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
+import { ClineMessagesStore } from "./ClineMessagesStore"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -307,13 +303,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// LLM Messages & Chat Messages
 	apiConversationHistory: ApiMessage[] = []
-	clineMessages: ClineMessage[] = []
+	private clineMessagesStore!: ClineMessagesStore
 
 	// Ask
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
-	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
 	// Tool Use
@@ -407,9 +402,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Token Usage Throttling - Debounced emit function
 	private readonly TOKEN_USAGE_EMIT_INTERVAL_MS = 2000 // 2 seconds
 	private debouncedEmitTokenUsage: ReturnType<typeof debounce>
-
-	// Historical cloud sync tracking retained only to avoid task resume churn.
-	private cloudSyncedMessageTimestamps: Set<number> = new Set()
 
 	// Initial status for the task's history item (set at creation time to avoid race conditions)
 	private readonly initialStatus?: "active" | "delegated" | "completed"
@@ -562,6 +554,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.TOKEN_USAGE_EMIT_INTERVAL_MS,
 			{ leading: true, trailing: true, maxWait: this.TOKEN_USAGE_EMIT_INTERVAL_MS },
 		)
+
+		this.clineMessagesStore = new ClineMessagesStore({
+			taskId: this.taskId,
+			rootTaskId: this.rootTaskId,
+			parentTaskId: this.parentTaskId,
+			taskNumber: this.taskNumber,
+			globalStoragePath: this.globalStoragePath,
+			workspace: this.cwd,
+			initialStatus: this.initialStatus,
+			getProvider: () => this.providerRef.deref(),
+			getTaskMode: () => this._taskMode,
+			getTaskApiConfigName: () => this._taskApiConfigName,
+			waitForTaskApiConfig: () => this.taskApiConfigReady,
+			getToolUsage: () => this.toolUsage,
+			emitMessage: (payload) => this.emit(RooCodeEventName.Message, payload),
+			emitTokenUsage: (tokenUsage, toolUsage) => this.debouncedEmitTokenUsage(tokenUsage, toolUsage),
+			afterOverwrite: () => restoreTodoListForTask(this),
+		})
 
 		onCreated?.(this)
 
@@ -1149,113 +1159,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Cline Messages
 
-	private async getSavedClineMessages(): Promise<ClineMessage[]> {
-		return readTaskMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
-	}
-
-	private async addToClineMessages(message: ClineMessage) {
-		this.clineMessages.push(message)
-		const provider = this.providerRef.deref()
-		// Avoid resending large, mostly-static fields (notably taskHistory) on every chat message update.
-		// taskHistory is maintained in-memory in the webview and updated via taskHistoryItemUpdated.
-		await provider?.postStateToWebviewWithoutTaskHistory()
-		this.emit(RooCodeEventName.Message, { action: "created", message })
-		await this.saveClineMessages()
-
-		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
-
-		if (shouldCaptureMessage) {
-			CloudService.instance.captureEvent({
-				event: TelemetryEventName.TASK_MESSAGE,
-				properties: { taskId: this.taskId, message },
-			})
-			// Track that this message has been synced to cloud
-			this.cloudSyncedMessageTimestamps.add(message.ts)
-		}
-	}
-
 	public async overwriteClineMessages(newMessages: ClineMessage[]) {
-		this.clineMessages = newMessages
-		restoreTodoListForTask(this)
-		await this.saveClineMessages()
-
-		// When overwriting messages (e.g., during task resume), repopulate the cloud sync tracking Set
-		// with timestamps from all non-partial messages to prevent re-syncing previously synced messages
-		this.cloudSyncedMessageTimestamps.clear()
-		for (const msg of newMessages) {
-			if (msg.partial !== true) {
-				this.cloudSyncedMessageTimestamps.add(msg.ts)
-			}
-		}
-	}
-
-	private async updateClineMessage(message: ClineMessage) {
-		const provider = this.providerRef.deref()
-		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
-		this.emit(RooCodeEventName.Message, { action: "updated", message })
-
-		// Check if we should sync to cloud and haven't already synced this message
-		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
-		const hasNotBeenSynced = !this.cloudSyncedMessageTimestamps.has(message.ts)
-
-		if (shouldCaptureMessage && hasNotBeenSynced) {
-			CloudService.instance.captureEvent({
-				event: TelemetryEventName.TASK_MESSAGE,
-				properties: { taskId: this.taskId, message },
-			})
-			// Track that this message has been synced to cloud
-			this.cloudSyncedMessageTimestamps.add(message.ts)
-		}
-	}
-
-	private async saveClineMessages(): Promise<boolean> {
-		try {
-			await saveTaskMessages({
-				messages: structuredClone(this.clineMessages),
-				taskId: this.taskId,
-				globalStoragePath: this.globalStoragePath,
-			})
-
-			if (this._taskApiConfigName === undefined) {
-				await this.taskApiConfigReady
-			}
-
-			const { historyItem, tokenUsage } = await taskMetadata({
-				taskId: this.taskId,
-				rootTaskId: this.rootTaskId,
-				parentTaskId: this.parentTaskId,
-				taskNumber: this.taskNumber,
-				messages: this.clineMessages,
-				globalStoragePath: this.globalStoragePath,
-				workspace: this.cwd,
-				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
-				apiConfigName: this._taskApiConfigName, // Use the task's own provider profile, not the current provider profile.
-				initialStatus: this.initialStatus,
-			})
-
-			// Emit token/tool usage updates using debounced function
-			// The debounce with maxWait ensures:
-			// - Immediate first emit (leading: true)
-			// - At most one emit per interval during rapid updates (maxWait)
-			// - Final state is emitted when updates stop (trailing: true)
-			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
-
-			await this.providerRef.deref()?.updateTaskHistory(historyItem)
-			return true
-		} catch (error) {
-			console.error("Failed to save Roo messages:", error)
-			return false
-		}
-	}
-
-	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
-		for (let i = this.clineMessages.length - 1; i >= 0; i--) {
-			if (this.clineMessages[i].ts === ts) {
-				return this.clineMessages[i]
-			}
-		}
-
-		return undefined
+		await this.clineMessagesStore.overwrite(newMessages)
 	}
 
 	// Note that `partial` has three valid states true (partial message),
@@ -1299,7 +1204,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// data or one whole message at a time so ignore partial for
 					// saves, and only post parts of partial message instead of
 					// whole array in new listener.
-					this.updateClineMessage(lastMessage)
+					this.clineMessagesStore.update(lastMessage)
 					// console.log("Task#ask: current ask promise was ignored (#1)")
 					throw new AskIgnoredError("updating existing partial")
 				} else {
@@ -1307,7 +1212,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// state.
 					askTs = Date.now()
 					this.lastMessageTs = askTs
-					await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, partial, isProtected })
+					await this.clineMessagesStore.add({ ts: askTs, type: "ask", ask: type, text, partial, isProtected })
 					// console.log("Task#ask: current ask promise was ignored (#2)")
 					throw new AskIgnoredError("new partial")
 				}
@@ -1336,8 +1241,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.partial = false
 					lastMessage.progressStatus = progressStatus
 					lastMessage.isProtected = isProtected
-					await this.saveClineMessages()
-					this.updateClineMessage(lastMessage)
+					await this.clineMessagesStore.save()
+					this.clineMessagesStore.update(lastMessage)
 				} else {
 					// This is a new and complete message, so add it like normal.
 					this.askResponse = undefined
@@ -1345,7 +1250,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponseImages = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
-					await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, isProtected })
+					await this.clineMessagesStore.add({ ts: askTs, type: "ask", ask: type, text, isProtected })
 				}
 			}
 		} else {
@@ -1355,7 +1260,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponseImages = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
-			await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, isProtected })
+			await this.clineMessagesStore.add({ ts: askTs, type: "ask", ask: type, text, isProtected })
 		}
 
 		let timeouts: NodeJS.Timeout[] = []
@@ -1394,7 +1299,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (isInteractiveAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
-						const message = this.findMessageByTimestamp(askTs)
+						const message = this.clineMessagesStore.findByTimestamp(askTs)
 
 						if (message) {
 							this.interactiveAsk = message
@@ -1406,7 +1311,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} else if (isResumableAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
-						const message = this.findMessageByTimestamp(askTs)
+						const message = this.clineMessagesStore.findByTimestamp(askTs)
 
 						if (message) {
 							this.resumableAsk = message
@@ -1417,7 +1322,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			} else if (isIdleAsk(type)) {
 				timeouts.push(
 					setTimeout(() => {
-						const message = this.findMessageByTimestamp(askTs)
+						const message = this.clineMessagesStore.findByTimestamp(askTs)
 
 						if (message) {
 							this.idleAsk = message
@@ -1525,7 +1430,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Mark this follow-up as answered
 				this.clineMessages[lastFollowUpIndex].isAnswered = true
 				// Save the updated messages
-				this.saveClineMessages().catch((error) => {
+				this.clineMessagesStore.save().catch((error) => {
 					console.error("Failed to save answered follow-up state:", error)
 				})
 			}
@@ -1539,8 +1444,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			)
 			if (lastToolAskIndex !== -1) {
 				this.clineMessages[lastToolAskIndex].isAnswered = true
-				void this.updateClineMessage(this.clineMessages[lastToolAskIndex])
-				this.saveClineMessages().catch((error) => {
+				void this.clineMessagesStore.update(this.clineMessages[lastToolAskIndex])
+				this.clineMessagesStore.save().catch((error) => {
 					console.error("Failed to save answered tool-ask state:", error)
 				})
 			}
@@ -1782,7 +1687,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.images = images
 					lastMessage.partial = partial
 					lastMessage.progressStatus = progressStatus
-					this.updateClineMessage(lastMessage)
+					this.clineMessagesStore.update(lastMessage)
 				} else {
 					// This is a new partial message, so add it with partial state.
 					const sayTs = Date.now()
@@ -1791,7 +1696,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					await this.addToClineMessages({
+					await this.clineMessagesStore.add({
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -1818,10 +1723,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Instead of streaming partialMessage events, we do a save
 					// and post like normal to persist to disk.
-					await this.saveClineMessages()
+					await this.clineMessagesStore.save()
 
 					// More performant than an entire `postStateToWebview`.
-					this.updateClineMessage(lastMessage)
+					this.clineMessagesStore.update(lastMessage)
 				} else {
 					// This is a new and complete message, so add it like normal.
 					const sayTs = Date.now()
@@ -1830,7 +1735,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						this.lastMessageTs = sayTs
 					}
 
-					await this.addToClineMessages({
+					await this.clineMessagesStore.add({
 						ts: sayTs,
 						type: "say",
 						say: type,
@@ -1853,7 +1758,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.lastMessageTs = sayTs
 			}
 
-			await this.addToClineMessages({
+			await this.clineMessagesStore.add({
 				ts: sayTs,
 				type: "say",
 				say: type,
@@ -2000,7 +1905,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async resumeTaskFromHistory() {
 		try {
-			const modifiedClineMessages = await this.getSavedClineMessages()
+			const modifiedClineMessages = await this.clineMessagesStore.getSaved()
 
 			// Remove any resume messages that may have been added before.
 			const lastRelevantMessageIndex = findLastIndex(
@@ -2041,7 +1946,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			await this.overwriteClineMessages(modifiedClineMessages)
-			this.clineMessages = await this.getSavedClineMessages()
+			this.clineMessages = await this.clineMessagesStore.getSaved()
 
 			// Now present the cline messages to the user and ask if they want to
 			// resume (NOTE: we ran into a bug before where the
@@ -2282,7 +2187,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Save the countdown message in the automatic retry or other content.
 		try {
 			// Save the countdown message in the automatic retry or other content.
-			await this.saveClineMessages()
+			await this.clineMessagesStore.save()
 		} catch (error) {
 			console.error(`Error saving messages during abort for task ${this.taskId}.${this.instanceId}:`, error)
 		}
@@ -2670,7 +2575,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiProtocol,
 			} satisfies ClineApiReqInfo)
 
-			await this.saveClineMessages()
+			await this.clineMessagesStore.save()
 			await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
 
 			try {
@@ -2748,7 +2653,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Update `api_req_started` to have cancelled and cost, so that
 					// we can display the cost of the partial stream and the cancellation reason
 					updateApiReqMsg(cancelReason, streamingFailedMessage)
-					await this.saveClineMessages()
+					await this.clineMessagesStore.save()
 
 					// Signals to provider that it can retrieve the saved messages
 					// from disk, as abortTask can not be awaited on in nature.
@@ -3114,12 +3019,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 								// Update the API request message with the latest usage data
 								updateApiReqMsg()
-								await this.saveClineMessages()
+								await this.clineMessagesStore.save()
 
 								// Update the specific message in the webview
 								const apiReqMessage = this.clineMessages[messageIndex]
 								if (apiReqMessage) {
-									await this.updateClineMessage(apiReqMessage)
+									await this.clineMessagesStore.update(apiReqMessage)
 								}
 
 								// Capture telemetry with provider-aware cost calculation
@@ -3396,11 +3301,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					if (lastReasoningIndex !== -1 && this.clineMessages[lastReasoningIndex].partial) {
 						this.clineMessages[lastReasoningIndex].partial = false
-						await this.updateClineMessage(this.clineMessages[lastReasoningIndex])
+						await this.clineMessagesStore.update(this.clineMessages[lastReasoningIndex])
 					}
 				}
 
-				await this.saveClineMessages()
+				await this.clineMessagesStore.save()
 				await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
 
 				// No legacy text-stream tool parser state to reset.
@@ -4673,6 +4578,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public get cwd() {
 		return this.workspacePath
+	}
+
+	public get clineMessages(): ClineMessage[] {
+		return this.clineMessagesStore.messages
+	}
+
+	public set clineMessages(messages: ClineMessage[]) {
+		this.clineMessagesStore.messages = messages
+	}
+
+	public get lastMessageTs(): number | undefined {
+		return this.clineMessagesStore.lastMessageTs
+	}
+
+	public set lastMessageTs(ts: number | undefined) {
+		this.clineMessagesStore.lastMessageTs = ts
 	}
 
 	/**

@@ -369,7 +369,7 @@ describe("Task persistence", () => {
 				startTask: false,
 			})
 
-			const result = await (task as Record<string, any>).saveClineMessages()
+			const result = await (task as Record<string, any>).clineMessagesStore.save()
 			expect(result).toBe(true)
 		})
 
@@ -383,7 +383,7 @@ describe("Task persistence", () => {
 				startTask: false,
 			})
 
-			const result = await (task as Record<string, any>).saveClineMessages()
+			const result = await (task as Record<string, any>).clineMessagesStore.save()
 			expect(result).toBe(false)
 		})
 
@@ -404,7 +404,7 @@ describe("Task persistence", () => {
 				ts: Date.now(),
 			})
 
-			await (task as Record<string, any>).saveClineMessages()
+			await (task as Record<string, any>).clineMessagesStore.save()
 
 			expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1)
 

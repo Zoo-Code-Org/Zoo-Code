@@ -106,7 +106,7 @@ describe("Task token usage throttling", () => {
 		const emitSpy = vi.spyOn(task, "emit")
 
 		// Add a message to trigger saveClineMessages
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -153,7 +153,7 @@ describe("Task token usage throttling", () => {
 		const emitSpy = vi.spyOn(task, "emit")
 
 		// First message - should emit
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -166,7 +166,7 @@ describe("Task token usage throttling", () => {
 
 		// Second message immediately after - should NOT emit due to throttle
 		vi.advanceTimersByTime(500) // Advance only 500ms
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -182,7 +182,7 @@ describe("Task token usage throttling", () => {
 
 		// Third message after 2+ seconds - should emit
 		vi.advanceTimersByTime(1600) // Total time: 2100ms
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -207,7 +207,7 @@ describe("Task token usage throttling", () => {
 		}
 
 		// Add a message to trigger emission
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -232,7 +232,7 @@ describe("Task token usage throttling", () => {
 		}
 
 		// Add a message first
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -288,7 +288,7 @@ describe("Task token usage throttling", () => {
 		})
 
 		// Add initial message
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -300,7 +300,7 @@ describe("Task token usage throttling", () => {
 
 		// Add another message within throttle window
 		vi.advanceTimersByTime(500)
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -312,7 +312,7 @@ describe("Task token usage throttling", () => {
 
 		// Add message after throttle window
 		vi.advanceTimersByTime(1600) // Total: 2100ms
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -354,7 +354,7 @@ describe("Task token usage throttling", () => {
 		const emitSpy = vi.spyOn(task, "emit")
 
 		// Add first message
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -367,7 +367,7 @@ describe("Task token usage throttling", () => {
 
 		// Wait for throttle period and add another message
 		vi.advanceTimersByTime(2100)
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -411,7 +411,7 @@ describe("Task token usage throttling", () => {
 		const emitSpy = vi.spyOn(task, "emit")
 
 		// Add first message - should emit
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -431,7 +431,7 @@ describe("Task token usage throttling", () => {
 		}
 
 		// Add another message
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -448,7 +448,7 @@ describe("Task token usage throttling", () => {
 
 	test("should update toolUsageSnapshot when emission occurs", async () => {
 		// Add initial message
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
@@ -470,7 +470,7 @@ describe("Task token usage throttling", () => {
 		}
 
 		// Add another message
-		await (task as any).addToClineMessages({
+		await (task as any).clineMessagesStore.add({
 			ts: Date.now(),
 			type: "say",
 			say: "text",
