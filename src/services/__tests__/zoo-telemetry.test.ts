@@ -101,4 +101,32 @@ describe("sendLlmTelemetry", () => {
 
 		resolveFetch?.({ ok: true })
 	})
+
+	it("sends cancelled status when provided in payload", async () => {
+		mockGetCachedZooCodeToken.mockReturnValue("zoo_ext_test_token")
+		mockGetCachedSubscriptionStatus.mockReturnValue("active")
+
+		global.fetch = vi.fn().mockResolvedValue({ ok: true })
+
+		await sendLlmTelemetry({ ...payload, status: "cancelled" })
+
+		expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toMatchObject({
+			...payload,
+			status: "cancelled",
+			editor: "vscode",
+		})
+	})
+
+	it("defaults to completed status when not provided", async () => {
+		mockGetCachedZooCodeToken.mockReturnValue("zoo_ext_test_token")
+		mockGetCachedSubscriptionStatus.mockReturnValue("active")
+
+		global.fetch = vi.fn().mockResolvedValue({ ok: true })
+
+		await sendLlmTelemetry(payload)
+
+		expect(JSON.parse((global.fetch as any).mock.calls[0][1].body)).toMatchObject({
+			status: "completed",
+		})
+	})
 })

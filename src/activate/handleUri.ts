@@ -36,20 +36,20 @@ export const handleUri = async (uri: vscode.Uri) => {
 			if (token) {
 				// Extract user info from callback URL params
 				// URLSearchParams.get() already decodes percent-encoded values - no need for decodeURIComponent
-				const name = query.get("name") ?? undefined
-				const email = query.get("email") ?? undefined
-				const image = query.get("image") ?? undefined
+				// Use null (not undefined) for missing values to actively clear stale data
+				const name = query.get("name") ?? null
+				const email = query.get("email") ?? null
+				const image = query.get("image") ?? null
 
 				const success = await handleZooCodeAuthCallback(token)
 				if (success) {
 					// Store user info after successful auth validation (regardless of webview visibility)
-					if (name || email || image) {
-						await setZooCodeUserInfo({
-							name,
-							email,
-							image,
-						})
-					}
+					// Always call setZooCodeUserInfo to clear stale data when fields are missing
+					await setZooCodeUserInfo({
+						name,
+						email,
+						image,
+					})
 					// Refresh webview state if a panel is currently open
 					if (visibleProvider) {
 						await visibleProvider.handleZooCodeCallback(token)

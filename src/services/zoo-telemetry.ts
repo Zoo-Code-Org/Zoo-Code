@@ -16,6 +16,7 @@ export type LlmTelemetryPayload = {
 	cacheReadTokens?: number
 	cacheWriteTokens?: number
 	totalCost?: number
+	status?: "completed" | "cancelled"
 }
 
 /**
@@ -43,7 +44,7 @@ export async function sendLlmTelemetry(payload: LlmTelemetryPayload): Promise<vo
 
 	const body = {
 		...payload,
-		status: "completed" as const,
+		status: payload.status ?? "completed",
 		extensionVersion: Package.version,
 		editor: "vscode",
 	}

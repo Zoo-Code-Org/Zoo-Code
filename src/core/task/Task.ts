@@ -3076,7 +3076,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						total: totalCost,
 					}
 
-					const drainStreamInBackgroundToFindAllUsage = async (apiReqIndex: number) => {
+					const drainStreamInBackgroundToFindAllUsage = async (
+						apiReqIndex: number,
+						status: "completed" | "cancelled" = "completed",
+					) => {
 						const timeoutMs = DEFAULT_USAGE_COLLECTION_TIMEOUT_MS
 						const startTime = performance.now()
 						const modelId = getModelId(this.apiConfiguration)
@@ -3098,6 +3101,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								total?: number
 							},
 							messageIndex: number = apiReqIndex,
+							status: "completed" | "cancelled" = "completed",
 						) => {
 							if (
 								tokens.input > 0 ||
@@ -3172,6 +3176,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											cacheReadTokens: tokens.cacheRead ?? 0,
 											cacheWriteTokens: tokens.cacheWrite ?? 0,
 											totalCost: tokens.total ?? costResult.totalCost,
+											status,
 										}).catch(() => {})
 									})
 									.catch(() => {})
@@ -3228,6 +3233,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										total: bgTotalCost,
 									},
 									lastApiReqIndex,
+									status,
 								)
 							} else {
 								console.warn(
@@ -3252,13 +3258,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										total: bgTotalCost,
 									},
 									lastApiReqIndex,
+									status,
 								)
 							}
 						}
 					}
 
 					// Start the background task and handle any errors
-					drainStreamInBackgroundToFindAllUsage(lastApiReqIndex).catch((error) => {
+					// Pass "cancelled" status if the task was aborted by the user
+					drainStreamInBackgroundToFindAllUsage(
+						lastApiReqIndex,
+						this.abort ? "cancelled" : "completed",
+					).catch((error) => {
 						console.error("Background usage collection failed:", error)
 					})
 				} catch (error) {

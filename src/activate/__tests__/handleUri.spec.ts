@@ -80,7 +80,29 @@ describe("handleUri", () => {
 			query: "token=zoo_ext_test_token",
 		} as any)
 
+		// When no user info is provided, null values are passed to clear stale data
+		expect(mockSetZooCodeUserInfo).toHaveBeenCalledWith({
+			name: null,
+			email: null,
+			image: null,
+		})
 		expect(mockVisibleProvider.handleZooCodeCallback).toHaveBeenCalledWith("zoo_ext_test_token")
+	})
+
+	it("clears stale user info fields when re-authing with missing fields", async () => {
+		mockHandleZooCodeAuthCallback.mockResolvedValue(true)
+
+		// Re-auth with only name - email and image should be cleared
+		await handleUri({
+			path: "/auth-callback",
+			query: "token=zoo_ext_test_token&name=John%20Doe",
+		} as any)
+
+		expect(mockSetZooCodeUserInfo).toHaveBeenCalledWith({
+			name: "John Doe",
+			email: null,
+			image: null,
+		})
 	})
 
 	it("does not persist user info when auth callback validation fails", async () => {

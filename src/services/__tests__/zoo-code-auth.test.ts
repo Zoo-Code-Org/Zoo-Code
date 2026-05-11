@@ -186,7 +186,7 @@ describe("zoo-code-auth", () => {
 	})
 
 	describe("initZooCodeAuth", () => {
-		it("clears stored user info when the cached token is invalid", async () => {
+		it("clears stored user info and token when the cached token is invalid", async () => {
 			await mockSecrets.store("zoo-code-session-token", "zoo_ext_stale_token")
 			await mockSecrets.store("zoo-code-user-name", "Jane Doe")
 			await mockSecrets.store("zoo-code-user-email", "jane@example.com")
@@ -198,6 +198,26 @@ describe("zoo-code-auth", () => {
 
 			await initZooCodeAuth(mockContext)
 
+			// Both token and user info should be cleared
+			expect(getCachedZooCodeToken()).toBe("")
+			expect(getCachedZooCodeUserInfo()).toEqual({
+				name: undefined,
+				email: undefined,
+				image: undefined,
+			})
+		})
+
+		it("clears stored user info and token when verification network request fails", async () => {
+			await mockSecrets.store("zoo-code-session-token", "zoo_ext_stale_token")
+			await mockSecrets.store("zoo-code-user-name", "Jane Doe")
+			await mockSecrets.store("zoo-code-user-email", "jane@example.com")
+			// Simulate a network error during verification
+			mockFetch.mockRejectedValueOnce(new Error("Network error"))
+
+			await initZooCodeAuth(mockContext)
+
+			// Both token and user info should be cleared on network error
+			// This prevents showing authenticated state when backend is unreachable
 			expect(getCachedZooCodeToken()).toBe("")
 			expect(getCachedZooCodeUserInfo()).toEqual({
 				name: undefined,
@@ -308,6 +328,45 @@ describe("zoo-code-auth", () => {
 
 			expect(valid).toBe(false)
 			expect(getCachedZooCodeToken()).toBe("")
+		})
+	})
+
+	describe("setZooCodeUserInfo", () => {
+		it("clears email when passed null", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeUserInfo({
+				name: "Jane Doe",
+				email: "jane@example.com",
+				image: "https://example.com/avatar.png",
+			})
+
+			// Verify email is set
+			expect(getCachedZooCodeUserInfo().email).toBe("jane@example.com")
+
+			// Clear email with null
+			await setZooCodeUserInfo({ email: null })
+
+			// Email should be cleared, but other fields should remain
+			const info = getCachedZooCodeUserInfo()
+			expect(info.email).toBeUndefined()
+			expect(info.name).toBe("Jane Doe")
+			expect(info.image).toBe("https://example.com/avatar.png")
+		})
+
+		it("does not clear email when passed undefined", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeUserInfo({
+				name: "Jane Doe",
+				email: "jane@example.com",
+				image: "https://example.com/avatar.png",
+			})
+
+			// Pass undefined for email - should preserve existing value
+			await setZooCodeUserInfo({ name: "John Doe", email: undefined })
+
+			const info = getCachedZooCodeUserInfo()
+			expect(info.email).toBe("jane@example.com")
+			expect(info.name).toBe("John Doe")
 		})
 	})
 

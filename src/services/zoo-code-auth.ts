@@ -36,7 +36,10 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 	if (_cachedToken) {
 		const isValid = await verifyZooCodeToken().catch(() => false)
 		if (!isValid) {
+			// Clear both user info and token to avoid showing authenticated state
+			// when the token is invalid or backend is unreachable
 			await clearZooCodeUserInfo()
+			await clearZooCodeToken()
 		} else {
 			void checkSubscriptionStatus().catch(() => {})
 		}
@@ -153,7 +156,7 @@ export async function setZooCodeToken(token: string): Promise<void> {
 
 export async function setZooCodeUserInfo(info: {
 	name?: string | null
-	email?: string
+	email?: string | null
 	image?: string | null
 }): Promise<void> {
 	if (!secretStorage) return
@@ -169,6 +172,9 @@ export async function setZooCodeUserInfo(info: {
 	if (info.email) {
 		await secretStorage.store(ZOO_CODE_USER_EMAIL_KEY, info.email)
 		_cachedUserEmail = info.email
+	} else if (info.email === null) {
+		await secretStorage.delete(ZOO_CODE_USER_EMAIL_KEY)
+		_cachedUserEmail = undefined
 	}
 
 	if (info.image) {
