@@ -4,21 +4,6 @@ import type { MarketplaceItem } from "@roo-code/types"
 
 import { MarketplaceManager } from "../MarketplaceManager"
 
-// Mock CloudService
-vi.mock("@roo-code/cloud", () => ({
-	getRooCodeApiUrl: () => "https://test.api.com",
-	CloudService: {
-		hasInstance: vi.fn(),
-		instance: {
-			isAuthenticated: vi.fn(),
-			getOrganizationSettings: vi.fn(),
-		},
-	},
-}))
-
-// Mock axios
-vi.mock("axios")
-
 // Mock TelemetryService
 vi.mock("../../../../packages/telemetry/src/TelemetryService", () => ({
 	TelemetryService: {
@@ -155,7 +140,7 @@ describe("MarketplaceManager", () => {
 	})
 
 	describe("getMarketplaceItems", () => {
-		it("should return items from API", async () => {
+		it("should return items from bundled marketplace assets", async () => {
 			// Mock the config loader to return test data
 			const mockItems: MarketplaceItem[] = [
 				{
@@ -177,40 +162,20 @@ describe("MarketplaceManager", () => {
 			expect(result.organizationMcps).toHaveLength(0)
 		})
 
-		it("should handle API errors gracefully", async () => {
+		it("should handle bundled marketplace loading errors gracefully", async () => {
 			// Mock the config loader to throw an error
-			vi.spyOn(manager["configLoader"], "loadAllItems").mockRejectedValue(new Error("API request failed"))
+			vi.spyOn(manager["configLoader"], "loadAllItems").mockRejectedValue(
+				new Error("Marketplace asset load failed"),
+			)
 
 			const result = await manager.getMarketplaceItems()
 
 			expect(result.marketplaceItems).toHaveLength(0)
 			expect(result.organizationMcps).toHaveLength(0)
-			expect(result.errors).toEqual(["API request failed"])
+			expect(result.errors).toEqual(["Marketplace asset load failed"])
 		})
 
-		it("should return organization MCPs when available", async () => {
-			const { CloudService } = await import("@roo-code/cloud")
-
-			// Mock CloudService to return organization settings
-			vi.mocked(CloudService.hasInstance).mockReturnValue(true)
-			vi.mocked(CloudService.instance.isAuthenticated).mockReturnValue(true)
-			vi.mocked(CloudService.instance.getOrganizationSettings).mockReturnValue({
-				version: 1,
-				mcps: [
-					{
-						id: "org-mcp-1",
-						name: "Organization MCP",
-						description: "An organization MCP",
-						url: "https://example.com/org-mcp",
-						content: '{"command": "node", "args": ["org-server.js"]}',
-					},
-				],
-				hiddenMcps: [],
-				allowList: { allowAll: true, providers: {} },
-				defaultSettings: {},
-			})
-
-			// Mock the config loader to return test data
+		it("should preserve the response shape while returning only bundled marketplace items", async () => {
 			const mockItems: MarketplaceItem[] = [
 				{
 					id: "test-mcp",
@@ -226,27 +191,12 @@ describe("MarketplaceManager", () => {
 
 			const result = await manager.getMarketplaceItems()
 
-			expect(result.organizationMcps).toHaveLength(1)
-			expect(result.organizationMcps[0].name).toBe("Organization MCP")
+			expect(result.organizationMcps).toEqual([])
 			expect(result.marketplaceItems).toHaveLength(1)
 			expect(result.marketplaceItems[0].name).toBe("Test MCP")
 		})
 
-		it("should filter out hidden MCPs from marketplace results", async () => {
-			const { CloudService } = await import("@roo-code/cloud")
-
-			// Mock CloudService to return organization settings with hidden MCPs
-			vi.mocked(CloudService.hasInstance).mockReturnValue(true)
-			vi.mocked(CloudService.instance.isAuthenticated).mockReturnValue(true)
-			vi.mocked(CloudService.instance.getOrganizationSettings).mockReturnValue({
-				version: 1,
-				mcps: [],
-				hiddenMcps: ["hidden-mcp"],
-				allowList: { allowAll: true, providers: {} },
-				defaultSettings: {},
-			})
-
-			// Mock the config loader to return test data including a hidden MCP
+		it("should not filter bundled MCP items through organization settings", async () => {
 			const mockItems: MarketplaceItem[] = [
 				{
 					id: "visible-mcp",
@@ -257,12 +207,12 @@ describe("MarketplaceManager", () => {
 					content: '{"command": "node", "args": ["visible.js"]}',
 				},
 				{
-					id: "hidden-mcp",
-					name: "Hidden MCP",
-					description: "A hidden MCP",
+					id: "second-mcp",
+					name: "Second MCP",
+					description: "Another bundled MCP",
 					type: "mcp",
-					url: "https://example.com/hidden-mcp",
-					content: '{"command": "node", "args": ["hidden.js"]}',
+					url: "https://example.com/second-mcp",
+					content: '{"command": "node", "args": ["second.js"]}',
 				},
 			]
 
@@ -270,36 +220,9 @@ describe("MarketplaceManager", () => {
 
 			const result = await manager.getMarketplaceItems()
 
-			expect(result.marketplaceItems).toHaveLength(1)
-			expect(result.marketplaceItems[0].name).toBe("Visible MCP")
+			expect(result.marketplaceItems).toHaveLength(2)
+			expect(result.marketplaceItems.map((item) => item.name)).toEqual(["Visible MCP", "Second MCP"])
 			expect(result.organizationMcps).toHaveLength(0)
-		})
-
-		it("should handle CloudService not being available", async () => {
-			const { CloudService } = await import("@roo-code/cloud")
-
-			// Mock CloudService to not be available
-			vi.mocked(CloudService.hasInstance).mockReturnValue(false)
-
-			// Mock the config loader to return test data
-			const mockItems: MarketplaceItem[] = [
-				{
-					id: "test-mcp",
-					name: "Test MCP",
-					description: "A test MCP",
-					type: "mcp",
-					url: "https://example.com/test-mcp",
-					content: '{"command": "node", "args": ["server.js"]}',
-				},
-			]
-
-			vi.spyOn(manager["configLoader"], "loadAllItems").mockResolvedValue(mockItems)
-
-			const result = await manager.getMarketplaceItems()
-
-			expect(result.organizationMcps).toHaveLength(0)
-			expect(result.marketplaceItems).toHaveLength(1)
-			expect(result.marketplaceItems[0].name).toBe("Test MCP")
 		})
 	})
 
@@ -386,13 +309,8 @@ describe("MarketplaceManager", () => {
 	})
 
 	describe("cleanup", () => {
-		it("should clear API cache", async () => {
-			// Mock the clearCache method
-			vi.spyOn(manager["configLoader"], "clearCache")
-
-			await manager.cleanup()
-
-			expect(manager["configLoader"].clearCache).toHaveBeenCalled()
+		it("should complete without runtime cleanup for bundled config", async () => {
+			await expect(manager.cleanup()).resolves.toBeUndefined()
 		})
 	})
 })

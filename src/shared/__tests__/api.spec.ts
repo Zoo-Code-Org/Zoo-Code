@@ -248,6 +248,42 @@ describe("getModelMaxOutputTokens", () => {
 		})
 	})
 
+	test("should bypass 20% cap for Z.ai provider and use exact configured max tokens", () => {
+		// glm-5.1: maxTokens=131_072 on a 200k context window (65.5%) — would be capped to 40k without bypass
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: true,
+			maxTokens: 131_072,
+			supportsReasoningEffort: ["disable", "medium"],
+		}
+
+		const result = getModelMaxOutputTokens({
+			modelId: "glm-5.1",
+			model,
+			settings: { apiProvider: "zai" },
+			format: "openai",
+		})
+
+		expect(result).toBe(131_072)
+	})
+
+	test("should still clamp non-Z.ai models with high maxTokens to 20% of context window", () => {
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: false,
+			maxTokens: 131_072,
+		}
+
+		const result = getModelMaxOutputTokens({
+			modelId: "glm-5.1",
+			model,
+			settings: { apiProvider: "openai" },
+			format: "openai",
+		})
+
+		expect(result).toBe(40_000)
+	})
+
 	test("should return modelMaxTokens from settings when reasoning budget is required", () => {
 		const model: ModelInfo = {
 			contextWindow: 200_000,

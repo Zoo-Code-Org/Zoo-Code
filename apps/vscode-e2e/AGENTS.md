@@ -99,6 +99,25 @@ Background API calls from the extension (usage collection, initialization) hit a
 | `OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:record` | Record mode — proxies to real API, writes `openai-*.json`          |
 | `OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:ci`     | Real-API mode — runs against live OpenRouter (for drift detection) |
 
+## Tests that use a fetch interceptor instead of aimock
+
+Some suites can't redirect their provider through aimock. These suites patch `globalThis.fetch` directly — the OpenAI SDK resolves `fetch` at API client construction time (which happens lazily at task start), so installing the interceptor before `api.startNewTask()` is sufficient. Installing it before `api.setConfiguration()` (as done below) is the conservative, recommended order.
+
+### Z.ai GLM (`suite/providers/zai.test.ts`)
+
+Z.ai doesn't expose a user-configurable base URL (it uses a fixed set of regional endpoints), so we deliberately avoided adding a hidden test-only override to the schema. The suite instead patches `globalThis.fetch` to intercept requests to `api.z.ai` and return a crafted OpenAI-compatible SSE response.
+
+The suite always runs (never skips). Set `ZAI_API_KEY` to bypass the interceptor and hit the real API instead:
+
+```sh
+# Mock mode (default — no key needed, interceptor active)
+pnpm --filter @roo-code/vscode-e2e test:ci:mock
+
+# Live mode — bypasses interceptor, calls real Z.ai API
+ZAI_API_KEY=<key> TEST_FILE=zai.test pnpm --filter @roo-code/vscode-e2e test:ci
+```
+
+When adding a new test to this suite, add a matching fixture to the `installZAiFetchInterceptor` call in `suiteSetup`. Use a short unique prefix (e.g. `"zai-glm-e2e-mytest:"`) that won't appear in `<environment_details>`.
 ## Tests that use a non-default provider
 
 If your test calls `api.setConfiguration({ apiProvider: "anthropic", ... })`, point aimock at the

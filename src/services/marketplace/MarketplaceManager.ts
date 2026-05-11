@@ -4,16 +4,15 @@ import * as path from "path"
 import * as vscode from "vscode"
 import * as yaml from "yaml"
 
-import type { OrganizationSettings, MarketplaceItem, MarketplaceItemType, McpMarketplaceItem } from "@roo-code/types"
+import type { MarketplaceItem, MarketplaceItemType } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
-import { CloudService } from "@roo-code/cloud"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { ensureSettingsDirectoryExists } from "../../utils/globalContext"
 import { t } from "../../i18n"
 import type { CustomModesManager } from "../../core/config/CustomModesManager"
 
-import { RemoteConfigLoader } from "./RemoteConfigLoader"
+import { ConfigLoader } from "./ConfigLoader"
 import { SimpleInstaller } from "./SimpleInstaller"
 
 export interface MarketplaceItemsResponse {
@@ -23,59 +22,24 @@ export interface MarketplaceItemsResponse {
 }
 
 export class MarketplaceManager {
-	private configLoader: RemoteConfigLoader
+	private configLoader: ConfigLoader
 	private installer: SimpleInstaller
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly customModesManager?: CustomModesManager,
 	) {
-		this.configLoader = new RemoteConfigLoader()
+		this.configLoader = new ConfigLoader(context.extensionUri.fsPath)
 		this.installer = new SimpleInstaller(context, customModesManager)
 	}
 
 	async getMarketplaceItems(): Promise<MarketplaceItemsResponse> {
 		try {
-			const errors: string[] = []
-
-			let orgSettings: OrganizationSettings | undefined
-
-			try {
-				if (CloudService.hasInstance() && CloudService.instance.isAuthenticated()) {
-					orgSettings = CloudService.instance.getOrganizationSettings()
-				}
-			} catch (orgError) {
-				console.warn("Failed to load organization settings:", orgError)
-				const orgErrorMessage = orgError instanceof Error ? orgError.message : String(orgError)
-				errors.push(`Organization settings: ${orgErrorMessage}`)
-			}
-
-			const allMarketplaceItems = await this.configLoader.loadAllItems(orgSettings?.hideMarketplaceMcps)
-			let organizationMcps: MarketplaceItem[] = []
-			let marketplaceItems = allMarketplaceItems
-
-			if (orgSettings) {
-				if (orgSettings.mcps && orgSettings.mcps.length > 0) {
-					organizationMcps = orgSettings.mcps.map(
-						(mcp: McpMarketplaceItem): MarketplaceItem => ({
-							...mcp,
-							type: "mcp" as const,
-						}),
-					)
-				}
-
-				if (orgSettings.hiddenMcps && orgSettings.hiddenMcps.length > 0) {
-					const hiddenMcpIds = new Set(orgSettings.hiddenMcps)
-					marketplaceItems = allMarketplaceItems.filter(
-						(item) => item.type !== "mcp" || !hiddenMcpIds.has(item.id),
-					)
-				}
-			}
+			const marketplaceItems = await this.configLoader.loadAllItems()
 
 			return {
-				organizationMcps,
+				organizationMcps: [],
 				marketplaceItems,
-				errors: errors.length > 0 ? errors : undefined,
 			}
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
@@ -216,8 +180,7 @@ export class MarketplaceManager {
 	}
 
 	async cleanup(): Promise<void> {
-		// Clear API cache if needed
-		this.configLoader.clearCache()
+		// Bundled marketplace config has no runtime resources to release.
 	}
 
 	/**
