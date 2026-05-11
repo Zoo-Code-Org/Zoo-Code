@@ -6,6 +6,7 @@ import { ZaiApiLine } from "../provider-settings.js"
 // https://docs.z.ai/guides/llm/glm-4.5
 // https://docs.z.ai/guides/llm/glm-4.6
 // https://docs.z.ai/guides/llm/glm-5.1
+// https://docs.z.ai/guides/llm/glm-5-turbo
 // https://docs.z.ai/guides/overview/pricing
 // https://bigmodel.cn/pricing
 
@@ -152,7 +153,7 @@ export const internationalZAiModels = {
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. It delivers top-tier reasoning, coding, and agentic performance.",
 	},
 	"glm-5-turbo": {
-		maxTokens: 16_384,
+		maxTokens: 131_072,
 		contextWindow: 202_752,
 		supportsImages: false,
 		supportsPromptCache: true,
@@ -358,7 +359,7 @@ export const mainlandZAiModels = {
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. It delivers top-tier reasoning, coding, and agentic performance.",
 	},
 	"glm-5-turbo": {
-		maxTokens: 16_384,
+		maxTokens: 131_072,
 		contextWindow: 202_752,
 		supportsImages: false,
 		supportsPromptCache: true,

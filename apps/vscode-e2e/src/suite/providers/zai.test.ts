@@ -153,7 +153,10 @@ suite("Z.ai GLM provider", function () {
 
 	suiteSetup(async () => {
 		restoreFetch = installZAiFetchInterceptor(
-			[{ match: "zai-glm-e2e:", result: "4" }],
+			[
+				{ match: "zai-glm-e2e:", result: "4" },
+				{ match: "zai-glm-5-turbo-e2e:", result: "4" },
+			],
 			requestCapture,
 			!!ZAI_API_KEY,
 		)
@@ -209,6 +212,45 @@ suite("Z.ai GLM provider", function () {
 			requestCapture.maxTokens,
 			131_072,
 			`max_tokens should be the documented glm-5.1 limit (131_072) but was ${requestCapture.maxTokens}`,
+		)
+	})
+
+	test("Should complete a task end-to-end using glm-5-turbo via Z.ai provider", async () => {
+		await globalThis.api.setConfiguration({
+			apiProvider: "zai" as const,
+			zaiApiKey: ZAI_API_KEY ?? "mock-key",
+			zaiApiLine: "international_api" as const,
+			apiModelId: "glm-5-turbo",
+		})
+
+		const api = globalThis.api
+		const messages: ClineMessage[] = []
+
+		api.on(RooCodeEventName.Message, ({ message }) => {
+			if (message.type === "say" && message.partial === false) {
+				messages.push(message)
+			}
+		})
+
+		const taskId = await api.startNewTask({
+			configuration: { mode: "ask", alwaysAllowModeSwitch: true, autoApprovalEnabled: true },
+			text: "zai-glm-5-turbo-e2e: what is 2+2? Reply with only the number.",
+		})
+
+		await waitUntilCompleted({ api, taskId })
+
+		const completionMessage = messages.find(
+			({ say, text }) => (say === "completion_result" || say === "text") && text?.trim() === "4",
+		)
+
+		assert.ok(completionMessage, "Task should complete with the expected Z.ai GLM-5-Turbo response")
+
+		// Verify max_tokens is the model's documented limit (131_072), not the 20%-of-context
+		// heuristic cap (40_000) that guards against inaccurate OpenRouter dynamic metadata.
+		assert.strictEqual(
+			requestCapture.maxTokens,
+			131_072,
+			`max_tokens should be the documented glm-5-turbo limit (131_072) but was ${requestCapture.maxTokens}`,
 		)
 	})
 })
