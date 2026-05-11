@@ -11,14 +11,19 @@ import { setDefaultSuiteTimeout } from "../test-utils"
 // The OpenAI SDK resolves `fetch` at client construction time
 // (this.fetch = options.fetch ?? getDefaultFetch()).  Patching globalThis.fetch
 // before setConfiguration() ensures any ZAiHandler created for this suite
-// captures our interceptor.  When ZAI_API_KEY is set the interceptor is not
-// installed and requests reach the real API instead.
+// captures our interceptor.  When ZAI_API_KEY is set the interceptor runs in
+// passthrough mode — it captures max_tokens from the request then forwards to
+// the real API, so the max_tokens assertion always runs in both modes.
 // ---------------------------------------------------------------------------
 
 type ZAiFixture = { match: string; result: string }
 type ZAiRequestCapture = { maxTokens?: number }
 
-function installZAiFetchInterceptor(fixtures: ZAiFixture[], capture?: ZAiRequestCapture): () => void {
+function installZAiFetchInterceptor(
+	fixtures: ZAiFixture[],
+	capture?: ZAiRequestCapture,
+	passthrough?: boolean,
+): () => void {
 	const original = globalThis.fetch
 
 	globalThis.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -34,6 +39,10 @@ function installZAiFetchInterceptor(fixtures: ZAiFixture[], capture?: ZAiRequest
 
 			if (capture) {
 				capture.maxTokens = body.max_tokens
+			}
+
+			if (passthrough) {
+				return original.call(globalThis, input, init as RequestInit)
 			}
 
 			const messages = body.messages ?? []
@@ -143,9 +152,11 @@ suite("Z.ai GLM provider", function () {
 	const requestCapture: ZAiRequestCapture = {}
 
 	suiteSetup(async () => {
-		if (!ZAI_API_KEY) {
-			restoreFetch = installZAiFetchInterceptor([{ match: "zai-glm-e2e:", result: "4" }], requestCapture)
-		}
+		restoreFetch = installZAiFetchInterceptor(
+			[{ match: "zai-glm-e2e:", result: "4" }],
+			requestCapture,
+			!!ZAI_API_KEY,
+		)
 
 		await globalThis.api.setConfiguration({
 			apiProvider: "zai" as const,
@@ -194,12 +205,10 @@ suite("Z.ai GLM provider", function () {
 
 		// Verify max_tokens is the model's documented limit (131_072), not the 20%-of-context
 		// heuristic cap (40_000) that guards against inaccurate OpenRouter dynamic metadata.
-		if (!ZAI_API_KEY) {
-			assert.strictEqual(
-				requestCapture.maxTokens,
-				131_072,
-				`max_tokens should be the documented glm-5.1 limit (131_072) but was ${requestCapture.maxTokens}`,
-			)
-		}
+		assert.strictEqual(
+			requestCapture.maxTokens,
+			131_072,
+			`max_tokens should be the documented glm-5.1 limit (131_072) but was ${requestCapture.maxTokens}`,
+		)
 	})
 })

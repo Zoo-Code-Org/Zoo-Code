@@ -132,20 +132,20 @@ export const getModelMaxOutputTokens = ({
 		return ANTHROPIC_DEFAULT_MAX_TOKENS
 	}
 
-	// If model has explicit maxTokens, clamp it to 20% of the context window.
-	// The cap guards against dynamically-fetched model metadata (e.g. OpenRouter)
-	// where maxTokens may equal contextWindow because the aggregator doesn't know
-	// the real output limit — sending that value causes context overflow errors.
-	// Providers with hand-curated model definitions bypass the cap because their
-	// maxTokens values are accurate and explicitly documented.
+	// If model has explicit maxTokens, clamp it to 20% of the context window
+	// Exception: GPT-5 models should use their exact configured max output tokens
 	if (model.maxTokens) {
-		// GPT-5 models have verified large output limits — bypass the cap.
+		// Check if this is a GPT-5 model (case-insensitive)
 		const isGpt5Model = modelId.toLowerCase().includes("gpt-5")
 
 		// Z.ai models have hand-curated maxTokens values from Z.ai's own documentation
 		// (e.g. glm-5.1 supports 128k output on a 200k context window) — bypass the cap.
+		// Note: ZAiHandler.createStreamWithThinking bypasses this function entirely because
+		// ApiHandlerOptions omits apiProvider; this bypass serves callers that pass full
+		// ProviderSettings (Task.ts context management, model-params.ts).
 		const isZaiProvider = settings?.apiProvider === "zai"
 
+		// GPT-5 models bypass the 20% cap and use their full configured max tokens
 		if (isGpt5Model || isZaiProvider) {
 			return model.maxTokens
 		}
