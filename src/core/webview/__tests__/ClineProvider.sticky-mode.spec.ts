@@ -217,7 +217,7 @@ describe("ClineProvider - Sticky Mode", () => {
 
 		mockContext = {
 			extensionPath: "/test/path",
-			extensionUri: {} as vscode.Uri,
+			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
 				get: vi.fn().mockImplementation((key: string) => globalState[key]),
 				update: vi.fn().mockImplementation((key: string, value: string | undefined) => {

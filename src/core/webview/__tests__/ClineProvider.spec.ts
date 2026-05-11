@@ -360,7 +360,7 @@ describe("ClineProvider", () => {
 
 		mockContext = {
 			extensionPath: "/test/path",
-			extensionUri: {} as vscode.Uri,
+			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
 				get: vi.fn().mockImplementation((key: string) => globalState[key]),
 				update: vi
@@ -2027,7 +2027,7 @@ describe("Project MCP Settings", () => {
 
 		mockContext = {
 			extensionPath: "/test/path",
-			extensionUri: {} as vscode.Uri,
+			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
 				get: vi.fn(),
 				update: vi.fn(),
@@ -2179,7 +2179,7 @@ describe.skip("ContextProxy integration", () => {
 				keys: vi.fn().mockReturnValue([]),
 			},
 			secrets: { get: vi.fn(), store: vi.fn(), delete: vi.fn() },
-			extensionUri: {} as vscode.Uri,
+			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalStorageUri: { fsPath: "/test/path" },
 			extension: { packageJSON: { version: "1.0.0" } },
 		} as unknown as vscode.ExtensionContext
@@ -2249,7 +2249,7 @@ describe("getTelemetryProperties", () => {
 				keys: vi.fn().mockReturnValue([]),
 			},
 			secrets: { get: vi.fn(), store: vi.fn(), delete: vi.fn() },
-			extensionUri: {} as vscode.Uri,
+			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalStorageUri: { fsPath: "/test/path" },
 			extension: { packageJSON: { version: "1.0.0" } },
 		} as unknown as vscode.ExtensionContext
@@ -2397,7 +2397,7 @@ describe("ClineProvider - Router Models", () => {
 
 		mockContext = {
 			extensionPath: "/test/path",
-			extensionUri: {} as vscode.Uri,
+			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
 				get: vi.fn().mockImplementation((key: string) => globalState[key]),
 				update: vi
@@ -2713,7 +2713,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 		mockContext = {
 			extensionPath: "/test/path",
-			extensionUri: {} as vscode.Uri,
+			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
 				get: vi.fn().mockImplementation((key: string) => globalState[key]),
 				update: vi
