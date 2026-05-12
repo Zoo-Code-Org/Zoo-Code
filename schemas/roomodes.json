@@ -80,6 +80,13 @@
 							"required": ["relativePath"],
 							"additionalProperties": false
 						}
+					},
+					"allowedMcpServers": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"description": "Optional list of MCP server names to include. When omitted, all servers are available. When set, only the listed servers are injected."
 					}
 				},
 				"required": ["slug", "name", "roleDefinition", "groups"],

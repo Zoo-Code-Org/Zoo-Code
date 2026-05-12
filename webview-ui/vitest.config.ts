@@ -1,10 +1,12 @@
 import { defineConfig } from "vitest/config"
+import react from "@vitejs/plugin-react"
 import path from "path"
 import { resolveVerbosity } from "../src/utils/vitest-verbosity"
 
 const { silent, reporters, onConsoleLog } = resolveVerbosity()
 
 export default defineConfig({
+	plugins: [react()],
 	test: {
 		globals: true,
 		setupFiles: ["./vitest.setup.ts"],
@@ -36,6 +38,12 @@ export default defineConfig({
 			// Mock the vscode module for tests since it's not available outside
 			// VS Code extension context.
 			vscode: path.resolve(__dirname, "./src/__mocks__/vscode.ts"),
+			// Mock the VSCode webview-ui-toolkit to avoid dual React instance
+			// issues caused by FAST Foundation web component registration.
+			"@vscode/webview-ui-toolkit/react": path.resolve(
+				__dirname,
+				"./src/__mocks__/@vscode/webview-ui-toolkit/react.tsx",
+			),
 		},
 	},
 })

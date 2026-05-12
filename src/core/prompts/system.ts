@@ -66,7 +66,15 @@ async function generatePrompt(
 
 	// Check if MCP functionality should be included
 	const hasMcpGroup = modeConfig.groups.some((groupEntry) => getGroupName(groupEntry) === "mcp")
-	const hasMcpServers = mcpHub && mcpHub.getServers().length > 0
+	const allowedMcpServers = modeConfig.allowedMcpServers
+
+	let hasMcpServers = false
+	if (mcpHub) {
+		const servers = allowedMcpServers
+			? mcpHub.getServers().filter((s) => new Set(allowedMcpServers).has(s.name))
+			: mcpHub.getServers()
+		hasMcpServers = servers.length > 0
+	}
 	const shouldIncludeMcp = hasMcpGroup && hasMcpServers
 
 	const codeIndexManager = CodeIndexManager.getInstance(context, cwd)
