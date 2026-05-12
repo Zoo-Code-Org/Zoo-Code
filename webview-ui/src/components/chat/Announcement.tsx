@@ -7,6 +7,7 @@ import { Package } from "@roo/package"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { vscode } from "@src/utils/vscode"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@src/components/ui"
+import { EXTERNAL_LINKS } from "@src/constants/externalLinks"
 
 interface AnnouncementProps {
 	hideAnnouncement: () => void
@@ -115,10 +116,10 @@ const SocialLink = ({ icon, label, href }: { icon: ReactNode; label: string; hre
 
 const GitHubLink = ({ children }: { children?: ReactNode }) => (
 	<VSCodeLink
-		href="https://github.com/RooCodeInc/Roo-Code"
+		href={EXTERNAL_LINKS.GITHUB_REPO}
 		onClick={(e) => {
 			e.preventDefault()
-			vscode.postMessage({ type: "openExternal", url: "https://github.com/RooCodeInc/Roo-Code" })
+			vscode.postMessage({ type: "openExternal", url: EXTERNAL_LINKS.GITHUB_REPO })
 		}}>
 		{children}
 	</VSCodeLink>
