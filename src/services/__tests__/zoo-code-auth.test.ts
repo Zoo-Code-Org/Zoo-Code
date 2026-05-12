@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
 
-import { Package } from "../../shared/package"
 import {
 	checkSubscriptionStatus,
 	clearZooCodeToken,
@@ -21,16 +20,17 @@ import {
 vi.mock("vscode", () => ({
 	workspace: {
 		getConfiguration: vi.fn(() => ({
-			get: vi.fn((key: string, defaultValue?: string) => {
-				if (key === "baseUrl") return undefined
-				return defaultValue
-			}),
+			get: vi.fn((key: string, defaultValue?: string) => defaultValue),
 		})),
 	},
 	window: {
 		showErrorMessage: vi.fn(),
 		showInformationMessage: vi.fn(),
 	},
+}))
+
+vi.mock("../i18n", () => ({
+	t: vi.fn((key: string) => key),
 }))
 
 const mockFetch = vi.fn()
@@ -198,7 +198,7 @@ describe("zoo-code-auth", () => {
 
 			await initZooCodeAuth(mockContext)
 
-			// Both token and user info should be cleared
+			// Both token and user info should be cleared on a definitive invalid response
 			expect(getCachedZooCodeToken()).toBe("")
 			expect(getCachedZooCodeUserInfo()).toEqual({
 				name: undefined,
@@ -207,8 +207,28 @@ describe("zoo-code-auth", () => {
 			})
 		})
 
-		it("clears stored user info and token when verification network request fails", async () => {
+		it("clears stored user info and token when backend returns HTTP error (invalid token)", async () => {
 			await mockSecrets.store("zoo-code-session-token", "zoo_ext_stale_token")
+			await mockSecrets.store("zoo-code-user-name", "Jane Doe")
+			await mockSecrets.store("zoo-code-user-email", "jane@example.com")
+			mockFetch.mockResolvedValueOnce({
+				ok: false,
+				status: 401,
+				statusText: "Unauthorized",
+			})
+
+			await initZooCodeAuth(mockContext)
+
+			expect(getCachedZooCodeToken()).toBe("")
+			expect(getCachedZooCodeUserInfo()).toEqual({
+				name: undefined,
+				email: undefined,
+				image: undefined,
+			})
+		})
+
+		it("preserves token and user info when the backend is temporarily unreachable", async () => {
+			await mockSecrets.store("zoo-code-session-token", "zoo_ext_valid_token")
 			await mockSecrets.store("zoo-code-user-name", "Jane Doe")
 			await mockSecrets.store("zoo-code-user-email", "jane@example.com")
 			// Simulate a network error during verification
@@ -216,14 +236,10 @@ describe("zoo-code-auth", () => {
 
 			await initZooCodeAuth(mockContext)
 
-			// Both token and user info should be cleared on network error
-			// This prevents showing authenticated state when backend is unreachable
-			expect(getCachedZooCodeToken()).toBe("")
-			expect(getCachedZooCodeUserInfo()).toEqual({
-				name: undefined,
-				email: undefined,
-				image: undefined,
-			})
+			// Token and user info should be kept; subscription status should be unknown
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_valid_token")
+			expect(getCachedZooCodeUserInfo().name).toBe("Jane Doe")
+			expect(getCachedSubscriptionStatus()).toBe("unknown")
 		})
 	})
 
@@ -261,9 +277,15 @@ describe("zoo-code-auth", () => {
 	})
 
 	describe("getZooCodeBaseUrl", () => {
-		it("returns the default URL when the setting is not configured", () => {
+		it("returns the default URL when ZOO_CODE_BASE_URL is not set", () => {
+			const originalEnv = process.env.ZOO_CODE_BASE_URL
+			delete process.env.ZOO_CODE_BASE_URL
+
 			expect(getZooCodeBaseUrl()).toBe("https://www.zoocode.dev")
-			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name)
+
+			if (originalEnv) {
+				process.env.ZOO_CODE_BASE_URL = originalEnv
+			}
 		})
 
 		it("respects ZOO_CODE_BASE_URL", () => {
@@ -316,7 +338,20 @@ describe("zoo-code-auth", () => {
 	})
 
 	describe("verifyZooCodeToken", () => {
-		it("clears the cached token when the backend reports it as invalid", async () => {
+		it("returns 'valid' when the backend confirms the token", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_valid_token")
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ valid: true }),
+			})
+
+			expect(await verifyZooCodeToken()).toBe("valid")
+			// Token should NOT be cleared — no side effects
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_valid_token")
+		})
+
+		it("returns 'invalid' when the backend reports valid: false", async () => {
 			await initZooCodeAuth(mockContext)
 			await setZooCodeToken("zoo_ext_invalid_token")
 			mockFetch.mockResolvedValueOnce({
@@ -324,10 +359,37 @@ describe("zoo-code-auth", () => {
 				json: async () => ({ valid: false }),
 			})
 
-			const valid = await verifyZooCodeToken()
+			expect(await verifyZooCodeToken()).toBe("invalid")
+			// No side effects — caller decides what to do
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_invalid_token")
+		})
 
-			expect(valid).toBe(false)
-			expect(getCachedZooCodeToken()).toBe("")
+		it("returns 'invalid' when the backend returns HTTP error", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_invalid_token")
+			mockFetch.mockResolvedValueOnce({
+				ok: false,
+				status: 401,
+				statusText: "Unauthorized",
+			})
+
+			expect(await verifyZooCodeToken()).toBe("invalid")
+		})
+
+		it("returns 'unreachable' when a network error occurs", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_token")
+			mockFetch.mockRejectedValueOnce(new Error("Network error"))
+
+			expect(await verifyZooCodeToken()).toBe("unreachable")
+			// Token must NOT be cleared on network error
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_token")
+		})
+
+		it("returns 'invalid' when no token is stored", async () => {
+			await initZooCodeAuth(mockContext)
+
+			expect(await verifyZooCodeToken()).toBe("invalid")
 		})
 	})
 

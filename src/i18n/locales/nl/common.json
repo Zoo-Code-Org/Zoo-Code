@@ -255,5 +255,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Ongeldig authenticatietoken ontvangen.",
+			"token_verification_failed": "Zoo Code: Tokenverificatie mislukt.",
+			"invalid_token": "Zoo Code: Ongeldig token.",
+			"could_not_verify_token": "Zoo Code: Token kon niet worden geverifieerd."
+		},
+		"info": {
+			"connected": "Zoo Code: Succesvol verbonden! Je kunt Zoo Code nu gebruiken als AI-provider.",
+			"disconnected": "Zoo Code: Succesvol losgekoppeld."
+		}
 	}
 }

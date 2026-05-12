@@ -255,5 +255,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: अमान्य प्रमाणीकरण token प्राप्त हुआ।",
+			"token_verification_failed": "Zoo Code: Token सत्यापन विफल रहा।",
+			"invalid_token": "Zoo Code: अमान्य token।",
+			"could_not_verify_token": "Zoo Code: Token सत्यापित नहीं किया जा सका।"
+		},
+		"info": {
+			"connected": "Zoo Code: सफलतापूर्वक कनेक्ट हो गया! अब तुम Zoo Code को अपने AI प्रदाता के रूप में उपयोग कर सकते हो।",
+			"disconnected": "Zoo Code: सफलतापूर्वक डिस्कनेक्ट हो गया।"
+		}
 	}
 }

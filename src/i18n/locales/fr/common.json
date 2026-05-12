@@ -255,5 +255,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Jeton d'authentification invalide reçu.",
+			"token_verification_failed": "Zoo Code: La vérification du jeton a échoué.",
+			"invalid_token": "Zoo Code: Jeton invalide.",
+			"could_not_verify_token": "Zoo Code: Impossible de vérifier le jeton."
+		},
+		"info": {
+			"connected": "Zoo Code: Connecté avec succès ! Vous pouvez maintenant utiliser Zoo Code comme fournisseur d'IA.",
+			"disconnected": "Zoo Code: Déconnecté avec succès."
+		}
 	}
 }

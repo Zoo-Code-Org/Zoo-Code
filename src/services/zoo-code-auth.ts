@@ -1,6 +1,6 @@
 import * as vscode from "vscode"
 
-import { Package } from "../shared/package"
+import { t } from "../i18n"
 
 const ZOO_CODE_TOKEN_KEY = "zoo-code-session-token"
 const ZOO_CODE_USER_NAME_KEY = "zoo-code-user-name"
@@ -34,13 +34,17 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 
 	// Validate persisted auth state on init before reporting the user as connected.
 	if (_cachedToken) {
-		const isValid = await verifyZooCodeToken().catch(() => false)
-		if (!isValid) {
-			// Clear both user info and token to avoid showing authenticated state
-			// when the token is invalid or backend is unreachable
+		const result = await verifyZooCodeToken()
+		if (result === "invalid") {
+			// Token is definitively rejected by the backend — clear everything.
 			await clearZooCodeUserInfo()
 			await clearZooCodeToken()
+		} else if (result === "unreachable") {
+			// Network is temporarily down; keep the cached session but mark subscription
+			// status as unknown so callers know it hasn't been confirmed.
+			_cachedSubscriptionStatus = "unknown"
 		} else {
+			// result === "valid"
 			void checkSubscriptionStatus().catch(() => {})
 		}
 	}
@@ -205,13 +209,12 @@ export async function clearZooCodeToken(): Promise<void> {
 }
 
 export function getZooCodeBaseUrl(): string {
-	const config = vscode.workspace.getConfiguration(Package.name)
-	return config.get<string>("baseUrl") || process.env.ZOO_CODE_BASE_URL || "https://www.zoocode.dev"
+	return process.env.ZOO_CODE_BASE_URL || "https://www.zoocode.dev"
 }
 
 export async function handleAuthCallback(token: string): Promise<boolean> {
 	if (!token || !token.startsWith("zoo_ext_")) {
-		vscode.window.showErrorMessage("Zoo Code: Invalid authentication token received.")
+		vscode.window.showErrorMessage(t("common:zooAuth.errors.invalid_token_received"))
 		return false
 	}
 
@@ -223,16 +226,16 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
 			signal: AbortSignal.timeout(10_000),
 		})
 		if (!response.ok) {
-			vscode.window.showErrorMessage("Zoo Code: Token verification failed.")
+			vscode.window.showErrorMessage(t("common:zooAuth.errors.token_verification_failed"))
 			return false
 		}
 		const data = (await response.json()) as { valid?: boolean }
 		if (!data.valid) {
-			vscode.window.showErrorMessage("Zoo Code: Invalid token.")
+			vscode.window.showErrorMessage(t("common:zooAuth.errors.invalid_token"))
 			return false
 		}
 	} catch {
-		vscode.window.showErrorMessage("Zoo Code: Could not verify token.")
+		vscode.window.showErrorMessage(t("common:zooAuth.errors.could_not_verify_token"))
 		return false
 	}
 
@@ -241,15 +244,22 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
 	// Check subscription status after successful auth
 	await checkSubscriptionStatus().catch(() => {})
 
-	vscode.window.showInformationMessage(
-		"Zoo Code: Successfully connected! You can now use Zoo Code as your AI provider.",
-	)
+	vscode.window.showInformationMessage(t("common:zooAuth.info.connected"))
 	return true
 }
 
-export async function verifyZooCodeToken(): Promise<boolean> {
+/**
+ * Verify the stored token against the backend.
+ * Returns:
+ *   - "valid"       — backend confirmed the token is good
+ *   - "invalid"     — backend explicitly rejected the token (HTTP error or valid: false)
+ *   - "unreachable" — network error / timeout; token state is unknown
+ *
+ * This function has no side-effects; callers are responsible for acting on the result.
+ */
+export async function verifyZooCodeToken(): Promise<"valid" | "invalid" | "unreachable"> {
 	const token = await getZooCodeToken()
-	if (!token) return false
+	if (!token) return "invalid"
 
 	const baseUrl = getZooCodeBaseUrl()
 
@@ -260,17 +270,13 @@ export async function verifyZooCodeToken(): Promise<boolean> {
 		})
 
 		if (!response.ok) {
-			await clearZooCodeToken()
-			return false
+			return "invalid"
 		}
 
 		const data = (await response.json()) as { valid?: boolean }
-		if (!data.valid) {
-			await clearZooCodeToken()
-		}
-		return data.valid === true
+		return data.valid === true ? "valid" : "invalid"
 	} catch {
-		return false
+		return "unreachable"
 	}
 }
 
@@ -296,5 +302,5 @@ export async function disconnectZooCode(): Promise<void> {
 	}
 	await clearZooCodeToken()
 	await clearZooCodeUserInfo()
-	vscode.window.showInformationMessage("Zoo Code: Disconnected successfully.")
+	vscode.window.showInformationMessage(t("common:zooAuth.info.disconnected"))
 }

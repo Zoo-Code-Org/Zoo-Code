@@ -247,5 +247,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Invalid authentication token received.",
+			"token_verification_failed": "Zoo Code: Token verification failed.",
+			"invalid_token": "Zoo Code: Invalid token.",
+			"could_not_verify_token": "Zoo Code: Could not verify token."
+		},
+		"info": {
+			"connected": "Zoo Code: Successfully connected! You can now use Zoo Code as your AI provider.",
+			"disconnected": "Zoo Code: Disconnected successfully."
+		}
 	}
 }
