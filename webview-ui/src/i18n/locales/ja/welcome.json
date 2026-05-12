@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "Roo Codeへようこそ！",
-		"introduction": "組み込みおよび拡張可能なモードを備えたRoo Codeは、計画、アーキテクチャ設計、コーディング、デバッグ、そして今までにない生産性向上を可能にします。",
+		"greeting": "Zoo Codeへようこそ！",
+		"introduction": "組み込みおよび拡張可能なモードを備えたZoo Codeは、計画、アーキテクチャ設計、コーディング、デバッグ、そして今までにない生産性向上を可能にします。",
 		"getStarted": "プロバイダーを選択"
 	},
 	"providerSignup": {
 		"heading": "プロバイダーを選択",
-		"chooseProvider": "Rooが機能するにはLLMプロバイダーが必要です。始めるために1つを選択してください。後から追加することもできます。",
+		"chooseProvider": "Zoo Codeが機能するにはLLMプロバイダーが必要です。始めるために1つを選択してください。後から追加することもできます。",
 		"goBack": "戻る",
 		"finish": "完了"
 	},

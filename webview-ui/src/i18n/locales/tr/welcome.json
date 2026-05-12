@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "Roo Code'a Hoş Geldin!",
-		"introduction": "Yerleşik ve genişletilebilir Modlar yelpazesiyle Roo Code, daha önce hiç olmadığı gibi planlama, mimari tasarım, kodlama, hata ayıklama ve üretkenliğini artırmanı sağlar.",
+		"greeting": "Zoo Code'a Hoş Geldin!",
+		"introduction": "Yerleşik ve genişletilebilir Modlar yelpazesiyle Zoo Code, daha önce hiç olmadığı gibi planlama, mimari tasarım, kodlama, hata ayıklama ve üretkenliğini artırmanı sağlar.",
 		"getStarted": "Sağlayıcınızı seçin"
 	},
 	"providerSignup": {
 		"heading": "Sağlayıcınızı seçin",
-		"chooseProvider": "Roo'nun çalışması için bir LLM sağlayıcısına ihtiyacı var. Başlamak için bir tane seç, sonra daha fazlasını ekleyebilirsin.",
+		"chooseProvider": "Zoo Code'un çalışması için bir LLM sağlayıcısına ihtiyacı var. Başlamak için bir tane seç, sonra daha fazlasını ekleyebilirsin.",
 		"goBack": "Geri",
 		"finish": "Bitir"
 	},
