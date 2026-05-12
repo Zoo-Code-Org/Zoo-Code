@@ -116,6 +116,23 @@ describe("ZAiHandler", () => {
 			expect(model.info.supportsImages).toBe(false)
 		})
 
+		it("should return GLM-5-Turbo international model with thinking support", () => {
+			const testModelId: InternationalZAiModelId = "glm-5-turbo"
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: testModelId,
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe(testModelId)
+			expect(model.info).toEqual(internationalZAiModels[testModelId])
+			expect(model.info.contextWindow).toBe(202_752)
+			expect(model.info.maxTokens).toBe(131_072)
+			expect(model.info.supportsReasoningEffort).toEqual(["disable", "medium"])
+			expect(model.info.reasoningEffort).toBe("medium")
+			expect(model.info.preserveReasoning).toBe(true)
+		})
+
 		it("should return GLM-4.5v international model with vision support", () => {
 			const testModelId: InternationalZAiModelId = "glm-4.5v"
 			const handlerWithModel = new ZAiHandler({
@@ -225,6 +242,23 @@ describe("ZAiHandler", () => {
 			expect(model.id).toBe(testModelId)
 			expect(model.info).toEqual(mainlandZAiModels[testModelId])
 			expect(model.info.contextWindow).toBe(204_800)
+			expect(model.info.supportsReasoningEffort).toEqual(["disable", "medium"])
+			expect(model.info.reasoningEffort).toBe("medium")
+			expect(model.info.preserveReasoning).toBe(true)
+		})
+
+		it("should return GLM-5-Turbo China model with thinking support", () => {
+			const testModelId: MainlandZAiModelId = "glm-5-turbo"
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: testModelId,
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "china_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe(testModelId)
+			expect(model.info).toEqual(mainlandZAiModels[testModelId])
+			expect(model.info.contextWindow).toBe(202_752)
+			expect(model.info.maxTokens).toBe(131_072)
 			expect(model.info.supportsReasoningEffort).toEqual(["disable", "medium"])
 			expect(model.info.reasoningEffort).toBe("medium")
 			expect(model.info.preserveReasoning).toBe(true)
@@ -556,6 +590,64 @@ describe("ZAiHandler", () => {
 			// For GLM-4.6 (no thinking support), thinking parameter should not be present
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.thinking).toBeUndefined()
+		})
+
+		it("should enable thinking by default for GLM-5-Turbo", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5-turbo",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5-turbo",
+					thinking: { type: "enabled" },
+				}),
+			)
+		})
+
+		it("should disable thinking for GLM-5-Turbo when reasoningEffort is set to disable", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5-turbo",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				enableReasoningEffort: true,
+				reasoningEffort: "disable",
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5-turbo",
+					thinking: { type: "disabled" },
+				}),
+			)
 		})
 	})
 })
