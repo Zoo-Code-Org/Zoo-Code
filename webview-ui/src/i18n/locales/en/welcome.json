@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "Welcome to Roo Code!",
-		"introduction": "With a range of built-in and extensible Modes, Roo Code lets you plan, architect, code, debug and boost your productivity like never before.",
+		"greeting": "Welcome to Zoo Code!",
+		"introduction": "With a range of built-in and extensible Modes, Zoo Code lets you plan, architect, code, debug and boost your productivity like never before.",
 		"getStarted": "Choose your provider"
 	},
 	"providerSignup": {
 		"heading": "Choose your provider",
-		"chooseProvider": "Roo needs an LLM provider to work. Choose one to get started, you can add more later.",
+		"chooseProvider": "Zoo Code needs an LLM provider to work. Choose one to get started, you can add more later.",
 		"goBack": "Back",
 		"finish": "Finish"
 	},
