@@ -64,6 +64,17 @@ jobs:
           grep -q "extension/assets/codicons/codicon.ttf" /tmp/zoo-code-vsix-contents.txt
           grep -q "extension/assets/vscode-material-icons/icons/3d.svg" /tmp/zoo-code-vsix-contents.txt
 
+      - name: Validate packaged manifest identity
+        run: |
+          package_version=$(node -p "require('./src/package.json').version")
+          vsix_path="bin/zoo-code-${package_version}.vsix"
+
+          artifact_name=$(unzip -p "$vsix_path" extension/package.json | jq -r '.name')
+          artifact_publisher=$(unzip -p "$vsix_path" extension/package.json | jq -r '.publisher')
+
+          test "$artifact_name" = "zoo-code"
+          test "$artifact_publisher" = "ZooCodeOrganization"
+
       - name: Publish to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}

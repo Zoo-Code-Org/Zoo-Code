@@ -78,6 +78,18 @@ jobs:
           grep -q "extension/webview-ui/build/assets/index.js" /tmp/zoo-code-vsix-contents.txt
           grep -q "extension/webview-ui/audio/celebration.wav" /tmp/zoo-code-vsix-contents.txt
 
+      - name: Validate packaged manifest identity
+        env:
+          VERSION_NUMBER: ${{ steps.version.outputs.number }}
+        run: |
+          vsix_path="bin/zoo-code-${VERSION_NUMBER}.vsix"
+
+          artifact_name=$(unzip -p "$vsix_path" extension/package.json | jq -r '.name')
+          artifact_publisher=$(unzip -p "$vsix_path" extension/package.json | jq -r '.publisher')
+
+          test "$artifact_name" = "zoo-code"
+          test "$artifact_publisher" = "ZooCodeOrganization"
+
       # Open VSX is intentionally excluded: it has no pre-release channel concept,
       # so pre-release builds would surface as the latest stable version for all users.
       - name: Publish pre-release to VS Code Marketplace

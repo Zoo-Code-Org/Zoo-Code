@@ -575,29 +575,33 @@ describe("newTaskTool", () => {
 			} as any)
 			vi.mocked(vscode.workspace.getConfiguration).mockImplementation(mockGetConfiguration)
 
-			// Mutate the mocked Package.name dynamically to simulate a different build variant
 			const pkg = await import("../../../shared/package")
+			const originalName = (pkg.Package as any).name
 			;(pkg.Package as any).name = "zoo-code-nightly"
 
-			const block: ToolUse<"new_task"> = {
-				type: "tool_use",
-				name: "new_task",
-				params: {
-					mode: "code",
-					message: "Test message",
-				},
-				partial: false,
+			try {
+				const block: ToolUse<"new_task"> = {
+					type: "tool_use",
+					name: "new_task",
+					params: {
+						mode: "code",
+						message: "Test message",
+					},
+					partial: false,
+				}
+
+				await newTaskTool.handle(mockCline as any, withNativeArgs(block), {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+				})
+
+				// Assert: configuration was read using the dynamic nightly namespace
+				expect(mockGetConfiguration).toHaveBeenCalledWith("zoo-code-nightly")
+				expect(mockGet).toHaveBeenCalledWith("newTaskRequireTodos", false)
+			} finally {
+				;(pkg.Package as any).name = originalName
 			}
-
-			await newTaskTool.handle(mockCline as any, withNativeArgs(block), {
-				askApproval: mockAskApproval,
-				handleError: mockHandleError,
-				pushToolResult: mockPushToolResult,
-			})
-
-			// Assert: configuration was read using the dynamic nightly namespace
-			expect(mockGetConfiguration).toHaveBeenCalledWith("zoo-code-nightly")
-			expect(mockGet).toHaveBeenCalledWith("newTaskRequireTodos", false)
 		})
 	})
 
