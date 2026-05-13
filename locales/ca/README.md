@@ -1,31 +1,43 @@
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=RooVeterinaryInc.roo-cline"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
-  <a href="https://x.com/roocode"><img src="https://img.shields.io/badge/roocode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-  <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-  <a href="https://discord.gg/roocode"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
-  <a href="https://www.reddit.com/r/RooCode/"><img src="https://img.shields.io/badge/Join%20r%2FRooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/RooCode"></a>
-</p>
-<p align="center">
-  <em>Obté ajuda ràpidament → <a href="https://discord.gg/roocode">Uneix-te a Discord</a> • Prefereixes l'asíncron? → <a href="https://www.reddit.com/r/RooCode/">Uneix-te a r/RooCode</a></em>
-</p>
+          <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
+          <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
+          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
+          <a href="https://discord.gg/SfHYG44NUA"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+          <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
+          <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
+        </p>
+        <p align="center">
+          <em>Obtén ajuda ràpid → <a href="https://discord.gg/SfHYG44NUA">Uneix-te a Discord</a> • Prefereixes anar al teu ritme? → <a href="https://www.reddit.com/r/ZooCode/">Uneix-te a r/ZooCode</a></em>
+        </p>
 
-# Roo Code
+        # Zoo Code
 
-> El teu equip de desenvolupament impulsat per IA, directament al teu editor
+        > El teu equip de desenvolupament impulsat per IA, directament al teu editor
 
-## Novetats de la v3.53.0
+        ## Som Zoo Code
 
-> ### El plugin Roo Code no desapareix.
+> Potser has vist el [recent anunci](https://x.com/mattrubens/status/2046636598859559114) de l'equip de Roo 🦘🦘🦘. El resum és que estan retirant Roo per treballar en un altre producte, [Roomote](https://roomote.dev/). Per a nosaltres, els qui fem servir Roo, la notícia ha estat dura; aquest plugin significa molt per a tots nosaltres.
 >
-> Potser has vist l'[anunci recent](https://x.com/mattrubens/status/2046636598859559114) que Roo Code ha arribat a 3 milions d'instal·lacions i que l'equip original es bolca completament amb Roomote. Sabem que aquesta notícia ha estat dura per a molts de vosaltres. Aquest plugin ens importa molt, tant a nosaltres com a tu, i t'escoltem.
+> Hem de donar les gràcies a tot l'equip de Roo per la feina increïble feta amb aquest plugin. No els esmentarem un per un aquí, però crec que tots estem d'acord que són desenvolupadors excel·lents i, igual d'important, persones excel·lents. Gràcies a l'equip de Roo.
 >
-> La bona notícia: **un equip de la comunitat ha donat un pas endavant per portar Roo Code cap endavant**, i estem treballant amb ells en un relleu oficial perquè el plugin en què confies continuï rebent manteniment i millores.
+> Els qui fem servir Roo venim de tota mena de perfils. Alguns l'utilitzen professionalment cada dia, altres el fan servir per imaginar fluxos de treball inimaginablement complexos. Alguns milloren Roo mateix, mentre que altres milloren els mateixos models que Roo utilitza (super meta). El que volem dir és que la comunitat és diversa i, tot i que un cangur 🦘🦘🦘 és un animal distingit i noble, vam sentir que un "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 reflectia millor aquesta diversitat d'usuaris del plugin.
+>
+> Per això volem anunciar que **Zoo Code** continuarà desenvolupant aquest projecte tan important. L'equip principal està format per desenvolupadors que ja havien contribuït a Roo i que valoren profundament aquest plugin. Continuarem actualitzant models, corregint errors i publicant funcionalitats. Però, per damunt de tot, pensem escoltar-vos a vosaltres, la comunitat, que heu fet aquest plugin tan especial. Així que uneix-te al nostre [Discord](https://discord.gg/SfHYG44NUA), al nostre [Reddit](https://www.reddit.com/r/ZooCode), o [crea un PR o una issue](https://github.com/Zoo-Code-Org/Zoo-Code); però, sobretot, et demanem que continuïs implicat, connectat i actiu com a comunitat.
+>
+> _-Zoo Code Team_
 
-**Novetats d'aquesta versió:**
+## Novetats a la v3.54.0
 
-- S'ha afegit suport per a GPT-5.5 mitjançant el proveïdor OpenAI Codex.
+**Llançament inicial de Zoo Code** — estableix Zoo Code com una extensió independent al VS Code Marketplace sota `ZooCodeOrganization.zoo-code`, amb versions pre-release publicades automàticament a cada merge a `main`.
+
+- S'ha afegit suport per a GPT-5.5 a través del proveïdor OpenAI Codex.
 - S'ha afegit suport per a Claude Opus 4.7 a Vertex AI.
-- S'han afegit controls de navegació per checkpoints anteriors al xat, perquè puguis tornar enrere pels checkpoints previs més fàcilment.
+- S'han afegit controls de navegació cap als checkpoints anteriors al xat.
+
+**Properament a la v3.54.0:**
+
+- Suport per a DeepSeek V4 amb obtenció dinàmica de models.
+- Suport per al client OAuth de MCP.
 
 <details>
   <summary>🌐 Idiomes disponibles</summary>
@@ -49,11 +61,11 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+    </details>
 
 ---
 
-## Què pot fer Roo Code per TU?
+## Què pot fer Zoo Code per TU?
 
 - Generar codi a partir de descripcions en llenguatge natural
 - Adaptar-se amb modes: Codi, Arquitecte, Pregunta, Depuració i Modes personalitzats
@@ -65,7 +77,7 @@
 
 ## Modes
 
-Roo Code s'adapta a la teva manera de treballar, no a l'inrevés:
+Zoo Code s'adapta a la teva manera de treballar, no a l'inrevés:
 
 - Mode Codi: codificació diària, edicions i operacions de fitxers
 - Mode Arquitecte: planificar sistemes, especificacions i migracions
@@ -81,7 +93,7 @@ Més informació: [Ús de Modes](https://docs.zoocode.dev/basic-usage/using-mode
 
 |                                                                                                                                                                            |                                                                                                                                                                           |                                                                                                                                                                                    |
 | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Instal·lant Roo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Configurant perfils</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Indexació de la base de codi</b> |
+| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Instal·lant Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Configurant perfils</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Indexació de la base de codi</b> |
 | <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Modes personalitzats</b> |  <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Punts de control</b>   |      <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Gestió de Context</b>       |
 
 </div>
@@ -91,12 +103,12 @@ Més informació: [Ús de Modes](https://docs.zoocode.dev/basic-usage/using-mode
 
 ## Recursos
 
-- **[Documentació](https://docs.zoocode.dev):** La guia oficial per instal·lar, configurar i dominar Roo Code.
+- **[Documentació](https://docs.zoocode.dev):** La guia oficial per instal·lar, configurar i dominar Zoo Code.
 - **[Canal de YouTube](https://youtube.com/@roocodeyt?feature=shared):** Mira tutorials i veu les funcionalitats en acció.
-- **[Servidor de Discord](https://discord.gg/roocode):** Uneix-te a la comunitat per obtenir ajuda i discutir en temps real.
-- **[Comunitat de Reddit](https://www.reddit.com/r/RooCode):** Comparteix les teves experiències i veu què estan construint altres.
-- **[Incidències de GitHub](https://github.com/RooCodeInc/Roo-Code/issues):** Informa d'errors i segueix el desenvolupament.
-- **[Sol·licituds de funcionalitats](https://github.com/RooCodeInc/Roo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** Tens una idea? Comparteix-la amb els desenvolupadors.
+- **[Servidor de Discord](https://discord.gg/SfHYG44NUA):** Uneix-te a la comunitat per obtenir ajuda i discutir en temps real.
+- **[Comunitat de Reddit](https://www.reddit.com/r/ZooCode):** Comparteix les teves experiències i veu què estan construint altres.
+- **[Incidències de GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Informa d'errors i segueix el desenvolupament.
+- **[Sol·licituds de funcionalitats](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** Tens una idea? Comparteix-la amb els desenvolupadors.
 
 ---
 
@@ -105,7 +117,7 @@ Més informació: [Ús de Modes](https://docs.zoocode.dev/basic-usage/using-mode
 1. **Clona** el repositori:
 
 ```sh
-git clone https://github.com/RooCodeInc/Roo-Code.git
+git clone https://github.com/Zoo-Code-Org/Zoo-Code.git
 ```
 
 2. **Instal·la les dependències**:
@@ -116,13 +128,13 @@ pnpm install
 
 3. **Executa l'extensió**:
 
-Hi ha diverses maneres d'executar l'extensió Roo Code:
+Hi ha diverses maneres d'executar l'extensió Zoo Code:
 
 ### Mode de desenvolupament (F5)
 
 Per al desenvolupament actiu, utilitza la depuració integrada de VSCode:
 
-Prem `F5` (o ves a **Executa** → **Inicia la depuració**) a VSCode. Això obrirà una nova finestra de VSCode amb l'extensió Roo Code en funcionament.
+Prem `F5` (o ves a **Executa** → **Inicia la depuració**) a VSCode. Això obrirà una nova finestra de VSCode amb l'extensió Zoo Code en funcionament.
 
 - Els canvis a la vista web apareixeran immediatament.
 - Els canvis a l'extensió principal també es recarregaran automàticament.
@@ -170,7 +182,7 @@ Utilitzem [changesets](https://github.com/changesets/changesets) per al versiona
 
 ## Avís legal
 
-**Tingueu en compte** que Roo Code, Inc **no** fa cap representació ni garantia pel que fa a cap codi, model o altres eines proporcionades o posades a disposició en relació amb Roo Code, qualsevol eina de tercers associada, o qualsevol resultat. Assumiu **tots els riscos** associats amb l'ús d'aquestes eines o resultats; aquestes eines es proporcionen **"TAL QUAL"** i **"SEGONS DISPONIBILITAT"**. Aquests riscos poden incloure, sense limitació, infraccions de propietat intel·lectual, vulnerabilitats o atacs cibernètics, biaix, inexactituds, errors, defectes, virus, temps d'inactivitat, pèrdua o dany de propietat i/o lesions personals. Sou l'únic responsable del vostre ús d'aquestes eines o resultats (incloent, sense limitació, la legalitat, idoneïtat i resultats dels mateixos).
+**Tingueu en compte** que Zoo Code, Inc **no** fa cap representació ni garantia pel que fa a cap codi, model o altres eines proporcionades o posades a disposició en relació amb Zoo Code, qualsevol eina de tercers associada, o qualsevol resultat. Assumiu **tots els riscos** associats amb l'ús d'aquestes eines o resultats; aquestes eines es proporcionen **"TAL QUAL"** i **"SEGONS DISPONIBILITAT"**. Aquests riscos poden incloure, sense limitació, infraccions de propietat intel·lectual, vulnerabilitats o atacs cibernètics, biaix, inexactituds, errors, defectes, virus, temps d'inactivitat, pèrdua o dany de propietat i/o lesions personals. Sou l'únic responsable del vostre ús d'aquestes eines o resultats (incloent, sense limitació, la legalitat, idoneïtat i resultats dels mateixos).
 
 ---
 
@@ -182,8 +194,8 @@ Ens encanten les contribucions de la comunitat! Comença llegint el nostre [CONT
 
 ## Llicència
 
-[Apache 2.0 © 2025 Roo Code, Inc.](../../LICENSE)
+[Apache 2.0 © 2025 Zoo Code Org](../../LICENSE)
 
 ---
 
-**Gaudeix de Roo Code!** Tant si el mantens amb una corretja curta com si el deixes moure's de forma autònoma, estem impacients per veure què construeixes. Si tens preguntes o idees sobre funcionalitats, passa't per la nostra [comunitat de Reddit](https://www.reddit.com/r/RooCode/) o [Discord](https://discord.gg/roocode). Feliç programació!
+**Gaudeix de Zoo Code!** Tant si el portes curt com si el deixes voltar de manera autònoma, tenim moltes ganes de veure què construiràs. Si tens preguntes o idees de funcionalitats, obre una [issue](https://github.com/Zoo-Code-Org/Zoo-Code/issues) o inicia una [discussion](https://github.com/Zoo-Code-Org/Zoo-Code/discussions). Feliç codi!
