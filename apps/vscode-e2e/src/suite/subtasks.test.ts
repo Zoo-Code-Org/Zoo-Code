@@ -2,73 +2,96 @@ import * as assert from "assert"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
+import { setDefaultSuiteTimeout } from "./test-utils"
 import { sleep, waitFor, waitUntilCompleted } from "./utils"
+import { SUBTASK_CHILD_FOLLOWUP_ANSWER, SUBTASK_CHILD_PROMPT, SUBTASK_PARENT_PROMPT } from "../fixtures/subtasks"
 
-suite.skip("Roo Code Subtasks", () => {
+suite("Roo Code Subtasks", function () {
+	setDefaultSuiteTimeout(this)
+
 	test("Should handle subtask cancellation and resumption correctly", async () => {
 		const api = globalThis.api
-
+		const asks: Record<string, ClineMessage[]> = {}
 		const messages: Record<string, ClineMessage[]> = {}
+		const waitForStage = async (label: string, condition: Parameters<typeof waitFor>[0]) => {
+			try {
+				await waitFor(condition)
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error)
+				throw new Error(`${label}: ${message}`)
+			}
+		}
 
-		api.on(RooCodeEventName.Message, ({ taskId, message }) => {
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "ask") {
+				asks[taskId] = asks[taskId] || []
+				asks[taskId].push(message)
+			}
+
 			if (message.type === "say" && message.partial === false) {
 				messages[taskId] = messages[taskId] || []
 				messages[taskId].push(message)
 			}
-		})
+		}
 
-		const childPrompt = "You are a calculator. Respond only with numbers. What is the square root of 9?"
+		api.on(RooCodeEventName.Message, messageHandler)
 
-		// Start a parent task that will create a subtask.
-		const parentTaskId = await api.startNewTask({
-			configuration: {
-				mode: "ask",
-				alwaysAllowModeSwitch: true,
-				alwaysAllowSubtasks: true,
-				autoApprovalEnabled: true,
-				enableCheckpoints: false,
-			},
-			text:
-				"You are the parent task. " +
-				`Create a subtask by using the new_task tool with the message '${childPrompt}'.` +
-				"After creating the subtask, wait for it to complete and then respond 'Parent task resumed'.",
-		})
+		try {
+			const parentTaskId = await api.startNewTask({
+				configuration: {
+					mode: "ask",
+					alwaysAllowModeSwitch: true,
+					alwaysAllowSubtasks: true,
+					autoApprovalEnabled: true,
+					enableCheckpoints: false,
+				},
+				text: SUBTASK_PARENT_PROMPT,
+			})
 
-		let spawnedTaskId: string | undefined = undefined
+			let spawnedTaskId: string | undefined
+			await waitForStage("wait for spawned subtask", () => {
+				const currentTaskStack = api.getCurrentTaskStack()
+				const currentTaskId = currentTaskStack[currentTaskStack.length - 1]
+				if (currentTaskId && currentTaskId !== parentTaskId) {
+					spawnedTaskId = currentTaskId
+					return true
+				}
+				return false
+			})
+			await waitForStage(
+				"wait for delegated child followup ask",
+				() => asks[spawnedTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "followup") ?? false,
+			)
 
-		// Wait for the subtask to be spawned and then cancel it.
-		api.on(RooCodeEventName.TaskSpawned, (_, childTaskId) => (spawnedTaskId = childTaskId))
-		await waitFor(() => !!spawnedTaskId)
-		await sleep(1_000) // Give the task a chance to start and populate the history.
-		await api.cancelCurrentTask()
+			await api.cancelCurrentTask()
 
-		// Wait a bit to ensure any task resumption would have happened.
-		await sleep(2_000)
+			await sleep(2_000)
 
-		// The parent task should not have resumed yet, so we shouldn't see
-		// "Parent task resumed".
-		assert.ok(
-			messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
-				undefined,
-			"Parent task should not have resumed after subtask cancellation",
-		)
+			assert.ok(
+				messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
+					undefined,
+				"Parent task should not have resumed after subtask cancellation",
+			)
 
-		// Start a new task with the same message as the subtask.
-		const anotherTaskId = await api.startNewTask({ text: childPrompt })
-		await waitUntilCompleted({ api, taskId: anotherTaskId })
+			const anotherTaskId = await api.startNewTask({ text: SUBTASK_CHILD_PROMPT })
+			await waitForStage(
+				"wait for standalone child followup ask",
+				() => asks[anotherTaskId]?.some(({ type, ask }) => type === "ask" && ask === "followup") ?? false,
+			)
+			await api.sendMessage(SUBTASK_CHILD_FOLLOWUP_ANSWER)
+			await waitUntilCompleted({ api, taskId: anotherTaskId })
 
-		// Wait a bit to ensure any task resumption would have happened.
-		await sleep(2_000)
+			await sleep(2_000)
 
-		// The parent task should still not have resumed.
-		assert.ok(
-			messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
-				undefined,
-			"Parent task should not have resumed after subtask cancellation",
-		)
+			assert.ok(
+				messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
+					undefined,
+				"Parent task should not have resumed after subtask cancellation",
+			)
 
-		// Clean up - cancel all tasks.
-		await api.clearCurrentTask()
-		await waitUntilCompleted({ api, taskId: parentTaskId })
+			await api.clearCurrentTask()
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+		}
 	})
 })
