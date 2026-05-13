@@ -5,11 +5,24 @@ import * as fs from "fs/promises"
 import { runTests } from "@vscode/test-electron"
 import { LLMock } from "@copilotkit/aimock"
 
+function getCliFlagValue(flag: string) {
+	return process.argv.find((arg, index) => process.argv[index - 1] === flag)
+}
+
+function isDeepSeekTargetedRun(testFile?: string, testGrep?: string) {
+	if (testFile?.toLowerCase().includes("deepseek-v4.test")) {
+		return true
+	}
+
+	// DeepSeek grep runs may target the suite name, file stem, or individual model IDs.
+	return testGrep?.toLowerCase().includes("deepseek") ?? false
+}
+
 async function main() {
 	const isRecord = process.env.AIMOCK_RECORD === "true"
-	const testGrep = process.argv.find((arg, i) => process.argv[i - 1] === "--grep") || process.env.TEST_GREP
-	const testFile = process.argv.find((arg, i) => process.argv[i - 1] === "--file") || process.env.TEST_FILE
-	const isDeepSeekTest = testFile?.includes("deepseek-v4") === true
+	const testGrep = getCliFlagValue("--grep") || process.env.TEST_GREP
+	const testFile = getCliFlagValue("--file") || process.env.TEST_FILE
+	const isDeepSeekTest = isDeepSeekTargetedRun(testFile, testGrep)
 
 	if (isRecord && isDeepSeekTest && !process.env.DEEPSEEK_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
