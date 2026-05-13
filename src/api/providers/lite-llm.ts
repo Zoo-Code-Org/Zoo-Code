@@ -117,6 +117,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		const { id: modelId, info } = await this.fetchModel()
 
 		const openAiMessages = convertToOpenAiMessages(messages, {
+			modelId,
 			normalizeToolCallId: sanitizeOpenAiCallId,
 		})
 

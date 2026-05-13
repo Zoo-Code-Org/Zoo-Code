@@ -1,0 +1,293 @@
+import { Anthropic } from "@anthropic-ai/sdk"
+import OpenAI from "openai"
+
+import { mimoModels, mimoDefaultModelId, MIMO_DEFAULT_TEMPERATURE, type ModelInfo } from "@roo-code/types"
+
+import type { ApiHandlerOptions } from "../../shared/api"
+
+import { ApiStream } from "../transform/stream"
+import { convertToOpenAiMessages } from "../transform/openai-format"
+import { getModelParams } from "../transform/model-params"
+import { calculateApiCostOpenAI } from "../../shared/cost"
+
+import { OpenAiHandler } from "./openai"
+import type { ApiHandlerCreateMessageMetadata } from "../index"
+
+/**
+ * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
+ *
+ * CRITICAL: Per MiMo's official docs, reasoning_content MUST be passed back
+ * in multi-turn conversations with tool calls. Without it, the API returns 400.
+ *
+ * Reference: https://platform.xiaomimimo.com/static/docs/usage-guide/passing-back-reasoning_content.md
+ */
+export class MimoHandler extends OpenAiHandler {
+	constructor(options: ApiHandlerOptions) {
+		super({
+			...options,
+			openAiApiKey: options.mimoApiKey ?? "not-provided",
+			openAiModelId: options.apiModelId ?? mimoDefaultModelId,
+			openAiBaseUrl: options.mimoBaseUrl || "https://token-plan-sgp.xiaomimimo.com/v1",
+			openAiStreamingEnabled: true,
+			includeMaxTokens: false,
+		})
+	}
+
+	override getModel() {
+		const id = this.options.apiModelId ?? mimoDefaultModelId
+		const info: ModelInfo = mimoModels[id as keyof typeof mimoModels] || mimoModels[mimoDefaultModelId]
+		const params = getModelParams({
+			format: "openai",
+			modelId: id,
+			model: info,
+			settings: this.options,
+			defaultTemperature: MIMO_DEFAULT_TEMPERATURE,
+		})
+		return { id, info, ...params }
+	}
+
+	/**
+	 * Strip OpenAI-specific extensions that MiMo's proxy rejects:
+	 * - strict: true on tools
+	 * - additionalProperties: false on schemas
+	 */
+	protected override convertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
+		if (!tools) {
+			return undefined
+		}
+
+		return tools.map((tool) => {
+			if (tool.type !== "function") {
+				return tool
+			}
+
+			return {
+				type: "function",
+				function: {
+					name: tool.function.name,
+					description: tool.function.description,
+					parameters: this.stripOpenAiExtensions(tool.function.parameters),
+				},
+			}
+		})
+	}
+
+	private stripOpenAiExtensions(schema: any): any {
+		if (!schema || typeof schema !== "object") {
+			return schema
+		}
+
+		const { additionalProperties, ...rest } = schema
+
+		if (rest.properties) {
+			const newProps: Record<string, any> = {}
+			for (const [key, prop] of Object.entries(rest.properties)) {
+				newProps[key] = this.stripOpenAiExtensions(prop)
+			}
+			rest.properties = newProps
+		}
+
+		if (rest.items && typeof rest.items === "object") {
+			rest.items = this.stripOpenAiExtensions(rest.items)
+		}
+
+		return rest
+	}
+
+	/**
+	 * Convert Anthropic messages to MiMo-compatible OpenAI format.
+	 *
+	 * CRITICAL: Extracts `type: "reasoning"` content blocks from Anthropic
+	 * messages and converts them to `reasoning_content` field in OpenAI
+	 * assistant messages. MiMo REQUIRES this for multi-turn tool calling.
+	 */
+	private convertMessagesForMiMo(
+		anthropicMessages: Anthropic.Messages.MessageParam[],
+	): OpenAI.Chat.ChatCompletionMessageParam[] {
+		const converted: OpenAI.Chat.ChatCompletionMessageParam[] = []
+
+		for (const msg of anthropicMessages) {
+			if (msg.role === "assistant" && Array.isArray(msg.content)) {
+				// Extract reasoning content from Anthropic content blocks
+				const reasoningParts: string[] = []
+				const textParts: string[] = []
+				const toolUseParts: Anthropic.ToolUseBlockParam[] = []
+
+				for (const block of msg.content) {
+					if ((block as any).type === "reasoning") {
+						reasoningParts.push((block as any).text || "")
+					} else if (block.type === "text") {
+						textParts.push(block.text)
+					} else if (block.type === "tool_use") {
+						toolUseParts.push(block)
+					}
+				}
+
+				// Build OpenAI assistant message with reasoning_content
+				const assistantMsg: any = {
+					role: "assistant",
+					content: textParts.join("\n") || "",
+				}
+
+				// CRITICAL: Add reasoning_content if present
+				if (reasoningParts.length > 0) {
+					assistantMsg.reasoning_content = reasoningParts.join("\n")
+				}
+
+				// Add tool_calls if present
+				if (toolUseParts.length > 0) {
+					assistantMsg.tool_calls = toolUseParts.map((block) => ({
+						id: block.id,
+						type: "function" as const,
+						function: {
+							name: block.name,
+							arguments: typeof block.input === "string" ? block.input : JSON.stringify(block.input),
+						},
+					}))
+				}
+
+				converted.push(assistantMsg)
+			} else if (msg.role === "user" && Array.isArray(msg.content)) {
+				// Process user messages: separate tool_results from text
+				const toolResults: Anthropic.ToolResultBlockParam[] = []
+				const textBlocks: string[] = []
+
+				for (const block of msg.content) {
+					if (block.type === "tool_result") {
+						toolResults.push(block)
+					} else if (block.type === "text") {
+						textBlocks.push(block.text)
+					}
+				}
+
+				// Add tool results as role:"tool" messages (MiMo supports this)
+				for (const tr of toolResults) {
+					let content: string
+					if (typeof tr.content === "string") {
+						content = tr.content
+					} else if (Array.isArray(tr.content)) {
+						content = tr.content.map((p: any) => (p.type === "text" ? p.text : "")).join("\n")
+					} else {
+						content = ""
+					}
+
+					converted.push({
+						role: "tool",
+						tool_call_id: tr.tool_use_id,
+						content: content || "(empty)",
+					})
+				}
+
+				// Add text content as user message
+				if (textBlocks.length > 0) {
+					converted.push({
+						role: "user",
+						content: textBlocks.join("\n"),
+					})
+				}
+			} else if (msg.role === "user" && typeof msg.content === "string") {
+				converted.push({
+					role: "user",
+					content: msg.content,
+				})
+			}
+		}
+
+		return converted
+	}
+
+	override async *createMessage(
+		systemPrompt: string,
+		messages: Anthropic.Messages.MessageParam[],
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): ApiStream {
+		const { id: modelId, info: modelInfo, temperature } = this.getModel()
+
+		// Use custom conversion that preserves reasoning_content
+		const convertedMessages = this.convertMessagesForMiMo(messages)
+
+		const tools = this.convertToolsForOpenAI(metadata?.tools)
+
+		// Build request per MiMo's OpenAI-compatible API
+		const params: Record<string, any> = {
+			model: modelId,
+			temperature,
+			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
+			stream: true,
+			// MiMo requires thinking to be enabled via extra_body
+			extra_body: { thinking: { type: "enabled" } },
+		}
+
+		if (tools && tools.length > 0) {
+			params.tools = tools
+		}
+
+		let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+		try {
+			stream = (await this.client.chat.completions.create(params as any)) as any
+		} catch (error) {
+			const { handleOpenAIError } = await import("./utils/openai-error-handler")
+			throw handleOpenAIError(error, "MiMo")
+		}
+
+		let lastUsage: OpenAI.CompletionUsage | undefined
+
+		for await (const chunk of stream) {
+			const delta = chunk.choices?.[0]?.delta ?? {}
+
+			if (delta.content) {
+				yield {
+					type: "text",
+					text: delta.content,
+				}
+			}
+
+			if ("reasoning_content" in delta && delta.reasoning_content) {
+				yield {
+					type: "reasoning",
+					text: (delta.reasoning_content as string) || "",
+				}
+			}
+
+			if (delta.tool_calls) {
+				for (const toolCall of delta.tool_calls) {
+					yield {
+						type: "tool_call_partial",
+						index: toolCall.index,
+						id: toolCall.id,
+						name: toolCall.function?.name,
+						arguments: toolCall.function?.arguments,
+					}
+				}
+			}
+
+			if (chunk.usage) {
+				lastUsage = chunk.usage
+			}
+		}
+
+		if (lastUsage) {
+			const inputTokens = lastUsage?.prompt_tokens || 0
+			const outputTokens = lastUsage?.completion_tokens || 0
+			const cacheWriteTokens = (lastUsage?.prompt_tokens_details as any)?.cache_write_tokens || 0
+			const cacheReadTokens = lastUsage?.prompt_tokens_details?.cached_tokens || 0
+
+			const { totalCost } = calculateApiCostOpenAI(
+				modelInfo,
+				inputTokens,
+				outputTokens,
+				cacheWriteTokens,
+				cacheReadTokens,
+			)
+
+			yield {
+				type: "usage",
+				inputTokens,
+				outputTokens,
+				cacheWriteTokens: cacheWriteTokens || undefined,
+				cacheReadTokens: cacheReadTokens || undefined,
+				totalCost,
+			}
+		}
+	}
+}

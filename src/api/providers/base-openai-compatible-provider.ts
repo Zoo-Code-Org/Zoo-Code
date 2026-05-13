@@ -90,7 +90,10 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			model,
 			max_tokens,
 			temperature,
-			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
+			messages: [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages, { modelId: model }),
+			],
 			stream: true,
 			stream_options: { include_usage: true },
 			tools: this.convertToolsForOpenAI(metadata?.tools),
@@ -224,7 +227,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
 			model: modelId,
-			messages: [{ role: "user", content: prompt }],
+			messages: [{ role: "user", content: prompt }], // No history, no MiMo strip needed
 		}
 
 		// Add thinking parameter if reasoning is enabled and model supports it

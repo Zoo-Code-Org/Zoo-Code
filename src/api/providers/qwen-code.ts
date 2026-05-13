@@ -223,7 +223,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			content: systemPrompt,
 		}
 
-		const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages)]
+		const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages, { modelId: model.id })]
 
 		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 			model: model.id,

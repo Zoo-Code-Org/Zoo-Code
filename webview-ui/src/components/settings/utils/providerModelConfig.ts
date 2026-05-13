@@ -16,6 +16,7 @@ import {
 	fireworksDefaultModelId,
 	minimaxDefaultModelId,
 	basetenDefaultModelId,
+	mimoDefaultModelId,
 } from "@roo-code/types"
 
 import { MODELS_BY_PROVIDER } from "../constants"
@@ -40,6 +41,7 @@ export const PROVIDER_SERVICE_CONFIG: Partial<Record<ProviderName, ProviderServi
 	zai: { serviceName: "Z.ai", serviceUrl: "https://z.ai" },
 	fireworks: { serviceName: "Fireworks AI", serviceUrl: "https://fireworks.ai" },
 	minimax: { serviceName: "MiniMax", serviceUrl: "https://minimax.chat" },
+	mimo: { serviceName: "Xiaomi MiMo", serviceUrl: "https://platform.xiaomimimo.com" },
 	baseten: { serviceName: "Baseten", serviceUrl: "https://baseten.co" },
 	ollama: { serviceName: "Ollama", serviceUrl: "https://ollama.ai" },
 	lmstudio: { serviceName: "LM Studio", serviceUrl: "https://lmstudio.ai/docs" },
@@ -64,6 +66,7 @@ export const PROVIDER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> =
 	zai: internationalZAiDefaultModelId,
 	fireworks: fireworksDefaultModelId,
 	minimax: minimaxDefaultModelId,
+	mimo: mimoDefaultModelId,
 	baseten: basetenDefaultModelId,
 }
 

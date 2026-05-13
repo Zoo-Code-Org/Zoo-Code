@@ -239,6 +239,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			...convertToOpenAiMessages(
 				messages,
 				isMistral ? { normalizeToolCallId: normalizeMistralToolCallId } : undefined,
+				modelId,
 			),
 		]
 

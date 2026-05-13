@@ -256,7 +256,8 @@ export function sanitizeGeminiMessages(
 /**
  * Options for converting Anthropic messages to OpenAI format.
  */
-export interface ConvertToOpenAiMessagesOptions {
+interface ConvertToOpenAiMessagesOptions {
+	modelId?: string // NEW: For provider-specific stripping (e.g., MiMo strict mode)
 	/**
 	 * Optional function to normalize tool call IDs for providers with strict ID requirements.
 	 * When provided, this function will be applied to all tool_use IDs and tool_result tool_use_ids.
@@ -314,7 +315,7 @@ export function convertToOpenAiMessages(
 
 			if (anthropicMessage.role === "assistant") {
 				const mapped = mapReasoningDetails(messageWithDetails.reasoning_details)
-				if (mapped) {
+				if (mapped && !(options?.modelId && /mimo/i.test(options.modelId || ""))) {
 					;(baseMessage as any).reasoning_details = mapped
 				}
 			}
