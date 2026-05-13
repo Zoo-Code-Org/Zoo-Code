@@ -8,7 +8,7 @@ import type { RooCodeAPI, RooCodeEventName } from "@roo-code/types"
 import { waitFor } from "./utils"
 
 export async function run() {
-	const extension = vscode.extensions.getExtension<RooCodeAPI>("RooVeterinaryInc.roo-cline")
+	const extension = vscode.extensions.getExtension<RooCodeAPI>("ZooCodeOrganization.zoo-code")
 
 	if (!extension) {
 		throw new Error("Extension not found")
@@ -19,10 +19,6 @@ export async function run() {
 	const aimockUrl = process.env.AIMOCK_URL
 	const isRecord = process.env.AIMOCK_RECORD === "true"
 
-	if (isRecord && !process.env.OPENROUTER_API_KEY) {
-		throw new Error("AIMOCK_RECORD=true requires OPENROUTER_API_KEY")
-	}
-
 	await api.setConfiguration({
 		apiProvider: "openrouter" as const,
 		// In record mode, forward the real key so aimock can proxy it to OpenRouter.
@@ -32,7 +28,7 @@ export async function run() {
 		...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
 	})
 
-	await vscode.commands.executeCommand("roo-cline.SidebarProvider.focus")
+	await vscode.commands.executeCommand("zoo-code.SidebarProvider.focus")
 	await waitFor(() => api.isReady())
 
 	// Automatically approve completion_result asks so tests don't stall waiting

@@ -255,5 +255,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: 無効な認証 token を受信しました。",
+			"token_verification_failed": "Zoo Code: Token の検証に失敗しました。",
+			"invalid_token": "Zoo Code: 無効な token です。",
+			"could_not_verify_token": "Zoo Code: Token を検証できませんでした。"
+		},
+		"info": {
+			"connected": "Zoo Code: 接続に成功しました！Zoo Code を AI プロバイダーとして使用できます。",
+			"disconnected": "Zoo Code: 正常に切断されました。"
+		}
 	}
 }

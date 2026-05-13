@@ -3,6 +3,16 @@
 // Mock vscode first to avoid import errors
 vitest.mock("vscode", () => ({}))
 
+const mockCaptureException = vitest.fn()
+
+vitest.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			captureException: (...args: unknown[]) => mockCaptureException(...args),
+		},
+	},
+}))
+
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import { ApiStreamChunk } from "../../transform/stream"
@@ -14,6 +24,8 @@ describe("VertexHandler", () => {
 	let handler: VertexHandler
 
 	beforeEach(() => {
+		mockCaptureException.mockClear()
+
 		// Create mock functions
 		const mockGenerateContentStream = vitest.fn()
 		const mockGenerateContent = vitest.fn()

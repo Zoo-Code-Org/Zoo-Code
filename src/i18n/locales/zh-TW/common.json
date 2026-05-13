@@ -255,5 +255,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: 收到無效的認證 token。",
+			"token_verification_failed": "Zoo Code: Token 驗證失敗。",
+			"invalid_token": "Zoo Code: 無效的 token。",
+			"could_not_verify_token": "Zoo Code: 無法驗證 token。"
+		},
+		"info": {
+			"connected": "Zoo Code: 連線成功！你現在可以使用 Zoo Code 作為 AI 提供商。",
+			"disconnected": "Zoo Code: 已成功中斷連線。"
+		}
 	}
 }

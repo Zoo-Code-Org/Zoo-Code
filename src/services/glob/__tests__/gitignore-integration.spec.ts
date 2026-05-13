@@ -26,6 +26,27 @@ vi.mock("../../path", () => ({
 import { listFiles } from "../list-files"
 import * as childProcess from "child_process"
 
+const createMockRipgrepProcess = (chunks: string[] = [], exitCode = 0) => ({
+	stdout: {
+		on: vi.fn((event, callback) => {
+			if (event === "data") {
+				for (const chunk of chunks) {
+					callback(chunk)
+				}
+			}
+		}),
+	},
+	stderr: {
+		on: vi.fn(),
+	},
+	on: vi.fn((event, callback) => {
+		if (event === "close") {
+			callback(exitCode)
+		}
+	}),
+	kill: vi.fn(),
+})
+
 describe("list-files gitignore integration", () => {
 	let tempDir: string
 	let originalCwd: string
@@ -61,31 +82,9 @@ describe("list-files gitignore integration", () => {
 
 		// Mock ripgrep to return files that would not be gitignored
 		const mockSpawn = vi.mocked(childProcess.spawn)
-		const mockProcess = {
-			stdout: {
-				on: vi.fn((event, callback) => {
-					if (event === "data") {
-						// Simulate ripgrep output (files that are not gitignored)
-						const files =
-							[path.join(tempDir, "src", "index.ts"), path.join(tempDir, "allowed-dir", "file.txt")].join(
-								"\n",
-							) + "\n"
-						setTimeout(() => callback(files), 10)
-					}
-				}),
-			},
-			stderr: {
-				on: vi.fn(),
-			},
-			on: vi.fn((event, callback) => {
-				if (event === "close") {
-					setTimeout(() => callback(0), 20)
-				}
-			}),
-			kill: vi.fn(),
-		}
-
-		mockSpawn.mockReturnValue(mockProcess as any)
+		const rgFiles =
+			[path.join(tempDir, "src", "index.ts"), path.join(tempDir, "allowed-dir", "file.txt")].join("\n") + "\n"
+		mockSpawn.mockReturnValue(createMockRipgrepProcess([rgFiles]) as any)
 
 		// Call listFiles in recursive mode
 		const [files, didHitLimit] = await listFiles(tempDir, true, 100)
@@ -118,26 +117,7 @@ describe("list-files gitignore integration", () => {
 
 		// Mock ripgrep
 		const mockSpawn = vi.mocked(childProcess.spawn)
-		const mockProcess = {
-			stdout: {
-				on: vi.fn((event, callback) => {
-					if (event === "data") {
-						setTimeout(() => callback(""), 10)
-					}
-				}),
-			},
-			stderr: {
-				on: vi.fn(),
-			},
-			on: vi.fn((event, callback) => {
-				if (event === "close") {
-					setTimeout(() => callback(0), 20)
-				}
-			}),
-			kill: vi.fn(),
-		}
-
-		mockSpawn.mockReturnValue(mockProcess as any)
+		mockSpawn.mockReturnValue(createMockRipgrepProcess() as any)
 
 		// Call listFiles in recursive mode
 		const [files, didHitLimit] = await listFiles(tempDir, true, 100)
@@ -165,28 +145,8 @@ describe("list-files gitignore integration", () => {
 
 		// Mock ripgrep for non-recursive mode
 		const mockSpawn = vi.mocked(childProcess.spawn)
-		const mockProcess = {
-			stdout: {
-				on: vi.fn((event, callback) => {
-					if (event === "data") {
-						// In non-recursive mode, ripgrep should now respect .gitignore
-						const files = [path.join(tempDir, "src"), path.join(tempDir, "allowed-dir")].join("\n") + "\n"
-						setTimeout(() => callback(files), 10)
-					}
-				}),
-			},
-			stderr: {
-				on: vi.fn(),
-			},
-			on: vi.fn((event, callback) => {
-				if (event === "close") {
-					setTimeout(() => callback(0), 20)
-				}
-			}),
-			kill: vi.fn(),
-		}
-
-		mockSpawn.mockReturnValue(mockProcess as any)
+		const rgFiles = [path.join(tempDir, "src"), path.join(tempDir, "allowed-dir")].join("\n") + "\n"
+		mockSpawn.mockReturnValue(createMockRipgrepProcess([rgFiles]) as any)
 
 		// Call listFiles in NON-recursive mode
 		const [files, didHitLimit] = await listFiles(tempDir, false, 100)

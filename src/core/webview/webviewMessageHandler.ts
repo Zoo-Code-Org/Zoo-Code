@@ -2421,6 +2421,18 @@ export const webviewMessageHandler = async (
 			await provider.postStateToWebview()
 			break
 		}
+		case "zooCodeSignOut": {
+			try {
+				const { disconnectZooCode } = await import("../../services/zoo-code-auth")
+				await disconnectZooCode()
+				await provider.postStateToWebview()
+			} catch (error) {
+				provider.log(
+					`Failed to sign out of Zoo Code: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+			break
+		}
 		case "switchOrganization": {
 			try {
 				const organizationId = message.organizationId ?? null

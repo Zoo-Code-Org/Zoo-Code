@@ -22,14 +22,27 @@ Record mode uses **record-on-miss**: if an existing fixture already matches a re
 
     The `-x` flag is required because `openai-*.json` files are gitignored — `git clean -f` alone silently skips them.
 
-3. Record fixtures (requires an OpenRouter API key with credits):
+3. Record fixtures. Use an OpenRouter key (default) or an Anthropic key (for tests that use the
+   Anthropic provider directly):
 
     ```sh
+    # OpenRouter (default — most tests)
     OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:record
+
+    # Anthropic provider (tests that call api.setConfiguration({ apiProvider: "anthropic" }))
+    # OPENROUTER_API_KEY is still required — the harness always initialises with OpenRouter.
+    OPENROUTER_API_KEY=<or-key> ANTHROPIC_API_KEY=<key> TEST_FILE=my-anthropic-test.test.js pnpm --filter @roo-code/vscode-e2e test:record
     ```
 
-    This proxies unmatched requests to OpenRouter and writes `fixtures/openai-*.json`. Background
-    calls from the extension will also be recorded here — that's expected, ignore them.
+    To avoid re-recording unrelated tests, filter to just your file:
+
+    ```sh
+    OPENROUTER_API_KEY=<key> TEST_FILE=my-feature.test.js pnpm --filter @roo-code/vscode-e2e test:record
+    ```
+
+    This proxies unmatched requests to the real API and writes `fixtures/openai-*.json` (OpenRouter)
+    or `fixtures/anthropic-*.json` (Anthropic). Background calls from the extension will also be
+    recorded — that's expected, ignore them.
 
 4. Find the auto-recorded file for your test:
 
@@ -85,6 +98,42 @@ Background API calls from the extension (usage collection, initialization) hit a
 | `pnpm --filter @roo-code/vscode-e2e test:ci:mock`                         | Replay mode — no API key needed, uses fixtures                     |
 | `OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:record` | Record mode — proxies to real API, writes `openai-*.json`          |
 | `OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:ci`     | Real-API mode — runs against live OpenRouter (for drift detection) |
+
+## Tests that use a fetch interceptor instead of aimock
+
+Some suites can't redirect their provider through aimock. These suites patch `globalThis.fetch` directly — the OpenAI SDK resolves `fetch` at API client construction time (which happens lazily at task start), so installing the interceptor before `api.startNewTask()` is sufficient. Installing it before `api.setConfiguration()` (as done below) is the conservative, recommended order.
+
+### Z.ai GLM (`suite/providers/zai.test.ts`)
+
+Z.ai doesn't expose a user-configurable base URL (it uses a fixed set of regional endpoints), so we deliberately avoided adding a hidden test-only override to the schema. The suite instead patches `globalThis.fetch` to intercept requests to `api.z.ai` and return a crafted OpenAI-compatible SSE response.
+
+The suite always runs (never skips). Set `ZAI_API_KEY` to bypass the interceptor and hit the real API instead:
+
+```sh
+# Mock mode (default — no key needed, interceptor active)
+pnpm --filter @roo-code/vscode-e2e test:ci:mock
+
+# Live mode — bypasses interceptor, calls real Z.ai API
+ZAI_API_KEY=<key> TEST_FILE=zai.test pnpm --filter @roo-code/vscode-e2e test:ci
+```
+
+When adding a new test to this suite, add a matching fixture to the `installZAiFetchInterceptor` call in `suiteSetup`. Use a short unique prefix (e.g. `"zai-glm-e2e-mytest:"`) that won't appear in `<environment_details>`.
+## Tests that use a non-default provider
+
+If your test calls `api.setConfiguration({ apiProvider: "anthropic", ... })`, point aimock at the
+Anthropic endpoint by passing `anthropicBaseUrl: aimockUrl` (without a `/v1` suffix — aimock
+appends the path itself):
+
+```typescript
+await api.setConfiguration({
+	apiProvider: "anthropic" as const,
+	apiKey: aimockUrl && !isRecord ? "mock-key" : process.env.ANTHROPIC_API_KEY!,
+	apiModelId: "claude-opus-4-7",
+	...(aimockUrl && { anthropicBaseUrl: aimockUrl }),
+})
+```
+
+Always restore the default OpenRouter config in `suiteTeardown` so subsequent suites are unaffected.
 
 ## Programmatic fixtures (regex matching)
 

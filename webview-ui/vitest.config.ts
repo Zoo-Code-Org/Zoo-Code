@@ -24,6 +24,7 @@ export default defineConfig({
 				"**/*.spec.tsx",
 				"**/vitest.setup.ts",
 				"**/vitest.config.ts",
+				"**/vite.config.ts",
 				"**/__mocks__/**",
 			],
 		},

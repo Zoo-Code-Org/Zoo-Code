@@ -235,8 +235,9 @@ export class ClineProvider
 
 			// Create named listener functions so we can remove them later.
 			const onTaskStarted = () => this.emit(RooCodeEventName.TaskStarted, instance.taskId)
-			const onTaskCompleted = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) =>
+			const onTaskCompleted = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) => {
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
+			}
 			const onTaskAborted = async () => {
 				this.emit(RooCodeEventName.TaskAborted, instance.taskId)
 
@@ -1156,7 +1157,7 @@ export class ClineProvider
 			"default-src 'none'",
 			`font-src ${webview.cspSource} data:`,
 			`style-src ${webview.cspSource} 'unsafe-inline' https://* http://${localServerUrl} http://0.0.0.0:${localPort}`,
-			`img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com data:`,
+			`img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:`,
 			`media-src ${webview.cspSource}`,
 			`script-src 'unsafe-eval' ${webview.cspSource} https://* https://*.posthog.com http://${localServerUrl} http://0.0.0.0:${localPort} 'nonce-${nonce}'`,
 			`connect-src ${webview.cspSource} ${openRouterDomain} https://* https://*.posthog.com ws://${localServerUrl} ws://0.0.0.0:${localPort} http://${localServerUrl} http://0.0.0.0:${localPort}`,
@@ -1247,7 +1248,7 @@ export class ClineProvider
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
             <meta name="theme-color" content="#000000">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com data:; media-src ${webview.cspSource}; script-src ${webview.cspSource} 'wasm-unsafe-eval' 'nonce-${nonce}' https://ph.roocode.com 'strict-dynamic'; connect-src ${webview.cspSource} ${openRouterDomain} https://api.requesty.ai https://ph.roocode.com;">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:; media-src ${webview.cspSource}; script-src ${webview.cspSource} 'wasm-unsafe-eval' 'nonce-${nonce}' https://ph.roocode.com 'strict-dynamic'; connect-src ${webview.cspSource} ${openRouterDomain} https://api.requesty.ai https://ph.roocode.com;">
             <link rel="stylesheet" type="text/css" href="${stylesUri}">
 			<link href="${codiconsUri}" rel="stylesheet" />
 			<script nonce="${nonce}">
@@ -1638,6 +1639,15 @@ export class ClineProvider
 		}
 
 		await this.upsertProviderProfile(currentApiConfigName, newConfiguration)
+	}
+
+	// Zoo Code Auth (for observability telemetry)
+
+	async handleZooCodeCallback(_token: string) {
+		// Auth mutation (token storage, subscription check, success toast) was already
+		// performed by handleAuthCallback() in handleUri.ts before this method was called.
+		// This method only needs to refresh the webview state to reflect the new auth status.
+		await this.postStateToWebview()
 	}
 
 	// Requesty
@@ -2115,6 +2125,38 @@ export class ClineProvider
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
 		const currentTask = this.getCurrentTask()
+		let zooCodeState: {
+			zooCodeIsAuthenticated: boolean
+			zooCodeUserName: string | undefined
+			zooCodeUserEmail: string | undefined
+			zooCodeUserImage: string | undefined
+			zooCodeBaseUrl: string
+			deviceName: string
+		} = {
+			zooCodeIsAuthenticated: false,
+			zooCodeUserName: undefined,
+			zooCodeUserEmail: undefined,
+			zooCodeUserImage: undefined,
+			zooCodeBaseUrl: "https://www.zoocode.dev",
+			deviceName: os.hostname(),
+		}
+
+		try {
+			const { isZooCodeAuthenticated, getCachedZooCodeUserInfo, getZooCodeBaseUrl } = await import(
+				"../../services/zoo-code-auth"
+			)
+			const userInfo = getCachedZooCodeUserInfo()
+			zooCodeState = {
+				zooCodeIsAuthenticated: await isZooCodeAuthenticated(),
+				zooCodeUserName: userInfo.name,
+				zooCodeUserEmail: userInfo.email,
+				zooCodeUserImage: userInfo.image,
+				zooCodeBaseUrl: getZooCodeBaseUrl(),
+				deviceName: os.hostname(),
+			}
+		} catch {
+			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
+		}
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
@@ -2238,6 +2280,7 @@ export class ClineProvider
 					return false
 				}
 			})(),
+			...zooCodeState,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
 		}
 	}
@@ -2986,6 +3029,7 @@ export class ClineProvider
 			this._appProperties = {
 				appName: packageJSON?.name ?? Package.name,
 				appVersion: packageJSON?.version ?? Package.version,
+				releaseChannel: Package.releaseChannel,
 				vscodeVersion: vscode.version,
 				platform: process.platform,
 				editorName: vscode.env.appName,

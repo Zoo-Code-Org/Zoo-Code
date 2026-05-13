@@ -372,6 +372,12 @@ export type ExtensionState = Pick<
 	mdmCompliant?: boolean
 	taskSyncEnabled: boolean
 	openAiCodexIsAuthenticated?: boolean
+	zooCodeIsAuthenticated?: boolean
+	zooCodeUserName?: string
+	zooCodeUserEmail?: string
+	zooCodeUserImage?: string
+	zooCodeBaseUrl?: string
+	deviceName?: string
 	debug?: boolean
 
 	/**
@@ -505,6 +511,7 @@ export interface WebviewMessage {
 		| "rooCloudManualUrl"
 		| "openAiCodexSignIn"
 		| "openAiCodexSignOut"
+		| "zooCodeSignOut"
 		| "switchOrganization"
 		| "condenseTaskContextRequest"
 		| "requestIndexingStatus"
