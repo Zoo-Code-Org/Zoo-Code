@@ -16,13 +16,36 @@
 
 ## We are Zoo Code
 
-> You may have seen the [recent announcement](https://x.com/mattrubens/status/2046636598859559114) from the Roo team 🦘🦘🦘. The TLDR is that they are sunsetting Roo in favour of working on another product, Roomote. The news was hard to take for us Roo coders, this plugin means a lot to all of us.
+> You may have seen the
+> [recent announcement](https://x.com/mattrubens/status/2046636598859559114)
+> from the Roo team 🦘🦘🦘. The TLDR is that they are sunsetting Roo in favour
+> of working on another product, [Roomote](https://roomote.dev/). The news was
+> hard to take for us Roo coders; this plugin means a lot to all of us.
 >
-> We must give thanks to the entire Roo team for doing amazing work on the plugin, we won't call out each by name here, but I think we can all agree that they are amazing devs, and just as importantly, amazing people. Thank you Roo team.
+> We must give thanks to the entire Roo team for doing amazing work on the
+> plugin. We won't call out each by name here, but I think we can all agree that
+> they are amazing devs, and just as importantly, amazing people. Thank you to
+> the Roo team.
 >
-> As Roo coders, we come in all kinds of shapes and size, some us were using it professionally in our day to day work, some were using it tinker and scheme unimaginably complicated workflows. Some were using it to improve Roo itself while others were using it to improve the very models that Roo was using (super meta). I guess the point we are making is that the community is diverse, and although a kangarooo 🦘🦘🦘 is a distinguished and noble animal, we felt a "Zoo" of different species better reflected this diversity of the plugin's users.
+> As Roo coders, we come in all kinds of shapes and sizes. Some of us are using
+> it professionally in our day-to-day work, some are using it to tinker and
+> scheme unimaginably complicated workflows. Some are using it to improve Roo
+> itself while others are using it to improve the very models that Roo is using
+> (super meta). I guess the point we are making is that the community is
+> diverse, and although a kangaroo 🦘🦘🦘 is a distinguished and noble animal,
+> we felt a "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 of different species better reflected this
+> diversity of the plugin's users.
 >
-> So we would like to announce that **Zoo Code** will continue developement on this important project. The core team are a group of devs that care deeply about this plugin and will continue to make model updates, fix bugs and release features. But more than anything, we plan to listen to you, the community, that made this plugin so special. So feel free to join us in [discord](https://discord.gg/SfHYG44NUA), [reddit](https://www.reddit.com/r/ZooCode), [create a PR or an issue](https://github.com/Zoo-Code-Org/Zoo-Code), but more than anything, we ask that you stay as involved, connected and active as a community.
+> So we would like to announce that **Zoo Code** will continue development on
+> this important project. The core team are a group of devs that contributed to
+> Roo previously and care deeply about this plugin. We will continue to make
+> model updates, fix bugs, and release features. But more than anything, we plan
+> to listen to you, the community, that made this plugin so special. So feel
+> free to join us in [Discord](https://discord.gg/SfHYG44NUA),
+> [Reddit](https://www.reddit.com/r/ZooCode),
+> [create a PR or an issue](https://github.com/Zoo-Code-Org/Zoo-Code), but more
+> than anything, we ask that you stay as involved, connected, and active as a
+> community.
 >
 > _-Zoo Code Team_
 
@@ -106,12 +129,18 @@ Learn more: [Using Modes](https://docs.zoocode.dev/basic-usage/using-modes) •
 
 ## Resources
 
-- **[Documentation](https://docs.zoocode.dev):** The official guide to installing, configuring, and mastering Zoo Code.
-- **[YouTube Channel](https://youtube.com/@roocodeyt?feature=shared):** Watch tutorials and see features in action.
-- **[Discord Server](https://discord.gg/SfHYG44NUA):** Join the community for real-time help and discussion.
-- **[Reddit Community](https://www.reddit.com/r/ZooCode/):** Share your experiences and see what others are building.
-- **[GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Report bugs and track development.
-- **[Feature Requests](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** Have an idea? Share it with the developers.
+- **[Documentation](https://docs.zoocode.dev):** The official guide to
+  installing, configuring, and mastering Zoo Code.
+- **[YouTube Channel](https://youtube.com/@roocodeyt?feature=shared):** Watch
+  tutorials and see features in action.
+- **[Discord Server](https://discord.gg/SfHYG44NUA):** Join the community for
+  real-time help and discussion.
+- **[Reddit Community](https://www.reddit.com/r/ZooCode/):** Share your
+  experiences and see what others are building.
+- **[GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Report
+  bugs and track development.
+- **[Feature Requests](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):**
+  Have an idea? Share it with the developers.
 
 ---
 
@@ -216,4 +245,8 @@ We love community contributions! Get started by reading our
 
 ---
 
-**Enjoy Zoo Code!** Whether you keep it on a short leash or let it roam autonomously, we can’t wait to see what you build. If you have questions or feature ideas, drop by our [Reddit community](https://www.reddit.com/r/ZooCode/) or [Discord](https://discord.gg/SfHYG44NUA), or open an [issue](https://github.com/Zoo-Code-Org/Zoo-Code/issues). Happy coding!
+**Enjoy Zoo Code!** Whether you keep it on a short leash or let it roam
+autonomously, we can’t wait to see what you build. If you have questions or
+feature ideas, drop by our [Reddit community](https://www.reddit.com/r/ZooCode/)
+or [Discord](https://discord.gg/SfHYG44NUA), or open an
+[issue](https://github.com/Zoo-Code-Org/Zoo-Code/issues). Happy coding!
