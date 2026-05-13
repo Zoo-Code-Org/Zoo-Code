@@ -491,7 +491,8 @@ export function convertToOpenAiMessages(
 				// Pass through reasoning_details to preserve the original shape from the API.
 				// The `id` field is stripped from openai-responses-v1 blocks (see mapReasoningDetails).
 				const mapped = mapReasoningDetails(messageWithDetails.reasoning_details)
-				if (mapped) {
+				const isMimoModel = !!(options?.modelId && /mimo/i.test(options.modelId))
+				if (mapped && !isMimoModel) {
 					baseMessage.reasoning_details = mapped
 				}
 

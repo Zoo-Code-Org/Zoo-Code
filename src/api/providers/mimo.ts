@@ -147,6 +147,16 @@ export class MimoHandler extends OpenAiHandler {
 				}
 
 				converted.push(assistantMsg)
+			} else if (msg.role === "assistant" && typeof msg.content === "string") {
+				const assistantMsg: any = {
+					role: "assistant",
+					content: msg.content,
+				}
+				const reasoningContent = (msg as any).reasoning_content
+				if (typeof reasoningContent === "string" && reasoningContent.trim()) {
+					assistantMsg.reasoning_content = reasoningContent
+				}
+				converted.push(assistantMsg)
 			} else if (msg.role === "user" && Array.isArray(msg.content)) {
 				// Process user messages: separate tool_results from text
 				const toolResults: Anthropic.ToolResultBlockParam[] = []

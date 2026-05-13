@@ -342,7 +342,7 @@ const mimoSchema = apiModelIdProviderModelSchema.extend({
 			z.literal("https://api.xiaomimimo.com/v1"),
 			z.literal("https://token-plan-cn.xiaomimimo.com/v1"),
 			z.literal("https://token-plan-sgp.xiaomimimo.com/v1"),
-			z.literal("https://token-plan-fra.xiaomimimo.com/v1"),
+			z.literal("https://token-plan-ams.xiaomimimo.com/v1"),
 		])
 		.optional(),
 	mimoApiKey: z.string().optional(),

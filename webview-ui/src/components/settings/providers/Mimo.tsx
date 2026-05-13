@@ -43,8 +43,8 @@ export const Mimo = ({ apiConfiguration, setApiConfigurationField }: MimoProps) 
 					<VSCodeOption value="https://token-plan-cn.xiaomimimo.com/v1" className="p-2">
 						Token Plan - China
 					</VSCodeOption>
-					<VSCodeOption value="https://token-plan-fra.xiaomimimo.com/v1" className="p-2">
-						Token Plan - Europe
+					<VSCodeOption value="https://token-plan-ams.xiaomimimo.com/v1" className="p-2">
+						Token Plan - Europe (AMS)
 					</VSCodeOption>
 					<VSCodeOption value="https://api.xiaomimimo.com/v1" className="p-2">
 						Pay-as-you-go
