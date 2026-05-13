@@ -1,0 +1,128 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"model": "deepseek-v4-flash",
+				"userMessage": "deepseek-v4-e2e:deepseek-v4-flash:reasoning-on",
+				"sequenceIndex": 0
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"deepseek-v4-e2e-deepseek-v4-flash-reasoning-on.txt\"}",
+						"id": "call_dsv4_flash_on_read"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "deepseek-v4-flash",
+				"toolCallId": "call_dsv4_flash_on_read"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"DEEPSEEK_V4_MARKER_deepseek_v4_flash_reasoning_on\"}",
+						"id": "call_dsv4_flash_on_done"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "deepseek-v4-flash",
+				"userMessage": "deepseek-v4-e2e:deepseek-v4-flash:reasoning-off",
+				"sequenceIndex": 0
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"deepseek-v4-e2e-deepseek-v4-flash-reasoning-off.txt\"}",
+						"id": "call_dsv4_flash_off_read"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "deepseek-v4-flash",
+				"toolCallId": "call_dsv4_flash_off_read"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"DEEPSEEK_V4_MARKER_deepseek_v4_flash_reasoning_off\"}",
+						"id": "call_dsv4_flash_off_done"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "deepseek-v4-pro",
+				"userMessage": "deepseek-v4-e2e:deepseek-v4-pro:reasoning-on",
+				"sequenceIndex": 0
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"deepseek-v4-e2e-deepseek-v4-pro-reasoning-on.txt\"}",
+						"id": "call_dsv4_pro_on_read"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "deepseek-v4-pro",
+				"toolCallId": "call_dsv4_pro_on_read"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"DEEPSEEK_V4_MARKER_deepseek_v4_pro_reasoning_on\"}",
+						"id": "call_dsv4_pro_on_done"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "deepseek-v4-pro",
+				"userMessage": "deepseek-v4-e2e:deepseek-v4-pro:reasoning-off",
+				"sequenceIndex": 0
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"deepseek-v4-e2e-deepseek-v4-pro-reasoning-off.txt\"}",
+						"id": "call_dsv4_pro_off_read"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "deepseek-v4-pro",
+				"toolCallId": "call_dsv4_pro_off_read"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"DEEPSEEK_V4_MARKER_deepseek_v4_pro_reasoning_off\"}",
+						"id": "call_dsv4_pro_off_done"
+					}
+				]
+			}
+		}
+	]
+}

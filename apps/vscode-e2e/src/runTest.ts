@@ -7,17 +7,24 @@ import { LLMock } from "@copilotkit/aimock"
 
 async function main() {
 	const isRecord = process.env.AIMOCK_RECORD === "true"
+	const testGrep = process.argv.find((arg, i) => process.argv[i - 1] === "--grep") || process.env.TEST_GREP
+	const testFile = process.argv.find((arg, i) => process.argv[i - 1] === "--file") || process.env.TEST_FILE
+	const isDeepSeekTest = testFile?.includes("deepseek-v4") === true
 
-	if (isRecord && !process.env.OPENROUTER_API_KEY) {
+	if (isRecord && isDeepSeekTest && !process.env.DEEPSEEK_API_KEY) {
+		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
+	}
+
+	if (isRecord && !isDeepSeekTest && !process.env.OPENROUTER_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires OPENROUTER_API_KEY to record fixtures")
 	}
 
 	// Record mode always needs aimock running (to capture traffic).
 	// Replay mode starts aimock when no real API key is present or USE_MOCK is forced.
-	const useMock =
-		isRecord ||
-		(!process.env.OPENROUTER_API_KEY && !process.env.ANTHROPIC_API_KEY) ||
-		process.env.USE_MOCK === "true"
+	const hasRealApiKey = isDeepSeekTest
+		? !!process.env.DEEPSEEK_API_KEY
+		: !!(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY)
+	const useMock = isRecord || !hasRealApiKey || process.env.USE_MOCK === "true"
 
 	let mock: InstanceType<typeof LLMock> | undefined
 
@@ -43,7 +50,7 @@ async function main() {
 						// Use /api (not /api/v1) — aimock appends the request path (/v1/chat/completions)
 						// so including /v1 here would produce a doubled /v1/v1 upstream URL.
 						providers: {
-							openai: "https://openrouter.ai/api",
+							openai: isDeepSeekTest ? "https://api.deepseek.com" : "https://openrouter.ai/api",
 							// aimock forwards the x-api-key header from the Anthropic SDK to the real API.
 							anthropic: "https://api.anthropic.com",
 						},
@@ -84,8 +91,6 @@ async function main() {
 		// - npm run test:e2e -- --grep "write-to-file"
 		// - TEST_GREP="apply-diff" npm run test:e2e
 		// - TEST_FILE="task.test.js" npm run test:e2e
-		const testGrep = process.argv.find((arg, i) => process.argv[i - 1] === "--grep") || process.env.TEST_GREP
-		const testFile = process.argv.find((arg, i) => process.argv[i - 1] === "--file") || process.env.TEST_FILE
 
 		// Pass test filters and mock URL as environment variables to the test runner
 		const extensionTestsEnv = {

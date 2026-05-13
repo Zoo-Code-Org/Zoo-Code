@@ -82,10 +82,42 @@ Record mode uses **record-on-miss**: if an existing fixture already matches a re
 
 If the LLM calls a tool first (e.g. `read_file`) and then calls `attempt_completion` after seeing the result, you need two fixtures:
 
-- **Turn 1**: match on the task prompt → respond with the tool call
-- **Turn 2**: match on a stable part of the tool _result_ → respond with `attempt_completion`
+- **Turn 1**: match on the task prompt (with `sequenceIndex: 0` so it fires only once) → respond with the tool call, giving the tool call a unique `id`
+- **Turn 2**: match on `toolCallId` → respond with `attempt_completion`
 
-The tool result is provided by the extension (not the mock), so its content is deterministic if test files have stable names. Use a stable substring from the tool result as the turn-2 match string.
+Using `toolCallId` (the `id` of the tool call emitted in turn 1) is the recommended approach for turn-2 matching. It is:
+
+- **Precise**: fires only when that exact tool call's result is in the conversation
+- **Cross-test safe**: each test's tool call ids are unique, so accumulated match counts from previous tests can't interfere
+- **Stateless**: no `sequenceIndex` needed on turn-2 fixtures — if the task makes extra API calls they'll keep getting the same `attempt_completion`
+
+Example:
+
+```json
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "my-e2e-tag:my-test",
+				"sequenceIndex": 0
+			},
+			"response": {
+				"toolCalls": [{ "name": "read_file", "arguments": "{\"path\":\"marker.txt\"}", "id": "call_my_read" }]
+			}
+		},
+		{
+			"match": { "toolCallId": "call_my_read" },
+			"response": {
+				"toolCalls": [
+					{ "name": "attempt_completion", "arguments": "{\"result\":\"MY_MARKER\"}", "id": "call_my_done" }
+				]
+			}
+		}
+	]
+}
+```
+
+The `model` field can be added to either match when a test targets a specific model.
 
 ## 404 errors in logs are expected
 
@@ -118,6 +150,23 @@ ZAI_API_KEY=<key> TEST_FILE=zai.test pnpm --filter @roo-code/vscode-e2e test:ci
 ```
 
 When adding a new test to this suite, add a matching fixture to the `installZAiFetchInterceptor` call in `suiteSetup`. Use a short unique prefix (e.g. `"zai-glm-e2e-mytest:"`) that won't appear in `<environment_details>`.
+
+### DeepSeek V4 (`suite/providers/deepseek-v4.test.ts`)
+
+DeepSeek exposes `deepSeekBaseUrl`, so the suite redirects the OpenAI-compatible DeepSeek client through aimock with `deepSeekBaseUrl: ${AIMOCK_URL}/v1`. The test still installs a lightweight fetch capture for request-shape assertions, but responses should come from aimock fixtures or aimock record mode.
+
+Record DeepSeek fixtures with the targeted file filter so aimock proxies OpenAI-compatible traffic to `https://api.deepseek.com`:
+
+```sh
+DEEPSEEK_API_KEY=<key> TEST_FILE=deepseek-v4.test pnpm --filter @roo-code/vscode-e2e test:record
+```
+
+After converting the generated `openai-*.json` files into stable named fixtures, verify in mock mode:
+
+```sh
+USE_MOCK=true TEST_FILE=deepseek-v4.test pnpm --filter @roo-code/vscode-e2e test:run
+```
+
 ## Tests that use a non-default provider
 
 If your test calls `api.setConfiguration({ apiProvider: "anthropic", ... })`, point aimock at the
