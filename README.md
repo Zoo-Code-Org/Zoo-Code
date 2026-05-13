@@ -19,13 +19,13 @@
 > You may have seen the
 > [recent announcement](https://x.com/mattrubens/status/2046636598859559114)
 > from the Roo team 🦘🦘🦘. The TLDR is that they are sunsetting Roo in favour
-> of working on another product, [Roomote](https://roomote.dev/). The news was
-> hard to take for us Roo coders; this plugin means a lot to all of us.
+> of working on another product, [Roomote](https://roomote.dev/). That news was
+> difficult for many Roo users; this plugin means a lot to this community.
 >
-> We must give thanks to the entire Roo team for doing amazing work on the
-> plugin. We won't call out each by name here, but I think we can all agree that
-> they are amazing devs, and just as importantly, amazing people. Thank you to
-> the Roo team.
+> We want to thank the entire Roo team for the work they put into this plugin.
+> We won't call out each person by name here, but we can all agree they are
+> exceptional developers and, just as importantly, thoughtful people. Thank you
+> to the Roo team.
 >
 > As Roo coders, we come in all kinds of shapes and sizes. Some of us are using
 > it professionally in our day-to-day work, some are using it to tinker and
@@ -37,15 +37,14 @@
 > diversity of the plugin's users.
 >
 > So we would like to announce that **Zoo Code** will continue development on
-> this important project. The core team are a group of devs that contributed to
-> Roo previously and care deeply about this plugin. We will continue to make
+> this important project. The core team is a group of developers who contributed
+> to Roo previously and care deeply about this plugin. We will continue to make
 > model updates, fix bugs, and release features. But more than anything, we plan
-> to listen to you, the community, that made this plugin so special. So feel
-> free to join us in [Discord](https://discord.gg/SfHYG44NUA),
-> [Reddit](https://www.reddit.com/r/ZooCode),
-> [create a PR or an issue](https://github.com/Zoo-Code-Org/Zoo-Code), but more
-> than anything, we ask that you stay as involved, connected, and active as a
-> community.
+> to listen to the community that made this plugin so special. Feel free to join
+> us on [Discord](https://discord.gg/SfHYG44NUA),
+> [Reddit](https://www.reddit.com/r/ZooCode), or
+> [open a PR or issue](https://github.com/Zoo-Code-Org/Zoo-Code), and above all,
+> please stay involved, connected, and active as a community.
 >
 > _-Zoo Code Team_
 
@@ -86,7 +85,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-    </details>
+  </details>
 
 ---
 
@@ -241,7 +240,7 @@ We love community contributions! Get started by reading our
 
 ## License
 
-[Apache 2.0 © 2025 Zoo Code Org](./LICENSE)
+[Apache 2.0 © 2026 Zoo Code Org](./LICENSE)
 
 ---
 

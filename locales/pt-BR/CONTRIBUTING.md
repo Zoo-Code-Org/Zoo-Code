@@ -88,7 +88,7 @@ Todas as contribuições começam com uma Issue do GitHub usando nossos modelos 
     - Passos de reprodução claros e numerados
     - Resultado esperado vs. real
     - Versão do Zoo Code (obrigatório); provedor/modelo de IA, se relevante
-- **Problemas de segurança**: Relate em particular através de [avisos de segurança](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
+- **Problemas de segurança**: Relate em particular por meio de [avisos de segurança](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
 
 ## Processo de desenvolvimento e envio
 

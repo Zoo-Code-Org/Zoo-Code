@@ -13,7 +13,7 @@
 
 # Contribuer à Zoo Code
 
-Zoo Code est un projet communautaire, et nous apprécions profondément chaque contribution. Pour simplifier la collaboration, nous fonctionnons sur une base [d'abord l'issue](#approche-issue-first), ce qui signifie que toutes les [Pull Requests (PRs)](#soumettre-une-pull-request) doivent d'abord être liées à une Issue GitHub. Veuillez lire attentivement ce guide.
+Zoo Code est un projet communautaire, et nous apprécions profondément chaque contribution. Pour simplifier la collaboration, nous fonctionnons sur une base [d’abord l’issue](#approche-issue-first), ce qui signifie que toutes les [Pull Requests (PRs)](#soumettre-une-pull-request) doivent d’abord être liées à une Issue GitHub. Veuillez lire attentivement ce guide.
 
 ## Table des matières
 
@@ -73,7 +73,7 @@ Toutes les contributions commencent par une Issue GitHub en utilisant nos modèl
 - **Créez une issue** en utilisant :
     - **Améliorations :** Modèle "Demande d'amélioration" (langage simple axé sur l'avantage pour l'utilisateur).
     - **Bugs :** Modèle "Rapport de bug" (reproduction minimale + attendu vs réel + version).
-- **Vous voulez y travailler ?** Commentez "Claiming" sur l'issue et envoyez un DM à **Hannes Rudolph (`hrudolph`)** sur [Discord](https://discord.gg/SfHYG44NUA) pour être assigné. L'assignation sera confirmée dans le fil de discussion.
+- **Vous voulez y travailler ?** Commentez "Claiming" sur l’issue et envoyez un DM à **Hannes Rudolph (`hrudolph`)** sur [Discord](https://discord.gg/SfHYG44NUA) pour être assigné. L’assignation sera confirmée dans le fil de discussion.
 - **Les PRs doivent être liées à l'issue.** Les PRs non liées peuvent être fermées.
 
 ### Décider sur quoi travailler

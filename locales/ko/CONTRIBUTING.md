@@ -78,7 +78,7 @@ PR에 이러한 영역과의 연관성을 언급하세요.
 
 ### 작업할 내용 결정하기
 
-- issue 를 찾으려면 [GitHub Issues 페이지](https://github.com/Zoo-Code-Org/Zoo-Code/issues)를 확인하세요.
+- 이슈를 찾으려면 [GitHub Issues 페이지](https://github.com/Zoo-Code-Org/Zoo-Code/issues)를 확인하세요.
 - 문서는 [Zoo Code 문서](https://github.com/Zoo-Code-Org/Zoo-Code-Docs)를 방문하세요.
 
 ### 버그 신고하기
