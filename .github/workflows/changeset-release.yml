@@ -1,5 +1,5 @@
 name: Changeset Release
-run-name: Changeset Release ${{ github.actor != 'R00-B0T' && '- Create PR' || '- Update Changelog' }}
+run-name: Changeset Release ${{ github.event_name != 'pull_request' && '- Create PR' || github.event.pull_request.user.login != vars.RELEASE_BOT_LOGIN && '- Create PR' || '- Validate Version PR' }}
 
 on:
   workflow_dispatch:
@@ -9,24 +9,37 @@ on:
 env:
   REPO_PATH: ${{ github.repository }}
   GIT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'main' }}
+  VERSION_BUMP_PR_TITLE: Zoo Code changeset version bump
 
 jobs:
   # Job 1: Create version bump PR when changesets are merged to main
   changeset-pr-version-bump:
+    # Loop guard: title comparison skips the version-bump PR itself so the job
+    # doesn't recurse when that PR merges. The title is set by VERSION_BUMP_PR_TITLE.
     if: >
       ( github.event_name == 'pull_request' &&
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main' &&
-      github.actor != 'R00-B0T' ) ||
+      github.event.pull_request.title != 'Zoo Code changeset version bump' ) ||
       github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
     steps:
+      - name: Generate release bot token
+        id: release-bot-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Git Checkout
         uses: actions/checkout@v4
         with:
+          token: ${{ steps.release-bot-token.outputs.token }}
           fetch-depth: 0
           ref: ${{ env.GIT_REF }}
       - name: Setup Node.js and pnpm
@@ -46,15 +59,15 @@ jobs:
         id: changesets
         uses: changesets/action@v1
         with:
-          commit: "changeset version bump"
-          title: "Changeset version bump"
+          commit: "chore: zoo code changeset version bump"
+          title: ${{ env.VERSION_BUMP_PR_TITLE }}
           version: pnpm changeset:version # This performs the changeset version bump
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.release-bot-token.outputs.token }}
 
-  # Job 2: Process version bump PR created by R00-B0T
-  changeset-pr-edit-approve:
-    name: Auto approve and merge Bump version PRs
+  # Job 2: Validate and approve version bump PRs created by the release bot
+  changeset-pr-validate-approve:
+    name: Validate and approve Bump version PRs
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -62,23 +75,30 @@ jobs:
     if: >
         github.event_name == 'pull_request' &&
         github.event.pull_request.base.ref == 'main' &&
-        github.actor == 'R00-B0T' &&
-        contains(github.event.pull_request.title, 'Changeset version bump')
+        github.event.pull_request.user.login == vars.RELEASE_BOT_LOGIN &&
+        github.event.pull_request.title == 'Zoo Code changeset version bump'
     steps:
       - name: Determine checkout ref
         id: checkout-ref
+        env:
+          EVENT_ACTION: ${{ github.event.action }}
+          HEAD_REF: ${{ github.head_ref }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          RELEASE_BOT_LOGIN: ${{ vars.RELEASE_BOT_LOGIN }}
         run: |
-          echo "Event action: ${{ github.event.action }}"
+          echo "Event action: $EVENT_ACTION"
           echo "Actor: ${{ github.actor }}"
-          echo "Head ref: ${{ github.head_ref }}"
-          echo "PR SHA: ${{ github.event.pull_request.head.sha }}"
+          echo "Head ref: $HEAD_REF"
+          echo "PR SHA: $PR_SHA"
+          echo "PR author: $PR_AUTHOR"
 
-          if [[ "${{ github.event.action }}" == "opened" && "${{ github.actor }}" == "R00-B0T" ]]; then
-            echo "Using branch ref: ${{ github.head_ref }}"  
-            echo "git_ref=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          if [[ "$EVENT_ACTION" == "opened" && "$PR_AUTHOR" == "$RELEASE_BOT_LOGIN" ]]; then
+            echo "Using branch ref: $HEAD_REF"
+            echo "git_ref=$HEAD_REF" >> $GITHUB_OUTPUT
           else
-            echo "Using SHA ref: ${{ github.event.pull_request.head.sha }}"
-            echo "git_ref=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+            echo "Using SHA ref: $PR_SHA"
+            echo "git_ref=$PR_SHA" >> $GITHUB_OUTPUT
           fi
 
       - name: Checkout Repo
@@ -88,22 +108,42 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.checkout-ref.outputs.git_ref }}
 
-      # Commit and push changelog updates
-      - name: Push Changelog updates
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'changelog-ready') }}
-        run: |
-          git config user.name "R00-B0T"
-          git config user.email github-actions@github.com
-          echo "Running git add and commit..."
-          git add CHANGELOG.md
-          git commit -m "Updating CHANGELOG.md format"
-          git status
-          echo "--------------------------------------------------------------------------------"
-          echo "Pushing to remote..."
-          echo "--------------------------------------------------------------------------------"
-          git push
+      - name: Setup Node.js and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          install-args: "--frozen-lockfile"
 
-      # Add label to indicate changelog has been formatted
+      - name: Build workspace packages
+        run: |
+          pnpm --filter @roo-code/build build
+          pnpm --filter @roo-code/vscode-webview build
+
+      - name: Validate version bump PR
+        env:
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+        run: |
+          package_name=$(node -p "require('./src/package.json').name")
+          publisher=$(node -p "require('./src/package.json').publisher")
+          package_version=$(node -p "require('./src/package.json').version")
+
+          test "$package_name" = "zoo-code"
+          test "$publisher" = "ZooCodeOrganization"
+
+          node -e 'const version = process.argv[1]; if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) { throw new Error("Invalid SemVer version: " + version) }' "$package_version"
+          grep -q "## \\[$package_version\\]\\|## $package_version" CHANGELOG.md
+
+          pnpm --filter ./src bundle --production
+          cmp README.md src/README.md
+
+          pnpm --filter ./src vsix
+          test -f "bin/zoo-code-${package_version}.vsix"
+
+          artifact_name=$(unzip -p "bin/zoo-code-${package_version}.vsix" extension/package.json | jq -r '.name')
+          artifact_publisher=$(unzip -p "bin/zoo-code-${package_version}.vsix" extension/package.json | jq -r '.publisher')
+          test "$artifact_name" = "zoo-code"
+          test "$artifact_publisher" = "ZooCodeOrganization"
+
+      # Add label to indicate release validation passed
       - name: Add changelog-ready label
         if: ${{ !contains(github.event.pull_request.labels.*.name, 'changelog-ready') }}
         uses: actions/github-script@v7
@@ -117,16 +157,7 @@ jobs:
               labels: ['changelog-ready']
             });
 
-      # Auto-approve PR only after it has been labeled
       - name: Auto approve PR
-        if: contains(github.event.pull_request.labels.*.name, 'changelog-ready')
         uses: hmarr/auto-approve-action@v4
         with:
-          review-message: "I'm approving since it's a bump version PR"
-      
-      # Auto-merge PR
-      - name: Automerge on PR
-        if: false # Needs enablePullRequestAutoMerge in repo settings to work contains(github.event.pull_request.labels.*.name, 'changelog-ready')
-        run: gh pr merge --auto --merge ${{ github.event.pull_request.number }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          review-message: "Approving the Zoo Code changeset version bump PR after release validation passed"
