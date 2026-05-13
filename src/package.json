@@ -481,7 +481,7 @@
 		"gray-matter": "^4.0.3",
 		"i18next": "^25.0.0",
 		"ignore": "^7.0.3",
-		"isbinaryfile": "^5.0.2",
+		"isbinaryfile": "^5.0.7",
 		"json-stream-stringify": "^3.1.6",
 		"jwt-decode": "^4.0.0",
 		"lodash.debounce": "^4.0.8",
