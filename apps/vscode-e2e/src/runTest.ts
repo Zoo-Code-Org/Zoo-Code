@@ -5,9 +5,12 @@ import * as fs from "fs/promises"
 import { runTests } from "@vscode/test-electron"
 import { LLMock } from "@copilotkit/aimock"
 
+import { addApplyDiffResultFixtures } from "./fixtures/apply-diff"
+import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
 import { addSearchFilesResultFixtures } from "./fixtures/search-files"
+import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 
 function getCliFlagValue(flag: string) {
 	return process.argv.find((arg, index) => process.argv[index - 1] === flag)
@@ -79,9 +82,12 @@ async function main() {
 			mock.loadFixtureDir(fixturesDir)
 
 			if (!isRecord) {
+				addApplyDiffResultFixtures(mock)
+				addExecuteCommandResultFixtures(mock)
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
+				addWriteToFileResultFixtures(mock)
 
 				// The modes test (switch_mode → ask) triggers a second API call whose last
 				// user message starts with <environment_details> directly — no <user_message>

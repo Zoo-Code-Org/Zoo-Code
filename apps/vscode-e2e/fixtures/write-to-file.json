@@ -1,0 +1,32 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "WRITE_TO_FILE_CREATE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "write_to_file",
+						"arguments": "{\"path\":\"write-to-file-tool-fixture/write-to-file-smoke.txt\",\"content\":\"Hello, this is a test file!\"}",
+						"id": "call_write_to_file_create_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "WRITE_TO_FILE_NESTED_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "write_to_file",
+						"arguments": "{\"path\":\"write-to-file-tool-fixture/nested/deep/directory/write-to-file-nested-smoke.txt\",\"content\":\"File in nested directory\"}",
+						"id": "call_write_to_file_nested_001"
+					}
+				]
+			}
+		}
+	]
+}
