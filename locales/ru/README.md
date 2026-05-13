@@ -49,7 +49,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -73,7 +73,7 @@ Roo Code адаптируется к вашему стилю работы, а н
 - Режим Отладка: отслеживание проблем, добавление логов, изоляция первопричин
 - Пользовательские режимы: создавайте специализированные режимы для вашей команды или рабочего процесса
 
-Подробнее: [Использование режимов](https://docs.roocode.com/basic-usage/using-modes) • [Пользовательские режимы](https://docs.roocode.com/advanced-usage/custom-modes)
+Подробнее: [Использование режимов](https://docs.zoocode.dev/basic-usage/using-modes) • [Пользовательские режимы](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
 ## Обучающие видео и видео о функциях
 
@@ -86,12 +86,12 @@ Roo Code адаптируется к вашему стилю работы, а н
 
 </div>
 <p align="center">
-<a href="https://docs.roocode.com/tutorial-videos">Больше коротких обучающих видео и видео о функциях...</a>
+<a href="https://docs.zoocode.dev/tutorial-videos">Больше коротких обучающих видео и видео о функциях...</a>
 </p>
 
 ## Ресурсы
 
-- **[Документация](https://docs.roocode.com):** Официальное руководство по установке, настройке и освоению Roo Code.
+- **[Документация](https://docs.zoocode.dev):** Официальное руководство по установке, настройке и освоению Roo Code.
 - **[Канал на YouTube](https://youtube.com/@roocodeyt?feature=shared):** Смотрите обучающие видео и функции в действии.
 - **[Сервер Discord](https://discord.gg/roocode):** Присоединяйтесь к сообществу для получения помощи и обсуждений в реальном времени.
 - **[Сообщество Reddit](https://www.reddit.com/r/RooCode):** Делитесь своим опытом и смотрите, что создают другие.

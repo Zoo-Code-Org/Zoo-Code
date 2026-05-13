@@ -49,7 +49,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -73,7 +73,7 @@
 - डीबग मोड: समस्याओं का पता लगाएं, लॉग जोड़ें, मूल कारणों को अलग करें
 - कस्टम मोड: अपनी टीम या वर्कफ़्लो के लिए विशेष मोड बनाएं
 
-और जानो: [मोड्स का इस्तेमाल](https://docs.roocode.com/basic-usage/using-modes) • [कस्टम मोड्स](https://docs.roocode.com/advanced-usage/custom-modes)
+और जानो: [मोड्स का इस्तेमाल](https://docs.zoocode.dev/basic-usage/using-modes) • [कस्टम मोड्स](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
 ## ट्यूटोरियल और फ़ीचर वीडियो
 
@@ -86,12 +86,12 @@
 
 </div>
 <p align="center">
-<a href="https://docs.roocode.com/tutorial-videos">अधिक त्वरित ट्यूटोरियल और फ़ीचर वीडियो...</a>
+<a href="https://docs.zoocode.dev/tutorial-videos">अधिक त्वरित ट्यूटोरियल और फ़ीचर वीडियो...</a>
 </p>
 
 ## संसाधन
 
-- **[दस्तावेज़ीकरण](https://docs.roocode.com):** Roo Code को स्थापित करने, कॉन्फ़िगर करने और उसमें महारत हासिल करने के लिए आधिकारिक गाइड।
+- **[दस्तावेज़ीकरण](https://docs.zoocode.dev):** Roo Code को स्थापित करने, कॉन्फ़िगर करने और उसमें महारत हासिल करने के लिए आधिकारिक गाइड।
 - **[यूट्यूब चैनल](https://youtube.com/@roocodeyt?feature=shared):** ट्यूटोरियल देखें और सुविधाओं को एक्शन में देखें।
 - **[डिस्कॉर्ड सर्वर](https://discord.gg/roocode):** रीयल-टाइम सहायता और चर्चा के लिए समुदाय में शामिल हों।
 - **[रेडिट समुदाय](https://www.reddit.com/r/RooCode):** अपने अनुभव साझा करें और देखें कि दूसरे क्या बना रहे हैं।

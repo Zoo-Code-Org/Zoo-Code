@@ -49,7 +49,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -73,7 +73,7 @@ Roo Code s'adapta a la teva manera de treballar, no a l'inrevés:
 - Mode Depuració: rastrejar problemes, afegir registres, aïllar les causes arrel
 - Modes personalitzats: crea modes especialitzats per al teu equip o flux de treball
 
-Més informació: [Ús de Modes](https://docs.roocode.com/basic-usage/using-modes) • [Modes personalitzats](https://docs.roocode.com/advanced-usage/custom-modes)
+Més informació: [Ús de Modes](https://docs.zoocode.dev/basic-usage/using-modes) • [Modes personalitzats](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
 ## Tutorials i vídeos de funcionalitats
 
@@ -86,12 +86,12 @@ Més informació: [Ús de Modes](https://docs.roocode.com/basic-usage/using-mode
 
 </div>
 <p align="center">
-<a href="https://docs.roocode.com/tutorial-videos">Més tutorials ràpids i vídeos de funcionalitats...</a>
+<a href="https://docs.zoocode.dev/tutorial-videos">Més tutorials ràpids i vídeos de funcionalitats...</a>
 </p>
 
 ## Recursos
 
-- **[Documentació](https://docs.roocode.com):** La guia oficial per instal·lar, configurar i dominar Roo Code.
+- **[Documentació](https://docs.zoocode.dev):** La guia oficial per instal·lar, configurar i dominar Roo Code.
 - **[Canal de YouTube](https://youtube.com/@roocodeyt?feature=shared):** Mira tutorials i veu les funcionalitats en acció.
 - **[Servidor de Discord](https://discord.gg/roocode):** Uneix-te a la comunitat per obtenir ajuda i discutir en temps real.
 - **[Comunitat de Reddit](https://www.reddit.com/r/RooCode):** Comparteix les teves experiències i veu què estan construint altres.

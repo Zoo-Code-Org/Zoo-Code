@@ -49,7 +49,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 
@@ -73,7 +73,7 @@ Roo Code 會配合您的工作方式，而非要您配合它：
 - 偵錯模式：追蹤問題、新增日誌、鎖定根本原因
 - 自訂模式：為您的團隊或工作流程建置專門的模式
 
-更多資訊：[使用模式](https://docs.roocode.com/basic-usage/using-modes) • [自訂模式](https://docs.roocode.com/advanced-usage/custom-modes)
+更多資訊：[使用模式](https://docs.zoocode.dev/basic-usage/using-modes) • [自訂模式](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
 ## 教學和功能影片
 
@@ -86,12 +86,12 @@ Roo Code 會配合您的工作方式，而非要您配合它：
 
 </div>
 <p align="center">
-<a href="https://docs.roocode.com/tutorial-videos">更多快速教學和功能影片...</a>
+<a href="https://docs.zoocode.dev/tutorial-videos">更多快速教學和功能影片...</a>
 </p>
 
 ## 資源
 
-- **[文件](https://docs.roocode.com):** 安裝、設定和掌握 Roo Code 的官方指南。
+- **[文件](https://docs.zoocode.dev):** 安裝、設定和掌握 Roo Code 的官方指南。
 - **[YouTube 頻道](https://youtube.com/@roocodeyt?feature=shared):** 觀看教學和功能實際操作。
 - **[Discord 伺服器](https://discord.gg/roocode):** 加入社群以獲得即時協助和討論。
 - **[Reddit 社群](https://www.reddit.com/r/RooCode):** 分享您的經驗，看看其他人正在建立什麼。

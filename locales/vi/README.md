@@ -49,7 +49,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -73,7 +73,7 @@ Roo Code thích ứng với cách bạn làm việc, chứ không phải ngượ
 - Chế độ Gỡ lỗi: theo dõi sự cố, thêm nhật ký, cô lập nguyên nhân gốc rễ
 - Chế độ Tùy chỉnh: xây dựng các chế độ chuyên biệt cho nhóm hoặc quy trình làm việc của bạn
 
-Xem thêm: [Sử dụng Chế độ](https://docs.roocode.com/basic-usage/using-modes) • [Chế độ tùy chỉnh](https://docs.roocode.com/advanced-usage/custom-modes)
+Xem thêm: [Sử dụng Chế độ](https://docs.zoocode.dev/basic-usage/using-modes) • [Chế độ tùy chỉnh](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
 ## Video hướng dẫn & tính năng
 
@@ -86,12 +86,12 @@ Xem thêm: [Sử dụng Chế độ](https://docs.roocode.com/basic-usage/using-
 
 </div>
 <p align="center">
-<a href="https://docs.roocode.com/tutorial-videos">Thêm video hướng dẫn và tính năng nhanh...</a>
+<a href="https://docs.zoocode.dev/tutorial-videos">Thêm video hướng dẫn và tính năng nhanh...</a>
 </p>
 
 ## Tài nguyên
 
-- **[Tài liệu](https://docs.roocode.com):** Hướng dẫn chính thức để cài đặt, cấu hình và sử dụng thành thạo Roo Code.
+- **[Tài liệu](https://docs.zoocode.dev):** Hướng dẫn chính thức để cài đặt, cấu hình và sử dụng thành thạo Roo Code.
 - **[Kênh YouTube](https://youtube.com/@roocodeyt?feature=shared):** Xem các video hướng dẫn và các tính năng đang hoạt động.
 - **[Máy chủ Discord](https://discord.gg/roocode):** Tham gia cộng đồng để được trợ giúp và thảo luận trong thời gian thực.
 - **[Cộng đồng Reddit](https://www.reddit.com/r/RooCode):** Chia sẻ kinh nghiệm của bạn và xem những người khác đang xây dựng gì.

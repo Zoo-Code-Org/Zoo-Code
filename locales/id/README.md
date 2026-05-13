@@ -49,7 +49,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -73,7 +73,7 @@ Roo Code beradaptasi dengan cara Anda bekerja, bukan sebaliknya:
 - Mode Debug: melacak masalah, menambahkan log, mengisolasi akar penyebab
 - Mode Kustom: buat mode khusus untuk tim atau alur kerja Anda
 
-Pelajari lebih lanjut: [Menggunakan Mode](https://docs.roocode.com/basic-usage/using-modes) • [Mode Kustom](https://docs.roocode.com/advanced-usage/custom-modes)
+Pelajari lebih lanjut: [Menggunakan Mode](https://docs.zoocode.dev/basic-usage/using-modes) • [Mode Kustom](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
 ## Video Tutorial & Fitur
 
@@ -86,12 +86,12 @@ Pelajari lebih lanjut: [Menggunakan Mode](https://docs.roocode.com/basic-usage/u
 
 </div>
 <p align="center">
-<a href="https://docs.roocode.com/tutorial-videos">Video tutorial dan fitur cepat lainnya...</a>
+<a href="https://docs.zoocode.dev/tutorial-videos">Video tutorial dan fitur cepat lainnya...</a>
 </p>
 
 ## Sumber daya
 
-- **[Dokumentasi](https://docs.roocode.com):** Panduan resmi untuk menginstal, mengonfigurasi, dan menguasai Roo Code.
+- **[Dokumentasi](https://docs.zoocode.dev):** Panduan resmi untuk menginstal, mengonfigurasi, dan menguasai Roo Code.
 - **[Saluran YouTube](https://youtube.com/@roocodeyt?feature=shared):** Tonton tutorial dan lihat fitur-fitur dalam aksi.
 - **[Server Discord](https://discord.gg/roocode):** Bergabunglah dengan komunitas untuk bantuan dan diskusi real-time.
 - **[Komunitas Reddit](https://www.reddit.com/r/RooCode):** Bagikan pengalaman Anda dan lihat apa yang sedang dibangun orang lain.

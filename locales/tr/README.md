@@ -49,7 +49,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -73,7 +73,7 @@ Roo Code, sizin çalışma şeklinize uyum sağlar, tam tersi değil:
 - Hata Ayıklama Modu: sorunları izleyin, günlükler ekleyin, kök nedenleri izole edin
 - Özel Modlar: ekibiniz veya iş akışınız için özel modlar oluşturun
 
-Daha fazla: [Modları kullanma](https://docs.roocode.com/basic-usage/using-modes) • [Özel modlar](https://docs.roocode.com/advanced-usage/custom-modes)
+Daha fazla: [Modları kullanma](https://docs.zoocode.dev/basic-usage/using-modes) • [Özel modlar](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
 ## Eğitim ve Özellik Videoları
 
@@ -86,12 +86,12 @@ Daha fazla: [Modları kullanma](https://docs.roocode.com/basic-usage/using-modes
 
 </div>
 <p align="center">
-<a href="https://docs.roocode.com/tutorial-videos">Daha fazla hızlı eğitim ve özellik videosu...</a>
+<a href="https://docs.zoocode.dev/tutorial-videos">Daha fazla hızlı eğitim ve özellik videosu...</a>
 </p>
 
 ## Kaynaklar
 
-- **[Dokümantasyon](https://docs.roocode.com):** Roo Code'u yükleme, yapılandırma ve ustalaşma konusundaki resmi kılavuz.
+- **[Dokümantasyon](https://docs.zoocode.dev):** Roo Code'u yükleme, yapılandırma ve ustalaşma konusundaki resmi kılavuz.
 - **[YouTube Kanalı](https://youtube.com/@roocodeyt?feature=shared):** Eğitimleri izleyin ve özellikleri çalışırken görün.
 - **[Discord Sunucusu](https://discord.gg/roocode):** Gerçek zamanlı yardım ve tartışma için topluluğa katılın.
 - **[Reddit Topluluğu](https://www.reddit.com/r/RooCode):** Deneyimlerinizi paylaşın ve başkalarının ne inşa ettiğini görün.

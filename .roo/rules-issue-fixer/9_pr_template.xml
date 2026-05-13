@@ -29,7 +29,7 @@ Closes: #[ISSUE_NUMBER] <!-- Replace with the issue number, e.g., Closes: #123 -
 <!--
 If you used Roo Code to help create this PR, you can share public task links here.
 This helps reviewers understand your development process and provides additional context.
-Example: https://app.roocode.com/share/task-id
+Example: https://app.zoocode.dev/share/task-id
 -->
 
 [TASK_CONTEXT]
@@ -163,7 +163,7 @@ gh repo fork [owner]/[repo] --clone=false
       </placeholder>
       <placeholder name="TASK_CONTEXT">
         <description>Optional Roo Code task links if used during development</description>
-        <example>https://app.roocode.com/share/task-abc123</example>
+        <example>https://app.zoocode.dev/share/task-abc123</example>
         <default>_No Roo Code task context for this PR_</default>
       </placeholder>
       <placeholder name="DESCRIPTION_CONTENT">
