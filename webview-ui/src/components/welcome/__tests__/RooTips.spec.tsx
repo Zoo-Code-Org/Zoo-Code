@@ -42,5 +42,11 @@ describe("RooTips Component", () => {
 			// Ensure only two tips are present plus the docs link in the Trans component (3 total links)
 			expect(screen.getAllByRole("link")).toHaveLength(3)
 		})
+
+		test("uses Zoo docs links on the welcome screen", () => {
+			const links = screen.getAllByRole("link")
+
+			expect(links.every((link) => link.getAttribute("href")?.startsWith("https://docs.zoocode.dev/"))).toBe(true)
+		})
 	})
 })

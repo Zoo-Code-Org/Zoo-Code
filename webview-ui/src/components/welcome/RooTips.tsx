@@ -5,16 +5,19 @@ import { Trans } from "react-i18next"
 import { buildDocLink } from "@src/utils/docLinks"
 import { ReplaceAll, Users } from "lucide-react"
 
+const buildWelcomeDocLink = (path: string, campaign: string) =>
+	buildDocLink(path, campaign).replace("https://docs.roocode.com", "https://docs.zoocode.dev")
+
 const tips = [
 	{
 		icon: <Users className="size-4 shrink-0 mt-0.5" />,
-		href: buildDocLink("basic-usage/using-modes", "tips"),
+		href: buildWelcomeDocLink("basic-usage/using-modes", "tips"),
 		titleKey: "rooTips.customizableModes.title",
 		descriptionKey: "rooTips.customizableModes.description",
 	},
 	{
 		icon: <ReplaceAll className="size-4 shrink-0 mt-0.5" />,
-		href: buildDocLink("getting-started/connecting-api-provider", "tips"),
+		href: buildWelcomeDocLink("getting-started/connecting-api-provider", "tips"),
 		titleKey: "rooTips.modelAgnostic.title",
 		descriptionKey: "rooTips.modelAgnostic.description",
 	},
@@ -48,7 +51,7 @@ const RooTips = () => {
 						DocsLink: (
 							<VSCodeLink
 								className="text-muted-foreground underline"
-								href={buildDocLink("", "welcome")}
+								href={buildWelcomeDocLink("", "welcome")}
 							/>
 						),
 					}}
