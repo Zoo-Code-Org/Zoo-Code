@@ -2,6 +2,7 @@
 	"fixtures": [
 		{
 			"match": {
+				"sequenceIndex": 0,
 				"userMessage": "READ_FILE_SIMPLE_SMOKE"
 			},
 			"response": {
@@ -16,6 +17,7 @@
 		},
 		{
 			"match": {
+				"sequenceIndex": 0,
 				"userMessage": "READ_FILE_MULTILINE_SMOKE"
 			},
 			"response": {
@@ -30,6 +32,7 @@
 		},
 		{
 			"match": {
+				"sequenceIndex": 0,
 				"userMessage": "READ_FILE_SLICE_SMOKE"
 			},
 			"response": {
@@ -44,6 +47,7 @@
 		},
 		{
 			"match": {
+				"sequenceIndex": 0,
 				"userMessage": "READ_FILE_MISSING_SMOKE"
 			},
 			"response": {
@@ -58,6 +62,7 @@
 		},
 		{
 			"match": {
+				"sequenceIndex": 0,
 				"userMessage": "READ_FILE_XML_SMOKE"
 			},
 			"response": {
@@ -72,6 +77,7 @@
 		},
 		{
 			"match": {
+				"sequenceIndex": 0,
 				"userMessage": "READ_FILE_MULTIPLE_SMOKE"
 			},
 			"response": {
@@ -91,6 +97,7 @@
 		},
 		{
 			"match": {
+				"sequenceIndex": 0,
 				"userMessage": "READ_FILE_LARGE_SMOKE"
 			},
 			"response": {
