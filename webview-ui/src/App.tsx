@@ -172,7 +172,9 @@ const App = () => {
 	}, [shouldShowAnnouncement, tab])
 
 	useEffect(() => {
-		if (showWelcome && settingsImportedAt && tab === "chat" && settingsImportedAt !== handledImportRef.current) {
+		const isRecoverableTab = tab === "settings" || tab === "marketplace"
+
+		if (showWelcome && settingsImportedAt && !isRecoverableTab && settingsImportedAt !== handledImportRef.current) {
 			handledImportRef.current = settingsImportedAt
 			setCurrentSection("providers")
 			setCurrentMarketplaceTab(undefined)

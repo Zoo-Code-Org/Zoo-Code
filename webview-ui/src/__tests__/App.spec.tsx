@@ -288,6 +288,34 @@ describe("App", () => {
 		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
 	})
 
+	it("redirects to providers settings when an import fires from another gated tab", async () => {
+		const state = {
+			didHydrateState: true,
+			showWelcome: true,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+			settingsImportedAt: undefined as number | undefined,
+		}
+
+		mockUseExtensionState.mockImplementation(() => state)
+
+		const { rerender } = render(<AppWithProviders />)
+
+		act(() => {
+			triggerMessage("historyButtonClicked")
+		})
+
+		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+
+		state.settingsImportedAt = Date.now()
+		rerender(<AppWithProviders />)
+
+		expect(await screen.findByTestId("settings-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
+	})
+
 	it("does not bounce back to settings after the import redirect has already fired", async () => {
 		const importedAt = Date.now()
 
