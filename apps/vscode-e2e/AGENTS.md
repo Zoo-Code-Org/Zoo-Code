@@ -2,6 +2,8 @@
 
 E2E tests run against `@copilotkit/aimock` (`LLMock`) — a local HTTP server that replays recorded LLM responses. This makes tests free, deterministic, and CI-friendly.
 
+Before adding an e2e test, check whether the regression can be proven with a package-local unit or integration test. E2E tests should cover real extension-host boundaries and full workflow smoke checks, not detailed assertions that belong to service, protocol, or UI component tests.
+
 ## How aimock matching works
 
 Fixtures are matched by **substring**: `incoming_last_user_message.includes(fixture.match.userMessage)`. A fixture fires if its match string appears _anywhere_ in the last user message of the API request.
