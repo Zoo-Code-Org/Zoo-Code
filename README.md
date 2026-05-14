@@ -18,20 +18,20 @@
 
 > You may have seen the
 > [recent announcement](https://x.com/mattrubens/status/2046636598859559114)
-> from the Roo team 🦘🦘🦘. The TLDR is that they are sunsetting Roo in favour
-> of working on another product, [Roomote](https://roomote.dev/). That news was
-> difficult for many Roo users; this plugin means a lot to this community.
+> from the Roo team 🦘🦘🦘. The TLDR is the team is winding down active Roo
+> Code development as they focus on [Roomote](https://roomote.dev/). That news
+> was difficult for many Roo users, this plugin means a lot to this community.
 >
 > We want to thank the entire Roo team for the work they put into this plugin.
 > We won't call out each person by name here, but we can all agree they are
-> exceptional developers and, just as importantly, thoughtful people. Thank you
+> exceptional developers and, just as importantly, incredible people. Thank you
 > to the Roo team.
 >
 > As Roo coders, we come in all kinds of shapes and sizes. Some of us are using
 > it professionally in our day-to-day work, some are using it to tinker and
 > scheme unimaginably complicated workflows. Some are using it to improve Roo
 > itself while others are using it to improve the very models that Roo is using
-> (super meta). I guess the point we are making is that the community is
+> (super meta). The point we are making is that the community is
 > diverse, and although a kangaroo 🦘🦘🦘 is a distinguished and noble animal,
 > we felt a "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 of different species better reflected this
 > diversity of the plugin's users.
@@ -48,7 +48,12 @@
 >
 > _-Zoo Code Team_
 
-## What's New in v3.53.0
+## Roo Code to Zoo Code migration
+
+You can find a quick guide on how to do the migration from Roo Code to Zoo Code [here](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/SfHYG44NUA)
+for this exact support, so if you are having problems or if you have quetion, jump on and ask.
+
+## What's New in v3.55.0
 
 **Initial Zoo Code release** — establishes Zoo Code as an independent extension
 on the VS Code Marketplace under `ZooCodeOrganization.zoo-code`, with
@@ -57,9 +62,6 @@ pre-release builds published automatically on every merge to `main`.
 - Add GPT-5.5 support via the OpenAI Codex provider
 - Add Claude Opus 4.7 support on Vertex AI
 - Add previous checkpoint navigation controls in chat
-
-**Coming in v3.54.0:**
-
 - DeepSeek V4 support with dynamic model fetching
 - MCP OAuth client support
 
@@ -85,7 +87,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 
@@ -199,15 +201,15 @@ Options:
 If you prefer to install the VSIX package manually:
 
 1. First, build the VSIX package:
-   ```sh
-   pnpm vsix
-   ```
+    ```sh
+    pnpm vsix
+    ```
 2. A `.vsix` file will be generated in the `bin/` directory (e.g.,
    `bin/zoo-code-<version>.vsix`).
 3. Install it manually using the VSCode CLI:
-   ```sh
-   code --install-extension bin/zoo-code-<version>.vsix
-   ```
+    ```sh
+    code --install-extension bin/zoo-code-<version>.vsix
+    ```
 
 ---
 
