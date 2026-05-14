@@ -16,9 +16,9 @@
 
         ## Chúng tôi là Zoo Code
 
-> Có thể bạn đã thấy [thông báo gần đây](https://x.com/mattrubens/status/2046636598859559114) từ đội ngũ Roo 🦘🦘🦘. Tóm lại, họ đang khép lại Roo để tập trung vào một sản phẩm khác là [Roomote](https://roomote.dev/). Tin này thật khó chấp nhận với chúng tôi, những người dùng Roo; plugin này có ý nghĩa rất lớn với tất cả chúng tôi.
+> Có thể bạn đã thấy [thông báo gần đây](https://x.com/mattrubens/status/2046636598859559114) từ đội ngũ Roo 🦘🦘🦘. Tóm lại, đội ngũ đang dần giảm việc phát triển Roo Code một cách tích cực để tập trung vào [Roomote](https://roomote.dev/). Tin này thật khó chấp nhận với nhiều người dùng Roo; plugin này có ý nghĩa rất lớn với cộng đồng này.
 >
-> Chúng tôi phải gửi lời cảm ơn tới toàn bộ đội ngũ Roo vì công sức tuyệt vời họ đã dành cho plugin này. Chúng tôi sẽ không gọi tên từng người ở đây, nhưng tôi nghĩ tất cả chúng ta đều đồng ý rằng họ là những nhà phát triển tuyệt vời và, quan trọng không kém, là những con người tuyệt vời. Cảm ơn đội ngũ Roo.
+> Chúng tôi muốn cảm ơn toàn bộ đội ngũ Roo vì công sức họ đã dành cho plugin này. Chúng tôi sẽ không nêu tên từng người ở đây, nhưng tất cả chúng ta đều có thể đồng ý rằng họ là những nhà phát triển xuất sắc và, quan trọng không kém, là những con người tuyệt vời. Cảm ơn đội ngũ Roo.
 >
 > Người dùng Roo đến từ đủ mọi kiểu khác nhau. Có người dùng nó chuyên nghiệp trong công việc hằng ngày, có người dùng nó để nghĩ ra những workflow phức tạp đến khó tin. Có người dùng nó để cải thiện chính Roo, trong khi người khác dùng nó để cải thiện những model mà Roo đang sử dụng (siêu meta). Điều chúng tôi muốn nói là cộng đồng rất đa dạng, và dù một chú kangaroo 🦘🦘🦘 là một loài vật cao quý và nổi bật, chúng tôi cảm thấy một "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 với nhiều loài khác nhau phản ánh sự đa dạng đó tốt hơn.
 >
@@ -26,16 +26,17 @@
 >
 > _-Zoo Code Team_
 
-## Điểm mới trong v3.54.0
+## Chuyển từ Roo Code sang Zoo Code
+
+Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/SfHYG44NUA). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
+
+## Điểm mới trong v3.55.0
 
 **Bản phát hành đầu tiên của Zoo Code** — đưa Zoo Code trở thành một extension độc lập trên VS Code Marketplace với tên `ZooCodeOrganization.zoo-code`, đồng thời các bản build pre-release sẽ được phát hành tự động sau mỗi lần merge vào `main`.
 
 - Thêm hỗ trợ GPT-5.5 thông qua nhà cung cấp OpenAI Codex.
 - Thêm hỗ trợ Claude Opus 4.7 trên Vertex AI.
 - Thêm các điều khiển điều hướng tới checkpoint trước đó trong chat.
-
-**Sắp có trong v3.54.0:**
-
 - Hỗ trợ DeepSeek V4 với khả năng lấy model động.
 - Hỗ trợ client OAuth của MCP.
 
@@ -61,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 

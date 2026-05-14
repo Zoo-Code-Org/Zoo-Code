@@ -16,9 +16,9 @@
 
         ## हम हैं Zoo Code
 
-> आपने शायद Roo टीम 🦘🦘🦘 की [हाल की घोषणा](https://x.com/mattrubens/status/2046636598859559114) देखी होगी। इसका सार यह है कि वे Roo को sunset कर रहे हैं ताकि दूसरे product, [Roomote](https://roomote.dev/), पर काम कर सकें। हमारे जैसे Roo users के लिए यह खबर मुश्किल थी; यह plugin हम सबके लिए बहुत मायने रखता है।
+> आपने शायद Roo टीम 🦘🦘🦘 की [हाल की घोषणा](https://x.com/mattrubens/status/2046636598859559114) देखी होगी। TLDR यह है कि टीम [Roomote](https://roomote.dev/) पर focus करते हुए Roo Code का active development धीरे-धीरे बंद कर रही है। यह खबर बहुत से Roo users के लिए मुश्किल थी; यह plugin इस community के लिए बहुत मायने रखता है।
 >
-> हमें पूरे Roo team का इस plugin पर किए गए शानदार काम के लिए धन्यवाद करना चाहिए। हम यहां हर व्यक्ति का नाम नहीं लेंगे, लेकिन मुझे लगता है कि हम सब सहमत हैं कि वे कमाल के developers हैं और उतने ही कमाल के इंसान भी। Roo टीम का धन्यवाद।
+> हम पूरे Roo टीम को इस plugin पर लगाए गए उनके काम के लिए धन्यवाद देना चाहते हैं। हम यहाँ हर व्यक्ति का नाम अलग-अलग नहीं लेंगे, लेकिन हम सब इस बात से सहमत हो सकते हैं कि वे exceptional developers हैं और, उतना ही ज़रूरी, incredible लोग भी हैं। Roo टीम को धन्यवाद।
 >
 > Roo users हर तरह के हैं। कुछ लोग इसे अपने day-to-day professional काम में इस्तेमाल करते हैं, कुछ लोग इससे बेहद जटिल workflows बनाते हैं। कुछ लोग खुद Roo को बेहतर बनाते हैं, जबकि कुछ वही models बेहतर बनाते हैं जिन्हें Roo इस्तेमाल करता है (super meta)। हमारी बात बस इतनी है कि community बहुत diverse है, और जबकि kangaroo 🦘🦘🦘 एक शानदार और सम्मानित जानवर है, हमें लगा कि अलग-अलग species वाला "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 plugin users की इस diversity को बेहतर दिखाता है।
 >
@@ -26,16 +26,17 @@
 >
 > _-Zoo Code Team_
 
-## v3.54.0 में नया क्या है
+## Roo Code से Zoo Code migration
+
+Roo Code से Zoo Code में आने के लिए एक quick guide तुम्हें [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration) में मिल जाएगी। We plan to help users as much as possible during the transition, और उसी support के लिए हमारा [Reddit](https://www.reddit.com/r/ZooCode) और [Discord](https://discord.gg/SfHYG44NUA) है। अगर तुम्हें कोई problem हो या कोई question हो, आकर पूछो।
+
+## v3.55.0 में नया क्या है
 
 **Zoo Code का शुरुआती release** — Zoo Code को `ZooCodeOrganization.zoo-code` नाम से VS Code Marketplace पर एक independent extension के रूप में स्थापित करता है, जहां `main` में हर merge पर pre-release builds अपने आप publish होती हैं।
 
 - OpenAI Codex provider के माध्यम से GPT-5.5 support जोड़ा गया।
 - Vertex AI पर Claude Opus 4.7 support जोड़ा गया।
 - Chat में पिछले checkpoints के लिए navigation controls जोड़े गए।
-
-**v3.54.0 में आगे आने वाला:**
-
 - Dynamic model fetching के साथ DeepSeek V4 support।
 - MCP OAuth client support।
 
@@ -61,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 

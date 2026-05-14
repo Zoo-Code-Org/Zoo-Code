@@ -16,9 +16,9 @@
 
         ## 我们是 Zoo Code
 
-> 你可能已经看到 Roo 团队 🦘🦘🦘 的[最近公告](https://x.com/mattrubens/status/2046636598859559114)。简单来说，他们将停止 Roo 的开发，转而投入另一个产品 [Roomote](https://roomote.dev/)。对我们这些 Roo 用户来说，这个消息很难接受；这个插件对我们所有人都意义重大。
+> 你可能已经看到 Roo 团队 🦘🦘🦘 的[最近公告](https://x.com/mattrubens/status/2046636598859559114)。简单来说，团队在把重心放到 [Roomote](https://roomote.dev/) 的同时，正在逐步减少 Roo Code 的活跃开发。这个消息让很多 Roo 用户都很难受；这个插件对这个社区意义重大。
 >
-> 我们必须感谢整个 Roo 团队为这个插件做出的卓越工作。这里就不一一点名了，但我想大家都同意，他们既是出色的开发者，也是非常棒的人。感谢 Roo 团队。
+> 我们想感谢整个 Roo 团队为这个插件投入的努力。这里不会逐一点名，但大家都能认同，他们既是卓越的开发者，也是同样令人敬佩的优秀的人。感谢 Roo 团队。
 >
 > Roo 用户来自各种不同背景。有人在日常工作中专业使用它，也有人用它来折腾难以想象的复杂 workflow。有人用它来改进 Roo 本身，也有人用它来改进 Roo 所使用的模型（非常 meta）。我们想表达的是，这个社区非常多元。虽然袋鼠 🦘🦘🦘 是一种高贵又有辨识度的动物，但我们觉得由不同物种组成的“Zoo” 🐘🦡🦒🦓🦛🦧🦭🦦 更能体现插件用户的多样性。
 >
@@ -26,16 +26,17 @@
 >
 > _-Zoo Code Team_
 
-## v3.54.0 新增内容
+## 从 Roo Code 迁移到 Zoo Code
+
+你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/SfHYG44NUA) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
+
+## v3.55.0 新增内容
 
 **Zoo Code 首次发布** —— Zoo Code 现已作为独立扩展在 VS Code Marketplace 上线，标识为 `ZooCodeOrganization.zoo-code`，并会在每次 merge 到 `main` 后自动发布 pre-release 构建。
 
 - 通过 OpenAI Codex 提供商新增对 GPT-5.5 的支持。
 - 在 Vertex AI 上新增对 Claude Opus 4.7 的支持。
 - 在聊天中新增上一 checkpoint 导航控件。
-
-**v3.54.0 即将推出：**
-
 - 支持动态拉取模型的 DeepSeek V4。
 - 支持 MCP OAuth 客户端。
 
@@ -61,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 

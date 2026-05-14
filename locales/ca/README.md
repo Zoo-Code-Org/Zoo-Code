@@ -16,9 +16,9 @@
 
         ## Som Zoo Code
 
-> Potser has vist el [recent anunci](https://x.com/mattrubens/status/2046636598859559114) de l'equip de Roo 🦘🦘🦘. El resum és que estan retirant Roo per treballar en un altre producte, [Roomote](https://roomote.dev/). Per a nosaltres, els qui fem servir Roo, la notícia ha estat dura; aquest plugin significa molt per a tots nosaltres.
+> Potser has vist el [recent anunci](https://x.com/mattrubens/status/2046636598859559114) de l'equip de Roo 🦘🦘🦘. El resum és que l'equip està reduint gradualment el desenvolupament actiu de Roo Code mentre es concentra en [Roomote](https://roomote.dev/). Aquesta notícia va ser difícil per a molts usuaris de Roo; aquest plugin significa molt per a aquesta comunitat.
 >
-> Hem de donar les gràcies a tot l'equip de Roo per la feina increïble feta amb aquest plugin. No els esmentarem un per un aquí, però crec que tots estem d'acord que són desenvolupadors excel·lents i, igual d'important, persones excel·lents. Gràcies a l'equip de Roo.
+> Volem donar les gràcies a tot l'equip de Roo per la feina que han posat en aquest plugin. No destacarem cada persona pel seu nom aquí, però tots podem coincidir que són desenvolupadors excepcionals i, igual d'important, persones increïbles. Gràcies a l'equip de Roo.
 >
 > Els qui fem servir Roo venim de tota mena de perfils. Alguns l'utilitzen professionalment cada dia, altres el fan servir per imaginar fluxos de treball inimaginablement complexos. Alguns milloren Roo mateix, mentre que altres milloren els mateixos models que Roo utilitza (super meta). El que volem dir és que la comunitat és diversa i, tot i que un cangur 🦘🦘🦘 és un animal distingit i noble, vam sentir que un "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 reflectia millor aquesta diversitat d'usuaris del plugin.
 >
@@ -26,16 +26,17 @@
 >
 > _-Zoo Code Team_
 
-## Novetats a la v3.54.0
+## Migració de Roo Code a Zoo Code
+
+Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/SfHYG44NUA) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
+
+## Novetats a la v3.55.0
 
 **Llançament inicial de Zoo Code** — estableix Zoo Code com una extensió independent al VS Code Marketplace sota `ZooCodeOrganization.zoo-code`, amb versions pre-release publicades automàticament a cada merge a `main`.
 
 - S'ha afegit suport per a GPT-5.5 a través del proveïdor OpenAI Codex.
 - S'ha afegit suport per a Claude Opus 4.7 a Vertex AI.
 - S'han afegit controls de navegació cap als checkpoints anteriors al xat.
-
-**Properament a la v3.54.0:**
-
 - Suport per a DeepSeek V4 amb obtenció dinàmica de models.
 - Suport per al client OAuth de MCP.
 
@@ -61,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

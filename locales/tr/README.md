@@ -16,9 +16,9 @@
 
         ## Biz Zoo Code'uz
 
-> Roo ekibinin 🦘🦘🦘 [son duyurusunu](https://x.com/mattrubens/status/2046636598859559114) görmüş olabilirsin. Kısacası, başka bir ürün olan [Roomote](https://roomote.dev/) üzerinde çalışmak için Roo'yu sonlandırıyorlar. Bu haber bizim gibi Roo kullanıcıları için zordu; bu eklenti hepimiz için çok şey ifade ediyor.
+> Roo ekibinin 🦘🦘🦘 [son duyurusunu](https://x.com/mattrubens/status/2046636598859559114) görmüş olabilirsin. Kısacası ekip, [Roomote](https://roomote.dev/) üzerine odaklanırken Roo Code'un aktif gelişimini kademeli olarak azaltıyor. Bu haber birçok Roo kullanıcısı için zordu; bu eklenti bu topluluk için çok şey ifade ediyor.
 >
-> Bu eklenti üzerinde yaptıkları harika çalışma için tüm Roo ekibine teşekkür etmeliyiz. Burada herkesi tek tek anmayacağız ama sanırım hepimiz onların harika geliştiriciler ve aynı derecede harika insanlar olduğu konusunda hemfikiriz. Roo ekibine teşekkürler.
+> Bu eklentiye verdikleri emek için tüm Roo ekibine teşekkür etmek istiyoruz. Burada herkesin adını tek tek anmayacağız, ama hepimiz onların olağanüstü geliştiriciler ve aynı derecede inanılmaz insanlar olduğu konusunda hemfikiriz. Roo ekibine teşekkürler.
 >
 > Roo kullanıcıları her türden geliyor. Bazıları bunu günlük işlerinde profesyonel olarak kullanıyor, bazılarıysa akıl almaz derecede karmaşık iş akışları tasarlamak için kullanıyor. Bazıları Roo'nun kendisini geliştirirken, bazıları da Roo'nun kullandığı modelleri geliştiriyor (tam anlamıyla meta). Demek istediğimiz şu: topluluk çok çeşitli ve bir kanguru 🦘🦘🦘 seçkin ve asil bir hayvan olsa da farklı türlerden oluşan bir "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 bu eklentinin kullanıcı çeşitliliğini daha iyi yansıtıyor.
 >
@@ -26,16 +26,17 @@
 >
 > _-Zoo Code Team_
 
-## v3.54.0'daki Yenilikler
+## Roo Code'dan Zoo Code'a geçiş
+
+Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/SfHYG44NUA) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
+
+## v3.55.0'daki Yenilikler
 
 **Zoo Code'un ilk sürümü** — Zoo Code'u `ZooCodeOrganization.zoo-code` adıyla VS Code Marketplace'te bağımsız bir uzantı olarak konumlandırır ve `main` dalına yapılan her merge sonrasında pre-release sürümleri otomatik olarak yayımlar.
 
 - OpenAI Codex sağlayıcısı üzerinden GPT-5.5 desteği eklendi.
 - Vertex AI'da Claude Opus 4.7 desteği eklendi.
 - Sohbette önceki checkpoint'lere gitmek için gezinme denetimleri eklendi.
-
-**v3.54.0'da gelecekler:**
-
 - Dinamik model getirme ile DeepSeek V4 desteği.
 - MCP OAuth istemcisi desteği.
 
@@ -61,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 
