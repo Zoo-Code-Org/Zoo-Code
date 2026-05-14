@@ -54,7 +54,7 @@ Vermeld de afstemming met deze gebieden in je PR's.
 
 ### 3. Word lid van de Zoo Code-community
 
-- **Discord:** Word lid van onze [Discord](https://discord.gg/SfHYG44NUA).
+- **Discord:** Word lid van onze [Discord](https://discord.gg/VxfP4Vx3gX).
 - **Reddit:** Word lid van onze [Reddit](https://www.reddit.com/r/ZooCode/).
 
 ## Je bijdrage vinden en plannen
@@ -73,7 +73,7 @@ Alle bijdragen beginnen met een GitHub Issue met behulp van onze slanke sjablone
 - **Maak een issue** aan met:
     - **Verbeteringen:** sjabloon "Verbeteringsverzoek" (eenvoudige taal gericht op gebruikersvoordeel).
     - **Bugs:** sjabloon "Bugrapport" (minimale repro + verwacht vs. feitelijk + versie).
-- **Wil je eraan werken?** Reageer met "Claiming" op de issue en stuur een DM naar het kernteam op [Discord](https://discord.gg/SfHYG44NUA) om toegewezen te worden. De toewijzing wordt in de thread bevestigd.
+- **Wil je eraan werken?** Reageer met "Claiming" op de issue en stuur een DM naar het kernteam op [Discord](https://discord.gg/VxfP4Vx3gX) om toegewezen te worden. De toewijzing wordt in de thread bevestigd.
 - **PR's moeten naar de issue linken.** Niet-gekoppelde PR's kunnen worden gesloten.
 
 ### Beslissen waaraan je wilt werken
@@ -126,7 +126,7 @@ pnpm install
 
 ### Pull Request-beleid
 
-- Moet verwijzen naar een toegewezen GitHub Issue. Om toegewezen te worden: reageer met "Claiming" op de issue en stuur een DM naar het kernteam op [Discord](https://discord.gg/SfHYG44NUA). De toewijzing wordt in de thread bevestigd.
+- Moet verwijzen naar een toegewezen GitHub Issue. Om toegewezen te worden: reageer met "Claiming" op de issue en stuur een DM naar het kernteam op [Discord](https://discord.gg/VxfP4Vx3gX). De toewijzing wordt in de thread bevestigd.
 - Niet-gekoppelde PR's kunnen worden gesloten.
 - PR's moeten slagen voor CI-tests, in lijn zijn met de roadmap en duidelijke documentatie hebben.
 

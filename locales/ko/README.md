@@ -2,12 +2,12 @@
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
           <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-          <a href="https://discord.gg/SfHYG44NUA"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+          <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
         </p>
         <p align="center">
-          <em>빠르게 도움받기 → <a href="https://discord.gg/SfHYG44NUA">Discord 참여하기</a> • 비동기가 더 좋아요? → <a href="https://www.reddit.com/r/ZooCode/">r/ZooCode 참여하기</a></em>
+          <em>빠르게 도움받기 → <a href="https://discord.gg/VxfP4Vx3gX">Discord 참여하기</a> • 비동기가 더 좋아요? → <a href="https://www.reddit.com/r/ZooCode/">r/ZooCode 참여하기</a></em>
         </p>
 
         # Zoo Code
@@ -22,13 +22,13 @@
 >
 > Roo 사용자들은 정말 다양합니다. 어떤 사람은 일상적인 업무에서 전문적으로 사용하고, 어떤 사람은 상상하기 어려울 정도로 복잡한 워크플로를 구상하는 데 사용합니다. 어떤 사람은 Roo 자체를 개선하는 데 쓰고, 또 어떤 사람은 Roo가 사용하는 모델 자체를 개선하는 데 씁니다 (정말 메타하죠). 우리가 말하고 싶은 핵심은 커뮤니티가 다양하다는 것입니다. 캥거루 🦘🦘🦘도 충분히 멋지고 고귀한 동물이지만, 여러 종이 함께 있는 "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦가 이 플러그인 사용자의 다양성을 더 잘 보여준다고 느꼈습니다.
 >
-> 그래서 **Zoo Code**가 이 중요한 프로젝트의 개발을 이어가겠다고 발표하고자 합니다. 핵심 팀은 이전에 Roo에 기여했고 이 플러그인을 깊이 아끼는 개발자들로 구성되어 있습니다. 우리는 계속해서 모델을 업데이트하고, 버그를 수정하고, 기능을 출시할 것입니다. 하지만 무엇보다도 이 플러그인을 특별하게 만들어 준 커뮤니티 여러분의 목소리에 귀 기울이려 합니다. 그러니 우리의 [Discord](https://discord.gg/SfHYG44NUA), [Reddit](https://www.reddit.com/r/ZooCode)에 참여하거나 [PR 또는 issue 를 만들어](https://github.com/Zoo-Code-Org/Zoo-Code) 주세요. 무엇보다도 커뮤니티로서 계속 연결되고, 참여하고, 활발하게 함께해 주시길 부탁드립니다.
+> 그래서 **Zoo Code**가 이 중요한 프로젝트의 개발을 이어가겠다고 발표하고자 합니다. 핵심 팀은 이전에 Roo에 기여했고 이 플러그인을 깊이 아끼는 개발자들로 구성되어 있습니다. 우리는 계속해서 모델을 업데이트하고, 버그를 수정하고, 기능을 출시할 것입니다. 하지만 무엇보다도 이 플러그인을 특별하게 만들어 준 커뮤니티 여러분의 목소리에 귀 기울이려 합니다. 그러니 우리의 [Discord](https://discord.gg/VxfP4Vx3gX), [Reddit](https://www.reddit.com/r/ZooCode)에 참여하거나 [PR 또는 issue 를 만들어](https://github.com/Zoo-Code-Org/Zoo-Code) 주세요. 무엇보다도 커뮤니티로서 계속 연결되고, 참여하고, 활발하게 함께해 주시길 부탁드립니다.
 >
 > _-Zoo Code Team_
 
 ## Roo Code에서 Zoo Code로 마이그레이션
 
-Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/SfHYG44NUA)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
+Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/VxfP4Vx3gX)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
 
 ## v3.55.0의 새로운 기능
 
@@ -62,7 +62,7 @@ Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -106,7 +106,7 @@ Zoo Code는 당신의 작업 방식에 맞춰 적응합니다.
 
 - **[문서](https://docs.zoocode.dev):** Zoo Code 설치, 구성 및 마스터하기 위한 공식 가이드.
 - **[YouTube 채널](https://youtube.com/@roocodeyt?feature=shared):** 튜토리얼을 시청하고 실제 기능을 확인하세요.
-- **[Discord 서버](https://discord.gg/SfHYG44NUA):** 커뮤니티에 가입하여 실시간 도움과 토론에 참여하세요.
+- **[Discord 서버](https://discord.gg/VxfP4Vx3gX):** 커뮤니티에 가입하여 실시간 도움과 토론에 참여하세요.
 - **[Reddit 커뮤니티](https://www.reddit.com/r/ZooCode):** 경험을 공유하고 다른 사람들이 무엇을 만들고 있는지 확인하세요.
 - **[GitHub 문제](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** 버그를 보고하고 개발을 추적하세요.
 - **[기능 요청](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** 아이디어가 있으신가요? 개발자들과 공유하세요.

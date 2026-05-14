@@ -2,12 +2,12 @@
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
           <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-          <a href="https://discord.gg/SfHYG44NUA"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+          <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
         </p>
         <p align="center">
-          <em>Нужна помощь быстро → <a href="https://discord.gg/SfHYG44NUA">Присоединяйся к Discord</a> • Предпочитаешь асинхронно? → <a href="https://www.reddit.com/r/ZooCode/">Присоединяйся к r/ZooCode</a></em>
+          <em>Нужна помощь быстро → <a href="https://discord.gg/VxfP4Vx3gX">Присоединяйся к Discord</a> • Предпочитаешь асинхронно? → <a href="https://www.reddit.com/r/ZooCode/">Присоединяйся к r/ZooCode</a></em>
         </p>
 
         # Zoo Code
@@ -22,13 +22,13 @@
 >
 > Пользователи Roo очень разные. Кто-то использует его профессионально каждый день, кто-то — чтобы придумывать невероятно сложные workflow. Кто-то помогает улучшать сам Roo, а кто-то — модели, которые использует Roo (супер мета). Суть в том, что сообщество разнообразно, и хотя кенгуру 🦘🦘🦘 — благородное и достойное животное, нам показалось, что «Zoo» 🐘🦡🦒🦓🦛🦧🦭🦦 лучше отражает это разнообразие пользователей плагина.
 >
-> Поэтому мы хотим объявить, что **Zoo Code** продолжит развитие этого важного проекта. Основная команда состоит из разработчиков, которые раньше уже вносили вклад в Roo и которым действительно небезразличен этот плагин. Мы продолжим обновлять модели, исправлять ошибки и выпускать новые функции. Но больше всего мы хотим слушать вас — сообщество, которое сделало этот плагин таким особенным. Так что присоединяйся к нашему [Discord](https://discord.gg/SfHYG44NUA), нашему [Reddit](https://www.reddit.com/r/ZooCode), или [открывай PR или issue](https://github.com/Zoo-Code-Org/Zoo-Code); но прежде всего мы просим тебя оставаться вовлеченным, на связи и активным как часть сообщества.
+> Поэтому мы хотим объявить, что **Zoo Code** продолжит развитие этого важного проекта. Основная команда состоит из разработчиков, которые раньше уже вносили вклад в Roo и которым действительно небезразличен этот плагин. Мы продолжим обновлять модели, исправлять ошибки и выпускать новые функции. Но больше всего мы хотим слушать вас — сообщество, которое сделало этот плагин таким особенным. Так что присоединяйся к нашему [Discord](https://discord.gg/VxfP4Vx3gX), нашему [Reddit](https://www.reddit.com/r/ZooCode), или [открывай PR или issue](https://github.com/Zoo-Code-Org/Zoo-Code); но прежде всего мы просим тебя оставаться вовлеченным, на связи и активным как часть сообщества.
 >
 > _-Zoo Code Team_
 
 ## Переход с Roo Code на Zoo Code
 
-Короткое руководство по переходу с Roo Code на Zoo Code можно найти в [гайде по миграции Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Мы хотим как можно лучше помочь пользователям во время перехода, и именно для этого у нас есть [Reddit](https://www.reddit.com/r/ZooCode) и [Discord](https://discord.gg/SfHYG44NUA). Если у тебя возникнут проблемы или вопросы, заходи и спрашивай.
+Короткое руководство по переходу с Roo Code на Zoo Code можно найти в [гайде по миграции Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Мы хотим как можно лучше помочь пользователям во время перехода, и именно для этого у нас есть [Reddit](https://www.reddit.com/r/ZooCode) и [Discord](https://discord.gg/VxfP4Vx3gX). Если у тебя возникнут проблемы или вопросы, заходи и спрашивай.
 
 ## Что нового в v3.55.0
 
@@ -62,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -106,7 +106,7 @@ Zoo Code адаптируется к вашему стилю работы, а н
 
 - **[Документация](https://docs.zoocode.dev):** Официальное руководство по установке, настройке и освоению Zoo Code.
 - **[Канал на YouTube](https://youtube.com/@roocodeyt?feature=shared):** Смотрите обучающие видео и функции в действии.
-- **[Сервер Discord](https://discord.gg/SfHYG44NUA):** Присоединяйтесь к сообществу для получения помощи и обсуждений в реальном времени.
+- **[Сервер Discord](https://discord.gg/VxfP4Vx3gX):** Присоединяйтесь к сообществу для получения помощи и обсуждений в реальном времени.
 - **[Сообщество Reddit](https://www.reddit.com/r/ZooCode):** Делитесь своим опытом и смотрите, что создают другие.
 - **[Проблемы на GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Сообщайте об ошибках и отслеживайте разработку.
 - **[Запросы на новые функции](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** Есть идея? Поделитесь ею с разработчиками.

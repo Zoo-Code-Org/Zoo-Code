@@ -2,12 +2,12 @@
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
           <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-          <a href="https://discord.gg/SfHYG44NUA"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+          <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
         </p>
         <p align="center">
-          <em>快速取得協助 → <a href="https://discord.gg/SfHYG44NUA">加入 Discord</a> • 比較喜歡非同步？→ <a href="https://www.reddit.com/r/ZooCode/">加入 r/ZooCode</a></em>
+          <em>快速取得協助 → <a href="https://discord.gg/VxfP4Vx3gX">加入 Discord</a> • 比較喜歡非同步？→ <a href="https://www.reddit.com/r/ZooCode/">加入 r/ZooCode</a></em>
         </p>
 
         # Zoo Code
@@ -22,13 +22,13 @@
 >
 > Roo 使用者來自各種不同背景。有人在日常工作中專業使用它，也有人用它來構思難以想像的複雜 workflow。有人用它來改進 Roo 本身，也有人用它來改進 Roo 所使用的模型（超級 meta）。我們想表達的是，這個社群非常多元。雖然袋鼠 🦘🦘🦘 是高貴又有代表性的動物，但我們覺得由不同物種組成的「Zoo」🐘🦡🦒🦓🦛🦧🦭🦦 更能反映這個外掛使用者的多樣性。
 >
-> 因此我們想宣布，**Zoo Code** 將繼續開發這個重要專案。核心團隊由先前曾為 Roo 做出貢獻、並且非常在乎這個外掛的開發者所組成。我們會持續更新模型、修正 bug，並推出新功能。但最重要的是，我們想傾聽你們——讓這個外掛如此特別的社群。歡迎加入我們的 [Discord](https://discord.gg/SfHYG44NUA)、[Reddit](https://www.reddit.com/r/ZooCode)，或是[建立 PR 或 issue](https://github.com/Zoo-Code-Org/Zoo-Code)；但更重要的是，我們希望你能繼續作為社群的一分子，保持參與、保持連結、保持活躍。
+> 因此我們想宣布，**Zoo Code** 將繼續開發這個重要專案。核心團隊由先前曾為 Roo 做出貢獻、並且非常在乎這個外掛的開發者所組成。我們會持續更新模型、修正 bug，並推出新功能。但最重要的是，我們想傾聽你們——讓這個外掛如此特別的社群。歡迎加入我們的 [Discord](https://discord.gg/VxfP4Vx3gX)、[Reddit](https://www.reddit.com/r/ZooCode)，或是[建立 PR 或 issue](https://github.com/Zoo-Code-Org/Zoo-Code)；但更重要的是，我們希望你能繼續作為社群的一分子，保持參與、保持連結、保持活躍。
 >
 > _-Zoo Code Team_
 
 ## 從 Roo Code 遷移到 Zoo Code
 
-你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/SfHYG44NUA) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
+你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
 ## v3.55.0 新功能
 
@@ -62,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -106,7 +106,7 @@ Zoo Code 會配合您的工作方式，而非要您配合它：
 
 - **[文件](https://docs.zoocode.dev):** 安裝、設定和掌握 Zoo Code 的官方指南。
 - **[YouTube 頻道](https://youtube.com/@roocodeyt?feature=shared):** 觀看教學和功能實際操作。
-- **[Discord 伺服器](https://discord.gg/SfHYG44NUA):** 加入社群以獲得即時協助和討論。
+- **[Discord 伺服器](https://discord.gg/VxfP4Vx3gX):** 加入社群以獲得即時協助和討論。
 - **[Reddit 社群](https://www.reddit.com/r/ZooCode):** 分享您的經驗，看看其他人正在建立什麼。
 - **[GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** 回報問題並追蹤開發進度。
 - **[功能請求](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** 有想法嗎？與開發人員分享。

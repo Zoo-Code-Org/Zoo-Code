@@ -54,7 +54,7 @@ Mencione la alineación con estas áreas en sus solicitudes de extracción.
 
 ### 3. Únete a la comunidad de Zoo Code
 
-- **Discord:** Únete a nuestro [Discord](https://discord.gg/SfHYG44NUA).
+- **Discord:** Únete a nuestro [Discord](https://discord.gg/VxfP4Vx3gX).
 - **Reddit:** Únete a nuestro [Reddit](https://www.reddit.com/r/ZooCode/).
 
 ## Encontrar y planificar su contribución
@@ -73,7 +73,7 @@ Todas las contribuciones comienzan con una incidencia de GitHub utilizando nuest
 - **Cree una incidencia** utilizando:
     - **Mejoras:** plantilla "Solicitud de mejora" (lenguaje sencillo centrado en el beneficio del usuario).
     - **Errores:** plantilla "Informe de error" (reproducción mínima + esperado vs. real + versión).
-- **¿Quiere trabajar en ello?** Comente "Reclamando" en la incidencia y envíe un mensaje directo al equipo principal en [Discord](https://discord.gg/SfHYG44NUA) para que se le asigne. La asignación se confirmará en el hilo.
+- **¿Quiere trabajar en ello?** Comente "Reclamando" en la incidencia y envíe un mensaje directo al equipo principal en [Discord](https://discord.gg/VxfP4Vx3gX) para que se le asigne. La asignación se confirmará en el hilo.
 - **Las solicitudes de extracción deben enlazar a la incidencia.** Las solicitudes de extracción no enlazadas pueden cerrarse.
 
 ### Decidir en qué trabajar
@@ -126,7 +126,7 @@ pnpm install
 
 ### Política de solicitud de extracción
 
-- Debe hacer referencia a una incidencia de GitHub asignada. Para que se le asigne: comente "Reclamando" en la incidencia y envíe un mensaje directo al equipo principal en [Discord](https://discord.gg/SfHYG44NUA). La asignación se confirmará en el hilo.
+- Debe hacer referencia a una incidencia de GitHub asignada. Para que se le asigne: comente "Reclamando" en la incidencia y envíe un mensaje directo al equipo principal en [Discord](https://discord.gg/VxfP4Vx3gX). La asignación se confirmará en el hilo.
 - Las solicitudes de extracción no enlazadas pueden cerrarse.
 - Las solicitudes de extracción deben pasar las pruebas de CI, estar alineadas con la hoja de ruta y tener una documentación clara.
 

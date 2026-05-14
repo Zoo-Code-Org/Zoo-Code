@@ -54,7 +54,7 @@ PR'lerinizde bu alanlarla uyumu belirtin.
 
 ### 3. Zoo Code topluluğuna katıl
 
-- **Discord:** [Discord](https://discord.gg/SfHYG44NUA) sunucumuza katıl.
+- **Discord:** [Discord](https://discord.gg/VxfP4Vx3gX) sunucumuza katıl.
 - **Reddit:** [Reddit](https://www.reddit.com/r/ZooCode/) topluluğumuza katıl.
 
 ## Katkınızı Bulma ve Planlama
@@ -73,7 +73,7 @@ Tüm katkılar, basit şablonlarımızı kullanarak bir GitHub Sorunu ile başla
 - **Bir sorun oluşturun**:
     - **İyileştirmeler:** "İyileştirme İsteği" şablonu (kullanıcı yararına odaklanan sade bir dil).
     - **Hatalar:** "Hata Raporu" şablonu (minimum yeniden oluşturma + beklenen vs gerçek + sürüm).
-- **Üzerinde çalışmak ister misiniz?** Soruna "Talep ediyorum" yorumu yapın ve atanmak için [Discord](https://discord.gg/SfHYG44NUA) üzerinden çekirdek ekiple iletişime geçin. Atama, başlıkta teyit edilecektir.
+- **Üzerinde çalışmak ister misiniz?** Soruna "Talep ediyorum" yorumu yapın ve atanmak için [Discord](https://discord.gg/VxfP4Vx3gX) üzerinden çekirdek ekiple iletişime geçin. Atama, başlıkta teyit edilecektir.
 - **PR'ler soruna bağlanmalıdır.** Bağlantısız PR'ler kapatılabilir.
 
 ### Ne Üzerinde Çalışılacağına Karar Verme
@@ -128,7 +128,7 @@ pnpm install
 
 ### Çekme İsteği Politikası
 
-- Atanmış bir GitHub Sorununa atıfta bulunmalıdır. Atanmak için: soruna "Talep ediyorum" yorumu yapın ve [Discord](https://discord.gg/SfHYG44NUA) üzerinden çekirdek ekiple iletişime geçin. Atama, başlıkta teyit edilecektir.
+- Atanmış bir GitHub Sorununa atıfta bulunmalıdır. Atanmak için: soruna "Talep ediyorum" yorumu yapın ve [Discord](https://discord.gg/VxfP4Vx3gX) üzerinden çekirdek ekiple iletişime geçin. Atama, başlıkta teyit edilecektir.
 - Bağlantısız PR'ler kapatılabilir.
 - PR'ler CI testlerini geçmeli, yol haritasıyla uyumlu olmalı ve net belgelere sahip olmalıdır.
 

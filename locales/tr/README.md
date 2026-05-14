@@ -2,12 +2,12 @@
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
           <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-          <a href="https://discord.gg/SfHYG44NUA"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+          <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
         </p>
         <p align="center">
-          <em>Hızlıca yardım al → <a href="https://discord.gg/SfHYG44NUA">Discord'a katıl</a> • Eşzamansız mı tercih ediyorsun? → <a href="https://www.reddit.com/r/ZooCode/">r/ZooCode'a katıl</a></em>
+          <em>Hızlıca yardım al → <a href="https://discord.gg/VxfP4Vx3gX">Discord'a katıl</a> • Eşzamansız mı tercih ediyorsun? → <a href="https://www.reddit.com/r/ZooCode/">r/ZooCode'a katıl</a></em>
         </p>
 
         # Zoo Code
@@ -22,13 +22,13 @@
 >
 > Roo kullanıcıları her türden geliyor. Bazıları bunu günlük işlerinde profesyonel olarak kullanıyor, bazılarıysa akıl almaz derecede karmaşık iş akışları tasarlamak için kullanıyor. Bazıları Roo'nun kendisini geliştirirken, bazıları da Roo'nun kullandığı modelleri geliştiriyor (tam anlamıyla meta). Demek istediğimiz şu: topluluk çok çeşitli ve bir kanguru 🦘🦘🦘 seçkin ve asil bir hayvan olsa da farklı türlerden oluşan bir "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 bu eklentinin kullanıcı çeşitliliğini daha iyi yansıtıyor.
 >
-> Bu yüzden **Zoo Code**'un bu önemli projenin geliştirilmesini sürdüreceğini duyurmak istiyoruz. Çekirdek ekip, daha önce Roo'ya katkıda bulunmuş ve bu eklentiye gerçekten önem veren geliştiricilerden oluşuyor. Model güncellemeleri yapmaya, hataları düzeltmeye ve özellikler yayınlamaya devam edeceğiz. Ama her şeyden önce, bu eklentiyi özel kılan topluluğun sesi olan seni dinlemek istiyoruz. Bu yüzden [Discord](https://discord.gg/SfHYG44NUA) sunucumuza, [Reddit](https://www.reddit.com/r/ZooCode) topluluğumuza katılabilir ya da [PR veya issue açabilirsin](https://github.com/Zoo-Code-Org/Zoo-Code); ama en önemlisi, topluluk olarak ilgili, bağlantıda ve aktif kalmanı istiyoruz.
+> Bu yüzden **Zoo Code**'un bu önemli projenin geliştirilmesini sürdüreceğini duyurmak istiyoruz. Çekirdek ekip, daha önce Roo'ya katkıda bulunmuş ve bu eklentiye gerçekten önem veren geliştiricilerden oluşuyor. Model güncellemeleri yapmaya, hataları düzeltmeye ve özellikler yayınlamaya devam edeceğiz. Ama her şeyden önce, bu eklentiyi özel kılan topluluğun sesi olan seni dinlemek istiyoruz. Bu yüzden [Discord](https://discord.gg/VxfP4Vx3gX) sunucumuza, [Reddit](https://www.reddit.com/r/ZooCode) topluluğumuza katılabilir ya da [PR veya issue açabilirsin](https://github.com/Zoo-Code-Org/Zoo-Code); ama en önemlisi, topluluk olarak ilgili, bağlantıda ve aktif kalmanı istiyoruz.
 >
 > _-Zoo Code Team_
 
 ## Roo Code'dan Zoo Code'a geçiş
 
-Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/SfHYG44NUA) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
+Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
 ## v3.55.0'daki Yenilikler
 
@@ -62,7 +62,7 @@ Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş reh
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -106,7 +106,7 @@ Daha fazla: [Modları kullanma](https://docs.zoocode.dev/basic-usage/using-modes
 
 - **[Dokümantasyon](https://docs.zoocode.dev):** Zoo Code'u yükleme, yapılandırma ve ustalaşma konusundaki resmi kılavuz.
 - **[YouTube Kanalı](https://youtube.com/@roocodeyt?feature=shared):** Eğitimleri izleyin ve özellikleri çalışırken görün.
-- **[Discord Sunucusu](https://discord.gg/SfHYG44NUA):** Gerçek zamanlı yardım ve tartışma için topluluğa katılın.
+- **[Discord Sunucusu](https://discord.gg/VxfP4Vx3gX):** Gerçek zamanlı yardım ve tartışma için topluluğa katılın.
 - **[Reddit Topluluğu](https://www.reddit.com/r/ZooCode):** Deneyimlerinizi paylaşın ve başkalarının ne inşa ettiğini görün.
 - **[GitHub Sorunları](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Hataları bildirin ve gelişimi takip edin.
 - **[Özellik İstekleri](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** Bir fikriniz mi var? Geliştiricilerle paylaşın.

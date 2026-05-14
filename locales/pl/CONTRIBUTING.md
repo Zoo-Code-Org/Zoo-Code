@@ -54,7 +54,7 @@ Wspomnij o dostosowaniu do tych obszarów w swoich PR-ach.
 
 ### 3. Dołącz do społeczności Zoo Code
 
-- **Discord:** Dołącz do naszego [Discorda](https://discord.gg/SfHYG44NUA).
+- **Discord:** Dołącz do naszego [Discorda](https://discord.gg/VxfP4Vx3gX).
 - **Reddit:** Dołącz do naszego [Reddita](https://www.reddit.com/r/ZooCode/).
 
 ## Znajdowanie i planowanie swojego wkładu
@@ -73,7 +73,7 @@ Wszystkie wkłady zaczynają się od zgłoszenia na GitHubie przy użyciu naszyc
 - **Utwórz zgłoszenie**, używając:
     - **Ulepszenia:** szablon „Prośba o ulepszenie” (prosty język skoncentrowany na korzyściach dla użytkownika).
     - **Błędy:** szablon „Zgłoszenie błędu” (minimalna reprodukcja + oczekiwane a rzeczywiste + wersja).
-- **Chcesz nad tym popracować?** Skomentuj „Zgłaszam się” w zgłoszeniu i wyślij wiadomość prywatną do głównego zespołu na [Discordzie](https://discord.gg/SfHYG44NUA), aby zostać przypisanym. Przypisanie zostanie potwierdzone w wątku.
+- **Chcesz nad tym popracować?** Skomentuj „Zgłaszam się” w zgłoszeniu i wyślij wiadomość prywatną do głównego zespołu na [Discordzie](https://discord.gg/VxfP4Vx3gX), aby zostać przypisanym. Przypisanie zostanie potwierdzone w wątku.
 - **PR-y muszą być połączone ze zgłoszeniem.** Niepołączone PR-y mogą zostać zamknięte.
 
 ### Decydowanie, nad czym pracować
@@ -126,7 +126,7 @@ pnpm install
 
 ### Polityka dotycząca żądań ściągnięcia
 
-- Musi odnosić się do przypisanego zgłoszenia na GitHubie. Aby zostać przypisanym: skomentuj „Zgłaszam się” w zgłoszeniu i wyślij wiadomość prywatną do głównego zespołu na [Discordzie](https://discord.gg/SfHYG44NUA). Przypisanie zostanie potwierdzone w wątku.
+- Musi odnosić się do przypisanego zgłoszenia na GitHubie. Aby zostać przypisanym: skomentuj „Zgłaszam się” w zgłoszeniu i wyślij wiadomość prywatną do głównego zespołu na [Discordzie](https://discord.gg/VxfP4Vx3gX). Przypisanie zostanie potwierdzone w wątku.
 - Niepołączone PR-y mogą zostać zamknięte.
 - PR-y muszą przejść testy CI, być zgodne z mapą drogową i mieć przejrzystą dokumentację.
 

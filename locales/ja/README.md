@@ -2,12 +2,12 @@
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
           <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-          <a href="https://discord.gg/SfHYG44NUA"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+          <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
         </p>
         <p align="center">
-          <em>すぐに助けが必要なら → <a href="https://discord.gg/SfHYG44NUA">Discord に参加</a> • 非同期のほうがいい？→ <a href="https://www.reddit.com/r/ZooCode/">r/ZooCode に参加</a></em>
+          <em>すぐに助けが必要なら → <a href="https://discord.gg/VxfP4Vx3gX">Discord に参加</a> • 非同期のほうがいい？→ <a href="https://www.reddit.com/r/ZooCode/">r/ZooCode に参加</a></em>
         </p>
 
         # Zoo Code
@@ -22,13 +22,13 @@
 >
 > Roo ユーザーには本当にいろいろな人がいます。日々の仕事でプロとして使っている人もいれば、信じられないほど複雑なワークフローを考えるために使っている人もいます。Roo 自体を改善するために使う人もいれば、Roo が使っているモデルそのものを改善するために使う人もいます（超メタです）。言いたいのは、コミュニティは多様だということです。カンガルー 🦘🦘🦘 も立派で高貴な動物ですが、さまざまな種が集まる「Zoo」🐘🦡🦒🦓🦛🦧🦭🦦 のほうが、このプラグインのユーザーの多様性をよりよく表していると感じました。
 >
-> そこで、**Zoo Code** がこの重要なプロジェクトの開発を継続することをお知らせします。コアチームは、以前 Roo に貢献していた開発者たちで構成されており、このプラグインを心から大切に思っています。これからもモデルの更新、バグ修正、機能リリースを続けていきます。ですが何よりも、このプラグインを特別なものにしてくれたコミュニティのみなさんの声に耳を傾けたいと考えています。ぜひ私たちの [Discord](https://discord.gg/SfHYG44NUA)、[Reddit](https://www.reddit.com/r/ZooCode) に参加したり、[PR や issue を作成](https://github.com/Zoo-Code-Org/Zoo-Code)したりしてください。何よりも、コミュニティとして関わり続け、つながり続け、活発でいてほしいと願っています。
+> そこで、**Zoo Code** がこの重要なプロジェクトの開発を継続することをお知らせします。コアチームは、以前 Roo に貢献していた開発者たちで構成されており、このプラグインを心から大切に思っています。これからもモデルの更新、バグ修正、機能リリースを続けていきます。ですが何よりも、このプラグインを特別なものにしてくれたコミュニティのみなさんの声に耳を傾けたいと考えています。ぜひ私たちの [Discord](https://discord.gg/VxfP4Vx3gX)、[Reddit](https://www.reddit.com/r/ZooCode) に参加したり、[PR や issue を作成](https://github.com/Zoo-Code-Org/Zoo-Code)したりしてください。何よりも、コミュニティとして関わり続け、つながり続け、活発でいてほしいと願っています。
 >
 > _-Zoo Code Team_
 
 ## Roo Code から Zoo Code への移行
 
-Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/SfHYG44NUA) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
+Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
 ## v3.55.0 の新機能
 
@@ -62,7 +62,7 @@ Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -106,7 +106,7 @@ Zoo Codeは、あなたの働き方に合わせるように適応します。
 
 - **[ドキュメント](https://docs.zoocode.dev):** Zoo Codeのインストール、設定、習熟のための公式ガイド。
 - **[YouTubeチャンネル](https://youtube.com/@roocodeyt?feature=shared):** チュートリアルを見て、実際の機能を確認できます。
-- **[Discordサーバー](https://discord.gg/SfHYG44NUA):** コミュニティに参加して、リアルタイムのヘルプやディスカッションに参加できます。
+- **[Discordサーバー](https://discord.gg/VxfP4Vx3gX):** コミュニティに参加して、リアルタイムのヘルプやディスカッションに参加できます。
 - **[Redditコミュニティ](https://www.reddit.com/r/ZooCode):** あなたの経験を共有し、他の人が何を構築しているかを見ることができます。
 - **[GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** バグを報告し、開発を追跡します。
 - **[機能リクエスト](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** アイデアがありますか？開発者と共有してください。

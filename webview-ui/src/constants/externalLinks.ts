@@ -6,5 +6,5 @@ export const EXTERNAL_LINKS = {
 	MARKETPLACE_ISSUE: "https://github.com/Zoo-Code-Org/Zoo-Code/issues/new?template=marketplace.yml",
 	SECURITY_POLICY: "https://github.com/Zoo-Code-Org/Zoo-Code/security/policy",
 	REDDIT: "https://www.reddit.com/r/ZooCode/",
-	DISCORD: "https://discord.gg/SfHYG44NUA",
+	DISCORD: "https://discord.gg/VxfP4Vx3gX",
 } as const

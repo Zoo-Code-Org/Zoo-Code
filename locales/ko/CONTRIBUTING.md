@@ -54,7 +54,7 @@ PR에 이러한 영역과의 연관성을 언급하세요.
 
 ### 3. Zoo Code 커뮤니티에 참여하세요
 
-- **Discord:** 우리의 [Discord](https://discord.gg/SfHYG44NUA)에 참여하세요.
+- **Discord:** 우리의 [Discord](https://discord.gg/VxfP4Vx3gX)에 참여하세요.
 - **Reddit:** 우리의 [Reddit](https://www.reddit.com/r/ZooCode/)에 참여하세요.
 
 ## 기여 찾기 및 계획하기
@@ -73,7 +73,7 @@ PR에 이러한 영역과의 연관성을 언급하세요.
 - **이슈 생성**:
     - **개선 사항:** "개선 요청" 템플릿 (사용자 혜택에 초점을 맞춘 평이한 언어).
     - **버그:** "버그 보고" 템플릿 (최소한의 재현 + 예상 대 실제 + 버전).
-- **작업하고 싶으신가요?** 이슈에 "Claiming"이라고 댓글을 달고 [Discord](https://discord.gg/SfHYG44NUA)의 코어 팀에 연락해 할당을 받으세요. 할당은 스레드에서 확인됩니다.
+- **작업하고 싶으신가요?** 이슈에 "Claiming"이라고 댓글을 달고 [Discord](https://discord.gg/VxfP4Vx3gX)의 코어 팀에 연락해 할당을 받으세요. 할당은 스레드에서 확인됩니다.
 - **PR은 이슈에 연결되어야 합니다.** 연결되지 않은 PR은 종료될 수 있습니다.
 
 ### 작업할 내용 결정하기
@@ -126,7 +126,7 @@ pnpm install
 
 ### 풀 리퀘스트 정책
 
-- 할당된 GitHub 이슈를 참조해야 합니다. 할당을 받으려면: 이슈에 "Claiming"이라고 댓글을 달고 [Discord](https://discord.gg/SfHYG44NUA)의 코어 팀에 연락하세요. 할당은 스레드에서 확인됩니다.
+- 할당된 GitHub 이슈를 참조해야 합니다. 할당을 받으려면: 이슈에 "Claiming"이라고 댓글을 달고 [Discord](https://discord.gg/VxfP4Vx3gX)의 코어 팀에 연락하세요. 할당은 스레드에서 확인됩니다.
 - 연결되지 않은 PR은 종료될 수 있습니다.
 - PR은 CI 테스트를 통과하고 로드맵과 일치하며 명확한 문서를 포함해야 합니다.
 

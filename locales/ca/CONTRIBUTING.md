@@ -54,7 +54,7 @@ Mencioneu l'alineació amb aquestes àrees a les vostres sol·licituds d'extracc
 
 ### 3. Uneix-te a la comunitat de Zoo Code
 
-- **Discord:** Uneix-te al nostre [Discord](https://discord.gg/SfHYG44NUA).
+- **Discord:** Uneix-te al nostre [Discord](https://discord.gg/VxfP4Vx3gX).
 - **Reddit:** Uneix-te al nostre [Reddit](https://www.reddit.com/r/ZooCode/).
 
 ## Trobar i planificar la vostra contribució
@@ -73,7 +73,7 @@ Totes les contribucions comencen amb una incidència de GitHub utilitzant les no
 - **Creeu una incidència** utilitzant:
     - **Millores:** plantilla "Sol·licitud de millora" (llenguatge senzill centrat en el benefici per a l'usuari).
     - **Errors:** plantilla "Informe d'error" (reproducció mínima + esperat vs real + versió).
-- **Voleu treballar-hi?** Comenteu "Reclamant" a la incidència i envieu un missatge directe a l'equip principal a [Discord](https://discord.gg/SfHYG44NUA) per ser assignat. L'assignació es confirmarà al fil.
+- **Voleu treballar-hi?** Comenteu "Reclamant" a la incidència i envieu un missatge directe a l'equip principal a [Discord](https://discord.gg/VxfP4Vx3gX) per ser assignat. L'assignació es confirmarà al fil.
 - **Les sol·licituds d'extracció han d'enllaçar a la incidència.** Les sol·licituds d'extracció no enllaçades es poden tancar.
 
 ### Decidir en què treballar
@@ -126,7 +126,7 @@ pnpm install
 
 ### Política de sol·licitud d'extracció
 
-- Ha de fer referència a una incidència de GitHub assignada. Per ser assignat: comenteu "Reclamant" a la incidència i envieu un missatge directe a l'equip principal a [Discord](https://discord.gg/SfHYG44NUA). L'assignació es confirmarà al fil.
+- Ha de fer referència a una incidència de GitHub assignada. Per ser assignat: comenteu "Reclamant" a la incidència i envieu un missatge directe a l'equip principal a [Discord](https://discord.gg/VxfP4Vx3gX). L'assignació es confirmarà al fil.
 - Les sol·licituds d'extracció no enllaçades es poden tancar.
 - Les sol·licituds d'extracció han de passar les proves de CI, alinear-se amb el full de ruta i tenir una documentació clara.
 
