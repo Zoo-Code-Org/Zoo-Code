@@ -81,6 +81,7 @@ async function withAnthropicProxy<T>(
 	run: (args: { proxyUrl: string; requests: CapturedAnthropicRequest[] }) => Promise<T>,
 ): Promise<T> {
 	const requests: CapturedAnthropicRequest[] = []
+	let proxyError: Error | undefined
 	const server = createServer(async (req, res) => {
 		try {
 			const requestUrl = req.url ?? "/"
@@ -127,7 +128,9 @@ async function withAnthropicProxy<T>(
 			})
 
 			await pipeFetchResponse(res, upstream)
-		} catch {
+		} catch (error) {
+			proxyError = error instanceof Error ? error : new Error(String(error))
+			console.error("Anthropic proxy request failed:", proxyError)
 			res.writeHead(500)
 			res.end("Anthropic proxy request failed")
 		}
@@ -143,7 +146,11 @@ async function withAnthropicProxy<T>(
 	const proxyUrl = `http://127.0.0.1:${address.port}`
 
 	try {
-		return await run({ proxyUrl, requests })
+		const result = await run({ proxyUrl, requests })
+		if (proxyError) {
+			throw proxyError
+		}
+		return result
 	} finally {
 		await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
 	}

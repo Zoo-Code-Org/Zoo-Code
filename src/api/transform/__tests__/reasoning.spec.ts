@@ -471,7 +471,6 @@ describe("reasoning.ts", () => {
 
 			const result = getAnthropicProviderReasoning({
 				...baseOptions,
-				modelId: "claude-opus-4-7",
 				model: modelWithBinaryReasoning,
 				settings: { enableReasoningEffort: true },
 				reasoningBudget: undefined,
@@ -488,7 +487,6 @@ describe("reasoning.ts", () => {
 
 			const result = getAnthropicProviderReasoning({
 				...baseOptions,
-				modelId: "claude-opus-4-7",
 				model: modelWithBinaryReasoning,
 				settings: { enableReasoningEffort: false },
 				reasoningBudget: undefined,
@@ -505,7 +503,6 @@ describe("reasoning.ts", () => {
 
 			const result = getAnthropicProviderReasoning({
 				...baseOptions,
-				modelId: "claude-sonnet-4-6",
 				model: modelWithBudgetReasoning,
 				settings: { enableReasoningEffort: true },
 				reasoningBudget: 1000,
@@ -1187,7 +1184,6 @@ describe("reasoning.ts", () => {
 
 			const result: AnthropicProviderReasoningParams | undefined = getAnthropicProviderReasoning({
 				...baseOptions,
-				modelId: "claude-opus-4-7",
 				model: modelWithBinaryReasoning,
 				settings: { enableReasoningEffort: true },
 				reasoningBudget: undefined,

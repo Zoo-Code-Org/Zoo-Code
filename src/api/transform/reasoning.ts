@@ -113,12 +113,11 @@ export const getAnthropicReasoning = ({
 	shouldUseReasoningBudget({ model, settings }) ? { type: "enabled", budget_tokens: reasoningBudget! } : undefined
 
 export const getAnthropicProviderReasoning = ({
-	modelId,
 	model,
 	reasoningBudget,
 	settings,
-}: GetModelReasoningOptions & { modelId: string }): AnthropicProviderReasoningParams | undefined => {
-	if (modelId === "claude-opus-4-7" && settings.enableReasoningEffort) {
+}: GetModelReasoningOptions): AnthropicProviderReasoningParams | undefined => {
+	if (model.supportsReasoningBinary && settings.enableReasoningEffort) {
 		return { type: "adaptive" }
 	}
 
