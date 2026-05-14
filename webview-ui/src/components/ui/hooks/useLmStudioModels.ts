@@ -40,8 +40,8 @@ const getLmStudioModels = async (baseUrl?: string) =>
 		requestLmStudioModels(baseUrl)
 	})
 
-export const useLmStudioModels = (modelId?: string, baseUrl?: string) =>
+export const useLmStudioModels = (modelId?: string) =>
 	useQuery({
-		queryKey: ["lmStudioModels", baseUrl ?? ""],
-		queryFn: () => (modelId ? getLmStudioModels(baseUrl) : {}),
+		queryKey: ["lmStudioModels"],
+		queryFn: () => (modelId ? getLmStudioModels() : {}),
 	})

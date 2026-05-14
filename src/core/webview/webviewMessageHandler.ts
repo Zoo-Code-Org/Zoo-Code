@@ -72,6 +72,7 @@ import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
+import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -1086,18 +1087,18 @@ export const webviewMessageHandler = async (
 			// Specific handler for LM Studio models only.
 			const { apiConfiguration: lmStudioApiConfig } = await provider.getState()
 			try {
-				const requestedBaseUrl =
-					typeof message.values?.baseUrl === "string"
-						? message.values.baseUrl
-						: lmStudioApiConfig.lmStudioBaseUrl
-				const lmStudioOptions = {
-					provider: "lmstudio" as const,
-					baseUrl: requestedBaseUrl,
-				}
-				// Flush cache and refresh to ensure fresh models.
-				await flushModels(lmStudioOptions, true)
-
-				const lmStudioModels = await getModels(lmStudioOptions)
+				const previewBaseUrl = typeof message.values?.baseUrl === "string" ? message.values.baseUrl : undefined
+				const lmStudioModels = previewBaseUrl
+					? await getLMStudioModels(previewBaseUrl)
+					: await (async () => {
+							const lmStudioOptions = {
+								provider: "lmstudio" as const,
+								baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
+							}
+							// Flush cache and refresh to ensure fresh models.
+							await flushModels(lmStudioOptions, true)
+							return getModels(lmStudioOptions)
+						})()
 
 				if (Object.keys(lmStudioModels).length > 0) {
 					provider.postMessageToWebview({
