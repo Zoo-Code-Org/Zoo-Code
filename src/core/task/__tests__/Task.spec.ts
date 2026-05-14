@@ -12,7 +12,6 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
-import { maybeRemoveImageBlocks } from "../../../api/transform/image-cleaning"
 import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
@@ -399,22 +398,47 @@ describe("Cline", () => {
 
 	describe("getEnvironmentDetails", () => {
 		describe("API conversation handling", () => {
-			it("should strip non-protocol fields from API conversation history", () => {
+			it("should strip non-protocol fields from API conversation history before sending to the API", async () => {
 				const cline = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "test task",
 					startTask: false,
 				})
+				vi.spyOn(cline as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
-				const cleanConversationHistory = (cline as any).buildCleanConversationHistory([
+				const mockStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "response" }
+					},
+					async next() {
+						return { done: true, value: { type: "text", text: "response" } }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(error: any) {
+						throw error
+					},
+					async [Symbol.asyncDispose]() {
+						// Cleanup
+					},
+				} as AsyncGenerator<ApiStreamChunk>
+				const createMessageSpy = vi.spyOn(cline.api, "createMessage").mockReturnValue(mockStream)
+
+				cline.apiConversationHistory = [
 					{
 						role: "user" as const,
 						content: [{ type: "text" as const, text: "test message" }],
 						ts: Date.now(),
 						extraProp: "should be removed",
 					},
-				])
+				]
+
+				const iterator = cline.attemptApiRequest(0)
+				await iterator.next()
+
+				const [, cleanConversationHistory] = createMessageSpy.mock.calls[0]!
 
 				expect(cleanConversationHistory).toEqual([
 					{
@@ -425,7 +449,7 @@ describe("Cline", () => {
 				expect(Object.keys(cleanConversationHistory[0]!)).toEqual(["role", "content"])
 			})
 
-			it("should shape image blocks for API compatibility before request construction", () => {
+			it("should shape image blocks for API compatibility before request construction", async () => {
 				const conversationHistory = [
 					{
 						role: "user" as const,
@@ -452,6 +476,7 @@ describe("Cline", () => {
 					task: "test task",
 					startTask: false,
 				})
+				vi.spyOn(withImages as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
 				vi.spyOn(withImages.api, "getModel").mockReturnValue({
 					id: "claude-3-sonnet",
@@ -474,6 +499,7 @@ describe("Cline", () => {
 					task: "test task",
 					startTask: false,
 				})
+				vi.spyOn(withoutImages as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
 				vi.spyOn(withoutImages.api, "getModel").mockReturnValue({
 					id: "gpt-3.5-turbo",
@@ -487,12 +513,36 @@ describe("Cline", () => {
 					} as ModelInfo,
 				})
 
-				const historyWithImages = (withImages as any).buildCleanConversationHistory(
-					maybeRemoveImageBlocks(conversationHistory as any, withImages.api),
-				)
-				const historyWithoutImages = (withoutImages as any).buildCleanConversationHistory(
-					maybeRemoveImageBlocks(conversationHistory as any, withoutImages.api),
-				)
+				const mockStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "response" }
+					},
+					async next() {
+						return { done: true, value: { type: "text", text: "response" } }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(error: any) {
+						throw error
+					},
+					async [Symbol.asyncDispose]() {
+						// Cleanup
+					},
+				} as AsyncGenerator<ApiStreamChunk>
+				const withImagesSpy = vi.spyOn(withImages.api, "createMessage").mockReturnValue(mockStream)
+				const withoutImagesSpy = vi.spyOn(withoutImages.api, "createMessage").mockReturnValue(mockStream)
+
+				withImages.apiConversationHistory = conversationHistory as any
+				withoutImages.apiConversationHistory = conversationHistory as any
+
+				const withImagesIterator = withImages.attemptApiRequest(0)
+				await withImagesIterator.next()
+				const withoutImagesIterator = withoutImages.attemptApiRequest(0)
+				await withoutImagesIterator.next()
+
+				const [, historyWithImages] = withImagesSpy.mock.calls[0]!
+				const [, historyWithoutImages] = withoutImagesSpy.mock.calls[0]!
 
 				expect(historyWithImages).toEqual([
 					{
@@ -522,11 +572,13 @@ describe("Cline", () => {
 			})
 
 			it("should handle API retry with countdown", async () => {
-				const [cline, task] = Task.create({
+				const cline = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "test task",
+					startTask: false,
 				})
+				vi.spyOn(cline as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
 				// Mock delay to track countdown timing
 				const mockDelay = vi.fn().mockResolvedValue(undefined)
@@ -584,8 +636,11 @@ describe("Cline", () => {
 					}
 					return mockSuccessStream
 				})
-				;(Task as any).lastGlobalApiRequestTime = undefined
-				mockProvider.getState = vi.fn().mockResolvedValue({
+				Task.resetGlobalApiRequestTime()
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
 					autoApprovalEnabled: true,
 					requestDelaySeconds: 3,
 				})
@@ -603,17 +658,17 @@ describe("Cline", () => {
 				])
 				expect(mockDelay).toHaveBeenCalledTimes(3)
 				expect(mockDelay).toHaveBeenCalledWith(1000)
-
-				await cline.abortTask(true)
-				await task.catch(() => {})
+				Task.resetGlobalApiRequestTime()
 			})
 
 			it("should not apply retry delay twice", async () => {
-				const [cline, task] = Task.create({
+				const cline = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "test task",
+					startTask: false,
 				})
+				vi.spyOn(cline as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
 				// Mock delay to track countdown timing
 				const mockDelay = vi.fn().mockResolvedValue(undefined)
@@ -671,8 +726,11 @@ describe("Cline", () => {
 					}
 					return mockSuccessStream
 				})
-				;(Task as any).lastGlobalApiRequestTime = undefined
-				mockProvider.getState = vi.fn().mockResolvedValue({
+				Task.resetGlobalApiRequestTime()
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
 					autoApprovalEnabled: true,
 					requestDelaySeconds: 3,
 				})
@@ -693,9 +751,7 @@ describe("Cline", () => {
 					["api_req_retry_delayed", "API Error\n<retry_timer>2</retry_timer>", undefined, true],
 					["api_req_retry_delayed", "API Error\n<retry_timer>1</retry_timer>", undefined, true],
 				])
-
-				await cline.abortTask(true)
-				await task.catch(() => {})
+				Task.resetGlobalApiRequestTime()
 			})
 
 			describe("processUserContentMentions", () => {

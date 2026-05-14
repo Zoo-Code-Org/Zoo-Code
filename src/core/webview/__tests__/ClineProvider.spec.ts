@@ -1,5 +1,7 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
+import * as path from "path"
+
 import Anthropic from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 import axios from "axios"
@@ -50,6 +52,14 @@ vi.mock("axios", () => ({
 }))
 
 vi.mock("../../../utils/safeWriteJson")
+
+vi.mock("../../../utils/path", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../utils/path")>()
+	return {
+		...actual,
+		getWorkspacePath: vi.fn().mockReturnValue(""),
+	}
+})
 
 vi.mock("../../../utils/storage", () => ({
 	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
@@ -135,6 +145,7 @@ vi.mock("vscode", () => ({
 		showInformationMessage: vi.fn(),
 		showWarningMessage: vi.fn(),
 		showErrorMessage: vi.fn(),
+		activeTextEditor: undefined,
 		onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
 	},
 	workspace: {
@@ -142,6 +153,7 @@ vi.mock("vscode", () => ({
 			get: vi.fn().mockReturnValue([]),
 			update: vi.fn(),
 		}),
+		getWorkspaceFolder: vi.fn(),
 		onDidChangeConfiguration: vi.fn().mockImplementation(() => ({
 			dispose: vi.fn(),
 		})),
@@ -2027,8 +2039,10 @@ describe("Project MCP Settings", () => {
 	let mockWebviewView: vscode.WebviewView
 	let mockPostMessage: any
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks()
+		const pathUtils = await import("../../../utils/path")
+		vi.mocked(pathUtils.getWorkspacePath).mockReturnValue("")
 
 		mockContext = {
 			extensionPath: "/test/path",
@@ -2077,14 +2091,16 @@ describe("Project MCP Settings", () => {
 			onDidDispose: vi.fn(),
 			onDidChangeVisibility: vi.fn(),
 		} as unknown as vscode.WebviewView
-
+		;(vscode.window as any).activeTextEditor = undefined
+		;(vscode.workspace.getWorkspaceFolder as any).mockReset()
 		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 	})
 
 	test("handles openProjectMcpSettings message", async () => {
 		// Mock workspace folders first
 		;(vscode.workspace as any).workspaceFolders = [{ uri: { fsPath: "/test/workspace" } }]
-		;(provider as any).currentWorkspacePath = "/test/workspace"
+		const pathUtils = await import("../../../utils/path")
+		vi.mocked(pathUtils.getWorkspacePath).mockReturnValue("/test/workspace")
 
 		// Mock fs functions
 		const fs = await import("fs/promises")
@@ -2115,20 +2131,18 @@ describe("Project MCP Settings", () => {
 			type: "openProjectMcpSettings",
 		})
 
+		const expectedRooDir = path.join("/test/workspace", ".roo")
+		const expectedMcpPath = path.join(expectedRooDir, "mcp.json")
+
 		// Check that fs.mkdir was called with the correct path
-		expect(mockedFs.mkdir).toHaveBeenCalledWith("/test/workspace/.roo", { recursive: true })
+		expect(mockedFs.mkdir).toHaveBeenCalledWith(expectedRooDir, { recursive: true })
+		expect(pathUtils.getWorkspacePath).toHaveBeenCalled()
 
 		// Verify file was created with default content
-		expect(safeWriteJson).toHaveBeenCalledWith(
-			"/test/workspace/.roo/mcp.json",
-			{ mcpServers: {} },
-			{
-				prettyPrint: true,
-			},
-		)
+		expect(safeWriteJson).toHaveBeenCalledWith(expectedMcpPath, { mcpServers: {} }, { prettyPrint: true })
 
 		// Check that openFile was called
-		expect(openFileSpy).toHaveBeenCalledWith("/test/workspace/.roo/mcp.json")
+		expect(openFileSpy).toHaveBeenCalledWith(expectedMcpPath)
 	})
 
 	test("handles openProjectMcpSettings when workspace is not open", async () => {
@@ -2151,7 +2165,8 @@ describe("Project MCP Settings", () => {
 
 		// Mock workspace folders
 		;(vscode.workspace as any).workspaceFolders = [{ uri: { fsPath: "/test/workspace" } }]
-		;(provider as any).currentWorkspacePath = "/test/workspace"
+		const pathUtils = await import("../../../utils/path")
+		vi.mocked(pathUtils.getWorkspacePath).mockReturnValue("/test/workspace")
 
 		// Mock fs functions to fail
 		const fs = await import("fs/promises")
