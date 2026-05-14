@@ -221,6 +221,18 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321")
 		expect(mockGetModels).not.toHaveBeenCalled()
 	})
+
+	it("treats an empty-string base URL as an explicit preview request", async () => {
+		mockGetLMStudioModels.mockResolvedValue({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestLmStudioModels",
+			values: { baseUrl: "" },
+		})
+
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("")
+		expect(mockGetModels).not.toHaveBeenCalled()
+	})
 })
 
 describe("webviewMessageHandler - image mentions", () => {
