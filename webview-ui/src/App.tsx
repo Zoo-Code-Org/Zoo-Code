@@ -68,6 +68,7 @@ const App = () => {
 
 	const [showAnnouncement, setShowAnnouncement] = useState(false)
 	const [tab, setTab] = useState<Tab>("chat")
+	const handledImportRef = useRef<number | undefined>(undefined)
 
 	const [deleteMessageDialogState, setDeleteMessageDialogState] = useState<DeleteMessageDialogState>({
 		isOpen: false,
@@ -171,7 +172,8 @@ const App = () => {
 	}, [shouldShowAnnouncement, tab])
 
 	useEffect(() => {
-		if (showWelcome && settingsImportedAt && tab === "chat") {
+		if (showWelcome && settingsImportedAt && tab === "chat" && settingsImportedAt !== handledImportRef.current) {
+			handledImportRef.current = settingsImportedAt
 			setCurrentSection("providers")
 			setCurrentMarketplaceTab(undefined)
 			setTab("settings")
@@ -223,7 +225,9 @@ const App = () => {
 
 	// Do not conditionally load ChatView, it's expensive and there's state we
 	// don't want to lose (user input, disableInput, askResponse promise, etc.)
-	return showWelcome && tab === "chat" ? (
+	const isSetupGatedTab = showWelcome && tab !== "settings" && tab !== "marketplace"
+
+	return isSetupGatedTab ? (
 		<WelcomeView />
 	) : (
 		<>

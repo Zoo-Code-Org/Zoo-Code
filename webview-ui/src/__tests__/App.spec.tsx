@@ -249,11 +249,33 @@ describe("App", () => {
 		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
 	})
 
-	it("opens providers settings automatically after an import leaves setup incomplete", async () => {
+	it("keeps history behind the welcome gate while setup is incomplete", () => {
 		mockUseExtensionState.mockReturnValue({
 			didHydrateState: true,
 			showWelcome: true,
-			settingsImportedAt: Date.now(),
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		act(() => {
+			triggerMessage("historyButtonClicked")
+		})
+
+		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("history-view")).not.toBeInTheDocument()
+	})
+
+	it("opens providers settings automatically after an import leaves setup incomplete", async () => {
+		const importedAt = Date.now()
+
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			settingsImportedAt: importedAt,
 			shouldShowAnnouncement: false,
 			experiments: {},
 			language: "en",
@@ -264,6 +286,32 @@ describe("App", () => {
 
 		expect(await screen.findByTestId("settings-view")).toBeInTheDocument()
 		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
+	})
+
+	it("does not bounce back to settings after the import redirect has already fired", async () => {
+		const importedAt = Date.now()
+
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			settingsImportedAt: importedAt,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		const settingsView = await screen.findByTestId("settings-view")
+		expect(settingsView).toBeInTheDocument()
+
+		act(() => {
+			settingsView.click()
+		})
+
+		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("settings-view")).not.toBeInTheDocument()
 	})
 
 	it("switches to history view when receiving historyButtonClicked action", async () => {
