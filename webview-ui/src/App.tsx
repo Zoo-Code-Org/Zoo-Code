@@ -54,6 +54,7 @@ const App = () => {
 	const {
 		didHydrateState,
 		showWelcome,
+		settingsImportedAt,
 		shouldShowAnnouncement,
 		telemetrySetting,
 		telemetryKey,
@@ -170,6 +171,14 @@ const App = () => {
 	}, [shouldShowAnnouncement, tab])
 
 	useEffect(() => {
+		if (showWelcome && settingsImportedAt && tab === "chat") {
+			setCurrentSection("providers")
+			setCurrentMarketplaceTab(undefined)
+			setTab("settings")
+		}
+	}, [showWelcome, settingsImportedAt, tab])
+
+	useEffect(() => {
 		if (didHydrateState) {
 			telemetryClient.updateTelemetryState(telemetrySetting, telemetryKey, machineId)
 		}
@@ -214,7 +223,7 @@ const App = () => {
 
 	// Do not conditionally load ChatView, it's expensive and there's state we
 	// don't want to lose (user input, disableInput, askResponse promise, etc.)
-	return showWelcome ? (
+	return showWelcome && tab === "chat" ? (
 		<WelcomeView />
 	) : (
 		<>

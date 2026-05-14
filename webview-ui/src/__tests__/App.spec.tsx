@@ -47,6 +47,13 @@ vi.mock("@src/components/settings/SettingsView", () => ({
 	},
 }))
 
+vi.mock("@src/components/welcome/WelcomeViewProvider", () => ({
+	__esModule: true,
+	default: function WelcomeView() {
+		return <div data-testid="welcome-view">Welcome View</div>
+	},
+}))
+
 vi.mock("@src/components/history/HistoryView", () => ({
 	__esModule: true,
 	default: function HistoryView({ onDone }: { onDone: () => void }) {
@@ -189,6 +196,22 @@ describe("App", () => {
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 	}, 10000)
 
+	it("shows welcome view when setup is incomplete", () => {
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("settings-view")).not.toBeInTheDocument()
+	})
+
 	it("switches to settings view when receiving settingsButtonClicked action", async () => {
 		render(<AppWithProviders />)
 
@@ -201,6 +224,46 @@ describe("App", () => {
 
 		const chatView = screen.getByTestId("chat-view")
 		expect(chatView.getAttribute("data-hidden")).toBe("true")
+	})
+
+	it.each([
+		["settings", "settings-view"],
+		["marketplace", "marketplace-view"],
+	])("still switches to %s while welcome gating is active", async (action, testId) => {
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		act(() => {
+			triggerMessage(`${action}ButtonClicked`)
+		})
+
+		expect(await screen.findByTestId(testId)).toBeInTheDocument()
+		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
+	})
+
+	it("opens providers settings automatically after an import leaves setup incomplete", async () => {
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			settingsImportedAt: Date.now(),
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		expect(await screen.findByTestId("settings-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
 	})
 
 	it("switches to history view when receiving historyButtonClicked action", async () => {
