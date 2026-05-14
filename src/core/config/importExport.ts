@@ -327,6 +327,7 @@ export const importSettingsWithFeedback = async (
 	if (result.success) {
 		provider.settingsImportedAt = Date.now()
 		await provider.postStateToWebview()
+		provider.settingsImportedAt = undefined
 		const warnings = "warnings" in result ? result.warnings : undefined
 
 		// Show warnings if any profiles had issues but were still imported (with modifications)
