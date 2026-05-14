@@ -234,6 +234,50 @@ describe("AnthropicHandler", () => {
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 			expect(requestOptions?.headers?.["anthropic-beta"]).not.toContain("context-1m-2025-08-07")
 		})
+
+		it("should use adaptive thinking for Claude Opus 4.7 when reasoning is enabled", async () => {
+			const opus47Handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: true,
+			})
+
+			const stream = opus47Handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+		})
+
+		it("should omit thinking for Claude Opus 4.7 when reasoning is disabled", async () => {
+			const opus47Handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: false,
+			})
+
+			const stream = opus47Handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestBody?.thinking).toBeUndefined()
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -354,8 +398,10 @@ describe("AnthropicHandler", () => {
 			expect(model.id).toBe("claude-opus-4-7")
 			expect(model.info.maxTokens).toBe(128000)
 			expect(model.info.contextWindow).toBe(1000000)
-			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBeUndefined()
 			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.reasoningBudget).toBeUndefined()
 		})
 
 		it("should enable 1M context for Claude 4.5 Sonnet when beta flag is set", () => {
