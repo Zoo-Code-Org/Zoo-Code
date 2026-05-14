@@ -56,6 +56,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const dynamicProvider = activeProvider && isDynamicProvider(activeProvider) ? activeProvider : undefined
 	const openRouterModelId = activeProvider === "openrouter" ? apiConfiguration?.openRouterModelId : undefined
 	const lmStudioModelId = activeProvider === "lmstudio" ? apiConfiguration?.lmStudioModelId : undefined
+	const lmStudioBaseUrl = activeProvider === "lmstudio" ? apiConfiguration?.lmStudioBaseUrl : undefined
 	const ollamaModelId = activeProvider === "ollama" ? apiConfiguration?.ollamaModelId : undefined
 
 	// Only fetch router models for dynamic providers
@@ -66,7 +67,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	})
 
 	const openRouterModelProviders = useOpenRouterModelProviders(openRouterModelId)
-	const lmStudioModels = useLmStudioModels(lmStudioModelId)
+	const lmStudioModels = useLmStudioModels(lmStudioModelId, lmStudioBaseUrl)
 	const ollamaModels = useOllamaModels(ollamaModelId)
 
 	// Compute readiness only for the data actually needed for the selected provider

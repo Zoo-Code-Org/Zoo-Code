@@ -1086,9 +1086,13 @@ export const webviewMessageHandler = async (
 			// Specific handler for LM Studio models only.
 			const { apiConfiguration: lmStudioApiConfig } = await provider.getState()
 			try {
+				const requestedBaseUrl =
+					typeof message.values?.baseUrl === "string"
+						? message.values.baseUrl
+						: lmStudioApiConfig.lmStudioBaseUrl
 				const lmStudioOptions = {
 					provider: "lmstudio" as const,
-					baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
+					baseUrl: requestedBaseUrl,
 				}
 				// Flush cache and refresh to ensure fresh models.
 				await flushModels(lmStudioOptions, true)

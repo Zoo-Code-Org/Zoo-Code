@@ -203,6 +203,17 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			lmStudioModels: mockModels,
 		})
 	})
+
+	it("prefers the request payload base URL over persisted settings", async () => {
+		mockGetModels.mockResolvedValue({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestLmStudioModels",
+			values: { baseUrl: "http://127.0.0.1:4321" },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "lmstudio", baseUrl: "http://127.0.0.1:4321" })
+	})
 })
 
 describe("webviewMessageHandler - image mentions", () => {
