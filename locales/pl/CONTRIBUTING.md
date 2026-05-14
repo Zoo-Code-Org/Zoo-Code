@@ -37,7 +37,7 @@ Nasza mapa drogowa wyznacza kierunek projektu. Dostosuj swój wkład do tych klu
 - Zapewnij, że edycja różnic i wykonywanie poleceń są niezawodne.
 - Zmniejsz punkty tarcia, które zniechęcają do regularnego użytkowania.
 - Zagwarantuj płynne działanie we wszystkich lokalizacjach i na wszystkich platformach.
-- Rozszerz solidne wsparcie для szerokiej gamy dostawców i modeli sztucznej inteligencji.
+- Rozszerz solidne wsparcie dla szerokiej gamy dostawców i modeli sztucznej inteligencji.
 
 ### Ulepszone wrażenia użytkownika
 
@@ -73,7 +73,7 @@ Wszystkie wkłady zaczynają się od zgłoszenia na GitHubie przy użyciu naszyc
 - **Utwórz zgłoszenie**, używając:
     - **Ulepszenia:** szablon „Prośba o ulepszenie” (prosty język skoncentrowany na korzyściach dla użytkownika).
     - **Błędy:** szablon „Zgłoszenie błędu” (minimalna reprodukcja + oczekiwane a rzeczywiste + wersja).
-- **Chcesz nad tym popracować?** Skomentuj „Zgłaszam się” w zgłoszeniu i wyślij wiadomość prywatną do **Hannes Rudolph (`hrudolph`)** na [Discordzie](https://discord.gg/SfHYG44NUA), aby zostać przypisanym. Przypisanie zostanie potwierdzone w wątku.
+- **Chcesz nad tym popracować?** Skomentuj „Zgłaszam się” w zgłoszeniu i wyślij wiadomość prywatną do głównego zespołu na [Discordzie](https://discord.gg/SfHYG44NUA), aby zostać przypisanym. Przypisanie zostanie potwierdzone w wątku.
 - **PR-y muszą być połączone ze zgłoszeniem.** Niepołączone PR-y mogą zostać zamknięte.
 
 ### Decydowanie, nad czym pracować
@@ -126,7 +126,7 @@ pnpm install
 
 ### Polityka dotycząca żądań ściągnięcia
 
-- Musi odnosić się do przypisanego zgłoszenia na GitHubie. Aby zostać przypisanym: skomentuj „Zgłaszam się” w zgłoszeniu i wyślij wiadomość prywatną do **Hannes Rudolph (`hrudolph`)** na [Discordzie](https://discord.gg/SfHYG44NUA). Przypisanie zostanie potwierdzone w wątku.
+- Musi odnosić się do przypisanego zgłoszenia na GitHubie. Aby zostać przypisanym: skomentuj „Zgłaszam się” w zgłoszeniu i wyślij wiadomość prywatną do głównego zespołu na [Discordzie](https://discord.gg/SfHYG44NUA). Przypisanie zostanie potwierdzone w wątku.
 - Niepołączone PR-y mogą zostać zamknięte.
 - PR-y muszą przejść testy CI, być zgodne z mapą drogową i mieć przejrzystą dokumentację.
 

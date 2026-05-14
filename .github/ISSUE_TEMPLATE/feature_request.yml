@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for helping improve Roo Code!
+        Thank you for helping improve Zoo Code!
         Please focus on the problem and the desired behavior in plain language.
 
   - type: textarea
@@ -56,9 +56,9 @@ body:
   - type: textarea
     id: roo-code-tasks
     attributes:
-      label: Roo Code Task Links (optional)
-      description: If you explored this with Roo Code, share public task links for context.
-      placeholder: Paste your Roo Code share links here, one per line
+      label: Zoo Code Task Links (optional)
+      description: If you explored this with Zoo Code, share public task links for context.
+      placeholder: Paste your Zoo Code share links here, one per line
 
   - type: markdown
     attributes:

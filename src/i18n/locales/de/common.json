@@ -113,7 +113,7 @@
 		},
 		"roo": {
 			"authenticationRequired": "Zoo-Anbieter erfordert Cloud-Authentifizierung. Bitte melde dich bei Zoo Code Cloud an.",
-			"routerRemoved": "Roo Code Router wurde entfernt. Bitte wähle einen anderen Anbieter und konfiguriere ihn."
+			"routerRemoved": "Zoo Code Router wurde entfernt. Bitte wähle einen anderen Anbieter und konfiguriere ihn."
 		},
 		"openAiCodex": {
 			"notAuthenticated": "Nicht bei OpenAI Codex authentifiziert. Bitte melde dich über den OpenAI Codex OAuth-Flow an.",
@@ -164,7 +164,7 @@
 		"mode_exported": "Modus '{{mode}}' erfolgreich exportiert",
 		"mode_imported": "Modus erfolgreich importiert",
 		"roo": {
-			"signInUnavailable": "Die Anmeldung bei Roo Code Cloud ist derzeit nicht verfügbar. Konfiguriere einen anderen Anbieter, um fortzufahren."
+			"signInUnavailable": "Die Anmeldung bei Zoo Code Cloud ist derzeit nicht verfügbar. Konfiguriere einen anderen Anbieter, um fortzufahren."
 		}
 	},
 	"answers": {

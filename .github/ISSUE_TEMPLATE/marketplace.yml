@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        **Thanks for your feedback!** Please check existing issues first: https://github.com/RooCodeInc/Roo-Code/issues
+        **Thanks for your feedback!** Please check existing issues first: https://github.com/Zoo-Code-Org/Zoo-Code/issues
 
   - type: dropdown
     id: feedback-type

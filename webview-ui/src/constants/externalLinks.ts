@@ -5,4 +5,6 @@ export const EXTERNAL_LINKS = {
 	FEATURE_REQUEST: "https://github.com/Zoo-Code-Org/Zoo-Code/issues/new?template=feature_request.yml",
 	MARKETPLACE_ISSUE: "https://github.com/Zoo-Code-Org/Zoo-Code/issues/new?template=marketplace.yml",
 	SECURITY_POLICY: "https://github.com/Zoo-Code-Org/Zoo-Code/security/policy",
+	REDDIT: "https://www.reddit.com/r/ZooCode/",
+	DISCORD: "https://discord.gg/SfHYG44NUA",
 } as const

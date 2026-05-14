@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "Callback OAuth - Roo Code",
+			"title": "Callback OAuth - Zoo Code",
 			"success": "Berhasil!",
 			"failed": "Gagal",
 			"auth_failed": "Autentikasi gagal. Silakan periksa log server MCP.",

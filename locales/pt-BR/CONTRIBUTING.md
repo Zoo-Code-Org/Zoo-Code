@@ -73,7 +73,7 @@ Todas as contribuições começam com uma Issue do GitHub usando nossos modelos 
 - **Crie uma issue** usando:
     - **Melhorias:** modelo "Solicitação de melhoria" (linguagem simples focada no benefício do usuário).
     - **Bugs:** modelo "Relatório de bug" (reprodução mínima + esperado vs. real + versão).
-- **Quer trabalhar nisso?** Comente "Reivindicando" na issue e envie uma DM para **Hannes Rudolph (`hrudolph`)** no [Discord](https://discord.gg/SfHYG44NUA) para ser atribuído. A atribuição será confirmada no tópico.
+- **Quer trabalhar nisso?** Comente "Reivindicando" na issue e envie uma DM para a equipe principal no [Discord](https://discord.gg/SfHYG44NUA) para ser atribuído. A atribuição será confirmada no tópico.
 - **Os PRs devem ser vinculados à issue.** PRs não vinculados podem ser fechados.
 
 ### Decidindo no que trabalhar
@@ -126,7 +126,7 @@ pnpm install
 
 ### Política de Pull Request
 
-- Deve fazer referência a uma Issue do GitHub atribuída. Para ser atribuído: comente "Reivindicando" na issue e envie uma DM para **Hannes Rudolph (`hrudolph`)** no [Discord](https://discord.gg/SfHYG44NUA). A atribuição será confirmada no tópico.
+- Deve fazer referência a uma Issue do GitHub atribuída. Para ser atribuído: comente "Reivindicando" na issue e envie uma DM para a equipe principal no [Discord](https://discord.gg/SfHYG44NUA). A atribuição será confirmada no tópico.
 - PRs não vinculados podem ser fechados.
 - Os PRs devem passar nos testes de CI, estar alinhados com o roteiro e ter documentação clara.
 

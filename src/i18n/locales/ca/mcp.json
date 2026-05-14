@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "Callback OAuth - Roo Code",
+			"title": "Callback OAuth - Zoo Code",
 			"success": "Èxit!",
 			"failed": "Error",
 			"auth_failed": "L'autenticació ha fallat. Si us plau, comprova els registres del servidor MCP.",

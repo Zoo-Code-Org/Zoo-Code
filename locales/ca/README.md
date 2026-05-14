@@ -61,7 +61,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-    </details>
+  </details>
 
 ---
 
@@ -91,10 +91,10 @@ Més informació: [Ús de Modes](https://docs.zoocode.dev/basic-usage/using-mode
 
 <div align="center">
 
-|                                                                                                                                                                            |                                                                                                                                                                           |                                                                                                                                                                                    |
-| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Instal·lant Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Configurant perfils</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Indexació de la base de codi</b> |
-| <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Modes personalitzats</b> |  <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Punts de control</b>   |      <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Gestió de Context</b>       |
+|                                                                                                                                                                                                                      |                                                                                                                                                                                                                     |                                                                                                                                                                                                                                  |
+| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" alt="Tutorial d'instal·lació de Zoo Code" width="100%"></a><br><b>Instal·lant Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" alt="Tutorial de configuració de perfils" width="100%"></a><br><b>Configurant perfils</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" alt="Tutorial d'indexació de la base de codi" width="100%"></a><br><b>Indexació de la base de codi</b> |
+|  <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" alt="Tutorial de modes personalitzats" width="100%"></a><br><b>Modes personalitzats</b>   |      <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" alt="Tutorial de punts de control" width="100%"></a><br><b>Punts de control</b>      |           <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" alt="Tutorial de gestió de context" width="100%"></a><br><b>Gestió de Context</b>            |
 
 </div>
 <p align="center">
@@ -168,10 +168,10 @@ Si prefereixes instal·lar el paquet VSIX manualment:
     ```sh
     pnpm vsix
     ```
-2.  Es generarà un fitxer `.vsix` al directori `bin/` (p. ej., `bin/roo-cline-<versió>.vsix`).
+2.  Es generarà un fitxer `.vsix` al directori `bin/` (p. ej., `bin/zoo-code-<versió>.vsix`).
 3.  Instal·la'l manualment utilitzant la CLI de VSCode:
     ```sh
-    code --install-extension bin/roo-cline-<versió>.vsix
+    code --install-extension bin/zoo-code-<versió>.vsix
     ```
 
 ---

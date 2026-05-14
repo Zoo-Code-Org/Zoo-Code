@@ -113,7 +113,7 @@
 		},
 		"roo": {
 			"authenticationRequired": "Провайдер Zoo требует облачной аутентификации. Войдите в Zoo Code Cloud.",
-			"routerRemoved": "Roo Code Router был удалён. Выберите и настройте другого провайдера."
+			"routerRemoved": "Zoo Code Router был удалён. Выберите и настройте другого провайдера."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API-ключ содержит недопустимые символы.",
@@ -164,7 +164,7 @@
 		"mode_exported": "Режим '{{mode}}' успешно экспортирован",
 		"mode_imported": "Режим успешно импортирован",
 		"roo": {
-			"signInUnavailable": "Вход в Roo Code Cloud сейчас недоступен. Настрой другого провайдера, чтобы продолжить."
+			"signInUnavailable": "Вход в Zoo Code Cloud сейчас недоступен. Настрой другого провайдера, чтобы продолжить."
 		}
 	},
 	"answers": {

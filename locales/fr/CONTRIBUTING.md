@@ -73,7 +73,7 @@ Toutes les contributions commencent par une Issue GitHub en utilisant nos modèl
 - **Créez une issue** en utilisant :
     - **Améliorations :** Modèle "Demande d'amélioration" (langage simple axé sur l'avantage pour l'utilisateur).
     - **Bugs :** Modèle "Rapport de bug" (reproduction minimale + attendu vs réel + version).
-- **Vous voulez y travailler ?** Commentez "Claiming" sur l’issue et envoyez un DM à **Hannes Rudolph (`hrudolph`)** sur [Discord](https://discord.gg/SfHYG44NUA) pour être assigné. L’assignation sera confirmée dans le fil de discussion.
+- **Vous voulez y travailler ?** Commentez "Je prends en charge" sur l’issue et envoyez un DM à l'équipe principale sur [Discord](https://discord.gg/SfHYG44NUA) pour être assigné. L’assignation sera confirmée dans le fil de discussion.
 - **Les PRs doivent être liées à l'issue.** Les PRs non liées peuvent être fermées.
 
 ### Décider sur quoi travailler
@@ -126,7 +126,7 @@ pnpm install
 
 ### Politique de Pull Request
 
-- Doit faire référence à une Issue GitHub assignée. Pour être assigné : commentez "Claiming" sur l'issue et envoyez un DM à **Hannes Rudolph (`hrudolph`)** sur [Discord](https://discord.gg/SfHYG44NUA). L'assignation sera confirmée dans le fil de discussion.
+- Doit faire référence à une Issue GitHub assignée. Pour être assigné : commentez "Je prends en charge" sur l'issue et envoyez un DM à l'équipe principale sur [Discord](https://discord.gg/SfHYG44NUA). L'assignation sera confirmée dans le fil de discussion.
 - Les PRs non liées peuvent être fermées.
 - Les PRs doivent passer les tests d'intégration continue, s'aligner sur la feuille de route et avoir une documentation claire.
 

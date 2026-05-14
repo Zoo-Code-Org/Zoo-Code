@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "OAuth 콜백 - Roo Code",
+			"title": "OAuth 콜백 - Zoo Code",
 			"success": "성공!",
 			"failed": "실패",
 			"auth_failed": "인증에 실패했습니다. MCP 서버 로그를 확인해 주세요.",

@@ -113,7 +113,7 @@
 		},
 		"roo": {
 			"authenticationRequired": "El proveedor Zoo requiere autenticación en la nube. Por favor, inicia sesión en Zoo Code Cloud.",
-			"routerRemoved": "Roo Code Router ha sido eliminado. Selecciona y configura un proveedor diferente."
+			"routerRemoved": "Zoo Code Router ha sido eliminado. Selecciona y configura un proveedor diferente."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "La clave API contiene caracteres inválidos.",
@@ -164,7 +164,7 @@
 		"mode_exported": "Modo '{{mode}}' exportado correctamente",
 		"mode_imported": "Modo importado correctamente",
 		"roo": {
-			"signInUnavailable": "El inicio de sesión de Roo Code Cloud no está disponible en este momento. Configura otro proveedor para continuar."
+			"signInUnavailable": "El inicio de sesión de Zoo Code Cloud no está disponible en este momento. Configura otro proveedor para continuar."
 		}
 	},
 	"answers": {

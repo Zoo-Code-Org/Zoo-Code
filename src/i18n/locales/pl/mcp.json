@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "Wywołanie zwrotne OAuth - Roo Code",
+			"title": "Wywołanie zwrotne OAuth - Zoo Code",
 			"success": "Sukces!",
 			"failed": "Niepowodzenie",
 			"auth_failed": "Uwierzytelnianie nie powiodło się. Sprawdź dzienniki serwera MCP.",

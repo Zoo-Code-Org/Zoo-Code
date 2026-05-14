@@ -73,7 +73,7 @@ Totes les contribucions comencen amb una incidència de GitHub utilitzant les no
 - **Creeu una incidència** utilitzant:
     - **Millores:** plantilla "Sol·licitud de millora" (llenguatge senzill centrat en el benefici per a l'usuari).
     - **Errors:** plantilla "Informe d'error" (reproducció mínima + esperat vs real + versió).
-- **Voleu treballar-hi?** Comenteu "Reclamant" a la incidència i envieu un missatge directe a **Hannes Rudolph (`hrudolph`)** a [Discord](https://discord.gg/SfHYG44NUA) per ser assignat. L'assignació es confirmarà al fil.
+- **Voleu treballar-hi?** Comenteu "Reclamant" a la incidència i envieu un missatge directe a l'equip principal a [Discord](https://discord.gg/SfHYG44NUA) per ser assignat. L'assignació es confirmarà al fil.
 - **Les sol·licituds d'extracció han d'enllaçar a la incidència.** Les sol·licituds d'extracció no enllaçades es poden tancar.
 
 ### Decidir en què treballar
@@ -88,7 +88,7 @@ Totes les contribucions comencen amb una incidència de GitHub utilitzant les no
     - Passos de reproducció clars i numerats
     - Resultat esperat vs real
     - Versió de Zoo Code (obligatori); proveïdor/model d'API si és rellevant
-- **Problemes de seguretat**: informeu de manera privada a través d' [avisos de seguretat](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
+- **Problemes de seguretat**: informeu de manera privada a través d'[avisos de seguretat](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
 
 ## Procés de desenvolupament i submissió
 
@@ -126,7 +126,7 @@ pnpm install
 
 ### Política de sol·licitud d'extracció
 
-- Ha de fer referència a una incidència de GitHub assignada. Per ser assignat: comenteu "Reclamant" a la incidència i envieu un missatge directe a **Hannes Rudolph (`hrudolph`)** a [Discord](https://discord.gg/SfHYG44NUA). L'assignació es confirmarà al fil.
+- Ha de fer referència a una incidència de GitHub assignada. Per ser assignat: comenteu "Reclamant" a la incidència i envieu un missatge directe a l'equip principal a [Discord](https://discord.gg/SfHYG44NUA). L'assignació es confirmarà al fil.
 - Les sol·licituds d'extracció no enllaçades es poden tancar.
 - Les sol·licituds d'extracció han de passar les proves de CI, alinear-se amb el full de ruta i tenir una documentació clara.
 

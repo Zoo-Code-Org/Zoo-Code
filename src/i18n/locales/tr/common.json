@@ -113,7 +113,7 @@
 		},
 		"roo": {
 			"authenticationRequired": "Zoo sağlayıcısı bulut kimlik doğrulaması gerektirir. Lütfen Zoo Code Cloud'a giriş yapın.",
-			"routerRemoved": "Roo Code Router kaldırıldı. Lütfen farklı bir sağlayıcı seçip yapılandırın."
+			"routerRemoved": "Zoo Code Router kaldırıldı. Lütfen farklı bir sağlayıcı seçip yapılandırın."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API anahtarı geçersiz karakterler içeriyor.",
@@ -164,7 +164,7 @@
 		"mode_exported": "'{{mode}}' modu başarıyla dışa aktarıldı",
 		"mode_imported": "Mod başarıyla içe aktarıldı",
 		"roo": {
-			"signInUnavailable": "Roo Code Cloud girişi şu anda kullanılamıyor. Devam etmek için farklı bir sağlayıcı yapılandırın."
+			"signInUnavailable": "Zoo Code Cloud girişi şu anda kullanılamıyor. Devam etmek için farklı bir sağlayıcı yapılandırın."
 		}
 	},
 	"answers": {

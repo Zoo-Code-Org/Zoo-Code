@@ -113,7 +113,7 @@
 		},
 		"roo": {
 			"authenticationRequired": "Dostawca Zoo wymaga uwierzytelnienia w chmurze. Zaloguj się do Zoo Code Cloud.",
-			"routerRemoved": "Roo Code Router został usunięty. Wybierz i skonfiguruj innego dostawcę."
+			"routerRemoved": "Zoo Code Router został usunięty. Wybierz i skonfiguruj innego dostawcę."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "Klucz API zawiera nieprawidłowe znaki.",
@@ -164,7 +164,7 @@
 		"mode_exported": "Tryb '{{mode}}' pomyślnie wyeksportowany",
 		"mode_imported": "Tryb pomyślnie zaimportowany",
 		"roo": {
-			"signInUnavailable": "Logowanie do Roo Code Cloud jest obecnie niedostępne. Skonfiguruj innego dostawcę, aby kontynuować."
+			"signInUnavailable": "Logowanie do Zoo Code Cloud jest obecnie niedostępne. Skonfiguruj innego dostawcę, aby kontynuować."
 		}
 	},
 	"answers": {

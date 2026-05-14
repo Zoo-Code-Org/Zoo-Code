@@ -113,7 +113,7 @@
 		},
 		"roo": {
 			"authenticationRequired": "Penyedia Zoo memerlukan autentikasi cloud. Silakan masuk ke Zoo Code Cloud.",
-			"routerRemoved": "Roo Code Router telah dihapus. Pilih dan konfigurasikan penyedia lain."
+			"routerRemoved": "Zoo Code Router telah dihapus. Pilih dan konfigurasikan penyedia lain."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "Kunci API mengandung karakter tidak valid.",
@@ -164,7 +164,7 @@
 		"mode_exported": "Mode '{{mode}}' berhasil diekspor",
 		"mode_imported": "Mode berhasil diimpor",
 		"roo": {
-			"signInUnavailable": "Masuk ke Roo Code Cloud saat ini tidak tersedia. Konfigurasikan penyedia lain untuk melanjutkan."
+			"signInUnavailable": "Masuk ke Zoo Code Cloud saat ini tidak tersedia. Konfigurasikan penyedia lain untuk melanjutkan."
 		}
 	},
 	"answers": {

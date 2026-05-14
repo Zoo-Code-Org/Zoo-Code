@@ -113,7 +113,7 @@
 		},
 		"roo": {
 			"authenticationRequired": "Zooプロバイダーはクラウド認証が必要です。Zoo Code Cloudにサインインしてください。",
-			"routerRemoved": "Roo Code Router は削除されました。別のプロバイダーを選択して設定してください。"
+			"routerRemoved": "Zoo Code Router は削除されました。別のプロバイダーを選択して設定してください。"
 		},
 		"api": {
 			"invalidKeyInvalidChars": "APIキーに無効な文字が含まれています。",
@@ -164,7 +164,7 @@
 		"mode_exported": "モード「{{mode}}」が正常にエクスポートされました",
 		"mode_imported": "モードが正常にインポートされました",
 		"roo": {
-			"signInUnavailable": "Roo Code Cloud へのサインインは現在利用できません。続行するには別のプロバイダーを設定してください。"
+			"signInUnavailable": "Zoo Code Cloud へのサインインは現在利用できません。続行するには別のプロバイダーを設定してください。"
 		}
 	},
 	"answers": {

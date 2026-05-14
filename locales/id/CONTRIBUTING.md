@@ -73,7 +73,7 @@ Semua kontribusi dimulai dengan Masalah GitHub menggunakan template ramping kami
 - **Buat masalah** menggunakan:
     - **Penyempurnaan:** Template "Permintaan Penyempurnaan" (bahasa sederhana yang berfokus pada manfaat pengguna).
     - **Bug:** Template "Laporan Bug" (repro minimal + yang diharapkan vs aktual + versi).
-- **Ingin mengerjakannya?** Beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke **Hannes Rudolph (`hrudolph`)** di [Discord](https://discord.gg/SfHYG44NUA) untuk ditugaskan. Penugasan akan dikonfirmasi di utas.
+- **Ingin mengerjakannya?** Beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke tim inti di [Discord](https://discord.gg/SfHYG44NUA) untuk ditugaskan. Penugasan akan dikonfirmasi di utas.
 - **PR harus menautkan ke masalah.** PR yang tidak tertaut dapat ditutup.
 
 ### Memutuskan Apa yang Akan Dikerjakan
@@ -126,7 +126,7 @@ pnpm install
 
 ### Kebijakan Pull Request
 
-- Harus merujuk pada Masalah GitHub yang ditugaskan. Untuk ditugaskan: beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke **Hannes Rudolph (`hrudolph`)** di [Discord](https://discord.gg/SfHYG44NUA). Penugasan akan dikonfirmasi di utas.
+- Harus merujuk pada Masalah GitHub yang ditugaskan. Untuk ditugaskan: beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke tim inti di [Discord](https://discord.gg/SfHYG44NUA). Penugasan akan dikonfirmasi di utas.
 - PR yang tidak tertaut dapat ditutup.
 - PR harus lulus tes CI, selaras dengan peta jalan, dan memiliki dokumentasi yang jelas.
 
