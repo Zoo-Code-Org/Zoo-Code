@@ -115,8 +115,8 @@
 			"thinking_complete_recitation": "(Pensament completat, però la sortida s'ha bloquejat a causa de la comprovació de recitació.)"
 		},
 		"roo": {
-			"authenticationRequired": "El proveïdor Zoo requereix autenticació al núvol. Si us plau, inicieu sessió a Zoo Code Cloud.",
-			"routerRemoved": "S'ha eliminat Zoo Code Router. Selecciona i configura un proveïdor diferent."
+			"authenticationRequired": "El proveïdor Roo requereix autenticació al núvol. Si us plau, inicieu sessió a Roo Code Cloud.",
+			"routerRemoved": "S'ha eliminat Roo Code Router. Selecciona i configura un proveïdor diferent."
 		},
 		"openAiCodex": {
 			"notAuthenticated": "No esteu autenticat amb OpenAI Codex. Si us plau, inicieu sessió mitjançant el flux OAuth d'OpenAI Codex.",
@@ -168,7 +168,7 @@
 		"mode_exported": "Mode '{{mode}}' exportat correctament",
 		"mode_imported": "Mode importat correctament",
 		"roo": {
-			"signInUnavailable": "L'inici de sessió de Zoo Code Cloud no està disponible en aquest moment. Configura un altre proveïdor per continuar."
+			"signInUnavailable": "L'inici de sessió de Roo Code Cloud no està disponible en aquest moment. Configura un altre proveïdor per continuar."
 		}
 	},
 	"answers": {

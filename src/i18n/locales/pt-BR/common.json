@@ -116,8 +116,8 @@
 			"thinking_complete_recitation": "(Pensamento concluído, mas a saída foi bloqueada devido à verificação de recitação.)"
 		},
 		"roo": {
-			"authenticationRequired": "O provedor Zoo requer autenticação na nuvem. Faça login no Zoo Code Cloud.",
-			"routerRemoved": "O Zoo Code Router foi removido. Selecione e configure um provedor diferente."
+			"authenticationRequired": "O provedor Roo requer autenticação na nuvem. Faça login no Roo Code Cloud.",
+			"routerRemoved": "O Roo Code Router foi removido. Selecione e configure um provedor diferente."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "A chave API contém caracteres inválidos.",
@@ -168,7 +168,7 @@
 		"mode_exported": "Modo '{{mode}}' exportado com sucesso",
 		"mode_imported": "Modo importado com sucesso",
 		"roo": {
-			"signInUnavailable": "O login do Zoo Code Cloud não está disponível no momento. Configure outro provedor para continuar."
+			"signInUnavailable": "O login do Roo Code Cloud não está disponível no momento. Configure outro provedor para continuar."
 		}
 	},
 	"answers": {

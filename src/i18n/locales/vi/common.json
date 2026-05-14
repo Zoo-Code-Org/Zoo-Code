@@ -112,8 +112,8 @@
 			"thinking_complete_recitation": "(Đã suy nghĩ xong nhưng kết quả bị chặn do kiểm tra trích dẫn.)"
 		},
 		"roo": {
-			"authenticationRequired": "Nhà cung cấp Zoo yêu cầu xác thực đám mây. Vui lòng đăng nhập vào Zoo Code Cloud.",
-			"routerRemoved": "Zoo Code Router đã bị xóa. Vui lòng chọn và cấu hình một nhà cung cấp khác."
+			"authenticationRequired": "Nhà cung cấp Roo yêu cầu xác thực đám mây. Vui lòng đăng nhập vào Roo Code Cloud.",
+			"routerRemoved": "Roo Code Router đã bị xóa. Vui lòng chọn và cấu hình một nhà cung cấp khác."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "Khóa API chứa ký tự không hợp lệ.",
@@ -164,7 +164,7 @@
 		"mode_exported": "Chế độ '{{mode}}' đã được xuất thành công",
 		"mode_imported": "Chế độ đã được nhập thành công",
 		"roo": {
-			"signInUnavailable": "Đăng nhập Zoo Code Cloud hiện không khả dụng. Hãy cấu hình nhà cung cấp khác để tiếp tục."
+			"signInUnavailable": "Đăng nhập Roo Code Cloud hiện không khả dụng. Hãy cấu hình nhà cung cấp khác để tiếp tục."
 		}
 	},
 	"answers": {

@@ -117,8 +117,8 @@
 			"thinking_complete_recitation": "（思考完成，但由于引用检查输出被阻止。）"
 		},
 		"roo": {
-			"authenticationRequired": "Zoo 提供商需要云认证。请登录 Zoo Code Cloud。",
-			"routerRemoved": "Zoo Code Router 已被移除。请选择并配置其他提供商。"
+			"authenticationRequired": "Roo 提供商需要云认证。请登录 Roo Code Cloud。",
+			"routerRemoved": "Roo Code Router 已被移除。请选择并配置其他提供商。"
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API 密钥包含无效字符.",
@@ -169,7 +169,7 @@
 		"mode_exported": "模式 '{{mode}}' 已成功导出",
 		"mode_imported": "模式已成功导入",
 		"roo": {
-			"signInUnavailable": "Zoo Code Cloud 登录当前不可用。请配置其他提供商以继续。"
+			"signInUnavailable": "Roo Code Cloud 登录当前不可用。请配置其他提供商以继续。"
 		}
 	},
 	"answers": {
