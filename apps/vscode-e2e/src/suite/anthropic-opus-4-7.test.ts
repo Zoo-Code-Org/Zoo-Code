@@ -13,10 +13,11 @@ type CapturedAnthropicRequest = {
 }
 
 const ALLOWED_PROXY_HOSTS = new Set(["127.0.0.1", "localhost", "api.anthropic.com"])
+const ANTHROPIC_MESSAGES_PATH = "/v1/messages"
 
 function isMessagesUrl(rawUrl: string): boolean {
 	try {
-		return new URL(rawUrl).pathname.endsWith("/v1/messages")
+		return new URL(rawUrl).pathname.endsWith(ANTHROPIC_MESSAGES_PATH)
 	} catch {
 		return false
 	}
@@ -61,7 +62,7 @@ async function pipeFetchResponse(target: ServerResponse, source: Response) {
 	target.end()
 }
 
-function resolveAllowedUpstreamUrl(baseUrl: string, requestUrl: string): URL {
+function resolveAllowedUpstreamUrl(baseUrl: string): URL {
 	const upstreamBase = new URL(baseUrl)
 	const isLocalProxy = upstreamBase.hostname === "127.0.0.1" || upstreamBase.hostname === "localhost"
 
@@ -72,7 +73,7 @@ function resolveAllowedUpstreamUrl(baseUrl: string, requestUrl: string): URL {
 		throw new Error(`Unexpected Anthropic proxy target: ${upstreamBase.origin}`)
 	}
 
-	return new URL(requestUrl, upstreamBase)
+	return new URL(ANTHROPIC_MESSAGES_PATH, upstreamBase)
 }
 
 async function withAnthropicProxy<T>(
@@ -118,7 +119,7 @@ async function withAnthropicProxy<T>(
 				}
 			}
 
-			const upstreamUrl = resolveAllowedUpstreamUrl(baseUrl, requestUrl)
+			const upstreamUrl = resolveAllowedUpstreamUrl(baseUrl)
 			const upstream = await fetch(upstreamUrl, {
 				method: req.method,
 				headers: forwardHeaders,
