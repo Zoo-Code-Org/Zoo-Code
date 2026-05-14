@@ -433,7 +433,7 @@ describe("Cline", () => {
 						ts: Date.now(),
 						extraProp: "should be removed",
 					},
-				]
+				] as any
 
 				const iterator = cline.attemptApiRequest(0)
 				await iterator.next()
