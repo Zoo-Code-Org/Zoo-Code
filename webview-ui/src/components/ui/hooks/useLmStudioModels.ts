@@ -4,7 +4,13 @@ import { type ModelRecord, type ExtensionMessage } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 
-const getLmStudioModels = async () =>
+export const requestLmStudioModels = (baseUrl?: string) =>
+	vscode.postMessage({
+		type: "requestLmStudioModels",
+		values: typeof baseUrl === "string" ? { baseUrl } : undefined,
+	})
+
+const getLmStudioModels = async (baseUrl?: string) =>
 	new Promise<ModelRecord>((resolve, reject) => {
 		const cleanup = () => {
 			window.removeEventListener("message", handler)
@@ -31,8 +37,11 @@ const getLmStudioModels = async () =>
 		}
 
 		window.addEventListener("message", handler)
-		vscode.postMessage({ type: "requestLmStudioModels" })
+		requestLmStudioModels(baseUrl)
 	})
 
 export const useLmStudioModels = (modelId?: string) =>
-	useQuery({ queryKey: ["lmStudioModels"], queryFn: () => (modelId ? getLmStudioModels() : {}) })
+	useQuery({
+		queryKey: ["lmStudioModels"],
+		queryFn: () => (modelId ? getLmStudioModels() : {}),
+	})
