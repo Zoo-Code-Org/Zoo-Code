@@ -50,7 +50,7 @@
 
 ## Roo Code to Zoo Code migration
 
-You can find a quick guide on how to do the migration from Roo Code to Zoo Code [here](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/SfHYG44NUA)
+You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/SfHYG44NUA)
 for this exact support, so if you are having problems or if you have quetion, jump on and ask.
 
 ## What's New in v3.55.0
@@ -87,7 +87,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-  </details>
+    </details>
 
 ---
 
@@ -201,15 +201,15 @@ Options:
 If you prefer to install the VSIX package manually:
 
 1. First, build the VSIX package:
-   ```sh
-   pnpm vsix
-   ```
+    ```sh
+    pnpm vsix
+    ```
 2. A `.vsix` file will be generated in the `bin/` directory (e.g.,
    `bin/zoo-code-<version>.vsix`).
 3. Install it manually using the VSCode CLI:
-   ```sh
-   code --install-extension bin/zoo-code-<version>.vsix
-   ```
+    ```sh
+    code --install-extension bin/zoo-code-<version>.vsix
+    ```
 
 ---
 
