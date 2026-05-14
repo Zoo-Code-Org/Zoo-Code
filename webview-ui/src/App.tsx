@@ -174,11 +174,13 @@ const App = () => {
 	useEffect(() => {
 		const isRecoverableTab = tab === "settings" || tab === "marketplace"
 
-		if (showWelcome && settingsImportedAt && !isRecoverableTab && settingsImportedAt !== handledImportRef.current) {
+		if (showWelcome && settingsImportedAt && settingsImportedAt !== handledImportRef.current) {
 			handledImportRef.current = settingsImportedAt
-			setCurrentSection("providers")
-			setCurrentMarketplaceTab(undefined)
-			setTab("settings")
+			if (!isRecoverableTab) {
+				setCurrentSection("providers")
+				setCurrentMarketplaceTab(undefined)
+				setTab("settings")
+			}
 		}
 	}, [showWelcome, settingsImportedAt, tab])
 

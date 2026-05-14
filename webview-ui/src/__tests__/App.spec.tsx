@@ -188,6 +188,15 @@ describe("App", () => {
 		window.dispatchEvent(messageEvent)
 	}
 
+	const createSetupIncompleteState = () => ({
+		didHydrateState: true,
+		showWelcome: true,
+		shouldShowAnnouncement: false,
+		experiments: {},
+		language: "en",
+		telemetrySetting: "enabled",
+	})
+
 	it("shows chat view by default", () => {
 		render(<AppWithProviders />)
 
@@ -269,33 +278,12 @@ describe("App", () => {
 		expect(screen.queryByTestId("history-view")).not.toBeInTheDocument()
 	})
 
-	it("opens providers settings automatically after an import leaves setup incomplete", async () => {
-		const importedAt = Date.now()
-
-		mockUseExtensionState.mockReturnValue({
-			didHydrateState: true,
-			showWelcome: true,
-			settingsImportedAt: importedAt,
-			shouldShowAnnouncement: false,
-			experiments: {},
-			language: "en",
-			telemetrySetting: "enabled",
-		})
-
-		render(<AppWithProviders />)
-
-		expect(await screen.findByTestId("settings-view")).toBeInTheDocument()
-		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
-	})
-
-	it("redirects to providers settings when an import fires from another gated tab", async () => {
+	it.each([
+		{ label: "chat", action: undefined },
+		{ label: "history", action: "historyButtonClicked" },
+	])("redirects to providers settings when an import fires from the $label tab", async ({ action }) => {
 		const state = {
-			didHydrateState: true,
-			showWelcome: true,
-			shouldShowAnnouncement: false,
-			experiments: {},
-			language: "en",
-			telemetrySetting: "enabled",
+			...createSetupIncompleteState(),
 			settingsImportedAt: undefined as number | undefined,
 		}
 
@@ -303,11 +291,15 @@ describe("App", () => {
 
 		const { rerender } = render(<AppWithProviders />)
 
-		act(() => {
-			triggerMessage("historyButtonClicked")
-		})
+		if (action) {
+			act(() => {
+				triggerMessage(action)
+			})
+		}
 
-		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		if (action === "historyButtonClicked") {
+			expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		}
 
 		state.settingsImportedAt = Date.now()
 		rerender(<AppWithProviders />)
@@ -316,17 +308,78 @@ describe("App", () => {
 		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
 	})
 
+	it.each([
+		{
+			label: "settings before returning to chat",
+			action: "settingsButtonClicked",
+			viewId: "settings-view",
+			nextAction: undefined,
+		},
+		{
+			label: "settings before switching to history",
+			action: "settingsButtonClicked",
+			viewId: "settings-view",
+			nextAction: "historyButtonClicked",
+		},
+		{
+			label: "marketplace before returning to chat",
+			action: "marketplaceButtonClicked",
+			viewId: "marketplace-view",
+			nextAction: undefined,
+		},
+		{
+			label: "marketplace before switching to history",
+			action: "marketplaceButtonClicked",
+			viewId: "marketplace-view",
+			nextAction: "historyButtonClicked",
+		},
+	])(
+		"consumes imported settings without a later redirect when already on $label",
+		async ({ action, viewId, nextAction }) => {
+			const state = {
+				...createSetupIncompleteState(),
+				settingsImportedAt: undefined as number | undefined,
+			}
+
+			mockUseExtensionState.mockImplementation(() => state)
+
+			const { rerender } = render(<AppWithProviders />)
+
+			act(() => {
+				triggerMessage(action)
+			})
+
+			expect(await screen.findByTestId(viewId)).toBeInTheDocument()
+			expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
+
+			state.settingsImportedAt = Date.now()
+			rerender(<AppWithProviders />)
+
+			const currentView = await screen.findByTestId(viewId)
+			expect(currentView).toBeInTheDocument()
+
+			if (nextAction) {
+				act(() => {
+					triggerMessage(nextAction)
+				})
+			} else {
+				act(() => {
+					currentView.click()
+				})
+			}
+
+			expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+			expect(screen.queryByTestId("settings-view")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("marketplace-view")).not.toBeInTheDocument()
+		},
+	)
+
 	it("does not bounce back to settings after the import redirect has already fired", async () => {
 		const importedAt = Date.now()
 
 		mockUseExtensionState.mockReturnValue({
-			didHydrateState: true,
-			showWelcome: true,
+			...createSetupIncompleteState(),
 			settingsImportedAt: importedAt,
-			shouldShowAnnouncement: false,
-			experiments: {},
-			language: "en",
-			telemetrySetting: "enabled",
 		})
 
 		render(<AppWithProviders />)
