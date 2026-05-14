@@ -18,7 +18,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
-import { getAnthropicProviderReasoning, type AnthropicProviderReasoningParams } from "../transform/reasoning"
+import { getAnthropicProviderReasoning } from "../transform/reasoning"
 import { handleProviderError } from "./utils/error-handler"
 
 import { BaseProvider } from "./base-provider"
@@ -123,9 +123,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 				const secondLastMsgUserIndex = userMsgIndices[userMsgIndices.length - 2] ?? -1
 
 				try {
-					const requestParams: Anthropic.Messages.MessageCreateParamsStreaming & {
-						thinking?: AnthropicProviderReasoningParams
-					} = {
+					const requestParams = {
 						model: modelId,
 						max_tokens: maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
 						temperature,
@@ -196,9 +194,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			}
 			default: {
 				try {
-					const requestParams: Anthropic.Messages.MessageCreateParamsStreaming & {
-						thinking?: AnthropicProviderReasoningParams
-					} = {
+					const requestParams = {
 						model: modelId,
 						max_tokens: maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
 						temperature,
