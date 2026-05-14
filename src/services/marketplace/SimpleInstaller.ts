@@ -325,7 +325,7 @@ export class SimpleInstaller {
 
 		// Use CustomModesManager to delete the mode configuration
 		// This also handles rules folder deletion
-		await this.customModesManager.deleteCustomMode(modeSlug, true)
+		await this.customModesManager.deleteCustomMode(modeSlug)
 	}
 
 	private async removeMcp(item: MarketplaceItem, target: "project" | "global"): Promise<void> {

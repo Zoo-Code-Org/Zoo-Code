@@ -11,19 +11,16 @@ import {
 	type GlobalState,
 	type ClineMessage,
 	type TelemetrySetting,
-	type UserSettingsConfig,
 	type ModelRecord,
 	type Command as SlashCommand,
 	type WebviewMessage,
 	type EditQueuedMessagePayload,
-	TelemetryEventName,
 	RooCodeSettings,
 	ExperimentId,
 	checkoutDiffPayloadSchema,
 	checkoutRestorePayloadSchema,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
-import { CloudService } from "@roo-code/cloud"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
@@ -47,7 +44,6 @@ import { MessageEnhancer } from "./messageEnhancer"
 
 import { CodeIndexManager } from "../../services/code-index/manager"
 import { checkExistKey } from "../../shared/checkExistApiConfig"
-import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
 import { Terminal } from "../../integrations/terminal/Terminal"
 import { openFile } from "../../integrations/misc/open-file"
@@ -75,7 +71,7 @@ import { getCommand } from "../../utils/commands"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
-import { MarketplaceManager, MarketplaceItemType } from "../../services/marketplace"
+import { MarketplaceItemType } from "../../services/marketplace"
 import { setPendingTodoList } from "../tools/UpdateTodoListTool"
 import {
 	handleListWorktrees,
@@ -90,11 +86,7 @@ import {
 	handleCheckoutBranch,
 } from "./worktree"
 
-export const webviewMessageHandler = async (
-	provider: ClineProvider,
-	message: WebviewMessage,
-	marketplaceManager?: MarketplaceManager,
-) => {
+export const webviewMessageHandler = async (provider: ClineProvider, message: WebviewMessage) => {
 	// Utility functions provided for concise get/update of global state via contextProxy API.
 	const getGlobalState = <K extends keyof GlobalState>(key: K) => provider.contextProxy.getValue(key)
 	const updateGlobalState = async <K extends keyof GlobalState>(key: K, value: GlobalState[K]) =>
@@ -102,12 +94,6 @@ export const webviewMessageHandler = async (
 
 	const getCurrentCwd = () => {
 		return provider.getCurrentTask()?.cwd || provider.cwd
-	}
-
-	const isCloudServiceAvailable = () => CloudService.hasInstance()
-
-	const showCloudUnavailableMessage = () => {
-		vscode.window.showInformationMessage(getRouterUnavailableSignInMessage())
 	}
 
 	const getCurrentMode = async (): Promise<string> => {
@@ -613,13 +599,6 @@ export const webviewMessageHandler = async (
 					),
 				)
 
-			// Enable telemetry by default (when unset) or when explicitly enabled
-			provider.getStateToPostToWebview().then((state) => {
-				const { telemetrySetting } = state
-				const isOptedIn = telemetrySetting !== "disabled"
-				TelemetryService.instance.updateTelemetryState(isOptedIn)
-			})
-
 			provider.isViewLaunched = true
 			break
 		case "newTask":
@@ -788,16 +767,6 @@ export const webviewMessageHandler = async (
 				provider.exportTaskWithId(currentTaskId)
 			}
 			break
-		case "shareCurrentTask":
-			const shareTaskId = provider.getCurrentTask()?.taskId
-
-			if (!shareTaskId) {
-				vscode.window.showErrorMessage(t("common:errors.share_no_active_task"))
-				break
-			}
-
-			vscode.window.showErrorMessage(t("common:errors.share_not_enabled"))
-			break
 		case "showTaskWithId":
 			provider.showTaskWithId(message.text!)
 			break
@@ -926,7 +895,6 @@ export const webviewMessageHandler = async (
 						unbound: {},
 						ollama: {},
 						lmstudio: {},
-						roo: {},
 						poe: {},
 						deepseek: {},
 					}
@@ -1105,24 +1073,6 @@ export const webviewMessageHandler = async (
 				// Silently fail - user hasn't configured LM Studio yet.
 				console.debug("LM Studio models fetch failed:", error)
 			}
-			break
-		}
-		case "requestRooModels": {
-			provider.postMessageToWebview({
-				type: "singleRouterModelFetchResponse",
-				success: false,
-				error: getRouterRemovalMessage(),
-				values: { provider: "roo" },
-			})
-			break
-		}
-		case "requestRooCreditBalance": {
-			const requestId = message.requestId
-			provider.postMessageToWebview({
-				type: "rooCreditBalance",
-				requestId,
-				values: { error: "Roo credit balance is no longer available." },
-			})
 			break
 		}
 		case "requestOpenAiModels":
@@ -1428,10 +1378,6 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
-		case "taskSyncEnabled":
-			provider.log("Ignoring taskSyncEnabled update because cloud task sync is disabled")
-			break
-
 		case "refreshAllMcpServers": {
 			const mcpHub = provider.getMcpHub()
 
@@ -1631,7 +1577,6 @@ export const webviewMessageHandler = async (
 					})
 
 					if (result.success && result.enhancedText) {
-						MessageEnhancer.captureTelemetry(currentCline?.taskId, includeTaskHistoryInEnhance)
 						await provider.postMessageToWebview({ type: "enhancedPrompt", text: result.enhancedText })
 					} else {
 						throw new Error(result.error || "Unknown error")
@@ -2275,59 +2220,6 @@ export const webviewMessageHandler = async (
 			await provider.postStateToWebview()
 			break
 		}
-		case "rooCloudSignIn": {
-			if (!isCloudServiceAvailable()) {
-				provider.log("CloudService unavailable; ignoring rooCloudSignIn")
-				showCloudUnavailableMessage()
-				break
-			}
-
-			try {
-				TelemetryService.instance.captureEvent(TelemetryEventName.AUTHENTICATION_INITIATED)
-				// Use provider signup flow if useProviderSignup is explicitly true
-				await CloudService.instance.login(undefined, message.useProviderSignup ?? false)
-			} catch (error) {
-				provider.log(`AuthService#login failed: ${error}`)
-				vscode.window.showErrorMessage("Sign in failed.")
-			}
-
-			break
-		}
-		case "cloudLandingPageSignIn": {
-			if (!isCloudServiceAvailable()) {
-				provider.log("CloudService unavailable; ignoring cloudLandingPageSignIn")
-				showCloudUnavailableMessage()
-				break
-			}
-
-			try {
-				const landingPageSlug = message.text || "supernova"
-				TelemetryService.instance.captureEvent(TelemetryEventName.AUTHENTICATION_INITIATED)
-				await CloudService.instance.login(landingPageSlug)
-			} catch (error) {
-				provider.log(`CloudService#login failed: ${error}`)
-				vscode.window.showErrorMessage("Sign in failed.")
-			}
-			break
-		}
-		case "rooCloudSignOut": {
-			if (!isCloudServiceAvailable()) {
-				await provider.postStateToWebview()
-				provider.postMessageToWebview({ type: "authenticatedUser", userInfo: undefined })
-				break
-			}
-
-			try {
-				await CloudService.instance.logout()
-				await provider.postStateToWebview()
-				provider.postMessageToWebview({ type: "authenticatedUser", userInfo: undefined })
-			} catch (error) {
-				provider.log(`AuthService#logout failed: ${error}`)
-				vscode.window.showErrorMessage("Sign out failed.")
-			}
-
-			break
-		}
 		case "openAiCodexSignIn": {
 			try {
 				const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")
@@ -2367,60 +2259,6 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
-		case "rooCloudManualUrl": {
-			if (!isCloudServiceAvailable()) {
-				provider.log("CloudService unavailable; ignoring rooCloudManualUrl")
-				showCloudUnavailableMessage()
-				break
-			}
-
-			try {
-				if (!message.text) {
-					vscode.window.showErrorMessage(t("common:errors.manual_url_empty"))
-					break
-				}
-
-				// Parse the callback URL to extract parameters
-				const callbackUrl = message.text.trim()
-				const uri = vscode.Uri.parse(callbackUrl)
-
-				if (!uri.query) {
-					throw new Error(t("common:errors.manual_url_no_query"))
-				}
-
-				const query = new URLSearchParams(uri.query)
-				const code = query.get("code")
-				const state = query.get("state")
-				const organizationId = query.get("organizationId")
-
-				if (!code || !state) {
-					throw new Error(t("common:errors.manual_url_missing_params"))
-				}
-
-				// Reuse the existing authentication flow
-				await CloudService.instance.handleAuthCallback(
-					code,
-					state,
-					organizationId === "null" ? null : organizationId,
-				)
-
-				await provider.postStateToWebview()
-			} catch (error) {
-				provider.log(`ManualUrl#handleAuthCallback failed: ${error}`)
-				const errorMessage = error instanceof Error ? error.message : t("common:errors.manual_url_auth_failed")
-
-				// Show error message through VS Code UI
-				vscode.window.showErrorMessage(`${t("common:errors.manual_url_auth_error")}: ${errorMessage}`)
-			}
-
-			break
-		}
-		case "clearCloudAuthSkipModel": {
-			// Clear the flag that indicates auth completed without model selection
-			await provider.context.globalState.update("roo-auth-skip-model", undefined)
-			await provider.postStateToWebview()
-			break
-		}
 		case "zooCodeSignOut": {
 			try {
 				const { disconnectZooCode } = await import("../../services/zoo-code-auth")
@@ -2433,39 +2271,6 @@ export const webviewMessageHandler = async (
 			}
 			break
 		}
-		case "switchOrganization": {
-			try {
-				const organizationId = message.organizationId ?? null
-
-				// Switch to the new organization context
-				await CloudService.instance.switchOrganization(organizationId)
-
-				// Refresh the state to update UI
-				await provider.postStateToWebview()
-
-				// Send success response back to webview
-				await provider.postMessageToWebview({
-					type: "organizationSwitchResult",
-					success: true,
-					organizationId: organizationId,
-				})
-			} catch (error) {
-				provider.log(`Organization switch failed: ${error}`)
-				const errorMessage = error instanceof Error ? error.message : String(error)
-
-				// Send error response back to webview
-				await provider.postMessageToWebview({
-					type: "organizationSwitchResult",
-					success: false,
-					error: errorMessage,
-					organizationId: message.organizationId ?? null,
-				})
-
-				vscode.window.showErrorMessage(`Failed to switch organization: ${errorMessage}`)
-			}
-			break
-		}
-
 		case "saveCodeIndexSettingsAtomic": {
 			if (!message.codeIndexSettings) {
 				break
@@ -2840,9 +2645,9 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case "filterMarketplaceItems": {
-			if (marketplaceManager && message.filters) {
+			if (message.filters) {
 				try {
-					await marketplaceManager.updateWithFilteredItems({
+					await provider.getMarketplaceManager().updateWithFilteredItems({
 						type: message.filters.type as MarketplaceItemType | undefined,
 						search: message.filters.search,
 						tags: message.filters.tags,
@@ -2863,12 +2668,11 @@ export const webviewMessageHandler = async (
 		}
 
 		case "installMarketplaceItem": {
-			if (marketplaceManager && message.mpItem && message.mpInstallOptions) {
+			if (message.mpItem && message.mpInstallOptions) {
 				try {
-					const configFilePath = await marketplaceManager.installMarketplaceItem(
-						message.mpItem,
-						message.mpInstallOptions,
-					)
+					const configFilePath = await provider
+						.getMarketplaceManager()
+						.installMarketplaceItem(message.mpItem, message.mpInstallOptions)
 					await provider.postStateToWebview()
 					console.log(`Marketplace item installed and config file opened: ${configFilePath}`)
 
@@ -2893,9 +2697,11 @@ export const webviewMessageHandler = async (
 		}
 
 		case "removeInstalledMarketplaceItem": {
-			if (marketplaceManager && message.mpItem && message.mpInstallOptions) {
+			if (message.mpItem && message.mpInstallOptions) {
 				try {
-					await marketplaceManager.removeInstalledMarketplaceItem(message.mpItem, message.mpInstallOptions)
+					await provider
+						.getMarketplaceManager()
+						.removeInstalledMarketplaceItem(message.mpItem, message.mpInstallOptions)
 					await provider.postStateToWebview()
 
 					// Send success message to webview
@@ -2921,12 +2727,8 @@ export const webviewMessageHandler = async (
 					})
 				}
 			} else {
-				// MarketplaceManager not available or missing required parameters
-				const errorMessage = !marketplaceManager
-					? "Marketplace manager is not available"
-					: "Missing required parameters for marketplace item removal"
+				const errorMessage = "Missing required parameters for marketplace item removal"
 				console.error(errorMessage)
-
 				vscode.window.showErrorMessage(errorMessage)
 
 				if (message.mpItem?.id) {
@@ -2942,11 +2744,13 @@ export const webviewMessageHandler = async (
 		}
 
 		case "installMarketplaceItemWithParameters": {
-			if (marketplaceManager && message.payload && "item" in message.payload && "parameters" in message.payload) {
+			if (message.payload && "item" in message.payload && "parameters" in message.payload) {
 				try {
-					const configFilePath = await marketplaceManager.installMarketplaceItem(message.payload.item, {
-						parameters: message.payload.parameters,
-					})
+					const configFilePath = await provider
+						.getMarketplaceManager()
+						.installMarketplaceItem(message.payload.item, {
+							parameters: message.payload.parameters,
+						})
 					await provider.postStateToWebview()
 					console.log(`Marketplace item with parameters installed and config file opened: ${configFilePath}`)
 				} catch (error) {

@@ -2,7 +2,6 @@ import * as vscode from "vscode"
 import delay from "delay"
 
 import type { CommandId } from "@roo-code/types"
-import { TelemetryService } from "@roo-code/telemetry"
 
 import { Package } from "../shared/package"
 import { getCommand } from "../utils/commands"
@@ -12,7 +11,6 @@ import { focusPanel } from "../utils/focusPanel"
 import { handleNewTask } from "./handleTask"
 import { CodeIndexManager } from "../services/code-index/manager"
 import { importSettingsWithFeedback } from "../core/config/importExport"
-import { MdmService } from "../services/mdm/MdmService"
 import { t } from "../i18n"
 
 /**
@@ -79,8 +77,6 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			return
 		}
 
-		TelemetryService.instance.captureTitleButtonClicked("plus")
-
 		await visibleProvider.removeClineFromStack()
 		await visibleProvider.refreshWorkspace()
 		await visibleProvider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
@@ -89,8 +85,6 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 		await visibleProvider.postMessageToWebview({ type: "action", action: "focusInput" })
 	},
 	popoutButtonClicked: () => {
-		TelemetryService.instance.captureTitleButtonClicked("popout")
-
 		return openClineInNewTab({ context, outputChannel })
 	},
 	openInNewTab: () => openClineInNewTab({ context, outputChannel }),
@@ -100,8 +94,6 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 		if (!visibleProvider) {
 			return
 		}
-
-		TelemetryService.instance.captureTitleButtonClicked("settings")
 
 		visibleProvider.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
 		// Also explicitly post the visibility message to trigger scroll reliably
@@ -114,14 +106,7 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			return
 		}
 
-		TelemetryService.instance.captureTitleButtonClicked("history")
-
 		visibleProvider.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
-	},
-	marketplaceButtonClicked: () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
-		if (!visibleProvider) return
-		visibleProvider.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
 	},
 	newTask: handleNewTask,
 	setCustomStoragePath: async () => {
@@ -194,16 +179,7 @@ export const openClineInNewTab = async ({ context, outputChannel }: Omit<Registe
 	const contextProxy = await ContextProxy.getInstance(context)
 	const codeIndexManager = CodeIndexManager.getInstance(context)
 
-	// Get the existing MDM service instance to ensure consistent policy enforcement
-	let mdmService: MdmService | undefined
-	try {
-		mdmService = MdmService.getInstance()
-	} catch (error) {
-		// MDM service not initialized, which is fine - extension can work without it
-		mdmService = undefined
-	}
-
-	const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService)
+	const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy)
 	const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
 
 	// Check if there are any visible text editors, otherwise open a new group

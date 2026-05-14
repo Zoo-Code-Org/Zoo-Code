@@ -19,6 +19,7 @@ import {
 	isSecretStateKey,
 	IpcOrigin,
 	IpcMessageType,
+	openRouterDefaultModelId,
 } from "@roo-code/types"
 import { IpcServer } from "@roo-code/ipc"
 
@@ -136,7 +137,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						break
 					case TaskCommandName.GetModels:
 						try {
-							sendResponse(RooCodeEventName.ModelsResponse, [{}])
+							const models = await getModels({
+								provider: "openrouter",
+							})
+
+							sendResponse(RooCodeEventName.ModelsResponse, [
+								models || { [openRouterDefaultModelId]: {} },
+							])
 						} catch (error) {
 							sendResponse(RooCodeEventName.ModelsResponse, [{}])
 						}

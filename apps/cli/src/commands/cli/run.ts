@@ -22,7 +22,6 @@ import { JsonEventEmitter } from "@/agent/json-event-emitter.js"
 import { loadSettings } from "@/lib/storage/index.js"
 import { readWorkspaceTaskSessions, resolveWorkspaceResumeSessionId } from "@/lib/task-history/index.js"
 import { getEnvVarName, getApiKeyFromEnv } from "@/lib/utils/provider.js"
-import { runOnboarding } from "@/lib/utils/onboarding.js"
 import { validateTerminalShellPath } from "@/lib/utils/shell.js"
 import { getDefaultExtensionPath } from "@/lib/utils/extension.js"
 import { isValidSessionId } from "@/lib/utils/session-id.js"
@@ -150,7 +149,6 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 
 	const isTuiSupported = process.stdin.isTTY && process.stdout.isTTY
 	const isTuiEnabled = !flagOptions.print && isTuiSupported
-	const isOnboardingEnabled = isTuiEnabled && !flagOptions.provider && !settings.provider
 
 	// Determine effective values: CLI flags > settings file > DEFAULT_FLAGS.
 	const effectiveMode = flagOptions.mode || settings.mode || DEFAULT_FLAGS.mode
@@ -231,12 +229,6 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		terminalShell,
 	}
 
-	if (isOnboardingEnabled) {
-		if (!settings.onboardingProviderChoice) {
-			await runOnboarding()
-		}
-	}
-
 	// Validations
 	// TODO: Validate the API key for the chosen provider.
 	// TODO: Validate the model for the chosen provider.
@@ -245,7 +237,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 
 	if (!extensionHostOptions.apiKey) {
 		console.error(`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`)
-		console.error(`For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`)
+		console.error(`[CLI] For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`)
 
 		process.exit(1)
 	}

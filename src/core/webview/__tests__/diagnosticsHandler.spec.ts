@@ -87,6 +87,7 @@ describe("generateErrorDiagnostics", () => {
 		expect(String(writtenContent)).toContain(
 			"// Please share this file with Zoo Code Support (support@zoocode.dev) to diagnose the issue faster",
 		)
+		expect(String(writtenContent)).not.toContain("support@roocode.com")
 		expect(String(writtenContent)).toContain('"error":')
 		expect(String(writtenContent)).toContain('"history":')
 		expect(String(writtenContent)).toContain('"version": "1.2.3"')

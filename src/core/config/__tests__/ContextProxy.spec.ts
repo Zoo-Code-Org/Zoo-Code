@@ -519,14 +519,12 @@ describe("ContextProxy", () => {
 			await proxy.setValues({
 				apiProvider: "roo",
 				apiModelId: "roo/code-supernova",
-				rooApiKey: "router-key",
 			})
 
 			const settings = proxy.getProviderSettings()
 
 			expect(settings.apiProvider).toBeUndefined()
 			expect(settings.apiModelId).toBeUndefined()
-			expect(settings.rooApiKey).toBeUndefined()
 		})
 
 		it("should sanitize invalid apiProvider before parsing", async () => {

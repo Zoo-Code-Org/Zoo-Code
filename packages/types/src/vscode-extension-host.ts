@@ -4,17 +4,10 @@ import type { GlobalSettings, RooCodeSettings } from "./global-settings.js"
 import type { ProviderSettings, ProviderSettingsEntry } from "./provider-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ModeConfig, PromptComponent } from "./mode.js"
-import type { TelemetrySetting } from "./telemetry.js"
 import type { Experiments } from "./experiment.js"
 import type { ClineMessage, QueuedMessage } from "./message.js"
-import {
-	type MarketplaceItem,
-	type MarketplaceInstalledMetadata,
-	type InstallMarketplaceItemOptions,
-	marketplaceItemSchema,
-} from "./marketplace.js"
 import type { TodoItem } from "./todo.js"
-import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList, ShareVisibility } from "./cloud.js"
+import type { OrganizationAllowList } from "./organization.js"
 import type { SerializedCustomToolDefinition } from "./custom-tool.js"
 import type { GitCommit } from "./git.js"
 import type { McpServer } from "./mcp.js"
@@ -22,6 +15,8 @@ import type { ModelRecord, RouterModels } from "./model.js"
 import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-limits.js"
 import type { SkillMetadata } from "./skills.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
+import { marketplaceItemSchema } from "./marketplace.js"
+import type { MarketplaceItem, MarketplaceInstalledMetadata, InstallMarketplaceItemOptions } from "./marketplace.js"
 
 /**
  * ExtensionMessage
@@ -76,10 +71,6 @@ export interface ExtensionMessage {
 		| "indexingStatusUpdate"
 		| "indexCleared"
 		| "codebaseIndexConfig"
-		| "marketplaceInstallResult"
-		| "marketplaceRemoveResult"
-		| "marketplaceData"
-		| "shareTaskSuccess"
 		| "codeIndexSettingsSaved"
 		| "codeIndexSecretStatus"
 		| "showDeleteMessageDialog"
@@ -87,7 +78,6 @@ export interface ExtensionMessage {
 		| "commands"
 		| "insertTextIntoTextarea"
 		| "dismissedUpsells"
-		| "organizationSwitchResult"
 		| "interactionRequired"
 		| "customToolsResult"
 		| "modes"
@@ -104,7 +94,13 @@ export interface ExtensionMessage {
 		| "folderSelected"
 		| "skills"
 		| "fileContent"
+		| "marketplaceData"
+		| "marketplaceInstallResult"
+		| "marketplaceRemoveResult"
 	text?: string
+	marketplaceItems?: MarketplaceItem[]
+	organizationMcps?: MarketplaceItem[]
+	marketplaceInstalledMetadata?: MarketplaceInstalledMetadata
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -159,15 +155,9 @@ export interface ExtensionMessage {
 	setting?: string
 	value?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	hasContent?: boolean
-	items?: MarketplaceItem[]
-	userInfo?: CloudUserInfo
 	organizationAllowList?: OrganizationAllowList
 	tab?: string
-	marketplaceItems?: MarketplaceItem[]
-	organizationMcps?: MarketplaceItem[]
-	marketplaceInstalledMetadata?: MarketplaceInstalledMetadata
 	errors?: string[]
-	visibility?: ShareVisibility
 	rulesFolderPath?: string
 	settings?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	messageTs?: number
@@ -176,7 +166,6 @@ export interface ExtensionMessage {
 	commands?: Command[]
 	queuedMessages?: QueuedMessage[]
 	list?: string[] // For dismissedUpsells
-	organizationId?: string | null // For organizationSwitchResult
 	tools?: SerializedCustomToolDefinition[] // For customToolsResult
 	skills?: SkillMetadata[] // For skills response
 	modes?: { slug: string; name: string }[] // For modes response
@@ -283,6 +272,7 @@ export type ExtensionState = Pick<
 	| "terminalZdotdir"
 	| "execaShellPath"
 	| "diagnosticsEnabled"
+	| "telemetrySetting"
 	| "language"
 	| "modeApiConfigs"
 	| "customModePrompts"
@@ -339,29 +329,14 @@ export type ExtensionState = Pick<
 	toolRequirements?: Record<string, boolean> // Map of tool names to their requirements (e.g. {"apply_diff": true})
 
 	cwd?: string // Current working directory
-	telemetrySetting: TelemetrySetting
-	telemetryKey?: string
-	machineId?: string
-
 	renderContext: "sidebar" | "editor"
 	settingsImportedAt?: number
 	historyPreviewCollapsed?: boolean
 
-	cloudUserInfo: CloudUserInfo | null
-	cloudIsAuthenticated: boolean
-	cloudAuthSkipModel?: boolean // Flag indicating auth completed without model selection (user should pick 3rd-party provider)
-	cloudApiUrl?: string
-	cloudOrganizations?: CloudOrganizationMembership[]
-	sharingEnabled: boolean
-	publicSharingEnabled: boolean
 	organizationAllowList: OrganizationAllowList
-	organizationSettingsVersion?: number
 
 	autoCondenseContext: boolean
 	autoCondenseContextPercent: number
-	marketplaceItems?: MarketplaceItem[]
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	marketplaceInstalledMetadata?: { project: Record<string, any>; global: Record<string, any> }
 	profileThresholds: Record<string, number>
 	hasOpenedModeSelector: boolean
 	openRouterImageApiKey?: string
@@ -369,8 +344,6 @@ export type ExtensionState = Pick<
 	lastShownAnnouncementId?: string
 	apiModelId?: string
 	mcpServers?: McpServer[]
-	mdmCompliant?: boolean
-	taskSyncEnabled: boolean
 	openAiCodexIsAuthenticated?: boolean
 	zooCodeIsAuthenticated?: boolean
 	zooCodeUserName?: string
@@ -434,7 +407,6 @@ export interface WebviewMessage {
 		| "didShowAnnouncement"
 		| "selectImages"
 		| "exportCurrentTask"
-		| "shareCurrentTask"
 		| "showTaskWithId"
 		| "deleteTaskWithId"
 		| "exportTaskWithId"
@@ -446,8 +418,6 @@ export interface WebviewMessage {
 		| "requestOpenAiModels"
 		| "requestOllamaModels"
 		| "requestLmStudioModels"
-		| "requestRooModels"
-		| "requestRooCreditBalance"
 		| "requestVsCodeLmModels"
 		| "openImage"
 		| "saveImage"
@@ -481,7 +451,6 @@ export interface WebviewMessage {
 		| "deleteMessageConfirm"
 		| "submitEditedMessage"
 		| "editMessageConfirm"
-		| "taskSyncEnabled"
 		| "searchCommits"
 		| "setApiConfigPassword"
 		| "mode"
@@ -499,20 +468,13 @@ export interface WebviewMessage {
 		| "checkpointRestore"
 		| "deleteMcpServer"
 		| "codebaseIndexEnabled"
-		| "telemetrySetting"
 		| "searchFiles"
 		| "toggleApiConfigPin"
 		| "hasOpenedModeSelector"
 		| "lockApiConfigAcrossModes"
-		| "clearCloudAuthSkipModel"
-		| "rooCloudSignIn"
-		| "cloudLandingPageSignIn"
-		| "rooCloudSignOut"
-		| "rooCloudManualUrl"
 		| "openAiCodexSignIn"
 		| "openAiCodexSignOut"
 		| "zooCodeSignOut"
-		| "switchOrganization"
 		| "condenseTaskContextRequest"
 		| "requestIndexingStatus"
 		| "startIndexing"
@@ -525,15 +487,13 @@ export interface WebviewMessage {
 		| "focusPanelRequest"
 		| "openExternal"
 		| "filterMarketplaceItems"
-		| "marketplaceButtonClicked"
 		| "installMarketplaceItem"
 		| "installMarketplaceItemWithParameters"
 		| "cancelMarketplaceInstall"
 		| "removeInstalledMarketplaceItem"
-		| "marketplaceInstallResult"
 		| "fetchMarketplaceData"
+		| "showMdmAuthRequiredNotification"
 		| "switchTab"
-		| "shareTaskSuccess"
 		| "exportMode"
 		| "exportModeResult"
 		| "importMode"
@@ -547,7 +507,6 @@ export interface WebviewMessage {
 		| "deleteCommand"
 		| "createCommand"
 		| "insertTextIntoTextarea"
-		| "showMdmAuthRequiredNotification"
 		| "imageGenerationSettings"
 		| "queueMessage"
 		| "removeQueuedMessage"
@@ -567,6 +526,7 @@ export interface WebviewMessage {
 		| "requestModes"
 		| "switchMode"
 		| "debugSetting"
+		| "telemetrySetting"
 		// Worktree messages
 		| "listWorktrees"
 		| "createWorktree"
@@ -589,7 +549,9 @@ export interface WebviewMessage {
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
-	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
+	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace"
+	mpItem?: MarketplaceItem
+	mpInstallOptions?: InstallMarketplaceItemOptions
 	disabled?: boolean
 	context?: string
 	dataUri?: string
@@ -641,17 +603,13 @@ export interface WebviewMessage {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	settings?: any
 	url?: string // For openExternal
-	mpItem?: MarketplaceItem
-	mpInstallOptions?: InstallMarketplaceItemOptions
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	config?: Record<string, any> // Add config to the payload
-	visibility?: ShareVisibility // For share visibility
 	hasContent?: boolean // For checkRulesDirectoryResult
 	checkOnly?: boolean // For deleteCustomMode check
 	upsellId?: string // For dismissUpsell
 	list?: string[] // For dismissedUpsells response
 	organizationId?: string | null // For organization switching
-	useProviderSignup?: boolean // For rooCloudSignIn to use provider signup flow
 	codeIndexSettings?: {
 		// Global state settings
 		codebaseIndexEnabled: boolean
@@ -685,7 +643,7 @@ export interface WebviewMessage {
 		codebaseIndexOpenRouterApiKey?: string
 	}
 	updatedSettings?: RooCodeSettings
-	/** Task configuration applied via `createTask()` when starting a cloud task. */
+	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
 	// Worktree properties
 	worktreePath?: string

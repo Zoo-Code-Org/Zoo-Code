@@ -22,15 +22,6 @@ vi.mock("vscode", () => ({
 }))
 
 // Mock other dependencies
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		instance: {
-			captureCheckpointCreated: vi.fn(),
-			captureCheckpointRestored: vi.fn(),
-			captureCheckpointDiffed: vi.fn(),
-		},
-	},
-}))
 
 vi.mock("../../../utils/path", () => ({
 	getWorkspacePath: vi.fn(() => "/test/workspace"),

@@ -336,7 +336,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				requesty: mockModels,
 				unbound: mockModels,
 				litellm: mockModels,
-				roo: {},
 				ollama: {},
 				lmstudio: {},
 				"vercel-ai-gateway": mockModels,
@@ -422,7 +421,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
-				roo: {},
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
@@ -478,7 +476,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: {},
 				unbound: mockModels,
-				roo: {},
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
@@ -537,19 +534,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			success: false,
 			error: "LiteLLM connection failed",
 			values: { provider: "litellm" },
-		})
-	})
-
-	it("returns an explicit removal error for requestRooModels", async () => {
-		await webviewMessageHandler(mockClineProvider, {
-			type: "requestRooModels",
-		})
-
-		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
-			type: "singleRouterModelFetchResponse",
-			success: false,
-			error: "Roo Code Router has been removed. Please select and configure a different provider.",
-			values: { provider: "roo" },
 		})
 	})
 

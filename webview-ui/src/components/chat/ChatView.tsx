@@ -29,8 +29,6 @@ import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import RooHero from "@src/components/welcome/RooHero"
 import RooTips from "@src/components/welcome/RooTips"
 import { StandardTooltip, Button } from "@src/components/ui"
-
-import TelemetryBanner from "../common/TelemetryBanner"
 import VersionIndicator from "../common/VersionIndicator"
 import HistoryPreview from "../history/HistoryPreview"
 import Announcement from "./Announcement"
@@ -81,7 +79,6 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		setMode,
 		alwaysAllowModeSwitch,
 		customModes,
-		telemetrySetting,
 		soundEnabled,
 		soundVolume,
 		messageQueue = [],
@@ -1554,7 +1551,6 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		<div
 			data-testid="chat-view"
 			className={isHidden ? "hidden" : "fixed top-0 left-0 right-0 bottom-0 flex flex-col overflow-hidden"}>
-			{telemetrySetting === "unset" && <TelemetryBanner />}
 			{(showAnnouncement || showAnnouncementModal) && (
 				<Announcement
 					hideAnnouncement={() => {
@@ -1618,7 +1614,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						/>
 						<div className="flex flex-col gap-4 w-full">
 							<RooHero />
-							<RooTips />
+							{taskHistory.length < 6 && <RooTips />}
 							{/* Everyone should see their task history if any */}
 							{taskHistory.length > 0 && <HistoryPreview />}
 						</div>
@@ -1754,7 +1750,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				<div className="px-[15px] py-1">
 					<WarningRow
 						title={t("chat:retiredProvider.title")}
-						message={t("chat:retiredProvider.message")}
+						message={t(
+							apiConfiguration?.apiProvider === "roo"
+								? "chat:retiredProvider.rooMessage"
+								: "chat:retiredProvider.message",
+						)}
 						actionText={t("chat:retiredProvider.openSettings")}
 						onAction={() => vscode.postMessage({ type: "switchTab", tab: "settings" })}
 					/>

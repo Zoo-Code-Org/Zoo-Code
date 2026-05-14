@@ -13,8 +13,6 @@ import fs from "fs/promises"
 import ignore from "ignore"
 import path from "path"
 import { t } from "../../i18n"
-import { TelemetryService } from "@roo-code/telemetry"
-import { TelemetryEventName } from "@roo-code/types"
 
 export class CodeIndexManager {
 	// --- Singleton Implementation ---
@@ -379,11 +377,6 @@ export class CodeIndexManager {
 		} catch (error) {
 			// Should never happen: reading file failed even though it exists
 			console.error("Unexpected error loading .gitignore:", error)
-			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-				location: "_recreateServices",
-			})
 		}
 
 		// Create RooIgnoreController instance
@@ -462,11 +455,6 @@ export class CodeIndexManager {
 				} catch (error) {
 					// Error state already set in _recreateServices
 					console.error("Failed to recreate services:", error)
-					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: error instanceof Error ? error.message : String(error),
-						stack: error instanceof Error ? error.stack : undefined,
-						location: "handleSettingsChange",
-					})
 					// Re-throw the error so the caller knows validation failed
 					throw error
 				}

@@ -19,15 +19,6 @@ vitest.mock("../../../shared/embeddingModels", () => ({
 	getModelDimension: vitest.fn(),
 }))
 
-// Mock TelemetryService
-vitest.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		instance: {
-			captureEvent: vitest.fn(),
-		},
-	},
-}))
-
 const MockedOpenAiEmbedder = OpenAiEmbedder as MockedClass<typeof OpenAiEmbedder>
 const MockedCodeIndexOllamaEmbedder = CodeIndexOllamaEmbedder as MockedClass<typeof CodeIndexOllamaEmbedder>
 const MockedOpenAICompatibleEmbedder = OpenAICompatibleEmbedder as MockedClass<typeof OpenAICompatibleEmbedder>

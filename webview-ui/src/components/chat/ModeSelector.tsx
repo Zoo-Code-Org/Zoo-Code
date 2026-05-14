@@ -2,12 +2,11 @@ import React from "react"
 import { Fzf } from "fzf"
 import { Check, X } from "lucide-react"
 
-import { type ModeConfig, type CustomModePrompts, TelemetryEventName } from "@roo-code/types"
+import { type ModeConfig, type CustomModePrompts } from "@roo-code/types"
 
 import { type Mode, getAllModes, defaultModeSlug } from "@roo/modes"
 
 import { vscode } from "@/utils/vscode"
-import { telemetryClient } from "@/utils/TelemetryClient"
 import { cn } from "@/lib/utils"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -52,9 +51,6 @@ export const ModeSelector = ({
 	const { t } = useAppTranslation()
 
 	const trackModeSelectorOpened = React.useCallback(() => {
-		// Track telemetry every time the mode selector is opened.
-		telemetryClient.capture(TelemetryEventName.MODE_SELECTOR_OPENED)
-
 		// Track first-time usage for UI purposes.
 		if (!hasOpenedModeSelector) {
 			setHasOpenedModeSelector(true)
@@ -311,21 +307,6 @@ export const ModeSelector = ({
 					{/* Bottom bar with buttons on left and title on right */}
 					<div className="flex flex-row items-center justify-between px-2 py-2 border-t border-vscode-dropdown-border">
 						<div className="flex flex-row gap-1">
-							<IconButton
-								iconClass="codicon-extensions"
-								title={t("chat:modeSelector.marketplace")}
-								onClick={() => {
-									window.postMessage(
-										{
-											type: "action",
-											action: "marketplaceButtonClicked",
-											values: { marketplaceTab: "mode" },
-										},
-										"*",
-									)
-									setOpen(false)
-								}}
-							/>
 							<IconButton
 								iconClass="codicon-settings-gear"
 								title={t("chat:modeSelector.settings")}

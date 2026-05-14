@@ -3,19 +3,22 @@
 import { webviewMessageHandler } from "../../../core/webview/webviewMessageHandler"
 
 // Mock the provider and marketplace manager
+const mockMarketplaceManager = {
+	updateWithFilteredItems: vi.fn(),
+	installMarketplaceItem: vi.fn().mockResolvedValue(undefined),
+} as any
+
 const mockProvider = {
 	getState: vi.fn(),
 	postStateToWebview: vi.fn(),
 	postMessageToWebview: vi.fn(),
-} as any
-
-const mockMarketplaceManager = {
-	updateWithFilteredItems: vi.fn(),
+	getMarketplaceManager: vi.fn().mockReturnValue(mockMarketplaceManager),
 } as any
 
 describe("Marketplace General Availability", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockProvider.getMarketplaceManager.mockReturnValue(mockMarketplaceManager)
 	})
 
 	it("should allow marketplace API calls (marketplace is generally available)", async () => {
@@ -29,7 +32,7 @@ describe("Marketplace General Availability", () => {
 			filters: { type: "mcp", search: "", tags: [] },
 		}
 
-		await webviewMessageHandler(mockProvider, message, mockMarketplaceManager)
+		await webviewMessageHandler(mockProvider, message)
 
 		// Should call marketplace manager methods since marketplace is generally available
 		expect(mockMarketplaceManager.updateWithFilteredItems).toHaveBeenCalledWith({
@@ -47,9 +50,7 @@ describe("Marketplace General Availability", () => {
 		})
 
 		const mockInstallMarketplaceItem = vi.fn().mockResolvedValue(undefined)
-		const mockMarketplaceManagerWithInstall = {
-			installMarketplaceItem: mockInstallMarketplaceItem,
-		}
+		mockProvider.getMarketplaceManager.mockReturnValue({ installMarketplaceItem: mockInstallMarketplaceItem })
 
 		const message = {
 			type: "installMarketplaceItem" as const,
@@ -64,7 +65,7 @@ describe("Marketplace General Availability", () => {
 			mpInstallOptions: { target: "project" as const },
 		}
 
-		await webviewMessageHandler(mockProvider, message, mockMarketplaceManagerWithInstall as any)
+		await webviewMessageHandler(mockProvider, message)
 
 		// Should call install method since marketplace is generally available
 		expect(mockInstallMarketplaceItem).toHaveBeenCalledWith(message.mpItem, message.mpInstallOptions)

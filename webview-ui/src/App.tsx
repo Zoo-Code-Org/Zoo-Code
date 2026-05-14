@@ -51,16 +51,7 @@ const tabsByMessageAction: Partial<Record<NonNullable<ExtensionMessage["action"]
 }
 
 const App = () => {
-	const {
-		didHydrateState,
-		showWelcome,
-		shouldShowAnnouncement,
-		telemetrySetting,
-		telemetryKey,
-		machineId,
-		renderContext,
-		mdmCompliant,
-	} = useExtensionState()
+	const { didHydrateState, showWelcome, shouldShowAnnouncement, renderContext } = useExtensionState()
 
 	// Create a persistent state manager
 	const marketplaceStateManager = useMemo(() => new MarketplaceViewStateManager(), [])
@@ -85,28 +76,19 @@ const App = () => {
 	const settingsRef = useRef<SettingsViewRef>(null)
 	const chatViewRef = useRef<ChatViewRef>(null)
 
-	const switchTab = useCallback(
-		(newTab: Tab) => {
-			if (mdmCompliant === false) {
-				// Notify the user that authentication is required by their organization
-				vscode.postMessage({ type: "showMdmAuthRequiredNotification" })
-				return
-			}
-
-			setCurrentSection(undefined)
-			setCurrentMarketplaceTab(undefined)
-
-			if (settingsRef.current?.checkUnsaveChanges) {
-				settingsRef.current.checkUnsaveChanges(() => setTab(newTab))
-			} else {
-				setTab(newTab)
-			}
-		},
-		[mdmCompliant],
-	)
-
 	const [currentSection, setCurrentSection] = useState<string | undefined>(undefined)
 	const [currentMarketplaceTab, setCurrentMarketplaceTab] = useState<string | undefined>(undefined)
+
+	const switchTab = useCallback((newTab: Tab) => {
+		setCurrentSection(undefined)
+		setCurrentMarketplaceTab(undefined)
+
+		if (settingsRef.current?.checkUnsaveChanges) {
+			settingsRef.current.checkUnsaveChanges(() => setTab(newTab))
+		} else {
+			setTab(newTab)
+		}
+	}, [])
 
 	const onMessage = useCallback(
 		(e: MessageEvent) => {
@@ -169,12 +151,6 @@ const App = () => {
 		}
 	}, [shouldShowAnnouncement, tab])
 
-	useEffect(() => {
-		if (didHydrateState) {
-			telemetryClient.updateTelemetryState(telemetrySetting, telemetryKey, machineId)
-		}
-	}, [telemetrySetting, telemetryKey, machineId, didHydrateState])
-
 	// Tell the extension that we are ready to receive messages.
 	useEffect(() => vscode.postMessage({ type: "webviewDidLaunch" }), [])
 
@@ -201,6 +177,7 @@ const App = () => {
 			}
 		}, [renderContext]),
 	)
+
 	// Track marketplace tab views
 	useEffect(() => {
 		if (tab === "marketplace") {

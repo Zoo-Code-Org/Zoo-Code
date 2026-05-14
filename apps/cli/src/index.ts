@@ -2,7 +2,7 @@ import { Command } from "commander"
 
 import { DEFAULT_FLAGS } from "@/types/constants.js"
 import { VERSION } from "@/lib/utils/version.js"
-import { run, logout, status, listCommands, listModes, listModels, listSessions, upgrade } from "@/commands/index.js"
+import { run, listCommands, listModes, listModels, listSessions, upgrade } from "@/commands/index.js"
 
 const program = new Command()
 
@@ -35,7 +35,7 @@ program
 	.option("-d, --debug", "Enable debug output (includes detailed debug information)", false)
 	.option("-a, --require-approval", "Require manual approval for actions", false)
 	.option("-k, --api-key <key>", "API key for the LLM provider")
-	.option("--provider <provider>", "API provider (anthropic, openai-native, gemini, openrouter, etc.)")
+	.option("--provider <provider>", "API provider (anthropic, openai, openrouter, etc.)")
 	.option("-m, --model <model>", "Model to use", DEFAULT_FLAGS.model)
 	.option("--mode <mode>", "Mode to start in (code, architect, ask, debug, etc.)", DEFAULT_FLAGS.mode)
 	.option("--terminal-shell <path>", "Absolute path to shell executable for inline terminal commands")
@@ -69,7 +69,7 @@ const applyListOptions = (command: Command) =>
 	command
 		.option("-w, --workspace <path>", "Workspace directory path (defaults to current working directory)")
 		.option("-e, --extension <path>", "Path to the extension bundle directory")
-		.option("-k, --api-key <key>", "OpenRouter API key (falls back to OPENROUTER_API_KEY)")
+		.option("-k, --api-key <key>", "API key for the LLM provider")
 		.option("--format <format>", 'Output format: "json" (default) or "text"', "json")
 		.option("-d, --debug", "Enable debug output", false)
 
@@ -107,7 +107,7 @@ applyListOptions(listCommand.command("modes").description("List available modes"
 	},
 )
 
-applyListOptions(listCommand.command("models").description("List available OpenRouter models")).action(
+applyListOptions(listCommand.command("models").description("List available models")).action(
 	async (options: Parameters<typeof listModels>[0]) => {
 		await runListAction(() => listModels(options))
 	},
@@ -124,26 +124,6 @@ program
 	.description("Upgrade Roo Code CLI to the latest version")
 	.action(async () => {
 		await runUpgradeAction(() => upgrade())
-	})
-
-const authCommand = program.command("auth").description("Inspect or remove legacy Roo auth tokens")
-
-authCommand
-	.command("logout")
-	.description("Remove a stored legacy Roo auth token")
-	.option("-v, --verbose", "Enable verbose output", false)
-	.action(async (options: { verbose: boolean }) => {
-		const result = await logout({ verbose: options.verbose })
-		process.exit(result.success ? 0 : 1)
-	})
-
-authCommand
-	.command("status")
-	.description("Show whether a legacy Roo auth token is still stored")
-	.option("-v, --verbose", "Enable verbose output", false)
-	.action(async (options: { verbose: boolean }) => {
-		await status({ verbose: options.verbose })
-		process.exit(0)
 	})
 
 program.parse()

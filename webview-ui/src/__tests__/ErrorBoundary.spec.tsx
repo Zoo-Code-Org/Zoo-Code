@@ -3,13 +3,6 @@ import { render, screen } from "@testing-library/react"
 import ErrorBoundary from "../components/ErrorBoundary"
 import { EXTERNAL_LINKS } from "../constants/externalLinks"
 
-// Mock telemetry client
-vi.mock("@src/utils/TelemetryClient", () => ({
-	telemetryClient: {
-		capture: vi.fn(),
-	},
-}))
-
 // Mock translation function
 vi.mock("react-i18next", () => {
 	const tFunction = (key: string) => key

@@ -6,7 +6,7 @@ import pWaitFor from "p-wait-for"
 
 import type { TaskSessionEntry } from "@roo-code/core/cli"
 import type { Command, ModelRecord, WebviewMessage } from "@roo-code/types"
-import { getProviderDefaultModelId } from "@roo-code/types"
+import { openRouterDefaultModelId } from "@roo-code/types"
 
 import { ExtensionHost, type ExtensionHostOptions } from "@/agent/index.js"
 import { readWorkspaceTaskSessions } from "@/lib/task-history/index.js"
@@ -112,7 +112,7 @@ async function createListHost(options: BaseListOptions, hostOptions: ListHostOpt
 		reasoningEffort: undefined,
 		user: null,
 		provider: "openrouter",
-		model: getProviderDefaultModelId("openrouter"),
+		model: openRouterDefaultModelId,
 		apiKey,
 		workspacePath,
 		extensionPath,
@@ -144,7 +144,7 @@ async function createListHost(options: BaseListOptions, hostOptions: ListHostOpt
  */
 function requestFromExtension<T>(
 	host: ExtensionHost,
-	request: WebviewMessage,
+	requestType: WebviewMessage["type"],
 	extract: (message: Record<string, unknown>) => T | undefined,
 ): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
@@ -187,17 +187,17 @@ function requestFromExtension<T>(
 
 		const timeoutId = setTimeout(() => {
 			finish(() =>
-				reject(new Error(`Timed out waiting for ${request.type} response after ${REQUEST_TIMEOUT_MS}ms`)),
+				reject(new Error(`Timed out waiting for ${requestType} response after ${REQUEST_TIMEOUT_MS}ms`)),
 			)
 		}, REQUEST_TIMEOUT_MS)
 
 		host.on("extensionWebviewMessage", onMessage)
-		host.sendToExtension(request)
+		host.sendToExtension({ type: requestType })
 	})
 }
 
 function requestCommands(host: ExtensionHost): Promise<CommandLike[]> {
-	return requestFromExtension(host, { type: "requestCommands" }, (message) => {
+	return requestFromExtension(host, "requestCommands", (message) => {
 		if (message.type !== "commands") {
 			return undefined
 		}
@@ -206,7 +206,7 @@ function requestCommands(host: ExtensionHost): Promise<CommandLike[]> {
 }
 
 function requestModes(host: ExtensionHost): Promise<ModeLike[]> {
-	return requestFromExtension(host, { type: "requestModes" }, (message) => {
+	return requestFromExtension(host, "requestModes", (message) => {
 		if (message.type !== "modes") {
 			return undefined
 		}
@@ -215,18 +215,15 @@ function requestModes(host: ExtensionHost): Promise<ModeLike[]> {
 }
 
 function requestOpenRouterModels(host: ExtensionHost): Promise<ModelRecord> {
-	return requestFromExtension(
-		host,
-		{ type: "requestRouterModels", values: { provider: "openrouter" } },
-		(message) => {
-			if (message.type !== "routerModels") {
-				return undefined
-			}
+	return requestFromExtension(host, "requestRouterModels", (message) => {
+		if (message.type !== "routerModels") {
+			return undefined
+		}
 
-			const routerModels = isRecord(message.routerModels) ? message.routerModels : undefined
-			return isRecord(routerModels?.openrouter) ? (routerModels.openrouter as ModelRecord) : {}
-		},
-	)
+		const routerModels = isRecord(message.routerModels) ? message.routerModels : {}
+		const openRouterModels = routerModels.openrouter
+		return isRecord(openRouterModels) ? (openRouterModels as ModelRecord) : {}
+	})
 }
 
 async function withHostAndSignalHandlers<T>(

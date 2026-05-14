@@ -98,6 +98,13 @@ vi.mock("../Announcement", () => ({
 	},
 }))
 
+// Mock DismissibleUpsell component
+vi.mock("@/components/common/DismissibleUpsell", () => ({
+	default: function MockDismissibleUpsell({ children }: { children: React.ReactNode }) {
+		return <div data-testid="dismissible-upsell">{children}</div>
+	},
+}))
+
 // Mock QueuedMessages component
 vi.mock("../QueuedMessages", () => ({
 	QueuedMessages: function MockQueuedMessages({
@@ -137,13 +144,6 @@ vi.mock("@src/components/welcome/RooTips", () => ({
 vi.mock("@src/components/welcome/RooHero", () => ({
 	default: function MockRooHero() {
 		return <div data-testid="roo-hero">Hero content</div>
-	},
-}))
-
-// Mock TelemetryBanner component
-vi.mock("../common/TelemetryBanner", () => ({
-	default: function MockTelemetryBanner() {
-		return null // Don't render anything to avoid interference
 	},
 }))
 
@@ -276,7 +276,6 @@ const mockPostMessage = (state: Partial<ExtensionState>) => {
 				allowedCommands: [],
 				alwaysAllowExecute: false,
 				cloudIsAuthenticated: false,
-				telemetrySetting: "enabled",
 				...state,
 			},
 		},
@@ -663,14 +662,45 @@ describe("ChatView - Version Indicator Tests", () => {
 	})
 })
 
-describe("ChatView - Welcome Screen Display Tests", () => {
+describe("ChatView - Welcome Content Display Tests", () => {
 	beforeEach(() => vi.clearAllMocks())
 
-	it("shows RooTips on the welcome screen regardless of task history or cloud auth", async () => {
-		const { getByTestId, queryByTestId } = renderChatView()
+	it("does not show removed cloud upsell for returning users", () => {
+		const { queryByTestId } = renderChatView()
 
 		mockPostMessage({
-			cloudIsAuthenticated: false,
+			taskHistory: [
+				{ id: "1", ts: Date.now() - 3000 },
+				{ id: "2", ts: Date.now() - 2000 },
+				{ id: "3", ts: Date.now() - 1000 },
+				{ id: "4", ts: Date.now() },
+			],
+			clineMessages: [], // No active task
+		})
+
+		expect(queryByTestId("dismissible-upsell")).not.toBeInTheDocument()
+	})
+
+	it("shows RooTips when user has only run 3 tasks in their history", () => {
+		const { queryByTestId } = renderChatView()
+
+		mockPostMessage({
+			taskHistory: [
+				{ id: "1", ts: Date.now() - 2000 },
+				{ id: "2", ts: Date.now() - 1000 },
+				{ id: "3", ts: Date.now() },
+			],
+			clineMessages: [], // No active task
+		})
+
+		expect(queryByTestId("dismissible-upsell")).not.toBeInTheDocument()
+		expect(queryByTestId("roo-tips")).toBeInTheDocument()
+	})
+
+	it("does not show removed cloud upsell when user has run 6 or more tasks", async () => {
+		const { queryByTestId } = renderChatView()
+
+		mockPostMessage({
 			taskHistory: [
 				{ id: "1", ts: Date.now() - 6000 },
 				{ id: "2", ts: Date.now() - 5000 },
@@ -684,16 +714,16 @@ describe("ChatView - Welcome Screen Display Tests", () => {
 		})
 
 		await waitFor(() => {
-			expect(getByTestId("roo-tips")).toBeInTheDocument()
+			expect(queryByTestId("dismissible-upsell")).not.toBeInTheDocument()
+			expect(queryByTestId("roo-tips")).not.toBeInTheDocument()
+			expect(queryByTestId("roo-hero")).toBeInTheDocument()
 		})
-		expect(queryByTestId("dismissible-upsell")).not.toBeInTheDocument()
 	})
 
 	it("does not show welcome content when there is an active task", async () => {
 		const { queryByTestId } = renderChatView()
 
 		mockPostMessage({
-			cloudIsAuthenticated: false,
 			taskHistory: [
 				{ id: "1", ts: Date.now() - 3000 },
 				{ id: "2", ts: Date.now() - 2000 },
@@ -715,6 +745,39 @@ describe("ChatView - Welcome Screen Display Tests", () => {
 			expect(queryByTestId("roo-tips")).not.toBeInTheDocument()
 			expect(queryByTestId("roo-hero")).not.toBeInTheDocument()
 		})
+	})
+
+	it("shows RooTips for newer users", () => {
+		const { queryByTestId, getByTestId } = renderChatView()
+
+		mockPostMessage({
+			taskHistory: [
+				{ id: "1", ts: Date.now() - 3000 },
+				{ id: "2", ts: Date.now() - 2000 },
+				{ id: "3", ts: Date.now() - 1000 },
+				{ id: "4", ts: Date.now() },
+			],
+			clineMessages: [], // No active task
+		})
+
+		expect(queryByTestId("dismissible-upsell")).not.toBeInTheDocument()
+		expect(getByTestId("roo-tips")).toBeInTheDocument()
+	})
+
+	it("shows RooTips when user has fewer than 6 tasks", () => {
+		const { queryByTestId, getByTestId } = renderChatView()
+
+		mockPostMessage({
+			taskHistory: [
+				{ id: "1", ts: Date.now() - 2000 },
+				{ id: "2", ts: Date.now() - 1000 },
+				{ id: "3", ts: Date.now() },
+			],
+			clineMessages: [], // No active task
+		})
+
+		expect(queryByTestId("dismissible-upsell")).not.toBeInTheDocument()
+		expect(getByTestId("roo-tips")).toBeInTheDocument()
 	})
 })
 

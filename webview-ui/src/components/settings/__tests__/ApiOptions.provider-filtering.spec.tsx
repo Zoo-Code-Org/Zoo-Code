@@ -321,6 +321,6 @@ describe("ApiOptions Provider Filtering", () => {
 
 		expect(providerValues).toContain("roo")
 		expect(screen.getByText("Roo Code Router")).toBeInTheDocument()
-		expect(screen.getByText("settings:providers.retiredProviderMessage")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.retiredRooProviderMessage")).toBeInTheDocument()
 	})
 })

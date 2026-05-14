@@ -225,8 +225,7 @@ describe("SimpleInstaller", () => {
 
 			await installer.removeItem(mockModeItem, { target: "project" })
 
-			// Should call deleteCustomMode with fromMarketplace flag set to true
-			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test", true)
+			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test")
 			// The rules folder deletion is now handled by CustomModesManager, not SimpleInstaller
 			expect(fileExistsAtPath).not.toHaveBeenCalled()
 			expect(mockFs.rm).not.toHaveBeenCalled()
@@ -240,8 +239,7 @@ describe("SimpleInstaller", () => {
 
 			await installer.removeItem(mockModeItem, { target: "global" })
 
-			// Should call deleteCustomMode with fromMarketplace flag set to true
-			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test", true)
+			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test")
 			// The rules folder deletion is now handled by CustomModesManager, not SimpleInstaller
 			expect(fileExistsAtPath).not.toHaveBeenCalled()
 			expect(mockFs.rm).not.toHaveBeenCalled()
@@ -255,8 +253,7 @@ describe("SimpleInstaller", () => {
 
 			await installer.removeItem(mockModeItem, { target: "project" })
 
-			// Should call deleteCustomMode with fromMarketplace flag set to true
-			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test", true)
+			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test")
 			// The rules folder deletion is now handled by CustomModesManager, not SimpleInstaller
 			expect(fileExistsAtPath).not.toHaveBeenCalled()
 			expect(mockFs.rm).not.toHaveBeenCalled()
@@ -273,7 +270,7 @@ describe("SimpleInstaller", () => {
 			// Should throw the error from deleteCustomMode
 			await expect(installer.removeItem(mockModeItem, { target: "project" })).rejects.toThrow("Permission denied")
 
-			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test", true)
+			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test")
 		})
 
 		it("should handle mode not found in custom modes list", async () => {
@@ -282,7 +279,7 @@ describe("SimpleInstaller", () => {
 
 			await installer.removeItem(mockModeItem, { target: "project" })
 
-			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test", true)
+			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test")
 			// Should not attempt to delete rules folder
 			expect(fileExistsAtPath).not.toHaveBeenCalled()
 			expect(mockFs.rm).not.toHaveBeenCalled()
@@ -335,7 +332,7 @@ describe("SimpleInstaller", () => {
 
 			await installer.removeItem(arrayContentItem, { target: "project" })
 
-			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test-array", true)
+			expect(mockCustomModesManager.deleteCustomMode).toHaveBeenCalledWith("test-array")
 		})
 
 		it("should throw error when CustomModesManager is not available", async () => {

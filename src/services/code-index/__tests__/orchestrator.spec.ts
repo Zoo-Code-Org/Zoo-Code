@@ -28,15 +28,6 @@ vi.mock("vscode", () => {
 	}
 })
 
-// Mock TelemetryService
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		instance: {
-			captureEvent: vi.fn(),
-		},
-	},
-}))
-
 // Mock i18n translator used in orchestrator messages
 vi.mock("../../i18n", () => ({
 	t: (key: string, params?: any) => {
