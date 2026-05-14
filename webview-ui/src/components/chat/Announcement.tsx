@@ -82,7 +82,7 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 							<SocialLink
 								icon={<SiDiscord className="w-4 h-4" aria-hidden />}
 								label="Discord"
-								href="https://discord.gg/rCQcvT7Fnt"
+								href="https://discord.gg/VxfP4Vx3gX"
 							/>
 							<SocialLink
 								icon={<SiReddit className="w-4 h-4" aria-hidden />}

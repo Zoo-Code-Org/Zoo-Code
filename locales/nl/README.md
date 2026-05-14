@@ -2,12 +2,12 @@
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
           <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-          <a href="https://discord.gg/SfHYG44NUA"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+          <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
         </p>
         <p align="center">
-          <em>Snel hulp nodig → <a href="https://discord.gg/SfHYG44NUA">Word lid van Discord</a> • Liever asynchroon? → <a href="https://www.reddit.com/r/ZooCode/">Word lid van r/ZooCode</a></em>
+          <em>Snel hulp nodig → <a href="https://discord.gg/VxfP4Vx3gX">Word lid van Discord</a> • Liever asynchroon? → <a href="https://www.reddit.com/r/ZooCode/">Word lid van r/ZooCode</a></em>
         </p>
 
         # Zoo Code
@@ -22,7 +22,7 @@
 >
 > Roo-gebruikers komen in alle soorten en maten. Sommigen gebruiken het professioneel in hun dagelijkse werk, anderen gebruiken het om onvoorstelbaar complexe workflows uit te denken. Sommigen gebruiken het om Roo zelf te verbeteren, terwijl anderen de modellen verbeteren die Roo gebruikt (super meta). Het punt is dat de community divers is, en hoewel een kangoeroe 🦘🦘🦘 een indrukwekkend en nobel dier is, vonden we dat een "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 die diversiteit van plugingebruikers beter weerspiegelde.
 >
-> Daarom willen we aankondigen dat **Zoo Code** de ontwikkeling van dit belangrijke project zal voortzetten. Het kernteam bestaat uit ontwikkelaars die eerder aan Roo hebben bijgedragen en veel om deze plugin geven. We blijven modellen updaten, bugs oplossen en functies uitbrengen. Maar bovenal willen we luisteren naar jullie, de community die deze plugin zo bijzonder heeft gemaakt. Voel je dus vrij om lid te worden van onze [Discord](https://discord.gg/SfHYG44NUA), onze [Reddit](https://www.reddit.com/r/ZooCode), of [een PR of issue te openen](https://github.com/Zoo-Code-Org/Zoo-Code); maar vooral vragen we je om betrokken, verbonden en actief te blijven als community.
+> Daarom willen we aankondigen dat **Zoo Code** de ontwikkeling van dit belangrijke project zal voortzetten. Het kernteam bestaat uit ontwikkelaars die eerder aan Roo hebben bijgedragen en veel om deze plugin geven. We blijven modellen updaten, bugs oplossen en functies uitbrengen. Maar bovenal willen we luisteren naar jullie, de community die deze plugin zo bijzonder heeft gemaakt. Voel je dus vrij om lid te worden van onze [Discord](https://discord.gg/VxfP4Vx3gX), onze [Reddit](https://www.reddit.com/r/ZooCode), of [een PR of issue te openen](https://github.com/Zoo-Code-Org/Zoo-Code); maar vooral vragen we je om betrokken, verbonden en actief te blijven als community.
 >
 > _-Zoo Code Team_
 
@@ -61,7 +61,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 
@@ -105,7 +105,7 @@ Meer info: [Modi gebruiken](https://docs.zoocode.dev/basic-usage/using-modes) �
 
 - **[Documentatie](https://docs.zoocode.dev):** De officiële gids voor het installeren, configureren en beheersen van Zoo Code.
 - **[YouTube-kanaal](https://youtube.com/@roocodeyt?feature=shared):** Bekijk tutorials en zie functies in actie.
-- **[Discord Server](https://discord.gg/SfHYG44NUA):** Word lid van de community voor realtime hulp en discussie.
+- **[Discord Server](https://discord.gg/VxfP4Vx3gX):** Word lid van de community voor realtime hulp en discussie.
 - **[Reddit Community](https://www.reddit.com/r/ZooCode):** Deel je ervaringen en kijk wat anderen bouwen.
 - **[GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Meld bugs en volg de ontwikkeling.
 - **[Feature Requests](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** Heb je een idee? Deel het met de ontwikkelaars.

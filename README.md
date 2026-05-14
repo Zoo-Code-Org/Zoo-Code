@@ -2,12 +2,12 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
   <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
   <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-  <a href="https://discord.gg/SfHYG44NUA"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+  <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
   <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
   <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
 </p>
 <p align="center">
-  <em>Get help fast → <a href="https://discord.gg/SfHYG44NUA">Join Discord</a> • Prefer async? → <a href="https://www.reddit.com/r/ZooCode/">Join r/ZooCode</a></em>
+  <em>Get help fast → <a href="https://discord.gg/VxfP4Vx3gX">Join Discord</a> • Prefer async? → <a href="https://www.reddit.com/r/ZooCode/">Join r/ZooCode</a></em>
 </p>
 
 # Zoo Code
@@ -41,7 +41,7 @@
 > to Roo previously and care deeply about this plugin. We will continue to make
 > model updates, fix bugs, and release features. But more than anything, we plan
 > to listen to the community that made this plugin so special. Feel free to join
-> us on [Discord](https://discord.gg/SfHYG44NUA),
+> us on [Discord](https://discord.gg/VxfP4Vx3gX),
 > [Reddit](https://www.reddit.com/r/ZooCode), or
 > [open a PR or issue](https://github.com/Zoo-Code-Org/Zoo-Code), and above all,
 > please stay involved, connected, and active as a community.
@@ -85,7 +85,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-  </details>
+    </details>
 
 ---
 
@@ -132,7 +132,7 @@ Learn more: [Using Modes](https://docs.zoocode.dev/basic-usage/using-modes) •
   installing, configuring, and mastering Zoo Code.
 - **[YouTube Channel](https://youtube.com/@roocodeyt?feature=shared):** Watch
   tutorials and see features in action.
-- **[Discord Server](https://discord.gg/SfHYG44NUA):** Join the community for
+- **[Discord Server](https://discord.gg/VxfP4Vx3gX):** Join the community for
   real-time help and discussion.
 - **[Reddit Community](https://www.reddit.com/r/ZooCode/):** Share your
   experiences and see what others are building.
@@ -199,15 +199,15 @@ Options:
 If you prefer to install the VSIX package manually:
 
 1. First, build the VSIX package:
-   ```sh
-   pnpm vsix
-   ```
+    ```sh
+    pnpm vsix
+    ```
 2. A `.vsix` file will be generated in the `bin/` directory (e.g.,
    `bin/zoo-code-<version>.vsix`).
 3. Install it manually using the VSCode CLI:
-   ```sh
-   code --install-extension bin/zoo-code-<version>.vsix
-   ```
+    ```sh
+    code --install-extension bin/zoo-code-<version>.vsix
+    ```
 
 ---
 
@@ -247,5 +247,5 @@ We love community contributions! Get started by reading our
 **Enjoy Zoo Code!** Whether you keep it on a short leash or let it roam
 autonomously, we can’t wait to see what you build. If you have questions or
 feature ideas, drop by our [Reddit community](https://www.reddit.com/r/ZooCode/)
-or [Discord](https://discord.gg/SfHYG44NUA), or open an
+or [Discord](https://discord.gg/VxfP4Vx3gX), or open an
 [issue](https://github.com/Zoo-Code-Org/Zoo-Code/issues). Happy coding!

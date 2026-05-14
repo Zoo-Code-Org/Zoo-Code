@@ -54,7 +54,7 @@ Menziona l'allineamento con queste aree nelle tue PR.
 
 ### 3. Unisciti alla community di Zoo Code
 
-- **Discord:** Unisciti al nostro [Discord](https://discord.gg/SfHYG44NUA).
+- **Discord:** Unisciti al nostro [Discord](https://discord.gg/VxfP4Vx3gX).
 - **Reddit:** Unisciti al nostro [Reddit](https://www.reddit.com/r/ZooCode/).
 
 ## Trovare e pianificare il tuo contributo
@@ -73,7 +73,7 @@ Tutti i contributi iniziano con un'issue di GitHub utilizzando i nostri modelli 
 - **Crea un'issue** utilizzando:
     - **Miglioramenti:** modello "Richiesta di miglioramento" (linguaggio semplice incentrato sul vantaggio per l'utente).
     - **Bug:** modello "Segnalazione di bug" (riproduzione minima + previsto vs effettivo + versione).
-- **Vuoi lavorarci?** Commenta "Rivendico" sull'issue e invia un DM al team principale su [Discord](https://discord.gg/SfHYG44NUA) per essere assegnato. L'assegnazione verrà confermata nel thread.
+- **Vuoi lavorarci?** Commenta "Rivendico" sull'issue e invia un DM al team principale su [Discord](https://discord.gg/VxfP4Vx3gX) per essere assegnato. L'assegnazione verrà confermata nel thread.
 - **Le PR devono essere collegate all'issue.** Le PR non collegate possono essere chiuse.
 
 ### Decidere su cosa lavorare
@@ -126,7 +126,7 @@ pnpm install
 
 ### Politica sulle Pull Request
 
-- Deve fare riferimento a un'issue di GitHub assegnata. Per essere assegnato: commenta "Rivendico" sull'issue e invia un DM al team principale su [Discord](https://discord.gg/SfHYG44NUA). L'assegnazione verrà confermata nel thread.
+- Deve fare riferimento a un'issue di GitHub assegnata. Per essere assegnato: commenta "Rivendico" sull'issue e invia un DM al team principale su [Discord](https://discord.gg/VxfP4Vx3gX). L'assegnazione verrà confermata nel thread.
 - Le PR non collegate possono essere chiuse.
 - Le PR devono superare i test di integrazione continua, essere in linea con la roadmap e avere una documentazione chiara.
 

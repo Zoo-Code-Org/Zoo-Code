@@ -1,7 +1,7 @@
 export const EXTERNAL_LINKS = {
 	GITHUB: "https://github.com/RooCodeInc/Roo-Code",
 	GITHUB_DISCUSSIONS: "https://github.com/RooCodeInc/Roo-Code/discussions",
-	DISCORD: "https://discord.gg/roocode",
+	DISCORD: "https://discord.gg/VxfP4Vx3gX",
 	REDDIT: "https://reddit.com/r/RooCode",
 	X: "https://x.com/roocode",
 	LINKEDIN: "https://www.linkedin.com/company/roo-code",

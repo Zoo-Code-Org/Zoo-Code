@@ -43,7 +43,7 @@ export function Evals({ runs }: { runs: EvalRun[] }) {
 				</div>
 				<div>
 					Want to see the results for a model we haven&apos;t tested yet? Ping us in{" "}
-					<a href="https://discord.gg/roocode" className="underline">
+					<a href="https://discord.gg/VxfP4Vx3gX" className="underline">
 						Discord
 					</a>
 					.

@@ -166,7 +166,7 @@ const faqs: FAQItem[] = [
 				</a>
 				. Submit issues, suggest features, or open a pull request. There&apos;s also an active community on{" "}
 				<a
-					href="https://discord.gg/roocode"
+					href="https://discord.gg/VxfP4Vx3gX"
 					target="_blank"
 					rel="noopener noreferrer"
 					className="text-primary underline-offset-4 hover:underline">
@@ -198,7 +198,7 @@ const faqs: FAQItem[] = [
 				</a>{" "}
 				for both a quick-start set up and advanced guides. You can also get community support on{" "}
 				<a
-					href="https://discord.gg/roocode"
+					href="https://discord.gg/VxfP4Vx3gX"
 					target="_blank"
 					rel="noopener noreferrer"
 					className="text-primary underline-offset-4 hover:underline">
