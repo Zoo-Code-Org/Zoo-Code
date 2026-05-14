@@ -255,6 +255,7 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.max_tokens).toBe(16384)
 		})
 
 		it("should omit thinking for Claude Opus 4.7 when reasoning is disabled", async () => {
@@ -277,6 +278,31 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			expect(requestBody?.thinking).toBeUndefined()
+			expect(requestBody?.max_tokens).toBe(8192)
+		})
+
+		it("should preserve custom maxTokens for Claude Opus 4.7 when reasoning is enabled", async () => {
+			const opus47Handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: true,
+				modelMaxTokens: 32768,
+			})
+
+			const stream = opus47Handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.max_tokens).toBe(32768)
 		})
 	})
 
@@ -398,8 +424,9 @@ describe("AnthropicHandler", () => {
 			expect(model.id).toBe("claude-opus-4-7")
 			expect(model.info.maxTokens).toBe(128000)
 			expect(model.info.contextWindow).toBe(1000000)
+			expect(model.maxTokens).toBe(8192)
 			expect(model.info.supportsReasoningBinary).toBe(true)
-			expect(model.info.supportsReasoningBudget).toBeUndefined()
+			expect(model.info.supportsReasoningBudget).toBe(true)
 			expect(model.info.supportsPromptCache).toBe(true)
 			expect(model.reasoningBudget).toBeUndefined()
 		})

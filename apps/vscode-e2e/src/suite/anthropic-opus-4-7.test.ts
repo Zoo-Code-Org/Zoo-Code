@@ -12,6 +12,8 @@ type CapturedAnthropicRequest = {
 	lastUserMessage: string
 }
 
+const ALLOWED_PROXY_HOSTS = new Set(["127.0.0.1", "localhost", "api.anthropic.com"])
+
 function isMessagesUrl(rawUrl: string): boolean {
 	try {
 		return new URL(rawUrl).pathname.endsWith("/v1/messages")
@@ -59,6 +61,20 @@ async function pipeFetchResponse(target: ServerResponse, source: Response) {
 	target.end()
 }
 
+function resolveAllowedUpstreamUrl(baseUrl: string, requestUrl: string): URL {
+	const upstreamBase = new URL(baseUrl)
+	const isLocalProxy = upstreamBase.hostname === "127.0.0.1" || upstreamBase.hostname === "localhost"
+
+	if (
+		!ALLOWED_PROXY_HOSTS.has(upstreamBase.hostname) ||
+		(isLocalProxy ? upstreamBase.protocol !== "http:" : baseUrl !== "https://api.anthropic.com")
+	) {
+		throw new Error(`Unexpected Anthropic proxy target: ${upstreamBase.origin}`)
+	}
+
+	return new URL(requestUrl, upstreamBase)
+}
+
 async function withAnthropicProxy<T>(
 	baseUrl: string,
 	run: (args: { proxyUrl: string; requests: CapturedAnthropicRequest[] }) => Promise<T>,
@@ -102,16 +118,17 @@ async function withAnthropicProxy<T>(
 				}
 			}
 
-			const upstream = await fetch(`${baseUrl}${requestUrl}`, {
+			const upstreamUrl = resolveAllowedUpstreamUrl(baseUrl, requestUrl)
+			const upstream = await fetch(upstreamUrl, {
 				method: req.method,
 				headers: forwardHeaders,
 				body: bodyText,
 			})
 
 			await pipeFetchResponse(res, upstream)
-		} catch (error) {
+		} catch {
 			res.writeHead(500)
-			res.end(error instanceof Error ? error.message : String(error))
+			res.end("Anthropic proxy request failed")
 		}
 	})
 
