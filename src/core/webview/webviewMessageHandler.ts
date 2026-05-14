@@ -1087,8 +1087,9 @@ export const webviewMessageHandler = async (
 			// Specific handler for LM Studio models only.
 			const { apiConfiguration: lmStudioApiConfig } = await provider.getState()
 			try {
-				const hasPreviewBaseUrl = typeof message.values?.baseUrl === "string"
-				const previewBaseUrl = hasPreviewBaseUrl ? message.values.baseUrl : undefined
+				const requestedBaseUrl = message.values?.baseUrl
+				const hasPreviewBaseUrl = typeof requestedBaseUrl === "string"
+				const previewBaseUrl = hasPreviewBaseUrl ? requestedBaseUrl : undefined
 				const lmStudioModels = hasPreviewBaseUrl
 					? await getLMStudioModels(previewBaseUrl)
 					: await (async () => {
