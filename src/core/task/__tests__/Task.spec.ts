@@ -398,6 +398,14 @@ describe("Cline", () => {
 
 	describe("getEnvironmentDetails", () => {
 		describe("API conversation handling", () => {
+			beforeEach(() => {
+				Task.resetGlobalApiRequestTime()
+			})
+
+			afterEach(() => {
+				Task.resetGlobalApiRequestTime()
+			})
+
 			it("should strip non-protocol fields from API conversation history before sending to the API", async () => {
 				const cline = new Task({
 					provider: mockProvider,
@@ -636,7 +644,6 @@ describe("Cline", () => {
 					}
 					return mockSuccessStream
 				})
-				Task.resetGlobalApiRequestTime()
 				const providerState = await mockProvider.getState()
 				vi.spyOn(mockProvider, "getState").mockResolvedValue({
 					...providerState,
@@ -658,7 +665,6 @@ describe("Cline", () => {
 				])
 				expect(mockDelay).toHaveBeenCalledTimes(3)
 				expect(mockDelay).toHaveBeenCalledWith(1000)
-				Task.resetGlobalApiRequestTime()
 			})
 
 			it("should not apply retry delay twice", async () => {
@@ -726,7 +732,6 @@ describe("Cline", () => {
 					}
 					return mockSuccessStream
 				})
-				Task.resetGlobalApiRequestTime()
 				const providerState = await mockProvider.getState()
 				vi.spyOn(mockProvider, "getState").mockResolvedValue({
 					...providerState,
@@ -751,7 +756,6 @@ describe("Cline", () => {
 					["api_req_retry_delayed", "API Error\n<retry_timer>2</retry_timer>", undefined, true],
 					["api_req_retry_delayed", "API Error\n<retry_timer>1</retry_timer>", undefined, true],
 				])
-				Task.resetGlobalApiRequestTime()
 			})
 
 			describe("processUserContentMentions", () => {
