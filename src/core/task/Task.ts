@@ -76,7 +76,6 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 // services
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
-import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
@@ -118,12 +117,9 @@ import {
 import { getEnvironmentDetails } from "../environment/getEnvironmentDetails"
 import { checkContextWindowExceededError } from "../context/context-management/context-error-handling"
 import {
+	CheckpointManager,
 	type CheckpointDiffOptions,
 	type CheckpointRestoreOptions,
-	getCheckpointService,
-	checkpointSave,
-	checkpointRestore,
-	checkpointDiff,
 } from "../checkpoints"
 import { processUserContentMentions } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
@@ -326,10 +322,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	toolUsage: ToolUsage = {}
 
 	// Checkpoints
-	enableCheckpoints: boolean
-	checkpointTimeout: number
-	checkpointService?: RepoPerTaskCheckpointService
-	checkpointServiceInitializing = false
+	private readonly checkpointManager: CheckpointManager
 
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService
@@ -491,8 +484,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.providerRef = new WeakRef(provider)
 		this.globalStoragePath = provider.context.globalStorageUri.fsPath
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
-		this.enableCheckpoints = enableCheckpoints
-		this.checkpointTimeout = checkpointTimeout
+		this.checkpointManager = new CheckpointManager(this, { enableCheckpoints, checkpointTimeout })
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
@@ -2471,7 +2463,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async initiateTaskLoop(userContent: Anthropic.Messages.ContentBlockParam[]): Promise<void> {
 		// Kicks off the checkpoints initialization process in the background.
-		getCheckpointService(this)
+		this.checkpointManager.getService()
 
 		let nextUserContent = userContent
 		let includeFileDetails = true
@@ -4451,8 +4443,40 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Checkpoints
 
+	public get enableCheckpoints() {
+		return this.checkpointManager.enableCheckpoints
+	}
+
+	public set enableCheckpoints(value: boolean) {
+		this.checkpointManager.enableCheckpoints = value
+	}
+
+	public get checkpointTimeout() {
+		return this.checkpointManager.checkpointTimeout
+	}
+
+	public set checkpointTimeout(value: number) {
+		this.checkpointManager.checkpointTimeout = value
+	}
+
+	public get checkpointService(): CheckpointManager["checkpointService"] {
+		return this.checkpointManager.checkpointService
+	}
+
+	public set checkpointService(value: CheckpointManager["checkpointService"]) {
+		this.checkpointManager.checkpointService = value
+	}
+
+	public get checkpointServiceInitializing() {
+		return this.checkpointManager.checkpointServiceInitializing
+	}
+
+	public set checkpointServiceInitializing(value: boolean) {
+		this.checkpointManager.checkpointServiceInitializing = value
+	}
+
 	public async checkpointSave(force: boolean = false, suppressMessage: boolean = false) {
-		return checkpointSave(this, force, suppressMessage)
+		return this.checkpointManager.save(force, suppressMessage)
 	}
 
 	private buildCleanConversationHistory(
@@ -4597,11 +4621,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return cleanConversationHistory
 	}
 	public async checkpointRestore(options: CheckpointRestoreOptions) {
-		return checkpointRestore(this, options)
+		return this.checkpointManager.restore(options)
 	}
 
 	public async checkpointDiff(options: CheckpointDiffOptions) {
-		return checkpointDiff(this, options)
+		return this.checkpointManager.diff(options)
 	}
 
 	// Metrics
