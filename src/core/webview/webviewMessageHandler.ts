@@ -1089,18 +1089,18 @@ export const webviewMessageHandler = async (
 			try {
 				const requestedBaseUrl = message.values?.baseUrl
 				const hasPreviewBaseUrl = typeof requestedBaseUrl === "string"
-				const previewBaseUrl = hasPreviewBaseUrl ? requestedBaseUrl : undefined
-				const lmStudioModels = hasPreviewBaseUrl
-					? await getLMStudioModels(previewBaseUrl)
-					: await (async () => {
-							const lmStudioOptions = {
-								provider: "lmstudio" as const,
-								baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
-							}
-							// Flush cache and refresh to ensure fresh models.
-							await flushModels(lmStudioOptions, true)
-							return getModels(lmStudioOptions)
-						})()
+				let lmStudioModels: ModelRecord
+				if (hasPreviewBaseUrl) {
+					lmStudioModels = await getLMStudioModels(requestedBaseUrl)
+				} else {
+					const lmStudioOptions = {
+						provider: "lmstudio" as const,
+						baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
+					}
+					// Flush cache and refresh to ensure fresh models.
+					await flushModels(lmStudioOptions, true)
+					lmStudioModels = await getModels(lmStudioOptions)
+				}
 
 				if (Object.keys(lmStudioModels).length > 0) {
 					provider.postMessageToWebview({
