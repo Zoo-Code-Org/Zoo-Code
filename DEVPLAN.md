@@ -221,7 +221,7 @@
 
 ## Phase 3 — VS Code Extension Rewire
 
-1. Audit extension host code into migration buckets
+1. [✅] Audit extension host code into migration buckets
 
     - **What:** Map modules in `packages/zoo-vscode/src/` to core agent logic, VS Code host glue, or shared types/utils as defined in SPEC section 4 Phase 3a.
     - **Files touched:** `docs/extension-rewire-audit.md` or equivalent audit doc, `HANDOFF.md`.

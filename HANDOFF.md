@@ -1,9 +1,9 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Task 2 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper for future SDK-gated paths.
-- **Last completed task:** Phase 3 Task 2 — portable-core feature flag scaffold.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 1 audit or Task 3 SDK activation bootstrap behind `usePortableCore()`.
+- **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Tasks 1 and 2 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper for future SDK-gated paths. `docs/extension-rewire-audit.md` maps the VS Code extension host into portable-core migration buckets and recommended rewire order.
+- **Last completed task:** Phase 3 Task 1 — extension rewire audit.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 3 SDK activation bootstrap behind `usePortableCore()`.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: no longer blocks Phase 1 Task 9 for current-platform VSIX binary preparation, but still affects Phase 6 all-platform release packaging decisions.
@@ -111,6 +111,10 @@
     - `packages/zoo-vscode/src/package.json` contributes `zoo-code.usePortableCore` with default `false`.
     - `packages/zoo-vscode/src/utils/config.ts` exports `usePortableCore(): boolean`, reading `vscode.workspace.getConfiguration(Package.name).get("usePortableCore", false)`.
     - `packages/zoo-vscode/src/utils/__tests__/config.spec.ts` covers default false and configured true behavior.
+- Phase 3 Task 1 extension rewire audit:
+    - `docs/extension-rewire-audit.md` now maps `packages/zoo-vscode/src` into core agent logic, VS Code host glue, shared types/utilities, webview bridge, task/session/config surfaces, and API/provider migration buckets.
+    - The audit records that `src/providers/webview` does not exist; current webview provider/bridge code lives in `src/core/webview`.
+    - Recommended migration order starts with interfaces/protocol contracts, SDK bootstrap, webview contract tests, then high-level `ClineProvider` SDK seams for sessions, streaming, abort, approvals, provider config, and modes.
 
 ## How to update this file
 
