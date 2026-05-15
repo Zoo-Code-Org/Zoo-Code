@@ -1,9 +1,9 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Tasks 1 through 3 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper plus activation-time `PortableCoreService` bootstrap for future SDK-gated paths. `docs/extension-rewire-audit.md` maps the VS Code extension host into portable-core migration buckets and recommended rewire order.
-- **Last completed task:** Phase 3 Task 3 — SDK activation bootstrap behind `usePortableCore()`.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 4 webview message protocol contracts.
+- **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Tasks 1 through 4 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper plus activation-time `PortableCoreService` bootstrap for future SDK-gated paths. `docs/extension-rewire-audit.md` maps the VS Code extension host into portable-core migration buckets and recommended rewire order; `docs/webview-message-protocol.md` and `@zoo-code/types` now pin the portable-core webview contract.
+- **Last completed task:** Phase 3 Task 4 — webview message protocol contracts.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 5 session creation and lookup SDK adapter seams behind `usePortableCore()`.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: no longer blocks Phase 1 Task 9 for current-platform VSIX binary preparation, but still affects Phase 6 all-platform release packaging decisions.
@@ -120,6 +120,10 @@
     - `packages/zoo-vscode/src/services/portable-core/PortableCoreService.ts` gates SDK startup with `usePortableCore()`, starts or reuses a local Zoo CLI IPC server with `createZooServer()`, connects a `ZooClient`, logs startup/reuse/failure, and disposes client/server resources idempotently.
     - `packages/zoo-vscode/src/extension.ts` initializes the bootstrap during activation after auth initialization and disposes it during deactivation before MCP cleanup.
     - Unit coverage verifies disabled flag behavior, enabled startup/reuse, startup failure fallback, idempotent disposal, and activation/deactivation integration.
+- Phase 3 Task 4 webview protocol contracts:
+    - `packages/types/src/webview-protocol.ts` exports `ZOO_WEBVIEW_PROTOCOL_VERSION = 1`, portable-core-relevant webview action types, host message types, approval responses, and current-to-target SDK mapping metadata.
+    - `packages/types/src/__tests__/webview-protocol.test.ts` pins the contract for new task, follow-up send, streaming chunks, session state/history, approvals, abort, terminal operation, and mode changes.
+    - `docs/webview-message-protocol.md` documents the current protocol sources, compatibility rules, and target SDK mapping before behavior rewiring.
 
 ## How to update this file
 

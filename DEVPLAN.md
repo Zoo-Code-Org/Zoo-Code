@@ -254,7 +254,7 @@
     - **Depends on:** Phase 2, Task 4; Phase 3, Task 2.
     - **Can parallelize with:** Phase 3, Task 4 after contracts are defined.
 
-4. Version webview message protocol contracts
+4. [✅] Version webview message protocol contracts
 
     - **What:** Audit and define the host-webview message protocol before changing behavior, including streaming chunks, tool approval requests, session state changes, send message, abort, approve tool, and change mode actions.
     - **Files touched:** `packages/zoo-vscode/webview-ui/src/**` message type files, `packages/zoo-vscode/src/**` bridge type files, shared contract docs/tests.
