@@ -2,17 +2,26 @@ import { Account } from "@/account/account"
 import { Agent } from "@/agent/agent"
 import { Config } from "@/config/config"
 import { InstanceState } from "@/effect/instance-state"
+import { Review } from "@/kilocode/review/review"
+import { WorktreeDiff } from "@/kilocode/review/worktree-diff"
 import { MCP } from "@/mcp"
 import { Project } from "@/project/project"
 import { Session } from "@/session/session"
 import { ToolRegistry } from "@/tool/registry"
 import * as EffectZod from "@/util/effect-zod"
 import { Worktree } from "@/worktree"
+import * as Log from "@opencode-ai/core/util/log"
 import { Effect, Option } from "effect"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { ConsoleSwitchPayload, SessionListQuery, ToolListQuery } from "../groups/experimental"
+import {
+	ConsoleSwitchPayload,
+	SessionListQuery,
+	ToolListQuery,
+	WorktreeDiffFileQuery,
+	WorktreeDiffQuery,
+} from "../groups/experimental"
 
 export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "experimental", (handlers) =>
 	Effect.gen(function* () {
@@ -113,6 +122,53 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
 			return true
 		})
 
+		const worktreeDiff = Effect.fn("ExperimentalHttpApi.worktreeDiff")(function* (ctx: {
+			query: typeof WorktreeDiffQuery.Type
+		}) {
+			const dir = yield* InstanceState.directory
+			const log = Log.create({ service: "worktree-diff" })
+			const base = ctx.query.base ?? (yield* Effect.promise(() => Review.getBaseBranch()))
+			log.info("computing diff", { dir, base })
+			const diffs = yield* Effect.tryPromise({
+				try: () => WorktreeDiff.full({ dir, base, log }),
+				catch: () => new HttpApiError.BadRequest({}),
+			})
+			return diffs.map((diff) => ({
+				file: diff.file,
+				before: diff.before,
+				after: diff.after,
+				additions: diff.additions,
+				deletions: diff.deletions,
+				status: diff.status,
+			}))
+		})
+
+		const worktreeDiffSummary = Effect.fn("ExperimentalHttpApi.worktreeDiffSummary")(function* (ctx: {
+			query: typeof WorktreeDiffQuery.Type
+		}) {
+			const dir = yield* InstanceState.directory
+			const log = Log.create({ service: "worktree-diff" })
+			const base = ctx.query.base ?? (yield* Effect.promise(() => Review.getBaseBranch()))
+			log.info("computing diff summary", { dir, base })
+			return yield* Effect.tryPromise({
+				try: () => WorktreeDiff.summary({ dir, base, log }),
+				catch: () => new HttpApiError.BadRequest({}),
+			})
+		})
+
+		const worktreeDiffFile = Effect.fn("ExperimentalHttpApi.worktreeDiffFile")(function* (ctx: {
+			query: typeof WorktreeDiffFileQuery.Type
+		}) {
+			const dir = yield* InstanceState.directory
+			const log = Log.create({ service: "worktree-diff" })
+			const base = ctx.query.base ?? (yield* Effect.promise(() => Review.getBaseBranch()))
+			log.info("computing diff detail", { dir, base, file: ctx.query.file })
+			return yield* Effect.tryPromise({
+				try: async () => (await WorktreeDiff.detail({ dir, base, file: ctx.query.file, log })) ?? null,
+				catch: () => new HttpApiError.BadRequest({}),
+			})
+		})
+
 		const session = Effect.fn("ExperimentalHttpApi.session")(function* (ctx: {
 			query: typeof SessionListQuery.Type
 		}) {
@@ -151,6 +207,9 @@ export const experimentalHandlers = HttpApiBuilder.group(InstanceHttpApi, "exper
 			.handle("worktreeCreate", worktreeCreate)
 			.handle("worktreeRemove", worktreeRemove)
 			.handle("worktreeReset", worktreeReset)
+			.handle("worktreeDiff", worktreeDiff)
+			.handle("worktreeDiffSummary", worktreeDiffSummary)
+			.handle("worktreeDiffFile", worktreeDiffFile)
 			.handle("session", session)
 			.handle("resource", resource)
 	}),

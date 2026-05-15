@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
+import { $ } from "bun"
 import { Effect } from "effect"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { GlobalBus } from "@/bus/global"
@@ -11,6 +12,7 @@ import * as Log from "@opencode-ai/core/util/log"
 import { Worktree } from "../../src/worktree"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
+import path from "path"
 
 void Log.init({ print: false })
 
@@ -216,5 +218,77 @@ describe("experimental HttpApi", () => {
 		const afterRemove = await app().request(ExperimentalPaths.worktree, { headers })
 		expect(afterRemove.status).toBe(200)
 		expect(await afterRemove.json()).toEqual([])
+	})
+
+	test("serves worktree diff routes through Hono bridge", async () => {
+		await using tmp = await tmpdir({
+			git: true,
+			config: { formatter: false, lsp: false },
+			init: async (dir) => {
+				await Bun.write(path.join(dir, "tracked.txt"), "one\n")
+				await $`git add tracked.txt`.cwd(dir).quiet()
+				await $`git commit -m "add tracked"`.cwd(dir).quiet()
+			},
+		})
+
+		const base = (await $`git rev-parse HEAD`.cwd(tmp.path).quiet()).stdout.toString().trim()
+		await Bun.write(path.join(tmp.path, "tracked.txt"), "one\ntwo\n")
+		await Bun.write(path.join(tmp.path, "new.txt"), "fresh\n")
+
+		const headers = { "x-kilo-directory": tmp.path }
+		const diff = await app().request(`${ExperimentalPaths.worktreeDiff}?${new URLSearchParams({ base })}`, {
+			headers,
+		})
+		expect(diff.status).toBe(200)
+		expect(await diff.json()).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					file: "tracked.txt",
+					before: "one\n",
+					after: "one\ntwo\n",
+					status: "modified",
+				}),
+				expect.objectContaining({
+					file: "new.txt",
+					before: "",
+					after: "fresh\n",
+					status: "added",
+				}),
+			]),
+		)
+
+		const summary = await app().request(
+			`${ExperimentalPaths.worktreeDiffSummary}?${new URLSearchParams({ base })}`,
+			{ headers },
+		)
+		expect(summary.status).toBe(200)
+		expect(await summary.json()).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ file: "tracked.txt", summarized: true, tracked: true }),
+				expect.objectContaining({ file: "new.txt", summarized: true, tracked: false }),
+			]),
+		)
+
+		const file = await app().request(
+			`${ExperimentalPaths.worktreeDiffFile}?${new URLSearchParams({ base, file: "tracked.txt" })}`,
+			{ headers },
+		)
+		expect(file.status).toBe(200)
+		expect(await file.json()).toEqual(
+			expect.objectContaining({
+				file: "tracked.txt",
+				before: "one\n",
+				after: "one\ntwo\n",
+				patch: expect.stringContaining("+two"),
+				summarized: false,
+			}),
+		)
+
+		const missing = await app().request(
+			`${ExperimentalPaths.worktreeDiffFile}?${new URLSearchParams({ base, file: "missing.txt" })}`,
+			{ headers },
+		)
+		expect(missing.status).toBe(200)
+		expect(await missing.json()).toBeNull()
 	})
 })

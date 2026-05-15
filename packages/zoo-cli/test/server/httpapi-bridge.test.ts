@@ -224,7 +224,7 @@ describe("HttpApi server", () => {
 
 	// kilocode_change start - skip Effect HttpApi parity tests until Kilo overlay routes are migrated.
 	// These tests verify every Hono route has an Effect HttpApi contract. Kilo-specific routes
-	// (/config/warnings, /indexing/status, /kilo/claw/*, /kilo/cloud-sessions, /experimental/worktree/diff*)
+	// (/indexing/status, /kilo/claw/*, /kilo/cloud-sessions, and other pending overlays)
 	// aren't yet wired into PublicApi. The Effect HttpApi bridge is gated behind KILO_EXPERIMENTAL_HTTPAPI
 	// and is not enabled in any production client (VS Code extension, JetBrains, TUI, desktop all use Hono).
 	// Follow-up: migrate Kilo overlay routes onto the Effect HttpApi bridge.
