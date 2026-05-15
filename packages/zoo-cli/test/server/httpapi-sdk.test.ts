@@ -459,6 +459,32 @@ describe("HttpApi SDK", () => {
 		),
 	)
 
+	parity("matches generated SDK permission missing request routes across backends", (backend) =>
+		withProject(backend, { git: false }, ({ sdk }) =>
+			Effect.gen(function* () {
+				const requestID = "per_missing"
+				const before = yield* capture(() => sdk.permission.list())
+				const reply = yield* capture(() =>
+					sdk.permission.reply({ requestID, reply: "reject", message: "missing permission" }),
+				)
+				const saveAlwaysRules = yield* capture(() =>
+					sdk.permission.saveAlwaysRules({
+						requestID,
+						approvedAlways: ["npm test"],
+						deniedAlways: ["rm -rf *"],
+					}),
+				)
+				const after = yield* capture(() => sdk.permission.list())
+
+				return {
+					statuses: statuses({ before, reply, saveAlwaysRules, after }),
+					beforeCount: array(before.data).length,
+					afterCount: array(after.data).length,
+				}
+			}),
+		),
+	)
+
 	parity("matches generated SDK experimental read routes across backends", (backend) =>
 		withProject(backend, { git: false }, ({ sdk }) =>
 			Effect.gen(function* () {

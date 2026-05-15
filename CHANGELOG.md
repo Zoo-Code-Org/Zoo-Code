@@ -40,6 +40,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add `@zoo-code/sdk` wrappers for portable-core path, VCS, VCS diff, and command read routes.
 - Add `@zoo-code/sdk` wrappers for portable-core file and find read routes.
 - Cover generated SDK `find.symbols()` parity across direct and HttpApi instance read routes.
+- Add generated SDK permission list/reply/always-rules missing-request parity across direct and HttpApi backends.
 - Add SDK wrappers for portable-core worktree list, create, remove, and reset routes.
 - Add SDK wrappers for legacy portable-core worktree diff, diff summary, and diff-file routes.
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.
