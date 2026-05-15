@@ -15,6 +15,9 @@ for await (const chunk of client.sendMessage(session.id, "Summarize this project
 	console.log(chunk)
 }
 
+// Queue a prompt without waiting for assistant generation.
+await client.promptAsync(session.id, "Index this context later", { mode: "code" })
+
 await server.close()
 ```
 

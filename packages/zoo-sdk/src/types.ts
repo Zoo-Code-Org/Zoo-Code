@@ -374,6 +374,33 @@ export type SendMessageOptions = {
 	parts?: unknown[]
 }
 
+/** Options for queueing an asynchronous prompt. */
+export type PromptAsyncOptions = SendMessageOptions & {
+	/** Existing message identifier when appending to a queued message. */
+	messageID?: string
+	/** Whether the server should skip assistant response generation. Defaults to true for SDK safety. */
+	noReply?: boolean
+	/** Optional system prompt override. */
+	system?: string
+	/** Provider-specific model variant. */
+	variant?: string
+	/** Optional tool enablement map. */
+	tools?: Record<string, boolean>
+	/** Optional response format hint. */
+	format?: unknown
+	/** Editor context snapshot for the prompt. */
+	editorContext?: {
+		visibleFiles?: string[]
+		openTabs?: string[]
+		activeFile?: string
+		shell?: string
+	}
+	/** Optional project directory query parameter. */
+	directory?: string
+	/** Optional workspace query parameter. */
+	workspace?: string
+}
+
 /** Events emitted by `ZooClient.on`. */
 export type ZooEvent = MessageChunk
 

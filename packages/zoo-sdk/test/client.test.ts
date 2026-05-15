@@ -41,6 +41,7 @@ function transport(): ZooTransport & { requests: any[] } {
 				}
 			}
 			if (input.path === "/session/ses_1") return { data: { id: "ses_1" } }
+			if (input.path.startsWith("/session/ses_1/prompt_async")) return { data: undefined }
 			if (input.path === "/session/ses_1/message?limit=2&before=cursor+1") {
 				return {
 					data: [
@@ -272,6 +273,31 @@ describe("ZooClient", () => {
 			method: "POST",
 			path: "/session/ses_1/message",
 			body: { agent: "code", message: "hi", parts: [{ type: "text", text: "hi" }] },
+		})
+	})
+
+	test("queues async prompts with safe no-reply defaults", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await client.promptAsync("ses_1", "summarize", {
+			mode: "code",
+			directory: "/repo/root",
+			workspace: "workspace-1",
+			parts: [{ type: "file", url: "file:///repo/root/src/app.ts", mime: "text/plain" }],
+		})
+
+		expect(mock.requests.at(-1)).toEqual({
+			method: "POST",
+			path: "/session/ses_1/prompt_async?directory=%2Frepo%2Froot&workspace=workspace-1",
+			body: {
+				agent: "code",
+				noReply: true,
+				parts: [
+					{ type: "text", text: "summarize" },
+					{ type: "file", url: "file:///repo/root/src/app.ts", mime: "text/plain" },
+				],
+			},
 		})
 	})
 

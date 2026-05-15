@@ -15,6 +15,7 @@ import type {
 	ProviderOAuthAuthorizeOptions,
 	ProviderOAuthAuthorizeResult,
 	ProviderOAuthCallbackOptions,
+	PromptAsyncOptions,
 	SendMessageOptions,
 	Session,
 	SessionCreateOptions,
@@ -74,6 +75,14 @@ function messageListQuery(options: MessageListOptions = {}) {
 function sessionDiffQuery(options: SessionDiffOptions = {}) {
 	const params = new URLSearchParams()
 	if (options.messageID) params.set("messageID", options.messageID)
+	const query = params.toString()
+	return query ? `?${query}` : ""
+}
+
+function promptAsyncQuery(options: Pick<PromptAsyncOptions, "directory" | "workspace"> = {}) {
+	const params = new URLSearchParams()
+	if (options.directory) params.set("directory", options.directory)
+	if (options.workspace) params.set("workspace", options.workspace)
 	const query = params.toString()
 	return query ? `?${query}` : ""
 }
@@ -286,6 +295,21 @@ export class ZooClient {
 			this.#emit(event)
 			yield event
 		}
+	}
+
+	/** Queue a user prompt asynchronously and return after server acceptance. */
+	async promptAsync(sessionID: string, message: string, options: PromptAsyncOptions = {}): Promise<void> {
+		const { mode, directory, workspace, parts, ...rest } = options
+		await this.#transport.request<void>({
+			method: "POST",
+			path: `/session/${encodeURIComponent(sessionID)}/prompt_async${promptAsyncQuery({ directory, workspace })}`,
+			body: {
+				...rest,
+				agent: mode,
+				noReply: rest.noReply ?? true,
+				parts: [{ type: "text", text: message }, ...(parts ?? [])],
+			},
+		})
 	}
 
 	/** List persisted messages for a session. */
