@@ -556,6 +556,7 @@ describe("HttpApi SDK", () => {
 					sdk.session.prompt({
 						sessionID,
 						agent: "build",
+						model: { providerID: "test", modelID: "test-model" },
 						noReply: true,
 						parts: [{ type: "text", text: "hello" }],
 					}),
@@ -564,6 +565,7 @@ describe("HttpApi SDK", () => {
 					sdk.session.promptAsync({
 						sessionID,
 						agent: "build",
+						model: { providerID: "test", modelID: "test-model" },
 						noReply: true,
 						parts: [{ type: "text", text: "async hello" }],
 					}),
