@@ -44,6 +44,7 @@ import { QueuedMessages } from "./QueuedMessages"
 import { WorktreeSelector } from "./WorktreeSelector"
 import FileChangesPanel from "./FileChangesPanel"
 import { useScrollLifecycle } from "@src/hooks/useScrollLifecycle"
+import { recordPromptHistorySend } from "./utils/promptHistory"
 
 export interface ChatViewProps {
 	isHidden: boolean
@@ -86,6 +87,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		soundVolume,
 		messageQueue = [],
 		showWorktreesInHomeScreen,
+		cwd,
 	} = useExtensionState()
 
 	// Show a WarningRow when the user sends a message with a retired provider.
@@ -591,6 +593,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					setShowRetiredProviderWarning(true)
 					return
 				}
+				recordPromptHistorySend(text, cwd)
 
 				// Queue message if:
 				// - Task is busy (sendingDisabled)
@@ -663,6 +666,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			isStreaming,
 			messageQueue.length,
 			apiConfiguration?.apiProvider,
+			cwd,
 		], // messagesRef and clineAskRef are stable
 	)
 
@@ -696,6 +700,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	const handleEnqueueCurrentMessage = useCallback(() => {
 		const text = inputValue.trim()
 		if (text || selectedImages.length > 0) {
+			if (text) {
+				recordPromptHistorySend(text, cwd)
+			}
 			vscode.postMessage({
 				type: "queueMessage",
 				text,
@@ -704,7 +711,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			setInputValue("")
 			setSelectedImages([])
 		}
-	}, [inputValue, selectedImages])
+	}, [inputValue, selectedImages, cwd])
 
 	// This logic depends on the useEffect[messages] above to set clineAsk,
 	// after which buttons are shown and we then send an askResponse to the
@@ -724,6 +731,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				case "mistake_limit_reached":
 					// Only send text/images if they exist
 					if (trimmedInput || (images && images.length > 0)) {
+						if (trimmedInput) {
+							recordPromptHistorySend(trimmedInput, cwd)
+						}
 						vscode.postMessage({
 							type: "askResponse",
 							askResponse: "yesButtonClicked",
@@ -750,6 +760,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					} else {
 						// Only send text/images if they exist
 						if (trimmedInput || (images && images.length > 0)) {
+							if (trimmedInput) {
+								recordPromptHistorySend(trimmedInput, cwd)
+							}
 							vscode.postMessage({
 								type: "askResponse",
 								askResponse: "yesButtonClicked",
@@ -780,7 +793,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			setPrimaryButtonText(undefined)
 			setSecondaryButtonText(undefined)
 		},
-		[clineAsk, startNewTask, currentTaskItem?.parentTaskId],
+		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, cwd],
 	)
 
 	const handleSecondaryButtonClick = useCallback(
@@ -807,6 +820,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				case "use_mcp_server":
 					// Only send text/images if they exist
 					if (trimmedInput || (images && images.length > 0)) {
+						if (trimmedInput) {
+							recordPromptHistorySend(trimmedInput, cwd)
+						}
 						vscode.postMessage({
 							type: "askResponse",
 							askResponse: "noButtonClicked",
@@ -829,7 +845,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			setClineAsk(undefined)
 			setEnableButtons(false)
 		},
-		[clineAsk, startNewTask, isStreaming, setDidClickCancel],
+		[clineAsk, startNewTask, isStreaming, setDidClickCancel, cwd],
 	)
 
 	const { info: model } = useSelectedModel(apiConfiguration)
@@ -1520,12 +1536,16 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	useImperativeHandle(ref, () => ({
 		acceptInput: () => {
-			const hasInput = inputValue.trim() || selectedImages.length > 0
+			const trimmedInput = inputValue.trim()
+			const hasInput = trimmedInput || selectedImages.length > 0
 
 			// Special case: during command_output, queue the message instead of
 			// triggering the primary button action (which would lose the message)
 			if (clineAskRef.current === "command_output" && hasInput) {
-				vscode.postMessage({ type: "queueMessage", text: inputValue.trim(), images: selectedImages })
+				if (trimmedInput) {
+					recordPromptHistorySend(trimmedInput, cwd)
+				}
+				vscode.postMessage({ type: "queueMessage", text: trimmedInput, images: selectedImages })
 				setInputValue("")
 				setSelectedImages([])
 				return

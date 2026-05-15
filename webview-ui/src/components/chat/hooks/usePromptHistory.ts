@@ -1,5 +1,13 @@
 import { ClineMessage, HistoryItem } from "@roo-code/types"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+
+import {
+	PROMPT_HISTORY_AUTOSAVE_INTERVAL_MS,
+	PROMPT_HISTORY_CHANGED_EVENT,
+	PROMPT_HISTORY_STORAGE_KEY,
+	autosavePromptHistoryDraft,
+	readPersistedPromptHistoryTexts,
+} from "../utils/promptHistory"
 
 interface UsePromptHistoryProps {
 	clineMessages: ClineMessage[] | undefined
@@ -38,6 +46,74 @@ export const usePromptHistory = ({
 	const [historyIndex, setHistoryIndex] = useState(-1)
 	const [tempInput, setTempInput] = useState("")
 	const [promptHistory, setPromptHistory] = useState<string[]>([])
+	const [persistedPromptHistory, setPersistedPromptHistory] = useState<string[]>(() =>
+		readPersistedPromptHistoryTexts(cwd),
+	)
+	const inputValueRef = useRef(inputValue)
+	const cwdRef = useRef(cwd)
+
+	useEffect(() => {
+		inputValueRef.current = inputValue
+	}, [inputValue])
+
+	useEffect(() => {
+		cwdRef.current = cwd
+	}, [cwd])
+
+	const refreshPersistedPromptHistory = useCallback(() => {
+		setPersistedPromptHistory(readPersistedPromptHistoryTexts(cwdRef.current))
+	}, [])
+
+	useEffect(() => {
+		refreshPersistedPromptHistory()
+	}, [cwd, refreshPersistedPromptHistory])
+
+	useEffect(() => {
+		const handlePromptHistoryChanged = () => refreshPersistedPromptHistory()
+		const handleStorage = (event: StorageEvent) => {
+			if (event.key === PROMPT_HISTORY_STORAGE_KEY) {
+				refreshPersistedPromptHistory()
+			}
+		}
+
+		window.addEventListener(PROMPT_HISTORY_CHANGED_EVENT, handlePromptHistoryChanged)
+		window.addEventListener("storage", handleStorage)
+
+		return () => {
+			window.removeEventListener(PROMPT_HISTORY_CHANGED_EVENT, handlePromptHistoryChanged)
+			window.removeEventListener("storage", handleStorage)
+		}
+	}, [refreshPersistedPromptHistory])
+
+	useEffect(() => {
+		const interval = setInterval(() => {
+			if (autosavePromptHistoryDraft(inputValueRef.current, cwdRef.current)) {
+				refreshPersistedPromptHistory()
+			}
+		}, PROMPT_HISTORY_AUTOSAVE_INTERVAL_MS)
+
+		return () => clearInterval(interval)
+	}, [refreshPersistedPromptHistory])
+
+	const mergePromptHistories = useCallback((...histories: Array<string[] | undefined>) => {
+		const seen = new Set<string>()
+		const merged: string[] = []
+
+		for (const history of histories) {
+			for (const prompt of history ?? []) {
+				const key = prompt.trim()
+
+				if (!key || seen.has(key)) {
+					continue
+				}
+
+				seen.add(key)
+				merged.push(prompt)
+			}
+		}
+
+		return merged.slice(0, MAX_PROMPT_HISTORY_SIZE)
+	}, [])
 
 	// Initialize prompt history with hybrid approach: conversation messages if in task, otherwise task history
 	const filteredPromptHistory = useMemo(() => {
@@ -47,27 +123,31 @@ export const usePromptHistory = ({
 			.map((message) => message.text!)
 
 		// If we have conversation messages, use those (newest first when navigating up)
-		if (conversationPrompts?.length) {
-			return conversationPrompts.slice(-MAX_PROMPT_HISTORY_SIZE).reverse()
+		if (conversationPrompts?.length || persistedPromptHistory.length) {
+			const activeConversationHistory = (conversationPrompts ?? []).slice(-MAX_PROMPT_HISTORY_SIZE).reverse()
+
+			return mergePromptHistories(persistedPromptHistory, activeConversationHistory)
 		}
 
 		// If we have clineMessages array (meaning we're in an active task), don't fall back to task history
 		// Only use task history when starting fresh (no active conversation)
 		if (clineMessages?.length) {
-			return []
+			return persistedPromptHistory
 		}
 
 		// Fall back to task history only when starting fresh (no active conversation)
 		if (!taskHistory?.length || !cwd) {
-			return []
+			return persistedPromptHistory
 		}
 
 		// Extract user prompts from task history for the current workspace only
-		return taskHistory
+		const taskHistoryPrompts = taskHistory
 			.filter((item) => item.task?.trim() && (!item.workspace || item.workspace === cwd))
 			.map((item) => item.task)
 			.slice(0, MAX_PROMPT_HISTORY_SIZE)
-	}, [clineMessages, taskHistory, cwd])
+
+		return mergePromptHistories(persistedPromptHistory, taskHistoryPrompts)
+	}, [clineMessages, persistedPromptHistory, taskHistory, cwd, mergePromptHistories])
 
 	// Update prompt history when filtered history changes and reset navigation
 	useEffect(() => {
