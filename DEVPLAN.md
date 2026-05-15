@@ -414,6 +414,8 @@
 
 ## Phase 5 — Feature Parity Matrix Implementation
 
+- **Progress:** SDK route parity started with provider route wrappers for listing providers, reading provider auth methods, and running provider OAuth authorize/callback flows through existing CLI routes. Remaining SDK/CLI route parity wrappers should be added in coherent groups for session message/history operations and worktree routes.
+
 1. Add CLI context flag support
 
     - **What:** Implement CLI support for context mentions via explicit flags such as `--context file.ts` so CLI can represent VS Code `@file` and `@folder` context.

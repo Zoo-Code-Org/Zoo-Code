@@ -20,6 +20,36 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/config" && input.method === "PATCH") return { data: input.body }
 			if (input.path === "/config") return { data: { model: "anthropic/claude" } }
 			if (input.path === "/config/providers") return { data: { default: "anthropic", providers: [] } }
+			if (input.path === "/provider") {
+				return {
+					data: {
+						all: [{ id: "anthropic", name: "Anthropic", source: "api", env: [], options: {}, models: {} }],
+						default: { anthropic: "claude-sonnet-4" },
+						connected: ["anthropic"],
+						failed: [],
+					},
+				}
+			}
+			if (input.path === "/provider/auth") {
+				return {
+					data: {
+						anthropic: [
+							{ type: "oauth", label: "Anthropic OAuth" },
+							{
+								type: "api",
+								label: "API key",
+								prompts: [{ type: "text", key: "apiKey", message: "API key" }],
+							},
+						],
+					},
+				}
+			}
+			if (input.path === "/provider/anthropic/oauth/authorize") {
+				return {
+					data: { url: "https://auth.example/authorize", method: "code", instructions: "Paste the code" },
+				}
+			}
+			if (input.path === "/provider/anthropic/oauth/callback") return { data: true }
 			return { data: undefined }
 		},
 		async *stream(input) {
@@ -146,6 +176,47 @@ describe("ZooClient", () => {
 		expect(mock.requests.slice(-2)).toEqual([
 			{ method: "PATCH", path: "/config", body: { model: "openai/gpt-5" } },
 			{ path: "/config/warnings" },
+		])
+	})
+
+	test("wraps provider routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.listProviders()).resolves.toEqual({
+			all: [{ id: "anthropic", name: "Anthropic", source: "api", env: [], options: {}, models: {} }],
+			default: { anthropic: "claude-sonnet-4" },
+			connected: ["anthropic"],
+			failed: [],
+		})
+		await expect(client.getProviderAuthMethods()).resolves.toEqual({
+			anthropic: [
+				{ type: "oauth", label: "Anthropic OAuth" },
+				{ type: "api", label: "API key", prompts: [{ type: "text", key: "apiKey", message: "API key" }] },
+			],
+		})
+		await expect(
+			client.authorizeProviderOAuth("anthropic", { method: 0, inputs: { workspace: "zoo" } }),
+		).resolves.toEqual({
+			url: "https://auth.example/authorize",
+			method: "code",
+			instructions: "Paste the code",
+		})
+		await expect(client.callbackProviderOAuth("anthropic", { method: 0, code: "oauth-code" })).resolves.toBe(true)
+
+		expect(mock.requests.slice(-4)).toEqual([
+			{ path: "/provider" },
+			{ path: "/provider/auth" },
+			{
+				method: "POST",
+				path: "/provider/anthropic/oauth/authorize",
+				body: { method: 0, inputs: { workspace: "zoo" } },
+			},
+			{
+				method: "POST",
+				path: "/provider/anthropic/oauth/callback",
+				body: { method: 0, code: "oauth-code" },
+			},
 		])
 	})
 })

@@ -68,6 +68,63 @@ export type Provider = {
 	[key: string]: unknown
 }
 
+/** Provider list returned by the portable core. */
+export type ProviderListResult = {
+	/** Available providers. */
+	all?: Provider[]
+	/** Default model/provider selections. */
+	default?: unknown
+	/** Provider IDs with usable credentials. */
+	connected?: string[]
+	/** Providers that failed to load or authenticate. */
+	failed?: unknown[]
+	/** Additional server-provided fields. */
+	[key: string]: unknown
+}
+
+/** Authentication method exposed for a provider. */
+export type ProviderAuthMethod = {
+	/** Auth method type, such as `oauth` or `api`. */
+	type: string
+	/** Display label for the auth method. */
+	label?: string
+	/** Additional prompts or method metadata. */
+	[key: string]: unknown
+}
+
+/** Provider auth methods keyed by provider ID. */
+export type ProviderAuthMethods = Record<string, ProviderAuthMethod[]>
+
+/** Input for starting a provider OAuth flow. */
+export type ProviderOAuthAuthorizeOptions = {
+	/** Auth method index selected by the caller. */
+	method: number
+	/** Provider-specific input values. */
+	inputs?: Record<string, unknown>
+}
+
+/** Provider OAuth authorization response. */
+export type ProviderOAuthAuthorizeResult = {
+	/** Authorization URL, when the provider needs browser auth. */
+	url?: string
+	/** Provider-specific method or flow metadata. */
+	method?: string
+	/** User-facing instructions returned by the provider. */
+	instructions?: string
+	/** Additional server-provided fields. */
+	[key: string]: unknown
+}
+
+/** Input for completing a provider OAuth flow. */
+export type ProviderOAuthCallbackOptions = {
+	/** Auth method index selected by the caller. */
+	method: number
+	/** Authorization code or provider callback payload. */
+	code?: string
+	/** Additional callback fields. */
+	[key: string]: unknown
+}
+
 /** A Zoo/Roo mode or primary agent selection. */
 export type Mode = {
 	/** Mode identifier. */

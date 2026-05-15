@@ -7,6 +7,11 @@ import type {
 	PermissionAlwaysRules,
 	PermissionReply,
 	PermissionRequest,
+	ProviderAuthMethods,
+	ProviderListResult,
+	ProviderOAuthAuthorizeOptions,
+	ProviderOAuthAuthorizeResult,
+	ProviderOAuthCallbackOptions,
 	SendMessageOptions,
 	Session,
 	SessionCreateOptions,
@@ -212,6 +217,57 @@ export class ZooClient {
 					path: "/config/providers",
 				}),
 			) ?? {}
+		)
+	}
+
+	/** List providers visible to the portable core. */
+	async listProviders(): Promise<ProviderListResult> {
+		return (
+			unwrap(
+				await this.#transport.request<ProviderListResult | { data?: ProviderListResult }>({
+					path: "/provider",
+				}),
+			) ?? {}
+		)
+	}
+
+	/** Read available authentication methods for providers. */
+	async getProviderAuthMethods(): Promise<ProviderAuthMethods> {
+		return (
+			unwrap(
+				await this.#transport.request<ProviderAuthMethods | { data?: ProviderAuthMethods }>({
+					path: "/provider/auth",
+				}),
+			) ?? {}
+		)
+	}
+
+	/** Start an OAuth flow for a provider. */
+	async authorizeProviderOAuth(
+		providerID: string,
+		options: ProviderOAuthAuthorizeOptions,
+	): Promise<ProviderOAuthAuthorizeResult> {
+		return (
+			unwrap(
+				await this.#transport.request<ProviderOAuthAuthorizeResult | { data?: ProviderOAuthAuthorizeResult }>({
+					method: "POST",
+					path: `/provider/${encodeURIComponent(providerID)}/oauth/authorize`,
+					body: options,
+				}),
+			) ?? {}
+		)
+	}
+
+	/** Complete an OAuth flow for a provider. */
+	async callbackProviderOAuth(providerID: string, options: ProviderOAuthCallbackOptions): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/provider/${encodeURIComponent(providerID)}/oauth/callback`,
+					body: options,
+				}),
+			) ?? false
 		)
 	}
 

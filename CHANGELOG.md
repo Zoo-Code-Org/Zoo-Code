@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add a VS Code extension `prepare:cli-binary` script for embedding the built Zoo CLI binary in VSIX assets.
 - Implement the initial `@zoo-code/sdk` package with shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers.
 - Add SDK wrappers for portable-core permission listing, config warnings, config updates, and permission always-rule saves.
+- Add SDK wrappers for portable-core provider listing, provider auth methods, and provider OAuth authorize/callback routes.
 - Add the default-off `zoo-code.usePortableCore` VS Code setting and helper for gating future SDK-backed extension paths.
 - Add activation-time portable-core SDK bootstrap wiring behind `zoo-code.usePortableCore` without changing the default extension-host runtime.
 - Version and document the host-webview protocol contract used by upcoming portable-core SDK adapter paths.
