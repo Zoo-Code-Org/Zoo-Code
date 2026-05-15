@@ -273,7 +273,6 @@ const mockPostMessage = (state: any) => {
 				version: "1.0.0",
 				clineMessages: [],
 				taskHistory: [],
-				shouldShowAnnouncement: false,
 				allowedCommands: [],
 				alwaysAllowExecute: false,
 				ttsEnabled: false,

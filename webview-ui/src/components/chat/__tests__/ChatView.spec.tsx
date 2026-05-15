@@ -23,7 +23,6 @@ interface ExtensionState {
 	version: string
 	clineMessages: ClineMessage[]
 	taskHistory: any[]
-	shouldShowAnnouncement: boolean
 	allowedCommands: string[]
 	alwaysAllowExecute: boolean
 	[key: string]: any
@@ -84,19 +83,6 @@ vi.mock("../../common/VersionIndicator", () => ({
 
 // Get the mock function after the module is mocked
 const mockVersionIndicator = vi.mocked((await import("../../common/VersionIndicator")).default)
-
-vi.mock("../Announcement", () => ({
-	default: function MockAnnouncement({ hideAnnouncement }: { hideAnnouncement: () => void }) {
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		const React = require("react")
-		return React.createElement(
-			"div",
-			{ "data-testid": "announcement-modal" },
-			React.createElement("div", null, "What's New"),
-			React.createElement("button", { onClick: hideAnnouncement }, "Close"),
-		)
-	},
-}))
 
 // Mock QueuedMessages component
 vi.mock("../QueuedMessages", () => ({
@@ -272,7 +258,6 @@ const mockPostMessage = (state: Partial<ExtensionState>) => {
 				version: "1.0.0",
 				clineMessages: [],
 				taskHistory: [],
-				shouldShowAnnouncement: false,
 				allowedCommands: [],
 				alwaysAllowExecute: false,
 				cloudIsAuthenticated: false,
@@ -286,8 +271,6 @@ const mockPostMessage = (state: Partial<ExtensionState>) => {
 
 const defaultProps: ChatViewProps = {
 	isHidden: false,
-	showAnnouncement: false,
-	hideAnnouncement: () => {},
 }
 
 const queryClient = new QueryClient()
@@ -542,16 +525,14 @@ describe("ChatView - Version Indicator Tests", () => {
 		expect(getByTestId("version-indicator")).toBeInTheDocument()
 	})
 
-	it("opens announcement modal when version indicator is clicked", async () => {
-		// Mock VersionIndicator to return a button with onClick
-		mockVersionIndicator.mockImplementation(({ onClick }: { onClick?: () => void }) =>
+	it("does not open release notes when version indicator is clicked", async () => {
+		mockVersionIndicator.mockReturnValue(
 			React.createElement("button", {
 				"data-testid": "version-indicator",
-				onClick,
 			}),
 		)
 
-		const { getByTestId, queryByTestId } = renderChatView({ showAnnouncement: false })
+		const { getByTestId, queryByTestId } = renderChatView()
 
 		// Hydrate state
 		mockPostMessage({
@@ -570,10 +551,7 @@ describe("ChatView - Version Indicator Tests", () => {
 			versionIndicator.click()
 		})
 
-		// Wait for announcement modal to appear
-		await waitFor(() => {
-			expect(queryByTestId("announcement-modal")).toBeInTheDocument()
-		})
+		expect(queryByTestId("announcement-modal")).not.toBeInTheDocument()
 	})
 
 	it("version indicator has correct styling classes", () => {
@@ -601,12 +579,10 @@ describe("ChatView - Version Indicator Tests", () => {
 	})
 
 	it("version indicator has proper accessibility attributes", () => {
-		// Mock VersionIndicator to return a button with aria-label
 		mockVersionIndicator.mockReturnValue(
-			React.createElement("button", {
+			React.createElement("span", {
 				"data-testid": "version-indicator",
 				"aria-label": "Version 1.0.0",
-				role: "button",
 			}),
 		)
 
@@ -620,7 +596,7 @@ describe("ChatView - Version Indicator Tests", () => {
 
 		const versionIndicator = getByTestId("version-indicator")
 		expect(versionIndicator.getAttribute("aria-label")).toBe("Version 1.0.0")
-		expect(versionIndicator.getAttribute("role")).toBe("button")
+		expect(versionIndicator.getAttribute("role")).toBeNull()
 	})
 
 	it("does not display version indicator when there is an active task", () => {
@@ -829,6 +805,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		// Simulate user typing and sending a message during the spinner
 		const chatTextArea = getByTestId("chat-textarea")
 		const input = chatTextArea.querySelector("input")! as HTMLInputElement
+		await waitFor(() => expect(input).toHaveAttribute("data-sending-disabled", "true"))
 
 		// Trigger message send by simulating typing and Enter key press
 		await act(async () => {

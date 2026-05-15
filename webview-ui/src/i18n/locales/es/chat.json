@@ -327,27 +327,6 @@
 		"copyToInput": "Copiar a la entrada (o Shift + clic)",
 		"timerPrefix": "Aprobación automática habilitada. Seleccionando en {{seconds}}s…"
 	},
-	"announcement": {
-		"title": "Zoo Code {{version}} publicado",
-		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
-		"handoff": {
-			"heading": "¡Roo Code ha vuelto! Ahora como un plugin mantenido por la comunidad llamado Zoo Code!!",
-			"description": "Si no has estado al tanto, el equipo de Roo Code anunció recientemente que va a dejar de desarrollar Roo Code y archivará el trabajo realizado. Pero no te preocupes: la comunidad ha dado un paso al frente para continuar el legado de Roo Code con un nuevo nombre y un nuevo hogar. Ya no somos solo un \"Roo\", somos una comunidad, un \"Zoo\", si quieres verlo así. Zoo Code es un plugin mantenido por la comunidad que continúa donde Roo Code lo dejó, y estamos comprometidos a mantener vivo el espíritu de Roo mientras introducimos nuevas funciones y mejoras. Queremos dar un enorme agradecimiento a todo el equipo de Roo Code por su increíble trabajo y por crear una herramienta tan increíble para desarrolladores. Nos entusiasma seguir construyendo sobre sus cimientos y ver hasta dónde lleva la comunidad a Zoo Code en el futuro.",
-			"readMore": "Visita la nueva página principal de Zoo Code y lee el anuncio completo"
-		},
-		"release": {
-			"heading": "Qué hay de nuevo:",
-			"gpt55": "GPT-5.5 vía OpenAI Codex: Se añadió soporte para GPT-5.5 en el proveedor OpenAI Codex para que puedas usar el modelo más reciente directamente desde Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 en Vertex AI: Se añadió Claude Opus 4.7 al proveedor Vertex AI, el modelo de razonamiento insignia más reciente de Anthropic.",
-			"checkpointNav": "Navegación por Checkpoints Anteriores: Se añadieron controles en el chat para retroceder por los checkpoints previos, con soporte completo de i18n."
-		},
-		"cloudAgents": {
-			"heading": "Novedades en la Nube:",
-			"specialized": "Presentamos <bold>Explainer</bold>, <bold>Planner</bold> y <bold>Coder</bold> - tres agentes en la nube especializados para mejorar tus flujos de trabajo.",
-			"description": "Los agentes trabajan juntos en la nube y se pueden activar desde la web o mediante Slack.",
-			"tryButton": "Prueba los Agentes en la Nube"
-		}
-	},
 	"costs": {
 		"totalWithSubtasks": "Costo total (incluyendo subtareas): ${{cost}}",
 		"total": "Costo total: ${{cost}}",
@@ -418,12 +397,7 @@
 		"stopping": "Deteniendo la indexación..."
 	},
 	"versionIndicator": {
-		"ariaLabel": "Versión {{version}} - Haz clic para ver las notas de la versión"
-	},
-	"rooCloudCTA": {
-		"title": "¡Zoo Code Cloud está evolucionando!",
-		"description": "Ejecuta agentes remotos en la nube, accede a tus tareas desde cualquier lugar, colabora con otros y mucho más.",
-		"joinWaitlist": "Regístrate para recibir las últimas actualizaciones."
+		"ariaLabel": "Version {{version}}"
 	},
 	"editMessage": {
 		"placeholder": "Edita tu mensaje..."

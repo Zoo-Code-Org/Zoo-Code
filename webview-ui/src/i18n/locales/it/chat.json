@@ -327,27 +327,6 @@
 		"copyToInput": "Copia nell'input (o Shift + clic)",
 		"timerPrefix": "Approvazione automatica abilitata. Selezione tra {{seconds}}s…"
 	},
-	"announcement": {
-		"title": "Rilasciato Zoo Code {{version}}",
-		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
-		"handoff": {
-			"heading": "Roo Code è tornato! Ora come plugin mantenuto dalla community chiamato Zoo Code!!",
-			"description": "Se non l'hai seguito, il team di Roo Code ha annunciato di recente che interromperà lo sviluppo di Roo Code e archivierà il lavoro svolto. Ma niente paura: la community si è fatta avanti per continuare l'eredità di Roo Code con un nuovo nome e una nuova casa! Non siamo più solo un singolo \"Roo\", ma una community, uno \"Zoo\" se vuoi. Zoo Code è un plugin mantenuto dalla community che riprende da dove Roo Code si era fermato, e ci impegniamo a mantenere vivo lo spirito di Roo introducendo anche nuove funzionalità e miglioramenti. Vogliamo ringraziare di cuore tutto il team di Roo Code per il lavoro incredibile e per aver creato uno strumento così straordinario per gli sviluppatori. Siamo entusiasti di continuare a costruire sulla loro base e di vedere dove la community porterà Zoo Code in futuro!",
-			"readMore": "Vai alla nuova home page di Zoo Code e leggi l'annuncio completo"
-		},
-		"release": {
-			"heading": "Novità:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: Aggiunto il supporto a GPT-5.5 nel provider OpenAI Codex così puoi usare il modello più recente direttamente da Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 su Vertex AI: Aggiunto Claude Opus 4.7 al provider Vertex AI, il nuovo modello di ragionamento di punta di Anthropic.",
-			"checkpointNav": "Navigazione Checkpoint Precedenti: Aggiunti controlli nella chat per tornare indietro ai checkpoint precedenti, con pieno supporto i18n."
-		},
-		"cloudAgents": {
-			"heading": "Novità nel Cloud:",
-			"specialized": "Presentazione di <bold>Explainer</bold>, <bold>Planner</bold> e <bold>Coder</bold> - tre agenti cloud specializzati per migliorare i tuoi flussi di lavoro.",
-			"description": "Gli agenti lavorano insieme nel cloud e possono essere attivati dal web o tramite Slack.",
-			"tryButton": "Prova gli Agenti Cloud"
-		}
-	},
 	"costs": {
 		"totalWithSubtasks": "Costo totale (sottoattività incluse): ${{cost}}",
 		"total": "Costo totale: ${{cost}}",
@@ -418,12 +397,7 @@
 		"stopping": "Interruzione dell'indicizzazione..."
 	},
 	"versionIndicator": {
-		"ariaLabel": "Versione {{version}} - Clicca per visualizzare le note di rilascio"
-	},
-	"rooCloudCTA": {
-		"title": "Zoo Code Cloud si sta evolvendo!",
-		"description": "Esegui agenti remoti nel cloud, accedi alle tue attività da qualsiasi luogo, collabora con altri e molto altro.",
-		"joinWaitlist": "Registrati per ricevere gli ultimi aggiornamenti."
+		"ariaLabel": "Version {{version}}"
 	},
 	"editMessage": {
 		"placeholder": "Modifica il tuo messaggio..."

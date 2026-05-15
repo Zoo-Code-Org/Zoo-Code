@@ -22,7 +22,6 @@ interface ExtensionState {
 	version: string
 	clineMessages: ClineMessage[]
 	taskHistory: any[]
-	shouldShowAnnouncement: boolean
 	allowedCommands: string[]
 	alwaysAllowExecute: boolean
 	[key: string]: any
@@ -57,19 +56,6 @@ vi.mock("../AutoApproveMenu", () => ({
 // Mock VersionIndicator
 vi.mock("../../common/VersionIndicator", () => ({
 	default: vi.fn(() => null),
-}))
-
-vi.mock("../Announcement", () => ({
-	default: function MockAnnouncement({ hideAnnouncement }: { hideAnnouncement: () => void }) {
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		const React = require("react")
-		return React.createElement(
-			"div",
-			{ "data-testid": "announcement-modal" },
-			React.createElement("div", null, "What's New"),
-			React.createElement("button", { onClick: hideAnnouncement }, "Close"),
-		)
-	},
 }))
 
 // Mock QueuedMessages component
@@ -226,7 +212,6 @@ const mockPostMessage = (state: Partial<ExtensionState>) => {
 				version: "1.0.0",
 				clineMessages: [],
 				taskHistory: [],
-				shouldShowAnnouncement: false,
 				allowedCommands: [],
 				alwaysAllowExecute: false,
 				cloudIsAuthenticated: false,
@@ -240,8 +225,6 @@ const mockPostMessage = (state: Partial<ExtensionState>) => {
 
 const defaultProps: ChatViewProps = {
 	isHidden: false,
-	showAnnouncement: false,
-	hideAnnouncement: () => {},
 }
 
 const queryClient = new QueryClient()

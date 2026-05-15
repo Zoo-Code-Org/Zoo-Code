@@ -327,27 +327,6 @@
 		"copyToInput": "इनपुट में कॉपी करें (या Shift + क्लिक)",
 		"timerPrefix": "ऑटो-अनुमोदन सक्षम है। {{seconds}}s में चयन किया जा रहा है…"
 	},
-	"announcement": {
-		"title": "Zoo Code {{version}} रिलीज़ हो गया",
-		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
-		"handoff": {
-			"heading": "Roo Code वापस आ गया है! अब Zoo Code नाम के community-maintained plugin के रूप में!!",
-			"description": "अगर आपने हाल की खबर नहीं देखी, तो Roo Code टीम ने हाल ही में घोषणा की कि वे Roo Code का विकास बंद कर रहे हैं और अब तक किए गए काम को archive कर रहे हैं। लेकिन चिंता मत करें, community नए नाम और नए घर के साथ Roo Code की विरासत को आगे बढ़ाने के लिए आगे आई है! अब हम सिर्फ एक \"Roo\" नहीं हैं, हम एक community हैं — अगर चाहो तो एक \"Zoo\"। Zoo Code एक community-maintained plugin है जो वहीं से आगे बढ़ता है जहाँ Roo Code रुका था, और हम Roo की भावना को ज़िंदा रखते हुए नई सुविधाएँ और सुधार लाने के लिए प्रतिबद्ध हैं। हम पूरी Roo Code टीम को उनके शानदार काम और डेवलपर्स के लिए इतना बेहतरीन tool बनाने के लिए दिल से धन्यवाद देना चाहते हैं। हम उनकी बनाई नींव पर आगे निर्माण करने और यह देखने के लिए उत्साहित हैं कि community Zoo Code को आगे कहाँ ले जाती है!",
-			"readMore": "Zoo Code का नया होम पेज देखें और पूरी घोषणा पढ़ें"
-		},
-		"release": {
-			"heading": "नया क्या है:",
-			"gpt55": "OpenAI Codex के माध्यम से GPT-5.5: OpenAI Codex provider में GPT-5.5 सपोर्ट जोड़ा गया, ताकि आप नवीनतम मॉडल का उपयोग सीधे Zoo Code से कर सकें।",
-			"claudeOpus47": "Vertex AI पर Claude Opus 4.7: Anthropic के नवीनतम flagship reasoning मॉडल के लिए Vertex AI provider में Claude Opus 4.7 जोड़ा गया।",
-			"checkpointNav": "पिछले Checkpoint की Navigation: चैट में controls जोड़े गए ताकि आप पिछले checkpoints पर वापस जा सकें, पूर्ण i18n सपोर्ट के साथ।"
-		},
-		"cloudAgents": {
-			"heading": "क्लाउड में नया:",
-			"specialized": "<bold>Explainer</bold>, <bold>Planner</bold>, और <bold>Coder</bold> की शुरुआत - तीन विशेष क्लाउड एजेंट आपके वर्कफ़्लो को बेहतर बनाने के लिए।",
-			"description": "एजेंट क्लाउड में एक साथ काम करते हैं और web या Slack के माध्यम से ट्रिगर किए जा सकते हैं।",
-			"tryButton": "क्लाउड एजेंट आज़माएं"
-		}
-	},
 	"costs": {
 		"totalWithSubtasks": "कुल लागत (उप-कार्यों सहित): ${{cost}}",
 		"total": "कुल लागत: ${{cost}}",
@@ -418,12 +397,7 @@
 		"stopping": "इंडेक्सिंग रोक रहा है..."
 	},
 	"versionIndicator": {
-		"ariaLabel": "संस्करण {{version}} - रिलीज़ नोट्स देखने के लिए क्लिक करें"
-	},
-	"rooCloudCTA": {
-		"title": "Zoo Code Cloud विकसित हो रहा है!",
-		"description": "क्लाउड में रिमोट एजेंट चलाएं, कहीं से भी अपने कार्यों तक पहुंचें, दूसरों के साथ सहयोग करें, और बहुत कुछ।",
-		"joinWaitlist": "नवीनतम अपडेट प्राप्त करने के लिए साइन अप करें।"
+		"ariaLabel": "Version {{version}}"
 	},
 	"editMessage": {
 		"placeholder": "अपना संदेश संपादित करें..."

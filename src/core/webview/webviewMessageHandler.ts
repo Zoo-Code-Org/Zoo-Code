@@ -770,10 +770,6 @@ export const webviewMessageHandler = async (
 			await provider.clearTask()
 			await provider.postStateToWebview()
 			break
-		case "didShowAnnouncement":
-			await updateGlobalState("lastShownAnnouncementId", provider.latestAnnouncementId)
-			await provider.postStateToWebview()
-			break
 		case "selectImages":
 			const images = await selectImages()
 			await provider.postMessageToWebview({
@@ -3222,41 +3218,6 @@ export const webviewMessageHandler = async (
 				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images)
 			}
 
-			break
-		}
-
-		case "dismissUpsell": {
-			if (message.upsellId) {
-				try {
-					// Get current list of dismissed upsells
-					const dismissedUpsells = getGlobalState("dismissedUpsells") || []
-
-					// Add the new upsell ID if not already present
-					let updatedList = dismissedUpsells
-					if (!dismissedUpsells.includes(message.upsellId)) {
-						updatedList = [...dismissedUpsells, message.upsellId]
-						await updateGlobalState("dismissedUpsells", updatedList)
-					}
-
-					// Send updated list back to webview (use the already computed updatedList)
-					await provider.postMessageToWebview({
-						type: "dismissedUpsells",
-						list: updatedList,
-					})
-				} catch (error) {
-					// Fail silently as per Bruno's comment - it's OK to fail silently in this case
-					provider.log(`Failed to dismiss upsell: ${error instanceof Error ? error.message : String(error)}`)
-				}
-			}
-			break
-		}
-		case "getDismissedUpsells": {
-			// Send the current list of dismissed upsells to the webview
-			const dismissedUpsells = getGlobalState("dismissedUpsells") || []
-			await provider.postMessageToWebview({
-				type: "dismissedUpsells",
-				list: dismissedUpsells,
-			})
 			break
 		}
 

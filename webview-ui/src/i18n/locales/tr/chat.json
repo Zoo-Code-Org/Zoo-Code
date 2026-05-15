@@ -328,27 +328,6 @@
 		"copyToInput": "Giriş alanına kopyala (veya Shift + tıklama)",
 		"timerPrefix": "Otomatik onay etkinleştirildi. {{seconds}}s içinde seçim yapılıyor…"
 	},
-	"announcement": {
-		"title": "Zoo Code {{version}} yayınlandı",
-		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
-		"handoff": {
-			"heading": "Roo Code geri döndü! Artık Zoo Code adlı, topluluk tarafından sürdürülen bir eklenti!!",
-			"description": "Takip etmiyorsan kaçırmış olabilirsin: Roo Code ekibi kısa süre önce Roo Code geliştirmesini aşamalı olarak sonlandırdığını ve yaptıkları çalışmaları arşivlediğini duyurdu. Ama endişelenme; topluluk, Roo Code mirasını yeni bir ad ve yeni bir yuva ile sürdürmek için öne çıktı! Artık sadece tek bir \"Roo\" değiliz; bir topluluğuz, istersen bir \"Zoo\" diyebilirsin. Zoo Code, Roo Code'un bıraktığı yerden devam eden, topluluk tarafından sürdürülen bir eklenti ve Roo'nun ruhunu korurken yeni özellikler ve iyileştirmeler sunmaya kararlıyız. Geliştiriciler için böylesine harika bir araç yarattıkları ve yaptıkları inanılmaz iş için tüm Roo Code ekibine kocaman bir teşekkür göndermek istiyoruz. Onların temeli üzerine inşa etmeyi sürdürmekten ve topluluğun gelecekte Zoo Code'u nereye taşıyacağını görmekten heyecan duyuyoruz!",
-			"readMore": "Zoo Code'un yeni ana sayfasına göz at ve tam duyuruyu oku"
-		},
-		"release": {
-			"heading": "Yenilikler:",
-			"gpt55": "OpenAI Codex üzerinden GPT-5.5: En son modeli doğrudan Zoo Code'dan kullanabilmen için OpenAI Codex sağlayıcısına GPT-5.5 desteği eklendi.",
-			"claudeOpus47": "Vertex AI'da Claude Opus 4.7: Anthropic'in en yeni amiral gemisi akıl yürütme modeli olan Claude Opus 4.7 Vertex AI sağlayıcısına eklendi.",
-			"checkpointNav": "Önceki Checkpoint Navigasyonu: Sohbetten önceki checkpoint'lere geri atlayabilmen için kontroller eklendi ve tam i18n desteği sunuluyor."
-		},
-		"cloudAgents": {
-			"heading": "Cloud'daki yenilikler:",
-			"specialized": "<bold>Explainer</bold>, <bold>Planner</bold> ve <bold>Coder</bold> tanıtımı - iş akışlarını geliştirmek için üç özel bulut ajanı.",
-			"description": "Ajanlar bulutta birlikte çalışır ve web'den veya Slack üzerinden tetiklenebilir.",
-			"tryButton": "Bulut Ajanlarını Dene"
-		}
-	},
 	"costs": {
 		"totalWithSubtasks": "Toplam Maliyet (alt görevler dahil): ${{cost}}",
 		"total": "Toplam Maliyet: ${{cost}}",
@@ -419,12 +398,7 @@
 		"stopping": "İndeksleme durduruluyor..."
 	},
 	"versionIndicator": {
-		"ariaLabel": "Sürüm {{version}} - Sürüm notlarını görüntülemek için tıklayın"
-	},
-	"rooCloudCTA": {
-		"title": "Zoo Code Cloud gelişiyor!",
-		"description": "Bulutta uzak ajanlar çalıştırın, görevlerinize her yerden erişin, başkalarıyla işbirliği yapın ve daha fazlası.",
-		"joinWaitlist": "En son güncellemeleri almak için kaydolun."
+		"ariaLabel": "Version {{version}}"
 	},
 	"editMessage": {
 		"placeholder": "Mesajını düzenle..."

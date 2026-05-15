@@ -346,27 +346,6 @@
 		"triggerLabel_other": "{{count}} auto-approved",
 		"triggerLabelAll": "BRRR"
 	},
-	"announcement": {
-		"title": "Zoo Code {{version}} Released",
-		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
-		"handoff": {
-			"heading": "Roo Code is back! Now as a community-maintained plugin called Zoo Code!!",
-			"description": "If you haven't been following, the Roo Code team recently announced they are sun setting the development of Roo Code and are archiving the work they have done. But fear not, the community has stepped up to continue the legacy of Roo Code with a new name and a new home! We are not just a single \"Roo\" anymore, we are a community, a \"Zoo\" if you will, Zoo Code is a community-maintained plugin that picks up where Roo Code left off, and we're committed to keeping the spirit of Roo alive while also introducing new features and improvements. We want to give a huge shoutout to the entire Roo Code team for their incredible work and for creating such an amazing tool for developers. We're excited to continue building on their foundation and to see where the community takes Zoo Code in the future!",
-			"readMore": "See the new home page of Zoo Code and read the full announcement"
-		},
-		"release": {
-			"heading": "What's New:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: Added GPT-5.5 support in the OpenAI Codex provider so you can use the latest model straight from Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 on Vertex AI: Added Claude Opus 4.7 to the Vertex AI provider for Anthropic's newest flagship reasoning model.",
-			"checkpointNav": "Previous Checkpoint Navigation: Added controls in chat to jump back through prior checkpoints, with full i18n support."
-		},
-		"cloudAgents": {
-			"heading": "New in the Cloud:",
-			"specialized": "Introducing <bold>Explainer</bold>, <bold>Planner</bold>, and <bold>Coder</bold> - three specialized cloud agents to enhance your workflows.",
-			"description": "The agents work together in the cloud and can be triggered from the web or through Slack.",
-			"tryButton": "Try Cloud Agents"
-		}
-	},
 	"reasoning": {
 		"thinking": "Thinking",
 		"seconds": "{{count}}s"
@@ -414,7 +393,7 @@
 		"stopping": "Stopping indexing..."
 	},
 	"versionIndicator": {
-		"ariaLabel": "Version {{version}} - Click to view release notes"
+		"ariaLabel": "Version {{version}}"
 	},
 	"command": {
 		"triggerDescription": "Trigger the {{name}} command"

@@ -327,27 +327,6 @@
 		"copyToInput": "입력창에 복사 (또는 Shift + 클릭)",
 		"timerPrefix": "자동 승인 활성화됨. {{seconds}}초 후 선택 중…"
 	},
-	"announcement": {
-		"title": "Zoo Code {{version}} 출시",
-		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
-		"handoff": {
-			"heading": "Roo Code가 돌아왔습니다! 이제 커뮤니티가 유지 관리하는 플러그인 Zoo Code입니다!!",
-			"description": "최근 소식을 못 보셨다면, Roo Code 팀이 Roo Code 개발을 종료하고 지금까지의 작업을 아카이브하겠다고 발표했어요. 하지만 걱정하지 마세요. 커뮤니티가 나서서 Roo Code의 유산을 새로운 이름과 새로운 터전에서 이어가고 있어요! 이제 우리는 더 이상 하나의 \"Roo\"가 아니라, 말 그대로 하나의 커뮤니티, 즉 \"Zoo\"입니다. Zoo Code는 Roo Code가 멈춘 지점에서 이어받는 커뮤니티 유지 관리 플러그인이며, Roo의 정신을 지키면서도 새로운 기능과 개선 사항을 계속 추가해 나가겠습니다. 개발자들에게 이렇게 훌륭한 도구를 만들어 준 Roo Code 팀 전체에 진심으로 큰 감사를 전합니다. 그들이 만든 기반 위에 계속해서 쌓아 올리고, 앞으로 커뮤니티가 Zoo Code를 어디까지 발전시킬지 정말 기대하고 있습니다!",
-			"readMore": "Zoo Code의 새 홈페이지에서 전체 공지를 읽어보세요"
-		},
-		"release": {
-			"heading": "새로운 기능:",
-			"gpt55": "OpenAI Codex를 통한 GPT-5.5: OpenAI Codex 제공업체에 GPT-5.5 지원을 추가해, Zoo Code에서 바로 최신 모델을 사용할 수 있어요.",
-			"claudeOpus47": "Vertex AI에서 Claude Opus 4.7: Anthropic의 최신 플래그십 추론 모델인 Claude Opus 4.7을 Vertex AI 제공업체에 추가했어요.",
-			"checkpointNav": "이전 체크포인트 탐색: 이전 체크포인트로 돌아갈 수 있는 컨트롤을 채팅에 추가했고, i18n을 완벽하게 지원해요."
-		},
-		"cloudAgents": {
-			"heading": "클라우드의 새로운 기능:",
-			"specialized": "<bold>Explainer</bold>, <bold>Planner</bold>, <bold>Coder</bold> 세 가지 전문 클라우드 에이전트를 소개합니다. 워크플로우를 향상시킵니다.",
-			"description": "에이전트는 클라우드에서 함께 작동하며 웹 또는 Slack을 통해 트리거할 수 있습니다.",
-			"tryButton": "클라우드 에이전트 사용해보기"
-		}
-	},
 	"costs": {
 		"totalWithSubtasks": "총 비용 (하위 작업 포함): ${{cost}}",
 		"total": "총 비용: ${{cost}}",
@@ -418,12 +397,7 @@
 		"stopping": "인덱싱 중지 중..."
 	},
 	"versionIndicator": {
-		"ariaLabel": "버전 {{version}} - 릴리스 노트를 보려면 클릭하세요"
-	},
-	"rooCloudCTA": {
-		"title": "Zoo Code Cloud가 진화하고 있습니다!",
-		"description": "클라우드에서 원격 에이전트를 실행하고, 어디서나 작업에 액세스하고, 다른 사람들과 협업하는 등 다양한 기능을 이용하세요.",
-		"joinWaitlist": "최신 업데이트를 받으려면 가입하세요."
+		"ariaLabel": "Version {{version}}"
 	},
 	"editMessage": {
 		"placeholder": "메시지 편집..."

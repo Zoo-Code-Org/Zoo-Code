@@ -166,7 +166,6 @@ describe("App", () => {
 		mockUseExtensionState.mockReturnValue({
 			didHydrateState: true,
 			showWelcome: false,
-			shouldShowAnnouncement: false,
 			experiments: {},
 			language: "en",
 			telemetrySetting: "enabled",
@@ -191,7 +190,6 @@ describe("App", () => {
 	const createSetupIncompleteState = () => ({
 		didHydrateState: true,
 		showWelcome: true,
-		shouldShowAnnouncement: false,
 		experiments: {},
 		language: "en",
 		telemetrySetting: "enabled",
@@ -209,7 +207,6 @@ describe("App", () => {
 		mockUseExtensionState.mockReturnValue({
 			didHydrateState: true,
 			showWelcome: true,
-			shouldShowAnnouncement: false,
 			experiments: {},
 			language: "en",
 			telemetrySetting: "enabled",
@@ -242,7 +239,6 @@ describe("App", () => {
 		mockUseExtensionState.mockReturnValue({
 			didHydrateState: true,
 			showWelcome: true,
-			shouldShowAnnouncement: false,
 			experiments: {},
 			language: "en",
 			telemetrySetting: "enabled",
@@ -262,7 +258,6 @@ describe("App", () => {
 		mockUseExtensionState.mockReturnValue({
 			didHydrateState: true,
 			showWelcome: true,
-			shouldShowAnnouncement: false,
 			experiments: {},
 			language: "en",
 			telemetrySetting: "enabled",

@@ -169,7 +169,6 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "apr-2026-v3.53.0-community-handoff-gpt55-opus47" // v3.53.0 Community handoff, GPT-5.5, Claude Opus 4.7, checkpoint navigation
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -2057,7 +2056,6 @@ export class ClineProvider
 
 		const {
 			apiConfiguration,
-			lastShownAnnouncementId,
 			customInstructions,
 			alwaysAllowReadOnly,
 			alwaysAllowReadOnlyOutsideWorkspace,
@@ -2228,8 +2226,6 @@ export class ClineProvider
 			ttsSpeed: ttsSpeed ?? 1.0,
 			enableCheckpoints: enableCheckpoints ?? true,
 			checkpointTimeout: checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
-			shouldShowAnnouncement:
-				telemetrySetting !== "unset" && lastShownAnnouncementId !== this.latestAnnouncementId,
 			allowedCommands: mergedAllowedCommands,
 			deniedCommands: mergedDeniedCommands,
 			soundVolume: soundVolume ?? 0.5,
@@ -2333,10 +2329,7 @@ export class ClineProvider
 	 */
 
 	async getState(): Promise<
-		Omit<
-			ExtensionState,
-			"clineMessages" | "renderContext" | "hasOpenedModeSelector" | "version" | "shouldShowAnnouncement"
-		>
+		Omit<ExtensionState, "clineMessages" | "renderContext" | "hasOpenedModeSelector" | "version">
 	> {
 		const stateValues = this.contextProxy.getValues()
 		const customModes = await this.customModesManager.getCustomModes()
@@ -2407,7 +2400,6 @@ export class ClineProvider
 		// Return the same structure as before.
 		return {
 			apiConfiguration: providerSettings,
-			lastShownAnnouncementId: stateValues.lastShownAnnouncementId,
 			customInstructions: stateValues.customInstructions,
 			apiModelId: stateValues.apiModelId,
 			alwaysAllowReadOnly: stateValues.alwaysAllowReadOnly ?? false,

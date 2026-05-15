@@ -356,27 +356,6 @@
 		"triggerLabel_other": "{{count}} disetujui otomatis",
 		"triggerLabelAll": "BRRR"
 	},
-	"announcement": {
-		"title": "Zoo Code {{version}} Dirilis",
-		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
-		"handoff": {
-			"heading": "Roo Code kembali! Sekarang sebagai plugin yang dikelola komunitas bernama Zoo Code!!",
-			"description": "Kalau kamu belum mengikuti kabarnya, tim Roo Code baru-baru ini mengumumkan bahwa mereka menghentikan pengembangan Roo Code dan mengarsipkan pekerjaan yang telah mereka lakukan. Tapi jangan khawatir, komunitas telah melangkah maju untuk melanjutkan warisan Roo Code dengan nama baru dan rumah baru! Kita bukan lagi satu \"Roo\" saja, kita adalah sebuah komunitas, sebuah \"Zoo\" kalau boleh dibilang. Zoo Code adalah plugin yang dikelola komunitas dan melanjutkan dari titik terakhir Roo Code, dan kami berkomitmen menjaga semangat Roo tetap hidup sambil menghadirkan fitur dan peningkatan baru. Kami juga ingin memberi apresiasi besar kepada seluruh tim Roo Code atas kerja luar biasa mereka dan karena telah menciptakan alat yang luar biasa untuk para developer. Kami antusias melanjutkan fondasi mereka dan melihat ke mana komunitas akan membawa Zoo Code ke depannya!",
-			"readMore": "Lihat halaman beranda baru Zoo Code dan baca pengumuman lengkapnya"
-		},
-		"release": {
-			"heading": "Yang Baru:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: Dukungan GPT-5.5 ditambahkan di provider OpenAI Codex agar kamu bisa menggunakan model terbaru langsung dari Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 di Vertex AI: Claude Opus 4.7 ditambahkan ke provider Vertex AI untuk model reasoning andalan terbaru dari Anthropic.",
-			"checkpointNav": "Navigasi Checkpoint Sebelumnya: Menambahkan kontrol di chat untuk melompat kembali ke checkpoint sebelumnya, dengan dukungan i18n penuh."
-		},
-		"cloudAgents": {
-			"heading": "Baru di Cloud:",
-			"specialized": "Memperkenalkan <bold>Explainer</bold>, <bold>Planner</bold>, dan <bold>Coder</bold> - tiga agen cloud khusus untuk meningkatkan alur kerja Anda.",
-			"description": "Agen bekerja bersama di cloud dan dapat dipicu dari web atau melalui Slack.",
-			"tryButton": "Coba Agen Cloud"
-		}
-	},
 	"reasoning": {
 		"thinking": "Berpikir",
 		"seconds": "{{count}}d"
@@ -424,12 +403,7 @@
 		"stopping": "Menghentikan pengindeksan..."
 	},
 	"versionIndicator": {
-		"ariaLabel": "Versi {{version}} - Klik untuk melihat catatan rilis"
-	},
-	"rooCloudCTA": {
-		"title": "Zoo Code Cloud sedang berkembang!",
-		"description": "Jalankan agen jarak jauh di cloud, akses tugas Anda dari mana saja, berkolaborasi dengan orang lain, dan banyak lagi.",
-		"joinWaitlist": "Daftar untuk mendapatkan pembaruan terbaru."
+		"ariaLabel": "Version {{version}}"
 	},
 	"editMessage": {
 		"placeholder": "Edit pesan Anda..."

@@ -83,10 +83,8 @@ export const globalSettingsSchema = z.object({
 	listApiConfigMeta: z.array(providerSettingsEntrySchema).optional(),
 	pinnedApiConfigs: z.record(z.string(), z.boolean()).optional(),
 
-	lastShownAnnouncementId: z.string().optional(),
 	customInstructions: z.string().optional(),
 	taskHistory: z.array(historyItemSchema).optional(),
-	dismissedUpsells: z.array(z.string()).optional(),
 
 	// Image generation settings (experimental) - flattened for simplicity
 	imageGenerationProvider: z.enum(["openrouter", "roo"]).optional(),
@@ -319,8 +317,6 @@ export const isGlobalStateKey = (key: string): key is Keys<GlobalState> =>
 // Default settings when running evals (unless overridden).
 export const EVALS_SETTINGS: RooCodeSettings = {
 	apiProvider: "openrouter",
-
-	lastShownAnnouncementId: "jul-09-2025-3-23-0",
 
 	pinnedApiConfigs: {},
 
