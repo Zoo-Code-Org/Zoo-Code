@@ -88,6 +88,38 @@ function transport(): ZooTransport & { requests: any[] } {
 				return { data: input.body }
 			if (input.path === "/session/ses_1/message/msg_1/part/part_1" && input.method === "DELETE")
 				return { data: true }
+			if (input.path === "/path?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return {
+					data: {
+						home: "/home/user",
+						state: "/home/user/.local/share/kilo",
+						config: "/home/user/.config/kilo",
+						worktree: "/repo/root",
+						directory: "/repo/root",
+					},
+				}
+			}
+			if (input.path === "/vcs?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: { branch: "feature", default_branch: "main" } }
+			}
+			if (input.path === "/vcs/diff?directory=%2Frepo%2Froot&workspace=workspace-1&mode=branch") {
+				return {
+					data: [{ file: "src/app.ts", patch: "patch", additions: 1, deletions: 1, status: "modified" }],
+				}
+			}
+			if (input.path === "/command?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return {
+					data: [
+						{
+							name: "review",
+							description: "review changes",
+							source: "command",
+							template: "Review",
+							hints: [],
+						},
+					],
+				}
+			}
 			if (input.path === "/agent") {
 				return { data: [{ name: "code", displayName: "Code", description: "Code mode", mode: "primary" }] }
 			}
@@ -433,6 +465,34 @@ describe("ZooClient", () => {
 			{ id: "code", name: "Code", description: "Code mode", primary: true },
 		])
 		expect(mock.requests.at(-1)).toEqual({ path: "/agent" })
+	})
+
+	test("wraps instance read routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const scope = { directory: "/repo/root", workspace: "workspace-1" }
+
+		await expect(client.getPaths(scope)).resolves.toEqual({
+			home: "/home/user",
+			state: "/home/user/.local/share/kilo",
+			config: "/home/user/.config/kilo",
+			worktree: "/repo/root",
+			directory: "/repo/root",
+		})
+		await expect(client.getVcsInfo(scope)).resolves.toEqual({ branch: "feature", default_branch: "main" })
+		await expect(client.getVcsDiff({ ...scope, mode: "branch" })).resolves.toEqual([
+			{ file: "src/app.ts", patch: "patch", additions: 1, deletions: 1, status: "modified" },
+		])
+		await expect(client.listCommands(scope)).resolves.toEqual([
+			{ name: "review", description: "review changes", source: "command", template: "Review", hints: [] },
+		])
+
+		expect(mock.requests.slice(-4)).toEqual([
+			{ path: "/path?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/vcs?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/vcs/diff?directory=%2Frepo%2Froot&workspace=workspace-1&mode=branch" },
+			{ path: "/command?directory=%2Frepo%2Froot&workspace=workspace-1" },
+		])
 	})
 
 	test("reads portable core config and configured providers", async () => {

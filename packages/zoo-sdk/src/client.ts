@@ -1,5 +1,6 @@
 import { createHttpTransport, createIpcTransport, type ZooTransport } from "./transport/index.js"
 import type {
+	CommandInfo,
 	MessageChunk,
 	MessageListOptions,
 	MessagePart,
@@ -7,6 +8,7 @@ import type {
 	Mode,
 	ConfigWarning,
 	ConfigProvidersResult,
+	PathInfo,
 	PermissionAlwaysRules,
 	PermissionReply,
 	PermissionRequest,
@@ -31,6 +33,10 @@ import type {
 	SessionUpdateOptions,
 	SessionViewedOptions,
 	Todo,
+	VcsDiffOptions,
+	VcsFileDiff,
+	VcsInfo,
+	WorkspaceRouteOptions,
 	WorktreeCreateOptions,
 	WorktreeDirectoryOptions,
 	WorktreeDiff,
@@ -94,6 +100,15 @@ function questionQuery(options: QuestionListOptions = {}) {
 	const params = new URLSearchParams()
 	if (options.directory) params.set("directory", options.directory)
 	if (options.workspace) params.set("workspace", options.workspace)
+	const query = params.toString()
+	return query ? `?${query}` : ""
+}
+
+function workspaceRouteQuery(options: WorkspaceRouteOptions & { mode?: string } = {}) {
+	const params = new URLSearchParams()
+	if (options.directory) params.set("directory", options.directory)
+	if (options.workspace) params.set("workspace", options.workspace)
+	if (options.mode) params.set("mode", options.mode)
 	const query = params.toString()
 	return query ? `?${query}` : ""
 }
@@ -490,6 +505,48 @@ export class ZooClient {
 					typeof record.primary === "boolean" ? record.primary : record.mode === "primary" ? true : undefined,
 			}
 		})
+	}
+
+	/** Read portable-core path metadata. */
+	async getPaths(options: WorkspaceRouteOptions = {}): Promise<PathInfo> {
+		return unwrap(
+			await this.#transport.request<PathInfo | { data?: PathInfo }>({
+				path: `/path${workspaceRouteQuery(options)}`,
+			}),
+		)
+	}
+
+	/** Read current VCS metadata. */
+	async getVcsInfo(options: WorkspaceRouteOptions = {}): Promise<VcsInfo> {
+		return (
+			unwrap(
+				await this.#transport.request<VcsInfo | { data?: VcsInfo }>({
+					path: `/vcs${workspaceRouteQuery(options)}`,
+				}),
+			) ?? {}
+		)
+	}
+
+	/** Read VCS diffs for the selected mode. */
+	async getVcsDiff(options: VcsDiffOptions): Promise<VcsFileDiff[]> {
+		return (
+			unwrap(
+				await this.#transport.request<VcsFileDiff[] | { data?: VcsFileDiff[] }>({
+					path: `/vcs/diff${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List portable-core slash commands. */
+	async listCommands(options: WorkspaceRouteOptions = {}): Promise<CommandInfo[]> {
+		return (
+			unwrap(
+				await this.#transport.request<CommandInfo[] | { data?: CommandInfo[] }>({
+					path: `/command${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
 	}
 
 	/** Read the portable-core configuration snapshot. */

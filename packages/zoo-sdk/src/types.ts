@@ -182,6 +182,56 @@ export type Mode = {
 	primary?: boolean
 }
 
+/** Optional workspace scoping for portable-core instance routes. */
+export type WorkspaceRouteOptions = {
+	directory?: string
+	workspace?: string
+}
+
+/** Portable-core path metadata. */
+export type PathInfo = {
+	home: string
+	state: string
+	config: string
+	worktree: string
+	directory: string
+}
+
+/** Current VCS metadata for a workspace. */
+export type VcsInfo = {
+	branch?: string
+	default_branch?: string
+}
+
+/** VCS diff mode supported by portable core. */
+export type VcsMode = "git" | "branch"
+
+/** Options for querying VCS diffs. */
+export type VcsDiffOptions = WorkspaceRouteOptions & {
+	mode: VcsMode
+}
+
+/** One VCS diff item. */
+export type VcsFileDiff = {
+	file: string
+	patch: string
+	additions: number
+	deletions: number
+	status?: "added" | "deleted" | "modified"
+}
+
+/** Portable-core command metadata. */
+export type CommandInfo = {
+	name: string
+	description?: string
+	agent?: string
+	model?: string
+	source?: "command" | "mcp" | "skill"
+	template: unknown
+	subtask?: boolean
+	hints: string[]
+}
+
 /** A portable-core permission rule or decision. */
 export type Permission = {
 	/** Permission capability, such as `bash` or `edit`. */
