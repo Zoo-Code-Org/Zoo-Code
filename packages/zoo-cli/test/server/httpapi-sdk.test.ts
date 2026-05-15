@@ -298,9 +298,9 @@ describe("HttpApi SDK", () => {
 		}),
 	)
 
-	// kilocode_change start - /config/providers and /agent 500 on HttpApi backend; Kilo overlays not yet migrated onto the bridge
-	httpapi.skip(
-		"uses the generated SDK for safe instance routes",
+	// kilocode_change start - keep provider discovery in skipped parity until provider/model initialization is isolated
+	httpapi(
+		"uses the generated SDK for safe instance route core subset",
 		withProject("httpapi", { git: false, setup: writeStandardFiles }, ({ sdk }) =>
 			Effect.gen(function* () {
 				const file = yield* call(() => sdk.file.read({ path: "hello.txt" }))
@@ -317,7 +317,6 @@ describe("HttpApi SDK", () => {
 				yield* Effect.all([
 					expectStatus(() => sdk.project.current(), 200),
 					expectStatus(() => sdk.config.get(), 200),
-					expectStatus(() => sdk.config.providers(), 200),
 					expectStatus(() => sdk.find.files({ query: "hello", limit: 10 }), 200),
 				])
 			}),
