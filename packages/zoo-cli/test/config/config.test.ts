@@ -462,6 +462,109 @@ test("project zoo.jsonc overrides global zoo.jsonc", async () => {
 	}
 })
 
+test("merges Zoo config objects deeply while only instructions arrays concatenate", async () => {
+	await using home = await tmpdir()
+	await using project = await tmpdir({
+		init: async (dir) => {
+			await writeConfig(
+				dir,
+				{
+					$schema: "https://zoo-code.ai/config.json",
+					disabled_providers: ["project-disabled"],
+					provider: {
+						litellm: {
+							env: ["PROJECT_ENV"],
+							options: {
+								apiKey: "project-key",
+								headers: { project: "yes" },
+							},
+						},
+					},
+					agent: {
+						reviewer: {
+							permission: { edit: "deny" },
+							options: { localOnly: true, shared: "project" },
+						},
+					},
+					instructions: ["shared.md", "project.md"],
+				},
+				"zoo.jsonc",
+			)
+		},
+	})
+	const homedir = spyOn(os, "homedir").mockReturnValue(home.path)
+	const prevConfig = Global.Path.config
+	;(Global.Path as { config: string }).config = path.join(home.path, "legacy-config")
+
+	try {
+		const globalConfigDir = path.join(home.path, ".config", "zoo-code")
+		await fs.mkdir(globalConfigDir, { recursive: true })
+		await writeConfig(
+			globalConfigDir,
+			{
+				$schema: "https://zoo-code.ai/config.json",
+				disabled_providers: ["global-disabled"],
+				provider: {
+					litellm: {
+						name: "LiteLLM",
+						npm: "@ai-sdk/openai-compatible",
+						env: ["GLOBAL_ENV"],
+						options: {
+							baseURL: "http://localhost:4000/v1",
+							headers: { global: "yes" },
+						},
+					},
+				},
+				agent: {
+					reviewer: {
+						description: "Review code changes",
+						mode: "primary",
+						prompt: "Review the change for correctness.",
+						model: "litellm/proxy-model",
+						permission: { bash: "allow" },
+						options: { globalOnly: true, shared: "global" },
+					},
+				},
+				instructions: ["global.md", "shared.md"],
+			},
+			"zoo.jsonc",
+		)
+		await clear(true)
+
+		await Instance.provide({
+			directory: project.path,
+			fn: async () => {
+				const config = await load()
+
+				expect(config.provider?.litellm).toMatchObject({
+					name: "LiteLLM",
+					npm: "@ai-sdk/openai-compatible",
+					env: ["PROJECT_ENV"],
+					options: {
+						baseURL: "http://localhost:4000/v1",
+						apiKey: "project-key",
+						headers: { global: "yes", project: "yes" },
+					},
+				})
+				expect(config.agent?.reviewer).toMatchObject({
+					description: "Review code changes",
+					mode: "primary",
+					prompt: "Review the change for correctness.",
+					model: "litellm/proxy-model",
+					permission: { bash: "allow", edit: "deny" },
+					options: { globalOnly: true, localOnly: true, shared: "project" },
+				})
+				expect(config.instructions).toEqual(["global.md", "shared.md", "project.md"])
+				expect(config.disabled_providers).toEqual(["project-disabled"])
+			},
+		})
+	} finally {
+		homedir.mockRestore()
+		;(Global.Path as { config: string }).config = prevConfig
+		await clear(true)
+	}
+})
+
 test("generated zoo.jsonc schema covers provider model agent rules and permissions", () => {
 	const schema = z.toJSONSchema(Config.Info.zod, { io: "input" }) as { properties?: Record<string, unknown> }
 
