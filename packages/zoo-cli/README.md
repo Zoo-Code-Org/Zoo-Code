@@ -44,6 +44,8 @@ Zoo Code CLI uses the same `models.dev` provider catalog and onboarding pattern 
 
 Zoo Code does not provide a bundled Zoo inference gateway or credit-backed model provider. Kilo gateway and indexing integrations are intentionally disabled in this package.
 
+See `docs/provider-parity.md` for the current Zoo/Roo VS Code provider parity audit.
+
 ## Commands
 
 | Command              | Description                 |

@@ -1,9 +1,9 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1 through 6 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, and bridges Roo/Zoo project modes into primary CLI agents.
+- **Current status:** Phase 1 Tasks 1 through 6 are implemented on top of the completed Phase 0 foundation, and Phase 1 Task 7 has an initial provider parity audit documented. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, and bridges Roo/Zoo project modes into primary CLI agents.
 - **Last completed task:** `DEVPLAN.md` Phase 1, Task 6 — Implement Roo/Zoo mode ingestion bridge.
-- **Next task to execute:** `DEVPLAN.md` Phase 1, Task 7 — Audit and merge missing Zoo/Roo providers.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 1, Task 7 — merge or explicitly defer missing Zoo/Roo providers based on `packages/zoo-cli/docs/provider-parity.md`.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
@@ -66,6 +66,7 @@
 - Phase 1 Task 6 added project `.roomodes` ingestion as a Roo/Zoo migration source, keeps `.zoo/modes/*.json` as the highest-priority project mode source, and exposes `--mode` for `zoo run` and TUI startup as a primary-agent selector. `--agent` retains existing fallback behavior, while invalid `--mode` selections fail with an actionable error.
 - Phase 1 Task 6 docs were updated in `packages/zoo-cli/README.md` and `CHANGELOG.md` to describe mode ingestion and selection.
 - Phase 1 Task 6 verification completed: `node --check packages/zoo-cli/bin/zoo`, `pnpm --filter @zoo-code/cli build`, `pnpm --filter @zoo-code/cli test`, `pnpm --filter @zoo-code/cli check-types`, `pnpm check-types`, `pnpm build`, and `pnpm exec turbo test --log-order grouped --output-logs new-only --concurrency=1`. Focused imported CLI test `bun test test/kilocode/modes-migrator.test.ts` remains blocked before execution because imported OpenCode package aliases such as `@opencode-ai/core/*` are unresolved in the current reconciled workspace.
+- Phase 1 Task 7 initial audit was documented in `packages/zoo-cli/docs/provider-parity.md`. The audit shows core BYOK providers are mostly available through `models.dev`/AI SDK loaders, while several Zoo/Roo VS Code handlers need either OpenAI-compatible config docs/tests or explicit deferral. No provider implementation was merged yet, and no Kilo/Zoo gateway was introduced.
 
 ## How to update this file
 

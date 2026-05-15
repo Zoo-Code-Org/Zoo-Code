@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Remove Kilo gateway/indexing dependencies from the imported CLI package and document BYOK provider onboarding through the OpenCode-style `models.dev` catalog.
 - Load project `AGENTS.md` and `.zoo/rules/*.md` into Zoo CLI session instructions with deterministic rule ordering.
 - Add Roo/Zoo mode ingestion for project `.roomodes` and expose `--mode` as a strict primary-agent selector for CLI/TUI startup.
+- Document the initial Zoo/Roo VS Code provider parity audit for the Zoo CLI provider registry.
 
 ## [3.54.0] - 2026-05-08
 
