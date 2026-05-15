@@ -12,6 +12,13 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/permission/perm_1/always-rules") return { data: true }
 			if (input.path === "/session")
 				return input.method === "POST" ? { data: { id: "ses_1" } } : { data: [{ id: "ses_1" }] }
+			if (input.path === "/session/status") return { data: { ses_1: { type: "idle" } } }
+			if (input.path === "/session/ses_1/children") return { data: [{ id: "ses_child", parentID: "ses_1" }] }
+			if (input.path === "/session/ses_1/todo")
+				return { data: [{ content: "Plan", status: "pending", priority: "high" }] }
+			if (input.path === "/session/ses_1" && input.method === "PATCH")
+				return { data: { id: "ses_1", ...input.body } }
+			if (input.path === "/session/ses_1" && input.method === "DELETE") return { data: true }
 			if (input.path === "/session/ses_1") return { data: { id: "ses_1" } }
 			if (input.path === "/session/ses_1/message?limit=2&before=cursor+1") {
 				return {
@@ -107,6 +114,31 @@ describe("ZooClient", () => {
 			["GET", "/session"],
 			["GET", "/session/ses_1"],
 			["POST", "/session/ses_1/abort"],
+		])
+	})
+
+	test("wraps session maintenance routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.getSessionStatus()).resolves.toEqual({ ses_1: { type: "idle" } })
+		await expect(client.listSessionChildren("ses_1")).resolves.toEqual([{ id: "ses_child", parentID: "ses_1" }])
+		await expect(client.listSessionTodos("ses_1")).resolves.toEqual([
+			{ content: "Plan", status: "pending", priority: "high" },
+		])
+		await expect(client.updateSession("ses_1", { title: "Renamed", time: { archived: 1 } })).resolves.toEqual({
+			id: "ses_1",
+			title: "Renamed",
+			time: { archived: 1 },
+		})
+		await expect(client.deleteSession("ses_1")).resolves.toBe(true)
+
+		expect(mock.requests.slice(-5)).toEqual([
+			{ path: "/session/status" },
+			{ path: "/session/ses_1/children" },
+			{ path: "/session/ses_1/todo" },
+			{ method: "PATCH", path: "/session/ses_1", body: { title: "Renamed", time: { archived: 1 } } },
+			{ method: "DELETE", path: "/session/ses_1" },
 		])
 	})
 

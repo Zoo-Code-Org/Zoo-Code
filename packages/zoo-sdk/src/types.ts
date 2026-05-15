@@ -6,9 +6,22 @@ export type Session = {
 	parentID?: string
 	/** Human-readable session title. */
 	title?: string
+	/** Workspace directory associated with the session. */
+	directory?: string
+	/** CLI session time metadata. */
+	time?: SessionTime
 	/** Session creation time as an ISO string or epoch milliseconds. */
 	createdAt?: string | number
 	/** Additional server-provided session fields. */
+	[key: string]: unknown
+}
+
+/** Session timestamp metadata returned by the portable core. */
+export type SessionTime = {
+	created?: number
+	updated?: number
+	archived?: number
+	compacting?: number
 	[key: string]: unknown
 }
 
@@ -202,6 +215,39 @@ export type SessionListOptions = {
 	/** Optional project/workspace directory filter. */
 	directory?: string
 }
+
+/** Session update payload accepted by the portable core. */
+export type SessionUpdateOptions = {
+	/** Updated display title. */
+	title?: string
+	/** Updated permission ruleset. */
+	permission?: unknown
+	/** Updated session time metadata. */
+	time?: Pick<SessionTime, "archived"> & Record<string, unknown>
+}
+
+/** Session todo item returned by the portable core. */
+export type Todo = {
+	/** Todo item content. */
+	content: string
+	/** Todo status, such as pending or completed. */
+	status: string
+	/** Todo priority, such as low, medium, or high. */
+	priority: string
+	/** Additional server-provided fields. */
+	[key: string]: unknown
+}
+
+/** Portable-core session status entry. */
+export type SessionStatus = {
+	/** Status discriminator, such as idle, busy, retry, or offline. */
+	type: string
+	/** Additional status metadata. */
+	[key: string]: unknown
+}
+
+/** Session statuses keyed by session ID. */
+export type SessionStatusMap = Record<string, SessionStatus>
 
 /** Options for sending a message. */
 export type SendMessageOptions = {

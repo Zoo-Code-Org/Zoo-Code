@@ -19,6 +19,9 @@ import type {
 	Session,
 	SessionCreateOptions,
 	SessionListOptions,
+	SessionStatusMap,
+	SessionUpdateOptions,
+	Todo,
 	ZooEvent,
 	ZooConfig,
 	ZooServerEvent,
@@ -95,6 +98,62 @@ export class ZooClient {
 			await this.#transport.request<Session | { data?: Session }>({
 				path: `/session/${encodeURIComponent(sessionID)}`,
 			}),
+		)
+	}
+
+	/** Read current status for known sessions. */
+	async getSessionStatus(): Promise<SessionStatusMap> {
+		return (
+			unwrap(
+				await this.#transport.request<SessionStatusMap | { data?: SessionStatusMap }>({
+					path: "/session/status",
+				}),
+			) ?? {}
+		)
+	}
+
+	/** List child sessions for a parent session. */
+	async listSessionChildren(sessionID: string): Promise<Session[]> {
+		return (
+			unwrap(
+				await this.#transport.request<Session[] | { data?: Session[] }>({
+					path: `/session/${encodeURIComponent(sessionID)}/children`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List todo items associated with a session. */
+	async listSessionTodos(sessionID: string): Promise<Todo[]> {
+		return (
+			unwrap(
+				await this.#transport.request<Todo[] | { data?: Todo[] }>({
+					path: `/session/${encodeURIComponent(sessionID)}/todo`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Update session metadata. */
+	async updateSession(sessionID: string, options: SessionUpdateOptions): Promise<Session> {
+		return unwrap(
+			await this.#transport.request<Session | { data?: Session }>({
+				method: "PATCH",
+				path: `/session/${encodeURIComponent(sessionID)}`,
+				body: options,
+			}),
+		)
+	}
+
+	/** Delete a persisted session. */
+	async deleteSession(sessionID: string): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "DELETE",
+					path: `/session/${encodeURIComponent(sessionID)}`,
+				}),
+			) ?? false
 		)
 	}
 
