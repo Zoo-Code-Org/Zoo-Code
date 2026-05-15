@@ -2,8 +2,8 @@
 
 - **Project:** Zoo Code CLI Integration
 - **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Tasks 1 through 7 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, lifecycle event callbacks, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper plus activation-time `PortableCoreService` bootstrap and a `ClineProvider` seam that routes session create/list/get, text-only send/stream, abort, and the first portable tool-approval request/response bridge through `PortableSessionAdapter` when enabled. `docs/extension-rewire-audit.md` maps the VS Code extension host into portable-core migration buckets and recommended rewire order; `docs/webview-message-protocol.md` and `@zoo-code/types` now pin the portable-core webview contract.
-- **Last completed task:** Phase 4 Task 2 focused config-loader coverage slice — project `zoo.jsonc` provider/agent/instruction fields are covered through the unified loader.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 12 by adding deterministic portable adapter validation for provider config and/or mode-list responses.
+- **Last completed task:** Phase 3 Task 12 adapter validation slice — portable mode-list and provider-config responses are validated at the VS Code adapter boundary.
+- **Next task to execute:** Continue remaining visible UI/state seams: Phase 3 Task 8 file/object approval coverage, Phase 3 Task 9 Settings UI read-only guidance, or Phase 3 Task 10 visible mode-selector replacement.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: no longer blocks Phase 1 Task 9 for current-platform VSIX binary preparation, but still affects Phase 6 all-platform release packaging decisions.
@@ -140,8 +140,8 @@
     - Focused coverage was added for portable abort routing and legacy cancel fallback.
     - `@zoo-code/sdk` `createZooServer()` now emits lifecycle callbacks for unexpected restarts, restart-limit exhaustion, and process errors; `PortableCoreService` logs those events to the VS Code output channel with reload/disable guidance.
 - Phase 3 Task 12 started, not complete:
-    - `PortableSessionAdapter` now validates SDK session responses (`id` must be a string) and streamed message chunks (`type` must be a string), preserving extra fields for forward compatibility.
-    - Focused adapter tests cover invalid create/get/list sessions, invalid streamed chunks, and valid extra-field preservation.
+    - `PortableSessionAdapter` now validates SDK session responses (`id` must be a string), streamed message chunks (`type` must be a string), mode-list responses (`id` and `name` must be strings), and provider-config responses (`providers` entries must include string `id`; `default`, when present, must be an object), preserving extra fields for forward compatibility.
+    - Focused adapter tests cover invalid create/get/list sessions, invalid streamed chunks, invalid modes/provider config, and valid extra-field preservation.
     - Full deterministic portable-core e2e validation remains pending until approval, provider config, and mode seams are stable.
 - Phase 3 Task 8 started, first functional bridge slice complete:
     - `@zoo-code/sdk` now exposes `subscribeEvents()` for the CLI `/event` stream and `replyPermission()` for `POST /permission/:requestID/reply`, with typed permission request/reply surfaces.

@@ -66,7 +66,7 @@ export class PortableSessionAdapter {
 
 	/** List portable-core modes/agents available for message routing. */
 	listModes(): Promise<Mode[]> {
-		return this.client.listModes()
+		return this.client.listModes().then(validateModeList)
 	}
 
 	/** Read the portable-core configuration snapshot. */
@@ -76,7 +76,7 @@ export class PortableSessionAdapter {
 
 	/** Read configured providers/defaults from the portable core. */
 	getConfigProviders(): Promise<ConfigProvidersResult> {
-		return this.client.getConfigProviders()
+		return this.client.getConfigProviders().then(validateConfigProvidersResult)
 	}
 }
 
@@ -98,4 +98,48 @@ async function* validateMessageChunks(
 
 		yield chunk
 	}
+}
+
+function validateModeList(value: unknown): Mode[] {
+	if (!Array.isArray(value)) {
+		throw new Error("Portable core listModes returned an invalid mode list")
+	}
+
+	return value.map((mode, index) => {
+		if (!mode || typeof mode !== "object" || typeof (mode as { id?: unknown }).id !== "string") {
+			throw new Error(`Portable core listModes[${index}] returned a mode without a string id`)
+		}
+
+		if (typeof (mode as { name?: unknown }).name !== "string") {
+			throw new Error(`Portable core listModes[${index}] returned a mode without a string name`)
+		}
+
+		return mode as Mode
+	})
+}
+
+function validateConfigProvidersResult(value: unknown): ConfigProvidersResult {
+	if (!value || typeof value !== "object") {
+		throw new Error("Portable core getConfigProviders returned an invalid provider config result")
+	}
+
+	const result = value as ConfigProvidersResult
+	if (result.default !== undefined && (!result.default || typeof result.default !== "object")) {
+		throw new Error("Portable core getConfigProviders returned an invalid default provider config")
+	}
+
+	if (result.providers === undefined) {
+		return result
+	}
+
+	const providers = Array.isArray(result.providers) ? result.providers : Object.values(result.providers)
+	providers.forEach((provider, index) => {
+		if (!provider || typeof provider !== "object" || typeof (provider as { id?: unknown }).id !== "string") {
+			throw new Error(
+				`Portable core getConfigProviders.providers[${index}] returned a provider without a string id`,
+			)
+		}
+	})
+
+	return result
 }

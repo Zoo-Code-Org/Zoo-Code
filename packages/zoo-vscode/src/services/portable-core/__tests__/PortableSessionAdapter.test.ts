@@ -15,7 +15,7 @@ describe("PortableSessionAdapter", () => {
 		replyPermission: vitest.fn().mockResolvedValue(undefined),
 		listModes: vitest.fn().mockResolvedValue([{ id: "code", name: "Code" }]),
 		getConfig: vitest.fn().mockResolvedValue({ model: "anthropic/claude" }),
-		getConfigProviders: vitest.fn().mockResolvedValue({ default: "anthropic", providers: [] }),
+		getConfigProviders: vitest.fn().mockResolvedValue({ default: { providerID: "anthropic" }, providers: [] }),
 	})
 
 	it("maps create/list/get session calls to the Zoo SDK client", async () => {
@@ -74,9 +74,30 @@ describe("PortableSessionAdapter", () => {
 		const adapter = new PortableSessionAdapter(client as any)
 
 		await expect(adapter.getConfig()).resolves.toEqual({ model: "anthropic/claude" })
-		await expect(adapter.getConfigProviders()).resolves.toEqual({ default: "anthropic", providers: [] })
+		await expect(adapter.getConfigProviders()).resolves.toEqual({
+			default: { providerID: "anthropic" },
+			providers: [],
+		})
 		expect(client.getConfig).toHaveBeenCalledTimes(1)
 		expect(client.getConfigProviders).toHaveBeenCalledTimes(1)
+	})
+
+	it("rejects malformed modes and provider config results", async () => {
+		const client = createClient()
+		const adapter = new PortableSessionAdapter(client as any)
+
+		client.listModes.mockResolvedValueOnce([{ id: "code", name: "Code" }, { name: "Missing id" }])
+		await expect(adapter.listModes()).rejects.toThrow("listModes[1] returned a mode without a string id")
+
+		client.getConfigProviders.mockResolvedValueOnce({ providers: [{ name: "Missing id" }] })
+		await expect(adapter.getConfigProviders()).rejects.toThrow(
+			"getConfigProviders.providers[0] returned a provider without a string id",
+		)
+
+		client.getConfigProviders.mockResolvedValueOnce({ default: "anthropic", providers: [] })
+		await expect(adapter.getConfigProviders()).rejects.toThrow(
+			"getConfigProviders returned an invalid default provider config",
+		)
 	})
 
 	it("rejects malformed session responses", async () => {
