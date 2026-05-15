@@ -153,6 +153,9 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/find/file?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello&limit=10") {
 				return { data: ["hello.txt"] }
 			}
+			if (input.path === "/find/symbol?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello") {
+				return { data: [{ name: "hello", kind: "function", location: { path: "hello.ts" } }] }
+			}
 			if (input.path === "/find?directory=%2Frepo%2Froot&workspace=workspace-1&pattern=sdk-parity") {
 				return { data: [{ path: { text: "hello.txt" }, lines: { text: "sdk-parity" }, line_number: 1 }] }
 			}
@@ -562,15 +565,19 @@ describe("ZooClient", () => {
 			{ path: "hello.txt", added: 1, removed: 0, status: "modified" },
 		])
 		await expect(client.findFiles({ ...scope, query: "hello", limit: 10 })).resolves.toEqual(["hello.txt"])
+		await expect(client.findSymbols({ ...scope, query: "hello" })).resolves.toEqual([
+			{ name: "hello", kind: "function", location: { path: "hello.ts" } },
+		])
 		await expect(client.findText({ ...scope, pattern: "sdk-parity" })).resolves.toEqual([
 			{ path: { text: "hello.txt" }, lines: { text: "sdk-parity" }, line_number: 1 },
 		])
 
-		expect(mock.requests.slice(-5)).toEqual([
+		expect(mock.requests.slice(-6)).toEqual([
 			{ path: "/file/content?directory=%2Frepo%2Froot&workspace=workspace-1&path=hello.txt" },
 			{ path: "/file?directory=%2Frepo%2Froot&workspace=workspace-1&path=." },
 			{ path: "/file/status?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/find/file?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello&limit=10" },
+			{ path: "/find/symbol?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello" },
 			{ path: "/find?directory=%2Frepo%2Froot&workspace=workspace-1&pattern=sdk-parity" },
 		])
 	})

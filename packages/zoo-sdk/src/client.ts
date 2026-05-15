@@ -7,6 +7,7 @@ import type {
 	FileReadOptions,
 	FileStatus,
 	FindFilesOptions,
+	FindSymbolsOptions,
 	FindTextOptions,
 	MessageChunk,
 	MessageListOptions,
@@ -42,6 +43,7 @@ import type {
 	SessionStatusMap,
 	SessionUpdateOptions,
 	SessionViewedOptions,
+	SymbolInfo,
 	Todo,
 	VcsDiffOptions,
 	VcsFileDiff,
@@ -619,6 +621,17 @@ export class ZooClient {
 			unwrap(
 				await this.#transport.request<SearchMatch[] | { data?: SearchMatch[] }>({
 					path: `/find${scopedQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Find workspace symbols by query. */
+	async findSymbols(options: FindSymbolsOptions): Promise<SymbolInfo[]> {
+		return (
+			unwrap(
+				await this.#transport.request<SymbolInfo[] | { data?: SymbolInfo[] }>({
+					path: `/find/symbol${scopedQuery(options)}`,
 				}),
 			) ?? []
 		)

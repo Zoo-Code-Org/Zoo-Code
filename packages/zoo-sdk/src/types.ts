@@ -320,6 +320,11 @@ export type FindTextOptions = WorkspaceRouteOptions & {
 	pattern: string
 }
 
+/** Options for finding workspace symbols. */
+export type FindSymbolsOptions = WorkspaceRouteOptions & {
+	query: string
+}
+
 /** Text search match returned by portable core. */
 export type SearchMatch = {
 	path?: { text: string }
@@ -327,6 +332,15 @@ export type SearchMatch = {
 	line_number?: number
 	absolute_offset?: number
 	submatches?: Array<{ match: { text: string }; start: number; end: number }>
+	[key: string]: unknown
+}
+
+/** Workspace symbol returned by portable core. */
+export type SymbolInfo = {
+	name?: string
+	kind?: string | number
+	location?: unknown
+	containerName?: string
 	[key: string]: unknown
 }
 
