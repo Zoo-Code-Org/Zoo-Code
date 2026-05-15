@@ -166,7 +166,7 @@ test("loads shell config field", async () => {
 })
 
 test("updates config and preserves empty shell sentinel", async () => {
-	// kilocode_change - upstream hardcodes project config to config.json; Kilo writes to kilo.json
+	// kilocode_change - project updates write Zoo-native config even when a legacy file was loaded
 	await using tmp = await tmpdir({
 		init: async (dir) => {
 			await writeConfig(dir, {
@@ -180,7 +180,7 @@ test("updates config and preserves empty shell sentinel", async () => {
 		fn: async () => {
 			await save({ shell: "" })
 
-			const writtenConfig = await Filesystem.readJson<{ shell?: string }>(path.join(tmp.path, "kilo.json"))
+			const writtenConfig = await Filesystem.readJson<{ shell?: string }>(path.join(tmp.path, "zoo.jsonc"))
 			expect(writtenConfig.shell).toBe("")
 		},
 	})
