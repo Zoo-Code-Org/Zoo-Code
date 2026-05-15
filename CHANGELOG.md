@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add SDK and VS Code adapter methods for read-only portable-core config and configured-provider access.
 - Include read-only portable provider metadata in VS Code extension state when portable core is enabled, without mutating legacy provider profiles.
 - Add Zoo CLI config-loader coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
+- Add Zoo CLI config-loader coverage for project `zoo.jsonc` provider, primary agent, model, and instruction fields.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
 ## [3.54.0] - 2026-05-08

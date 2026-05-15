@@ -2,8 +2,8 @@
 
 - **Project:** Zoo Code CLI Integration
 - **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Tasks 1 through 7 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, lifecycle event callbacks, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper plus activation-time `PortableCoreService` bootstrap and a `ClineProvider` seam that routes session create/list/get, text-only send/stream, abort, and the first portable tool-approval request/response bridge through `PortableSessionAdapter` when enabled. `docs/extension-rewire-audit.md` maps the VS Code extension host into portable-core migration buckets and recommended rewire order; `docs/webview-message-protocol.md` and `@zoo-code/types` now pin the portable-core webview contract.
-- **Last completed task:** Phase 3 Task 9 first read-only provider-config slice — posted extension state now includes portable provider metadata when the adapter is present without mutating legacy profiles.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 4 Task 2 by adding unified `zoo.jsonc` loader coverage for provider/mode/rules precedence.
+- **Last completed task:** Phase 4 Task 2 focused config-loader coverage slice — project `zoo.jsonc` provider/agent/instruction fields are covered through the unified loader.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 12 by adding deterministic portable adapter validation for provider config and/or mode-list responses.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: no longer blocks Phase 1 Task 9 for current-platform VSIX binary preparation, but still affects Phase 6 all-platform release packaging decisions.
@@ -163,7 +163,10 @@
     - Remaining Task 9 work: add visible Settings UI read-only guidance/actions and finalize how selected portable defaults map into UI once Phase 4 schema/loader semantics are stable.
 - Phase 4 Task 2 started, not complete:
     - Added CLI config-loader regression coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
-    - Remaining Task 4 work: broaden unified `zoo.jsonc` schema/loader coverage for global/project precedence, providers, modes, rules, `AGENTS.md`, `.zoo/rules`, `.zoo/modes`, and `.zooignore`.
+    - Added focused unified loader coverage proving project `zoo.jsonc` loads Zoo-native OpenAI-compatible provider config, primary agent/mode config, and explicit instruction paths.
+    - Focused verification passes with `pnpm --filter @zoo-code/cli exec bun test test/config/config.test.ts --timeout 60000 -t "loads Zoo-native provider and agent settings from zoo.jsonc"`.
+    - Broad direct `test/config/config.test.ts` still exposes unrelated existing config-suite failures in shell update, legacy `.kilo` precedence, and permission key-order expectations; use focused filters for new Phase 4 coverage until those are reconciled.
+    - Remaining Task 4 work: broaden unified `zoo.jsonc` schema/loader coverage for global/project precedence, rules, `AGENTS.md`, `.zoo/rules`, `.zoo/modes`, and `.zooignore`.
 
 ## How to update this file
 

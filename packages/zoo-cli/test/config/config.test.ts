@@ -362,6 +362,56 @@ test("loads watcher ignore patterns from config", async () => {
 	})
 })
 
+test("loads Zoo-native provider and agent settings from zoo.jsonc", async () => {
+	await using tmp = await tmpdir({
+		init: async (dir) => {
+			await writeConfig(
+				dir,
+				{
+					$schema: "https://zoo-code.ai/config.json",
+					provider: {
+						litellm: {
+							name: "LiteLLM",
+							npm: "@ai-sdk/openai-compatible",
+							api: "http://localhost:4000/v1",
+							env: ["LITELLM_API_KEY"],
+							models: { "proxy-model": { name: "Proxy Model" } },
+							options: { apiKey: "test-key", baseURL: "http://localhost:4000/v1" },
+						},
+					},
+					agent: {
+						reviewer: {
+							description: "Review code changes",
+							mode: "primary",
+							prompt: "Review the change for correctness.",
+							model: "litellm/proxy-model",
+						},
+					},
+					instructions: ["AGENTS.md", ".zoo/rules/security.md"],
+				},
+				"zoo.jsonc",
+			)
+		},
+	})
+
+	await Instance.provide({
+		directory: tmp.path,
+		fn: async () => {
+			const config = await load()
+
+			expect(config.provider?.litellm?.npm).toBe("@ai-sdk/openai-compatible")
+			expect(config.provider?.litellm?.options?.baseURL).toBe("http://localhost:4000/v1")
+			expect(config.agent?.reviewer).toMatchObject({
+				description: "Review code changes",
+				mode: "primary",
+				prompt: "Review the change for correctness.",
+				model: "litellm/proxy-model",
+			})
+			expect(config.instructions).toEqual(["AGENTS.md", ".zoo/rules/security.md"])
+		},
+	})
+})
+
 test("jsonc overrides json in the same directory", async () => {
 	await using tmp = await tmpdir({
 		init: async (dir) => {
