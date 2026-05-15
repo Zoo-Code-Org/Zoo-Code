@@ -222,9 +222,12 @@ export namespace ModesMigrator {
 			allModes.push(...(await readModesFile(legacyPath)))
 		}
 
-		// 5. Project .kilocodemodes
-		const projectModesPath = path.join(options.projectDir, ".kilocodemodes")
-		allModes.push(...(await readModesFile(projectModesPath)))
+		// 5. Project legacy Kilo modes, then Roo/Zoo migration modes.
+		// Later entries win, so .roomodes takes precedence over Kilo fallbacks.
+		const projectKiloModesPath = path.join(options.projectDir, ".kilocodemodes")
+		allModes.push(...(await readModesFile(projectKiloModesPath)))
+		const projectRooModesPath = path.join(options.projectDir, ".roomodes")
+		allModes.push(...(await readModesFile(projectRooModesPath)))
 
 		// 6. Preferred Zoo project modes: {project}/.zoo/modes/*.json. Added last so Zoo wins dedupe.
 		allModes.push(...(await readZooModeFiles(options.projectDir)))

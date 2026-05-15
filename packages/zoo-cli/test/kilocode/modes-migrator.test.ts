@@ -299,6 +299,55 @@ describe("ModesMigrator", () => {
 			expect(result.agents.reviewer.permission?.edit).toBe("allow")
 		})
 
+		test("loads project .roomodes for Roo migration", async () => {
+			await using tmp = await tmpdir({
+				init: async (dir) => {
+					await Bun.write(
+						path.join(dir, ".roomodes"),
+						`customModes:
+  - slug: reviewer
+    name: Reviewer
+    roleDefinition: Review code from Roo mode
+    groups:
+      - read
+      - edit`,
+					)
+				},
+			})
+
+			const result = await ModesMigrator.migrate({ projectDir: tmp.path, skipGlobalPaths: true })
+
+			expect(result.agents.reviewer.prompt).toBe("Review code from Roo mode")
+			expect(result.agents.reviewer.permission?.read).toBe("allow")
+			expect(result.agents.reviewer.permission?.edit).toBe("allow")
+		})
+
+		test("lets .zoo/modes override .roomodes for the same slug", async () => {
+			await using tmp = await tmpdir({
+				init: async (dir) => {
+					await Bun.write(
+						path.join(dir, ".roomodes"),
+						`customModes:
+  - slug: reviewer
+    name: Reviewer
+    roleDefinition: Roo reviewer
+    groups:
+      - read`,
+					)
+					await fs.mkdir(path.join(dir, ".zoo", "modes"), { recursive: true })
+					await Bun.write(
+						path.join(dir, ".zoo", "modes", "reviewer.json"),
+						JSON.stringify({ name: "Reviewer", prompt: "Zoo reviewer", groups: ["read", "edit"] }),
+					)
+				},
+			})
+
+			const result = await ModesMigrator.migrate({ projectDir: tmp.path, skipGlobalPaths: true })
+
+			expect(result.agents.reviewer.prompt).toBe("Zoo reviewer")
+			expect(result.agents.reviewer.permission?.edit).toBe("allow")
+		})
+
 		test("returns empty agents when no custom modes exist", async () => {
 			await using tmp = await tmpdir()
 

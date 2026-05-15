@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Import Kilo Code's OpenCode-derived portable core into `packages/zoo-cli`, expose Zoo CLI metadata/bins, and add Zoo config path discovery for global/project configs, rules, modes, and ignore files.
 - Remove Kilo gateway/indexing dependencies from the imported CLI package and document BYOK provider onboarding through the OpenCode-style `models.dev` catalog.
 - Load project `AGENTS.md` and `.zoo/rules/*.md` into Zoo CLI session instructions with deterministic rule ordering.
+- Add Roo/Zoo mode ingestion for project `.roomodes` and expose `--mode` as a strict primary-agent selector for CLI/TUI startup.
 
 ## [3.54.0] - 2026-05-08
 

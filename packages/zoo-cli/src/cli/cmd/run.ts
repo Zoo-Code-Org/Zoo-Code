@@ -250,6 +250,10 @@ export const RunCommand = cmd({
 					type: "string",
 					describe: "agent to use",
 				})
+				.option("mode", {
+					type: "string",
+					describe: "mode to use (alias for a primary agent)",
+				})
 				.option("format", {
 					type: "string",
 					choices: ["default", "json"],
@@ -425,6 +429,9 @@ export const RunCommand = cmd({
 		}
 
 		async function execute(sdk: KiloClient) {
+			const requestedAgent = args.mode ?? args.agent
+			const modeWasRequested = typeof args.mode === "string" && args.mode.length > 0
+
 			function tool(part: ToolPart) {
 				try {
 					if (part.tool === "bash") return bash(props<typeof BashTool>(part))
@@ -622,8 +629,8 @@ export const RunCommand = cmd({
 
 			// Validate agent if specified
 			const agent = await (async () => {
-				if (!args.agent) return undefined
-				const name = args.agent
+				if (!requestedAgent) return undefined
+				const name = requestedAgent
 
 				// When attaching, validate against the running server instead of local Instance state.
 				if (args.attach) {
@@ -643,6 +650,10 @@ export const RunCommand = cmd({
 
 					const agent = modes.find((a) => a.name === name)
 					if (!agent) {
+						if (modeWasRequested) {
+							UI.error(`mode "${name}" not found. Run \`zoo agent\` to list available modes.`)
+							process.exit(1)
+						}
 						UI.println(
 							UI.Style.TEXT_WARNING_BOLD + "!",
 							UI.Style.TEXT_NORMAL,
@@ -652,6 +663,10 @@ export const RunCommand = cmd({
 					}
 
 					if (agent.mode === "subagent") {
+						if (modeWasRequested) {
+							UI.error(`mode "${name}" is a subagent, not a primary mode.`)
+							process.exit(1)
+						}
 						UI.println(
 							UI.Style.TEXT_WARNING_BOLD + "!",
 							UI.Style.TEXT_NORMAL,
@@ -665,6 +680,10 @@ export const RunCommand = cmd({
 
 				const entry = await AppRuntime.runPromise(Agent.Service.use((svc) => svc.get(name)))
 				if (!entry) {
+					if (modeWasRequested) {
+						UI.error(`mode "${name}" not found. Run \`zoo agent\` to list available modes.`)
+						process.exit(1)
+					}
 					UI.println(
 						UI.Style.TEXT_WARNING_BOLD + "!",
 						UI.Style.TEXT_NORMAL,
@@ -673,6 +692,10 @@ export const RunCommand = cmd({
 					return undefined
 				}
 				if (entry.mode === "subagent") {
+					if (modeWasRequested) {
+						UI.error(`mode "${name}" is a subagent, not a primary mode.`)
+						process.exit(1)
+					}
 					UI.println(
 						UI.Style.TEXT_WARNING_BOLD + "!",
 						UI.Style.TEXT_NORMAL,

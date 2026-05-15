@@ -119,6 +119,10 @@ export const TuiThreadCommand = cmd({
 			.option("agent", {
 				type: "string",
 				describe: "agent to use",
+			})
+			.option("mode", {
+				type: "string",
+				describe: "mode to use (alias for a primary agent)",
 			}),
 	handler: async (args) => {
 		// Keep ENABLE_PROCESSED_INPUT cleared even if other code flips it.
@@ -345,7 +349,7 @@ export const TuiThreadCommand = cmd({
 					args: {
 						continue: args.continue,
 						sessionID: args.session,
-						agent: args.agent,
+						agent: args.mode ?? args.agent,
 						model: args.model,
 						prompt,
 						fork: args.fork,

@@ -46,16 +46,17 @@ Zoo Code does not provide a bundled Zoo inference gateway or credit-backed model
 
 ## Commands
 
-| Command              | Description                |
-| -------------------- | -------------------------- |
-| `zoo`                | Launch interactive TUI     |
-| `zoo run "<task>"`   | Run a one-off task         |
-| `zoo auth`           | Manage authentication      |
-| `zoo models`         | List available models      |
-| `zoo mcp`            | Manage MCP servers         |
-| `zoo session list`   | List sessions              |
-| `zoo session delete` | Delete a session           |
-| `zoo export`         | Export session transcripts |
+| Command              | Description                 |
+| -------------------- | --------------------------- |
+| `zoo`                | Launch interactive TUI      |
+| `zoo run "<task>"`   | Run a one-off task          |
+| `zoo auth`           | Manage authentication       |
+| `zoo models`         | List available models       |
+| `zoo agent`          | List available agents/modes |
+| `zoo mcp`            | Manage MCP servers          |
+| `zoo session list`   | List sessions               |
+| `zoo session delete` | Delete a session            |
+| `zoo export`         | Export session transcripts  |
 
 Run `zoo --help` for the full list.
 
@@ -64,6 +65,10 @@ Run `zoo --help` for the full list.
 Zoo Code reads and writes its primary global config at `~/.config/zoo-code/zoo.jsonc` and project config at `{project}/zoo.jsonc`.
 Project rules live in `{project}/.zoo/rules/*.md`, project modes in `{project}/.zoo/modes/*.json`, and file access ignore patterns in `{project}/.zooignore`.
 Legacy Kilo/OpenCode paths may still be read as lower-priority migration fallbacks.
+
+## Modes
+
+Zoo Code CLI supports custom modes from `{project}/.zoo/modes/*.json` and reads existing `{project}/.roomodes` files during Roo/Zoo migration. Use `zoo run --mode <name> "<task>"` or `zoo --mode <name>` to select a mode; invalid mode names fail with an actionable error.
 
 ## Project Instructions And Rules
 
