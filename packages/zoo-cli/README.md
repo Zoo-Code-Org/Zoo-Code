@@ -28,6 +28,12 @@ Run a one-off task:
 zoo run "add input validation to the signup form"
 ```
 
+Include explicit file or folder context in a one-off task:
+
+```bash
+zoo run --context src/auth.ts --context docs/ "explain the login flow"
+```
+
 ## Features
 
 - **Code generation** -- describe what you want in natural language
@@ -115,6 +121,10 @@ Modes can be split into files such as `{project}/.zoo/modes/architect.json`:
 ## Modes
 
 Zoo Code CLI supports custom modes from `{project}/.zoo/modes/*.json` and reads existing `{project}/.roomodes` files during Roo/Zoo migration. Use `zoo run --mode <name> "<task>"` or `zoo --mode <name>` to select a mode; invalid mode names fail with an actionable error.
+
+## Context
+
+Use `zoo run --context <path>` to include files or folders as context for a one-off task. Folder context uses the existing portable-core directory reader semantics, which summarize the directory and inline supported top-level files.
 
 ## Project Instructions And Rules
 

@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Document Roo-to-Zoo portable config migration paths for `zoo.jsonc`, `.zoo/modes`, `.zoo/rules`, `.zooignore`, read-only portable provider config, and CLI-managed mode selection.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 - Clean up imported CLI config migration docs to label legacy Kilo paths as fallbacks, point to Zoo portable config paths, and remove bundled Kilo Gateway notification guidance.
+- Add `zoo run --context <path>` for including file or folder context in one-off CLI tasks.
 
 ## [3.54.0] - 2026-05-08
 

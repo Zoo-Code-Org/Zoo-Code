@@ -435,6 +435,8 @@
     - **Depends on:** Phase 1, Task 8; Phase 4, Task 2.
     - **Can parallelize with:** Phase 5, Tasks 2 and 3.
 
+    - **Progress:** Added `zoo run --context <path>` for files and folders by reusing the existing file-part ingestion path. Context parts are sent before `--file` attachments and prompt text, and command invocations receive the same context/file parts through the existing command input shape. Focused run smoke coverage pins file and directory context payloads. Folder content expansion remains the existing portable-core directory reader behavior rather than a new recursive context implementation.
+
 2. Add CLI tool approval modes
 
     - **What:** Ensure CLI supports interactive TTY approval prompts and non-interactive `--auto-approve` behavior using the shared approval protocol.

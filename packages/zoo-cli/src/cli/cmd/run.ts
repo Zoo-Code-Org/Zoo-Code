@@ -1,13 +1,11 @@
 import type { Argv } from "yargs"
 import path from "path"
-import { pathToFileURL } from "url"
 import { UI } from "../ui"
 import { cmd } from "./cmd"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { bootstrap } from "../bootstrap"
 import { EOL } from "os"
 import { text as streamText } from "node:stream/consumers"
-import { Filesystem } from "@/util/filesystem"
 import { createKiloClient, type KiloClient, type ToolPart } from "@kilocode/sdk/v2"
 import { Server } from "../../server/server"
 import { Provider } from "@/provider/provider"
@@ -29,6 +27,7 @@ import { Locale } from "@/util/locale"
 import { importCloudSession, validateCloudFork } from "@/kilocode/cloud-session" // kilocode_change
 import { AppRuntime } from "@/effect/app-runtime"
 import { KiloRunAuto } from "@/kilocode/cli/run-auto" // kilocode_change
+import { collectRunFileParts } from "@/kilocode/cli/run-context" // kilocode_change
 
 type ToolProps<T> = {
 	input: Tool.InferParameters<T>
@@ -266,6 +265,13 @@ export const RunCommand = cmd({
 					array: true,
 					describe: "file(s) to attach to message",
 				})
+				// kilocode_change start - explicit context paths for Zoo run
+				.option("context", {
+					type: "string",
+					array: true,
+					describe: "file or folder path(s) to include as context",
+				})
+				// kilocode_change end
 				.option("title", {
 					type: "string",
 					describe: "title for the session (uses truncated prompt if no value provided)",
@@ -322,27 +328,8 @@ export const RunCommand = cmd({
 			}
 		})()
 
-		const files: { type: "file"; url: string; filename: string; mime: string }[] = []
-		if (args.file) {
-			const list = Array.isArray(args.file) ? args.file : [args.file]
-
-			for (const filePath of list) {
-				const resolvedPath = path.resolve(process.cwd(), filePath)
-				if (!(await Filesystem.exists(resolvedPath))) {
-					UI.error(`File not found: ${filePath}`)
-					process.exit(1)
-				}
-
-				const mime = (await Filesystem.isDir(resolvedPath)) ? "application/x-directory" : "text/plain"
-
-				files.push({
-					type: "file",
-					url: pathToFileURL(resolvedPath).href,
-					filename: path.basename(resolvedPath),
-					mime,
-				})
-			}
-		}
+		const contextFiles = await collectRunFileParts(args.context, "Context") // kilocode_change
+		const files = await collectRunFileParts(args.file, "File") // kilocode_change
 
 		if (!process.stdin.isTTY) message += "\n" + (await streamText(process.stdin))
 
@@ -727,6 +714,7 @@ export const RunCommand = cmd({
 					command: args.command,
 					arguments: message,
 					variant: args.variant,
+					parts: [...contextFiles, ...files],
 				})
 			} else {
 				const model = args.model ? Provider.parseModel(args.model) : undefined
@@ -735,7 +723,7 @@ export const RunCommand = cmd({
 					agent,
 					model,
 					variant: args.variant,
-					parts: [...files, { type: "text", text: message }],
+					parts: [...contextFiles, ...files, { type: "text", text: message }],
 				})
 			}
 		}
