@@ -191,6 +191,7 @@ vi.mock("../../task/Task", () => ({
 		overwriteClineMessages: vi.fn(),
 		overwriteApiConversationHistory: vi.fn(),
 		start: vi.fn(),
+		cancelCurrentRequest: vi.fn(),
 		getTaskNumber: vi.fn().mockReturnValue(0),
 		setTaskNumber: vi.fn(),
 		setParentTask: vi.fn(),
@@ -321,6 +322,7 @@ describe("ClineProvider", () => {
 				overwriteClineMessages: vi.fn(),
 				overwriteApiConversationHistory: vi.fn(),
 				start: vi.fn(),
+				cancelCurrentRequest: vi.fn(),
 				getTaskNumber: vi.fn().mockReturnValue(0),
 				setTaskNumber: vi.fn(),
 				setParentTask: vi.fn(),
@@ -941,6 +943,43 @@ describe("ClineProvider", () => {
 		await provider.handleWebviewAskResponse("messageResponse", "Legacy follow up")
 
 		expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Legacy follow up", undefined)
+	})
+
+	test("portable session adapter aborts the active SDK session", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-abort-session", title: "Abort task" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+			abortSession: vi.fn().mockResolvedValue(undefined),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Abort task")
+		vi.mocked(task.abortTask).mockClear()
+
+		await portableProvider.cancelTask()
+
+		expect(portableSessionAdapter.abortSession).toHaveBeenCalledWith("portable-abort-session")
+		expect(task.abortTask).not.toHaveBeenCalled()
+		expect(task.abortReason).toBe("user_cancelled")
+	})
+
+	test("legacy provider keeps existing cancel path", async () => {
+		const task = await provider.createTask("Legacy cancel task")
+		vi.mocked(task.abortTask).mockClear()
+
+		await provider.cancelTask()
+
+		expect(task.cancelCurrentRequest).toHaveBeenCalled()
+		expect(task.abortTask).toHaveBeenCalled()
 	})
 
 	test("legacy provider does not call SDK session APIs", async () => {

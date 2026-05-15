@@ -3076,6 +3076,13 @@ export class ClineProvider
 
 		console.log(`[cancelTask] cancelling task ${task.taskId}.${task.instanceId}`)
 
+		if (this.portableSessionAdapter) {
+			await this.portableSessionAdapter.abortSession(task.taskId)
+			task.abortReason = "user_cancelled"
+			await this.postStateToWebviewWithoutTaskHistory()
+			return
+		}
+
 		let historyItem: HistoryItem | undefined
 		try {
 			const history = await this.getTaskWithId(task.taskId)

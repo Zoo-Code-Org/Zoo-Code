@@ -135,6 +135,10 @@
     - `ClineProvider.handleWebviewAskResponse()` centralizes follow-up routing; `askResponse: "messageResponse"` uses SDK streaming when portable core is enabled, while all unsupported responses and flag-false paths call the existing `Task.handleWebviewAskResponse()` behavior.
     - Image-bearing messages deliberately fall back to the legacy path until the SDK/CLI image-part contract is specified.
     - Focused coverage was added for initial portable text streaming, follow-up streaming, legacy response fallback, and webview handler delegation.
+- Phase 3 Task 7 started, not complete:
+    - `ClineProvider.cancelTask()` now calls `PortableSessionAdapter.abortSession()` for the active SDK session when portable core is enabled and keeps the existing extension-host cancellation path when no adapter is present.
+    - Focused coverage was added for portable abort routing and legacy cancel fallback.
+    - Remaining Task 7 work: surface SDK process lifecycle restart/retry exhaustion UX beyond the existing `PortableCoreService` output-channel startup/fallback logging.
 
 ## How to update this file
 
