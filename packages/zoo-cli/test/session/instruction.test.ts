@@ -281,6 +281,33 @@ describe("Instruction.system", () => {
 		),
 	)
 
+	it.live("loads project AGENTS.md before sorted .zoo/rules markdown", () =>
+		provideTmpdirInstance((dir) =>
+			Effect.gen(function* () {
+				yield* writeFiles(dir, {
+					"AGENTS.md": "# Project Instructions",
+					".zoo/rules/z-last.md": "# Last Rule",
+					".zoo/rules/a-first.md": "# First Rule",
+				})
+
+				const agents = path.join(dir, "AGENTS.md")
+				const first = path.join(dir, ".zoo", "rules", "a-first.md")
+				const last = path.join(dir, ".zoo", "rules", "z-last.md")
+
+				yield* Effect.gen(function* () {
+					const svc = yield* Instruction.Service
+					const rules = yield* svc.system()
+
+					expect(rules).toEqual([
+						`Instructions from: ${agents}\n# Project Instructions`,
+						`Instructions from: ${first}\n# First Rule`,
+						`Instructions from: ${last}\n# Last Rule`,
+					])
+				}).pipe(provideInstruction({ home: dir, config: dir }, { instructions: [first, last] }))
+			}),
+		),
+	)
+
 	it.live("loads both project and global AGENTS.md when both exist", () =>
 		Effect.gen(function* () {
 			const globalTmp = yield* tmpWithFiles({ "AGENTS.md": "# Global Instructions" })
