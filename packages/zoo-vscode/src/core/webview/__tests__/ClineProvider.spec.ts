@@ -972,6 +972,38 @@ describe("ClineProvider", () => {
 		expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
 	})
 
+	test("portable session adapter sends persisted selected mode", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-architect-session", title: "Architect" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		;(portableProvider as any).providerSettingsManager = {
+			getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			listConfig: vi.fn().mockResolvedValue([]),
+			setModeConfig: vi.fn(),
+		} as any
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		await portableProvider.handleModeSwitch("architect")
+		const task = await portableProvider.createTask("Architect")
+
+		expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+		expect(portableSessionAdapter.sendMessage).toHaveBeenCalledWith("portable-architect-session", "Architect", {
+			mode: "architect",
+		})
+		expect(task.start).not.toHaveBeenCalled()
+	})
+
 	test("portable permission asks display bash command approval", async () => {
 		let emitPermission!: (event: any) => void
 		const permissionEvent = new Promise<any>((resolve) => {
