@@ -64,6 +64,10 @@ import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 
 // shared
 import { findLastIndex } from "../../shared/array"
+import {
+	isUnsupported as isBedrockStructuredOutputUnsupported,
+	markUnsupported as markBedrockStructuredOutputUnsupported,
+} from "../../shared/bedrock-structured-output-cache"
 import { combineApiRequests } from "../../shared/combineApiRequests"
 import { combineCommandSequences } from "../../shared/combineCommandSequences"
 import { t } from "../../i18n"
@@ -1682,6 +1686,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
+			...this.getBedrockStructuredOutputAccessors(),
 			...(allTools.length > 0
 				? {
 						tools: allTools,
@@ -3856,6 +3861,31 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 	}
 
+	private getBedrockStructuredOutputAccessors(): Pick<
+		ApiHandlerCreateMessageMetadata,
+		"isModelStructuredOutputUnsupported" | "markModelStructuredOutputUnsupported"
+	> {
+		return {
+			isModelStructuredOutputUnsupported: (modelId: string) => {
+				const proxy = this.providerRef.deref()?.contextProxy
+				if (!proxy) return false
+				return isBedrockStructuredOutputUnsupported(
+					proxy.getValue("bedrockStructuredOutputUnsupported"),
+					modelId,
+				)
+			},
+			markModelStructuredOutputUnsupported: (modelId: string) => {
+				const proxy = this.providerRef.deref()?.contextProxy
+				if (!proxy) return
+				const current = proxy.getValue("bedrockStructuredOutputUnsupported")
+				void proxy.setValue(
+					"bedrockStructuredOutputUnsupported",
+					markBedrockStructuredOutputUnsupported(current, modelId),
+				)
+			},
+		}
+	}
+
 	private async handleContextWindowExceededError(): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {}, mode, apiConfiguration } = state ?? {}
@@ -3905,6 +3935,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
+			...this.getBedrockStructuredOutputAccessors(),
 			...(allTools.length > 0
 				? {
 						tools: allTools,
@@ -4286,6 +4317,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			mode: mode,
 			taskId: this.taskId,
 			suppressPreviousResponseId: this.skipPrevResponseIdOnce,
+			...this.getBedrockStructuredOutputAccessors(),
 			// Include tools whenever they are present.
 			...(shouldIncludeTools
 				? {

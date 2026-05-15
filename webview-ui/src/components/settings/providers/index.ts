@@ -1,5 +1,6 @@
 export { Anthropic } from "./Anthropic"
 export { Bedrock } from "./Bedrock"
+export { BedrockThinkingBudget } from "./BedrockThinkingBudget"
 export { DeepSeek } from "./DeepSeek"
 export { Gemini } from "./Gemini"
 export { LMStudio } from "./LMStudio"

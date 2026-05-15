@@ -5,7 +5,6 @@ import {
 	type ModelRecord,
 	type RouterModels,
 	anthropicModels,
-	bedrockModels,
 	deepSeekModels,
 	moonshotModels,
 	minimaxModels,
@@ -26,11 +25,11 @@ import {
 	qwenCodeModels,
 	litellmDefaultModelInfo,
 	lMStudioDefaultModelInfo,
-	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
 	isRetiredProvider,
 	getProviderDefaultModelId,
+	resolveBedrockModelInfo,
 } from "@roo-code/types"
 
 import { useRouterModels } from "./useRouterModels"
@@ -180,28 +179,20 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case "bedrock": {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const baseInfo = bedrockModels[id as keyof typeof bedrockModels]
-
-			// Special case for custom ARN.
-			if (id === "custom-arn") {
-				return {
-					id,
-					info: { maxTokens: 5000, contextWindow: 128_000, supportsPromptCache: true, supportsImages: true },
-				}
-			}
-
-			// Apply 1M context for supported Claude 4 models when enabled
-			if (BEDROCK_1M_CONTEXT_MODEL_IDS.includes(id as any) && apiConfiguration.awsBedrock1MContext && baseInfo) {
-				// Create a new ModelInfo object with updated context window
-				const info: ModelInfo = {
-					...baseInfo,
-					contextWindow: 1_000_000,
-				}
-				return { id, info }
-			}
-
-			return { id, info: baseInfo }
+			const targetId =
+				apiConfiguration.awsCustomArn ||
+				apiConfiguration.awsBedrockInvokeTarget ||
+				apiConfiguration.apiModelId ||
+				defaultModelId
+			const resolved = resolveBedrockModelInfo({
+				baseModelId: apiConfiguration.apiModelId,
+				targetId,
+				optIn1MContext: apiConfiguration.awsBedrock1MContext,
+				maxOutputTokensOverride: apiConfiguration.awsModelMaxOutputTokens,
+				contextWindowOverride: apiConfiguration.awsModelContextWindow,
+			})
+			const displayId = apiConfiguration.apiModelId ?? resolved.baseModelId
+			return { id: displayId, info: resolved.info }
 		}
 		case "vertex": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId

@@ -87,6 +87,16 @@ export interface ApiHandlerCreateMessageMetadata {
 	 * Only applies to providers that support function calling restrictions (e.g., Gemini).
 	 */
 	allowedFunctionNames?: string[]
+	/**
+	 * Bedrock-specific: read-only accessor returning true if the given model is currently
+	 * cached as not supporting strict structured output (Converse `strict: true`).
+	 */
+	isModelStructuredOutputUnsupported?: (modelId: string) => boolean
+	/**
+	 * Bedrock-specific: marks the given model as not supporting strict structured output
+	 * for 30 days so future requests silently skip strict mode.
+	 */
+	markModelStructuredOutputUnsupported?: (modelId: string) => void
 }
 
 export interface ApiHandler {

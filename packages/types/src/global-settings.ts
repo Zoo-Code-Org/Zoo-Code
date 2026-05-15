@@ -232,6 +232,11 @@ export const globalSettingsSchema = z.object({
 	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
+	/**
+	 * Hidden per-model cache of AWS Bedrock models observed to reject strict structured output.
+	 * Map key: Bedrock model id / ARN. Map value: expiry timestamp (ms since epoch).
+	 */
+	bedrockStructuredOutputUnsupported: z.record(z.string(), z.number()).optional(),
 })
 
 export type GlobalSettings = z.infer<typeof globalSettingsSchema>

@@ -84,24 +84,9 @@ export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfigur
 
 export const getStaticModelsForProvider = (
 	provider: ProviderName,
-	customArnLabel?: string,
+	_customArnLabel?: string,
 ): Record<string, ModelInfo> => {
-	const models = MODELS_BY_PROVIDER[provider] ?? {}
-
-	// Add custom-arn option for Bedrock
-	if (provider === "bedrock") {
-		return {
-			...models,
-			"custom-arn": {
-				maxTokens: 0,
-				contextWindow: 0,
-				supportsPromptCache: false,
-				description: customArnLabel ?? "Use Custom ARN",
-			},
-		}
-	}
-
-	return models
+	return MODELS_BY_PROVIDER[provider] ?? {}
 }
 
 /**
@@ -121,6 +106,7 @@ export const PROVIDERS_WITH_CUSTOM_MODEL_UI: ProviderName[] = [
 	"unbound",
 	"openai", // OpenAI Compatible
 	"openai-codex", // OpenAI Codex has custom UI with auth and rate limits
+	"bedrock",
 	"litellm",
 	"vercel-ai-gateway",
 	"roo",
@@ -141,15 +127,10 @@ export const shouldUseGenericModelPicker = (provider: ProviderName): boolean => 
  * Centralizes provider-specific logic to keep it out of the ApiOptions template.
  */
 export const handleModelChangeSideEffects = <K extends keyof ProviderSettings>(
-	provider: ProviderName,
-	modelId: string,
+	_provider: ProviderName,
+	_modelId: string,
 	setApiConfigurationField: (field: K, value: ProviderSettings[K]) => void,
 ): void => {
-	// Bedrock: Clear custom ARN if not using custom ARN option
-	if (provider === "bedrock" && modelId !== "custom-arn") {
-		setApiConfigurationField("awsCustomArn" as K, "" as ProviderSettings[K])
-	}
-
 	// All providers: Clear reasoning settings when switching models to allow
 	// the new model's defaults to take effect. Different models within the
 	// same provider can have different reasoning defaults/options.

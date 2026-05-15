@@ -20,16 +20,18 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 		mockSend = vi.fn()
 
 		// Mock ConverseStreamCommand to capture the payload
-		;(ConverseStreamCommand as unknown as ReturnType<typeof vi.fn>).mockImplementation((payload) => {
+		;(ConverseStreamCommand as unknown as ReturnType<typeof vi.fn>).mockImplementation(function (payload) {
 			capturedPayload = payload
 			return {
 				input: payload,
 			}
 		})
-		;(BedrockRuntimeClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
-			send: mockSend,
-			config: { region: "us-east-1" },
-		}))
+		;(BedrockRuntimeClient as unknown as ReturnType<typeof vi.fn>).mockImplementation(function () {
+			return {
+				send: mockSend,
+				config: { region: "us-east-1" },
+			}
+		})
 		;(logger.info as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => {})
 		;(logger.error as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => {})
 	})
@@ -280,6 +282,101 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			expect(reasoningChunks).toHaveLength(2)
 			expect(reasoningChunks[0].text).toBe("Let me think...")
 			expect(reasoningChunks[1].text).toBe(" about this problem.")
+		})
+
+		it("should send adaptive thinking payload (not budget_tokens) for Claude Opus 4.7", async () => {
+			handler = new AwsBedrockHandler({
+				apiProvider: "bedrock",
+				apiModelId: "anthropic.claude-opus-4-7",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				modelMaxThinkingTokens: 8192,
+			})
+
+			mockSend.mockResolvedValue({
+				stream: (async function* () {
+					yield { messageStart: { role: "assistant" } }
+					yield { metadata: { usage: { inputTokens: 100, outputTokens: 50 } } }
+				})(),
+			})
+
+			const messages = [{ role: "user" as const, content: "Test message" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			for await (const _chunk of stream) {
+				// consume stream
+			}
+
+			expect(mockSend).toHaveBeenCalledTimes(1)
+			expect(capturedPayload).toBeDefined()
+
+			// Opus 4.7 must use the adaptive thinking shape.
+			expect(capturedPayload.additionalModelRequestFields).toBeDefined()
+			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({ type: "adaptive" })
+			expect(capturedPayload.additionalModelRequestFields.thinking.budget_tokens).toBeUndefined()
+
+			// output_config.effort must live at the top level of the payload.
+			expect(capturedPayload.output_config).toBeDefined()
+			expect(["low", "medium", "high"]).toContain(capturedPayload.output_config.effort)
+			// 8192 tokens falls in the "medium" bucket per mapReasoningBudgetToBedrockEffort.
+			expect(capturedPayload.output_config.effort).toBe("medium")
+		})
+
+		it("should honor explicit reasoningEffort for Claude Opus 4.7", async () => {
+			handler = new AwsBedrockHandler({
+				apiProvider: "bedrock",
+				apiModelId: "anthropic.claude-opus-4-7",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				modelMaxThinkingTokens: 4096,
+				reasoningEffort: "high" as any,
+			})
+
+			mockSend.mockResolvedValue({
+				stream: (async function* () {
+					yield { messageStart: { role: "assistant" } }
+					yield { metadata: { usage: { inputTokens: 100, outputTokens: 50 } } }
+				})(),
+			})
+
+			const messages = [{ role: "user" as const, content: "Test message" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			for await (const _chunk of stream) {
+				// consume stream
+			}
+
+			expect(capturedPayload.output_config).toEqual({ effort: "high" })
+		})
+
+		it("should still use legacy budget_tokens thinking payload for Claude Sonnet 4", async () => {
+			handler = new AwsBedrockHandler({
+				apiProvider: "bedrock",
+				apiModelId: "anthropic.claude-sonnet-4-20250514-v1:0",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+				modelMaxThinkingTokens: 4096,
+			})
+
+			mockSend.mockResolvedValue({
+				stream: (async function* () {
+					yield { messageStart: { role: "assistant" } }
+					yield { metadata: { usage: { inputTokens: 100, outputTokens: 50 } } }
+				})(),
+			})
+
+			const messages = [{ role: "user" as const, content: "Test message" }]
+			const stream = handler.createMessage("System prompt", messages)
+
+			for await (const _chunk of stream) {
+				// consume stream
+			}
+
+			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({
+				type: "enabled",
+				budget_tokens: 4096,
+			})
+			expect(capturedPayload.output_config).toBeUndefined()
 		})
 
 		it("should support API key authentication", async () => {

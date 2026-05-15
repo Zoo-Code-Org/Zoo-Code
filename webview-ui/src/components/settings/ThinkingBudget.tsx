@@ -32,7 +32,7 @@ Notes:
 - "minimal" uses t("settings:providers.reasoningEffort.minimal").
 */
 
-import { useEffect } from "react"
+import { useEffect, type ReactNode } from "react"
 import { Checkbox } from "vscrui"
 
 import {
@@ -52,6 +52,8 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Slider, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
+import { MaxOutputTokensControl } from "./MaxOutputTokensControl"
+
 interface ThinkingBudgetProps {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: <K extends keyof ProviderSettings>(
@@ -60,9 +62,30 @@ interface ThinkingBudgetProps {
 		isUserAction?: boolean,
 	) => void
 	modelInfo?: ModelInfo
+	/**
+	 * Optional render slot for provider-specific affordances next to the max-output-tokens
+	 * control (e.g. the Bedrock "Detect max output tokens" button). Only rendered when the
+	 * provider passes one in; non-Bedrock providers keep the historic plain-slider layout.
+	 */
+	maxOutputTokensExtraSlot?: ReactNode
+	/** Optional helper text rendered below the max-output-tokens control. */
+	maxOutputTokensHelperText?: ReactNode
+	/**
+	 * When true, ThinkingBudget renders the new combined slider+numeric input control for
+	 * max output tokens (used by Bedrock today). Other providers stick with the legacy slider
+	 * to avoid surprising existing users.
+	 */
+	useEnhancedMaxOutputControl?: boolean
 }
 
-export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, modelInfo }: ThinkingBudgetProps) => {
+export const ThinkingBudget = ({
+	apiConfiguration,
+	setApiConfigurationField,
+	modelInfo,
+	maxOutputTokensExtraSlot,
+	maxOutputTokensHelperText,
+	useEnhancedMaxOutputControl = false,
+}: ThinkingBudgetProps) => {
 	const { t } = useAppTranslation()
 	const { id: selectedModelId } = useSelectedModel(apiConfiguration)
 
@@ -179,6 +202,12 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 		)
 	}
 
+	const maxOutputTokensSliderMax = Math.max(
+		modelInfo.maxTokens || 8192,
+		customMaxOutputTokens,
+		DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
+	)
+
 	return isReasoningBudgetSupported && !!modelInfo.maxTokens ? (
 		<>
 			{!isReasoningBudgetRequired && (
@@ -196,20 +225,29 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 				<>
 					<div className="flex flex-col gap-1">
 						<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
-						<div className="flex items-center gap-1">
-							<Slider
+						{useEnhancedMaxOutputControl ? (
+							<MaxOutputTokensControl
+								value={customMaxOutputTokens}
 								min={8192}
-								max={Math.max(
-									modelInfo.maxTokens || 8192,
-									customMaxOutputTokens,
-									DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
-								)}
-								step={1024}
-								value={[customMaxOutputTokens]}
-								onValueChange={([value]) => setApiConfigurationField("modelMaxTokens", value)}
+								max={maxOutputTokensSliderMax}
+								defaultValue={DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS}
+								onChange={(value) => setApiConfigurationField("modelMaxTokens", value)}
+								inputAriaLabel={t("settings:thinkingBudget.maxTokens")}
+								extraSlot={maxOutputTokensExtraSlot}
+								helperText={maxOutputTokensHelperText}
 							/>
-							<div className="w-12 text-sm text-center">{customMaxOutputTokens}</div>
-						</div>
+						) : (
+							<div className="flex items-center gap-1">
+								<Slider
+									min={8192}
+									max={maxOutputTokensSliderMax}
+									step={1024}
+									value={[customMaxOutputTokens]}
+									onValueChange={([value]) => setApiConfigurationField("modelMaxTokens", value)}
+								/>
+								<div className="w-12 text-sm text-center">{customMaxOutputTokens}</div>
+							</div>
+						)}
 					</div>
 					<div className="flex flex-col gap-1">
 						<div className="font-medium">{t("settings:thinkingBudget.maxThinkingTokens")}</div>

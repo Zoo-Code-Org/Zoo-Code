@@ -499,6 +499,9 @@
 		"enablePromptCaching": "Enable prompt caching",
 		"enablePromptCachingTitle": "Enable prompt caching to improve performance and reduce costs for supported models.",
 		"cacheUsageNote": "Note: If you don't see cache usage, try selecting a different model and then selecting your desired model again.",
+		"awsBedrockStructuredOutput": "Attempt strict structured output",
+		"awsBedrockStructuredOutputTooltip": "Asks AWS Bedrock to strictly validate tool-call arguments against their JSON schema (Converse 'strict: true'). Falls back automatically and silently retries without strict mode for models that reject it; unsupported models are remembered for 30 days.",
+		"awsBedrockStructuredOutputDescription": "When enabled, Zoo Code sets 'strict: true' on tool specs in every Bedrock Converse request. If a model rejects strict mode, Zoo Code shows the Bedrock error, disables strict for that model for 30 days, and retries automatically.",
 		"vscodeLmModel": "Language Model",
 		"vscodeLmWarning": "Note: Models accessed via the VS Code Language Model API may be wrapped or fine-tuned by the provider, so behavior can differ from using the same model directly from a typical provider or router. To use a model from the Language Model dropdown, first switch to that model and then click Accept in the Copilot Chat prompt; otherwise you may see an error such as 400 \"The requested model is not supported\".",
 		"googleCloudSetup": {
@@ -530,6 +533,17 @@
 			"numCtxHelp": "Override the model's default context window size. Leave empty to use the model's Modelfile configuration. Minimum value is 128.",
 			"description": "Ollama allows you to run models locally on your computer. For instructions on how to get started, see their quickstart guide.",
 			"warning": "Note: Zoo Code uses complex prompts and works best with Claude models. Less capable models may not work as expected."
+		},
+		"bedrock": {
+			"discoveryDescription": "Zoo Code probes Bedrock control-plane APIs for foundation models and inference profiles in the selected account and region.",
+			"discoveryDescriptionNoRegion": "Select an AWS region to discover Bedrock models and inference profiles.",
+			"detectMaxTokens": "Detect max output tokens",
+			"detectMaxTokensProbing": "Probing AWS for the model's max output cap...",
+			"detectMaxTokensTooltip": "Sends a single tiny Converse request to AWS Bedrock to discover the largest accepted max_tokens value for the selected model. AWS does not expose this through GetFoundationModel, so Zoo Code measures it empirically.",
+			"detectMaxTokensSuccess": "Detected cap: {{value}} tokens (source: {{source}}, attempts: {{attempts}}). The slider now extends to this value.",
+			"detectMaxTokensOverrideActive": "Custom cap active: {{value}} tokens. Click \"Reset to default\" to revert to the built-in table.",
+			"detectMaxTokensError": "Detection failed: {{error}}",
+			"detectMaxTokensReset": "Reset to default"
 		},
 		"openRouter": {
 			"providerRouting": {

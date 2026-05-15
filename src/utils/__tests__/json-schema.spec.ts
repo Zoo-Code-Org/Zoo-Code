@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { normalizeToolSchema } from "../json-schema"
+import { normalizeToolSchema, stripBedrockStrictIncompatibleConstraints } from "../json-schema"
 
 describe("normalizeToolSchema", () => {
 	it("should convert type array to anyOf for nullable string", () => {
@@ -584,5 +584,153 @@ describe("normalizeToolSchema", () => {
 				expect(result.required).toContain("body")
 			})
 		})
+	})
+})
+
+describe("stripBedrockStrictIncompatibleConstraints", () => {
+	it("strips numeric minimum/maximum and appends them to description", () => {
+		const input = {
+			type: "object",
+			properties: {
+				expected_replacements: {
+					type: "integer",
+					description: "How many times to replace",
+					minimum: 1,
+					maximum: 10,
+				},
+			},
+		}
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		expect(result.properties.expected_replacements.minimum).toBeUndefined()
+		expect(result.properties.expected_replacements.maximum).toBeUndefined()
+		expect(result.properties.expected_replacements.description).toBe(
+			"How many times to replace (minimum=1, maximum=10)",
+		)
+		expect(result.properties.expected_replacements.type).toBe("integer")
+	})
+
+	it("strips exclusiveMinimum / exclusiveMaximum / multipleOf", () => {
+		const input = {
+			type: "object",
+			properties: {
+				n: {
+					type: "number",
+					exclusiveMinimum: 0,
+					exclusiveMaximum: 1,
+					multipleOf: 0.1,
+				},
+			},
+		}
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		const n = result.properties.n
+		expect(n.exclusiveMinimum).toBeUndefined()
+		expect(n.exclusiveMaximum).toBeUndefined()
+		expect(n.multipleOf).toBeUndefined()
+		// No prior description — new one reflects stripped keys
+		expect(typeof n.description).toBe("string")
+		expect(n.description).toContain("exclusiveMinimum=0")
+		expect(n.description).toContain("multipleOf=0.1")
+	})
+
+	it("strips maxItems on arrays and appends to description", () => {
+		const input = {
+			type: "array",
+			maxItems: 4,
+			items: { type: "string" },
+		}
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		expect(result.maxItems).toBeUndefined()
+		expect(result.description).toContain("maxItems=4")
+	})
+
+	it("preserves minItems of 1 (Bedrock accepts minItems: 0 or 1)", () => {
+		const input = { type: "array", minItems: 1, items: { type: "string" } }
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		expect(result.minItems).toBe(1)
+		expect(result.description).toBeUndefined()
+	})
+
+	it("strips minItems > 1", () => {
+		const input = { type: "array", minItems: 3, items: { type: "string" } }
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		expect(result.minItems).toBeUndefined()
+		expect(result.description).toBe("minItems=3")
+	})
+
+	it("preserves string length/pattern/format constraints", () => {
+		const input = {
+			type: "object",
+			properties: {
+				email: {
+					type: "string",
+					minLength: 3,
+					maxLength: 100,
+					pattern: "^[^@]+@[^@]+$",
+					format: "email",
+				},
+			},
+		}
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		const email = result.properties.email
+		expect(email.minLength).toBe(3)
+		expect(email.maxLength).toBe(100)
+		expect(email.pattern).toBe("^[^@]+@[^@]+$")
+		expect(email.format).toBe("email")
+	})
+
+	it("recurses through anyOf / nested items / nested properties", () => {
+		const input = {
+			type: "object",
+			properties: {
+				choices: {
+					type: "array",
+					minItems: 1,
+					maxItems: 4,
+					items: {
+						type: "object",
+						properties: {
+							weight: { type: "integer", minimum: 0, maximum: 100 },
+						},
+					},
+				},
+				union: {
+					anyOf: [{ type: "integer", minimum: 5 }, { type: "null" }],
+				},
+			},
+		}
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		// Array wrapper: maxItems stripped, minItems:1 preserved
+		expect(result.properties.choices.maxItems).toBeUndefined()
+		expect(result.properties.choices.minItems).toBe(1)
+		expect(result.properties.choices.description).toContain("maxItems=4")
+		// Nested: weight.minimum and weight.maximum stripped
+		const weight = result.properties.choices.items.properties.weight
+		expect(weight.minimum).toBeUndefined()
+		expect(weight.maximum).toBeUndefined()
+		expect(weight.description).toContain("minimum=0")
+		// anyOf arm: minimum stripped on the integer variant, null variant untouched
+		const [intArm, nullArm] = result.properties.union.anyOf
+		expect(intArm.minimum).toBeUndefined()
+		expect(intArm.description).toContain("minimum=5")
+		expect(nullArm.type).toBe("null")
+	})
+
+	it("returns a new object — does not mutate input", () => {
+		const input = { type: "integer", minimum: 1 }
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		expect(result).not.toBe(input)
+		expect(input.minimum).toBe(1)
+		expect(result.minimum).toBeUndefined()
+	})
+
+	it("is a no-op for a non-object input", () => {
+		expect(stripBedrockStrictIncompatibleConstraints(null as any)).toBeNull()
+	})
+
+	it("does not strip numeric constraints when type is absent (preserves schema)", () => {
+		// Without a declared type, we can't know the constraint context; leave as-is.
+		const input = { minimum: 5 }
+		const result = stripBedrockStrictIncompatibleConstraints(input) as any
+		expect(result.minimum).toBe(5)
 	})
 })

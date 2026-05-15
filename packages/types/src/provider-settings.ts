@@ -230,11 +230,19 @@ const bedrockSchema = apiModelIdProviderModelSchema.extend({
 	awsApiKey: z.string().optional(),
 	awsUseApiKey: z.boolean().optional(),
 	awsCustomArn: z.string().optional(),
+	awsBedrockInvokeTarget: z.string().optional(),
+	awsBedrockTargetKind: z
+		.enum(["foundation-model", "system-profile", "application-profile", "custom-arn", "prompt-router", "unknown"])
+		.optional(),
 	awsModelContextWindow: z.number().optional(),
+	// Empirically detected (or manually entered) per-config cap on the model's max output tokens.
+	// Takes precedence over the static `bedrockModels.<id>.maxTokens` table when present.
+	awsModelMaxOutputTokens: z.number().optional(),
 	awsBedrockEndpointEnabled: z.boolean().optional(),
 	awsBedrockEndpoint: z.string().optional(),
 	awsBedrock1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.
 	awsBedrockServiceTier: z.enum(["STANDARD", "FLEX", "PRIORITY"]).optional(), // AWS Bedrock service tier selection
+	awsBedrockStructuredOutput: z.boolean().optional(), // Attempt strict JSON-schema tool validation on Bedrock Converse. Default ON when unset.
 })
 
 const vertexSchema = apiModelIdProviderModelSchema.extend({

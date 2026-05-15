@@ -64,7 +64,7 @@ export class MultiPointStrategy extends CacheStrategy {
 		minTokensPerPoint: number,
 		remainingCachePoints: number,
 	): CachePointPlacement[] {
-		if (this.config.messages.length <= 1) {
+		if (remainingCachePoints <= 0) {
 			return []
 		}
 
@@ -250,7 +250,7 @@ export class MultiPointStrategy extends CacheStrategy {
 		endIndex: number,
 		minTokensPerPoint: number,
 	): CachePointPlacement | null {
-		if (startIndex >= endIndex) {
+		if (startIndex > endIndex) {
 			return null
 		}
 

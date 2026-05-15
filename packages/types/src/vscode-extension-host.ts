@@ -20,6 +20,7 @@ import type { GitCommit } from "./git.js"
 import type { McpServer } from "./mcp.js"
 import type { ModelRecord, RouterModels } from "./model.js"
 import type { OpenAiCodexRateLimitInfo } from "./providers/openai-codex-rate-limits.js"
+import type { BedrockDiscoveredTarget } from "./providers/bedrock.js"
 import type { SkillMetadata } from "./skills.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
 
@@ -43,6 +44,8 @@ export interface ExtensionMessage {
 		| "commitSearchResults"
 		| "listApiConfig"
 		| "routerModels"
+		| "bedrockDiscovery"
+		| "bedrockMaxTokensProbe"
 		| "openAiModels"
 		| "ollamaModels"
 		| "lmStudioModels"
@@ -136,6 +139,13 @@ export interface ExtensionMessage {
 	}>
 	clineMessage?: ClineMessage
 	routerModels?: RouterModels
+	bedrockDiscovery?: BedrockDiscoveredTarget[]
+	bedrockMaxTokensProbe?: {
+		maxOutputTokens: number
+		source: "accepted" | "hint" | "binary-search"
+		attempts: number
+		modelId: string
+	}
 	openAiModels?: string[]
 	ollamaModels?: ModelRecord
 	lmStudioModels?: ModelRecord
@@ -443,6 +453,8 @@ export interface WebviewMessage {
 		| "resetState"
 		| "flushRouterModels"
 		| "requestRouterModels"
+		| "requestBedrockDiscovery"
+		| "requestBedrockMaxTokensProbe"
 		| "requestOpenAiModels"
 		| "requestOllamaModels"
 		| "requestLmStudioModels"
