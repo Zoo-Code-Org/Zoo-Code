@@ -36,6 +36,7 @@ import {
 	type ToolUsage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type ActiveConversationSummary,
 	type MarketplaceInstalledMetadata,
 	RooCodeEventName,
 	requestyDefaultModelId,
@@ -137,6 +138,8 @@ export class ClineProvider
 	private webviewDisposables: vscode.Disposable[] = []
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private clineStack: Task[] = []
+	private visibleTaskId?: string
+	private hasExplicitTaskSelectionClear = false
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
@@ -156,6 +159,8 @@ export class ClineProvider
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	private pendingOperations: Map<string, PendingEditOperation> = new Map()
 	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
+	private activeConversationsUpdateTimer: ReturnType<typeof setTimeout> | null = null
+	private static readonly ACTIVE_CONVERSATIONS_UPDATE_DEBOUNCE_MS = 250
 
 	private cloudOrganizationsCache: CloudOrganizationMembership[] | null = null
 	private cloudOrganizationsCacheTimestamp: number | null = null
@@ -237,24 +242,40 @@ export class ClineProvider
 		// We do something fairly similar for the IPC-based API.
 		this.taskCreationCallback = (instance: Task) => {
 			this.emit(RooCodeEventName.TaskCreated, instance)
+			const broadcastTaskState = () => {
+				this.postTaskStateToWebview(instance.taskId).catch((error) => {
+					this.log(
+						`[taskCreationCallback] Failed to broadcast task state for ${instance.taskId}: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				})
+			}
 
 			// Create named listener functions so we can remove them later.
-			const onTaskStarted = () => this.emit(RooCodeEventName.TaskStarted, instance.taskId)
+			const onTaskStarted = () => {
+				this.emit(RooCodeEventName.TaskStarted, instance.taskId)
+				broadcastTaskState()
+			}
 			const onTaskCompleted = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) => {
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
+				broadcastTaskState()
 			}
 			const onTaskAborted = async () => {
 				this.emit(RooCodeEventName.TaskAborted, instance.taskId)
+				broadcastTaskState()
 
 				try {
 					// Only rehydrate on genuine streaming failures.
 					// User-initiated cancels are handled by cancelTask().
 					if (instance.abortReason === "streaming_failed") {
-						// Defensive safeguard: if another path already replaced this instance, skip
-						const current = this.getCurrentTask()
-						if (current && current.instanceId !== instance.instanceId) {
+						// Defensive safeguard: if another path already replaced or removed this instance, skip
+						const current = this.getTaskById(instance.taskId)
+						if (!current || current.instanceId !== instance.instanceId) {
 							this.log(
-								`[onTaskAborted] Skipping rehydrate: current instance ${current.instanceId} != aborted ${instance.instanceId}`,
+								`[onTaskAborted] Skipping rehydrate for ${instance.taskId}: active instance ${
+									current?.instanceId ?? "none"
+								} != aborted ${instance.instanceId}`,
 							)
 							return
 						}
@@ -262,7 +283,10 @@ export class ClineProvider
 						const { historyItem } = await this.getTaskWithId(instance.taskId)
 						const rootTask = instance.rootTask
 						const parentTask = instance.parentTask
-						await this.createTaskWithHistoryItem({ ...historyItem, rootTask, parentTask })
+						await this.createTaskWithHistoryItem(
+							{ ...historyItem, rootTask, parentTask },
+							{ replaceExistingTask: true, focus: this.isTaskVisible(instance.taskId) },
+						)
 					}
 				} catch (error) {
 					this.log(
@@ -274,12 +298,30 @@ export class ClineProvider
 			}
 			const onTaskFocused = () => this.emit(RooCodeEventName.TaskFocused, instance.taskId)
 			const onTaskUnfocused = () => this.emit(RooCodeEventName.TaskUnfocused, instance.taskId)
-			const onTaskActive = (taskId: string) => this.emit(RooCodeEventName.TaskActive, taskId)
-			const onTaskInteractive = (taskId: string) => this.emit(RooCodeEventName.TaskInteractive, taskId)
-			const onTaskResumable = (taskId: string) => this.emit(RooCodeEventName.TaskResumable, taskId)
-			const onTaskIdle = (taskId: string) => this.emit(RooCodeEventName.TaskIdle, taskId)
-			const onTaskPaused = (taskId: string) => this.emit(RooCodeEventName.TaskPaused, taskId)
-			const onTaskUnpaused = (taskId: string) => this.emit(RooCodeEventName.TaskUnpaused, taskId)
+			const onTaskActive = (taskId: string) => {
+				this.emit(RooCodeEventName.TaskActive, taskId)
+				broadcastTaskState()
+			}
+			const onTaskInteractive = (taskId: string) => {
+				this.emit(RooCodeEventName.TaskInteractive, taskId)
+				broadcastTaskState()
+			}
+			const onTaskResumable = (taskId: string) => {
+				this.emit(RooCodeEventName.TaskResumable, taskId)
+				broadcastTaskState()
+			}
+			const onTaskIdle = (taskId: string) => {
+				this.emit(RooCodeEventName.TaskIdle, taskId)
+				broadcastTaskState()
+			}
+			const onTaskPaused = (taskId: string) => {
+				this.emit(RooCodeEventName.TaskPaused, taskId)
+				broadcastTaskState()
+			}
+			const onTaskUnpaused = (taskId: string) => {
+				this.emit(RooCodeEventName.TaskUnpaused, taskId)
+				broadcastTaskState()
+			}
 			const onTaskSpawned = (taskId: string) => this.emit(RooCodeEventName.TaskSpawned, taskId)
 			const onTaskUserMessage = (taskId: string) => this.emit(RooCodeEventName.TaskUserMessage, taskId)
 			const onTaskTokenUsageUpdated = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) =>
@@ -319,6 +361,195 @@ export class ClineProvider
 				() => instance.off(RooCodeEventName.TaskTokenUsageUpdated, onTaskTokenUsageUpdated),
 			])
 		}
+	}
+
+	private getTaskById(taskId?: string): Task | undefined {
+		if (!taskId) {
+			return undefined
+		}
+
+		return this.clineStack.find((task) => task.taskId === taskId)
+	}
+
+	private getRootTaskId(task: Pick<Task, "taskId" | "rootTaskId">): string {
+		return task.rootTaskId ?? task.taskId
+	}
+
+	private getTaskActivityTs(task: Task): number {
+		return (
+			this.taskHistoryStore.get(task.taskId)?.ts ??
+			this.taskHistoryStore.get(this.getRootTaskId(task))?.ts ??
+			task.clineMessages.at(-1)?.ts ??
+			0
+		)
+	}
+
+	public isTaskVisible(taskId: string): boolean {
+		return this.visibleTaskId === taskId
+	}
+
+	private async syncVisibleTaskContext(task: Task): Promise<void> {
+		const [mode, currentApiConfigName] = await Promise.all([
+			typeof task.getTaskMode === "function"
+				? task.getTaskMode().catch(() => defaultModeSlug)
+				: Promise.resolve(task.taskMode ?? defaultModeSlug),
+			typeof task.getTaskApiConfigName === "function"
+				? task.getTaskApiConfigName().catch(() => undefined)
+				: Promise.resolve(task.taskApiConfigName),
+		])
+
+		await this.contextProxy.setValue("mode", mode)
+		if (task.apiConfiguration) {
+			await this.contextProxy.setProviderSettings(task.apiConfiguration)
+		}
+
+		if (currentApiConfigName !== undefined) {
+			await this.contextProxy.setValue("currentApiConfigName", currentApiConfigName)
+		}
+
+		this.emit(RooCodeEventName.ModeChanged, mode)
+
+		if (task.apiConfiguration?.apiProvider) {
+			this.emit(RooCodeEventName.ProviderProfileChanged, {
+				name: currentApiConfigName ?? "default",
+				provider: task.apiConfiguration.apiProvider,
+			})
+		}
+	}
+
+	private getActiveConversationSummaries(): ActiveConversationSummary[] {
+		const taskByRoot = new Map<string, Task>()
+
+		for (const task of this.clineStack) {
+			const rootTaskId = this.getRootTaskId(task)
+			const existing = taskByRoot.get(rootTaskId)
+
+			if (!existing || this.getTaskActivityTs(task) >= this.getTaskActivityTs(existing)) {
+				taskByRoot.set(rootTaskId, task)
+			}
+		}
+
+		return Array.from(taskByRoot.values())
+			.map((task) => {
+				const rootTaskId = this.getRootTaskId(task)
+				const rootTaskItem = this.taskHistoryStore.get(rootTaskId)
+				const activeTaskItem = this.taskHistoryStore.get(task.taskId)
+				const taskMetadata = task.metadata
+				const queuedMessages = task.queuedMessages ?? []
+				const steerMessageCount = queuedMessages.filter(
+					(message) => (message as { deliveryMode?: string }).deliveryMode === "steer",
+				).length
+
+				return {
+					rootTaskId,
+					activeTaskId: task.taskId,
+					rootTask: rootTaskItem?.task ?? activeTaskItem?.task ?? taskMetadata?.task ?? rootTaskId,
+					activeTask: activeTaskItem?.task ?? taskMetadata?.task ?? rootTaskItem?.task ?? task.taskId,
+					ts: this.getTaskActivityTs(task),
+					status: task.taskStatus ?? "running",
+					parentTaskId: task.parentTaskId,
+					queuedMessageCount: queuedMessages.length,
+					steerMessageCount,
+				} satisfies ActiveConversationSummary
+			})
+			.sort((a, b) => {
+				if (a.activeTaskId === this.visibleTaskId) {
+					return -1
+				}
+				if (b.activeTaskId === this.visibleTaskId) {
+					return 1
+				}
+				return b.ts - a.ts
+			})
+	}
+
+	private postActiveConversationsStateToWebview(): void {
+		const taskStateSeq = ++this.clineMessagesSeq
+		this.postMessageToWebview({
+			type: "state",
+			state: {
+				clineMessagesSeq: taskStateSeq,
+				activeConversations: this.getActiveConversationSummaries(),
+			},
+		})
+	}
+
+	private scheduleActiveConversationsStateToWebview(options: { immediate?: boolean } = {}): void {
+		if (this._disposed) {
+			return
+		}
+
+		const flush = () => {
+			this.activeConversationsUpdateTimer = null
+			if (!this._disposed) {
+				this.postActiveConversationsStateToWebview()
+			}
+		}
+
+		if (options.immediate) {
+			if (this.activeConversationsUpdateTimer) {
+				clearTimeout(this.activeConversationsUpdateTimer)
+				this.activeConversationsUpdateTimer = null
+			}
+			flush()
+			return
+		}
+
+		if (!this.activeConversationsUpdateTimer) {
+			this.activeConversationsUpdateTimer = setTimeout(
+				flush,
+				ClineProvider.ACTIVE_CONVERSATIONS_UPDATE_DEBOUNCE_MS,
+			)
+		}
+	}
+
+	public async selectTask(taskId?: string, options?: { broadcast?: boolean }): Promise<void> {
+		const { broadcast = true } = options ?? {}
+		const previousTask = this.getTaskById(this.visibleTaskId)
+		const nextTask = this.getTaskById(taskId)
+		const nextSelectionCleared = taskId === undefined && nextTask === undefined
+
+		if (previousTask?.taskId === nextTask?.taskId && this.hasExplicitTaskSelectionClear === nextSelectionCleared) {
+			if (broadcast) {
+				if (nextTask) {
+					await this.syncVisibleTaskContext(nextTask)
+				}
+				await this.postStateToWebviewWithoutTaskHistory()
+			}
+			return
+		}
+
+		if (previousTask) {
+			previousTask.emit(RooCodeEventName.TaskUnfocused)
+		}
+
+		this.visibleTaskId = nextTask?.taskId
+		this.hasExplicitTaskSelectionClear = nextSelectionCleared
+
+		if (nextTask) {
+			await this.syncVisibleTaskContext(nextTask)
+			nextTask.emit(RooCodeEventName.TaskFocused)
+		}
+
+		if (broadcast) {
+			await this.postStateToWebviewWithoutTaskHistory()
+		}
+	}
+
+	public async postTaskStateToWebview(taskId: string): Promise<void> {
+		if (this.isTaskVisible(taskId)) {
+			await this.postStateToWebviewWithoutTaskHistory()
+			return
+		}
+		this.scheduleActiveConversationsStateToWebview({ immediate: true })
+	}
+
+	public async postTaskMessageToWebview(taskId: string, message: ExtensionMessage): Promise<void> {
+		if (this.isTaskVisible(taskId)) {
+			await this.postMessageToWebview(message)
+			return
+		}
+		this.scheduleActiveConversationsStateToWebview()
 	}
 
 	/**
@@ -403,11 +634,11 @@ export class ClineProvider
 	// The instance is pushed to the top of the stack (LIFO order).
 	// When the task is completed, the top instance is removed, reactivating the
 	// previous task.
-	async addClineToStack(task: Task) {
+	async addClineToStack(task: Task, options?: { focus?: boolean }) {
+		const { focus = true } = options ?? {}
 		// Add this cline instance into the stack that represents the order of
 		// all the called tasks.
 		this.clineStack.push(task)
-		task.emit(RooCodeEventName.TaskFocused)
 
 		// Perform special setup provider specific tasks.
 		await this.performPreparationTasks(task)
@@ -417,6 +648,12 @@ export class ClineProvider
 
 		if (!state || typeof state.mode !== "string") {
 			throw new Error(t("common:errors.retrieve_current_mode"))
+		}
+
+		if (focus) {
+			await this.selectTask(task.taskId, { broadcast: false })
+		} else if (this.isViewLaunched) {
+			await this.postStateToWebviewWithoutClineMessages()
 		}
 	}
 
@@ -438,23 +675,34 @@ export class ClineProvider
 		}
 	}
 
-	// Removes and destroys the top Cline instance (the current finished task),
-	// activating the previous one (resuming the parent task).
-	async removeClineFromStack(options?: { skipDelegationRepair?: boolean }) {
+	// Removes and destroys an active Task instance.
+	async removeClineFromStack(options?: { skipDelegationRepair?: boolean; taskId?: string; broadcast?: boolean }) {
 		if (this.clineStack.length === 0) {
 			return
 		}
 
-		// Pop the top Cline instance from the stack.
-		let task = this.clineStack.pop()
+		const { broadcast = true } = options ?? {}
+		const taskIdToRemove =
+			options?.taskId ?? this.visibleTaskId ?? this.clineStack[this.clineStack.length - 1]?.taskId
+		const taskIndex = this.clineStack.findIndex((task) => task.taskId === taskIdToRemove)
+
+		if (taskIndex === -1) {
+			return
+		}
+
+		let task: Task | undefined = this.clineStack.splice(taskIndex, 1)[0]
 
 		if (task) {
 			// Capture delegation metadata before abort/dispose, since abortTask(true)
 			// is async and the task reference is cleared afterwards.
 			const childTaskId = task.taskId
 			const parentTaskId = task.parentTaskId
+			const wasVisible = this.visibleTaskId === childTaskId
 
-			task.emit(RooCodeEventName.TaskUnfocused)
+			if (wasVisible) {
+				this.visibleTaskId = undefined
+				task.emit(RooCodeEventName.TaskUnfocused)
+			}
 
 			try {
 				// Abort the running task and set isAbandoned to true so
@@ -479,7 +727,7 @@ export class ClineProvider
 			task = undefined
 
 			// Delegation-aware parent metadata repair:
-			// If the popped task was a delegated child, repair the parent's metadata
+			// If the removed task was a delegated child, repair the parent's metadata
 			// so it transitions from "delegated" back to "active" and becomes resumable
 			// from the task history list.
 			// Skip when called from delegateParentAndOpenChild() during nested delegation
@@ -500,12 +748,21 @@ export class ClineProvider
 						)
 					}
 				} catch (err) {
-					// Non-fatal: log but do not block the pop operation.
+					// Non-fatal: log but do not block the removal operation.
 					this.log(
 						`[ClineProvider#removeClineFromStack] Failed to repair parent metadata for ${parentTaskId} (non-fatal): ${
 							err instanceof Error ? err.message : String(err)
 						}`,
 					)
+				}
+			}
+
+			if (broadcast) {
+				if (wasVisible) {
+					const fallbackTaskId = this.clineStack[this.clineStack.length - 1]?.taskId
+					await this.selectTask(fallbackTaskId)
+				} else {
+					await this.postStateToWebviewWithoutClineMessages()
 				}
 			}
 		}
@@ -896,126 +1153,92 @@ export class ClineProvider
 
 	public async createTaskWithHistoryItem(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
-		options?: { startTask?: boolean },
+		options?: { startTask?: boolean; replaceExistingTask?: boolean; focus?: boolean },
 	) {
 		const isCliRuntime = process.env.ROO_CLI_RUNTIME === "1"
 		// CLI injects runtime provider settings from command flags/env at startup.
 		// Restoring provider profiles from task history can overwrite those
 		// runtime settings with stale/incomplete persisted profiles.
 		const skipProfileRestoreFromHistory = isCliRuntime
+		const { startTask = true, replaceExistingTask = false, focus = true } = options ?? {}
+		const existingTask = this.getTaskById(historyItem.id)
 
-		// Check if we're rehydrating the current task to avoid flicker
-		const currentTask = this.getCurrentTask()
-		const isRehydratingCurrentTask = currentTask && currentTask.taskId === historyItem.id
-
-		if (!isRehydratingCurrentTask) {
-			await this.removeClineFromStack()
+		if (existingTask && !replaceExistingTask) {
+			if (focus) {
+				await this.selectTask(existingTask.taskId)
+			}
+			return existingTask
 		}
 
-		// If the history item has a saved mode, restore it and its associated API configuration.
 		if (historyItem.mode) {
-			// Validate that the mode still exists
 			const customModes = await this.customModesManager.getCustomModes()
 			const modeExists = getModeBySlug(historyItem.mode, customModes) !== undefined
 
 			if (!modeExists) {
-				// Mode no longer exists, fall back to default mode.
 				this.log(
 					`Mode '${historyItem.mode}' from history no longer exists. Falling back to default mode '${defaultModeSlug}'.`,
 				)
 				historyItem.mode = defaultModeSlug
 			}
-
-			await this.updateGlobalState("mode", historyItem.mode)
-
-			// Load the saved API config for the restored mode if it exists.
-			// Skip mode-based profile activation if historyItem.apiConfigName exists,
-			// since the task's specific provider profile will override it anyway.
-			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
-
-			if (!historyItem.apiConfigName && !lockApiConfigAcrossModes && !skipProfileRestoreFromHistory) {
-				const savedConfigId = await this.providerSettingsManager.getModeConfigId(historyItem.mode)
-				const listApiConfig = await this.providerSettingsManager.listConfig()
-
-				// Update listApiConfigMeta first to ensure UI has latest data.
-				await this.updateGlobalState("listApiConfigMeta", listApiConfig)
-
-				// If this mode has a saved config, use it.
-				if (savedConfigId) {
-					const profile = listApiConfig.find(({ id }) => id === savedConfigId)
-
-					if (profile?.name) {
-						try {
-							// Check if the profile has actual API configuration (not just an id).
-							// In CLI mode, the ProviderSettingsManager may return empty default profiles
-							// that only contain 'id' and 'name' fields. Activating such a profile would
-							// overwrite the CLI's working API configuration with empty settings.
-							const fullProfile = await this.providerSettingsManager.getProfile({ name: profile.name })
-							const hasActualSettings = !!fullProfile.apiProvider
-
-							if (hasActualSettings) {
-								await this.activateProviderProfile({ name: profile.name })
-							} else {
-								// The task will continue with the current/default configuration.
-							}
-						} catch (error) {
-							// Log the error but continue with task restoration.
-							this.log(
-								`Failed to restore API configuration for mode '${historyItem.mode}': ${
-									error instanceof Error ? error.message : String(error)
-								}. Continuing with default configuration.`,
-							)
-							// The task will continue with the current/default configuration.
-						}
-					}
-				}
-			}
 		}
 
-		// If the history item has a saved API config name (provider profile), restore it.
-		// This overrides any mode-based config restoration above, because the task's
-		// specific provider profile takes precedence over mode defaults.
-		if (historyItem.apiConfigName && !skipProfileRestoreFromHistory) {
-			const listApiConfig = await this.providerSettingsManager.listConfig()
-			// Keep global state/UI in sync with latest profiles for parity with mode restoration above.
-			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
-			const profile = listApiConfig.find(({ name }) => name === historyItem.apiConfigName)
-
-			if (profile?.name) {
-				try {
-					await this.activateProviderProfile(
-						{ name: profile.name },
-						{ persistModeConfig: false, persistTaskHistory: false },
-					)
-				} catch (error) {
-					// Log the error but continue with task restoration.
-					this.log(
-						`Failed to restore API configuration '${historyItem.apiConfigName}' for task: ${
-							error instanceof Error ? error.message : String(error)
-						}. Continuing with current configuration.`,
-					)
-				}
-			} else {
-				// Profile no longer exists, log warning but continue
-				this.log(
-					`Provider profile '${historyItem.apiConfigName}' from history no longer exists. Using current configuration.`,
-				)
-			}
-		} else if (historyItem.apiConfigName && skipProfileRestoreFromHistory) {
+		if (historyItem.apiConfigName && skipProfileRestoreFromHistory) {
 			this.log(
 				`Skipping restore of provider profile '${historyItem.apiConfigName}' for task ${historyItem.id} in CLI runtime.`,
 			)
 		}
 
-		const { apiConfiguration, enableCheckpoints, checkpointTimeout, experiments, cloudUserInfo, taskSyncEnabled } =
-			await this.getState()
+		const { apiConfiguration, enableCheckpoints, checkpointTimeout, experiments } = await this.getState()
+		const listApiConfig = await this.providerSettingsManager.listConfig()
+		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
+		await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+
+		let restoredApiConfiguration = apiConfiguration
+		let restoredApiConfigName = historyItem.apiConfigName
+
+		if (!skipProfileRestoreFromHistory) {
+			let profileNameToRestore = historyItem.apiConfigName
+
+			if (!profileNameToRestore && historyItem.mode && !lockApiConfigAcrossModes) {
+				const savedConfigId = await this.providerSettingsManager.getModeConfigId(historyItem.mode)
+				profileNameToRestore = listApiConfig.find(({ id }) => id === savedConfigId)?.name
+			}
+
+			if (profileNameToRestore) {
+				const profile = listApiConfig.find(({ name }) => name === profileNameToRestore)
+
+				if (profile?.name) {
+					try {
+						const {
+							id: _profileId,
+							name: _profileName,
+							...providerSettings
+						} = await this.providerSettingsManager.getProfile({ name: profile.name })
+						if (providerSettings.apiProvider) {
+							restoredApiConfiguration = providerSettings
+							restoredApiConfigName = profile.name
+						}
+					} catch (error) {
+						this.log(
+							`Failed to restore API configuration '${profile.name}' for task ${historyItem.id}: ${
+								error instanceof Error ? error.message : String(error)
+							}. Continuing with current configuration.`,
+						)
+					}
+				} else if (historyItem.apiConfigName) {
+					this.log(
+						`Provider profile '${historyItem.apiConfigName}' from history no longer exists. Using current configuration.`,
+					)
+				}
+			}
+		}
 
 		const task = new Task({
 			provider: this,
-			apiConfiguration,
+			apiConfiguration: restoredApiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
-			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			consecutiveMistakeLimit: restoredApiConfiguration.consecutiveMistakeLimit,
 			historyItem,
 			experiments,
 			rootTask: historyItem.rootTask,
@@ -1023,17 +1246,28 @@ export class ClineProvider
 			taskNumber: historyItem.number,
 			workspacePath: historyItem.workspace,
 			onCreated: this.taskCreationCallback,
-			startTask: options?.startTask ?? true,
+			startTask,
 			// Preserve the status from the history item to avoid overwriting it when the task saves messages
 			initialStatus: historyItem.status,
 		})
+		if (typeof task.setTaskApiConfigName === "function") {
+			task.setTaskApiConfigName(restoredApiConfigName)
+		} else {
+			;(task as any)._taskApiConfigName = restoredApiConfigName
+			;(task as any).taskApiConfigName = restoredApiConfigName
+		}
+		if (typeof task.getTaskMode !== "function") {
+			;(task as any)._taskMode = historyItem.mode ?? defaultModeSlug
+			;(task as any).taskMode = historyItem.mode ?? defaultModeSlug
+		}
 
-		if (isRehydratingCurrentTask) {
+		if (existingTask && replaceExistingTask) {
 			// Replace the current task in-place to avoid UI flicker
-			const stackIndex = this.clineStack.length - 1
+			const stackIndex = this.clineStack.findIndex((candidate) => candidate.taskId === existingTask.taskId)
 
 			// Properly dispose of the old task to ensure garbage collection
 			const oldTask = this.clineStack[stackIndex]
+			const wasVisible = this.visibleTaskId === oldTask?.taskId
 
 			// Abort the old task to stop running processes and mark as abandoned
 			try {
@@ -1053,16 +1287,21 @@ export class ClineProvider
 
 			// Replace the task in the stack
 			this.clineStack[stackIndex] = task
-			task.emit(RooCodeEventName.TaskFocused)
 
 			// Perform preparation tasks and set up event listeners
 			await this.performPreparationTasks(task)
+
+			if (focus || wasVisible) {
+				await this.selectTask(task.taskId, { broadcast: false })
+			} else if (this.isViewLaunched) {
+				await this.postStateToWebviewWithoutClineMessages()
+			}
 
 			this.log(
 				`[createTaskWithHistoryItem] rehydrated task ${task.taskId}.${task.instanceId} in-place (flicker-free)`,
 			)
 		} else {
-			await this.addClineToStack(task)
+			await this.addClineToStack(task, { focus })
 
 			this.log(
 				`[createTaskWithHistoryItem] ${task.parentTask ? "child" : "parent"} task ${task.taskId}.${task.instanceId} instantiated`,
@@ -1778,10 +2017,12 @@ export class ClineProvider
 	}
 
 	async showTaskWithId(id: string) {
-		if (id !== this.getCurrentTask()?.taskId) {
-			// Non-current task.
+		const activeTask = this.getTaskById(id)
+		if (activeTask) {
+			await this.selectTask(activeTask.taskId)
+		} else if (id !== this.getCurrentTask()?.taskId) {
 			const { historyItem } = await this.getTaskWithId(id)
-			await this.createTaskWithHistoryItem(historyItem) // Clears existing task.
+			await this.createTaskWithHistoryItem(historyItem)
 		}
 
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
@@ -1811,10 +2052,14 @@ export class ClineProvider
 			}
 		}
 		if (!task) {
+			await this.postMessageToWebview({ type: "condenseTaskContextResponse", text: taskId })
 			throw new Error(`Task with id ${taskId} not found in stack`)
 		}
-		await task.condenseContext()
-		await this.postMessageToWebview({ type: "condenseTaskContextResponse", text: taskId })
+		try {
+			await task.condenseContext()
+		} finally {
+			await this.postMessageToWebview({ type: "condenseTaskContextResponse", text: taskId })
+		}
 	}
 
 	// this function deletes a task from task history, and deletes its checkpoints and delete the task folder
@@ -1847,13 +2092,19 @@ export class ClineProvider
 				await collectChildIds(id)
 			}
 
-			// Remove from stack if any of the tasks to delete are in the current task stack
-			for (const taskId of allIdsToDelete) {
-				if (taskId === this.getCurrentTask()?.taskId) {
-					// Close the current task instance; delegation flows will be handled via metadata if applicable.
-					await this.removeClineFromStack()
-					break
-				}
+			// Remove any live instances for tasks being deleted, not just the currently visible one.
+			const liveTaskIdsToDelete = this.clineStack
+				.filter((task) => allIdsToDelete.includes(task.taskId))
+				.map((task) => task.taskId)
+			const removedVisibleTask =
+				this.visibleTaskId !== undefined && liveTaskIdsToDelete.includes(this.visibleTaskId)
+
+			for (const taskId of liveTaskIdsToDelete) {
+				await this.removeClineFromStack({ taskId, broadcast: false })
+			}
+
+			if (removedVisibleTask) {
+				await this.selectTask(this.clineStack[this.clineStack.length - 1]?.taskId, { broadcast: false })
 			}
 
 			// Delete all tasks from state in one batch
@@ -2219,6 +2470,7 @@ export class ClineProvider
 			uriScheme: vscode.env.uriScheme,
 			currentTaskId: currentTask?.taskId,
 			currentTaskItem: currentTask?.taskId ? this.taskHistoryStore.get(currentTask.taskId) : undefined,
+			activeConversations: this.getActiveConversationSummaries(),
 			clineMessages: currentTask?.clineMessages || [],
 			currentTaskTodos: currentTask?.todoList || [],
 			messageQueue: currentTask?.messageQueueService?.messages,
@@ -2765,11 +3017,28 @@ export class ClineProvider
 	 */
 
 	public getCurrentTask(): Task | undefined {
+		const visibleTask = this.getTaskById(this.visibleTaskId)
+		if (visibleTask) {
+			return visibleTask
+		}
+
+		if (this.hasExplicitTaskSelectionClear) {
+			return undefined
+		}
+
 		if (this.clineStack.length === 0) {
 			return undefined
 		}
 
 		return this.clineStack[this.clineStack.length - 1]
+	}
+
+	public resolveMessageTask(taskId?: string): Task | undefined {
+		if (taskId !== undefined && taskId !== "") {
+			return this.getTaskById(taskId)
+		}
+
+		return this.getCurrentTask()
 	}
 
 	public getRecentTasks(): string[] {
@@ -2873,18 +3142,12 @@ export class ClineProvider
 		const { apiConfiguration, organizationAllowList, enableCheckpoints, checkpointTimeout, experiments } =
 			await this.getState()
 
-		// Single-open-task invariant: always enforce for user-initiated top-level tasks
-		if (!parentTask) {
-			try {
-				await this.removeClineFromStack()
-			} catch {
-				// Non-fatal
-			}
-		}
-
 		if (!ProfileValidator.isProfileAllowed(apiConfiguration, organizationAllowList)) {
 			throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
 		}
+
+		const resolvedParentTask = parentTask as Task | undefined
+		const rootTask = resolvedParentTask ? (resolvedParentTask.rootTask ?? resolvedParentTask) : undefined
 
 		const task = new Task({
 			provider: this,
@@ -2895,9 +3158,9 @@ export class ClineProvider
 			task: text,
 			images,
 			experiments,
-			rootTask: this.clineStack.length > 0 ? this.clineStack[0] : undefined,
-			parentTask,
-			taskNumber: this.clineStack.length + 1,
+			rootTask,
+			parentTask: resolvedParentTask,
+			taskNumber: this.taskHistoryStore.getAll().length + 1,
 			onCreated: this.taskCreationCallback,
 			initialTodos: options.initialTodos,
 			// Ensure this task is present in clineStack before startTask() emits
@@ -2906,7 +3169,7 @@ export class ClineProvider
 			...options,
 		})
 
-		await this.addClineToStack(task)
+		await this.addClineToStack(task, { focus: options.focus ?? true })
 		task.start()
 
 		this.log(
@@ -2916,14 +3179,15 @@ export class ClineProvider
 		return task
 	}
 
-	public async cancelTask(): Promise<void> {
-		const task = this.getCurrentTask()
+	public async cancelTask(taskId?: string): Promise<void> {
+		const task = this.resolveMessageTask(taskId)
 
 		if (!task) {
 			return
 		}
 
 		console.log(`[cancelTask] cancelling task ${task.taskId}.${task.instanceId}`)
+		const wasVisible = this.isTaskVisible(task.taskId)
 
 		let historyItem: HistoryItem | undefined
 		try {
@@ -2962,13 +3226,13 @@ export class ClineProvider
 
 		await pWaitFor(
 			() =>
-				this.getCurrentTask()! === undefined ||
-				this.getCurrentTask()!.isStreaming === false ||
-				this.getCurrentTask()!.didFinishAbortingStream ||
+				this.getTaskById(task.taskId) === undefined ||
+				task.isStreaming === false ||
+				task.didFinishAbortingStream ||
 				// If only the first chunk is processed, then there's no
 				// need to wait for graceful abort (closes edits, browser,
 				// etc).
-				this.getCurrentTask()!.isWaitingForFirstChunk,
+				task.isWaitingForFirstChunk,
 			{
 				timeout: 3_000,
 			},
@@ -2977,7 +3241,7 @@ export class ClineProvider
 		})
 
 		// Defensive safeguard: if current instance already changed, skip rehydrate
-		const current = this.getCurrentTask()
+		const current = this.getTaskById(task.taskId)
 		if (current && current.instanceId !== originalInstanceId) {
 			this.log(
 				`[cancelTask] Skipping rehydrate: current instance ${current.instanceId} != original ${originalInstanceId}`,
@@ -2987,7 +3251,7 @@ export class ClineProvider
 
 		// Final race check before rehydrate to avoid duplicate rehydration
 		{
-			const currentAfterCheck = this.getCurrentTask()
+			const currentAfterCheck = this.getTaskById(task.taskId)
 			if (currentAfterCheck && currentAfterCheck.instanceId !== originalInstanceId) {
 				this.log(
 					`[cancelTask] Skipping rehydrate after final check: current instance ${currentAfterCheck.instanceId} != original ${originalInstanceId}`,
@@ -3001,16 +3265,19 @@ export class ClineProvider
 		}
 
 		// Clears task again, so we need to abortTask manually above.
-		await this.createTaskWithHistoryItem({ ...historyItem, rootTask, parentTask })
+		await this.createTaskWithHistoryItem(
+			{ ...historyItem, rootTask, parentTask },
+			{ replaceExistingTask: true, focus: wasVisible },
+		)
 	}
 
 	// Clear the current task without treating it as a subtask.
 	// This is used when the user cancels a task that is not a subtask.
 	public async clearTask(): Promise<void> {
-		if (this.clineStack.length > 0) {
-			const task = this.clineStack[this.clineStack.length - 1]
+		const task = this.getCurrentTask()
+		if (task) {
 			console.log(`[clearTask] clearing task ${task.taskId}.${task.instanceId}`)
-			await this.removeClineFromStack()
+			await this.selectTask(undefined)
 		}
 	}
 

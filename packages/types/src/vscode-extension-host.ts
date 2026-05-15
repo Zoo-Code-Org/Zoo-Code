@@ -245,6 +245,18 @@ export interface OpenAiCodexRateLimitsMessage {
 	error?: string
 }
 
+export interface ActiveConversationSummary {
+	rootTaskId: string
+	activeTaskId: string
+	rootTask: string
+	activeTask: string
+	ts: number
+	status: "running" | "interactive" | "resumable" | "idle" | "none"
+	parentTaskId?: string
+	queuedMessageCount: number
+	steerMessageCount: number
+}
+
 export type ExtensionState = Pick<
 	GlobalSettings,
 	| "currentApiConfigName"
@@ -315,6 +327,7 @@ export type ExtensionState = Pick<
 	apiConfiguration: ProviderSettings
 	uriScheme?: string
 	shouldShowAnnouncement: boolean
+	activeConversations?: ActiveConversationSummary[]
 
 	taskHistory: HistoryItem[]
 

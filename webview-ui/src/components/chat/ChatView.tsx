@@ -10,7 +10,15 @@ import { appendImages } from "@src/utils/imageUtils"
 import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
 import { batchConsecutive } from "@src/utils/batchConsecutive"
 
-import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType } from "@roo-code/types"
+import type {
+	ClineAsk,
+	ClineSayTool,
+	ClineMessage,
+	ExtensionMessage,
+	AudioType,
+	TodoItem,
+	QueuedMessage,
+} from "@roo-code/types"
 import { isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
@@ -34,6 +42,7 @@ import TelemetryBanner from "../common/TelemetryBanner"
 import VersionIndicator from "../common/VersionIndicator"
 import HistoryPreview from "../history/HistoryPreview"
 import Announcement from "./Announcement"
+import ActiveConversationList, { type ConversationListItem } from "./ActiveConversationList"
 import ChatRow from "./ChatRow"
 import WarningRow from "./WarningRow"
 import { ChatTextArea } from "./ChatTextArea"
@@ -59,6 +68,16 @@ export const MAX_IMAGES_PER_MESSAGE = 20 // This is the Anthropic limit.
 
 const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
 
+interface DraftConversation {
+	id: string
+	ts: number
+	title: string
+}
+
+const EMPTY_MESSAGES: ClineMessage[] = []
+const EMPTY_TODOS: TodoItem[] = []
+const EMPTY_MESSAGE_QUEUE: QueuedMessage[] = []
+
 const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewProps> = (
 	{ isHidden, showAnnouncement, hideAnnouncement },
 	ref,
@@ -71,9 +90,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	const modeShortcutText = `${isMac ? "⌘" : "Ctrl"} + . ${t("chat:forNextMode")}, ${isMac ? "⌘" : "Ctrl"} + Shift + . ${t("chat:forPreviousMode")}`
 
 	const {
-		clineMessages: messages,
-		currentTaskItem,
-		currentTaskTodos,
+		clineMessages: contextMessages,
+		currentTaskId: contextCurrentTaskId,
+		currentTaskItem: contextCurrentTaskItem,
+		currentTaskTodos: contextCurrentTaskTodos,
+		activeConversations = [],
 		taskHistory,
 		apiConfiguration,
 		organizationAllowList,
@@ -87,6 +108,83 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		messageQueue = [],
 		showWorktreesInHomeScreen,
 	} = useExtensionState()
+	const [draftConversations, setDraftConversations] = useState<DraftConversation[]>([])
+	const [selectedDraftId, setSelectedDraftId] = useState<string | undefined>(undefined)
+	const isDraftSelected = selectedDraftId !== undefined
+	const messages = useMemo(
+		() => (isDraftSelected ? EMPTY_MESSAGES : contextMessages),
+		[contextMessages, isDraftSelected],
+	)
+	const currentTaskId = isDraftSelected ? undefined : contextCurrentTaskId
+	const currentTaskItem = isDraftSelected ? undefined : contextCurrentTaskItem
+	const currentTaskTodos = useMemo(
+		() => (isDraftSelected ? EMPTY_TODOS : contextCurrentTaskTodos),
+		[contextCurrentTaskTodos, isDraftSelected],
+	)
+	const visibleMessageQueue = useMemo(
+		() => (isDraftSelected ? EMPTY_MESSAGE_QUEUE : messageQueue),
+		[messageQueue, isDraftSelected],
+	)
+
+	const visibleConversationIds = useMemo(
+		() =>
+			new Set(
+				activeConversations.flatMap((conversation) => [conversation.rootTaskId, conversation.activeTaskId]),
+			),
+		[activeConversations],
+	)
+
+	useEffect(() => {
+		setDraftConversations((prev) => {
+			const next = prev.filter((draft) => !visibleConversationIds.has(draft.id))
+			return next.length === prev.length ? prev : next
+		})
+
+		if (selectedDraftId && visibleConversationIds.has(selectedDraftId)) {
+			setSelectedDraftId(undefined)
+		}
+	}, [selectedDraftId, visibleConversationIds])
+
+	const selectedConversationId = selectedDraftId ?? currentTaskId
+
+	const conversations = useMemo<ConversationListItem[]>(() => {
+		const draftItems = draftConversations
+			.filter((draft) => !visibleConversationIds.has(draft.id))
+			.map(
+				(draft) =>
+					({
+						kind: "draft",
+						rootTaskId: draft.id,
+						activeTaskId: draft.id,
+						rootTask: draft.title,
+						activeTask: draft.title,
+						ts: draft.ts,
+						status: "none",
+						queuedMessageCount: 0,
+						steerMessageCount: 0,
+					}) satisfies ConversationListItem,
+			)
+
+		const taskItems = activeConversations.map(
+			(conversation) =>
+				({
+					...conversation,
+					kind: "task",
+				}) satisfies ConversationListItem,
+		)
+
+		return [...draftItems, ...taskItems].sort((a, b) => {
+			if (a.activeTaskId === selectedConversationId) {
+				return -1
+			}
+			if (b.activeTaskId === selectedConversationId) {
+				return 1
+			}
+			return b.ts - a.ts
+		})
+	}, [activeConversations, draftConversations, selectedConversationId, visibleConversationIds])
+
+	const hasConversationSidebar = conversations.length > 0
 
 	// Show a WarningRow when the user sends a message with a retired provider.
 	const [showRetiredProviderWarning, setShowRetiredProviderWarning] = useState(false)
@@ -364,7 +462,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						case "completion_result":
 							// Extension waiting for feedback, but we can just present a new task button.
 							// Only play celebration sound if there are no queued messages.
-							if (!isPartial && messageQueue.length === 0) {
+							if (!isPartial && visibleMessageQueue.length === 0) {
 								playSound("celebration")
 							}
 							setSendingDisabled(isPartial)
@@ -600,12 +698,12 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				if (
 					sendingDisabled ||
 					isStreaming ||
-					messageQueue.length > 0 ||
+					visibleMessageQueue.length > 0 ||
 					clineAskRef.current === "command_output"
 				) {
 					try {
 						console.log("queueMessage", text, images)
-						vscode.postMessage({ type: "queueMessage", text, images })
+						vscode.postMessage({ type: "queueMessage", taskId: currentTaskId, text, images })
 						setInputValue("")
 						setSelectedImages([])
 					} catch (error) {
@@ -621,7 +719,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				userRespondedRef.current = true
 
 				if (messagesRef.current.length === 0) {
-					vscode.postMessage({ type: "newTask", text, images })
+					vscode.postMessage({ type: "newTask", taskId: selectedDraftId, text, images })
 				} else if (clineAskRef.current) {
 					if (clineAskRef.current === "followup") {
 						markFollowUpAsAnswered()
@@ -641,6 +739,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						case "mistake_limit_reached":
 							vscode.postMessage({
 								type: "askResponse",
+								taskId: currentTaskId,
 								askResponse: "messageResponse",
 								text,
 								images,
@@ -650,7 +749,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}
 				} else {
 					// This is a new message in an ongoing task.
-					vscode.postMessage({ type: "askResponse", askResponse: "messageResponse", text, images })
+					vscode.postMessage({
+						type: "askResponse",
+						taskId: currentTaskId,
+						askResponse: "messageResponse",
+						text,
+						images,
+					})
 				}
 
 				handleChatReset()
@@ -661,8 +766,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			markFollowUpAsAnswered,
 			sendingDisabled,
 			isStreaming,
-			messageQueue.length,
+			visibleMessageQueue.length,
 			apiConfiguration?.apiProvider,
+			currentTaskId,
+			selectedDraftId,
 		], // messagesRef and clineAskRef are stable
 	)
 
@@ -682,15 +789,50 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 
 	const startNewTask = useCallback(() => {
+		const draftId = `draft-${
+			typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+				? crypto.randomUUID()
+				: Date.now().toString(36)
+		}`
 		setShowRetiredProviderWarning(false)
+		setInputValue("")
+		setSelectedImages([])
+		setSelectedDraftId(draftId)
+		setDraftConversations((prev) => [{ id: draftId, ts: Date.now(), title: "New conversation" }, ...prev])
 		vscode.postMessage({ type: "clearTask" })
+	}, [])
+
+	const handleSelectConversation = useCallback(
+		(conversation: ConversationListItem) => {
+			if (conversation.kind === "draft") {
+				setSelectedDraftId(conversation.activeTaskId)
+				if (currentTaskId) {
+					vscode.postMessage({ type: "clearTask" })
+				}
+				return
+			}
+
+			setSelectedDraftId(undefined)
+			vscode.postMessage({ type: "showTaskWithId", text: conversation.activeTaskId })
+		},
+		[currentTaskId],
+	)
+
+	const handleDeleteConversation = useCallback((conversation: ConversationListItem) => {
+		if (conversation.kind === "draft") {
+			setDraftConversations((prev) => prev.filter((draft) => draft.id !== conversation.activeTaskId))
+			setSelectedDraftId((prev) => (prev === conversation.activeTaskId ? undefined : prev))
+			return
+		}
+
+		vscode.postMessage({ type: "deleteTaskWithId", text: conversation.rootTaskId })
 	}, [])
 
 	// Handle stop button click from textarea
 	const handleStopTask = useCallback(() => {
-		vscode.postMessage({ type: "cancelTask" })
+		vscode.postMessage({ type: "cancelTask", taskId: currentTaskId })
 		setDidClickCancel(true)
-	}, [setDidClickCancel])
+	}, [currentTaskId, setDidClickCancel])
 
 	// Handle enqueue button click from textarea
 	const handleEnqueueCurrentMessage = useCallback(() => {
@@ -698,13 +840,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		if (text || selectedImages.length > 0) {
 			vscode.postMessage({
 				type: "queueMessage",
+				taskId: currentTaskId,
 				text,
 				images: selectedImages,
 			})
 			setInputValue("")
 			setSelectedImages([])
 		}
-	}, [inputValue, selectedImages])
+	}, [currentTaskId, inputValue, selectedImages])
 
 	// This logic depends on the useEffect[messages] above to set clineAsk,
 	// after which buttons are shown and we then send an askResponse to the
@@ -726,6 +869,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					if (trimmedInput || (images && images.length > 0)) {
 						vscode.postMessage({
 							type: "askResponse",
+							taskId: currentTaskId,
 							askResponse: "yesButtonClicked",
 							text: trimmedInput,
 							images: images,
@@ -734,7 +878,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						setInputValue("")
 						setSelectedImages([])
 					} else {
-						vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
+						vscode.postMessage({
+							type: "askResponse",
+							taskId: currentTaskId,
+							askResponse: "yesButtonClicked",
+						})
 					}
 					break
 				case "resume_task":
@@ -752,6 +900,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						if (trimmedInput || (images && images.length > 0)) {
 							vscode.postMessage({
 								type: "askResponse",
+								taskId: currentTaskId,
 								askResponse: "yesButtonClicked",
 								text: trimmedInput,
 								images: images,
@@ -760,7 +909,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							setInputValue("")
 							setSelectedImages([])
 						} else {
-							vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
+							vscode.postMessage({
+								type: "askResponse",
+								taskId: currentTaskId,
+								askResponse: "yesButtonClicked",
+							})
 						}
 					}
 					break
@@ -770,7 +923,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					startNewTask()
 					break
 				case "command_output":
-					vscode.postMessage({ type: "terminalOperation", terminalOperation: "continue" })
+					vscode.postMessage({
+						type: "terminalOperation",
+						taskId: currentTaskId,
+						terminalOperation: "continue",
+					})
 					break
 			}
 
@@ -780,7 +937,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			setPrimaryButtonText(undefined)
 			setSecondaryButtonText(undefined)
 		},
-		[clineAsk, startNewTask, currentTaskItem?.parentTaskId],
+		[clineAsk, currentTaskId, startNewTask, currentTaskItem?.parentTaskId],
 	)
 
 	const handleSecondaryButtonClick = useCallback(
@@ -791,7 +948,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			const trimmedInput = text?.trim()
 
 			if (isStreaming) {
-				vscode.postMessage({ type: "cancelTask" })
+				vscode.postMessage({ type: "cancelTask", taskId: currentTaskId })
 				setDidClickCancel(true)
 				return
 			}
@@ -809,6 +966,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					if (trimmedInput || (images && images.length > 0)) {
 						vscode.postMessage({
 							type: "askResponse",
+							taskId: currentTaskId,
 							askResponse: "noButtonClicked",
 							text: trimmedInput,
 							images: images,
@@ -818,18 +976,26 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						setSelectedImages([])
 					} else {
 						// Responds to the API with a "This operation failed" and lets it try again
-						vscode.postMessage({ type: "askResponse", askResponse: "noButtonClicked" })
+						vscode.postMessage({
+							type: "askResponse",
+							taskId: currentTaskId,
+							askResponse: "noButtonClicked",
+						})
 					}
 					break
 				case "command_output":
-					vscode.postMessage({ type: "terminalOperation", terminalOperation: "abort" })
+					vscode.postMessage({
+						type: "terminalOperation",
+						taskId: currentTaskId,
+						terminalOperation: "abort",
+					})
 					break
 			}
 			setSendingDisabled(true)
 			setClineAsk(undefined)
 			setEnableButtons(false)
 		},
-		[clineAsk, startNewTask, isStreaming, setDidClickCancel],
+		[clineAsk, currentTaskId, startNewTask, isStreaming, setDidClickCancel],
 	)
 
 	const { info: model } = useSelectedModel(apiConfiguration)
@@ -1384,10 +1550,18 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		[handleSendMessage, setInputValue, switchToMode, alwaysAllowModeSwitch, clineAsk, markFollowUpAsAnswered],
 	)
 
-	const handleBatchFileResponse = useCallback((response: { [key: string]: boolean }) => {
-		// Handle batch file response, e.g., for file uploads
-		vscode.postMessage({ type: "askResponse", askResponse: "objectResponse", text: JSON.stringify(response) })
-	}, [])
+	const handleBatchFileResponse = useCallback(
+		(response: { [key: string]: boolean }) => {
+			// Handle batch file response, e.g., for file uploads
+			vscode.postMessage({
+				type: "askResponse",
+				taskId: currentTaskId,
+				askResponse: "objectResponse",
+				text: JSON.stringify(response),
+			})
+		},
+		[currentTaskId],
+	)
 
 	// Cancel backend auto-approval timeout when FollowUpSuggest's countdown effect cleans up.
 	// This is called when auto-approve is toggled off, a suggestion is clicked, or the component unmounts.
@@ -1525,7 +1699,12 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// Special case: during command_output, queue the message instead of
 			// triggering the primary button action (which would lose the message)
 			if (clineAskRef.current === "command_output" && hasInput) {
-				vscode.postMessage({ type: "queueMessage", text: inputValue.trim(), images: selectedImages })
+				vscode.postMessage({
+					type: "queueMessage",
+					taskId: currentTaskId,
+					text: inputValue.trim(),
+					images: selectedImages,
+				})
 				setInputValue("")
 				setSelectedImages([])
 				return
@@ -1567,231 +1746,270 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}}
 				/>
 			)}
-			{task ? (
-				<>
-					<TaskHeader
-						task={task}
-						tokensIn={apiMetrics.totalTokensIn}
-						tokensOut={apiMetrics.totalTokensOut}
-						cacheWrites={apiMetrics.totalCacheWrites}
-						cacheReads={apiMetrics.totalCacheReads}
-						totalCost={apiMetrics.totalCost}
-						aggregatedCost={
-							currentTaskItem?.id && aggregatedCostsMap.has(currentTaskItem.id)
-								? aggregatedCostsMap.get(currentTaskItem.id)!.totalCost
-								: undefined
-						}
-						hasSubtasks={
-							!!(
-								currentTaskItem?.id &&
-								aggregatedCostsMap.has(currentTaskItem.id) &&
-								aggregatedCostsMap.get(currentTaskItem.id)!.childrenCost > 0
-							)
-						}
-						parentTaskId={currentTaskItem?.parentTaskId}
-						costBreakdown={
-							currentTaskItem?.id && aggregatedCostsMap.has(currentTaskItem.id)
-								? getCostBreakdownIfNeeded(aggregatedCostsMap.get(currentTaskItem.id)!, {
-										own: t("common:costs.own"),
-										subtasks: t("common:costs.subtasks"),
-									})
-								: undefined
-						}
-						contextTokens={apiMetrics.contextTokens}
-						buttonsDisabled={sendingDisabled}
-						handleCondenseContext={handleCondenseContext}
-						todos={latestTodos}
+			<div className="flex min-h-0 flex-1 overflow-hidden">
+				{hasConversationSidebar && (
+					<ActiveConversationList
+						conversations={conversations}
+						selectedConversationId={selectedConversationId}
+						onCreateConversation={startNewTask}
+						onSelectConversation={handleSelectConversation}
+						onDeleteConversation={handleDeleteConversation}
 					/>
+				)}
+				<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+					{task ? (
+						<>
+							<TaskHeader
+								task={task}
+								tokensIn={apiMetrics.totalTokensIn}
+								tokensOut={apiMetrics.totalTokensOut}
+								cacheWrites={apiMetrics.totalCacheWrites}
+								cacheReads={apiMetrics.totalCacheReads}
+								totalCost={apiMetrics.totalCost}
+								aggregatedCost={
+									currentTaskItem?.id && aggregatedCostsMap.has(currentTaskItem.id)
+										? aggregatedCostsMap.get(currentTaskItem.id)!.totalCost
+										: undefined
+								}
+								hasSubtasks={
+									!!(
+										currentTaskItem?.id &&
+										aggregatedCostsMap.has(currentTaskItem.id) &&
+										aggregatedCostsMap.get(currentTaskItem.id)!.childrenCost > 0
+									)
+								}
+								parentTaskId={currentTaskItem?.parentTaskId}
+								costBreakdown={
+									currentTaskItem?.id && aggregatedCostsMap.has(currentTaskItem.id)
+										? getCostBreakdownIfNeeded(aggregatedCostsMap.get(currentTaskItem.id)!, {
+												own: t("common:costs.own"),
+												subtasks: t("common:costs.subtasks"),
+											})
+										: undefined
+								}
+								contextTokens={apiMetrics.contextTokens}
+								buttonsDisabled={sendingDisabled}
+								handleCondenseContext={handleCondenseContext}
+								todos={latestTodos}
+							/>
 
-					{checkpointWarning && (
-						<div className="px-3">
-							<CheckpointWarning warning={checkpointWarning} />
-						</div>
-					)}
-				</>
-			) : (
-				<div className="flex flex-col h-full justify-center p-6 min-h-0 overflow-y-auto gap-4 relative">
-					<div className="flex flex-col items-start gap-2 justify-center h-full min-[400px]:px-6">
-						<VersionIndicator
-							onClick={() => setShowAnnouncementModal(true)}
-							className="absolute top-2 right-3 z-10"
-						/>
-						<div className="flex flex-col gap-4 w-full">
-							<RooHero />
-							<RooTips />
-							{/* Everyone should see their task history if any */}
-							{taskHistory.length > 0 && <HistoryPreview />}
-						</div>
-					</div>
-				</div>
-			)}
-
-			{!task && showWorktreesInHomeScreen && <WorktreeSelector />}
-
-			{task && (
-				<>
-					<div className="grow flex" ref={scrollContainerRef}>
-						<Virtuoso
-							ref={virtuosoRef}
-							key={task.ts}
-							className="scrollable grow overflow-y-scroll mb-1"
-							increaseViewportBy={{ top: 3_000, bottom: 1000 }}
-							data={groupedMessages}
-							itemContent={itemContent}
-							followOutput={followOutputCallback}
-							atBottomStateChange={atBottomStateChangeCallback}
-							atBottomThreshold={10}
-						/>
-					</div>
-					<FileChangesPanel clineMessages={messages} />
-					{areButtonsVisible && (
-						<div
-							className={`flex h-9 items-center mb-1 px-[15px] ${
-								showScrollToBottom ? "opacity-100" : enableButtons ? "opacity-100" : "opacity-50"
-							}`}>
-							{showScrollToBottom ? (
-								<>
-									<StandardTooltip content={t("chat:scrollToBottom")}>
-										<Button
-											variant="secondary"
-											className={hasLatestCheckpoint ? "flex-1 mr-[6px]" : "flex-[2]"}
-											onClick={handleScrollToBottomAndResetCheckpointCursor}>
-											<span className="codicon codicon-chevron-down"></span>
-										</Button>
-									</StandardTooltip>
-									{hasLatestCheckpoint && (
-										<StandardTooltip content={t("chat:scrollToLatestCheckpoint")}>
-											<Button
-												variant="secondary"
-												className="flex-1 ml-[6px]"
-												onClick={handleScrollToLatestCheckpoint}
-												aria-label={t("chat:scrollToLatestCheckpoint")}>
-												<span className="codicon codicon-history"></span>
-											</Button>
-										</StandardTooltip>
-									)}
-								</>
-							) : (
-								<>
-									{primaryButtonText && (
-										<StandardTooltip
-											content={
-												primaryButtonText === t("chat:retry.title")
-													? t("chat:retry.tooltip")
-													: primaryButtonText === t("chat:save.title")
-														? t("chat:save.tooltip")
-														: primaryButtonText === t("chat:approve.title")
-															? t("chat:approve.tooltip")
-															: primaryButtonText === t("chat:runCommand.title")
-																? t("chat:runCommand.tooltip")
-																: primaryButtonText === t("chat:startNewTask.title")
-																	? t("chat:startNewTask.tooltip")
-																	: primaryButtonText === t("chat:resumeTask.title")
-																		? t("chat:resumeTask.tooltip")
-																		: primaryButtonText ===
-																			  t("chat:proceedAnyways.title")
-																			? t("chat:proceedAnyways.tooltip")
-																			: primaryButtonText ===
-																				  t("chat:proceedWhileRunning.title")
-																				? t("chat:proceedWhileRunning.tooltip")
-																				: undefined
-											}>
-											<Button
-												variant="primary"
-												disabled={!enableButtons}
-												className={secondaryButtonText ? "flex-1 mr-[6px]" : "flex-[2] mr-0"}
-												onClick={() => handlePrimaryButtonClick(inputValue, selectedImages)}>
-												{primaryButtonText}
-											</Button>
-										</StandardTooltip>
-									)}
-									{secondaryButtonText && (
-										<StandardTooltip
-											content={
-												secondaryButtonText === t("chat:startNewTask.title")
-													? t("chat:startNewTask.tooltip")
-													: secondaryButtonText === t("chat:reject.title")
-														? t("chat:reject.tooltip")
-														: secondaryButtonText === t("chat:terminate.title")
-															? t("chat:terminate.tooltip")
-															: secondaryButtonText === t("chat:killCommand.title")
-																? t("chat:killCommand.tooltip")
-																: undefined
-											}>
-											<Button
-												variant="secondary"
-												disabled={!enableButtons}
-												className="flex-1 ml-[6px]"
-												onClick={() => handleSecondaryButtonClick(inputValue, selectedImages)}>
-												{secondaryButtonText}
-											</Button>
-										</StandardTooltip>
-									)}
-								</>
+							{checkpointWarning && (
+								<div className="px-3">
+									<CheckpointWarning warning={checkpointWarning} />
+								</div>
 							)}
+						</>
+					) : (
+						<div className="flex flex-col h-full justify-center p-6 min-h-0 overflow-y-auto gap-4 relative">
+							<div className="flex flex-col items-start gap-2 justify-center h-full min-[400px]:px-6">
+								<VersionIndicator
+									onClick={() => setShowAnnouncementModal(true)}
+									className="absolute top-2 right-3 z-10"
+								/>
+								<div className="flex flex-col gap-4 w-full">
+									<RooHero />
+									<RooTips />
+									{/* Everyone should see their task history if any */}
+									{taskHistory.length > 0 && <HistoryPreview />}
+								</div>
+							</div>
 						</div>
 					)}
-				</>
-			)}
 
-			<QueuedMessages
-				queue={messageQueue}
-				onRemove={(index) => {
-					if (messageQueue[index]) {
-						vscode.postMessage({ type: "removeQueuedMessage", text: messageQueue[index].id })
-					}
-				}}
-				onUpdate={(index, newText) => {
-					if (messageQueue[index]) {
-						vscode.postMessage({
-							type: "editQueuedMessage",
-							payload: { id: messageQueue[index].id, text: newText, images: messageQueue[index].images },
-						})
-					}
-				}}
-			/>
-			{showRetiredProviderWarning && (
-				<div className="px-[15px] py-1">
-					<WarningRow
-						title={t("chat:retiredProvider.title")}
-						message={t("chat:retiredProvider.message")}
-						actionText={t("chat:retiredProvider.openSettings")}
-						onAction={() => vscode.postMessage({ type: "switchTab", tab: "settings" })}
+					{!task && showWorktreesInHomeScreen && <WorktreeSelector />}
+
+					{task && (
+						<>
+							<div className="grow flex" ref={scrollContainerRef}>
+								<Virtuoso
+									ref={virtuosoRef}
+									key={task.ts}
+									className="scrollable grow overflow-y-scroll mb-1"
+									increaseViewportBy={{ top: 3_000, bottom: 1000 }}
+									data={groupedMessages}
+									itemContent={itemContent}
+									followOutput={followOutputCallback}
+									atBottomStateChange={atBottomStateChangeCallback}
+									atBottomThreshold={10}
+								/>
+							</div>
+							<FileChangesPanel clineMessages={messages} />
+							{areButtonsVisible && (
+								<div
+									className={`flex h-9 items-center mb-1 px-[15px] ${
+										showScrollToBottom
+											? "opacity-100"
+											: enableButtons
+												? "opacity-100"
+												: "opacity-50"
+									}`}>
+									{showScrollToBottom ? (
+										<>
+											<StandardTooltip content={t("chat:scrollToBottom")}>
+												<Button
+													variant="secondary"
+													className={hasLatestCheckpoint ? "flex-1 mr-[6px]" : "flex-[2]"}
+													onClick={handleScrollToBottomAndResetCheckpointCursor}>
+													<span className="codicon codicon-chevron-down"></span>
+												</Button>
+											</StandardTooltip>
+											{hasLatestCheckpoint && (
+												<StandardTooltip content={t("chat:scrollToLatestCheckpoint")}>
+													<Button
+														variant="secondary"
+														className="flex-1 ml-[6px]"
+														onClick={handleScrollToLatestCheckpoint}
+														aria-label={t("chat:scrollToLatestCheckpoint")}>
+														<span className="codicon codicon-history"></span>
+													</Button>
+												</StandardTooltip>
+											)}
+										</>
+									) : (
+										<>
+											{primaryButtonText && (
+												<StandardTooltip
+													content={
+														primaryButtonText === t("chat:retry.title")
+															? t("chat:retry.tooltip")
+															: primaryButtonText === t("chat:save.title")
+																? t("chat:save.tooltip")
+																: primaryButtonText === t("chat:approve.title")
+																	? t("chat:approve.tooltip")
+																	: primaryButtonText === t("chat:runCommand.title")
+																		? t("chat:runCommand.tooltip")
+																		: primaryButtonText ===
+																			  t("chat:startNewTask.title")
+																			? t("chat:startNewTask.tooltip")
+																			: primaryButtonText ===
+																				  t("chat:resumeTask.title")
+																				? t("chat:resumeTask.tooltip")
+																				: primaryButtonText ===
+																					  t("chat:proceedAnyways.title")
+																					? t("chat:proceedAnyways.tooltip")
+																					: primaryButtonText ===
+																						  t(
+																								"chat:proceedWhileRunning.title",
+																						  )
+																						? t(
+																								"chat:proceedWhileRunning.tooltip",
+																							)
+																						: undefined
+													}>
+													<Button
+														variant="primary"
+														disabled={!enableButtons}
+														className={
+															secondaryButtonText ? "flex-1 mr-[6px]" : "flex-[2] mr-0"
+														}
+														onClick={() =>
+															handlePrimaryButtonClick(inputValue, selectedImages)
+														}>
+														{primaryButtonText}
+													</Button>
+												</StandardTooltip>
+											)}
+											{secondaryButtonText && (
+												<StandardTooltip
+													content={
+														secondaryButtonText === t("chat:startNewTask.title")
+															? t("chat:startNewTask.tooltip")
+															: secondaryButtonText === t("chat:reject.title")
+																? t("chat:reject.tooltip")
+																: secondaryButtonText === t("chat:terminate.title")
+																	? t("chat:terminate.tooltip")
+																	: secondaryButtonText ===
+																		  t("chat:killCommand.title")
+																		? t("chat:killCommand.tooltip")
+																		: undefined
+													}>
+													<Button
+														variant="secondary"
+														disabled={!enableButtons}
+														className="flex-1 ml-[6px]"
+														onClick={() =>
+															handleSecondaryButtonClick(inputValue, selectedImages)
+														}>
+														{secondaryButtonText}
+													</Button>
+												</StandardTooltip>
+											)}
+										</>
+									)}
+								</div>
+							)}
+						</>
+					)}
+
+					<QueuedMessages
+						queue={visibleMessageQueue}
+						onRemove={(index) => {
+							if (visibleMessageQueue[index]) {
+								vscode.postMessage({
+									type: "removeQueuedMessage",
+									text: visibleMessageQueue[index].id,
+									taskId: currentTaskId,
+								})
+							}
+						}}
+						onUpdate={(index, newText) => {
+							if (visibleMessageQueue[index]) {
+								vscode.postMessage({
+									type: "editQueuedMessage",
+									taskId: currentTaskId,
+									payload: {
+										id: visibleMessageQueue[index].id,
+										text: newText,
+										images: visibleMessageQueue[index].images,
+									},
+								})
+							}
+						}}
 					/>
-				</div>
-			)}
-			<ChatTextArea
-				ref={textAreaRef}
-				inputValue={inputValue}
-				setInputValue={setInputValue}
-				sendingDisabled={sendingDisabled || isProfileDisabled}
-				selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
-				placeholderText={placeholderText}
-				selectedImages={selectedImages}
-				setSelectedImages={setSelectedImages}
-				onSend={() => handleSendMessage(inputValue, selectedImages)}
-				onSelectImages={selectImages}
-				shouldDisableImages={shouldDisableImages}
-				onHeightChange={() => {
-					if (isAtBottomRef.current && scrollPhaseRef.current !== "USER_BROWSING_HISTORY") {
-						scrollToBottomAuto()
-					}
-				}}
-				mode={mode}
-				setMode={setMode}
-				modeShortcutText={modeShortcutText}
-				isStreaming={isStreaming}
-				onStop={handleStopTask}
-				onEnqueueMessage={handleEnqueueCurrentMessage}
-			/>
+					{showRetiredProviderWarning && (
+						<div className="px-[15px] py-1">
+							<WarningRow
+								title={t("chat:retiredProvider.title")}
+								message={t("chat:retiredProvider.message")}
+								actionText={t("chat:retiredProvider.openSettings")}
+								onAction={() => vscode.postMessage({ type: "switchTab", tab: "settings" })}
+							/>
+						</div>
+					)}
+					<ChatTextArea
+						ref={textAreaRef}
+						inputValue={inputValue}
+						setInputValue={setInputValue}
+						sendingDisabled={sendingDisabled || isProfileDisabled}
+						selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
+						placeholderText={placeholderText}
+						selectedImages={selectedImages}
+						setSelectedImages={setSelectedImages}
+						onSend={() => handleSendMessage(inputValue, selectedImages)}
+						onSelectImages={selectImages}
+						shouldDisableImages={shouldDisableImages}
+						onHeightChange={() => {
+							if (isAtBottomRef.current && scrollPhaseRef.current !== "USER_BROWSING_HISTORY") {
+								scrollToBottomAuto()
+							}
+						}}
+						mode={mode}
+						setMode={setMode}
+						modeShortcutText={modeShortcutText}
+						isStreaming={isStreaming}
+						onStop={handleStopTask}
+						onEnqueueMessage={handleEnqueueCurrentMessage}
+					/>
 
-			{isProfileDisabled && (
-				<div className="px-3">
-					<ProfileViolationWarning />
-				</div>
-			)}
+					{isProfileDisabled && (
+						<div className="px-3">
+							<ProfileViolationWarning />
+						</div>
+					)}
 
-			<div id="roo-portal" />
+					<div id="roo-portal" />
+				</div>
+			</div>
 		</div>
 	)
 }

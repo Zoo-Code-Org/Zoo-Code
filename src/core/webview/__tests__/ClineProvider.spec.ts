@@ -1743,6 +1743,7 @@ describe("ClineProvider", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
+			const logSpy = vi.spyOn(provider, "log")
 
 			// Create history item without mode
 			const historyItem = {
@@ -1756,11 +1757,12 @@ describe("ClineProvider", () => {
 				totalCost: 0,
 			}
 
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
+			// Initialize with history item without forcing a visible-task sync.
+			await provider.createTaskWithHistoryItem(historyItem, { focus: false })
 
-			// Verify no mode validation occurred (mode update not called)
-			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", expect.any(String))
+			// Verify no mode validation/fallback occurred.
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Falling back to default mode"))
+			expect(historyItem).not.toHaveProperty("mode")
 		})
 
 		test("continues with task restoration even if mode config loading fails", async () => {
@@ -1788,7 +1790,7 @@ describe("ClineProvider", () => {
 				listConfig: vi
 					.fn()
 					.mockResolvedValue([{ name: "test-config", id: "config-id", apiProvider: "anthropic" }]),
-				activateProfile: vi.fn().mockRejectedValue(new Error("Failed to load config")),
+				getProfile: vi.fn().mockRejectedValue(new Error("Failed to load config")),
 			}
 
 			// Spy on log method
@@ -1811,7 +1813,7 @@ describe("ClineProvider", () => {
 
 			// Verify error was logged but task restoration continued
 			expect(logSpy).toHaveBeenCalledWith(
-				expect.stringContaining("Failed to restore API configuration for mode 'code'"),
+				expect.stringContaining("Failed to restore API configuration 'test-config' for task test-id"),
 			)
 		})
 	})

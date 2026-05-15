@@ -22,7 +22,7 @@ export interface TaskProviderLike {
 		options?: CreateTaskOptions,
 		configuration?: RooCodeSettings,
 	): Promise<TaskLike>
-	cancelTask(): Promise<void>
+	cancelTask(taskId?: string): Promise<void>
 	clearTask(): Promise<void>
 	resumeTask(taskId: string): void
 
@@ -94,6 +94,8 @@ export interface CreateTaskOptions {
 	consecutiveMistakeLimit?: number
 	experiments?: Record<string, boolean>
 	initialTodos?: TodoItem[]
+	/** Whether the task should become the visible task in the UI (default: true). */
+	focus?: boolean
 	/** Initial status for the task's history item (e.g., "active" for child tasks) */
 	initialStatus?: "active" | "delegated" | "completed"
 	/** Whether to start the task loop immediately (default: true).

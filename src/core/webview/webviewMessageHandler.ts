@@ -196,6 +196,21 @@ export const webviewMessageHandler = async (
 		})
 		return resolved
 	}
+
+	const restoreDroppedInput = async (text?: string, images?: string[]) => {
+		const restoredText = text ?? ""
+		const restoredImages = images ?? []
+		if (!restoredText && restoredImages.length === 0) {
+			return
+		}
+
+		await provider.postMessageToWebview({
+			type: "invoke",
+			invoke: "setChatBoxMessage",
+			text: restoredText,
+			images: restoredImages,
+		})
+	}
 	/**
 	 * Shared utility to find message indices based on timestamp.
 	 * When multiple messages share the same timestamp (e.g., after condense),
@@ -653,10 +668,25 @@ export const webviewMessageHandler = async (
 
 		case "askResponse":
 			{
+				const targetTask = provider.resolveMessageTask(message.taskId)
+				if (!targetTask) {
+					provider.log(
+						`[askResponse] dropped because target task ${message.taskId ?? "(current)"} is not active`,
+					)
+					await restoreDroppedInput(message.text, message.images)
+					break
+				}
+				const expectedTaskId = targetTask.taskId
 				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-				provider
-					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+				const stillActive = provider.resolveMessageTask(expectedTaskId)
+				if (!stillActive || stillActive.taskId !== expectedTaskId) {
+					provider.log(
+						`[askResponse] dropped after image resolution because task ${expectedTaskId} is not active`,
+					)
+					await restoreDroppedInput(resolved.text, resolved.images)
+					break
+				}
+				stillActive.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
 			}
 			break
 
@@ -760,7 +790,7 @@ export const webviewMessageHandler = async (
 
 		case "terminalOperation":
 			if (message.terminalOperation) {
-				provider.getCurrentTask()?.handleTerminalOperation(message.terminalOperation)
+				provider.resolveMessageTask(message.taskId)?.handleTerminalOperation(message.terminalOperation)
 			}
 			break
 		case "clearTask":
@@ -803,7 +833,13 @@ export const webviewMessageHandler = async (
 			provider.showTaskWithId(message.text!)
 			break
 		case "condenseTaskContextRequest":
-			provider.condenseTaskContext(message.text!)
+			provider.condenseTaskContext(message.text!).catch((error) => {
+				provider.log(
+					`[condenseTaskContextRequest] failed for task ${message.text}: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			})
 			break
 		case "deleteTaskWithId":
 			provider.deleteTaskWithId(message.text!)
@@ -1263,7 +1299,7 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case "cancelTask":
-			await provider.cancelTask()
+			await provider.cancelTask(message.taskId)
 			break
 		case "cancelAutoApproval":
 			// Cancel any pending auto-approval timeout for the current task
@@ -3209,17 +3245,22 @@ export const webviewMessageHandler = async (
 
 		case "queueMessage": {
 			const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images)
+			const targetTask = provider.resolveMessageTask(message.taskId)
+			if (!targetTask) {
+				await restoreDroppedInput(resolved.text, resolved.images)
+				break
+			}
+			targetTask.messageQueueService.addMessage(resolved.text, resolved.images)
 			break
 		}
 		case "removeQueuedMessage": {
-			provider.getCurrentTask()?.messageQueueService.removeMessage(message.text ?? "")
+			provider.resolveMessageTask(message.taskId)?.messageQueueService.removeMessage(message.text ?? "")
 			break
 		}
 		case "editQueuedMessage": {
 			if (message.payload) {
 				const { id, text, images } = message.payload as EditQueuedMessagePayload
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images)
+				provider.resolveMessageTask(message.taskId)?.messageQueueService.updateMessage(id, text, images)
 			}
 
 			break

@@ -173,7 +173,15 @@ describe("ClineProvider flicker-free cancel", () => {
 			instanceId: "instance-1",
 			emit: vi.fn(),
 			abortTask: vi.fn().mockResolvedValue(undefined),
+			cancelCurrentRequest: vi.fn(),
+			cancelAutoApprovalTimeout: vi.fn(),
+			supersedePendingAsk: vi.fn(),
+			messageQueueService: { messages: [] },
+			terminalProcess: { abort: vi.fn() },
+			rootTask: undefined,
+			parentTask: undefined,
 			abandoned: false,
+			abort: false,
 			dispose: vi.fn(),
 			on: vi.fn(),
 			off: vi.fn(),
@@ -188,10 +196,12 @@ describe("ClineProvider flicker-free cancel", () => {
 		}
 
 		// Mock Task constructor
-		vi.mocked(Task).mockImplementation(() => mockTask2 as any)
+		vi.mocked(Task).mockImplementation(function () {
+			return mockTask2 as any
+		})
 	})
 
-	it("should not remove current task from stack when rehydrating same taskId", async () => {
+	it("should reuse the current task instance when reopening the same taskId without replacement", async () => {
 		// Setup: Add a task to the stack first
 		;(provider as any).clineStack = [mockTask1]
 
@@ -215,30 +225,33 @@ describe("ClineProvider flicker-free cancel", () => {
 			workspace: "/test/workspace",
 		}
 
-		// Act: Create task with history item (should rehydrate in-place)
-		await provider.createTaskWithHistoryItem(historyItem)
+		// Act: Reopen the same task ID without forcing replacement
+		const task = await provider.createTaskWithHistoryItem(historyItem)
 
 		// Assert: removeClineFromStack should NOT be called
 		expect(removeClineFromStackSpy).not.toHaveBeenCalled()
 
-		// Verify the task was replaced in-place
+		// Verify the existing task instance was reused
+		expect(task).toBe(mockTask1)
 		expect((provider as any).clineStack).toHaveLength(1)
-		expect((provider as any).clineStack[0]).toBe(mockTask2)
+		expect((provider as any).clineStack[0]).toBe(mockTask1)
 
-		// Verify old event listeners were cleaned up
-		expect(mockCleanupFunctions[0]).toHaveBeenCalled()
-		expect(mockCleanupFunctions[1]).toHaveBeenCalled()
+		// No replacement means no cleanup or fresh Task construction
+		expect(mockCleanupFunctions[0]).not.toHaveBeenCalled()
+		expect(mockCleanupFunctions[1]).not.toHaveBeenCalled()
+		expect(Task).not.toHaveBeenCalled()
 
-		// Verify new task received focus event
-		expect(mockTask2.emit).toHaveBeenCalledWith("taskFocused")
+		// Verify the existing task received focus
+		expect(mockTask1.emit).toHaveBeenCalledWith("taskFocused")
 	})
 
-	it("should remove task from stack when creating different task", async () => {
+	it("should append a different task without removing the existing stack", async () => {
 		// Setup: Add a task to the stack first
 		;(provider as any).clineStack = [mockTask1]
 
-		// Spy on removeClineFromStack to verify it IS called
+		// Spy on removeClineFromStack to verify it is NOT called
 		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockResolvedValue(undefined)
+		mockTask2.taskId = "task-2"
 
 		// Create history item with different taskId
 		const historyItem: HistoryItem = {
@@ -253,13 +266,17 @@ describe("ClineProvider flicker-free cancel", () => {
 		}
 
 		// Act: Create task with different history item
-		await provider.createTaskWithHistoryItem(historyItem)
+		const task = await provider.createTaskWithHistoryItem(historyItem)
 
-		// Assert: removeClineFromStack should be called
-		expect(removeClineFromStackSpy).toHaveBeenCalled()
+		// Assert: multi-conversation restore keeps both tasks alive
+		expect(removeClineFromStackSpy).not.toHaveBeenCalled()
+		expect(task).toBe(mockTask2)
+		expect((provider as any).clineStack).toHaveLength(2)
+		expect((provider as any).clineStack[0]).toBe(mockTask1)
+		expect((provider as any).clineStack[1]).toBe(mockTask2)
 	})
 
-	it("should handle empty stack gracefully during rehydration attempt", async () => {
+	it("should handle empty stack gracefully during task creation", async () => {
 		// Setup: Empty stack
 		;(provider as any).clineStack = []
 
@@ -278,14 +295,17 @@ describe("ClineProvider flicker-free cancel", () => {
 			workspace: "/test/workspace",
 		}
 
-		// Act: Should not error and should call removeClineFromStack
-		await provider.createTaskWithHistoryItem(historyItem)
+		// Act: Should create a fresh task without trying to remove anything
+		const task = await provider.createTaskWithHistoryItem(historyItem)
 
-		// Assert: removeClineFromStack should be called (no current task to rehydrate)
-		expect(removeClineFromStackSpy).toHaveBeenCalled()
+		// Assert: removeClineFromStack should not be called
+		expect(removeClineFromStackSpy).not.toHaveBeenCalled()
+		expect(task).toBe(mockTask2)
+		expect((provider as any).clineStack).toHaveLength(1)
+		expect((provider as any).clineStack[0]).toBe(mockTask2)
 	})
 
-	it("should maintain task stack integrity during flicker-free replacement", async () => {
+	it("should replace the matching task in-place when replacement is explicitly requested", async () => {
 		// Setup: Stack with multiple tasks
 		const mockParentTask = {
 			taskId: "parent-task",
@@ -295,9 +315,10 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		;(provider as any).clineStack = [mockParentTask, mockTask1]
 		;(provider as any).taskEventListeners = new WeakMap()
-		;(provider as any).taskEventListeners.set(mockTask1, [vi.fn()])
+		const cleanup = vi.fn()
+		;(provider as any).taskEventListeners.set(mockTask1, [cleanup])
 
-		// Act: Rehydrate the current (top) task
+		// Act: Rehydrate the current (top) task with explicit replacement
 		const historyItem: HistoryItem = {
 			id: "task-1",
 			number: 1,
@@ -309,11 +330,15 @@ describe("ClineProvider flicker-free cancel", () => {
 			workspace: "/test/workspace",
 		}
 
-		await provider.createTaskWithHistoryItem(historyItem)
+		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockResolvedValue(undefined)
+		await provider.createTaskWithHistoryItem(historyItem, { replaceExistingTask: true })
 
 		// Assert: Stack should maintain parent task and replace current task
+		expect(removeClineFromStackSpy).not.toHaveBeenCalled()
 		expect((provider as any).clineStack).toHaveLength(2)
 		expect((provider as any).clineStack[0]).toBe(mockParentTask)
 		expect((provider as any).clineStack[1]).toBe(mockTask2)
+		expect(mockTask1.abortTask).toHaveBeenCalledWith(true)
+		expect(cleanup).toHaveBeenCalled()
 	})
 })
