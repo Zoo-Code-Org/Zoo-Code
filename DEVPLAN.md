@@ -309,7 +309,7 @@
     - **Depends on:** Phase 3, Tasks 4 and 6.
     - **Can parallelize with:** Phase 3, Task 7.
 
-    - **Progress:** SDK and VS Code adapter now expose CLI event subscription and permission reply methods for the future approval UI bridge; ClineProvider/webview approval routing is still pending.
+    - **Progress:** SDK and VS Code adapter expose CLI event subscription and permission reply methods. `ClineProvider` now subscribes to portable `permission.asked` events when the adapter is present, maps bash requests to existing `command` asks and other requests to existing tool/MCP asks, stores transient pending request IDs, and routes yes/no/message responses back through `replyPermission()` while preserving the legacy no-adapter path. Remaining work: broaden file-write/object approval coverage and validate against real CLI permission event payloads.
 
 9. Rewire provider config access
 

@@ -940,6 +940,145 @@ describe("ClineProvider", () => {
 		expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
 	})
 
+	test("portable permission asks display bash command approval", async () => {
+		let emitPermission!: (event: any) => void
+		const permissionEvent = new Promise<any>((resolve) => {
+			emitPermission = resolve
+		})
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-approval-session", title: "Approval" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+			subscribeEvents: vi.fn().mockImplementation(async function* () {
+				yield await permissionEvent
+			}),
+			replyPermission: vi.fn().mockResolvedValue(undefined),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Approval")
+
+		emitPermission({
+			type: "permission.asked",
+			properties: {
+				id: "permission-1",
+				sessionID: "portable-approval-session",
+				permission: "bash",
+				patterns: ["echo *"],
+				metadata: { command: "echo hello" },
+			},
+		})
+
+		await vi.waitFor(() => {
+			expect(task.clineMessages).toContainEqual(
+				expect.objectContaining({ type: "ask", ask: "command", text: "echo hello" }),
+			)
+		})
+		expect(task.overwriteClineMessages).toHaveBeenCalledWith(task.clineMessages)
+	})
+
+	test("portable permission yes and no responses reply to pending request", async () => {
+		let emitPermission!: (event: any) => void
+		const permissionEvent = new Promise<any>((resolve) => {
+			emitPermission = resolve
+		})
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-reply-session", title: "Approval" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+			subscribeEvents: vi.fn().mockImplementation(async function* () {
+				yield await permissionEvent
+			}),
+			replyPermission: vi.fn().mockResolvedValue(undefined),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Approval")
+
+		emitPermission({
+			type: "permission.asked",
+			properties: { id: "permission-2", sessionID: "portable-reply-session", permission: "edit" },
+		})
+		await vi.waitFor(() => {
+			expect(task.clineMessages).toContainEqual(expect.objectContaining({ type: "ask", ask: "tool" }))
+		})
+
+		await portableProvider.handleWebviewAskResponse("yesButtonClicked")
+
+		expect(portableSessionAdapter.replyPermission).toHaveBeenCalledWith("permission-2", { reply: "once" })
+		expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("yesButtonClicked", undefined, undefined)
+		;(portableProvider as any).pendingPortablePermissionRequests.set("portable-reply-session", {
+			requestID: "permission-3",
+			permission: "edit",
+		})
+		await portableProvider.handleWebviewAskResponse("noButtonClicked", "Please do not edit that file")
+
+		expect(portableSessionAdapter.replyPermission).toHaveBeenCalledWith("permission-3", {
+			reply: "reject",
+			message: "Please do not edit that file",
+		})
+	})
+
+	test("portable permission message response rejects with feedback instead of sending a user message", async () => {
+		let emitPermission!: (event: any) => void
+		const permissionEvent = new Promise<any>((resolve) => {
+			emitPermission = resolve
+		})
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-feedback-session", title: "Approval" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+			subscribeEvents: vi.fn().mockImplementation(async function* () {
+				yield await permissionEvent
+			}),
+			replyPermission: vi.fn().mockResolvedValue(undefined),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Approval")
+		portableSessionAdapter.sendMessage.mockClear()
+
+		emitPermission({
+			type: "permission.asked",
+			properties: { id: "permission-4", sessionID: "portable-feedback-session", permission: "bash" },
+		})
+		await vi.waitFor(() => {
+			expect(task.clineMessages).toContainEqual(expect.objectContaining({ type: "ask", ask: "command" }))
+		})
+
+		await portableProvider.handleWebviewAskResponse("messageResponse", "Use a safer command")
+
+		expect(portableSessionAdapter.replyPermission).toHaveBeenCalledWith("permission-4", {
+			reply: "reject",
+			message: "Use a safer command",
+		})
+		expect(portableSessionAdapter.sendMessage).not.toHaveBeenCalled()
+	})
+
 	test("legacy provider keeps existing message response path", async () => {
 		const task = await provider.createTask("Legacy task")
 		vi.mocked(task.handleWebviewAskResponse).mockClear()

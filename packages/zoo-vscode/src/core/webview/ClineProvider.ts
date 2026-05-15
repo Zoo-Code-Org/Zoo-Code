@@ -76,7 +76,7 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
-import type { Session } from "@zoo-code/sdk"
+import type { PermissionReply, PermissionRequest, Session } from "@zoo-code/sdk"
 import type { PortableSessionAdapter } from "../../services/portable-core/PortableSessionAdapter"
 
 import { fileExistsAtPath } from "../../utils/fs"
@@ -125,6 +125,11 @@ interface PendingEditOperation {
 	createdAt: number
 }
 
+type PendingPortablePermissionRequest = {
+	requestID: string
+	permission: string
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -157,6 +162,7 @@ export class ClineProvider
 	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	private pendingOperations: Map<string, PendingEditOperation> = new Map()
+	private pendingPortablePermissionRequests: Map<string, PendingPortablePermissionRequest> = new Map()
 	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 
 	private cloudOrganizationsCache: CloudOrganizationMembership[] | null = null
@@ -235,6 +241,7 @@ export class ClineProvider
 		})
 
 		this.marketplaceManager = new MarketplaceManager(this.context, this.customModesManager)
+		this.startPortablePermissionEventBridge()
 
 		// Forward <most> task events to the provider.
 		// We do something fairly similar for the IPC-based API.
@@ -2955,11 +2962,161 @@ export class ClineProvider
 			return
 		}
 
+		if (await this.replyToPendingPortablePermission(task, askResponse, text)) {
+			task.handleWebviewAskResponse(askResponse, text, images)
+			return
+		}
+
 		if (askResponse === "messageResponse" && (await this.sendPortableUserMessage(task, text, images))) {
 			return
 		}
 
 		task.handleWebviewAskResponse(askResponse, text, images)
+	}
+
+	private startPortablePermissionEventBridge(): void {
+		if (!this.portableSessionAdapter || typeof this.portableSessionAdapter.subscribeEvents !== "function") {
+			return
+		}
+		const adapter = this.portableSessionAdapter
+
+		void (async () => {
+			try {
+				for await (const event of adapter.subscribeEvents()) {
+					if (this._disposed) {
+						break
+					}
+
+					if (event.type === "permission.asked" && this.isPortablePermissionRequest(event.properties)) {
+						await this.handlePortablePermissionAsked(event.properties)
+					}
+				}
+			} catch (error) {
+				if (!this._disposed) {
+					this.log(
+						`Portable permission event bridge failed: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				}
+			}
+		})()
+	}
+
+	private isPortablePermissionRequest(value: unknown): value is PermissionRequest {
+		return (
+			!!value &&
+			typeof value === "object" &&
+			typeof (value as { id?: unknown }).id === "string" &&
+			typeof (value as { sessionID?: unknown }).sessionID === "string" &&
+			typeof (value as { permission?: unknown }).permission === "string"
+		)
+	}
+
+	private async handlePortablePermissionAsked(request: PermissionRequest): Promise<void> {
+		const task = this.getCurrentTask()
+		if (!task || request.sessionID !== task.taskId) {
+			return
+		}
+
+		const message = this.mapPortablePermissionToAsk(request)
+		task.clineMessages = [...task.clineMessages, message]
+		this.pendingPortablePermissionRequests.set(task.taskId, {
+			requestID: request.id,
+			permission: request.permission,
+		})
+
+		await task.overwriteClineMessages(task.clineMessages)
+		await this.postStateToWebviewWithoutTaskHistory()
+	}
+
+	private mapPortablePermissionToAsk(request: PermissionRequest): ClineMessage {
+		const permission = request.permission.toLowerCase()
+		if (permission === "bash" || permission === "command") {
+			return {
+				ts: Date.now(),
+				type: "ask",
+				ask: "command",
+				text: this.getPortablePermissionCommandText(request),
+			}
+		}
+
+		if (permission === "mcp" || permission.includes("mcp")) {
+			return {
+				ts: Date.now(),
+				type: "ask",
+				ask: "use_mcp_server",
+				text: this.getPortablePermissionSummary(request),
+			}
+		}
+
+		return {
+			ts: Date.now(),
+			type: "ask",
+			ask: "tool",
+			text: this.getPortablePermissionSummary(request),
+		}
+	}
+
+	private getPortablePermissionCommandText(request: PermissionRequest): string {
+		const metadata = request.metadata
+		if (
+			metadata &&
+			typeof metadata === "object" &&
+			typeof (metadata as { command?: unknown }).command === "string"
+		) {
+			return (metadata as { command: string }).command
+		}
+
+		return request.patterns?.join(", ") || this.getPortablePermissionSummary(request)
+	}
+
+	private getPortablePermissionSummary(request: PermissionRequest): string {
+		const summary = {
+			permission: request.permission,
+			tool: request.tool,
+			patterns: request.patterns,
+			metadata: request.metadata,
+		}
+
+		return JSON.stringify(summary)
+	}
+
+	private async replyToPendingPortablePermission(
+		task: Task,
+		askResponse: ClineAskResponse,
+		text?: string,
+	): Promise<boolean> {
+		if (!this.portableSessionAdapter) {
+			return false
+		}
+
+		const pending = this.pendingPortablePermissionRequests.get(task.taskId)
+		if (!pending) {
+			return false
+		}
+
+		const reply = this.mapPortablePermissionReply(askResponse, text)
+		await this.portableSessionAdapter.replyPermission(pending.requestID, reply)
+		this.pendingPortablePermissionRequests.delete(task.taskId)
+		return true
+	}
+
+	private mapPortablePermissionReply(askResponse: ClineAskResponse, text?: string): PermissionReply {
+		if (askResponse === "yesButtonClicked") {
+			return { reply: "once" }
+		}
+
+		if (askResponse === "objectResponse") {
+			try {
+				const value = JSON.parse(text || "{}")
+				if (value && typeof value === "object" && Object.values(value).every(Boolean)) {
+					return { reply: "once" }
+				}
+			} catch {
+				// Malformed object responses are treated as rejection feedback below.
+			}
+		}
+
+		return { reply: "reject", message: text }
 	}
 
 	private async sendPortableUserMessage(task: Task, text?: string, images?: string[]): Promise<boolean> {
