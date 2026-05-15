@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fix project config directory precedence so `.kilo` overrides legacy `.kilocode` for config and command discovery.
 - Fix permission order config coverage to isolate Zoo global config and make the full config test file pass.
 - Unskip deterministic generated SDK HttpApi coverage for core instance routes while keeping provider discovery isolated.
+- Enable generated SDK parity coverage for deterministic instance read routes across direct and HttpApi backends.
 - Add SDK wrappers for portable-core worktree list, create, remove, and reset routes.
 - Add SDK wrappers for legacy portable-core worktree diff, diff summary, and diff-file routes.
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.

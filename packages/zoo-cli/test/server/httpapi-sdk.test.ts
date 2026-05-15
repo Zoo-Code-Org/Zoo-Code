@@ -382,21 +382,19 @@ describe("HttpApi SDK", () => {
 		),
 	)
 
-	// kilocode_change start - /config/providers and /agent 500 on HttpApi backend; Kilo overlays not yet migrated onto the bridge
-	parity.skip("matches generated SDK instance read routes across backends", (backend) =>
+	// kilocode_change start - keep provider and agent discovery excluded until Kilo overlays are isolated
+	parity("matches generated SDK instance read routes across backends", (backend) =>
 		withStandardProject(backend, ({ sdk, directory }) =>
 			Effect.gen(function* () {
 				const project = yield* capture(() => sdk.project.current())
 				const projects = yield* capture(() => sdk.project.list())
 				const paths = yield* capture(() => sdk.path.get())
 				const config = yield* capture(() => sdk.config.get())
-				const providers = yield* capture(() => sdk.config.providers())
 				const file = yield* capture(() => sdk.file.read({ path: "hello.txt" }))
 				const files = yield* capture(() => sdk.file.list({ path: "." }))
 				const fileStatus = yield* capture(() => sdk.file.status())
 				const findFiles = yield* capture(() => sdk.find.files({ query: "hello", limit: 10 }))
 				const findText = yield* capture(() => sdk.find.text({ pattern: "sdk-parity" }))
-				const agents = yield* capture(() => sdk.app.agents())
 				const skills = yield* capture(() => sdk.app.skills())
 				const tools = yield* capture(() => sdk.tool.ids())
 				const vcs = yield* capture(() => sdk.vcs.get())
@@ -409,13 +407,11 @@ describe("HttpApi SDK", () => {
 						projects,
 						paths,
 						config,
-						providers,
 						file,
 						files,
 						fileStatus,
 						findFiles,
 						findText,
-						agents,
 						skills,
 						tools,
 						vcs,
