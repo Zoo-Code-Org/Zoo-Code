@@ -222,6 +222,57 @@ export type WorktreeDirectoryOptions = {
 	directory: string
 }
 
+/** Worktree diff file status. */
+export type WorktreeDiffStatus = "added" | "deleted" | "modified"
+
+/** Options for querying worktree diffs. */
+export type WorktreeDiffOptions = {
+	/** Base branch or revision. */
+	base?: string
+}
+
+/** Options for querying one worktree diff file. */
+export type WorktreeDiffFileOptions = WorktreeDiffOptions & {
+	/** Relative file path to inspect. */
+	file: string
+}
+
+/** Full worktree file diff returned by the portable core. */
+export type WorktreeDiff = {
+	/** Relative file path. */
+	file: string
+	/** Before content. */
+	before?: string
+	/** After content. */
+	after?: string
+	/** Patch text when returned by the route. */
+	patch?: string
+	/** Added line count. */
+	additions: number
+	/** Deleted line count. */
+	deletions: number
+	/** File status. */
+	status?: WorktreeDiffStatus
+}
+
+/** Summarized worktree diff item. */
+export type WorktreeDiffItem = WorktreeDiff & {
+	/** Patch text. */
+	patch: string
+	/** Before content, often empty for summaries. */
+	before: string
+	/** After content, often empty for summaries. */
+	after: string
+	/** Whether the file is tracked by git. */
+	tracked: boolean
+	/** Whether the file appears generated. */
+	generatedLike: boolean
+	/** Whether content was summarized. */
+	summarized: boolean
+	/** Diff version stamp. */
+	stamp: string
+}
+
 /** Options used to create a new session. */
 export type SessionCreateOptions = {
 	/** Optional title for display in history. */

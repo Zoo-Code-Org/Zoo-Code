@@ -88,6 +88,56 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/experimental/worktree" && input.method === "DELETE") return { data: true }
 			if (input.path === "/experimental/worktree") return { data: ["/tmp/repo-feature"] }
 			if (input.path === "/experimental/worktree/reset") return { data: true }
+			if (input.path === "/experimental/worktree/diff?base=main") {
+				return {
+					data: [
+						{
+							file: "src/app.ts",
+							before: "old\n",
+							after: "new\n",
+							additions: 1,
+							deletions: 1,
+							status: "modified",
+						},
+					],
+				}
+			}
+			if (input.path === "/experimental/worktree/diff/summary?base=main") {
+				return {
+					data: [
+						{
+							file: "src/app.ts",
+							patch: "",
+							before: "",
+							after: "",
+							additions: 1,
+							deletions: 1,
+							status: "modified",
+							tracked: true,
+							generatedLike: false,
+							summarized: true,
+							stamp: "7:1",
+						},
+					],
+				}
+			}
+			if (input.path === "/experimental/worktree/diff/file?base=main&file=src%2Fapp.ts") {
+				return {
+					data: {
+						file: "src/app.ts",
+						patch: "patch",
+						before: "old\n",
+						after: "new\n",
+						additions: 1,
+						deletions: 1,
+						status: "modified",
+						tracked: true,
+						generatedLike: false,
+						summarized: false,
+						stamp: "7:1",
+					},
+				}
+			}
 			return { data: undefined }
 		},
 		async *stream(input) {
@@ -333,6 +383,49 @@ describe("ZooClient", () => {
 			},
 			{ method: "DELETE", path: "/experimental/worktree", body: { directory: "/tmp/repo-feature" } },
 			{ method: "POST", path: "/experimental/worktree/reset", body: { directory: "/tmp/repo-feature" } },
+		])
+	})
+
+	test("wraps worktree diff routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.getWorktreeDiff({ base: "main" })).resolves.toEqual([
+			{ file: "src/app.ts", before: "old\n", after: "new\n", additions: 1, deletions: 1, status: "modified" },
+		])
+		await expect(client.getWorktreeDiffSummary({ base: "main" })).resolves.toEqual([
+			{
+				file: "src/app.ts",
+				patch: "",
+				before: "",
+				after: "",
+				additions: 1,
+				deletions: 1,
+				status: "modified",
+				tracked: true,
+				generatedLike: false,
+				summarized: true,
+				stamp: "7:1",
+			},
+		])
+		await expect(client.getWorktreeDiffFile({ base: "main", file: "src/app.ts" })).resolves.toEqual({
+			file: "src/app.ts",
+			patch: "patch",
+			before: "old\n",
+			after: "new\n",
+			additions: 1,
+			deletions: 1,
+			status: "modified",
+			tracked: true,
+			generatedLike: false,
+			summarized: false,
+			stamp: "7:1",
+		})
+
+		expect(mock.requests.slice(-3)).toEqual([
+			{ path: "/experimental/worktree/diff?base=main" },
+			{ path: "/experimental/worktree/diff/summary?base=main" },
+			{ path: "/experimental/worktree/diff/file?base=main&file=src%2Fapp.ts" },
 		])
 	})
 })

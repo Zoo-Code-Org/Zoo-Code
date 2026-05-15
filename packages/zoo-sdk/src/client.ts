@@ -24,6 +24,10 @@ import type {
 	Todo,
 	WorktreeCreateOptions,
 	WorktreeDirectoryOptions,
+	WorktreeDiff,
+	WorktreeDiffFileOptions,
+	WorktreeDiffItem,
+	WorktreeDiffOptions,
 	WorktreeInfo,
 	ZooEvent,
 	ZooConfig,
@@ -64,6 +68,14 @@ function messageListQuery(options: MessageListOptions = {}) {
 
 function worktreeDirectoryBody(input: string | WorktreeDirectoryOptions): WorktreeDirectoryOptions {
 	return typeof input === "string" ? { directory: input } : input
+}
+
+function worktreeDiffQuery(options: WorktreeDiffOptions & { file?: string } = {}) {
+	const params = new URLSearchParams()
+	if (options.base) params.set("base", options.base)
+	if (options.file) params.set("file", options.file)
+	const query = params.toString()
+	return query ? `?${query}` : ""
 }
 
 /** Client for the Zoo Code portable-core server. */
@@ -399,6 +411,39 @@ export class ZooClient {
 					body: worktreeDirectoryBody(input),
 				}),
 			) ?? false
+		)
+	}
+
+	/** Read the full worktree diff. Experimental: currently backed by legacy Hono routes. */
+	async getWorktreeDiff(options: WorktreeDiffOptions = {}): Promise<WorktreeDiff[]> {
+		return (
+			unwrap(
+				await this.#transport.request<WorktreeDiff[] | { data?: WorktreeDiff[] }>({
+					path: `/experimental/worktree/diff${worktreeDiffQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Read summarized worktree diff items. Experimental: currently backed by legacy Hono routes. */
+	async getWorktreeDiffSummary(options: WorktreeDiffOptions = {}): Promise<WorktreeDiffItem[]> {
+		return (
+			unwrap(
+				await this.#transport.request<WorktreeDiffItem[] | { data?: WorktreeDiffItem[] }>({
+					path: `/experimental/worktree/diff/summary${worktreeDiffQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Read one worktree diff file. Experimental: currently backed by legacy Hono routes. */
+	async getWorktreeDiffFile(options: WorktreeDiffFileOptions): Promise<WorktreeDiffItem | null> {
+		return (
+			unwrap(
+				await this.#transport.request<WorktreeDiffItem | null | { data?: WorktreeDiffItem | null }>({
+					path: `/experimental/worktree/diff/file${worktreeDiffQuery(options)}`,
+				}),
+			) ?? null
 		)
 	}
 
