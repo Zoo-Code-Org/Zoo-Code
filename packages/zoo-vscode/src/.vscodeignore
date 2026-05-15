@@ -28,6 +28,7 @@
 
 # Include icons and images
 !assets/codicons/**
+!assets/bin/**
 !assets/vscode-material-icons/**
 !assets/icons/**
 !assets/images/**

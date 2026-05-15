@@ -1,9 +1,9 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1 through 8 are implemented on top of the completed Phase 0 foundation, and the imported Zoo CLI can now resolve local Kilo/OpenCode compatibility packages for `@opencode-ai/core/*`, `@kilocode/sdk`, and `@kilocode/plugin`. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity through catalog-backed and OpenAI-compatible providers, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, runs real focused and broader imported CLI test suites, has current-platform local build scripts, and is covered by the real workspace `check-types` task.
-- **Last completed task:** Phase 1 Task 8 — server IPC startup/shutdown and `zoo run` smoke coverage.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 1, Task 9 VS Code CLI binary preparation, then Phase 2 SDK implementation.
+- **Current status:** Phase 1 Tasks 1 through 9 are implemented on top of the completed Phase 0 foundation, and the imported Zoo CLI can now resolve local Kilo/OpenCode compatibility packages for `@opencode-ai/core/*`, `@kilocode/sdk`, and `@kilocode/plugin`. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity through catalog-backed and OpenAI-compatible providers, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, can prepare the current-platform CLI binary for VSIX assets, runs real focused and broader imported CLI test suites, has current-platform local build scripts, and is covered by the real workspace `check-types` task.
+- **Last completed task:** Phase 1 Task 9 — VS Code CLI binary preparation script.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 2 SDK implementation.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
@@ -99,6 +99,10 @@
     - `zoo server` is now an alias for `zoo serve`, and `--ipc <path>` starts the local server over a Unix socket for SDK clients while preserving the existing HTTP `serve` path.
     - `packages/zoo-cli/test/server/listen-smoke.test.ts` covers HTTP and IPC listener startup/shutdown with deterministic CORS preflight requests.
     - `packages/zoo-cli/test/cli/run-smoke.test.ts` covers `zoo run` on the local in-process server path with a mocked SDK client and deterministic streamed text/idle events.
+- Phase 1 Task 9 VS Code binary preparation completion:
+    - `packages/zoo-vscode/src/package.json` now exposes `prepare:cli-binary`, implemented by `packages/zoo-vscode/src/script/local-bin.ts`.
+    - The script copies the current-platform `packages/zoo-cli/dist/@zoo-code/cli-<platform>/bin/zoo` artifact into `packages/zoo-vscode/src/assets/bin/`, writes a small manifest, and supports `ZOO_CLI_BINARY` for release-pipeline artifacts.
+    - `.vscodeignore` now includes `assets/bin/**` so prepared CLI binaries are packaged into the VSIX.
 
 ## How to update this file
 

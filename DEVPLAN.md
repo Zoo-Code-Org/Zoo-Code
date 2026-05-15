@@ -153,7 +153,7 @@
     - **Depends on:** Phase 1, Tasks 2, 3, 4, 5, 6, and 7.
     - **Can parallelize with:** None.
 
-9. Add VS Code CLI binary preparation script
+9. [✅] Add VS Code CLI binary preparation script
     - **What:** Add `prepare:cli-binary` to `packages/zoo-vscode` following Kilo's `script/local-bin.ts` pattern so the built CLI binary can be embedded in the VSIX.
     - **Files touched:** `packages/zoo-vscode/package.json`, `packages/zoo-vscode/script/local-bin.ts` or equivalent, `.vscodeignore`, build scripts, docs.
     - **Acceptance criteria:** Running the preparation script copies the correct Zoo CLI binary artifact into extension assets; `.vscodeignore` includes the binary in packaged VSIX; script works with the selected runtime/toolchain.

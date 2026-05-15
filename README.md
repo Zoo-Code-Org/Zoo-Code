@@ -87,7 +87,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 
@@ -163,9 +163,20 @@ pnpm install
 
 - `packages/zoo-vscode/src`: VS Code extension host package.
 - `packages/zoo-vscode/webview-ui`: React webview package.
-- `packages/zoo-cli`: scaffold for the future Zoo Code CLI portable core.
+- `packages/zoo-cli`: Zoo Code CLI portable core.
 - `packages/zoo-sdk`: scaffold for the future Zoo Code SDK.
 - `packages/*` and `apps/*`: existing shared packages and application targets.
+
+### Embedding The Zoo CLI Binary
+
+Build the current-platform CLI binary, then copy it into the VS Code extension assets before packaging a VSIX:
+
+```sh
+pnpm --filter @zoo-code/cli build
+pnpm --filter zoo-code prepare:cli-binary
+```
+
+Release pipelines can set `ZOO_CLI_BINARY=/path/to/zoo` to copy a prebuilt platform artifact instead of the local `packages/zoo-cli/dist` output.
 
 3. **Run the extension**:
 
