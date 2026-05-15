@@ -456,6 +456,31 @@ describe("HttpApi SDK", () => {
 		),
 	)
 
+	parity("matches generated SDK experimental read routes across backends", (backend) =>
+		withProject(backend, { git: false }, ({ sdk }) =>
+			Effect.gen(function* () {
+				const created = yield* capture(() => sdk.session.create({ title: "experimental-read" }))
+				const sessions = yield* capture(() => sdk.experimental.session.list({ roots: false, limit: 10 }))
+				const resources = yield* capture(() => sdk.experimental.resource.list())
+				const adapters = yield* capture(() => sdk.experimental.workspace.adapter.list())
+				const workspaces = yield* capture(() => sdk.experimental.workspace.list())
+				const workspaceStatus = yield* capture(() => sdk.experimental.workspace.status())
+
+				return {
+					statuses: statuses({ created, sessions, resources, adapters, workspaces, workspaceStatus }),
+					sessionTitles: sessionTitles(sessions.data),
+					resourceKeys: Object.keys(record(resources.data)).sort(),
+					adapterTypes: array(adapters.data)
+						.map((item) => record(item).type)
+						.filter((type): type is string => typeof type === "string")
+						.sort(),
+					workspaceCount: array(workspaces.data).length,
+					workspaceStatusCount: array(workspaceStatus.data).length,
+				}
+			}),
+		),
+	)
+
 	parity("matches generated SDK session lifecycle routes across backends", (backend) =>
 		withStandardProject(backend, ({ sdk }) =>
 			Effect.gen(function* () {

@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Cover generated SDK `config.warnings()` on deterministic HttpApi and direct-vs-HttpApi read-route tests.
 - Cover generated SDK VCS diff parity across direct and HttpApi instance read routes.
 - Add generated SDK question list/reply/reject parity across direct and HttpApi backends.
+- Add generated SDK experimental session/resource/workspace read-route parity across direct and HttpApi backends.
 - Add SDK wrappers for portable-core worktree list, create, remove, and reset routes.
 - Add SDK wrappers for legacy portable-core worktree diff, diff summary, and diff-file routes.
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.
