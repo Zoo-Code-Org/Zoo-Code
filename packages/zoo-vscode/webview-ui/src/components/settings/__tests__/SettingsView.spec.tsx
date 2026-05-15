@@ -1,6 +1,6 @@
 // pnpm --filter @zoo-code/vscode-webview test src/components/settings/__tests__/SettingsView.spec.tsx
 
-import { render, screen, fireEvent, within } from "@/utils/test-utils"
+import { render, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { vscode } from "@/utils/vscode"
@@ -287,7 +287,7 @@ const mockPostMessage = (state: any) => {
 	)
 }
 
-const renderSettingsView = () => {
+const renderSettingsView = (initialState: any = {}) => {
 	const onDone = vi.fn()
 	const queryClient = new QueryClient()
 
@@ -300,7 +300,7 @@ const renderSettingsView = () => {
 	)
 
 	// Hydrate initial state.
-	mockPostMessage({})
+	mockPostMessage(initialState)
 
 	// Helper function to activate a tab and ensure its content is visible
 	const activateTab = (tabId: string) => {
@@ -520,6 +520,28 @@ describe("SettingsView - API Configuration", () => {
 		renderSettingsView()
 
 		expect(screen.getByTestId("api-config-management")).toBeInTheDocument()
+	})
+
+	it("renders portable provider config as read-only and does not upsert legacy profiles on save", async () => {
+		renderSettingsView({
+			providerConfigSource: "portable",
+			portableProviderConfig: {
+				readOnly: true,
+				guidance: "Portable provider config is managed by zoo.jsonc.",
+				providers: [{ id: "openai", name: "OpenAI", modelId: "gpt-5.5" }],
+			},
+		})
+
+		await waitFor(() => expect(screen.queryByTestId("api-config-management")).not.toBeInTheDocument())
+		expect(screen.getByTestId("portable-provider-config")).toHaveTextContent(
+			"Portable provider config is managed by zoo.jsonc.",
+		)
+		expect(screen.getByTestId("portable-provider-config")).toHaveTextContent("OpenAI (gpt-5.5)")
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
 	})
 })
 

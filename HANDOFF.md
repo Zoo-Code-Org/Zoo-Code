@@ -2,8 +2,8 @@
 
 - **Project:** Zoo Code CLI Integration
 - **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Tasks 1 through 7 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, lifecycle event callbacks, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper plus activation-time `PortableCoreService` bootstrap and a `ClineProvider` seam that routes session create/list/get, text-only send/stream, abort, and the first portable tool-approval request/response bridge through `PortableSessionAdapter` when enabled. `docs/extension-rewire-audit.md` maps the VS Code extension host into portable-core migration buckets and recommended rewire order; `docs/webview-message-protocol.md` and `@zoo-code/types` now pin the portable-core webview contract.
-- **Last completed task:** Phase 3 Task 8 file/object approval slice — edit permission file-diff metadata maps to existing `appliedDiff` approval payloads, and object approval responses are covered.
-- **Next task to execute:** Continue Phase 3 Task 9 Settings UI read-only guidance for portable provider config.
+- **Last completed task:** Phase 3 Task 9 Settings UI read-only guidance slice — portable provider config is displayed read-only from cached settings state and no longer upserts legacy profiles on save.
+- **Next task to execute:** Continue Phase 3 Task 10 visible mode-selector replacement using read-only portable mode state.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: no longer blocks Phase 1 Task 9 for current-platform VSIX binary preparation, but still affects Phase 6 all-platform release packaging decisions.
@@ -160,8 +160,9 @@
     - `@zoo-code/sdk` now exposes read-only `getConfig()` and `getConfigProviders()` wrappers for CLI `/config` and `/config/providers`.
     - `PortableSessionAdapter` forwards portable-core config/provider reads for VS Code provider state migration.
     - `ExtensionState` now includes optional `providerConfigSource` and `portableProviderConfig` fields. `ClineProvider.getStateToPostToWebview()` populates read-only normalized provider metadata from `getConfigProviders()` when the adapter is present and does not call legacy provider-profile mutation APIs.
-    - Focused coverage verifies portable provider metadata is posted as read-only state.
-    - Remaining Task 9 work: add visible Settings UI read-only guidance/actions and finalize how selected portable defaults map into UI once Phase 4 schema/loader semantics are stable.
+    - `SettingsView` renders portable provider config as read-only guidance from local `cachedState`, hides mutable profile/API options controls in that mode, and suppresses `upsertApiConfiguration` on save so portable config is not copied into legacy VS Code profiles.
+    - Focused coverage verifies portable provider metadata is posted as read-only state and rendered/saved safely in Settings UI.
+    - Remaining Task 9 work: harden extension-host profile mutation messages and finalize how selected portable defaults map into UI once Phase 4 schema/loader semantics are stable.
 - Phase 4 Task 2 started, not complete:
     - Added CLI config-loader regression coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
     - Added focused unified loader coverage proving project `zoo.jsonc` loads Zoo-native OpenAI-compatible provider config, primary agent/mode config, and explicit instruction paths.

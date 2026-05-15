@@ -206,6 +206,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
+	const portableProviderConfig = cachedState.portableProviderConfig
+	const isPortableProviderConfig =
+		cachedState.providerConfigSource === "portable" && portableProviderConfig?.readOnly === true
 
 	useEffect(() => {
 		// Update only when currentApiConfigName is changed.
@@ -218,6 +221,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		prevApiConfigName.current = currentApiConfigName
 		setChangeDetected(false)
 	}, [currentApiConfigName, extensionState])
+
+	useEffect(() => {
+		if (extensionState.providerConfigSource !== cachedState.providerConfigSource) {
+			setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
+			setChangeDetected(false)
+		}
+	}, [cachedState.providerConfigSource, extensionState])
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
@@ -426,8 +436,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			})
 
 			// These have more complex logic so they aren't (yet) handled
-			// by the `updateSettings` message.
-			vscode.postMessage({ type: "upsertApiConfiguration", text: currentApiConfigName, apiConfiguration })
+			// by the `updateSettings` message. Portable provider config is read-only
+			// in VS Code and must not be copied into legacy provider profiles.
+			if (!isPortableProviderConfig) {
+				vscode.postMessage({ type: "upsertApiConfiguration", text: currentApiConfigName, apiConfiguration })
+			}
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
@@ -739,40 +752,70 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								<SectionHeader>{t("settings:sections.providers")}</SectionHeader>
 
 								<Section>
-									<ApiConfigManager
-										currentApiConfigName={currentApiConfigName}
-										listApiConfigMeta={listApiConfigMeta}
-										onSelectConfig={(configName: string) =>
-											checkUnsaveChanges(() =>
-												vscode.postMessage({ type: "loadApiConfiguration", text: configName }),
-											)
-										}
-										onDeleteConfig={(configName: string) =>
-											vscode.postMessage({ type: "deleteApiConfiguration", text: configName })
-										}
-										onRenameConfig={(oldName: string, newName: string) => {
-											vscode.postMessage({
-												type: "renameApiConfiguration",
-												values: { oldName, newName },
-												apiConfiguration,
-											})
-											prevApiConfigName.current = newName
-										}}
-										onUpsertConfig={(configName: string) =>
-											vscode.postMessage({
-												type: "upsertApiConfiguration",
-												text: configName,
-												apiConfiguration,
-											})
-										}
-									/>
-									<ApiOptions
-										uriScheme={uriScheme}
-										apiConfiguration={apiConfiguration}
-										setApiConfigurationField={setApiConfigurationField}
-										errorMessage={errorMessage}
-										setErrorMessage={setErrorMessage}
-									/>
+									{isPortableProviderConfig ? (
+										<div
+											data-testid="portable-provider-config"
+											className="flex flex-col gap-3 text-sm">
+											<p>{portableProviderConfig.guidance}</p>
+											{portableProviderConfig.providers.length > 0 ? (
+												<ul className="flex flex-col gap-2">
+													{portableProviderConfig.providers.map((provider) => (
+														<li key={provider.id}>
+															<strong>{provider.name ?? provider.id}</strong>
+															{provider.modelId ? (
+																<span> ({provider.modelId})</span>
+															) : null}
+														</li>
+													))}
+												</ul>
+											) : (
+												<p>No portable providers were reported by the CLI.</p>
+											)}
+										</div>
+									) : (
+										<>
+											<ApiConfigManager
+												currentApiConfigName={currentApiConfigName}
+												listApiConfigMeta={listApiConfigMeta}
+												onSelectConfig={(configName: string) =>
+													checkUnsaveChanges(() =>
+														vscode.postMessage({
+															type: "loadApiConfiguration",
+															text: configName,
+														}),
+													)
+												}
+												onDeleteConfig={(configName: string) =>
+													vscode.postMessage({
+														type: "deleteApiConfiguration",
+														text: configName,
+													})
+												}
+												onRenameConfig={(oldName: string, newName: string) => {
+													vscode.postMessage({
+														type: "renameApiConfiguration",
+														values: { oldName, newName },
+														apiConfiguration,
+													})
+													prevApiConfigName.current = newName
+												}}
+												onUpsertConfig={(configName: string) =>
+													vscode.postMessage({
+														type: "upsertApiConfiguration",
+														text: configName,
+														apiConfiguration,
+													})
+												}
+											/>
+											<ApiOptions
+												uriScheme={uriScheme}
+												apiConfiguration={apiConfiguration}
+												setApiConfigurationField={setApiConfigurationField}
+												errorMessage={errorMessage}
+												setErrorMessage={setErrorMessage}
+											/>
+										</>
+									)}
 								</Section>
 							</div>
 						)}
