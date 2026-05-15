@@ -65,12 +65,13 @@ describe("MimoHandler", () => {
 
 		it("should use Singapore base URL if not provided", () => {
 			const h = new MimoHandler({ ...mockOptions, mimoBaseUrl: undefined })
-			expect(h).toBeInstanceOf(MimoHandler)
+			expect((h as any).options.openAiBaseUrl).toBe("https://token-plan-sgp.xiaomimimo.com/v1")
 		})
 
 		it("should use custom base URL when provided", () => {
-			const h = new MimoHandler({ ...mockOptions, mimoBaseUrl: "https://api.xiaomimimo.com/v1" })
-			expect(h).toBeInstanceOf(MimoHandler)
+			const customUrl = "https://api.xiaomimimo.com/v1"
+			const h = new MimoHandler({ ...mockOptions, mimoBaseUrl: customUrl })
+			expect((h as any).options.openAiBaseUrl).toBe(customUrl)
 		})
 	})
 
