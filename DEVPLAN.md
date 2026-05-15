@@ -385,6 +385,8 @@
     - **Depends on:** Phase 4, Task 1; Phase 1, Task 3.
     - **Can parallelize with:** Phase 4, Task 4 after schema is stable.
 
+    - **Progress:** Added regression coverage proving the existing config loader accepts `watcher.ignore` arrays and reports warnings for invalid watcher ignore shapes.
+
 3. Add VS Code config watcher for portable core
 
     - **What:** Watch Zoo config files from the extension and trigger CLI reload or restart when relevant files change.

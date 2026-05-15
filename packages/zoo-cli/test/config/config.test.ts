@@ -342,6 +342,26 @@ test("loads JSONC config file", async () => {
 	})
 })
 
+test("loads watcher ignore patterns from config", async () => {
+	await using tmp = await tmpdir({
+		init: async (dir) => {
+			await writeConfig(dir, {
+				$schema: "https://app.kilo.ai/config.json",
+				watcher: {
+					ignore: ["dist/**", ".cache/**"],
+				},
+			})
+		},
+	})
+	await Instance.provide({
+		directory: tmp.path,
+		fn: async () => {
+			const config = await load()
+			expect(config.watcher?.ignore).toEqual(["dist/**", ".cache/**"])
+		},
+	})
+})
+
 test("jsonc overrides json in the same directory", async () => {
 	await using tmp = await tmpdir({
 		init: async (dir) => {
@@ -598,6 +618,27 @@ test("reports warning for invalid JSON", async () => {
 		directory: tmp.path,
 		fn: async () => {
 			// kilocode_change - invalid JSON surfaces as a warning, not a throw
+			await load()
+			const warnings = await Config.warnings()
+			expect(warnings.length).toBeGreaterThan(0)
+		},
+	})
+})
+
+test("reports warning for invalid watcher ignore config", async () => {
+	await using tmp = await tmpdir({
+		init: async (dir) => {
+			await writeConfig(dir, {
+				$schema: "https://app.kilo.ai/config.json",
+				watcher: {
+					ignore: "dist/**",
+				},
+			})
+		},
+	})
+	await Instance.provide({
+		directory: tmp.path,
+		fn: async () => {
 			await load()
 			const warnings = await Config.warnings()
 			expect(warnings.length).toBeGreaterThan(0)

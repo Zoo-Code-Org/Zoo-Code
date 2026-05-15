@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add SDK and VS Code adapter methods for portable-core event subscriptions and permission replies, enabling the upcoming tool approval bridge.
 - Add SDK and VS Code adapter mode listing from portable-core agents, and include the current selected mode in portable-core message sends.
 - Add SDK and VS Code adapter methods for read-only portable-core config and configured-provider access.
+- Add Zoo CLI config-loader coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
 ## [3.54.0] - 2026-05-08

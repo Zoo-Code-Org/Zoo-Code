@@ -155,6 +155,9 @@
     - `@zoo-code/sdk` now exposes read-only `getConfig()` and `getConfigProviders()` wrappers for CLI `/config` and `/config/providers`.
     - `PortableSessionAdapter` forwards portable-core config/provider reads for future VS Code provider state migration.
     - Remaining Task 9 work: decide and implement how portable config maps into `ExtensionState.apiConfiguration`/settings UI without mutating legacy VS Code profiles, after Phase 4 schema/loader semantics are stable.
+- Phase 4 Task 2 started, not complete:
+    - Added CLI config-loader regression coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
+    - Remaining Task 4 work: broaden unified `zoo.jsonc` schema/loader coverage for global/project precedence, providers, modes, rules, `AGENTS.md`, `.zoo/rules`, `.zoo/modes`, and `.zooignore`.
 
 ## How to update this file
 
