@@ -210,6 +210,16 @@ vi.mock("../api/providers/fetchers/modelCache", () => ({
 	refreshModels: vi.fn().mockResolvedValue({}),
 }))
 
+vi.mock("../services/zoo-code-auth", () => ({
+	initZooCodeAuth: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock("../services/portable-core/PortableCoreService", () => ({
+	PortableCoreService: {
+		create: vi.fn().mockResolvedValue(undefined),
+	},
+}))
+
 describe("extension.ts", () => {
 	let mockContext: vscode.ExtensionContext
 	let authStateChangedHandler:
@@ -309,6 +319,33 @@ describe("extension.ts", () => {
 			const { activate } = await import("../extension")
 
 			await expect(activate(mockContext)).resolves.toBeDefined()
+		})
+	})
+
+	describe("portable core bootstrap", () => {
+		beforeEach(() => {
+			vi.resetModules()
+		})
+
+		test("activation delegates portable-core startup to the bootstrap service", async () => {
+			const { PortableCoreService } = await import("../services/portable-core/PortableCoreService")
+			const { activate } = await import("../extension")
+
+			await activate(mockContext)
+
+			expect(PortableCoreService.create).toHaveBeenCalledWith(mockContext, expect.any(Object))
+		})
+
+		test("deactivation disposes the portable-core bootstrap", async () => {
+			const dispose = vi.fn().mockResolvedValue(undefined)
+			const { PortableCoreService } = await import("../services/portable-core/PortableCoreService")
+			vi.mocked(PortableCoreService.create).mockResolvedValue({ dispose } as any)
+
+			const { activate, deactivate } = await import("../extension")
+			await activate(mockContext)
+			await deactivate()
+
+			expect(dispose).toHaveBeenCalledTimes(1)
 		})
 	})
 })

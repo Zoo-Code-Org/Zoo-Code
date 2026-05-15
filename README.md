@@ -87,7 +87,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-  </details>
+    </details>
 
 ---
 
@@ -164,7 +164,7 @@ pnpm install
 - `packages/zoo-vscode/src`: VS Code extension host package.
 - `packages/zoo-vscode/webview-ui`: React webview package.
 - `packages/zoo-cli`: Zoo Code CLI portable core.
-- `packages/zoo-sdk`: scaffold for the future Zoo Code SDK.
+- `packages/zoo-sdk`: Zoo Code SDK for portable-core client, transport, and CLI process lifecycle helpers.
 - `packages/*` and `apps/*`: existing shared packages and application targets.
 
 ### Embedding The Zoo CLI Binary
@@ -181,6 +181,8 @@ Release pipelines can set `ZOO_CLI_BINARY=/path/to/zoo` to copy a prebuilt platf
 ### Portable Core Feature Flag
 
 The VS Code setting `zoo-code.usePortableCore` defaults to `false`. SDK-backed portable-core paths must check this flag before starting or routing through the Zoo CLI core so the existing extension-host runtime remains the stable default during the migration.
+
+When the flag is enabled in development builds, activation initializes an isolated `@zoo-code/sdk` bootstrap that starts or reuses a local `zoo server --ipc` process and disposes it during extension deactivation. The bootstrap does not route chat/session behavior yet; it only validates lifecycle wiring for the upcoming SDK-backed adapter paths.
 
 3. **Run the extension**:
 

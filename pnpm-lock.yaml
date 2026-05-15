@@ -1413,6 +1413,9 @@ importers:
       '@zoo-code/ipc':
         specifier: workspace:^
         version: link:../../ipc
+      '@zoo-code/sdk':
+        specifier: workspace:^
+        version: link:../../zoo-sdk
       '@zoo-code/telemetry':
         specifier: workspace:^
         version: link:../../telemetry

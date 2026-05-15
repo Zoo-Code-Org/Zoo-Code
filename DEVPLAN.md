@@ -243,7 +243,7 @@
     - **Depends on:** Phase 3, Task 1.
     - **Can parallelize with:** Phase 2 tasks; must complete before Phase 3 Tasks 4-12.
 
-3. Add SDK dependency and activation bootstrap scaffold
+3. [✅] Add SDK dependency and activation bootstrap scaffold
 
     - **What:** Add `@zoo-code/sdk` as a workspace dependency and create an activation-time bootstrap service that can initialize `ZooClient` only when `usePortableCore()` is true.
     - **Files touched:** `packages/zoo-vscode/package.json`, `packages/zoo-vscode/src/extension.ts`, new bootstrap service under `packages/zoo-vscode/src/**`, tests.

@@ -50,6 +50,7 @@ import {
 import { initializeI18n } from "./i18n"
 import { initializeModelCacheRefresh } from "./api/providers/fetchers/modelCache"
 import { initZooCodeAuth } from "./services/zoo-code-auth"
+import { PortableCoreService } from "./services/portable-core/PortableCoreService"
 
 /**
  * Built using https://github.com/microsoft/vscode-webview-ui-toolkit
@@ -62,6 +63,7 @@ import { initZooCodeAuth } from "./services/zoo-code-auth"
 let outputChannel: vscode.OutputChannel
 let extensionContext: vscode.ExtensionContext
 let cloudService: CloudService | undefined
+let portableCoreService: PortableCoreService | undefined
 
 let authStateChangedHandler: ((data: { state: AuthState; previousState: AuthState }) => Promise<void>) | undefined
 let settingsUpdatedHandler: (() => void) | undefined
@@ -161,6 +163,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize Zoo Code auth service for extension session token management.
 	await initZooCodeAuth(context)
+
+	portableCoreService = await PortableCoreService.create(context, outputChannel)
+	if (portableCoreService) {
+		context.subscriptions.push(portableCoreService)
+	}
 
 	// Get default commands from configuration.
 	const defaultCommands = vscode.workspace.getConfiguration(Package.name).get<string[]>("allowedCommands") || []
@@ -384,6 +391,9 @@ export async function deactivate() {
 			)
 		}
 	}
+
+	await portableCoreService?.dispose()
+	portableCoreService = undefined
 
 	await McpServerManager.cleanup(extensionContext)
 	TelemetryService.instance.shutdown()
