@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fix project config update coverage to assert the Zoo-native `zoo.jsonc` write target for empty shell values.
 - Fix global config update coverage to isolate homedir and assert Zoo-native `zoo.jsonc` writes for empty shell values.
 - Fix project config directory precedence so `.kilo` overrides legacy `.kilocode` for config and command discovery.
+- Fix permission order config coverage to isolate Zoo global config and make the full config test file pass.
 - Add SDK wrappers for portable-core worktree list, create, remove, and reset routes.
 - Add SDK wrappers for legacy portable-core worktree diff, diff summary, and diff-file routes.
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.

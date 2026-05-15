@@ -2119,8 +2119,10 @@ test("permission config preserves user key order", async () => {
 	// kilocode_change start — isolate from global config to prevent cross-test contamination
 	// (migrateBashPermission may write permission.bash to a global config file created by other
 	// test files running in parallel, which mergeDeep then prepends to the project permission keys)
+	await using home = await tmpdir()
 	await using globalTmp = await tmpdir()
-	const prev = Global.Path.config
+	const homedir = spyOn(os, "homedir").mockReturnValue(home.path)
+	const prevConfig = Global.Path.config
 	;(Global.Path as { config: string }).config = globalTmp.path
 	await clear(true)
 	try {
@@ -2167,7 +2169,8 @@ test("permission config preserves user key order", async () => {
 		})
 		// kilocode_change start
 	} finally {
-		;(Global.Path as { config: string }).config = prev
+		homedir.mockRestore()
+		;(Global.Path as { config: string }).config = prevConfig
 		await clear(true)
 	}
 	// kilocode_change end
