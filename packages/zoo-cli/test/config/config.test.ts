@@ -1,4 +1,4 @@
-import { test, expect, describe, mock, afterEach, beforeEach } from "bun:test"
+import { test, expect, describe, mock, afterEach, beforeEach, spyOn } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { Config } from "@/config/config"
@@ -23,6 +23,7 @@ const infra = CrossSpawnSpawner.defaultLayer.pipe(
 )
 import path from "path"
 import fs from "fs/promises"
+import os from "os"
 import { pathToFileURL } from "url"
 import { Global } from "@opencode-ai/core/global"
 import { ProjectID } from "../../src/project/schema"
@@ -410,6 +411,54 @@ test("loads Zoo-native provider and agent settings from zoo.jsonc", async () => 
 			expect(config.instructions).toEqual(["AGENTS.md", ".zoo/rules/security.md"])
 		},
 	})
+})
+
+test("project zoo.jsonc overrides global zoo.jsonc", async () => {
+	await using home = await tmpdir()
+	await using project = await tmpdir({
+		init: async (dir) => {
+			await writeConfig(
+				dir,
+				{
+					$schema: "https://zoo-code.ai/config.json",
+					model: "project/model",
+				},
+				"zoo.jsonc",
+			)
+		},
+	})
+	const homedir = spyOn(os, "homedir").mockReturnValue(home.path)
+	const prevConfig = Global.Path.config
+	;(Global.Path as { config: string }).config = path.join(home.path, "legacy-config")
+
+	try {
+		const globalConfigDir = path.join(home.path, ".config", "zoo-code")
+		await fs.mkdir(globalConfigDir, { recursive: true })
+		await writeConfig(
+			globalConfigDir,
+			{
+				$schema: "https://zoo-code.ai/config.json",
+				model: "global/model",
+				username: "global-user",
+			},
+			"zoo.jsonc",
+		)
+		await clear(true)
+
+		await Instance.provide({
+			directory: project.path,
+			fn: async () => {
+				const config = await load()
+
+				expect(config.model).toBe("project/model")
+				expect(config.username).toBe("global-user")
+			},
+		})
+	} finally {
+		homedir.mockRestore()
+		;(Global.Path as { config: string }).config = prevConfig
+		await clear(true)
+	}
 })
 
 test("loads Zoo-native .zoo/modes as agents through config loader", async () => {

@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add Zoo CLI config-loader coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
 - Add Zoo CLI config-loader coverage for project `zoo.jsonc` provider, primary agent, model, and instruction fields.
 - Add Zoo CLI config-loader coverage for `.zoo/modes`, `.zoo/rules`, `.zooignore`, and Zoo-over-legacy mode precedence.
+- Add Zoo CLI config-loader coverage for project `zoo.jsonc` precedence over global Zoo config.
 - Add Zoo CLI instruction coverage for project `AGENTS.md` ordering ahead of sorted `.zoo/rules` markdown.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
