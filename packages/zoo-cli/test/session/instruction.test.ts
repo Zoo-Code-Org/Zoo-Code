@@ -17,33 +17,34 @@ import { testEffect } from "../lib/effect"
 
 const it = testEffect(Layer.mergeAll(CrossSpawnSpawner.defaultLayer, NodeFileSystem.layer))
 
-const configLayer = Layer.succeed(
-	Config.Service,
-	Config.Service.of({
-		get: () => Effect.succeed({}),
-		getGlobal: () => Effect.succeed({}),
-		getConsoleState: () => Effect.succeed(emptyConsoleState),
-		update: () => Effect.void,
-		updateGlobal: (config) => Effect.succeed(config),
-		invalidate: () => Effect.void,
-		directories: () => Effect.succeed([]),
-		waitForDependencies: () => Effect.void,
-		warnings: () => Effect.succeed([]), // kilocode_change
-	}),
-)
+const configLayer = (config: Config.Info = {}) =>
+	Layer.succeed(
+		Config.Service,
+		Config.Service.of({
+			get: () => Effect.succeed(config),
+			getGlobal: () => Effect.succeed({}),
+			getConsoleState: () => Effect.succeed(emptyConsoleState),
+			update: () => Effect.void,
+			updateGlobal: (config) => Effect.succeed(config),
+			invalidate: () => Effect.void,
+			directories: () => Effect.succeed([]),
+			waitForDependencies: () => Effect.void,
+			warnings: () => Effect.succeed([]), // kilocode_change
+		}),
+	)
 
-const instructionLayer = (global: Partial<Global.Interface>) =>
+const instructionLayer = (global: Partial<Global.Interface>, config: Config.Info = {}) =>
 	Instruction.layer.pipe(
-		Layer.provide(configLayer),
+		Layer.provide(configLayer(config)),
 		Layer.provide(AppFileSystem.defaultLayer),
 		Layer.provide(FetchHttpClient.layer),
 		Layer.provide(Global.layerWith(global)),
 	)
 
 const provideInstruction =
-	(global: Partial<Global.Interface>) =>
+	(global: Partial<Global.Interface>, config?: Config.Info) =>
 	<A, E, R>(self: Effect.Effect<A, E, R>) =>
-		self.pipe(Effect.provide(instructionLayer(global)))
+		self.pipe(Effect.provide(instructionLayer(global, config)))
 
 const write = (filepath: string, content: string) =>
 	Effect.gen(function* () {
@@ -215,6 +216,71 @@ describe("Instruction.resolve", () => {
 })
 
 describe("Instruction.system", () => {
+	it.live("returns empty when AGENTS.md and configured rules are missing", () =>
+		withFiles({}, (dir) =>
+			Effect.gen(function* () {
+				const svc = yield* Instruction.Service
+
+				const paths = yield* svc.systemPaths()
+				const rules = yield* svc.system()
+
+				expect(paths.size).toBe(0)
+				expect(rules).toEqual([])
+			}),
+		),
+	)
+
+	it.live("loads configured .zoo/rules markdown without AGENTS.md", () =>
+		provideTmpdirInstance((dir) =>
+			Effect.gen(function* () {
+				yield* writeFiles(dir, {
+					".zoo/rules/a-first.md": "# First Rule",
+					".zoo/rules/z-last.md": "# Last Rule",
+				})
+
+				const first = path.join(dir, ".zoo", "rules", "a-first.md")
+				const last = path.join(dir, ".zoo", "rules", "z-last.md")
+
+				yield* Effect.gen(function* () {
+					const svc = yield* Instruction.Service
+					const rules = yield* svc.system()
+
+					expect(rules).toEqual([
+						`Instructions from: ${first}\n# First Rule`,
+						`Instructions from: ${last}\n# Last Rule`,
+					])
+				}).pipe(provideInstruction({ home: dir, config: dir }, { instructions: [first, last] }))
+			}),
+		),
+	)
+
+	it.live("loads project AGENTS.md before configured .zoo/rules markdown", () =>
+		provideTmpdirInstance((dir) =>
+			Effect.gen(function* () {
+				yield* writeFiles(dir, {
+					"AGENTS.md": "# Project Instructions",
+					".zoo/rules/coding.md": "# Coding Rule",
+				})
+
+				const agents = path.join(dir, "AGENTS.md")
+				const rule = path.join(dir, ".zoo", "rules", "coding.md")
+
+				yield* Effect.gen(function* () {
+					const svc = yield* Instruction.Service
+					const paths = yield* svc.systemPaths()
+					const rules = yield* svc.system()
+
+					expect(paths.has(agents)).toBe(true)
+					expect(paths.has(rule)).toBe(true)
+					expect(rules).toEqual([
+						`Instructions from: ${agents}\n# Project Instructions`,
+						`Instructions from: ${rule}\n# Coding Rule`,
+					])
+				}).pipe(provideInstruction({ home: dir, config: dir }, { instructions: [rule] }))
+			}),
+		),
+	)
+
 	it.live("loads both project and global AGENTS.md when both exist", () =>
 		Effect.gen(function* () {
 			const globalTmp = yield* tmpWithFiles({ "AGENTS.md": "# Global Instructions" })

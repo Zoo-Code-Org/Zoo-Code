@@ -1,9 +1,9 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1 through 4 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, and no longer depends on Kilo gateway/indexing packages.
-- **Last completed task:** `DEVPLAN.md` Phase 1, Task 4 — Remove Kilo-specific gateway and indexing integrations.
-- **Next task to execute:** `DEVPLAN.md` Phase 1, Task 5 — Normalize runtime/toolchain choice, pending Open Question 2.
+- **Current status:** Phase 1 Tasks 1 through 5 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, and loads project `AGENTS.md` plus `.zoo/rules/*.md` into session instructions.
+- **Last completed task:** `DEVPLAN.md` Phase 1, Task 5 — Add AGENTS and Zoo rules ingestion.
+- **Next task to execute:** `DEVPLAN.md` Phase 1, Task 6 — Implement Roo/Zoo mode ingestion bridge.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
@@ -60,6 +60,9 @@
 - Phase 1 Task 4 removed `@kilocode/kilo-gateway` and `@kilocode/kilo-indexing` dependencies from `packages/zoo-cli`, removed active source imports of those packages, filtered the Kilo gateway provider out of `models.dev` results, disabled bundled indexing with a local stub, and documented BYOK provider onboarding via `models.dev` in the CLI README.
 - `pnpm install` now completes after replacing imported Bun catalog specs with pinned versions and removing unresolved imported workspace-only dependencies from `packages/zoo-cli/package.json`.
 - Phase 1 Task 4 verification completed: `pnpm install`, `node --check packages/zoo-cli/bin/zoo`, `pnpm --filter @zoo-code/cli build`, `pnpm --filter @zoo-code/cli test`, `pnpm --filter @zoo-code/cli check-types`, `pnpm check-types`, `pnpm build`, `pnpm exec turbo test --log-order grouped --output-logs new-only --concurrency=1`, and source/package searches confirming no active `@kilocode/kilo-gateway` or `@kilocode/kilo-indexing` imports remain under `packages/zoo-cli/src` or `packages/zoo-cli/package.json`.
+- Phase 1 Task 5 made `.zoo/rules/*.md` discovery deterministic by filename order, kept Zoo rules ahead of legacy Kilo rule-directory fallbacks, and added focused coverage for missing instructions, rules-only instructions, and combined `AGENTS.md` plus Zoo rules ordering.
+- Phase 1 Task 5 docs were updated in `packages/zoo-cli/README.md` and `CHANGELOG.md` to describe project instruction/rules loading.
+- Phase 1 Task 5 verification completed: `node --check packages/zoo-cli/bin/zoo`, `pnpm --filter @zoo-code/cli build`, `pnpm --filter @zoo-code/cli test`, `pnpm --filter @zoo-code/cli check-types`, `pnpm check-types`, `pnpm build`, and `pnpm exec turbo test --log-order grouped --output-logs new-only --concurrency=1`. Focused imported CLI tests `bun test test/kilocode/rules-migrator.test.ts test/session/instruction.test.ts` remain blocked before execution because imported OpenCode package aliases such as `@opencode-ai/core/*` are unresolved in the current reconciled workspace; this is the same runtime/toolchain caveat as earlier Phase 1 work.
 
 ## How to update this file
 

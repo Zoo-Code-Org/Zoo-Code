@@ -9,7 +9,7 @@ export namespace RulesMigrator {
 
 	// Directory-based rules. Zoo rules are the preferred project location;
 	// Kilo-era locations remain lower-priority migration fallbacks.
-	const KILO_RULES_DIRS = [".zoo/rules", ".kilo/rules", ".kilocode/rules"]
+	const PROJECT_RULES_DIRS = [".zoo/rules", ".kilo/rules", ".kilocode/rules"]
 	const globalRulesDirs = () => [path.join(home(), ".kilo", "rules"), path.join(home(), ".kilocode", "rules")]
 
 	// Known modes for mode-specific rule discovery
@@ -42,7 +42,10 @@ export namespace RulesMigrator {
 	async function findMarkdownFiles(dir: string): Promise<string[]> {
 		try {
 			const entries = await fs.readdir(dir, { withFileTypes: true })
-			return entries.filter((e) => e.isFile() && e.name.endsWith(".md")).map((e) => path.join(dir, e.name))
+			return entries
+				.filter((e) => e.isFile() && e.name.endsWith(".md"))
+				.map((e) => path.join(dir, e.name))
+				.sort((a, b) => a.localeCompare(b))
 		} catch {
 			return []
 		}
@@ -66,7 +69,7 @@ export namespace RulesMigrator {
 
 		// 2. Project .zoo/rules/, with legacy .kilo/.kilocode fallbacks
 		const seen = new Set<string>()
-		for (const rulesRel of KILO_RULES_DIRS) {
+		for (const rulesRel of PROJECT_RULES_DIRS) {
 			const projectRulesDir = path.join(projectDir, rulesRel)
 			if (await isDirectory(projectRulesDir)) {
 				const files = await findMarkdownFiles(projectRulesDir)

@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Rebrand exported workspace package surfaces, CLI-facing examples, and VS Code provider metadata to Zoo Code while preserving legacy Roo migration references.
 - Import Kilo Code's OpenCode-derived portable core into `packages/zoo-cli`, expose Zoo CLI metadata/bins, and add Zoo config path discovery for global/project configs, rules, modes, and ignore files.
 - Remove Kilo gateway/indexing dependencies from the imported CLI package and document BYOK provider onboarding through the OpenCode-style `models.dev` catalog.
+- Load project `AGENTS.md` and `.zoo/rules/*.md` into Zoo CLI session instructions with deterministic rule ordering.
 
 ## [3.54.0] - 2026-05-08
 

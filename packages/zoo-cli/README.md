@@ -65,6 +65,10 @@ Zoo Code reads and writes its primary global config at `~/.config/zoo-code/zoo.j
 Project rules live in `{project}/.zoo/rules/*.md`, project modes in `{project}/.zoo/modes/*.json`, and file access ignore patterns in `{project}/.zooignore`.
 Legacy Kilo/OpenCode paths may still be read as lower-priority migration fallbacks.
 
+## Project Instructions And Rules
+
+Zoo Code CLI loads `{project}/AGENTS.md` as project instructions and `{project}/.zoo/rules/*.md` as rule files for agent sessions. Rules are loaded in deterministic filename order after AGENTS instructions; missing files and empty rules directories are ignored.
+
 ## Alternative Installation
 
 ### Homebrew (macOS/Linux)

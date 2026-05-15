@@ -66,6 +66,20 @@ describe("RulesMigrator", () => {
 			expect(rules[0].path).toContain(`${path.sep}.zoo${path.sep}rules${path.sep}coding.md`)
 		})
 
+		test("discovers .zoo/rules markdown files in deterministic filename order", async () => {
+			await using tmp = await tmpdir({
+				init: async (dir) => {
+					await fs.mkdir(path.join(dir, ".zoo", "rules"), { recursive: true })
+					await Bun.write(path.join(dir, ".zoo", "rules", "z-last.md"), "# Last")
+					await Bun.write(path.join(dir, ".zoo", "rules", "a-first.md"), "# First")
+				},
+			})
+
+			const rules = await RulesMigrator.discoverRules(tmp.path)
+
+			expect(rules.map((rule) => path.basename(rule.path))).toEqual(["a-first.md", "z-last.md"])
+		})
+
 		test("discovers rules from legacy .kilocode/rules/", async () => {
 			await using tmp = await tmpdir({
 				init: async (dir) => {
@@ -194,8 +208,8 @@ describe("RulesMigrator", () => {
 		test("returns instructions array with discovered rules", async () => {
 			await using tmp = await tmpdir({
 				init: async (dir) => {
-					await fs.mkdir(path.join(dir, ".kilo", "rules"), { recursive: true })
-					await Bun.write(path.join(dir, ".kilo", "rules", "main.md"), "# Main rules")
+					await fs.mkdir(path.join(dir, ".zoo", "rules"), { recursive: true })
+					await Bun.write(path.join(dir, ".zoo", "rules", "main.md"), "# Main rules")
 				},
 			})
 
@@ -203,6 +217,7 @@ describe("RulesMigrator", () => {
 
 			expect(result.instructions).toHaveLength(1)
 			expect(result.instructions[0]).toContain("main.md")
+			expect(result.instructions[0]).toContain(`${path.sep}.zoo${path.sep}rules${path.sep}`)
 		})
 
 		test("warns about legacy files", async () => {
