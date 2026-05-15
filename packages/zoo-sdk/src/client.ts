@@ -9,6 +9,8 @@ import type {
 	FindFilesOptions,
 	FindSymbolsOptions,
 	FindTextOptions,
+	FormatterStatus,
+	LspStatus,
 	McpStatusMap,
 	MessageChunk,
 	MessageListOptions,
@@ -44,6 +46,7 @@ import type {
 	SessionStatusMap,
 	SessionUpdateOptions,
 	SessionViewedOptions,
+	SkillInfo,
 	SymbolInfo,
 	Todo,
 	VcsDiffOptions,
@@ -569,6 +572,50 @@ export class ZooClient {
 			unwrap(
 				await this.#transport.request<CommandInfo[] | { data?: CommandInfo[] }>({
 					path: `/command${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List portable-core skills. */
+	async listSkills(options: WorkspaceRouteOptions = {}): Promise<SkillInfo[]> {
+		return (
+			unwrap(
+				await this.#transport.request<SkillInfo[] | { data?: SkillInfo[] }>({
+					path: `/skill${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Read LSP connection status entries. */
+	async getLspStatus(options: WorkspaceRouteOptions = {}): Promise<LspStatus[]> {
+		return (
+			unwrap(
+				await this.#transport.request<LspStatus[] | { data?: LspStatus[] }>({
+					path: `/lsp${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Read formatter availability status entries. */
+	async getFormatterStatus(options: WorkspaceRouteOptions = {}): Promise<FormatterStatus[]> {
+		return (
+			unwrap(
+				await this.#transport.request<FormatterStatus[] | { data?: FormatterStatus[] }>({
+					path: `/formatter${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List portable-core tool IDs. */
+	async listToolIDs(options: WorkspaceRouteOptions = {}): Promise<string[]> {
+		return (
+			unwrap(
+				await this.#transport.request<string[] | { data?: string[] }>({
+					path: `/experimental/tool/ids${workspaceRouteQuery(options)}`,
 				}),
 			) ?? []
 		)

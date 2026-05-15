@@ -232,6 +232,32 @@ export type CommandInfo = {
 	hints: string[]
 }
 
+/** Portable-core skill metadata. */
+export type SkillInfo = {
+	name: string
+	description: string
+	location: string
+	content: string
+	[key: string]: unknown
+}
+
+/** LSP connection status entry. */
+export type LspStatus = {
+	id: string
+	name: string
+	root: string
+	status: "connected" | "error" | string
+	[key: string]: unknown
+}
+
+/** Formatter availability status entry. */
+export type FormatterStatus = {
+	name: string
+	extensions: string[]
+	enabled: boolean
+	[key: string]: unknown
+}
+
 /** Portable-core project metadata. */
 export type Project = {
 	id: string

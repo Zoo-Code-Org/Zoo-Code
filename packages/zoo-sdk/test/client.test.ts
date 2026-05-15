@@ -131,6 +131,20 @@ function transport(): ZooTransport & { requests: any[] } {
 					],
 				}
 			}
+			if (input.path === "/skill?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return {
+					data: [{ name: "review", description: "Review", location: "builtin", content: "Review changes" }],
+				}
+			}
+			if (input.path === "/lsp?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: [{ id: "ts", name: "TypeScript", root: "/repo/root", status: "connected" }] }
+			}
+			if (input.path === "/formatter?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: [{ name: "prettier", extensions: ["ts"], enabled: true }] }
+			}
+			if (input.path === "/experimental/tool/ids?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: ["bash"] }
+			}
 			if (input.path === "/file/content?directory=%2Frepo%2Froot&workspace=workspace-1&path=hello.txt") {
 				return { data: { type: "text", content: "hello" } }
 			}
@@ -541,12 +555,26 @@ describe("ZooClient", () => {
 		await expect(client.listCommands(scope)).resolves.toEqual([
 			{ name: "review", description: "review changes", source: "command", template: "Review", hints: [] },
 		])
+		await expect(client.listSkills(scope)).resolves.toEqual([
+			{ name: "review", description: "Review", location: "builtin", content: "Review changes" },
+		])
+		await expect(client.getLspStatus(scope)).resolves.toEqual([
+			{ id: "ts", name: "TypeScript", root: "/repo/root", status: "connected" },
+		])
+		await expect(client.getFormatterStatus(scope)).resolves.toEqual([
+			{ name: "prettier", extensions: ["ts"], enabled: true },
+		])
+		await expect(client.listToolIDs(scope)).resolves.toEqual(["bash"])
 
-		expect(mock.requests.slice(-4)).toEqual([
+		expect(mock.requests.slice(-8)).toEqual([
 			{ path: "/path?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/vcs?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/vcs/diff?directory=%2Frepo%2Froot&workspace=workspace-1&mode=branch" },
 			{ path: "/command?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/skill?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/lsp?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/formatter?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/experimental/tool/ids?directory=%2Frepo%2Froot&workspace=workspace-1" },
 		])
 	})
 
