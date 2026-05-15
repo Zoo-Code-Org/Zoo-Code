@@ -23,6 +23,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
 import { MessageManager } from "../../message-manager"
+import { PortableSessionAdapter } from "../../../services/portable-core/PortableSessionAdapter"
 
 // Mock setup must come before imports.
 vi.mock("../../prompts/sections/custom-instructions")
@@ -1014,6 +1015,53 @@ describe("ClineProvider", () => {
 			)
 		})
 		expect(task.overwriteClineMessages).toHaveBeenCalledWith(task.clineMessages)
+	})
+
+	test("portable permission bridge consumes validated adapter events", async () => {
+		let emitPermission!: (event: any) => void
+		const permissionEvent = new Promise<any>((resolve) => {
+			emitPermission = resolve
+		})
+		const client = {
+			createSession: vi.fn().mockResolvedValue({ id: "portable-validated-session", title: "Approval" }),
+			listSessions: vi.fn().mockResolvedValue([]),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+			subscribeEvents: vi.fn().mockImplementation(async function* () {
+				yield await permissionEvent
+			}),
+			replyPermission: vi.fn().mockResolvedValue(undefined),
+		}
+		const adapter = new PortableSessionAdapter(client as any)
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			adapter,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Approval")
+
+		emitPermission({
+			type: "permission.asked",
+			properties: {
+				id: "permission-validated-1",
+				sessionID: "portable-validated-session",
+				permission: "bash",
+				metadata: { command: "echo validated" },
+			},
+		})
+
+		await vi.waitFor(() => {
+			expect(task.clineMessages).toContainEqual(
+				expect.objectContaining({ type: "ask", ask: "command", text: "echo validated" }),
+			)
+		})
+		await portableProvider.handleWebviewAskResponse("yesButtonClicked")
+
+		expect(client.subscribeEvents).toHaveBeenCalledOnce()
+		expect(client.replyPermission).toHaveBeenCalledWith("permission-validated-1", { reply: "once" })
 	})
 
 	test("portable permission bridge ignores valid non-permission events", async () => {

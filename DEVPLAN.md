@@ -363,6 +363,8 @@
 
 - **Progress:** Adapter-level deterministic validation is in place for portable-core sessions, streamed message chunks, server event envelopes, non-permission event properties, `permission.asked` event properties, mode lists, and provider-config responses. ClineProvider coverage proves valid non-permission events are ignored while later approval requests still reach the bridge; full extension e2e flow validation still depends on completing visible approval, provider config, and mode UI seams.
 
+- **Progress:** Added deterministic ClineProvider coverage using a real `PortableSessionAdapter` over a fake SDK client, proving validated `permission.asked` events reach the approval UI and replies route back through the SDK boundary.
+
 ## Phase 4 — Config Model Unification
 
 1. Define `zoo.jsonc` schema
