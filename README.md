@@ -55,14 +55,15 @@ for this exact support, so if you are having problems or if you have question, j
 
 Portable-core migration is additive and does not delete existing Roo configuration. The shared Zoo targets are:
 
-| Old/source location               | Zoo portable target                                                          |
-| --------------------------------- | ---------------------------------------------------------------------------- |
-| VS Code provider/profile settings | `~/.config/zoo-code/zoo.jsonc` for user defaults or `{project}/zoo.jsonc`    |
-| Project config                    | `{project}/zoo.jsonc`                                                        |
-| Roo project modes / `.roomodes`   | `{project}/.zoo/modes/*.json`; `.roomodes` remains a lower-priority fallback |
-| Project rules                     | `{project}/.zoo/rules/*.md`                                                  |
-| Ignore patterns                   | `{project}/.zooignore`                                                       |
-| Project instructions              | `{project}/AGENTS.md`                                                        |
+| Old/source location               | Zoo portable target                                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| VS Code provider/profile settings | `~/.config/zoo-code/zoo.jsonc` for user defaults or `{project}/zoo.jsonc`                                           |
+| Project config                    | `{project}/zoo.jsonc`                                                                                               |
+| Roo project modes / `.roomodes`   | `{project}/.zoo/modes/*.json`; `.roomodes` remains a lower-priority fallback                                        |
+| Project rules                     | `{project}/.zoo/rules/*.md`                                                                                         |
+| Project MCP servers               | `{project}/zoo.jsonc` `mcp` object; legacy `.kilocode/mcp.json` and `.kilo/mcp.json` remain CLI migration fallbacks |
+| Ignore patterns                   | `{project}/.zooignore`                                                                                              |
+| Project instructions              | `{project}/AGENTS.md`                                                                                               |
 
 When `zoo-code.usePortableCore` is enabled, provider config comes from `zoo.jsonc` through the CLI portable core and is shown read-only in VS Code settings. Portable modes are CLI-managed: the VS Code mode selector uses modes from portable core, and `.zoo/modes/*.json` takes precedence over `.roomodes` for duplicate mode slugs.
 
@@ -100,7 +101,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 

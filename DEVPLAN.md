@@ -482,6 +482,8 @@
     - **Depends on:** Phase 1, Task 7; Phase 3, Task 12.
     - **Can parallelize with:** Phase 5, Task 4.
 
+    - **Progress:** Closed a narrow MCP parity documentation/schema gap: root migration notes now list project MCP servers as `zoo.jsonc` `mcp` config with legacy `.kilocode/mcp.json` and `.kilo/mcp.json` as CLI migration fallbacks, and generated `zoo.jsonc` schema coverage now pins local and remote MCP config acceptance.
+
 6. Add CLI JSON output for scripting
 
     - **What:** Implement `--json` output for relevant CLI operations as the CLI-only intentional divergence for scripting/headless use.

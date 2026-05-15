@@ -569,7 +569,7 @@ test("generated zoo.jsonc schema covers provider model agent rules and permissio
 	const schema = z.toJSONSchema(Config.Info.zod, { io: "input" }) as { properties?: Record<string, unknown> }
 
 	expect(Object.keys(schema.properties ?? {})).toEqual(
-		expect.arrayContaining(["provider", "model", "default_agent", "agent", "instructions", "permission"]),
+		expect.arrayContaining(["provider", "model", "default_agent", "agent", "instructions", "permission", "mcp"]),
 	)
 
 	const parsed = Config.Info.zod.safeParse({
@@ -598,6 +598,18 @@ test("generated zoo.jsonc schema covers provider model agent rules and permissio
 			},
 		},
 		instructions: ["AGENTS.md", ".zoo/rules/security.md"],
+		mcp: {
+			filesystem: {
+				type: "local",
+				command: ["node", "server.js"],
+				enabled: false,
+			},
+			remoteDocs: {
+				type: "remote",
+				url: "https://example.com/mcp",
+				oauth: false,
+			},
+		},
 		permission: {
 			read: "allow",
 			edit: { "src/**": "ask" },
