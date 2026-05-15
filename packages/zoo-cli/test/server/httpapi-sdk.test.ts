@@ -439,6 +439,33 @@ describe("HttpApi SDK", () => {
 	)
 	// kilocode_change end
 
+	parity("matches generated SDK MCP status behavior across backends", (backend) =>
+		withProject(
+			backend,
+			{
+				git: false,
+				config: {
+					mcp: {
+						demo: {
+							type: "local",
+							command: ["echo", "demo"],
+							enabled: false,
+						},
+					},
+				},
+			},
+			({ sdk }) =>
+				Effect.gen(function* () {
+					const mcpStatus = yield* capture(() => sdk.mcp.status())
+
+					return {
+						statuses: statuses({ mcpStatus }),
+						body: mcpStatus.data,
+					}
+				}),
+		),
+	)
+
 	parity("matches generated SDK question routes across backends", (backend) =>
 		withProject(backend, { git: false }, ({ sdk }) =>
 			Effect.gen(function* () {
