@@ -22,6 +22,7 @@ import type {
 	SessionFileDiff,
 	SessionForkOptions,
 	SessionListOptions,
+	SessionRevertOptions,
 	SessionStatusMap,
 	SessionUpdateOptions,
 	SessionViewedOptions,
@@ -207,6 +208,47 @@ export class ZooClient {
 				method: "POST",
 				path: `/session/${encodeURIComponent(sessionID)}/fork`,
 				body: options,
+			}),
+		)
+	}
+
+	/** Share a session and return its updated metadata. */
+	async shareSession(sessionID: string): Promise<Session> {
+		return unwrap(
+			await this.#transport.request<Session | { data?: Session }>({
+				method: "POST",
+				path: `/session/${encodeURIComponent(sessionID)}/share`,
+			}),
+		)
+	}
+
+	/** Remove sharing from a session and return its updated metadata. */
+	async unshareSession(sessionID: string): Promise<Session> {
+		return unwrap(
+			await this.#transport.request<Session | { data?: Session }>({
+				method: "DELETE",
+				path: `/session/${encodeURIComponent(sessionID)}/share`,
+			}),
+		)
+	}
+
+	/** Revert a session to a prior message or part. */
+	async revertSession(sessionID: string, options: SessionRevertOptions): Promise<Session> {
+		return unwrap(
+			await this.#transport.request<Session | { data?: Session }>({
+				method: "POST",
+				path: `/session/${encodeURIComponent(sessionID)}/revert`,
+				body: options,
+			}),
+		)
+	}
+
+	/** Clear a session revert state. */
+	async unrevertSession(sessionID: string): Promise<Session> {
+		return unwrap(
+			await this.#transport.request<Session | { data?: Session }>({
+				method: "POST",
+				path: `/session/${encodeURIComponent(sessionID)}/unrevert`,
 			}),
 		)
 	}

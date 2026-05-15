@@ -21,6 +21,12 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/session/ses_1" && input.method === "DELETE") return { data: true }
 			if (input.path === "/session/viewed") return { data: true }
 			if (input.path === "/session/ses_1/fork") return { data: { id: "ses_fork", parentID: "ses_1" } }
+			if (input.path === "/session/ses_1/share" && input.method === "POST") {
+				return { data: { id: "ses_1", share: { url: "https://share.example/ses_1" } } }
+			}
+			if (input.path === "/session/ses_1/share" && input.method === "DELETE") return { data: { id: "ses_1" } }
+			if (input.path === "/session/ses_1/revert") return { data: { id: "ses_1", revert: input.body } }
+			if (input.path === "/session/ses_1/unrevert") return { data: { id: "ses_1" } }
 			if (input.path === "/session/ses_1/diff?messageID=msg_1") {
 				return {
 					data: [
@@ -223,13 +229,27 @@ describe("ZooClient", () => {
 			id: "ses_fork",
 			parentID: "ses_1",
 		})
+		await expect(client.shareSession("ses_1")).resolves.toEqual({
+			id: "ses_1",
+			share: { url: "https://share.example/ses_1" },
+		})
+		await expect(client.unshareSession("ses_1")).resolves.toEqual({ id: "ses_1" })
+		await expect(client.revertSession("ses_1", { messageID: "msg_1", partID: "part_1" })).resolves.toEqual({
+			id: "ses_1",
+			revert: { messageID: "msg_1", partID: "part_1" },
+		})
+		await expect(client.unrevertSession("ses_1")).resolves.toEqual({ id: "ses_1" })
 		await expect(client.getSessionDiff("ses_1", { messageID: "msg_1" })).resolves.toEqual([
 			{ file: "src/app.ts", before: "old\n", after: "new\n", additions: 1, deletions: 1 },
 		])
 
-		expect(mock.requests.slice(-3)).toEqual([
+		expect(mock.requests.slice(-7)).toEqual([
 			{ method: "POST", path: "/session/viewed", body: { focused: ["ses_1"], open: ["ses_1", "ses_2"] } },
 			{ method: "POST", path: "/session/ses_1/fork", body: { messageID: "msg_1" } },
+			{ method: "POST", path: "/session/ses_1/share" },
+			{ method: "DELETE", path: "/session/ses_1/share" },
+			{ method: "POST", path: "/session/ses_1/revert", body: { messageID: "msg_1", partID: "part_1" } },
+			{ method: "POST", path: "/session/ses_1/unrevert" },
 			{ path: "/session/ses_1/diff?messageID=msg_1" },
 		])
 	})

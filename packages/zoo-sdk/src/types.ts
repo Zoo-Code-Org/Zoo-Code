@@ -307,6 +307,14 @@ export type SessionDiffOptions = {
 	messageID?: string
 }
 
+/** Options for reverting a session to a prior message or part. */
+export type SessionRevertOptions = {
+	/** Message to revert to. */
+	messageID: string
+	/** Optional part within the message to revert to. */
+	partID?: string
+}
+
 /** File diff returned for a session checkpoint. */
 export type SessionFileDiff = {
 	/** Relative file path. */
