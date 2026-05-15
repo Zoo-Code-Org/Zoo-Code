@@ -14,6 +14,8 @@ describe("PortableSessionAdapter", () => {
 		}),
 		replyPermission: vitest.fn().mockResolvedValue(undefined),
 		listModes: vitest.fn().mockResolvedValue([{ id: "code", name: "Code" }]),
+		getConfig: vitest.fn().mockResolvedValue({ model: "anthropic/claude" }),
+		getConfigProviders: vitest.fn().mockResolvedValue({ default: "anthropic", providers: [] }),
 	})
 
 	it("maps create/list/get session calls to the Zoo SDK client", async () => {
@@ -65,6 +67,16 @@ describe("PortableSessionAdapter", () => {
 
 		await expect(adapter.listModes()).resolves.toEqual([{ id: "code", name: "Code" }])
 		expect(client.listModes).toHaveBeenCalledTimes(1)
+	})
+
+	it("maps config reads to the Zoo SDK client", async () => {
+		const client = createClient()
+		const adapter = new PortableSessionAdapter(client as any)
+
+		await expect(adapter.getConfig()).resolves.toEqual({ model: "anthropic/claude" })
+		await expect(adapter.getConfigProviders()).resolves.toEqual({ default: "anthropic", providers: [] })
+		expect(client.getConfig).toHaveBeenCalledTimes(1)
+		expect(client.getConfigProviders).toHaveBeenCalledTimes(1)
 	})
 
 	it("rejects malformed session responses", async () => {

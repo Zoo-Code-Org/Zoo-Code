@@ -11,6 +11,8 @@ function transport(): ZooTransport & { requests: any[] } {
 				return input.method === "POST" ? { data: { id: "ses_1" } } : { data: [{ id: "ses_1" }] }
 			if (input.path === "/session/ses_1") return { data: { id: "ses_1" } }
 			if (input.path === "/agent") return { data: [{ id: "code", name: "Code", description: "Code mode" }] }
+			if (input.path === "/config") return { data: { model: "anthropic/claude" } }
+			if (input.path === "/config/providers") return { data: { default: "anthropic", providers: [] } }
 			return { data: undefined }
 		},
 		async *stream(input) {
@@ -95,5 +97,14 @@ describe("ZooClient", () => {
 
 		await expect(client.listModes()).resolves.toEqual([{ id: "code", name: "Code", description: "Code mode" }])
 		expect(mock.requests.at(-1)).toEqual({ path: "/agent" })
+	})
+
+	test("reads portable core config and configured providers", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.getConfig()).resolves.toEqual({ model: "anthropic/claude" })
+		await expect(client.getConfigProviders()).resolves.toEqual({ default: "anthropic", providers: [] })
+		expect(mock.requests.slice(-2)).toEqual([{ path: "/config" }, { path: "/config/providers" }])
 	})
 })

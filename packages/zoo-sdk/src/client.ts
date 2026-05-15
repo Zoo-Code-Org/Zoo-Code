@@ -2,12 +2,14 @@ import { createHttpTransport, createIpcTransport, type ZooTransport } from "./tr
 import type {
 	MessageChunk,
 	Mode,
+	ConfigProvidersResult,
 	PermissionReply,
 	SendMessageOptions,
 	Session,
 	SessionCreateOptions,
 	SessionListOptions,
 	ZooEvent,
+	ZooConfig,
 	ZooServerEvent,
 } from "./types.js"
 
@@ -137,6 +139,22 @@ export class ZooClient {
 				primary: typeof record.primary === "boolean" ? record.primary : undefined,
 			}
 		})
+	}
+
+	/** Read the portable-core configuration snapshot. */
+	async getConfig(): Promise<ZooConfig> {
+		return unwrap(await this.#transport.request<ZooConfig | { data?: ZooConfig }>({ path: "/config" })) ?? {}
+	}
+
+	/** Read configured providers/defaults from the portable core. */
+	async getConfigProviders(): Promise<ConfigProvidersResult> {
+		return (
+			unwrap(
+				await this.#transport.request<ConfigProvidersResult | { data?: ConfigProvidersResult }>({
+					path: "/config/providers",
+				}),
+			) ?? {}
+		)
 	}
 
 	/** Close any transport resources owned by this client. */

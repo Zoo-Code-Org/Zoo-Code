@@ -159,3 +159,13 @@ export type PermissionReply = {
 	/** Optional user feedback for rejected requests. */
 	message?: string
 }
+
+/** Portable-core configuration snapshot. Shape is intentionally loose while zoo.jsonc schema stabilizes. */
+export type ZooConfig = Record<string, unknown>
+
+/** Configured provider/default-model data returned by the portable core. */
+export type ConfigProvidersResult = {
+	providers?: Provider[] | Record<string, unknown>
+	default?: unknown
+	[key: string]: unknown
+}

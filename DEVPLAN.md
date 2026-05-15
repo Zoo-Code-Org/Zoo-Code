@@ -322,6 +322,8 @@
     - **Depends on:** Phase 3, Task 3; Phase 4, Tasks 1 and 2.
     - **Can parallelize with:** Phase 3, Task 10 after config schema is stable.
 
+    - **Progress:** SDK and VS Code adapter can read portable-core `/config` and `/config/providers` for future provider-state migration. The VS Code UI still uses legacy profiles until Phase 4 config schema/loader migration semantics are stable.
+
 10. Rewire mode selection actions
 
 - **What:** Route webview/command mode selection through SDK/CLI mode APIs under the feature flag so `.roomodes` and `.zoo/modes` selections match CLI behavior.

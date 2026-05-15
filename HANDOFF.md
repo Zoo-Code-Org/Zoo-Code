@@ -151,6 +151,10 @@
     - `@zoo-code/sdk` now exposes `listModes()` backed by the CLI `/agent` route, and `PortableSessionAdapter` forwards mode listing.
     - `ClineProvider` now includes the current selected VS Code mode in portable-core `sendMessage()` options for text-only sends.
     - Remaining Task 10 work: replace webview mode list/state with portable-core mode data when the flag is enabled and define persistent mode/session selection semantics.
+- Phase 3 Task 9 started, not complete:
+    - `@zoo-code/sdk` now exposes read-only `getConfig()` and `getConfigProviders()` wrappers for CLI `/config` and `/config/providers`.
+    - `PortableSessionAdapter` forwards portable-core config/provider reads for future VS Code provider state migration.
+    - Remaining Task 9 work: decide and implement how portable config maps into `ExtensionState.apiConfiguration`/settings UI without mutating legacy VS Code profiles, after Phase 4 schema/loader semantics are stable.
 
 ## How to update this file
 

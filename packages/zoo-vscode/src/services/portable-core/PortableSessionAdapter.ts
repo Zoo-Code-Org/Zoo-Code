@@ -1,11 +1,13 @@
 import type {
 	MessageChunk,
 	Mode,
+	ConfigProvidersResult,
 	PermissionReply,
 	Session,
 	SessionCreateOptions,
 	SessionListOptions,
 	ZooClient,
+	ZooConfig,
 	ZooServerEvent,
 } from "@zoo-code/sdk"
 
@@ -65,6 +67,16 @@ export class PortableSessionAdapter {
 	/** List portable-core modes/agents available for message routing. */
 	listModes(): Promise<Mode[]> {
 		return this.client.listModes()
+	}
+
+	/** Read the portable-core configuration snapshot. */
+	getConfig(): Promise<ZooConfig> {
+		return this.client.getConfig()
+	}
+
+	/** Read configured providers/defaults from the portable core. */
+	getConfigProviders(): Promise<ConfigProvidersResult> {
+		return this.client.getConfigProviders()
 	}
 }
 
