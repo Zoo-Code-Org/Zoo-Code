@@ -412,6 +412,119 @@ test("loads Zoo-native provider and agent settings from zoo.jsonc", async () => 
 	})
 })
 
+test("loads Zoo-native .zoo/modes as agents through config loader", async () => {
+	await using tmp = await tmpdir({
+		init: async (dir) => {
+			await fs.mkdir(path.join(dir, ".zoo", "modes"), { recursive: true })
+			await Bun.write(
+				path.join(dir, ".zoo", "modes", "reviewer.json"),
+				JSON.stringify({
+					name: "Reviewer",
+					description: "Review code changes",
+					prompt: "Review the change for correctness.",
+					groups: ["read", "edit"],
+				}),
+			)
+		},
+	})
+
+	await Instance.provide({
+		directory: tmp.path,
+		fn: async () => {
+			const config = await load()
+
+			expect(config.agent?.reviewer).toMatchObject({
+				description: "Review code changes",
+				mode: "primary",
+				prompt: "Review the change for correctness.",
+				permission: {
+					read: "allow",
+					edit: "allow",
+					bash: "deny",
+					mcp: "deny",
+				},
+			})
+		},
+	})
+})
+
+test("loads Zoo-native .zoo/rules as instructions through config loader", async () => {
+	await using tmp = await tmpdir({
+		init: async (dir) => {
+			await fs.mkdir(path.join(dir, ".zoo", "rules"), { recursive: true })
+			await Bun.write(path.join(dir, ".zoo", "rules", "z-last.md"), "# Last")
+			await Bun.write(path.join(dir, ".zoo", "rules", "a-first.md"), "# First")
+		},
+	})
+
+	await Instance.provide({
+		directory: tmp.path,
+		fn: async () => {
+			const config = await load()
+
+			expect(config.instructions?.map((file) => path.relative(tmp.path, file))).toEqual([
+				path.join(".zoo", "rules", "a-first.md"),
+				path.join(".zoo", "rules", "z-last.md"),
+			])
+		},
+	})
+})
+
+test("loads Zoo-native .zooignore as read and edit permissions through config loader", async () => {
+	await using tmp = await tmpdir({
+		init: async (dir) => {
+			await Bun.write(path.join(dir, ".zooignore"), "secrets/\n*.env\n!.env.example")
+		},
+	})
+
+	await Instance.provide({
+		directory: tmp.path,
+		fn: async () => {
+			const config = await load()
+			const expected = {
+				"*": "allow",
+				"secrets/*": "deny",
+				"*.env": "deny",
+				".env.example": "allow",
+			} as const
+
+			expect(config.permission?.read).toEqual(expected)
+			expect(config.permission?.edit).toEqual(expected)
+		},
+	})
+})
+
+test("prefers Zoo-native mode config over legacy migration fallbacks", async () => {
+	await using tmp = await tmpdir({
+		init: async (dir) => {
+			await Bun.write(
+				path.join(dir, ".roomodes"),
+				`customModes:
+  - slug: reviewer
+    name: Reviewer
+    roleDefinition: Roo reviewer
+    groups:
+      - read`,
+			)
+			await fs.mkdir(path.join(dir, ".zoo", "modes"), { recursive: true })
+			await Bun.write(
+				path.join(dir, ".zoo", "modes", "reviewer.json"),
+				JSON.stringify({ name: "Reviewer", prompt: "Zoo reviewer", groups: ["read", "edit"] }),
+			)
+		},
+	})
+
+	await Instance.provide({
+		directory: tmp.path,
+		fn: async () => {
+			const config = await load()
+
+			expect(config.agent?.reviewer?.prompt).toBe("Zoo reviewer")
+			expect(config.agent?.reviewer?.permission?.edit).toBe("allow")
+		},
+	})
+})
+
 test("jsonc overrides json in the same directory", async () => {
 	await using tmp = await tmpdir({
 		init: async (dir) => {

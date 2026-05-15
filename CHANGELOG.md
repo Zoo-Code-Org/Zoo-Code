@@ -36,6 +36,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Show portable provider config as read-only in VS Code settings and avoid saving it into legacy provider profiles.
 - Add Zoo CLI config-loader coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
 - Add Zoo CLI config-loader coverage for project `zoo.jsonc` provider, primary agent, model, and instruction fields.
+- Add Zoo CLI config-loader coverage for `.zoo/modes`, `.zoo/rules`, `.zooignore`, and Zoo-over-legacy mode precedence.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
 ## [3.54.0] - 2026-05-08

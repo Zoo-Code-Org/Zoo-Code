@@ -385,7 +385,7 @@
     - **Depends on:** Phase 4, Task 1; Phase 1, Task 3.
     - **Can parallelize with:** Phase 4, Task 4 after schema is stable.
 
-    - **Progress:** Added regression coverage proving the existing config loader accepts `watcher.ignore` arrays and reports warnings for invalid watcher ignore shapes. Added focused coverage proving project `zoo.jsonc` loads Zoo-native provider, primary agent, model, and instruction fields through the unified config loader.
+    - **Progress:** Added regression coverage proving the existing config loader accepts `watcher.ignore` arrays and reports warnings for invalid watcher ignore shapes. Added focused coverage proving project `zoo.jsonc` loads Zoo-native provider, primary agent, model, and instruction fields through the unified config loader. Added focused `Config.get()` integration coverage proving `.zoo/modes/*.json` becomes agent config, `.zoo/rules/*.md` becomes deterministic instructions, `.zooignore` becomes read/edit permission rules with negation support, and `.zoo/modes` overrides legacy `.roomodes` for the same slug.
 
 3. Add VS Code config watcher for portable core
 
