@@ -194,12 +194,32 @@ export type Permission = {
 
 /** Git worktree metadata shared across CLI and editor surfaces. */
 export type WorktreeInfo = {
-	/** Worktree identifier or path. */
-	id: string
-	/** Absolute worktree path. */
-	path: string
+	/** Worktree name returned by the portable core. */
+	name?: string
 	/** Current branch if known. */
 	branch?: string
+	/** Absolute worktree directory. */
+	directory?: string
+	/** Worktree identifier or path alias for SDK callers. */
+	id?: string
+	/** Absolute worktree path alias for SDK callers. */
+	path?: string
+	/** Additional server-provided fields. */
+	[key: string]: unknown
+}
+
+/** Options for creating a worktree. */
+export type WorktreeCreateOptions = {
+	/** Optional worktree name. */
+	name?: string
+	/** Optional setup command to run after creating the worktree. */
+	startCommand?: string
+}
+
+/** Options for operations that target a worktree directory. */
+export type WorktreeDirectoryOptions = {
+	/** Worktree directory to target. */
+	directory: string
 }
 
 /** Options used to create a new session. */

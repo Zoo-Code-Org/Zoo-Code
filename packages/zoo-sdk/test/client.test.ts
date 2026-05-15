@@ -82,6 +82,12 @@ function transport(): ZooTransport & { requests: any[] } {
 				}
 			}
 			if (input.path === "/provider/anthropic/oauth/callback") return { data: true }
+			if (input.path === "/experimental/worktree" && input.method === "POST") {
+				return { data: { name: "feature", branch: "opencode/feature", directory: "/tmp/repo-feature" } }
+			}
+			if (input.path === "/experimental/worktree" && input.method === "DELETE") return { data: true }
+			if (input.path === "/experimental/worktree") return { data: ["/tmp/repo-feature"] }
+			if (input.path === "/experimental/worktree/reset") return { data: true }
 			return { data: undefined }
 		},
 		async *stream(input) {
@@ -302,6 +308,31 @@ describe("ZooClient", () => {
 				path: "/provider/anthropic/oauth/callback",
 				body: { method: 0, code: "oauth-code" },
 			},
+		])
+	})
+
+	test("wraps worktree lifecycle routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.listWorktrees()).resolves.toEqual(["/tmp/repo-feature"])
+		await expect(client.createWorktree({ name: "feature", startCommand: "bun install" })).resolves.toEqual({
+			name: "feature",
+			branch: "opencode/feature",
+			directory: "/tmp/repo-feature",
+		})
+		await expect(client.removeWorktree({ directory: "/tmp/repo-feature" })).resolves.toBe(true)
+		await expect(client.resetWorktree("/tmp/repo-feature")).resolves.toBe(true)
+
+		expect(mock.requests.slice(-4)).toEqual([
+			{ path: "/experimental/worktree" },
+			{
+				method: "POST",
+				path: "/experimental/worktree",
+				body: { name: "feature", startCommand: "bun install" },
+			},
+			{ method: "DELETE", path: "/experimental/worktree", body: { directory: "/tmp/repo-feature" } },
+			{ method: "POST", path: "/experimental/worktree/reset", body: { directory: "/tmp/repo-feature" } },
 		])
 	})
 })

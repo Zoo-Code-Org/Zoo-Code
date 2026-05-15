@@ -22,6 +22,9 @@ import type {
 	SessionStatusMap,
 	SessionUpdateOptions,
 	Todo,
+	WorktreeCreateOptions,
+	WorktreeDirectoryOptions,
+	WorktreeInfo,
 	ZooEvent,
 	ZooConfig,
 	ZooServerEvent,
@@ -57,6 +60,10 @@ function messageListQuery(options: MessageListOptions = {}) {
 	if (options.before) params.set("before", options.before)
 	const query = params.toString()
 	return query ? `?${query}` : ""
+}
+
+function worktreeDirectoryBody(input: string | WorktreeDirectoryOptions): WorktreeDirectoryOptions {
+	return typeof input === "string" ? { directory: input } : input
 }
 
 /** Client for the Zoo Code portable-core server. */
@@ -347,6 +354,51 @@ export class ZooClient {
 					path: "/config/providers",
 				}),
 			) ?? {}
+		)
+	}
+
+	/** List portable-core worktree directories. */
+	async listWorktrees(): Promise<string[]> {
+		return (
+			unwrap(await this.#transport.request<string[] | { data?: string[] }>({ path: "/experimental/worktree" })) ??
+			[]
+		)
+	}
+
+	/** Create a portable-core worktree. */
+	async createWorktree(options: WorktreeCreateOptions = {}): Promise<WorktreeInfo> {
+		return unwrap(
+			await this.#transport.request<WorktreeInfo | { data?: WorktreeInfo }>({
+				method: "POST",
+				path: "/experimental/worktree",
+				body: options,
+			}),
+		)
+	}
+
+	/** Remove a portable-core worktree. */
+	async removeWorktree(input: string | WorktreeDirectoryOptions): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "DELETE",
+					path: "/experimental/worktree",
+					body: worktreeDirectoryBody(input),
+				}),
+			) ?? false
+		)
+	}
+
+	/** Reset a portable-core worktree. */
+	async resetWorktree(input: string | WorktreeDirectoryOptions): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: "/experimental/worktree/reset",
+					body: worktreeDirectoryBody(input),
+				}),
+			) ?? false
 		)
 	}
 
