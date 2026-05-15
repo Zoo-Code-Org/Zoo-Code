@@ -400,6 +400,7 @@ describe("HttpApi SDK", () => {
 				const skills = yield* capture(() => sdk.app.skills())
 				const tools = yield* capture(() => sdk.tool.ids())
 				const vcs = yield* capture(() => sdk.vcs.get())
+				const vcsDiff = yield* capture(() => sdk.vcs.diff({ mode: "git" }))
 				const formatter = yield* capture(() => sdk.formatter.status())
 				const lsp = yield* capture(() => sdk.lsp.status())
 
@@ -418,6 +419,7 @@ describe("HttpApi SDK", () => {
 						skills,
 						tools,
 						vcs,
+						vcsDiff,
 						formatter,
 						lsp,
 					}),
