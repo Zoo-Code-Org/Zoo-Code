@@ -79,6 +79,24 @@ describe("PortableSessionAdapter", () => {
 		expect(events).toEqual([{ type: "server.connected", properties: { ok: true } }])
 	})
 
+	it("rejects malformed non-permission event properties", async () => {
+		const client = createClient()
+		client.subscribeEvents.mockImplementationOnce(async function* () {
+			yield { type: "server.connected", properties: {} }
+			yield { type: "server.heartbeat", properties: null }
+		})
+		const adapter = new PortableSessionAdapter(client as any)
+		const events: unknown[] = []
+
+		await expect(async () => {
+			for await (const event of adapter.subscribeEvents()) {
+				events.push(event)
+			}
+		}).rejects.toThrow("subscribeEvents returned an event with invalid properties")
+
+		expect(events).toEqual([{ type: "server.connected", properties: {} }])
+	})
+
 	it("rejects malformed permission asked events", async () => {
 		const client = createClient()
 		client.subscribeEvents.mockImplementationOnce(async function* () {

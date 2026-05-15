@@ -1016,6 +1016,50 @@ describe("ClineProvider", () => {
 		expect(task.overwriteClineMessages).toHaveBeenCalledWith(task.clineMessages)
 	})
 
+	test("portable permission bridge ignores valid non-permission events", async () => {
+		let emitPermission!: (event: any) => void
+		const permissionEvent = new Promise<any>((resolve) => {
+			emitPermission = resolve
+		})
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-mixed-event-session", title: "Approval" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+			subscribeEvents: vi.fn().mockImplementation(async function* () {
+				yield { type: "server.connected", properties: {} }
+				yield await permissionEvent
+			}),
+			replyPermission: vi.fn().mockResolvedValue(undefined),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Approval")
+		emitPermission({
+			type: "permission.asked",
+			properties: {
+				id: "permission-mixed-1",
+				sessionID: "portable-mixed-event-session",
+				permission: "bash",
+				metadata: { command: "pwd" },
+			},
+		})
+
+		await vi.waitFor(() => {
+			expect(task.clineMessages).toContainEqual(
+				expect.objectContaining({ type: "ask", ask: "command", text: "pwd" }),
+			)
+		})
+		expect(task.clineMessages.filter((message) => message.type === "ask")).toHaveLength(1)
+	})
+
 	test("portable permission yes and no responses reply to pending request", async () => {
 		let emitPermission!: (event: any) => void
 		const permissionEvent = new Promise<any>((resolve) => {

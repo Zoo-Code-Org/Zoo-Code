@@ -108,6 +108,11 @@ async function* validateServerEvents(
 			throw new Error("Portable core subscribeEvents returned an event without a string type")
 		}
 
+		const properties = (event as { properties?: unknown }).properties
+		if (properties !== undefined && (!properties || typeof properties !== "object")) {
+			throw new Error("Portable core subscribeEvents returned an event with invalid properties")
+		}
+
 		if ((event as { type: string }).type === "permission.asked") {
 			validatePermissionAskedEvent(event)
 		}
