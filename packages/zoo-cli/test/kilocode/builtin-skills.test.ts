@@ -21,7 +21,7 @@ test("built-in skills are present in empty project", async () => {
 				expect(found).toBeDefined()
 				expect(found!.location).toBe(Skill.BUILTIN_LOCATION)
 				expect(found!.description).toBe(builtin.description)
-				expect(found!.content.length).toBeGreaterThan(0)
+				expect(found!.content).toContain("# Zoo CLI Configuration Reference")
 			}
 		},
 	})
@@ -37,7 +37,7 @@ test("built-in skill has correct metadata", async () => {
 			expect(skill).toBeDefined()
 			expect(skill!.name).toBe("kilo-config")
 			expect(skill!.location).toBe(Skill.BUILTIN_LOCATION)
-			expect(skill!.content).toContain("kilo")
+			expect(skill!.content).toContain("# Zoo CLI Configuration Reference")
 		},
 	})
 })

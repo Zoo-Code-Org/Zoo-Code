@@ -7,6 +7,7 @@
 - [✅] Restore real `@zoo-code/cli` typechecking in workspace `pnpm check-types` by reconciling imported Kilo/OpenCode type drift and stale gateway/indexing tests.
 - [✅] Restore `@zoo-code/cli` broader imported test and build blocker coverage by running `test:opencode` through an explicit quarantine list and aligning `build:opencode` with the current-platform monorepo build path.
 - [✅] Clean up stale imported Kilo/OpenCode config docs by labeling legacy paths as migration fallbacks, documenting Zoo portable config paths, and removing bundled Kilo Gateway notification guidance.
+- [✅] Fix built-in markdown skill loading under Bun tests by importing the bundled config skill as text and hardening coverage to assert real markdown content.
 
 ## Phase 0 — Fork and Rebrand
 
