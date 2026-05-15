@@ -3,7 +3,21 @@
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"types": "./dist/index.d.ts",
+	"main": "./dist/index.js",
 	"scripts": {
-		"build": "node -e \"\""
+		"build": "tsc -p tsconfig.json",
+		"check-types": "tsc -p tsconfig.json --noEmit",
+		"test": "bun test test"
+	},
+	"devDependencies": {
+		"@types/node": "^22.15.30",
+		"typescript": "^5.8.3"
 	}
 }

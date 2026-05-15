@@ -165,7 +165,7 @@
 
 ## Phase 2 — Zoo SDK Package
 
-1. Define SDK package exports and shared types
+1. [✅] Define SDK package exports and shared types
 
     - **What:** Create `@zoo-code/sdk` with exported shared types: `Session`, `Message`, `MessageChunk`, `ToolCall`, `ToolResult`, `Provider`, `Mode`, `Permission`, and `WorktreeInfo`.
     - **Files touched:** `packages/zoo-sdk/package.json`, `packages/zoo-sdk/src/types.ts`, `packages/zoo-sdk/src/index.ts`, package tsconfig/build files, README.
@@ -176,7 +176,7 @@
     - **Depends on:** Phase 0 complete; Phase 1, Task 1 for server API reference.
     - **Can parallelize with:** Phase 1, Tasks 3-7; Phase 4, Task 1.
 
-2. Implement `ZooClient` interface
+2. [✅] Implement `ZooClient` interface
 
     - **What:** Implement `ZooClient` with `connect`, `createSession`, `sendMessage`, `getSession`, `listSessions`, `abortSession`, and `on` methods matching SPEC section 4 Phase 2.
     - **Files touched:** `packages/zoo-sdk/src/client.ts`, `packages/zoo-sdk/src/index.ts`, SDK tests.
@@ -187,7 +187,7 @@
     - **Depends on:** Phase 2, Task 1.
     - **Can parallelize with:** Phase 2, Task 3 after transport contract is agreed.
 
-3. Implement IPC/HTTP transport layer
+3. [✅] Implement IPC/HTTP transport layer
 
     - **What:** Wrap the CLI local IPC/HTTP server API so SDK consumers can connect via `ipcPath` or `httpPort`, following Kilo's SDK pattern.
     - **Files touched:** `packages/zoo-sdk/src/transport/**` or equivalent, `packages/zoo-sdk/src/client.ts`, transport tests.
@@ -198,7 +198,7 @@
     - **Depends on:** Phase 2, Task 2; Phase 1, Task 8 for actual server verification.
     - **Can parallelize with:** Phase 2, Task 4 after client construction exists.
 
-4. Implement CLI process lifecycle management
+4. [✅] Implement CLI process lifecycle management
 
     - **What:** Add SDK functionality to detect an existing Zoo CLI server, spawn `zoo server --ipc /tmp/zoo-{pid}.sock` when needed, gracefully stop it, and restart unexpected exits up to three times before surfacing an error.
     - **Files touched:** `packages/zoo-sdk/src/process/**` or equivalent, `packages/zoo-sdk/src/client.ts`, lifecycle tests.
@@ -209,7 +209,7 @@
     - **Depends on:** Phase 2, Tasks 2 and 3.
     - **Can parallelize with:** Phase 1, Task 9.
 
-5. Add SDK round-trip integration coverage
+5. [✅] Add SDK round-trip integration coverage
     - **What:** Add integration tests that exercise `ZooClient` against a mocked or real local `zoo-cli` server for session creation, streaming, session listing, abort, and shutdown.
     - **Files touched:** `packages/zoo-sdk/test/**`, test fixtures, CI/test scripts if needed.
     - **Acceptance criteria:** SDK round trips pass deterministically without real LLM calls; tests validate message chunk order and lifecycle cleanup.

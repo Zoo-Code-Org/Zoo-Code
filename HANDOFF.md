@@ -1,9 +1,9 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1 through 9 are implemented on top of the completed Phase 0 foundation, and the imported Zoo CLI can now resolve local Kilo/OpenCode compatibility packages for `@opencode-ai/core/*`, `@kilocode/sdk`, and `@kilocode/plugin`. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity through catalog-backed and OpenAI-compatible providers, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, can prepare the current-platform CLI binary for VSIX assets, runs real focused and broader imported CLI test suites, has current-platform local build scripts, and is covered by the real workspace `check-types` task.
-- **Last completed task:** Phase 1 Task 9 — VS Code CLI binary preparation script.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 2 SDK implementation.
+- **Current status:** Phase 1 Tasks 1 through 9 and Phase 2 Tasks 1 through 5 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers with mocked/unit coverage.
+- **Last completed task:** Phase 2 Tasks 1-5 — initial Zoo SDK implementation and tests.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 1 audit or Task 2 portable-core feature flag scaffold, then gate SDK-backed VS Code activation paths.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
@@ -103,6 +103,10 @@
     - `packages/zoo-vscode/src/package.json` now exposes `prepare:cli-binary`, implemented by `packages/zoo-vscode/src/script/local-bin.ts`.
     - The script copies the current-platform `packages/zoo-cli/dist/@zoo-code/cli-<platform>/bin/zoo` artifact into `packages/zoo-vscode/src/assets/bin/`, writes a small manifest, and supports `ZOO_CLI_BINARY` for release-pipeline artifacts.
     - `.vscodeignore` now includes `assets/bin/**` so prepared CLI binaries are packaged into the VSIX.
+- Phase 2 SDK implementation:
+    - `packages/zoo-sdk` now builds with `tsc`, exports package-root types and JS from `dist`, and has a real `test` script.
+    - `ZooClient` supports session create/list/get/abort and streaming `sendMessage()` over injected, HTTP, or IPC transports.
+    - HTTP and Unix-socket IPC transports are covered with mocked/fake local servers. `createZooServer()` can reuse an existing IPC server when reachable or spawn `zoo server --ipc=<path>` with graceful close and capped unexpected-exit restart attempts.
 
 ## How to update this file
 
