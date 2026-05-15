@@ -99,9 +99,11 @@ async function main() {
 				// user message starts with <environment_details> directly — no <user_message>
 				// wrapper. JSON fixtures use substring matching so a bare "<environment_details>"
 				// match would collide with all other requests. A regex anchored to the start
-				// uniquely identifies this post-switch turn.
+				// uniquely identifies this post-switch turn. Scope this fixture to the
+				// OpenRouter default model so provider-specific suites (e.g. DeepSeek)
+				// cannot accidentally match it.
 				mock.addFixture({
-					match: { userMessage: /^<environment_details>/ },
+					match: { model: "openai/gpt-4.1", userMessage: /^<environment_details>/ },
 					response: {
 						toolCalls: [
 							{

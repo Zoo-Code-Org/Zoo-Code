@@ -3,7 +3,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from "http"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
-import { waitUntilCompleted } from "./utils"
 import { setDefaultSuiteTimeout } from "./test-utils"
 
 type CapturedAnthropicRequest = {
@@ -14,6 +13,19 @@ type CapturedAnthropicRequest = {
 
 const ALLOWED_PROXY_HOSTS = new Set(["127.0.0.1", "localhost", "api.anthropic.com"])
 const ANTHROPIC_MESSAGES_PATH = "/v1/messages"
+const HOP_BY_HOP = new Set([
+	"connection",
+	"keep-alive",
+	"transfer-encoding",
+	"te",
+	"trailer",
+	"upgrade",
+	"proxy-connection",
+	"proxy-authenticate",
+	"proxy-authorization",
+	"host",
+	"content-length",
+])
 
 function isMessagesUrl(rawUrl: string): boolean {
 	try {
@@ -35,7 +47,12 @@ function readRequestBody(req: IncomingMessage): Promise<string> {
 function writeResponseHeaders(target: ServerResponse, source: Response) {
 	const headers: Record<string, string> = {}
 	source.headers.forEach((value, key) => {
-		if (key.toLowerCase() !== "content-length") {
+		const lower = key.toLowerCase()
+		// fetch() automatically decompresses the body, so strip content-encoding to
+		// prevent the SDK from attempting a second decompression (zlib "incorrect
+		// header check"). Also strip content-length since the decoded body length
+		// differs from the compressed length.
+		if (lower !== "content-length" && lower !== "content-encoding") {
 			headers[key] = value
 		}
 	})
@@ -111,11 +128,7 @@ async function withAnthropicProxy<T>(
 
 			const forwardHeaders: Record<string, string> = {}
 			for (const [key, value] of Object.entries(req.headers)) {
-				if (
-					key.toLowerCase() !== "host" &&
-					key.toLowerCase() !== "content-length" &&
-					typeof value === "string"
-				) {
+				if (!HOP_BY_HOP.has(key.toLowerCase()) && typeof value === "string") {
 					forwardHeaders[key] = value
 				}
 			}
@@ -210,7 +223,35 @@ suite("Claude Opus 4.7 (Anthropic)", function () {
 					text: `${promptTag}: what is 2+2? Reply with only the number.`,
 				})
 
-				await waitUntilCompleted({ api, taskId })
+				await new Promise<void>((resolve, reject) => {
+					const timer = setTimeout(() => {
+						cleanup()
+						reject(new Error("Timeout after 60s"))
+					}, 60_000)
+
+					const cleanup = () => {
+						clearTimeout(timer)
+						api.off(RooCodeEventName.TaskCompleted, onCompleted)
+						api.off(RooCodeEventName.TaskAborted, onAborted)
+					}
+
+					const onCompleted = (completedId: string) => {
+						if (completedId === taskId) {
+							cleanup()
+							resolve()
+						}
+					}
+
+					const onAborted = (abortedId: string) => {
+						if (abortedId === taskId) {
+							cleanup()
+							reject(new Error("Task was aborted - Anthropic API request failed"))
+						}
+					}
+
+					api.on(RooCodeEventName.TaskCompleted, onCompleted)
+					api.on(RooCodeEventName.TaskAborted, onAborted)
+				})
 
 				const firstRequest = requests[0]
 				assert.ok(firstRequest, "Anthropic provider should issue at least one /v1/messages request")
