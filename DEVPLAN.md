@@ -142,7 +142,7 @@
     - **Depends on:** Phase 1, Tasks 1 and 4.
     - **Can parallelize with:** Phase 1, Tasks 5 and 6.
 
-8. Add CLI server and run smoke coverage
+8. [✅] Add CLI server and run smoke coverage
 
     - **What:** Verify the portable core exposes `zoo server --ipc ...` and `zoo run <task>` using the shared agent runtime, with mocked LLM support for deterministic tests.
     - **Files touched:** `packages/zoo-cli/src/server/**`, CLI command files, run command tests, server tests.

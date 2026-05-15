@@ -1,8 +1,24 @@
 import type { Hono } from "hono"
 import { createBunWebSocket } from "hono/bun"
+import { existsSync, unlinkSync } from "fs"
 import type { Adapter, FetchApp, Opts } from "./adapter"
 
 function listen(app: FetchApp, opts: Opts, websocket?: ReturnType<typeof createBunWebSocket>["websocket"]) {
+	if (opts.ipcPath) {
+		if (existsSync(opts.ipcPath)) unlinkSync(opts.ipcPath)
+		const serveOptions = { fetch: app.fetch, idleTimeout: 0, unix: opts.ipcPath, websocket } as any
+		const server = Bun.serve(serveOptions)
+		return {
+			port: 0,
+			ipcPath: opts.ipcPath,
+			stop(close?: boolean) {
+				return Promise.resolve(server.stop(close)).finally(() => {
+					if (opts.ipcPath && existsSync(opts.ipcPath)) unlinkSync(opts.ipcPath)
+				})
+			},
+		}
+	}
+
 	const start = (port: number) => {
 		try {
 			if (websocket) {

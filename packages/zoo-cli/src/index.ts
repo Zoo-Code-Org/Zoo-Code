@@ -52,7 +52,7 @@ async function migrateLegacyKiloAuth(
 // (any command other than 'serve') is tagged as 'cli'. If 'serve' is spawned without
 // the env var, it gets 'unknown' so the misconfiguration is visible in data.
 if (!process.env[ENV_FEATURE]) {
-	const isServe = process.argv.includes("serve")
+	const isServe = process.argv.includes("serve") || process.argv.includes("server")
 	process.env[ENV_FEATURE] = isServe ? "unknown" : "cli"
 }
 

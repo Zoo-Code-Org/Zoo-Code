@@ -50,17 +50,18 @@ See `docs/provider-parity.md` for the current Zoo/Roo VS Code provider parity au
 
 ## Commands
 
-| Command              | Description                 |
-| -------------------- | --------------------------- |
-| `zoo`                | Launch interactive TUI      |
-| `zoo run "<task>"`   | Run a one-off task          |
-| `zoo auth`           | Manage authentication       |
-| `zoo models`         | List available models       |
-| `zoo agent`          | List available agents/modes |
-| `zoo mcp`            | Manage MCP servers          |
-| `zoo session list`   | List sessions               |
-| `zoo session delete` | Delete a session            |
-| `zoo export`         | Export session transcripts  |
+| Command                   | Description                              |
+| ------------------------- | ---------------------------------------- |
+| `zoo`                     | Launch interactive TUI                   |
+| `zoo run "<task>"`        | Run a one-off task                       |
+| `zoo server --ipc <path>` | Start a local IPC server for SDK clients |
+| `zoo auth`                | Manage authentication                    |
+| `zoo models`              | List available models                    |
+| `zoo agent`               | List available agents/modes              |
+| `zoo mcp`                 | Manage MCP servers                       |
+| `zoo session list`        | List sessions                            |
+| `zoo session delete`      | Delete a session                         |
+| `zoo export`              | Export session transcripts               |
 
 Run `zoo --help` for the full list.
 

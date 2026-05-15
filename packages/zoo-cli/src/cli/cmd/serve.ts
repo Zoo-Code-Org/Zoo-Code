@@ -6,6 +6,7 @@ import { InstanceStore } from "../../project/instance-store" // kilocode_change
 
 export const ServeCommand = cmd({
 	command: "serve",
+	aliases: ["server"],
 	builder: (yargs) => withNetworkOptions(yargs),
 	describe: "starts a headless zoo server", // kilocode_change
 	handler: async (args) => {
@@ -14,7 +15,11 @@ export const ServeCommand = cmd({
 		}
 		const opts = await resolveNetworkOptions(args)
 		const server = await Server.listen(opts)
-		console.log(`zoo server listening on http://${server.hostname}:${server.port}`)
+		console.log(
+			server.ipcPath
+				? `zoo server listening on ipc ${server.ipcPath}`
+				: `zoo server listening on http://${server.hostname}:${server.port}`,
+		)
 
 		// kilocode_change start - graceful signal shutdown
 		const abort = new AbortController()

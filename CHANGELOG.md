@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add Roo/Zoo mode ingestion for project `.roomodes` and expose `--mode` as a strict primary-agent selector for CLI/TUI startup.
 - Document the initial Zoo/Roo VS Code provider parity audit for the Zoo CLI provider registry.
 - Add Zoo CLI provider parity coverage for catalog-backed and OpenAI-compatible Zoo/Roo providers without introducing a bundled gateway.
+- Add `zoo server` as an alias for the headless server command with Unix-socket `--ipc` startup support for portable-core SDK clients.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
 ## [3.54.0] - 2026-05-08

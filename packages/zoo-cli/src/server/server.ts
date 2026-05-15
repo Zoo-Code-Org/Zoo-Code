@@ -31,6 +31,7 @@ const log = Log.create({ service: "server" })
 export type Listener = {
 	hostname: string
 	port: number
+	ipcPath?: string
 	url: URL
 	stop: (close?: boolean) => Promise<void>
 }
@@ -43,6 +44,7 @@ type ServerApp = {
 type ListenOptions = CorsOptions & {
 	port: number
 	hostname: string
+	ipcPath?: string
 	mdns?: boolean
 	mdnsDomain?: string
 }
@@ -166,7 +168,7 @@ export async function listen(opts: ListenOptions): Promise<Listener> {
 
 	const next = new URL("http://localhost")
 	next.hostname = opts.hostname
-	next.port = String(server.port)
+	if (server.port) next.port = String(server.port)
 	url = next
 
 	const mdns =
@@ -185,6 +187,7 @@ export async function listen(opts: ListenOptions): Promise<Listener> {
 	return {
 		hostname: opts.hostname,
 		port: server.port,
+		ipcPath: server.ipcPath,
 		url: next,
 		stop(close?: boolean) {
 			closing ??= (async () => {

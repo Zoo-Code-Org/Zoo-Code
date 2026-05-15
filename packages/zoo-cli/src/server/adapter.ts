@@ -8,10 +8,12 @@ export type FetchApp = {
 export type Opts = {
 	port: number
 	hostname: string
+	ipcPath?: string
 }
 
 export type Listener = {
 	port: number
+	ipcPath?: string
 	stop: (close?: boolean) => Promise<void>
 }
 

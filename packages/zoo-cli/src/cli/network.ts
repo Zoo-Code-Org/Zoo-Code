@@ -8,6 +8,10 @@ const options = {
 		describe: "port to listen on",
 		default: 0,
 	},
+	ipc: {
+		type: "string" as const,
+		describe: "Unix socket path for local IPC server transport",
+	},
 	hostname: {
 		type: "string" as const,
 		describe: "hostname to listen on",
@@ -43,6 +47,7 @@ export async function resolveNetworkOptions(args: NetworkOptions) {
 
 export function resolveNetworkOptionsNoConfig(args: NetworkOptions, config?: Config.Info) {
 	const portExplicitlySet = process.argv.includes("--port")
+	const ipcPath = args.ipc
 	const hostnameExplicitlySet = process.argv.includes("--hostname")
 	const mdnsExplicitlySet = process.argv.includes("--mdns")
 	const mdnsDomainExplicitlySet = process.argv.includes("--mdns-domain")
@@ -60,5 +65,5 @@ export function resolveNetworkOptionsNoConfig(args: NetworkOptions, config?: Con
 	const argsCors = Array.isArray(args.cors) ? args.cors : args.cors ? [args.cors] : []
 	const cors = [...configCors, ...argsCors]
 
-	return { hostname, port, mdns, mdnsDomain, cors }
+	return { hostname, port, ipcPath, mdns, mdnsDomain, cors }
 }
