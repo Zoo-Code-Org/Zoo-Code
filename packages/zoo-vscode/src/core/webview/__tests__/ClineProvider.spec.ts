@@ -852,8 +852,9 @@ describe("ClineProvider", () => {
 
 	test("portable session adapter creates sessions before legacy task shell", async () => {
 		const portableSessionAdapter = {
-			listSessions: vi.fn(),
+			listSessions: vi.fn().mockResolvedValue([]),
 			getSession: vi.fn(),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
 			createSession: vi.fn().mockResolvedValue({ id: "portable-created-session", title: "Create task" }),
 		}
 		const portableProvider = new ClineProvider(
@@ -869,6 +870,77 @@ describe("ClineProvider", () => {
 
 		expect(portableSessionAdapter.createSession).toHaveBeenCalledWith({ title: "Create task" })
 		expect(task.taskId).toBe("portable-created-session")
+	})
+
+	test("portable session adapter streams initial task messages", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-stream-session", title: "Stream task" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {
+				yield { type: "text", text: "hello" }
+				yield { type: "text", text: " world" }
+			}),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		const postMessageSpy = vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		const task = await portableProvider.createTask("Stream task")
+
+		expect(portableSessionAdapter.sendMessage).toHaveBeenCalledWith("portable-stream-session", "Stream task")
+		expect(task.start).not.toHaveBeenCalled()
+		expect(task.clineMessages).toEqual([
+			expect.objectContaining({ type: "say", say: "text", text: "Stream task" }),
+			expect.objectContaining({ type: "say", say: "text", text: "hello world", partial: false }),
+		])
+		expect(postMessageSpy).toHaveBeenCalledWith({
+			type: "messageUpdated",
+			clineMessage: expect.objectContaining({ text: "hello world", partial: false }),
+		})
+	})
+
+	test("portable session adapter routes follow-up message responses", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-followup-session", title: "Initial" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {
+				yield { type: "text", text: "done" }
+			}),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Initial")
+		vi.mocked(task.handleWebviewAskResponse).mockClear()
+		portableSessionAdapter.sendMessage.mockClear()
+
+		await portableProvider.handleWebviewAskResponse("messageResponse", "Follow up")
+
+		expect(portableSessionAdapter.sendMessage).toHaveBeenCalledWith("portable-followup-session", "Follow up")
+		expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
+	})
+
+	test("legacy provider keeps existing message response path", async () => {
+		const task = await provider.createTask("Legacy task")
+		vi.mocked(task.handleWebviewAskResponse).mockClear()
+
+		await provider.handleWebviewAskResponse("messageResponse", "Legacy follow up")
+
+		expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Legacy follow up", undefined)
 	})
 
 	test("legacy provider does not call SDK session APIs", async () => {

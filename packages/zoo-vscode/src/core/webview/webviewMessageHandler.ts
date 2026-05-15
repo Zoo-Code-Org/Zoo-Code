@@ -654,9 +654,7 @@ export const webviewMessageHandler = async (
 		case "askResponse":
 			{
 				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-				provider
-					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+				await provider.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
 			}
 			break
 

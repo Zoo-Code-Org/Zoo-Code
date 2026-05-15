@@ -58,7 +58,7 @@ import { GlobalFileNames } from "../../shared/globalFileNames"
 import { Mode, defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import { experimentDefault } from "../../shared/experiments"
 import { formatLanguage } from "../../shared/language"
-import { WebviewMessage } from "../../shared/WebviewMessage"
+import { type ClineAskResponse, WebviewMessage } from "../../shared/WebviewMessage"
 import { EMBEDDING_MODEL_PROFILES } from "../../shared/embeddingModels"
 import { ProfileValidator } from "../../shared/ProfileValidator"
 
@@ -2931,13 +2931,100 @@ export class ClineProvider
 		})
 
 		await this.addClineToStack(task)
-		task.start()
+		const handledByPortableCore = await this.sendPortableUserMessage(task, text, images)
+
+		if (!handledByPortableCore) {
+			task.start()
+		}
 
 		this.log(
 			`[createTask] ${task.parentTask ? "child" : "parent"} task ${task.taskId}.${task.instanceId} instantiated`,
 		)
 
 		return task
+	}
+
+	public async handleWebviewAskResponse(
+		askResponse: ClineAskResponse,
+		text?: string,
+		images?: string[],
+	): Promise<void> {
+		const task = this.getCurrentTask()
+
+		if (!task) {
+			return
+		}
+
+		if (askResponse === "messageResponse" && (await this.sendPortableUserMessage(task, text, images))) {
+			return
+		}
+
+		task.handleWebviewAskResponse(askResponse, text, images)
+	}
+
+	private async sendPortableUserMessage(task: Task, text?: string, images?: string[]): Promise<boolean> {
+		if (!this.portableSessionAdapter || images?.length) {
+			return false
+		}
+
+		const message = text?.trim()
+		if (!message) {
+			return false
+		}
+
+		const userMessage: ClineMessage = { ts: Date.now(), type: "say", say: "text", text: message }
+		const assistantMessage: ClineMessage = {
+			ts: userMessage.ts + 1,
+			type: "say",
+			say: "text",
+			text: "",
+			partial: true,
+		}
+
+		task.clineMessages = [...task.clineMessages, userMessage, assistantMessage]
+		await task.overwriteClineMessages(task.clineMessages)
+		await this.postStateToWebviewWithoutTaskHistory()
+
+		try {
+			let assistantText = ""
+			for await (const chunk of this.portableSessionAdapter.sendMessage(task.taskId, message)) {
+				const chunkText = this.getPortableChunkText(chunk)
+				if (!chunkText) {
+					continue
+				}
+
+				assistantText += chunkText
+				assistantMessage.text = assistantText
+				await this.postMessageToWebview({ type: "messageUpdated", clineMessage: assistantMessage })
+			}
+
+			assistantMessage.partial = false
+			await task.overwriteClineMessages(task.clineMessages)
+			await this.postMessageToWebview({ type: "messageUpdated", clineMessage: assistantMessage })
+		} catch (error) {
+			assistantMessage.partial = false
+			assistantMessage.say = "error"
+			assistantMessage.text = error instanceof Error ? error.message : String(error)
+			await task.overwriteClineMessages(task.clineMessages)
+			await this.postMessageToWebview({ type: "messageUpdated", clineMessage: assistantMessage })
+		}
+
+		return true
+	}
+
+	private getPortableChunkText(chunk: unknown): string | undefined {
+		if (!chunk || typeof chunk !== "object") {
+			return undefined
+		}
+
+		const record = chunk as Record<string, unknown>
+		for (const key of ["text", "delta", "content"]) {
+			if (typeof record[key] === "string") {
+				return record[key]
+			}
+		}
+
+		return undefined
 	}
 
 	private async getPortableTaskHistory(): Promise<HistoryItem[] | undefined> {

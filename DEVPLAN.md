@@ -276,7 +276,7 @@
     - **Depends on:** Phase 3, Tasks 2, 3, and 4.
     - **Can parallelize with:** Phase 3, Task 6 if adapters are isolated.
 
-6. Rewire message sending and streaming responses
+6. [✅] Rewire message sending and streaming responses
 
     - **What:** Replace direct agent execution/send-message paths with `ZooClient.sendMessage()` under the feature flag and forward streaming chunks to the webview protocol.
     - **Files touched:** Chat/message controllers, webview bridge, streaming handlers, tests.
