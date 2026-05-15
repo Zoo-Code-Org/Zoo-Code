@@ -10,7 +10,9 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/session")
 				return input.method === "POST" ? { data: { id: "ses_1" } } : { data: [{ id: "ses_1" }] }
 			if (input.path === "/session/ses_1") return { data: { id: "ses_1" } }
-			if (input.path === "/agent") return { data: [{ id: "code", name: "Code", description: "Code mode" }] }
+			if (input.path === "/agent") {
+				return { data: [{ name: "code", displayName: "Code", description: "Code mode", mode: "primary" }] }
+			}
 			if (input.path === "/config") return { data: { model: "anthropic/claude" } }
 			if (input.path === "/config/providers") return { data: { default: "anthropic", providers: [] } }
 			return { data: undefined }
@@ -55,7 +57,7 @@ describe("ZooClient", () => {
 		client.on("text", (event) => seen.push(String(event.text)))
 
 		const chunks = []
-		for await (const chunk of client.sendMessage("ses_1", "hi")) chunks.push(chunk)
+		for await (const chunk of client.sendMessage("ses_1", "hi", { mode: "code" })) chunks.push(chunk)
 
 		expect(chunks).toEqual([
 			{ type: "text", sessionID: "ses_1", text: "hello" },
@@ -65,7 +67,7 @@ describe("ZooClient", () => {
 		expect(mock.requests.at(-1)).toMatchObject({
 			method: "POST",
 			path: "/session/ses_1/message",
-			body: { message: "hi", parts: [{ type: "text", text: "hi" }] },
+			body: { agent: "code", message: "hi", parts: [{ type: "text", text: "hi" }] },
 		})
 	})
 
@@ -95,7 +97,9 @@ describe("ZooClient", () => {
 		const mock = transport()
 		const client = await ZooClient.connect({ transport: mock })
 
-		await expect(client.listModes()).resolves.toEqual([{ id: "code", name: "Code", description: "Code mode" }])
+		await expect(client.listModes()).resolves.toEqual([
+			{ id: "code", name: "Code", description: "Code mode", primary: true },
+		])
 		expect(mock.requests.at(-1)).toEqual({ path: "/agent" })
 	})
 

@@ -335,7 +335,7 @@
 - **Depends on:** Phase 3, Task 4; Phase 1, Task 6; Phase 4, Task 2.
 - **Can parallelize with:** Phase 3, Task 9.
 
-- **Progress:** SDK and VS Code adapter can list portable-core agents/modes from `/agent`, and portable text sends now include the current selected VS Code mode in `sendMessage()` options. Persistent mode selection and webview mode list replacement remain pending.
+- **Progress:** SDK and VS Code adapter can list portable-core agents/modes from `/agent`, with SDK mapping aligned to CLI agent fields (`name`, `displayName`, `mode`). Portable text sends translate the selected VS Code mode to the CLI `agent` request field. `ClineProvider.getModes()` now returns `PortableSessionAdapter.listModes()` data when the adapter is present and preserves the legacy `CustomModesManager` path when absent. Remaining work: define broader visible webview mode-state replacement and persistent session selection semantics.
 
 11. Add settings and mode migration wizard
 

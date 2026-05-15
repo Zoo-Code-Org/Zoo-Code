@@ -3341,6 +3341,16 @@ export class ClineProvider
 	// Modes
 
 	public async getModes(): Promise<{ slug: string; name: string }[]> {
+		if (this.portableSessionAdapter) {
+			try {
+				const modes = await this.portableSessionAdapter.listModes()
+				return modes.map(({ id, name }) => ({ slug: id, name }))
+			} catch (error) {
+				this.log(`Error fetching portable modes: ${error instanceof Error ? error.message : String(error)}`)
+				return []
+			}
+		}
+
 		try {
 			const customModes = await this.customModesManager.getCustomModes()
 			return [...DEFAULT_MODES, ...customModes].map(({ slug, name }) => ({ slug, name }))

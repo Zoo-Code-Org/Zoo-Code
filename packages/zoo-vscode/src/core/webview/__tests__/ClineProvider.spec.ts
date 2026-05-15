@@ -1115,6 +1115,32 @@ describe("ClineProvider", () => {
 		expect(task.abortReason).toBe("user_cancelled")
 	})
 
+	test("portable session adapter provides modes when available", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn(),
+			listModes: vi.fn().mockResolvedValue([
+				{ id: "code", name: "Code" },
+				{ id: "review", name: "Review" },
+			]),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+
+		await expect(portableProvider.getModes()).resolves.toEqual([
+			{ slug: "code", name: "Code" },
+			{ slug: "review", name: "Review" },
+		])
+		expect(portableSessionAdapter.listModes).toHaveBeenCalled()
+	})
+
 	test("legacy provider keeps existing cancel path", async () => {
 		const task = await provider.createTask("Legacy cancel task")
 		vi.mocked(task.abortTask).mockClear()

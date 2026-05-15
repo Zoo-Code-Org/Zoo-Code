@@ -2,8 +2,8 @@
 
 - **Project:** Zoo Code CLI Integration
 - **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Tasks 1 through 7 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, lifecycle event callbacks, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper plus activation-time `PortableCoreService` bootstrap and a `ClineProvider` seam that routes session create/list/get, text-only send/stream, abort, and the first portable tool-approval request/response bridge through `PortableSessionAdapter` when enabled. `docs/extension-rewire-audit.md` maps the VS Code extension host into portable-core migration buckets and recommended rewire order; `docs/webview-message-protocol.md` and `@zoo-code/types` now pin the portable-core webview contract.
-- **Last completed task:** Phase 3 Task 8 first functional slice — portable `permission.asked` events now surface in existing VS Code approval asks and yes/no/message responses call `replyPermission()`.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 10 mode list seam by replacing backend mode listing with `PortableSessionAdapter.listModes()` when portable core is enabled, then add focused tests.
+- **Last completed task:** Phase 3 Task 10 first mode-list slice — backend `getModes()` now uses portable-core modes when the adapter is present, and SDK mode/message mapping matches CLI agent fields.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 9 provider config read seam by adding read-only portable provider/config state without mutating legacy VS Code profiles.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: no longer blocks Phase 1 Task 9 for current-platform VSIX binary preparation, but still affects Phase 6 all-platform release packaging decisions.
@@ -149,10 +149,12 @@
     - `ClineProvider` subscribes to portable events when an adapter is present, maps matching-session `permission.asked` events into existing `command`, `tool`, or `use_mcp_server` ask messages, stores pending request IDs in transient provider memory, and routes `yesButtonClicked`, `noButtonClicked`, and approval-time `messageResponse` decisions back through `replyPermission()`.
     - Focused coverage in `packages/zoo-vscode/src/core/webview/__tests__/ClineProvider.spec.ts` verifies bash approval display, yes/no reply mapping, and message feedback rejecting without sending a follow-up user message.
     - Remaining Task 8 work: broaden file-write/object approval payload coverage and validate the mapping against real CLI permission event payloads.
-- Phase 3 Task 10 started, not complete:
-    - `@zoo-code/sdk` now exposes `listModes()` backed by the CLI `/agent` route, and `PortableSessionAdapter` forwards mode listing.
-    - `ClineProvider` now includes the current selected VS Code mode in portable-core `sendMessage()` options for text-only sends.
-    - Remaining Task 10 work: replace webview mode list/state with portable-core mode data when the flag is enabled and define persistent mode/session selection semantics.
+- Phase 3 Task 10 started, first backend mode-list slice complete:
+    - `@zoo-code/sdk` exposes `listModes()` backed by the CLI `/agent` route and now maps CLI agent fields correctly: `id` from `agent.name`, display label from `displayName ?? name`, and `primary` from `mode === "primary"`.
+    - `ZooClient.sendMessage()` now translates the selected VS Code `mode` option to the CLI `agent` request field while preserving the SDK-facing option name for the VS Code seam.
+    - `PortableSessionAdapter` forwards mode listing, and `ClineProvider.getModes()` uses `PortableSessionAdapter.listModes()` when the adapter is present while preserving the legacy built-in/custom mode list when absent.
+    - Focused coverage verifies SDK agent mapping/send body shape and VS Code portable `getModes()` delegation.
+    - Remaining Task 10 work: replace visible webview mode list/state with portable-core mode data where needed and define persistent mode/session selection semantics.
 - Phase 3 Task 9 started, not complete:
     - `@zoo-code/sdk` now exposes read-only `getConfig()` and `getConfigProviders()` wrappers for CLI `/config` and `/config/providers`.
     - `PortableSessionAdapter` forwards portable-core config/provider reads for future VS Code provider state migration.

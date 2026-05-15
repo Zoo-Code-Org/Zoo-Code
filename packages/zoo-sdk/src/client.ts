@@ -90,7 +90,8 @@ export class ZooClient {
 		message: string,
 		options: SendMessageOptions = {},
 	): AsyncIterableIterator<MessageChunk> {
-		const body = { ...options, message, parts: options.parts ?? [{ type: "text", text: message }] }
+		const { mode, ...rest } = options
+		const body = { ...rest, agent: mode, message, parts: options.parts ?? [{ type: "text", text: message }] }
 		for await (const chunk of this.#transport.stream({
 			method: "POST",
 			path: `/session/${encodeURIComponent(sessionID)}/message`,
@@ -134,9 +135,15 @@ export class ZooClient {
 			const id = typeof record.id === "string" ? record.id : String(record.name ?? "")
 			return {
 				id,
-				name: typeof record.name === "string" ? record.name : id,
+				name:
+					typeof record.displayName === "string"
+						? record.displayName
+						: typeof record.name === "string"
+							? record.name
+							: id,
 				description: typeof record.description === "string" ? record.description : undefined,
-				primary: typeof record.primary === "boolean" ? record.primary : undefined,
+				primary:
+					typeof record.primary === "boolean" ? record.primary : record.mode === "primary" ? true : undefined,
 			}
 		})
 	}
