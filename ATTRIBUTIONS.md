@@ -13,6 +13,8 @@ This project is derived from and/or integrates work from the upstream projects l
 
 - `packages/zoo-cli` imports Kilo Code's `packages/opencode` from `Kilo-Org/kilocode` commit `a4218d893d4b7ecf6921531c553d84905b8510c0` and keeps a package-local MIT `LICENSE` copied from that source revision.
 - `packages/opencode-core` imports Kilo Code's `packages/core` from `Kilo-Org/kilocode` commit `a4218d893d4b7ecf6921531c553d84905b8510c0` under its upstream package name `@opencode-ai/core` so imported CLI aliases resolve.
+- `packages/kilocode-sdk` imports Kilo Code's `packages/sdk/js` from `Kilo-Org/kilocode` ref `kilo-upstream/main` under its upstream package name `@kilocode/sdk` and includes the upstream MIT `LICENSE` text.
+- `packages/kilocode-plugin` imports Kilo Code's `packages/plugin` from `Kilo-Org/kilocode` ref `kilo-upstream/main` under its upstream package name `@kilocode/plugin` and includes the upstream MIT `LICENSE` text.
 
 ## License Notes
 

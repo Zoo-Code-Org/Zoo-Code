@@ -1,5 +1,7 @@
 packages:
     - "packages/zoo-cli"
+    - "packages/kilocode-plugin"
+    - "packages/kilocode-sdk"
     - "packages/kilo-telemetry-stub"
     - "packages/opencode-core"
     - "packages/opencode-script"

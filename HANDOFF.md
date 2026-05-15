@@ -1,9 +1,9 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1 through 6 are implemented on top of the completed Phase 0 foundation, Phase 1 Task 7 has an initial provider parity audit documented, and the imported Zoo CLI can now resolve Kilo/OpenCode `@opencode-ai/core/*` aliases for focused Bun tests. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, and runs a real focused default CLI test subset.
-- **Last completed task:** Ad hoc maintenance — restore imported Zoo CLI runtime alias resolution.
-- **Next task to execute:** Continue blocker reduction by reconciling local SDK/plugin/build helper compatibility shims, then continue `DEVPLAN.md` Phase 1, Task 7 provider parity work based on `packages/zoo-cli/docs/provider-parity.md`.
+- **Current status:** Phase 1 Tasks 1 through 6 are implemented on top of the completed Phase 0 foundation, Phase 1 Task 7 has an initial provider parity audit documented, and the imported Zoo CLI can now resolve local Kilo/OpenCode compatibility packages for `@opencode-ai/core/*`, `@kilocode/sdk`, and `@kilocode/plugin`. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, runs a real focused default CLI test subset, and has a real current-platform local build script.
+- **Last completed task:** Ad hoc maintenance — import Kilo SDK and plugin workspace packages.
+- **Next task to execute:** Continue blocker reduction from the real CLI typecheck/full-test blockers below, then continue `DEVPLAN.md` Phase 1, Task 7 provider parity work based on `packages/zoo-cli/docs/provider-parity.md`.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
@@ -74,6 +74,16 @@
 - `@opencode-ai/core` default `test` is intentionally narrowed to `bun test test/filesystem test/util test/effect test/kilocode`, which passes. Its full imported upstream test suite still has Kilo/Zoo expectation mismatches in `test/global.test.ts` and project `.npmrc` registry behavior in `test/npm-config.test.ts`.
 - `packages/opencode-script` provides a local `@opencode-ai/script` compatibility shim for imported CLI build scripts without upstream Bun-version or release-network behavior.
 - Remaining real `@zoo-code/cli` blockers mapped on 2026-05-15: full `test:opencode` first fails on missing `@kilocode/sdk`; `typecheck` has `tsgo` available but fails on unresolved `@kilocode/sdk`, `@kilocode/plugin`, `@kilocode/plugin/tui`, stale gateway/indexing test imports, and follow-on strict TS errors; `build:opencode` still needs SDK/plugin reconciliation before it can safely replace the placeholder build.
+- `packages/kilocode-sdk` now imports Kilo upstream `packages/sdk/js` from `kilo-upstream/main` as local workspace package `@kilocode/sdk`; `packages/kilocode-plugin` imports Kilo upstream `packages/plugin` as local workspace package `@kilocode/plugin`. Both include package-local copies of Kilo's MIT `LICENSE`, and `ATTRIBUTIONS.md` records the imports. Manifest `catalog:` specs were replaced with pinned versions using existing imported CLI pins where available (`cross-spawn`, `effect`, `zod`, `@opentui/*`, `typescript`, `@typescript/native-preview`, etc.). Their workspace `build` scripts are intentional no-ops because they are consumed from checked-in TypeScript source and upstream SDK regeneration expects an external `opencode` repo path.
+- `packages/zoo-cli/package.json` now depends on local `@kilocode/sdk` and `@kilocode/plugin` via `workspace:*`; it still does **not** depend on `@kilocode/kilo-gateway` or `@kilocode/kilo-indexing`.
+- `pnpm install` completed after the manifest changes. Expected warnings remain: Node `v20.19.6` vs requested `20.20.2`, plus existing peer warnings around scoped Zod 4/effect/OpenTUI packages.
+- Targeted verification after SDK/plugin import and local build restoration:
+    - `pnpm --filter @zoo-code/cli build` passes, including binary smoke test `zoo --version` returning `7.2.52`. `patchelf` is unavailable but the script treats that as a skipped interpreter fix, not a failure.
+    - `pnpm --filter @zoo-code/cli test` passes the focused default imported utility subset: 15 files passed, 0 failed.
+    - `pnpm build` passes after making `@kilocode/sdk` and `@kilocode/plugin` source-package builds no-op. Turbo warns that those packages produce no output files, which is expected.
+    - `node --check packages/zoo-cli/bin/zoo` passes.
+    - `pnpm check-types` passes at the workspace level only because `@zoo-code/cli` still uses its placeholder `check-types` script.
+    - `pnpm --filter @zoo-code/cli typecheck` gets past unresolved `@kilocode/sdk`/`@kilocode/plugin` packages. Remaining real CLI typecheck blockers include missing `@types/mime-types` for `packages/opencode-core`, missing `os` import in `src/kilocode/config/config.ts`, model/status type mismatches, feedback/dialog notification shape drift, and stale test imports of `@kilocode/kilo-gateway`/`@kilocode/kilo-indexing` that should be removed or replaced with local disabled-feature assertions rather than reintroduced.
 
 ## How to update this file
 
