@@ -31,7 +31,7 @@ mode: code
     - Do not manually edit `src/README.md`; the extension bundle step copies root `README.md` into `src/README.md`.
     - Check for stale upstream Roo Code wording that should now say Zoo Code.
 
-6. Draft the release notes in a temporary changeset file at `.changeset/v[version].md`. Use this as the input to `pnpm changeset:version`; it will be consumed on the release branch before the PR is opened.
+6. Create the release notes as a changeset file at `.changeset/v[version].md`, then run `pnpm changeset:version` on the release branch before opening the PR.
 
     ```md
     ---
@@ -76,13 +76,13 @@ mode: code
     pnpm changeset:version
     ```
 
-    - This should update `src/package.json`, `CHANGELOG.md`, and `src/CHANGELOG.md`, then consume the temporary `.changeset` file.
+    - This should update `src/package.json`, `CHANGELOG.md`, and `src/CHANGELOG.md`, then consume the `.changeset` file.
     - Review the generated version and changelog before opening the PR.
 
 11. Open a single release PR with the fully generated release state.
 
     ```bash
-    git add CHANGELOG.md src/CHANGELOG.md src/package.json README.md
+    git add CHANGELOG.md src/CHANGELOG.md src/package.json README.md locales/*/README.md src/package.nls*.json
     # If generated or updated:
     git add releases/[version]-release.png webview-ui/src/components/chat/Announcement.tsx src/core/webview/ClineProvider.ts
     git commit -m "chore: prepare v[version] release"
@@ -92,6 +92,7 @@ mode: code
 
     - There is no separate version-bump PR in this flow.
     - The release PR should already contain the final version number and generated changelog updates.
+    - If the release includes translated README or package-localization updates, include those files in the same PR.
     - Let the release validation workflow and normal PR checks run before merge.
 
 12. After the release PR is merged, create the release tag on the resulting `main` commit:

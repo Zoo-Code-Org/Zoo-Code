@@ -7,8 +7,10 @@ on:
         paths:
             - "CHANGELOG.md"
             - "README.md"
+            - "locales/*/README.md"
             - "src/package.json"
             - "src/CHANGELOG.md"
+            - "src/package.nls*.json"
             - "src/core/webview/ClineProvider.ts"
             - "webview-ui/src/components/chat/Announcement.tsx"
             - "releases/**"
