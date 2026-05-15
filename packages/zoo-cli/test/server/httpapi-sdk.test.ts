@@ -397,6 +397,7 @@ describe("HttpApi SDK", () => {
 				const fileStatus = yield* capture(() => sdk.file.status())
 				const findFiles = yield* capture(() => sdk.find.files({ query: "hello", limit: 10 }))
 				const findText = yield* capture(() => sdk.find.text({ pattern: "sdk-parity" }))
+				const findSymbols = yield* capture(() => sdk.find.symbols({ query: "needle" }))
 				const skills = yield* capture(() => sdk.app.skills())
 				const tools = yield* capture(() => sdk.tool.ids())
 				const vcs = yield* capture(() => sdk.vcs.get())
@@ -416,6 +417,7 @@ describe("HttpApi SDK", () => {
 						fileStatus,
 						findFiles,
 						findText,
+						findSymbols,
 						skills,
 						tools,
 						vcs,
@@ -429,6 +431,7 @@ describe("HttpApi SDK", () => {
 					hasProject: array(projects.data).length > 0,
 					foundFile: JSON.stringify(findFiles.data).includes("hello.txt"),
 					foundText: JSON.stringify(findText.data ?? null).includes("sdk-parity"),
+					symbols: findSymbols.data,
 					listedFile: JSON.stringify(files.data).includes("hello.txt"),
 				}
 			}),
