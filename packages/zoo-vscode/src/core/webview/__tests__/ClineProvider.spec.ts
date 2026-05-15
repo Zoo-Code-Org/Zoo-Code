@@ -1110,6 +1110,102 @@ describe("ClineProvider", () => {
 		expect(portableSessionAdapter.sendMessage).not.toHaveBeenCalled()
 	})
 
+	test("portable edit permission maps file diff metadata to tool approval payload", async () => {
+		let emitPermission!: (event: any) => void
+		const permissionEvent = new Promise<any>((resolve) => {
+			emitPermission = resolve
+		})
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-write-session", title: "Approval" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+			subscribeEvents: vi.fn().mockImplementation(async function* () {
+				yield await permissionEvent
+			}),
+			replyPermission: vi.fn().mockResolvedValue(undefined),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Approval")
+
+		emitPermission({
+			type: "permission.asked",
+			properties: {
+				id: "permission-write-1",
+				sessionID: "portable-write-session",
+				permission: "edit",
+				patterns: ["src/file.ts"],
+				metadata: {
+					filepath: "/workspace/src/file.ts",
+					diff: "fallback diff",
+					filediff: {
+						file: "/workspace/src/file.ts",
+						patch: "@@ -1 +1 @@\n-old\n+new\n",
+						additions: 1,
+						deletions: 1,
+					},
+				},
+			},
+		})
+
+		await vi.waitFor(() => {
+			expect(task.clineMessages).toContainEqual(expect.objectContaining({ type: "ask", ask: "tool" }))
+		})
+		const message = task.clineMessages.find((item) => item.type === "ask" && item.ask === "tool")
+		expect(JSON.parse(message?.text ?? "{}")).toEqual({
+			tool: "appliedDiff",
+			path: "src/file.ts",
+			content: "@@ -1 +1 @@\n-old\n+new\n",
+			diffStats: { added: 1, removed: 1 },
+		})
+	})
+
+	test("portable permission object responses approve only when all entries are accepted", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-object-session", title: "Approval" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+			replyPermission: vi.fn().mockResolvedValue(undefined),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		await portableProvider.createTask("Approval")
+		;(portableProvider as any).pendingPortablePermissionRequests.set("portable-object-session", {
+			requestID: "permission-object-1",
+			permission: "edit",
+		})
+
+		await portableProvider.handleWebviewAskResponse("objectResponse", JSON.stringify({ "src/a.ts": true }))
+
+		expect(portableSessionAdapter.replyPermission).toHaveBeenCalledWith("permission-object-1", { reply: "once" })
+		;(portableProvider as any).pendingPortablePermissionRequests.set("portable-object-session", {
+			requestID: "permission-object-2",
+			permission: "edit",
+		})
+		const rejection = JSON.stringify({ "src/a.ts": true, "src/b.ts": false })
+		await portableProvider.handleWebviewAskResponse("objectResponse", rejection)
+
+		expect(portableSessionAdapter.replyPermission).toHaveBeenCalledWith("permission-object-2", {
+			reply: "reject",
+			message: rejection,
+		})
+	})
+
 	test("legacy provider keeps existing message response path", async () => {
 		const task = await provider.createTask("Legacy task")
 		vi.mocked(task.handleWebviewAskResponse).mockClear()

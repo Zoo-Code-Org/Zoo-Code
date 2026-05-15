@@ -98,7 +98,7 @@ import { CustomModesManager } from "../config/CustomModesManager"
 import { Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
-import type { ClineMessage, TodoItem } from "@zoo-code/types"
+import type { ClineMessage, ClineSayTool, TodoItem } from "@zoo-code/types"
 import { readApiMessages, saveApiMessages, saveTaskMessages, TaskHistoryStore } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
@@ -3105,6 +3105,18 @@ export class ClineProvider
 			}
 		}
 
+		if (permission === "edit") {
+			const toolPayload = this.mapPortableEditPermissionToToolPayload(request)
+			if (toolPayload) {
+				return {
+					ts: Date.now(),
+					type: "ask",
+					ask: "tool",
+					text: JSON.stringify(toolPayload),
+				}
+			}
+		}
+
 		return {
 			ts: Date.now(),
 			type: "ask",
@@ -3124,6 +3136,46 @@ export class ClineProvider
 		}
 
 		return request.patterns?.join(", ") || this.getPortablePermissionSummary(request)
+	}
+
+	private mapPortableEditPermissionToToolPayload(request: PermissionRequest): ClineSayTool | undefined {
+		const metadata = request.metadata
+		if (!metadata || typeof metadata !== "object") {
+			return undefined
+		}
+
+		const record = metadata as Record<string, unknown>
+		const filediff =
+			record.filediff && typeof record.filediff === "object"
+				? (record.filediff as Record<string, unknown>)
+				: undefined
+		const content =
+			typeof filediff?.patch === "string"
+				? filediff.patch
+				: typeof record.diff === "string"
+					? record.diff
+					: undefined
+		if (!content) {
+			return undefined
+		}
+
+		const path =
+			request.patterns?.[0] ??
+			(typeof filediff?.file === "string" ? filediff.file : undefined) ??
+			(typeof record.filepath === "string" ? record.filepath : undefined)
+		const additions = typeof filediff?.additions === "number" ? filediff.additions : undefined
+		const deletions = typeof filediff?.deletions === "number" ? filediff.deletions : undefined
+
+		return {
+			tool: "appliedDiff",
+			path,
+			content,
+			diffStats:
+				additions !== undefined && deletions !== undefined
+					? { added: additions, removed: deletions }
+					: undefined,
+			isProtected: record.disableAlways === true ? true : undefined,
+		}
 	}
 
 	private getPortablePermissionSummary(request: PermissionRequest): string {

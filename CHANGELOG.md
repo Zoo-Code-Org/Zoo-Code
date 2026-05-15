@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Validate portable-core session, message chunk, mode-list, and provider-config shapes at the VS Code adapter boundary before they reach webview state.
 - Add SDK and VS Code adapter methods for portable-core event subscriptions and permission replies, enabling the upcoming tool approval bridge.
 - Proxy portable-core permission requests into the existing VS Code approval UI and return approval/denial responses through the SDK when `zoo-code.usePortableCore` is enabled.
+- Render portable edit permission file diffs through the existing VS Code diff approval UI and support object approval responses.
 - Add SDK and VS Code adapter mode listing from portable-core agents, use portable modes for backend mode-list requests when enabled, and send the selected mode through the CLI `agent` field.
 - Add SDK and VS Code adapter methods for read-only portable-core config and configured-provider access.
 - Include read-only portable provider metadata in VS Code extension state when portable core is enabled, without mutating legacy provider profiles.
