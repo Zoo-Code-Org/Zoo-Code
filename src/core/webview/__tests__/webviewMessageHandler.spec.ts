@@ -4,6 +4,9 @@ import type { Mock } from "vitest"
 
 // Mock dependencies - must come before imports
 vi.mock("../../../api/providers/fetchers/modelCache")
+vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
+	getLMStudioModels: vi.fn(),
+}))
 
 vi.mock("../../../integrations/openai-codex/oauth", () => ({
 	openAiCodexOAuthManager: {
@@ -42,11 +45,13 @@ import type { ModelRecord } from "@roo-code/types"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
 import { getModels } from "../../../api/providers/fetchers/modelCache"
+import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
 const { openAiCodexOAuthManager } = await import("../../../integrations/openai-codex/oauth")
 const { fetchOpenAiCodexRateLimitInfo } = await import("../../../integrations/openai-codex/rate-limits")
 
 const mockGetModels = getModels as Mock<typeof getModels>
+const mockGetLMStudioModels = getLMStudioModels as Mock<typeof getLMStudioModels>
 const mockGetCommands = vi.mocked(getCommands)
 const mockGetAccessToken = vi.mocked(openAiCodexOAuthManager.getAccessToken)
 const mockGetAccountId = vi.mocked(openAiCodexOAuthManager.getAccountId)
@@ -166,6 +171,7 @@ import { resolveImageMentions } from "../../mentions/resolveImageMentions"
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockGetLMStudioModels.mockReset()
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
 				lmStudioModelId: "model-1",
@@ -202,6 +208,30 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			type: "lmStudioModels",
 			lmStudioModels: mockModels,
 		})
+	})
+
+	it("prefers the request payload base URL over persisted settings", async () => {
+		mockGetLMStudioModels.mockResolvedValue({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestLmStudioModels",
+			values: { baseUrl: "http://127.0.0.1:4321" },
+		})
+
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321")
+		expect(mockGetModels).not.toHaveBeenCalled()
+	})
+
+	it("treats an empty-string base URL as an explicit preview request", async () => {
+		mockGetLMStudioModels.mockResolvedValue({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestLmStudioModels",
+			values: { baseUrl: "" },
+		})
+
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("")
+		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 })
 
@@ -322,12 +352,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			}),
 		)
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: "vercel-ai-gateway" })
-		expect(mockGetModels).toHaveBeenCalledWith(
-			expect.objectContaining({
-				provider: "roo",
-				baseUrl: expect.any(String),
-			}),
-		)
 		expect(mockGetModels).toHaveBeenCalledWith({
 			provider: "litellm",
 			apiKey: "litellm-key",
@@ -342,11 +366,12 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				requesty: mockModels,
 				unbound: mockModels,
 				litellm: mockModels,
-				roo: mockModels,
+				roo: {},
 				ollama: {},
 				lmstudio: {},
 				"vercel-ai-gateway": mockModels,
 				poe: {},
+				deepseek: {},
 			},
 			values: undefined,
 		})
@@ -427,12 +452,13 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
-				roo: mockModels,
+				roo: {},
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
 				"vercel-ai-gateway": mockModels,
 				poe: {},
+				deepseek: {},
 			},
 			values: undefined,
 		})
@@ -454,7 +480,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockResolvedValueOnce(mockModels) // unbound
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway
-			.mockResolvedValueOnce(mockModels) // roo
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -483,12 +508,13 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: {},
 				unbound: mockModels,
-				roo: mockModels,
+				roo: {},
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
 				"vercel-ai-gateway": mockModels,
 				poe: {},
+				deepseek: {},
 			},
 			values: undefined,
 		})
@@ -501,7 +527,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockRejectedValueOnce(new Error("Unbound error")) // unbound
 			.mockRejectedValueOnce(new Error("Vercel AI Gateway error")) // vercel-ai-gateway
-			.mockRejectedValueOnce(new Error("Roo API error")) // roo
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -540,15 +565,21 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
-			error: "Roo API error",
-			values: { provider: "roo" },
+			error: "LiteLLM connection failed",
+			values: { provider: "litellm" },
+		})
+	})
+
+	it("returns an explicit removal error for requestRooModels", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRooModels",
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
-			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			error: "Roo Code Router has been removed. Please select and configure a different provider.",
+			values: { provider: "roo" },
 		})
 	})
 

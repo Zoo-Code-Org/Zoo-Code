@@ -1,6 +1,6 @@
 {
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "エディター内のAIデベロッパーチーム全体。"
 	},
 	"number_format": {
@@ -112,7 +112,8 @@
 			"thinking_complete_recitation": "（思考完了、引用チェックにより出力ブロック）"
 		},
 		"roo": {
-			"authenticationRequired": "Rooプロバイダーはクラウド認証が必要です。Roo Code Cloudにサインインしてください。"
+			"authenticationRequired": "Rooプロバイダーはクラウド認証が必要です。Roo Code Cloudにサインインしてください。",
+			"routerRemoved": "Roo Code Router は削除されました。別のプロバイダーを選択して設定してください。"
 		},
 		"api": {
 			"invalidKeyInvalidChars": "APIキーに無効な文字が含まれています。",
@@ -145,7 +146,7 @@
 	"warnings": {
 		"no_terminal_content": "選択されたターミナルコンテンツがありません",
 		"missing_task_files": "このタスクのファイルが見つかりません。タスクリストから削除しますか？",
-		"auto_import_failed": "RooCode設定の自動インポートに失敗しました：{{error}}"
+		"auto_import_failed": "ZooCode設定の自動インポートに失敗しました：{{error}}"
 	},
 	"info": {
 		"no_changes": "変更は見つかりませんでした。",
@@ -154,14 +155,17 @@
 		"custom_storage_path_set": "カスタムストレージパスが設定されました：{{path}}",
 		"default_storage_path": "デフォルトのストレージパスに戻りました",
 		"settings_imported": "設定が正常にインポートされました。",
-		"auto_import_success": "RooCode設定が{{filename}}から自動インポートされました",
+		"auto_import_success": "ZooCode設定が{{filename}}から自動インポートされました",
 		"share_link_copied": "共有リンクがクリップボードにコピーされました",
 		"image_copied_to_clipboard": "画像データURIがクリップボードにコピーされました",
 		"image_saved": "画像を{{path}}に保存しました",
 		"organization_share_link_copied": "組織共有リンクがクリップボードにコピーされました！",
 		"public_share_link_copied": "公開共有リンクがクリップボードにコピーされました！",
 		"mode_exported": "モード「{{mode}}」が正常にエクスポートされました",
-		"mode_imported": "モードが正常にインポートされました"
+		"mode_imported": "モードが正常にインポートされました",
+		"roo": {
+			"signInUnavailable": "Roo Code Cloud へのサインインは現在利用できません。続行するには別のプロバイダーを設定してください。"
+		}
 	},
 	"answers": {
 		"yes": "はい",
@@ -187,12 +191,12 @@
 	},
 	"storage": {
 		"prompt_custom_path": "会話履歴のカスタムストレージパスを入力してください。デフォルトの場所を使用する場合は空のままにしてください",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "絶対パスを入力してください（例：D:\\RooCodeStorage または /home/user/storage）",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "絶対パスを入力してください（例：D:\\ZooCodeStorage または /home/user/storage）",
 		"enter_valid_path": "有効なパスを入力してください"
 	},
 	"input": {
-		"task_prompt": "Rooにどんなことをさせますか？",
+		"task_prompt": "Zooにどんなことをさせますか？",
 		"task_placeholder": "タスクをここに入力してください"
 	},
 	"settings": {
@@ -222,8 +226,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "あなたの組織では Roo Code Cloud 認証が必要です。続行するにはサインインしてください。",
-			"organization_mismatch": "組織の Roo Code Cloud アカウントで認証する必要があります。",
+			"cloud_auth_required": "あなたの組織では Zoo Code Cloud 認証が必要です。続行するにはサインインしてください。",
+			"organization_mismatch": "組織の Zoo Code Cloud アカウントで認証する必要があります。",
 			"manual_url_empty": "有効なコールバック URL を入力してください",
 			"manual_url_no_query": "無効なコールバック URL：クエリパラメータがありません",
 			"manual_url_missing_params": "無効なコールバック URL：必要なパラメータ（code と state）がありません",
@@ -250,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: 無効な認証 token を受信しました。",
+			"token_verification_failed": "Zoo Code: Token の検証に失敗しました。",
+			"invalid_token": "Zoo Code: 無効な token です。",
+			"could_not_verify_token": "Zoo Code: Token を検証できませんでした。"
+		},
+		"info": {
+			"connected": "Zoo Code: 接続に成功しました！Zoo Code を AI プロバイダーとして使用できます。",
+			"disconnected": "Zoo Code: 正常に切断されました。"
+		}
 	}
 }

@@ -11,9 +11,9 @@
 </sub>
 </div>
 
-# 為 Roo Code 做出貢獻
+# 為 Zoo Code 做出貢獻
 
-Roo Code 是一個由社群驅動的專案，我們非常重視每一份貢獻。為了簡化協作流程，我們採用 [「Issue 優先」的方法](#issue-優先方法)，這意味著所有的 [Pull Request (PR)](#提交-pull-request) 都必須先連結到一個 GitHub Issue。請仔細閱讀本指南。
+Zoo Code 是一個由社群驅動的專案，我們非常重視每一份貢獻。為了簡化協作流程，我們採用 [「Issue 優先」的方法](#issue-優先方法)，這意味著所有的 [Pull Request (PR)](#提交-pull-request) 都必須先連結到一個 GitHub Issue。請仔細閱讀本指南。
 
 ## 目錄
 
@@ -52,10 +52,10 @@ Roo Code 是一個由社群驅動的專案，我們非常重視每一份貢獻�
 
 在您的 PR 中提及與這些領域的一致性。
 
-### 3. 加入 Roo Code 社群
+### 3. 加入 Zoo Code 社群
 
-- **主要方式：** 加入我們的 [Discord](https://discord.gg/roocode) 並私訊 **Hannes Rudolph (`hrudolph`)**。
-- **替代方式：** 經驗豐富的貢獻者可以透過 [GitHub Project](https://github.com/orgs/RooCodeInc/projects/1) 直接參與。
+- **Discord：**加入我們的 [Discord](https://discord.gg/VxfP4Vx3gX)。
+- **Reddit：**加入我們的 [Reddit](https://www.reddit.com/r/ZooCode/)。
 
 ## 尋找和規劃您的貢獻
 
@@ -69,26 +69,26 @@ Roo Code 是一個由社群驅動的專案，我們非常重視每一份貢獻�
 
 所有貢獻都始於使用我們精簡範本的 GitHub Issue。
 
-- **檢查現有 Issue**：在 [GitHub Issues](https://github.com/RooCodeInc/Roo-Code/issues) 中搜尋。
+- **檢查現有 Issue**：在 [GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues) 中搜尋。
 - **使用以下範本建立 Issue**：
     - **增強功能：** 「Enhancement Request」範本（著重於使用者利益的淺顯描述）。
     - **錯誤** 「Bug Report」範本（最少的重現步驟 + 預期與實際結果 + 版本）。
-- **想參與其中嗎？** 在 Issue 上留言「Claiming」，並在 [Discord](https://discord.gg/roocode) 上私訊 **Hannes Rudolph (`hrudolph`)** 以獲得分配。分配結果將在討論串中確認。
+- **想參與其中嗎？** 在 Issue 上留言「Claiming」，並在 [Discord](https://discord.gg/VxfP4Vx3gX) 上聯繫核心團隊以獲得分配。分配結果將在討論串中確認。
 - **PR 必須連結到 Issue。** 未連結的 PR 可能會被關閉。
 
 ### 決定做什麼
 
-- 查看 [GitHub 專案](https://github.com/orgs/RooCodeInc/projects/1) 中的「Issue [Unassigned]」。
-- 如需文件，請造訪 [Roo Code Docs](https://github.com/RooCodeInc/Roo-Code-Docs)。
+- 若要查看 issue，請前往 [GitHub Issues 頁面](https://github.com/Zoo-Code-Org/Zoo-Code/issues)。
+- 如需文件，請造訪 [Zoo Code Docs](https://github.com/Zoo-Code-Org/Zoo-Code-Docs)。
 
 ### 回報錯誤
 
 - 首先檢查現有的報告。
-- 使用 [「Bug Report」範本](https://github.com/RooCodeInc/Roo-Code/issues/new/choose) 建立一個新的錯誤回報，並提供：
+- 使用 [「Bug Report」範本](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) 建立一個新的錯誤回報，並提供：
     - 清晰、編號的重現步驟
     - 預期與實際結果
-    - Roo Code 版本（必填）；如果相關，還需提供 API 供應商/模型
-- **安全問題**：透過 [安全公告 (Security Advisories)](https://github.com/RooCodeInc/Roo-Code/security/advisories/new) 私下回報。
+    - Zoo Code 版本（必填）；如果相關，還需提供 API 供應商/模型
+- **安全問題**：透過 [安全公告 (Security Advisories)](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new) 私下回報。
 
 ## 開發和提交流程
 
@@ -97,7 +97,7 @@ Roo Code 是一個由社群驅動的專案，我們非常重視每一份貢獻�
 1. **Fork 與 Clone：**
 
 ```
-git clone https://github.com/YOUR_USERNAME/Roo-Code.git
+git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
 2. **安裝相依套件：**
@@ -126,7 +126,7 @@ pnpm install
 
 ### Pull Request 政策
 
-- 必須引用一個已指派的 GitHub Issue。如要被指派：請在 Issue 上留言「Claiming」，並在 [Discord](https://discord.gg/roocode) 上私訊 **Hannes Rudolph (`hrudolph`)**。指派結果將可在討論串中確認。
+- 必須引用一個已指派的 GitHub Issue。如要被指派：請在 Issue 上留言「Claiming」，並在 [Discord](https://discord.gg/VxfP4Vx3gX) 上聯繫核心團隊。指派結果將可在討論串中確認。
 - 未連結 Issue 的 PR 可能會被關閉。
 - PR 必須通過 CI 測試，與路線圖保持一致，並有清晰的文件。
 
@@ -138,4 +138,4 @@ pnpm install
 
 ## 法律資訊
 
-透過貢獻，您同意您的貢獻將根據 Apache 2.0 授權條款進行授權，這與 Roo Code 的授權一致。
+透過貢獻，您同意您的貢獻將根據 Apache 2.0 授權條款進行授權，這與 Zoo Code 的授權一致。

@@ -22,6 +22,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { logger } from "../../utils/logging"
 import { supportPrompt } from "../../shared/support-prompt"
+import { downgradeLegacyRooConfig } from "./routerRemoval"
 
 type GlobalStateKey = keyof GlobalState
 type SecretStateKey = keyof SecretState
@@ -90,6 +91,9 @@ export class ContextProxy {
 
 		// Migration: Check for old nested image generation settings and migrate them
 		await this.migrateImageGenerationSettings()
+
+		// Migration: Downgrade legacy Roo Code Router state before generic sanitization.
+		await this.migrateLegacyRooApiProvider()
 
 		// Migration: Sanitize invalid/removed API providers
 		await this.migrateInvalidApiProvider()
@@ -221,6 +225,33 @@ export class ContextProxy {
 		const hasNoV2Features = v2Features.every((feature) => !prompt.toLowerCase().includes(feature.toLowerCase()))
 
 		return hasAllV1Phrases && hasNoV2Features
+	}
+
+	/**
+	 * Migrates legacy Roo Code Router selections into a setup-needed state.
+	 */
+	private async migrateLegacyRooApiProvider() {
+		try {
+			const { config: migratedState, migrated } = downgradeLegacyRooConfig(
+				this.stateCache as Record<string, unknown>,
+			)
+
+			if (!migrated) {
+				return
+			}
+
+			logger.info("[ContextProxy] Migrating legacy Roo Code Router state to setup-needed fallback")
+			this.stateCache = migratedState as GlobalState
+			await Promise.all([
+				this.originalContext.globalState.update("apiProvider", undefined),
+				this.originalContext.globalState.update("apiModelId", undefined),
+				this.originalContext.globalState.update("rooApiKey", undefined),
+			])
+		} catch (error) {
+			logger.error(
+				`Error during Roo Code Router migration: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
 	}
 
 	/**
@@ -446,11 +477,13 @@ export class ContextProxy {
 	 * Active and retired providers are preserved.
 	 */
 	private sanitizeProviderValues(values: RooCodeSettings): RooCodeSettings {
+		const { config: rooSanitizedValues } = downgradeLegacyRooConfig(values as Record<string, unknown>)
+		let sanitizedValues = rooSanitizedValues as RooCodeSettings
+
 		// Remove legacy Claude Code CLI wrapper keys that may still exist in global state.
 		// These keys were used by a removed local CLI runner and are no longer part of ProviderSettings.
 		const legacyKeys = ["claudeCodePath", "claudeCodeMaxOutputTokens"] as const
 
-		let sanitizedValues = values
 		for (const key of legacyKeys) {
 			if (key in sanitizedValues) {
 				const copy = { ...sanitizedValues } as Record<string, unknown>
@@ -460,11 +493,13 @@ export class ContextProxy {
 		}
 
 		const isKnownProvider =
-			typeof values.apiProvider === "string" &&
-			(isProviderName(values.apiProvider) || isRetiredProvider(values.apiProvider))
+			typeof sanitizedValues.apiProvider === "string" &&
+			(isProviderName(sanitizedValues.apiProvider) || isRetiredProvider(sanitizedValues.apiProvider))
 
-		if (values.apiProvider !== undefined && !isKnownProvider) {
-			logger.info(`[ContextProxy] Sanitizing invalid provider "${values.apiProvider}" - resetting to undefined`)
+		if (sanitizedValues.apiProvider !== undefined && !isKnownProvider) {
+			logger.info(
+				`[ContextProxy] Sanitizing invalid provider "${sanitizedValues.apiProvider}" - resetting to undefined`,
+			)
 			// Return a new values object without the invalid apiProvider
 			const { apiProvider, ...restValues } = sanitizedValues
 			return restValues as RooCodeSettings

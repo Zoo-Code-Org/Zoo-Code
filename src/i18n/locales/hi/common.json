@@ -1,6 +1,6 @@
 {
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "आपके एडिटर में AI डेवलपर्स की पूरी टीम।"
 	},
 	"number_format": {
@@ -112,7 +112,8 @@
 			"thinking_complete_recitation": "(सोचना पूरा हुआ, लेकिन पाठ जाँच के कारण आउटपुट अवरुद्ध कर दिया गया।)"
 		},
 		"roo": {
-			"authenticationRequired": "Roo प्रदाता को क्लाउड प्रमाणीकरण की आवश्यकता है। कृपया Roo Code Cloud में साइन इन करें।"
+			"authenticationRequired": "Roo प्रदाता को क्लाउड प्रमाणीकरण की आवश्यकता है। कृपया Roo Code Cloud में साइन इन करें।",
+			"routerRemoved": "Roo Code Router हटा दिया गया है। कृपया कोई दूसरा प्रदाता चुनें और कॉन्फ़िगर करें।"
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API कुंजी में अमान्य वर्ण हैं।",
@@ -145,7 +146,7 @@
 	"warnings": {
 		"no_terminal_content": "कोई टर्मिनल सामग्री चयनित नहीं",
 		"missing_task_files": "इस टास्क की फाइलें गायब हैं। क्या आप इसे टास्क सूची से हटाना चाहते हैं?",
-		"auto_import_failed": "RooCode सेटिंग्स का स्वचालित आयात विफल: {{error}}"
+		"auto_import_failed": "ZooCode सेटिंग्स का स्वचालित आयात विफल: {{error}}"
 	},
 	"info": {
 		"no_changes": "कोई परिवर्तन नहीं मिला।",
@@ -154,14 +155,17 @@
 		"custom_storage_path_set": "कस्टम स्टोरेज पाथ सेट किया गया: {{path}}",
 		"default_storage_path": "डिफ़ॉल्ट स्टोरेज पाथ का उपयोग पुनः शुरू किया गया",
 		"settings_imported": "सेटिंग्स सफलतापूर्वक इम्पोर्ट की गईं।",
-		"auto_import_success": "RooCode सेटिंग्स {{filename}} से स्वचालित रूप से आयात की गईं",
+		"auto_import_success": "ZooCode सेटिंग्स {{filename}} से स्वचालित रूप से आयात की गईं",
 		"share_link_copied": "साझा लिंक क्लिपबोर्ड पर कॉपी किया गया",
 		"image_copied_to_clipboard": "छवि डेटा URI क्लिपबोर्ड में कॉपी की गई",
 		"image_saved": "छवि {{path}} में सहेजी गई",
 		"organization_share_link_copied": "संगठन साझाकरण लिंक क्लिपबोर्ड में कॉपी किया गया!",
 		"public_share_link_copied": "सार्वजनिक साझाकरण लिंक क्लिपबोर्ड में कॉपी किया गया!",
 		"mode_exported": "मोड '{{mode}}' सफलतापूर्वक निर्यात किया गया",
-		"mode_imported": "मोड सफलतापूर्वक आयात किया गया"
+		"mode_imported": "मोड सफलतापूर्वक आयात किया गया",
+		"roo": {
+			"signInUnavailable": "Roo Code Cloud साइन-इन अभी उपलब्ध नहीं है। जारी रखने के लिए कोई दूसरा प्रदाता कॉन्फ़िगर करें।"
+		}
 	},
 	"answers": {
 		"yes": "हां",
@@ -187,12 +191,12 @@
 	},
 	"storage": {
 		"prompt_custom_path": "वार्तालाप इतिहास के लिए कस्टम स्टोरेज पाथ दर्ज करें, डिफ़ॉल्ट स्थान का उपयोग करने के लिए खाली छोड़ दें",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "कृपया एक पूर्ण पाथ दर्ज करें (उदाहरण: D:\\RooCodeStorage या /home/user/storage)",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "कृपया एक पूर्ण पाथ दर्ज करें (उदाहरण: D:\\ZooCodeStorage या /home/user/storage)",
 		"enter_valid_path": "कृपया एक वैध पाथ दर्ज करें"
 	},
 	"input": {
-		"task_prompt": "Roo को क्या करना है?",
+		"task_prompt": "Zoo को क्या करना है?",
 		"task_placeholder": "अपना कार्य यहाँ लिखें"
 	},
 	"settings": {
@@ -222,8 +226,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "आपके संगठन को Roo Code Cloud प्रमाणीकरण की आवश्यकता है। कृपया जारी रखने के लिए साइन इन करें।",
-			"organization_mismatch": "आपको अपने संगठन के Roo Code Cloud खाते से प्रमाणित होना होगा।",
+			"cloud_auth_required": "आपके संगठन को Zoo Code Cloud प्रमाणीकरण की आवश्यकता है। कृपया जारी रखने के लिए साइन इन करें।",
+			"organization_mismatch": "आपको अपने संगठन के Zoo Code Cloud खाते से प्रमाणित होना होगा।",
 			"manual_url_empty": "कृपया एक वैध callback URL दर्ज करें",
 			"manual_url_no_query": "अवैध callback URL: क्वेरी पैरामीटर गुम हैं",
 			"manual_url_missing_params": "अवैध callback URL: आवश्यक पैरामीटर गुम हैं (code और state)",
@@ -250,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: अमान्य प्रमाणीकरण token प्राप्त हुआ।",
+			"token_verification_failed": "Zoo Code: Token सत्यापन विफल रहा।",
+			"invalid_token": "Zoo Code: अमान्य token।",
+			"could_not_verify_token": "Zoo Code: Token सत्यापित नहीं किया जा सका।"
+		},
+		"info": {
+			"connected": "Zoo Code: सफलतापूर्वक कनेक्ट हो गया! अब तुम Zoo Code को अपने AI प्रदाता के रूप में उपयोग कर सकते हो।",
+			"disconnected": "Zoo Code: सफलतापूर्वक डिस्कनेक्ट हो गया।"
+		}
 	}
 }

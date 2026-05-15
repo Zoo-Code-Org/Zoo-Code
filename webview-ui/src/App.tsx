@@ -19,12 +19,11 @@ import { MarketplaceView } from "./components/marketplace/MarketplaceView"
 import { CheckpointRestoreDialog } from "./components/chat/CheckpointRestoreDialog"
 import { DeleteMessageDialog, EditMessageDialog } from "./components/chat/MessageModificationConfirmationDialog"
 import ErrorBoundary from "./components/ErrorBoundary"
-import { CloudView } from "./components/cloud/CloudView"
 import { useAddNonInteractiveClickListener } from "./components/ui/hooks/useNonInteractiveClick"
 import { TooltipProvider } from "./components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "./components/ui/standard-tooltip"
 
-type Tab = "settings" | "history" | "chat" | "marketplace" | "cloud"
+type Tab = "settings" | "history" | "chat" | "marketplace"
 
 interface DeleteMessageDialogState {
 	isOpen: boolean
@@ -49,21 +48,17 @@ const tabsByMessageAction: Partial<Record<NonNullable<ExtensionMessage["action"]
 	settingsButtonClicked: "settings",
 	historyButtonClicked: "history",
 	marketplaceButtonClicked: "marketplace",
-	cloudButtonClicked: "cloud",
 }
 
 const App = () => {
 	const {
 		didHydrateState,
 		showWelcome,
+		settingsImportedAt,
 		shouldShowAnnouncement,
 		telemetrySetting,
 		telemetryKey,
 		machineId,
-		cloudUserInfo,
-		cloudIsAuthenticated,
-		cloudApiUrl,
-		cloudOrganizations,
 		renderContext,
 		mdmCompliant,
 	} = useExtensionState()
@@ -73,6 +68,7 @@ const App = () => {
 
 	const [showAnnouncement, setShowAnnouncement] = useState(false)
 	const [tab, setTab] = useState<Tab>("chat")
+	const handledImportRef = useRef<number | undefined>(undefined)
 
 	const [deleteMessageDialogState, setDeleteMessageDialogState] = useState<DeleteMessageDialogState>({
 		isOpen: false,
@@ -93,9 +89,7 @@ const App = () => {
 
 	const switchTab = useCallback(
 		(newTab: Tab) => {
-			// Only check MDM compliance if mdmCompliant is explicitly false (meaning there's an MDM policy and user is non-compliant)
-			// If mdmCompliant is undefined or true, allow tab switching
-			if (mdmCompliant === false && newTab !== "cloud") {
+			if (mdmCompliant === false) {
 				// Notify the user that authentication is required by their organization
 				vscode.postMessage({ type: "showMdmAuthRequiredNotification" })
 				return
@@ -178,6 +172,19 @@ const App = () => {
 	}, [shouldShowAnnouncement, tab])
 
 	useEffect(() => {
+		const isRecoverableTab = tab === "settings" || tab === "marketplace"
+
+		if (showWelcome && settingsImportedAt && settingsImportedAt !== handledImportRef.current) {
+			handledImportRef.current = settingsImportedAt
+			if (!isRecoverableTab) {
+				setCurrentSection("providers")
+				setCurrentMarketplaceTab(undefined)
+				setTab("settings")
+			}
+		}
+	}, [showWelcome, settingsImportedAt, tab])
+
+	useEffect(() => {
 		if (didHydrateState) {
 			telemetryClient.updateTelemetryState(telemetrySetting, telemetryKey, machineId)
 		}
@@ -222,7 +229,9 @@ const App = () => {
 
 	// Do not conditionally load ChatView, it's expensive and there's state we
 	// don't want to lose (user input, disableInput, askResponse promise, etc.)
-	return showWelcome ? (
+	const isSetupGatedTab = showWelcome && tab !== "settings" && tab !== "marketplace"
+
+	return isSetupGatedTab ? (
 		<WelcomeView />
 	) : (
 		<>
@@ -235,14 +244,6 @@ const App = () => {
 					stateManager={marketplaceStateManager}
 					onDone={() => switchTab("chat")}
 					targetTab={currentMarketplaceTab as "mcp" | "mode" | undefined}
-				/>
-			)}
-			{tab === "cloud" && (
-				<CloudView
-					userInfo={cloudUserInfo}
-					isAuthenticated={cloudIsAuthenticated}
-					cloudApiUrl={cloudApiUrl}
-					organizations={cloudOrganizations}
 				/>
 			)}
 			<ChatView

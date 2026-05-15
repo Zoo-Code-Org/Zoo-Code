@@ -18,6 +18,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
+import { getAnthropicProviderReasoning } from "../transform/reasoning"
 import { handleProviderError } from "./utils/error-handler"
 
 import { BaseProvider } from "./base-provider"
@@ -58,8 +59,15 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			betas = ["fine-grained-tool-streaming-2025-05-14"],
 			maxTokens,
 			temperature,
-			reasoning: thinking,
+			info,
+			reasoningBudget,
 		} = this.getModel()
+		const thinking = getAnthropicProviderReasoning({
+			model: info,
+			reasoningBudget,
+			reasoningEffort: undefined,
+			settings: this.options,
+		})
 
 		// Filter out non-Anthropic blocks (reasoning, thoughtSignature, etc.) before sending to the API
 		const sanitizedMessages = filterNonAnthropicBlocks(messages)
@@ -85,6 +93,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			case "claude-sonnet-4-5":
 			case "claude-sonnet-4-20250514":
 			case "claude-opus-4-6":
+			case "claude-opus-4-7":
 			case "claude-opus-4-5-20251101":
 			case "claude-opus-4-1-20250805":
 			case "claude-opus-4-20250514":
@@ -113,33 +122,34 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 				const secondLastMsgUserIndex = userMsgIndices[userMsgIndices.length - 2] ?? -1
 
 				try {
-					stream = await this.client.messages.create(
-						{
-							model: modelId,
-							max_tokens: maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
-							temperature,
-							thinking,
-							// Setting cache breakpoint for system prompt so new tasks can reuse it.
-							system: [{ text: systemPrompt, type: "text", cache_control: cacheControl }],
-							messages: sanitizedMessages.map((message, index) => {
-								if (index === lastUserMsgIndex || index === secondLastMsgUserIndex) {
-									return {
-										...message,
-										content:
-											typeof message.content === "string"
-												? [{ type: "text", text: message.content, cache_control: cacheControl }]
-												: message.content.map((content, contentIndex) =>
-														contentIndex === message.content.length - 1
-															? { ...content, cache_control: cacheControl }
-															: content,
-													),
-									}
+					const requestParams = {
+						model: modelId,
+						max_tokens: maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
+						temperature,
+						thinking,
+						// Setting cache breakpoint for system prompt so new tasks can reuse it.
+						system: [{ text: systemPrompt, type: "text", cache_control: cacheControl }],
+						messages: sanitizedMessages.map((message, index) => {
+							if (index === lastUserMsgIndex || index === secondLastMsgUserIndex) {
+								return {
+									...message,
+									content:
+										typeof message.content === "string"
+											? [{ type: "text", text: message.content, cache_control: cacheControl }]
+											: message.content.map((content, contentIndex) =>
+													contentIndex === message.content.length - 1
+														? { ...content, cache_control: cacheControl }
+														: content,
+												),
 								}
-								return message
-							}),
-							stream: true,
-							...nativeToolParams,
-						},
+							}
+							return message
+						}),
+						stream: true,
+						...nativeToolParams,
+					}
+					stream = await this.client.messages.create(
+						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
 						(() => {
 							// prompt caching: https://x.com/alexalbert__/status/1823751995901272068
 							// https://github.com/anthropics/anthropic-sdk-typescript?tab=readme-ov-file#default-headers
@@ -151,6 +161,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 								case "claude-sonnet-4-5":
 								case "claude-sonnet-4-20250514":
 								case "claude-opus-4-6":
+								case "claude-opus-4-7":
 								case "claude-opus-4-5-20251101":
 								case "claude-opus-4-1-20250805":
 								case "claude-opus-4-20250514":
@@ -182,15 +193,19 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			}
 			default: {
 				try {
-					stream = (await this.client.messages.create({
+					const requestParams = {
 						model: modelId,
 						max_tokens: maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
 						temperature,
+						thinking,
 						system: [{ text: systemPrompt, type: "text" }],
 						messages: sanitizedMessages,
 						stream: true,
 						...nativeToolParams,
-					})) as any
+					}
+					stream = (await this.client.messages.create(
+						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
+					)) as any
 				} catch (error) {
 					TelemetryService.instance.captureException(
 						new ApiProviderError(

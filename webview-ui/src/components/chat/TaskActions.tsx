@@ -8,7 +8,6 @@ import { useCopyToClipboard } from "@/utils/clipboard"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 
 import { DeleteTaskDialog } from "../history/DeleteTaskDialog"
-import { ShareButton } from "./ShareButton"
 import { CopyIcon, CheckIcon, DownloadIcon, Trash2Icon, FileJsonIcon, MessageSquareCodeIcon } from "lucide-react"
 import { LucideIconButton } from "./LucideIconButton"
 
@@ -62,7 +61,6 @@ export const TaskActions = ({ item, buttonsDisabled }: TaskActionsProps) => {
 					)}
 				</>
 			)}
-			<ShareButton item={item} disabled={false} />
 			{debug && item?.id && (
 				<>
 					<LucideIconButton

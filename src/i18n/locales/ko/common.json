@@ -1,6 +1,6 @@
 {
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "에디터 내에서 동작하는 AI 개발팀 전체입니다."
 	},
 	"number_format": {
@@ -112,7 +112,8 @@
 			"thinking_complete_recitation": "(생각 완료, 암송 확인으로 출력 차단됨)"
 		},
 		"roo": {
-			"authenticationRequired": "Roo 제공업체는 클라우드 인증이 필요합니다. Roo Code Cloud에 로그인하세요."
+			"authenticationRequired": "Roo 제공업체는 클라우드 인증이 필요합니다. Roo Code Cloud에 로그인하세요.",
+			"routerRemoved": "Roo Code Router가 제거되었습니다. 다른 제공업체를 선택하고 구성하세요."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API 키에 유효하지 않은 문자가 포함되어 있습니다.",
@@ -145,7 +146,7 @@
 	"warnings": {
 		"no_terminal_content": "선택된 터미널 내용이 없습니다",
 		"missing_task_files": "이 작업의 파일이 누락되었습니다. 작업 목록에서 제거하시겠습니까?",
-		"auto_import_failed": "RooCode 설정 자동 가져오기 실패: {{error}}"
+		"auto_import_failed": "ZooCode 설정 자동 가져오기 실패: {{error}}"
 	},
 	"info": {
 		"no_changes": "변경 사항이 없습니다.",
@@ -154,14 +155,17 @@
 		"custom_storage_path_set": "사용자 지정 저장 경로 설정됨: {{path}}",
 		"default_storage_path": "기본 저장 경로로 되돌아갔습니다",
 		"settings_imported": "설정이 성공적으로 가져와졌습니다.",
-		"auto_import_success": "{{filename}}에서 RooCode 설정을 자동으로 가져왔습니다",
+		"auto_import_success": "{{filename}}에서 ZooCode 설정을 자동으로 가져왔습니다",
 		"share_link_copied": "공유 링크가 클립보드에 복사되었습니다",
 		"image_copied_to_clipboard": "이미지 데이터 URI가 클립보드에 복사되었습니다",
 		"image_saved": "이미지가 {{path}}에 저장되었습니다",
 		"organization_share_link_copied": "조직 공유 링크가 클립보드에 복사되었습니다!",
 		"public_share_link_copied": "공개 공유 링크가 클립보드에 복사되었습니다!",
 		"mode_exported": "'{{mode}}' 모드가 성공적으로 내보내졌습니다",
-		"mode_imported": "모드를 성공적으로 가져왔습니다"
+		"mode_imported": "모드를 성공적으로 가져왔습니다",
+		"roo": {
+			"signInUnavailable": "Roo Code Cloud 로그인은 현재 사용할 수 없습니다. 계속하려면 다른 제공업체를 구성하세요."
+		}
 	},
 	"answers": {
 		"yes": "예",
@@ -187,12 +191,12 @@
 	},
 	"storage": {
 		"prompt_custom_path": "대화 내역을 위한 사용자 지정 저장 경로를 입력하세요. 기본 위치를 사용하려면 비워두세요",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "절대 경로를 입력하세요 (예: D:\\RooCodeStorage 또는 /home/user/storage)",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "절대 경로를 입력하세요 (예: D:\\ZooCodeStorage 또는 /home/user/storage)",
 		"enter_valid_path": "유효한 경로를 입력하세요"
 	},
 	"input": {
-		"task_prompt": "Roo에게 무엇을 시킬까요?",
+		"task_prompt": "Zoo에게 무엇을 시킬까요?",
 		"task_placeholder": "여기에 작업을 입력하세요"
 	},
 	"settings": {
@@ -222,8 +226,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "조직에서 Roo Code Cloud 인증이 필요합니다. 계속하려면 로그인하세요.",
-			"organization_mismatch": "조직의 Roo Code Cloud 계정으로 인증해야 합니다.",
+			"cloud_auth_required": "조직에서 Zoo Code Cloud 인증이 필요합니다. 계속하려면 로그인하세요.",
+			"organization_mismatch": "조직의 Zoo Code Cloud 계정으로 인증해야 합니다.",
 			"manual_url_empty": "유효한 콜백 URL을 입력하세요",
 			"manual_url_no_query": "유효하지 않은 콜백 URL: 쿼리 매개변수 누락",
 			"manual_url_missing_params": "유효하지 않은 콜백 URL: 필요한 매개변수 누락 (code와 state)",
@@ -250,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: 잘못된 인증 token을 수신했습니다.",
+			"token_verification_failed": "Zoo Code: Token 검증에 실패했습니다.",
+			"invalid_token": "Zoo Code: 잘못된 token입니다.",
+			"could_not_verify_token": "Zoo Code: Token을 검증할 수 없습니다."
+		},
+		"info": {
+			"connected": "Zoo Code: 연결에 성공했습니다! 이제 Zoo Code를 AI 제공자로 사용할 수 있습니다.",
+			"disconnected": "Zoo Code: 연결이 해제되었습니다."
+		}
 	}
 }

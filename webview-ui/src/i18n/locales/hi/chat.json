@@ -1,5 +1,5 @@
 {
-	"greeting": "Roo Code में आपका स्वागत है",
+	"greeting": "Zoo Code में आपका स्वागत है!",
 	"task": {
 		"title": "कार्य",
 		"expand": "कार्य विस्तृत करें",
@@ -15,16 +15,6 @@
 		"export": "कार्य इतिहास निर्यात करें",
 		"delete": "कार्य हटाएं (पुष्टि को छोड़ने के लिए Shift + क्लिक)",
 		"condenseContext": "संदर्भ को बुद्धिमानी से संघनित करें",
-		"share": "कार्य साझा करें",
-		"shareWithOrganization": "संगठन के साथ साझा करें",
-		"shareWithOrganizationDescription": "केवल आपके संगठन के सदस्य पहुंच सकते हैं",
-		"sharePublicly": "सार्वजनिक रूप से साझा करें",
-		"sharePubliclyDescription": "लिंक वाला कोई भी व्यक्ति पहुंच सकता है",
-		"connectToCloud": "Cloud से कनेक्ट करें",
-		"connectToCloudDescription": "कार्य साझा करने के लिए Roo Code Cloud में साइन इन करें",
-		"sharingDisabledByOrganization": "संगठन द्वारा साझाकरण अक्षम किया गया",
-		"shareSuccessOrganization": "संगठन लिंक क्लिपबोर्ड में कॉपी किया गया",
-		"shareSuccessPublic": "सार्वजनिक लिंक क्लिपबोर्ड में कॉपी किया गया",
 		"openApiHistory": "API इतिहास खोलें",
 		"openUiHistory": "UI इतिहास खोलें",
 		"backToParentTask": "मूल कार्य"
@@ -98,7 +88,7 @@
 	"enqueueMessage": "संदेश को कतार में जोड़ें (वर्तमान कार्य पूरा होने के बाद भेजा जाएगा)",
 	"scrollToBottom": "चैट के निचले हिस्से तक स्क्रॉल करें",
 	"scrollToLatestCheckpoint": "पिछले चेकपॉइंट तक स्क्रॉल करें",
-	"about": "Roo Code आपके संपादक में एक पूरी AI देव टीम है।",
+	"about": "Zoo Code आपके संपादक में एक पूरी AI देव टीम है।",
 	"docs": "और जानने के लिए हमारे <DocsLink>दस्तावेज़</DocsLink> देखें।",
 	"onboarding": "इस कार्यक्षेत्र में आपकी कार्य सूची खाली है।",
 	"rooTips": {
@@ -130,7 +120,7 @@
 		"title": "मोड्स",
 		"marketplace": "मोड मार्केटप्लेस",
 		"settings": "मोड सेटिंग्स",
-		"description": "विशेष व्यक्तित्व जो Roo के व्यवहार को अनुकूलित करते हैं।",
+		"description": "विशेष व्यक्तित्व जो Zoo के व्यवहार को अनुकूलित करते हैं।",
 		"searchPlaceholder": "मोड खोजें...",
 		"noResults": "कोई परिणाम नहीं मिला"
 	},
@@ -144,7 +134,7 @@
 	"diffError": {
 		"title": "संपादन असफल"
 	},
-	"troubleMessage": "Roo को समस्या हो रही है...",
+	"troubleMessage": "Zoo को समस्या हो रही है...",
 	"apiRequest": {
 		"title": "API अनुरोध",
 		"failed": "API अनुरोध विफल हुआ",
@@ -162,7 +152,7 @@
 			"500": "प्रदाता सर्वर त्रुटि। प्रदाता की ओर से कुछ गलत है, आपके अनुरोध में कुछ गलत नहीं है।",
 			"docs": "डॉक्स",
 			"goToSettings": "सेटिंग्स",
-			"unknown": "अज्ञात API त्रुटि। कृपया Roo Code सहायता से संपर्क करें।",
+			"unknown": "अज्ञात API त्रुटि। कृपया Zoo Code सहायता से संपर्क करें।",
 			"connection": "कनेक्शन त्रुटि। सुनिश्चित करें कि आपके पास कार्यशील इंटरनेट कनेक्शन है।",
 			"claudeCodeNotAuthenticated": "Claude Code का उपयोग करने के लिए आपको साइन इन करना होगा। सेटिंग्स में जाएं और प्रमाणित करने के लिए \"Claude Code में साइन इन करें\" पर क्लिक करें।"
 		}
@@ -190,40 +180,40 @@
 		"wantsToFetch": "Roo को वर्तमान कार्य में सहायता के लिए विस्तृत निर्देश प्राप्त करना है"
 	},
 	"fileOperations": {
-		"wantsToRead": "Roo इस फ़ाइल को पढ़ना चाहता है",
-		"wantsToReadOutsideWorkspace": "Roo कार्यक्षेत्र के बाहर इस फ़ाइल को पढ़ना चाहता है",
-		"didRead": "Roo ने इस फ़ाइल को पढ़ा",
-		"wantsToEdit": "Roo इस फ़ाइल को संपादित करना चाहता है",
-		"wantsToEditOutsideWorkspace": "Roo कार्यक्षेत्र के बाहर इस फ़ाइल को संपादित करना चाहता है",
-		"wantsToEditProtected": "Roo एक सुरक्षित कॉन्फ़िगरेशन फ़ाइल को संपादित करना चाहता है",
-		"wantsToCreate": "Roo एक नई फ़ाइल बनाना चाहता है",
+		"wantsToRead": "Zoo इस फ़ाइल को पढ़ना चाहता है",
+		"wantsToReadOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर इस फ़ाइल को पढ़ना चाहता है",
+		"didRead": "Zoo ने इस फ़ाइल को पढ़ा",
+		"wantsToEdit": "Zoo इस फ़ाइल को संपादित करना चाहता है",
+		"wantsToEditOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर इस फ़ाइल को संपादित करना चाहता है",
+		"wantsToEditProtected": "Zoo एक सुरक्षित कॉन्फ़िगरेशन फ़ाइल को संपादित करना चाहता है",
+		"wantsToCreate": "Zoo एक नई फ़ाइल बनाना चाहता है",
 		"wantsToSearchReplace": "Roo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
 		"didSearchReplace": "Roo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
-		"wantsToInsert": "Roo इस फ़ाइल में सामग्री डालना चाहता है",
-		"wantsToInsertWithLineNumber": "Roo इस फ़ाइल की {{lineNumber}} लाइन पर सामग्री डालना चाहता है",
-		"wantsToInsertAtEnd": "Roo इस फ़ाइल के अंत में सामग्री जोड़ना चाहता है",
+		"wantsToInsert": "Zoo इस फ़ाइल में सामग्री डालना चाहता है",
+		"wantsToInsertWithLineNumber": "Zoo इस फ़ाइल की {{lineNumber}} लाइन पर सामग्री डालना चाहता है",
+		"wantsToInsertAtEnd": "Zoo इस फ़ाइल के अंत में सामग्री जोड़ना चाहता है",
 		"wantsToReadAndXMore": "रू इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
-		"wantsToReadMultiple": "Roo कई फ़ाइलें पढ़ना चाहता है",
-		"wantsToApplyBatchChanges": "Roo कई फ़ाइलों में परिवर्तन लागू करना चाहता है",
-		"wantsToGenerateImage": "Roo एक छवि बनाना चाहता है",
-		"wantsToGenerateImageOutsideWorkspace": "Roo कार्यक्षेत्र के बाहर एक छवि बनाना चाहता है",
-		"wantsToGenerateImageProtected": "Roo एक संरक्षित स्थान पर छवि बनाना चाहता है",
-		"didGenerateImage": "Roo ने एक छवि बनाई"
+		"wantsToReadMultiple": "Zoo कई फ़ाइलें पढ़ना चाहता है",
+		"wantsToApplyBatchChanges": "Zoo कई फ़ाइलों में परिवर्तन लागू करना चाहता है",
+		"wantsToGenerateImage": "Zoo एक छवि बनाना चाहता है",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर एक छवि बनाना चाहता है",
+		"wantsToGenerateImageProtected": "Zoo एक संरक्षित स्थान पर छवि बनाना चाहता है",
+		"didGenerateImage": "Zoo ने एक छवि बनाई"
 	},
 	"directoryOperations": {
-		"wantsToViewTopLevel": "Roo इस निर्देशिका में शीर्ष स्तर की फ़ाइलें देखना चाहता है",
-		"didViewTopLevel": "Roo ने इस निर्देशिका में शीर्ष स्तर की फ़ाइलें देखीं",
-		"wantsToViewRecursive": "Roo इस निर्देशिका में सभी फ़ाइलों को पुनरावर्ती रूप से देखना चाहता है",
-		"didViewRecursive": "Roo ने इस निर्देशिका में सभी फ़ाइलों को पुनरावर्ती रूप से देखा",
-		"wantsToSearch": "Roo इस निर्देशिका में <code>{{regex}}</code> के लिए खोज करना चाहता है",
-		"didSearch": "Roo ने इस निर्देशिका में <code>{{regex}}</code> के लिए खोज की",
-		"wantsToSearchOutsideWorkspace": "Roo इस निर्देशिका (कार्यक्षेत्र के बाहर) में <code>{{regex}}</code> के लिए खोज करना चाहता है",
-		"didSearchOutsideWorkspace": "Roo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में <code>{{regex}}</code> के लिए खोज की",
-		"wantsToViewTopLevelOutsideWorkspace": "Roo इस निर्देशिका (कार्यक्षेत्र के बाहर) में शीर्ष स्तर की फ़ाइलें देखना चाहता है",
-		"didViewTopLevelOutsideWorkspace": "Roo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में शीर्ष स्तर की फ़ाइलें देखीं",
-		"wantsToViewRecursiveOutsideWorkspace": "Roo इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखना चाहता है",
-		"didViewRecursiveOutsideWorkspace": "Roo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखा",
-		"wantsToViewMultipleDirectories": "Roo कई डायरेक्ट्रीज़ देखना चाहता है"
+		"wantsToViewTopLevel": "Zoo इस निर्देशिका में शीर्ष स्तर की फ़ाइलें देखना चाहता है",
+		"didViewTopLevel": "Zoo ने इस निर्देशिका में शीर्ष स्तर की फ़ाइलें देखीं",
+		"wantsToViewRecursive": "Zoo इस निर्देशिका में सभी फ़ाइलों को पुनरावर्ती रूप से देखना चाहता है",
+		"didViewRecursive": "Zoo ने इस निर्देशिका में सभी फ़ाइलों को पुनरावर्ती रूप से देखा",
+		"wantsToSearch": "Zoo इस निर्देशिका में <code>{{regex}}</code> के लिए खोज करना चाहता है",
+		"didSearch": "Zoo ने इस निर्देशिका में <code>{{regex}}</code> के लिए खोज की",
+		"wantsToSearchOutsideWorkspace": "Zoo इस निर्देशिका (कार्यक्षेत्र के बाहर) में <code>{{regex}}</code> के लिए खोज करना चाहता है",
+		"didSearchOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में <code>{{regex}}</code> के लिए खोज की",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo इस निर्देशिका (कार्यक्षेत्र के बाहर) में शीर्ष स्तर की फ़ाइलें देखना चाहता है",
+		"didViewTopLevelOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में शीर्ष स्तर की फ़ाइलें देखीं",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखना चाहता है",
+		"didViewRecursiveOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखा",
+		"wantsToViewMultipleDirectories": "Zoo कई डायरेक्ट्रीज़ देखना चाहता है"
 	},
 	"commandOutput": "कमांड आउटपुट",
 	"commandExecution": {
@@ -251,18 +241,18 @@
 		"youSaid": "आपने कहा"
 	},
 	"mcp": {
-		"wantsToUseTool": "Roo {{serverName}} MCP सर्वर पर एक टूल का उपयोग करना चाहता है",
-		"wantsToAccessResource": "Roo {{serverName}} MCP सर्वर पर एक संसाधन का उपयोग करना चाहता है"
+		"wantsToUseTool": "Zoo {{serverName}} MCP सर्वर पर एक टूल का उपयोग करना चाहता है",
+		"wantsToAccessResource": "Zoo {{serverName}} MCP सर्वर पर एक संसाधन का उपयोग करना चाहता है"
 	},
 	"modes": {
-		"wantsToSwitch": "Roo <code>{{mode}}</code> मोड में स्विच करना चाहता है",
-		"wantsToSwitchWithReason": "Roo <code>{{mode}}</code> मोड में स्विच करना चाहता है क्योंकि: {{reason}}",
-		"didSwitch": "Roo <code>{{mode}}</code> मोड में स्विच कर गया",
-		"didSwitchWithReason": "Roo <code>{{mode}}</code> मोड में स्विच कर गया क्योंकि: {{reason}}"
+		"wantsToSwitch": "Zoo <code>{{mode}}</code> मोड में स्विच करना चाहता है",
+		"wantsToSwitchWithReason": "Zoo <code>{{mode}}</code> मोड में स्विच करना चाहता है क्योंकि: {{reason}}",
+		"didSwitch": "Zoo <code>{{mode}}</code> मोड में स्विच कर गया",
+		"didSwitchWithReason": "Zoo <code>{{mode}}</code> मोड में स्विच कर गया क्योंकि: {{reason}}"
 	},
 	"subtasks": {
-		"wantsToCreate": "Roo <code>{{mode}}</code> मोड में एक नया उपकार्य बनाना चाहता है",
-		"wantsToFinish": "Roo इस उपकार्य को समाप्त करना चाहता है",
+		"wantsToCreate": "Zoo <code>{{mode}}</code> मोड में एक नया उपकार्य बनाना चाहता है",
+		"wantsToFinish": "Zoo इस उपकार्य को समाप्त करना चाहता है",
 		"newTaskContent": "उपकार्य निर्देश",
 		"completionContent": "उपकार्य पूर्ण",
 		"resultContent": "उपकार्य परिणाम",
@@ -271,7 +261,7 @@
 		"goToSubtask": "कार्य देखें"
 	},
 	"questions": {
-		"hasQuestion": "Roo का एक प्रश्न है"
+		"hasQuestion": "Zoo का एक प्रश्न है"
 	},
 	"taskCompleted": "कार्य पूरा हुआ",
 	"modelResponseIncomplete": "मॉडल प्रतिक्रिया अपूर्ण",
@@ -287,7 +277,7 @@
 		"copyToClipboard": "क्लिपबोर्ड पर कॉपी करें",
 		"copied": "कॉपी किया गया!",
 		"diagnostics": "विस्तृत त्रुटि जानकारी प्राप्त करें",
-		"proxyProvider": "ऐसा लगता है कि आप एक प्रॉक्सी-आधारित प्रदाता का उपयोग कर रहे हैं। इसके लॉग की जांच करना सुनिश्चित करें और सुनिश्चित करें कि यह Roo के अनुरोधों को नहीं फिर से लिख रहा है।"
+		"proxyProvider": "ऐसा लगता है कि आप एक प्रॉक्सी-आधारित प्रदाता का उपयोग कर रहे हैं। इसके लॉग की जांच करना सुनिश्चित करें और सुनिश्चित करें कि यह Zoo के अनुरोधों को नहीं फिर से लिख रहा है।"
 	},
 	"powershell": {
 		"issues": "ऐसा लगता है कि आपको Windows PowerShell के साथ समस्याएँ हो रही हैं, कृपया इसे देखें"
@@ -330,31 +320,24 @@
 		}
 	},
 	"skill": {
-		"wantsToLoad": "Roo एक कौशल लोड करना चाहता है",
-		"didLoad": "Roo ने एक कौशल लोड किया"
+		"wantsToLoad": "Zoo एक कौशल लोड करना चाहता है",
+		"didLoad": "Zoo ने एक कौशल लोड किया"
 	},
 	"followUpSuggest": {
 		"copyToInput": "इनपुट में कॉपी करें (या Shift + क्लिक)",
 		"timerPrefix": "ऑटो-अनुमोदन सक्षम है। {{seconds}}s में चयन किया जा रहा है…"
 	},
 	"announcement": {
-		"title": "Roo Code {{version}} रिलीज़ हुआ",
-		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Roo Code का समर्थन करें।",
-		"stealthModel": {
-			"feature": "<bold>सीमित समय के लिए मुफ़्त स्टेल्थ मॉडल</bold> - Code Supernova: अब <bold>1M Token संदर्भ विंडो</bold> के साथ अपग्रेड हुआ! एक बहुमुखी एजेंटिक कोडिंग मॉडल जो छवि इनपुट का समर्थन करता है, Roo Code Cloud के माध्यम से उपलब्ध।",
-			"note": "(नोट: प्रॉम्प्ट्स और कम्प्लीशन्स मॉडल निर्माता द्वारा लॉग किए जाते हैं और मॉडल को बेहतर बनाने के लिए उपयोग किए जाते हैं)",
-			"connectButton": "Roo Code Cloud से कनेक्ट करें",
-			"selectModel": "आरंभ करने के लिए सेटिंग्स में Roo Code Cloud प्रोवाइडर से <code>roo/code-supernova</code> चुनें।",
-			"goToSettingsButton": "सेटिंग्स पर जाएं"
-		},
+		"title": "Zoo Code {{version}} रिलीज़ हो गया",
+		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
 		"handoff": {
-			"heading": "Roo Code plugin कहीं नहीं जा रहा है।",
-			"description": "आपने शायद हाल ही की घोषणा देखी होगी कि Roo Code ने 30 लाख installs पार कर लिए हैं और मूल टीम पूरी तरह Roomote पर focus कर रही है। हम जानते हैं कि यह खबर आप में से कई के लिए कठिन थी। यह plugin हमारे और आपके लिए बहुत मायने रखता है, और हम आपकी बात सुन रहे हैं। अच्छी खबर: <bold>एक community team ने Roo Code को आगे ले जाने की ज़िम्मेदारी ली है</bold>, और हम उनके साथ एक आधिकारिक handoff पर काम कर रहे हैं ताकि जिस plugin पर आप भरोसा करते हैं, उसका maintenance और improvement जारी रहे।",
-			"readMore": "Matt Rubens की मूल घोषणा पढ़ें"
+			"heading": "Roo Code वापस आ गया है! अब Zoo Code नाम के community-maintained plugin के रूप में!!",
+			"description": "अगर आपने हाल की खबर नहीं देखी, तो Roo Code टीम ने हाल ही में घोषणा की कि वे Roo Code का विकास बंद कर रहे हैं और अब तक किए गए काम को archive कर रहे हैं। लेकिन चिंता मत करें, community नए नाम और नए घर के साथ Roo Code की विरासत को आगे बढ़ाने के लिए आगे आई है! अब हम सिर्फ एक \"Roo\" नहीं हैं, हम एक community हैं — अगर चाहो तो एक \"Zoo\"। Zoo Code एक community-maintained plugin है जो वहीं से आगे बढ़ता है जहाँ Roo Code रुका था, और हम Roo की भावना को ज़िंदा रखते हुए नई सुविधाएँ और सुधार लाने के लिए प्रतिबद्ध हैं। हम पूरी Roo Code टीम को उनके शानदार काम और डेवलपर्स के लिए इतना बेहतरीन tool बनाने के लिए दिल से धन्यवाद देना चाहते हैं। हम उनकी बनाई नींव पर आगे निर्माण करने और यह देखने के लिए उत्साहित हैं कि community Zoo Code को आगे कहाँ ले जाती है!",
+			"readMore": "Zoo Code का नया होम पेज देखें और पूरी घोषणा पढ़ें"
 		},
 		"release": {
 			"heading": "नया क्या है:",
-			"gpt55": "OpenAI Codex के माध्यम से GPT-5.5: OpenAI Codex provider में GPT-5.5 सपोर्ट जोड़ा गया, ताकि आप नवीनतम मॉडल का उपयोग सीधे Roo Code से कर सकें।",
+			"gpt55": "OpenAI Codex के माध्यम से GPT-5.5: OpenAI Codex provider में GPT-5.5 सपोर्ट जोड़ा गया, ताकि आप नवीनतम मॉडल का उपयोग सीधे Zoo Code से कर सकें।",
 			"claudeOpus47": "Vertex AI पर Claude Opus 4.7: Anthropic के नवीनतम flagship reasoning मॉडल के लिए Vertex AI provider में Claude Opus 4.7 जोड़ा गया।",
 			"checkpointNav": "पिछले Checkpoint की Navigation: चैट में controls जोड़े गए ताकि आप पिछले checkpoints पर वापस जा सकें, पूर्ण i18n सपोर्ट के साथ।"
 		},
@@ -380,24 +363,24 @@
 	"profileViolationWarning": "वर्तमान प्रोफ़ाइल आपके संगठन की सेटिंग्स के साथ संगत नहीं है",
 	"shellIntegration": {
 		"title": "कमांड निष्पादन चेतावनी",
-		"description": "आपका कमांड VSCode टर्मिनल शेल इंटीग्रेशन के बिना निष्पादित हो रहा है। इस चेतावनी को दबाने के लिए आप <settingsLink>Roo Code सेटिंग्स</settingsLink> के <strong>Terminal</strong> अनुभाग में शेल इंटीग्रेशन को अक्षम कर सकते हैं या नीचे दिए गए लिंक का उपयोग करके VSCode टर्मिनल इंटीग्रेशन की समस्या का समाधान कर सकते हैं।",
+		"description": "आपका कमांड VSCode टर्मिनल शेल इंटीग्रेशन के बिना निष्पादित हो रहा है। इस चेतावनी को दबाने के लिए आप <settingsLink>Zoo Code सेटिंग्स</settingsLink> के <strong>Terminal</strong> अनुभाग में शेल इंटीग्रेशन को अक्षम कर सकते हैं या नीचे दिए गए लिंक का उपयोग करके VSCode टर्मिनल इंटीग्रेशन की समस्या का समाधान कर सकते हैं।",
 		"troubleshooting": "शेल इंटीग्रेशन दस्तावेज़ के लिए यहां क्लिक करें।"
 	},
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "स्वत:-स्वीकृत अनुरोध सीमा पहुंची",
-			"description": "Roo {{count}} API अनुरोध(धों) की स्वत:-स्वीकृत सीमा तक पहुंच गया है। क्या आप गणना को रीसेट करके कार्य जारी रखना चाहते हैं?",
+			"description": "Zoo {{count}} API अनुरोध(धों) की स्वत:-स्वीकृत सीमा तक पहुंच गया है। क्या आप गणना को रीसेट करके कार्य जारी रखना चाहते हैं?",
 			"button": "रीसेट करें और जारी रखें"
 		},
 		"autoApprovedCostLimitReached": {
 			"title": "स्वत:-अनुमोदित लागत सीमा पहुँच गई",
 			"button": "रीसेट करें और जारी रखें",
-			"description": "Roo ने स्वचालित-स्वीकृत लागत सीमा ${{count}} तक पहुंच गई है। क्या आप लागत को रीसेट करके कार्य जारी रखना चाहेंगे?"
+			"description": "Zoo ने स्वचालित-स्वीकृत लागत सीमा ${{count}} तक पहुंच गई है। क्या आप लागत को रीसेट करके कार्य जारी रखना चाहेंगे?"
 		}
 	},
 	"codebaseSearch": {
-		"wantsToSearch": "Roo कोडबेस में <code>{{query}}</code> खोजना चाहता है",
-		"wantsToSearchWithPath": "Roo <code>{{path}}</code> में कोडबेस में <code>{{query}}</code> खोजना चाहता है",
+		"wantsToSearch": "Zoo कोडबेस में <code>{{query}}</code> खोजना चाहता है",
+		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> में कोडबेस में <code>{{query}}</code> खोजना चाहता है",
 		"didSearch_one": "1 परिणाम मिला",
 		"didSearch_other": "{{count}} परिणाम मिले",
 		"resultTooltip": "समानता स्कोर: {{score}} (फ़ाइल खोलने के लिए क्लिक करें)"
@@ -438,7 +421,7 @@
 		"ariaLabel": "संस्करण {{version}} - रिलीज़ नोट्स देखने के लिए क्लिक करें"
 	},
 	"rooCloudCTA": {
-		"title": "Roo Code Cloud विकसित हो रहा है!",
+		"title": "Zoo Code Cloud विकसित हो रहा है!",
 		"description": "क्लाउड में रिमोट एजेंट चलाएं, कहीं से भी अपने कार्यों तक पहुंचें, दूसरों के साथ सहयोग करें, और बहुत कुछ।",
 		"joinWaitlist": "नवीनतम अपडेट प्राप्त करने के लिए साइन अप करें।"
 	},
@@ -479,8 +462,8 @@
 		"clickToEdit": "संदेश संपादित करने के लिए क्लिक करें"
 	},
 	"slashCommand": {
-		"wantsToRun": "Roo एक स्लैश कमांड चलाना चाहता है",
-		"didRun": "Roo ने एक स्लैश कमांड चलाया"
+		"wantsToRun": "Zoo एक स्लैश कमांड चलाना चाहता है",
+		"didRun": "Zoo ने एक स्लैश कमांड चलाया"
 	},
 	"todo": {
 		"partial": "{{total}} में से {{completed}} टू-डू हो गए",
@@ -499,11 +482,11 @@
 		"openMcpSettings": "MCP सेटिंग्स खोलें"
 	},
 	"readCommandOutput": {
-		"title": "Roo read command output"
+		"title": "Zoo read command output"
 	},
 	"retiredProvider": {
 		"title": "प्रदाता अब समर्थित नहीं है",
-		"message": "क्षमा करें, यह प्रदाता अब समर्थित नहीं है। हमने देखा कि बहुत कम Roo उपयोगकर्ता वास्तव में इसका उपयोग कर रहे थे और हमें अपने कोडबेस का दायरा कम करने की आवश्यकता है ताकि हम तेज़ी से काम करना और अपने समुदाय की अच्छी सेवा करना जारी रख सकें। यह वाकई एक कठिन निर्णय था, लेकिन इससे हम उस पर ध्यान केंद्रित कर सकते हैं जो तुम्हारे लिए सबसे ज़्यादा मायने रखता है। हम जानते हैं, यह बुरा लगता है।",
+		"message": "यह प्रदाता अब उपलब्ध नहीं है। जारी रखने के लिए कोई समर्थित प्रदाता चुनें।",
 		"openSettings": "सेटिंग्स खोलें"
 	}
 }

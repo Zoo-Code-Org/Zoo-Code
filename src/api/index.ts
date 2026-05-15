@@ -3,6 +3,7 @@ import OpenAI from "openai"
 
 import { isRetiredProvider, type ProviderSettings, type ModelInfo } from "@roo-code/types"
 
+import { getRouterRemovalMessage } from "../core/config/routerRemoval"
 import { ApiStream } from "./transform/stream"
 
 import {
@@ -30,7 +31,6 @@ import {
 	SambaNovaHandler,
 	ZAiHandler,
 	FireworksHandler,
-	RooHandler,
 	VercelAiGatewayHandler,
 	MiniMaxHandler,
 	BasetenHandler,
@@ -112,6 +112,10 @@ export interface ApiHandler {
 export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 	const { apiProvider, ...options } = configuration
 
+	if (apiProvider === "roo") {
+		throw new Error(getRouterRemovalMessage())
+	}
+
 	if (apiProvider && isRetiredProvider(apiProvider)) {
 		throw new Error(
 			`Sorry, this provider is no longer supported. We saw very few Roo users actually using it and we need to reduce the surface area of our codebase so we can keep shipping fast and serving our community well in this space. It was a really hard decision but it lets us focus on what matters most to you. It sucks, we know.\n\nPlease select a different provider in your API profile settings.`,
@@ -167,10 +171,6 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new ZAiHandler(options)
 		case "fireworks":
 			return new FireworksHandler(options)
-		case "roo":
-			// Never throw exceptions from provider constructors
-			// The provider-proxy server will handle authentication and return appropriate error codes
-			return new RooHandler(options)
 		case "vercel-ai-gateway":
 			return new VercelAiGatewayHandler(options)
 		case "minimax":

@@ -7,6 +7,8 @@ export const DEFAULT_FLAGS = {
 	consecutiveMistakeLimit: 10,
 }
 
+export const DEFAULT_PROVIDER = "openrouter" as const
+
 export const REASONING_EFFORTS = [...reasoningEffortsExtended, "unspecified", "disabled"]
 
 /**

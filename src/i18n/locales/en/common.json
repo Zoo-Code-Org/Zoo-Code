@@ -1,6 +1,6 @@
 {
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "A whole dev team of AI agents in your editor."
 	},
 	"number_format": {
@@ -112,7 +112,8 @@
 			"thinking_complete_recitation": "(Thinking complete, but output was blocked due to recitation check.)"
 		},
 		"roo": {
-			"authenticationRequired": "Roo provider requires cloud authentication. Please sign in to Roo Code Cloud."
+			"authenticationRequired": "Roo provider requires cloud authentication. Please sign in to Roo Code Cloud.",
+			"routerRemoved": "Roo Code Router has been removed. Please select and configure a different provider."
 		},
 		"openAiCodex": {
 			"notAuthenticated": "Not authenticated with OpenAI Codex. Please sign in using the OpenAI Codex OAuth flow.",
@@ -145,7 +146,7 @@
 	"warnings": {
 		"no_terminal_content": "No terminal content selected",
 		"missing_task_files": "This task's files are missing. Would you like to remove it from the task list?",
-		"auto_import_failed": "Failed to auto-import RooCode settings: {{error}}"
+		"auto_import_failed": "Failed to auto-import ZooCode settings: {{error}}"
 	},
 	"info": {
 		"no_changes": "No changes found.",
@@ -154,14 +155,17 @@
 		"custom_storage_path_set": "Custom storage path set: {{path}}",
 		"default_storage_path": "Reverted to using default storage path",
 		"settings_imported": "Settings imported successfully.",
-		"auto_import_success": "RooCode settings automatically imported from {{filename}}",
+		"auto_import_success": "ZooCode settings automatically imported from {{filename}}",
 		"share_link_copied": "Share link copied to clipboard",
 		"organization_share_link_copied": "Organization share link copied to clipboard!",
 		"public_share_link_copied": "Public share link copied to clipboard!",
 		"image_copied_to_clipboard": "Image data URI copied to clipboard",
 		"image_saved": "Image saved to {{path}}",
 		"mode_exported": "Mode '{{mode}}' exported successfully",
-		"mode_imported": "Mode imported successfully"
+		"mode_imported": "Mode imported successfully",
+		"roo": {
+			"signInUnavailable": "Roo Code Cloud sign-in is currently unavailable. Configure another provider to continue."
+		}
 	},
 	"answers": {
 		"yes": "Yes",
@@ -187,12 +191,12 @@
 	},
 	"storage": {
 		"prompt_custom_path": "Enter custom conversation history storage path, leave empty to use default location",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "Please enter an absolute path (e.g. D:\\RooCodeStorage or /home/user/storage)",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "Please enter an absolute path (e.g. D:\\ZooCodeStorage or /home/user/storage)",
 		"enter_valid_path": "Please enter a valid path"
 	},
 	"input": {
-		"task_prompt": "What should Roo do?",
+		"task_prompt": "What should Zoo do?",
 		"task_placeholder": "Type your task here"
 	},
 	"customModes": {
@@ -219,8 +223,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "Your organization requires Roo Code Cloud authentication. Please sign in to continue.",
-			"organization_mismatch": "You must be authenticated with your organization's Roo Code Cloud account.",
+			"cloud_auth_required": "Your organization requires Zoo Code Cloud authentication. Please sign in to continue.",
+			"organization_mismatch": "You must be authenticated with your organization's Zoo Code Cloud account.",
 			"verification_failed": "Unable to verify organization authentication."
 		},
 		"info": {
@@ -242,6 +246,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Invalid authentication token received.",
+			"token_verification_failed": "Zoo Code: Token verification failed.",
+			"invalid_token": "Zoo Code: Invalid token.",
+			"could_not_verify_token": "Zoo Code: Could not verify token."
+		},
+		"info": {
+			"connected": "Zoo Code: Successfully connected! You can now use Zoo Code as your AI provider.",
+			"disconnected": "Zoo Code: Disconnected successfully."
+		}
 	}
 }

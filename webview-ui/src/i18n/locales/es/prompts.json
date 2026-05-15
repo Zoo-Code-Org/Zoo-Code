@@ -9,7 +9,7 @@
 		"editModesConfig": "Editar configuración de modos",
 		"editGlobalModes": "Editar modos globales",
 		"editProjectModes": "Editar modos del proyecto (.roomodes)",
-		"createModeHelpText": "Los modos son personas especializadas que adaptan el comportamiento de Roo. <0>Aprende sobre el uso de modos</0> o <1>Personalización de modos.</1>",
+		"createModeHelpText": "Los modos son personas especializadas que adaptan el comportamiento de Zoo. <0>Aprende sobre el uso de modos</0> o <1>Personalización de modos.</1>",
 		"selectMode": "Buscar modos"
 	},
 	"apiConfiguration": {
@@ -33,7 +33,7 @@
 	"roleDefinition": {
 		"title": "Definición de rol",
 		"resetToDefault": "Restablecer a valores predeterminados",
-		"description": "Define la experiencia y personalidad de Roo para este modo. Esta descripción determina cómo Roo se presenta y aborda las tareas."
+		"description": "Define la experiencia y personalidad de Zoo para este modo. Esta descripción determina cómo Zoo se presenta y aborda las tareas."
 	},
 	"description": {
 		"title": "Descripción breve (para humanos)",
@@ -102,7 +102,7 @@
 		"types": {
 			"ENHANCE": {
 				"label": "Mejorar solicitud",
-				"description": "Utiliza la mejora de solicitudes para obtener sugerencias o mejoras personalizadas para tus entradas. Esto asegura que Roo entienda tu intención y proporcione las mejores respuestas posibles. Disponible a través del icono ✨ en el chat."
+				"description": "Utiliza la mejora de solicitudes para obtener sugerencias o mejoras personalizadas para tus entradas. Esto asegura que Zoo entienda tu intención y proporcione las mejores respuestas posibles. Disponible a través del icono ✨ en el chat."
 			},
 			"CONDENSE": {
 				"label": "Condensación de contexto",
@@ -167,7 +167,7 @@
 		},
 		"roleDefinition": {
 			"label": "Definición de rol",
-			"description": "Define la experiencia y personalidad de Roo para este modo."
+			"description": "Define la experiencia y personalidad de Zoo para este modo."
 		},
 		"whenToUse": {
 			"label": "Cuándo usar (opcional)",

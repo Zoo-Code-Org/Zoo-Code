@@ -1,0 +1,32 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "opus47-e2e:reasoning-on: what is 2+2? Reply with only the number."
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\": \"4\"}",
+						"id": "toolu_014MmgmKQV9c2DmffmF8bKm3"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "opus47-e2e:reasoning-off: what is 2+2? Reply with only the number."
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\": \"4\"}",
+						"id": "toolu_014MmgmKQV9c2DmffmF8bKm3"
+					}
+				]
+			}
+		}
+	]
+}

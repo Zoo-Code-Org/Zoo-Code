@@ -1,6 +1,6 @@
 // npx vitest src/components/settings/__tests__/ApiOptions.spec.tsx
 
-import { render, screen, fireEvent } from "@/utils/test-utils"
+import { render, screen, fireEvent, within } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
@@ -176,7 +176,7 @@ vi.mock("../TodoListSettingsControl", () => ({
 
 // Mock ThinkingBudget component
 vi.mock("../ThinkingBudget", () => ({
-	ThinkingBudget: ({ modelInfo }: any) => {
+	ThinkingBudget: ({ modelInfo, apiConfiguration, setApiConfigurationField }: any) => {
 		// Only render if model supports reasoning budget (thinking models)
 		if (modelInfo?.supportsReasoningBudget || modelInfo?.requiredReasoningBudget) {
 			return (
@@ -186,6 +186,22 @@ vi.mock("../ThinkingBudget", () => ({
 				</div>
 			)
 		}
+
+		if (modelInfo?.supportsReasoningEffort) {
+			return (
+				<div data-testid="reasoning-effort">
+					<select
+						value={apiConfiguration?.reasoningEffort || ""}
+						onChange={(e) => setApiConfigurationField("reasoningEffort", e.target.value)}>
+						<option value="">Select...</option>
+						<option value="low">Low</option>
+						<option value="medium">Medium</option>
+						<option value="high">High</option>
+					</select>
+				</div>
+			)
+		}
+
 		return null
 	},
 }))
@@ -215,14 +231,7 @@ vi.mock("../providers/LiteLLM", () => ({
 
 // Mock Roo provider for tests
 vi.mock("../providers/Roo", () => ({
-	Roo: ({ cloudIsAuthenticated }: any) => (
-		<div data-testid="roo-provider">{cloudIsAuthenticated ? "Authenticated" : "Not Authenticated"}</div>
-	),
-}))
-
-// Mock RooBalanceDisplay for tests
-vi.mock("../providers/RooBalanceDisplay", () => ({
-	RooBalanceDisplay: () => <div data-testid="roo-balance-display">Balance: $10.00</div>,
+	Roo: () => <div data-testid="roo-provider">Roo Provider</div>,
 }))
 
 vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
@@ -466,7 +475,7 @@ describe("ApiOptions", () => {
 			// However, we've tested the state update call.
 		})
 
-		it.skip("updates reasoningEffort in openAiCustomModelInfo when select value changes", () => {
+		it("updates reasoningEffort in openAiCustomModelInfo when select value changes", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
 				apiProvider: "openai" as const,
@@ -491,10 +500,11 @@ describe("ApiOptions", () => {
 			const selectContainer = screen.getByTestId("reasoning-effort")
 			expect(selectContainer).toBeInTheDocument()
 
-			console.log(selectContainer.querySelector("select")?.value)
+			const reasoningSelect = within(selectContainer).getByRole("combobox")
+			expect(reasoningSelect).toHaveValue("low")
 
 			// Simulate changing the reasoning effort to 'high'
-			fireEvent.change(selectContainer.querySelector("select")!, { target: { value: "high" } })
+			fireEvent.change(reasoningSelect, { target: { value: "high" } })
 
 			// Check if setApiConfigurationField was called correctly for openAiCustomModelInfo
 			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
@@ -570,25 +580,7 @@ describe("ApiOptions", () => {
 	})
 
 	describe("Roo provider tests", () => {
-		it("shows balance display when authenticated", () => {
-			// Mock useExtensionState to return authenticated state
-			const useExtensionStateMock = vi.spyOn(ExtensionStateContext, "useExtensionState")
-			useExtensionStateMock.mockReturnValue({
-				cloudIsAuthenticated: true,
-				organizationAllowList: { providers: {} },
-			} as any)
-
-			renderApiOptions({
-				apiConfiguration: {
-					apiProvider: "roo",
-				},
-			})
-
-			expect(screen.getByTestId("roo-balance-display")).toBeInTheDocument()
-		})
-
-		it("does not show balance display when not authenticated", () => {
-			// Mock useExtensionState to return unauthenticated state
+		it("renders the retired provider message for legacy roo selections without cloud account UI", () => {
 			const useExtensionStateMock = vi.spyOn(ExtensionStateContext, "useExtensionState")
 			useExtensionStateMock.mockReturnValue({
 				cloudIsAuthenticated: false,
@@ -601,7 +593,11 @@ describe("ApiOptions", () => {
 				},
 			})
 
-			expect(screen.queryByTestId("roo-balance-display")).not.toBeInTheDocument()
+			expect(screen.getByTestId("retired-provider-message")).toHaveTextContent(
+				"settings:providers.retiredProviderMessage",
+			)
+			expect(screen.queryByText("Authenticated")).not.toBeInTheDocument()
+			expect(screen.queryByText("Not Authenticated")).not.toBeInTheDocument()
 		})
 
 		it("pins roo provider to the top when not on welcome screen", () => {

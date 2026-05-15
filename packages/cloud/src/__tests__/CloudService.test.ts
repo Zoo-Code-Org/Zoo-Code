@@ -2,7 +2,8 @@
 
 import * as vscode from "vscode"
 
-import type { ClineMessage } from "@roo-code/types"
+import { TelemetryEventName } from "@roo-code/types"
+import type { ClineMessage, TelemetryEvent } from "@roo-code/types"
 
 import { TaskNotFoundError } from "../errors.js"
 import { CloudService } from "../CloudService.js"
@@ -186,6 +187,13 @@ describe("CloudService", () => {
 				"CloudService instance already created",
 			)
 		})
+
+		it("should reset the singleton when initialization fails", async () => {
+			mockAuthService.initialize.mockRejectedValueOnce(new Error("init failed"))
+
+			await expect(CloudService.createInstance(mockContext)).rejects.toThrow("init failed")
+			expect(CloudService.hasInstance()).toBe(false)
+		})
 	})
 
 	describe("authentication methods", () => {
@@ -209,6 +217,10 @@ describe("CloudService", () => {
 			const result = cloudService.isAuthenticated()
 			expect(mockAuthService.isAuthenticated).toHaveBeenCalled()
 			expect(result).toBe(false)
+		})
+
+		it("always disables cloud telemetry gating in compatibility mode", () => {
+			expect(CloudService.isEnabled()).toBe(false)
 		})
 
 		it("should delegate hasActiveSession to AuthService", () => {
@@ -613,6 +625,21 @@ describe("CloudService", () => {
 			expect(mockShareService.shareTask).toHaveBeenCalledTimes(1)
 			expect(mockShareService.shareTask).toHaveBeenCalledWith(taskId, "organization")
 			expect(result).toEqual(expectedResult)
+		})
+
+		it("captureEvent is a no-op in compatibility mode", async () => {
+			const log = vi.fn()
+			const compatService = cloudService
+			vi.spyOn(compatService as unknown as { log: (...args: unknown[]) => void }, "log").mockImplementation(log)
+
+			const telemetryEvent: TelemetryEvent = {
+				event: TelemetryEventName.TASK_CREATED,
+				properties: { taskId: "task-123" },
+			}
+
+			compatService.captureEvent(telemetryEvent)
+
+			expect(log).toHaveBeenCalledWith("[CloudService] Skipping cloud telemetry capture in compatibility mode")
 		})
 	})
 })

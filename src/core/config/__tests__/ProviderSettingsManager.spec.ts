@@ -66,6 +66,7 @@ describe("ProviderSettingsManager", () => {
 						consecutiveMistakeLimitMigrated: true,
 						todoListEnabledMigrated: true,
 						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
 					},
 				}),
 			)
@@ -224,7 +225,7 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.migrations.todoListEnabledMigrated).toEqual(true)
 		})
 
-		it("should apply model migrations for all providers", async () => {
+		it("should migrate legacy Roo provider profiles into a setup-needed fallback", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
 					currentApiConfigName: "default",
@@ -253,6 +254,7 @@ describe("ProviderSettingsManager", () => {
 						},
 					},
 					migrations: {
+						routerProviderMigrated: false,
 						rateLimitSecondsMigrated: true,
 						openAiHeadersMigrated: true,
 						consecutiveMistakeLimitMigrated: true,
@@ -267,73 +269,41 @@ describe("ProviderSettingsManager", () => {
 			const calls = mockSecrets.store.mock.calls
 			const storedConfig = JSON.parse(calls[calls.length - 1][1])
 
-			// Roo provider configs should be migrated
-			expect(storedConfig.apiConfigs.default.apiModelId).toEqual("roo/code-supernova-1-million")
-			expect(storedConfig.apiConfigs.test.apiModelId).toEqual("roo/code-supernova-1-million")
-			expect(storedConfig.apiConfigs.existing.apiModelId).toEqual("roo/code-supernova-1-million")
+			// Roo provider configs should be downgraded into an unconfigured fallback state
+			expect(storedConfig.apiConfigs.default.apiProvider).toBeUndefined()
+			expect(storedConfig.apiConfigs.default.apiModelId).toBeUndefined()
+			expect(storedConfig.apiConfigs.test.apiProvider).toBeUndefined()
+			expect(storedConfig.apiConfigs.test.apiModelId).toBeUndefined()
+			expect(storedConfig.apiConfigs.existing.apiProvider).toBeUndefined()
+			expect(storedConfig.apiConfigs.existing.apiModelId).toBeUndefined()
+			expect(storedConfig.migrations.routerProviderMigrated).toEqual(true)
 
 			// Non-roo provider configs should not be migrated
 			expect(storedConfig.apiConfigs.otherProvider.apiModelId).toEqual("roo/code-supernova")
 			expect(storedConfig.apiConfigs.noProvider.apiModelId).toEqual("roo/code-supernova")
 		})
 
-		it("should apply model migrations every time, not just once", async () => {
-			// First load with old model
+		it("should downgrade Roo provider when saving a profile", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
 					currentApiConfigName: "default",
 					apiConfigs: {
-						default: {
-							apiProvider: "roo",
-							apiModelId: "roo/code-supernova",
-							id: "default",
-						},
+						default: { id: "default" },
 					},
-					migrations: {
-						rateLimitSecondsMigrated: true,
-						openAiHeadersMigrated: true,
-						consecutiveMistakeLimitMigrated: true,
-						todoListEnabledMigrated: true,
-					},
+					migrations: {},
 				}),
 			)
 
-			await providerSettingsManager.initialize()
+			await providerSettingsManager.saveConfig("router-profile", {
+				id: "router-id",
+				apiProvider: "roo",
+				apiModelId: "roo/code-supernova",
+				rooApiKey: "router-key",
+			} as any)
 
-			// Verify migration happened
-			let calls = mockSecrets.store.mock.calls
-			let storedConfig = JSON.parse(calls[calls.length - 1][1])
-			expect(storedConfig.apiConfigs.default.apiModelId).toEqual("roo/code-supernova-1-million")
-
-			// Create a new instance to simulate another load
-			const newManager = new ProviderSettingsManager(mockContext)
-
-			// Somehow the model got reverted (e.g., manual edit, sync issue)
-			mockSecrets.get.mockResolvedValue(
-				JSON.stringify({
-					currentApiConfigName: "default",
-					apiConfigs: {
-						default: {
-							apiProvider: "roo",
-							apiModelId: "roo/code-supernova", // Old model again
-							id: "default",
-						},
-					},
-					migrations: {
-						rateLimitSecondsMigrated: true,
-						openAiHeadersMigrated: true,
-						consecutiveMistakeLimitMigrated: true,
-						todoListEnabledMigrated: true,
-					},
-				}),
-			)
-
-			await newManager.initialize()
-
-			// Verify migration happened again
-			calls = mockSecrets.store.mock.calls
-			storedConfig = JSON.parse(calls[calls.length - 1][1])
-			expect(storedConfig.apiConfigs.default.apiModelId).toEqual("roo/code-supernova-1-million")
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+			expect(storedConfig.apiConfigs["router-profile"]).toEqual({ id: "router-id" })
 		})
 
 		it("should throw error if secrets storage fails", async () => {

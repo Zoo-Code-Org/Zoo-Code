@@ -45,13 +45,13 @@ export type ImageGenerationProvider = "openrouter" | "roo"
 
 /**
  * Get the image generation provider with backwards compatibility
- * - If provider is explicitly set, use it
- * - If a model is already configured (existing users), default to "openrouter"
- * - Otherwise default to "roo" (new users)
+ * - Legacy "roo" selections are downgraded to "openrouter"
+ * - If provider is explicitly set to "openrouter", keep it
+ * - Otherwise default to "openrouter"
  */
 export function getImageGenerationProvider(
 	explicitProvider: ImageGenerationProvider | undefined,
-	hasExistingModel: boolean,
+	_hasExistingModel: boolean,
 ): ImageGenerationProvider {
-	return explicitProvider !== undefined ? explicitProvider : hasExistingModel ? "openrouter" : "roo"
+	return explicitProvider === "openrouter" ? "openrouter" : "openrouter"
 }

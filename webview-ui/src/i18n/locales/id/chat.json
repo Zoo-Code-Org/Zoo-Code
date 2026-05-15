@@ -1,5 +1,5 @@
 {
-	"greeting": "Selamat datang di Roo Code",
+	"greeting": "Selamat datang di Zoo Code!",
 	"task": {
 		"title": "Tugas",
 		"expand": "Perluas tugas",
@@ -14,17 +14,7 @@
 		"contextWindow": "Panjang Konteks",
 		"closeAndStart": "Tutup tugas dan mulai yang baru",
 		"export": "Ekspor riwayat tugas",
-		"share": "Bagikan tugas",
 		"delete": "Hapus Tugas (Shift + Klik untuk lewati konfirmasi)",
-		"shareWithOrganization": "Bagikan dengan organisasi",
-		"shareWithOrganizationDescription": "Hanya anggota organisasi Anda yang dapat mengakses",
-		"sharePublicly": "Bagikan secara publik",
-		"sharePubliclyDescription": "Siapa pun dengan tautan dapat mengakses",
-		"connectToCloud": "Hubungkan ke Cloud",
-		"connectToCloudDescription": "Masuk ke Roo Code Cloud untuk berbagi tugas",
-		"sharingDisabledByOrganization": "Berbagi dinonaktifkan oleh organisasi",
-		"shareSuccessOrganization": "Tautan organisasi disalin ke clipboard",
-		"shareSuccessPublic": "Tautan publik disalin ke clipboard",
 		"openApiHistory": "Buka Riwayat API",
 		"openUiHistory": "Buka Riwayat UI",
 		"backToParentTask": "Tugas Induk"
@@ -128,7 +118,7 @@
 	"enqueueMessage": "Tambahkan pesan ke antrean (akan dikirim setelah tugas saat ini selesai)",
 	"scrollToBottom": "Gulir ke bawah chat",
 	"scrollToLatestCheckpoint": "Gulir ke checkpoint sebelumnya",
-	"about": "Roo Code adalah seluruh tim pengembang AI di editor Anda.",
+	"about": "Zoo Code adalah seluruh tim pengembang AI di editor Anda.",
 	"docs": "Lihat <DocsLink>dokumentasi</DocsLink> kami untuk mempelajari lebih lanjut.",
 	"onboarding": "Daftar tugas Anda di ruang kerja ini kosong.",
 	"rooTips": {
@@ -151,7 +141,7 @@
 		"title": "Mode",
 		"marketplace": "Marketplace Mode",
 		"settings": "Pengaturan Mode",
-		"description": "Persona khusus yang menyesuaikan perilaku Roo.",
+		"description": "Persona khusus yang menyesuaikan perilaku Zoo.",
 		"searchPlaceholder": "Cari mode...",
 		"noResults": "Tidak ada hasil yang ditemukan"
 	},
@@ -187,7 +177,7 @@
 			"500": "Kesalahan server penyedia. Ada yang salah di sisi penyedia, tidak ada yang salah dengan permintaan Anda.",
 			"docs": "Dokumentasi",
 			"goToSettings": "Pengaturan",
-			"unknown": "Kesalahan API yang tidak diketahui. Harap hubungi dukungan Roo Code.",
+			"unknown": "Kesalahan API yang tidak diketahui. Harap hubungi dukungan Zoo Code.",
 			"connection": "Kesalahan koneksi. Pastikan Anda memiliki koneksi internet yang berfungsi.",
 			"claudeCodeNotAuthenticated": "Anda perlu masuk untuk menggunakan Claude Code. Buka Pengaturan dan klik \"Masuk ke Claude Code\" untuk mengautentikasi."
 		}
@@ -227,51 +217,51 @@
 		}
 	},
 	"skill": {
-		"wantsToLoad": "Roo ingin memuat keterampilan",
-		"didLoad": "Roo telah memuat keterampilan"
+		"wantsToLoad": "Zoo ingin memuat keterampilan",
+		"didLoad": "Zoo telah memuat keterampilan"
 	},
 	"instructions": {
 		"wantsToFetch": "Roo ingin mengambil instruksi detail untuk membantu tugas saat ini"
 	},
 	"fileOperations": {
-		"wantsToRead": "Roo ingin membaca file ini",
-		"wantsToReadMultiple": "Roo ingin membaca beberapa file",
-		"wantsToReadAndXMore": "Roo ingin membaca file ini dan {{count}} lainnya",
-		"wantsToReadOutsideWorkspace": "Roo ingin membaca file ini di luar workspace",
-		"didRead": "Roo membaca file ini",
-		"wantsToEdit": "Roo ingin mengedit file ini",
-		"wantsToEditOutsideWorkspace": "Roo ingin mengedit file ini di luar workspace",
-		"wantsToEditProtected": "Roo ingin mengedit file konfigurasi yang dilindungi",
-		"wantsToApplyBatchChanges": "Roo ingin menerapkan perubahan ke beberapa file",
-		"wantsToGenerateImage": "Roo ingin menghasilkan gambar",
-		"wantsToGenerateImageOutsideWorkspace": "Roo ingin menghasilkan gambar di luar workspace",
-		"wantsToGenerateImageProtected": "Roo ingin menghasilkan gambar di lokasi yang dilindungi",
-		"didGenerateImage": "Roo telah menghasilkan gambar",
-		"wantsToCreate": "Roo ingin membuat file baru",
+		"wantsToRead": "Zoo ingin membaca file ini",
+		"wantsToReadMultiple": "Zoo ingin membaca beberapa file",
+		"wantsToReadAndXMore": "Zoo ingin membaca file ini dan {{count}} lainnya",
+		"wantsToReadOutsideWorkspace": "Zoo ingin membaca file ini di luar workspace",
+		"didRead": "Zoo membaca file ini",
+		"wantsToEdit": "Zoo ingin mengedit file ini",
+		"wantsToEditOutsideWorkspace": "Zoo ingin mengedit file ini di luar workspace",
+		"wantsToEditProtected": "Zoo ingin mengedit file konfigurasi yang dilindungi",
+		"wantsToApplyBatchChanges": "Zoo ingin menerapkan perubahan ke beberapa file",
+		"wantsToGenerateImage": "Zoo ingin menghasilkan gambar",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo ingin menghasilkan gambar di luar workspace",
+		"wantsToGenerateImageProtected": "Zoo ingin menghasilkan gambar di lokasi yang dilindungi",
+		"didGenerateImage": "Zoo telah menghasilkan gambar",
+		"wantsToCreate": "Zoo ingin membuat file baru",
 		"wantsToSearchReplace": "Roo ingin mencari dan mengganti di file ini",
 		"didSearchReplace": "Roo melakukan pencarian dan penggantian pada file ini",
-		"wantsToInsert": "Roo ingin menyisipkan konten ke file ini",
-		"wantsToInsertWithLineNumber": "Roo ingin menyisipkan konten ke file ini di baris {{lineNumber}}",
-		"wantsToInsertAtEnd": "Roo ingin menambahkan konten ke akhir file ini"
+		"wantsToInsert": "Zoo ingin menyisipkan konten ke file ini",
+		"wantsToInsertWithLineNumber": "Zoo ingin menyisipkan konten ke file ini di baris {{lineNumber}}",
+		"wantsToInsertAtEnd": "Zoo ingin menambahkan konten ke akhir file ini"
 	},
 	"directoryOperations": {
-		"wantsToViewTopLevel": "Roo ingin melihat file tingkat atas di direktori ini",
-		"didViewTopLevel": "Roo melihat file tingkat atas di direktori ini",
-		"wantsToViewRecursive": "Roo ingin melihat semua file secara rekursif di direktori ini",
-		"didViewRecursive": "Roo melihat semua file secara rekursif di direktori ini",
-		"wantsToSearch": "Roo ingin mencari direktori ini untuk <code>{{regex}}</code>",
-		"didSearch": "Roo mencari direktori ini untuk <code>{{regex}}</code>",
-		"wantsToSearchOutsideWorkspace": "Roo ingin mencari direktori ini (di luar workspace) untuk <code>{{regex}}</code>",
-		"didSearchOutsideWorkspace": "Roo mencari direktori ini (di luar workspace) untuk <code>{{regex}}</code>",
-		"wantsToViewTopLevelOutsideWorkspace": "Roo ingin melihat file tingkat atas di direktori ini (di luar workspace)",
-		"didViewTopLevelOutsideWorkspace": "Roo melihat file tingkat atas di direktori ini (di luar workspace)",
-		"wantsToViewRecursiveOutsideWorkspace": "Roo ingin melihat semua file secara rekursif di direktori ini (di luar workspace)",
-		"didViewRecursiveOutsideWorkspace": "Roo melihat semua file secara rekursif di direktori ini (di luar workspace)",
-		"wantsToViewMultipleDirectories": "Roo ingin melihat beberapa direktori"
+		"wantsToViewTopLevel": "Zoo ingin melihat file tingkat atas di direktori ini",
+		"didViewTopLevel": "Zoo melihat file tingkat atas di direktori ini",
+		"wantsToViewRecursive": "Zoo ingin melihat semua file secara rekursif di direktori ini",
+		"didViewRecursive": "Zoo melihat semua file secara rekursif di direktori ini",
+		"wantsToSearch": "Zoo ingin mencari direktori ini untuk <code>{{regex}}</code>",
+		"didSearch": "Zoo mencari direktori ini untuk <code>{{regex}}</code>",
+		"wantsToSearchOutsideWorkspace": "Zoo ingin mencari direktori ini (di luar workspace) untuk <code>{{regex}}</code>",
+		"didSearchOutsideWorkspace": "Zoo mencari direktori ini (di luar workspace) untuk <code>{{regex}}</code>",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo ingin melihat file tingkat atas di direktori ini (di luar workspace)",
+		"didViewTopLevelOutsideWorkspace": "Zoo melihat file tingkat atas di direktori ini (di luar workspace)",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo ingin melihat semua file secara rekursif di direktori ini (di luar workspace)",
+		"didViewRecursiveOutsideWorkspace": "Zoo melihat semua file secara rekursif di direktori ini (di luar workspace)",
+		"wantsToViewMultipleDirectories": "Zoo ingin melihat beberapa direktori"
 	},
 	"codebaseSearch": {
-		"wantsToSearch": "Roo ingin mencari codebase untuk <code>{{query}}</code>",
-		"wantsToSearchWithPath": "Roo ingin mencari codebase untuk <code>{{query}}</code> di <code>{{path}}</code>",
+		"wantsToSearch": "Zoo ingin mencari codebase untuk <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo ingin mencari codebase untuk <code>{{query}}</code> di <code>{{path}}</code>",
 		"didSearch_one": "Ditemukan 1 hasil",
 		"didSearch_other": "Ditemukan {{count}} hasil",
 		"resultTooltip": "Skor kemiripan: {{score}} (klik untuk membuka file)"
@@ -296,24 +286,24 @@
 	"response": "Respons",
 	"arguments": "Argumen",
 	"text": {
-		"rooSaid": "Roo berkata"
+		"rooSaid": "Zoo berkata"
 	},
 	"feedback": {
 		"youSaid": "Anda bilang"
 	},
 	"mcp": {
-		"wantsToUseTool": "Roo ingin menggunakan tool di server MCP {{serverName}}",
-		"wantsToAccessResource": "Roo ingin mengakses resource di server MCP {{serverName}}"
+		"wantsToUseTool": "Zoo ingin menggunakan tool di server MCP {{serverName}}",
+		"wantsToAccessResource": "Zoo ingin mengakses resource di server MCP {{serverName}}"
 	},
 	"modes": {
-		"wantsToSwitch": "Roo ingin beralih ke mode {{mode}}",
-		"wantsToSwitchWithReason": "Roo ingin beralih ke mode {{mode}} karena: {{reason}}",
-		"didSwitch": "Roo beralih ke mode {{mode}}",
-		"didSwitchWithReason": "Roo beralih ke mode {{mode}} karena: {{reason}}"
+		"wantsToSwitch": "Zoo ingin beralih ke mode {{mode}}",
+		"wantsToSwitchWithReason": "Zoo ingin beralih ke mode {{mode}} karena: {{reason}}",
+		"didSwitch": "Zoo beralih ke mode {{mode}}",
+		"didSwitchWithReason": "Zoo beralih ke mode {{mode}} karena: {{reason}}"
 	},
 	"subtasks": {
-		"wantsToCreate": "Roo ingin membuat subtugas baru dalam mode {{mode}}",
-		"wantsToFinish": "Roo ingin menyelesaikan subtugas ini",
+		"wantsToCreate": "Zoo ingin membuat subtugas baru dalam mode {{mode}}",
+		"wantsToFinish": "Zoo ingin menyelesaikan subtugas ini",
 		"newTaskContent": "Instruksi Subtugas",
 		"completionContent": "Subtugas Selesai",
 		"resultContent": "Hasil Subtugas",
@@ -322,7 +312,7 @@
 		"goToSubtask": "Lihat tugas"
 	},
 	"questions": {
-		"hasQuestion": "Roo punya pertanyaan"
+		"hasQuestion": "Zoo punya pertanyaan"
 	},
 	"taskCompleted": "Tugas Selesai",
 	"error": "Error",
@@ -336,14 +326,14 @@
 	"diffError": {
 		"title": "Edit Tidak Berhasil"
 	},
-	"troubleMessage": "Roo mengalami masalah...",
+	"troubleMessage": "Zoo mengalami masalah...",
 	"errorDetails": {
 		"link": "Details",
 		"title": "Detail Kesalahan",
 		"copyToClipboard": "Salin ke Clipboard",
 		"copied": "Disalin!",
 		"diagnostics": "Dapatkan informasi kesalahan terperinci",
-		"proxyProvider": "Tampaknya kamu menggunakan penyedia berbasis proxy. Pastikan untuk memeriksa log-nya dan memastikan tidak menulis ulang permintaan Roo."
+		"proxyProvider": "Tampaknya kamu menggunakan penyedia berbasis proxy. Pastikan untuk memeriksa log-nya dan memastikan tidak menulis ulang permintaan Zoo."
 	},
 	"powershell": {
 		"issues": "Sepertinya kamu mengalami masalah Windows PowerShell, silakan lihat ini"
@@ -367,23 +357,16 @@
 		"triggerLabelAll": "BRRR"
 	},
 	"announcement": {
-		"title": "Roo Code {{version}} Dirilis",
-		"support": "Dukung Roo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
-		"stealthModel": {
-			"feature": "<bold>Model stealth GRATIS waktu terbatas</bold> - Code Supernova: Sekarang diupgrade dengan <bold>jendela konteks 1M token</bold>! Model coding agentik serbaguna yang mendukung input gambar, tersedia melalui Roo Code Cloud.",
-			"note": "(Catatan: prompt dan completion dicatat oleh pembuat model dan digunakan untuk meningkatkan model)",
-			"connectButton": "Hubungkan ke Roo Code Cloud",
-			"selectModel": "Pilih <code>roo/code-supernova</code> dari penyedia Roo Code Cloud di Pengaturan untuk memulai.",
-			"goToSettingsButton": "Pergi ke Pengaturan"
-		},
+		"title": "Zoo Code {{version}} Dirilis",
+		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"handoff": {
-			"heading": "Plugin Roo Code tidak akan hilang.",
-			"description": "Kamu mungkin sudah melihat pengumuman baru-baru ini bahwa Roo Code mencapai 3 juta instalasi dan tim aslinya sepenuhnya fokus ke Roomote. Kami tahu berita itu berat bagi banyak dari kalian. Plugin ini sangat berarti bagi kami dan bagi kamu, dan kami mendengarmu. Kabar baiknya: <bold>sebuah tim komunitas telah maju untuk melanjutkan Roo Code</bold>, dan kami sedang bekerja sama dengan mereka untuk serah terima resmi agar plugin yang kamu andalkan tetap dirawat dan ditingkatkan.",
-			"readMore": "Baca pengumuman asli dari Matt Rubens"
+			"heading": "Roo Code kembali! Sekarang sebagai plugin yang dikelola komunitas bernama Zoo Code!!",
+			"description": "Kalau kamu belum mengikuti kabarnya, tim Roo Code baru-baru ini mengumumkan bahwa mereka menghentikan pengembangan Roo Code dan mengarsipkan pekerjaan yang telah mereka lakukan. Tapi jangan khawatir, komunitas telah melangkah maju untuk melanjutkan warisan Roo Code dengan nama baru dan rumah baru! Kita bukan lagi satu \"Roo\" saja, kita adalah sebuah komunitas, sebuah \"Zoo\" kalau boleh dibilang. Zoo Code adalah plugin yang dikelola komunitas dan melanjutkan dari titik terakhir Roo Code, dan kami berkomitmen menjaga semangat Roo tetap hidup sambil menghadirkan fitur dan peningkatan baru. Kami juga ingin memberi apresiasi besar kepada seluruh tim Roo Code atas kerja luar biasa mereka dan karena telah menciptakan alat yang luar biasa untuk para developer. Kami antusias melanjutkan fondasi mereka dan melihat ke mana komunitas akan membawa Zoo Code ke depannya!",
+			"readMore": "Lihat halaman beranda baru Zoo Code dan baca pengumuman lengkapnya"
 		},
 		"release": {
 			"heading": "Yang Baru:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: Dukungan GPT-5.5 ditambahkan di provider OpenAI Codex agar kamu bisa menggunakan model terbaru langsung dari Roo Code.",
+			"gpt55": "GPT-5.5 via OpenAI Codex: Dukungan GPT-5.5 ditambahkan di provider OpenAI Codex agar kamu bisa menggunakan model terbaru langsung dari Zoo Code.",
 			"claudeOpus47": "Claude Opus 4.7 di Vertex AI: Claude Opus 4.7 ditambahkan ke provider Vertex AI untuk model reasoning andalan terbaru dari Anthropic.",
 			"checkpointNav": "Navigasi Checkpoint Sebelumnya: Menambahkan kontrol di chat untuk melompat kembali ke checkpoint sebelumnya, dengan dukungan i18n penuh."
 		},
@@ -417,18 +400,18 @@
 	"profileViolationWarning": "Profil saat ini tidak kompatibel dengan pengaturan organisasi kamu",
 	"shellIntegration": {
 		"title": "Peringatan Eksekusi Perintah",
-		"description": "Perintah kamu dijalankan tanpa integrasi shell terminal VSCode. Untuk menekan peringatan ini kamu bisa menonaktifkan integrasi shell di bagian <strong>Terminal</strong> dari <settingsLink>pengaturan Roo Code</settingsLink> atau troubleshoot integrasi terminal VSCode menggunakan link di bawah.",
+		"description": "Perintah kamu dijalankan tanpa integrasi shell terminal VSCode. Untuk menekan peringatan ini kamu bisa menonaktifkan integrasi shell di bagian <strong>Terminal</strong> dari <settingsLink>pengaturan Zoo Code</settingsLink> atau troubleshoot integrasi terminal VSCode menggunakan link di bawah.",
 		"troubleshooting": "Klik di sini untuk dokumentasi integrasi shell."
 	},
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Batas Permintaan yang Disetujui Otomatis Tercapai",
-			"description": "Roo telah mencapai batas {{count}} permintaan API yang disetujui otomatis. Apakah Anda ingin mengatur ulang hitungan dan melanjutkan tugas?",
+			"description": "Zoo telah mencapai batas {{count}} permintaan API yang disetujui otomatis. Apakah Anda ingin mengatur ulang hitungan dan melanjutkan tugas?",
 			"button": "Setel Ulang dan Lanjutkan"
 		},
 		"autoApprovedCostLimitReached": {
 			"title": "Batas Biaya yang Disetujui Otomatis Tercapai",
-			"description": "Roo telah mencapai batas biaya yang disetujui otomatis sebesar ${{count}}. Apakah Anda ingin mengatur ulang biaya dan melanjutkan tugas?",
+			"description": "Zoo telah mencapai batas biaya yang disetujui otomatis sebesar ${{count}}. Apakah Anda ingin mengatur ulang biaya dan melanjutkan tugas?",
 			"button": "Setel Ulang dan Lanjutkan"
 		}
 	},
@@ -444,7 +427,7 @@
 		"ariaLabel": "Versi {{version}} - Klik untuk melihat catatan rilis"
 	},
 	"rooCloudCTA": {
-		"title": "Roo Code Cloud sedang berkembang!",
+		"title": "Zoo Code Cloud sedang berkembang!",
 		"description": "Jalankan agen jarak jauh di cloud, akses tugas Anda dari mana saja, berkolaborasi dengan orang lain, dan banyak lagi.",
 		"joinWaitlist": "Daftar untuk mendapatkan pembaruan terbaru."
 	},
@@ -485,8 +468,8 @@
 		"clickToEdit": "Klik untuk mengedit pesan"
 	},
 	"slashCommand": {
-		"wantsToRun": "Roo ingin menjalankan perintah slash",
-		"didRun": "Roo telah menjalankan perintah slash"
+		"wantsToRun": "Zoo ingin menjalankan perintah slash",
+		"didRun": "Zoo telah menjalankan perintah slash"
 	},
 	"todo": {
 		"partial": "{{completed}} dari {{total}} to-do selesai",
@@ -505,11 +488,11 @@
 		"openMcpSettings": "Buka Pengaturan MCP"
 	},
 	"readCommandOutput": {
-		"title": "Roo read command output"
+		"title": "Zoo read command output"
 	},
 	"retiredProvider": {
 		"title": "Penyedia tidak lagi didukung",
-		"message": "Maaf, penyedia ini tidak lagi didukung. Kami melihat sangat sedikit pengguna Roo yang benar-benar menggunakannya dan kami perlu mengurangi cakupan kode kami agar bisa terus bergerak cepat dan melayani komunitas kami dengan baik. Ini adalah keputusan yang sangat sulit, tapi ini memungkinkan kami fokus pada apa yang paling penting bagimu. Memang menyebalkan, kami tahu.",
+		"message": "Penyedia ini sudah tidak tersedia. Pilih penyedia yang didukung untuk melanjutkan.",
 		"openSettings": "Buka Pengaturan"
 	}
 }

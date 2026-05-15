@@ -1,10 +1,10 @@
 {
 	"input": {
-		"task_prompt": "Què vols que faci Roo?",
+		"task_prompt": "Què vols que faci Zoo?",
 		"task_placeholder": "Escriu la teva tasca aquí"
 	},
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "Tot un equip de desenvolupadors d'IA al teu editor."
 	},
 	"number_format": {
@@ -115,7 +115,8 @@
 			"thinking_complete_recitation": "(Pensament completat, però la sortida s'ha bloquejat a causa de la comprovació de recitació.)"
 		},
 		"roo": {
-			"authenticationRequired": "El proveïdor Roo requereix autenticació al núvol. Si us plau, inicieu sessió a Roo Code Cloud."
+			"authenticationRequired": "El proveïdor Roo requereix autenticació al núvol. Si us plau, inicieu sessió a Roo Code Cloud.",
+			"routerRemoved": "S'ha eliminat Roo Code Router. Selecciona i configura un proveïdor diferent."
 		},
 		"openAiCodex": {
 			"notAuthenticated": "No esteu autenticat amb OpenAI Codex. Si us plau, inicieu sessió mitjançant el flux OAuth d'OpenAI Codex.",
@@ -149,7 +150,7 @@
 	"warnings": {
 		"no_terminal_content": "No s'ha seleccionat contingut de terminal",
 		"missing_task_files": "Els fitxers d'aquesta tasca falten. Vols eliminar-la de la llista de tasques?",
-		"auto_import_failed": "Ha fallat la importació automàtica de la configuració de RooCode: {{error}}"
+		"auto_import_failed": "Ha fallat la importació automàtica de la configuració de ZooCode: {{error}}"
 	},
 	"info": {
 		"no_changes": "No s'han trobat canvis.",
@@ -158,14 +159,17 @@
 		"custom_storage_path_set": "Ruta d'emmagatzematge personalitzada establerta: {{path}}",
 		"default_storage_path": "S'ha reprès l'ús de la ruta d'emmagatzematge predeterminada",
 		"settings_imported": "Configuració importada correctament.",
-		"auto_import_success": "Configuració de RooCode importada automàticament des de {{filename}}",
+		"auto_import_success": "Configuració de ZooCode importada automàticament des de {{filename}}",
 		"share_link_copied": "Enllaç de compartició copiat al portapapers",
 		"image_copied_to_clipboard": "URI de dades de la imatge copiada al portapapers",
 		"image_saved": "Imatge desada a {{path}}",
 		"organization_share_link_copied": "Enllaç de compartició d'organització copiat al porta-retalls!",
 		"public_share_link_copied": "Enllaç de compartició pública copiat al porta-retalls!",
 		"mode_exported": "Mode '{{mode}}' exportat correctament",
-		"mode_imported": "Mode importat correctament"
+		"mode_imported": "Mode importat correctament",
+		"roo": {
+			"signInUnavailable": "L'inici de sessió de Roo Code Cloud no està disponible en aquest moment. Configura un altre proveïdor per continuar."
+		}
 	},
 	"answers": {
 		"yes": "Sí",
@@ -191,8 +195,8 @@
 	},
 	"storage": {
 		"prompt_custom_path": "Introdueix una ruta d'emmagatzematge personalitzada per a l'historial de converses o deixa-ho buit per utilitzar la ubicació predeterminada",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "Introdueix una ruta completa (p. ex. D:\\RooCodeStorage o /home/user/storage)",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "Introdueix una ruta completa (p. ex. D:\\ZooCodeStorage o /home/user/storage)",
 		"enter_valid_path": "Introdueix una ruta vàlida"
 	},
 	"settings": {
@@ -222,8 +226,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "La teva organització requereix autenticació de Roo Code Cloud. Si us plau, inicia sessió per continuar.",
-			"organization_mismatch": "Has d'estar autenticat amb el compte de Roo Code Cloud de la teva organització.",
+			"cloud_auth_required": "La teva organització requereix autenticació de Zoo Code Cloud. Si us plau, inicia sessió per continuar.",
+			"organization_mismatch": "Has d'estar autenticat amb el compte de Zoo Code Cloud de la teva organització.",
 			"manual_url_empty": "Si us plau, introdueix una URL de callback vàlida",
 			"manual_url_no_query": "URL de callback no vàlida: falten paràmetres de consulta",
 			"manual_url_missing_params": "URL de callback no vàlida: falten paràmetres requerits (code i state)",
@@ -250,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: S'ha rebut un token d'autenticació no vàlid.",
+			"token_verification_failed": "Zoo Code: Ha fallat la verificació del token.",
+			"invalid_token": "Zoo Code: Token no vàlid.",
+			"could_not_verify_token": "Zoo Code: No s'ha pogut verificar el token."
+		},
+		"info": {
+			"connected": "Zoo Code: Connectat correctament! Ara podeu utilitzar Zoo Code com a proveïdor d'IA.",
+			"disconnected": "Zoo Code: Desconnectat correctament."
+		}
 	}
 }

@@ -17,6 +17,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { ProviderSettingsManager, providerProfilesSchema } from "./ProviderSettingsManager"
 import { ContextProxy } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
+import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { t } from "../../i18n"
 
@@ -46,7 +47,14 @@ function sanitizeProviderConfig(configName: string, apiConfig: unknown): { confi
 		return { config: apiConfig }
 	}
 
-	const config = apiConfig as Record<string, unknown>
+	const { config, migrated } = downgradeLegacyRooConfig(apiConfig as Record<string, unknown>)
+
+	if (migrated) {
+		return {
+			config,
+			warning: `Profile "${configName}": ${ROUTER_REMOVAL_IMPORT_WARNING}`,
+		}
+	}
 
 	// Check if apiProvider is set and if it's still valid
 	if (config.apiProvider !== undefined && !isProviderName(config.apiProvider)) {
@@ -319,14 +327,16 @@ export const importSettingsWithFeedback = async (
 	if (result.success) {
 		provider.settingsImportedAt = Date.now()
 		await provider.postStateToWebview()
+		provider.settingsImportedAt = undefined
+		const warnings = "warnings" in result ? result.warnings : undefined
 
 		// Show warnings if any profiles had issues but were still imported (with modifications)
-		if (result.warnings && result.warnings.length > 0) {
+		if (warnings && warnings.length > 0) {
 			// Log full details to the console for debugging
-			console.warn("Settings import completed with warnings:", result.warnings)
+			console.warn("Settings import completed with warnings:", warnings)
 
 			// Show a short summary in the toast notification
-			const count = result.warnings.length
+			const count = warnings.length
 			const summary =
 				count === 1 ? `1 profile had issues during import.` : `${count} profiles had issues during import.`
 			await vscode.window.showWarningMessage(

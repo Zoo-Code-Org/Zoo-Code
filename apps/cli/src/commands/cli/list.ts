@@ -10,7 +10,6 @@ import { getProviderDefaultModelId } from "@roo-code/types"
 
 import { ExtensionHost, type ExtensionHostOptions } from "@/agent/index.js"
 import { readWorkspaceTaskSessions } from "@/lib/task-history/index.js"
-import { loadToken } from "@/lib/storage/index.js"
 import { getDefaultExtensionPath } from "@/lib/utils/extension.js"
 import { getApiKeyFromEnv } from "@/lib/utils/provider.js"
 import { isRecord } from "@/lib/utils/guards.js"
@@ -106,14 +105,14 @@ function outputSessionsText(sessions: SessionLike[]): void {
 async function createListHost(options: BaseListOptions, hostOptions: ListHostOptions): Promise<ExtensionHost> {
 	const workspacePath = resolveWorkspacePath(options.workspace)
 	const extensionPath = resolveExtensionPath(options.extension)
-	const apiKey = options.apiKey || (await loadToken()) || getApiKeyFromEnv("roo")
+	const apiKey = options.apiKey || getApiKeyFromEnv("openrouter")
 
 	const extensionHostOptions: ExtensionHostOptions = {
 		mode: "code",
 		reasoningEffort: undefined,
 		user: null,
-		provider: "roo",
-		model: getProviderDefaultModelId("roo"),
+		provider: "openrouter",
+		model: getProviderDefaultModelId("openrouter"),
 		apiKey,
 		workspacePath,
 		extensionPath,
@@ -145,7 +144,7 @@ async function createListHost(options: BaseListOptions, hostOptions: ListHostOpt
  */
 function requestFromExtension<T>(
 	host: ExtensionHost,
-	requestType: WebviewMessage["type"],
+	request: WebviewMessage,
 	extract: (message: Record<string, unknown>) => T | undefined,
 ): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
@@ -188,17 +187,17 @@ function requestFromExtension<T>(
 
 		const timeoutId = setTimeout(() => {
 			finish(() =>
-				reject(new Error(`Timed out waiting for ${requestType} response after ${REQUEST_TIMEOUT_MS}ms`)),
+				reject(new Error(`Timed out waiting for ${request.type} response after ${REQUEST_TIMEOUT_MS}ms`)),
 			)
 		}, REQUEST_TIMEOUT_MS)
 
 		host.on("extensionWebviewMessage", onMessage)
-		host.sendToExtension({ type: requestType })
+		host.sendToExtension(request)
 	})
 }
 
 function requestCommands(host: ExtensionHost): Promise<CommandLike[]> {
-	return requestFromExtension(host, "requestCommands", (message) => {
+	return requestFromExtension(host, { type: "requestCommands" }, (message) => {
 		if (message.type !== "commands") {
 			return undefined
 		}
@@ -207,7 +206,7 @@ function requestCommands(host: ExtensionHost): Promise<CommandLike[]> {
 }
 
 function requestModes(host: ExtensionHost): Promise<ModeLike[]> {
-	return requestFromExtension(host, "requestModes", (message) => {
+	return requestFromExtension(host, { type: "requestModes" }, (message) => {
 		if (message.type !== "modes") {
 			return undefined
 		}
@@ -215,27 +214,19 @@ function requestModes(host: ExtensionHost): Promise<ModeLike[]> {
 	})
 }
 
-function requestRooModels(host: ExtensionHost): Promise<ModelRecord> {
-	return requestFromExtension(host, "requestRooModels", (message) => {
-		if (message.type !== "singleRouterModelFetchResponse") {
-			return undefined
-		}
+function requestOpenRouterModels(host: ExtensionHost): Promise<ModelRecord> {
+	return requestFromExtension(
+		host,
+		{ type: "requestRouterModels", values: { provider: "openrouter" } },
+		(message) => {
+			if (message.type !== "routerModels") {
+				return undefined
+			}
 
-		const values = isRecord(message.values) ? message.values : undefined
-		if (values?.provider !== "roo") {
-			return undefined
-		}
-
-		if (message.success === false) {
-			const errorMessage =
-				typeof message.error === "string" && message.error.length > 0
-					? message.error
-					: "Failed to fetch Roo models"
-			throw new Error(errorMessage)
-		}
-
-		return isRecord(values.models) ? (values.models as ModelRecord) : {}
-	})
+			const routerModels = isRecord(message.routerModels) ? message.routerModels : undefined
+			return isRecord(routerModels?.openrouter) ? (routerModels.openrouter as ModelRecord) : {}
+		},
+	)
 }
 
 async function withHostAndSignalHandlers<T>(
@@ -299,7 +290,7 @@ export async function listModels(options: BaseListOptions): Promise<void> {
 	const format = parseFormat(options.format)
 
 	await withHostAndSignalHandlers(options, { ephemeral: true }, async (host) => {
-		const models = await requestRooModels(host)
+		const models = await requestOpenRouterModels(host)
 
 		if (format === "json") {
 			outputJson({ models })

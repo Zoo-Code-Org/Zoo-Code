@@ -1,12 +1,12 @@
 // npx vitest src/components/welcome/__tests__/WelcomeViewProvider.spec.tsx
 
+import React from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
 import * as ExtensionStateContext from "@src/context/ExtensionStateContext"
 const { ExtensionStateContextProvider } = ExtensionStateContext
 
 import WelcomeViewProvider from "../WelcomeViewProvider"
-import { vscode } from "@src/utils/vscode"
 
 // Mock VSCode components
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
@@ -14,20 +14,6 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 		<button onClick={onClick} data-testid="vscode-link">
 			{children}
 		</button>
-	),
-	VSCodeProgressRing: () => <div data-testid="progress-ring">Loading...</div>,
-	VSCodeTextField: ({ value, onKeyUp, placeholder }: any) => (
-		<input data-testid="text-field" type="text" value={value} onChange={onKeyUp} placeholder={placeholder} />
-	),
-	VSCodeRadioGroup: ({ children, value, _onChange }: any) => (
-		<div data-testid="radio-group" data-value={value}>
-			{children}
-		</div>
-	),
-	VSCodeRadio: ({ children, value, onClick }: any) => (
-		<div data-testid={`radio-${value}`} data-value={value} onClick={onClick}>
-			{children}
-		</div>
 	),
 }))
 
@@ -48,7 +34,11 @@ vi.mock("../../settings/ApiOptions", () => ({
 // Mock Tab components
 vi.mock("../../common/Tab", () => ({
 	Tab: ({ children }: any) => <div data-testid="tab">{children}</div>,
-	TabContent: ({ children }: any) => <div data-testid="tab-content">{children}</div>,
+	TabContent: ({ children, className }: any) => (
+		<div data-testid="tab-content" className={className}>
+			{children}
+		</div>
+	),
 }))
 
 // Mock RooHero
@@ -90,7 +80,7 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 
 // Mock buildDocLink
 vi.mock("@/utils/docLinks", () => ({
-	buildDocLink: (path: string, source: string) => `https://docs.roocode.com/${path}?utm_source=${source}`,
+	buildDocLink: (path: string, source: string) => `https://docs.zoocode.dev/${path}?utm_source=${source}`,
 }))
 
 const renderWelcomeViewProvider = (extensionState = {}) => {
@@ -128,224 +118,93 @@ describe("WelcomeViewProvider", () => {
 			// Should show introduction
 			expect(screen.getByTestId("trans-welcome:landing.introduction")).toBeInTheDocument()
 
-			// Should show account mention
-			expect(screen.getByTestId("trans-welcome:landing.accountMention")).toBeInTheDocument()
+			// Router account marketing copy should be removed
+			expect(screen.queryByTestId("trans-welcome:landing.accountMention")).not.toBeInTheDocument()
 
 			// Should show "Get Started" button
 			expect(screen.getByTestId("button-primary")).toBeInTheDocument()
 
-			// Should show "no account" link
-			const noAccountLink = screen
-				.getAllByTestId("vscode-link")
-				.find((link) => link.textContent?.includes("welcome:landing.noAccount"))
-			expect(noAccountLink).toBeInTheDocument()
+			expect(screen.queryByText(/welcome:landing.noAccount/)).not.toBeInTheDocument()
 		})
 
-		it("triggers auth when 'Get Started' is clicked on landing", () => {
+		it("moves to provider selection when 'Get Started' is clicked on landing", () => {
 			renderWelcomeViewProvider()
 
 			const getStartedButton = screen.getByTestId("button-primary")
 			fireEvent.click(getStartedButton)
 
-			expect(vscode.postMessage).toHaveBeenCalledWith({
-				type: "rooCloudSignIn",
-				useProviderSignup: true,
-			})
-		})
-
-		it("shows auth in progress after clicking 'Get Started' on landing", () => {
-			renderWelcomeViewProvider()
-
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
-
-			// Should show progress ring
-			expect(screen.getByTestId("progress-ring")).toBeInTheDocument()
-
-			// Should show waiting heading
-			expect(screen.getByText(/welcome:waitingForCloud.heading/)).toBeInTheDocument()
-		})
-
-		it("navigates to provider selection when 'no account' is clicked", () => {
-			renderWelcomeViewProvider()
-
-			// Click the "no account" link
-			const noAccountLink = screen
-				.getAllByTestId("vscode-link")
-				.find((link) => link.textContent?.includes("welcome:landing.noAccount"))
-			fireEvent.click(noAccountLink!)
-
-			// Should now show provider selection screen with radio buttons
-			expect(screen.getByTestId("radio-group")).toBeInTheDocument()
-			expect(screen.getByTestId("radio-roo")).toBeInTheDocument()
-			expect(screen.getByTestId("radio-custom")).toBeInTheDocument()
+			expect(screen.getByTestId("api-options")).toBeInTheDocument()
 			expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
+		})
+
+		it("keeps the landing screen centered", () => {
+			renderWelcomeViewProvider()
+
+			expect(screen.getByTestId("tab-content")).toHaveClass("justify-center")
+		})
+
+		it("does not enter auth-in-progress state after clicking 'Get Started' on landing", () => {
+			renderWelcomeViewProvider()
+
+			const getStartedButton = screen.getByTestId("button-primary")
+			fireEvent.click(getStartedButton)
+
+			expect(screen.queryByTestId("progress-ring")).not.toBeInTheDocument()
+			expect(screen.getByTestId("api-options")).toBeInTheDocument()
+		})
+
+		it("does not render the retired Roo onboarding option", () => {
+			renderWelcomeViewProvider()
+			fireEvent.click(screen.getByTestId("button-primary"))
+
+			expect(screen.queryByTestId("radio-roo")).not.toBeInTheDocument()
+			expect(screen.queryByText(/welcome:providerSignup.rooCloudProvider/)).not.toBeInTheDocument()
 		})
 	})
 
 	describe("Provider Selection Screen", () => {
 		const navigateToProviderSelection = () => {
-			const noAccountLink = screen
-				.getAllByTestId("vscode-link")
-				.find((link) => link.textContent?.includes("welcome:landing.noAccount"))
-			fireEvent.click(noAccountLink!)
+			fireEvent.click(screen.getByTestId("button-primary"))
 		}
 
-		it("shows radio buttons for Roo and Custom providers", () => {
+		it("shows provider configuration without Router selection controls", () => {
 			renderWelcomeViewProvider()
 			navigateToProviderSelection()
 
-			// Should show radio group
-			expect(screen.getByTestId("radio-group")).toBeInTheDocument()
-
-			// Should show both radio options
-			expect(screen.getByTestId("radio-roo")).toBeInTheDocument()
-			expect(screen.getByTestId("radio-custom")).toBeInTheDocument()
-
-			// Should show Roo provider description
-			expect(screen.getByText(/welcome:providerSignup.rooCloudDescription/)).toBeInTheDocument()
-
-			// Should show custom provider description
-			expect(screen.getByText(/welcome:providerSignup.useAnotherProviderDescription/)).toBeInTheDocument()
+			expect(screen.getByTestId("api-options")).toBeInTheDocument()
+			expect(screen.queryByTestId("radio-group")).not.toBeInTheDocument()
 		})
 
-		it("Roo provider is selected by default", () => {
+		it("shows provider setup copy", () => {
 			renderWelcomeViewProvider()
 			navigateToProviderSelection()
 
-			const radioGroup = screen.getByTestId("radio-group")
-			expect(radioGroup).toHaveAttribute("data-value", "roo")
+			expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
 		})
 
-		it("does not show API options when Roo provider is selected", () => {
+		it("top-aligns provider setup content so tall forms remain reachable", () => {
 			renderWelcomeViewProvider()
 			navigateToProviderSelection()
 
-			// API options exist but should be hidden with max-h-0 (collapsed via CSS)
-			// We can't easily test CSS visibility, so just verify the element is in the DOM
-			// but would be hidden by the transition class
+			expect(screen.getByTestId("tab-content")).not.toHaveClass("justify-center")
+		})
+
+		it("shows API options immediately", () => {
+			renderWelcomeViewProvider()
+			navigateToProviderSelection()
+
 			const apiOptions = screen.queryByTestId("api-options")
 			expect(apiOptions).toBeInTheDocument()
 		})
 
-		it("triggers auth when Get Started is clicked on Roo provider (not authenticated)", () => {
-			renderWelcomeViewProvider({ cloudIsAuthenticated: false })
-			navigateToProviderSelection()
-
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
-
-			expect(vscode.postMessage).toHaveBeenCalledWith({
-				type: "rooCloudSignIn",
-				useProviderSignup: true,
-			})
-		})
-
-		it("saves config immediately when Get Started is clicked on Roo provider (already authenticated)", () => {
-			renderWelcomeViewProvider({ cloudIsAuthenticated: true })
-			navigateToProviderSelection()
-
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
-
-			expect(vscode.postMessage).toHaveBeenCalledWith({
-				type: "upsertApiConfiguration",
-				text: "default",
-				apiConfiguration: {
-					apiProvider: "roo",
-				},
-			})
-		})
-
-		// Note: We can't easily test radio selection changes in the mocked environment
-		// since the VSCodeRadioGroup component's onChange is complex
-		// These tests would work in a real browser environment
-		it.skip("shows API options when custom provider is selected", () => {
+		it("returns to landing when Back is clicked", () => {
 			renderWelcomeViewProvider()
 			navigateToProviderSelection()
 
-			// Would simulate selecting custom provider in real environment
-			// API options visibility is controlled by CSS transition based on selectedProvider state
-		})
+			fireEvent.click(screen.getByTestId("button-secondary"))
 
-		it.skip("validates and saves configuration when Get Started is clicked on custom provider", () => {
-			// This test would require properly simulating the radio group onChange
-			// which is complex in the mocked environment
-		})
-	})
-
-	describe("Auth In Progress State", () => {
-		it("shows waiting state with progress ring", () => {
-			renderWelcomeViewProvider()
-
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
-
-			// Should show progress ring
-			expect(screen.getByTestId("progress-ring")).toBeInTheDocument()
-
-			// Should show waiting heading
-			expect(screen.getByText(/welcome:waitingForCloud.heading/)).toBeInTheDocument()
-
-			// Should show description (it's rendered via t() not Trans)
-			expect(screen.getByText(/welcome:waitingForCloud.description/)).toBeInTheDocument()
-		})
-
-		it("shows Go Back button in waiting state", () => {
-			renderWelcomeViewProvider()
-
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
-
-			// Should show secondary button (Go Back)
-			expect(screen.getByTestId("button-secondary")).toBeInTheDocument()
-			expect(screen.getByText(/welcome:waitingForCloud.goBack/)).toBeInTheDocument()
-		})
-
-		it("returns to landing screen when Go Back is clicked (auth from landing)", () => {
-			renderWelcomeViewProvider()
-
-			// Start auth from landing
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
-
-			// Verify we're in auth progress
-			expect(screen.getByTestId("progress-ring")).toBeInTheDocument()
-
-			// Click Go Back
-			const goBackButton = screen.getByTestId("button-secondary")
-			fireEvent.click(goBackButton)
-
-			// Should be back on landing screen
 			expect(screen.getByText(/welcome:landing.greeting/)).toBeInTheDocument()
-			expect(screen.getByTestId("trans-welcome:landing.introduction")).toBeInTheDocument()
-			expect(screen.queryByTestId("progress-ring")).not.toBeInTheDocument()
-		})
-
-		it("returns to provider selection when Go Back is clicked (auth from provider selection)", () => {
-			renderWelcomeViewProvider({ cloudIsAuthenticated: false })
-
-			// Navigate to provider selection
-			const noAccountLink = screen
-				.getAllByTestId("vscode-link")
-				.find((link) => link.textContent?.includes("welcome:landing.noAccount"))
-			fireEvent.click(noAccountLink!)
-
-			// Start auth from provider selection (Roo is selected by default)
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
-
-			// Verify we're in auth progress
-			expect(screen.getByTestId("progress-ring")).toBeInTheDocument()
-
-			// Click Go Back
-			const goBackButton = screen.getByTestId("button-secondary")
-			fireEvent.click(goBackButton)
-
-			// Should be back on provider selection screen
-			expect(screen.getByTestId("radio-group")).toBeInTheDocument()
-			expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
-			expect(screen.queryByTestId("progress-ring")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("api-options")).not.toBeInTheDocument()
 		})
 	})
 })

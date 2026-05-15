@@ -11,9 +11,9 @@
 </sub>
 </div>
 
-# Contribuir a Roo Code
+# Contribuir a Zoo Code
 
-Roo Code es un proyecto impulsado por la comunidad y valoramos profundamente cada contribución. Para agilizar la colaboración, operamos con un [enfoque de "primero la incidencia"](#enfoque-de-primero-la-incidencia), lo que significa que todas las [solicitudes de extracción (PR)](#envío-de-una-solicitud-de-extracción) deben estar primero vinculadas a una incidencia de GitHub. Por favor, revise esta guía detenidamente.
+Zoo Code es un proyecto impulsado por la comunidad y valoramos profundamente cada contribución. Para agilizar la colaboración, operamos con un [enfoque de "primero la incidencia"](#enfoque-de-primero-la-incidencia), lo que significa que todas las [solicitudes de extracción (PR)](#envío-de-una-solicitud-de-extracción) deben estar primero vinculadas a una incidencia de GitHub. Por favor, revise esta guía detenidamente.
 
 ## Tabla de contenidos
 
@@ -52,10 +52,10 @@ Nuestra hoja de ruta guía la dirección del proyecto. Alinee sus contribuciones
 
 Mencione la alineación con estas áreas en sus solicitudes de extracción.
 
-### 3. Únase a la comunidad de Roo Code
+### 3. Únete a la comunidad de Zoo Code
 
-- **Principal:** Únase a nuestro [Discord](https://discord.gg/roocode) y envíe un mensaje directo a **Hannes Rudolph (`hrudolph`)**.
-- **Alternativa:** Los colaboradores experimentados pueden participar directamente a través de [Proyectos de GitHub](https://github.com/orgs/RooCodeInc/projects/1).
+- **Discord:** Únete a nuestro [Discord](https://discord.gg/VxfP4Vx3gX).
+- **Reddit:** Únete a nuestro [Reddit](https://www.reddit.com/r/ZooCode/).
 
 ## Encontrar y planificar su contribución
 
@@ -69,26 +69,26 @@ Mencione la alineación con estas áreas en sus solicitudes de extracción.
 
 Todas las contribuciones comienzan con una incidencia de GitHub utilizando nuestras plantillas simplificadas.
 
-- **Compruebe las incidencias existentes**: busque en [Incidencias de GitHub](https://github.com/RooCodeInc/Roo-Code/issues).
+- **Compruebe las incidencias existentes**: busque en [Incidencias de GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
 - **Cree una incidencia** utilizando:
     - **Mejoras:** plantilla "Solicitud de mejora" (lenguaje sencillo centrado en el beneficio del usuario).
     - **Errores:** plantilla "Informe de error" (reproducción mínima + esperado vs. real + versión).
-- **¿Quiere trabajar en ello?** Comente "Reclamando" en la incidencia y envíe un mensaje directo a **Hannes Rudolph (`hrudolph`)** en [Discord](https://discord.gg/roocode) para que se le asigne. La asignación se confirmará en el hilo.
+- **¿Quiere trabajar en ello?** Comente "Reclamando" en la incidencia y envíe un mensaje directo al equipo principal en [Discord](https://discord.gg/VxfP4Vx3gX) para que se le asigne. La asignación se confirmará en el hilo.
 - **Las solicitudes de extracción deben enlazar a la incidencia.** Las solicitudes de extracción no enlazadas pueden cerrarse.
 
 ### Decidir en qué trabajar
 
-- Consulte el [Proyecto de GitHub](https://github.com/orgs/RooCodeInc/projects/1) para ver las incidencias "Incidencia [Sin asignar]".
-- Para la documentación, visite [Documentos de Roo Code](https://github.com/RooCodeInc/Roo-Code-Docs).
+- Consulta la [página de GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues) para ver las issues.
+- Para la documentación, visite [Documentos de Zoo Code](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
 
 ### Informar de errores
 
 - Compruebe primero si existen informes.
-- Cree un nuevo error utilizando la [plantilla "Informe de error"](https://github.com/RooCodeInc/Roo-Code/issues/new/choose) con:
+- Cree un nuevo error utilizando la [plantilla "Informe de error"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) con:
     - Pasos de reproducción claros y numerados
     - Resultado esperado vs. real
-    - Versión de Roo Code (obligatorio); proveedor/modelo de API si es relevante
-- **Problemas de seguridad**: informe de forma privada a través de [avisos de seguridad](https://github.com/RooCodeInc/Roo-Code/security/advisories/new).
+    - Versión de Zoo Code (obligatorio); proveedor/modelo de API si es relevante
+- **Problemas de seguridad**: informe de forma privada a través de [avisos de seguridad](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
 
 ## Proceso de desarrollo y envío
 
@@ -97,7 +97,7 @@ Todas las contribuciones comienzan con una incidencia de GitHub utilizando nuest
 1. **Bifurcar y clonar:**
 
 ```
-git clone https://github.com/SU_NOMBRE_DE_USUARIO/Roo-Code.git
+git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
 2. **Instalar dependencias:**
@@ -126,7 +126,7 @@ pnpm install
 
 ### Política de solicitud de extracción
 
-- Debe hacer referencia a una incidencia de GitHub asignada. Para que se le asigne: comente "Reclamando" en la incidencia y envíe un mensaje directo a **Hannes Rudolph (`hrudolph`)** en [Discord](https://discord.gg/roocode). La asignación se confirmará en el hilo.
+- Debe hacer referencia a una incidencia de GitHub asignada. Para que se le asigne: comente "Reclamando" en la incidencia y envíe un mensaje directo al equipo principal en [Discord](https://discord.gg/VxfP4Vx3gX). La asignación se confirmará en el hilo.
 - Las solicitudes de extracción no enlazadas pueden cerrarse.
 - Las solicitudes de extracción deben pasar las pruebas de CI, estar alineadas con la hoja de ruta y tener una documentación clara.
 
@@ -138,4 +138,4 @@ pnpm install
 
 ## Legal
 
-Al contribuir, acepta que sus contribuciones se licenciarán bajo la Licencia Apache 2.0, de acuerdo con la licencia de Roo Code.
+Al contribuir, acepta que sus contribuciones se licenciarán bajo la Licencia Apache 2.0, de acuerdo con la licencia de Zoo Code.

@@ -1,6 +1,7 @@
 import React from "react"
 
 import { render, screen } from "@/utils/test-utils"
+import { EXTERNAL_LINKS } from "@/constants/externalLinks"
 
 import Announcement from "../Announcement"
 
@@ -25,7 +26,13 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 }))
 
 vi.mock("react-i18next", () => ({
-	Trans: ({ i18nKey }: { i18nKey: string }) => <span>{i18nKey}</span>,
+	Trans: ({ i18nKey, components }: { i18nKey: string; components?: Record<string, React.ReactElement> }) => {
+		if (i18nKey === "chat:announcement.support" && components?.githubLink) {
+			return React.cloneElement(components.githubLink, undefined, "GitHub")
+		}
+
+		return <span>{i18nKey}</span>
+	},
 }))
 
 vi.mock("@src/i18n/TranslationContext", () => ({
@@ -77,5 +84,11 @@ describe("Announcement", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
 		expect(screen.getAllByRole("listitem")).toHaveLength(3)
+	})
+
+	it("links support users to the Zoo Code GitHub repository", () => {
+		render(<Announcement hideAnnouncement={vi.fn()} />)
+
+		expect(screen.getByRole("link", { name: "GitHub" })).toHaveAttribute("href", EXTERNAL_LINKS.GITHUB_REPO)
 	})
 })

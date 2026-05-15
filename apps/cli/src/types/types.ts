@@ -7,7 +7,6 @@ export const supportedProviders = [
 	"gemini",
 	"openrouter",
 	"vercel-ai-gateway",
-	"roo",
 ] as const satisfies ProviderName[]
 
 export type SupportedProvider = (typeof supportedProviders)[number]
@@ -44,9 +43,14 @@ export type FlagOptions = {
 }
 
 export enum OnboardingProviderChoice {
-	Roo = "roo",
 	Byok = "byok",
 }
+
+export const LEGACY_PROVIDER_PREFERENCE_ROO = "roo" as const
+export const LEGACY_ONBOARDING_PROVIDER_CHOICE_ROO = "roo" as const
+
+export type CliProviderPreference = SupportedProvider | typeof LEGACY_PROVIDER_PREFERENCE_ROO
+export type CliOnboardingProviderChoice = OnboardingProviderChoice | typeof LEGACY_ONBOARDING_PROVIDER_CHOICE_ROO
 
 export interface OnboardingResult {
 	choice: OnboardingProviderChoice
@@ -55,11 +59,11 @@ export interface OnboardingResult {
 }
 
 export interface CliSettings {
-	onboardingProviderChoice?: OnboardingProviderChoice
+	onboardingProviderChoice?: CliOnboardingProviderChoice
 	/** Default mode to use (e.g., "code", "architect", "ask", "debug") */
 	mode?: string
 	/** Default provider to use */
-	provider?: SupportedProvider
+	provider?: CliProviderPreference
 	/** Default model to use */
 	model?: string
 	/** Default reasoning effort level */

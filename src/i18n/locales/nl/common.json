@@ -1,6 +1,6 @@
 {
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "Een compleet ontwikkelteam van AI-agenten in je editor."
 	},
 	"number_format": {
@@ -91,7 +91,7 @@
 			"errorOutput": "Foutuitvoer: {{output}}",
 			"processExitedWithError": "Claude Code proces beëindigd met code {{exitCode}}. Foutuitvoer: {{output}}",
 			"stoppedWithReason": "Claude Code gestopt om reden: {{reason}}",
-			"apiKeyModelPlanMismatch": "API keys and subscription plans allow different models. Make sure the selected model is included in your plan."
+			"apiKeyModelPlanMismatch": "API-sleutels en abonnementsplannen staan verschillende modellen toe. Controleer of het geselecteerde model in je plan is inbegrepen."
 		},
 		"message": {
 			"no_active_task_to_delete": "Geen actieve taak om berichten uit te verwijderen",
@@ -112,7 +112,8 @@
 			"thinking_complete_recitation": "(Nadenken voltooid, maar uitvoer is geblokkeerd vanwege recitatiecontrole.)"
 		},
 		"roo": {
-			"authenticationRequired": "Roo provider vereist cloud authenticatie. Log in bij Roo Code Cloud."
+			"authenticationRequired": "Roo provider vereist cloud authenticatie. Log in bij Roo Code Cloud.",
+			"routerRemoved": "Roo Code Router is verwijderd. Selecteer en configureer een andere provider."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API-sleutel bevat ongeldige karakters.",
@@ -145,7 +146,7 @@
 	"warnings": {
 		"no_terminal_content": "Geen terminalinhoud geselecteerd",
 		"missing_task_files": "De bestanden van deze taak ontbreken. Wil je deze uit de takenlijst verwijderen?",
-		"auto_import_failed": "Automatisch importeren van RooCode-instellingen mislukt: {{error}}"
+		"auto_import_failed": "Automatisch importeren van ZooCode-instellingen mislukt: {{error}}"
 	},
 	"info": {
 		"no_changes": "Geen wijzigingen gevonden.",
@@ -154,14 +155,17 @@
 		"custom_storage_path_set": "Aangepast opslagpad ingesteld: {{path}}",
 		"default_storage_path": "Terug naar standaard opslagpad",
 		"settings_imported": "Instellingen succesvol geïmporteerd.",
-		"auto_import_success": "RooCode-instellingen automatisch geïmporteerd van {{filename}}",
+		"auto_import_success": "ZooCode-instellingen automatisch geïmporteerd van {{filename}}",
 		"share_link_copied": "Deellink gekopieerd naar klembord",
 		"image_copied_to_clipboard": "Afbeelding data-URI gekopieerd naar klembord",
 		"image_saved": "Afbeelding opgeslagen naar {{path}}",
 		"organization_share_link_copied": "Organisatie deel-link gekopieerd naar klembord!",
 		"public_share_link_copied": "Openbare deel-link gekopieerd naar klembord!",
 		"mode_exported": "Modus '{{mode}}' succesvol geëxporteerd",
-		"mode_imported": "Modus succesvol geïmporteerd"
+		"mode_imported": "Modus succesvol geïmporteerd",
+		"roo": {
+			"signInUnavailable": "Inloggen bij Roo Code Cloud is momenteel niet beschikbaar. Configureer een andere provider om door te gaan."
+		}
 	},
 	"answers": {
 		"yes": "Ja",
@@ -187,12 +191,12 @@
 	},
 	"storage": {
 		"prompt_custom_path": "Voer een aangepast opslagpad voor gespreksgeschiedenis in, laat leeg voor standaardlocatie",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "Voer een absoluut pad in (bijv. D:\\RooCodeStorage of /home/user/storage)",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "Voer een absoluut pad in (bijv. D:\\ZooCodeStorage of /home/user/storage)",
 		"enter_valid_path": "Voer een geldig pad in"
 	},
 	"input": {
-		"task_prompt": "Wat moet Roo doen?",
+		"task_prompt": "Wat moet Zoo doen?",
 		"task_placeholder": "Typ hier je taak"
 	},
 	"settings": {
@@ -222,8 +226,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "Je organisatie vereist Roo Code Cloud-authenticatie. Log in om door te gaan.",
-			"organization_mismatch": "Je moet geauthenticeerd zijn met het Roo Code Cloud-account van je organisatie.",
+			"cloud_auth_required": "Je organisatie vereist Zoo Code Cloud-authenticatie. Log in om door te gaan.",
+			"organization_mismatch": "Je moet geauthenticeerd zijn met het Zoo Code Cloud-account van je organisatie.",
 			"manual_url_empty": "Voer een geldige callback-URL in",
 			"manual_url_no_query": "Ongeldige callback-URL: query-parameters ontbreken",
 			"manual_url_missing_params": "Ongeldige callback-URL: vereiste parameters ontbreken (code en state)",
@@ -250,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Ongeldig authenticatietoken ontvangen.",
+			"token_verification_failed": "Zoo Code: Tokenverificatie mislukt.",
+			"invalid_token": "Zoo Code: Ongeldig token.",
+			"could_not_verify_token": "Zoo Code: Token kon niet worden geverifieerd."
+		},
+		"info": {
+			"connected": "Zoo Code: Succesvol verbonden! Je kunt Zoo Code nu gebruiken als AI-provider.",
+			"disconnected": "Zoo Code: Succesvol losgekoppeld."
+		}
 	}
 }

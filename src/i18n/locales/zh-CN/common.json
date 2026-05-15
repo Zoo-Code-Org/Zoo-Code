@@ -1,6 +1,6 @@
 {
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "您编辑器中的完整AI开发团队。"
 	},
 	"number_format": {
@@ -117,7 +117,8 @@
 			"thinking_complete_recitation": "（思考完成，但由于引用检查输出被阻止。）"
 		},
 		"roo": {
-			"authenticationRequired": "Roo 提供商需要云认证。请登录 Roo Code Cloud。"
+			"authenticationRequired": "Roo 提供商需要云认证。请登录 Roo Code Cloud。",
+			"routerRemoved": "Roo Code Router 已被移除。请选择并配置其他提供商。"
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API 密钥包含无效字符.",
@@ -150,7 +151,7 @@
 	"warnings": {
 		"no_terminal_content": "没有选择终端内容",
 		"missing_task_files": "此任务的文件丢失。您想从任务列表中删除它吗？",
-		"auto_import_failed": "自动导入 RooCode 设置失败：{{error}}"
+		"auto_import_failed": "自动导入 ZooCode 设置失败：{{error}}"
 	},
 	"info": {
 		"no_changes": "未找到更改。",
@@ -159,14 +160,17 @@
 		"custom_storage_path_set": "自定义存储路径已设置：{{path}}",
 		"default_storage_path": "已恢复使用默认存储路径",
 		"settings_imported": "设置已成功导入。",
-		"auto_import_success": "已自动导入 RooCode 设置：{{filename}}",
+		"auto_import_success": "已自动导入 ZooCode 设置：{{filename}}",
 		"share_link_copied": "分享链接已复制到剪贴板",
 		"image_copied_to_clipboard": "图片数据 URI 已复制到剪贴板",
 		"image_saved": "图片已保存到 {{path}}",
 		"organization_share_link_copied": "组织分享链接已复制到剪贴板！",
 		"public_share_link_copied": "公开分享链接已复制到剪贴板！",
 		"mode_exported": "模式 '{{mode}}' 已成功导出",
-		"mode_imported": "模式已成功导入"
+		"mode_imported": "模式已成功导入",
+		"roo": {
+			"signInUnavailable": "Roo Code Cloud 登录当前不可用。请配置其他提供商以继续。"
+		}
 	},
 	"answers": {
 		"yes": "是",
@@ -192,12 +196,12 @@
 	},
 	"storage": {
 		"prompt_custom_path": "输入自定义会话历史存储路径，留空以使用默认位置",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "请输入绝对路径（例如 D:\\RooCodeStorage 或 /home/user/storage）",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "请输入绝对路径（例如 D:\\ZooCodeStorage 或 /home/user/storage）",
 		"enter_valid_path": "请输入有效的路径"
 	},
 	"input": {
-		"task_prompt": "让Roo做什么？",
+		"task_prompt": "让Zoo做什么？",
 		"task_placeholder": "在这里输入任务"
 	},
 	"settings": {
@@ -227,8 +231,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "您的组织需要 Roo Code Cloud 身份验证。请登录以继续。",
-			"organization_mismatch": "您必须使用组织的 Roo Code Cloud 账户进行身份验证。",
+			"cloud_auth_required": "您的组织需要 Zoo Code Cloud 身份验证。请登录以继续。",
+			"organization_mismatch": "您必须使用组织的 Zoo Code Cloud 账户进行身份验证。",
 			"manual_url_empty": "请输入有效的回调 URL",
 			"manual_url_no_query": "无效的回调 URL：缺少查询参数",
 			"manual_url_missing_params": "无效的回调 URL：缺少必需参数（code 和 state）",
@@ -255,6 +259,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: 收到无效的认证 token。",
+			"token_verification_failed": "Zoo Code: Token 验证失败。",
+			"invalid_token": "Zoo Code: 无效的 token。",
+			"could_not_verify_token": "Zoo Code: 无法验证 token。"
+		},
+		"info": {
+			"connected": "Zoo Code: 连接成功！你现在可以使用 Zoo Code 作为 AI 提供商。",
+			"disconnected": "Zoo Code: 已成功断开连接。"
+		}
 	}
 }

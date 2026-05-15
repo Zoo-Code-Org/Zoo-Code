@@ -1,5 +1,5 @@
 {
-	"greeting": "Witamy w Roo Code",
+	"greeting": "Witamy w Zoo Code!",
 	"task": {
 		"title": "Zadanie",
 		"expand": "Rozwiń zadanie",
@@ -15,16 +15,6 @@
 		"export": "Eksportuj historię zadań",
 		"delete": "Usuń zadanie (Shift + Kliknięcie, aby pominąć potwierdzenie)",
 		"condenseContext": "Inteligentnie skondensuj kontekst",
-		"share": "Udostępnij zadanie",
-		"shareWithOrganization": "Udostępnij organizacji",
-		"shareWithOrganizationDescription": "Tylko członkowie twojej organizacji mogą uzyskać dostęp",
-		"sharePublicly": "Udostępnij publicznie",
-		"sharePubliclyDescription": "Każdy z linkiem może uzyskać dostęp",
-		"connectToCloud": "Połącz z chmurą",
-		"connectToCloudDescription": "Zaloguj się do Roo Code Cloud, aby udostępniać zadania",
-		"sharingDisabledByOrganization": "Udostępnianie wyłączone przez organizację",
-		"shareSuccessOrganization": "Link organizacji skopiowany do schowka",
-		"shareSuccessPublic": "Link publiczny skopiowany do schowka",
 		"openApiHistory": "Otwórz historię API",
 		"openUiHistory": "Otwórz historię UI",
 		"backToParentTask": "Zadanie nadrzędne"
@@ -98,7 +88,7 @@
 	"enqueueMessage": "Dodaj wiadomość do kolejki (zostanie wysłana po zakończeniu bieżącego zadania)",
 	"scrollToBottom": "Przewiń do dołu czatu",
 	"scrollToLatestCheckpoint": "Przewiń do poprzedniego punktu kontrolnego",
-	"about": "Roo Code to cały zespół deweloperów AI w Twoim edytorze.",
+	"about": "Zoo Code to cały zespół deweloperów AI w Twoim edytorze.",
 	"docs": "Sprawdź naszą <DocsLink>dokumentację</DocsLink>, aby dowiedzieć się więcej.",
 	"onboarding": "Twoja lista zadań w tym obszarze roboczym jest pusta.",
 	"rooTips": {
@@ -130,7 +120,7 @@
 		"title": "Tryby",
 		"marketplace": "Marketplace Trybów",
 		"settings": "Ustawienia Trybów",
-		"description": "Wyspecjalizowane persony, które dostosowują zachowanie Roo.",
+		"description": "Wyspecjalizowane persony, które dostosowują zachowanie Zoo.",
 		"searchPlaceholder": "Szukaj trybów...",
 		"noResults": "Nie znaleziono wyników"
 	},
@@ -144,7 +134,7 @@
 	"diffError": {
 		"title": "Edycja nieudana"
 	},
-	"troubleMessage": "Roo ma problemy...",
+	"troubleMessage": "Zoo ma problemy...",
 	"apiRequest": {
 		"title": "Zapytanie API",
 		"failed": "Zapytanie API nie powiodło się",
@@ -162,7 +152,7 @@
 			"500": "Błąd serwera dostawcy. Po stronie dostawcy coś się nie powiodło, w Twoim żądaniu nie ma nic złego.",
 			"docs": "Dokumentacja",
 			"goToSettings": "Ustawienia",
-			"unknown": "Nieznany błąd API. Skontaktuj się z pomocą techniczną Roo Code.",
+			"unknown": "Nieznany błąd API. Skontaktuj się z pomocą techniczną Zoo Code.",
 			"connection": "Błąd połączenia. Upewnij się, że masz działające połączenie internetowe.",
 			"claudeCodeNotAuthenticated": "Musisz się zalogować, aby korzystać z Claude Code. Przejdź do Ustawień i kliknij \"Zaloguj się do Claude Code\", aby się uwierzytelnić."
 		}
@@ -190,40 +180,40 @@
 		"wantsToFetch": "Roo chce pobrać szczegółowe instrukcje, aby pomóc w bieżącym zadaniu"
 	},
 	"fileOperations": {
-		"wantsToRead": "Roo chce przeczytać ten plik",
-		"wantsToReadOutsideWorkspace": "Roo chce przeczytać ten plik poza obszarem roboczym",
-		"didRead": "Roo przeczytał ten plik",
-		"wantsToEdit": "Roo chce edytować ten plik",
-		"wantsToEditOutsideWorkspace": "Roo chce edytować ten plik poza obszarem roboczym",
-		"wantsToEditProtected": "Roo chce edytować chroniony plik konfiguracyjny",
-		"wantsToCreate": "Roo chce utworzyć nowy plik",
+		"wantsToRead": "Zoo chce przeczytać ten plik",
+		"wantsToReadOutsideWorkspace": "Zoo chce przeczytać ten plik poza obszarem roboczym",
+		"didRead": "Zoo przeczytał ten plik",
+		"wantsToEdit": "Zoo chce edytować ten plik",
+		"wantsToEditOutsideWorkspace": "Zoo chce edytować ten plik poza obszarem roboczym",
+		"wantsToEditProtected": "Zoo chce edytować chroniony plik konfiguracyjny",
+		"wantsToCreate": "Zoo chce utworzyć nowy plik",
 		"wantsToSearchReplace": "Roo chce wykonać wyszukiwanie i zamianę w tym pliku",
 		"didSearchReplace": "Roo wykonał wyszukiwanie i zamianę w tym pliku",
-		"wantsToInsert": "Roo chce wstawić zawartość do tego pliku",
-		"wantsToInsertWithLineNumber": "Roo chce wstawić zawartość do tego pliku w linii {{lineNumber}}",
-		"wantsToInsertAtEnd": "Roo chce dodać zawartość na końcu tego pliku",
-		"wantsToReadAndXMore": "Roo chce przeczytać ten plik i {{count}} więcej",
-		"wantsToReadMultiple": "Roo chce odczytać wiele plików",
-		"wantsToApplyBatchChanges": "Roo chce zastosować zmiany do wielu plików",
-		"wantsToGenerateImage": "Roo chce wygenerować obraz",
-		"wantsToGenerateImageOutsideWorkspace": "Roo chce wygenerować obraz poza obszarem roboczym",
-		"wantsToGenerateImageProtected": "Roo chce wygenerować obraz w chronionym miejscu",
-		"didGenerateImage": "Roo wygenerował obraz"
+		"wantsToInsert": "Zoo chce wstawić zawartość do tego pliku",
+		"wantsToInsertWithLineNumber": "Zoo chce wstawić zawartość do tego pliku w linii {{lineNumber}}",
+		"wantsToInsertAtEnd": "Zoo chce dodać zawartość na końcu tego pliku",
+		"wantsToReadAndXMore": "Zoo chce przeczytać ten plik i {{count}} więcej",
+		"wantsToReadMultiple": "Zoo chce odczytać wiele plików",
+		"wantsToApplyBatchChanges": "Zoo chce zastosować zmiany do wielu plików",
+		"wantsToGenerateImage": "Zoo chce wygenerować obraz",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo chce wygenerować obraz poza obszarem roboczym",
+		"wantsToGenerateImageProtected": "Zoo chce wygenerować obraz w chronionym miejscu",
+		"didGenerateImage": "Zoo wygenerował obraz"
 	},
 	"directoryOperations": {
-		"wantsToViewTopLevel": "Roo chce zobaczyć pliki najwyższego poziomu w tym katalogu",
-		"didViewTopLevel": "Roo zobaczył pliki najwyższego poziomu w tym katalogu",
-		"wantsToViewRecursive": "Roo chce rekurencyjnie zobaczyć wszystkie pliki w tym katalogu",
-		"didViewRecursive": "Roo rekurencyjnie zobaczył wszystkie pliki w tym katalogu",
-		"wantsToSearch": "Roo chce przeszukać ten katalog w poszukiwaniu <code>{{regex}}</code>",
-		"didSearch": "Roo przeszukał ten katalog w poszukiwaniu <code>{{regex}}</code>",
-		"wantsToSearchOutsideWorkspace": "Roo chce przeszukać ten katalog (poza obszarem roboczym) w poszukiwaniu <code>{{regex}}</code>",
-		"didSearchOutsideWorkspace": "Roo przeszukał ten katalog (poza obszarem roboczym) w poszukiwaniu <code>{{regex}}</code>",
-		"wantsToViewTopLevelOutsideWorkspace": "Roo chce zobaczyć pliki najwyższego poziomu w tym katalogu (poza obszarem roboczym)",
-		"didViewTopLevelOutsideWorkspace": "Roo zobaczył pliki najwyższego poziomu w tym katalogu (poza obszarem roboczym)",
-		"wantsToViewRecursiveOutsideWorkspace": "Roo chce rekurencyjnie zobaczyć wszystkie pliki w tym katalogu (poza obszarem roboczym)",
-		"didViewRecursiveOutsideWorkspace": "Roo rekurencyjnie zobaczył wszystkie pliki w tym katalogu (poza obszarem roboczym)",
-		"wantsToViewMultipleDirectories": "Roo chce wyświetlić wiele katalogów"
+		"wantsToViewTopLevel": "Zoo chce zobaczyć pliki najwyższego poziomu w tym katalogu",
+		"didViewTopLevel": "Zoo zobaczył pliki najwyższego poziomu w tym katalogu",
+		"wantsToViewRecursive": "Zoo chce rekurencyjnie zobaczyć wszystkie pliki w tym katalogu",
+		"didViewRecursive": "Zoo rekurencyjnie zobaczył wszystkie pliki w tym katalogu",
+		"wantsToSearch": "Zoo chce przeszukać ten katalog w poszukiwaniu <code>{{regex}}</code>",
+		"didSearch": "Zoo przeszukał ten katalog w poszukiwaniu <code>{{regex}}</code>",
+		"wantsToSearchOutsideWorkspace": "Zoo chce przeszukać ten katalog (poza obszarem roboczym) w poszukiwaniu <code>{{regex}}</code>",
+		"didSearchOutsideWorkspace": "Zoo przeszukał ten katalog (poza obszarem roboczym) w poszukiwaniu <code>{{regex}}</code>",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo chce zobaczyć pliki najwyższego poziomu w tym katalogu (poza obszarem roboczym)",
+		"didViewTopLevelOutsideWorkspace": "Zoo zobaczył pliki najwyższego poziomu w tym katalogu (poza obszarem roboczym)",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo chce rekurencyjnie zobaczyć wszystkie pliki w tym katalogu (poza obszarem roboczym)",
+		"didViewRecursiveOutsideWorkspace": "Zoo rekurencyjnie zobaczył wszystkie pliki w tym katalogu (poza obszarem roboczym)",
+		"wantsToViewMultipleDirectories": "Zoo chce wyświetlić wiele katalogów"
 	},
 	"commandOutput": "Wyjście polecenia",
 	"commandExecution": {
@@ -245,24 +235,24 @@
 	"response": "Odpowiedź",
 	"arguments": "Argumenty",
 	"text": {
-		"rooSaid": "Roo powiedział"
+		"rooSaid": "Zoo powiedział"
 	},
 	"feedback": {
 		"youSaid": "Powiedziałeś"
 	},
 	"mcp": {
-		"wantsToUseTool": "Roo chce użyć narzędzia na serwerze MCP {{serverName}}",
-		"wantsToAccessResource": "Roo chce uzyskać dostęp do zasobu na serwerze MCP {{serverName}}"
+		"wantsToUseTool": "Zoo chce użyć narzędzia na serwerze MCP {{serverName}}",
+		"wantsToAccessResource": "Zoo chce uzyskać dostęp do zasobu na serwerze MCP {{serverName}}"
 	},
 	"modes": {
-		"wantsToSwitch": "Roo chce przełączyć się na tryb <code>{{mode}}</code>",
-		"wantsToSwitchWithReason": "Roo chce przełączyć się na tryb <code>{{mode}}</code> ponieważ: {{reason}}",
-		"didSwitch": "Roo przełączył się na tryb <code>{{mode}}</code>",
-		"didSwitchWithReason": "Roo przełączył się na tryb <code>{{mode}}</code> ponieważ: {{reason}}"
+		"wantsToSwitch": "Zoo chce przełączyć się na tryb <code>{{mode}}</code>",
+		"wantsToSwitchWithReason": "Zoo chce przełączyć się na tryb <code>{{mode}}</code> ponieważ: {{reason}}",
+		"didSwitch": "Zoo przełączył się na tryb <code>{{mode}}</code>",
+		"didSwitchWithReason": "Zoo przełączył się na tryb <code>{{mode}}</code> ponieważ: {{reason}}"
 	},
 	"subtasks": {
-		"wantsToCreate": "Roo chce utworzyć nowe podzadanie w trybie <code>{{mode}}</code>",
-		"wantsToFinish": "Roo chce zakończyć to podzadanie",
+		"wantsToCreate": "Zoo chce utworzyć nowe podzadanie w trybie <code>{{mode}}</code>",
+		"wantsToFinish": "Zoo chce zakończyć to podzadanie",
 		"newTaskContent": "Instrukcje podzadania",
 		"completionContent": "Podzadanie zakończone",
 		"resultContent": "Wyniki podzadania",
@@ -271,7 +261,7 @@
 		"goToSubtask": "Wyświetl zadanie"
 	},
 	"questions": {
-		"hasQuestion": "Roo ma pytanie"
+		"hasQuestion": "Zoo ma pytanie"
 	},
 	"taskCompleted": "Zadanie zakończone",
 	"modelResponseIncomplete": "Odpowiedź modelu niekompletna",
@@ -287,7 +277,7 @@
 		"copyToClipboard": "Kopiuj do schowka",
 		"copied": "Skopiowano!",
 		"diagnostics": "Uzyskaj szczegółowe informacje o błędzie",
-		"proxyProvider": "Wygląda na to, że używasz dostawcy opartego na proxy. Pamiętaj, aby sprawdzić jego dzienniki i upewnić się, że nie przepisuje żądań Roo."
+		"proxyProvider": "Wygląda na to, że używasz dostawcy opartego na proxy. Pamiętaj, aby sprawdzić jego dzienniki i upewnić się, że nie przepisuje żądań Zoo."
 	},
 	"powershell": {
 		"issues": "Wygląda na to, że masz problemy z Windows PowerShell, proszę zapoznaj się z tym"
@@ -330,31 +320,24 @@
 		}
 	},
 	"skill": {
-		"wantsToLoad": "Roo chce załadować umiejętność",
-		"didLoad": "Roo załadował umiejętność"
+		"wantsToLoad": "Zoo chce załadować umiejętność",
+		"didLoad": "Zoo załadował umiejętność"
 	},
 	"followUpSuggest": {
 		"copyToInput": "Kopiuj do pola wprowadzania (lub Shift + kliknięcie)",
 		"timerPrefix": "Automatyczne zatwierdzanie włączone. Zaznaczanie za {{seconds}}s…"
 	},
 	"announcement": {
-		"title": "Roo Code {{version}} wydany",
-		"support": "Wesprzyj Roo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
-		"stealthModel": {
-			"feature": "<bold>Darmowy model stealth na ograniczony czas</bold> - Code Supernova: Teraz ulepszony z <bold>oknem kontekstu 1M tokenów</bold>! Wszechstronny model kodowania agentowego, który obsługuje wprowadzanie obrazów, dostępny przez Roo Code Cloud.",
-			"note": "(Uwaga: prompty i uzupełnienia są rejestrowane przez twórcę modelu i używane do jego ulepszania)",
-			"connectButton": "Połącz z Roo Code Cloud",
-			"selectModel": "Wybierz <code>roo/code-supernova</code> od dostawcy Roo Code Cloud w Ustawieniach, aby rozpocząć.",
-			"goToSettingsButton": "Przejdź do Ustawień"
-		},
+		"title": "Zoo Code {{version}} wydany",
+		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"handoff": {
-			"heading": "Wtyczka Roo Code nie znika.",
-			"description": "Być może widziałeś niedawne ogłoszenie, że Roo Code osiągnął 3 miliony instalacji, a oryginalny zespół całkowicie skupia się na Roomote. Wiemy, że ta wiadomość była trudna dla wielu z was. Ta wtyczka wiele dla nas i dla ciebie znaczy, i słyszymy was. Dobra wiadomość: <bold>zespół społeczności zgłosił się, żeby poprowadzić Roo Code dalej</bold>, i pracujemy z nimi nad oficjalnym przekazaniem, żeby wtyczka, na której polegasz, była nadal utrzymywana i ulepszana.",
-			"readMore": "Przeczytaj oryginalne ogłoszenie Matta Rubensa"
+			"heading": "Roo Code wraca! Teraz jako wtyczka utrzymywana przez społeczność pod nazwą Zoo Code!!",
+			"description": "Jeśli nie jesteś na bieżąco, zespół Roo Code niedawno ogłosił, że wygasza rozwój Roo Code i archiwizuje dotychczasową pracę. Ale bez obaw — społeczność ruszyła do działania, aby kontynuować dziedzictwo Roo Code pod nową nazwą i w nowym domu! Nie jesteśmy już tylko jednym „Roo” — jesteśmy społecznością, czyli „Zoo”, jeśli wolisz. Zoo Code to wtyczka utrzymywana przez społeczność, która przejmuje pałeczkę tam, gdzie Roo Code skończył, i zobowiązujemy się zachować ducha Roo, jednocześnie wprowadzając nowe funkcje i ulepszenia. Chcemy też ogromnie podziękować całemu zespołowi Roo Code za ich niesamowitą pracę i stworzenie tak świetnego narzędzia dla deweloperów. Cieszymy się, że możemy rozwijać ich dorobek i zobaczyć, dokąd społeczność zaprowadzi Zoo Code w przyszłości!",
+			"readMore": "Zobacz nową stronę główną Zoo Code i przeczytaj pełne ogłoszenie"
 		},
 		"release": {
 			"heading": "Co nowego:",
-			"gpt55": "GPT-5.5 przez OpenAI Codex: Dodano obsługę GPT-5.5 w dostawcy OpenAI Codex, żebyś mógł korzystać z najnowszego modelu bezpośrednio z Roo Code.",
+			"gpt55": "GPT-5.5 przez OpenAI Codex: Dodano obsługę GPT-5.5 w dostawcy OpenAI Codex, żebyś mógł korzystać z najnowszego modelu bezpośrednio z Zoo Code.",
 			"claudeOpus47": "Claude Opus 4.7 w Vertex AI: Dodano Claude Opus 4.7 do dostawcy Vertex AI - najnowszy flagowy model rozumowania od Anthropic.",
 			"checkpointNav": "Nawigacja po poprzednich checkpointach: Dodano kontrolki w czacie, żebyś mógł cofać się do wcześniejszych checkpointów, z pełną obsługą i18n."
 		},
@@ -380,24 +363,24 @@
 	"profileViolationWarning": "Bieżący profil nie jest kompatybilny z ustawieniami Twojej organizacji",
 	"shellIntegration": {
 		"title": "Ostrzeżenie wykonania polecenia",
-		"description": "Twoje polecenie jest wykonywane bez integracji powłoki terminala VSCode. Aby ukryć to ostrzeżenie, możesz wyłączyć integrację powłoki w sekcji <strong>Terminal</strong> w <settingsLink>ustawieniach Roo Code</settingsLink> lub rozwiązać problemy z integracją terminala VSCode korzystając z poniższego linku.",
+		"description": "Twoje polecenie jest wykonywane bez integracji powłoki terminala VSCode. Aby ukryć to ostrzeżenie, możesz wyłączyć integrację powłoki w sekcji <strong>Terminal</strong> w <settingsLink>ustawieniach Zoo Code</settingsLink> lub rozwiązać problemy z integracją terminala VSCode korzystając z poniższego linku.",
 		"troubleshooting": "Kliknij tutaj, aby zobaczyć dokumentację integracji powłoki."
 	},
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Osiągnięto limit automatycznie zatwierdzonych żądań",
-			"description": "Roo osiągnął automatycznie zatwierdzony limit {{count}} żądania/żądań API. Czy chcesz zresetować licznik i kontynuować zadanie?",
+			"description": "Zoo osiągnął automatycznie zatwierdzony limit {{count}} żądania/żądań API. Czy chcesz zresetować licznik i kontynuować zadanie?",
 			"button": "Zresetuj i kontynuuj"
 		},
 		"autoApprovedCostLimitReached": {
 			"button": "Zresetuj i Kontynuuj",
 			"title": "Osiągnięto limit kosztów z automatycznym zatwierdzaniem",
-			"description": "Roo osiągnął automatycznie zatwierdzony limit kosztów wynoszący ${{count}}. Czy chcesz zresetować koszt i kontynuować zadanie?"
+			"description": "Zoo osiągnął automatycznie zatwierdzony limit kosztów wynoszący ${{count}}. Czy chcesz zresetować koszt i kontynuować zadanie?"
 		}
 	},
 	"codebaseSearch": {
-		"wantsToSearch": "Roo chce przeszukać bazę kodu w poszukiwaniu <code>{{query}}</code>",
-		"wantsToSearchWithPath": "Roo chce przeszukać bazę kodu w poszukiwaniu <code>{{query}}</code> w <code>{{path}}</code>",
+		"wantsToSearch": "Zoo chce przeszukać bazę kodu w poszukiwaniu <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo chce przeszukać bazę kodu w poszukiwaniu <code>{{query}}</code> w <code>{{path}}</code>",
 		"didSearch_one": "Znaleziono 1 wynik",
 		"didSearch_other": "Znaleziono {{count}} wyników",
 		"resultTooltip": "Wynik podobieństwa: {{score}} (kliknij, aby otworzyć plik)"
@@ -438,7 +421,7 @@
 		"ariaLabel": "Wersja {{version}} - Kliknij, aby wyświetlić informacje o wydaniu"
 	},
 	"rooCloudCTA": {
-		"title": "Roo Code Cloud się rozwija!",
+		"title": "Zoo Code Cloud się rozwija!",
 		"description": "Uruchamiaj zdalne agenty w chmurze, uzyskuj dostęp do swoich zadań z dowolnego miejsca, współpracuj z innymi i wiele więcej.",
 		"joinWaitlist": "Zarejestruj się, aby otrzymywać najnowsze aktualizacje."
 	},
@@ -479,8 +462,8 @@
 		"clickToEdit": "Kliknij, aby edytować wiadomość"
 	},
 	"slashCommand": {
-		"wantsToRun": "Roo chce uruchomić komendę slash",
-		"didRun": "Roo uruchomił komendę slash"
+		"wantsToRun": "Zoo chce uruchomić komendę slash",
+		"didRun": "Zoo uruchomił komendę slash"
 	},
 	"todo": {
 		"partial": "Ukończono {{completed}} z {{total}} zadań do wykonania",
@@ -499,11 +482,11 @@
 		"openMcpSettings": "Otwórz ustawienia MCP"
 	},
 	"readCommandOutput": {
-		"title": "Roo read command output"
+		"title": "Zoo read command output"
 	},
 	"retiredProvider": {
 		"title": "Dostawca nie jest już obsługiwany",
-		"message": "Przepraszamy, ten dostawca nie jest już obsługiwany. Zauważyliśmy, że bardzo niewielu użytkowników Roo faktycznie z niego korzystało, a my musimy zmniejszyć zakres naszego kodu, aby móc dalej szybko dostarczać i dobrze służyć naszej społeczności. To była naprawdę trudna decyzja, ale pozwala nam skupić się na tym, co jest dla ciebie najważniejsze. Wiemy, że to frustrujące.",
+		"message": "Ten dostawca nie jest już dostępny. Wybierz obsługiwanego dostawcę, aby kontynuować.",
 		"openSettings": "Otwórz ustawienia"
 	}
 }

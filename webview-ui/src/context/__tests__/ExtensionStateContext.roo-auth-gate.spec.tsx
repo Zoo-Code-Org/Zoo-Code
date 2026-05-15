@@ -10,7 +10,7 @@ vi.mock("@src/utils/vscode", () => ({
 import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
 
-describe("ExtensionStateContext Roo auth gate", () => {
+describe("ExtensionStateContext auth change side effects", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
@@ -47,7 +47,7 @@ describe("ExtensionStateContext Roo auth gate", () => {
 		})
 	})
 
-	it("posts requestRooModels when auth flips and provider === 'roo'", async () => {
+	it("does not post requestRooModels when auth flips and provider === 'roo'", async () => {
 		render(
 			<ExtensionStateContextProvider>
 				<div />
@@ -62,14 +62,16 @@ describe("ExtensionStateContext Roo auth gate", () => {
 
 		vi.clearAllMocks()
 
-		// Flip to true with provider roo - should trigger
+		// Flip to true with provider roo - should remain quiet because Router is retired
 		postStateMessage({
 			cloudIsAuthenticated: true,
 			apiConfiguration: { apiProvider: "roo" },
 		})
 
 		await waitFor(() => {
-			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "requestRooModels" })
+			const calls = (vscode.postMessage as any).mock.calls as any[][]
+			const hasRequest = calls.some((c) => c[0]?.type === "requestRooModels")
+			expect(hasRequest).toBe(false)
 		})
 	})
 })

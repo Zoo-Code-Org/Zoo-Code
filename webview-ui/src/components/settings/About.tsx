@@ -9,6 +9,7 @@ import type { TelemetrySetting } from "@roo-code/types"
 import { Package } from "@roo/package"
 
 import { vscode } from "@/utils/vscode"
+import { EXTERNAL_LINKS } from "@/constants/externalLinks"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui"
 
@@ -52,7 +53,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<Trans
 							i18nKey="settings:footer.telemetry.description"
 							components={{
-								privacyLink: <VSCodeLink href="https://roocode.com/privacy" />,
+								privacyLink: <VSCodeLink href="https://www.zoocode.dev/privacy" />,
 							}}
 						/>
 					</p>
@@ -66,7 +67,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<Bug className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							{t("settings:about.bugReport.label")}{" "}
-							<VSCodeLink href="https://github.com/RooCodeInc/Roo-Code/issues/new?template=bug_report.yml">
+							<VSCodeLink href={EXTERNAL_LINKS.BUG_REPORT}>
 								{t("settings:about.bugReport.link")}
 							</VSCodeLink>
 						</span>
@@ -75,7 +76,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<Lightbulb className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							{t("settings:about.featureRequest.label")}{" "}
-							<VSCodeLink href="https://github.com/RooCodeInc/Roo-Code/issues/new?template=feature_request.yml">
+							<VSCodeLink href={EXTERNAL_LINKS.FEATURE_REQUEST}>
 								{t("settings:about.featureRequest.link")}
 							</VSCodeLink>
 						</span>
@@ -84,7 +85,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<Shield className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							{t("settings:about.securityIssue.label")}{" "}
-							<VSCodeLink href="https://github.com/RooCodeInc/Roo-Code/security/policy">
+							<VSCodeLink href={EXTERNAL_LINKS.SECURITY_POLICY}>
 								{t("settings:about.securityIssue.link")}
 							</VSCodeLink>
 						</span>
@@ -95,8 +96,8 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 							<Trans
 								i18nKey="settings:about.community"
 								components={{
-									redditLink: <VSCodeLink href="https://reddit.com/r/RooCode" />,
-									discordLink: <VSCodeLink href="https://discord.gg/roocode" />,
+									redditLink: <VSCodeLink href={EXTERNAL_LINKS.REDDIT} />,
+									discordLink: <VSCodeLink href={EXTERNAL_LINKS.DISCORD} />,
 								}}
 							/>
 						</span>

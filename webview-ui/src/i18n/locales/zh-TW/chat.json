@@ -1,5 +1,5 @@
 {
-	"greeting": "歡迎使用 Roo Code！",
+	"greeting": "歡迎使用 Zoo Code！",
 	"task": {
 		"title": "工作",
 		"expand": "展開工作",
@@ -14,17 +14,7 @@
 		"contextWindow": "上下文長度",
 		"closeAndStart": "關閉現有工作並開始新工作",
 		"export": "匯出工作記錄",
-		"share": "分享工作",
 		"delete": "刪除工作（按住 Shift 並點選可跳過確認）",
-		"shareWithOrganization": "與組織分享",
-		"shareWithOrganizationDescription": "僅組織成員可存取",
-		"sharePublicly": "公開分享",
-		"sharePubliclyDescription": "任何擁有連結的人都可存取",
-		"connectToCloud": "連線至雲端",
-		"connectToCloudDescription": "登入 Roo Code Cloud 以分享工作",
-		"sharingDisabledByOrganization": "組織已停用分享功能",
-		"shareSuccessOrganization": "組織連結已複製到剪貼簿",
-		"shareSuccessPublic": "公開連結已複製到剪貼簿",
 		"openApiHistory": "開啟 API 歷史紀錄",
 		"openUiHistory": "開啟 UI 歷史紀錄",
 		"backToParentTask": "上層工作"
@@ -125,7 +115,7 @@
 	},
 	"scrollToBottom": "捲動至對話底部",
 	"scrollToLatestCheckpoint": "捲動至上一個檢查點",
-	"about": "Roo 是編輯器中的完整 AI 開發團隊。",
+	"about": "Zoo 是編輯器中的完整 AI 開發團隊。",
 	"docs": "請參閱 <DocsLink>說明文件</DocsLink> 開始使用。",
 	"onboarding": "想要做什麼呢？",
 	"rooTips": {
@@ -135,7 +125,7 @@
 		},
 		"modelAgnostic": {
 			"title": "自備模型，無加價無鎖定",
-			"description": "使用自己的供應商金鑰，甚至可執行本機推論 - Roo 不額外收費"
+			"description": "使用自己的供應商金鑰，甚至可執行本機推論 - Zoo 不額外收費"
 		}
 	},
 	"selectMode": "選擇互動模式",
@@ -147,7 +137,7 @@
 		"title": "模式",
 		"marketplace": "模式市集",
 		"settings": "模式設定",
-		"description": "專門量身打造 Roo 行為的角色。",
+		"description": "專門量身打造 Zoo 行為的角色。",
 		"searchPlaceholder": "搜尋模式...",
 		"noResults": "找不到結果"
 	},
@@ -185,7 +175,7 @@
 			"docs": "說明文件",
 			"goToSettings": "設定",
 			"connection": "連線錯誤。請確保您有可用的網際網路連線。",
-			"unknown": "未知 API 錯誤。請聯絡 Roo Code 技術支援。",
+			"unknown": "未知 API 錯誤。請聯絡 Zoo Code 技術支援。",
 			"claudeCodeNotAuthenticated": "您需要登入才能使用 Claude Code。前往設定並點選「登入 Claude Code」以進行驗證。"
 		}
 	},
@@ -224,49 +214,49 @@
 		}
 	},
 	"skill": {
-		"wantsToLoad": "Roo 想要載入技能",
-		"didLoad": "Roo 載入了技能"
+		"wantsToLoad": "Zoo 想要載入技能",
+		"didLoad": "Zoo 載入了技能"
 	},
 	"instructions": {
 		"wantsToFetch": "Roo 想要取得詳細指示以協助目前工作"
 	},
 	"fileOperations": {
-		"wantsToRead": "Roo 想要讀取此檔案",
-		"wantsToReadMultiple": "Roo 想要讀取多個檔案",
-		"wantsToReadAndXMore": "Roo 想要讀取此檔案以及另外 {{count}} 個檔案",
-		"wantsToReadOutsideWorkspace": "Roo 想要讀取此工作區外的檔案",
-		"didRead": "Roo 已讀取此檔案",
-		"wantsToEdit": "Roo 想要編輯此檔案",
-		"wantsToEditOutsideWorkspace": "Roo 想要編輯此工作區外的檔案",
-		"wantsToEditProtected": "Roo 想要編輯受保護的設定檔案",
-		"wantsToApplyBatchChanges": "Roo 想要對多個檔案套用變更",
-		"wantsToGenerateImage": "Roo 想要產生圖片",
-		"wantsToGenerateImageOutsideWorkspace": "Roo 想要在工作區外產生圖片",
-		"wantsToGenerateImageProtected": "Roo 想要在受保護位置產生圖片",
-		"didGenerateImage": "Roo 已產生圖片",
-		"wantsToCreate": "Roo 想要建立新檔案",
-		"wantsToInsert": "Roo 想要在此檔案中插入內容",
-		"wantsToInsertWithLineNumber": "Roo 想要在此檔案第 {{lineNumber}} 行插入內容",
-		"wantsToInsertAtEnd": "Roo 想要在此檔案尾端新增內容"
+		"wantsToRead": "Zoo 想要讀取此檔案",
+		"wantsToReadMultiple": "Zoo 想要讀取多個檔案",
+		"wantsToReadAndXMore": "Zoo 想要讀取此檔案以及另外 {{count}} 個檔案",
+		"wantsToReadOutsideWorkspace": "Zoo 想要讀取此工作區外的檔案",
+		"didRead": "Zoo 已讀取此檔案",
+		"wantsToEdit": "Zoo 想要編輯此檔案",
+		"wantsToEditOutsideWorkspace": "Zoo 想要編輯此工作區外的檔案",
+		"wantsToEditProtected": "Zoo 想要編輯受保護的設定檔案",
+		"wantsToApplyBatchChanges": "Zoo 想要對多個檔案套用變更",
+		"wantsToGenerateImage": "Zoo 想要產生圖片",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo 想要在工作區外產生圖片",
+		"wantsToGenerateImageProtected": "Zoo 想要在受保護位置產生圖片",
+		"didGenerateImage": "Zoo 已產生圖片",
+		"wantsToCreate": "Zoo 想要建立新檔案",
+		"wantsToInsert": "Zoo 想要在此檔案中插入內容",
+		"wantsToInsertWithLineNumber": "Zoo 想要在此檔案第 {{lineNumber}} 行插入內容",
+		"wantsToInsertAtEnd": "Zoo 想要在此檔案尾端新增內容"
 	},
 	"directoryOperations": {
-		"wantsToViewTopLevel": "Roo 想要檢視此目錄中最上層的檔案",
-		"didViewTopLevel": "Roo 已檢視此目錄中最上層的檔案",
-		"wantsToViewTopLevelOutsideWorkspace": "Roo 想要檢視此目錄（工作區外）中最上層的檔案",
-		"didViewTopLevelOutsideWorkspace": "Roo 已檢視此目錄（工作區外）中最上層的檔案",
-		"wantsToViewRecursive": "Roo 想要遞迴檢視此目錄中的所有檔案",
-		"didViewRecursive": "Roo 已遞迴檢視此目錄中的所有檔案",
-		"wantsToViewRecursiveOutsideWorkspace": "Roo 想要遞迴檢視此目錄（工作區外）中的所有檔案",
-		"didViewRecursiveOutsideWorkspace": "Roo 已遞迴檢視此目錄（工作區外）中的所有檔案",
-		"wantsToSearch": "Roo 想要在此目錄中搜尋 <code>{{regex}}</code>",
-		"didSearch": "Roo 已在此目錄中搜尋 <code>{{regex}}</code>",
-		"wantsToSearchOutsideWorkspace": "Roo 想要在此目錄（工作區外）中搜尋 <code>{{regex}}</code>",
-		"didSearchOutsideWorkspace": "Roo 已在此目錄（工作區外）中搜尋 <code>{{regex}}</code>",
-		"wantsToViewMultipleDirectories": "Roo 想要查看多個目錄"
+		"wantsToViewTopLevel": "Zoo 想要檢視此目錄中最上層的檔案",
+		"didViewTopLevel": "Zoo 已檢視此目錄中最上層的檔案",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo 想要檢視此目錄（工作區外）中最上層的檔案",
+		"didViewTopLevelOutsideWorkspace": "Zoo 已檢視此目錄（工作區外）中最上層的檔案",
+		"wantsToViewRecursive": "Zoo 想要遞迴檢視此目錄中的所有檔案",
+		"didViewRecursive": "Zoo 已遞迴檢視此目錄中的所有檔案",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo 想要遞迴檢視此目錄（工作區外）中的所有檔案",
+		"didViewRecursiveOutsideWorkspace": "Zoo 已遞迴檢視此目錄（工作區外）中的所有檔案",
+		"wantsToSearch": "Zoo 想要在此目錄中搜尋 <code>{{regex}}</code>",
+		"didSearch": "Zoo 已在此目錄中搜尋 <code>{{regex}}</code>",
+		"wantsToSearchOutsideWorkspace": "Zoo 想要在此目錄（工作區外）中搜尋 <code>{{regex}}</code>",
+		"didSearchOutsideWorkspace": "Zoo 已在此目錄（工作區外）中搜尋 <code>{{regex}}</code>",
+		"wantsToViewMultipleDirectories": "Zoo 想要查看多個目錄"
 	},
 	"codebaseSearch": {
-		"wantsToSearch": "Roo 想要在程式碼庫中搜尋 <code>{{query}}</code>",
-		"wantsToSearchWithPath": "Roo 想要在 <code>{{path}}</code> 中搜尋程式碼庫 <code>{{query}}</code>",
+		"wantsToSearch": "Zoo 想要在程式碼庫中搜尋 <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo 想要在 <code>{{path}}</code> 中搜尋程式碼庫 <code>{{query}}</code>",
 		"didSearch_one": "找到 1 個結果",
 		"didSearch_other": "找到 {{count}} 個結果",
 		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）"
@@ -291,24 +281,24 @@
 	"response": "回應",
 	"arguments": "參數",
 	"text": {
-		"rooSaid": "Roo 說"
+		"rooSaid": "Zoo 說"
 	},
 	"feedback": {
 		"youSaid": "您說"
 	},
 	"mcp": {
-		"wantsToUseTool": "Roo 想要在 {{serverName}} MCP 伺服器上使用工具",
-		"wantsToAccessResource": "Roo 想要存取 {{serverName}} MCP 伺服器上的資源"
+		"wantsToUseTool": "Zoo 想要在 {{serverName}} MCP 伺服器上使用工具",
+		"wantsToAccessResource": "Zoo 想要存取 {{serverName}} MCP 伺服器上的資源"
 	},
 	"modes": {
-		"wantsToSwitch": "Roo 想要切換至 {{mode}} 模式",
-		"wantsToSwitchWithReason": "Roo 想要切換至 {{mode}} 模式，原因：{{reason}}",
-		"didSwitch": "Roo 已切換至 {{mode}} 模式",
-		"didSwitchWithReason": "Roo 已切換至 {{mode}} 模式，原因：{{reason}}"
+		"wantsToSwitch": "Zoo 想要切換至 {{mode}} 模式",
+		"wantsToSwitchWithReason": "Zoo 想要切換至 {{mode}} 模式，原因：{{reason}}",
+		"didSwitch": "Zoo 已切換至 {{mode}} 模式",
+		"didSwitchWithReason": "Zoo 已切換至 {{mode}} 模式，原因：{{reason}}"
 	},
 	"subtasks": {
-		"wantsToCreate": "Roo 想要在 {{mode}} 模式下建立新的子任務",
-		"wantsToFinish": "Roo 想要完成此子任務",
+		"wantsToCreate": "Zoo 想要在 {{mode}} 模式下建立新的子任務",
+		"wantsToFinish": "Zoo 想要完成此子任務",
 		"newTaskContent": "子任務指示",
 		"resultContent": "子任務結果",
 		"defaultResult": "請繼續下一個工作。",
@@ -316,7 +306,7 @@
 		"goToSubtask": "查看工作"
 	},
 	"questions": {
-		"hasQuestion": "Roo 有一個問題"
+		"hasQuestion": "Zoo 有一個問題"
 	},
 	"taskCompleted": "工作完成",
 	"error": "錯誤",
@@ -333,12 +323,12 @@
 		"copyToClipboard": "複製基本錯誤資訊",
 		"copied": "已複製！",
 		"diagnostics": "取得詳細錯誤資訊",
-		"proxyProvider": "似乎正在使用代理型供應商。請檢查記錄，並確保不會重寫 Roo 的請求。"
+		"proxyProvider": "似乎正在使用代理型供應商。請檢查記錄，並確保不會重寫 Zoo 的請求。"
 	},
 	"diffError": {
 		"title": "編輯失敗"
 	},
-	"troubleMessage": "Roo 遇到問題...",
+	"troubleMessage": "Zoo 遇到問題...",
 	"powershell": {
 		"issues": "似乎遇到 Windows PowerShell 問題，請參閱此說明文件"
 	},
@@ -360,23 +350,16 @@
 		"triggerLabelAll": "BRRR"
 	},
 	"announcement": {
-		"title": "Roo Code {{version}} 已發布",
-		"support": "請在 <githubLink>GitHub</githubLink> 上給 Roo Code 星星支持我們。",
-		"stealthModel": {
-			"feature": "<bold>限時免費隱形模型</bold> - Code Supernova：現已升級為 <bold>1M Token 上下文視窗</bold>！一個支援影像輸入的多功能代理程式設計模型，透過 Roo Code Cloud 提供。",
-			"note": "（注意：提示詞和回應會被模型建立者記錄並用於改進模型）",
-			"connectButton": "連線到 Roo Code Cloud",
-			"selectModel": "在設定中從 Roo Code Cloud 供應商選擇 <code>roo/code-supernova</code> 開始使用。",
-			"goToSettingsButton": "前往設定"
-		},
+		"title": "Zoo Code {{version}} 已發布",
+		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"handoff": {
-			"heading": "Roo Code 外掛不會消失。",
-			"description": "你可能已經看到最近的公告：Roo Code 已突破 300 萬次安裝，原團隊將全心投入 Roomote。我們知道這個消息讓許多人感到難受。這個外掛對我們和你都意義重大，你的心聲我們聽到了。好消息是：<bold>一支社群團隊已挺身而出，繼續推進 Roo Code</bold>，我們正與他們協作進行正式交接，讓你所仰賴的外掛持續受到維護與改進。",
-			"readMore": "閱讀 Matt Rubens 的原始公告"
+			"heading": "Roo Code 回來了！現在以社群維護的 Zoo Code 外掛重新登場！！",
+			"description": "如果你最近沒有追蹤消息，Roo Code 團隊最近宣布將逐步停止 Roo Code 的開發，並封存他們至今完成的工作。不過別擔心，社群已經挺身而出，將以新名稱與新家園延續 Roo Code 的傳承！我們不再只是單一的「Roo」，而是一個社群，也就是你可以稱之為「Zoo」的集合。Zoo Code 是一款由社群維護的外掛，接續 Roo Code 停下的地方繼續前進；我們承諾在保留 Roo 精神的同時，也會帶來新功能與改進。我們也要向整個 Roo Code 團隊致上最深的敬意，感謝他們不可思議的付出，以及為開發者打造出如此出色的工具。我們很期待在他們奠定的基礎上繼續建設，也期待看看社群未來會把 Zoo Code 帶往何方！",
+			"readMore": "查看 Zoo Code 的新首頁並閱讀完整公告"
 		},
 		"release": {
 			"heading": "新增功能：",
-			"gpt55": "透過 OpenAI Codex 支援 GPT-5.5：已在 OpenAI Codex 供應商中新增 GPT-5.5 支援，讓你可以直接在 Roo Code 中使用最新模型。",
+			"gpt55": "透過 OpenAI Codex 支援 GPT-5.5：已在 OpenAI Codex 供應商中新增 GPT-5.5 支援，讓你可以直接在 Zoo Code 中使用最新模型。",
 			"claudeOpus47": "Vertex AI 上的 Claude Opus 4.7：已將 Anthropic 最新旗艦推理模型 Claude Opus 4.7 新增至 Vertex AI 供應商。",
 			"checkpointNav": "前一個存檔點導覽：在聊天中新增控制項，可回到此前的存檔點，並提供完整的 i18n 支援。"
 		},
@@ -410,18 +393,18 @@
 	"profileViolationWarning": "目前設定檔與您的組織設定不相容",
 	"shellIntegration": {
 		"title": "命令執行警告",
-		"description": "命令正在沒有 VS Code 終端機 Shell 整合的情況下執行。若要隱藏此警告，可在 <settingsLink>Roo Code 設定</settingsLink> 的 <strong>終端機</strong> 區塊中停用 Shell 整合，或使用下方連結排解 VS Code 終端機整合問題。",
+		"description": "命令正在沒有 VS Code 終端機 Shell 整合的情況下執行。若要隱藏此警告，可在 <settingsLink>Zoo Code 設定</settingsLink> 的 <strong>終端機</strong> 區塊中停用 Shell 整合，或使用下方連結排解 VS Code 終端機整合問題。",
 		"troubleshooting": "點選此處查看 Shell 整合說明文件。"
 	},
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "已達自動核准請求上限",
-			"description": "Roo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
+			"description": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
 			"button": "重設並繼續"
 		},
 		"autoApprovedCostLimitReached": {
 			"title": "已達自動核准費用上限",
-			"description": "Roo 已達到 ${{count}} 的自動核准費用上限。您想重設費用並繼續工作嗎？",
+			"description": "Zoo 已達到 ${{count}} 的自動核准費用上限。您想重設費用並繼續工作嗎？",
 			"button": "重設並繼續"
 		}
 	},
@@ -460,8 +443,8 @@
 		}
 	},
 	"slashCommand": {
-		"wantsToRun": "Roo 想要執行斜線指令",
-		"didRun": "Roo 執行了斜線指令"
+		"wantsToRun": "Zoo 想要執行斜線指令",
+		"didRun": "Zoo 執行了斜線指令"
 	},
 	"queuedMessages": {
 		"title": "佇列中的訊息",
@@ -490,11 +473,11 @@
 		"openMcpSettings": "開啟 MCP 設定"
 	},
 	"readCommandOutput": {
-		"title": "Roo read command output"
+		"title": "Zoo read command output"
 	},
 	"retiredProvider": {
 		"title": "供應商不再受支援",
-		"message": "抱歉，此供應商已不再受支援。我們發現實際使用它的 Roo 使用者非常少，我們需要縮減程式碼庫的範圍，以便繼續快速交付並更好地服務社群。這是一個非常艱難的決定，但它能讓我們專注於對你最重要的事情。我們知道這很遺憾。",
+		"message": "此供應商已不可用。請選擇受支援的供應商以繼續。",
 		"openSettings": "開啟設定"
 	}
 }

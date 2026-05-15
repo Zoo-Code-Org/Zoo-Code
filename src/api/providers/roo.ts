@@ -2,7 +2,6 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { rooDefaultModelId, getApiProtocol, type ImageGenerationApiMethod } from "@roo-code/types"
-import { CloudService } from "@roo-code/cloud"
 
 import { NativeToolCallParser } from "../../core/assistant-message/NativeToolCallParser"
 
@@ -33,8 +32,7 @@ type RooChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParamsStreaming &
 }
 
 function getSessionToken(): string {
-	const token = CloudService.hasInstance() ? CloudService.instance.authService?.getSessionToken() : undefined
-	return token ?? "unauthenticated"
+	return "unauthenticated"
 }
 
 export class RooHandler extends BaseOpenAiCompatibleProvider<string> {

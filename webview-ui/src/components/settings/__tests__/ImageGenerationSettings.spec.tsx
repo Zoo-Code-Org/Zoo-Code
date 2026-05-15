@@ -90,14 +90,14 @@ describe("ImageGenerationSettings", () => {
 			).toBeInTheDocument()
 		})
 
-		it("should not render API key field when provider is roo", () => {
-			const { queryByPlaceholderText } = render(
+		it("should treat legacy roo provider as openrouter", () => {
+			const { getByPlaceholderText } = render(
 				<ImageGenerationSettings {...defaultProps} enabled={true} imageGenerationProvider="roo" />,
 			)
 
 			expect(
-				queryByPlaceholderText("settings:experimental.IMAGE_GENERATION.openRouterApiKeyPlaceholder"),
-			).not.toBeInTheDocument()
+				getByPlaceholderText("settings:experimental.IMAGE_GENERATION.openRouterApiKeyPlaceholder"),
+			).toBeInTheDocument()
 		})
 
 		it("should not render input fields when enabled is false", () => {

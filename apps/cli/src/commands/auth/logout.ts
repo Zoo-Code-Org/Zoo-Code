@@ -13,7 +13,7 @@ export async function logout({ verbose = false }: LogoutOptions = {}): Promise<L
 	const wasLoggedIn = await hasToken()
 
 	if (!wasLoggedIn) {
-		console.log("You are not currently logged in.")
+		console.log("No legacy Roo auth token stored.")
 		return { success: true, wasLoggedIn: false }
 	}
 
@@ -22,6 +22,6 @@ export async function logout({ verbose = false }: LogoutOptions = {}): Promise<L
 	}
 
 	await clearToken()
-	console.log("✓ Successfully logged out")
+	console.log("✓ Removed stored legacy Roo auth token")
 	return { success: true, wasLoggedIn: true }
 }

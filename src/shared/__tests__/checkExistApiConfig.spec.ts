@@ -80,10 +80,10 @@ describe("checkExistKey", () => {
 		expect(checkExistKey(config)).toBe(true)
 	})
 
-	it("should return true for roo provider without API key", () => {
+	it("should return false for roo provider without API key", () => {
 		const config: ProviderSettings = {
 			apiProvider: "roo",
 		}
-		expect(checkExistKey(config)).toBe(true)
+		expect(checkExistKey(config)).toBe(false)
 	})
 })

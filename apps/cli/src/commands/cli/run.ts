@@ -10,20 +10,17 @@ import { setLogger } from "@roo-code/vscode-shim"
 import {
 	FlagOptions,
 	isSupportedProvider,
-	OnboardingProviderChoice,
 	supportedProviders,
 	DEFAULT_FLAGS,
+	DEFAULT_PROVIDER,
 	REASONING_EFFORTS,
-	SDK_BASE_URL,
 	OutputFormat,
 } from "@/types/index.js"
 import { isValidOutputFormat } from "@/types/json-events.js"
 import { JsonEventEmitter } from "@/agent/json-event-emitter.js"
 
-import { createClient } from "@/lib/sdk/index.js"
-import { loadToken, loadSettings } from "@/lib/storage/index.js"
+import { loadSettings } from "@/lib/storage/index.js"
 import { readWorkspaceTaskSessions, resolveWorkspaceResumeSessionId } from "@/lib/task-history/index.js"
-import { isRecord } from "@/lib/utils/guards.js"
 import { getEnvVarName, getApiKeyFromEnv } from "@/lib/utils/provider.js"
 import { runOnboarding } from "@/lib/utils/onboarding.js"
 import { validateTerminalShellPath } from "@/lib/utils/shell.js"
@@ -36,7 +33,6 @@ import { isExpectedControlFlowError } from "./cancellation.js"
 import { runStdinStreamMode } from "./stdin-stream.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const ROO_MODEL_WARMUP_TIMEOUT_MS = 10_000
 const SIGNAL_ONLY_EXIT_KEEPALIVE_MS = 60_000
 const STREAM_RESUME_WAIT_TIMEOUT_MS = 2_000
 
@@ -54,57 +50,38 @@ function normalizeError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error))
 }
 
-async function warmRooModels(host: ExtensionHost): Promise<void> {
-	await new Promise<void>((resolve, reject) => {
-		let settled = false
-
-		const cleanup = () => {
-			clearTimeout(timeoutId)
-			host.off("extensionWebviewMessage", onMessage)
+export function resolveProviderPreference({
+	flagProvider,
+	settingsProvider,
+}: {
+	flagProvider?: string
+	settingsProvider?: string
+}): {
+	provider: string
+	fellBackFromStoredRooPreference: boolean
+	fellBackFromExplicitRooRequest: boolean
+} {
+	if (flagProvider === "roo") {
+		return {
+			provider: DEFAULT_PROVIDER,
+			fellBackFromStoredRooPreference: false,
+			fellBackFromExplicitRooRequest: true,
 		}
+	}
 
-		const finish = (fn: () => void) => {
-			if (settled) return
-			settled = true
-			cleanup()
-			fn()
+	if (settingsProvider === "roo") {
+		return {
+			provider: DEFAULT_PROVIDER,
+			fellBackFromStoredRooPreference: true,
+			fellBackFromExplicitRooRequest: false,
 		}
+	}
 
-		const onMessage = (message: unknown) => {
-			if (!isRecord(message)) {
-				return
-			}
-
-			if (message.type !== "singleRouterModelFetchResponse") {
-				return
-			}
-
-			const values = isRecord(message.values) ? message.values : undefined
-
-			if (values?.provider !== "roo") {
-				return
-			}
-
-			if (message.success === false) {
-				const errorMessage =
-					typeof message.error === "string" && message.error.length > 0
-						? message.error
-						: "failed to refresh Roo models"
-
-				finish(() => reject(new Error(errorMessage)))
-				return
-			}
-
-			finish(() => resolve())
-		}
-
-		const timeoutId = setTimeout(() => {
-			finish(() => reject(new Error(`timed out waiting for Roo models after ${ROO_MODEL_WARMUP_TIMEOUT_MS}ms`)))
-		}, ROO_MODEL_WARMUP_TIMEOUT_MS)
-
-		host.on("extensionWebviewMessage", onMessage)
-		host.sendToExtension({ type: "requestRooModels" })
-	})
+	return {
+		provider: flagProvider ?? settingsProvider ?? DEFAULT_PROVIDER,
+		fellBackFromStoredRooPreference: false,
+		fellBackFromExplicitRooRequest: false,
+	}
 }
 
 export async function run(promptArg: string | undefined, flagOptions: FlagOptions) {
@@ -169,19 +146,25 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 
 	// Options
 
-	let rooToken = await loadToken()
 	const settings = await loadSettings()
 
 	const isTuiSupported = process.stdin.isTTY && process.stdout.isTTY
 	const isTuiEnabled = !flagOptions.print && isTuiSupported
-	const isOnboardingEnabled = isTuiEnabled && !rooToken && !flagOptions.provider && !settings.provider
+	const isOnboardingEnabled = isTuiEnabled && !flagOptions.provider && !settings.provider
 
 	// Determine effective values: CLI flags > settings file > DEFAULT_FLAGS.
 	const effectiveMode = flagOptions.mode || settings.mode || DEFAULT_FLAGS.mode
 	const effectiveModel = flagOptions.model || settings.model || DEFAULT_FLAGS.model
 	const effectiveReasoningEffort =
 		flagOptions.reasoningEffort || settings.reasoningEffort || DEFAULT_FLAGS.reasoningEffort
-	const effectiveProvider = flagOptions.provider ?? settings.provider ?? (rooToken ? "roo" : "openrouter")
+	const {
+		provider: resolvedProvider,
+		fellBackFromStoredRooPreference,
+		fellBackFromExplicitRooRequest,
+	} = resolveProviderPreference({
+		flagProvider: flagOptions.provider,
+		settingsProvider: settings.provider,
+	})
 	const effectiveWorkspacePath = flagOptions.workspace ? path.resolve(flagOptions.workspace) : process.cwd()
 	const legacyRequireApprovalFromSettings =
 		settings.requireApproval ??
@@ -191,6 +174,25 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 	const rawConsecutiveMistakeLimit =
 		flagOptions.consecutiveMistakeLimit ?? settings.consecutiveMistakeLimit ?? DEFAULT_FLAGS.consecutiveMistakeLimit
 	const effectiveConsecutiveMistakeLimit = Number(rawConsecutiveMistakeLimit)
+
+	if (fellBackFromStoredRooPreference) {
+		console.warn(
+			`[CLI] Saved Roo Code Router preference detected in CLI settings. Continuing with the default provider (${DEFAULT_PROVIDER}).`,
+		)
+	}
+
+	if (fellBackFromExplicitRooRequest) {
+		console.warn(
+			`[CLI] Roo Code Router is no longer supported by the CLI. Continuing with the default provider (${DEFAULT_PROVIDER}).`,
+		)
+	}
+
+	if (!isSupportedProvider(resolvedProvider)) {
+		console.error(
+			`[CLI] Error: Invalid provider: ${resolvedProvider}; must be one of: ${supportedProviders.join(", ")}`,
+		)
+		process.exit(1)
+	}
 
 	if (!Number.isInteger(effectiveConsecutiveMistakeLimit) || effectiveConsecutiveMistakeLimit < 0) {
 		console.error(
@@ -217,7 +219,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		reasoningEffort: effectiveReasoningEffort === "unspecified" ? undefined : effectiveReasoningEffort,
 		consecutiveMistakeLimit: effectiveConsecutiveMistakeLimit,
 		user: null,
-		provider: effectiveProvider,
+		provider: resolvedProvider,
 		model: effectiveModel,
 		workspacePath: effectiveWorkspacePath,
 		extensionPath: path.resolve(flagOptions.extension || getDefaultExtensionPath(__dirname)),
@@ -229,76 +231,21 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		terminalShell,
 	}
 
-	// Roo Code Cloud Authentication
-
 	if (isOnboardingEnabled) {
-		let { onboardingProviderChoice } = settings
-
-		if (!onboardingProviderChoice) {
-			const { choice, token } = await runOnboarding()
-			onboardingProviderChoice = choice
-			rooToken = token ?? null
+		if (!settings.onboardingProviderChoice) {
+			await runOnboarding()
 		}
-
-		if (onboardingProviderChoice === OnboardingProviderChoice.Roo) {
-			extensionHostOptions.provider = "roo"
-		}
-	}
-
-	if (extensionHostOptions.provider === "roo") {
-		if (rooToken) {
-			try {
-				const client = createClient({ url: SDK_BASE_URL, authToken: rooToken })
-				const me = await client.auth.me.query()
-
-				if (me?.type !== "user") {
-					throw new Error("Invalid token")
-				}
-
-				extensionHostOptions.apiKey = rooToken
-				extensionHostOptions.user = me.user
-			} catch {
-				// If an explicit API key was provided via flag or env var, fall through
-				// to the general API key resolution below instead of exiting.
-				if (!flagOptions.apiKey && !getApiKeyFromEnv(extensionHostOptions.provider)) {
-					console.error("[CLI] Your Roo Code Router token is not valid.")
-					console.error("[CLI] Please run: roo auth login")
-					console.error("[CLI] Or use --api-key or set ROO_API_KEY to provide your own API key.")
-					process.exit(1)
-				}
-			}
-		}
-		// If no rooToken, fall through to the general API key resolution below
-		// which will check flagOptions.apiKey and ROO_API_KEY env var.
 	}
 
 	// Validations
 	// TODO: Validate the API key for the chosen provider.
 	// TODO: Validate the model for the chosen provider.
 
-	if (!isSupportedProvider(extensionHostOptions.provider)) {
-		console.error(
-			`[CLI] Error: Invalid provider: ${extensionHostOptions.provider}; must be one of: ${supportedProviders.join(", ")}`,
-		)
-		process.exit(1)
-	}
-
-	extensionHostOptions.apiKey =
-		extensionHostOptions.apiKey || flagOptions.apiKey || getApiKeyFromEnv(extensionHostOptions.provider)
+	extensionHostOptions.apiKey = flagOptions.apiKey || getApiKeyFromEnv(extensionHostOptions.provider)
 
 	if (!extensionHostOptions.apiKey) {
-		if (extensionHostOptions.provider === "roo") {
-			console.error("[CLI] Error: Authentication with Roo Code Cloud failed or was cancelled.")
-			console.error("[CLI] Please run: roo auth login")
-			console.error("[CLI] Or use --api-key to provide your own API key.")
-		} else {
-			console.error(
-				`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`,
-			)
-			console.error(
-				`[CLI] For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`,
-			)
-		}
+		console.error(`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`)
+		console.error(`For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`)
 
 		process.exit(1)
 	}
@@ -606,16 +553,6 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 
 		try {
 			await host.activate()
-			if (extensionHostOptions.provider === "roo") {
-				try {
-					await warmRooModels(host)
-				} catch (warmupError) {
-					if (flagOptions.debug) {
-						const message = warmupError instanceof Error ? warmupError.message : String(warmupError)
-						console.error(`[CLI] Warning: Roo model warmup failed: ${message}`)
-					}
-				}
-			}
 
 			if (jsonEmitter) {
 				jsonEmitter.attachToClient(host.client)

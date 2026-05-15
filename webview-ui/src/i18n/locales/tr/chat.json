@@ -1,5 +1,5 @@
 {
-	"greeting": "Roo Code'a Hoş Geldiniz",
+	"greeting": "Zoo Code'a hoş geldin!",
 	"task": {
 		"title": "Görev",
 		"expand": "Görevi genişlet",
@@ -15,16 +15,6 @@
 		"export": "Görev geçmişini dışa aktar",
 		"delete": "Görevi sil (Onayı atlamak için Shift + Tıkla)",
 		"condenseContext": "Bağlamı akıllıca yoğunlaştır",
-		"share": "Görevi paylaş",
-		"shareWithOrganization": "Kuruluşla paylaş",
-		"shareWithOrganizationDescription": "Sadece kuruluşunuzun üyeleri erişebilir",
-		"sharePublicly": "Herkese açık paylaş",
-		"sharePubliclyDescription": "Bağlantıya sahip herkes erişebilir",
-		"connectToCloud": "Buluta bağlan",
-		"connectToCloudDescription": "Görevleri paylaşmak için Roo Code Cloud'a giriş yap",
-		"sharingDisabledByOrganization": "Paylaşım kuruluş tarafından devre dışı bırakıldı",
-		"shareSuccessOrganization": "Organizasyon bağlantısı panoya kopyalandı",
-		"shareSuccessPublic": "Genel bağlantı panoya kopyalandı",
 		"openApiHistory": "API Geçmişini Aç",
 		"openUiHistory": "UI Geçmişini Aç",
 		"backToParentTask": "Üst görev"
@@ -98,7 +88,7 @@
 	"enqueueMessage": "Mesajı kuyruğa ekle (mevcut görev tamamlandıktan sonra gönderilecek)",
 	"scrollToBottom": "Sohbetin altına kaydır",
 	"scrollToLatestCheckpoint": "Önceki checkpoint'e kaydır",
-	"about": "Roo Code, düzenleyicinizdeki bütün bir yapay zeka geliştirme ekibidir.",
+	"about": "Zoo Code, düzenleyicinizdeki bütün bir yapay zeka geliştirme ekibidir.",
 	"docs": "Daha fazla bilgi için <DocsLink>belgelerimize</DocsLink> göz atın.",
 	"onboarding": "Bu çalışma alanındaki görev listeniz boş.",
 	"rooTips": {
@@ -130,7 +120,7 @@
 		"title": "Modlar",
 		"marketplace": "Mod Pazaryeri",
 		"settings": "Mod Ayarları",
-		"description": "Roo'nun davranışını özelleştiren uzmanlaşmış kişilikler.",
+		"description": "Zoo'nun davranışını özelleştiren uzmanlaşmış kişilikler.",
 		"searchPlaceholder": "Modları ara...",
 		"noResults": "Sonuç bulunamadı"
 	},
@@ -144,7 +134,7 @@
 	"diffError": {
 		"title": "Düzenleme Başarısız"
 	},
-	"troubleMessage": "Roo sorun yaşıyor...",
+	"troubleMessage": "Zoo sorun yaşıyor...",
 	"apiRequest": {
 		"title": "API İsteği",
 		"failed": "API İsteği Başarısız",
@@ -162,7 +152,7 @@
 			"500": "Sağlayıcı sunucu hatası. Sağlayıcı tarafında bir sorun var, isteğinizde sorun yok.",
 			"docs": "Belgeler",
 			"goToSettings": "Ayarlar",
-			"unknown": "Bilinmeyen API hatası. Lütfen Roo Code desteğiyle iletişime geç.",
+			"unknown": "Bilinmeyen API hatası. Lütfen Zoo Code desteğiyle iletişime geç.",
 			"connection": "Bağlantı hatası. Çalışan bir internet bağlantınız olduğundan emin olun.",
 			"claudeCodeNotAuthenticated": "Claude Code'u kullanmak için oturum açmanız gerekiyor. Ayarlar'a gidin ve kimlik doğrulaması yapmak için \"Claude Code'da Oturum Aç\" seçeneğine tıklayın."
 		}
@@ -190,40 +180,40 @@
 		"wantsToFetch": "Roo mevcut göreve yardımcı olmak için ayrıntılı talimatlar almak istiyor"
 	},
 	"fileOperations": {
-		"wantsToRead": "Roo bu dosyayı okumak istiyor",
-		"wantsToReadOutsideWorkspace": "Roo çalışma alanı dışındaki bu dosyayı okumak istiyor",
-		"didRead": "Roo bu dosyayı okudu",
-		"wantsToEdit": "Roo bu dosyayı düzenlemek istiyor",
-		"wantsToEditOutsideWorkspace": "Roo çalışma alanı dışındaki bu dosyayı düzenlemek istiyor",
-		"wantsToEditProtected": "Roo korumalı bir yapılandırma dosyasını düzenlemek istiyor",
-		"wantsToCreate": "Roo yeni bir dosya oluşturmak istiyor",
+		"wantsToRead": "Zoo bu dosyayı okumak istiyor",
+		"wantsToReadOutsideWorkspace": "Zoo çalışma alanı dışındaki bu dosyayı okumak istiyor",
+		"didRead": "Zoo bu dosyayı okudu",
+		"wantsToEdit": "Zoo bu dosyayı düzenlemek istiyor",
+		"wantsToEditOutsideWorkspace": "Zoo çalışma alanı dışındaki bu dosyayı düzenlemek istiyor",
+		"wantsToEditProtected": "Zoo korumalı bir yapılandırma dosyasını düzenlemek istiyor",
+		"wantsToCreate": "Zoo yeni bir dosya oluşturmak istiyor",
 		"wantsToSearchReplace": "Roo bu dosyada arama ve değiştirme yapmak istiyor",
 		"didSearchReplace": "Roo bu dosyada arama ve değiştirme yaptı",
-		"wantsToInsert": "Roo bu dosyaya içerik eklemek istiyor",
-		"wantsToInsertWithLineNumber": "Roo bu dosyanın {{lineNumber}}. satırına içerik eklemek istiyor",
-		"wantsToInsertAtEnd": "Roo bu dosyanın sonuna içerik eklemek istiyor",
-		"wantsToReadAndXMore": "Roo bu dosyayı ve {{count}} tane daha okumak istiyor",
-		"wantsToReadMultiple": "Roo birden fazla dosya okumak istiyor",
-		"wantsToApplyBatchChanges": "Roo birden fazla dosyaya değişiklik uygulamak istiyor",
-		"wantsToGenerateImage": "Roo bir görsel oluşturmak istiyor",
-		"wantsToGenerateImageOutsideWorkspace": "Roo çalışma alanının dışında bir görsel oluşturmak istiyor",
-		"wantsToGenerateImageProtected": "Roo korumalı bir konumda görsel oluşturmak istiyor",
-		"didGenerateImage": "Roo bir görsel oluşturdu"
+		"wantsToInsert": "Zoo bu dosyaya içerik eklemek istiyor",
+		"wantsToInsertWithLineNumber": "Zoo bu dosyanın {{lineNumber}}. satırına içerik eklemek istiyor",
+		"wantsToInsertAtEnd": "Zoo bu dosyanın sonuna içerik eklemek istiyor",
+		"wantsToReadAndXMore": "Zoo bu dosyayı ve {{count}} tane daha okumak istiyor",
+		"wantsToReadMultiple": "Zoo birden fazla dosya okumak istiyor",
+		"wantsToApplyBatchChanges": "Zoo birden fazla dosyaya değişiklik uygulamak istiyor",
+		"wantsToGenerateImage": "Zoo bir görsel oluşturmak istiyor",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo çalışma alanının dışında bir görsel oluşturmak istiyor",
+		"wantsToGenerateImageProtected": "Zoo korumalı bir konumda görsel oluşturmak istiyor",
+		"didGenerateImage": "Zoo bir görsel oluşturdu"
 	},
 	"directoryOperations": {
-		"wantsToViewTopLevel": "Roo bu dizindeki üst düzey dosyaları görüntülemek istiyor",
-		"didViewTopLevel": "Roo bu dizindeki üst düzey dosyaları görüntüledi",
-		"wantsToViewRecursive": "Roo bu dizindeki tüm dosyaları özyinelemeli olarak görüntülemek istiyor",
-		"didViewRecursive": "Roo bu dizindeki tüm dosyaları özyinelemeli olarak görüntüledi",
-		"wantsToSearch": "Roo bu dizinde <code>{{regex}}</code> için arama yapmak istiyor",
-		"didSearch": "Roo bu dizinde <code>{{regex}}</code> için arama yaptı",
-		"wantsToSearchOutsideWorkspace": "Roo bu dizinde (çalışma alanı dışında) <code>{{regex}}</code> için arama yapmak istiyor",
-		"didSearchOutsideWorkspace": "Roo bu dizinde (çalışma alanı dışında) <code>{{regex}}</code> için arama yaptı",
-		"wantsToViewTopLevelOutsideWorkspace": "Roo bu dizindeki (çalışma alanı dışında) üst düzey dosyaları görüntülemek istiyor",
-		"didViewTopLevelOutsideWorkspace": "Roo bu dizindeki (çalışma alanı dışında) üst düzey dosyaları görüntüledi",
-		"wantsToViewRecursiveOutsideWorkspace": "Roo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntülemek istiyor",
-		"didViewRecursiveOutsideWorkspace": "Roo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntüledi",
-		"wantsToViewMultipleDirectories": "Roo birden fazla dizini görüntülemek istiyor"
+		"wantsToViewTopLevel": "Zoo bu dizindeki üst düzey dosyaları görüntülemek istiyor",
+		"didViewTopLevel": "Zoo bu dizindeki üst düzey dosyaları görüntüledi",
+		"wantsToViewRecursive": "Zoo bu dizindeki tüm dosyaları özyinelemeli olarak görüntülemek istiyor",
+		"didViewRecursive": "Zoo bu dizindeki tüm dosyaları özyinelemeli olarak görüntüledi",
+		"wantsToSearch": "Zoo bu dizinde <code>{{regex}}</code> için arama yapmak istiyor",
+		"didSearch": "Zoo bu dizinde <code>{{regex}}</code> için arama yaptı",
+		"wantsToSearchOutsideWorkspace": "Zoo bu dizinde (çalışma alanı dışında) <code>{{regex}}</code> için arama yapmak istiyor",
+		"didSearchOutsideWorkspace": "Zoo bu dizinde (çalışma alanı dışında) <code>{{regex}}</code> için arama yaptı",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) üst düzey dosyaları görüntülemek istiyor",
+		"didViewTopLevelOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) üst düzey dosyaları görüntüledi",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntülemek istiyor",
+		"didViewRecursiveOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntüledi",
+		"wantsToViewMultipleDirectories": "Zoo birden fazla dizini görüntülemek istiyor"
 	},
 	"commandOutput": "Komut Çıktısı",
 	"commandExecution": {
@@ -246,24 +236,24 @@
 	"response": "Yanıt",
 	"arguments": "Argümanlar",
 	"text": {
-		"rooSaid": "Roo dedi"
+		"rooSaid": "Zoo dedi"
 	},
 	"feedback": {
 		"youSaid": "Dediniz ki"
 	},
 	"mcp": {
-		"wantsToUseTool": "Roo {{serverName}} MCP sunucusunda bir araç kullanmak istiyor",
-		"wantsToAccessResource": "Roo {{serverName}} MCP sunucusundaki bir kaynağa erişmek istiyor"
+		"wantsToUseTool": "Zoo {{serverName}} MCP sunucusunda bir araç kullanmak istiyor",
+		"wantsToAccessResource": "Zoo {{serverName}} MCP sunucusundaki bir kaynağa erişmek istiyor"
 	},
 	"modes": {
-		"wantsToSwitch": "Roo <code>{{mode}}</code> moduna geçmek istiyor",
-		"wantsToSwitchWithReason": "Roo <code>{{mode}}</code> moduna geçmek istiyor çünkü: {{reason}}",
-		"didSwitch": "Roo <code>{{mode}}</code> moduna geçti",
-		"didSwitchWithReason": "Roo <code>{{mode}}</code> moduna geçti çünkü: {{reason}}"
+		"wantsToSwitch": "Zoo <code>{{mode}}</code> moduna geçmek istiyor",
+		"wantsToSwitchWithReason": "Zoo <code>{{mode}}</code> moduna geçmek istiyor çünkü: {{reason}}",
+		"didSwitch": "Zoo <code>{{mode}}</code> moduna geçti",
+		"didSwitchWithReason": "Zoo <code>{{mode}}</code> moduna geçti çünkü: {{reason}}"
 	},
 	"subtasks": {
-		"wantsToCreate": "Roo <code>{{mode}}</code> modunda yeni bir alt görev oluşturmak istiyor",
-		"wantsToFinish": "Roo bu alt görevi bitirmek istiyor",
+		"wantsToCreate": "Zoo <code>{{mode}}</code> modunda yeni bir alt görev oluşturmak istiyor",
+		"wantsToFinish": "Zoo bu alt görevi bitirmek istiyor",
 		"newTaskContent": "Alt Görev Talimatları",
 		"completionContent": "Alt Görev Tamamlandı",
 		"resultContent": "Alt Görev Sonuçları",
@@ -272,7 +262,7 @@
 		"goToSubtask": "Görevi görüntüle"
 	},
 	"questions": {
-		"hasQuestion": "Roo'nun bir sorusu var"
+		"hasQuestion": "Zoo'nun bir sorusu var"
 	},
 	"taskCompleted": "Görev Tamamlandı",
 	"modelResponseIncomplete": "Model yanıtı eksik",
@@ -288,7 +278,7 @@
 		"copyToClipboard": "Panoya Kopyala",
 		"copied": "Kopyalandı!",
 		"diagnostics": "Ayrıntılı hata bilgisi al",
-		"proxyProvider": "Proxy tabanlı bir sağlayıcı kullanıyor gibi görünüyorsun. Günlüklerini kontrol ettiğinden ve Roo'nun isteklerini yeniden yazmadığından emin ol."
+		"proxyProvider": "Proxy tabanlı bir sağlayıcı kullanıyor gibi görünüyorsun. Günlüklerini kontrol ettiğinden ve Zoo'nun isteklerini yeniden yazmadığından emin ol."
 	},
 	"powershell": {
 		"issues": "Windows PowerShell ile ilgili sorunlar yaşıyor gibi görünüyorsunuz, lütfen şu konuya bakın"
@@ -331,31 +321,24 @@
 		}
 	},
 	"skill": {
-		"wantsToLoad": "Roo bir beceri yüklemek istiyor",
-		"didLoad": "Roo bir beceri yükledi"
+		"wantsToLoad": "Zoo bir beceri yüklemek istiyor",
+		"didLoad": "Zoo bir beceri yükledi"
 	},
 	"followUpSuggest": {
 		"copyToInput": "Giriş alanına kopyala (veya Shift + tıklama)",
 		"timerPrefix": "Otomatik onay etkinleştirildi. {{seconds}}s içinde seçim yapılıyor…"
 	},
 	"announcement": {
-		"title": "Roo Code {{version}} Yayınlandı",
-		"support": "<githubLink>GitHub</githubLink>'da yıldız vererek Roo Code'u destekle.",
-		"stealthModel": {
-			"feature": "<bold>Sınırlı süre ÜCRETSİZ gizli model</bold> - Code Supernova: Artık <bold>1M token bağlam penceresi</bold> ile yükseltildi! Görüntü girişlerini destekleyen çok amaçlı acentik kodlama modeli, Roo Code Cloud üzerinden kullanılabilir.",
-			"note": "(Not: istemler ve tamamlamalar model yaratıcısı tarafından kaydedilir ve modeli geliştirmek için kullanılır)",
-			"connectButton": "Roo Code Cloud'a bağlan",
-			"selectModel": "Başlamak için Ayarlar'da Roo Code Cloud sağlayıcısından <code>roo/code-supernova</code>'yı seçin.",
-			"goToSettingsButton": "Ayarlar'a Git"
-		},
+		"title": "Zoo Code {{version}} yayınlandı",
+		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"handoff": {
-			"heading": "Roo Code eklentisi bir yere gitmiyor.",
-			"description": "Roo Code'un 3 milyon kuruluma ulaştığı ve orijinal ekibin tüm enerjisini Roomote'a verdiği son duyuruyu görmüş olabilirsin. Bu haberin birçoğunuz için zor olduğunu biliyoruz. Bu eklenti bizim ve senin için çok şey ifade ediyor ve seni duyuyoruz. İyi haber: <bold>bir topluluk ekibi Roo Code'u ileriye taşımak için öne çıktı</bold> ve güvendiğin eklentinin bakımı ve geliştirilmesinin sürmesi için onlarla resmi bir devir çalışması yürütüyoruz.",
-			"readMore": "Matt Rubens'in orijinal duyurusunu oku"
+			"heading": "Roo Code geri döndü! Artık Zoo Code adlı, topluluk tarafından sürdürülen bir eklenti!!",
+			"description": "Takip etmiyorsan kaçırmış olabilirsin: Roo Code ekibi kısa süre önce Roo Code geliştirmesini aşamalı olarak sonlandırdığını ve yaptıkları çalışmaları arşivlediğini duyurdu. Ama endişelenme; topluluk, Roo Code mirasını yeni bir ad ve yeni bir yuva ile sürdürmek için öne çıktı! Artık sadece tek bir \"Roo\" değiliz; bir topluluğuz, istersen bir \"Zoo\" diyebilirsin. Zoo Code, Roo Code'un bıraktığı yerden devam eden, topluluk tarafından sürdürülen bir eklenti ve Roo'nun ruhunu korurken yeni özellikler ve iyileştirmeler sunmaya kararlıyız. Geliştiriciler için böylesine harika bir araç yarattıkları ve yaptıkları inanılmaz iş için tüm Roo Code ekibine kocaman bir teşekkür göndermek istiyoruz. Onların temeli üzerine inşa etmeyi sürdürmekten ve topluluğun gelecekte Zoo Code'u nereye taşıyacağını görmekten heyecan duyuyoruz!",
+			"readMore": "Zoo Code'un yeni ana sayfasına göz at ve tam duyuruyu oku"
 		},
 		"release": {
 			"heading": "Yenilikler:",
-			"gpt55": "OpenAI Codex üzerinden GPT-5.5: En son modeli doğrudan Roo Code'dan kullanabilmen için OpenAI Codex sağlayıcısına GPT-5.5 desteği eklendi.",
+			"gpt55": "OpenAI Codex üzerinden GPT-5.5: En son modeli doğrudan Zoo Code'dan kullanabilmen için OpenAI Codex sağlayıcısına GPT-5.5 desteği eklendi.",
 			"claudeOpus47": "Vertex AI'da Claude Opus 4.7: Anthropic'in en yeni amiral gemisi akıl yürütme modeli olan Claude Opus 4.7 Vertex AI sağlayıcısına eklendi.",
 			"checkpointNav": "Önceki Checkpoint Navigasyonu: Sohbetten önceki checkpoint'lere geri atlayabilmen için kontroller eklendi ve tam i18n desteği sunuluyor."
 		},
@@ -381,24 +364,24 @@
 	"profileViolationWarning": "Geçerli profil kuruluşunuzun ayarlarıyla uyumlu değil",
 	"shellIntegration": {
 		"title": "Komut Çalıştırma Uyarısı",
-		"description": "Komutunuz VSCode terminal kabuk entegrasyonu olmadan çalıştırılıyor. Bu uyarıyı gizlemek için <settingsLink>Roo Code ayarları</settingsLink>'nın <strong>Terminal</strong> bölümünden kabuk entegrasyonunu devre dışı bırakabilir veya aşağıdaki bağlantıyı kullanarak VSCode terminal entegrasyonu sorunlarını giderebilirsiniz.",
+		"description": "Komutunuz VSCode terminal kabuk entegrasyonu olmadan çalıştırılıyor. Bu uyarıyı gizlemek için <settingsLink>Zoo Code ayarları</settingsLink>'nın <strong>Terminal</strong> bölümünden kabuk entegrasyonunu devre dışı bırakabilir veya aşağıdaki bağlantıyı kullanarak VSCode terminal entegrasyonu sorunlarını giderebilirsiniz.",
 		"troubleshooting": "Kabuk entegrasyonu belgelerini görmek için buraya tıklayın."
 	},
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Otomatik Onaylanan İstek Limiti Aşıldı",
-			"description": "Roo, {{count}} API isteği/istekleri için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
+			"description": "Zoo, {{count}} API isteği/istekleri için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
 			"button": "Sıfırla ve Devam Et"
 		},
 		"autoApprovedCostLimitReached": {
 			"title": "Otomatik Onaylanan Maliyet Sınırına Ulaşıldı",
-			"description": "Roo otomatik olarak onaylanmış ${{count}} maliyet sınırına ulaştı. Maliyeti sıfırlamak ve göreve devam etmek ister misiniz?",
+			"description": "Zoo otomatik olarak onaylanmış ${{count}} maliyet sınırına ulaştı. Maliyeti sıfırlamak ve göreve devam etmek ister misiniz?",
 			"button": "Sıfırla ve Devam Et"
 		}
 	},
 	"codebaseSearch": {
-		"wantsToSearch": "Roo kod tabanında <code>{{query}}</code> aramak istiyor",
-		"wantsToSearchWithPath": "Roo <code>{{path}}</code> içinde kod tabanında <code>{{query}}</code> aramak istiyor",
+		"wantsToSearch": "Zoo kod tabanında <code>{{query}}</code> aramak istiyor",
+		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> içinde kod tabanında <code>{{query}}</code> aramak istiyor",
 		"didSearch_one": "1 sonuç bulundu",
 		"didSearch_other": "{{count}} sonuç bulundu",
 		"resultTooltip": "Benzerlik puanı: {{score}} (dosyayı açmak için tıklayın)"
@@ -439,7 +422,7 @@
 		"ariaLabel": "Sürüm {{version}} - Sürüm notlarını görüntülemek için tıklayın"
 	},
 	"rooCloudCTA": {
-		"title": "Roo Code Cloud gelişiyor!",
+		"title": "Zoo Code Cloud gelişiyor!",
 		"description": "Bulutta uzak ajanlar çalıştırın, görevlerinize her yerden erişin, başkalarıyla işbirliği yapın ve daha fazlası.",
 		"joinWaitlist": "En son güncellemeleri almak için kaydolun."
 	},
@@ -480,8 +463,8 @@
 		"clickToEdit": "Mesajı düzenlemek için tıkla"
 	},
 	"slashCommand": {
-		"wantsToRun": "Roo bir slash komutu çalıştırmak istiyor",
-		"didRun": "Roo bir slash komutu çalıştırdı"
+		"wantsToRun": "Zoo bir slash komutu çalıştırmak istiyor",
+		"didRun": "Zoo bir slash komutu çalıştırdı"
 	},
 	"todo": {
 		"partial": "{{total}} yapılacaklar listesinden {{completed}} tanesi tamamlandı",
@@ -500,11 +483,11 @@
 		"openMcpSettings": "MCP Ayarlarını Aç"
 	},
 	"readCommandOutput": {
-		"title": "Roo read command output"
+		"title": "Zoo read command output"
 	},
 	"retiredProvider": {
 		"title": "Sağlayıcı artık desteklenmiyor",
-		"message": "Üzgünüz, bu sağlayıcı artık desteklenmiyor. Çok az Roo kullanıcısının bunu gerçekten kullandığını gördük ve hızlı gelişmeye devam edip topluluğumuza iyi hizmet verebilmek için kod tabanımızın kapsamını daraltmamız gerekiyor. Gerçekten zor bir karardı ama senin için en önemli olana odaklanmamızı sağlıyor. Bunun can sıkıcı olduğunu biliyoruz.",
+		"message": "Bu sağlayıcı artık kullanılamıyor. Devam etmek için desteklenen bir sağlayıcı seçin.",
 		"openSettings": "Ayarları aç"
 	}
 }

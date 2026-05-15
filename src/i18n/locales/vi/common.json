@@ -1,6 +1,6 @@
 {
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "Toàn bộ đội ngũ phát triển AI trong trình soạn thảo của bạn."
 	},
 	"number_format": {
@@ -112,7 +112,8 @@
 			"thinking_complete_recitation": "(Đã suy nghĩ xong nhưng kết quả bị chặn do kiểm tra trích dẫn.)"
 		},
 		"roo": {
-			"authenticationRequired": "Nhà cung cấp Roo yêu cầu xác thực đám mây. Vui lòng đăng nhập vào Roo Code Cloud."
+			"authenticationRequired": "Nhà cung cấp Roo yêu cầu xác thực đám mây. Vui lòng đăng nhập vào Roo Code Cloud.",
+			"routerRemoved": "Roo Code Router đã bị xóa. Vui lòng chọn và cấu hình một nhà cung cấp khác."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "Khóa API chứa ký tự không hợp lệ.",
@@ -145,7 +146,7 @@
 	"warnings": {
 		"no_terminal_content": "Không có nội dung terminal được chọn",
 		"missing_task_files": "Các tệp của nhiệm vụ này bị thiếu. Bạn có muốn xóa nó khỏi danh sách nhiệm vụ không?",
-		"auto_import_failed": "Không thể tự động nhập cài đặt RooCode: {{error}}"
+		"auto_import_failed": "Không thể tự động nhập cài đặt ZooCode: {{error}}"
 	},
 	"info": {
 		"no_changes": "Không tìm thấy thay đổi nào.",
@@ -154,14 +155,17 @@
 		"custom_storage_path_set": "Đã thiết lập đường dẫn lưu trữ tùy chỉnh: {{path}}",
 		"default_storage_path": "Đã quay lại sử dụng đường dẫn lưu trữ mặc định",
 		"settings_imported": "Cài đặt đã được nhập thành công.",
-		"auto_import_success": "Cài đặt RooCode đã được tự động nhập từ {{filename}}",
+		"auto_import_success": "Cài đặt ZooCode đã được tự động nhập từ {{filename}}",
 		"share_link_copied": "Liên kết chia sẻ đã được sao chép vào clipboard",
 		"image_copied_to_clipboard": "URI dữ liệu hình ảnh đã được sao chép vào clipboard",
 		"image_saved": "Hình ảnh đã được lưu vào {{path}}",
 		"organization_share_link_copied": "Liên kết chia sẻ tổ chức đã được sao chép vào clipboard!",
 		"public_share_link_copied": "Liên kết chia sẻ công khai đã được sao chép vào clipboard!",
 		"mode_exported": "Chế độ '{{mode}}' đã được xuất thành công",
-		"mode_imported": "Chế độ đã được nhập thành công"
+		"mode_imported": "Chế độ đã được nhập thành công",
+		"roo": {
+			"signInUnavailable": "Đăng nhập Roo Code Cloud hiện không khả dụng. Hãy cấu hình nhà cung cấp khác để tiếp tục."
+		}
 	},
 	"answers": {
 		"yes": "Có",
@@ -187,12 +191,12 @@
 	},
 	"storage": {
 		"prompt_custom_path": "Nhập đường dẫn lưu trữ tùy chỉnh cho lịch sử hội thoại, để trống để sử dụng vị trí mặc định",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "Vui lòng nhập đường dẫn tuyệt đối (ví dụ: D:\\RooCodeStorage hoặc /home/user/storage)",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "Vui lòng nhập đường dẫn tuyệt đối (ví dụ: D:\\ZooCodeStorage hoặc /home/user/storage)",
 		"enter_valid_path": "Vui lòng nhập đường dẫn hợp lệ"
 	},
 	"input": {
-		"task_prompt": "Bạn muốn Roo làm gì?",
+		"task_prompt": "Bạn muốn Zoo làm gì?",
 		"task_placeholder": "Nhập nhiệm vụ của bạn ở đây"
 	},
 	"settings": {
@@ -222,8 +226,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "Tổ chức của bạn yêu cầu xác thực Roo Code Cloud. Vui lòng đăng nhập để tiếp tục.",
-			"organization_mismatch": "Bạn phải được xác thực bằng tài khoản Roo Code Cloud của tổ chức.",
+			"cloud_auth_required": "Tổ chức của bạn yêu cầu xác thực Zoo Code Cloud. Vui lòng đăng nhập để tiếp tục.",
+			"organization_mismatch": "Bạn phải được xác thực bằng tài khoản Zoo Code Cloud của tổ chức.",
 			"manual_url_empty": "Vui lòng nhập URL callback hợp lệ",
 			"manual_url_no_query": "URL callback không hợp lệ: thiếu tham số truy vấn",
 			"manual_url_missing_params": "URL callback không hợp lệ: thiếu tham số bắt buộc (code và state)",
@@ -257,6 +261,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Nhận được token xác thực không hợp lệ.",
+			"token_verification_failed": "Zoo Code: Xác minh token thất bại.",
+			"invalid_token": "Zoo Code: Token không hợp lệ.",
+			"could_not_verify_token": "Zoo Code: Không thể xác minh token."
+		},
+		"info": {
+			"connected": "Zoo Code: Kết nối thành công! Bạn có thể sử dụng Zoo Code làm nhà cung cấp AI.",
+			"disconnected": "Zoo Code: Đã ngắt kết nối thành công."
+		}
 	}
 }

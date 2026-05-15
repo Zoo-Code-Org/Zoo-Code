@@ -731,9 +731,12 @@ describe("importExport", () => {
 					{ name: "valid-profile", id: "valid-id", apiProvider: "openai" as ProviderName },
 				])
 
+				const seenImportedAt: Array<number | undefined> = []
 				const mockProvider = {
-					settingsImportedAt: 0,
-					postStateToWebview: vi.fn().mockResolvedValue(undefined),
+					settingsImportedAt: undefined as number | undefined,
+					postStateToWebview: vi.fn().mockImplementation(async () => {
+						seenImportedAt.push(mockProvider.settingsImportedAt)
+					}),
 				}
 
 				const showWarningMessageSpy = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined)
@@ -766,13 +769,65 @@ describe("importExport", () => {
 				)
 				expect(showInfoMessageSpy).not.toHaveBeenCalled()
 
-				// Provider state should still be updated
-				expect(mockProvider.settingsImportedAt).toBeGreaterThan(0)
+				// Provider state should be delivered once, then cleared.
+				expect(seenImportedAt).toHaveLength(1)
+				expect(seenImportedAt[0]).toBeGreaterThan(0)
+				expect(mockProvider.settingsImportedAt).toBeUndefined()
 				expect(mockProvider.postStateToWebview).toHaveBeenCalled()
 
 				showWarningMessageSpy.mockRestore()
 				showInfoMessageSpy.mockRestore()
 				consoleWarnSpy.mockRestore()
+			})
+
+			it("clears settingsImportedAt after posting the imported state so later launches do not replay it", async () => {
+				const filePath = "/mock/path/settings.json"
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: "openai" as ProviderName,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: { mode: "code" },
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				;(fs.access as Mock).mockResolvedValue(undefined)
+
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: "openai" as ProviderName },
+				])
+
+				const seenImportedAt: Array<number | undefined> = []
+				const mockProvider = {
+					settingsImportedAt: undefined as number | undefined,
+					postStateToWebview: vi.fn().mockImplementation(async () => {
+						seenImportedAt.push(mockProvider.settingsImportedAt)
+					}),
+				}
+
+				await importSettingsWithFeedback(
+					{
+						providerSettingsManager: mockProviderSettingsManager,
+						contextProxy: mockContextProxy,
+						customModesManager: mockCustomModesManager,
+						provider: mockProvider,
+					},
+					filePath,
+				)
+
+				expect(seenImportedAt).toHaveLength(1)
+				expect(seenImportedAt[0]).toBeGreaterThan(0)
+				expect(mockProvider.settingsImportedAt).toBeUndefined()
 			})
 
 			it("should handle multiple profiles with mixed valid and invalid providers", async () => {
@@ -841,6 +896,45 @@ describe("importExport", () => {
 				// Invalid provider profiles should have apiProvider removed
 				expect(importedProfiles.apiConfigs["old-claude-profile"].apiProvider).toBeUndefined()
 				expect(importedProfiles.apiConfigs["another-invalid"].apiProvider).toBeUndefined()
+			})
+
+			it("should downgrade imported Roo profiles without failing the import", async () => {
+				;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "router-profile",
+						apiConfigs: {
+							"router-profile": {
+								apiProvider: "roo",
+								apiModelId: "roo/code-supernova",
+								rooApiKey: "router-key",
+								id: "router-id",
+							},
+						},
+					},
+					globalSettings: { mode: "code" },
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
+				})
+
+				const result = await importSettings({
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+				})
+
+				expect(result.success).toBe(true)
+				expect((result as { warnings?: string[] }).warnings?.[0]).toContain("Roo Code Router was removed")
+
+				const importedProfiles = mockProviderSettingsManager.import.mock.calls[0][0]
+				expect(importedProfiles.currentApiConfigName).toBe("router-profile")
+				expect(importedProfiles.apiConfigs["router-profile"]).toEqual({ id: "router-id" })
 			})
 
 			it("should fallback currentApiConfigName when the imported current profile was skipped", async () => {

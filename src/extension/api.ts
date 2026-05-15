@@ -21,7 +21,6 @@ import {
 	IpcMessageType,
 } from "@roo-code/types"
 import { IpcServer } from "@roo-code/ipc"
-import { CloudService } from "@roo-code/cloud"
 
 import { Package } from "../shared/package"
 import { ClineProvider } from "../core/webview/ClineProvider"
@@ -137,15 +136,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						break
 					case TaskCommandName.GetModels:
 						try {
-							const models = await getModels({
-								provider: "roo" as const,
-								baseUrl: process.env.ROO_CODE_PROVIDER_URL ?? "https://api.roocode.com/proxy",
-								apiKey: CloudService.hasInstance()
-									? CloudService.instance.authService?.getSessionToken()
-									: undefined,
-							})
-
-							sendResponse(RooCodeEventName.ModelsResponse, [models])
+							sendResponse(RooCodeEventName.ModelsResponse, [{}])
 						} catch (error) {
 							sendResponse(RooCodeEventName.ModelsResponse, [{}])
 						}
@@ -292,6 +283,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	public async pressSecondaryButton() {
 		await this.sidebarProvider.postMessageToWebview({ type: "invoke", invoke: "secondaryButtonClick" })
+	}
+
+	public async approveCurrentAsk() {
+		this.sidebarProvider.getCurrentTask()?.approveAsk()
 	}
 
 	public isReady() {

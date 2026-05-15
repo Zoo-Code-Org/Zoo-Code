@@ -13,8 +13,7 @@ class TelemetryClient {
 			TelemetryClient.telemetryEnabled = true
 
 			posthog.init(apiKey, {
-				api_host: "https://ph.roocode.com",
-				ui_host: "https://us.posthog.com",
+				api_host: "https://us.i.posthog.com",
 				persistence: "localStorage",
 				loaded: () => posthog.identify(distinctId),
 				capture_pageview: false,
@@ -37,7 +36,12 @@ class TelemetryClient {
 	public capture(eventName: string, properties?: Record<string, any>) {
 		if (TelemetryClient.telemetryEnabled) {
 			try {
-				posthog.capture(eventName, properties)
+				posthog.capture(eventName, {
+					appName: process.env.PKG_NAME,
+					appVersion: process.env.PKG_VERSION,
+					releaseChannel: process.env.PKG_RELEASE_CHANNEL || "stable",
+					...properties,
+				})
 			} catch (_error) {
 				// Silently fail if there's an error capturing an event.
 			}

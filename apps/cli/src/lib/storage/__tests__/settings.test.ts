@@ -19,7 +19,7 @@ vi.mock("../config-dir.js", () => ({
 
 // Import after mocking
 import { loadSettings, saveSettings, resetOnboarding, getSettingsPath } from "../settings.js"
-import { OnboardingProviderChoice } from "@/types/index.js"
+import { DEFAULT_PROVIDER, OnboardingProviderChoice } from "@/types/index.js"
 
 // Re-derive the test config dir for use in tests (must match the hoisted one)
 const actualTestConfigDir = getTestConfigDir()
@@ -30,11 +30,16 @@ describe("Settings Storage", () => {
 	beforeEach(async () => {
 		// Clear test directory before each test
 		await fs.rm(actualTestConfigDir, { recursive: true, force: true })
+		vi.spyOn(console, "warn").mockImplementation(() => {})
 	})
 
 	afterAll(async () => {
 		// Clean up test directory
 		await fs.rm(actualTestConfigDir, { recursive: true, force: true })
+	})
+
+	afterEach(() => {
+		vi.restoreAllMocks()
 	})
 
 	describe("getSettingsPath", () => {
@@ -51,7 +56,7 @@ describe("Settings Storage", () => {
 
 		it("should load saved settings", async () => {
 			const settingsData = {
-				onboardingProviderChoice: OnboardingProviderChoice.Roo,
+				onboardingProviderChoice: OnboardingProviderChoice.Byok,
 				mode: "architect",
 				provider: "anthropic" as const,
 				model: "claude-sonnet-4-20250514",
@@ -63,6 +68,32 @@ describe("Settings Storage", () => {
 
 			const loaded = await loadSettings()
 			expect(loaded).toEqual(settingsData)
+		})
+
+		it("migrates legacy Roo provider settings to the default provider path", async () => {
+			const legacySettings = {
+				onboardingProviderChoice: "roo",
+				provider: "roo",
+				mode: "architect",
+			}
+
+			await fs.mkdir(actualTestConfigDir, { recursive: true })
+			await fs.writeFile(expectedSettingsFile, JSON.stringify(legacySettings), "utf-8")
+
+			const loaded = await loadSettings()
+
+			expect(loaded).toEqual({
+				onboardingProviderChoice: OnboardingProviderChoice.Byok,
+				provider: DEFAULT_PROVIDER,
+				mode: "architect",
+			})
+
+			const rewritten = JSON.parse(await fs.readFile(expectedSettingsFile, "utf-8"))
+			expect(rewritten).toEqual({
+				onboardingProviderChoice: OnboardingProviderChoice.Byok,
+				provider: DEFAULT_PROVIDER,
+				mode: "architect",
+			})
 		})
 
 		it("should load settings with only some fields set", async () => {
@@ -138,7 +169,7 @@ describe("Settings Storage", () => {
 
 	describe("resetOnboarding", () => {
 		it("should reset onboarding provider choice", async () => {
-			await saveSettings({ onboardingProviderChoice: OnboardingProviderChoice.Roo })
+			await saveSettings({ onboardingProviderChoice: OnboardingProviderChoice.Byok })
 
 			await resetOnboarding()
 

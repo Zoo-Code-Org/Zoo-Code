@@ -1,5 +1,5 @@
 {
-	"greeting": "Welcome to Roo Code!",
+	"greeting": "Welcome to Zoo Code!",
 	"task": {
 		"title": "Task",
 		"expand": "Expand task",
@@ -14,17 +14,7 @@
 		"contextWindow": "Context Length",
 		"closeAndStart": "Close task and start a new one",
 		"export": "Export task history",
-		"share": "Share task",
 		"delete": "Delete Task (Shift + Click to skip confirmation)",
-		"shareWithOrganization": "Share with Organization",
-		"shareWithOrganizationDescription": "Only members of your organization can access",
-		"sharePublicly": "Share Publicly",
-		"sharePubliclyDescription": "Anyone with the link can access",
-		"connectToCloud": "Connect to Cloud",
-		"connectToCloudDescription": "Sign in to Roo Code Cloud to share tasks",
-		"sharingDisabledByOrganization": "Sharing disabled by organization",
-		"shareSuccessOrganization": "Organization link copied to clipboard",
-		"shareSuccessPublic": "Public link copied to clipboard",
 		"openApiHistory": "Open API History",
 		"openUiHistory": "Open UI History",
 		"backToParentTask": "Parent task"
@@ -125,7 +115,7 @@
 	},
 	"scrollToBottom": "Scroll to bottom of chat",
 	"scrollToLatestCheckpoint": "Scroll to previous checkpoint",
-	"about": "Roo is a whole AI dev team in your editor",
+	"about": "Zoo is a whole AI dev team in your editor",
 	"docs": "Check our <DocsLink>docs</DocsLink> to get started",
 	"onboarding": "What would you like to do?",
 	"rooTips": {
@@ -135,7 +125,7 @@
 		},
 		"modelAgnostic": {
 			"title": "Bring your own model, no markup or lock-in",
-			"description": "Use your own provider key or even run local inference — Roo doesn't charge for it"
+			"description": "Use your own provider key or even run local inference — Zoo doesn't charge for it"
 		}
 	},
 	"selectMode": "Select mode for interaction",
@@ -147,7 +137,7 @@
 		"title": "Modes",
 		"marketplace": "Mode Marketplace",
 		"settings": "Mode Settings",
-		"description": "Specialized personas that tailor Roo's behavior.",
+		"description": "Specialized personas that tailor Zoo's behavior.",
 		"searchPlaceholder": "Search modes...",
 		"noResults": "No results found"
 	},
@@ -185,7 +175,7 @@
 			"docs": "Docs",
 			"goToSettings": "Settings",
 			"connection": "Connection error. Make sure you have a working internet connection.",
-			"unknown": "Unknown API error. Please contact Roo Code support.",
+			"unknown": "Unknown API error. Please contact Zoo Code support.",
 			"claudeCodeNotAuthenticated": "You need to sign in to use Claude Code. Go to Settings and click \"Sign in to Claude Code\" to authenticate."
 		}
 	},
@@ -224,46 +214,46 @@
 		}
 	},
 	"skill": {
-		"wantsToLoad": "Roo wants to load a skill",
-		"didLoad": "Roo loaded a skill"
+		"wantsToLoad": "Zoo wants to load a skill",
+		"didLoad": "Zoo loaded a skill"
 	},
 	"fileOperations": {
-		"wantsToRead": "Roo wants to read this file",
-		"wantsToReadMultiple": "Roo wants to read multiple files",
-		"wantsToReadAndXMore": "Roo wants to read this file and {{count}} more",
-		"wantsToReadOutsideWorkspace": "Roo wants to read this file outside of the workspace",
-		"didRead": "Roo read this file",
-		"wantsToEdit": "Roo wants to edit this file",
-		"wantsToEditOutsideWorkspace": "Roo wants to edit this file outside of the workspace",
-		"wantsToEditProtected": "Roo wants to edit a protected configuration file",
-		"wantsToApplyBatchChanges": "Roo wants to apply changes to multiple files",
-		"wantsToGenerateImage": "Roo wants to generate an image",
-		"wantsToGenerateImageOutsideWorkspace": "Roo wants to generate an image outside of the workspace",
-		"wantsToGenerateImageProtected": "Roo wants to generate an image in a protected location",
-		"didGenerateImage": "Roo generated an image",
-		"wantsToCreate": "Roo wants to create a new file",
-		"wantsToInsert": "Roo wants to insert content into this file",
-		"wantsToInsertWithLineNumber": "Roo wants to insert content into this file at line {{lineNumber}}",
-		"wantsToInsertAtEnd": "Roo wants to append content to the end of this file"
+		"wantsToRead": "Zoo wants to read this file",
+		"wantsToReadMultiple": "Zoo wants to read multiple files",
+		"wantsToReadAndXMore": "Zoo wants to read this file and {{count}} more",
+		"wantsToReadOutsideWorkspace": "Zoo wants to read this file outside of the workspace",
+		"didRead": "Zoo read this file",
+		"wantsToEdit": "Zoo wants to edit this file",
+		"wantsToEditOutsideWorkspace": "Zoo wants to edit this file outside of the workspace",
+		"wantsToEditProtected": "Zoo wants to edit a protected configuration file",
+		"wantsToApplyBatchChanges": "Zoo wants to apply changes to multiple files",
+		"wantsToGenerateImage": "Zoo wants to generate an image",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo wants to generate an image outside of the workspace",
+		"wantsToGenerateImageProtected": "Zoo wants to generate an image in a protected location",
+		"didGenerateImage": "Zoo generated an image",
+		"wantsToCreate": "Zoo wants to create a new file",
+		"wantsToInsert": "Zoo wants to insert content into this file",
+		"wantsToInsertWithLineNumber": "Zoo wants to insert content into this file at line {{lineNumber}}",
+		"wantsToInsertAtEnd": "Zoo wants to append content to the end of this file"
 	},
 	"directoryOperations": {
-		"wantsToViewTopLevel": "Roo wants to view the top level files in this directory",
-		"didViewTopLevel": "Roo viewed the top level files in this directory",
-		"wantsToViewTopLevelOutsideWorkspace": "Roo wants to view the top level files in this directory (outside workspace)",
-		"didViewTopLevelOutsideWorkspace": "Roo viewed the top level files in this directory (outside workspace)",
-		"wantsToViewRecursive": "Roo wants to recursively view all files in this directory",
-		"didViewRecursive": "Roo recursively viewed all files in this directory",
-		"wantsToViewRecursiveOutsideWorkspace": "Roo wants to recursively view all files in this directory (outside workspace)",
-		"didViewRecursiveOutsideWorkspace": "Roo recursively viewed all files in this directory (outside workspace)",
-		"wantsToViewMultipleDirectories": "Roo wants to view multiple directories",
-		"wantsToSearch": "Roo wants to search this directory for <code>{{regex}}</code>",
-		"didSearch": "Roo searched this directory for <code>{{regex}}</code>",
-		"wantsToSearchOutsideWorkspace": "Roo wants to search this directory (outside workspace) for <code>{{regex}}</code>",
-		"didSearchOutsideWorkspace": "Roo searched this directory (outside workspace) for <code>{{regex}}</code>"
+		"wantsToViewTopLevel": "Zoo wants to view the top level files in this directory",
+		"didViewTopLevel": "Zoo viewed the top level files in this directory",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo wants to view the top level files in this directory (outside workspace)",
+		"didViewTopLevelOutsideWorkspace": "Zoo viewed the top level files in this directory (outside workspace)",
+		"wantsToViewRecursive": "Zoo wants to recursively view all files in this directory",
+		"didViewRecursive": "Zoo recursively viewed all files in this directory",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo wants to recursively view all files in this directory (outside workspace)",
+		"didViewRecursiveOutsideWorkspace": "Zoo recursively viewed all files in this directory (outside workspace)",
+		"wantsToViewMultipleDirectories": "Zoo wants to view multiple directories",
+		"wantsToSearch": "Zoo wants to search this directory for <code>{{regex}}</code>",
+		"didSearch": "Zoo searched this directory for <code>{{regex}}</code>",
+		"wantsToSearchOutsideWorkspace": "Zoo wants to search this directory (outside workspace) for <code>{{regex}}</code>",
+		"didSearchOutsideWorkspace": "Zoo searched this directory (outside workspace) for <code>{{regex}}</code>"
 	},
 	"codebaseSearch": {
-		"wantsToSearch": "Roo wants to search the codebase for <code>{{query}}</code>",
-		"wantsToSearchWithPath": "Roo wants to search the codebase for <code>{{query}}</code> in <code>{{path}}</code>",
+		"wantsToSearch": "Zoo wants to search the codebase for <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo wants to search the codebase for <code>{{query}}</code> in <code>{{path}}</code>",
 		"didSearch_one": "Found 1 result",
 		"didSearch_other": "Found {{count}} results",
 		"resultTooltip": "Similarity score: {{score}} (click to open file)"
@@ -288,24 +278,24 @@
 	"response": "Response",
 	"arguments": "Arguments",
 	"text": {
-		"rooSaid": "Roo said"
+		"rooSaid": "Zoo said"
 	},
 	"feedback": {
 		"youSaid": "You said"
 	},
 	"mcp": {
-		"wantsToUseTool": "Roo wants to use a tool on the {{serverName}} MCP server",
-		"wantsToAccessResource": "Roo wants to access a resource on the {{serverName}} MCP server"
+		"wantsToUseTool": "Zoo wants to use a tool on the {{serverName}} MCP server",
+		"wantsToAccessResource": "Zoo wants to access a resource on the {{serverName}} MCP server"
 	},
 	"modes": {
-		"wantsToSwitch": "Roo wants to switch to {{mode}} mode",
-		"wantsToSwitchWithReason": "Roo wants to switch to {{mode}} mode because: {{reason}}",
-		"didSwitch": "Roo switched to {{mode}} mode",
-		"didSwitchWithReason": "Roo switched to {{mode}} mode because: {{reason}}"
+		"wantsToSwitch": "Zoo wants to switch to {{mode}} mode",
+		"wantsToSwitchWithReason": "Zoo wants to switch to {{mode}} mode because: {{reason}}",
+		"didSwitch": "Zoo switched to {{mode}} mode",
+		"didSwitchWithReason": "Zoo switched to {{mode}} mode because: {{reason}}"
 	},
 	"subtasks": {
-		"wantsToCreate": "Roo wants to create a new subtask in {{mode}} mode",
-		"wantsToFinish": "Roo wants to mark this as completed",
+		"wantsToCreate": "Zoo wants to create a new subtask in {{mode}} mode",
+		"wantsToFinish": "Zoo wants to mark this as completed",
 		"newTaskContent": "Subtask Instructions",
 		"resultContent": "Subtask completed",
 		"defaultResult": "Please continue to the next task.",
@@ -313,7 +303,7 @@
 		"goToSubtask": "View task"
 	},
 	"questions": {
-		"hasQuestion": "Roo has a question"
+		"hasQuestion": "Zoo has a question"
 	},
 	"taskCompleted": "Task Completed",
 	"error": "Error",
@@ -330,12 +320,12 @@
 		"copyToClipboard": "Copy basic error info",
 		"copied": "Copied!",
 		"diagnostics": "Get detailed error info",
-		"proxyProvider": "You seem to be using a proxy-based provider. Make sure to check its logs and to ensure it's not rewriting Roo's requests."
+		"proxyProvider": "You seem to be using a proxy-based provider. Make sure to check its logs and to ensure it's not rewriting Zoo's requests."
 	},
 	"diffError": {
 		"title": "Edit Unsuccessful"
 	},
-	"troubleMessage": "Roo is having trouble...",
+	"troubleMessage": "Zoo is having trouble...",
 	"powershell": {
 		"issues": "It seems like you're having Windows PowerShell issues, please see this"
 	},
@@ -357,23 +347,16 @@
 		"triggerLabelAll": "BRRR"
 	},
 	"announcement": {
-		"title": "Roo Code {{version}} Released",
-		"support": "Please support Roo Code by starring us on <githubLink>GitHub</githubLink>.",
-		"stealthModel": {
-			"feature": "<bold>Limited-time FREE stealth model</bold> - Code Supernova: Now upgraded with a <bold>1M token context window</bold>! A versatile agentic coding model that supports image inputs, accessible through Roo Code Cloud.",
-			"note": "(Note: prompts and completions are logged by the model creator and used to improve the model)",
-			"connectButton": "Connect to Roo Code Cloud",
-			"selectModel": "Select <code>roo/code-supernova</code> from the Roo Code Cloud provider in Settings to get started.",
-			"goToSettingsButton": "Go to Settings"
-		},
+		"title": "Zoo Code {{version}} Released",
+		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"handoff": {
-			"heading": "The Roo Code plugin is not going away.",
-			"description": "You may have seen the recent announcement that Roo Code hit 3 million installs and the original team is going all-in on Roomote. We know that news was hard for a lot of you. This plugin means a lot to us and to you, and we hear you. The good news: <bold>a community team has stepped up to carry Roo Code forward</bold>, and we're working with them on an official handoff so the plugin you rely on keeps getting maintained and improved.",
-			"readMore": "Read the original announcement from Matt Rubens"
+			"heading": "Roo Code is back! Now as a community-maintained plugin called Zoo Code!!",
+			"description": "If you haven't been following, the Roo Code team recently announced they are sun setting the development of Roo Code and are archiving the work they have done. But fear not, the community has stepped up to continue the legacy of Roo Code with a new name and a new home! We are not just a single \"Roo\" anymore, we are a community, a \"Zoo\" if you will, Zoo Code is a community-maintained plugin that picks up where Roo Code left off, and we're committed to keeping the spirit of Roo alive while also introducing new features and improvements. We want to give a huge shoutout to the entire Roo Code team for their incredible work and for creating such an amazing tool for developers. We're excited to continue building on their foundation and to see where the community takes Zoo Code in the future!",
+			"readMore": "See the new home page of Zoo Code and read the full announcement"
 		},
 		"release": {
 			"heading": "What's New:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: Added GPT-5.5 support in the OpenAI Codex provider so you can use the latest model straight from Roo Code.",
+			"gpt55": "GPT-5.5 via OpenAI Codex: Added GPT-5.5 support in the OpenAI Codex provider so you can use the latest model straight from Zoo Code.",
 			"claudeOpus47": "Claude Opus 4.7 on Vertex AI: Added Claude Opus 4.7 to the Vertex AI provider for Anthropic's newest flagship reasoning model.",
 			"checkpointNav": "Previous Checkpoint Navigation: Added controls in chat to jump back through prior checkpoints, with full i18n support."
 		},
@@ -407,18 +390,18 @@
 	"profileViolationWarning": "The current profile isn't compatible with your organization's settings",
 	"shellIntegration": {
 		"title": "Command Execution Warning",
-		"description": "Your command is being executed without VSCode terminal shell integration. To suppress this warning you can disable shell integration in the <strong>Terminal</strong> section of the <settingsLink>Roo Code settings</settingsLink> or troubleshoot VSCode terminal integration using the link below.",
+		"description": "Your command is being executed without VSCode terminal shell integration. To suppress this warning you can disable shell integration in the <strong>Terminal</strong> section of the <settingsLink>Zoo Code settings</settingsLink> or troubleshoot VSCode terminal integration using the link below.",
 		"troubleshooting": "Click here for shell integration documentation."
 	},
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Auto-Approved Request Limit Reached",
-			"description": "Roo has reached the auto-approved limit of {{count}} API request(s). Would you like to reset the count and proceed with the task?",
+			"description": "Zoo has reached the auto-approved limit of {{count}} API request(s). Would you like to reset the count and proceed with the task?",
 			"button": "Reset and Continue"
 		},
 		"autoApprovedCostLimitReached": {
 			"title": "Auto-Approved Cost Limit Reached",
-			"description": "Roo has reached the auto-approved cost limit of ${{count}}. Would you like to reset the cost and proceed with the task?",
+			"description": "Zoo has reached the auto-approved cost limit of ${{count}}. Would you like to reset the cost and proceed with the task?",
 			"button": "Reset and Continue"
 		}
 	},
@@ -457,8 +440,8 @@
 		}
 	},
 	"slashCommand": {
-		"wantsToRun": "Roo wants to run a slash command",
-		"didRun": "Roo ran a slash command"
+		"wantsToRun": "Zoo wants to run a slash command",
+		"didRun": "Zoo ran a slash command"
 	},
 	"queuedMessages": {
 		"title": "Queued Messages",
@@ -487,11 +470,11 @@
 		"openMcpSettings": "Open MCP Settings"
 	},
 	"readCommandOutput": {
-		"title": "Roo read command output"
+		"title": "Zoo read command output"
 	},
 	"retiredProvider": {
 		"title": "Provider no longer supported",
-		"message": "Sorry, this provider is no longer supported. We saw very few Roo users actually using it and we need to reduce the surface area of our codebase so we can keep shipping fast and serving our community well in this space. It was a really hard decision but it lets us focus on what matters most to you. It sucks, we know.",
+		"message": "This provider is no longer available. Select a supported provider to continue.",
 		"openSettings": "Open Settings"
 	}
 }

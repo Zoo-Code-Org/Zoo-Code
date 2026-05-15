@@ -1,6 +1,6 @@
 {
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "Tim pengembang AI lengkap di editor kamu."
 	},
 	"number_format": {
@@ -112,7 +112,8 @@
 			"thinking_complete_recitation": "(Berpikir selesai, tetapi output diblokir karena pemeriksaan resitasi.)"
 		},
 		"roo": {
-			"authenticationRequired": "Penyedia Roo memerlukan autentikasi cloud. Silakan masuk ke Roo Code Cloud."
+			"authenticationRequired": "Penyedia Roo memerlukan autentikasi cloud. Silakan masuk ke Roo Code Cloud.",
+			"routerRemoved": "Roo Code Router telah dihapus. Pilih dan konfigurasikan penyedia lain."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "Kunci API mengandung karakter tidak valid.",
@@ -145,7 +146,7 @@
 	"warnings": {
 		"no_terminal_content": "Tidak ada konten terminal yang dipilih",
 		"missing_task_files": "File tugas ini hilang. Apakah kamu ingin menghapusnya dari daftar tugas?",
-		"auto_import_failed": "Gagal mengimpor pengaturan RooCode secara otomatis: {{error}}"
+		"auto_import_failed": "Gagal mengimpor pengaturan ZooCode secara otomatis: {{error}}"
 	},
 	"info": {
 		"no_changes": "Tidak ada perubahan ditemukan.",
@@ -154,14 +155,17 @@
 		"custom_storage_path_set": "Path penyimpanan kustom diatur: {{path}}",
 		"default_storage_path": "Kembali menggunakan path penyimpanan default",
 		"settings_imported": "Pengaturan berhasil diimpor.",
-		"auto_import_success": "Pengaturan RooCode berhasil diimpor secara otomatis dari {{filename}}",
+		"auto_import_success": "Pengaturan ZooCode berhasil diimpor secara otomatis dari {{filename}}",
 		"share_link_copied": "Link bagikan disalin ke clipboard",
 		"image_copied_to_clipboard": "Data URI gambar disalin ke clipboard",
 		"image_saved": "Gambar disimpan ke {{path}}",
 		"organization_share_link_copied": "Tautan berbagi organisasi disalin ke clipboard!",
 		"public_share_link_copied": "Tautan berbagi publik disalin ke clipboard!",
 		"mode_exported": "Mode '{{mode}}' berhasil diekspor",
-		"mode_imported": "Mode berhasil diimpor"
+		"mode_imported": "Mode berhasil diimpor",
+		"roo": {
+			"signInUnavailable": "Masuk ke Roo Code Cloud saat ini tidak tersedia. Konfigurasikan penyedia lain untuk melanjutkan."
+		}
 	},
 	"answers": {
 		"yes": "Ya",
@@ -187,12 +191,12 @@
 	},
 	"storage": {
 		"prompt_custom_path": "Masukkan path penyimpanan riwayat percakapan kustom, biarkan kosong untuk menggunakan lokasi default",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "Silakan masukkan path absolut (misalnya D:\\RooCodeStorage atau /home/user/storage)",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "Silakan masukkan path absolut (misalnya D:\\ZooCodeStorage atau /home/user/storage)",
 		"enter_valid_path": "Silakan masukkan path yang valid"
 	},
 	"input": {
-		"task_prompt": "Apa yang harus Roo lakukan?",
+		"task_prompt": "Apa yang harus Zoo lakukan?",
 		"task_placeholder": "Ketik tugas kamu di sini"
 	},
 	"settings": {
@@ -222,8 +226,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "Organisasi kamu memerlukan autentikasi Roo Code Cloud. Silakan masuk untuk melanjutkan.",
-			"organization_mismatch": "Kamu harus diautentikasi dengan akun Roo Code Cloud organisasi kamu.",
+			"cloud_auth_required": "Organisasi kamu memerlukan autentikasi Zoo Code Cloud. Silakan masuk untuk melanjutkan.",
+			"organization_mismatch": "Kamu harus diautentikasi dengan akun Zoo Code Cloud organisasi kamu.",
 			"manual_url_empty": "Silakan masukkan URL callback yang valid",
 			"manual_url_no_query": "URL callback tidak valid: parameter query hilang",
 			"manual_url_missing_params": "URL callback tidak valid: parameter yang diperlukan hilang (code dan state)",
@@ -250,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Token autentikasi yang diterima tidak valid.",
+			"token_verification_failed": "Zoo Code: Verifikasi token gagal.",
+			"invalid_token": "Zoo Code: Token tidak valid.",
+			"could_not_verify_token": "Zoo Code: Tidak dapat memverifikasi token."
+		},
+		"info": {
+			"connected": "Zoo Code: Berhasil terhubung! Kamu sekarang bisa menggunakan Zoo Code sebagai penyedia AI.",
+			"disconnected": "Zoo Code: Berhasil terputus."
+		}
 	}
 }

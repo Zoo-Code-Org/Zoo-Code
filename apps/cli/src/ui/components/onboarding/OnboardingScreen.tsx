@@ -13,12 +13,11 @@ export function OnboardingScreen({ onSelect }: OnboardingScreenProps) {
 			<Text bold color="cyan">
 				{ASCII_ROO}
 			</Text>
-			<Text dimColor>Welcome! How would you like to connect to an LLM provider?</Text>
+			<Text dimColor>
+				Welcome! Roo Code works without login. Choose how you want to connect to an LLM provider.
+			</Text>
 			<Select
-				options={[
-					{ label: "Connect to Roo Code Cloud", value: OnboardingProviderChoice.Roo },
-					{ label: "Bring your own API key", value: OnboardingProviderChoice.Byok },
-				]}
+				options={[{ label: "Continue with your own API key", value: OnboardingProviderChoice.Byok }]}
 				onChange={(value: string) => {
 					onSelect(value as OnboardingProviderChoice)
 				}}

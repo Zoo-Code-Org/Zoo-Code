@@ -18,17 +18,14 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { Mode, modes } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
+import { downgradeLegacyRooConfig } from "./routerRemoval"
 
 // Type-safe model migrations mapping
 type ModelMigrations = {
 	[K in ProviderName]?: Record<string, string>
 }
 
-const MODEL_MIGRATIONS: ModelMigrations = {
-	roo: {
-		"roo/code-supernova": "roo/code-supernova-1-million",
-	},
-} as const satisfies ModelMigrations
+const MODEL_MIGRATIONS: ModelMigrations = {} as const satisfies ModelMigrations
 
 export interface SyncCloudProfilesResult {
 	hasChanges: boolean
@@ -48,6 +45,7 @@ export const providerProfilesSchema = z.object({
 			consecutiveMistakeLimitMigrated: z.boolean().optional(),
 			todoListEnabledMigrated: z.boolean().optional(),
 			claudeCodeLegacySettingsMigrated: z.boolean().optional(),
+			routerProviderMigrated: z.boolean().optional(),
 		})
 		.optional(),
 })
@@ -72,6 +70,7 @@ export class ProviderSettingsManager {
 			consecutiveMistakeLimitMigrated: true, // Mark as migrated on fresh installs
 			todoListEnabledMigrated: true, // Mark as migrated on fresh installs
 			claudeCodeLegacySettingsMigrated: true, // Mark as migrated on fresh installs
+			routerProviderMigrated: true, // Mark as migrated on fresh installs
 		},
 	}
 
@@ -144,7 +143,16 @@ export class ProviderSettingsManager {
 						consecutiveMistakeLimitMigrated: false,
 						todoListEnabledMigrated: false,
 						claudeCodeLegacySettingsMigrated: false,
+						routerProviderMigrated: false,
 					} // Initialize with default values
+					isDirty = true
+				}
+
+				if (!providerProfiles.migrations.routerProviderMigrated) {
+					if (this.migrateLegacyRooProviderProfiles(providerProfiles)) {
+						isDirty = true
+					}
+					providerProfiles.migrations.routerProviderMigrated = true
 					isDirty = true
 				}
 
@@ -313,6 +321,25 @@ export class ProviderSettingsManager {
 		return migrated
 	}
 
+	private migrateLegacyRooProviderProfiles(providerProfiles: ProviderProfiles): boolean {
+		let migrated = false
+
+		for (const [name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+			const { config: downgradedConfig, migrated: didMigrate } = downgradeLegacyRooConfig(
+				apiConfig as Record<string, unknown>,
+			)
+
+			if (!didMigrate) {
+				continue
+			}
+
+			providerProfiles.apiConfigs[name] = providerSettingsWithIdSchema.parse(downgradedConfig)
+			migrated = true
+		}
+
+		return migrated
+	}
+
 	/**
 	 * Clean model ID by removing prefix before "/"
 	 */
@@ -359,15 +386,17 @@ export class ProviderSettingsManager {
 				// Preserve the existing ID if this is an update to an existing config.
 				const existingId = providerProfiles.apiConfigs[name]?.id
 				const id = config.id || existingId || this.generateId()
+				const normalizedConfig = downgradeLegacyRooConfig(config as Record<string, unknown>)
+					.config as ProviderSettingsWithId
 
 				// For active providers, filter out settings from other providers.
 				// For retired providers, preserve full profile fields (including legacy
 				// provider-specific keys) to avoid data loss — passthrough() keeps
 				// unknown keys that strict parse() would strip.
 				const filteredConfig =
-					typeof config.apiProvider === "string" && isRetiredProvider(config.apiProvider)
-						? providerSettingsWithIdSchema.passthrough().parse(config)
-						: discriminatedProviderSettingsWithIdSchema.parse(config)
+					typeof normalizedConfig.apiProvider === "string" && isRetiredProvider(normalizedConfig.apiProvider)
+						? providerSettingsWithIdSchema.passthrough().parse(normalizedConfig)
+						: discriminatedProviderSettingsWithIdSchema.parse(normalizedConfig)
 				providerProfiles.apiConfigs[name] = { ...filteredConfig, id }
 				await this.store(providerProfiles)
 				return id
@@ -645,7 +674,7 @@ export class ProviderSettingsManager {
 			return apiConfig
 		}
 
-		const config = apiConfig as Record<string, unknown>
+		const { config } = downgradeLegacyRooConfig(apiConfig as Record<string, unknown>)
 
 		const apiProvider = config.apiProvider
 

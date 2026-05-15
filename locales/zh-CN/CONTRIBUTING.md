@@ -11,9 +11,9 @@
 </sub>
 </div>
 
-# 为 Roo Code 做贡献
+# 为 Zoo Code 做贡献
 
-Roo Code 是一个由社区驱动的项目，我们非常重视每一份贡献。为了简化协作，我们采用 [“问题优先” 的方法](#问题优先方法)，这意味着所有的 [拉取请求 (PR)](#提交拉取请求) 都必须首先链接到一个 GitHub 问题。请仔细阅读本指南。
+Zoo Code 是一个由社区驱动的项目，我们非常重视每一份贡献。为了简化协作，我们采用 [“问题优先” 的方法](#问题优先方法)，这意味着所有的 [拉取请求 (PR)](#提交拉取请求) 都必须首先链接到一个 GitHub 问题。请仔细阅读本指南。
 
 ## 目录
 
@@ -52,10 +52,10 @@ Roo Code 是一个由社区驱动的项目，我们非常重视每一份贡献�
 
 在您的 PR 中提及与这些领域的一致性。
 
-### 3. 加入 Roo Code 社区
+### 3. 加入 Zoo Code 社区
 
-- **主要方式：** 加入我们的 [Discord](https://discord.gg/roocode) 并私信 **Hannes Rudolph (`hrudolph`)**。
-- **替代方式：** 经验丰富的贡献者可以通过 [GitHub 项目](https://github.com/orgs/RooCodeInc/projects/1) 直接参与。
+- **Discord：**加入我们的 [Discord](https://discord.gg/VxfP4Vx3gX)。
+- **Reddit：**加入我们的 [Reddit](https://www.reddit.com/r/ZooCode/)。
 
 ## 寻找和规划您的贡献
 
@@ -69,26 +69,26 @@ Roo Code 是一个由社区驱动的项目，我们非常重视每一份贡献�
 
 所有贡献都始于使用我们精简模板的 GitHub 问题。
 
-- **检查现有问题**：在 [GitHub 问题](https://github.com/RooCodeInc/Roo-Code/issues) 中搜索。
+- **检查现有问题**：在 [GitHub 问题](https://github.com/Zoo-Code-Org/Zoo-Code/issues) 中搜索。
 - **使用以下模板创建问题**：
     - **增强功能：** “增强请求”模板（侧重于用户利益的简单语言）。
     - **错误：** “错误报告”模板（最少的复现步骤 + 预期与实际 + 版本）。
-- **想参与其中吗？** 在问题上评论“领取”，并在[Discord](https://discord.gg/roocode)上私信 **Hannes Rudolph (`hrudolph`)** 以获得分配。分配将在帖子中确认。
+- **想参与其中吗？** 在问题上评论“领取”，并在[Discord](https://discord.gg/VxfP4Vx3gX)上联系核心团队以获得分配。分配将在帖子中确认。
 - **PR 必须链接到问题。** 未链接的 PR 可能会被关闭。
 
 ### 决定做什么
 
-- 查看 [GitHub 项目](https://github.com/orgs/RooCodeInc/projects/1) 中的“问题 [未分配]”问题。
-- 如需文档，请访问 [Roo Code 文档](https://github.com/RooCodeInc/Roo-Code-Docs)。
+- 如需查看 issue，请访问 [GitHub Issues 页面](https://github.com/Zoo-Code-Org/Zoo-Code/issues)。
+- 如需文档，请访问 [Zoo Code 文档](https://github.com/Zoo-Code-Org/Zoo-Code-Docs)。
 
 ### 报告错误
 
 - 首先检查现有的报告。
-- 使用 [“错误报告”模板](https://github.com/RooCodeInc/Roo-Code/issues/new/choose) 创建一个新错误，并提供：
+- 使用 [“错误报告”模板](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) 创建一个新错误，并提供：
     - 清晰、编号的复现步骤
     - 预期与实际结果
-    - Roo Code 版本（必需）；如果相关，还需提供 API 提供商/模型
-- **安全问题**：通过 [安全公告](https://github.com/RooCodeInc/Roo-Code/security/advisories/new) 私下报告。
+    - Zoo Code 版本（必需）；如果相关，还需提供 API 提供商/模型
+- **安全问题**：通过 [安全公告](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new) 私下报告。
 
 ## 开发和提交流程
 
@@ -97,7 +97,7 @@ Roo Code 是一个由社区驱动的项目，我们非常重视每一份贡献�
 1. **复刻和克隆：**
 
 ```
-git clone https://github.com/您的用户名/Roo-Code.git
+git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
 2. **安装依赖项：**
@@ -126,7 +126,7 @@ pnpm install
 
 ### 拉取请求政策
 
-- 必须引用一个已分配的 GitHub 问题。要获得分配：在问题上评论“领取”，并在[Discord](https://discord.gg/roocode)上私信 **Hannes Rudolph (`hrudolph`)**。分配将在帖子中确认。
+- 必须引用一个已分配的 GitHub 问题。要获得分配：在问题上评论“领取”，并在[Discord](https://discord.gg/VxfP4Vx3gX)上联系核心团队。分配将在帖子中确认。
 - 未链接的 PR 可能会被关闭。
 - PR 必须通过 CI 测试，与路线图保持一致，并有清晰的文档。
 
@@ -138,4 +138,4 @@ pnpm install
 
 ## 法律
 
-通过贡献，您同意您的贡献将根据 Apache 2.0 许可证进行许可，这与 Roo Code 的许可一致。
+通过贡献，您同意您的贡献将根据 Apache 2.0 许可证进行许可，这与 Zoo Code 的许可一致。

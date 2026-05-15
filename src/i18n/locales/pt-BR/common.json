@@ -1,10 +1,10 @@
 {
 	"input": {
-		"task_prompt": "O que você quer que o Roo faça?",
+		"task_prompt": "O que você quer que o Zoo faça?",
 		"task_placeholder": "Digite sua tarefa aqui"
 	},
 	"extension": {
-		"name": "Roo Code",
+		"name": "Zoo Code",
 		"description": "Uma equipe completa de desenvolvedores com IA em seu editor."
 	},
 	"number_format": {
@@ -116,7 +116,8 @@
 			"thinking_complete_recitation": "(Pensamento concluído, mas a saída foi bloqueada devido à verificação de recitação.)"
 		},
 		"roo": {
-			"authenticationRequired": "O provedor Roo requer autenticação na nuvem. Faça login no Roo Code Cloud."
+			"authenticationRequired": "O provedor Roo requer autenticação na nuvem. Faça login no Roo Code Cloud.",
+			"routerRemoved": "O Roo Code Router foi removido. Selecione e configure um provedor diferente."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "A chave API contém caracteres inválidos.",
@@ -149,7 +150,7 @@
 	"warnings": {
 		"no_terminal_content": "Nenhum conteúdo do terminal selecionado",
 		"missing_task_files": "Os arquivos desta tarefa estão faltando. Deseja removê-la da lista de tarefas?",
-		"auto_import_failed": "Falha ao importar automaticamente as configurações do RooCode: {{error}}"
+		"auto_import_failed": "Falha ao importar automaticamente as configurações do ZooCode: {{error}}"
 	},
 	"info": {
 		"no_changes": "Nenhuma alteração encontrada.",
@@ -158,14 +159,17 @@
 		"custom_storage_path_set": "Caminho de armazenamento personalizado definido: {{path}}",
 		"default_storage_path": "Retornado ao caminho de armazenamento padrão",
 		"settings_imported": "Configurações importadas com sucesso.",
-		"auto_import_success": "Configurações do RooCode importadas automaticamente de {{filename}}",
+		"auto_import_success": "Configurações do ZooCode importadas automaticamente de {{filename}}",
 		"share_link_copied": "Link de compartilhamento copiado para a área de transferência",
 		"image_copied_to_clipboard": "URI de dados da imagem copiada para a área de transferência",
 		"image_saved": "Imagem salva em {{path}}",
 		"organization_share_link_copied": "Link de compartilhamento da organização copiado para a área de transferência!",
 		"public_share_link_copied": "Link de compartilhamento público copiado para a área de transferência!",
 		"mode_exported": "Modo '{{mode}}' exportado com sucesso",
-		"mode_imported": "Modo importado com sucesso"
+		"mode_imported": "Modo importado com sucesso",
+		"roo": {
+			"signInUnavailable": "O login do Roo Code Cloud não está disponível no momento. Configure outro provedor para continuar."
+		}
 	},
 	"answers": {
 		"yes": "Sim",
@@ -191,8 +195,8 @@
 	},
 	"storage": {
 		"prompt_custom_path": "Digite o caminho de armazenamento personalizado para o histórico de conversas, deixe em branco para usar o local padrão",
-		"path_placeholder": "D:\\RooCodeStorage",
-		"enter_absolute_path": "Por favor, digite um caminho absoluto (ex: D:\\RooCodeStorage ou /home/user/storage)",
+		"path_placeholder": "D:\\ZooCodeStorage",
+		"enter_absolute_path": "Por favor, digite um caminho absoluto (ex: D:\\ZooCodeStorage ou /home/user/storage)",
 		"enter_valid_path": "Por favor, digite um caminho válido"
 	},
 	"settings": {
@@ -222,8 +226,8 @@
 	},
 	"mdm": {
 		"errors": {
-			"cloud_auth_required": "Sua organização requer autenticação do Roo Code Cloud. Faça login para continuar.",
-			"organization_mismatch": "Você deve estar autenticado com a conta Roo Code Cloud da sua organização.",
+			"cloud_auth_required": "Sua organização requer autenticação do Zoo Code Cloud. Faça login para continuar.",
+			"organization_mismatch": "Você deve estar autenticado com a conta Zoo Code Cloud da sua organização.",
 			"manual_url_empty": "Por favor, insira uma URL de callback válida",
 			"manual_url_no_query": "URL de callback inválida: parâmetros de consulta ausentes",
 			"manual_url_missing_params": "URL de callback inválida: parâmetros obrigatórios ausentes (code e state)",
@@ -250,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Token de autenticação inválido recebido.",
+			"token_verification_failed": "Zoo Code: Falha na verificação do token.",
+			"invalid_token": "Zoo Code: Token inválido.",
+			"could_not_verify_token": "Zoo Code: Não foi possível verificar o token."
+		},
+		"info": {
+			"connected": "Zoo Code: Conectado com sucesso! Agora você pode usar o Zoo Code como provedor de IA.",
+			"disconnected": "Zoo Code: Desconectado com sucesso."
+		}
 	}
 }

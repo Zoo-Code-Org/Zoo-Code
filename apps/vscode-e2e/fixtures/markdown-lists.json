@@ -1,0 +1,60 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "Please show me an example of an unordered list with the following items: Apple, Banana, Orange"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Here is an unordered list:\\n- Apple\\n- Banana\\n- Orange\"}",
+						"id": "call_markdown_unordered_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "Please show me a numbered list with three steps: First step, Second step, Third step"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Here is a numbered list:\\n1. First step\\n2. Second step\\n3. Third step\"}",
+						"id": "call_markdown_ordered_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "Please create a nested list with 'Main item' having two sub-items: 'Sub-item A' and 'Sub-item B'"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Here is a nested list:\\n- Main item\\n  - Sub-item A\\n  - Sub-item B\"}",
+						"id": "call_markdown_nested_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "Please create a list that has both numbered items and bullet points, mixing ordered and unordered lists"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Here is a mixed list:\\n1. First numbered item\\n- Bullet point A\\n- Bullet point B\\n2. Second numbered item\"}",
+						"id": "call_markdown_mixed_001"
+					}
+				]
+			}
+		}
+	]
+}

@@ -48,7 +48,8 @@ import {
 	CodeActionProvider,
 } from "./activate"
 import { initializeI18n } from "./i18n"
-import { flushModels, initializeModelCacheRefresh, refreshModels } from "./api/providers/fetchers/modelCache"
+import { initializeModelCacheRefresh } from "./api/providers/fetchers/modelCache"
+import { initZooCodeAuth } from "./services/zoo-code-auth"
 
 /**
  * Built using https://github.com/microsoft/vscode-webview-ui-toolkit
@@ -67,7 +68,7 @@ let settingsUpdatedHandler: (() => void) | undefined
 let userInfoHandler: ((data: { userInfo: CloudUserInfo }) => Promise<void>) | undefined
 
 /**
- * Check if we should auto-open the Roo Code sidebar after switching to a worktree.
+ * Check if we should auto-open the Zoo Code sidebar after switching to a worktree.
  * This is called during extension activation to handle the worktree auto-open flow.
  */
 async function checkWorktreeAutoOpen(
@@ -95,12 +96,12 @@ async function checkWorktreeAutoOpen(
 			// Clear the state first to prevent re-triggering
 			await context.globalState.update("worktreeAutoOpenPath", undefined)
 
-			outputChannel.appendLine(`[Worktree] Auto-opening Roo Code sidebar for worktree: ${worktreeAutoOpenPath}`)
+			outputChannel.appendLine(`[Worktree] Auto-opening Zoo Code sidebar for worktree: ${worktreeAutoOpenPath}`)
 
-			// Open the Roo Code sidebar with a slight delay to ensure UI is ready
+			// Open the Zoo Code sidebar with a slight delay to ensure UI is ready
 			setTimeout(async () => {
 				try {
-					await vscode.commands.executeCommand("roo-cline.plusButtonClicked")
+					await vscode.commands.executeCommand("zoo-code.plusButtonClicked")
 				} catch (error) {
 					outputChannel.appendLine(
 						`[Worktree] Error auto-opening sidebar: ${error instanceof Error ? error.message : String(error)}`,
@@ -158,6 +159,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize OpenAI Codex OAuth manager for ChatGPT subscription-based access.
 	openAiCodexOAuthManager.initialize(context, (message) => outputChannel.appendLine(message))
 
+	// Initialize Zoo Code auth service for extension session token management.
+	await initZooCodeAuth(context)
+
 	// Get default commands from configuration.
 	const defaultCommands = vscode.workspace.getConfiguration(Package.name).get<string[]>("allowedCommands") || []
 
@@ -197,61 +201,8 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize Roo Code Cloud service.
 	const postStateListener = () => ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
 
-	authStateChangedHandler = async (data: { state: AuthState; previousState: AuthState }) => {
+	authStateChangedHandler = async (_data: { state: AuthState; previousState: AuthState }) => {
 		postStateListener()
-
-		// Handle Roo models cache based on auth state (ROO-202)
-		const handleRooModelsCache = async () => {
-			try {
-				if (data.state === "active-session") {
-					// Refresh with auth token to get authenticated models
-					const sessionToken = CloudService.hasInstance()
-						? CloudService.instance.authService?.getSessionToken()
-						: undefined
-					await refreshModels({
-						provider: "roo",
-						baseUrl: process.env.ROO_CODE_PROVIDER_URL ?? "https://api.roocode.com/proxy",
-						apiKey: sessionToken,
-					})
-				} else {
-					// Flush without refresh on logout
-					await flushModels({ provider: "roo" }, false)
-				}
-			} catch (error) {
-				cloudLogger(
-					`[authStateChangedHandler] Failed to handle Roo models cache: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-		}
-
-		if (data.state === "active-session" || data.state === "logged-out") {
-			await handleRooModelsCache()
-
-			// Apply stored provider model to API configuration if present
-			if (data.state === "active-session") {
-				try {
-					const storedModel = context.globalState.get<string>("roo-provider-model")
-					if (storedModel) {
-						cloudLogger(`[authStateChangedHandler] Applying stored provider model: ${storedModel}`)
-						// Get the current API configuration name
-						const currentConfigName =
-							provider.contextProxy.getGlobalState("currentApiConfigName") || "default"
-						// Update it with the stored model using upsertProviderProfile
-						await provider.upsertProviderProfile(currentConfigName, {
-							apiProvider: "roo",
-							apiModelId: storedModel,
-						})
-						// Clear the stored model after applying
-						await context.globalState.update("roo-provider-model", undefined)
-						cloudLogger(`[authStateChangedHandler] Applied and cleared stored provider model`)
-					}
-				} catch (error) {
-					cloudLogger(
-						`[authStateChangedHandler] Failed to apply stored provider model: ${error instanceof Error ? error.message : String(error)}`,
-					)
-				}
-			}
-		}
 	}
 
 	settingsUpdatedHandler = async () => {
@@ -262,31 +213,19 @@ export async function activate(context: vscode.ExtensionContext) {
 		postStateListener()
 	}
 
-	cloudService = await CloudService.createInstance(context, cloudLogger, {
-		"auth-state-changed": authStateChangedHandler,
-		"settings-updated": settingsUpdatedHandler,
-		"user-info": userInfoHandler,
-	})
-
 	try {
-		if (cloudService.telemetryClient) {
-			TelemetryService.instance.register(cloudService.telemetryClient)
-		}
-	} catch (error) {
-		outputChannel.appendLine(
-			`[CloudService] Failed to register TelemetryClient: ${error instanceof Error ? error.message : String(error)}`,
-		)
-	}
+		cloudService = await CloudService.createInstance(context, cloudLogger, {
+			"auth-state-changed": authStateChangedHandler,
+			"settings-updated": settingsUpdatedHandler,
+			"user-info": userInfoHandler,
+		})
 
-	// Add to subscriptions for proper cleanup on deactivate.
-	context.subscriptions.push(cloudService)
-
-	// Trigger initial cloud profile sync now that CloudService is ready.
-	try {
-		await provider.initializeCloudProfileSyncWhenReady()
+		// Add to subscriptions for proper cleanup on deactivate.
+		context.subscriptions.push(cloudService)
 	} catch (error) {
+		cloudService = undefined
 		outputChannel.appendLine(
-			`[CloudService] Failed to initialize cloud profile sync: ${error instanceof Error ? error.message : String(error)}`,
+			`[CloudService] Initialization failed; continuing without cloud startup dependencies: ${error instanceof Error ? error.message : String(error)}`,
 		)
 	}
 
