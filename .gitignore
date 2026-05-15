@@ -1,0 +1,57 @@
+.pnpm-store
+dist
+out
+out-*
+node_modules
+package-lock.json
+coverage/
+mock/
+
+.DS_Store
+
+# IDEs
+.idea
+
+# Builds
+bin/
+*.vsix
+
+# Local prompts and rules
+/local-prompts
+AGENTS.local.md
+
+# Test environment
+.test_env
+.vscode-test/
+
+# Docs
+docs/_site/
+
+# Dotenv
+.env
+.env.*
+!.env.*.sample
+
+# Logging
+logs
+*.log
+
+# Vite development
+.vite-port
+
+# Turborepo
+.turbo
+
+# IntelliJ and Qodo plugin folders
+.idea/
+.qodo/
+.vercel
+.roo/mcp.json
+
+# Qdrant
+qdrant_storage/
+
+# Architect plans
+plans/
+
+roo-cli-*.tar.gz*

@@ -1,0 +1,81 @@
+name: Code QA Roo Code
+
+on:
+    workflow_dispatch:
+    push:
+        branches: [main]
+    pull_request:
+        types: [opened, reopened, ready_for_review, synchronize]
+
+jobs:
+    check-translations:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+            - name: Verify all translations are complete
+              run: node scripts/find-missing-translations.js
+
+    knip:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+            - name: Run knip checks
+              run: pnpm knip
+
+    compile:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+            - name: Lint
+              run: pnpm lint
+            - name: Check types
+              run: pnpm check-types
+
+    unit-test:
+        name: platform-unit-test (${{ matrix.name }})
+        runs-on: ${{ matrix.os }}
+        strategy:
+            matrix:
+                include:
+                    - os: ubuntu-latest
+                      name: ubuntu-latest
+                      codecov-flag: ubuntu
+                    - os: windows-latest
+                      name: windows-latest
+                      codecov-flag: windows
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+            - name: Cache Turbo
+              uses: actions/cache@v4
+              with:
+                  path: .turbo/cache
+                  key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
+                  restore-keys: |
+                      ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-
+                      ${{ runner.os }}-turbo-
+            - name: Run unit tests with coverage
+              run: pnpm test:coverage
+            - name: Upload coverage to Codecov
+              uses: codecov/codecov-action@v4
+              with:
+                  files: >-
+                      src/coverage/lcov.info,
+                      webview-ui/coverage/lcov.info,
+                      packages/core/coverage/lcov.info,
+                      packages/cloud/coverage/lcov.info,
+                      packages/telemetry/coverage/lcov.info,
+                      apps/cli/coverage/lcov.info
+                  flags: ${{ matrix.codecov-flag }}
+                  token: ${{ secrets.CODECOV_TOKEN }}

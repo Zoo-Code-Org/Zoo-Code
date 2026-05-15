@@ -1,0 +1,52 @@
+import posthog from "posthog-js"
+
+import type { TelemetrySetting } from "@roo-code/types"
+
+class TelemetryClient {
+	private static instance: TelemetryClient
+	private static telemetryEnabled: boolean = false
+
+	public updateTelemetryState(telemetrySetting: TelemetrySetting, apiKey?: string, distinctId?: string) {
+		posthog.reset()
+
+		if (telemetrySetting !== "disabled" && apiKey && distinctId) {
+			TelemetryClient.telemetryEnabled = true
+
+			posthog.init(apiKey, {
+				api_host: "https://us.i.posthog.com",
+				persistence: "localStorage",
+				loaded: () => posthog.identify(distinctId),
+				capture_pageview: false,
+				capture_pageleave: false,
+				autocapture: false,
+			})
+		} else {
+			TelemetryClient.telemetryEnabled = false
+		}
+	}
+
+	public static getInstance(): TelemetryClient {
+		if (!TelemetryClient.instance) {
+			TelemetryClient.instance = new TelemetryClient()
+		}
+
+		return TelemetryClient.instance
+	}
+
+	public capture(eventName: string, properties?: Record<string, any>) {
+		if (TelemetryClient.telemetryEnabled) {
+			try {
+				posthog.capture(eventName, {
+					appName: process.env.PKG_NAME,
+					appVersion: process.env.PKG_VERSION,
+					releaseChannel: process.env.PKG_RELEASE_CHANNEL || "stable",
+					...properties,
+				})
+			} catch (_error) {
+				// Silently fail if there's an error capturing an event.
+			}
+		}
+	}
+}
+
+export const telemetryClient = TelemetryClient.getInstance()

@@ -1,0 +1,492 @@
+{
+	"greeting": "Benvingut a Zoo Code!",
+	"task": {
+		"title": "Tasca",
+		"expand": "Expandir tasca",
+		"collapse": "Replegar tasca",
+		"seeMore": "Veure més",
+		"seeLess": "Veure menys",
+		"tokens": "Tokens",
+		"cache": "Caché",
+		"apiCost": "Cost d'API",
+		"size": "Mida",
+		"contextWindow": "Finestra de context",
+		"closeAndStart": "Tancar tasca i iniciar-ne una de nova",
+		"export": "Exportar historial de tasques",
+		"delete": "Eliminar tasca (Shift + Clic per ometre confirmació)",
+		"condenseContext": "Condensar context de forma intel·ligent",
+		"openApiHistory": "Obrir historial d'API",
+		"openUiHistory": "Obrir historial d'UI",
+		"backToParentTask": "Tasca principal"
+	},
+	"unpin": "Desfixar",
+	"pin": "Fixar",
+	"fileChangesInConversation": {
+		"header": "{{count}} fitxer(s) canviat(s) en aquesta conversa"
+	},
+	"tokenProgress": {
+		"availableSpace": "Espai disponible: {{amount}} tokens",
+		"tokensUsed": "Tokens utilitzats: {{used}} de {{total}}",
+		"reservedForResponse": "Reservat per a resposta del model: {{amount}} tokens",
+		"tokensUsedLabel": "Tokens utilitzats",
+		"reservedForResponseLabel": "Reservat per a resposta",
+		"availableSpaceLabel": "Espai disponible"
+	},
+	"retry": {
+		"title": "Tornar a intentar",
+		"tooltip": "Torna a provar l'operació"
+	},
+	"startNewTask": {
+		"title": "Començar una nova tasca",
+		"tooltip": "Comença una nova tasca"
+	},
+	"proceedAnyways": {
+		"title": "Continuar de totes maneres",
+		"tooltip": "Continua mentre s'executa l'ordre"
+	},
+	"save": {
+		"title": "Desar",
+		"tooltip": "Desa els canvis del missatge"
+	},
+	"reject": {
+		"title": "Rebutjar",
+		"tooltip": "Rebutja aquesta acció"
+	},
+	"completeSubtaskAndReturn": "Completar la subtasca i tornar",
+	"approve": {
+		"title": "Aprovar",
+		"tooltip": "Aprova aquesta acció"
+	},
+	"runCommand": {
+		"title": "Ordre",
+		"tooltip": "Executa aquesta ordre"
+	},
+	"proceedWhileRunning": {
+		"title": "Continuar mentre s'executa",
+		"tooltip": "Continua malgrat els advertiments"
+	},
+	"killCommand": {
+		"title": "Atura l'ordre",
+		"tooltip": "Atura l'ordre actual"
+	},
+	"resumeTask": {
+		"title": "Reprendre la tasca",
+		"tooltip": "Repren la tasca actual"
+	},
+	"terminate": {
+		"title": "Finalitzar",
+		"tooltip": "Finalitza la tasca actual"
+	},
+	"stop": {
+		"title": "Atura",
+		"tooltip": "Atura la tasca actual"
+	},
+	"cancel": {
+		"title": "Cancel·lar",
+		"tooltip": "Cancel·la l'operació actual"
+	},
+	"enqueueMessage": "Afegeix el missatge a la cua (s'enviarà quan acabi la tasca actual)",
+	"scrollToBottom": "Desplaça't al final del xat",
+	"scrollToLatestCheckpoint": "Desplaça't al checkpoint anterior",
+	"about": "Zoo Code és tot un equip de desenvolupament d'IA al teu editor.",
+	"docs": "Consulta els nostres <DocsLink>documents</DocsLink> per a més informació.",
+	"onboarding": "La teva llista de tasques en aquest espai de treball està buida.",
+	"rooTips": {
+		"customizableModes": {
+			"title": "Modes personalitzables",
+			"description": "Persones especialitzades que es mantenen en la tasca i compleixen."
+		},
+		"modelAgnostic": {
+			"title": "Porta el teu propi model",
+			"description": "Fes servir la teva pròpia clau de proveïdor o fins i tot executa inferència local — sense sobrepreus, sense bloquejos, sense restriccions"
+		}
+	},
+	"selectMode": "Selecciona el mode d'interacció",
+	"selectApiConfig": "Seleccioneu la configuració de l'API",
+	"lockApiConfigAcrossModes": "Bloqueja la configuració de l'API a tots els modes en aquest espai de treball",
+	"unlockApiConfigAcrossModes": "La configuració de l'API està bloquejada a tots els modes en aquest espai de treball (fes clic per desbloquejar)",
+	"enhancePrompt": "Millora la sol·licitud amb context addicional",
+	"addImages": "Afegeix imatges al missatge",
+	"sendMessage": "Envia el missatge",
+	"pressToSend": "Prem {{keyCombination}} per enviar",
+	"stopTts": "Atura la síntesi de veu",
+	"typeMessage": "Escriu un missatge...",
+	"typeTask": "Escriu la teva tasca aquí...",
+	"addContext": "@ per afegir context, / per a comandes",
+	"dragFiles": "manté premut shift per arrossegar fitxers",
+	"dragFilesImages": "manté premut shift per arrossegar fitxers/imatges",
+	"enhancePromptDescription": "El botó 'Millora la sol·licitud' ajuda a millorar la teva sol·licitud proporcionant context addicional, aclariments o reformulacions. Prova d'escriure una sol·licitud aquí i fes clic al botó de nou per veure com funciona.",
+	"modeSelector": {
+		"title": "Modes",
+		"marketplace": "Marketplace de Modes",
+		"settings": "Configuració de Modes",
+		"description": "Personalitats especialitzades que adapten el comportament de Zoo.",
+		"searchPlaceholder": "Cerca modes...",
+		"noResults": "No s'han trobat resultats"
+	},
+	"errorReadingFile": "Error en llegir el fitxer",
+	"noValidImages": "No s'ha processat cap imatge vàlida",
+	"separator": "Separador",
+	"edit": "Edita...",
+	"forNextMode": "per al següent mode",
+	"forPreviousMode": "per al mode anterior",
+	"error": "Error",
+	"diffError": {
+		"title": "Edició fallida"
+	},
+	"troubleMessage": "Zoo està tenint problemes...",
+	"apiRequest": {
+		"title": "Sol·licitud API",
+		"failed": "Sol·licitud API ha fallat",
+		"streaming": "Sol·licitud API...",
+		"cancelled": "Sol·licitud API cancel·lada",
+		"streamingFailed": "Transmissió API ha fallat",
+		"rateLimitWait": "Limitació de taxa",
+		"errorTitle": "Error de proveïdor {{code}}",
+		"errorMessage": {
+			"400": "El proveïdor no ha pogut processar la sol·licitud tal com es va fer. Interromp la tasca i prova una abordatge diferent.",
+			"401": "No s'ha pogut autenticar amb el proveïdor. Si us plau, verifica la teva configuració de clau API.",
+			"402": "Sembla que se t'han acabat els fons/crèdits al teu compte. Vés al teu proveïdor i afegeix més per continuar.",
+			"403": "No autoritzat. La teva clau API és vàlida, però el proveïdor ha rebutjat completar aquesta sol·licitud.",
+			"429": "Massa sol·licituds. Estàs sent limitat pel proveïdor. Si us plau espera una mica abans de la teva propera crida API.",
+			"500": "Error del servidor del proveïdor. Quelcom va malament del costat del proveïdor, no hi ha res de malament amb la teva sol·licitud.",
+			"docs": "Documentació",
+			"goToSettings": "Configuració",
+			"unknown": "Error API desconegut. Si us plau, contacta amb el suport de Zoo Code.",
+			"connection": "Error de connexió. Assegureu-vos que teniu una connexió a Internet funcional.",
+			"claudeCodeNotAuthenticated": "Has d'iniciar sessió per utilitzar Claude Code. Vés a Configuració i fes clic a \"Iniciar sessió a Claude Code\" per autenticar-te."
+		}
+	},
+	"checkpoint": {
+		"regular": "Punt de control",
+		"initializingWarning": "Encara s'està inicialitzant el punt de control... Si això triga massa, pots desactivar els punts de control a la <settingsLink>configuració</settingsLink> i reiniciar la teva tasca.",
+		"menu": {
+			"viewDiff": "Veure diferències",
+			"more": "Més opcions",
+			"viewDiffFromInit": "Veure tots els canvis",
+			"viewDiffWithCurrent": "Veure els canvis des d'aquest punt de control",
+			"restore": "Restaurar punt de control",
+			"restoreFiles": "Restaurar arxius",
+			"restoreFilesDescription": "Restaura els arxius del teu projecte a una instantània presa en aquest punt.",
+			"restoreFilesAndTask": "Restaurar arxius i tasca",
+			"confirm": "Confirmar",
+			"cancel": "Cancel·lar",
+			"cannotUndo": "Aquesta acció no es pot desfer.",
+			"restoreFilesAndTaskDescription": "Restaura els arxius del teu projecte a una instantània presa en aquest punt i elimina tots els missatges posteriors a aquest punt."
+		},
+		"current": "Actual"
+	},
+	"instructions": {
+		"wantsToFetch": "Roo vol obtenir instruccions detallades per ajudar amb la tasca actual."
+	},
+	"fileOperations": {
+		"wantsToRead": "Zoo vol llegir aquest fitxer",
+		"wantsToReadOutsideWorkspace": "Zoo vol llegir aquest fitxer fora de l'espai de treball",
+		"didRead": "Zoo ha llegit aquest fitxer",
+		"wantsToEdit": "Zoo vol editar aquest fitxer",
+		"wantsToEditOutsideWorkspace": "Zoo vol editar aquest fitxer fora de l'espai de treball",
+		"wantsToEditProtected": "Zoo vol editar un fitxer de configuració protegit",
+		"wantsToCreate": "Zoo vol crear un nou fitxer",
+		"wantsToSearchReplace": "Roo vol realitzar cerca i substitució en aquest fitxer",
+		"didSearchReplace": "Roo ha realitzat cerca i substitució en aquest fitxer",
+		"wantsToInsert": "Zoo vol inserir contingut en aquest fitxer",
+		"wantsToInsertWithLineNumber": "Zoo vol inserir contingut a la línia {{lineNumber}} d'aquest fitxer",
+		"wantsToInsertAtEnd": "Zoo vol afegir contingut al final d'aquest fitxer",
+		"wantsToReadAndXMore": "En Zoo vol llegir aquest fitxer i {{count}} més",
+		"wantsToReadMultiple": "Zoo vol llegir diversos fitxers",
+		"wantsToApplyBatchChanges": "Zoo vol aplicar canvis a múltiples fitxers",
+		"wantsToGenerateImage": "Zoo vol generar una imatge",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo vol generar una imatge fora de l'espai de treball",
+		"wantsToGenerateImageProtected": "Zoo vol generar una imatge en una ubicació protegida",
+		"didGenerateImage": "Zoo ha generat una imatge"
+	},
+	"directoryOperations": {
+		"wantsToViewTopLevel": "Zoo vol veure els fitxers de nivell superior en aquest directori",
+		"didViewTopLevel": "Zoo ha vist els fitxers de nivell superior en aquest directori",
+		"wantsToViewRecursive": "Zoo vol veure recursivament tots els fitxers en aquest directori",
+		"didViewRecursive": "Zoo ha vist recursivament tots els fitxers en aquest directori",
+		"wantsToSearch": "Zoo vol cercar en aquest directori <code>{{regex}}</code>",
+		"didSearch": "Zoo ha cercat en aquest directori <code>{{regex}}</code>",
+		"wantsToSearchOutsideWorkspace": "Zoo vol cercar en aquest directori (fora de l'espai de treball) <code>{{regex}}</code>",
+		"didSearchOutsideWorkspace": "Zoo ha cercat en aquest directori (fora de l'espai de treball) <code>{{regex}}</code>",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo vol veure els fitxers de nivell superior en aquest directori (fora de l'espai de treball)",
+		"didViewTopLevelOutsideWorkspace": "Zoo ha vist els fitxers de nivell superior en aquest directori (fora de l'espai de treball)",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo vol veure recursivament tots els fitxers en aquest directori (fora de l'espai de treball)",
+		"didViewRecursiveOutsideWorkspace": "Zoo ha vist recursivament tots els fitxers en aquest directori (fora de l'espai de treball)",
+		"wantsToViewMultipleDirectories": "Zoo vol veure diversos directoris"
+	},
+	"commandOutput": "Sortida de la comanda",
+	"commandExecution": {
+		"abort": "Avortar",
+		"running": "En execució",
+		"pid": "PID: {{pid}}",
+		"exitStatus": "S'ha sortit amb l'estat {{exitCode}}",
+		"manageCommands": "Comandes aprovades automàticament",
+		"addToAllowed": "Afegeix a la llista permesa",
+		"removeFromAllowed": "Elimina de la llista permesa",
+		"addToDenied": "Afegeix a la llista denegada",
+		"removeFromDenied": "Elimina de la llista denegada",
+		"abortCommand": "Interrompre l'execució de l'ordre",
+		"expandOutput": "Amplia la sortida",
+		"collapseOutput": "Redueix la sortida",
+		"expandManagement": "Amplia la secció de gestió de comandaments",
+		"collapseManagement": "Redueix la secció de gestió de comandaments"
+	},
+	"response": "Resposta",
+	"arguments": "Arguments",
+	"text": {
+		"rooSaid": "En Zoo ha dit"
+	},
+	"feedback": {
+		"youSaid": "Has dit"
+	},
+	"mcp": {
+		"wantsToUseTool": "Zoo vol utilitzar una eina al servidor MCP {{serverName}}",
+		"wantsToAccessResource": "Zoo vol accedir a un recurs al servidor MCP {{serverName}}"
+	},
+	"modes": {
+		"wantsToSwitch": "Zoo vol canviar a mode <code>{{mode}}</code>",
+		"wantsToSwitchWithReason": "Zoo vol canviar a mode <code>{{mode}}</code> perquè: {{reason}}",
+		"didSwitch": "Zoo ha canviat a mode <code>{{mode}}</code>",
+		"didSwitchWithReason": "Zoo ha canviat a mode <code>{{mode}}</code> perquè: {{reason}}"
+	},
+	"subtasks": {
+		"wantsToCreate": "Zoo vol crear una nova subtasca en mode <code>{{mode}}</code>",
+		"wantsToFinish": "Zoo vol finalitzar aquesta subtasca",
+		"newTaskContent": "Instruccions de la subtasca",
+		"completionContent": "Subtasca completada",
+		"resultContent": "Resultats de la subtasca",
+		"defaultResult": "Si us plau, continua amb la següent tasca.",
+		"completionInstructions": "Subtasca completada! Pots revisar els resultats i suggerir correccions o següents passos. Si tot sembla correcte, confirma per tornar el resultat a la tasca principal.",
+		"goToSubtask": "Veure tasca"
+	},
+	"questions": {
+		"hasQuestion": "Zoo té una pregunta"
+	},
+	"taskCompleted": "Tasca completada",
+	"modelResponseIncomplete": "Resposta del model incompleta",
+	"modelResponseErrors": {
+		"noToolsUsed": "El model no ha utilitzat cap eina en la seva resposta. Això sol passar quan el model només proporciona text/raonament sense cridar les eines necessàries per completar la tasca.",
+		"noToolsUsedDetails": "El model ha proporcionat text/raonament però no ha cridat cap de les eines necessàries. Això sol indicar que el model ha entès malament la tasca o té dificultats per determinar quina eina utilitzar. El model ha estat sol·licitat automàticament per tornar-ho a provar amb l'ús adequat de les eines.",
+		"noAssistantMessages": "El model no ha proporcionat cap contingut de resposta. Això pot indicar un problema amb l'API o la sortida del model.",
+		"noAssistantMessagesDetails": "El model de llenguatge ha retornat una resposta buida sense text ni crides a eines. Això pot passar a causa de problemes d'API, limitació de velocitat o problemes específics del model. El model ha estat sol·licitat automàticament per tornar-ho a provar."
+	},
+	"errorDetails": {
+		"link": "Details",
+		"title": "Detalls de l'error",
+		"copyToClipboard": "Copiar al porta-retalls",
+		"copied": "Copiat!",
+		"diagnostics": "Obtenir informació d'error detallada",
+		"proxyProvider": "Sembla que estàs utilitzant un proveïdor basat en proxy. Assegura't de comprovar els seus registres i de garantir que no estàs reescrivint les sol·licituds de Zoo."
+	},
+	"powershell": {
+		"issues": "Sembla que estàs tenint problemes amb Windows PowerShell, si us plau consulta aquesta documentació per a més informació."
+	},
+	"autoApprove": {
+		"tooltipManage": "Gestiona la configuració d'aprovació automàtica",
+		"tooltipStatus": "Aprovació automàtica activada per a: {{toggles}}",
+		"title": "Aprovació automàtica",
+		"toggle": "Commuta l'aprovació automàtica",
+		"all": "Tot",
+		"none": "Cap",
+		"description": "Executa aquestes accions sense demanar permís. Activa-ho només per a accions de confiança.",
+		"selectOptionsFirst": "Selecciona almenys una opció a continuació per activar l'aprovació automàtica",
+		"toggleAriaLabel": "Commuta l'aprovació automàtica",
+		"disabledAriaLabel": "Aprovació automàtica desactivada - selecciona primer les opcions",
+		"triggerLabelOff": "Aprovació automàtica desactivada",
+		"triggerLabelOffShort": "Off",
+		"triggerLabel_zero": "0 aprovacions automàtiques",
+		"triggerLabel_one": "1 aprovació automàtica",
+		"triggerLabel_other": "{{count}} aprovacions automàtiques",
+		"triggerLabelAll": "BRRR"
+	},
+	"reasoning": {
+		"thinking": "Pensant",
+		"seconds": "{{count}}s"
+	},
+	"contextManagement": {
+		"tokens": "tokens",
+		"condensation": {
+			"title": "Context condensat",
+			"inProgress": "Condensant context...",
+			"errorHeader": "Error en condensar el context"
+		},
+		"truncation": {
+			"title": "Context truncat",
+			"inProgress": "Truncant context...",
+			"messagesRemoved": "{{count}} missatge eliminat",
+			"messagesRemoved_other": "{{count}} missatges eliminats",
+			"description": "S'han eliminat missatges més antics de la conversa per mantenir-se dins del límit de la finestra de context. Aquest és un enfocament ràpid però menys conservador del context en comparació amb la condensació."
+		}
+	},
+	"skill": {
+		"wantsToLoad": "En Zoo vol carregar una habilitat",
+		"didLoad": "En Zoo ha carregat una habilitat"
+	},
+	"followUpSuggest": {
+		"copyToInput": "Copiar a l'entrada (o Shift + clic)",
+		"timerPrefix": "Aprovació automàtica habilitada. Seleccionant en {{seconds}}s…"
+	},
+	"announcement": {
+		"title": "S'ha publicat Zoo Code {{version}}",
+		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
+		"handoff": {
+			"heading": "Roo Code ha tornat! Ara com a connector mantingut per la comunitat anomenat Zoo Code!!",
+			"description": "Per si no ho havies seguit, l'equip de Roo Code ha anunciat fa poc que deixa de desenvolupar Roo Code i n'arxiva la feina feta. Però no pateixis: la comunitat ha fet un pas endavant per continuar el llegat de Roo Code amb un nom nou i una llar nova! Ja no som només un sol \"Roo\", som una comunitat, un \"Zoo\" si vols. Zoo Code és un connector mantingut per la comunitat que reprèn el camí on Roo Code ho va deixar, i ens comprometem a mantenir viu l'esperit de Roo mentre també hi incorporem funcions i millores noves. Volem donar un enorme agraïment a tot l'equip de Roo Code per la feina increïble que han fet i per haver creat una eina tan extraordinària per als desenvolupadors. Ens fa molta il·lusió continuar construint sobre la seva base i veure fins on porta la comunitat Zoo Code en el futur!",
+			"readMore": "Mira la nova pàgina principal de Zoo Code i llegeix l'anunci complet"
+		},
+		"release": {
+			"heading": "Què hi ha de nou:",
+			"gpt55": "GPT-5.5 via OpenAI Codex: S'ha afegit suport per a GPT-5.5 al proveïdor OpenAI Codex perquè puguis fer servir el model més recent directament des de Zoo Code.",
+			"claudeOpus47": "Claude Opus 4.7 a Vertex AI: S'ha afegit Claude Opus 4.7 al proveïdor Vertex AI, el nou model de raonament emblemàtic d'Anthropic.",
+			"checkpointNav": "Navegació per Checkpoints Anteriors: S'han afegit controls al xat per tornar enrere pels checkpoints previs, amb suport complet d'i18n."
+		},
+		"cloudAgents": {
+			"heading": "Novetats al núvol:",
+			"specialized": "Presentem <bold>Explainer</bold>, <bold>Planner</bold> i <bold>Coder</bold> - tres agents al núvol especialitzats per millorar els teus fluxos de treball.",
+			"description": "Els agents treballen junts al núvol i es poden activar des del web o mitjançant Slack.",
+			"tryButton": "Prova els Agents al Núvol"
+		}
+	},
+	"costs": {
+		"totalWithSubtasks": "Cost total (subtasques incloses): ${{cost}}",
+		"total": "Cost total: ${{cost}}",
+		"includesSubtasks": "Inclou els costos de les subtasques"
+	},
+	"codeblock": {
+		"tooltips": {
+			"expand": "Expandir bloc de codi",
+			"collapse": "Contraure bloc de codi",
+			"copy_code": "Copiar codi"
+		}
+	},
+	"profileViolationWarning": "El perfil actual no és compatible amb la configuració de la teva organització",
+	"shellIntegration": {
+		"title": "Advertència d'execució d'ordres",
+		"description": "La teva ordre s'està executant sense la integració de shell del terminal VSCode. Per suprimir aquest advertiment, pots desactivar la integració de shell a la secció <strong>Terminal</strong> de la <settingsLink>configuració de Zoo Code</settingsLink> o solucionar problemes d'integració del terminal VSCode utilitzant l'enllaç de sota.",
+		"troubleshooting": "Fes clic aquí per a la documentació d'integració de shell."
+	},
+	"ask": {
+		"autoApprovedRequestLimitReached": {
+			"title": "S'ha arribat al límit de sol·licituds aprovades automàticament",
+			"description": "Zoo ha arribat al límit aprovat automàticament de {{count}} sol·licitud(s) d'API. Vols reiniciar el comptador i continuar amb la tasca?",
+			"button": "Reiniciar i continuar"
+		},
+		"autoApprovedCostLimitReached": {
+			"title": "S'ha arribat al límit de cost d'aprovació automàtica",
+			"button": "Restableix i continua",
+			"description": "Zoo ha arribat al límit de cost aprovat automàticament de ${{count}}. Vols restablir el cost i continuar amb la tasca?"
+		}
+	},
+	"codebaseSearch": {
+		"wantsToSearch": "Zoo vol cercar a la base de codi <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo vol cercar a la base de codi <code>{{query}}</code> a <code>{{path}}</code>",
+		"didSearch_one": "S'ha trobat 1 resultat",
+		"didSearch_other": "S'han trobat {{count}} resultats",
+		"resultTooltip": "Puntuació de similitud: {{score}} (fes clic per obrir el fitxer)"
+	},
+	"read-batch": {
+		"approve": {
+			"title": "Aprovar tot"
+		},
+		"deny": {
+			"title": "Denegar tot"
+		}
+	},
+	"list-batch": {
+		"approve": {
+			"title": "Aprovar tot"
+		},
+		"deny": {
+			"title": "Denegar tot"
+		}
+	},
+	"edit-batch": {
+		"approve": {
+			"title": "Desar tot"
+		},
+		"deny": {
+			"title": "Denegar tot"
+		}
+	},
+	"indexingStatus": {
+		"ready": "Índex preparat",
+		"indexing": "Indexant {{percentage}}%",
+		"indexed": "Indexat",
+		"error": "Error d'índex",
+		"status": "Estat de l'índex",
+		"stopping": "Aturant la indexació..."
+	},
+	"versionIndicator": {
+		"ariaLabel": "Versió {{version}} - Feu clic per veure les notes de llançament"
+	},
+	"rooCloudCTA": {
+		"title": "Zoo Code Cloud està evolucionant!",
+		"description": "Executa agents remots al núvol, accedeix a les teves tasques des de qualsevol lloc, col·labora amb altres i molt més.",
+		"joinWaitlist": "Registra't per rebre les últimes actualitzacions."
+	},
+	"editMessage": {
+		"placeholder": "Edita el teu missatge..."
+	},
+	"command": {
+		"triggerDescription": "Activa la comanda {{name}}"
+	},
+	"slashCommands": {
+		"tooltip": "Gestionar ordres de barra",
+		"title": "Ordres de Barra",
+		"description": "Utilitza ordres de barra integrades o crea personalitzades per accedir ràpidament a indicacions i fluxos de treball utilitzats amb freqüència. <DocsLink>Documentació</DocsLink>",
+		"manageCommands": "Gestiona les ordres de barra a la configuració",
+		"builtInCommands": "Ordres Integrades",
+		"globalCommands": "Ordres Globals",
+		"workspaceCommands": "Ordres de l'Espai de Treball",
+		"globalCommand": "Ordre global",
+		"editCommand": "Editar ordre",
+		"deleteCommand": "Eliminar ordre",
+		"newGlobalCommandPlaceholder": "Nova ordre global...",
+		"newWorkspaceCommandPlaceholder": "Nova ordre de l'espai de treball...",
+		"deleteDialog": {
+			"title": "Eliminar Ordre",
+			"description": "Estàs segur que vols eliminar l'ordre \"{{name}}\"? Aquesta acció no es pot desfer.",
+			"cancel": "Cancel·lar",
+			"confirm": "Eliminar"
+		}
+	},
+	"queuedMessages": {
+		"title": "Missatges en cua",
+		"clickToEdit": "Feu clic per editar el missatge"
+	},
+	"slashCommand": {
+		"wantsToRun": "Zoo vol executar una comanda slash",
+		"didRun": "Zoo ha executat una comanda slash"
+	},
+	"contextMenu": {
+		"noResults": "Sense resultats",
+		"problems": "Problemes",
+		"terminal": "Terminal",
+		"url": "Enganxa la URL per obtenir-ne el contingut"
+	},
+	"todo": {
+		"partial": "{{completed}} de {{total}} tasques pendents fetes",
+		"complete": "{{total}} tasques pendents fetes",
+		"updated": "S'ha actualitzat la llista de tasques pendents",
+		"completed": "Completat",
+		"started": "Iniciat"
+	},
+	"tooManyTools": {
+		"title": "Massa eines habilitades",
+		"toolsPart_one": "{{count}} eina",
+		"toolsPart_other": "{{count}} eines",
+		"serversPart_one": "{{count}} servidor MCP",
+		"serversPart_other": "{{count}} servidors MCP",
+		"messageTemplate": "Tens {{tools}} habilitades via {{servers}}. Un nombre tant alt pot confondre el model i portar a errors. Intenta mantenir-lo per sota de {{threshold}}.",
+		"openMcpSettings": "Obrir configuració de MCP"
+	},
+	"readCommandOutput": {
+		"title": "Zoo read command output"
+	},
+	"retiredProvider": {
+		"title": "Proveïdor ja no compatible",
+		"message": "Aquest proveïdor ja no està disponible. Selecciona un proveïdor compatible per continuar.",
+		"openSettings": "Obrir configuració"
+	}
+}

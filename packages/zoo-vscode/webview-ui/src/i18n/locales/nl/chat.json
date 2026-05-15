@@ -1,0 +1,492 @@
+{
+	"greeting": "Welkom bij Zoo Code!",
+	"task": {
+		"title": "Taak",
+		"expand": "Taak uitvouwen",
+		"collapse": "Taak samenvouwen",
+		"seeMore": "Meer weergeven",
+		"seeLess": "Minder weergeven",
+		"tokens": "Tokens",
+		"cache": "Cache",
+		"apiCost": "API-kosten",
+		"size": "Grootte",
+		"contextWindow": "Contextlengte",
+		"closeAndStart": "Taak sluiten en een nieuwe starten",
+		"export": "Taakgeschiedenis exporteren",
+		"delete": "Taak verwijderen (Shift + Klik om bevestiging over te slaan)",
+		"condenseContext": "Context intelligent samenvatten",
+		"openApiHistory": "API-geschiedenis openen",
+		"openUiHistory": "UI-geschiedenis openen",
+		"backToParentTask": "Bovenliggende taak"
+	},
+	"unpin": "Losmaken",
+	"pin": "Vastmaken",
+	"fileChangesInConversation": {
+		"header": "{{count}} bestand(en) gewijzigd in dit gesprek"
+	},
+	"retry": {
+		"title": "Opnieuw proberen",
+		"tooltip": "Probeer de bewerking opnieuw"
+	},
+	"startNewTask": {
+		"title": "Nieuwe taak starten",
+		"tooltip": "Begin een nieuwe taak"
+	},
+	"proceedAnyways": {
+		"title": "Toch doorgaan",
+		"tooltip": "Ga door terwijl het commando wordt uitgevoerd"
+	},
+	"save": {
+		"title": "Opslaan",
+		"tooltip": "Berichtwijzigingen opslaan"
+	},
+	"tokenProgress": {
+		"availableSpace": "Beschikbare ruimte: {{amount}} tokens",
+		"tokensUsed": "Gebruikte tokens: {{used}} van {{total}}",
+		"reservedForResponse": "Gereserveerd voor modelantwoord: {{amount}} tokens",
+		"tokensUsedLabel": "Gebruikte tokens",
+		"reservedForResponseLabel": "Gereserveerd voor antwoord",
+		"availableSpaceLabel": "Beschikbare ruimte"
+	},
+	"reject": {
+		"title": "Weigeren",
+		"tooltip": "Deze actie weigeren"
+	},
+	"completeSubtaskAndReturn": "Subtaak voltooien en terugkeren",
+	"approve": {
+		"title": "Goedkeuren",
+		"tooltip": "Deze actie goedkeuren"
+	},
+	"runCommand": {
+		"title": "Commando",
+		"tooltip": "Voer dit commando uit"
+	},
+	"proceedWhileRunning": {
+		"title": "Doorgaan tijdens uitvoeren",
+		"tooltip": "Ga door ondanks waarschuwingen"
+	},
+	"killCommand": {
+		"title": "Commando stoppen",
+		"tooltip": "Huidig commando stoppen"
+	},
+	"resumeTask": {
+		"title": "Taak hervatten",
+		"tooltip": "Ga door met de huidige taak"
+	},
+	"terminate": {
+		"title": "Beëindigen",
+		"tooltip": "Beëindig de huidige taak"
+	},
+	"stop": {
+		"title": "Stoppen",
+		"tooltip": "Stop de huidige taak"
+	},
+	"cancel": {
+		"title": "Annuleren",
+		"tooltip": "Annuleer de huidige bewerking"
+	},
+	"enqueueMessage": "Bericht aan de wachtrij toevoegen (wordt verzonden nadat de huidige taak is voltooid)",
+	"scrollToBottom": "Scroll naar onderaan de chat",
+	"scrollToLatestCheckpoint": "Scroll naar het vorige checkpoint",
+	"about": "Zoo Code is een heel AI-ontwikkelteam in je editor.",
+	"docs": "Bekijk onze <DocsLink>documentatie</DocsLink> voor meer informatie.",
+	"onboarding": "Je takenlijst in deze werkruimte is leeg.",
+	"rooTips": {
+		"customizableModes": {
+			"title": "Aanpasbare modi",
+			"description": "Gespecialiseerde persona's die op schema blijven en presteren."
+		},
+		"modelAgnostic": {
+			"title": "Breng je eigen model mee",
+			"description": "Gebruik je eigen providersleutel of voer zelfs lokale inferentie uit — geen opslag, geen lock-in, geen beperkingen"
+		}
+	},
+	"selectMode": "Selecteer modus voor interactie",
+	"selectApiConfig": "Selecteer API-configuratie",
+	"lockApiConfigAcrossModes": "API-configuratie vergrendelen voor alle modi in deze werkruimte",
+	"unlockApiConfigAcrossModes": "API-configuratie is vergrendeld voor alle modi in deze werkruimte (klik om te ontgrendelen)",
+	"enhancePrompt": "Prompt verbeteren met extra context",
+	"enhancePromptDescription": "De knop 'Prompt verbeteren' helpt je prompt te verbeteren door extra context, verduidelijking of herformulering te bieden. Probeer hier een prompt te typen en klik opnieuw op de knop om te zien hoe het werkt.",
+	"modeSelector": {
+		"title": "Modi",
+		"marketplace": "Modus Marktplaats",
+		"settings": "Modus Instellingen",
+		"description": "Gespecialiseerde persona's die het gedrag van Zoo aanpassen.",
+		"searchPlaceholder": "Zoek modi...",
+		"noResults": "Geen resultaten gevonden"
+	},
+	"addImages": "Afbeeldingen toevoegen aan bericht",
+	"sendMessage": "Bericht verzenden",
+	"pressToSend": "Druk op {{keyCombination}} om te verzenden",
+	"stopTts": "Stop tekst-naar-spraak",
+	"typeMessage": "Typ een bericht...",
+	"typeTask": "Typ hier je taak...",
+	"addContext": "@ om context toe te voegen, / voor commando's",
+	"dragFiles": "houd shift ingedrukt om bestanden te slepen",
+	"dragFilesImages": "houd shift ingedrukt om bestanden/afbeeldingen te slepen",
+	"errorReadingFile": "Fout bij het lezen van bestand",
+	"noValidImages": "Er zijn geen geldige afbeeldingen verwerkt",
+	"separator": "Scheidingsteken",
+	"edit": "Bewerken...",
+	"forNextMode": "voor volgende modus",
+	"forPreviousMode": "voor vorige modus",
+	"apiRequest": {
+		"title": "API-verzoek",
+		"failed": "API-verzoek mislukt",
+		"streaming": "API-verzoek...",
+		"cancelled": "API-verzoek geannuleerd",
+		"streamingFailed": "API-streaming mislukt",
+		"rateLimitWait": "Snelheidsbeperking",
+		"errorTitle": "Fout van provider {{code}}",
+		"errorMessage": {
+			"400": "De provider kon het verzoek niet verwerken zoals ingediend. Stop de taak en probeer een ander benadering.",
+			"401": "Kon niet authenticeren met provider. Controleer je API-sleutelconfiguratie.",
+			"402": "Het lijkt erop dat je funds/credits op je account op zijn. Ga naar je provider en voeg meer toe om door te gaan.",
+			"403": "Niet geautoriseerd. Je API-sleutel is geldig, maar de provider weigerde dit verzoek in te willigen.",
+			"429": "Te veel verzoeken. Je bent rate-gelimiteerd door de provider. Wacht alsjeblieft even voor je volgende API-aanroep.",
+			"500": "Provider-serverfout. Er is iets mis aan de kant van de provider, er is niets mis met je verzoek.",
+			"docs": "Documentatie",
+			"goToSettings": "Instellingen",
+			"unknown": "Onbekende API-fout. Neem contact op met Zoo Code-support.",
+			"connection": "Verbindingsfout. Zorg ervoor dat je een werkende internetverbinding hebt.",
+			"claudeCodeNotAuthenticated": "Je moet inloggen om Claude Code te gebruiken. Ga naar Instellingen en klik op \"Inloggen bij Claude Code\" om te authenticeren."
+		}
+	},
+	"checkpoint": {
+		"regular": "Checkpoint",
+		"initializingWarning": "Checkpoint wordt nog steeds geïnitialiseerd... Als dit te lang duurt, kun je checkpoints uitschakelen in de <settingsLink>instellingen</settingsLink> en je taak opnieuw starten.",
+		"menu": {
+			"viewDiff": "Bekijk verschil",
+			"more": "Meer opties",
+			"viewDiffFromInit": "Bekijk alle wijzigingen",
+			"viewDiffWithCurrent": "Bekijk wijzigingen sinds dit checkpoint",
+			"restore": "Herstel checkpoint",
+			"restoreFiles": "Bestanden herstellen",
+			"restoreFilesDescription": "Herstelt de bestanden van je project naar een momentopname die op dit punt is gemaakt.",
+			"restoreFilesAndTask": "Bestanden & taak herstellen",
+			"confirm": "Bevestigen",
+			"cancel": "Annuleren",
+			"cannotUndo": "Deze actie kan niet ongedaan worden gemaakt.",
+			"restoreFilesAndTaskDescription": "Herstelt de bestanden van je project naar een momentopname die op dit punt is gemaakt en verwijdert alle berichten na dit punt."
+		},
+		"current": "Huidig"
+	},
+	"instructions": {
+		"wantsToFetch": "Roo wil gedetailleerde instructies ophalen om te helpen met de huidige taak"
+	},
+	"fileOperations": {
+		"wantsToRead": "Zoo wil dit bestand lezen",
+		"wantsToReadOutsideWorkspace": "Zoo wil dit bestand buiten de werkruimte lezen",
+		"didRead": "Zoo heeft dit bestand gelezen",
+		"wantsToEdit": "Zoo wil dit bestand bewerken",
+		"wantsToEditOutsideWorkspace": "Zoo wil dit bestand buiten de werkruimte bewerken",
+		"wantsToEditProtected": "Zoo wil een beveiligd configuratiebestand bewerken",
+		"wantsToCreate": "Zoo wil een nieuw bestand aanmaken",
+		"wantsToSearchReplace": "Roo wil zoeken en vervangen in dit bestand",
+		"didSearchReplace": "Roo heeft zoeken en vervangen uitgevoerd op dit bestand",
+		"wantsToInsert": "Zoo wil inhoud invoegen in dit bestand",
+		"wantsToInsertWithLineNumber": "Zoo wil inhoud invoegen in dit bestand op regel {{lineNumber}}",
+		"wantsToInsertAtEnd": "Zoo wil inhoud toevoegen aan het einde van dit bestand",
+		"wantsToReadAndXMore": "Zoo wil dit bestand en nog {{count}} andere lezen",
+		"wantsToReadMultiple": "Zoo wil meerdere bestanden lezen",
+		"wantsToApplyBatchChanges": "Zoo wil wijzigingen toepassen op meerdere bestanden",
+		"wantsToGenerateImage": "Zoo wil een afbeelding genereren",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo wil een afbeelding genereren buiten de werkruimte",
+		"wantsToGenerateImageProtected": "Zoo wil een afbeelding genereren op een beschermde locatie",
+		"didGenerateImage": "Zoo heeft een afbeelding gegenereerd"
+	},
+	"directoryOperations": {
+		"wantsToViewTopLevel": "Zoo wil de bovenliggende bestanden in deze map bekijken",
+		"didViewTopLevel": "Zoo heeft de bovenliggende bestanden in deze map bekeken",
+		"wantsToViewRecursive": "Zoo wil alle bestanden in deze map recursief bekijken",
+		"didViewRecursive": "Zoo heeft alle bestanden in deze map recursief bekeken",
+		"wantsToSearch": "Zoo wil deze map doorzoeken op <code>{{regex}}</code>",
+		"didSearch": "Zoo heeft deze map doorzocht op <code>{{regex}}</code>",
+		"wantsToSearchOutsideWorkspace": "Zoo wil deze map (buiten werkruimte) doorzoeken op <code>{{regex}}</code>",
+		"didSearchOutsideWorkspace": "Zoo heeft deze map (buiten werkruimte) doorzocht op <code>{{regex}}</code>",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo wil de bovenliggende bestanden in deze map (buiten werkruimte) bekijken",
+		"didViewTopLevelOutsideWorkspace": "Zoo heeft de bovenliggende bestanden in deze map (buiten werkruimte) bekeken",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo wil alle bestanden in deze map (buiten werkruimte) recursief bekijken",
+		"didViewRecursiveOutsideWorkspace": "Zoo heeft alle bestanden in deze map (buiten werkruimte) recursief bekeken",
+		"wantsToViewMultipleDirectories": "Zoo wil meerdere mappen bekijken"
+	},
+	"commandOutput": "Commando-uitvoer",
+	"commandExecution": {
+		"running": "Lopend",
+		"abort": "Afbreken",
+		"pid": "PID: {{pid}}",
+		"exitStatus": "Afgesloten met status {{exitCode}}",
+		"manageCommands": "Automatisch goedgekeurde commando's",
+		"addToAllowed": "Toevoegen aan toegestane lijst",
+		"removeFromAllowed": "Verwijderen van toegestane lijst",
+		"addToDenied": "Toevoegen aan geweigerde lijst",
+		"removeFromDenied": "Verwijderen van geweigerde lijst",
+		"abortCommand": "Commando-uitvoering afbreken",
+		"expandOutput": "Uitvoer uitvouwen",
+		"collapseOutput": "Uitvoer samenvouwen",
+		"expandManagement": "Beheersectie voor commando's uitvouwen",
+		"collapseManagement": "Beheersectie voor commando's samenvouwen"
+	},
+	"response": "Antwoord",
+	"arguments": "Argumenten",
+	"text": {
+		"rooSaid": "Zoo zei"
+	},
+	"feedback": {
+		"youSaid": "Jij zei"
+	},
+	"mcp": {
+		"wantsToUseTool": "Zoo wil een tool gebruiken op de {{serverName}} MCP-server",
+		"wantsToAccessResource": "Zoo wil een bron benaderen op de {{serverName}} MCP-server"
+	},
+	"modes": {
+		"wantsToSwitch": "Zoo wil overschakelen naar {{mode}} modus",
+		"wantsToSwitchWithReason": "Zoo wil overschakelen naar {{mode}} modus omdat: {{reason}}",
+		"didSwitch": "Zoo is overgeschakeld naar {{mode}} modus",
+		"didSwitchWithReason": "Zoo is overgeschakeld naar {{mode}} modus omdat: {{reason}}"
+	},
+	"subtasks": {
+		"wantsToCreate": "Zoo wil een nieuwe subtaak aanmaken in {{mode}} modus",
+		"wantsToFinish": "Zoo wil deze subtaak voltooien",
+		"newTaskContent": "Subtaak-instructies",
+		"completionContent": "Subtaak voltooid",
+		"resultContent": "Subtaakresultaten",
+		"defaultResult": "Ga verder met de volgende taak.",
+		"completionInstructions": "Subtaak voltooid! Je kunt de resultaten bekijken en eventuele correcties of volgende stappen voorstellen. Als alles goed is, bevestig dan om het resultaat terug te sturen naar de hoofdtaak.",
+		"goToSubtask": "Taak weergeven"
+	},
+	"questions": {
+		"hasQuestion": "Zoo heeft een vraag"
+	},
+	"taskCompleted": "Taak voltooid",
+	"error": "Fout",
+	"modelResponseIncomplete": "Modelrespons onvolledig",
+	"modelResponseErrors": {
+		"noToolsUsed": "Het model heeft geen tools gebruikt in zijn reactie. Dit gebeurt meestal wanneer het model alleen tekst/redenering levert zonder de vereiste tools aan te roepen om de taak te voltooien.",
+		"noToolsUsedDetails": "Het model heeft tekst/redenering geleverd maar heeft geen van de vereiste tools aangeroepen. Dit geeft meestal aan dat het model de taak verkeerd heeft begrepen of moeite heeft om te bepalen welke tool te gebruiken. Het model is automatisch gevraagd om opnieuw te proberen met correct gebruik van tools.",
+		"noAssistantMessages": "Het model heeft geen reactie-inhoud geleverd. Dit kan wijzen op een probleem met de API of de output van het model.",
+		"noAssistantMessagesDetails": "Het taalmodel heeft een lege reactie geretourneerd zonder tekst of tool-aanroepen. Dit kan gebeuren door API-problemen, snelheidslimieten of modelspecifieke problemen. Het model is automatisch gevraagd om opnieuw te proberen."
+	},
+	"diffError": {
+		"title": "Bewerking mislukt"
+	},
+	"troubleMessage": "Zoo ondervindt problemen...",
+	"errorDetails": {
+		"link": "Details",
+		"title": "Foutdetails",
+		"copyToClipboard": "Naar klembord kopiëren",
+		"copied": "Gekopieerd!",
+		"diagnostics": "Gedetailleerde foutinformatie ophalen",
+		"proxyProvider": "Je lijkt een proxy-gebaseerde provider te gebruiken. Zorg ervoor dat je de logs controleert en dat het geen Zoo-verzoeken herschrijft."
+	},
+	"powershell": {
+		"issues": "Het lijkt erop dat je problemen hebt met Windows PowerShell, zie deze"
+	},
+	"autoApprove": {
+		"tooltipManage": "Beheer instellingen voor automatische goedkeuring",
+		"tooltipStatus": "Automatische goedkeuring ingeschakeld voor: {{toggles}}",
+		"title": "Automatisch goedkeuren",
+		"toggle": "Automatisch goedkeuren in-/uitschakelen",
+		"all": "Alles",
+		"none": "Geen",
+		"description": "Voer deze acties uit zonder om toestemming te vragen. Schakel dit alleen in voor acties die je volledig vertrouwt.",
+		"selectOptionsFirst": "Selecteer hieronder minstens één optie om automatische goedkeuring in te schakelen",
+		"toggleAriaLabel": "Automatische goedkeuring in-/uitschakelen",
+		"disabledAriaLabel": "Automatische goedkeuring uitgeschakeld - selecteer eerst opties",
+		"triggerLabelOff": "Automatisch goedkeuren uit",
+		"triggerLabelOffShort": "Uit",
+		"triggerLabel_zero": "0 automatisch goedgekeurd",
+		"triggerLabel_one": "1 automatisch goedgekeurd",
+		"triggerLabel_other": "{{count}} automatisch goedgekeurd",
+		"triggerLabelAll": "BRRR"
+	},
+	"announcement": {
+		"title": "Zoo Code {{version}} uitgebracht",
+		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
+		"handoff": {
+			"heading": "Roo Code is terug! Nu als een door de community onderhouden plugin genaamd Zoo Code!!",
+			"description": "Als je het gemist hebt: het Roo Code-team heeft onlangs aangekondigd dat het de ontwikkeling van Roo Code afbouwt en het bestaande werk archiveert. Maar geen zorgen: de community is opgestaan om de erfenis van Roo Code voort te zetten met een nieuwe naam en een nieuw thuis. We zijn niet langer slechts één \"Roo\", maar een community — een \"Zoo\", zogezegd. Zoo Code is een door de community onderhouden plugin die verdergaat waar Roo Code ophield, en we zetten ons ervoor in om de geest van Roo levend te houden terwijl we ook nieuwe functies en verbeteringen introduceren. We willen het hele Roo Code-team enorm bedanken voor hun geweldige werk en voor het maken van zo'n fantastisch hulpmiddel voor ontwikkelaars. We kijken ernaar uit om verder te bouwen op hun fundament en te zien waar de community Zoo Code in de toekomst naartoe brengt!",
+			"readMore": "Bekijk de nieuwe homepage van Zoo Code en lees de volledige aankondiging"
+		},
+		"release": {
+			"heading": "Wat is er nieuw:",
+			"gpt55": "GPT-5.5 via OpenAI Codex: GPT-5.5-ondersteuning toegevoegd in de OpenAI Codex-provider, zodat je het nieuwste model direct vanuit Zoo Code kunt gebruiken.",
+			"claudeOpus47": "Claude Opus 4.7 op Vertex AI: Claude Opus 4.7 toegevoegd aan de Vertex AI-provider voor Anthropic's nieuwste vlaggenschip-reasoningmodel.",
+			"checkpointNav": "Navigatie naar vorige checkpoints: Bediening toegevoegd in de chat om terug te springen door eerdere checkpoints, met volledige i18n-ondersteuning."
+		},
+		"cloudAgents": {
+			"heading": "Nieuw in de Cloud:",
+			"specialized": "Introductie van <bold>Explainer</bold>, <bold>Planner</bold> en <bold>Coder</bold> - drie gespecialiseerde cloud-agents om je workflows te verbeteren.",
+			"description": "De agents werken samen in de cloud en kunnen worden geactiveerd vanaf het web of via Slack.",
+			"tryButton": "Probeer Cloud-agents"
+		}
+	},
+	"reasoning": {
+		"thinking": "Denkt na",
+		"seconds": "{{count}}s"
+	},
+	"contextManagement": {
+		"tokens": "tokens",
+		"condensation": {
+			"title": "Context samengevat",
+			"inProgress": "Context aan het samenvatten...",
+			"errorHeader": "Context samenvatten mislukt"
+		},
+		"truncation": {
+			"title": "Context ingekort",
+			"inProgress": "Context aan het inkorten...",
+			"messagesRemoved": "{{count}} bericht verwijderd",
+			"messagesRemoved_other": "{{count}} berichten verwijderd",
+			"description": "Oudere berichten zijn uit het gesprek verwijderd om binnen de limiet van het contextvenster te blijven. Dit is een snelle maar minder contextbehoudende aanpak in vergelijking met samenvoeging."
+		}
+	},
+	"skill": {
+		"wantsToLoad": "Zoo wil een vaardigheid laden",
+		"didLoad": "Zoo heeft een vaardigheid geladen"
+	},
+	"followUpSuggest": {
+		"copyToInput": "Kopiëren naar invoer (zelfde als shift + klik)",
+		"timerPrefix": "Automatisch goedkeuren ingeschakeld. Selecteren in {{seconds}}s…"
+	},
+	"costs": {
+		"totalWithSubtasks": "Totale kosten (inclusief subtaken): ${{cost}}",
+		"total": "Totale kosten: ${{cost}}",
+		"includesSubtasks": "Inclusief kosten van subtaken"
+	},
+	"codeblock": {
+		"tooltips": {
+			"expand": "Codeblok uitvouwen",
+			"collapse": "Codeblok samenvouwen",
+			"copy_code": "Code kopiëren"
+		}
+	},
+	"profileViolationWarning": "Het huidige profiel is niet compatibel met de instellingen van uw organisatie",
+	"shellIntegration": {
+		"title": "Waarschuwing commando-uitvoering",
+		"description": "Je commando wordt uitgevoerd zonder VSCode-terminal-shellintegratie. Om deze waarschuwing te onderdrukken kun je shellintegratie uitschakelen in de sectie <strong>Terminal</strong> van de <settingsLink>Zoo Code-instellingen</settingsLink> of de VSCode-terminalintegratie oplossen via de onderstaande link.",
+		"troubleshooting": "Klik hier voor shell-integratie documentatie."
+	},
+	"ask": {
+		"autoApprovedRequestLimitReached": {
+			"title": "Limiet voor automatisch goedgekeurde verzoeken bereikt",
+			"description": "Zoo heeft de automatisch goedgekeurde limiet van {{count}} API-verzoek(en) bereikt. Wil je de teller resetten en doorgaan met de taak?",
+			"button": "Resetten en doorgaan"
+		},
+		"autoApprovedCostLimitReached": {
+			"title": "Limiet voor automatisch goedgekeurde kosten bereikt",
+			"button": "Resetten en doorgaan",
+			"description": "Zoo heeft de automatisch goedgekeurde kostenlimiet van ${{count}} bereikt. Wilt u de kosten resetten en doorgaan met de taak?"
+		}
+	},
+	"codebaseSearch": {
+		"wantsToSearch": "Zoo wil de codebase doorzoeken op <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo wil de codebase doorzoeken op <code>{{query}}</code> in <code>{{path}}</code>",
+		"didSearch_one": "1 resultaat gevonden",
+		"didSearch_other": "{{count}} resultaten gevonden",
+		"resultTooltip": "Gelijkenisscore: {{score}} (klik om bestand te openen)"
+	},
+	"read-batch": {
+		"approve": {
+			"title": "Alles goedkeuren"
+		},
+		"deny": {
+			"title": "Alles weigeren"
+		}
+	},
+	"list-batch": {
+		"approve": {
+			"title": "Alles goedkeuren"
+		},
+		"deny": {
+			"title": "Alles weigeren"
+		}
+	},
+	"edit-batch": {
+		"approve": {
+			"title": "Alles opslaan"
+		},
+		"deny": {
+			"title": "Alles weigeren"
+		}
+	},
+	"indexingStatus": {
+		"ready": "Index gereed",
+		"indexing": "Indexeren {{percentage}}%",
+		"indexed": "Geïndexeerd",
+		"error": "Index fout",
+		"status": "Index status",
+		"stopping": "Indexering wordt gestopt..."
+	},
+	"versionIndicator": {
+		"ariaLabel": "Versie {{version}} - Klik om release notes te bekijken"
+	},
+	"rooCloudCTA": {
+		"title": "Zoo Code Cloud evolueert!",
+		"description": "Voer externe agenten uit in de cloud, krijg overal toegang tot je taken, werk samen met anderen en nog veel meer.",
+		"joinWaitlist": "Meld je aan om de laatste updates te ontvangen."
+	},
+	"editMessage": {
+		"placeholder": "Bewerk je bericht..."
+	},
+	"command": {
+		"triggerDescription": "Activeer de {{name}} opdracht"
+	},
+	"slashCommands": {
+		"tooltip": "Slash-opdrachten beheren",
+		"title": "Slash-opdrachten",
+		"description": "Gebruik ingebouwde slash-opdrachten of maak aangepaste voor snelle toegang tot veelgebruikte prompts en workflows. <DocsLink>Documentatie</DocsLink>",
+		"manageCommands": "Beheer slash-opdrachten in instellingen",
+		"builtInCommands": "Ingebouwde Opdrachten",
+		"globalCommands": "Globale Opdrachten",
+		"workspaceCommands": "Werkruimte Opdrachten",
+		"globalCommand": "Globale opdracht",
+		"editCommand": "Opdracht bewerken",
+		"deleteCommand": "Opdracht verwijderen",
+		"newGlobalCommandPlaceholder": "Nieuwe globale opdracht...",
+		"newWorkspaceCommandPlaceholder": "Nieuwe werkruimte opdracht...",
+		"deleteDialog": {
+			"title": "Opdracht Verwijderen",
+			"description": "Weet je zeker dat je de opdracht \"{{name}}\" wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
+			"cancel": "Annuleren",
+			"confirm": "Verwijderen"
+		}
+	},
+	"contextMenu": {
+		"noResults": "Geen resultaten",
+		"problems": "Problemen",
+		"terminal": "Terminal",
+		"url": "Plak URL om inhoud op te halen"
+	},
+	"queuedMessages": {
+		"title": "Berichten in wachtrij",
+		"clickToEdit": "Klik om bericht te bewerken"
+	},
+	"slashCommand": {
+		"wantsToRun": "Zoo wil een slash commando uitvoeren",
+		"didRun": "Zoo heeft een slash commando uitgevoerd"
+	},
+	"todo": {
+		"partial": "{{completed}} van {{total}} to-do's voltooid",
+		"complete": "{{total}} to-do's voltooid",
+		"updated": "De to-do-lijst is bijgewerkt",
+		"completed": "Voltooid",
+		"started": "Gestart"
+	},
+	"tooManyTools": {
+		"title": "Te veel tools ingeschakeld",
+		"toolsPart_one": "{{count}} tool",
+		"toolsPart_other": "{{count}} tools",
+		"serversPart_one": "{{count}} MCP server",
+		"serversPart_other": "{{count}} MCP servers",
+		"messageTemplate": "Je hebt {{tools}} ingeschakeld via {{servers}}. Zoveel tools kunnen het model verwarren en tot fouten leiden. Probeer dit onder {{threshold}} te houden.",
+		"openMcpSettings": "MCP-instellingen openen"
+	},
+	"readCommandOutput": {
+		"title": "Zoo read command output"
+	},
+	"retiredProvider": {
+		"title": "Provider wordt niet meer ondersteund",
+		"message": "Deze provider is niet meer beschikbaar. Selecteer een ondersteunde provider om door te gaan.",
+		"openSettings": "Instellingen openen"
+	}
+}

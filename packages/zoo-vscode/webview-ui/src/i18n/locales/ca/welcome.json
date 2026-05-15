@@ -1,0 +1,18 @@
+{
+	"landing": {
+		"greeting": "Benvingut a Zoo Code!",
+		"introduction": "Amb una gamma de Modes integrats i ampliables, Zoo Code et permet planificar, arquitectar, codificar, depurar i augmentar la teva productivitat com mai abans.",
+		"getStarted": "Tria el teu proveïdor"
+	},
+	"providerSignup": {
+		"heading": "Tria el teu proveïdor",
+		"chooseProvider": "Zoo Code necessita un proveïdor de LLM per funcionar. Tria-ne un per començar, pots afegir-ne més tard.",
+		"goBack": "Enrere",
+		"finish": "Finalitza"
+	},
+	"telemetry": {
+		"helpImprove": "Ajuda a millorar Zoo Code",
+		"helpImproveMessage": "Zoo Code recopila dades d'errors i ús per ajudar-nos a corregir errors i millorar l'extensió. Aquesta telemetria no recopila codi, indicacions o informació personal. Pots desactivar-la a <settingsLink>configuració</settingsLink>."
+	},
+	"importSettings": "Importa la configuració"
+}

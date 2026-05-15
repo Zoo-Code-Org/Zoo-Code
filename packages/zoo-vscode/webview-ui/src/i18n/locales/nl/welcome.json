@@ -1,0 +1,18 @@
+{
+	"landing": {
+		"greeting": "Welkom bij Zoo Code!",
+		"introduction": "Met een reeks ingebouwde en uitbreidbare Modi laat Zoo Code je plannen, ontwerpen, coderen, debuggen en je productiviteit verhogen als nooit tevoren.",
+		"getStarted": "Kies je provider"
+	},
+	"providerSignup": {
+		"heading": "Kies je provider",
+		"chooseProvider": "Zoo Code heeft een LLM-provider nodig om te werken. Kies er een om te beginnen, je kunt er later meer toevoegen.",
+		"goBack": "Terug",
+		"finish": "Klaar"
+	},
+	"telemetry": {
+		"helpImprove": "Help Zoo Code te verbeteren",
+		"helpImproveMessage": "Zoo Code verzamelt fout- en gebruiksgegevens om ons te helpen bugs op te lossen en de extensie te verbeteren. Deze telemetrie verzamelt geen code, prompts of persoonlijke informatie. Je kunt dit in <settingsLink>instellingen</settingsLink> uitschakelen."
+	},
+	"importSettings": "Instellingen importeren"
+}

@@ -1,0 +1,492 @@
+{
+	"greeting": "Zoo Code へようこそ！",
+	"task": {
+		"title": "タスク",
+		"expand": "タスクを展開",
+		"collapse": "タスクを折りたたむ",
+		"seeMore": "もっと見る",
+		"seeLess": "表示を減らす",
+		"tokens": "トークン",
+		"cache": "キャッシュ",
+		"apiCost": "APIコスト",
+		"size": "サイズ",
+		"contextWindow": "コンテキストウィンドウ",
+		"closeAndStart": "タスクを閉じて新しいタスクを開始",
+		"export": "タスク履歴をエクスポート",
+		"delete": "タスクを削除（Shift + クリックで確認をスキップ）",
+		"condenseContext": "コンテキストをインテリジェントに圧縮",
+		"openApiHistory": "API履歴を開く",
+		"openUiHistory": "UI履歴を開く",
+		"backToParentTask": "親タスク"
+	},
+	"unpin": "ピン留めを解除",
+	"pin": "ピン留め",
+	"fileChangesInConversation": {
+		"header": "この会話で {{count}} 個のファイルが変更されました"
+	},
+	"tokenProgress": {
+		"availableSpace": "利用可能な空き容量: {{amount}} トークン",
+		"tokensUsed": "使用トークン: {{used}} / {{total}}",
+		"reservedForResponse": "モデル応答用に予約: {{amount}} トークン",
+		"tokensUsedLabel": "使用トークン",
+		"reservedForResponseLabel": "応答用に予約",
+		"availableSpaceLabel": "利用可能な空き容量"
+	},
+	"retry": {
+		"title": "再試行",
+		"tooltip": "操作を再試行"
+	},
+	"startNewTask": {
+		"title": "新しいタスクを開始",
+		"tooltip": "新しいタスクを開始"
+	},
+	"proceedAnyways": {
+		"title": "それでも続行",
+		"tooltip": "コマンド実行中でも続行"
+	},
+	"save": {
+		"title": "保存",
+		"tooltip": "メッセージの変更を保存"
+	},
+	"reject": {
+		"title": "拒否",
+		"tooltip": "このアクションを拒否"
+	},
+	"completeSubtaskAndReturn": "サブタスクを完了して戻る",
+	"approve": {
+		"title": "承認",
+		"tooltip": "このアクションを承認"
+	},
+	"runCommand": {
+		"title": "コマンド",
+		"tooltip": "このコマンドを実行"
+	},
+	"proceedWhileRunning": {
+		"title": "実行中も続行",
+		"tooltip": "警告にもかかわらず続行"
+	},
+	"killCommand": {
+		"title": "コマンドを強制終了",
+		"tooltip": "現在のコマンドを強制終了します"
+	},
+	"resumeTask": {
+		"title": "タスクを再開",
+		"tooltip": "現在のタスクを続行"
+	},
+	"terminate": {
+		"title": "終了",
+		"tooltip": "現在のタスクを終了"
+	},
+	"stop": {
+		"title": "停止",
+		"tooltip": "現在のタスクを停止"
+	},
+	"cancel": {
+		"title": "キャンセル",
+		"tooltip": "現在の操作をキャンセル"
+	},
+	"enqueueMessage": "メッセージをキューに追加（現在のタスク完了後に送信されます）",
+	"scrollToBottom": "チャットの最下部にスクロール",
+	"scrollToLatestCheckpoint": "前のチェックポイントまでスクロール",
+	"about": "Zoo Codeは、エディタに常駐するAI開発チームです。",
+	"docs": "詳細については、<DocsLink>ドキュメント</DocsLink>をご確認ください。",
+	"onboarding": "このワークスペースのタスクリストは空です。",
+	"rooTips": {
+		"customizableModes": {
+			"title": "カスタマイズ可能なモード",
+			"description": "タスクに集中し、成果を出す専門のペルソナ。"
+		},
+		"modelAgnostic": {
+			"title": "独自のモデルを持ち込む",
+			"description": "独自のプロバイダーキーを使用したり、ローカルで推論を実行したりできます — マークアップ、ロックイン、制限はありません"
+		}
+	},
+	"selectMode": "対話モードを選択",
+	"selectApiConfig": "API構成を選択",
+	"lockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成をロック",
+	"unlockApiConfigAcrossModes": "このワークスペースのすべてのモードでAPI構成がロックされています（クリックで解除）",
+	"enhancePrompt": "追加コンテキストでプロンプトを強化",
+	"addImages": "メッセージに画像を追加",
+	"sendMessage": "メッセージを送信",
+	"pressToSend": "{{keyCombination}}を押して送信",
+	"stopTts": "テキスト読み上げを停止",
+	"typeMessage": "メッセージを入力...",
+	"typeTask": "ここにタスクを入力...",
+	"addContext": "コンテキスト追加は@、コマンドは/",
+	"dragFiles": "ファイルをドラッグするにはShiftキーを押したまま",
+	"dragFilesImages": "ファイル/画像をドラッグするにはShiftキーを押したまま",
+	"enhancePromptDescription": "「プロンプトを強化」ボタンは、追加コンテキスト、説明、または言い換えを提供することで、リクエストを改善します。ここにリクエストを入力し、ボタンを再度クリックして動作を確認してください。",
+	"modeSelector": {
+		"title": "モード",
+		"marketplace": "モードマーケットプレイス",
+		"settings": "モード設定",
+		"description": "Rooの動作をカスタマイズする専門的なペルソナ。",
+		"searchPlaceholder": "モードを検索...",
+		"noResults": "結果が見つかりません"
+	},
+	"errorReadingFile": "ファイル読み込みエラー",
+	"noValidImages": "有効な画像が処理されませんでした",
+	"separator": "区切り",
+	"edit": "編集...",
+	"forNextMode": "次のモード用",
+	"forPreviousMode": "前のモード用",
+	"error": "エラー",
+	"diffError": {
+		"title": "編集に失敗しました"
+	},
+	"troubleMessage": "Rooに問題が発生しています...",
+	"apiRequest": {
+		"title": "APIリクエスト",
+		"failed": "APIリクエスト失敗",
+		"streaming": "APIリクエスト...",
+		"cancelled": "APIリクエストキャンセル",
+		"streamingFailed": "APIストリーミング失敗",
+		"rateLimitWait": "レート制限中",
+		"errorTitle": "プロバイダーエラー {{code}}",
+		"errorMessage": {
+			"400": "プロバイダーはリクエストをそのまま処理できませんでした。タスクを停止して別のアプローチを試してください。",
+			"401": "プロバイダーで認証できませんでした。API キーの設定を確認してください。",
+			"402": "アカウントの資金/クレジットが不足しているようです。プロバイダーに移動してさらに追加してください。",
+			"403": "認可されていません。API キーは有効ですが、プロバイダーがこのリクエストの完了を拒否しました。",
+			"429": "リクエストが多すぎます。プロバイダーによってレート制限されています。次の API 呼び出しの前にお待ちください。",
+			"500": "プロバイダー サーバー エラー。プロバイダー側に問題があり、リクエスト自体に問題はありません。",
+			"docs": "ドキュメント",
+			"goToSettings": "設定",
+			"unknown": "不明な API エラーです。Zoo Code サポートにお問い合わせください。",
+			"connection": "接続エラー。インターネット接続が機能していることを確認してください。",
+			"claudeCodeNotAuthenticated": "Claude Codeを使用するにはサインインが必要です。設定に移動して「Claude Codeにサインイン」をクリックして認証してください。"
+		}
+	},
+	"checkpoint": {
+		"regular": "チェックポイント",
+		"initializingWarning": "チェックポイントの初期化中... 時間がかかりすぎる場合は、<settingsLink>設定</settingsLink>でチェックポイントを無効にしてタスクを再開できます。",
+		"menu": {
+			"viewDiff": "差分を表示",
+			"more": "その他のオプション",
+			"viewDiffFromInit": "すべての変更を表示",
+			"viewDiffWithCurrent": "このチェックポイント以降の変更を表示",
+			"restore": "チェックポイントを復元",
+			"restoreFiles": "ファイルを復元",
+			"restoreFilesDescription": "この時点で撮影されたスナップショットにプロジェクトのファイルを復元します。",
+			"restoreFilesAndTask": "ファイルとタスクを復元",
+			"confirm": "確認",
+			"cancel": "キャンセル",
+			"cannotUndo": "このアクションは元に戻せません。",
+			"restoreFilesAndTaskDescription": "この時点で撮影されたスナップショットにプロジェクトのファイルを復元し、この時点以降のすべてのメッセージを削除します。"
+		},
+		"current": "現在"
+	},
+	"instructions": {
+		"wantsToFetch": "Rooは現在のタスクを支援するための詳細な指示を取得したい"
+	},
+	"fileOperations": {
+		"wantsToRead": "Rooはこのファイルを読みたい",
+		"wantsToReadOutsideWorkspace": "Rooはワークスペース外のこのファイルを読みたい",
+		"didRead": "Rooはこのファイルを読みました",
+		"wantsToEdit": "Rooはこのファイルを編集したい",
+		"wantsToEditOutsideWorkspace": "Rooはワークスペース外のこのファイルを編集したい",
+		"wantsToEditProtected": "Rooは保護された設定ファイルを編集したい",
+		"wantsToCreate": "Rooは新しいファイルを作成したい",
+		"wantsToSearchReplace": "Rooはこのファイルで検索と置換を行う",
+		"didSearchReplace": "Rooはこのファイルで検索と置換を実行しました",
+		"wantsToInsert": "Rooはこのファイルにコンテンツを挿入したい",
+		"wantsToInsertWithLineNumber": "Rooはこのファイルの{{lineNumber}}行目にコンテンツを挿入したい",
+		"wantsToInsertAtEnd": "Rooはこのファイルの末尾にコンテンツを追加したい",
+		"wantsToReadAndXMore": "Zoo はこのファイルと他に {{count}} 個のファイルを読み込もうとしています",
+		"wantsToReadMultiple": "Rooは複数のファイルを読み取ろうとしています",
+		"wantsToApplyBatchChanges": "Rooは複数のファイルに変更を適用したい",
+		"wantsToGenerateImage": "Rooは画像を生成したい",
+		"wantsToGenerateImageOutsideWorkspace": "Rooはワークスペース外で画像を生成したい",
+		"wantsToGenerateImageProtected": "Rooは保護された場所で画像を生成したい",
+		"didGenerateImage": "Rooは画像を生成しました"
+	},
+	"directoryOperations": {
+		"wantsToViewTopLevel": "Rooはこのディレクトリのトップレベルファイルを表示したい",
+		"didViewTopLevel": "Rooはこのディレクトリのトップレベルファイルを表示しました",
+		"wantsToViewRecursive": "Rooはこのディレクトリのすべてのファイルを再帰的に表示したい",
+		"didViewRecursive": "Rooはこのディレクトリのすべてのファイルを再帰的に表示しました",
+		"wantsToSearch": "Rooはこのディレクトリで <code>{{regex}}</code> を検索したい",
+		"didSearch": "Rooはこのディレクトリで <code>{{regex}}</code> を検索しました",
+		"wantsToSearchOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）で <code>{{regex}}</code> を検索したい",
+		"didSearchOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）で <code>{{regex}}</code> を検索しました",
+		"wantsToViewTopLevelOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）のトップレベルファイルを表示したい",
+		"didViewTopLevelOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）のトップレベルファイルを表示しました",
+		"wantsToViewRecursiveOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示したい",
+		"didViewRecursiveOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示しました",
+		"wantsToViewMultipleDirectories": "Zoo は複数のディレクトリを表示したい"
+	},
+	"commandOutput": "コマンド出力",
+	"commandExecution": {
+		"abort": "中止",
+		"running": "実行中",
+		"pid": "PID: {{pid}}",
+		"exitStatus": "ステータス {{exitCode}} で終了しました",
+		"manageCommands": "自動承認されたコマンド",
+		"addToAllowed": "許可リストに追加",
+		"removeFromAllowed": "許可リストから削除",
+		"addToDenied": "拒否リストに追加",
+		"removeFromDenied": "拒否リストから削除",
+		"abortCommand": "コマンドの実行を中止",
+		"expandOutput": "出力を展開",
+		"collapseOutput": "出力を折りたたむ",
+		"expandManagement": "コマンド管理セクションを展開",
+		"collapseManagement": "コマンド管理セクションを折りたたむ"
+	},
+	"response": "応答",
+	"arguments": "引数",
+	"text": {
+		"rooSaid": "Rooの発言"
+	},
+	"feedback": {
+		"youSaid": "あなたの発言"
+	},
+	"mcp": {
+		"wantsToUseTool": "RooはMCPサーバー{{serverName}}でツールを使用したい",
+		"wantsToAccessResource": "RooはMCPサーバー{{serverName}}のリソースにアクセスしたい"
+	},
+	"modes": {
+		"wantsToSwitch": "Rooは<code>{{mode}}</code>モードに切り替えたい",
+		"wantsToSwitchWithReason": "Rooは次の理由で<code>{{mode}}</code>モードに切り替えたい: {{reason}}",
+		"didSwitch": "Rooは<code>{{mode}}</code>モードに切り替えました",
+		"didSwitchWithReason": "Rooは次の理由で<code>{{mode}}</code>モードに切り替えました: {{reason}}"
+	},
+	"subtasks": {
+		"wantsToCreate": "Rooは<code>{{mode}}</code>モードで新しいサブタスクを作成したい",
+		"wantsToFinish": "Rooはこのサブタスクを終了したい",
+		"newTaskContent": "サブタスク指示",
+		"completionContent": "サブタスク完了",
+		"resultContent": "サブタスク結果",
+		"defaultResult": "次のタスクに進んでください。",
+		"completionInstructions": "サブタスク完了！結果を確認し、修正や次のステップを提案できます。問題なければ、親タスクに結果を返すために確認してください。",
+		"goToSubtask": "タスクを表示"
+	},
+	"questions": {
+		"hasQuestion": "Rooは質問があります"
+	},
+	"taskCompleted": "タスク完了",
+	"modelResponseIncomplete": "モデルの応答が不完全",
+	"modelResponseErrors": {
+		"noToolsUsed": "モデルは応答でツールを使用しませんでした。これは通常、モデルがタスクを完了するために必要なツールを呼び出さずに、テキスト/推論のみを提供する場合に発生します。",
+		"noToolsUsedDetails": "モデルはテキスト/推論を提供しましたが、必要なツールを呼び出しませんでした。これは通常、モデルがタスクを誤解したか、どのツールを使用するかを決定するのに苦労していることを示しています。モデルは適切なツールの使用で再試行するよう自動的に促されました。",
+		"noAssistantMessages": "モデルは応答コンテンツを提供しませんでした。これはAPIまたはモデルの出力に問題がある可能性を示しています。",
+		"noAssistantMessagesDetails": "言語モデルはテキストやツール呼び出しのない空の応答を返しました。これはAPI問題、レート制限、またはモデル固有の問題により発生する可能性があります。モデルは自動的に再試行するよう促されました。"
+	},
+	"errorDetails": {
+		"link": "詳細",
+		"title": "エラー詳細",
+		"copyToClipboard": "クリップボードにコピー",
+		"copied": "コピーしました！",
+		"diagnostics": "詳細なエラー情報を取得",
+		"proxyProvider": "プロキシベースのプロバイダーを使用しているようです。ログを確認し、Rooのリクエストを書き換えていないことを確認してください。"
+	},
+	"powershell": {
+		"issues": "Windows PowerShellに問題があるようです。こちらを参照してください"
+	},
+	"autoApprove": {
+		"tooltipManage": "自動承認設定を管理する",
+		"tooltipStatus": "自動承認が有効です: {{toggles}}",
+		"title": "自動承認",
+		"toggle": "自動承認を切り替える",
+		"all": "すべて",
+		"none": "なし",
+		"description": "許可を求めずにこれらのアクションを実行します。完全に信頼するアクションに対してのみ有効にしてください。",
+		"selectOptionsFirst": "自動承認を有効にするには、以下のオプションを少なくとも1つ選択してください",
+		"toggleAriaLabel": "自動承認を切り替える",
+		"disabledAriaLabel": "自動承認が無効です - 最初にオプションを選択してください",
+		"triggerLabelOff": "自動承認オフ",
+		"triggerLabelOffShort": "オフ",
+		"triggerLabel_zero": "0個の自動承認",
+		"triggerLabel_one": "1個の自動承認済み",
+		"triggerLabel_other": "{{count}}個の自動承認済み",
+		"triggerLabelAll": "BRRR"
+	},
+	"reasoning": {
+		"thinking": "考え中",
+		"seconds": "{{count}}秒"
+	},
+	"contextManagement": {
+		"tokens": "トークン",
+		"condensation": {
+			"title": "コンテキスト要約",
+			"inProgress": "コンテキストを圧縮中...",
+			"errorHeader": "コンテキストの圧縮に失敗しました"
+		},
+		"truncation": {
+			"title": "コンテキスト切り詰め",
+			"inProgress": "コンテキストを切り詰め中...",
+			"messagesRemoved": "{{count}}件のメッセージを削除",
+			"messagesRemoved_other": "{{count}}件のメッセージを削除",
+			"description": "コンテキストウィンドウの制限内に収めるため、古いメッセージが会話から削除されました。これは圧縮と比較して高速ですが、コンテキストの保持性が低いアプローチです。"
+		}
+	},
+	"skill": {
+		"wantsToLoad": "Rooはスキルを読み込もうとしています",
+		"didLoad": "Rooはスキルを読み込みました"
+	},
+	"followUpSuggest": {
+		"copyToInput": "入力欄にコピー（またはShift + クリック）",
+		"timerPrefix": "自動承認が有効です。{{seconds}}秒後に選択中…"
+	},
+	"announcement": {
+		"title": "Zoo Code {{version}} リリース",
+		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
+		"handoff": {
+			"heading": "Roo Code が帰ってきた！今度はコミュニティメンテナンスのプラグイン、Zoo Code です！！",
+			"description": "まだ追えていない方のために言うと、Roo Code チームは最近、Roo Code の開発を終了し、これまでの成果をアーカイブすると発表しました。でも心配はいりません。コミュニティが新しい名前と新しい拠点のもとで、Roo Code のレガシーを引き継ぐために立ち上がりました！ もう私たちは 1 匹の「Roo」ではなく、いわば「Zoo」というコミュニティです。Zoo Code は Roo Code が残したところを引き継ぐコミュニティメンテナンスのプラグインで、Roo の精神を大切にしながら、新機能や改善も加えていくことを約束します。開発者のための素晴らしいツールを生み出してくれた Roo Code チーム全員に、心から大きな感謝を伝えたいです。彼らの土台の上にさらに築いていき、これからコミュニティが Zoo Code をどこまで育てていくのかを見るのが楽しみです！",
+			"readMore": "Zoo Code の新しいホームページを見て、完全なお知らせを読む"
+		},
+		"release": {
+			"heading": "新機能:",
+			"gpt55": "OpenAI Codex 経由の GPT-5.5: OpenAI Codex プロバイダーで GPT-5.5 のサポートを追加しました。Zoo Code から最新モデルを直接利用できます。",
+			"claudeOpus47": "Vertex AI 上の Claude Opus 4.7: Anthropic の最新フラッグシップ推論モデルとして、Vertex AI プロバイダーに Claude Opus 4.7 を追加しました。",
+			"checkpointNav": "以前のチェックポイントへのナビゲーション: チャットから以前のチェックポイントへ戻るためのコントロールを追加しました。i18n にも完全対応しています。"
+		},
+		"cloudAgents": {
+			"heading": "クラウドの新機能:",
+			"specialized": "<bold>Explainer</bold>、<bold>Planner</bold>、<bold>Coder</bold> の 3 つの専門クラウドエージェントを紹介します。ワークフローを強化します。",
+			"description": "エージェントはクラウドで連携して動作し、Web または Slack からトリガーできます。",
+			"tryButton": "クラウドエージェントを試す"
+		}
+	},
+	"costs": {
+		"totalWithSubtasks": "合計コスト（サブタスク含む）: ${{cost}}",
+		"total": "合計コスト: ${{cost}}",
+		"includesSubtasks": "サブタスクのコストを含む"
+	},
+	"codeblock": {
+		"tooltips": {
+			"expand": "コードブロックを展開",
+			"collapse": "コードブロックを折りたたむ",
+			"copy_code": "コードをコピー"
+		}
+	},
+	"profileViolationWarning": "現在のプロファイルは組織の設定と互換性がありません",
+	"shellIntegration": {
+		"title": "コマンド実行警告",
+		"description": "コマンドはVSCodeターミナルシェル統合なしで実行されています。この警告を非表示にするには、<settingsLink>Zoo Code 設定</settingsLink>の<strong>Terminal</strong>セクションでシェル統合を無効にするか、以下のリンクを使用してVSCodeターミナル統合のトラブルシューティングを行ってください。",
+		"troubleshooting": "シェル統合のドキュメントはこちらをクリック"
+	},
+	"ask": {
+		"autoApprovedRequestLimitReached": {
+			"title": "自動承認リクエスト制限に達しました",
+			"description": "Rooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
+			"button": "リセットして続行"
+		},
+		"autoApprovedCostLimitReached": {
+			"title": "自動承認コスト制限に達しました",
+			"description": "Rooは自動承認されたコスト制限の${{count}}に達しました。コストをリセットしてタスクを続行しますか？",
+			"button": "リセットして続ける"
+		}
+	},
+	"codebaseSearch": {
+		"wantsToSearch": "Rooはコードベースで <code>{{query}}</code> を検索したい",
+		"wantsToSearchWithPath": "Rooは <code>{{path}}</code> 内のコードベースで <code>{{query}}</code> を検索したい",
+		"didSearch_one": "1件の結果が見つかりました",
+		"didSearch_other": "{{count}}件の結果が見つかりました",
+		"resultTooltip": "類似度スコア: {{score}} (クリックしてファイルを開く)"
+	},
+	"read-batch": {
+		"approve": {
+			"title": "すべて承認"
+		},
+		"deny": {
+			"title": "すべて拒否"
+		}
+	},
+	"list-batch": {
+		"approve": {
+			"title": "すべて承認"
+		},
+		"deny": {
+			"title": "すべて拒否"
+		}
+	},
+	"edit-batch": {
+		"approve": {
+			"title": "すべて保存"
+		},
+		"deny": {
+			"title": "すべて拒否"
+		}
+	},
+	"indexingStatus": {
+		"ready": "インデックス準備完了",
+		"indexing": "インデックス作成中 {{percentage}}%",
+		"indexed": "インデックス作成済み",
+		"error": "インデックスエラー",
+		"status": "インデックス状態",
+		"stopping": "インデックス作成を停止中..."
+	},
+	"versionIndicator": {
+		"ariaLabel": "バージョン {{version}} - クリックしてリリースノートを表示"
+	},
+	"rooCloudCTA": {
+		"title": "Zoo Code Cloud が進化中！",
+		"description": "クラウドでリモートエージェントを実行し、どこからでもタスクにアクセスし、他の人と協力し、その他多くの機能を利用できます。",
+		"joinWaitlist": "最新のアップデートを受け取るためにサインアップしてください。"
+	},
+	"editMessage": {
+		"placeholder": "メッセージを編集..."
+	},
+	"command": {
+		"triggerDescription": "{{name}}コマンドをトリガー"
+	},
+	"slashCommands": {
+		"tooltip": "スラッシュコマンドを管理",
+		"title": "スラッシュコマンド",
+		"description": "組み込みスラッシュコマンドを使用するか、よく使用するプロンプトやワークフローに素早くアクセスするためのカスタムスラッシュコマンドを作成します。<DocsLink>ドキュメント</DocsLink>",
+		"manageCommands": "設定でスラッシュコマンドを管理",
+		"builtInCommands": "組み込みコマンド",
+		"globalCommands": "グローバルコマンド",
+		"workspaceCommands": "ワークスペースコマンド",
+		"globalCommand": "グローバルコマンド",
+		"editCommand": "コマンドを編集",
+		"deleteCommand": "コマンドを削除",
+		"newGlobalCommandPlaceholder": "新しいグローバルコマンド...",
+		"newWorkspaceCommandPlaceholder": "新しいワークスペースコマンド...",
+		"deleteDialog": {
+			"title": "コマンドを削除",
+			"description": "\"{{name}}\" コマンドを削除してもよろしいですか？この操作は元に戻せません。",
+			"cancel": "キャンセル",
+			"confirm": "削除"
+		}
+	},
+	"contextMenu": {
+		"noResults": "結果なし",
+		"problems": "問題",
+		"terminal": "ターミナル",
+		"url": "URLを貼り付けてコンテンツを取得"
+	},
+	"queuedMessages": {
+		"title": "キューメッセージ",
+		"clickToEdit": "クリックしてメッセージを編集"
+	},
+	"slashCommand": {
+		"wantsToRun": "Rooはスラッシュコマンドを実行したい",
+		"didRun": "Rooはスラッシュコマンドを実行しました"
+	},
+	"todo": {
+		"partial": "{{total}}件中{{completed}}件のTo-Doが完了",
+		"complete": "{{total}}件のTo-Doが完了",
+		"updated": "To-Doリストを更新しました",
+		"completed": "完了",
+		"started": "開始"
+	},
+	"tooManyTools": {
+		"title": "有効になっているツールが多すぎます",
+		"toolsPart_one": "{{count}} ツール",
+		"toolsPart_other": "{{count}} ツール",
+		"serversPart_one": "{{count}} MCP サーバー",
+		"serversPart_other": "{{count}} MCP サーバー",
+		"messageTemplate": "{{servers}}経由で{{tools}}が有効になっています。このような高い数は、モデルを混乱させてエラーを引き起こす可能性があります。{{threshold}}以下に保つようにしてください。",
+		"openMcpSettings": "MCP 設定を開く"
+	},
+	"readCommandOutput": {
+		"title": "Rooがコマンド出力を読み込みました"
+	},
+	"retiredProvider": {
+		"title": "プロバイダーのサポート終了",
+		"message": "このプロバイダーは現在利用できません。続行するには、サポートされているプロバイダーを選択してください。",
+		"openSettings": "設定を開く"
+	}
+}

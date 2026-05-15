@@ -1,0 +1,492 @@
+{
+	"greeting": "Willkommen bei Zoo Code!",
+	"task": {
+		"title": "Aufgabe",
+		"expand": "Aufgabe erweitern",
+		"collapse": "Aufgabe einklappen",
+		"seeMore": "Mehr anzeigen",
+		"seeLess": "Weniger anzeigen",
+		"tokens": "Tokens",
+		"cache": "Cache",
+		"apiCost": "API-Kosten",
+		"size": "Größe",
+		"contextWindow": "Kontextfenster",
+		"closeAndStart": "Aufgabe schließen und neue starten",
+		"export": "Aufgabenverlauf exportieren",
+		"delete": "Aufgabe löschen (Shift + Klick zum Überspringen der Bestätigung)",
+		"condenseContext": "Kontext intelligent komprimieren",
+		"openApiHistory": "API-Verlauf öffnen",
+		"openUiHistory": "UI-Verlauf öffnen",
+		"backToParentTask": "Übergeordnete Aufgabe"
+	},
+	"unpin": "Lösen von oben",
+	"pin": "Anheften",
+	"fileChangesInConversation": {
+		"header": "{{count}} Datei(en) in dieser Unterhaltung geändert"
+	},
+	"tokenProgress": {
+		"availableSpace": "Verfügbarer Speicher: {{amount}} Tokens",
+		"tokensUsed": "Verwendete Tokens: {{used}} von {{total}}",
+		"reservedForResponse": "Reserviert für Modellantwort: {{amount}} Tokens",
+		"tokensUsedLabel": "Verwendete Tokens",
+		"reservedForResponseLabel": "Für Antwort reserviert",
+		"availableSpaceLabel": "Verfügbarer Speicher"
+	},
+	"retry": {
+		"title": "Wiederholen",
+		"tooltip": "Versuch erneut starten"
+	},
+	"startNewTask": {
+		"title": "Neue Aufgabe starten",
+		"tooltip": "Beginne eine neue Aufgabe"
+	},
+	"proceedAnyways": {
+		"title": "Trotzdem fortfahren",
+		"tooltip": "Während der Befehlsausführung fortfahren"
+	},
+	"save": {
+		"title": "Speichern",
+		"tooltip": "Nachrichtenänderungen speichern"
+	},
+	"reject": {
+		"title": "Ablehnen",
+		"tooltip": "Diese Aktion ablehnen"
+	},
+	"completeSubtaskAndReturn": "Teilaufgabe abschließen und zurückkehren",
+	"approve": {
+		"title": "Genehmigen",
+		"tooltip": "Diese Aktion genehmigen"
+	},
+	"runCommand": {
+		"title": "Befehl",
+		"tooltip": "Diesen Befehl ausführen"
+	},
+	"proceedWhileRunning": {
+		"title": "Während Ausführung fortfahren",
+		"tooltip": "Trotz Warnungen fortfahren"
+	},
+	"killCommand": {
+		"title": "Befehl abbrechen",
+		"tooltip": "Aktuellen Befehl abbrechen"
+	},
+	"resumeTask": {
+		"title": "Aufgabe fortsetzen",
+		"tooltip": "Aktuelle Aufgabe fortsetzen"
+	},
+	"terminate": {
+		"title": "Beenden",
+		"tooltip": "Aktuelle Aufgabe beenden"
+	},
+	"stop": {
+		"title": "Stoppen",
+		"tooltip": "Aktuelle Aufgabe stoppen"
+	},
+	"cancel": {
+		"title": "Abbrechen",
+		"tooltip": "Aktuelle Operation abbrechen"
+	},
+	"enqueueMessage": "Nachricht zur Warteschlange hinzufügen (wird nach Abschluss der aktuellen Aufgabe gesendet)",
+	"scrollToBottom": "Zum Chat-Ende scrollen",
+	"scrollToLatestCheckpoint": "Zum vorherigen Checkpoint scrollen",
+	"about": "Zoo Code ist ein ganzes KI-Entwicklerteam in deinem Editor.",
+	"docs": "Schau in unsere <DocsLink>Dokumentation</DocsLink>, um mehr zu erfahren.",
+	"onboarding": "Deine Aufgabenliste in diesem Arbeitsbereich ist leer.",
+	"rooTips": {
+		"customizableModes": {
+			"title": "Anpassbare Modi",
+			"description": "Spezialisierte Personas, die bei der Sache bleiben und liefern."
+		},
+		"modelAgnostic": {
+			"title": "Bring dein eigenes Modell mit",
+			"description": "Verwende deinen eigenen Anbieter-Schlüssel oder führe sogar lokale Inferenz aus – kein Aufschlag, keine Bindung, keine Einschränkungen"
+		}
+	},
+	"selectMode": "Interaktionsmodus auswählen",
+	"selectApiConfig": "API-Konfiguration auswählen",
+	"lockApiConfigAcrossModes": "API-Konfiguration für alle Modi in diesem Arbeitsbereich sperren",
+	"unlockApiConfigAcrossModes": "API-Konfiguration ist für alle Modi in diesem Arbeitsbereich gesperrt (klicke zum Entsperren)",
+	"enhancePrompt": "Prompt mit zusätzlichem Kontext verbessern",
+	"addImages": "Bilder zur Nachricht hinzufügen",
+	"sendMessage": "Nachricht senden",
+	"pressToSend": "Drücke {{keyCombination}} zum Senden",
+	"stopTts": "Text-in-Sprache beenden",
+	"typeMessage": "Nachricht eingeben...",
+	"typeTask": "Gib deine Aufgabe hier ein...",
+	"addContext": "@ für Kontext, / für Befehle",
+	"dragFiles": "Shift halten, um Dateien einzufügen",
+	"dragFilesImages": "Shift halten, um Dateien/Bilder einzufügen",
+	"enhancePromptDescription": "Die Schaltfläche 'Prompt verbessern' hilft, deine Anfrage durch zusätzlichen Kontext, Klarstellungen oder Umformulierungen zu verbessern. Versuche, hier eine Anfrage einzugeben und klicke erneut auf die Schaltfläche, um zu sehen, wie es funktioniert.",
+	"modeSelector": {
+		"title": "Modi",
+		"marketplace": "Modus-Marketplace",
+		"settings": "Modus-Einstellungen",
+		"description": "Spezialisierte Personas, die Roos Verhalten anpassen.",
+		"searchPlaceholder": "Modi suchen...",
+		"noResults": "Keine Ergebnisse gefunden"
+	},
+	"errorReadingFile": "Fehler beim Lesen der Datei",
+	"noValidImages": "Keine gültigen Bilder wurden verarbeitet",
+	"separator": "Trennlinie",
+	"edit": "Bearbeiten...",
+	"forNextMode": "für nächsten Modus",
+	"forPreviousMode": "für vorherigen Modus",
+	"error": "Fehler",
+	"diffError": {
+		"title": "Bearbeitung fehlgeschlagen"
+	},
+	"troubleMessage": "Zoo hat Probleme...",
+	"apiRequest": {
+		"title": "API-Anfrage",
+		"failed": "API-Anfrage fehlgeschlagen",
+		"streaming": "API-Anfrage...",
+		"cancelled": "API-Anfrage abgebrochen",
+		"streamingFailed": "API-Streaming fehlgeschlagen",
+		"rateLimitWait": "Ratenbegrenzung",
+		"errorTitle": "Anbieter-Fehler {{code}}",
+		"errorMessage": {
+			"400": "Der Anbieter konnte die Anfrage nicht wie gestellt verarbeiten. Beende die Aufgabe und versuche einen anderen Ansatz.",
+			"401": "Authentifizierung beim Anbieter fehlgeschlagen. Bitte überprüfe deine API-Schlüssel-Konfiguration.",
+			"402": "Es sieht so aus, als ob dir die Guthaben/Credits in deinem Konto ausgegangen sind. Gehe zu deinem Anbieter und füge mehr hinzu, um fortzufahren.",
+			"403": "Nicht autorisiert. Dein API-Schlüssel ist gültig, aber der Anbieter hat sich geweigert, diese Anfrage zu erfüllen.",
+			"429": "Zu viele Anfragen. Du wirst vom Anbieter rate-limitiert. Bitte warte ein wenig, bevor du den nächsten API-Aufruf machst.",
+			"500": "Fehler auf dem Server des Anbieters. Es stimmt etwas mit der Anbieterseite nicht, mit deiner Anfrage stimmt alles.",
+			"docs": "Dokumentation",
+			"goToSettings": "Einstellungen",
+			"unknown": "Unbekannter API-Fehler. Bitte kontaktiere den Zoo Code Support.",
+			"connection": "Verbindungsfehler. Stelle sicher, dass du eine funktionierende Internetverbindung hast.",
+			"claudeCodeNotAuthenticated": "Du musst dich anmelden, um Claude Code zu verwenden. Gehe zu den Einstellungen und klicke auf \"Bei Claude Code anmelden\", um dich zu authentifizieren."
+		}
+	},
+	"checkpoint": {
+		"regular": "Checkpoint",
+		"initializingWarning": "Checkpoint wird noch initialisiert... Falls dies zu lange dauert, kannst du Checkpoints in den <settingsLink>Einstellungen</settingsLink> deaktivieren und deine Aufgabe neu starten.",
+		"menu": {
+			"viewDiff": "Unterschiede anzeigen",
+			"more": "Weitere Optionen",
+			"viewDiffFromInit": "Alle Änderungen anzeigen",
+			"viewDiffWithCurrent": "Änderungen seit diesem Checkpoint anzeigen",
+			"restore": "Checkpoint wiederherstellen",
+			"restoreFiles": "Dateien wiederherstellen",
+			"restoreFilesDescription": "Stellt die Dateien deines Projekts auf einen Snapshot zurück, der an diesem Punkt erstellt wurde.",
+			"restoreFilesAndTask": "Dateien & Aufgabe wiederherstellen",
+			"confirm": "Bestätigen",
+			"cancel": "Abbrechen",
+			"cannotUndo": "Diese Aktion kann nicht rückgängig gemacht werden.",
+			"restoreFilesAndTaskDescription": "Stellt die Dateien deines Projekts auf einen Snapshot zurück, der an diesem Punkt erstellt wurde, und löscht alle Nachrichten nach diesem Punkt."
+		},
+		"current": "Aktuell"
+	},
+	"instructions": {
+		"wantsToFetch": "Roo möchte detaillierte Anweisungen abrufen, um bei der aktuellen Aufgabe zu helfen"
+	},
+	"fileOperations": {
+		"wantsToRead": "Zoo möchte diese Datei lesen",
+		"wantsToReadAndXMore": "Zoo möchte diese Datei und {{count}} weitere lesen",
+		"wantsToReadOutsideWorkspace": "Zoo möchte diese Datei außerhalb des Arbeitsbereichs lesen",
+		"didRead": "Zoo hat diese Datei gelesen",
+		"wantsToEdit": "Zoo möchte diese Datei bearbeiten",
+		"wantsToEditOutsideWorkspace": "Zoo möchte diese Datei außerhalb des Arbeitsbereichs bearbeiten",
+		"wantsToEditProtected": "Zoo möchte eine geschützte Konfigurationsdatei bearbeiten",
+		"wantsToCreate": "Zoo möchte eine neue Datei erstellen",
+		"wantsToSearchReplace": "Roo möchte in dieser Datei suchen und ersetzen",
+		"didSearchReplace": "Roo hat Suchen und Ersetzen in dieser Datei durchgeführt",
+		"wantsToInsert": "Zoo möchte Inhalte in diese Datei einfügen",
+		"wantsToInsertWithLineNumber": "Zoo möchte Inhalte in diese Datei in Zeile {{lineNumber}} einfügen",
+		"wantsToInsertAtEnd": "Zoo möchte Inhalte am Ende dieser Datei anhängen",
+		"wantsToReadMultiple": "Zoo möchte mehrere Dateien lesen",
+		"wantsToApplyBatchChanges": "Zoo möchte Änderungen an mehreren Dateien vornehmen",
+		"wantsToGenerateImage": "Zoo möchte ein Bild generieren",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo möchte ein Bild außerhalb des Arbeitsbereichs generieren",
+		"wantsToGenerateImageProtected": "Zoo möchte ein Bild an einem geschützten Ort generieren",
+		"didGenerateImage": "Zoo hat ein Bild generiert"
+	},
+	"directoryOperations": {
+		"wantsToViewTopLevel": "Zoo möchte die Dateien auf oberster Ebene in diesem Verzeichnis anzeigen",
+		"didViewTopLevel": "Zoo hat die Dateien auf oberster Ebene in diesem Verzeichnis angezeigt",
+		"wantsToViewRecursive": "Zoo möchte rekursiv alle Dateien in diesem Verzeichnis anzeigen",
+		"didViewRecursive": "Zoo hat rekursiv alle Dateien in diesem Verzeichnis angezeigt",
+		"wantsToSearch": "Zoo möchte dieses Verzeichnis nach <code>{{regex}}</code> durchsuchen",
+		"didSearch": "Zoo hat dieses Verzeichnis nach <code>{{regex}}</code> durchsucht",
+		"wantsToSearchOutsideWorkspace": "Zoo möchte dieses Verzeichnis (außerhalb des Arbeitsbereichs) nach <code>{{regex}}</code> durchsuchen",
+		"didSearchOutsideWorkspace": "Zoo hat dieses Verzeichnis (außerhalb des Arbeitsbereichs) nach <code>{{regex}}</code> durchsucht",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo möchte die Dateien auf oberster Ebene in diesem Verzeichnis (außerhalb des Arbeitsbereichs) anzeigen",
+		"didViewTopLevelOutsideWorkspace": "Zoo hat die Dateien auf oberster Ebene in diesem Verzeichnis (außerhalb des Arbeitsbereichs) angezeigt",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo möchte rekursiv alle Dateien in diesem Verzeichnis (außerhalb des Arbeitsbereichs) anzeigen",
+		"didViewRecursiveOutsideWorkspace": "Zoo hat rekursiv alle Dateien in diesem Verzeichnis (außerhalb des Arbeitsbereichs) angezeigt",
+		"wantsToViewMultipleDirectories": "Zoo möchte mehrere Verzeichnisse anzeigen"
+	},
+	"commandOutput": "Befehlsausgabe",
+	"commandExecution": {
+		"abort": "Abbrechen",
+		"running": "Wird ausgeführt",
+		"pid": "PID: {{pid}}",
+		"exitStatus": "Beendet mit Status {{exitCode}}",
+		"manageCommands": "Automatisch genehmigte Befehle",
+		"addToAllowed": "Zur erlaubten Liste hinzufügen",
+		"removeFromAllowed": "Von der erlaubten Liste entfernen",
+		"addToDenied": "Zur verweigerten Liste hinzufügen",
+		"removeFromDenied": "Von der verweigerten Liste entfernen",
+		"abortCommand": "Befehlsausführung abbrechen",
+		"expandOutput": "Ausgabe erweitern",
+		"collapseOutput": "Ausgabe reduzieren",
+		"expandManagement": "Befehlsverwaltungsbereich erweitern",
+		"collapseManagement": "Befehlsverwaltungsbereich reduzieren"
+	},
+	"response": "Antwort",
+	"arguments": "Argumente",
+	"text": {
+		"rooSaid": "Zoo hat gesagt"
+	},
+	"feedback": {
+		"youSaid": "Du hast gesagt"
+	},
+	"mcp": {
+		"wantsToUseTool": "Zoo möchte ein Tool auf dem {{serverName}} MCP-Server verwenden",
+		"wantsToAccessResource": "Zoo möchte auf eine Ressource auf dem {{serverName}} MCP-Server zugreifen"
+	},
+	"modes": {
+		"wantsToSwitch": "Zoo möchte zum <code>{{mode}}</code>-Modus wechseln",
+		"wantsToSwitchWithReason": "Zoo möchte zum <code>{{mode}}</code>-Modus wechseln, weil: {{reason}}",
+		"didSwitch": "Zoo hat zum <code>{{mode}}</code>-Modus gewechselt",
+		"didSwitchWithReason": "Zoo hat zum <code>{{mode}}</code>-Modus gewechselt, weil: {{reason}}"
+	},
+	"subtasks": {
+		"wantsToCreate": "Zoo möchte eine neue Teilaufgabe im <code>{{mode}}</code>-Modus erstellen",
+		"wantsToFinish": "Zoo möchte diese Teilaufgabe abschließen",
+		"newTaskContent": "Teilaufgabenanweisungen",
+		"completionContent": "Teilaufgabe abgeschlossen",
+		"resultContent": "Teilaufgabenergebnisse",
+		"defaultResult": "Bitte fahre mit der nächsten Aufgabe fort.",
+		"completionInstructions": "Teilaufgabe abgeschlossen! Du kannst die Ergebnisse überprüfen und Korrekturen oder nächste Schritte vorschlagen. Wenn alles gut aussieht, bestätige, um das Ergebnis an die übergeordnete Aufgabe zurückzugeben.",
+		"goToSubtask": "Aufgabe anzeigen"
+	},
+	"questions": {
+		"hasQuestion": "Zoo hat eine Frage"
+	},
+	"taskCompleted": "Aufgabe abgeschlossen",
+	"modelResponseIncomplete": "Modellantwort unvollständig",
+	"modelResponseErrors": {
+		"noToolsUsed": "Das Modell hat in seiner Antwort keine Tools verwendet. Dies passiert normalerweise, wenn das Modell nur Text/Überlegungen liefert, ohne die erforderlichen Tools aufzurufen, um die Aufgabe zu erledigen.",
+		"noToolsUsedDetails": "Das Modell hat Text/Überlegungen geliefert, aber keine der erforderlichen Tools aufgerufen. Dies deutet normalerweise darauf hin, dass das Modell die Aufgabe missverstanden hat oder Schwierigkeiten hat zu bestimmen, welches Tool verwendet werden soll. Das Modell wurde automatisch aufgefordert, es erneut mit der richtigen Tool-Verwendung zu versuchen.",
+		"noAssistantMessages": "Das Modell hat keinen Antwortinhalt geliefert. Dies kann auf ein Problem mit der API oder der Modellausgabe hindeuten.",
+		"noAssistantMessagesDetails": "Das Sprachmodell hat eine leere Antwort ohne Text oder Tool-Aufrufe zurückgegeben. Dies kann aufgrund von API-Problemen, Ratenbegrenzung oder modellspezifischen Problemen passieren. Das Modell wurde automatisch aufgefordert, es erneut zu versuchen."
+	},
+	"errorDetails": {
+		"link": "Details",
+		"title": "Fehlerdetails",
+		"copyToClipboard": "In Zwischenablage kopieren",
+		"copied": "Kopiert!",
+		"diagnostics": "Detaillierte Fehlerinformationen abrufen",
+		"proxyProvider": "Du scheinst einen Proxy-basierten Anbieter zu verwenden. Überprüfe unbedingt seine Protokolle und stelle sicher, dass er Roos Anfragen nicht umschreibt."
+	},
+	"powershell": {
+		"issues": "Es scheint, dass du Probleme mit Windows PowerShell hast, bitte sieh dir dies an"
+	},
+	"autoApprove": {
+		"tooltipManage": "Einstellungen für die automatische Genehmigung verwalten",
+		"tooltipStatus": "Automatische Genehmigung aktiviert für: {{toggles}}",
+		"title": "Automatische Genehmigung",
+		"toggle": "Automatische Genehmigung umschalten",
+		"all": "Alle",
+		"none": "Keine",
+		"description": "Führe diese Aktionen aus, ohne um Erlaubnis zu fragen. Aktiviere dies nur für Aktionen, denen du voll vertraust.",
+		"selectOptionsFirst": "Wähle mindestens eine Option unten aus, um die automatische Genehmigung zu aktivieren",
+		"toggleAriaLabel": "Automatische Genehmigung umschalten",
+		"disabledAriaLabel": "Automatische Genehmigung deaktiviert - wähle zuerst Optionen aus",
+		"triggerLabelOff": "Automatische Genehmigung aus",
+		"triggerLabelOffShort": "Aus",
+		"triggerLabel_zero": "0 automatisch genehmigt",
+		"triggerLabel_one": "1 automatisch genehmigt",
+		"triggerLabel_other": "{{count}} automatisch genehmigt",
+		"triggerLabelAll": "BRRR"
+	},
+	"reasoning": {
+		"thinking": "Denke nach",
+		"seconds": "{{count}}s"
+	},
+	"contextManagement": {
+		"tokens": "Tokens",
+		"condensation": {
+			"title": "Kontext komprimiert",
+			"inProgress": "Kontext wird komprimiert...",
+			"errorHeader": "Kontext konnte nicht komprimiert werden"
+		},
+		"truncation": {
+			"title": "Kontext gekürzt",
+			"inProgress": "Kontext wird gekürzt...",
+			"messagesRemoved": "{{count}} Nachricht entfernt",
+			"messagesRemoved_other": "{{count}} Nachrichten entfernt",
+			"description": "Ältere Nachrichten wurden aus der Konversation entfernt, um innerhalb des Kontextfenster-Limits zu bleiben. Dies ist ein schnellerer, aber weniger kontexterhaltender Ansatz im Vergleich zur Komprimierung."
+		}
+	},
+	"skill": {
+		"wantsToLoad": "Zoo möchte eine Fähigkeit laden",
+		"didLoad": "Zoo hat eine Fähigkeit geladen"
+	},
+	"followUpSuggest": {
+		"copyToInput": "In Eingabefeld kopieren (oder Shift + Klick)",
+		"timerPrefix": "Automatische Genehmigung aktiviert. Wähle in {{seconds}}s…"
+	},
+	"announcement": {
+		"title": "Zoo Code {{version}} veröffentlicht",
+		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
+		"handoff": {
+			"heading": "Roo Code ist zurück! Jetzt als Community-gepflegtes Plugin namens Zoo Code!!",
+			"description": "Falls du es nicht mitbekommen hast: Das Roo Code Team hat vor Kurzem angekündigt, die Entwicklung von Roo Code einzustellen und die bisherige Arbeit zu archivieren. Aber keine Sorge: Die Community ist eingesprungen, um das Vermächtnis von Roo Code unter neuem Namen und in einem neuen Zuhause weiterzuführen! Wir sind nicht mehr nur ein einzelnes \"Roo\", sondern eine Community – ein \"Zoo\", wenn du so willst. Zoo Code ist ein Community-gepflegtes Plugin, das dort weitermacht, wo Roo Code aufgehört hat. Wir wollen den Geist von Roo bewahren und gleichzeitig neue Funktionen und Verbesserungen einführen. Dem gesamten Roo Code Team gilt ein riesiges Dankeschön für die unglaubliche Arbeit und dafür, dass es so ein großartiges Tool für Entwickler geschaffen hat. Wir freuen uns darauf, auf diesem Fundament weiterzubauen und zu sehen, wohin die Community Zoo Code in Zukunft führt!",
+			"readMore": "Sieh dir die neue Zoo Code Startseite an und lies die vollständige Ankündigung"
+		},
+		"release": {
+			"heading": "Was ist neu:",
+			"gpt55": "GPT-5.5 via OpenAI Codex: GPT-5.5-Unterstützung im OpenAI Codex-Provider hinzugefügt, damit du das neueste Modell direkt in Zoo Code nutzen kannst.",
+			"claudeOpus47": "Claude Opus 4.7 auf Vertex AI: Claude Opus 4.7 zum Vertex AI-Provider hinzugefügt – Anthropics neuestes Flaggschiff-Reasoning-Modell.",
+			"checkpointNav": "Navigation zu vorherigen Checkpoints: Neue Steuerelemente im Chat, um durch frühere Checkpoints zurückzuspringen, mit vollständiger i18n-Unterstützung."
+		},
+		"cloudAgents": {
+			"heading": "Neu in der Cloud:",
+			"specialized": "Wir stellen <bold>Explainer</bold>, <bold>Planner</bold> und <bold>Coder</bold> vor - drei spezialisierte Cloud-Agenten zur Verbesserung deiner Workflows.",
+			"description": "Die Agenten arbeiten zusammen in der Cloud und können vom Web oder über Slack ausgelöst werden.",
+			"tryButton": "Probiere Cloud-Agenten aus"
+		}
+	},
+	"costs": {
+		"totalWithSubtasks": "Gesamtkosten (inkl. Unteraufgaben): ${{cost}}",
+		"total": "Gesamtkosten: ${{cost}}",
+		"includesSubtasks": "Enthält Kosten für Unteraufgaben"
+	},
+	"codeblock": {
+		"tooltips": {
+			"expand": "Code-Block erweitern",
+			"collapse": "Code-Block reduzieren",
+			"copy_code": "Code kopieren"
+		}
+	},
+	"profileViolationWarning": "Das aktuelle Profil ist nicht kompatibel mit den Einstellungen deiner Organisation",
+	"shellIntegration": {
+		"title": "Befehlsausführungswarnung",
+		"description": "Dein Befehl wird ohne VSCode Terminal-Shell-Integration ausgeführt. Um diese Warnung zu unterdrücken, kannst du die Shell-Integration im Abschnitt <strong>Terminal</strong> der <settingsLink>Zoo Code Einstellungen</settingsLink> deaktivieren oder die VSCode Terminal-Integration mit dem Link unten beheben.",
+		"troubleshooting": "Klicke hier für die Shell-Integrationsdokumentation."
+	},
+	"ask": {
+		"autoApprovedRequestLimitReached": {
+			"title": "Limit für automatisch genehmigte Anfragen erreicht",
+			"description": "Zoo hat das automatisch genehmigte Limit von {{count}} API-Anfrage(n) erreicht. Möchtest du den Zähler zurücksetzen und mit der Aufgabe fortfahren?",
+			"button": "Zurücksetzen und fortfahren"
+		},
+		"autoApprovedCostLimitReached": {
+			"description": "Zoo hat das automatisch genehmigte Kostenlimit von ${{count}} erreicht. Möchten Sie die Kosten zurücksetzen und mit der Aufgabe fortfahren?",
+			"title": "Kostengrenze für automatische Genehmigung erreicht",
+			"button": "Zurücksetzen und Fortfahren"
+		}
+	},
+	"codebaseSearch": {
+		"wantsToSearch": "Zoo möchte den Codebase nach <code>{{query}}</code> durchsuchen",
+		"wantsToSearchWithPath": "Zoo möchte den Codebase nach <code>{{query}}</code> in <code>{{path}}</code> durchsuchen",
+		"didSearch_one": "1 Ergebnis gefunden",
+		"didSearch_other": "{{count}} Ergebnisse gefunden",
+		"resultTooltip": "Ähnlichkeitswert: {{score}} (klicken zum Öffnen der Datei)"
+	},
+	"read-batch": {
+		"approve": {
+			"title": "Alle genehmigen"
+		},
+		"deny": {
+			"title": "Alle ablehnen"
+		}
+	},
+	"list-batch": {
+		"approve": {
+			"title": "Alle genehmigen"
+		},
+		"deny": {
+			"title": "Alle ablehnen"
+		}
+	},
+	"edit-batch": {
+		"approve": {
+			"title": "Alle speichern"
+		},
+		"deny": {
+			"title": "Alle ablehnen"
+		}
+	},
+	"indexingStatus": {
+		"ready": "Index bereit",
+		"indexing": "Indizierung {{percentage}}%",
+		"indexed": "Indiziert",
+		"error": "Index-Fehler",
+		"status": "Index-Status",
+		"stopping": "Indexierung wird gestoppt..."
+	},
+	"versionIndicator": {
+		"ariaLabel": "Version {{version}} - Klicken Sie, um die Versionshinweise anzuzeigen"
+	},
+	"rooCloudCTA": {
+		"title": "Zoo Code Cloud entwickelt sich weiter!",
+		"description": "Führe Remote-Agenten in der Cloud aus, greife von überall auf deine Aufgaben zu, arbeite mit anderen zusammen und vieles mehr.",
+		"joinWaitlist": "Melde dich an, um die neuesten Updates zu erhalten."
+	},
+	"command": {
+		"triggerDescription": "Starte den {{name}} Befehl"
+	},
+	"editMessage": {
+		"placeholder": "Bearbeite deine Nachricht..."
+	},
+	"slashCommands": {
+		"tooltip": "Slash-Befehle verwalten",
+		"title": "Slash-Befehle",
+		"description": "Verwende eingebaute Slash-Befehle oder erstelle benutzerdefinierte für schnellen Zugriff auf häufig verwendete Prompts und Workflows. <DocsLink>Dokumentation</DocsLink>",
+		"manageCommands": "Slash-Befehle in den Einstellungen verwalten",
+		"builtInCommands": "Eingebaute Befehle",
+		"globalCommands": "Globale Befehle",
+		"workspaceCommands": "Arbeitsbereich-Befehle",
+		"globalCommand": "Globaler Befehl",
+		"editCommand": "Befehl bearbeiten",
+		"deleteCommand": "Befehl löschen",
+		"newGlobalCommandPlaceholder": "Neuer globaler Befehl...",
+		"newWorkspaceCommandPlaceholder": "Neuer Arbeitsbereich-Befehl...",
+		"deleteDialog": {
+			"title": "Befehl löschen",
+			"description": "Bist du sicher, dass du den Befehl \"{{name}}\" löschen möchtest? Diese Aktion kann nicht rückgängig gemacht werden.",
+			"cancel": "Abbrechen",
+			"confirm": "Löschen"
+		}
+	},
+	"contextMenu": {
+		"noResults": "Keine Ergebnisse",
+		"problems": "Probleme",
+		"terminal": "Terminal",
+		"url": "URL einfügen, um Inhalte abzurufen"
+	},
+	"queuedMessages": {
+		"title": "Warteschlange Nachrichten",
+		"clickToEdit": "Klicken zum Bearbeiten der Nachricht"
+	},
+	"slashCommand": {
+		"wantsToRun": "Zoo möchte einen Slash-Befehl ausführen",
+		"didRun": "Zoo hat einen Slash-Befehl ausgeführt"
+	},
+	"todo": {
+		"partial": "{{completed}} von {{total}} To-Dos erledigt",
+		"complete": "{{total}} To-Dos erledigt",
+		"updated": "Die To-Do-Liste wurde aktualisiert",
+		"completed": "Abgeschlossen",
+		"started": "Gestartet"
+	},
+	"tooManyTools": {
+		"title": "Zu viele Tools aktiviert",
+		"toolsPart_one": "{{count}} Tool",
+		"toolsPart_other": "{{count}} Tools",
+		"serversPart_one": "{{count}} MCP-Server",
+		"serversPart_other": "{{count}} MCP-Server",
+		"messageTemplate": "Du hast {{tools}} über {{servers}} aktiviert. Eine so hohe Anzahl kann das Modell verwirren und zu Fehlern führen. Versuche, es unter {{threshold}} zu halten.",
+		"openMcpSettings": "MCP-Einstellungen öffnen"
+	},
+	"readCommandOutput": {
+		"title": "Zoo las Befehlsausgabe"
+	},
+	"retiredProvider": {
+		"title": "Anbieter wird nicht mehr unterstützt",
+		"message": "Dieser Anbieter ist nicht mehr verfügbar. Wähle einen unterstützten Anbieter aus, um fortzufahren.",
+		"openSettings": "Einstellungen öffnen"
+	}
+}

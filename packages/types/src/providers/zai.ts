@@ -1,0 +1,461 @@
+import type { ModelInfo } from "../model.js"
+import { ZaiApiLine } from "../provider-settings.js"
+
+// Z AI
+// https://docs.z.ai/guides/llm/glm-4-32b-0414-128k
+// https://docs.z.ai/guides/llm/glm-4.5
+// https://docs.z.ai/guides/llm/glm-4.6
+// https://docs.z.ai/guides/llm/glm-5.1
+// https://docs.z.ai/guides/llm/glm-5-turbo
+// https://docs.z.ai/guides/overview/pricing
+// https://bigmodel.cn/pricing
+
+export type InternationalZAiModelId = keyof typeof internationalZAiModels
+export const internationalZAiDefaultModelId: InternationalZAiModelId = "glm-4.6"
+export const internationalZAiModels = {
+	"glm-4.5": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.6,
+		outputPrice: 2.2,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.11,
+		description:
+			"GLM-4.5 is Zhipu's latest featured model. Its comprehensive capabilities in reasoning, coding, and agent reach the state-of-the-art (SOTA) level among open-source models, with a context length of up to 128k.",
+	},
+	"glm-4.5-air": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.2,
+		outputPrice: 1.1,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.03,
+		description:
+			"GLM-4.5-Air is the lightweight version of GLM-4.5. It balances performance and cost-effectiveness, and can flexibly switch to hybrid thinking models.",
+	},
+	"glm-4.5-x": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 2.2,
+		outputPrice: 8.9,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.45,
+		description:
+			"GLM-4.5-X is a high-performance variant optimized for strong reasoning with ultra-fast responses.",
+	},
+	"glm-4.5-airx": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 1.1,
+		outputPrice: 4.5,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.22,
+		description: "GLM-4.5-AirX is a lightweight, ultra-fast variant delivering strong performance with lower cost.",
+	},
+	"glm-4.5-flash": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0,
+		outputPrice: 0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+		description: "GLM-4.5-Flash is a free, high-speed model excellent for reasoning, coding, and agentic tasks.",
+	},
+	"glm-4.5v": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0.6,
+		outputPrice: 1.8,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.11,
+		description:
+			"GLM-4.5V is Z.AI's multimodal visual reasoning model (image/video/text/file input), optimized for GUI tasks, grounding, and document/video understanding.",
+	},
+	"glm-4.6v": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0.3,
+		outputPrice: 0.9,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.05,
+		description:
+			"GLM-4.6V is an advanced multimodal vision model with improved performance and cost-efficiency for visual understanding tasks.",
+	},
+	"glm-4.6": {
+		maxTokens: 16_384,
+		contextWindow: 200_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.6,
+		outputPrice: 2.2,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.11,
+		description:
+			"GLM-4.6 is Zhipu's newest model with an extended context window of up to 200k tokens, providing enhanced capabilities for processing longer documents and conversations.",
+	},
+	"glm-4.7": {
+		maxTokens: 16_384,
+		contextWindow: 200_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 0.6,
+		outputPrice: 2.2,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.11,
+		description:
+			"GLM-4.7 is Zhipu's latest model with built-in thinking capabilities enabled by default. It provides enhanced reasoning for complex tasks while maintaining fast response times.",
+	},
+	"glm-5": {
+		maxTokens: 16_384,
+		contextWindow: 202_752,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 0.6,
+		outputPrice: 2.2,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.11,
+		description:
+			"GLM-5 is Zhipu's next-generation model with a 202k context window and built-in thinking capabilities. It delivers state-of-the-art reasoning, coding, and agentic performance.",
+	},
+	"glm-5.1": {
+		maxTokens: 131_072,
+		contextWindow: 200_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.26,
+		description:
+			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. It delivers top-tier reasoning, coding, and agentic performance.",
+	},
+	"glm-5-turbo": {
+		maxTokens: 131_072,
+		contextWindow: 202_752,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 1.2,
+		outputPrice: 4.0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.24,
+		description:
+			"GLM-5-Turbo is Zhipu's OpenClaw-optimized model with built-in thinking capabilities. It improves tool use, instruction following, and long-running agent workflows while keeping fast response times.",
+	},
+	"glm-4.7-flash": {
+		maxTokens: 16_384,
+		contextWindow: 200_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0,
+		outputPrice: 0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+		description:
+			"GLM-4.7-Flash is a free, high-speed variant of GLM-4.7 offering fast responses for reasoning and coding tasks.",
+	},
+	"glm-4.7-flashx": {
+		maxTokens: 16_384,
+		contextWindow: 200_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.07,
+		outputPrice: 0.4,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.01,
+		description:
+			"GLM-4.7-FlashX is an ultra-fast variant of GLM-4.7 with exceptional speed and cost-effectiveness for high-throughput applications.",
+	},
+	"glm-4.6v-flash": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0,
+		outputPrice: 0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+		description:
+			"GLM-4.6V-Flash is a free, high-speed multimodal vision model for rapid image understanding and visual reasoning tasks.",
+	},
+	"glm-4.6v-flashx": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0.04,
+		outputPrice: 0.4,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.004,
+		description:
+			"GLM-4.6V-FlashX is an ultra-fast multimodal vision model optimized for high-speed visual processing at low cost.",
+	},
+	"glm-4-32b-0414-128k": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: false,
+		inputPrice: 0.1,
+		outputPrice: 0.1,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+		description: "GLM-4-32B is a 32 billion parameter model with 128k context length, optimized for efficiency.",
+	},
+} as const satisfies Record<string, ModelInfo>
+
+export type MainlandZAiModelId = keyof typeof mainlandZAiModels
+export const mainlandZAiDefaultModelId: MainlandZAiModelId = "glm-4.6"
+export const mainlandZAiModels = {
+	"glm-4.5": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.29,
+		outputPrice: 1.14,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.057,
+		description:
+			"GLM-4.5 is Zhipu's latest featured model. Its comprehensive capabilities in reasoning, coding, and agent reach the state-of-the-art (SOTA) level among open-source models, with a context length of up to 128k.",
+	},
+	"glm-4.5-air": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.1,
+		outputPrice: 0.6,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.02,
+		description:
+			"GLM-4.5-Air is the lightweight version of GLM-4.5. It balances performance and cost-effectiveness, and can flexibly switch to hybrid thinking models.",
+	},
+	"glm-4.5-x": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.29,
+		outputPrice: 1.14,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.057,
+		description:
+			"GLM-4.5-X is a high-performance variant optimized for strong reasoning with ultra-fast responses.",
+	},
+	"glm-4.5-airx": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.1,
+		outputPrice: 0.6,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.02,
+		description: "GLM-4.5-AirX is a lightweight, ultra-fast variant delivering strong performance with lower cost.",
+	},
+	"glm-4.5-flash": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0,
+		outputPrice: 0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+		description: "GLM-4.5-Flash is a free, high-speed model excellent for reasoning, coding, and agentic tasks.",
+	},
+	"glm-4.5v": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0.29,
+		outputPrice: 0.93,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.057,
+		description:
+			"GLM-4.5V is Z.AI's multimodal visual reasoning model (image/video/text/file input), optimized for GUI tasks, grounding, and document/video understanding.",
+	},
+	"glm-4.6": {
+		maxTokens: 16_384,
+		contextWindow: 204_800,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.29,
+		outputPrice: 1.14,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.057,
+		description:
+			"GLM-4.6 is Zhipu's newest model with an extended context window of up to 200k tokens, providing enhanced capabilities for processing longer documents and conversations.",
+	},
+	"glm-4.7": {
+		maxTokens: 16_384,
+		contextWindow: 204_800,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 0.29,
+		outputPrice: 1.14,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.057,
+		description:
+			"GLM-4.7 is Zhipu's latest model with built-in thinking capabilities enabled by default. It provides enhanced reasoning for complex tasks while maintaining fast response times.",
+	},
+	"glm-5": {
+		maxTokens: 16_384,
+		contextWindow: 202_752,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 0.29,
+		outputPrice: 1.14,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.057,
+		description:
+			"GLM-5 is Zhipu's next-generation model with a 202k context window and built-in thinking capabilities. It delivers state-of-the-art reasoning, coding, and agentic performance.",
+	},
+	"glm-5.1": {
+		maxTokens: 131_072,
+		contextWindow: 204_800,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 0.68,
+		outputPrice: 2.28,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.13,
+		description:
+			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. It delivers top-tier reasoning, coding, and agentic performance.",
+	},
+	"glm-5-turbo": {
+		maxTokens: 131_072,
+		contextWindow: 202_752,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 0.35,
+		outputPrice: 1.43,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.07,
+		description:
+			"GLM-5-Turbo is Zhipu's OpenClaw-optimized model with built-in thinking capabilities. It improves tool use, instruction following, and long-running agent workflows while keeping fast response times.",
+	},
+	"glm-4.7-flash": {
+		maxTokens: 16_384,
+		contextWindow: 204_800,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0,
+		outputPrice: 0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+		description:
+			"GLM-4.7-Flash is a free, high-speed variant of GLM-4.7 offering fast responses for reasoning and coding tasks.",
+	},
+	"glm-4.7-flashx": {
+		maxTokens: 16_384,
+		contextWindow: 204_800,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 0.035,
+		outputPrice: 0.2,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.005,
+		description:
+			"GLM-4.7-FlashX is an ultra-fast variant of GLM-4.7 with exceptional speed and cost-effectiveness for high-throughput applications.",
+	},
+	"glm-4.6v": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0.15,
+		outputPrice: 0.45,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.025,
+		description:
+			"GLM-4.6V is an advanced multimodal vision model with improved performance and cost-efficiency for visual understanding tasks.",
+	},
+	"glm-4.6v-flash": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0,
+		outputPrice: 0,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0,
+		description:
+			"GLM-4.6V-Flash is a free, high-speed multimodal vision model for rapid image understanding and visual reasoning tasks.",
+	},
+	"glm-4.6v-flashx": {
+		maxTokens: 16_384,
+		contextWindow: 131_072,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0.02,
+		outputPrice: 0.2,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.002,
+		description:
+			"GLM-4.6V-FlashX is an ultra-fast multimodal vision model optimized for high-speed visual processing at low cost.",
+	},
+} as const satisfies Record<string, ModelInfo>
+
+export const ZAI_DEFAULT_TEMPERATURE = 0.6
+
+export const zaiApiLineConfigs = {
+	international_coding: {
+		name: "International Coding",
+		baseUrl: "https://api.z.ai/api/coding/paas/v4",
+		isChina: false,
+	},
+	china_coding: {
+		name: "China Coding",
+		baseUrl: "https://open.bigmodel.cn/api/coding/paas/v4",
+		isChina: true,
+	},
+	international_api: {
+		name: "International API",
+		baseUrl: "https://api.z.ai/api/paas/v4",
+		isChina: false,
+	},
+	china_api: {
+		name: "China API",
+		baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+		isChina: true,
+	},
+} satisfies Record<ZaiApiLine, { name: string; baseUrl: string; isChina: boolean }>

@@ -1,0 +1,492 @@
+{
+	"greeting": "Zoo Code में आपका स्वागत है!",
+	"task": {
+		"title": "कार्य",
+		"expand": "कार्य विस्तृत करें",
+		"collapse": "कार्य संक्षिप्त करें",
+		"seeMore": "अधिक देखें",
+		"seeLess": "कम देखें",
+		"tokens": "Tokens",
+		"cache": "कैश",
+		"apiCost": "API लागत",
+		"size": "आकार",
+		"contextWindow": "संदर्भ लंबाई",
+		"closeAndStart": "कार्य बंद करें और नया शुरू करें",
+		"export": "कार्य इतिहास निर्यात करें",
+		"delete": "कार्य हटाएं (पुष्टि को छोड़ने के लिए Shift + क्लिक)",
+		"condenseContext": "संदर्भ को बुद्धिमानी से संघनित करें",
+		"openApiHistory": "API इतिहास खोलें",
+		"openUiHistory": "UI इतिहास खोलें",
+		"backToParentTask": "मूल कार्य"
+	},
+	"unpin": "पिन करें",
+	"pin": "अवपिन करें",
+	"fileChangesInConversation": {
+		"header": "इस वार्तालाप में {{count}} फ़ाइल(ें) बदली गईं"
+	},
+	"tokenProgress": {
+		"availableSpace": "उपलब्ध स्थान: {{amount}} tokens",
+		"tokensUsed": "प्रयुक्त tokens: {{used}} / {{total}}",
+		"reservedForResponse": "मॉडल प्रतिक्रिया के लिए आरक्षित: {{amount}} tokens",
+		"tokensUsedLabel": "प्रयुक्त tokens",
+		"reservedForResponseLabel": "प्रतिक्रिया के लिए आरक्षित",
+		"availableSpaceLabel": "उपलब्ध स्थान"
+	},
+	"retry": {
+		"title": "पुनः प्रयास करें",
+		"tooltip": "ऑपरेशन फिर से प्रयास करें"
+	},
+	"startNewTask": {
+		"title": "नया कार्य शुरू करें",
+		"tooltip": "नया कार्य शुरू करें"
+	},
+	"proceedAnyways": {
+		"title": "फिर भी आगे बढ़ें",
+		"tooltip": "कमांड निष्पादन के दौरान जारी रखें"
+	},
+	"save": {
+		"title": "सहेजें",
+		"tooltip": "संदेश के बदलाव सहेजें"
+	},
+	"reject": {
+		"title": "अस्वीकार करें",
+		"tooltip": "इस क्रिया को अस्वीकार करें"
+	},
+	"completeSubtaskAndReturn": "उपकार्य पूरा करें और वापस लौटें",
+	"approve": {
+		"title": "स्वीकृत करें",
+		"tooltip": "इस क्रिया को स्वीकृत करें"
+	},
+	"runCommand": {
+		"title": "कमांड",
+		"tooltip": "इस कमांड को निष्पादित करें"
+	},
+	"proceedWhileRunning": {
+		"title": "चलते समय आगे बढ़ें",
+		"tooltip": "चेतावनियों के बावजूद जारी रखें"
+	},
+	"killCommand": {
+		"title": "कमांड रोकें",
+		"tooltip": "वर्तमान कमांड रोकें"
+	},
+	"resumeTask": {
+		"title": "कार्य जारी रखें",
+		"tooltip": "वर्तमान कार्य जारी रखें"
+	},
+	"terminate": {
+		"title": "समाप्त करें",
+		"tooltip": "वर्तमान कार्य समाप्त करें"
+	},
+	"stop": {
+		"title": "रोकें",
+		"tooltip": "वर्तमान कार्य रोकें"
+	},
+	"cancel": {
+		"title": "रद्द करें",
+		"tooltip": "वर्तमान ऑपरेशन रद्द करें"
+	},
+	"enqueueMessage": "संदेश को कतार में जोड़ें (वर्तमान कार्य पूरा होने के बाद भेजा जाएगा)",
+	"scrollToBottom": "चैट के निचले हिस्से तक स्क्रॉल करें",
+	"scrollToLatestCheckpoint": "पिछले चेकपॉइंट तक स्क्रॉल करें",
+	"about": "Zoo Code आपके संपादक में एक पूरी AI देव टीम है।",
+	"docs": "और जानने के लिए हमारे <DocsLink>दस्तावेज़</DocsLink> देखें।",
+	"onboarding": "इस कार्यक्षेत्र में आपकी कार्य सूची खाली है।",
+	"rooTips": {
+		"customizableModes": {
+			"title": "अनुकूलन योग्य मोड",
+			"description": "विशेष व्यक्ति जो कार्य पर बने रहते हैं और वितरित करते हैं।"
+		},
+		"modelAgnostic": {
+			"title": "अपना खुद का मॉडल लाओ",
+			"description": "अपने स्वयं के प्रदाता कुंजी का उपयोग करें या यहां तक   कि स्थानीय अनुमान चलाएं - कोई मार्कअप, लॉक-इन, कोई प्रतिबंध नहीं"
+		}
+	},
+	"selectMode": "इंटरैक्शन मोड चुनें",
+	"selectApiConfig": "एपीआई कॉन्फ़िगरेशन का चयन करें",
+	"lockApiConfigAcrossModes": "इस कार्यक्षेत्र में सभी मोड के लिए API कॉन्फ़िगरेशन लॉक करें",
+	"unlockApiConfigAcrossModes": "इस कार्यक्षेत्र में सभी मोड के लिए API कॉन्फ़िगरेशन लॉक है (अनलॉक करने के लिए क्लिक करें)",
+	"enhancePrompt": "अतिरिक्त संदर्भ के साथ प्रॉम्प्ट बढ़ाएँ",
+	"addImages": "संदेश में चित्र जोड़ें",
+	"sendMessage": "संदेश भेजें",
+	"pressToSend": "भेजने के लिए {{keyCombination}} दबाएं",
+	"stopTts": "टेक्स्ट-टू-स्पीच बंद करें",
+	"typeMessage": "एक संदेश लिखें...",
+	"typeTask": "अपना कार्य यहां लिखें...",
+	"addContext": "संदर्भ जोड़ने के लिए @, कमांड के लिए /",
+	"dragFiles": "फ़ाइलें खींचने के लिए shift दबाकर रखें",
+	"dragFilesImages": "फ़ाइलें/चित्र खींचने के लिए shift दबाकर रखें",
+	"enhancePromptDescription": "'प्रॉम्प्ट बढ़ाएँ' बटन अतिरिक्त संदर्भ, स्पष्टीकरण या पुनर्विचार प्रदान करके आपके अनुरोध को बेहतर बनाने में मदद करता है। यहां अनुरोध लिखकर देखें और यह कैसे काम करता है यह देखने के लिए बटन पर फिर से क्लिक करें।",
+	"modeSelector": {
+		"title": "मोड्स",
+		"marketplace": "मोड मार्केटप्लेस",
+		"settings": "मोड सेटिंग्स",
+		"description": "विशेष व्यक्तित्व जो Zoo के व्यवहार को अनुकूलित करते हैं।",
+		"searchPlaceholder": "मोड खोजें...",
+		"noResults": "कोई परिणाम नहीं मिला"
+	},
+	"errorReadingFile": "फ़ाइल पढ़ने में त्रुटि",
+	"noValidImages": "कोई मान्य चित्र प्रोसेस नहीं किया गया",
+	"separator": "विभाजक",
+	"edit": "संपादित करें...",
+	"forNextMode": "अगले मोड के लिए",
+	"forPreviousMode": "पिछले मोड के लिए",
+	"error": "त्रुटि",
+	"diffError": {
+		"title": "संपादन असफल"
+	},
+	"troubleMessage": "Zoo को समस्या हो रही है...",
+	"apiRequest": {
+		"title": "API अनुरोध",
+		"failed": "API अनुरोध विफल हुआ",
+		"streaming": "API अनुरोध...",
+		"cancelled": "API अनुरोध रद्द किया गया",
+		"streamingFailed": "API स्ट्रीमिंग विफल हुई",
+		"rateLimitWait": "दर सीमा",
+		"errorTitle": "प्रदाता त्रुटि {{code}}",
+		"errorMessage": {
+			"400": "प्रदाता अनुरोध को जैसे बनाया गया था उसे प्रोसेस नहीं कर सका। कार्य को रोकें और एक अलग तरीका आजमाएं।",
+			"401": "प्रदाता के साथ प्रमाणित नहीं किए जा सके। अपने API कुंजी कॉन्फ़िगरेशन की जाँच करें।",
+			"402": "ऐसा लगता है कि आपके खाते में फंड/क्रेडिट समाप्त हो गए हैं। अपने प्रदाता के पास जाएं और जारी रखने के लिए और अधिक जोड़ें।",
+			"403": "अनुमति नहीं। आपकी API कुंजी वैध है, लेकिन प्रदाता ने इस अनुरोध को पूरा करने से इनकार कर दिया।",
+			"429": "बहुत सारे अनुरोध। आप प्रदाता द्वारा दर-सीमित हो रहे हैं। कृपया अपनी अगली API कॉल से पहले थोड़ी देर प्रतीक्षा करें।",
+			"500": "प्रदाता सर्वर त्रुटि। प्रदाता की ओर से कुछ गलत है, आपके अनुरोध में कुछ गलत नहीं है।",
+			"docs": "डॉक्स",
+			"goToSettings": "सेटिंग्स",
+			"unknown": "अज्ञात API त्रुटि। कृपया Zoo Code सहायता से संपर्क करें।",
+			"connection": "कनेक्शन त्रुटि। सुनिश्चित करें कि आपके पास कार्यशील इंटरनेट कनेक्शन है।",
+			"claudeCodeNotAuthenticated": "Claude Code का उपयोग करने के लिए आपको साइन इन करना होगा। सेटिंग्स में जाएं और प्रमाणित करने के लिए \"Claude Code में साइन इन करें\" पर क्लिक करें।"
+		}
+	},
+	"checkpoint": {
+		"regular": "चेकपॉइंट",
+		"initializingWarning": "चेकपॉइंट अभी भी आरंभ हो रहा है... अगर यह बहुत समय ले रहा है, तो आप <settingsLink>सेटिंग्स</settingsLink> में चेकपॉइंट को अक्षम कर सकते हैं और अपने कार्य को पुनः आरंभ कर सकते हैं।",
+		"menu": {
+			"viewDiff": "अंतर देखें",
+			"more": "अधिक विकल्प",
+			"viewDiffFromInit": "सभी परिवर्तन देखें",
+			"viewDiffWithCurrent": "इस चेकपॉइंट के बाद से परिवर्तन देखें",
+			"restore": "चेकपॉइंट पुनर्स्थापित करें",
+			"restoreFiles": "फ़ाइलें पुनर्स्थापित करें",
+			"restoreFilesDescription": "आपके प्रोजेक्ट की फ़ाइलों को इस बिंदु पर लिए गए स्नैपशॉट पर पुनर्स्थापित करता है।",
+			"restoreFilesAndTask": "फ़ाइलें और कार्य पुनर्स्थापित करें",
+			"confirm": "पुष्टि करें",
+			"cancel": "रद्द करें",
+			"cannotUndo": "इस क्रिया को पूर्ववत नहीं किया जा सकता।",
+			"restoreFilesAndTaskDescription": "आपके प्रोजेक्ट की फ़ाइलों को इस बिंदु पर लिए गए स्नैपशॉट पर पुनर्स्थापित करता है और इस बिंदु के बाद के सभी संदेशों को हटा देता है।"
+		},
+		"current": "वर्तमान"
+	},
+	"instructions": {
+		"wantsToFetch": "Roo को वर्तमान कार्य में सहायता के लिए विस्तृत निर्देश प्राप्त करना है"
+	},
+	"fileOperations": {
+		"wantsToRead": "Zoo इस फ़ाइल को पढ़ना चाहता है",
+		"wantsToReadOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर इस फ़ाइल को पढ़ना चाहता है",
+		"didRead": "Zoo ने इस फ़ाइल को पढ़ा",
+		"wantsToEdit": "Zoo इस फ़ाइल को संपादित करना चाहता है",
+		"wantsToEditOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर इस फ़ाइल को संपादित करना चाहता है",
+		"wantsToEditProtected": "Zoo एक सुरक्षित कॉन्फ़िगरेशन फ़ाइल को संपादित करना चाहता है",
+		"wantsToCreate": "Zoo एक नई फ़ाइल बनाना चाहता है",
+		"wantsToSearchReplace": "Roo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
+		"didSearchReplace": "Roo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
+		"wantsToInsert": "Zoo इस फ़ाइल में सामग्री डालना चाहता है",
+		"wantsToInsertWithLineNumber": "Zoo इस फ़ाइल की {{lineNumber}} लाइन पर सामग्री डालना चाहता है",
+		"wantsToInsertAtEnd": "Zoo इस फ़ाइल के अंत में सामग्री जोड़ना चाहता है",
+		"wantsToReadAndXMore": "रू इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
+		"wantsToReadMultiple": "Zoo कई फ़ाइलें पढ़ना चाहता है",
+		"wantsToApplyBatchChanges": "Zoo कई फ़ाइलों में परिवर्तन लागू करना चाहता है",
+		"wantsToGenerateImage": "Zoo एक छवि बनाना चाहता है",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर एक छवि बनाना चाहता है",
+		"wantsToGenerateImageProtected": "Zoo एक संरक्षित स्थान पर छवि बनाना चाहता है",
+		"didGenerateImage": "Zoo ने एक छवि बनाई"
+	},
+	"directoryOperations": {
+		"wantsToViewTopLevel": "Zoo इस निर्देशिका में शीर्ष स्तर की फ़ाइलें देखना चाहता है",
+		"didViewTopLevel": "Zoo ने इस निर्देशिका में शीर्ष स्तर की फ़ाइलें देखीं",
+		"wantsToViewRecursive": "Zoo इस निर्देशिका में सभी फ़ाइलों को पुनरावर्ती रूप से देखना चाहता है",
+		"didViewRecursive": "Zoo ने इस निर्देशिका में सभी फ़ाइलों को पुनरावर्ती रूप से देखा",
+		"wantsToSearch": "Zoo इस निर्देशिका में <code>{{regex}}</code> के लिए खोज करना चाहता है",
+		"didSearch": "Zoo ने इस निर्देशिका में <code>{{regex}}</code> के लिए खोज की",
+		"wantsToSearchOutsideWorkspace": "Zoo इस निर्देशिका (कार्यक्षेत्र के बाहर) में <code>{{regex}}</code> के लिए खोज करना चाहता है",
+		"didSearchOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में <code>{{regex}}</code> के लिए खोज की",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo इस निर्देशिका (कार्यक्षेत्र के बाहर) में शीर्ष स्तर की फ़ाइलें देखना चाहता है",
+		"didViewTopLevelOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में शीर्ष स्तर की फ़ाइलें देखीं",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखना चाहता है",
+		"didViewRecursiveOutsideWorkspace": "Zoo ने इस निर्देशिका (कार्यक्षेत्र के बाहर) में सभी फ़ाइलों को पुनरावर्ती रूप से देखा",
+		"wantsToViewMultipleDirectories": "Zoo कई डायरेक्ट्रीज़ देखना चाहता है"
+	},
+	"commandOutput": "कमांड आउटपुट",
+	"commandExecution": {
+		"abort": "रद्द करें",
+		"running": "चल रहा है",
+		"pid": "पीआईडी: {{pid}}",
+		"exitStatus": "{{exitCode}} स्थिति के साथ बाहर निकल गया",
+		"manageCommands": "स्वतः-अनुमोदित कमांड",
+		"addToAllowed": "अनुमत सूची में जोड़ें",
+		"removeFromAllowed": "अनुमत सूची से हटाएँ",
+		"addToDenied": "अस्वीकृत सूची में जोड़ें",
+		"removeFromDenied": "अस्वीकृत सूची से हटाएँ",
+		"abortCommand": "कमांड निष्पादन रद्द करें",
+		"expandOutput": "आउटपुट का विस्तार करें",
+		"collapseOutput": "आउटपुट संक्षिप्त करें",
+		"expandManagement": "कमांड प्रबंधन अनुभाग का विस्तार करें",
+		"collapseManagement": "कमांड प्रबंधन अनुभाग संक्षिप्त करें"
+	},
+	"response": "प्रतिक्रिया",
+	"arguments": "आर्ग्युमेंट्स",
+	"text": {
+		"rooSaid": "रू ने कहा"
+	},
+	"feedback": {
+		"youSaid": "आपने कहा"
+	},
+	"mcp": {
+		"wantsToUseTool": "Zoo {{serverName}} MCP सर्वर पर एक टूल का उपयोग करना चाहता है",
+		"wantsToAccessResource": "Zoo {{serverName}} MCP सर्वर पर एक संसाधन का उपयोग करना चाहता है"
+	},
+	"modes": {
+		"wantsToSwitch": "Zoo <code>{{mode}}</code> मोड में स्विच करना चाहता है",
+		"wantsToSwitchWithReason": "Zoo <code>{{mode}}</code> मोड में स्विच करना चाहता है क्योंकि: {{reason}}",
+		"didSwitch": "Zoo <code>{{mode}}</code> मोड में स्विच कर गया",
+		"didSwitchWithReason": "Zoo <code>{{mode}}</code> मोड में स्विच कर गया क्योंकि: {{reason}}"
+	},
+	"subtasks": {
+		"wantsToCreate": "Zoo <code>{{mode}}</code> मोड में एक नया उपकार्य बनाना चाहता है",
+		"wantsToFinish": "Zoo इस उपकार्य को समाप्त करना चाहता है",
+		"newTaskContent": "उपकार्य निर्देश",
+		"completionContent": "उपकार्य पूर्ण",
+		"resultContent": "उपकार्य परिणाम",
+		"defaultResult": "कृपया अगले कार्य पर जारी रखें।",
+		"completionInstructions": "उपकार्य पूर्ण! आप परिणामों की समीक्षा कर सकते हैं और सुधार या अगले चरण सुझा सकते हैं। यदि सब कुछ ठीक लगता है, तो मुख्य कार्य को परिणाम वापस करने के लिए पुष्टि करें।",
+		"goToSubtask": "कार्य देखें"
+	},
+	"questions": {
+		"hasQuestion": "Zoo का एक प्रश्न है"
+	},
+	"taskCompleted": "कार्य पूरा हुआ",
+	"modelResponseIncomplete": "मॉडल प्रतिक्रिया अपूर्ण",
+	"modelResponseErrors": {
+		"noToolsUsed": "मॉडल ने अपनी प्रतिक्रिया में कोई टूल का उपयोग नहीं किया। यह आमतौर पर तब होता है जब मॉडल केवल टेक्स्ट/तर्क प्रदान करता है बिना कार्य पूरा करने के लिए आवश्यक टूल को कॉल किए।",
+		"noToolsUsedDetails": "मॉडल ने टेक्स्ट/तर्क प्रदान किया लेकिन किसी भी आवश्यक टूल को कॉल नहीं किया। यह आमतौर पर संकेत देता है कि मॉडल ने कार्य को गलत समझा या किस टूल का उपयोग करना है यह निर्धारित करने में कठिनाई हो रही है। मॉडल को स्वचालित रूप से उचित टूल उपयोग के साथ पुनः प्रयास करने के लिए कहा गया है।",
+		"noAssistantMessages": "मॉडल ने कोई प्रतिक्रिया सामग्री प्रदान नहीं की। यह API या मॉडल के आउटपुट में समस्या का संकेत दे सकता है।",
+		"noAssistantMessagesDetails": "भाषा मॉडल ने बिना किसी टेक्स्ट या टूल कॉल के खाली प्रतिक्रिया लौटाई। यह API समस्याओं, दर सीमित करने, या मॉडल-विशिष्ट समस्याओं के कारण हो सकता है। मॉडल को स्वचालित रूप से पुनः प्रयास करने के लिए कहा गया है।"
+	},
+	"errorDetails": {
+		"link": "विवरण",
+		"title": "त्रुटि विवरण",
+		"copyToClipboard": "क्लिपबोर्ड पर कॉपी करें",
+		"copied": "कॉपी किया गया!",
+		"diagnostics": "विस्तृत त्रुटि जानकारी प्राप्त करें",
+		"proxyProvider": "ऐसा लगता है कि आप एक प्रॉक्सी-आधारित प्रदाता का उपयोग कर रहे हैं। इसके लॉग की जांच करना सुनिश्चित करें और सुनिश्चित करें कि यह Zoo के अनुरोधों को नहीं फिर से लिख रहा है।"
+	},
+	"powershell": {
+		"issues": "ऐसा लगता है कि आपको Windows PowerShell के साथ समस्याएँ हो रही हैं, कृपया इसे देखें"
+	},
+	"autoApprove": {
+		"tooltipManage": "स्वतः-अनुमोदन सेटिंग्स प्रबंधित करें",
+		"tooltipStatus": "स्वतः-अनुमोदन इनके लिए सक्षम है: {{toggles}}",
+		"title": "स्वतः-अनुमोदन",
+		"toggle": "स्वतः-अनुमोदन टॉगल करें",
+		"all": "सभी",
+		"none": "कोई नहीं",
+		"description": "अनुमति मांगे बिना इन क्रियाओं को चलाएं। इसे केवल उन क्रियाओं के लिए सक्षम करें जिन पर आपको पूरा भरोसा है।",
+		"selectOptionsFirst": "स्वतः-अनुमोदन सक्षम करने के लिए नीचे से कम से कम एक विकल्प चुनें",
+		"toggleAriaLabel": "स्वतः-अनुमोदन टॉगल करें",
+		"disabledAriaLabel": "स्वतः-अनुमोदन अक्षम है - पहले विकल्प चुनें",
+		"triggerLabelOff": "स्वतः-अनुमोदन बंद",
+		"triggerLabelOffShort": "बंद",
+		"triggerLabel_zero": "0 स्वतः-अनुमोदन",
+		"triggerLabel_one": "1 स्वतः-अनुमोदित",
+		"triggerLabel_other": "{{count}} स्वतः-अनुमोदित",
+		"triggerLabelAll": "BRRR"
+	},
+	"reasoning": {
+		"thinking": "विचार कर रहा है",
+		"seconds": "{{count}} सेकंड"
+	},
+	"contextManagement": {
+		"tokens": "टोकन",
+		"condensation": {
+			"title": "संदर्भ संक्षिप्त किया गया",
+			"inProgress": "संदर्भ संघनित कर रहा है...",
+			"errorHeader": "संदर्भ संघनित करने में विफल"
+		},
+		"truncation": {
+			"title": "संदर्भ छोटा किया गया",
+			"inProgress": "संदर्भ छोटा कर रहा है...",
+			"messagesRemoved": "{{count}} संदेश हटाया गया",
+			"messagesRemoved_other": "{{count}} संदेश हटाए गए",
+			"description": "संदर्भ विंडो सीमा के भीतर रहने के लिए बातचीत से पुराने संदेश हटा दिए गए। संघनन की तुलना में यह एक तेज़ लेकिन कम संदर्भ-संरक्षित दृष्टिकोण है।"
+		}
+	},
+	"skill": {
+		"wantsToLoad": "Zoo एक कौशल लोड करना चाहता है",
+		"didLoad": "Zoo ने एक कौशल लोड किया"
+	},
+	"followUpSuggest": {
+		"copyToInput": "इनपुट में कॉपी करें (या Shift + क्लिक)",
+		"timerPrefix": "ऑटो-अनुमोदन सक्षम है। {{seconds}}s में चयन किया जा रहा है…"
+	},
+	"announcement": {
+		"title": "Zoo Code {{version}} रिलीज़ हो गया",
+		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
+		"handoff": {
+			"heading": "Roo Code वापस आ गया है! अब Zoo Code नाम के community-maintained plugin के रूप में!!",
+			"description": "अगर आपने हाल की खबर नहीं देखी, तो Roo Code टीम ने हाल ही में घोषणा की कि वे Roo Code का विकास बंद कर रहे हैं और अब तक किए गए काम को archive कर रहे हैं। लेकिन चिंता मत करें, community नए नाम और नए घर के साथ Roo Code की विरासत को आगे बढ़ाने के लिए आगे आई है! अब हम सिर्फ एक \"Roo\" नहीं हैं, हम एक community हैं — अगर चाहो तो एक \"Zoo\"। Zoo Code एक community-maintained plugin है जो वहीं से आगे बढ़ता है जहाँ Roo Code रुका था, और हम Roo की भावना को ज़िंदा रखते हुए नई सुविधाएँ और सुधार लाने के लिए प्रतिबद्ध हैं। हम पूरी Roo Code टीम को उनके शानदार काम और डेवलपर्स के लिए इतना बेहतरीन tool बनाने के लिए दिल से धन्यवाद देना चाहते हैं। हम उनकी बनाई नींव पर आगे निर्माण करने और यह देखने के लिए उत्साहित हैं कि community Zoo Code को आगे कहाँ ले जाती है!",
+			"readMore": "Zoo Code का नया होम पेज देखें और पूरी घोषणा पढ़ें"
+		},
+		"release": {
+			"heading": "नया क्या है:",
+			"gpt55": "OpenAI Codex के माध्यम से GPT-5.5: OpenAI Codex provider में GPT-5.5 सपोर्ट जोड़ा गया, ताकि आप नवीनतम मॉडल का उपयोग सीधे Zoo Code से कर सकें।",
+			"claudeOpus47": "Vertex AI पर Claude Opus 4.7: Anthropic के नवीनतम flagship reasoning मॉडल के लिए Vertex AI provider में Claude Opus 4.7 जोड़ा गया।",
+			"checkpointNav": "पिछले Checkpoint की Navigation: चैट में controls जोड़े गए ताकि आप पिछले checkpoints पर वापस जा सकें, पूर्ण i18n सपोर्ट के साथ।"
+		},
+		"cloudAgents": {
+			"heading": "क्लाउड में नया:",
+			"specialized": "<bold>Explainer</bold>, <bold>Planner</bold>, और <bold>Coder</bold> की शुरुआत - तीन विशेष क्लाउड एजेंट आपके वर्कफ़्लो को बेहतर बनाने के लिए।",
+			"description": "एजेंट क्लाउड में एक साथ काम करते हैं और web या Slack के माध्यम से ट्रिगर किए जा सकते हैं।",
+			"tryButton": "क्लाउड एजेंट आज़माएं"
+		}
+	},
+	"costs": {
+		"totalWithSubtasks": "कुल लागत (उप-कार्यों सहित): ${{cost}}",
+		"total": "कुल लागत: ${{cost}}",
+		"includesSubtasks": "उप-कार्यों की लागत शामिल है"
+	},
+	"codeblock": {
+		"tooltips": {
+			"expand": "कोड ब्लॉक का विस्तार करें",
+			"collapse": "कोड ब्लॉक को संकुचित करें",
+			"copy_code": "कोड कॉपी करें"
+		}
+	},
+	"profileViolationWarning": "वर्तमान प्रोफ़ाइल आपके संगठन की सेटिंग्स के साथ संगत नहीं है",
+	"shellIntegration": {
+		"title": "कमांड निष्पादन चेतावनी",
+		"description": "आपका कमांड VSCode टर्मिनल शेल इंटीग्रेशन के बिना निष्पादित हो रहा है। इस चेतावनी को दबाने के लिए आप <settingsLink>Zoo Code सेटिंग्स</settingsLink> के <strong>Terminal</strong> अनुभाग में शेल इंटीग्रेशन को अक्षम कर सकते हैं या नीचे दिए गए लिंक का उपयोग करके VSCode टर्मिनल इंटीग्रेशन की समस्या का समाधान कर सकते हैं।",
+		"troubleshooting": "शेल इंटीग्रेशन दस्तावेज़ के लिए यहां क्लिक करें।"
+	},
+	"ask": {
+		"autoApprovedRequestLimitReached": {
+			"title": "स्वत:-स्वीकृत अनुरोध सीमा पहुंची",
+			"description": "Zoo {{count}} API अनुरोध(धों) की स्वत:-स्वीकृत सीमा तक पहुंच गया है। क्या आप गणना को रीसेट करके कार्य जारी रखना चाहते हैं?",
+			"button": "रीसेट करें और जारी रखें"
+		},
+		"autoApprovedCostLimitReached": {
+			"title": "स्वत:-अनुमोदित लागत सीमा पहुँच गई",
+			"button": "रीसेट करें और जारी रखें",
+			"description": "Zoo ने स्वचालित-स्वीकृत लागत सीमा ${{count}} तक पहुंच गई है। क्या आप लागत को रीसेट करके कार्य जारी रखना चाहेंगे?"
+		}
+	},
+	"codebaseSearch": {
+		"wantsToSearch": "Zoo कोडबेस में <code>{{query}}</code> खोजना चाहता है",
+		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> में कोडबेस में <code>{{query}}</code> खोजना चाहता है",
+		"didSearch_one": "1 परिणाम मिला",
+		"didSearch_other": "{{count}} परिणाम मिले",
+		"resultTooltip": "समानता स्कोर: {{score}} (फ़ाइल खोलने के लिए क्लिक करें)"
+	},
+	"read-batch": {
+		"approve": {
+			"title": "सभी स्वीकृत करें"
+		},
+		"deny": {
+			"title": "सभी अस्वीकार करें"
+		}
+	},
+	"list-batch": {
+		"approve": {
+			"title": "सभी स्वीकृत करें"
+		},
+		"deny": {
+			"title": "सभी अस्वीकार करें"
+		}
+	},
+	"edit-batch": {
+		"approve": {
+			"title": "सभी सहेजें"
+		},
+		"deny": {
+			"title": "सभी अस्वीकार करें"
+		}
+	},
+	"indexingStatus": {
+		"ready": "इंडेक्स तैयार",
+		"indexing": "इंडेक्सिंग {{percentage}}%",
+		"indexed": "इंडेक्स किया गया",
+		"error": "इंडेक्स त्रुटि",
+		"status": "इंडेक्स स्थिति",
+		"stopping": "इंडेक्सिंग रोक रहा है..."
+	},
+	"versionIndicator": {
+		"ariaLabel": "संस्करण {{version}} - रिलीज़ नोट्स देखने के लिए क्लिक करें"
+	},
+	"rooCloudCTA": {
+		"title": "Zoo Code Cloud विकसित हो रहा है!",
+		"description": "क्लाउड में रिमोट एजेंट चलाएं, कहीं से भी अपने कार्यों तक पहुंचें, दूसरों के साथ सहयोग करें, और बहुत कुछ।",
+		"joinWaitlist": "नवीनतम अपडेट प्राप्त करने के लिए साइन अप करें।"
+	},
+	"editMessage": {
+		"placeholder": "अपना संदेश संपादित करें..."
+	},
+	"command": {
+		"triggerDescription": "{{name}} कमांड को ट्रिगर करें"
+	},
+	"slashCommands": {
+		"tooltip": "स्लैश कमांड प्रबंधित करें",
+		"title": "स्लैश कमांड",
+		"description": "बिल्ट-इन स्लैश कमांड का उपयोग करें या बार-बार उपयोग किए जाने वाले प्रॉम्प्ट और वर्कफ़्लो तक त्वरित पहुंच के लिए कस्टम स्लैश कमांड बनाएं। <DocsLink>दस्तावेज़</DocsLink>",
+		"manageCommands": "सेटिंग्स में स्लैश कमांड प्रबंधित करें",
+		"builtInCommands": "बिल्ट-इन कमांड",
+		"globalCommands": "वैश्विक कमांड",
+		"workspaceCommands": "कार्यक्षेत्र कमांड",
+		"globalCommand": "वैश्विक कमांड",
+		"editCommand": "कमांड संपादित करें",
+		"deleteCommand": "कमांड हटाएं",
+		"newGlobalCommandPlaceholder": "नया वैश्विक कमांड...",
+		"newWorkspaceCommandPlaceholder": "नया कार्यक्षेत्र कमांड...",
+		"deleteDialog": {
+			"title": "कमांड हटाएं",
+			"description": "क्या आप वाकई \"{{name}}\" कमांड को हटाना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
+			"cancel": "रद्द करें",
+			"confirm": "हटाएं"
+		}
+	},
+	"contextMenu": {
+		"noResults": "कोई परिणाम नहीं",
+		"problems": "समस्याएँ",
+		"terminal": "टर्मिनल",
+		"url": "सामग्री लाने के लिए URL पेस्ट करें"
+	},
+	"queuedMessages": {
+		"title": "कतार में संदेश",
+		"clickToEdit": "संदेश संपादित करने के लिए क्लिक करें"
+	},
+	"slashCommand": {
+		"wantsToRun": "Zoo एक स्लैश कमांड चलाना चाहता है",
+		"didRun": "Zoo ने एक स्लैश कमांड चलाया"
+	},
+	"todo": {
+		"partial": "{{total}} में से {{completed}} टू-डू हो गए",
+		"complete": "{{total}} टू-डू हो गए",
+		"updated": "टू-डू सूची अपडेट की गई",
+		"completed": "पूरा हुआ",
+		"started": "शुरू हुआ"
+	},
+	"tooManyTools": {
+		"title": "बहुत सारे उपकरण सक्षम हैं",
+		"toolsPart_one": "{{count}} उपकरण",
+		"toolsPart_other": "{{count}} उपकरण",
+		"serversPart_one": "{{count}} MCP सर्वर",
+		"serversPart_other": "{{count}} MCP सर्वर",
+		"messageTemplate": "आपके पास {{servers}} के माध्यम से {{tools}} सक्षम हैं। इतनी अधिक संख्या मॉडल को भ्रमित कर सकती है और त्रुटियों का कारण बन सकती है। इसे {{threshold}} से नीचे रखने का प्रयास करें।",
+		"openMcpSettings": "MCP सेटिंग्स खोलें"
+	},
+	"readCommandOutput": {
+		"title": "Zoo read command output"
+	},
+	"retiredProvider": {
+		"title": "प्रदाता अब समर्थित नहीं है",
+		"message": "यह प्रदाता अब उपलब्ध नहीं है। जारी रखने के लिए कोई समर्थित प्रदाता चुनें।",
+		"openSettings": "सेटिंग्स खोलें"
+	}
+}

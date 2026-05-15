@@ -1,0 +1,18 @@
+{
+	"landing": {
+		"greeting": "Selamat datang di Zoo Code!",
+		"introduction": "Dengan berbagai Mode bawaan dan dapat diperluas, Zoo Code memungkinkan Anda merencanakan, merancang, coding, debug, dan meningkatkan produktivitas seperti yang belum pernah terjadi sebelumnya.",
+		"getStarted": "Pilih penyedia Anda"
+	},
+	"providerSignup": {
+		"heading": "Pilih penyedia Anda",
+		"chooseProvider": "Zoo Code memerlukan penyedia LLM untuk bekerja. Pilih satu untuk memulai, Anda dapat menambahkan lebih banyak nanti.",
+		"goBack": "Kembali",
+		"finish": "Selesai"
+	},
+	"telemetry": {
+		"helpImprove": "Bantu Tingkatkan Zoo Code",
+		"helpImproveMessage": "Zoo Code mengumpulkan data kesalahan dan penggunaan untuk membantu kami memperbaiki bug dan meningkatkan ekstensi. Telemetri ini tidak mengumpulkan kode, prompt, atau informasi pribadi. Anda dapat menonaktifkannya di <settingsLink>pengaturan</settingsLink>."
+	},
+	"importSettings": "Impor Pengaturan"
+}

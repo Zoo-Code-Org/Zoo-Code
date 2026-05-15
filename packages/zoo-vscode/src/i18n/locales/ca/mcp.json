@@ -1,0 +1,51 @@
+{
+	"errors": {
+		"invalid_settings_format": "Format JSON de configuració MCP no vàlid. Si us plau, assegura't que la teva configuració segueix el format JSON correcte.",
+		"invalid_settings_syntax": "Format JSON de configuració MCP no vàlid. Si us plau, comprova si hi ha errors de sintaxi al teu fitxer de configuració.",
+		"invalid_settings_validation": "Format de configuració MCP no vàlid: {{errorMessages}}",
+		"create_json": "Ha fallat la creació o obertura de .roo/mcp.json: {{error}}",
+		"failed_update_project": "Ha fallat l'actualització dels servidors MCP del projecte",
+		"invalidJsonArgument": "Zoo ha intentat utilitzar {{toolName}} amb un argument JSON no vàlid. Tornant a intentar...",
+		"refresh_after_disable": "Ha fallat l'actualització de les connexions MCP després de desactivar",
+		"refresh_after_enable": "Ha fallat l'actualització de les connexions MCP després d'activar",
+		"disconnect_servers_partial": "Ha fallat la desconnexió de {{count}} servidor(s) MCP. Comprova la sortida per més detalls.",
+		"toolNotFound": "L'eina '{{toolName}}' no existeix al servidor '{{serverName}}'. Eines disponibles: {{availableTools}}",
+		"serverNotFound": "El servidor MCP '{{serverName}}' no està configurat. Servidors disponibles: {{availableServers}}",
+		"toolDisabled": "L'eina '{{toolName}}' del servidor '{{serverName}}' està desactivada. Eines activades disponibles: {{availableTools}}"
+	},
+	"info": {
+		"server_restarting": "Reiniciant el servidor MCP {{serverName}}...",
+		"server_connected": "Servidor MCP {{serverName}} connectat",
+		"server_deleted": "Servidor MCP eliminat: {{serverName}}",
+		"server_not_found": "Servidor \"{{serverName}}\" no trobat a la configuració",
+		"global_servers_active": "Servidors MCP globals actius: {{mcpServers}}",
+		"project_servers_active": "Servidors MCP del projecte actius: {{mcpServers}}",
+		"already_refreshing": "Els servidors MCP ja s'estan actualitzant.",
+		"refreshing_all": "Actualitzant tots els servidors MCP...",
+		"all_refreshed": "Tots els servidors MCP han estat actualitzats.",
+		"project_config_deleted": "Fitxer de configuració MCP del projecte eliminat. Tots els servidors MCP del projecte han estat desconnectats."
+	},
+	"oauth": {
+		"callback": {
+			"title": "Callback OAuth - Zoo Code",
+			"success": "Èxit!",
+			"failed": "Error",
+			"auth_failed": "L'autenticació ha fallat. Si us plau, comprova els registres del servidor MCP.",
+			"auth_success": "El servidor MCP s'ha autenticat correctament. Ara pots tancar aquesta pestanya del navegador.",
+			"server_connection_complete": "La connexió al servidor és completa.",
+			"tab_closing_in": "Aquesta pestanya intentarà tancar-se en <span id=\"count\">{{count}}</span>s...",
+			"safe_to_close": "Si la pestanya no s'ha tancat, pots tancar-la manualment sense cap problema.",
+			"invalid_state": "Error: Paràmetre d'estat no vàlid"
+		},
+		"flow": {
+			"authenticating": "El servidor MCP \"{{name}}\" requereix autenticació",
+			"waitingForBrowser": "Completa l'inici de sessió al navegador...",
+			"clickAuthenticate": "El servidor MCP \"{{name}}\" està esperant autenticació.",
+			"dismissedHint": "Notificació descartada — cancel·la i torna a connectar el servidor per autenticar-te.",
+			"authenticateButton": "Autenticar",
+			"cancelled": "L'autenticació OAuth ha estat cancel·lada",
+			"timedOut": "L'autenticació OAuth ha expirat",
+			"connected": "El servidor MCP \"{{name}}\" s'ha connectat correctament després de l'autenticació OAuth."
+		}
+	}
+}

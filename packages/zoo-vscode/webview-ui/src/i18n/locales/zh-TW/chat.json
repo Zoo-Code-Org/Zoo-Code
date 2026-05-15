@@ -1,0 +1,483 @@
+{
+	"greeting": "歡迎使用 Zoo Code！",
+	"task": {
+		"title": "工作",
+		"expand": "展開工作",
+		"collapse": "收合工作",
+		"seeMore": "顯示更多",
+		"seeLess": "顯示較少",
+		"tokens": "Token",
+		"cache": "快取",
+		"apiCost": "API 費用",
+		"size": "大小",
+		"condenseContext": "智慧壓縮內容",
+		"contextWindow": "上下文長度",
+		"closeAndStart": "關閉現有工作並開始新工作",
+		"export": "匯出工作記錄",
+		"delete": "刪除工作（按住 Shift 並點選可跳過確認）",
+		"openApiHistory": "開啟 API 歷史紀錄",
+		"openUiHistory": "開啟 UI 歷史紀錄",
+		"backToParentTask": "上層工作"
+	},
+	"unpin": "取消釘選",
+	"pin": "釘選",
+	"fileChangesInConversation": {
+		"header": "此對話中已變更 {{count}} 個檔案"
+	},
+	"retry": {
+		"title": "重試",
+		"tooltip": "再次嘗試操作"
+	},
+	"startNewTask": {
+		"title": "開始新工作",
+		"tooltip": "開始一項新工作"
+	},
+	"proceedAnyways": {
+		"title": "仍要繼續",
+		"tooltip": "在命令執行時繼續"
+	},
+	"save": {
+		"title": "儲存",
+		"tooltip": "儲存訊息變更"
+	},
+	"tokenProgress": {
+		"availableSpace": "可用空間：{{amount}} Token",
+		"tokensUsed": "已使用 Token： {{used}} / {{total}}",
+		"reservedForResponse": "模型回應保留：{{amount}} Token",
+		"tokensUsedLabel": "已使用 Token",
+		"reservedForResponseLabel": "為回覆保留",
+		"availableSpaceLabel": "可用空間"
+	},
+	"reject": {
+		"title": "拒絕",
+		"tooltip": "阻止此操作執行"
+	},
+	"completeSubtaskAndReturn": "完成子任務並返回",
+	"approve": {
+		"title": "核准",
+		"tooltip": "允許執行此操作"
+	},
+	"read-batch": {
+		"approve": {
+			"title": "全部核准"
+		},
+		"deny": {
+			"title": "全部拒絕"
+		}
+	},
+	"list-batch": {
+		"approve": {
+			"title": "全部核准"
+		},
+		"deny": {
+			"title": "全部拒絕"
+		}
+	},
+	"edit-batch": {
+		"approve": {
+			"title": "全部儲存"
+		},
+		"deny": {
+			"title": "全部拒絕"
+		}
+	},
+	"runCommand": {
+		"title": "執行",
+		"tooltip": "執行此命令"
+	},
+	"proceedWhileRunning": {
+		"title": "執行時繼續",
+		"tooltip": "儘管有警告仍繼續執行"
+	},
+	"killCommand": {
+		"title": "終止命令",
+		"tooltip": "終止目前的命令"
+	},
+	"resumeTask": {
+		"title": "繼續",
+		"tooltip": "繼續目前的工作"
+	},
+	"terminate": {
+		"title": "新工作",
+		"tooltip": "開始新的工作"
+	},
+	"cancel": {
+		"title": "取消",
+		"tooltip": "取消目前操作"
+	},
+	"stop": {
+		"title": "停止",
+		"tooltip": "停止目前的工作"
+	},
+	"enqueueMessage": "將訊息加入佇列（會在目前工作完成後傳送）",
+	"editMessage": {
+		"placeholder": "編輯訊息..."
+	},
+	"scrollToBottom": "捲動至對話底部",
+	"scrollToLatestCheckpoint": "捲動至上一個檢查點",
+	"about": "Zoo 是編輯器中的完整 AI 開發團隊。",
+	"docs": "請參閱 <DocsLink>說明文件</DocsLink> 開始使用。",
+	"onboarding": "想要做什麼呢？",
+	"rooTips": {
+		"customizableModes": {
+			"title": "可自訂模式，專注任務不偏離",
+			"description": "專注於任務並交付成果的專業角色。"
+		},
+		"modelAgnostic": {
+			"title": "自備模型，無加價無鎖定",
+			"description": "使用自己的供應商金鑰，甚至可執行本機推論 - Zoo 不額外收費"
+		}
+	},
+	"selectMode": "選擇互動模式",
+	"selectApiConfig": "選取 API 設定",
+	"lockApiConfigAcrossModes": "鎖定此工作區所有模式的 API 設定",
+	"unlockApiConfigAcrossModes": "此工作區所有模式的 API 設定已鎖定（點擊解鎖）",
+	"enhancePrompt": "使用額外內容強化提示詞",
+	"modeSelector": {
+		"title": "模式",
+		"marketplace": "模式市集",
+		"settings": "模式設定",
+		"description": "專門量身打造 Zoo 行為的角色。",
+		"searchPlaceholder": "搜尋模式...",
+		"noResults": "找不到結果"
+	},
+	"enhancePromptDescription": "「強化提示詞」按鈕可透過提供額外內容、說明或改寫來協助改善提示詞。試著在這裡輸入提示詞，再點選一次按鈕以了解其運作方式。",
+	"addImages": "新增圖片到訊息中",
+	"sendMessage": "傳送訊息",
+	"pressToSend": "按 {{keyCombination}} 傳送",
+	"stopTts": "停止文字轉語音",
+	"typeMessage": "輸入訊息...",
+	"typeTask": "在這裡輸入工作...",
+	"addContext": "輸入 @ 新增內容，/ 執行命令",
+	"dragFiles": "按住 Shift 鍵拖曳檔案",
+	"dragFilesImages": "按住 Shift 鍵拖曳檔案／圖片",
+	"errorReadingFile": "讀取檔案時發生錯誤",
+	"noValidImages": "未處理到任何有效圖片",
+	"separator": "分隔符號",
+	"edit": "編輯...",
+	"forNextMode": "用於下一個模式",
+	"forPreviousMode": "用於上一個模式",
+	"apiRequest": {
+		"title": "API 請求",
+		"failed": "API 請求失敗",
+		"streaming": "正在處理 API 請求...",
+		"cancelled": "API 請求已取消",
+		"streamingFailed": "API 串流處理失敗",
+		"rateLimitWait": "速率限制",
+		"errorTitle": "供應商錯誤 {{code}}",
+		"errorMessage": {
+			"400": "供應商無法按照此方式處理請求。請停止工作並嘗試其他方法。",
+			"401": "無法向供應商進行身份驗證。請檢查您的 API 金鑰設定。",
+			"402": "您的帳戶資金／額度似乎已用盡。請前往供應商增加額度以繼續。",
+			"403": "無權存取。您的 API 金鑰有效，但供應商拒絕完成此請求。",
+			"429": "請求次數過多。供應商已對您的請求進行速率限制。請在下一次 API 呼叫前稍候。",
+			"500": "供應商伺服器錯誤。伺服器端發生問題，您的請求沒有問題。",
+			"docs": "說明文件",
+			"goToSettings": "設定",
+			"connection": "連線錯誤。請確保您有可用的網際網路連線。",
+			"unknown": "未知 API 錯誤。請聯絡 Zoo Code 技術支援。",
+			"claudeCodeNotAuthenticated": "您需要登入才能使用 Claude Code。前往設定並點選「登入 Claude Code」以進行驗證。"
+		}
+	},
+	"checkpoint": {
+		"regular": "檢查點",
+		"initializingWarning": "正在初始化檢查點... 如果耗時過長，您可以在 <settingsLink>設定</settingsLink> 中停用檢查點並重新啟動工作。",
+		"menu": {
+			"viewDiff": "檢視差異",
+			"viewDiffFromInit": "檢視所有變更",
+			"viewDiffWithCurrent": "檢視自此檢查點以來的變更",
+			"restore": "還原檢查點",
+			"restoreFiles": "還原檔案",
+			"restoreFilesDescription": "將您的專案檔案還原到此時的快照。",
+			"restoreFilesAndTask": "還原檔案和工作",
+			"confirm": "確認",
+			"cancel": "取消",
+			"cannotUndo": "此操作無法復原。",
+			"restoreFilesAndTaskDescription": "將您的專案檔案還原到此時的快照，並刪除此點之後的所有訊息。",
+			"more": "更多選項"
+		},
+		"current": "目前"
+	},
+	"contextManagement": {
+		"tokens": "Token",
+		"condensation": {
+			"title": "上下文已壓縮",
+			"inProgress": "正在壓縮上下文...",
+			"errorHeader": "壓縮上下文失敗"
+		},
+		"truncation": {
+			"title": "上下文已截斷",
+			"inProgress": "正在截斷上下文...",
+			"messagesRemoved": "已移除 {{count}} 則訊息",
+			"messagesRemoved_other": "已移除 {{count}} 則訊息",
+			"description": "為保持在上下文視窗限制內，已從對話中移除較舊的訊息。與壓縮相比，這是一種快速但上下文保留較少的方法。"
+		}
+	},
+	"skill": {
+		"wantsToLoad": "Zoo 想要載入技能",
+		"didLoad": "Zoo 載入了技能"
+	},
+	"instructions": {
+		"wantsToFetch": "Roo 想要取得詳細指示以協助目前工作"
+	},
+	"fileOperations": {
+		"wantsToRead": "Zoo 想要讀取此檔案",
+		"wantsToReadMultiple": "Zoo 想要讀取多個檔案",
+		"wantsToReadAndXMore": "Zoo 想要讀取此檔案以及另外 {{count}} 個檔案",
+		"wantsToReadOutsideWorkspace": "Zoo 想要讀取此工作區外的檔案",
+		"didRead": "Zoo 已讀取此檔案",
+		"wantsToEdit": "Zoo 想要編輯此檔案",
+		"wantsToEditOutsideWorkspace": "Zoo 想要編輯此工作區外的檔案",
+		"wantsToEditProtected": "Zoo 想要編輯受保護的設定檔案",
+		"wantsToApplyBatchChanges": "Zoo 想要對多個檔案套用變更",
+		"wantsToGenerateImage": "Zoo 想要產生圖片",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo 想要在工作區外產生圖片",
+		"wantsToGenerateImageProtected": "Zoo 想要在受保護位置產生圖片",
+		"didGenerateImage": "Zoo 已產生圖片",
+		"wantsToCreate": "Zoo 想要建立新檔案",
+		"wantsToInsert": "Zoo 想要在此檔案中插入內容",
+		"wantsToInsertWithLineNumber": "Zoo 想要在此檔案第 {{lineNumber}} 行插入內容",
+		"wantsToInsertAtEnd": "Zoo 想要在此檔案尾端新增內容"
+	},
+	"directoryOperations": {
+		"wantsToViewTopLevel": "Zoo 想要檢視此目錄中最上層的檔案",
+		"didViewTopLevel": "Zoo 已檢視此目錄中最上層的檔案",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo 想要檢視此目錄（工作區外）中最上層的檔案",
+		"didViewTopLevelOutsideWorkspace": "Zoo 已檢視此目錄（工作區外）中最上層的檔案",
+		"wantsToViewRecursive": "Zoo 想要遞迴檢視此目錄中的所有檔案",
+		"didViewRecursive": "Zoo 已遞迴檢視此目錄中的所有檔案",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo 想要遞迴檢視此目錄（工作區外）中的所有檔案",
+		"didViewRecursiveOutsideWorkspace": "Zoo 已遞迴檢視此目錄（工作區外）中的所有檔案",
+		"wantsToSearch": "Zoo 想要在此目錄中搜尋 <code>{{regex}}</code>",
+		"didSearch": "Zoo 已在此目錄中搜尋 <code>{{regex}}</code>",
+		"wantsToSearchOutsideWorkspace": "Zoo 想要在此目錄（工作區外）中搜尋 <code>{{regex}}</code>",
+		"didSearchOutsideWorkspace": "Zoo 已在此目錄（工作區外）中搜尋 <code>{{regex}}</code>",
+		"wantsToViewMultipleDirectories": "Zoo 想要查看多個目錄"
+	},
+	"codebaseSearch": {
+		"wantsToSearch": "Zoo 想要在程式碼庫中搜尋 <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo 想要在 <code>{{path}}</code> 中搜尋程式碼庫 <code>{{query}}</code>",
+		"didSearch_one": "找到 1 個結果",
+		"didSearch_other": "找到 {{count}} 個結果",
+		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）"
+	},
+	"commandOutput": "命令輸出",
+	"commandExecution": {
+		"abort": "中止",
+		"running": "執行中",
+		"pid": "PID: {{pid}}",
+		"exitStatus": "已結束，狀態碼 {{exitCode}}",
+		"manageCommands": "自動核准的命令",
+		"addToAllowed": "新增至允許清單",
+		"removeFromAllowed": "從允許清單中移除",
+		"addToDenied": "新增至拒絕清單",
+		"removeFromDenied": "從拒絕清單中移除",
+		"abortCommand": "中止命令執行",
+		"expandOutput": "展開輸出",
+		"collapseOutput": "摺疊輸出",
+		"expandManagement": "展開命令管理部分",
+		"collapseManagement": "摺疊命令管理部分"
+	},
+	"response": "回應",
+	"arguments": "參數",
+	"text": {
+		"rooSaid": "Zoo 說"
+	},
+	"feedback": {
+		"youSaid": "您說"
+	},
+	"mcp": {
+		"wantsToUseTool": "Zoo 想要在 {{serverName}} MCP 伺服器上使用工具",
+		"wantsToAccessResource": "Zoo 想要存取 {{serverName}} MCP 伺服器上的資源"
+	},
+	"modes": {
+		"wantsToSwitch": "Zoo 想要切換至 {{mode}} 模式",
+		"wantsToSwitchWithReason": "Zoo 想要切換至 {{mode}} 模式，原因：{{reason}}",
+		"didSwitch": "Zoo 已切換至 {{mode}} 模式",
+		"didSwitchWithReason": "Zoo 已切換至 {{mode}} 模式，原因：{{reason}}"
+	},
+	"subtasks": {
+		"wantsToCreate": "Zoo 想要在 {{mode}} 模式下建立新的子任務",
+		"wantsToFinish": "Zoo 想要完成此子任務",
+		"newTaskContent": "子任務指示",
+		"resultContent": "子任務結果",
+		"defaultResult": "請繼續下一個工作。",
+		"completionInstructions": "子任務已完成！您可以檢閱結果並提出修正或後續步驟。如果一切順利，請確認以將結果回傳給主任務。",
+		"goToSubtask": "查看工作"
+	},
+	"questions": {
+		"hasQuestion": "Zoo 有一個問題"
+	},
+	"taskCompleted": "工作完成",
+	"error": "錯誤",
+	"modelResponseIncomplete": "模型回應不完整",
+	"modelResponseErrors": {
+		"noToolsUsed": "模型在回應中未使用任何工具。這通常發生在模型僅提供文字／推理而未呼叫完成工作所需的工具時。",
+		"noToolsUsedDetails": "模型提供了文字／推理，但未呼叫任何必需的工具。這通常表示模型誤解了工作，或在確定使用哪個工具時遇到困難。系統已自動提示模型使用正確的工具重試。",
+		"noAssistantMessages": "模型未提供任何回應內容。這可能表示 API 或模型輸出存在問題。",
+		"noAssistantMessagesDetails": "語言模型回傳了一個沒有任何文字或工具呼叫的空回應。這可能是由於 API 問題、速率限制或模型特定問題所導致。系統已自動提示模型重試。"
+	},
+	"errorDetails": {
+		"link": "詳細內容",
+		"title": "錯誤詳細資訊",
+		"copyToClipboard": "複製基本錯誤資訊",
+		"copied": "已複製！",
+		"diagnostics": "取得詳細錯誤資訊",
+		"proxyProvider": "似乎正在使用代理型供應商。請檢查記錄，並確保不會重寫 Zoo 的請求。"
+	},
+	"diffError": {
+		"title": "編輯失敗"
+	},
+	"troubleMessage": "Zoo 遇到問題...",
+	"powershell": {
+		"issues": "似乎遇到 Windows PowerShell 問題，請參閱此說明文件"
+	},
+	"autoApprove": {
+		"tooltipManage": "管理自動核准設定",
+		"tooltipStatus": "自動核准已啟用：{{toggles}}",
+		"title": "自動核准",
+		"all": "全部",
+		"none": "無",
+		"description": "無需請求權限即可執行這些操作。僅對完全信任的操作啟用此功能。",
+		"selectOptionsFirst": "請至少選擇以下一個選項以啟用自動核准",
+		"toggleAriaLabel": "切換自動核准",
+		"disabledAriaLabel": "自動核准已停用，請先選擇選項",
+		"triggerLabelOff": "自動核准已關閉",
+		"triggerLabelOffShort": "關閉",
+		"triggerLabel_zero": "0 個自動核准",
+		"triggerLabel_one": "1 個自動核准",
+		"triggerLabel_other": "{{count}} 個自動核准",
+		"triggerLabelAll": "BRRR"
+	},
+	"announcement": {
+		"title": "Zoo Code {{version}} 已發布",
+		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
+		"handoff": {
+			"heading": "Roo Code 回來了！現在以社群維護的 Zoo Code 外掛重新登場！！",
+			"description": "如果你最近沒有追蹤消息，Roo Code 團隊最近宣布將逐步停止 Roo Code 的開發，並封存他們至今完成的工作。不過別擔心，社群已經挺身而出，將以新名稱與新家園延續 Roo Code 的傳承！我們不再只是單一的「Roo」，而是一個社群，也就是你可以稱之為「Zoo」的集合。Zoo Code 是一款由社群維護的外掛，接續 Roo Code 停下的地方繼續前進；我們承諾在保留 Roo 精神的同時，也會帶來新功能與改進。我們也要向整個 Roo Code 團隊致上最深的敬意，感謝他們不可思議的付出，以及為開發者打造出如此出色的工具。我們很期待在他們奠定的基礎上繼續建設，也期待看看社群未來會把 Zoo Code 帶往何方！",
+			"readMore": "查看 Zoo Code 的新首頁並閱讀完整公告"
+		},
+		"release": {
+			"heading": "新增功能：",
+			"gpt55": "透過 OpenAI Codex 支援 GPT-5.5：已在 OpenAI Codex 供應商中新增 GPT-5.5 支援，讓你可以直接在 Zoo Code 中使用最新模型。",
+			"claudeOpus47": "Vertex AI 上的 Claude Opus 4.7：已將 Anthropic 最新旗艦推理模型 Claude Opus 4.7 新增至 Vertex AI 供應商。",
+			"checkpointNav": "前一個存檔點導覽：在聊天中新增控制項，可回到此前的存檔點，並提供完整的 i18n 支援。"
+		},
+		"cloudAgents": {
+			"heading": "雲端的新功能：",
+			"specialized": "推出 <bold>Explainer</bold>、<bold>Planner</bold> 和 <bold>Coder</bold>，三個專業雲端代理用來強化工作流程。",
+			"description": "代理在雲端協同工作，可從網頁或透過 Slack 觸發。",
+			"tryButton": "試用雲端代理"
+		}
+	},
+	"reasoning": {
+		"thinking": "思考中",
+		"seconds": "{{count}} 秒"
+	},
+	"followUpSuggest": {
+		"copyToInput": "複製到輸入欄（或按住 Shift 並點選）",
+		"timerPrefix": "自動核准已啟用。{{seconds}} 秒後自動選取..."
+	},
+	"costs": {
+		"totalWithSubtasks": "總成本（包含子任務）：${{cost}}",
+		"total": "總成本：${{cost}}",
+		"includesSubtasks": "包含子任務成本"
+	},
+	"codeblock": {
+		"tooltips": {
+			"expand": "展開程式碼區塊",
+			"collapse": "摺疊程式碼區塊",
+			"copy_code": "複製程式碼"
+		}
+	},
+	"profileViolationWarning": "目前設定檔與您的組織設定不相容",
+	"shellIntegration": {
+		"title": "命令執行警告",
+		"description": "命令正在沒有 VS Code 終端機 Shell 整合的情況下執行。若要隱藏此警告，可在 <settingsLink>Zoo Code 設定</settingsLink> 的 <strong>終端機</strong> 區塊中停用 Shell 整合，或使用下方連結排解 VS Code 終端機整合問題。",
+		"troubleshooting": "點選此處查看 Shell 整合說明文件。"
+	},
+	"ask": {
+		"autoApprovedRequestLimitReached": {
+			"title": "已達自動核准請求上限",
+			"description": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
+			"button": "重設並繼續"
+		},
+		"autoApprovedCostLimitReached": {
+			"title": "已達自動核准費用上限",
+			"description": "Zoo 已達到 ${{count}} 的自動核准費用上限。您想重設費用並繼續工作嗎？",
+			"button": "重設並繼續"
+		}
+	},
+	"indexingStatus": {
+		"ready": "索引就緒",
+		"indexing": "索引中 {{percentage}}%",
+		"indexed": "已索引",
+		"error": "索引錯誤",
+		"status": "索引狀態",
+		"stopping": "正在停止索引..."
+	},
+	"versionIndicator": {
+		"ariaLabel": "版本 {{version}} - 點選查看發布說明"
+	},
+	"command": {
+		"triggerDescription": "觸發 {{name}} 命令"
+	},
+	"slashCommands": {
+		"tooltip": "管理斜線命令",
+		"title": "斜線命令",
+		"description": "使用內建斜線命令或建立自訂命令，以便快速存取常用的提示詞和工作流程。<DocsLink>說明文件</DocsLink>",
+		"manageCommands": "在設定中管理斜線命令",
+		"builtInCommands": "內建命令",
+		"globalCommands": "全域命令",
+		"workspaceCommands": "工作區命令",
+		"globalCommand": "全域命令",
+		"editCommand": "編輯命令",
+		"deleteCommand": "刪除命令",
+		"newGlobalCommandPlaceholder": "新增全域命令...",
+		"newWorkspaceCommandPlaceholder": "新增工作區命令...",
+		"deleteDialog": {
+			"title": "刪除命令",
+			"description": "您確定要刪除「{{name}}」命令嗎？此操作無法復原。",
+			"cancel": "取消",
+			"confirm": "刪除"
+		}
+	},
+	"slashCommand": {
+		"wantsToRun": "Zoo 想要執行斜線指令",
+		"didRun": "Zoo 執行了斜線指令"
+	},
+	"queuedMessages": {
+		"title": "佇列中的訊息",
+		"clickToEdit": "點選以編輯訊息"
+	},
+	"contextMenu": {
+		"noResults": "找不到結果",
+		"problems": "問題",
+		"terminal": "終端機",
+		"url": "貼上 URL 以擷取內容"
+	},
+	"todo": {
+		"partial": "已完成 {{completed}}／{{total}} 個待辦事項",
+		"complete": "已完成 {{total}} 個待辦事項",
+		"updated": "已更新待辦事項清單",
+		"completed": "已完成",
+		"started": "已開始"
+	},
+	"tooManyTools": {
+		"title": "啟用的工具過多",
+		"toolsPart_one": "{{count}} 個工具",
+		"toolsPart_other": "{{count}} 個工具",
+		"serversPart_one": "{{count}} 個 MCP 伺服器",
+		"serversPart_other": "{{count}} 個 MCP 伺服器",
+		"messageTemplate": "您已啟用 {{tools}}（透過 {{servers}}）。這麼多的工具可能會混淆模型並導致錯誤。請嘗試保持在 {{threshold}} 以下。",
+		"openMcpSettings": "開啟 MCP 設定"
+	},
+	"readCommandOutput": {
+		"title": "Zoo read command output"
+	},
+	"retiredProvider": {
+		"title": "供應商不再受支援",
+		"message": "此供應商已不可用。請選擇受支援的供應商以繼續。",
+		"openSettings": "開啟設定"
+	}
+}

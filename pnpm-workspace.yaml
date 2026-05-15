@@ -1,0 +1,7 @@
+packages:
+    - "packages/zoo-cli"
+    - "packages/zoo-sdk"
+    - "packages/zoo-vscode/src"
+    - "packages/zoo-vscode/webview-ui"
+    - "apps/*"
+    - "packages/*"

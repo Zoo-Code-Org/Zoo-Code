@@ -1,0 +1,493 @@
+{
+	"greeting": "欢迎使用 Zoo Code！",
+	"task": {
+		"title": "任务",
+		"expand": "展开任务",
+		"collapse": "收起任务",
+		"seeMore": "展开",
+		"seeLess": "收起",
+		"tokens": "Token 用量",
+		"cache": "缓存",
+		"apiCost": "API 费用",
+		"size": "大小",
+		"contextWindow": "上下文长度",
+		"closeAndStart": "关闭任务并开始新任务",
+		"export": "导出任务历史",
+		"delete": "删除任务（Shift + 点击跳过确认）",
+		"condenseContext": "智能压缩上下文",
+		"openApiHistory": "打开 API 历史",
+		"openUiHistory": "打开 UI 历史",
+		"backToParentTask": "父任务"
+	},
+	"unpin": "取消置顶",
+	"pin": "置顶",
+	"fileChangesInConversation": {
+		"header": "此对话中已更改 {{count}} 个文件"
+	},
+	"tokenProgress": {
+		"availableSpace": "可用: {{amount}}",
+		"tokensUsed": "已使用: {{used}} / {{total}}",
+		"reservedForResponse": "已保留: {{amount}}",
+		"tokensUsedLabel": "已使用 Token",
+		"reservedForResponseLabel": "为回复保留",
+		"availableSpaceLabel": "可用空间"
+	},
+	"retry": {
+		"title": "重试",
+		"tooltip": "再次尝试操作"
+	},
+	"startNewTask": {
+		"title": "开始新任务",
+		"tooltip": "开始一个新任务"
+	},
+	"proceedAnyways": {
+		"title": "仍然继续",
+		"tooltip": "在命令执行时继续"
+	},
+	"save": {
+		"title": "保存",
+		"tooltip": "保存消息更改"
+	},
+	"reject": {
+		"title": "拒绝",
+		"tooltip": "拒绝此操作"
+	},
+	"completeSubtaskAndReturn": "完成子任务并返回",
+	"approve": {
+		"title": "批准",
+		"tooltip": "批准此操作"
+	},
+	"runCommand": {
+		"title": "命令",
+		"tooltip": "执行此命令"
+	},
+	"proceedWhileRunning": {
+		"title": "强制继续",
+		"tooltip": "忽略运行中的命令并继续"
+	},
+	"killCommand": {
+		"title": "终止命令",
+		"tooltip": "终止当前命令"
+	},
+	"resumeTask": {
+		"title": "恢复任务",
+		"tooltip": "继续当前任务"
+	},
+	"terminate": {
+		"title": "结束",
+		"tooltip": "结束当前任务"
+	},
+	"cancel": {
+		"title": "取消",
+		"tooltip": "取消当前操作"
+	},
+	"stop": {
+		"title": "停止",
+		"tooltip": "停止当前任务"
+	},
+	"enqueueMessage": "将消息加入队列（当前任务完成后发送）",
+	"scrollToBottom": "滚动到聊天底部",
+	"scrollToLatestCheckpoint": "滚动到上一个检查点",
+	"about": "Zoo Code 是您编辑器中的整个 AI 开发团队。",
+	"docs": "查看我们的 <DocsLink>文档</DocsLink> 了解更多信息。",
+	"onboarding": "此工作区中的任务列表为空。",
+	"rooTips": {
+		"customizableModes": {
+			"title": "可自定义模式",
+			"description": "专注任务并交付成果的专业角色。"
+		},
+		"modelAgnostic": {
+			"title": "自带模型",
+			"description": "使用您自己的提供商密钥，甚至可以在本地运行推理 — 无加价，无锁定，无限制"
+		}
+	},
+	"selectMode": "选择交互模式",
+	"selectApiConfig": "选择 API 配置",
+	"lockApiConfigAcrossModes": "锁定此工作区所有模式的 API 配置",
+	"unlockApiConfigAcrossModes": "此工作区所有模式的 API 配置已锁定（点击解锁）",
+	"enhancePrompt": "增强提示词",
+	"addImages": "添加图片到消息",
+	"sendMessage": "发送消息",
+	"pressToSend": "按 {{keyCombination}} 发送",
+	"stopTts": "停止文本转语音",
+	"typeMessage": "输入消息...",
+	"typeTask": "在此处输入您的任务...",
+	"addContext": "@添加上下文，/输入命令",
+	"dragFiles": "Shift+拖拽文件",
+	"dragFilesImages": "Shift+拖拽文件/图片",
+	"enhancePromptDescription": "'增强提示'按钮通过提供额外上下文、澄清或重新表述来帮助改进您的请求。尝试在此处输入请求，然后再次点击按钮查看其工作原理。",
+	"modeSelector": {
+		"title": "模式",
+		"marketplace": "模式市场",
+		"settings": "模式设置",
+		"description": "专门定制Roo行为的角色。",
+		"searchPlaceholder": "搜索模式...",
+		"noResults": "未找到结果"
+	},
+	"errorReadingFile": "读取文件时出错",
+	"noValidImages": "没有处理有效图片",
+	"separator": "分隔符",
+	"edit": "编辑...",
+	"forNextMode": "用于下一个模式",
+	"forPreviousMode": "用于上一个模式",
+	"error": "错误",
+	"diffError": {
+		"title": "编辑失败"
+	},
+	"troubleMessage": "Roo遇到问题...",
+	"apiRequest": {
+		"title": "API请求",
+		"failed": "API请求失败",
+		"streaming": "API请求...",
+		"cancelled": "API请求已取消",
+		"streamingFailed": "API流式传输失败",
+		"rateLimitWait": "请求频率限制",
+		"errorTitle": "提供商错误 {{code}}",
+		"errorMessage": {
+			"400": "提供商无法按此方式处理请求。请停止任务并尝试不同方法。",
+			"401": "无法向提供商进行身份验证。请检查您的 API 密钥配置。",
+			"402": "您的账户余额/积分似乎已用尽。请前往提供商处充值以继续。",
+			"403": "无权限。您的 API 密钥有效，但提供商拒绝完成此请求。",
+			"429": "请求过于频繁。提供商已对您的请求进行速率限制。请在下一次 API 调用前稍候。",
+			"500": "提供商服务器错误。提供商端出现问题，您的请求无问题。",
+			"docs": "文档",
+			"goToSettings": "设置",
+			"unknown": "未知 API 错误。请联系 Zoo Code 支持。",
+			"connection": "连接错误。确保您有可用的互联网连接。",
+			"claudeCodeNotAuthenticated": "你需要登录才能使用 Claude Code。前往设置并点击「登录到 Claude Code」进行身份验证。"
+		}
+	},
+	"checkpoint": {
+		"regular": "检查点",
+		"initializingWarning": "正在初始化检查点...如果耗时过长，你可以在<settingsLink>设置</settingsLink>中禁用检查点并重新启动任务。",
+		"menu": {
+			"viewDiff": "查看差异",
+			"more": "更多选项",
+			"viewDiffFromInit": "查看所有更改",
+			"viewDiffWithCurrent": "查看自此检查点以来的更改",
+			"restore": "恢复检查点",
+			"restoreFiles": "恢复文件",
+			"restoreFilesDescription": "将项目文件恢复到此检查点状态",
+			"restoreFilesAndTask": "恢复文件和任务",
+			"confirm": "确认",
+			"cancel": "取消",
+			"cannotUndo": "此操作无法撤消。",
+			"restoreFilesAndTaskDescription": "恢复文件至此时状态，并清除后续对话记录"
+		},
+		"current": "当前"
+	},
+	"instructions": {
+		"wantsToFetch": "Roo 想要获取详细指示以协助当前任务"
+	},
+	"fileOperations": {
+		"wantsToRead": "需要读取文件",
+		"wantsToReadOutsideWorkspace": "请求访问外部文件",
+		"didRead": "已读取文件",
+		"wantsToEdit": "需要编辑文件",
+		"wantsToEditOutsideWorkspace": "需要编辑外部文件",
+		"wantsToEditProtected": "需要编辑受保护的配置文件",
+		"wantsToCreate": "需要新建文件",
+		"wantsToSearchReplace": "需要在此文件中搜索和替换",
+		"didSearchReplace": "已完成搜索和替换",
+		"wantsToInsert": "需要在此文件中插入内容",
+		"wantsToInsertWithLineNumber": "需要在第 {{lineNumber}} 行插入内容",
+		"wantsToInsertAtEnd": "需要在文件末尾添加内容",
+		"wantsToReadAndXMore": "Zoo 想读取此文件以及另外 {{count}} 个文件",
+		"wantsToReadMultiple": "Zoo 想要读取多个文件",
+		"wantsToApplyBatchChanges": "Zoo 想要对多个文件应用更改",
+		"wantsToGenerateImage": "需要生成图片",
+		"wantsToGenerateImageOutsideWorkspace": "需要在工作区外生成图片",
+		"wantsToGenerateImageProtected": "需要在受保护位置生成图片",
+		"didGenerateImage": "已生成图片"
+	},
+	"directoryOperations": {
+		"wantsToViewTopLevel": "需要查看目录文件列表",
+		"didViewTopLevel": "已查看目录文件列表",
+		"wantsToViewRecursive": "需要查看目录所有文件",
+		"didViewRecursive": "已查看目录所有文件",
+		"wantsToSearch": "需要搜索内容: {{regex}}",
+		"didSearch": "已完成内容搜索: {{regex}}",
+		"wantsToSearchOutsideWorkspace": "需要搜索内容（工作区外）: {{regex}}",
+		"didSearchOutsideWorkspace": "已完成内容搜索（工作区外）: {{regex}}",
+		"wantsToViewTopLevelOutsideWorkspace": "需要查看目录文件列表（工作区外）",
+		"didViewTopLevelOutsideWorkspace": "已查看目录文件列表（工作区外）",
+		"wantsToViewRecursiveOutsideWorkspace": "需要查看目录所有文件（工作区外）",
+		"didViewRecursiveOutsideWorkspace": "已查看目录所有文件（工作区外）",
+		"wantsToViewMultipleDirectories": "Zoo 想要查看多个目录"
+	},
+	"commandOutput": "命令输出",
+	"commandExecution": {
+		"running": "正在运行",
+		"abort": "中止",
+		"pid": "PID: {{pid}}",
+		"exitStatus": "已退出，状态码 {{exitCode}}",
+		"manageCommands": "管理命令权限",
+		"commandManagementDescription": "管理命令权限：点击 ✓ 允许自动执行，点击 ✗ 拒绝执行。可以打开/关闭模式或从列表中删除。<settingsLink>查看所有设置</settingsLink>",
+		"addToAllowed": "添加到允许列表",
+		"removeFromAllowed": "从允许列表中删除",
+		"addToDenied": "添加到拒绝列表",
+		"removeFromDenied": "从拒绝列表中删除",
+		"abortCommand": "中止命令执行",
+		"expandOutput": "展开输出",
+		"collapseOutput": "折叠输出",
+		"expandManagement": "展开命令管理部分",
+		"collapseManagement": "折叠命令管理部分"
+	},
+	"response": "响应",
+	"arguments": "参数",
+	"text": {
+		"rooSaid": "Zoo 说"
+	},
+	"feedback": {
+		"youSaid": "你说"
+	},
+	"mcp": {
+		"wantsToUseTool": "Roo想在{{serverName}} MCP上使用工具",
+		"wantsToAccessResource": "Roo想访问{{serverName}} MCP服务上的资源"
+	},
+	"modes": {
+		"wantsToSwitch": "即将切换至{{mode}}模式",
+		"wantsToSwitchWithReason": "即将切换至{{mode}}模式（原因：{{reason}}）",
+		"didSwitch": "已切换至{{mode}}模式",
+		"didSwitchWithReason": "已切换至{{mode}}模式（原因：{{reason}}）"
+	},
+	"subtasks": {
+		"wantsToCreate": "Roo想在<code>{{mode}}</code>模式下创建新子任务",
+		"wantsToFinish": "Roo想完成此子任务",
+		"newTaskContent": "子任务说明",
+		"completionContent": "子任务已完成",
+		"resultContent": "子任务结果",
+		"defaultResult": "请继续下一个任务。",
+		"completionInstructions": "子任务已完成！您可以查看结果并提出修改或下一步建议。如果一切正常，请确认以将结果返回给主任务。",
+		"goToSubtask": "查看任务"
+	},
+	"questions": {
+		"hasQuestion": "Roo有一个问题"
+	},
+	"taskCompleted": "任务完成",
+	"modelResponseIncomplete": "模型响应不完整",
+	"modelResponseErrors": {
+		"noToolsUsed": "模型在响应中未使用任何工具。这通常发生在模型仅提供文本/推理而未调用完成任务所需的工具时。",
+		"noToolsUsedDetails": "模型提供了文本/推理，但未调用任何必需的工具。这通常表明模型误解了任务，或在确定使用哪个工具时遇到困难。系统已自动提示模型使用正确的工具重试。",
+		"noAssistantMessages": "模型未提供任何响应内容。这可能表示 API 或模型输出存在问题。",
+		"noAssistantMessagesDetails": "语言模型返回了一个没有任何文本或工具调用的空响应。这可能是由于 API 问题、速率限制或模型特定问题所导致。系统已自动提示模型重试。"
+	},
+	"errorDetails": {
+		"link": "详情",
+		"title": "错误详情",
+		"copyToClipboard": "复制到剪贴板",
+		"copied": "已复制!",
+		"diagnostics": "获取详细错误信息",
+		"proxyProvider": "看起来你在使用基于代理的提供商。请检查日志并确保它不会重写 Zoo 的请求。"
+	},
+	"powershell": {
+		"issues": "看起来您遇到了Windows PowerShell问题，请参阅此"
+	},
+	"autoApprove": {
+		"tooltipManage": "管理自动批准设置",
+		"tooltipStatus": "自动批准已启用：{{toggles}}",
+		"title": "自动批准",
+		"toggle": "切换自动批准",
+		"all": "全部",
+		"none": "无",
+		"description": "无需请求权限即可执行这些操作。仅对您完全信任的操作启用此功能。",
+		"selectOptionsFirst": "请至少选择以下一个选项以启用自动批准",
+		"toggleAriaLabel": "切换自动批准",
+		"disabledAriaLabel": "自动批准已禁用 - 请先选择选项",
+		"triggerLabelOff": "自动批准已关闭",
+		"triggerLabelOffShort": "关闭",
+		"triggerLabel_zero": "0 个自动批准",
+		"triggerLabel_one": "1 个自动批准",
+		"triggerLabel_other": "{{count}} 个自动批准",
+		"triggerLabelAll": "BRRR"
+	},
+	"reasoning": {
+		"thinking": "思考中",
+		"seconds": "{{count}}秒"
+	},
+	"contextManagement": {
+		"tokens": "Token",
+		"condensation": {
+			"title": "上下文已压缩",
+			"inProgress": "正在压缩上下文...",
+			"errorHeader": "上下文压缩失败"
+		},
+		"truncation": {
+			"title": "上下文已截断",
+			"inProgress": "正在截断上下文...",
+			"messagesRemoved": "已移除 {{count}} 条消息",
+			"messagesRemoved_other": "已移除 {{count}} 条消息",
+			"description": "为保持在上下文窗口限制内，已从对话中移除较旧的消息。与压缩相比，这是一种快速但上下文保留较少的方法。"
+		}
+	},
+	"skill": {
+		"wantsToLoad": "Zoo 想要加载技能",
+		"didLoad": "Zoo 加载了技能"
+	},
+	"followUpSuggest": {
+		"copyToInput": "复制到输入框（或按住Shift点击）",
+		"timerPrefix": "自动批准已启用。{{seconds}}秒后选择中…"
+	},
+	"announcement": {
+		"title": "Zoo Code {{version}} 已发布",
+		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
+		"handoff": {
+			"heading": "Roo Code 回来了！现在以社区维护的 Zoo Code 插件之名继续前进！！",
+			"description": "如果你还没关注到，Roo Code 团队最近宣布将逐步停止 Roo Code 的开发，并归档他们已经完成的工作。但别担心，社区已经站了出来，以全新的名称和新家园延续 Roo Code 的传承！我们不再只是一个单独的“Roo”，而是一个社区，一个“Zoo”。Zoo Code 是一个由社区维护的插件，在 Roo Code 停下的地方继续前进。我们会继续保留 Roo 的精神，同时带来新功能和改进。我们也要向整个 Roo Code 团队致以诚挚感谢，感谢他们的卓越工作，打造出这样一款出色的开发者工具。我们很高兴能在他们打下的基础上继续建设，也期待看到社区未来会把 Zoo Code 带到哪里！",
+			"readMore": "查看 Zoo Code 的新主页并阅读完整公告"
+		},
+		"release": {
+			"heading": "新增功能：",
+			"gpt55": "通过 OpenAI Codex 支持 GPT-5.5：已在 OpenAI Codex 提供商中新增 GPT-5.5 支持，让你可以直接在 Zoo Code 中使用最新模型。",
+			"claudeOpus47": "Vertex AI 上的 Claude Opus 4.7：已将 Anthropic 最新旗舰推理模型 Claude Opus 4.7 添加到 Vertex AI 提供商。",
+			"checkpointNav": "上一存档点导航：在聊天中新增控件，可回退到此前的存档点，并提供完整的 i18n 支持。"
+		},
+		"cloudAgents": {
+			"heading": "云端新功能：",
+			"specialized": "推出 <bold>Explainer</bold>、<bold>Planner</bold> 和 <bold>Coder</bold> - 三个专业云代理来增强你的工作流程。",
+			"description": "代理在云端协同工作，可从网页或通过 Slack 触发。",
+			"tryButton": "试用云代理"
+		}
+	},
+	"costs": {
+		"totalWithSubtasks": "总成本（包括子任务）: ${{cost}}",
+		"total": "总成本: ${{cost}}",
+		"includesSubtasks": "包括子任务成本"
+	},
+	"codeblock": {
+		"tooltips": {
+			"expand": "展开代码块",
+			"collapse": "收起代码块",
+			"copy_code": "复制代码"
+		}
+	},
+	"profileViolationWarning": "当前配置文件与您的组织设置不兼容",
+	"shellIntegration": {
+		"title": "命令执行警告",
+		"description": "您的命令正在没有 VSCode 终端 shell 集成的情况下执行。要隐藏此警告，您可以在 <settingsLink>Zoo Code 设置</settingsLink>的 <strong>Terminal</strong> 部分禁用 shell 集成，或使用下方链接排查 VSCode 终端集成问题。",
+		"troubleshooting": "点击此处查看 shell 集成文档。"
+	},
+	"ask": {
+		"autoApprovedRequestLimitReached": {
+			"title": "已达自动批准请求限制",
+			"description": "Zoo 已达到 {{count}} 次 API 请求的自动批准限制。您想重置计数并继续任务吗？",
+			"button": "重置并继续"
+		},
+		"autoApprovedCostLimitReached": {
+			"title": "已达到自动批准的费用限额",
+			"description": "Roo已经达到了${{count}}的自动批准成本限制。您想重置成本并继续任务吗？",
+			"button": "重置并继续"
+		}
+	},
+	"codebaseSearch": {
+		"wantsToSearch": "Zoo 需要搜索代码库: <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo 需要在 <code>{{path}}</code> 中搜索: <code>{{query}}</code>",
+		"didSearch_one": "找到 1 个结果",
+		"didSearch_other": "找到 {{count}} 个结果",
+		"resultTooltip": "相似度评分: {{score}} (点击打开文件)"
+	},
+	"read-batch": {
+		"approve": {
+			"title": "全部批准"
+		},
+		"deny": {
+			"title": "全部拒绝"
+		}
+	},
+	"list-batch": {
+		"approve": {
+			"title": "全部批准"
+		},
+		"deny": {
+			"title": "全部拒绝"
+		}
+	},
+	"edit-batch": {
+		"approve": {
+			"title": "全部保存"
+		},
+		"deny": {
+			"title": "全部拒绝"
+		}
+	},
+	"indexingStatus": {
+		"ready": "索引就绪",
+		"indexing": "索引中 {{percentage}}%",
+		"indexed": "已索引",
+		"error": "索引错误",
+		"status": "索引状态",
+		"stopping": "正在停止索引..."
+	},
+	"versionIndicator": {
+		"ariaLabel": "版本 {{version}} - 点击查看发布说明"
+	},
+	"rooCloudCTA": {
+		"title": "Zoo Code Cloud 正在进化！",
+		"description": "在云端运行远程代理，随时随地访问任务，与他人协作等更多功能。",
+		"joinWaitlist": "注册获取最新更新。"
+	},
+	"command": {
+		"triggerDescription": "触发 {{name}} 命令"
+	},
+	"editMessage": {
+		"placeholder": "编辑消息..."
+	},
+	"slashCommands": {
+		"tooltip": "管理斜杠命令",
+		"title": "斜杠命令",
+		"description": "使用内置斜杠命令或创建自定义命令，快速访问常用提示词和工作流程。<DocsLink>文档</DocsLink>",
+		"manageCommands": "在设置中管理斜杠命令",
+		"builtInCommands": "内置命令",
+		"globalCommands": "全局命令",
+		"workspaceCommands": "工作区命令",
+		"globalCommand": "全局命令",
+		"editCommand": "编辑命令",
+		"deleteCommand": "删除命令",
+		"newGlobalCommandPlaceholder": "新建全局命令...",
+		"newWorkspaceCommandPlaceholder": "新建工作区命令...",
+		"deleteDialog": {
+			"title": "删除命令",
+			"description": "确定要删除命令 \"{{name}}\" 吗？此操作无法撤销。",
+			"cancel": "取消",
+			"confirm": "删除"
+		}
+	},
+	"contextMenu": {
+		"noResults": "无结果",
+		"problems": "问题",
+		"terminal": "终端",
+		"url": "粘贴URL以获取内容"
+	},
+	"queuedMessages": {
+		"title": "队列消息",
+		"clickToEdit": "点击编辑消息"
+	},
+	"slashCommand": {
+		"wantsToRun": "Zoo 想要运行斜杠命令",
+		"didRun": "Zoo 运行了斜杠命令"
+	},
+	"todo": {
+		"partial": "已完成 {{completed}} / {{total}} 个待办事项",
+		"complete": "已完成 {{total}} 个待办事项",
+		"updated": "已更新待办事项列表",
+		"completed": "已完成",
+		"started": "已开始"
+	},
+	"tooManyTools": {
+		"title": "启用的工具过多",
+		"toolsPart_one": "{{count}} 个工具",
+		"toolsPart_other": "{{count}} 个工具",
+		"serversPart_one": "{{count}} 个 MCP 服务",
+		"serversPart_other": "{{count}} 个 MCP 服务",
+		"messageTemplate": "你通过 {{servers}} 启用了 {{tools}}。这么多数量会混淆模型并导致错误。建议将其保持在 {{threshold}} 以下。",
+		"openMcpSettings": "打开 MCP 设置"
+	},
+	"readCommandOutput": {
+		"title": "Zoo read command output"
+	},
+	"retiredProvider": {
+		"title": "供应商不再受支持",
+		"message": "此提供商已不可用。请选择受支持的提供商以继续。",
+		"openSettings": "打开设置"
+	}
+}

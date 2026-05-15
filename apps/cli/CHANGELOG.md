@@ -1,0 +1,391 @@
+# Changelog
+
+All notable changes to the `@roo-code/cli` package will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.17] - 2026-03-04
+
+### Added
+
+- **Custom Session ID Support**: New `--create-with-session-id` flag allows specifying a custom UUID session ID when creating tasks. Session IDs are now validated as UUIDs for both create and resume operations, as well as for `start.taskId` in stdin-stream mode.
+
+### Tests
+
+- Added integration coverage for create+resume loading the correct session.
+
+## [0.1.16] - 2026-03-04
+
+### Added
+
+- **Custom Shell Selection**: New `--terminal-shell` flag to specify which shell to use for inline command execution. The shell path is validated at the CLI layer and passed through the standard settings mechanism.
+
+### Tests
+
+- Added integration coverage for stdin stream routing and race invariants.
+
+## [0.1.15] - 2026-03-03
+
+### Fixed
+
+- **Follow-up Routing for Completion Asks**: Fixed routing of follow-up messages when the agent asks for clarification (ask_followup_question) in stdin-stream mode. Messages sent after a completion ask are now correctly delivered to the agent instead of being queued.
+
+## [0.1.14] - 2026-03-03
+
+### Fixed
+
+- **Command Output Streaming**: Ensure full command output is streamed before the done event is emitted, preventing truncated output in stdin-stream mode.
+
+## [0.1.13] - 2026-03-02
+
+### Added
+
+- **Skills as Slash Commands**: Skills are now exposed as slash commands, so you can invoke skill workflows directly from command-style input.
+- **Skill Fallback Execution**: When a slash command does not match a command file but matches a skill slug, the CLI can resolve and execute that skill path.
+
+### Changed
+
+- **Slash Command Resolution Priority**: Command precedence is preserved, with skill fallback only used when no matching slash command is found.
+
+### Tests
+
+- Added and updated tests for slash command + skill fallback behavior, including command precedence and duplicate skill-slug handling.
+
+## [0.1.12] - 2026-03-02
+
+### Fixed
+
+- **Command Timeout Handling**: CLI runtime now correctly ignores model-provided background timeouts for commands, ensuring command lifetime is governed solely by the `--timeout` setting.
+
+## [0.1.11] - 2026-03-02
+
+### Added
+
+- **Image Support in Stdin Stream**: The `start` and `message` commands in stdin-stream mode now support an optional `images` field (array of base64 data URIs) to attach images to prompts.
+
+### Fixed
+
+- **Upgrade Version Detection**: Fixed version detection in the `upgrade` command to correctly identify when updates are available.
+
+## [0.1.10] - 2026-03-02
+
+### Added
+
+- **Command Exit Code in Events**: The `tool_result` event for command executions now includes an `exitCode` field, allowing CLI consumers to programmatically distinguish between successful and failed command executions without parsing output text.
+
+## [0.1.9] - 2026-03-02
+
+### Fixed
+
+- **Stdin Stream Cancel Race**: Fixed a race condition during startup cancellation in stdin-stream mode that could cause unexpected behavior when canceling tasks immediately after starting them.
+
+### Tests
+
+- **Integration Test Suite**: Added comprehensive integration test suite for stdin-stream protocol covering cancel, followup, multi-message queue, and shutdown scenarios.
+
+## [0.1.8] - 2026-03-02
+
+### Changed
+
+- **Command Execution Timeout**: Increased timeout for command execution to improve reliability for long-running operations.
+
+### Fixed
+
+- **Stdin Stream Queue Handling**: Fixed stdin stream queued messages and command output streaming to ensure messages are properly processed.
+
+## [0.1.7] - 2026-03-01
+
+### Fixed
+
+- **Stdin Stream Control Flow**: Gracefully handle control-flow errors in stdin-stream mode to prevent unexpected crashes during cancellation and shutdown sequences.
+
+### Changed
+
+- **Type Definitions**: Refactored and simplified JSON event type definitions for better type safety.
+
+## [0.1.6] - 2026-02-27
+
+### Added
+
+- **Consecutive Mistake Limit**: New `--mistake-limit` flag to configure the maximum number of consecutive mistakes before the agent pauses for intervention.
+
+### Changed
+
+- **Workspace-Scoped Sessions**: The `list sessions` command and `--resume` flag now only show and resume sessions from the current workspace directory.
+
+### Fixed
+
+- **Task Configuration Forwarding**: Task configuration (custom modes, disabled tools, etc.) passed via the stdin-prompt-stream protocol is now correctly forwarded to the extension host instead of being silently dropped.
+- **Stream Error Recovery**: Improved recovery from streaming errors to prevent task interruption.
+
+## [0.1.5] - 2026-02-26
+
+### Added
+
+- **Session History**: New `list sessions` subcommand to view recent CLI sessions with task IDs, timestamps, and initial prompts.
+- **Session Resume**: New `--resume <taskId>` flag to continue a previous session from where it left off.
+- **Upgrade Command**: New `upgrade` command to check for and install the latest CLI version.
+
+## [0.1.4] - 2026-02-26
+
+### Fixed
+
+- **Exception Handling**: Improved recovery from unhandled exceptions in the CLI to prevent unexpected crashes.
+
+## [0.1.3] - 2026-02-25
+
+### Fixed
+
+- **Task Resumption**: Fixed an issue where resuming a previously suspended task could fail due to state initialization timing in the extension host.
+
+## [0.1.2] - 2026-02-25
+
+### Changed
+
+- **Streaming Deltas**: Tool use ask messages (command, tool, mcp) are now streamed as structured deltas instead of full snapshots in json-event-emitter for improved efficiency.
+- **Task ID Propagation**: Task ID is now generated upfront and propagated through runTask/createTask so currentTaskId is available in extension state immediately.
+- **Custom Tools**: Enabled customTools experiment in extension host.
+
+### Fixed
+
+- **Cancel Recovery**: Wait for resumable state after cancel before processing follow-up messages to prevent race conditions in stdin-stream.
+- **Custom Tool Schema**: Provide valid empty JSON Schema for custom tools without parameters to fix strict-mode API validation.
+- **Path Handling**: Skip paths outside cwd in RooProtectedController to avoid RangeError.
+- **Retry Handling**: Silently handle abort during exponential backoff retry countdown.
+- Fixed spelling/grammar and casing inconsistencies.
+
+### Added
+
+- **Telemetry Control**: Added `ROO_CODE_DISABLE_TELEMETRY=1` environment variable to disable cloud telemetry.
+
+## [0.1.1] - 2026-02-24
+
+### Added
+
+- **Roo Model Warmup**: When configured with the Roo provider, the CLI now proactively fetches and warms the model list during activation so that model information is available before the first prompt is sent. The warmup has a 10s timeout and failures are logged only in debug mode.
+- **Unbound Provider**: Added Unbound as an available provider option.
+
+## [0.1.0] - 2026-02-19
+
+### Added
+
+- **NDJSON Stdin Protocol**: Overhauled the stdin prompt stream from raw text lines to a structured NDJSON command protocol (`start`/`message`/`cancel`/`ping`/`shutdown`) with requestId correlation, ack/done/error lifecycle events, and queue telemetry. See [`stdin-stream.ts`](src/ui/stdin-stream.ts) for implementation.
+- **List Subcommands**: New `list` subcommands (`commands`, `modes`, `models`) for programmatic discovery of available CLI capabilities.
+- **Shared Utilities**: Added `isRecord` guard utility for improved type safety.
+
+### Changed
+
+- **Modularized Architecture**: Extracted stdin stream logic from `run.ts` into dedicated [`stdin-stream.ts`](src/ui/stdin-stream.ts) module for better code organization and maintainability.
+
+### Fixed
+
+- Fixed a bug in `Task.ts` affecting CLI operation.
+
+## [0.0.55] - 2026-02-17
+
+### Fixed
+
+- **Stdin Stream Mode**: Fixed issue where new tasks were incorrectly being created in stdin-prompt-stream mode. The mode now properly reuses the existing task for subsequent prompts instead of creating new tasks.
+
+## [0.0.54] - 2026-02-15
+
+### Added
+
+- **Stdin Stream Mode**: New `stdin-prompt-stream` mode that reads prompts from stdin, allowing batch processing and piping multiple tasks. Each line of stdin is processed as a separate prompt with streaming JSON output. See [`stdin-prompt-stream.ts`](src/ui/stdin-prompt-stream.ts) for implementation.
+
+### Fixed
+
+- Fixed JSON emitter state not being cleared between tasks in stdin-prompt-stream mode
+- Fixed inconsistent user role for prompt echo partials in stream-json mode
+
+## [0.0.53] - 2026-02-12
+
+### Changed
+
+- **Auto-Approve by Default**: The CLI now auto-approves all actions (tools, commands, browser, MCP) by default. Followup questions auto-select the first suggestion after a 60-second timeout.
+- **New `--require-approval` Flag**: Replaced `-y`/`--yes`/`--dangerously-skip-permissions` flags with a new `-a, --require-approval` flag for users who want manual approval prompts before actions execute.
+
+### Fixed
+
+- Spamming the escape key to cancel a running task no longer crashes the cli.
+
+## [0.0.52] - 2026-02-09
+
+### Added
+
+- **Linux Support**: Added support for `linux-arm64`.
+
+## [0.0.51] - 2026-02-06
+
+### Changed
+
+- **Default Model Update**: Changed the default model from Opus 4.5 to Opus 4.6 for improved performance and capabilities
+
+## [0.0.50] - 2026-02-05
+
+### Added
+
+- **Linux Support**: The CLI now supports Linux platforms in addition to macOS
+- **Roo Provider API Key Support**: Allow `--api-key` flag and `ROO_API_KEY` environment variable for the roo provider instead of requiring cloud auth token
+- **Exit on Error**: New `--exit-on-error` flag to exit immediately on API request errors instead of retrying, useful for CI/CD pipelines
+
+### Changed
+
+- **Improved Dev Experience**: Dev scripts now use `tsx` for running directly from source without building first
+- **Path Resolution Fixes**: Fixed path resolution in [`version.ts`](src/lib/utils/version.ts), [`extension.ts`](src/lib/utils/extension.ts), and [`extension-host.ts`](src/agent/extension-host.ts) to work from both source and bundled locations
+- **Debug Logging**: Debug log file (`~/.roo/cli-debug.log`) is now disabled by default unless `--debug` flag is passed
+- Updated README with complete environment variable table and dev workflow documentation
+
+### Fixed
+
+- Corrected example in install script
+
+### Removed
+
+- Dropped macOS 13 support
+
+## [0.0.49] - 2026-01-18
+
+### Added
+
+- **Output Format Options**: New `--output-format` flag to control CLI output format for scripting and automation:
+    - `text` (default) - Human-readable interactive output
+    - `json` - Single JSON object with all events and final result at task completion
+    - `stream-json` - NDJSON (newline-delimited JSON) for real-time streaming of events
+    - See [`json-events.ts`](src/types/json-events.ts) for the complete event schema
+    - New [`JsonEventEmitter`](src/agent/json-event-emitter.ts) for structured output generation
+
+## [0.0.48] - 2026-01-17
+
+### Changed
+
+- Simplified authentication callback flow by using HTTP redirects instead of POST requests with CORS headers for improved browser compatibility
+
+## [0.0.47] - 2026-01-17
+
+### Added
+
+- **Workspace flag**: New `-w, --workspace <path>` option to specify a custom workspace directory instead of using the current working directory
+- **Oneshot mode**: New `--oneshot` flag to exit upon task completion, useful for scripting and automation (can also be saved in settings via [`CliSettings.oneshot`](src/types/types.ts))
+
+### Changed
+
+- Skip onboarding flow when a provider is explicitly specified via `--provider` flag or saved in settings
+- Unified permission flags: Combined approval-skipping flags into a single option for Claude Code-like CLI compatibility
+- Improved Roo Code Router authentication flow and error messaging
+
+### Fixed
+
+- Removed unnecessary timeout that could cause issues with long-running tasks
+- Fixed authentication token validation for Roo Code Router provider
+
+## [0.0.45] - 2026-01-08
+
+### Changed
+
+- **Major Refactor**: Extracted ~1400 lines from [`App.tsx`](src/ui/App.tsx) into reusable hooks and utilities for better maintainability:
+
+    - [`useExtensionHost`](src/ui/hooks/useExtensionHost.ts) - Extension host connection and lifecycle management
+    - [`useMessageHandlers`](src/ui/hooks/useMessageHandlers.ts) - Message processing and state updates
+    - [`useTaskSubmit`](src/ui/hooks/useTaskSubmit.ts) - Task submission logic
+    - [`useGlobalInput`](src/ui/hooks/useGlobalInput.ts) - Global keyboard shortcut handling
+    - [`useFollowupCountdown`](src/ui/hooks/useFollowupCountdown.ts) - Auto-approval countdown logic
+    - [`useFocusManagement`](src/ui/hooks/useFocusManagement.ts) - Input focus state management
+    - [`usePickerHandlers`](src/ui/hooks/usePickerHandlers.ts) - Picker component event handling
+    - [`uiStateStore`](src/ui/stores/uiStateStore.ts) - UI-specific state (showExitHint, countdown, etc.)
+    - Tool data utilities ([`extractToolData`](src/ui/utils/toolDataUtils.ts), `formatToolOutput`, etc.)
+    - [`HorizontalLine`](src/ui/components/HorizontalLine.tsx) component
+
+- **Performance Optimizations**:
+
+    - Added RAF-style scroll throttling to reduce state updates
+    - Stabilized `useExtensionHost` hook return values with `useCallback`/`useMemo`
+    - Added streaming message debouncing to batch rapid partial updates
+    - Added shallow array equality checks to prevent unnecessary re-renders
+
+- Simplified [`ModeTool`](src/ui/components/tools/ModeTool.tsx) layout to horizontal with mode suffix
+- Simplified logging by removing verbose debug output and adding first/last partial message logging pattern
+- Updated Nerd Font icon codepoints in [`Icon`](src/ui/components/Icon.tsx) component
+
+### Added
+
+- `#` shortcut in help trigger for quick access to task history autocomplete
+
+### Fixed
+
+- Fixed a crash in message handling
+- Added protected file warning in tool approval prompts
+- Enabled `alwaysAllowWriteProtected` for non-interactive mode
+
+### Removed
+
+- Removed unused `renderLogger.ts` utility file
+
+### Tests
+
+- Updated extension-host tests to expect `[Tool Request]` format
+- Updated Icon tests to expect single-char Nerd Font icons
+
+## [0.0.44] - 2026-01-08
+
+### Added
+
+- **Tool Renderer Components**: Specialized renderers for displaying tool outputs with optimized formatting for each tool type. Each renderer provides a focused view of its data structure.
+
+    - [`FileReadTool`](src/ui/components/tools/FileReadTool.tsx) - Display file read operations with syntax highlighting
+    - [`FileWriteTool`](src/ui/components/tools/FileWriteTool.tsx) - Show file write/edit operations with diff views
+    - [`SearchTool`](src/ui/components/tools/SearchTool.tsx) - Render search results with context
+    - [`CommandTool`](src/ui/components/tools/CommandTool.tsx) - Display command execution with output
+    - [`BrowserTool`](src/ui/components/tools/BrowserTool.tsx) - Show browser automation actions
+    - [`ModeTool`](src/ui/components/tools/ModeTool.tsx) - Display mode switching operations
+    - [`CompletionTool`](src/ui/components/tools/CompletionTool.tsx) - Show task completion status
+    - [`GenericTool`](src/ui/components/tools/GenericTool.tsx) - Fallback renderer for other tools
+
+- **History Trigger**: New `#` trigger for task history autocomplete with fuzzy search support. Type `#` at the start of a line to browse and resume previous tasks.
+
+    - [`HistoryTrigger.tsx`](src/ui/components/autocomplete/triggers/HistoryTrigger.tsx) - Trigger implementation with fuzzy filtering
+    - Shows task status, mode, and relative timestamps
+    - Supports keyboard navigation for quick task selection
+
+- **Release Confirmation Prompt**: The release script now prompts for confirmation before creating a release.
+
+### Fixed
+
+- Task history picker selection and navigation issues
+- Mode switcher keyboard handling bug
+
+### Changed
+
+- Reorganized test files into `__tests__` directories for better project structure
+- Refactored utility modules into dedicated `utils/` directory
+
+## [0.0.43] - 2026-01-07
+
+### Added
+
+- **Toast Notification System**: New toast notifications for user feedback with support for info, success, warning, and error types. Toasts auto-dismiss after a configurable duration and are managed via Zustand store.
+
+    - New [`ToastDisplay`](src/ui/components/ToastDisplay.tsx) component for rendering toast messages
+    - New [`useToast`](src/ui/hooks/useToast.ts) hook for managing toast state and displaying notifications
+
+- **Global Input Sequences Registry**: Centralized system for handling keyboard shortcuts at the application level, preventing conflicts with input components.
+
+    - New [`globalInputSequences.ts`](src/ui/utils/globalInputSequences.ts) utility module
+    - Support for Kitty keyboard protocol (CSI u encoding) for better terminal compatibility
+    - Built-in sequences for `Ctrl+C` (exit) and `Ctrl+M` (mode cycling)
+
+- **Local Tarball Installation**: The install script now supports installing from a local tarball via the `ROO_LOCAL_TARBALL` environment variable, useful for offline installation or testing pre-release builds.
+
+### Changed
+
+- **MultilineTextInput**: Updated to respect global input sequences, preventing the component from consuming shortcuts meant for application-level handling.
+
+### Tests
+
+- Added comprehensive tests for the toast notification system
+- Added tests for global input sequence matching
+
+## [0.0.42] - 2025-01-07
+
+The cli is alive!

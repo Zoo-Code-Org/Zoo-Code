@@ -1,0 +1,18 @@
+{
+	"landing": {
+		"greeting": "歡迎使用 Zoo Code！",
+		"introduction": "Zoo Code 提供一系列內建和可擴充的模式，讓您以前所未有的方式規劃專案、設計架構、編寫程式碼、除錯並提升工作效率。",
+		"getStarted": "選擇供應商"
+	},
+	"providerSignup": {
+		"heading": "選擇供應商",
+		"chooseProvider": "Zoo Code 需要 LLM 供應商才能運作。選擇一個以開始使用，您可以稍後新增更多。",
+		"goBack": "返回",
+		"finish": "完成"
+	},
+	"telemetry": {
+		"helpImprove": "幫助改進 Zoo Code",
+		"helpImproveMessage": "Zoo Code 會收集錯誤和使用情況資料以幫助我們修復錯誤並改進擴充功能。此遙測不會收集程式碼、提示詞或個人資訊。您可以在 <settingsLink>設定</settingsLink> 中關閉。"
+	},
+	"importSettings": "匯入設定"
+}

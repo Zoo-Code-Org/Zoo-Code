@@ -1,0 +1,18 @@
+{
+	"landing": {
+		"greeting": "Witaj w Zoo Code!",
+		"introduction": "Dzięki szerokiej gamie wbudowanych i rozszerzalnych Trybów, Zoo Code pozwala planować, projektować architekturę, kodować, debugować i zwiększać produktywność jak nigdy dotąd.",
+		"getStarted": "Wybierz swojego dostawcę"
+	},
+	"providerSignup": {
+		"heading": "Wybierz swojego dostawcę",
+		"chooseProvider": "Zoo Code potrzebuje dostawcy LLM, aby działać. Wybierz jeden, aby zacząć, możesz dodać więcej później.",
+		"goBack": "Wróć",
+		"finish": "Zakończ"
+	},
+	"telemetry": {
+		"helpImprove": "Pomóż ulepszyć Zoo Code",
+		"helpImproveMessage": "Zoo Code zbiera dane o błędach i użytkowaniu, aby pomóc nam naprawiać błędy i ulepszać rozszerzenie. Ta telemetria nie zbiera kodu, podpowiedzi ani danych osobowych. Możesz je wyłączyć w <settingsLink>ustawieniach</settingsLink>."
+	},
+	"importSettings": "Importuj ustawienia"
+}

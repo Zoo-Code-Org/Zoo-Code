@@ -1,0 +1,18 @@
+{
+	"landing": {
+		"greeting": "Zoo Code에 오신 것을 환영합니다!",
+		"introduction": "내장 및 확장 가능한 다양한 모드를 통해 Zoo Code는 계획, 아키텍처 설계, 코딩, 디버깅 및 전례 없는 생산성 향상을 가능하게 합니다.",
+		"getStarted": "공급자 선택"
+	},
+	"providerSignup": {
+		"heading": "공급자 선택",
+		"chooseProvider": "Zoo Code가 작동하려면 LLM 공급자가 필요합니다. 시작하려면 하나를 선택하세요. 나중에 더 추가할 수 있습니다.",
+		"goBack": "뒤로",
+		"finish": "완료"
+	},
+	"telemetry": {
+		"helpImprove": "Zoo Code 개선에 도움주세요",
+		"helpImproveMessage": "Zoo Code는 버그를 수정하고 확장을 개선하기 위해 오류 및 사용 데이터를 수집합니다. 이 원격 분석은 코드, 프롬프트 또는 개인 정보를 수집하지 않습니다. <settingsLink>설정</settingsLink>에서 이를 비활성화할 수 있습니다."
+	},
+	"importSettings": "설정 가져오기"
+}

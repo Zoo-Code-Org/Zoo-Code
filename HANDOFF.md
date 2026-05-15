@@ -1,15 +1,15 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 0 repository source references are established. No implementation code has changed.
-- **Last completed task:** `DEVPLAN.md` Phase 0, Task 1 — Fork source repositories and establish upstream references.
-- **Next task to execute:** `DEVPLAN.md` Phase 0, Task 2 — Create monorepo package skeleton.
+- **Current status:** Phase 0 Tasks 2 and 3 are implemented. Zoo upstream source has been materialized locally, the VS Code extension/webview have been relocated under `packages/zoo-vscode/`, scaffold packages exist for `packages/zoo-cli/` and `packages/zoo-sdk/`, and workspace discovery/build graph wiring has been updated.
+- **Last completed task:** `DEVPLAN.md` Phase 0, Task 3 — Update workspace and build graph for new packages.
+- **Next task to execute:** `DEVPLAN.md` Phase 0, Task 4 — Add attribution inventory.
 - **Blocked on:**
-  - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: blocks `DEVPLAN.md` Phase 1, Task 1.
-  - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
-  - Open Question 3, cloud services/gateway strategy: blocks final behavior for `DEVPLAN.md` Phase 1, Task 4 and Phase 5 scope decisions.
-  - Open Question 4, inline autocomplete scope: blocks only any future autocomplete work; current `DEVPLAN.md` treats it as out of scope pending Phase 5, Task 7.
-  - Open Question 5, JetBrains/other IDE support: blocks only future IDE packages; current `DEVPLAN.md` treats it as out of scope pending Phase 5, Task 7.
+    - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: blocks `DEVPLAN.md` Phase 1, Task 1.
+    - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
+    - Open Question 3, cloud services/gateway strategy: blocks final behavior for `DEVPLAN.md` Phase 1, Task 4 and Phase 5 scope decisions.
+    - Open Question 4, inline autocomplete scope: blocks only any future autocomplete work; current `DEVPLAN.md` treats it as out of scope pending Phase 5, Task 7.
+    - Open Question 5, JetBrains/other IDE support: blocks only future IDE packages; current `DEVPLAN.md` treats it as out of scope pending Phase 5, Task 7.
 
 ## Context the next agent needs
 
@@ -34,6 +34,14 @@
 - Kilo remotes: `kilo-fork` -> `https://github.com/mojomast/kilocode.git`; `kilo-upstream` -> `https://github.com/Kilo-Org/kilocode.git`.
 - Optional OpenCode upstream remote: `opencode-upstream` -> `https://github.com/anomalyco/opencode.git`.
 - Source repositories were verified with non-destructive `gh repo view` commands; local remotes were verified with `git remote -v`.
+- `DEVPLAN.md` Phase 0, Task 2 was clarified because this local workspace initially contained only planning docs; implementing the task required first materializing `zoo-upstream/main` into the working tree before the mechanical `src/` and `webview-ui/` relocation could happen.
+- `packages/zoo-vscode/src` contains the relocated VS Code extension package, and `packages/zoo-vscode/webview-ui` contains the relocated React webview package. This preserves the existing package manifests while grouping both under `packages/zoo-vscode/`.
+- `packages/zoo-cli` and `packages/zoo-sdk` are scaffold-only packages with no runtime/API implementation yet.
+- `pnpm-workspace.yaml` now discovers `packages/zoo-cli`, `packages/zoo-sdk`, `packages/zoo-vscode/src`, and `packages/zoo-vscode/webview-ui` alongside existing `apps/*` and `packages/*` packages.
+- Path-sensitive build references were adjusted for the relocation, including extension/webview scripts, VS Code launch config, nightly build source path, webview Vite output paths, and workspace lockfile links.
+- Verification completed: `pnpm list --depth -1 --recursive`, `pnpm --filter @zoo-code/cli build`, `pnpm --filter @zoo-code/sdk build`, `pnpm --filter zoo-code check-types`, `pnpm --filter @roo-code/vscode-webview check-types`, `pnpm --filter @roo-code/vscode-webview build`, `pnpm --filter @roo-code/build build`, and `pnpm --filter zoo-code bundle`.
+- Verification warning: the environment uses Node `v20.19.6`; root and extension package manifests request Node `20.20.2`. Commands still completed after dependency installation.
+- Dependency installation was required because `node_modules` was missing. `pnpm install` completed and retained the existing lockfile resolution.
 
 ## How to update this file
 

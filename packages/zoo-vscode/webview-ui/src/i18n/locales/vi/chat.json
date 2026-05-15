@@ -1,0 +1,493 @@
+{
+	"greeting": "Chào mừng đến với Zoo Code!",
+	"task": {
+		"title": "Nhiệm vụ",
+		"expand": "Mở rộng nhiệm vụ",
+		"collapse": "Thu gọn nhiệm vụ",
+		"seeMore": "Xem thêm",
+		"seeLess": "Thu gọn",
+		"tokens": "Tokens",
+		"cache": "Bộ nhớ đệm",
+		"apiCost": "Chi phí API",
+		"size": "Kích thước",
+		"contextWindow": "Chiều dài bối cảnh",
+		"closeAndStart": "Đóng nhiệm vụ và bắt đầu nhiệm vụ mới",
+		"export": "Xuất lịch sử nhiệm vụ",
+		"delete": "Xóa nhiệm vụ (Shift + Click để bỏ qua xác nhận)",
+		"condenseContext": "Cô đọng ngữ cảnh thông minh",
+		"openApiHistory": "Mở lịch sử API",
+		"openUiHistory": "Mở lịch sử UI",
+		"backToParentTask": "Nhiệm vụ cha"
+	},
+	"unpin": "Bỏ ghim khỏi đầu",
+	"pin": "Ghim lên đầu",
+	"fileChangesInConversation": {
+		"header": "{{count}} tệp đã thay đổi trong cuộc hội thoại này"
+	},
+	"tokenProgress": {
+		"availableSpace": "Không gian khả dụng: {{amount}} tokens",
+		"tokensUsed": "Tokens đã sử dụng: {{used}} trong {{total}}",
+		"reservedForResponse": "Dành riêng cho phản hồi mô hình: {{amount}} tokens",
+		"tokensUsedLabel": "Tokens đã sử dụng",
+		"reservedForResponseLabel": "Dành riêng cho phản hồi",
+		"availableSpaceLabel": "Không gian khả dụng"
+	},
+	"retry": {
+		"title": "Thử lại",
+		"tooltip": "Thử lại thao tác"
+	},
+	"startNewTask": {
+		"title": "Bắt đầu nhiệm vụ mới",
+		"tooltip": "Bắt đầu một nhiệm vụ mới"
+	},
+	"proceedAnyways": {
+		"title": "Vẫn tiếp tục",
+		"tooltip": "Tiếp tục trong khi lệnh đang chạy"
+	},
+	"save": {
+		"title": "Lưu",
+		"tooltip": "Lưu các thay đổi tin nhắn"
+	},
+	"reject": {
+		"title": "Từ chối",
+		"tooltip": "Từ chối hành động này"
+	},
+	"completeSubtaskAndReturn": "Hoàn thành nhiệm vụ phụ và quay lại",
+	"approve": {
+		"title": "Phê duyệt",
+		"tooltip": "Phê duyệt hành động này"
+	},
+	"runCommand": {
+		"title": "Lệnh",
+		"tooltip": "Thực thi lệnh này"
+	},
+	"proceedWhileRunning": {
+		"title": "Tiếp tục trong khi chạy",
+		"tooltip": "Tiếp tục bất chấp cảnh báo"
+	},
+	"killCommand": {
+		"title": "Dừng lệnh",
+		"tooltip": "Dừng lệnh hiện tại"
+	},
+	"resumeTask": {
+		"title": "Tiếp tục nhiệm vụ",
+		"tooltip": "Tiếp tục nhiệm vụ hiện tại"
+	},
+	"terminate": {
+		"title": "Kết thúc",
+		"tooltip": "Kết thúc nhiệm vụ hiện tại"
+	},
+	"stop": {
+		"title": "Dừng",
+		"tooltip": "Dừng nhiệm vụ hiện tại"
+	},
+	"cancel": {
+		"title": "Hủy",
+		"tooltip": "Hủy thao tác hiện tại"
+	},
+	"enqueueMessage": "Thêm tin nhắn vào hàng đợi (sẽ gửi sau khi nhiệm vụ hiện tại hoàn tất)",
+	"scrollToBottom": "Cuộn xuống cuối cuộc trò chuyện",
+	"scrollToLatestCheckpoint": "Cuộn đến checkpoint trước đó",
+	"about": "Zoo Code là một đội ngũ phát triển AI đầy đủ trong trình chỉnh sửa của bạn.",
+	"docs": "Kiểm tra <DocsLink>tài liệu</DocsLink> của chúng tôi để tìm hiểu thêm.",
+	"onboarding": "Danh sách nhiệm vụ của bạn trong không gian làm việc này đang trống.",
+	"rooTips": {
+		"customizableModes": {
+			"title": "Chế độ có thể tùy chỉnh",
+			"description": "Các nhân vật chuyên biệt luôn bám sát nhiệm vụ và mang lại hiệu quả."
+		},
+		"modelAgnostic": {
+			"title": "Mang theo mô hình của riêng bạn",
+			"description": "Sử dụng khóa nhà cung cấp của riêng bạn hoặc thậm chí chạy suy luận cục bộ — không phụ phí, không khóa, không hạn chế"
+		}
+	},
+	"selectMode": "Chọn chế độ tương tác",
+	"selectApiConfig": "Chọn cấu hình API",
+	"lockApiConfigAcrossModes": "Khóa cấu hình API cho tất cả chế độ trong workspace này",
+	"unlockApiConfigAcrossModes": "Cấu hình API đã bị khóa cho tất cả chế độ trong workspace này (nhấn để mở khóa)",
+	"enhancePrompt": "Nâng cao yêu cầu với ngữ cảnh bổ sung",
+	"addImages": "Thêm hình ảnh vào tin nhắn",
+	"sendMessage": "Gửi tin nhắn",
+	"pressToSend": "Nhấn {{keyCombination}} để gửi",
+	"stopTts": "Dừng chuyển văn bản thành giọng nói",
+	"typeMessage": "Nhập tin nhắn...",
+	"typeTask": "Nhập nhiệm vụ của bạn tại đây...",
+	"addContext": "@ để thêm ngữ cảnh, / cho lệnh",
+	"dragFiles": "giữ shift để kéo tệp",
+	"dragFilesImages": "giữ shift để kéo tệp/hình ảnh",
+	"enhancePromptDescription": "Nút 'Nâng cao yêu cầu' giúp cải thiện yêu cầu của bạn bằng cách cung cấp ngữ cảnh bổ sung, làm rõ hoặc diễn đạt lại. Hãy thử nhập yêu cầu tại đây và nhấp vào nút một lần nữa để xem cách thức hoạt động.",
+	"modeSelector": {
+		"title": "Chế độ",
+		"marketplace": "Chợ Chế độ",
+		"settings": "Cài đặt Chế độ",
+		"description": "Các nhân cách chuyên biệt điều chỉnh hành vi của Zoo.",
+		"searchPlaceholder": "Tìm kiếm chế độ...",
+		"noResults": "Không tìm thấy kết quả nào"
+	},
+	"errorReadingFile": "Lỗi khi đọc tệp",
+	"noValidImages": "Không có hình ảnh hợp lệ nào được xử lý",
+	"separator": "Dấu phân cách",
+	"edit": "Chỉnh sửa...",
+	"forNextMode": "cho chế độ tiếp theo",
+	"forPreviousMode": "cho chế độ trước đó",
+	"error": "Lỗi",
+	"diffError": {
+		"title": "Chỉnh sửa không thành công"
+	},
+	"troubleMessage": "Zoo đang gặp sự cố...",
+	"apiRequest": {
+		"title": "Yêu cầu API",
+		"failed": "Yêu cầu API thất bại",
+		"streaming": "Yêu cầu API...",
+		"cancelled": "Yêu cầu API đã hủy",
+		"streamingFailed": "Streaming API thất bại",
+		"rateLimitWait": "Giới hạn tốc độ",
+		"errorTitle": "Lỗi nhà cung cấp {{code}}",
+		"errorMessage": {
+			"400": "Nhà cung cấp không thể xử lý yêu cầu theo cách này. Hãy dừng nhiệm vụ và thử một cách tiếp cận khác.",
+			"401": "Không thể xác thực với nhà cung cấp. Vui lòng kiểm tra cấu hình khóa API của bạn.",
+			"402": "Có vẻ như bạn đã hết tiền/tín dụng trong tài khoản. Hãy truy cập nhà cung cấp và thêm tiền để tiếp tục.",
+			"403": "Truy cập bị từ chối. Khóa API của bạn hợp lệ, nhưng nhà cung cấp từ chối hoàn thành yêu cầu này.",
+			"429": "Quá nhiều yêu cầu. Nhà cung cấp đang giới hạn tốc độ yêu cầu của bạn. Vui lòng chờ một chút trước khi gọi API tiếp theo.",
+			"500": "Lỗi máy chủ của nhà cung cấp. Có sự cố ở phía nhà cung cấp, không có gì sai với yêu cầu của bạn.",
+			"docs": "Tài liệu",
+			"goToSettings": "Cài đặt",
+			"unknown": "Lỗi API không xác định. Vui lòng liên hệ bộ phận hỗ trợ Zoo Code.",
+			"connection": "Lỗi kết nối. Đảm bảo rằng bạn có kết nối Internet hoạt động.",
+			"claudeCodeNotAuthenticated": "Bạn cần đăng nhập để sử dụng Claude Code. Vào Cài đặt và nhấp vào \"Đăng nhập vào Claude Code\" để xác thực."
+		}
+	},
+	"checkpoint": {
+		"regular": "Điểm kiểm tra",
+		"initializingWarning": "Đang khởi tạo điểm kiểm tra... Nếu quá trình này mất quá nhiều thời gian, bạn có thể vô hiệu hóa điểm kiểm tra trong <settingsLink>cài đặt</settingsLink> và khởi động lại tác vụ của bạn.",
+		"menu": {
+			"viewDiff": "Xem khác biệt",
+			"more": "Thêm tùy chọn",
+			"viewDiffFromInit": "Xem tất cả các thay đổi",
+			"viewDiffWithCurrent": "Xem các thay đổi kể từ điểm kiểm tra này",
+			"restore": "Khôi phục điểm kiểm tra",
+			"restoreFiles": "Khôi phục tệp",
+			"restoreFilesDescription": "Khôi phục các tệp dự án của bạn về bản chụp được thực hiện tại thời điểm này.",
+			"restoreFilesAndTask": "Khôi phục tệp & nhiệm vụ",
+			"confirm": "Xác nhận",
+			"cancel": "Hủy",
+			"cannotUndo": "Hành động này không thể hoàn tác.",
+			"restoreFilesAndTaskDescription": "Khôi phục các tệp dự án của bạn về bản chụp được thực hiện tại thời điểm này và xóa tất cả tin nhắn sau điểm này."
+		},
+		"current": "Hiện tại"
+	},
+	"instructions": {
+		"wantsToFetch": "Roo muốn lấy hướng dẫn chi tiết để hỗ trợ nhiệm vụ hiện tại"
+	},
+	"fileOperations": {
+		"wantsToRead": "Zoo muốn đọc tệp này",
+		"wantsToReadOutsideWorkspace": "Zoo muốn đọc tệp này bên ngoài không gian làm việc",
+		"didRead": "Zoo đã đọc tệp này",
+		"wantsToEdit": "Zoo muốn chỉnh sửa tệp này",
+		"wantsToEditOutsideWorkspace": "Zoo muốn chỉnh sửa tệp này bên ngoài không gian làm việc",
+		"wantsToEditProtected": "Zoo muốn chỉnh sửa tệp cấu hình được bảo vệ",
+		"wantsToCreate": "Zoo muốn tạo một tệp mới",
+		"wantsToSearchReplace": "Roo muốn thực hiện tìm kiếm và thay thế trong tệp này",
+		"didSearchReplace": "Roo đã thực hiện tìm kiếm và thay thế trong tệp này",
+		"wantsToInsert": "Zoo muốn chèn nội dung vào tệp này",
+		"wantsToInsertWithLineNumber": "Zoo muốn chèn nội dung vào dòng {{lineNumber}} của tệp này",
+		"wantsToInsertAtEnd": "Zoo muốn thêm nội dung vào cuối tệp này",
+		"wantsToReadAndXMore": "Zoo muốn đọc tệp này và {{count}} tệp khác",
+		"wantsToReadMultiple": "Zoo muốn đọc nhiều tệp",
+		"wantsToApplyBatchChanges": "Zoo muốn áp dụng thay đổi cho nhiều tệp",
+		"wantsToGenerateImage": "Zoo muốn tạo một hình ảnh",
+		"wantsToGenerateImageOutsideWorkspace": "Zoo muốn tạo hình ảnh bên ngoài không gian làm việc",
+		"wantsToGenerateImageProtected": "Zoo muốn tạo hình ảnh ở vị trí được bảo vệ",
+		"didGenerateImage": "Zoo đã tạo một hình ảnh"
+	},
+	"directoryOperations": {
+		"wantsToViewTopLevel": "Zoo muốn xem các tệp cấp cao nhất trong thư mục này",
+		"didViewTopLevel": "Zoo đã xem các tệp cấp cao nhất trong thư mục này",
+		"wantsToViewRecursive": "Zoo muốn xem đệ quy tất cả các tệp trong thư mục này",
+		"didViewRecursive": "Zoo đã xem đệ quy tất cả các tệp trong thư mục này",
+		"wantsToSearch": "Zoo muốn tìm kiếm trong thư mục này cho <code>{{regex}}</code>",
+		"didSearch": "Zoo đã tìm kiếm trong thư mục này cho <code>{{regex}}</code>",
+		"wantsToSearchOutsideWorkspace": "Zoo muốn tìm kiếm trong thư mục này (ngoài không gian làm việc) cho <code>{{regex}}</code>",
+		"didSearchOutsideWorkspace": "Zoo đã tìm kiếm trong thư mục này (ngoài không gian làm việc) cho <code>{{regex}}</code>",
+		"wantsToViewTopLevelOutsideWorkspace": "Zoo muốn xem các tệp cấp cao nhất trong thư mục này (ngoài không gian làm việc)",
+		"didViewTopLevelOutsideWorkspace": "Zoo đã xem các tệp cấp cao nhất trong thư mục này (ngoài không gian làm việc)",
+		"wantsToViewRecursiveOutsideWorkspace": "Zoo muốn xem đệ quy tất cả các tệp trong thư mục này (ngoài không gian làm việc)",
+		"didViewRecursiveOutsideWorkspace": "Zoo đã xem đệ quy tất cả các tệp trong thư mục này (ngoài không gian làm việc)",
+		"wantsToViewMultipleDirectories": "Zoo muốn xem nhiều thư mục"
+	},
+	"commandOutput": "Kết quả lệnh",
+	"commandExecution": {
+		"running": "Đang chạy",
+		"abort": "Hủy bỏ",
+		"pid": "PID: {{pid}}",
+		"exitStatus": "Đã thoát với trạng thái {{exitCode}}",
+		"manageCommands": "Quản lý quyền lệnh",
+		"commandManagementDescription": "Quản lý quyền lệnh: Nhấp vào ✓ để cho phép tự động thực thi, ✗ để từ chối thực thi. Các mẫu có thể được bật/tắt hoặc xóa khỏi danh sách. <settingsLink>Xem tất cả cài đặt</settingsLink>",
+		"addToAllowed": "Thêm vào danh sách cho phép",
+		"removeFromAllowed": "Xóa khỏi danh sách cho phép",
+		"addToDenied": "Thêm vào danh sách từ chối",
+		"removeFromDenied": "Xóa khỏi danh sách từ chối",
+		"abortCommand": "Hủy bỏ thực thi lệnh",
+		"expandOutput": "Mở rộng kết quả",
+		"collapseOutput": "Thu gọn kết quả",
+		"expandManagement": "Mở rộng phần quản lý lệnh",
+		"collapseManagement": "Thu gọn phần quản lý lệnh"
+	},
+	"response": "Phản hồi",
+	"arguments": "Tham số",
+	"text": {
+		"rooSaid": "Zoo đã nói"
+	},
+	"feedback": {
+		"youSaid": "Bạn đã nói"
+	},
+	"mcp": {
+		"wantsToUseTool": "Zoo muốn sử dụng một công cụ trên máy chủ MCP {{serverName}}",
+		"wantsToAccessResource": "Zoo muốn truy cập một tài nguyên trên máy chủ MCP {{serverName}}"
+	},
+	"modes": {
+		"wantsToSwitch": "Zoo muốn chuyển sang chế độ <code>{{mode}}</code>",
+		"wantsToSwitchWithReason": "Zoo muốn chuyển sang chế độ <code>{{mode}}</code> vì: {{reason}}",
+		"didSwitch": "Zoo đã chuyển sang chế độ <code>{{mode}}</code>",
+		"didSwitchWithReason": "Zoo đã chuyển sang chế độ <code>{{mode}}</code> vì: {{reason}}"
+	},
+	"subtasks": {
+		"wantsToCreate": "Zoo muốn tạo một nhiệm vụ phụ mới trong chế độ <code>{{mode}}</code>",
+		"wantsToFinish": "Zoo muốn hoàn thành nhiệm vụ phụ này",
+		"newTaskContent": "Hướng dẫn nhiệm vụ phụ",
+		"completionContent": "Nhiệm vụ phụ đã hoàn thành",
+		"resultContent": "Kết quả nhiệm vụ phụ",
+		"defaultResult": "Vui lòng tiếp tục với nhiệm vụ tiếp theo.",
+		"completionInstructions": "Nhiệm vụ phụ đã hoàn thành! Bạn có thể xem lại kết quả và đề xuất các sửa đổi hoặc bước tiếp theo. Nếu mọi thứ có vẻ tốt, hãy xác nhận để trả kết quả về nhiệm vụ chính.",
+		"goToSubtask": "Xem nhiệm vụ"
+	},
+	"questions": {
+		"hasQuestion": "Zoo có một câu hỏi"
+	},
+	"taskCompleted": "Nhiệm vụ hoàn thành",
+	"modelResponseIncomplete": "Phản hồi của mô hình không đầy đủ",
+	"modelResponseErrors": {
+		"noToolsUsed": "Mô hình đã không sử dụng bất kỳ công cụ nào trong phản hồi của mình. Điều này thường xảy ra khi mô hình chỉ cung cấp văn bản/lý luận mà không gọi các công cụ cần thiết để hoàn thành tác vụ.",
+		"noToolsUsedDetails": "Mô hình đã cung cấp văn bản/lý luận nhưng không gọi bất kỳ công cụ bắt buộc nào. Điều này thường cho thấy mô hình đã hiểu sai tác vụ hoặc đang gặp khó khăn trong việc xác định công cụ nào sẽ sử dụng. Mô hình đã được tự động nhắc thử lại với việc sử dụng công cụ phù hợp.",
+		"noAssistantMessages": "Mô hình không cung cấp bất kỳ nội dung phản hồi nào. Điều này có thể cho thấy có vấn đề với API hoặc đầu ra của mô hình.",
+		"noAssistantMessagesDetails": "Mô hình ngôn ngữ đã trả về một phản hồi trống mà không có văn bản hoặc lệnh gọi công cụ nào. Điều này có thể xảy ra do vấn đề API, giới hạn tốc độ hoặc các vấn đề cụ thể của mô hình. Mô hình đã được tự động nhắc thử lại."
+	},
+	"errorDetails": {
+		"link": "Chi tiết",
+		"title": "Chi tiết lỗi",
+		"copyToClipboard": "Sao chép vào clipboard",
+		"copied": "Đã sao chép!",
+		"diagnostics": "Nhận thông tin lỗi chi tiết",
+		"proxyProvider": "Có vẻ bạn đang sử dụng nhà cung cấp dựa trên proxy. Hãy chắc chắn kiểm tra các nhật ký của nó và đảm bảo nó không viết lại các yêu cầu của Zoo."
+	},
+	"powershell": {
+		"issues": "Có vẻ như bạn đang gặp vấn đề với Windows PowerShell, vui lòng xem"
+	},
+	"autoApprove": {
+		"tooltipManage": "Quản lý cài đặt tự động phê duyệt",
+		"tooltipStatus": "Tự động phê duyệt được bật cho: {{toggles}}",
+		"title": "Tự động phê duyệt",
+		"toggle": "Bật/tắt tự động phê duyệt",
+		"all": "Tất cả",
+		"none": "Không có",
+		"description": "Thực hiện các hành động này mà không cần xin phép. Chỉ bật tính năng này cho các hành động bạn hoàn toàn tin tưởng.",
+		"selectOptionsFirst": "Chọn ít nhất một tùy chọn bên dưới để bật tính năng tự động phê duyệt",
+		"toggleAriaLabel": "Bật/tắt tự động phê duyệt",
+		"disabledAriaLabel": "Tự động phê duyệt đã tắt - trước tiên hãy chọn các tùy chọn",
+		"triggerLabelOff": "Tự động phê duyệt tắt",
+		"triggerLabelOffShort": "Tắt",
+		"triggerLabel_zero": "0 được tự động phê duyệt",
+		"triggerLabel_one": "1 được tự động phê duyệt",
+		"triggerLabel_other": "{{count}} được tự động phê duyệt",
+		"triggerLabelAll": "BRRR"
+	},
+	"reasoning": {
+		"thinking": "Đang suy nghĩ",
+		"seconds": "{{count}} giây"
+	},
+	"contextManagement": {
+		"tokens": "token",
+		"condensation": {
+			"title": "Ngữ cảnh đã tóm tắt",
+			"inProgress": "Đang cô đọng ngữ cảnh...",
+			"errorHeader": "Không thể cô đọng ngữ cảnh"
+		},
+		"truncation": {
+			"title": "Ngữ cảnh đã cắt bớt",
+			"inProgress": "Đang cắt bớt ngữ cảnh...",
+			"messagesRemoved": "{{count}} tin nhắn đã xóa",
+			"messagesRemoved_other": "{{count}} tin nhắn đã xóa",
+			"description": "Các tin nhắn cũ hơn đã bị xóa khỏi cuộc trò chuyện để giữ trong giới hạn cửa sổ ngữ cảnh. Đây là cách tiếp cận nhanh nhưng ít bảo toàn ngữ cảnh hơn so với cô đọng."
+		}
+	},
+	"skill": {
+		"wantsToLoad": "Zoo muốn tải một kỹ năng",
+		"didLoad": "Zoo đã tải một kỹ năng"
+	},
+	"followUpSuggest": {
+		"copyToInput": "Sao chép vào ô nhập liệu (hoặc Shift + nhấp chuột)",
+		"timerPrefix": "Phê duyệt tự động được bật. Chọn trong {{seconds}}s…"
+	},
+	"announcement": {
+		"title": "Zoo Code {{version}} đã phát hành",
+		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
+		"handoff": {
+			"heading": "Roo Code đã trở lại, giờ là plugin do cộng đồng duy trì với tên gọi Zoo Code!!",
+			"description": "Nếu bạn chưa theo dõi, đội ngũ Roo Code gần đây đã thông báo họ sẽ dừng phát triển Roo Code và lưu trữ lại những gì họ đã xây dựng. Nhưng đừng lo, cộng đồng đã đứng ra tiếp nối di sản của Roo Code với một cái tên mới và một mái nhà mới! Chúng ta không còn chỉ là một \"Roo\" nữa, mà là cả một cộng đồng, một \"Zoo\" đúng nghĩa. Zoo Code là plugin do cộng đồng duy trì, tiếp nối từ nơi Roo Code dừng lại, và chúng tôi cam kết giữ vững tinh thần của Roo đồng thời mang đến các tính năng và cải tiến mới. Chúng tôi cũng muốn gửi lời cảm ơn sâu sắc đến toàn bộ đội ngũ Roo Code vì công sức tuyệt vời của họ và vì đã tạo ra một công cụ tuyệt vời cho các nhà phát triển. Chúng tôi rất háo hức được tiếp tục phát triển trên nền tảng đó và chờ xem cộng đồng sẽ đưa Zoo Code tiến xa đến đâu trong tương lai!",
+			"readMore": "Xem trang chủ mới của Zoo Code và đọc toàn bộ thông báo"
+		},
+		"release": {
+			"heading": "Tính năng mới:",
+			"gpt55": "GPT-5.5 qua OpenAI Codex: Đã thêm hỗ trợ GPT-5.5 trong nhà cung cấp OpenAI Codex để bạn có thể dùng model mới nhất trực tiếp từ Zoo Code.",
+			"claudeOpus47": "Claude Opus 4.7 trên Vertex AI: Đã thêm Claude Opus 4.7 vào nhà cung cấp Vertex AI - model reasoning flagship mới nhất của Anthropic.",
+			"checkpointNav": "Điều hướng Checkpoint trước đó: Đã thêm các điều khiển trong chat để quay lại các checkpoint trước, với hỗ trợ i18n đầy đủ."
+		},
+		"cloudAgents": {
+			"heading": "Mới trên Cloud:",
+			"specialized": "Giới thiệu <bold>Explainer</bold>, <bold>Planner</bold> và <bold>Coder</bold> - ba agent đám mây chuyên biệt để nâng cao quy trình làm việc của bạn.",
+			"description": "Các agent làm việc cùng nhau trên đám mây và có thể được kích hoạt từ web hoặc qua Slack.",
+			"tryButton": "Dùng thử Agents trên Cloud"
+		}
+	},
+	"costs": {
+		"totalWithSubtasks": "Tổng chi phí (bao gồm các tác vụ phụ): ${{cost}}",
+		"total": "Tổng chi phí: ${{cost}}",
+		"includesSubtasks": "Bao gồm chi phí của các tác vụ phụ"
+	},
+	"codeblock": {
+		"tooltips": {
+			"expand": "Mở rộng khối mã",
+			"collapse": "Thu gọn khối mã",
+			"copy_code": "Sao chép mã"
+		}
+	},
+	"profileViolationWarning": "Hồ sơ hiện tại không tương thích với cài đặt của tổ chức của bạn",
+	"shellIntegration": {
+		"title": "Cảnh báo thực thi lệnh",
+		"description": "Lệnh của bạn đang được thực thi mà không có tích hợp shell terminal VSCode. Để ẩn cảnh báo này, bạn có thể tắt tích hợp shell trong phần <strong>Terminal</strong> của <settingsLink>cài đặt Zoo Code</settingsLink> hoặc khắc phục sự cố tích hợp terminal VSCode bằng liên kết bên dưới.",
+		"troubleshooting": "Nhấp vào đây để xem tài liệu tích hợp shell."
+	},
+	"ask": {
+		"autoApprovedRequestLimitReached": {
+			"title": "Đã Đạt Giới Hạn Yêu Cầu Tự Động Phê Duyệt",
+			"description": "Zoo đã đạt đến giới hạn tự động phê duyệt là {{count}} yêu cầu API. Bạn có muốn đặt lại bộ đếm và tiếp tục nhiệm vụ không?",
+			"button": "Đặt lại và Tiếp tục"
+		},
+		"autoApprovedCostLimitReached": {
+			"button": "Đặt lại và Tiếp tục",
+			"title": "Đã Đạt Giới Hạn Chi Phí Tự Động Phê Duyệt",
+			"description": "Zoo đã đạt đến giới hạn chi phí tự động phê duyệt là ${{count}}. Bạn có muốn đặt lại chi phí và tiếp tục với nhiệm vụ không?"
+		}
+	},
+	"codebaseSearch": {
+		"wantsToSearch": "Zoo muốn tìm kiếm trong cơ sở mã cho <code>{{query}}</code>",
+		"wantsToSearchWithPath": "Zoo muốn tìm kiếm trong cơ sở mã cho <code>{{query}}</code> trong <code>{{path}}</code>",
+		"didSearch_one": "Đã tìm thấy 1 kết quả",
+		"didSearch_other": "Đã tìm thấy {{count}} kết quả",
+		"resultTooltip": "Điểm tương tự: {{score}} (nhấp để mở tệp)"
+	},
+	"read-batch": {
+		"approve": {
+			"title": "Chấp nhận tất cả"
+		},
+		"deny": {
+			"title": "Từ chối tất cả"
+		}
+	},
+	"list-batch": {
+		"approve": {
+			"title": "Chấp nhận tất cả"
+		},
+		"deny": {
+			"title": "Từ chối tất cả"
+		}
+	},
+	"edit-batch": {
+		"approve": {
+			"title": "Lưu tất cả"
+		},
+		"deny": {
+			"title": "Từ chối tất cả"
+		}
+	},
+	"indexingStatus": {
+		"ready": "Chỉ mục sẵn sàng",
+		"indexing": "Đang lập chỉ mục {{percentage}}%",
+		"indexed": "Đã lập chỉ mục",
+		"error": "Lỗi chỉ mục",
+		"status": "Trạng thái chỉ mục",
+		"stopping": "Đang dừng lập chỉ mục..."
+	},
+	"versionIndicator": {
+		"ariaLabel": "Phiên bản {{version}} - Nhấp để xem ghi chú phát hành"
+	},
+	"rooCloudCTA": {
+		"title": "Zoo Code Cloud đang phát triển!",
+		"description": "Chạy các agent từ xa trên cloud, truy cập các tác vụ của bạn từ mọi nơi, cộng tác với người khác và nhiều hơn nữa.",
+		"joinWaitlist": "Đăng ký để nhận các cập nhật mới nhất."
+	},
+	"editMessage": {
+		"placeholder": "Chỉnh sửa tin nhắn của bạn..."
+	},
+	"command": {
+		"triggerDescription": "Kích hoạt lệnh {{name}}"
+	},
+	"slashCommands": {
+		"tooltip": "Quản lý lệnh gạch chéo",
+		"title": "Lệnh Gạch Chéo",
+		"description": "Sử dụng lệnh gạch chéo tích hợp sẵn hoặc tạo tùy chỉnh để truy cập nhanh vào các lời nhắc và quy trình làm việc thường dùng. <DocsLink>Tài liệu</DocsLink>",
+		"manageCommands": "Quản lý các lệnh slash trong cài đặt",
+		"builtInCommands": "Lệnh Tích Hợp",
+		"globalCommands": "Lệnh Toàn Cục",
+		"workspaceCommands": "Lệnh Không Gian Làm Việc",
+		"globalCommand": "Lệnh toàn cục",
+		"editCommand": "Chỉnh sửa lệnh",
+		"deleteCommand": "Xóa lệnh",
+		"newGlobalCommandPlaceholder": "Lệnh toàn cục mới...",
+		"newWorkspaceCommandPlaceholder": "Lệnh không gian làm việc mới...",
+		"deleteDialog": {
+			"title": "Xóa Lệnh",
+			"description": "Bạn có chắc chắn muốn xóa lệnh \"{{name}}\" không? Hành động này không thể hoàn tác.",
+			"cancel": "Hủy",
+			"confirm": "Xóa"
+		}
+	},
+	"contextMenu": {
+		"noResults": "Không có kết quả",
+		"problems": "Vấn đề",
+		"terminal": "Terminal",
+		"url": "Dán URL để lấy nội dung"
+	},
+	"queuedMessages": {
+		"title": "Tin nhắn trong hàng đợi",
+		"clickToEdit": "Nhấp để chỉnh sửa tin nhắn"
+	},
+	"slashCommand": {
+		"wantsToRun": "Zoo muốn chạy lệnh slash",
+		"didRun": "Zoo đã chạy lệnh slash"
+	},
+	"todo": {
+		"partial": "{{completed}} trong tổng số {{total}} công việc đã hoàn thành",
+		"complete": "{{total}} công việc đã hoàn thành",
+		"updated": "Đã cập nhật danh sách công việc",
+		"completed": "Đã hoàn thành",
+		"started": "Đã bắt đầu"
+	},
+	"tooManyTools": {
+		"title": "Đã bật quá nhiều công cụ",
+		"toolsPart_one": "{{count}} công cụ",
+		"toolsPart_other": "{{count}} công cụ",
+		"serversPart_one": "{{count}} máy chủ MCP",
+		"serversPart_other": "{{count}} máy chủ MCP",
+		"messageTemplate": "Bạn đã bật {{tools}} qua {{servers}}. Số lượng lớn như vậy có thể khiến mô hình bối rối và dẫn đến lỗi. Cố gắng giữ nó dưới {{threshold}}.",
+		"openMcpSettings": "Mở cài đặt MCP"
+	},
+	"readCommandOutput": {
+		"title": "Zoo read command output"
+	},
+	"retiredProvider": {
+		"title": "Nhà cung cấp không còn được hỗ trợ",
+		"message": "Nhà cung cấp này không còn khả dụng. Hãy chọn một nhà cung cấp được hỗ trợ để tiếp tục.",
+		"openSettings": "Mở cài đặt"
+	}
+}

@@ -1,0 +1,18 @@
+{
+	"landing": {
+		"greeting": "Chào mừng đến với Zoo Code!",
+		"introduction": "Với nhiều Chế độ tích hợp và có thể mở rộng, Zoo Code cho phép bạn lập kế hoạch, thiết kế kiến trúc, viết mã, gỡ lỗi và tăng năng suất như chưa từng có trước đây.",
+		"getStarted": "Chọn nhà cung cấp của bạn"
+	},
+	"providerSignup": {
+		"heading": "Chọn nhà cung cấp của bạn",
+		"chooseProvider": "Zoo Code cần một nhà cung cấp LLM để hoạt động. Chọn một để bắt đầu, bạn có thể thêm nhiều hơn sau.",
+		"goBack": "Quay lại",
+		"finish": "Hoàn thành"
+	},
+	"telemetry": {
+		"helpImprove": "Giúp cải thiện Zoo Code",
+		"helpImproveMessage": "Zoo Code thu thập dữ liệu lỗi và sử dụng để giúp chúng tôi sửa lỗi và cải thiện tiện ích mở rộng. Dữ liệu từ xa này không thu thập mã, lời nhắc hoặc thông tin cá nhân. Bạn có thể vô hiệu hóa nó trong <settingsLink>cài đặt</settingsLink>."
+	},
+	"importSettings": "Nhập Cài đặt"
+}

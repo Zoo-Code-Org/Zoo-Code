@@ -1,0 +1,18 @@
+{
+	"landing": {
+		"greeting": "Benvenuto in Zoo Code!",
+		"introduction": "Con una gamma di Modalità integrate ed estensibili, Zoo Code ti permette di pianificare, architettare, codificare, debuggare e aumentare la tua produttività come mai prima d'ora.",
+		"getStarted": "Scegli il tuo provider"
+	},
+	"providerSignup": {
+		"heading": "Scegli il tuo provider",
+		"chooseProvider": "Zoo Code ha bisogno di un provider LLM per funzionare. Scegline uno per iniziare, puoi aggiungerne altri in seguito.",
+		"goBack": "Indietro",
+		"finish": "Fine"
+	},
+	"telemetry": {
+		"helpImprove": "Aiuta a migliorare Zoo Code",
+		"helpImproveMessage": "Zoo Code raccoglie dati di errore e utilizzo per aiutarci a correggere i bug e migliorare l'estensione. Questa telemetria non raccoglie codice, prompt o informazioni personali. Puoi disabilitare questa funzione in <settingsLink>impostazioni</settingsLink>."
+	},
+	"importSettings": "Importa impostazioni"
+}

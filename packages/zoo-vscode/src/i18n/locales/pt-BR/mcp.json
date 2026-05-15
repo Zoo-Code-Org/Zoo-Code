@@ -1,0 +1,51 @@
+{
+	"errors": {
+		"invalid_settings_format": "Formato JSON das configurações MCP inválido. Por favor, verifique se suas configurações seguem o formato JSON correto.",
+		"invalid_settings_syntax": "Formato JSON das configurações MCP inválido. Por favor, verifique se há erros de sintaxe no seu arquivo de configurações.",
+		"invalid_settings_validation": "Formato de configurações MCP inválido: {{errorMessages}}",
+		"create_json": "Falha ao criar ou abrir .roo/mcp.json: {{error}}",
+		"failed_update_project": "Falha ao atualizar os servidores MCP do projeto",
+		"invalidJsonArgument": "Zoo tentou usar {{toolName}} com um argumento JSON inválido. Tentando novamente...",
+		"refresh_after_disable": "Falha ao atualizar as conexões MCP após desativar",
+		"refresh_after_enable": "Falha ao atualizar as conexões MCP após ativar",
+		"disconnect_servers_partial": "Falha ao desconectar {{count}} servidor(es) MCP. Verifique a saída para detalhes.",
+		"toolNotFound": "A ferramenta '{{toolName}}' não existe no servidor '{{serverName}}'. Ferramentas disponíveis: {{availableTools}}",
+		"serverNotFound": "O servidor MCP '{{serverName}}' não está configurado. Servidores disponíveis: {{availableServers}}",
+		"toolDisabled": "A ferramenta '{{toolName}}' no servidor '{{serverName}}' está desabilitada. Ferramentas habilitadas disponíveis: {{availableTools}}"
+	},
+	"info": {
+		"server_restarting": "Reiniciando o servidor MCP {{serverName}}...",
+		"server_connected": "Servidor MCP {{serverName}} conectado",
+		"server_deleted": "Servidor MCP excluído: {{serverName}}",
+		"server_not_found": "Servidor \"{{serverName}}\" não encontrado na configuração",
+		"global_servers_active": "Servidores MCP globais ativos: {{mcpServers}}",
+		"project_servers_active": "Servidores MCP de projeto ativos: {{mcpServers}}",
+		"already_refreshing": "Os servidores MCP já estão atualizando.",
+		"refreshing_all": "Atualizando todos os servidores MCP...",
+		"all_refreshed": "Todos os servidores MCP foram atualizados.",
+		"project_config_deleted": "Arquivo de configuração MCP do projeto excluído. Todos os servidores MCP do projeto foram desconectados."
+	},
+	"oauth": {
+		"callback": {
+			"title": "Callback OAuth - Zoo Code",
+			"success": "Sucesso!",
+			"failed": "Falhou",
+			"auth_failed": "A autenticação falhou. Verifique os logs do servidor MCP.",
+			"auth_success": "Servidor MCP autenticado com sucesso. Você já pode fechar esta aba do navegador.",
+			"server_connection_complete": "A conexão com o servidor foi concluída.",
+			"tab_closing_in": "Esta aba tentará fechar em <span id=\"count\">{{count}}</span>s...",
+			"safe_to_close": "Se a aba não fechar, você pode fechá-la manualmente com segurança.",
+			"invalid_state": "Erro: Parâmetro de estado inválido"
+		},
+		"flow": {
+			"authenticating": "O servidor MCP \"{{name}}\" requer autenticação",
+			"waitingForBrowser": "Conclua o login no seu navegador...",
+			"clickAuthenticate": "O servidor MCP \"{{name}}\" está aguardando autenticação.",
+			"dismissedHint": "Notificação descartada — cancele e reconecte o servidor para autenticar-se.",
+			"authenticateButton": "Autenticar",
+			"cancelled": "A autenticação OAuth foi cancelada",
+			"timedOut": "A autenticação OAuth expirou",
+			"connected": "O servidor MCP \"{{name}}\" foi conectado com sucesso após a autenticação OAuth."
+		}
+	}
+}

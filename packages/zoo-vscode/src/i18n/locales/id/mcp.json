@@ -1,0 +1,51 @@
+{
+	"errors": {
+		"invalid_settings_format": "Format JSON pengaturan MCP tidak valid. Pastikan pengaturan kamu mengikuti format JSON yang benar.",
+		"invalid_settings_syntax": "Format JSON pengaturan MCP tidak valid. Periksa file pengaturan kamu untuk kesalahan sintaks.",
+		"invalid_settings_validation": "Format pengaturan MCP tidak valid: {{errorMessages}}",
+		"create_json": "Gagal membuat atau membuka .roo/mcp.json: {{error}}",
+		"failed_update_project": "Gagal memperbarui server MCP proyek",
+		"invalidJsonArgument": "Zoo mencoba menggunakan {{toolName}} dengan argumen JSON yang tidak valid. Mencoba lagi...",
+		"refresh_after_disable": "Gagal me-refresh koneksi MCP setelah menonaktifkan",
+		"refresh_after_enable": "Gagal me-refresh koneksi MCP setelah mengaktifkan",
+		"disconnect_servers_partial": "Gagal memutus koneksi {{count}} server MCP. Periksa output untuk detailnya.",
+		"toolNotFound": "Tool '{{toolName}}' tidak ada di server '{{serverName}}'. Tool yang tersedia: {{availableTools}}",
+		"serverNotFound": "Server MCP '{{serverName}}' tidak dikonfigurasi. Server yang tersedia: {{availableServers}}",
+		"toolDisabled": "Tool '{{toolName}}' di server '{{serverName}}' dinonaktifkan. Tool aktif yang tersedia: {{availableTools}}"
+	},
+	"info": {
+		"server_restarting": "Merestart server MCP {{serverName}}...",
+		"server_connected": "Server MCP {{serverName}} terhubung",
+		"server_deleted": "Server MCP dihapus: {{serverName}}",
+		"server_not_found": "Server \"{{serverName}}\" tidak ditemukan dalam konfigurasi",
+		"global_servers_active": "Server MCP Global Aktif: {{mcpServers}}",
+		"project_servers_active": "Server MCP Proyek Aktif: {{mcpServers}}",
+		"already_refreshing": "Server MCP sudah sedang di-refresh.",
+		"refreshing_all": "Me-refresh semua server MCP...",
+		"all_refreshed": "Semua server MCP telah di-refresh.",
+		"project_config_deleted": "File konfigurasi MCP proyek dihapus. Semua server MCP proyek telah diputus koneksinya."
+	},
+	"oauth": {
+		"callback": {
+			"title": "Callback OAuth - Zoo Code",
+			"success": "Berhasil!",
+			"failed": "Gagal",
+			"auth_failed": "Autentikasi gagal. Silakan periksa log server MCP.",
+			"auth_success": "Server MCP berhasil diautentikasi. Anda sekarang dapat menutup tab browser ini.",
+			"server_connection_complete": "Koneksi server selesai.",
+			"tab_closing_in": "Tab ini akan mencoba menutup dalam <span id=\"count\">{{count}}</span> detik...",
+			"safe_to_close": "Jika tab tidak tertutup, Anda dapat menutupnya secara manual dengan aman.",
+			"invalid_state": "Kesalahan: Parameter state tidak valid"
+		},
+		"flow": {
+			"authenticating": "Server MCP \"{{name}}\" memerlukan autentikasi",
+			"waitingForBrowser": "Selesaikan masuk di browser Anda...",
+			"clickAuthenticate": "Server MCP \"{{name}}\" menunggu autentikasi.",
+			"dismissedHint": "Notifikasi ditutup — batalkan dan hubungkan kembali server untuk autentikasi ulang.",
+			"authenticateButton": "Autentikasi",
+			"cancelled": "Autentikasi OAuth dibatalkan",
+			"timedOut": "Autentikasi OAuth habis waktu",
+			"connected": "Server MCP \"{{name}}\" berhasil terhubung setelah autentikasi OAuth."
+		}
+	}
+}
