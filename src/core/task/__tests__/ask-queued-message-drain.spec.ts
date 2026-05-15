@@ -69,4 +69,40 @@ describe("Task.ask queued message drain", () => {
 		expect((task as any).messageQueueService.isEmpty()).toBe(false)
 		expect((task as any).messageQueueService.messages[0]?.text).toBe("1+1=?")
 	})
+
+	it("does not consume queued messages for resumable asks when draining is deferred", async () => {
+		const task = Object.create(Task.prototype) as Task
+		;(task as any).abort = false
+		;(task as any).clineMessages = []
+		;(task as any).askResponse = undefined
+		;(task as any).askResponseText = undefined
+		;(task as any).askResponseImages = undefined
+		;(task as any).lastMessageTs = undefined
+
+		const { MessageQueueService } = await import("../../message-queue/MessageQueueService")
+		;(task as any).messageQueueService = new MessageQueueService()
+		;(task as any).addToClineMessages = vi.fn(async () => {})
+		;(task as any).saveClineMessages = vi.fn(async () => {})
+		;(task as any).updateClineMessage = vi.fn(async () => {})
+		;(task as any).cancelAutoApprovalTimeout = vi.fn(() => {})
+		;(task as any).checkpointSave = vi.fn(async () => {})
+		;(task as any).emit = vi.fn()
+		;(task as any).providerRef = { deref: () => undefined }
+
+		task.setDeferQueuedMessageDrainUntilResume(true)
+
+		const askPromise = task.ask("resume_task", "resume?", false)
+		;(task as any).messageQueueService.addMessage("follow up after cancel")
+
+		setTimeout(() => {
+			task.approveAsk()
+		}, 0)
+
+		const result = await askPromise
+
+		expect(result.response).toBe("yesButtonClicked")
+		expect(result.text).toBeUndefined()
+		expect((task as any).messageQueueService.isEmpty()).toBe(false)
+		expect((task as any).messageQueueService.messages[0]?.text).toBe("follow up after cancel")
+	})
 })

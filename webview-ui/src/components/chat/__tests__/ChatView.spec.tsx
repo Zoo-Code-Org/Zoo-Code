@@ -104,19 +104,30 @@ vi.mock("../QueuedMessages", () => ({
 		queue = [],
 		onRemove,
 	}: {
-		queue?: Array<{ id: string; text: string; images?: string[] }>
-		onRemove?: (index: number) => void
-		onUpdate?: (index: number, newText: string) => void
+		queue?: Array<{
+			id: string
+			text: string
+			images?: string[]
+			timestamp?: number
+			createdAt?: number
+			updatedAt?: number
+			deliveryMode?: "queue" | "steer"
+		}>
+		onRemove?: (messageId: string) => void
+		onUpdate?: (
+			message: { id: string; text: string; images?: string[] },
+			updates: { text?: string; deliveryMode?: "queue" | "steer" },
+		) => void
 	}) {
 		if (!queue || queue.length === 0) {
 			return null
 		}
 		return (
 			<div data-testid="queued-messages">
-				{queue.map((msg, index) => (
+				{queue.map((msg) => (
 					<div key={msg.id}>
 						<span>{msg.text}</span>
-						<button aria-label="Remove message" onClick={() => onRemove?.(index)}>
+						<button aria-label="Remove message" onClick={() => onRemove?.(msg.id)}>
 							Remove
 						</button>
 					</div>
@@ -841,11 +852,14 @@ describe("ChatView - Message Queueing Tests", () => {
 
 		// Verify that the message was queued, not sent as askResponse
 		await waitFor(() => {
-			expect(vscode.postMessage).toHaveBeenCalledWith({
-				type: "queueMessage",
-				text: "follow-up question during spinner",
-				images: [],
-			})
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "queueMessage",
+					text: "follow-up question during spinner",
+					images: [],
+					deliveryMode: "queue",
+				}),
+			)
 		})
 
 		// Verify it was NOT sent as a direct askResponse (which would get lost)
@@ -971,11 +985,14 @@ describe("ChatView - Message Queueing Tests", () => {
 
 		// Verify that the new message was queued (not sent directly) to preserve order
 		await waitFor(() => {
-			expect(vscode.postMessage).toHaveBeenCalledWith({
-				type: "queueMessage",
-				text: "message during queue drain",
-				images: [],
-			})
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "queueMessage",
+					text: "message during queue drain",
+					images: [],
+					deliveryMode: "queue",
+				}),
+			)
 		})
 
 		// Verify it was NOT sent as askResponse (which would break ordering)
@@ -1034,11 +1051,14 @@ describe("ChatView - Message Queueing Tests", () => {
 
 		// Verify that the message was queued (not lost via terminalOperation)
 		await waitFor(() => {
-			expect(vscode.postMessage).toHaveBeenCalledWith({
-				type: "queueMessage",
-				text: "message during command execution",
-				images: [],
-			})
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "queueMessage",
+					text: "message during command execution",
+					images: [],
+					deliveryMode: "queue",
+				}),
+			)
 		})
 
 		// Verify it was NOT sent as terminalOperation (which would lose the message)

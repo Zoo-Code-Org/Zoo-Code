@@ -1270,12 +1270,16 @@ export class ClineProvider
 			const wasVisible = this.visibleTaskId === oldTask?.taskId
 
 			// Abort the old task to stop running processes and mark as abandoned
-			try {
-				await oldTask.abortTask(true)
-			} catch (e) {
-				this.log(
-					`[createTaskWithHistoryItem] abortTask() failed for old task ${oldTask.taskId}.${oldTask.instanceId}: ${e.message}`,
-				)
+			if (oldTask && !oldTask.abandoned) {
+				try {
+					await oldTask.abortTask(true)
+				} catch (error) {
+					this.log(
+						`[createTaskWithHistoryItem] abortTask() failed for old task ${oldTask.taskId}.${oldTask.instanceId}: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
 			}
 
 			// Remove event listeners from the old task
@@ -3188,6 +3192,10 @@ export class ClineProvider
 
 		console.log(`[cancelTask] cancelling task ${task.taskId}.${task.instanceId}`)
 		const wasVisible = this.isTaskVisible(task.taskId)
+		const preservedQueuedMessages = task.messageQueueService.messages.map((message) => ({
+			...message,
+			images: message.images ? [...message.images] : undefined,
+		}))
 
 		let historyItem: HistoryItem | undefined
 		try {
@@ -3265,10 +3273,15 @@ export class ClineProvider
 		}
 
 		// Clears task again, so we need to abortTask manually above.
-		await this.createTaskWithHistoryItem(
+		const replacementTask = await this.createTaskWithHistoryItem(
 			{ ...historyItem, rootTask, parentTask },
 			{ replaceExistingTask: true, focus: wasVisible },
 		)
+
+		if (replacementTask && preservedQueuedMessages.length > 0) {
+			replacementTask.messageQueueService.restoreMessages(preservedQueuedMessages)
+			replacementTask.setDeferQueuedMessageDrainUntilResume(true)
+		}
 	}
 
 	// Clear the current task without treating it as a subtask.

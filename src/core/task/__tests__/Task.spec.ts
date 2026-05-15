@@ -1755,7 +1755,7 @@ describe("Cline", () => {
 	})
 })
 
-describe("Queued message processing after condense", () => {
+describe("Deferred message dispatch boundaries", () => {
 	function createProvider(): any {
 		const storageUri = { fsPath: path.join(os.tmpdir(), "test-storage") }
 		const ctx = {
@@ -1802,7 +1802,30 @@ describe("Queued message processing after condense", () => {
 		apiKey: "test-api-key",
 	} as any
 
-	it("processes queued message after condense completes", async () => {
+	it("keeps queued messages pending when processQueuedMessages is called", async () => {
+		const provider = createProvider()
+		const task = new Task({
+			provider,
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		task.messageQueueService.addMessage("queued text", ["img1.png"], "queue")
+
+		task.processQueuedMessages()
+
+		expect(submitSpy).not.toHaveBeenCalled()
+		expect(task.messageQueueService.getMessagesByMode("queue")).toEqual([
+			expect.objectContaining({
+				text: "queued text",
+				images: ["img1.png"],
+				deliveryMode: "queue",
+			}),
+		])
+	})
+
+	it("consumes only steer messages at API boundaries and preserves queued follow-ups", async () => {
 		const provider = createProvider()
 		const task = new Task({
 			provider,
@@ -1811,69 +1834,80 @@ describe("Queued message processing after condense", () => {
 			startTask: false,
 		})
 
-		// Make condense fast + deterministic
-		vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("system")
-		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined as any)
 
-		// Queue a message during condensing
-		task.messageQueueService.addMessage("queued text", ["img1.png"])
+		task.messageQueueService.addMessage("queued text", undefined, "queue")
+		task.messageQueueService.addMessage("steer text", undefined, "steer")
 
-		// Use fake timers to capture setTimeout(0) in processQueuedMessages
-		vi.useFakeTimers()
-		await task.condenseContext()
+		const consumed = await task.consumePendingSteerAtApiBoundary()
 
-		// Flush the microtask that submits the queued message
-		vi.runAllTimers()
-		vi.useRealTimers()
-
-		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
-		expect(task.messageQueueService.isEmpty()).toBe(true)
+		expect(consumed).toBe(true)
+		expect(saySpy).toHaveBeenCalledWith("user_feedback", "steer text", undefined)
+		expect(task.messageQueueService.getMessagesByMode("steer")).toEqual([])
+		expect(task.messageQueueService.getMessagesByMode("queue")).toEqual([
+			expect.objectContaining({
+				text: "queued text",
+				deliveryMode: "queue",
+			}),
+		])
+		expect((task as any).userMessageContent).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "text",
+					text: "<user_message>\nsteer text\n</user_message>",
+				}),
+			]),
+		)
 	})
 
-	it("does not cross-drain queues between separate tasks", async () => {
-		const providerA = createProvider()
-		const providerB = createProvider()
-
-		const taskA = new Task({
-			provider: providerA,
+	it("interrupts after a tool boundary for steer messages and injects synthetic tool results for skipped tools", async () => {
+		const provider = createProvider()
+		const task = new Task({
+			provider,
 			apiConfiguration: apiConfig,
-			task: "task A",
-			startTask: false,
-		})
-		const taskB = new Task({
-			provider: providerB,
-			apiConfiguration: apiConfig,
-			task: "task B",
+			task: "initial task",
 			startTask: false,
 		})
 
-		vi.spyOn(taskA as any, "getSystemPrompt").mockResolvedValue("system")
-		vi.spyOn(taskB as any, "getSystemPrompt").mockResolvedValue("system")
+		const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined as any)
 
-		const spyA = vi.spyOn(taskA, "submitUserMessage").mockResolvedValue(undefined)
-		const spyB = vi.spyOn(taskB, "submitUserMessage").mockResolvedValue(undefined)
+		;(task as any).assistantMessageContent = [
+			{ type: "text", content: "first plan" },
+			{ type: "tool_use", id: "tool-1", partial: false, name: "read_file" },
+			{ type: "tool_use", id: "tool-2", partial: false, name: "edit_file" },
+		]
 
-		taskA.messageQueueService.addMessage("A message")
-		taskB.messageQueueService.addMessage("B message")
+		task.messageQueueService.addMessage("queued follow-up", undefined, "queue")
+		task.messageQueueService.addMessage("steer follow-up", undefined, "steer")
 
-		// Condense in task A should only drain A's queue
-		vi.useFakeTimers()
-		await taskA.condenseContext()
-		vi.runAllTimers()
-		vi.useRealTimers()
+		const interrupted = await task.maybeInterruptForPendingSteerAtToolBoundary(1)
 
-		expect(spyA).toHaveBeenCalledWith("A message", undefined)
-		expect(spyB).not.toHaveBeenCalled()
-		expect(taskB.messageQueueService.isEmpty()).toBe(false)
-
-		// Now condense in task B should drain B's queue
-		vi.useFakeTimers()
-		await taskB.condenseContext()
-		vi.runAllTimers()
-		vi.useRealTimers()
-
-		expect(spyB).toHaveBeenCalledWith("B message", undefined)
-		expect(taskB.messageQueueService.isEmpty()).toBe(true)
+		expect(interrupted).toBe(true)
+		expect(saySpy).toHaveBeenCalledWith("user_feedback", "steer follow-up", undefined)
+		expect((task as any).interruptedAssistantText).toBe("first plan")
+		expect((task as any).currentStreamingContentIndex).toBe((task as any).assistantMessageContent.length)
+		expect((task as any).userMessageContentReady).toBe(true)
+		expect((task as any).didSteerCurrentTurn).toBe(true)
+		expect((task as any).userMessageContent).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "tool_result",
+					tool_use_id: "tool-2",
+					content: "Task was interrupted before this tool call could be completed.",
+				}),
+				expect.objectContaining({
+					type: "text",
+					text: "<user_message>\nsteer follow-up\n</user_message>",
+				}),
+			]),
+		)
+		expect(task.messageQueueService.getMessagesByMode("steer")).toEqual([])
+		expect(task.messageQueueService.getMessagesByMode("queue")).toEqual([
+			expect.objectContaining({
+				text: "queued follow-up",
+				deliveryMode: "queue",
+			}),
+		])
 	})
 })
 

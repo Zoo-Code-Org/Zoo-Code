@@ -294,11 +294,18 @@ export type TokenUsage = z.infer<typeof tokenUsageSchema>
  * QueuedMessage
  */
 
+export const queuedMessageDeliveryModeSchema = z.enum(["queue", "steer"])
+
+export type QueuedMessageDeliveryMode = z.infer<typeof queuedMessageDeliveryModeSchema>
+
 export const queuedMessageSchema = z.object({
 	timestamp: z.number(),
+	createdAt: z.number(),
+	updatedAt: z.number(),
 	id: z.string(),
 	text: z.string(),
 	images: z.array(z.string()).optional(),
+	deliveryMode: queuedMessageDeliveryModeSchema.default("queue"),
 })
 
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>

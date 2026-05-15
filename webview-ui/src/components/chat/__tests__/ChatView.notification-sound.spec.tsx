@@ -83,19 +83,22 @@ vi.mock("../QueuedMessages", () => ({
 		queue = [],
 		onRemove,
 	}: {
-		queue?: Array<{ id: string; text: string; images?: string[] }>
-		onRemove?: (index: number) => void
-		onUpdate?: (index: number, newText: string) => void
+		queue?: Array<{ id: string; text: string; images?: string[]; deliveryMode?: "queue" | "steer" }>
+		onRemove?: (messageId: string) => void
+		onUpdate?: (
+			message: { id: string; text: string; images?: string[] },
+			updates: { text?: string; deliveryMode?: "queue" | "steer" },
+		) => void
 	}) {
 		if (!queue || queue.length === 0) {
 			return null
 		}
 		return (
 			<div data-testid="queued-messages">
-				{queue.map((msg, index) => (
+				{queue.map((msg) => (
 					<div key={msg.id}>
 						<span>{msg.text}</span>
-						<button aria-label="Remove message" onClick={() => onRemove?.(index)}>
+						<button aria-label="Remove message" onClick={() => onRemove?.(msg.id)}>
 							Remove
 						</button>
 					</div>

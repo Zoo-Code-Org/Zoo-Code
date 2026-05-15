@@ -193,6 +193,8 @@ describe("ClineProvider flicker-free cancel", () => {
 			emit: vi.fn(),
 			on: vi.fn(),
 			off: vi.fn(),
+			messageQueueService: { restoreMessages: vi.fn() },
+			setDeferQueuedMessageDrainUntilResume: vi.fn(),
 		}
 
 		// Mock Task constructor
@@ -340,5 +342,25 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect((provider as any).clineStack[1]).toBe(mockTask2)
 		expect(mockTask1.abortTask).toHaveBeenCalledWith(true)
 		expect(cleanup).toHaveBeenCalled()
+	})
+
+	it("restores queued messages on the replacement task after cancel", async () => {
+		const queuedMessage = {
+			id: "queued-1",
+			text: "follow-up while streaming",
+			images: ["image-1.png"],
+			timestamp: 123,
+			createdAt: 123,
+			updatedAt: 123,
+			deliveryMode: "steer" as const,
+		}
+
+		mockTask1.messageQueueService = { messages: [queuedMessage] }
+		;(provider as any).clineStack = [mockTask1]
+
+		await provider.cancelTask("task-1")
+
+		expect(mockTask2.messageQueueService.restoreMessages).toHaveBeenCalledWith([queuedMessage])
+		expect(mockTask2.setDeferQueuedMessageDrainUntilResume).toHaveBeenCalledWith(true)
 	})
 })
