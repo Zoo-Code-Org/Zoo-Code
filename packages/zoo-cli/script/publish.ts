@@ -1,0 +1,207 @@
+#!/usr/bin/env bun
+import { $ } from "bun"
+import pkg from "../package.json"
+import { Script } from "@opencode-ai/script"
+import { fileURLToPath } from "url"
+
+const dir = fileURLToPath(new URL("..", import.meta.url))
+process.chdir(dir)
+
+async function published(name: string, version: string) {
+	return (await $`npm view ${name}@${version} version`.nothrow()).exitCode === 0
+}
+
+async function publish(dir: string, name: string, version: string) {
+	// GitHub artifact downloads can drop the executable bit, and Docker uses the
+	// unpacked dist binaries directly rather than the published tarball.
+	if (process.platform !== "win32") await $`chmod -R 755 .`.cwd(dir)
+	if (await published(name, version)) {
+		console.log(`already published ${name}@${version}`)
+		return
+	}
+	await $`bun pm pack`.cwd(dir)
+	await $`npm publish *.tgz --access public --tag ${Script.channel} --provenance`.cwd(dir) // kilocode_change
+}
+
+const binaries: Record<string, string> = {}
+// kilocode_change start
+for (const filepath of new Bun.Glob("*/*/package.json").scanSync({ cwd: "./dist" })) {
+	// kilocode_change end
+	const pkg = await Bun.file(`./dist/${filepath}`).json()
+	binaries[pkg.name] = pkg.version
+}
+console.log("binaries", binaries)
+const version = Object.values(binaries)[0]
+
+await $`mkdir -p ./dist/${pkg.name}`
+await $`cp -r ./bin ./dist/${pkg.name}/bin`
+await $`cp ./script/postinstall.mjs ./dist/${pkg.name}/postinstall.mjs`
+await Bun.file(`./dist/${pkg.name}/LICENSE`).write(await Bun.file("../../LICENSE").text())
+await Bun.file(`./dist/${pkg.name}/README.md`).write(await Bun.file("./README.md").text()) // kilocode_change
+
+await Bun.file(`./dist/${pkg.name}/package.json`).write(
+	JSON.stringify(
+		{
+			name: pkg.name, // kilocode_change
+			bin: {
+				// kilocode_change start
+				zoo: `./bin/zoo`,
+				"zoo-code": `./bin/zoo`,
+				// kilocode_change end
+			},
+			scripts: {
+				postinstall: "bun ./postinstall.mjs || node ./postinstall.mjs",
+			},
+			version: version,
+			license: pkg.license,
+			optionalDependencies: binaries,
+			// kilocode_change start
+			repository: {
+				type: "git",
+				url: "https://github.com/Zoo-Code-Org/zoocode",
+			},
+			// kilocode_change end
+		},
+		null,
+		2,
+	),
+)
+
+const tasks = Object.entries(binaries).map(async ([name]) => {
+	await publish(`./dist/${name}`, name, binaries[name])
+})
+await Promise.all(tasks)
+await publish(`./dist/${pkg.name}`, pkg.name, version) // kilocode_change
+
+const image = "ghcr.io/zoo-code-org/zoo-code" // kilocode_change
+const platforms = "linux/amd64,linux/arm64"
+const tags = [`${image}:${version}`, `${image}:${Script.channel}`]
+const tagFlags = tags.flatMap((t) => ["-t", t])
+
+// registries
+if (!Script.preview) {
+	await $`docker buildx build --platform ${platforms} ${tagFlags} --push .`
+	// Calculate SHA values
+	const arm64Sha = await $`sha256sum ./dist/zoo-linux-arm64.tar.gz | cut -d' ' -f1`.text().then((x) => x.trim())
+	const x64Sha = await $`sha256sum ./dist/zoo-linux-x64.tar.gz | cut -d' ' -f1`.text().then((x) => x.trim())
+	const macX64Sha = await $`sha256sum ./dist/zoo-darwin-x64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
+	const macArm64Sha = await $`sha256sum ./dist/zoo-darwin-arm64.zip | cut -d' ' -f1`.text().then((x) => x.trim())
+
+	const [pkgver, _subver = ""] = Script.version.split(/(-.*)/, 2)
+
+	// arch
+	const binaryPkgbuild = [
+		"# Maintainer: zoo-code", // kilocode_change
+		"",
+		"pkgname='zoo-code-bin'",
+		`pkgver=${pkgver}`,
+		`_subver=${_subver}`,
+		"options=('!debug' '!strip')",
+		"pkgrel=1",
+		"pkgdesc='The AI coding agent built for the terminal.'",
+		"url='https://github.com/Zoo-Code-Org/zoocode'",
+		"arch=('aarch64' 'x86_64')",
+		"license=('MIT')",
+		"provides=('zoo')",
+		"conflicts=('zoo')",
+		"depends=('ripgrep')",
+		"",
+		`source_aarch64=("\${pkgname}_\${pkgver}_aarch64.tar.gz::https://github.com/Zoo-Code-Org/zoocode/releases/download/v\${pkgver}\${_subver}/zoo-linux-arm64.tar.gz")`,
+		`sha256sums_aarch64=('${arm64Sha}')`,
+
+		`source_x86_64=("\${pkgname}_\${pkgver}_x86_64.tar.gz::https://github.com/Zoo-Code-Org/zoocode/releases/download/v\${pkgver}\${_subver}/zoo-linux-x64.tar.gz")`,
+		`sha256sums_x86_64=('${x64Sha}')`,
+		"",
+		"package() {",
+		'  install -Dm755 ./zoo "${pkgdir}/usr/bin/zoo"',
+		"}",
+		"",
+	].join("\n")
+
+	for (const [pkg, pkgbuild] of [["zoo-code-bin", binaryPkgbuild]]) {
+		for (let i = 0; i < 30; i++) {
+			try {
+				await $`rm -rf ./dist/aur-${pkg}`
+				await $`git clone ssh://aur@aur.archlinux.org/${pkg}.git ./dist/aur-${pkg}`
+				await $`cd ./dist/aur-${pkg} && git checkout master`
+				await Bun.file(`./dist/aur-${pkg}/PKGBUILD`).write(pkgbuild)
+				await $`cd ./dist/aur-${pkg} && makepkg --printsrcinfo > .SRCINFO`
+				await $`cd ./dist/aur-${pkg} && git add PKGBUILD .SRCINFO`
+				if ((await $`cd ./dist/aur-${pkg} && git diff --cached --quiet`.nothrow()).exitCode === 0) break
+				await $`cd ./dist/aur-${pkg} && git commit -m "Update to v${Script.version}"`
+				await $`cd ./dist/aur-${pkg} && git push`
+				break
+			} catch {
+				continue
+			}
+		}
+	}
+
+	// Homebrew formula
+	const homebrewFormula = [
+		"# typed: false",
+		"# frozen_string_literal: true",
+		"",
+		"# This file was generated by GoReleaser. DO NOT EDIT.",
+		"class Zoo < Formula", // kilocode_change
+		`  desc "The AI coding agent built for the terminal."`,
+		`  homepage "https://zoo-code.ai"`, // kilocode_change
+		`  version "${Script.version.split("-")[0]}"`,
+		"",
+		`  depends_on "ripgrep"`,
+		"",
+		"  on_macos do",
+		"    if Hardware::CPU.intel?",
+		`      url "https://github.com/Zoo-Code-Org/zoocode/releases/download/v${Script.version}/zoo-darwin-x64.zip"`,
+		`      sha256 "${macX64Sha}"`,
+		"",
+		"      def install",
+		'        bin.install "zoo"',
+		"      end",
+		"    end",
+		"    if Hardware::CPU.arm?",
+		`      url "https://github.com/Zoo-Code-Org/zoocode/releases/download/v${Script.version}/zoo-darwin-arm64.zip"`,
+		`      sha256 "${macArm64Sha}"`,
+		"",
+		"      def install",
+		'        bin.install "zoo"',
+		"      end",
+		"    end",
+		"  end",
+		"",
+		"  on_linux do",
+		"    if Hardware::CPU.intel? and Hardware::CPU.is_64_bit?",
+		`      url "https://github.com/Zoo-Code-Org/zoocode/releases/download/v${Script.version}/zoo-linux-x64.tar.gz"`,
+		`      sha256 "${x64Sha}"`,
+		"      def install",
+		'        bin.install "zoo"',
+		"      end",
+		"    end",
+		"    if Hardware::CPU.arm? and Hardware::CPU.is_64_bit?",
+		`      url "https://github.com/Zoo-Code-Org/zoocode/releases/download/v${Script.version}/zoo-linux-arm64.tar.gz"`,
+		`      sha256 "${arm64Sha}"`,
+		"      def install",
+		'        bin.install "zoo"',
+		"      end",
+		"    end",
+		"  end",
+		"end",
+		"",
+		"",
+	].join("\n")
+
+	const token = process.env.GITHUB_TOKEN
+	if (!token) {
+		console.error("GITHUB_TOKEN is required to update homebrew tap")
+		process.exit(1)
+	}
+	const tap = `https://x-access-token:${token}@github.com/Zoo-Code-Org/homebrew-tap.git` // kilocode_change
+	await $`rm -rf ./dist/homebrew-tap`
+	await $`git clone ${tap} ./dist/homebrew-tap`
+	await Bun.file("./dist/homebrew-tap/zoo.rb").write(homebrewFormula) // kilocode_change
+	await $`cd ./dist/homebrew-tap && git add zoo.rb` // kilocode_change
+	if ((await $`cd ./dist/homebrew-tap && git diff --cached --quiet`.nothrow()).exitCode !== 0) {
+		await $`cd ./dist/homebrew-tap && git commit -m "Update to v${Script.version}"`
+		await $`cd ./dist/homebrew-tap && git push`
+	}
+}

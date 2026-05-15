@@ -9,6 +9,10 @@ This project is derived from and/or integrates work from the upstream projects l
 | Kilo Code | https://github.com/Kilo-Org/kilocode     | MIT License        | Reference/source for the planned OpenCode-derived CLI core and SDK patterns.      |
 | OpenCode  | https://github.com/anomalyco/opencode    | MIT License        | Upstream CLI core reference and optional cleaner base for future CLI import work. |
 
+## Imported Source Inventory
+
+- `packages/zoo-cli` imports Kilo Code's `packages/opencode` from `Kilo-Org/kilocode` commit `a4218d893d4b7ecf6921531c553d84905b8510c0` and keeps a package-local MIT `LICENSE` copied from that source revision.
+
 ## License Notes
 
 - The repository root `LICENSE` contains the Apache License 2.0 text for Zoo Code.

@@ -14,6 +14,8 @@ mock/
 
 # Builds
 bin/
+!packages/zoo-cli/bin/
+!packages/zoo-cli/bin/zoo
 *.vsix
 
 # Local prompts and rules
