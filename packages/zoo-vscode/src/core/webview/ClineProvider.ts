@@ -2987,7 +2987,8 @@ export class ClineProvider
 
 		try {
 			let assistantText = ""
-			for await (const chunk of this.portableSessionAdapter.sendMessage(task.taskId, message)) {
+			const { mode } = await this.getState()
+			for await (const chunk of this.portableSessionAdapter.sendMessage(task.taskId, message, { mode })) {
 				const chunkText = this.getPortableChunkText(chunk)
 				if (!chunkText) {
 					continue

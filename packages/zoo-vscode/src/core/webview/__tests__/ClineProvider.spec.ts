@@ -896,7 +896,9 @@ describe("ClineProvider", () => {
 
 		const task = await portableProvider.createTask("Stream task")
 
-		expect(portableSessionAdapter.sendMessage).toHaveBeenCalledWith("portable-stream-session", "Stream task")
+		expect(portableSessionAdapter.sendMessage).toHaveBeenCalledWith("portable-stream-session", "Stream task", {
+			mode: "code",
+		})
 		expect(task.start).not.toHaveBeenCalled()
 		expect(task.clineMessages).toEqual([
 			expect.objectContaining({ type: "say", say: "text", text: "Stream task" }),
@@ -932,7 +934,9 @@ describe("ClineProvider", () => {
 
 		await portableProvider.handleWebviewAskResponse("messageResponse", "Follow up")
 
-		expect(portableSessionAdapter.sendMessage).toHaveBeenCalledWith("portable-followup-session", "Follow up")
+		expect(portableSessionAdapter.sendMessage).toHaveBeenCalledWith("portable-followup-session", "Follow up", {
+			mode: "code",
+		})
 		expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
 	})
 

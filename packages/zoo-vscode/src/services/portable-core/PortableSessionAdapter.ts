@@ -1,5 +1,6 @@
 import type {
 	MessageChunk,
+	Mode,
 	PermissionReply,
 	Session,
 	SessionCreateOptions,
@@ -59,6 +60,11 @@ export class PortableSessionAdapter {
 	/** Reply to a pending portable-core permission request. */
 	replyPermission(requestID: string, reply: PermissionReply): Promise<void> {
 		return this.client.replyPermission(requestID, reply)
+	}
+
+	/** List portable-core modes/agents available for message routing. */
+	listModes(): Promise<Mode[]> {
+		return this.client.listModes()
 	}
 }
 

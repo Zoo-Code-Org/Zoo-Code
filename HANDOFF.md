@@ -147,6 +147,10 @@
     - `@zoo-code/sdk` now exposes `subscribeEvents()` for the CLI `/event` stream and `replyPermission()` for `POST /permission/:requestID/reply`, with typed permission request/reply surfaces.
     - `PortableSessionAdapter` forwards event subscription and permission replies for the future webview approval bridge.
     - Remaining Task 8 work: map `permission.asked` events into existing `ClineMessage` approval asks, store pending request IDs, and route `yesButtonClicked`/`noButtonClicked` responses back through `replyPermission()`.
+- Phase 3 Task 10 started, not complete:
+    - `@zoo-code/sdk` now exposes `listModes()` backed by the CLI `/agent` route, and `PortableSessionAdapter` forwards mode listing.
+    - `ClineProvider` now includes the current selected VS Code mode in portable-core `sendMessage()` options for text-only sends.
+    - Remaining Task 10 work: replace webview mode list/state with portable-core mode data when the flag is enabled and define persistent mode/session selection semantics.
 
 ## How to update this file
 

@@ -1,6 +1,7 @@
 import { createHttpTransport, createIpcTransport, type ZooTransport } from "./transport/index.js"
 import type {
 	MessageChunk,
+	Mode,
 	PermissionReply,
 	SendMessageOptions,
 	Session,
@@ -120,6 +121,21 @@ export class ZooClient {
 			method: "POST",
 			path: `/permission/${encodeURIComponent(requestID)}/reply`,
 			body: reply,
+		})
+	}
+
+	/** List portable-core agents/modes available for message routing. */
+	async listModes(): Promise<Mode[]> {
+		const result = unwrap(await this.#transport.request<unknown[] | { data?: unknown[] }>({ path: "/agent" })) ?? []
+		return result.map((agent) => {
+			const record = agent && typeof agent === "object" ? (agent as Record<string, unknown>) : {}
+			const id = typeof record.id === "string" ? record.id : String(record.name ?? "")
+			return {
+				id,
+				name: typeof record.name === "string" ? record.name : id,
+				description: typeof record.description === "string" ? record.description : undefined,
+				primary: typeof record.primary === "boolean" ? record.primary : undefined,
+			}
 		})
 	}
 

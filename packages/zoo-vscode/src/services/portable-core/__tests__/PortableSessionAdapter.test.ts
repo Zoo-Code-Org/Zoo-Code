@@ -13,6 +13,7 @@ describe("PortableSessionAdapter", () => {
 			yield { type: "permission.asked", properties: { id: "perm_1", sessionID: "session-1", permission: "bash" } }
 		}),
 		replyPermission: vitest.fn().mockResolvedValue(undefined),
+		listModes: vitest.fn().mockResolvedValue([{ id: "code", name: "Code" }]),
 	})
 
 	it("maps create/list/get session calls to the Zoo SDK client", async () => {
@@ -56,6 +57,14 @@ describe("PortableSessionAdapter", () => {
 		])
 		expect(client.subscribeEvents).toHaveBeenCalledTimes(1)
 		expect(client.replyPermission).toHaveBeenCalledWith("perm_1", { reply: "once" })
+	})
+
+	it("maps mode listing to the Zoo SDK client", async () => {
+		const client = createClient()
+		const adapter = new PortableSessionAdapter(client as any)
+
+		await expect(adapter.listModes()).resolves.toEqual([{ id: "code", name: "Code" }])
+		expect(client.listModes).toHaveBeenCalledTimes(1)
 	})
 
 	it("rejects malformed session responses", async () => {

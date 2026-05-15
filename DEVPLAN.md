@@ -333,6 +333,8 @@
 - **Depends on:** Phase 3, Task 4; Phase 1, Task 6; Phase 4, Task 2.
 - **Can parallelize with:** Phase 3, Task 9.
 
+- **Progress:** SDK and VS Code adapter can list portable-core agents/modes from `/agent`, and portable text sends now include the current selected VS Code mode in `sendMessage()` options. Persistent mode selection and webview mode list replacement remain pending.
+
 11. Add settings and mode migration wizard
 
 - **What:** Add command `Migrate Zoo Code settings` that reads existing VS Code extension settings and legacy `.roomodes` data, then writes additive `zoo.jsonc` and `.zoo/modes` output without deleting old config.

@@ -10,6 +10,7 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/session")
 				return input.method === "POST" ? { data: { id: "ses_1" } } : { data: [{ id: "ses_1" }] }
 			if (input.path === "/session/ses_1") return { data: { id: "ses_1" } }
+			if (input.path === "/agent") return { data: [{ id: "code", name: "Code", description: "Code mode" }] }
 			return { data: undefined }
 		},
 		async *stream(input) {
@@ -86,5 +87,13 @@ describe("ZooClient", () => {
 			path: "/permission/perm_1/reply",
 			body: { reply: "reject", message: "No thanks" },
 		})
+	})
+
+	test("lists portable core modes from agents", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.listModes()).resolves.toEqual([{ id: "code", name: "Code", description: "Code mode" }])
+		expect(mock.requests.at(-1)).toEqual({ path: "/agent" })
 	})
 })
