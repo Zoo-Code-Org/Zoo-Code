@@ -19,6 +19,21 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/session/ses_1" && input.method === "PATCH")
 				return { data: { id: "ses_1", ...input.body } }
 			if (input.path === "/session/ses_1" && input.method === "DELETE") return { data: true }
+			if (input.path === "/session/viewed") return { data: true }
+			if (input.path === "/session/ses_1/fork") return { data: { id: "ses_fork", parentID: "ses_1" } }
+			if (input.path === "/session/ses_1/diff?messageID=msg_1") {
+				return {
+					data: [
+						{
+							file: "src/app.ts",
+							before: "old\n",
+							after: "new\n",
+							additions: 1,
+							deletions: 1,
+						},
+					],
+				}
+			}
 			if (input.path === "/session/ses_1") return { data: { id: "ses_1" } }
 			if (input.path === "/session/ses_1/message?limit=2&before=cursor+1") {
 				return {
@@ -195,6 +210,26 @@ describe("ZooClient", () => {
 			{ path: "/session/ses_1/todo" },
 			{ method: "PATCH", path: "/session/ses_1", body: { title: "Renamed", time: { archived: 1 } } },
 			{ method: "DELETE", path: "/session/ses_1" },
+		])
+	})
+
+	test("wraps additional safe session action routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.setViewedSessions({ focused: ["ses_1"], open: ["ses_1", "ses_2"] })).resolves.toBe(true)
+		await expect(client.forkSession("ses_1", { messageID: "msg_1" })).resolves.toEqual({
+			id: "ses_fork",
+			parentID: "ses_1",
+		})
+		await expect(client.getSessionDiff("ses_1", { messageID: "msg_1" })).resolves.toEqual([
+			{ file: "src/app.ts", before: "old\n", after: "new\n", additions: 1, deletions: 1 },
+		])
+
+		expect(mock.requests.slice(-3)).toEqual([
+			{ method: "POST", path: "/session/viewed", body: { focused: ["ses_1"], open: ["ses_1", "ses_2"] } },
+			{ method: "POST", path: "/session/ses_1/fork", body: { messageID: "msg_1" } },
+			{ path: "/session/ses_1/diff?messageID=msg_1" },
 		])
 	})
 

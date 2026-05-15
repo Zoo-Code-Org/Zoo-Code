@@ -414,7 +414,7 @@
 
 ## Phase 5 — Feature Parity Matrix Implementation
 
-- **Progress:** SDK route parity started with provider route wrappers for listing providers, reading provider auth methods, and running provider OAuth authorize/callback flows through existing CLI routes. Added persisted session message/part wrappers for listing, reading, deleting, and updating stored message data. Added session maintenance wrappers for status, children, todo, update, and delete routes. Added worktree lifecycle wrappers for list/create/remove/reset routes. Added SDK wrappers for legacy Hono worktree diff, diff summary, and diff-file routes, and added matching Effect HttpApi parity for those worktree diff routes. Remaining SDK/CLI route parity wrappers should be added in coherent groups for any remaining session action routes.
+- **Progress:** SDK route parity started with provider route wrappers for listing providers, reading provider auth methods, and running provider OAuth authorize/callback flows through existing CLI routes. Added persisted session message/part wrappers for listing, reading, deleting, and updating stored message data. Added session maintenance wrappers for status, children, todo, update, delete, viewed-session state, fork, and diff routes. Added worktree lifecycle wrappers for list/create/remove/reset routes. Added SDK wrappers for legacy Hono worktree diff, diff summary, and diff-file routes, and added matching Effect HttpApi parity for those worktree diff routes. Remaining SDK/CLI route parity wrappers should be added in coherent groups for any remaining session action routes.
 
 1. Add CLI context flag support
 

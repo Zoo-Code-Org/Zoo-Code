@@ -287,6 +287,42 @@ export type SessionListOptions = {
 	directory?: string
 }
 
+/** Viewed-session state tracked by editor clients. */
+export type SessionViewedOptions = {
+	/** Sessions currently focused by clients. */
+	focused?: string[]
+	/** Sessions currently open by clients. */
+	open?: string[]
+}
+
+/** Options for forking a session. */
+export type SessionForkOptions = {
+	/** Optional message to fork from. */
+	messageID?: string
+}
+
+/** Options for reading a session diff. */
+export type SessionDiffOptions = {
+	/** Optional message to diff at. */
+	messageID?: string
+}
+
+/** File diff returned for a session checkpoint. */
+export type SessionFileDiff = {
+	/** Relative file path. */
+	file: string
+	/** Previous file content. */
+	before: string
+	/** Current file content. */
+	after: string
+	/** Added line count. */
+	additions: number
+	/** Deleted line count. */
+	deletions: number
+	/** Additional server-provided fields. */
+	[key: string]: unknown
+}
+
 /** Session update payload accepted by the portable core. */
 export type SessionUpdateOptions = {
 	/** Updated display title. */

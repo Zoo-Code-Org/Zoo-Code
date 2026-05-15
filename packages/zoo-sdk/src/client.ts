@@ -18,9 +18,13 @@ import type {
 	SendMessageOptions,
 	Session,
 	SessionCreateOptions,
+	SessionDiffOptions,
+	SessionFileDiff,
+	SessionForkOptions,
 	SessionListOptions,
 	SessionStatusMap,
 	SessionUpdateOptions,
+	SessionViewedOptions,
 	Todo,
 	WorktreeCreateOptions,
 	WorktreeDirectoryOptions,
@@ -62,6 +66,13 @@ function messageListQuery(options: MessageListOptions = {}) {
 	const params = new URLSearchParams()
 	if (options.limit !== undefined) params.set("limit", String(options.limit))
 	if (options.before) params.set("before", options.before)
+	const query = params.toString()
+	return query ? `?${query}` : ""
+}
+
+function sessionDiffQuery(options: SessionDiffOptions = {}) {
+	const params = new URLSearchParams()
+	if (options.messageID) params.set("messageID", options.messageID)
 	const query = params.toString()
 	return query ? `?${query}` : ""
 }
@@ -108,6 +119,19 @@ export class ZooClient {
 		const query = options.directory ? `?directory=${encodeURIComponent(options.directory)}` : ""
 		return (
 			unwrap(await this.#transport.request<Session[] | { data?: Session[] }>({ path: `/session${query}` })) ?? []
+		)
+	}
+
+	/** Persist the editor client's viewed-session state. */
+	async setViewedSessions(options: SessionViewedOptions = {}): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: "/session/viewed",
+					body: options,
+				}),
+			) ?? false
 		)
 	}
 
@@ -173,6 +197,28 @@ export class ZooClient {
 					path: `/session/${encodeURIComponent(sessionID)}`,
 				}),
 			) ?? false
+		)
+	}
+
+	/** Fork a session, optionally from a specific message. */
+	async forkSession(sessionID: string, options: SessionForkOptions = {}): Promise<Session> {
+		return unwrap(
+			await this.#transport.request<Session | { data?: Session }>({
+				method: "POST",
+				path: `/session/${encodeURIComponent(sessionID)}/fork`,
+				body: options,
+			}),
+		)
+	}
+
+	/** Read file diffs for a session checkpoint. */
+	async getSessionDiff(sessionID: string, options: SessionDiffOptions = {}): Promise<SessionFileDiff[]> {
+		return (
+			unwrap(
+				await this.#transport.request<SessionFileDiff[] | { data?: SessionFileDiff[] }>({
+					path: `/session/${encodeURIComponent(sessionID)}/diff${sessionDiffQuery(options)}`,
+				}),
+			) ?? []
 		)
 	}
 
