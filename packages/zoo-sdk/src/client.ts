@@ -1,6 +1,9 @@
 import { createHttpTransport, createIpcTransport, type ZooTransport } from "./transport/index.js"
 import type {
 	MessageChunk,
+	MessageListOptions,
+	MessagePart,
+	MessageWithParts,
 	Mode,
 	ConfigWarning,
 	ConfigProvidersResult,
@@ -43,6 +46,14 @@ function transportFrom(options: ZooClientConnectOptions) {
 function unwrap<T>(value: T | { data?: T }) {
 	if (value && typeof value === "object" && "data" in value) return (value as { data?: T }).data as T
 	return value as T
+}
+
+function messageListQuery(options: MessageListOptions = {}) {
+	const params = new URLSearchParams()
+	if (options.limit !== undefined) params.set("limit", String(options.limit))
+	if (options.before) params.set("before", options.before)
+	const query = params.toString()
+	return query ? `?${query}` : ""
 }
 
 /** Client for the Zoo Code portable-core server. */
@@ -109,6 +120,66 @@ export class ZooClient {
 			this.#emit(event)
 			yield event
 		}
+	}
+
+	/** List persisted messages for a session. */
+	async listMessages(sessionID: string, options: MessageListOptions = {}): Promise<MessageWithParts[]> {
+		return (
+			unwrap(
+				await this.#transport.request<MessageWithParts[] | { data?: MessageWithParts[] }>({
+					path: `/session/${encodeURIComponent(sessionID)}/message${messageListQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Fetch one persisted session message and its parts. */
+	async getMessage(sessionID: string, messageID: string): Promise<MessageWithParts> {
+		return unwrap(
+			await this.#transport.request<MessageWithParts | { data?: MessageWithParts }>({
+				path: `/session/${encodeURIComponent(sessionID)}/message/${encodeURIComponent(messageID)}`,
+			}),
+		)
+	}
+
+	/** Delete one persisted session message. */
+	async deleteMessage(sessionID: string, messageID: string): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "DELETE",
+					path: `/session/${encodeURIComponent(sessionID)}/message/${encodeURIComponent(messageID)}`,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Update one persisted message part. */
+	async updateMessagePart(
+		sessionID: string,
+		messageID: string,
+		partID: string,
+		part: MessagePart,
+	): Promise<MessagePart> {
+		return unwrap(
+			await this.#transport.request<MessagePart | { data?: MessagePart }>({
+				method: "PATCH",
+				path: `/session/${encodeURIComponent(sessionID)}/message/${encodeURIComponent(messageID)}/part/${encodeURIComponent(partID)}`,
+				body: part,
+			}),
+		)
+	}
+
+	/** Delete one persisted message part. */
+	async deleteMessagePart(sessionID: string, messageID: string, partID: string): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "DELETE",
+					path: `/session/${encodeURIComponent(sessionID)}/message/${encodeURIComponent(messageID)}/part/${encodeURIComponent(partID)}`,
+				}),
+			) ?? false
+		)
 	}
 
 	/** Subscribe to client-side events emitted while streaming messages. */

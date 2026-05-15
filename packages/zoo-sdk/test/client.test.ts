@@ -13,6 +13,31 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/session")
 				return input.method === "POST" ? { data: { id: "ses_1" } } : { data: [{ id: "ses_1" }] }
 			if (input.path === "/session/ses_1") return { data: { id: "ses_1" } }
+			if (input.path === "/session/ses_1/message?limit=2&before=cursor+1") {
+				return {
+					data: [
+						{
+							info: { id: "msg_1", sessionID: "ses_1", role: "user", text: "hello" },
+							parts: [
+								{ id: "part_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "hello" },
+							],
+						},
+					],
+				}
+			}
+			if (input.path === "/session/ses_1/message/msg_1" && input.method === "DELETE") return { data: true }
+			if (input.path === "/session/ses_1/message/msg_1") {
+				return {
+					data: {
+						info: { id: "msg_1", sessionID: "ses_1", role: "user", text: "hello" },
+						parts: [{ id: "part_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "hello" }],
+					},
+				}
+			}
+			if (input.path === "/session/ses_1/message/msg_1/part/part_1" && input.method === "PATCH")
+				return { data: input.body }
+			if (input.path === "/session/ses_1/message/msg_1/part/part_1" && input.method === "DELETE")
+				return { data: true }
 			if (input.path === "/agent") {
 				return { data: [{ name: "code", displayName: "Code", description: "Code mode", mode: "primary" }] }
 			}
@@ -104,6 +129,34 @@ describe("ZooClient", () => {
 			path: "/session/ses_1/message",
 			body: { agent: "code", message: "hi", parts: [{ type: "text", text: "hi" }] },
 		})
+	})
+
+	test("wraps persisted message and part routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const part = { id: "part_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "updated" }
+
+		await expect(client.listMessages("ses_1", { limit: 2, before: "cursor 1" })).resolves.toEqual([
+			{
+				info: { id: "msg_1", sessionID: "ses_1", role: "user", text: "hello" },
+				parts: [{ id: "part_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "hello" }],
+			},
+		])
+		await expect(client.getMessage("ses_1", "msg_1")).resolves.toEqual({
+			info: { id: "msg_1", sessionID: "ses_1", role: "user", text: "hello" },
+			parts: [{ id: "part_1", messageID: "msg_1", sessionID: "ses_1", type: "text", text: "hello" }],
+		})
+		await expect(client.deleteMessage("ses_1", "msg_1")).resolves.toBe(true)
+		await expect(client.updateMessagePart("ses_1", "msg_1", "part_1", part)).resolves.toEqual(part)
+		await expect(client.deleteMessagePart("ses_1", "msg_1", "part_1")).resolves.toBe(true)
+
+		expect(mock.requests.slice(-5)).toEqual([
+			{ path: "/session/ses_1/message?limit=2&before=cursor+1" },
+			{ path: "/session/ses_1/message/msg_1" },
+			{ method: "DELETE", path: "/session/ses_1/message/msg_1" },
+			{ method: "PATCH", path: "/session/ses_1/message/msg_1/part/part_1", body: part },
+			{ method: "DELETE", path: "/session/ses_1/message/msg_1/part/part_1" },
+		])
 	})
 
 	test("subscribes to server events and replies to permission requests", async () => {

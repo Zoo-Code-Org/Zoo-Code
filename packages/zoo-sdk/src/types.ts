@@ -26,6 +26,38 @@ export type Message = {
 	[key: string]: unknown
 }
 
+/** Options for listing persisted session messages. */
+export type MessageListOptions = {
+	/** Maximum number of messages to return. */
+	limit?: number
+	/** Cursor returned by a previous message listing. */
+	before?: string
+}
+
+/** A persisted message part associated with a session message. */
+export type MessagePart = {
+	/** Stable part identifier. */
+	id: string
+	/** Parent message identifier. */
+	messageID: string
+	/** Parent session identifier. */
+	sessionID: string
+	/** Part discriminator. */
+	type: string
+	/** Additional server-provided fields. */
+	[key: string]: unknown
+}
+
+/** Persisted message plus its associated parts. */
+export type MessageWithParts = {
+	/** Message metadata. */
+	info: Message
+	/** Message parts. */
+	parts: MessagePart[]
+	/** Additional server-provided fields. */
+	[key: string]: unknown
+}
+
 /** A streamed response event or content chunk from the Zoo portable core. */
 export type MessageChunk = {
 	/** Event type, such as `text`, `tool_use`, or `error`. */
