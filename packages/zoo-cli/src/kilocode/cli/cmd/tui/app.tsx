@@ -7,21 +7,11 @@
  */
 
 import { createEffect, on } from "solid-js"
-import { useKeyboard } from "@opentui/solid"
-import { TextAttributes } from "@opentui/core"
-import * as Clipboard from "@tui/util/clipboard"
 import { useCommandDialog } from "@tui/component/dialog-command"
 import { useSDK } from "@tui/context/sdk"
 import { useSync } from "@tui/context/sync"
-import { useDialog } from "@tui/ui/dialog"
 import { useToast } from "@tui/ui/toast"
-import { useTheme } from "@tui/context/theme"
-import { DialogAlert } from "@tui/ui/dialog-alert"
-import { DialogSelect } from "@tui/ui/dialog-select"
-import { Link } from "@tui/ui/link"
 import { isKiloError, showKiloErrorToast } from "@/kilocode/kilo-errors"
-import { registerKiloCommands } from "@/kilocode/kilo-commands"
-import { initializeTUIDependencies } from "@kilocode/kilo-gateway/tui"
 
 // Re-export so upstream can render the route without importing directly
 export { KiloClawView } from "@/kilocode/claw/view"
@@ -132,25 +122,6 @@ export function init() {
 	const sync = useSync()
 	const sdk = useSDK()
 	const toast = useToast()
-
-	// Inject TUI dependencies for kilo-gateway
-	initializeTUIDependencies({
-		useCommandDialog,
-		useSync,
-		useDialog,
-		useToast,
-		useTheme,
-		useSDK,
-		DialogAlert,
-		DialogSelect,
-		Link,
-		Clipboard,
-		useKeyboard,
-		TextAttributes,
-	})
-
-	// Register Kilo Gateway commands (profile, teams, kiloclaw, remote, etc.)
-	registerKiloCommands(useSDK)
 
 	// Register auto-approve toggle
 	command.register(() => [

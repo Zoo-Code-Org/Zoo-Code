@@ -36,7 +36,13 @@ zoo run "add input validation to the signup form"
 - **MCP servers** -- extend agent capabilities with the Model Context Protocol
 - **Multiple modes** -- Plan with Architect, code with Coder, debug with Debugger, or create your own
 - **Sessions** -- resume previous conversations and export transcripts
-- **API keys optional** -- bring your own keys or use Zoo Code credits when available
+- **Bring your own keys** -- Zoo Code CLI has no built-in inference provider; configure one of the providers listed from `models.dev`
+
+## Providers
+
+Zoo Code CLI uses the same `models.dev` provider catalog and onboarding pattern as OpenCode. Run `zoo models` to inspect available providers and models, then authenticate or configure the provider you want to use with your own credentials.
+
+Zoo Code does not provide a bundled Zoo inference gateway or credit-backed model provider. Kilo gateway and indexing integrations are intentionally disabled in this package.
 
 ## Commands
 

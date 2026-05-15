@@ -3,8 +3,6 @@
 // Called from ../../server/instance/index.ts before the UI fallback route.
 
 import { Hono } from "hono"
-import { describeRoute, validator, resolver } from "hono-openapi"
-import z from "zod"
 import { TelemetryRoutes } from "../../server/routes/instance/telemetry"
 import { CommitMessageRoutes } from "./routes/commit-message"
 import { EnhancePromptRoutes } from "../../server/routes/instance/enhance-prompt"
@@ -14,17 +12,6 @@ import { RemoteRoutes } from "../../server/routes/instance/remote"
 import { NetworkRoutes } from "../../server/routes/instance/network"
 import { SuggestionRoutes } from "../suggestion/routes"
 import { IndexingRoutes } from "./routes/indexing"
-import { createKiloRoutes } from "@kilocode/kilo-gateway"
-import { Auth } from "../../auth"
-import { errors } from "../../server/error"
-import { ModelCache } from "../../provider/model-cache"
-import { Database } from "../../storage/db"
-import { Instance } from "../../project/instance"
-import { InstanceStore } from "../../project/instance-store"
-import { Session } from "../../session/session"
-import { Identifier } from "../../id/id"
-import { SessionTable, MessageTable, PartTable } from "../../session/session.sql"
-import { Bus } from "@/bus"
 
 export function register(app: Hono): Hono {
 	return app
@@ -37,27 +24,4 @@ export function register(app: Hono): Hono {
 		.route("/commit-message", CommitMessageRoutes())
 		.route("/enhance-prompt", EnhancePromptRoutes())
 		.route("/kilocode", KilocodeRoutes())
-		.route(
-			"/kilo",
-			createKiloRoutes({
-				Hono,
-				describeRoute,
-				validator,
-				resolver,
-				errors,
-				Auth,
-				z,
-				Database,
-				Instance,
-				InstanceStore,
-				SessionTable,
-				MessageTable,
-				PartTable,
-				SessionToRow: Session.toRow,
-				Bus,
-				SessionCreatedEvent: Session.Event.Created,
-				Identifier,
-				ModelCache,
-			}),
-		)
 }

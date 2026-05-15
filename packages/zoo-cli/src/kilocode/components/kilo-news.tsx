@@ -9,9 +9,16 @@ import { createEffect, createMemo, createSignal, on, Show } from "solid-js"
 import { useSync } from "@tui/context/sync"
 import { useSDK } from "@tui/context/sdk"
 import { useDialog } from "@tui/ui/dialog"
-import type { KilocodeNotification } from "@kilocode/kilo-gateway"
 import { NotificationBanner } from "./notification-banner.js"
 import { DialogKiloNotifications } from "./dialog-kilo-notifications.js"
+
+type KilocodeNotification = {
+	title: string
+	message: string
+	actionUrl?: string
+	actionText?: string
+	showIn?: string[]
+}
 
 export function KiloNews() {
 	const sync = useSync()

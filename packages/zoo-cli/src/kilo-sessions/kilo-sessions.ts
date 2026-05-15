@@ -15,7 +15,6 @@ import { clearInFlightCache, withInFlightCache } from "@/kilo-sessions/inflight-
 import type * as SDK from "@kilocode/sdk/v2"
 import z from "zod"
 import { Schema } from "effect"
-import { KILO_API_BASE } from "@kilocode/kilo-gateway"
 import { Config } from "@/config/config"
 import { Instance } from "@/project/instance"
 import { Vcs } from "@/project/vcs"
@@ -27,6 +26,8 @@ import { Telemetry } from "@kilocode/kilo-telemetry"
 import { Question } from "@/question"
 import { Permission } from "@/permission"
 import { withTimeout } from "@/util/timeout"
+
+const KILO_API_BASE = "https://api.kilo.ai"
 
 export namespace KiloSessions {
 	export const Event = {

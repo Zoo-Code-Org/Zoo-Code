@@ -1,6 +1,6 @@
-import type { IndexingStatus } from "@kilocode/kilo-indexing/status"
+import type { KiloIndexing } from "./indexing"
 
-export function formatIndexingLabel(status: IndexingStatus): string {
+export function formatIndexingLabel(status: KiloIndexing.Status): string {
 	if (status.state === "In Progress") {
 		if (status.totalFiles <= 0) return "IDX In Progress"
 		return `IDX ${status.percent}% ${status.processedFiles}/${status.totalFiles}`

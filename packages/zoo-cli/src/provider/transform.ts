@@ -6,7 +6,6 @@ import type * as Provider from "./provider"
 import type * as ModelsDev from "./models"
 import { iife } from "@/util/iife"
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { kiloProviderOptions } from "@/kilocode/provider-options"
 import { isLing } from "@/kilocode/model-match" // kilocode_change
 
 type Modality = NonNullable<ModelsDev.Model["modalities"]>["input"][number]
@@ -42,8 +41,6 @@ function sdkKey(npm: string): string | undefined {
 		case "@ai-sdk/gateway":
 			return "gateway"
 		case "@openrouter/ai-sdk-provider":
-			return "openrouter"
-		case "@kilocode/kilo-gateway": // kilocode_change
 			return "openrouter"
 	}
 	return undefined
@@ -449,11 +446,7 @@ function anthropicAdaptiveEfforts(apiId: string): string[] | null {
 
 export function variants(model: Provider.Model): Record<string, Record<string, any>> {
 	// kilocode_change start
-	if (
-		["@kilocode/kilo-gateway", "@ai-sdk/openai-compatible"].includes(model.api.npm) &&
-		model.variants &&
-		Object.keys(model.variants).length > 0
-	) {
+	if (model.api.npm === "@ai-sdk/openai-compatible" && model.variants && Object.keys(model.variants).length > 0) {
 		return model.variants
 	}
 	// kilocode_change end
@@ -480,8 +473,7 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
 
 	// see: https://docs.x.ai/docs/guides/reasoning#control-how-hard-the-model-thinks
 	if (id.includes("grok") && id.includes("grok-3-mini")) {
-		if (model.api.npm === "@openrouter/ai-sdk-provider" || model.api.npm === "@kilocode/kilo-gateway") {
-			// kilocode_change - add Kilo Gateway support
+		if (model.api.npm === "@openrouter/ai-sdk-provider") {
 			return {
 				low: { reasoning: { effort: "low" } },
 				high: { reasoning: { effort: "high" } },
@@ -495,7 +487,6 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
 	if (id.includes("grok")) return {}
 
 	switch (model.api.npm) {
-		case "@kilocode/kilo-gateway": // kilocode_change
 		case "@openrouter/ai-sdk-provider":
 			// kilocode_change start
 			if (id.includes("glm") || id.includes("kimi") || id.includes("qwen")) {
@@ -919,8 +910,7 @@ export function options(input: {
 
 	if (
 		input.model.api.npm === "@openrouter/ai-sdk-provider" ||
-		input.model.api.npm === "@llmgateway/ai-sdk-provider" ||
-		input.model.api.npm === "@kilocode/kilo-gateway" // kilocode_change
+		input.model.api.npm === "@llmgateway/ai-sdk-provider"
 	) {
 		result["usage"] = {
 			include: true,
@@ -995,8 +985,7 @@ export function options(input: {
 				input.model.api.npm === "@ai-sdk/openai" ||
 				input.model.api.npm === "@ai-sdk/azure" ||
 				input.model.api.npm === "@ai-sdk/github-copilot" || // kilocode_change
-				input.model.api.npm === "@openrouter/ai-sdk-provider" || // kilocode_change
-				input.model.api.npm === "@kilocode/kilo-gateway" // kilocode_change
+				input.model.api.npm === "@openrouter/ai-sdk-provider" // kilocode_change
 			) {
 				result["reasoningSummary"] = "auto"
 			}
@@ -1007,8 +996,7 @@ export function options(input: {
 			(input.model.api.npm === "@ai-sdk/openai" ||
 				input.model.api.npm === "@ai-sdk/azure" ||
 				input.model.api.npm === "@ai-sdk/github-copilot" ||
-				input.model.api.npm === "@openrouter/ai-sdk-provider" ||
-				input.model.api.npm === "@kilocode/kilo-gateway") &&
+				input.model.api.npm === "@openrouter/ai-sdk-provider") &&
 			// kilocode_change end
 			input.model.api.id.includes("gpt-5.") &&
 			!input.model.api.id.includes("codex") &&
@@ -1062,11 +1050,7 @@ export function smallOptions(model: Provider.Model) {
 		}
 		return { thinkingConfig: { thinkingBudget: 0 } }
 	}
-	if (
-		model.providerID === "openrouter" ||
-		model.providerID === "llmgateway" ||
-		model.api.npm === "@kilocode/kilo-gateway" // kilocode_change
-	) {
+	if (model.providerID === "openrouter" || model.providerID === "llmgateway") {
 		if (model.api.id.includes("google")) {
 			return { reasoning: { enabled: false } }
 		}
@@ -1116,12 +1100,6 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
 
 		return result
 	}
-
-	// kilocode_change start
-	if (model.api.npm === "@kilocode/kilo-gateway") {
-		return kiloProviderOptions(options)
-	}
-	// kilocode_change end
 
 	// AI SDK packages that resolve providerOptionsName by splitting the
 	// provider name on "." (e.g. "wafer.ai" -> "wafer") need the same

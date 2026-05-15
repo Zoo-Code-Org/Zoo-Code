@@ -1,8 +1,9 @@
-// kilocode_change - new file
-import { fetchKiloModels, type KiloModelsResult } from "@kilocode/kilo-gateway"
 import { Config } from "../config/config"
 import { Auth } from "../auth"
 import * as Log from "@opencode-ai/core/util/log"
+
+type ModelFetchError = { message?: string; status?: number }
+type ModelFetchResult = { models: Record<string, any>; error?: ModelFetchError }
 
 export namespace ModelCache {
 	const log = Log.create({ service: "model-cache" })
@@ -20,12 +21,12 @@ export namespace ModelCache {
 	const inFlightRefresh = new Map<string, Promise<Record<string, any>>>()
 
 	// Per-provider failure tracking
-	const failures = new Map<string, KiloModelsResult["error"]>()
+	const failures = new Map<string, ModelFetchError>()
 
 	/**
 	 * Get the failure state for a provider (undefined = no failure)
 	 */
-	export function getFailure(providerID: string): KiloModelsResult["error"] | undefined {
+	export function getFailure(providerID: string): ModelFetchError | undefined {
 		return failures.get(providerID)
 	}
 
@@ -179,11 +180,7 @@ export namespace ModelCache {
 	 * @param options - Provider options
 	 * @returns Fetched models
 	 */
-	async function fetchModels(providerID: string, options: any): Promise<KiloModelsResult> {
-		if (providerID === "kilo") {
-			return fetchKiloModels(options)
-		}
-
+	async function fetchModels(providerID: string, options: any): Promise<ModelFetchResult> {
 		// kilocode_change start
 		if (providerID === "apertis") {
 			const models = await fetchApertisModels(options)
@@ -256,51 +253,6 @@ export namespace ModelCache {
 	 */
 	async function getAuthOptions(providerID: string): Promise<any> {
 		const options: any = {}
-
-		if (providerID === "kilo") {
-			// Get from Config
-			const config = await Config.get()
-			const providerConfig = config.provider?.[providerID]
-			if (providerConfig?.options?.apiKey) {
-				options.kilocodeToken = providerConfig.options.apiKey
-			}
-
-			// kilocode_change start
-			if (providerConfig?.options?.kilocodeOrganizationId) {
-				options.kilocodeOrganizationId = providerConfig.options.kilocodeOrganizationId
-			}
-			// kilocode_change end
-
-			// Get from Auth
-			const auth = await Auth.get(providerID)
-			if (auth) {
-				if (auth.type === "api") {
-					options.kilocodeToken = auth.key
-				} else if (auth.type === "oauth") {
-					options.kilocodeToken = auth.access
-					// kilocode_change start - read org ID from OAuth accountId for enterprise model filtering
-					if (auth.accountId) {
-						options.kilocodeOrganizationId = auth.accountId
-					}
-					// kilocode_change end
-				}
-			}
-
-			// Get from Env (process.env — matches upstream's pattern for sync async helpers)
-			const env = process.env
-			if (env.KILO_API_KEY) {
-				options.kilocodeToken = env.KILO_API_KEY
-			}
-			if (env.KILO_ORG_ID) {
-				options.kilocodeOrganizationId = env.KILO_ORG_ID
-			}
-
-			log.debug("auth options resolved", {
-				providerID,
-				hasToken: !!options.kilocodeToken,
-				hasOrganizationId: !!options.kilocodeOrganizationId,
-			})
-		}
 
 		// kilocode_change start
 		if (providerID === "apertis") {

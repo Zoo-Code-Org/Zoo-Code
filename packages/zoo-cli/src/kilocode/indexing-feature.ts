@@ -1,7 +1,10 @@
 import { pathToFileURL } from "url"
-import { hasIndexingPlugin } from "@kilocode/kilo-indexing/detect"
 
-export const INDEXING_PLUGIN = "@kilocode/kilo-indexing"
+export const INDEXING_PLUGIN = "@zoo-code/indexing-disabled"
+
+function hasIndexingPlugin(items: readonly PluginSpec[]): boolean {
+	return items.some((item) => (typeof item === "string" ? item : item[0]) === INDEXING_PLUGIN)
+}
 
 // RATIONALE: Upstream PluginSpec changed from string to string | [string, Record].
 // Use a broad input type to accept both forms but return the concrete PluginSpec shape.

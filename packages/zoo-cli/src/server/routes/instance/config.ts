@@ -6,12 +6,6 @@ import { Provider } from "@/provider/provider"
 import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
 import { jsonRequest } from "./trace"
-// kilocode_change start
-import { fetchDefaultModel } from "@kilocode/kilo-gateway"
-import { Auth } from "@/auth"
-import { Effect } from "effect"
-import { ModelID, ProviderID } from "@/provider/schema"
-// kilocode_change end
 
 export const ConfigRoutes = lazy(() =>
 	new Hono()
@@ -110,22 +104,6 @@ export const ConfigRoutes = lazy(() =>
 					const svc = yield* Provider.Service
 					const providers = yield* svc.list()
 					const defaults = Provider.defaultModelIDs(providers)
-
-					// kilocode_change start - Fetch default model from Kilo API when the kilo provider is available.
-					// Only call the Kilo API when the kilo provider is actually available.
-					// This prevents unnecessary network calls for teams using only their
-					// own providers (e.g. LiteLLM) via enabled_providers config.
-					if (providers[ProviderID.kilo]) {
-						const auth = yield* Auth.Service
-						const kiloAuth = yield* auth.get("kilo")
-						const token = kiloAuth?.type === "oauth" ? kiloAuth.access : kiloAuth?.key
-						const organizationId = kiloAuth?.type === "oauth" ? kiloAuth.accountId : undefined
-						const kiloApiDefault = yield* Effect.promise(() => fetchDefaultModel(token, organizationId))
-						if (kiloApiDefault && providers[ProviderID.kilo]?.models[kiloApiDefault]) {
-							defaults[ProviderID.kilo] = ModelID.make(kiloApiDefault)
-						}
-					}
-					// kilocode_change end
 
 					return {
 						providers: Object.values(providers),

@@ -6,8 +6,18 @@
  */
 
 import { DialogSelect } from "@tui/ui/dialog-select"
-import type { Organization } from "@kilocode/kilo-gateway"
-import { getOrganizationOptions } from "@kilocode/kilo-gateway/tui"
+
+type Organization = { id: string; name: string; role?: string }
+
+function getOrganizationOptions(organizations: Organization[], current?: string) {
+	return [
+		{ value: null, label: current ? "Personal" : "Personal (current)" },
+		...organizations.map((org) => ({
+			value: org.id,
+			label: `${org.name}${org.id === current ? " (current)" : ""}`,
+		})),
+	]
+}
 
 interface DialogKiloTeamSelectProps {
 	organizations: Organization[]

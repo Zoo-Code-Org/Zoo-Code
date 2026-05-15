@@ -6,9 +6,7 @@
 // This module exports patch functions and data that the upstream provider.ts
 // calls at well-defined injection points (each marked with kilocode_change).
 
-import { createKilo, type KiloProvider, AI_SDK_PROVIDERS, PROMPTS } from "@kilocode/kilo-gateway"
 import { DEFAULT_HEADERS } from "@/kilocode/const"
-import { ProviderID, ModelID } from "@/provider/schema"
 import { Effect, Schema } from "effect"
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { mapValues, omit, pickBy } from "remeda"
@@ -22,9 +20,7 @@ export const REQUEST_TIMEOUT_MS = 120_000 // 2 minutes
 
 type BundledSDK = { languageModel(modelId: string): LanguageModelV3 }
 
-export const KILO_BUNDLED_PROVIDERS: Record<string, () => Promise<(options: any) => BundledSDK>> = {
-	"@kilocode/kilo-gateway": async () => createKilo as unknown as (options: any) => BundledSDK,
-}
+export const KILO_BUNDLED_PROVIDERS: Record<string, () => Promise<(options: any) => BundledSDK>> = {}
 
 // ---------------------------------------------------------------------------
 // Model schema extensions  (spread into Provider.Model Schema.Struct)
@@ -32,9 +28,9 @@ export const KILO_BUNDLED_PROVIDERS: Record<string, () => Promise<(options: any)
 
 export const KILO_MODEL_SCHEMA_EXTENSIONS = {
 	recommendedIndex: Schema.optional(Schema.Number),
-	prompt: Schema.optional(Schema.Literals(PROMPTS)),
+	prompt: Schema.optional(Schema.String),
 	isFree: Schema.optional(Schema.Boolean),
-	ai_sdk_provider: Schema.optional(Schema.Literals(AI_SDK_PROVIDERS)),
+	ai_sdk_provider: Schema.optional(Schema.String),
 }
 
 // ---------------------------------------------------------------------------
@@ -114,37 +110,6 @@ export function kiloCustomLoaders(dep: CustomDep): Record<string, CustomLoader> 
 				},
 				options: {},
 			}),
-
-		kilo: Effect.fnUntraced(function* (input: any) {
-			const env = yield* dep.env()
-			const hasKey = yield* Effect.gen(function* () {
-				if (input.env.some((item: string) => env[item])) return true
-				if (yield* dep.auth(input.id)) return true
-				if ((yield* dep.config()).provider?.["kilo"]?.options?.apiKey) return true
-				return false
-			})
-
-			const options: Record<string, string> = {}
-			if (env.KILO_ORG_ID) {
-				options.kilocodeOrganizationId = env.KILO_ORG_ID
-			}
-			if (!hasKey) {
-				options.apiKey = "anonymous"
-			}
-
-			return {
-				autoload: Object.keys(input.models).length > 0,
-				options,
-				async getModel(sdk: KiloProvider, modelID: string) {
-					const provider = input.models[modelID]?.ai_sdk_provider
-					if (provider === "alibaba") return sdk.alibaba(modelID)
-					if (provider === "anthropic") return sdk.anthropic(modelID)
-					if (provider === "openai") return sdk.openai(modelID)
-					if (provider === "openai-compatible") return sdk.openaiCompatible(modelID)
-					return sdk.languageModel(modelID)
-				},
-			}
-		}),
 
 		// Override opencode to prevent auto-connecting without credentials
 		opencode: () =>

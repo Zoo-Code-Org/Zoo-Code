@@ -11,7 +11,6 @@ import { useRoute } from "@tui/context/route"
 import { useDialog } from "@tui/ui/dialog"
 import { useToast } from "@tui/ui/toast"
 import { DialogAlert } from "@tui/ui/dialog-alert"
-import type { Organization } from "@kilocode/kilo-gateway"
 import type { ClawStatus } from "./claw/types.js"
 import { DialogKiloTeamSelect } from "./components/dialog-kilo-team-select.js"
 import { DialogKiloProfile } from "./components/dialog-kilo-profile.js"
@@ -19,6 +18,8 @@ import { DialogClawSetup } from "./components/dialog-claw-setup.js"
 import { DialogClawUpgrade } from "./components/dialog-claw-upgrade.js"
 import { DialogIndexing } from "./components/dialog-indexing.js"
 import { indexingEnabled } from "./indexing-feature"
+
+type Organization = { id: string; name: string; role?: string }
 
 // These types are OpenCode-internal and imported at runtime
 type UseSDK = any

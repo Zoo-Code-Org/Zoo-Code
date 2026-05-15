@@ -1,13 +1,13 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1, 2, and 3 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, and prefers Zoo config/rules/modes/ignore paths while retaining lower-priority Kilo/OpenCode migration fallbacks.
-- **Last completed task:** `DEVPLAN.md` Phase 1, Task 3 — Rebrand CLI config paths and project directories.
-- **Next task to execute:** `DEVPLAN.md` Phase 1, Task 4 — Remove Kilo-specific gateway and indexing integrations. This is blocked on Open Question 3 for final cloud/gateway behavior.
+- **Current status:** Phase 1 Tasks 1 through 4 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, and no longer depends on Kilo gateway/indexing packages.
+- **Last completed task:** `DEVPLAN.md` Phase 1, Task 4 — Remove Kilo-specific gateway and indexing integrations.
+- **Next task to execute:** `DEVPLAN.md` Phase 1, Task 5 — Normalize runtime/toolchain choice, pending Open Question 2.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
-    - Open Question 3, cloud services/gateway strategy: blocks final behavior for `DEVPLAN.md` Phase 1, Task 4 and Phase 5 scope decisions.
+    - Open Question 3, cloud services/gateway strategy: resolved for Phase 1 by disabling Kilo gateway/indexing and using OpenCode-style BYOK providers from `models.dev`; no built-in Zoo inference provider exists for now. Later cloud features remain out of scope until explicitly planned.
     - Open Question 4, inline autocomplete scope: blocks only any future autocomplete work; current `DEVPLAN.md` treats it as out of scope pending Phase 5, Task 7.
     - Open Question 5, JetBrains/other IDE support: blocks only future IDE packages; current `DEVPLAN.md` treats it as out of scope pending Phase 5, Task 7.
 
@@ -36,7 +36,7 @@
 - Source repositories were verified with non-destructive `gh repo view` commands; local remotes were verified with `git remote -v`.
 - `DEVPLAN.md` Phase 0, Task 2 was clarified because this local workspace initially contained only planning docs; implementing the task required first materializing `zoo-upstream/main` into the working tree before the mechanical `src/` and `webview-ui/` relocation could happen.
 - `packages/zoo-vscode/src` contains the relocated VS Code extension package, and `packages/zoo-vscode/webview-ui` contains the relocated React webview package. This preserves the existing package manifests while grouping both under `packages/zoo-vscode/`.
-- `packages/zoo-cli` and `packages/zoo-sdk` are scaffold-only packages with no runtime/API implementation yet.
+- `packages/zoo-cli` is no longer scaffold-only. `packages/zoo-sdk` remains scaffold-only.
 - `pnpm-workspace.yaml` now discovers `packages/zoo-cli`, `packages/zoo-sdk`, `packages/zoo-vscode/src`, and `packages/zoo-vscode/webview-ui` alongside existing `apps/*` and `packages/*` packages.
 - Path-sensitive build references were adjusted for the relocation, including extension/webview scripts, VS Code launch config, nightly build source path, webview Vite output paths, and workspace lockfile links.
 - Phase 0 Tasks 2 and 3 verification completed: `pnpm list --depth -1 --recursive`, `pnpm --filter @zoo-code/cli build`, `pnpm --filter @zoo-code/sdk build`, `pnpm --filter zoo-code check-types`, `pnpm --filter @zoo-code/vscode-webview check-types`, `pnpm --filter @zoo-code/vscode-webview build`, `pnpm --filter @zoo-code/build build`, and `pnpm --filter zoo-code bundle`.
@@ -54,9 +54,12 @@
 - Phase 1 Task 1 imported `Kilo-Org/kilocode` commit `a4218d893d4b7ecf6921531c553d84905b8510c0`, subdirectory `packages/opencode`, into `packages/zoo-cli`. A package-local MIT `LICENSE` was copied from that source revision, and `ATTRIBUTIONS.md` records the imported source inventory.
 - Phase 1 Task 2 rebranded `packages/zoo-cli` metadata to `@zoo-code/cli`, exposed `zoo` and `zoo-code` bins through `bin/zoo`, and updated obvious exported help/install/build/publish references.
 - Phase 1 Task 3 added/preferred Zoo config paths: `~/.config/zoo-code/zoo.jsonc`, project `zoo.jsonc`, `.zoo/rules/*.md`, `.zoo/modes/*.json`, and `.zooignore`. Kilo/OpenCode config paths remain as lower-priority migration fallbacks where useful.
-- `packages/zoo-cli` still depends on Kilo/OpenCode workspace packages and Bun/OpenTUI tooling that are not reconciled into the Zoo pnpm workspace yet. To keep the workspace green, default `@zoo-code/cli` `build`, `test`, and `check-types` scripts are explicit placeholder commands; the original imported commands are preserved as `build:opencode`, `test:opencode`, `test:ci:opencode`, and `typecheck`.
+- `packages/zoo-cli` still contains imported Kilo/OpenCode code that references unreconciled runtime modules and Bun/OpenTUI tooling. To keep the workspace green, default `@zoo-code/cli` `build`, `test`, and `check-types` scripts are explicit placeholder commands; the original imported commands are preserved as `build:opencode`, `test:opencode`, `test:ci:opencode`, and `typecheck`.
 - Phase 1 Tasks 1-3 verification completed: `node --check packages/zoo-cli/bin/zoo`, `pnpm --filter @zoo-code/cli build`, `pnpm --filter @zoo-code/cli test`, `pnpm --filter @zoo-code/cli check-types`, `pnpm check-types`, `pnpm build`, and `pnpm exec turbo test --log-order grouped --output-logs new-only --concurrency=1`.
 - Direct imported Kilo package verification remains blocked until dependency/toolchain reconciliation: `bun test ...` fails before execution because `@opentui/solid/preload` is missing, and `bun run typecheck` fails because `tsgo` is not installed.
+- Phase 1 Task 4 removed `@kilocode/kilo-gateway` and `@kilocode/kilo-indexing` dependencies from `packages/zoo-cli`, removed active source imports of those packages, filtered the Kilo gateway provider out of `models.dev` results, disabled bundled indexing with a local stub, and documented BYOK provider onboarding via `models.dev` in the CLI README.
+- `pnpm install` now completes after replacing imported Bun catalog specs with pinned versions and removing unresolved imported workspace-only dependencies from `packages/zoo-cli/package.json`.
+- Phase 1 Task 4 verification completed: `pnpm install`, `node --check packages/zoo-cli/bin/zoo`, `pnpm --filter @zoo-code/cli build`, `pnpm --filter @zoo-code/cli test`, `pnpm --filter @zoo-code/cli check-types`, `pnpm check-types`, `pnpm build`, `pnpm exec turbo test --log-order grouped --output-logs new-only --concurrency=1`, and source/package searches confirming no active `@kilocode/kilo-gateway` or `@kilocode/kilo-indexing` imports remain under `packages/zoo-cli/src` or `packages/zoo-cli/package.json`.
 
 ## How to update this file
 

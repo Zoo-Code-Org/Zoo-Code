@@ -6,6 +6,7 @@
 
 - Rebrand the exported CLI package metadata and binary entrypoints to Zoo Code (`zoo` and `zoo-code`).
 - Prefer Zoo config paths for global/project config, rules, modes, and ignore files while retaining Kilo/OpenCode migration fallbacks.
+- Remove Kilo gateway and indexing package dependencies; providers now come from the OpenCode-style `models.dev` catalog with BYOK onboarding and no built-in Zoo inference provider.
 
 ## 7.2.51
 

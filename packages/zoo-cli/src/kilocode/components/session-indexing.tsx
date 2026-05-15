@@ -4,9 +4,9 @@ import { useSync } from "@tui/context/sync"
 import { useTheme } from "@tui/context/theme"
 import { indexingEnabled } from "../indexing-feature"
 import { formatIndexingLabel } from "../indexing-label"
-import type { IndexingStatusState } from "@kilocode/kilo-indexing/status"
+import type { KiloIndexing } from "../indexing"
 
-function tone(state: IndexingStatusState, theme: ReturnType<typeof useTheme>["theme"]) {
+function tone(state: KiloIndexing.StatusState, theme: ReturnType<typeof useTheme>["theme"]) {
 	if (state === "Complete") return theme.success
 	if (state === "Error") return theme.error
 	if (state === "In Progress") return theme.warning

@@ -40,7 +40,9 @@ import { DevSetupCommand, DevAliasCommand } from "./kilocode/cli/dev-setup" // k
 // kilocode_change start - Import telemetry, instance disposal, and legacy migration
 import { Telemetry } from "@kilocode/kilo-telemetry"
 import { InstanceStore } from "./project/instance-store" // kilocode_change
-import { migrateLegacyKiloAuth, ENV_FEATURE, ENV_VERSION } from "@kilocode/kilo-gateway"
+const ENV_FEATURE = "KILOCODE_FEATURE"
+const ENV_VERSION = "KILOCODE_VERSION"
+async function migrateLegacyKiloAuth(..._args: unknown[]) {}
 
 // kilocode_change - set feature for tracking. 'serve' is spawned by other services
 // (extension, cloud) which set their own KILOCODE_FEATURE env var. Direct CLI use

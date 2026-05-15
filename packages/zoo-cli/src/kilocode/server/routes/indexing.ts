@@ -1,11 +1,9 @@
 import { lazy } from "@/util/lazy"
-import { createIndexingRoutes } from "@kilocode/kilo-indexing/server"
+import { Hono } from "hono"
 
 export const IndexingRoutes = lazy(() =>
-	createIndexingRoutes({
-		current: async () => {
-			const mod = await import("@/kilocode/indexing")
-			return mod.KiloIndexing.current()
-		},
+	new Hono().get("/status", async (c) => {
+		const mod = await import("@/kilocode/indexing")
+		return c.json(await mod.KiloIndexing.current())
 	}),
 )

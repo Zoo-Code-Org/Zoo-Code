@@ -34,7 +34,6 @@ import { handleSuggestionEvent } from "@/kilocode/suggestion/tui/sync" // kiloco
 import { useToast } from "@tui/ui/toast" // kilocode_change
 import * as Log from "@opencode-ai/core/util/log"
 import { emptyConsoleState, type ConsoleState } from "@/config/console-state"
-import type { IndexingStatus } from "@kilocode/kilo-indexing/status" // kilocode_change
 import { KiloIndexing } from "@/kilocode/indexing" // kilocode_change
 import path from "path"
 import { useKV } from "./kv"
@@ -92,7 +91,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 			}
 			formatter: FormatterStatus[]
 			vcs: VcsInfo | undefined
-			indexing: IndexingStatus // kilocode_change
+			indexing: KiloIndexing.Status // kilocode_change
 		}>({
 			provider_next: {
 				all: [],

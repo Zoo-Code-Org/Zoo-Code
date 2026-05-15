@@ -9,11 +9,11 @@ import { useRoute } from "../../context/route"
 import { useEvent } from "../../context/event" // kilocode_change
 import { RemoteIndicator } from "@/kilocode/remote-tui" // kilocode_change
 import { formatIndexingLabel } from "@/kilocode/indexing-label" // kilocode_change
-import type { IndexingStatusState } from "@kilocode/kilo-indexing/status" // kilocode_change
+import type { KiloIndexing } from "@/kilocode/indexing" // kilocode_change
 import { indexingEnabled } from "@/kilocode/indexing-feature" // kilocode_change
 
 // kilocode_change start
-function indexingTone(state: IndexingStatusState, theme: ReturnType<typeof useTheme>["theme"]) {
+function indexingTone(state: KiloIndexing.StatusState, theme: ReturnType<typeof useTheme>["theme"]) {
 	if (state === "Complete") return theme.success
 	if (state === "Error") return theme.error
 	if (state === "In Progress") return theme.warning

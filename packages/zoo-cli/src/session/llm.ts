@@ -21,10 +21,6 @@ import { SessionID } from "@/session/schema"
 import { Auth } from "@/auth"
 // kilocode_change start
 import { DEFAULT_HEADERS } from "@/kilocode/const"
-import { getKiloProjectId } from "@/kilocode/project-id"
-import { HEADER_PROJECTID, HEADER_MACHINEID, HEADER_TASKID } from "@kilocode/kilo-gateway"
-import { Identity } from "@kilocode/kilo-telemetry"
-import { makeRuntime } from "@/effect/run-service"
 import { KiloLLM } from "@/kilocode/session/llm"
 // kilocode_change end
 import { Installation } from "@/installation"
@@ -217,16 +213,6 @@ const live: Layer.Layer<
 				},
 			)
 
-			// kilocode_change start - resolve project ID and machine ID for kilo provider
-			const isKilo = input.model.api.npm === "@kilocode/kilo-gateway"
-			const kiloProjectId = yield* isKilo
-				? Effect.promise(() => getKiloProjectId().catch(() => undefined))
-				: Effect.succeed(undefined)
-			const machineId = yield* isKilo
-				? Effect.promise(() => Identity.getMachineId().catch(() => undefined))
-				: Effect.succeed(undefined)
-			// kilocode_change end
-
 			const tools = resolveTools(input)
 			// kilocode_change start - cap maxOutputTokens to fit within context after estimating real input size
 			params.maxOutputTokens = KiloLLM.capOutputTokens({
@@ -378,10 +364,6 @@ const live: Layer.Layer<
 					})
 				: undefined
 
-			const opencodeProjectID = input.model.providerID.startsWith("opencode")
-				? (yield* InstanceState.context).project.id
-				: undefined
-
 			return streamText({
 				onError(error) {
 					l.error("stream error", {
@@ -419,25 +401,10 @@ const live: Layer.Layer<
 				maxOutputTokens: params.maxOutputTokens,
 				abortSignal: input.abort,
 				headers: {
-					...(input.model.providerID.startsWith("kilo") // kilocode_change
-						? {
-								"x-kilo-project": opencodeProjectID,
-								"x-kilo-session": input.sessionID,
-								"x-kilo-request": input.user.id,
-								"x-kilo-client": Flag.KILO_CLIENT,
-							}
-						: {
-								"x-session-affinity": input.sessionID,
-								...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
-								"User-Agent": `opencode/${InstallationVersion}`,
-								...(input.model.providerID !== "anthropic" ? DEFAULT_HEADERS : undefined), // kilocode_change
-							}),
-					// kilocode_change start - headers for kilo provider
-					...(isKilo && input.agent.name ? { "x-kilocode-mode": input.agent.name.toLowerCase() } : {}),
-					...(isKilo && kiloProjectId ? { [HEADER_PROJECTID]: kiloProjectId } : {}),
-					...(isKilo && machineId ? { [HEADER_MACHINEID]: machineId } : {}),
-					...(isKilo ? { [HEADER_TASKID]: input.sessionID } : {}),
-					// kilocode_change end
+					"x-session-affinity": input.sessionID,
+					...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
+					"User-Agent": `opencode/${InstallationVersion}`,
+					...(input.model.providerID !== "anthropic" ? DEFAULT_HEADERS : undefined), // kilocode_change
 					...input.model.headers,
 					...headers,
 				},

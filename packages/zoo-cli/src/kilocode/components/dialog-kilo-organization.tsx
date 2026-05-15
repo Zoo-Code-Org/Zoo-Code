@@ -9,8 +9,16 @@ import { useDialog } from "@tui/ui/dialog"
 import { useSync } from "@tui/context/sync"
 import { useToast } from "@tui/ui/toast"
 import { DialogSelect } from "@tui/ui/dialog-select"
-import type { Organization } from "@kilocode/kilo-gateway"
-import { getOrganizationOptions, getDefaultOrganizationSelection } from "@kilocode/kilo-gateway/tui"
+
+type Organization = { id: string; name: string; role?: string }
+
+function getOrganizationOptions(organizations: Organization[]) {
+	return organizations.map((org) => ({ value: org.id, label: org.name }))
+}
+
+function getDefaultOrganizationSelection(organizations: Organization[]) {
+	return organizations[0]?.id ?? null
+}
 
 // These types are OpenCode-internal and imported at runtime
 type UseSDK = any
