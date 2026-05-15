@@ -1,0 +1,11 @@
+{
+	"name": "@kilocode/kilo-telemetry",
+	"version": "7.2.52",
+	"type": "module",
+	"license": "MIT",
+	"private": true,
+	"description": "Zoo Code no-op compatibility stub for Kilo CLI telemetry imports.",
+	"exports": {
+		".": "./src/index.ts"
+	}
+}

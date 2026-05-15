@@ -1,5 +1,9 @@
 # Zoo Code CLI Integration Development Plan
 
+## Ad hoc maintenance completed
+
+- [✅] Restore imported Zoo CLI runtime alias resolution by wiring Kilo's `@opencode-ai/core` workspace package and a no-op telemetry compatibility stub.
+
 ## Phase 0 — Fork and Rebrand
 
 1. Fork source repositories and establish upstream references

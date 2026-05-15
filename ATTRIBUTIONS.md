@@ -12,6 +12,7 @@ This project is derived from and/or integrates work from the upstream projects l
 ## Imported Source Inventory
 
 - `packages/zoo-cli` imports Kilo Code's `packages/opencode` from `Kilo-Org/kilocode` commit `a4218d893d4b7ecf6921531c553d84905b8510c0` and keeps a package-local MIT `LICENSE` copied from that source revision.
+- `packages/opencode-core` imports Kilo Code's `packages/core` from `Kilo-Org/kilocode` commit `a4218d893d4b7ecf6921531c553d84905b8510c0` under its upstream package name `@opencode-ai/core` so imported CLI aliases resolve.
 
 ## License Notes
 
