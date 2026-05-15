@@ -76,6 +76,22 @@ Zoo Code CLI supports custom modes from `{project}/.zoo/modes/*.json` and reads 
 
 Zoo Code CLI loads `{project}/AGENTS.md` as project instructions and `{project}/.zoo/rules/*.md` as rule files for agent sessions. Rules are loaded in deterministic filename order after AGENTS instructions; missing files and empty rules directories are ignored.
 
+## Build And Test
+
+The default package build runs the current-platform binary build and smoke-tests `zoo --version`:
+
+```bash
+pnpm --filter @zoo-code/cli build
+```
+
+`test` runs the fast focused utility subset. `test:opencode` runs the broader imported OpenCode/Kilo test suite through the isolated runner. The broader suite intentionally quarantines imported tests that assert removed Kilo gateway/indexing behavior, legacy Kilo config precedence, or unresolved upstream-only release assumptions.
+
+```bash
+pnpm --filter @zoo-code/cli test
+pnpm --filter @zoo-code/cli test:opencode
+pnpm --filter @zoo-code/cli check-types
+```
+
 ## Alternative Installation
 
 ### Homebrew (macOS/Linux)

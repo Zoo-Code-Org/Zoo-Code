@@ -5,6 +5,7 @@
 - [✅] Restore imported Zoo CLI runtime alias resolution by wiring Kilo's `@opencode-ai/core` workspace package and a no-op telemetry compatibility stub.
 - [✅] Import Kilo upstream `@kilocode/sdk` and `@kilocode/plugin` as local workspace packages for CLI blocker reduction without reintroducing Kilo gateway/indexing packages.
 - [✅] Restore real `@zoo-code/cli` typechecking in workspace `pnpm check-types` by reconciling imported Kilo/OpenCode type drift and stale gateway/indexing tests.
+- [✅] Restore `@zoo-code/cli` broader imported test and build blocker coverage by running `test:opencode` through an explicit quarantine list and aligning `build:opencode` with the current-platform monorepo build path.
 
 ## Phase 0 — Fork and Rebrand
 
