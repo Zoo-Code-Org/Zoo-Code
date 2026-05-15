@@ -62,6 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fix bundled CLI markdown skill loading under Bun so prompt tests and runtime skill content use the actual markdown text.
 - Add `zoo agent list --format json` for scripting-friendly agent metadata output.
 - Document MCP server config migration to portable `zoo.jsonc` and pin MCP coverage in the generated config schema test.
+- Update the Effect HttpApi checklist to include implemented worktree diff routes.
 
 ## [3.54.0] - 2026-05-08
 

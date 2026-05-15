@@ -285,6 +285,9 @@ This checklist tracks bridge parity only. Checked routes are available through t
 - [x] `POST /experimental/worktree` - create worktree.
 - [x] `DELETE /experimental/worktree` - remove worktree.
 - [x] `POST /experimental/worktree/reset` - reset worktree.
+- [x] `GET /experimental/worktree/diff` - full worktree diff.
+- [x] `GET /experimental/worktree/diff/summary` - summarized worktree diff metadata.
+- [x] `GET /experimental/worktree/diff/file` - single worktree diff detail.
 - [x] `GET /experimental/session` - global session list.
 - [x] `GET /experimental/resource` - MCP resources.
 

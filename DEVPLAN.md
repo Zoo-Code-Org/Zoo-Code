@@ -482,7 +482,7 @@
     - **Depends on:** Phase 1, Task 7; Phase 3, Task 12.
     - **Can parallelize with:** Phase 5, Task 4.
 
-    - **Progress:** Closed a narrow MCP parity documentation/schema gap: root migration notes now list project MCP servers as `zoo.jsonc` `mcp` config with legacy `.kilocode/mcp.json` and `.kilo/mcp.json` as CLI migration fallbacks, and generated `zoo.jsonc` schema coverage now pins local and remote MCP config acceptance.
+    - **Progress:** Closed a narrow MCP parity documentation/schema gap: root migration notes now list project MCP servers as `zoo.jsonc` `mcp` config with legacy `.kilocode/mcp.json` and `.kilo/mcp.json` as CLI migration fallbacks, and generated `zoo.jsonc` schema coverage now pins local and remote MCP config acceptance. Closed a narrow worktree parity checklist gap by listing the already-implemented Effect HttpApi worktree diff, diff summary, and diff-file routes.
 
 6. Add CLI JSON output for scripting
 
