@@ -1,6 +1,7 @@
 import { test, expect, describe, mock, afterEach, beforeEach, spyOn } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
+import z from "zod"
 import { Config } from "@/config/config"
 import { ConfigManaged } from "@/config/managed"
 import { ConfigParse } from "../../src/config/parse"
@@ -459,6 +460,49 @@ test("project zoo.jsonc overrides global zoo.jsonc", async () => {
 		;(Global.Path as { config: string }).config = prevConfig
 		await clear(true)
 	}
+})
+
+test("generated zoo.jsonc schema covers provider model agent rules and permissions", () => {
+	const schema = z.toJSONSchema(Config.Info.zod, { io: "input" }) as { properties?: Record<string, unknown> }
+
+	expect(Object.keys(schema.properties ?? {})).toEqual(
+		expect.arrayContaining(["provider", "model", "default_agent", "agent", "instructions", "permission"]),
+	)
+
+	const parsed = Config.Info.zod.safeParse({
+		$schema: "https://zoo-code.ai/config.json",
+		provider: {
+			litellm: {
+				name: "LiteLLM",
+				npm: "@ai-sdk/openai-compatible",
+				api: "http://localhost:4000/v1",
+				models: { "proxy-model": { name: "Proxy Model" } },
+			},
+		},
+		model: "litellm/proxy-model",
+		default_agent: "reviewer",
+		agent: {
+			reviewer: {
+				description: "Review code changes",
+				mode: "primary",
+				prompt: "Review the change for correctness.",
+				model: "litellm/proxy-model",
+				permission: {
+					read: "allow",
+					edit: { "src/**": "ask" },
+					bash: "deny",
+				},
+			},
+		},
+		instructions: ["AGENTS.md", ".zoo/rules/security.md"],
+		permission: {
+			read: "allow",
+			edit: { "src/**": "ask" },
+			bash: "deny",
+		},
+	})
+
+	expect(parsed.success).toBe(true)
 })
 
 test("loads Zoo-native .zoo/modes as agents through config loader", async () => {

@@ -37,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Include read-only portable provider metadata in VS Code extension state when portable core is enabled, without mutating legacy provider profiles.
 - Show portable provider config as read-only in VS Code settings and avoid saving it into legacy provider profiles.
 - Add Zoo CLI config-loader coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
+- Add Zoo CLI generated-schema coverage for `zoo.jsonc` provider, model, agent, rules-path, and permission fields.
 - Add Zoo CLI config-loader coverage for project `zoo.jsonc` provider, primary agent, model, and instruction fields.
 - Add Zoo CLI config-loader coverage for `.zoo/modes`, `.zoo/rules`, `.zooignore`, and Zoo-over-legacy mode precedence.
 - Add Zoo CLI config-loader coverage for project `zoo.jsonc` precedence over global Zoo config.
