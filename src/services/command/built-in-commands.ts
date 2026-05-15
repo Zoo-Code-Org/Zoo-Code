@@ -8,6 +8,17 @@ interface BuiltInCommandDefinition {
 }
 
 const BUILT_IN_COMMANDS: Record<string, BuiltInCommandDefinition> = {
+	compact: {
+		name: "compact",
+		description: "Manually condense the current task context to free up tokens",
+		content: "",
+	},
+	"compact-and": {
+		name: "compact-and",
+		description: "Condense context, then send the following message",
+		argumentHint: "<message to send after condensing>",
+		content: "",
+	},
 	init: {
 		name: "init",
 		description: "Analyze codebase and create concise AGENTS.md files for AI assistants",
