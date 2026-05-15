@@ -56,7 +56,7 @@ export class PortableSessionAdapter {
 
 	/** Subscribe to portable-core server events, including tool approval requests. */
 	subscribeEvents(): AsyncIterableIterator<ZooServerEvent> {
-		return this.client.subscribeEvents()
+		return validateServerEvents(this.client.subscribeEvents())
 	}
 
 	/** Reply to a pending portable-core permission request. */
@@ -97,6 +97,42 @@ async function* validateMessageChunks(
 		}
 
 		yield chunk
+	}
+}
+
+async function* validateServerEvents(
+	events: AsyncIterableIterator<ZooServerEvent>,
+): AsyncIterableIterator<ZooServerEvent> {
+	for await (const event of events) {
+		if (!event || typeof event !== "object" || typeof (event as { type?: unknown }).type !== "string") {
+			throw new Error("Portable core subscribeEvents returned an event without a string type")
+		}
+
+		if ((event as { type: string }).type === "permission.asked") {
+			validatePermissionAskedEvent(event)
+		}
+
+		yield event
+	}
+}
+
+function validatePermissionAskedEvent(event: unknown): asserts event is ZooServerEvent {
+	const properties = (event as { properties?: unknown }).properties
+	if (!properties || typeof properties !== "object") {
+		throw new Error("Portable core subscribeEvents returned permission.asked without properties")
+	}
+
+	const request = properties as { id?: unknown; sessionID?: unknown; permission?: unknown }
+	if (typeof request.id !== "string") {
+		throw new Error("Portable core subscribeEvents returned permission.asked without a string id")
+	}
+
+	if (typeof request.sessionID !== "string") {
+		throw new Error("Portable core subscribeEvents returned permission.asked without a string sessionID")
+	}
+
+	if (typeof request.permission !== "string") {
+		throw new Error("Portable core subscribeEvents returned permission.asked without a string permission")
 	}
 }
 

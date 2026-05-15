@@ -361,7 +361,7 @@
 - **Depends on:** Phase 3, Tasks 5-10; Phase 2 complete.
 - **Can parallelize with:** None.
 
-    - **Progress:** Adapter-level deterministic validation is in place for portable-core sessions, streamed message chunks, mode lists, and provider-config responses; full extension e2e flow validation still depends on completing visible approval, provider config, and mode UI seams.
+- **Progress:** Adapter-level deterministic validation is in place for portable-core sessions, streamed message chunks, server events, `permission.asked` event properties, mode lists, and provider-config responses; full extension e2e flow validation still depends on completing visible approval, provider config, and mode UI seams.
 
 ## Phase 4 — Config Model Unification
 

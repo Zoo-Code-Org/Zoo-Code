@@ -49,7 +49,7 @@ describe("PortableSessionAdapter", () => {
 	it("maps event subscription and permission replies to the Zoo SDK client", async () => {
 		const client = createClient()
 		const adapter = new PortableSessionAdapter(client as any)
-		const events = []
+		const events: unknown[] = []
 
 		for await (const event of adapter.subscribeEvents()) events.push(event)
 		await adapter.replyPermission("perm_1", { reply: "once" })
@@ -59,6 +59,67 @@ describe("PortableSessionAdapter", () => {
 		])
 		expect(client.subscribeEvents).toHaveBeenCalledTimes(1)
 		expect(client.replyPermission).toHaveBeenCalledWith("perm_1", { reply: "once" })
+	})
+
+	it("rejects malformed streamed server events", async () => {
+		const client = createClient()
+		client.subscribeEvents.mockImplementationOnce(async function* () {
+			yield { type: "server.connected", properties: { ok: true } }
+			yield { properties: {} }
+		})
+		const adapter = new PortableSessionAdapter(client as any)
+		const events: unknown[] = []
+
+		await expect(async () => {
+			for await (const event of adapter.subscribeEvents()) {
+				events.push(event)
+			}
+		}).rejects.toThrow("subscribeEvents returned an event without a string type")
+
+		expect(events).toEqual([{ type: "server.connected", properties: { ok: true } }])
+	})
+
+	it("rejects malformed permission asked events", async () => {
+		const client = createClient()
+		client.subscribeEvents.mockImplementationOnce(async function* () {
+			yield { type: "permission.asked", properties: { id: "perm_1", permission: "bash" } }
+		})
+		const adapter = new PortableSessionAdapter(client as any)
+
+		await expect(async () => {
+			for await (const event of adapter.subscribeEvents()) {
+				void event
+				// Drain stream to trigger validation.
+			}
+		}).rejects.toThrow("subscribeEvents returned permission.asked without a string sessionID")
+	})
+
+	it("preserves extra fields on valid permission asked events", async () => {
+		const event = {
+			type: "permission.asked",
+			properties: {
+				id: "perm_1",
+				sessionID: "session-1",
+				permission: "edit",
+				patterns: ["src/**/*.ts"],
+				metadata: { filediff: "diff --git" },
+				always: true,
+				extra: { value: 1 },
+			},
+			extraEventField: "kept",
+		}
+		const client = createClient()
+		client.subscribeEvents.mockImplementationOnce(async function* () {
+			yield event
+		})
+		const adapter = new PortableSessionAdapter(client as any)
+		const events = []
+
+		for await (const item of adapter.subscribeEvents()) {
+			events.push(item)
+		}
+
+		expect(events).toEqual([event])
 	})
 
 	it("maps mode listing to the Zoo SDK client", async () => {
