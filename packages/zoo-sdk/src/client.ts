@@ -10,6 +10,9 @@ import type {
 	PermissionAlwaysRules,
 	PermissionReply,
 	PermissionRequest,
+	QuestionAnswer,
+	QuestionListOptions,
+	QuestionRequest,
 	ProviderAuthMethods,
 	ProviderListResult,
 	ProviderOAuthAuthorizeOptions,
@@ -80,6 +83,14 @@ function sessionDiffQuery(options: SessionDiffOptions = {}) {
 }
 
 function promptAsyncQuery(options: Pick<PromptAsyncOptions, "directory" | "workspace"> = {}) {
+	const params = new URLSearchParams()
+	if (options.directory) params.set("directory", options.directory)
+	if (options.workspace) params.set("workspace", options.workspace)
+	const query = params.toString()
+	return query ? `?${query}` : ""
+}
+
+function questionQuery(options: QuestionListOptions = {}) {
 	const params = new URLSearchParams()
 	if (options.directory) params.set("directory", options.directory)
 	if (options.workspace) params.set("workspace", options.workspace)
@@ -385,6 +396,46 @@ export class ZooClient {
 		for await (const event of this.#transport.stream({ path: "/event" })) {
 			yield event as ZooServerEvent
 		}
+	}
+
+	/** List pending portable-core question requests. */
+	async listQuestions(options: QuestionListOptions = {}): Promise<QuestionRequest[]> {
+		return (
+			unwrap(
+				await this.#transport.request<QuestionRequest[] | { data?: QuestionRequest[] }>({
+					path: `/question${questionQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Reply to a pending portable-core question request. */
+	async replyQuestion(
+		requestID: string,
+		answers: QuestionAnswer[],
+		options: QuestionListOptions = {},
+	): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/question/${encodeURIComponent(requestID)}/reply${questionQuery(options)}`,
+					body: { answers },
+				}),
+			) ?? false
+		)
+	}
+
+	/** Reject a pending portable-core question request. */
+	async rejectQuestion(requestID: string, options: QuestionListOptions = {}): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/question/${encodeURIComponent(requestID)}/reject${questionQuery(options)}`,
+				}),
+			) ?? false
+		)
 	}
 
 	/** Reply to a pending portable-core permission request. */

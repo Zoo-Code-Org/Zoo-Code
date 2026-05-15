@@ -7,6 +7,27 @@ function transport(): ZooTransport & { requests: any[] } {
 		requests,
 		async request(input) {
 			requests.push(input)
+			if (input.path === "/question") {
+				return {
+					data: [
+						{
+							id: "que_1",
+							sessionID: "ses_1",
+							questions: [
+								{
+									question: "Continue?",
+									header: "Confirm",
+									options: [{ label: "Yes", description: "Continue" }],
+								},
+							],
+						},
+					],
+				}
+			}
+			if (input.path === "/question/que_1/reply?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: true }
+			}
+			if (input.path === "/question/que_1/reject") return { data: true }
 			if (input.path === "/permission")
 				return { data: [{ id: "perm_1", sessionID: "ses_1", permission: "bash" }] }
 			if (input.path === "/permission/perm_1/always-rules") return { data: true }
@@ -368,6 +389,39 @@ describe("ZooClient", () => {
 				path: "/permission/perm_1/always-rules",
 				body: { approvedAlways: ["npm test"], deniedAlways: ["rm -rf *"] },
 			},
+		])
+	})
+
+	test("lists and answers question requests", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.listQuestions()).resolves.toEqual([
+			{
+				id: "que_1",
+				sessionID: "ses_1",
+				questions: [
+					{
+						question: "Continue?",
+						header: "Confirm",
+						options: [{ label: "Yes", description: "Continue" }],
+					},
+				],
+			},
+		])
+		await expect(
+			client.replyQuestion("que_1", [["Yes"]], { directory: "/repo/root", workspace: "workspace-1" }),
+		).resolves.toBe(true)
+		await expect(client.rejectQuestion("que_1")).resolves.toBe(true)
+
+		expect(mock.requests.slice(-3)).toEqual([
+			{ path: "/question" },
+			{
+				method: "POST",
+				path: "/question/que_1/reply?directory=%2Frepo%2Froot&workspace=workspace-1",
+				body: { answers: [["Yes"]] },
+			},
+			{ method: "POST", path: "/question/que_1/reject" },
 		])
 	})
 

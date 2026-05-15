@@ -192,6 +192,54 @@ export type Permission = {
 	pattern?: string
 }
 
+/** One selectable answer option for a portable-core question. */
+export type QuestionOption = {
+	label: string
+	description: string
+	labelKey?: string
+	descriptionKey?: string
+	mode?: string
+	[key: string]: unknown
+}
+
+/** One question shown to the user. */
+export type QuestionInfo = {
+	question: string
+	header: string
+	options: QuestionOption[]
+	multiple?: boolean
+	questionKey?: string
+	headerKey?: string
+	custom?: boolean
+	[key: string]: unknown
+}
+
+/** Optional tool metadata attached to a question request. */
+export type QuestionTool = {
+	messageID: string
+	callID: string
+	[key: string]: unknown
+}
+
+/** Pending portable-core question request. */
+export type QuestionRequest = {
+	id: string
+	sessionID: string
+	questions: QuestionInfo[]
+	blocking?: boolean
+	tool?: QuestionTool
+	[key: string]: unknown
+}
+
+/** Selected labels for one question. */
+export type QuestionAnswer = string[]
+
+/** Optional workspace scoping for question routes. */
+export type QuestionListOptions = {
+	directory?: string
+	workspace?: string
+}
+
 /** Git worktree metadata shared across CLI and editor surfaces. */
 export type WorktreeInfo = {
 	/** Worktree name returned by the portable core. */
