@@ -2,6 +2,7 @@ import type * as vscode from "vscode"
 import { createZooServer, type ZooClient, type ZooServerHandle } from "@zoo-code/sdk"
 
 import { usePortableCore } from "../../utils/config"
+import { PortableSessionAdapter } from "./PortableSessionAdapter"
 
 /** Activation-time owner for the SDK-backed portable core process and client. */
 export class PortableCoreService implements vscode.Disposable {
@@ -53,6 +54,11 @@ export class PortableCoreService implements vscode.Disposable {
 			)
 			return undefined
 		}
+	}
+
+	/** Create the session adapter used by future SDK-backed task/session paths. */
+	createSessionAdapter(): PortableSessionAdapter {
+		return new PortableSessionAdapter(this.client)
 	}
 
 	/** Stop SDK client resources and the spawned CLI server, if this process owns it. */

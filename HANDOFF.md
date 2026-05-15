@@ -124,6 +124,9 @@
     - `packages/types/src/webview-protocol.ts` exports `ZOO_WEBVIEW_PROTOCOL_VERSION = 1`, portable-core-relevant webview action types, host message types, approval responses, and current-to-target SDK mapping metadata.
     - `packages/types/src/__tests__/webview-protocol.test.ts` pins the contract for new task, follow-up send, streaming chunks, session state/history, approvals, abort, terminal operation, and mode changes.
     - `docs/webview-message-protocol.md` documents the current protocol sources, compatibility rules, and target SDK mapping before behavior rewiring.
+- Phase 3 Task 5 started, not complete:
+    - `packages/zoo-vscode/src/services/portable-core/PortableSessionAdapter.ts` is a narrow VS Code-side adapter over `ZooClient.createSession()`, `listSessions()`, `getSession()`, `sendMessage()`, and `abortSession()`.
+    - `PortableCoreService.createSessionAdapter()` exposes the adapter from the activation bootstrap, but `ClineProvider` and webview behavior are not routed through it yet.
 
 ## How to update this file
 
