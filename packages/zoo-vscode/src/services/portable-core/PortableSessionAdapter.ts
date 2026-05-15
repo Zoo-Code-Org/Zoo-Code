@@ -11,18 +11,22 @@ export class PortableSessionAdapter {
 	constructor(private readonly client: ZooClient) {}
 
 	/** Create a portable-core session through the Zoo SDK. */
-	createSession(options: SessionCreateOptions = {}): Promise<Session> {
-		return this.client.createSession(options)
+	async createSession(options: SessionCreateOptions = {}): Promise<Session> {
+		return validateSession(await this.client.createSession(options), "createSession")
 	}
 
 	/** List portable-core sessions, optionally scoped to a workspace directory. */
-	listSessions(options: SessionListOptions = {}): Promise<Session[]> {
-		return this.client.listSessions(options)
+	async listSessions(options: SessionListOptions = {}): Promise<Session[]> {
+		const sessions = await this.client.listSessions(options)
+		if (!Array.isArray(sessions)) {
+			throw new Error("Portable core listSessions returned an invalid session list")
+		}
+		return sessions.map((session, index) => validateSession(session, `listSessions[${index}]`))
 	}
 
 	/** Fetch a portable-core session snapshot. */
-	getSession(sessionID: string): Promise<Session> {
-		return this.client.getSession(sessionID)
+	async getSession(sessionID: string): Promise<Session> {
+		return validateSession(await this.client.getSession(sessionID), "getSession")
 	}
 
 	/** Send a message to the portable core and stream response chunks. */
@@ -31,11 +35,31 @@ export class PortableSessionAdapter {
 		message: string,
 		options: PortableSessionSendOptions = {},
 	): AsyncIterableIterator<MessageChunk> {
-		return this.client.sendMessage(sessionID, message, options)
+		return validateMessageChunks(this.client.sendMessage(sessionID, message, options))
 	}
 
 	/** Abort a portable-core session. */
 	abortSession(sessionID: string): Promise<void> {
 		return this.client.abortSession(sessionID)
+	}
+}
+
+function validateSession(value: unknown, source: string): Session {
+	if (!value || typeof value !== "object" || typeof (value as { id?: unknown }).id !== "string") {
+		throw new Error(`Portable core ${source} returned a session without a string id`)
+	}
+
+	return value as Session
+}
+
+async function* validateMessageChunks(
+	chunks: AsyncIterableIterator<MessageChunk>,
+): AsyncIterableIterator<MessageChunk> {
+	for await (const chunk of chunks) {
+		if (!chunk || typeof chunk !== "object" || typeof (chunk as { type?: unknown }).type !== "string") {
+			throw new Error("Portable core sendMessage returned a chunk without a string type")
+		}
+
+		yield chunk
 	}
 }

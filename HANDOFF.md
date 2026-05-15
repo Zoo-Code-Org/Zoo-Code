@@ -139,6 +139,10 @@
     - `ClineProvider.cancelTask()` now calls `PortableSessionAdapter.abortSession()` for the active SDK session when portable core is enabled and keeps the existing extension-host cancellation path when no adapter is present.
     - Focused coverage was added for portable abort routing and legacy cancel fallback.
     - `@zoo-code/sdk` `createZooServer()` now emits lifecycle callbacks for unexpected restarts, restart-limit exhaustion, and process errors; `PortableCoreService` logs those events to the VS Code output channel with reload/disable guidance.
+- Phase 3 Task 12 started, not complete:
+    - `PortableSessionAdapter` now validates SDK session responses (`id` must be a string) and streamed message chunks (`type` must be a string), preserving extra fields for forward compatibility.
+    - Focused adapter tests cover invalid create/get/list sessions, invalid streamed chunks, and valid extra-field preservation.
+    - Full deterministic portable-core e2e validation remains pending until approval, provider config, and mode seams are stable.
 
 ## How to update this file
 

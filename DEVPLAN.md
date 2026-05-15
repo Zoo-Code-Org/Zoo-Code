@@ -353,6 +353,8 @@
 - **Depends on:** Phase 3, Tasks 5-10; Phase 2 complete.
 - **Can parallelize with:** None.
 
+    - **Progress:** Adapter-level deterministic validation is in place for portable-core sessions and streamed message chunks; full extension e2e flow validation still depends on completing approval, provider config, and mode seams.
+
 ## Phase 4 — Config Model Unification
 
 1. Define `zoo.jsonc` schema

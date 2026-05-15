@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Stream text-only VS Code task messages through `ZooClient.sendMessage()` in portable-core mode, mapping SDK text chunks into the existing webview state/message update protocol.
 - Route VS Code task cancellation through `ZooClient.abortSession()` in portable-core mode while preserving the default extension-host cancellation path.
 - Surface portable-core Zoo CLI process restart, restart-exhaustion, and process-error lifecycle events through the VS Code output channel.
+- Validate portable-core session and message chunk shapes at the VS Code adapter boundary before they reach webview state.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
 ## [3.54.0] - 2026-05-08
