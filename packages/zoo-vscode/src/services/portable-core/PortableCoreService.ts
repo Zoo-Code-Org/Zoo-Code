@@ -1,5 +1,5 @@
 import type * as vscode from "vscode"
-import { createZooServer, type ZooClient, type ZooServerHandle } from "@zoo-code/sdk"
+import { createZooServer, type ZooClient, type ZooServerHandle, type ZooServerLifecycleEvent } from "@zoo-code/sdk"
 
 import { usePortableCore } from "../../utils/config"
 import { PortableSessionAdapter } from "./PortableSessionAdapter"
@@ -41,7 +41,10 @@ export class PortableCoreService implements vscode.Disposable {
 		const abortController = new AbortController()
 
 		try {
-			const handle = await createZooServer({ signal: abortController.signal })
+			const handle = await createZooServer({
+				signal: abortController.signal,
+				onLifecycleEvent: (event) => logLifecycleEvent(outputChannel, event),
+			})
 			const client = await handle.connect()
 			outputChannel.appendLine(
 				`[PortableCore] ${handle.reused ? "Reused" : "Started"} Zoo CLI server at ${handle.ipcPath}`,
@@ -85,5 +88,23 @@ export class PortableCoreService implements vscode.Disposable {
 				`[PortableCore] Failed to stop Zoo CLI server: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		}
+	}
+}
+
+function logLifecycleEvent(outputChannel: vscode.OutputChannel, event: ZooServerLifecycleEvent): void {
+	switch (event.type) {
+		case "restarting":
+			outputChannel.appendLine(
+				`[PortableCore] Zoo CLI server exited unexpectedly; restarting portable core process (attempt ${event.attempt}/${event.limit}).`,
+			)
+			break
+		case "restartLimitExceeded":
+			outputChannel.appendLine(
+				`[PortableCore] Zoo CLI server restart limit exhausted after ${event.limit} attempts. Portable core sessions may fail until VS Code is reloaded or zoo-code.usePortableCore is disabled.`,
+			)
+			break
+		case "processError":
+			outputChannel.appendLine(`[PortableCore] Zoo CLI server process error: ${event.error.message}`)
+			break
 	}
 }

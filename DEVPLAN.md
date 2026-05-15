@@ -287,7 +287,7 @@
     - **Depends on:** Phase 3, Tasks 3 and 4; Phase 2, Task 5.
     - **Can parallelize with:** Phase 3, Task 5 if shared adapters are stable.
 
-7. Rewire abort and process lifecycle UX
+7. [✅] Rewire abort and process lifecycle UX
 
     - **What:** Route abort actions through `ZooClient.abortSession()` when the feature flag is true and surface SDK process lifecycle errors/restarts to the extension logger or user notification path.
     - **Files touched:** Abort command handlers, lifecycle notification/logging modules, tests.

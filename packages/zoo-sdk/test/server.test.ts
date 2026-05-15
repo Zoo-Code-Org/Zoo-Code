@@ -36,4 +36,40 @@ describe("createZooServer", () => {
 		await server.close()
 		expect(fake.procs[0].signalCode).toBe("SIGTERM")
 	})
+
+	test("emits lifecycle event and restarts after unexpected exit", async () => {
+		const fake = fakeSpawn()
+		const events: unknown[] = []
+		await createZooServer({
+			ipcPath: "/tmp/zoo-sdk.sock",
+			spawn: fake.spawn,
+			timeout: 100,
+			restartLimit: 1,
+			onLifecycleEvent: (event) => events.push(event),
+		})
+
+		fake.procs[0].exitCode = 1
+		fake.procs[0].emit("exit", 1, null)
+
+		expect(fake.calls.length).toBe(2)
+		expect(events).toEqual([{ type: "restarting", code: 1, signal: null, attempt: 1, limit: 1 }])
+	})
+
+	test("emits lifecycle event when restart limit is exhausted", async () => {
+		const fake = fakeSpawn()
+		const events: unknown[] = []
+		await createZooServer({
+			ipcPath: "/tmp/zoo-sdk.sock",
+			spawn: fake.spawn,
+			timeout: 100,
+			restartLimit: 0,
+			onLifecycleEvent: (event) => events.push(event),
+		})
+
+		fake.procs[0].exitCode = 1
+		fake.procs[0].emit("exit", 1, null)
+
+		expect(fake.calls.length).toBe(1)
+		expect(events).toEqual([{ type: "restartLimitExceeded", code: 1, signal: null, limit: 0 }])
+	})
 })

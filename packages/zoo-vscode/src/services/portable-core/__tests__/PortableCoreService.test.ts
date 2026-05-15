@@ -53,7 +53,10 @@ describe("PortableCoreService", () => {
 
 		const service = await PortableCoreService.create(createContext() as any, outputChannel as any)
 
-		expect(createZooServer).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) })
+		expect(createZooServer).toHaveBeenCalledWith({
+			signal: expect.any(AbortSignal),
+			onLifecycleEvent: expect.any(Function),
+		})
 		expect(handle.connect).toHaveBeenCalledTimes(1)
 		expect(service?.client).toBe(client)
 		expect(service?.ipcPath).toBe("/tmp/zoo-test.sock")
@@ -102,6 +105,64 @@ describe("PortableCoreService", () => {
 
 		await adapter.createSession({ title: "Adapter smoke" })
 		expect(client.createSession).toHaveBeenCalledWith({ title: "Adapter smoke" })
+	})
+
+	it("logs SDK server restart lifecycle events", async () => {
+		usePortableCore.mockReturnValue(true)
+		const handle = {
+			ipcPath: "/tmp/zoo-test.sock",
+			reused: false,
+			connect: vitest.fn().mockResolvedValue({ close: vitest.fn().mockResolvedValue(undefined) }),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		createZooServer.mockResolvedValue(handle)
+		const outputChannel = createOutputChannel()
+
+		await PortableCoreService.create(createContext() as any, outputChannel as any)
+		const [{ onLifecycleEvent }] = createZooServer.mock.calls[0]
+		onLifecycleEvent({ type: "restarting", code: 1, signal: null, attempt: 1, limit: 3 })
+
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			"[PortableCore] Zoo CLI server exited unexpectedly; restarting portable core process (attempt 1/3).",
+		)
+	})
+
+	it("logs SDK server restart exhaustion lifecycle events", async () => {
+		usePortableCore.mockReturnValue(true)
+		const handle = {
+			ipcPath: "/tmp/zoo-test.sock",
+			reused: false,
+			connect: vitest.fn().mockResolvedValue({ close: vitest.fn().mockResolvedValue(undefined) }),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		createZooServer.mockResolvedValue(handle)
+		const outputChannel = createOutputChannel()
+
+		await PortableCoreService.create(createContext() as any, outputChannel as any)
+		const [{ onLifecycleEvent }] = createZooServer.mock.calls[0]
+		onLifecycleEvent({ type: "restartLimitExceeded", code: 1, signal: null, limit: 3 })
+
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			"[PortableCore] Zoo CLI server restart limit exhausted after 3 attempts. Portable core sessions may fail until VS Code is reloaded or zoo-code.usePortableCore is disabled.",
+		)
+	})
+
+	it("logs SDK server process errors", async () => {
+		usePortableCore.mockReturnValue(true)
+		const handle = {
+			ipcPath: "/tmp/zoo-test.sock",
+			reused: false,
+			connect: vitest.fn().mockResolvedValue({ close: vitest.fn().mockResolvedValue(undefined) }),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		createZooServer.mockResolvedValue(handle)
+		const outputChannel = createOutputChannel()
+
+		await PortableCoreService.create(createContext() as any, outputChannel as any)
+		const [{ onLifecycleEvent }] = createZooServer.mock.calls[0]
+		onLifecycleEvent({ type: "processError", error: new Error("boom") })
+
+		expect(outputChannel.appendLine).toHaveBeenCalledWith("[PortableCore] Zoo CLI server process error: boom")
 	})
 
 	it("continues with the legacy runtime when SDK startup fails", async () => {

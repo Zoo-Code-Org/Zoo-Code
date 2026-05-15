@@ -18,9 +18,16 @@ export type ZooServerOptions = {
 	env?: NodeJS.ProcessEnv
 	/** Restart attempts after unexpected exits. */
 	restartLimit?: number
+	/** Lifecycle callback for host integrations that need restart/error visibility. */
+	onLifecycleEvent?: (event: ZooServerLifecycleEvent) => void
 	/** Spawn implementation for tests. */
 	spawn?: (command: string, args: string[], options: Parameters<typeof launch>[2]) => ChildProcess
 }
+
+export type ZooServerLifecycleEvent =
+	| { type: "restarting"; code: number | null; signal: NodeJS.Signals | null; attempt: number; limit: number }
+	| { type: "restartLimitExceeded"; code: number | null; signal: NodeJS.Signals | null; limit: number }
+	| { type: "processError"; error: Error }
 
 export type ZooServerHandle = {
 	/** IPC path clients should connect to. */
@@ -73,9 +80,16 @@ export async function createZooServer(options: ZooServerOptions = {}): Promise<Z
 			windowsHide: true,
 		})
 		clearAbort = bindAbort(proc, options.signal)
-		proc.on("exit", () => {
+		proc.on("error", (error) => {
+			options.onLifecycleEvent?.({ type: "processError", error })
+		})
+		proc.on("exit", (code, signal) => {
 			if (closing || proc.exitCode === 0 || proc.signalCode) return
-			if (restarts++ >= restartLimit) return
+			if (restarts++ >= restartLimit) {
+				options.onLifecycleEvent?.({ type: "restartLimitExceeded", code, signal, limit: restartLimit })
+				return
+			}
+			options.onLifecycleEvent?.({ type: "restarting", code, signal, attempt: restarts, limit: restartLimit })
 			start()
 		})
 		return proc
