@@ -302,7 +302,7 @@ export const ModelPicker = ({
 							hidePricing={hidePricing}
 						/>
 					)}
-					{!hidePricing && (
+					{!hidePricing && apiConfiguration.apiProvider !== "mimo" && (
 						<div className="text-sm text-vscode-descriptionForeground">
 							<Trans
 								i18nKey="settings:modelPicker.automaticFetch"
