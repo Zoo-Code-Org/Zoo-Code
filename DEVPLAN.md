@@ -309,6 +309,8 @@
     - **Depends on:** Phase 3, Tasks 4 and 6.
     - **Can parallelize with:** Phase 3, Task 7.
 
+    - **Progress:** SDK and VS Code adapter now expose CLI event subscription and permission reply methods for the future approval UI bridge; ClineProvider/webview approval routing is still pending.
+
 9. Rewire provider config access
 
     - **What:** Replace direct reads of VS Code provider settings with SDK/config-derived provider state under the feature flag, while preserving old settings path until migration is complete.

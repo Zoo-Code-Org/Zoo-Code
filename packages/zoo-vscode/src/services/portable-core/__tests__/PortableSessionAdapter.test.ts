@@ -9,6 +9,10 @@ describe("PortableSessionAdapter", () => {
 			yield { type: "text", sessionID: "session-1", text: "hello" }
 		}),
 		abortSession: vitest.fn().mockResolvedValue(undefined),
+		subscribeEvents: vitest.fn().mockImplementation(async function* () {
+			yield { type: "permission.asked", properties: { id: "perm_1", sessionID: "session-1", permission: "bash" } }
+		}),
+		replyPermission: vitest.fn().mockResolvedValue(undefined),
 	})
 
 	it("maps create/list/get session calls to the Zoo SDK client", async () => {
@@ -37,6 +41,21 @@ describe("PortableSessionAdapter", () => {
 		expect(chunks).toEqual([{ type: "text", sessionID: "session-1", text: "hello" }])
 		expect(client.sendMessage).toHaveBeenCalledWith("session-1", "hello", { mode: "code" })
 		expect(client.abortSession).toHaveBeenCalledWith("session-1")
+	})
+
+	it("maps event subscription and permission replies to the Zoo SDK client", async () => {
+		const client = createClient()
+		const adapter = new PortableSessionAdapter(client as any)
+		const events = []
+
+		for await (const event of adapter.subscribeEvents()) events.push(event)
+		await adapter.replyPermission("perm_1", { reply: "once" })
+
+		expect(events).toEqual([
+			{ type: "permission.asked", properties: { id: "perm_1", sessionID: "session-1", permission: "bash" } },
+		])
+		expect(client.subscribeEvents).toHaveBeenCalledTimes(1)
+		expect(client.replyPermission).toHaveBeenCalledWith("perm_1", { reply: "once" })
 	})
 
 	it("rejects malformed session responses", async () => {

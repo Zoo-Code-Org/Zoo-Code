@@ -143,6 +143,10 @@
     - `PortableSessionAdapter` now validates SDK session responses (`id` must be a string) and streamed message chunks (`type` must be a string), preserving extra fields for forward compatibility.
     - Focused adapter tests cover invalid create/get/list sessions, invalid streamed chunks, and valid extra-field preservation.
     - Full deterministic portable-core e2e validation remains pending until approval, provider config, and mode seams are stable.
+- Phase 3 Task 8 started, not complete:
+    - `@zoo-code/sdk` now exposes `subscribeEvents()` for the CLI `/event` stream and `replyPermission()` for `POST /permission/:requestID/reply`, with typed permission request/reply surfaces.
+    - `PortableSessionAdapter` forwards event subscription and permission replies for the future webview approval bridge.
+    - Remaining Task 8 work: map `permission.asked` events into existing `ClineMessage` approval asks, store pending request IDs, and route `yesButtonClicked`/`noButtonClicked` responses back through `replyPermission()`.
 
 ## How to update this file
 

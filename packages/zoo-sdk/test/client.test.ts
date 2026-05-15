@@ -14,6 +14,13 @@ function transport(): ZooTransport & { requests: any[] } {
 		},
 		async *stream(input) {
 			requests.push(input)
+			if (input.path === "/event") {
+				yield {
+					type: "permission.asked",
+					properties: { id: "perm_1", sessionID: "ses_1", permission: "bash" },
+				}
+				return
+			}
 			yield { type: "text", sessionID: "ses_1", text: "hello" }
 			yield { type: "done", sessionID: "ses_1" }
 		},
@@ -56,6 +63,28 @@ describe("ZooClient", () => {
 			method: "POST",
 			path: "/session/ses_1/message",
 			body: { message: "hi", parts: [{ type: "text", text: "hi" }] },
+		})
+	})
+
+	test("subscribes to server events and replies to permission requests", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const events = []
+
+		for await (const event of client.subscribeEvents()) events.push(event)
+		await client.replyPermission("perm_1", { reply: "reject", message: "No thanks" })
+
+		expect(events).toEqual([
+			{
+				type: "permission.asked",
+				properties: { id: "perm_1", sessionID: "ses_1", permission: "bash" },
+			},
+		])
+		expect(mock.requests.at(-2)).toMatchObject({ path: "/event" })
+		expect(mock.requests.at(-1)).toEqual({
+			method: "POST",
+			path: "/permission/perm_1/reply",
+			body: { reply: "reject", message: "No thanks" },
 		})
 	})
 })

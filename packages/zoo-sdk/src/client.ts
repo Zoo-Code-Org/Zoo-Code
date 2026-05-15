@@ -1,11 +1,13 @@
 import { createHttpTransport, createIpcTransport, type ZooTransport } from "./transport/index.js"
 import type {
 	MessageChunk,
+	PermissionReply,
 	SendMessageOptions,
 	Session,
 	SessionCreateOptions,
 	SessionListOptions,
 	ZooEvent,
+	ZooServerEvent,
 } from "./types.js"
 
 export type ZooClientConnectOptions =
@@ -103,6 +105,22 @@ export class ZooClient {
 		set.add(handler as Handler)
 		this.#handlers.set(type, set)
 		return () => set.delete(handler as Handler)
+	}
+
+	/** Subscribe to portable-core server events such as permission requests. */
+	async *subscribeEvents(): AsyncIterableIterator<ZooServerEvent> {
+		for await (const event of this.#transport.stream({ path: "/event" })) {
+			yield event as ZooServerEvent
+		}
+	}
+
+	/** Reply to a pending portable-core permission request. */
+	async replyPermission(requestID: string, reply: PermissionReply): Promise<void> {
+		await this.#transport.request({
+			method: "POST",
+			path: `/permission/${encodeURIComponent(requestID)}/reply`,
+			body: reply,
+		})
 	}
 
 	/** Close any transport resources owned by this client. */

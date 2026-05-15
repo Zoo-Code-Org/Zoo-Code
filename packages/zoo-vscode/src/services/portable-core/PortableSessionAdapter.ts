@@ -1,4 +1,12 @@
-import type { MessageChunk, Session, SessionCreateOptions, SessionListOptions, ZooClient } from "@zoo-code/sdk"
+import type {
+	MessageChunk,
+	PermissionReply,
+	Session,
+	SessionCreateOptions,
+	SessionListOptions,
+	ZooClient,
+	ZooServerEvent,
+} from "@zoo-code/sdk"
 
 export type PortableSessionSendOptions = {
 	mode?: string
@@ -41,6 +49,16 @@ export class PortableSessionAdapter {
 	/** Abort a portable-core session. */
 	abortSession(sessionID: string): Promise<void> {
 		return this.client.abortSession(sessionID)
+	}
+
+	/** Subscribe to portable-core server events, including tool approval requests. */
+	subscribeEvents(): AsyncIterableIterator<ZooServerEvent> {
+		return this.client.subscribeEvents()
+	}
+
+	/** Reply to a pending portable-core permission request. */
+	replyPermission(requestID: string, reply: PermissionReply): Promise<void> {
+		return this.client.replyPermission(requestID, reply)
 	}
 }
 

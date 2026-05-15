@@ -126,3 +126,36 @@ export type SendMessageOptions = {
 
 /** Events emitted by `ZooClient.on`. */
 export type ZooEvent = MessageChunk
+
+/** Permission request emitted by the portable core when a tool needs approval. */
+export type PermissionRequest = {
+	/** Stable permission request identifier. */
+	id: string
+	/** Session that owns the request. */
+	sessionID: string
+	/** Permission capability, such as `bash` or `edit`. */
+	permission: string
+	/** Optional tool name or payload from the portable core. */
+	tool?: unknown
+	/** Suggested always-allow patterns. */
+	patterns?: string[]
+	/** Additional portable-core metadata. */
+	metadata?: unknown
+	/** Whether this request can be answered as an always rule. */
+	always?: boolean
+	/** Additional server-provided fields. */
+	[key: string]: unknown
+}
+
+/** Server event emitted by the Zoo CLI event stream. */
+export type ZooServerEvent =
+	| { type: "permission.asked"; properties: PermissionRequest }
+	| { type: string; properties?: unknown; [key: string]: unknown }
+
+/** Permission decision sent back to the portable core. */
+export type PermissionReply = {
+	/** Approval decision. */
+	reply: "once" | "always" | "reject"
+	/** Optional user feedback for rejected requests. */
+	message?: string
+}
