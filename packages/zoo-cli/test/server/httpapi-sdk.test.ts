@@ -436,6 +436,26 @@ describe("HttpApi SDK", () => {
 	)
 	// kilocode_change end
 
+	parity("matches generated SDK question routes across backends", (backend) =>
+		withProject(backend, { git: false }, ({ sdk }) =>
+			Effect.gen(function* () {
+				const requestID = "que_missing"
+				const before = yield* capture(() => sdk.question.list())
+				const reply = yield* capture(() => sdk.question.reply({ requestID, answers: [] }))
+				const reject = yield* capture(() => sdk.question.reject({ requestID }))
+				const after = yield* capture(() => sdk.question.list())
+
+				return {
+					statuses: statuses({ before, reply, reject, after }),
+					beforeCount: array(before.data).length,
+					reply: reply.data,
+					reject: reject.data,
+					afterCount: array(after.data).length,
+				}
+			}),
+		),
+	)
+
 	parity("matches generated SDK session lifecycle routes across backends", (backend) =>
 		withStandardProject(backend, ({ sdk }) =>
 			Effect.gen(function* () {
