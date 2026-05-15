@@ -67,6 +67,7 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/config" && input.method === "PATCH") return { data: input.body }
 			if (input.path === "/config") return { data: { model: "anthropic/claude" } }
 			if (input.path === "/config/providers") return { data: { default: "anthropic", providers: [] } }
+			if (input.path === "/global/dispose") return { data: true }
 			if (input.path === "/provider") {
 				return {
 					data: {
@@ -353,6 +354,14 @@ describe("ZooClient", () => {
 			{ method: "PATCH", path: "/config", body: { model: "openai/gpt-5" } },
 			{ path: "/config/warnings" },
 		])
+	})
+
+	test("invalidates portable core config", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.invalidateConfig()).resolves.toBe(true)
+		expect(mock.requests.at(-1)).toEqual({ method: "POST", path: "/global/dispose" })
 	})
 
 	test("wraps provider routes", async () => {

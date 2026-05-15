@@ -107,6 +107,51 @@ describe("PortableCoreService", () => {
 		expect(client.createSession).toHaveBeenCalledWith({ title: "Adapter smoke" })
 	})
 
+	it("reloads portable core config through the SDK client", async () => {
+		usePortableCore.mockReturnValue(true)
+		const client = {
+			invalidateConfig: vitest.fn().mockResolvedValue(true),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		const handle = {
+			ipcPath: "/tmp/zoo-test.sock",
+			reused: false,
+			connect: vitest.fn().mockResolvedValue(client),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		createZooServer.mockResolvedValue(handle)
+		const outputChannel = createOutputChannel()
+
+		const service = await PortableCoreService.create(createContext() as any, outputChannel as any)
+		await service!.reloadConfig("zoo.jsonc")
+
+		expect(client.invalidateConfig).toHaveBeenCalledOnce()
+		expect(outputChannel.appendLine).toHaveBeenCalledWith("[PortableCore] Reloaded config after zoo.jsonc")
+	})
+
+	it("logs portable core config reload failures", async () => {
+		usePortableCore.mockReturnValue(true)
+		const client = {
+			invalidateConfig: vitest.fn().mockRejectedValue(new Error("reload failed")),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		const handle = {
+			ipcPath: "/tmp/zoo-test.sock",
+			reused: false,
+			connect: vitest.fn().mockResolvedValue(client),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		createZooServer.mockResolvedValue(handle)
+		const outputChannel = createOutputChannel()
+
+		const service = await PortableCoreService.create(createContext() as any, outputChannel as any)
+		await service!.reloadConfig("zoo.jsonc")
+
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			"[PortableCore] Failed to reload config after zoo.jsonc: reload failed",
+		)
+	})
+
 	it("logs SDK server restart lifecycle events", async () => {
 		usePortableCore.mockReturnValue(true)
 		const handle = {

@@ -415,6 +415,18 @@ export class ZooClient {
 		)
 	}
 
+	/** Invalidate portable-core config caches and dispose active instances. */
+	async invalidateConfig(): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: "/global/dispose",
+				}),
+			) ?? false
+		)
+	}
+
 	/** List portable-core worktree directories. */
 	async listWorktrees(): Promise<string[]> {
 		return (

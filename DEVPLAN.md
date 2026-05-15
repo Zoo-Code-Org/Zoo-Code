@@ -404,6 +404,8 @@
     - **Depends on:** Phase 3, Task 3; Phase 4, Task 2.
     - **Can parallelize with:** Phase 4, Task 4.
 
+    - **Progress:** Added an SDK `invalidateConfig()` wrapper for `POST /global/dispose`, `PortableCoreService.reloadConfig()`, and a debounced VS Code watcher for global/project `zoo.jsonc`, `AGENTS.md`, `.zoo/rules`, `.zoo/modes`, and `.zooignore` that invalidates portable-core config caches when files change.
+
 4. Document Roo-to-Zoo config migration
     - **What:** Document migration from VS Code settings, `.roomodes`, `.roo/rules`, and `.rooignore` to `zoo.jsonc`, `.zoo/modes`, `.zoo/rules`, and `.zooignore`.
     - **Files touched:** Root README if migration is global, `packages/zoo-cli/README.md`, `packages/zoo-vscode/README.md`, migration docs if present.

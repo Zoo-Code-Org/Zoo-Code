@@ -28,6 +28,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.
 - Add the default-off `zoo-code.usePortableCore` VS Code setting and helper for gating future SDK-backed extension paths.
 - Add activation-time portable-core SDK bootstrap wiring behind `zoo-code.usePortableCore` without changing the default extension-host runtime.
+- Watch portable-core Zoo config files in VS Code and invalidate CLI config caches after changes.
 - Version and document the host-webview protocol contract used by upcoming portable-core SDK adapter paths.
 - Route VS Code session create, list, and lookup seams through the Zoo SDK when `zoo-code.usePortableCore` is enabled while preserving the default extension-host path.
 - Stream text-only VS Code task messages through `ZooClient.sendMessage()` in portable-core mode, mapping SDK text chunks into the existing webview state/message update protocol.

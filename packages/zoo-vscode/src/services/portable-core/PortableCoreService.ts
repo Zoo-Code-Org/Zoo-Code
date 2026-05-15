@@ -64,6 +64,18 @@ export class PortableCoreService implements vscode.Disposable {
 		return new PortableSessionAdapter(this.client)
 	}
 
+	/** Invalidate portable-core config caches after local config files change. */
+	async reloadConfig(reason: string): Promise<void> {
+		try {
+			await this.client.invalidateConfig()
+			this.#outputChannel.appendLine(`[PortableCore] Reloaded config after ${reason}`)
+		} catch (error) {
+			this.#outputChannel.appendLine(
+				`[PortableCore] Failed to reload config after ${reason}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
 	/** Stop SDK client resources and the spawned CLI server, if this process owns it. */
 	async dispose(): Promise<void> {
 		if (this.#disposed) {

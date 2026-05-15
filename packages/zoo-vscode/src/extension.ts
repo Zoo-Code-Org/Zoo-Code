@@ -51,6 +51,7 @@ import { initializeI18n } from "./i18n"
 import { initializeModelCacheRefresh } from "./api/providers/fetchers/modelCache"
 import { initZooCodeAuth } from "./services/zoo-code-auth"
 import { PortableCoreService } from "./services/portable-core/PortableCoreService"
+import { PortableConfigWatcher } from "./services/portable-core/PortableConfigWatcher"
 
 /**
  * Built using https://github.com/microsoft/vscode-webview-ui-toolkit
@@ -167,6 +168,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	portableCoreService = await PortableCoreService.create(context, outputChannel)
 	if (portableCoreService) {
 		context.subscriptions.push(portableCoreService)
+		context.subscriptions.push(new PortableConfigWatcher(portableCoreService, outputChannel))
 	}
 
 	// Get default commands from configuration.
