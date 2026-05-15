@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add an SDK `promptAsync()` wrapper for safely queueing no-reply portable-core prompts.
 - Fix generated SDK no-reply prompt route parity coverage to avoid provider discovery while staying no-LLM.
 - Fix project config update coverage to assert the Zoo-native `zoo.jsonc` write target for empty shell values.
+- Fix global config update coverage to isolate homedir and assert Zoo-native `zoo.jsonc` writes for empty shell values.
 - Add SDK wrappers for portable-core worktree list, create, remove, and reset routes.
 - Add SDK wrappers for legacy portable-core worktree diff, diff summary, and diff-file routes.
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.

@@ -187,36 +187,48 @@ test("updates config and preserves empty shell sentinel", async () => {
 })
 
 test("updates global config and omits empty shell key in json", async () => {
-	// kilocode_change - globalConfigFile() prefers kilo.json over opencode.json
-	await using tmp = await tmpdir({
+	// kilocode_change - global updates write Zoo-native config and isolate homedir
+	await using home = await tmpdir({
 		init: async (dir) => {
-			await writeConfig(dir, {
-				$schema: "https://opencode.ai/config.json",
-				shell: "bash",
-			})
+			const globalConfigDir = path.join(dir, ".config", "zoo-code")
+			await fs.mkdir(globalConfigDir, { recursive: true })
+			await writeConfig(
+				globalConfigDir,
+				{
+					$schema: "https://opencode.ai/config.json",
+					shell: "bash",
+				},
+				"zoo.jsonc",
+			)
 		},
 	})
 
+	const homedir = spyOn(os, "homedir").mockReturnValue(home.path)
 	const prev = Global.Path.config
-	;(Global.Path as { config: string }).config = tmp.path
+	;(Global.Path as { config: string }).config = path.join(home.path, "legacy-config")
 	await clear(true)
 
 	try {
 		await saveGlobal({ shell: "" })
 
-		const writtenConfig = await Filesystem.readJson<{ shell?: string }>(path.join(tmp.path, "kilo.json"))
+		const writtenConfig = await Filesystem.readJson<{ shell?: string }>(
+			path.join(home.path, ".config", "zoo-code", "zoo.jsonc"),
+		)
 		expect("shell" in writtenConfig).toBe(false)
 	} finally {
+		homedir.mockRestore()
 		;(Global.Path as { config: string }).config = prev
 		await clear(true)
 	}
 })
 
 test("updates global config and omits empty shell key in jsonc", async () => {
-	await using tmp = await tmpdir({
+	await using home = await tmpdir({
 		init: async (dir) => {
+			const globalConfigDir = path.join(dir, ".config", "zoo-code")
+			await fs.mkdir(globalConfigDir, { recursive: true })
 			await Filesystem.write(
-				path.join(dir, "opencode.jsonc"),
+				path.join(globalConfigDir, "zoo.jsonc"),
 				JSON.stringify({
 					$schema: "https://opencode.ai/config.json",
 					shell: "bash",
@@ -226,20 +238,22 @@ test("updates global config and omits empty shell key in jsonc", async () => {
 		},
 	})
 
+	const homedir = spyOn(os, "homedir").mockReturnValue(home.path)
 	const prev = Global.Path.config
-	;(Global.Path as { config: string }).config = tmp.path
+	;(Global.Path as { config: string }).config = path.join(home.path, "legacy-config")
 	await clear(true)
 
 	try {
 		await saveGlobal({ shell: "" })
 
-		const file = path.join(tmp.path, "opencode.jsonc")
+		const file = path.join(home.path, ".config", "zoo-code", "zoo.jsonc")
 		const writtenConfig = await Filesystem.readText(file)
 		const parsed = ConfigParse.schema(Config.Info.zod, ConfigParse.jsonc(writtenConfig, file), file)
 		expect(writtenConfig).not.toContain('"shell"')
 		expect(parsed.shell).toBeUndefined()
 		expect(parsed.model).toBe("test/model")
 	} finally {
+		homedir.mockRestore()
 		;(Global.Path as { config: string }).config = prev
 		await clear(true)
 	}
