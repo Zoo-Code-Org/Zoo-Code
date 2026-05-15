@@ -493,6 +493,8 @@
     - **Depends on:** Phase 1, Task 8; Phase 5, Task 4 for session command shape if applicable.
     - **Can parallelize with:** Phase 5, Task 7.
 
+    - **Progress:** Added `zoo agent list --format json` as the first small non-LLM JSON output mode. The output is a stable array of public agent metadata and structured permissions, excluding large prompt text and arbitrary options. Focused formatter coverage pins the JSON shape.
+
 7. Decide and document out-of-scope parity items
     - **What:** Record product decisions for inline autocomplete, browser automation stretch scope, JetBrains/future IDE support, and cloud gateway behavior so parity work does not expand beyond SPEC scope.
     - **Files touched:** `SPEC.md`/`spec.md` if decisions amend the spec, `DEVPLAN.md` if tasks change, `HANDOFF.md`, README roadmap if present.

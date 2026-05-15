@@ -71,6 +71,8 @@ See `docs/provider-parity.md` for the current Zoo/Roo VS Code provider parity au
 
 Run `zoo --help` for the full list.
 
+For scripting, `zoo agent list --format json` emits a stable JSON array with public agent metadata and structured permissions.
+
 ## Configuration paths
 
 Zoo Code reads and writes its primary global config at `~/.config/zoo-code/zoo.jsonc` and project config at `{project}/zoo.jsonc`.

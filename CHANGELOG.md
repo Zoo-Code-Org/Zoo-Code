@@ -60,6 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Clean up imported CLI config migration docs to label legacy Kilo paths as fallbacks, point to Zoo portable config paths, and remove bundled Kilo Gateway notification guidance.
 - Add `zoo run --context <path>` for including file or folder context in one-off CLI tasks.
 - Fix bundled CLI markdown skill loading under Bun so prompt tests and runtime skill content use the actual markdown text.
+- Add `zoo agent list --format json` for scripting-friendly agent metadata output.
 
 ## [3.54.0] - 2026-05-08
 

@@ -15,6 +15,26 @@ import type { Argv } from "yargs"
 
 type AgentMode = "all" | "primary" | "subagent"
 
+export function formatAgentListJSON(agents: Agent.Info[]): string {
+	return (
+		JSON.stringify(
+			agents.map((agent) => ({
+				name: agent.name,
+				displayName: agent.displayName,
+				description: agent.description,
+				mode: agent.mode,
+				native: agent.native,
+				hidden: agent.hidden,
+				model: agent.model,
+				variant: agent.variant,
+				permission: agent.permission,
+			})),
+			null,
+			2,
+		) + EOL
+	)
+}
+
 // Permission keys (not raw tool names). Multiple tools can map to a single
 // permission — e.g. write/edit/apply_patch all gate on `edit` — so we configure
 // agents at the permission level to match how the runtime actually enforces it.
@@ -235,7 +255,14 @@ const AgentCreateCommand = cmd({
 const AgentListCommand = cmd({
 	command: "list",
 	describe: "list all available agents",
-	async handler() {
+	builder: (yargs: Argv) =>
+		yargs.option("format", {
+			type: "string",
+			choices: ["text", "json"] as const,
+			default: "text",
+			describe: "output format",
+		}),
+	async handler(args) {
 		await Instance.provide({
 			directory: process.cwd(),
 			async fn() {
@@ -246,6 +273,11 @@ const AgentListCommand = cmd({
 					}
 					return a.name.localeCompare(b.name)
 				})
+
+				if (args.format === "json") {
+					process.stdout.write(formatAgentListJSON(sortedAgents))
+					return
+				}
 
 				for (const agent of sortedAgents) {
 					process.stdout.write(`${agent.name} (${agent.mode})` + EOL)
