@@ -2,6 +2,7 @@ packages:
     - "packages/zoo-cli"
     - "packages/kilo-telemetry-stub"
     - "packages/opencode-core"
+    - "packages/opencode-script"
     - "packages/zoo-sdk"
     - "packages/zoo-vscode/src"
     - "packages/zoo-vscode/webview-ui"

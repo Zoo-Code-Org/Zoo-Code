@@ -1,0 +1,12 @@
+{
+	"$schema": "https://json.schemastore.org/package.json",
+	"name": "@opencode-ai/script",
+	"version": "7.2.52",
+	"type": "module",
+	"license": "MIT",
+	"private": true,
+	"description": "Zoo Code local compatibility shim for imported OpenCode build scripts.",
+	"exports": {
+		".": "./src/index.ts"
+	}
+}
