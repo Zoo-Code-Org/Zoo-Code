@@ -439,6 +439,30 @@ describe("HttpApi SDK", () => {
 	)
 	// kilocode_change end
 
+	parity("matches generated SDK project update behavior across backends", (backend) =>
+		withStandardProject(backend, ({ sdk }) =>
+			Effect.gen(function* () {
+				const project = yield* capture(() => sdk.project.current())
+				const projectID = String(record(project.data).id)
+				const update = yield* capture(() =>
+					sdk.project.update({
+						projectID,
+						name: "sdk project",
+						icon: { color: "blue" },
+						commands: { start: "bun dev" },
+					}),
+				)
+
+				return {
+					statuses: statuses({ project, update }),
+					name: record(update.data).name,
+					iconColor: record(record(update.data).icon).color,
+					start: record(record(update.data).commands).start,
+				}
+			}),
+		),
+	)
+
 	parity("matches generated SDK MCP status behavior across backends", (backend) =>
 		withProject(
 			backend,
