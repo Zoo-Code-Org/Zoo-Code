@@ -13,6 +13,7 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 export const ZOO_CONFIG_DIR_NAME = "zoo-code"
 export const ZOO_CONFIG_FILE_NAME = "zoo"
 export const ZOO_PROJECT_DIR = ".zoo"
+const PROJECT_CONFIG_DIR_TARGETS = [".opencode", ".kilocode", ".kilo", ZOO_PROJECT_DIR]
 
 export function zooGlobalConfigDir() {
 	return path.join(os.homedir(), ".config", ZOO_CONFIG_DIR_NAME)
@@ -38,13 +39,13 @@ export const directories = Effect.fn("ConfigPaths.directories")(function* (direc
 		Global.Path.config,
 		...(!Flag.KILO_DISABLE_PROJECT_CONFIG
 			? yield* afs.up({
-					targets: [ZOO_PROJECT_DIR, ".kilo", ".kilocode", ".opencode"], // kilocode_change
+					targets: PROJECT_CONFIG_DIR_TARGETS, // kilocode_change
 					start: directory,
 					stop: worktree,
 				})
 			: []),
 		...(yield* afs.up({
-			targets: [ZOO_PROJECT_DIR, ".kilo", ".kilocode", ".opencode"], // kilocode_change
+			targets: PROJECT_CONFIG_DIR_TARGETS, // kilocode_change
 			start: Global.Path.home,
 			stop: Global.Path.home,
 		})),
