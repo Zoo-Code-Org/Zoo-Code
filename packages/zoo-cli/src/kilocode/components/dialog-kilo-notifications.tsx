@@ -78,10 +78,10 @@ export function DialogKiloNotifications(props: DialogKiloNotificationsProps) {
 										<text fg={hover() ? theme.text : theme.textMuted} wrapMode="word">
 											{notification.message}
 										</text>
-										{notification.action && (
+										{notification.actionUrl && notification.actionText && (
 											<box flexDirection="row" marginTop={1}>
-												<Link href={notification.action.actionURL} fg={theme.primary}>
-													[{notification.action.actionText}]
+												<Link href={notification.actionUrl} fg={theme.primary}>
+													[{notification.actionText}]
 												</Link>
 											</box>
 										)}

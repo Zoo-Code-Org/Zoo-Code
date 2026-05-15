@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { Effect, Layer, Option } from "effect"
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import path from "path"
-import { hasIndexingPlugin } from "@kilocode/kilo-indexing/detect"
 import { Account } from "../../../src/account/account"
 import { Auth } from "../../../src/auth"
 import { Config } from "../../../src/config/config"
@@ -71,7 +70,7 @@ describe("kilocode default indexing plugin", () => {
 				directory: tmp.path,
 				fn: async () => {
 					const config = await load()
-					expect(hasIndexingPlugin(config.plugin ?? [])).toBe(false)
+					expect(config.plugin ?? []).not.toContain("@kilocode/kilo-indexing")
 				},
 			})
 		} finally {

@@ -10,6 +10,13 @@ import { KilocodePaths } from "./paths"
 type OrganizationMode = {
 	slug: string
 	name: string
+	config: {
+		roleDefinition?: string
+		groups?: Array<string | [string, { fileRegex?: string; description?: string }]>
+		customInstructions?: string
+		whenToUse?: string
+		description?: string
+	}
 	roleDefinition?: string
 	groups?: Array<string | [string, { fileRegex?: string; description?: string }]>
 	customInstructions?: string

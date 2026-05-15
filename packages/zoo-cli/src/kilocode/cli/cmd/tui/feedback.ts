@@ -38,6 +38,7 @@ export function submitFeedback(rating: "up" | "down", dialog: DialogContext, ctx
 	}
 	const providerID = lastAssistant.providerID
 	const payload: Telemetry.FeedbackProperties = {
+		feedbackType: "message",
 		providerID,
 		modelID: lastAssistant.modelID,
 		rating,

@@ -30,7 +30,7 @@ export namespace Telemetry {
 
 	export function track(_event: string | TelemetryEvent, _properties?: Record<string, unknown>) {}
 	export function trackCliStart() {}
-	export function trackCliExit(_exitCode: number) {}
+	export function trackCliExit(_exitCode?: number) {}
 	export function trackAuthSuccess(_providerID: string) {}
 	export function trackAuthLogout(_providerID: string) {}
 	export function trackRemoteConnectionOpened() {}

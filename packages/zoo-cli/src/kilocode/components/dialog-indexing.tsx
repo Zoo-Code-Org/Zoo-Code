@@ -11,7 +11,7 @@ export function DialogIndexing(_props: DialogIndexingProps) {
 		<DialogAlert
 			title="Indexing unavailable"
 			message="Codebase indexing is not bundled in Zoo Code CLI."
-			onClose={() => dialog.clear()}
+			onConfirm={() => dialog.clear()}
 		/>
 	)
 }

@@ -6,7 +6,7 @@
 	"license": "MIT",
 	"private": true,
 	"scripts": {
-		"check-types": "node -e \"console.log('zoo-cli typecheck pending Kilo dependency reconciliation')\"",
+		"check-types": "tsgo --noEmit",
 		"typecheck": "tsgo --noEmit",
 		"test": "bun run script/test-runner.ts test/util/",
 		"test:ci": "node -e \"console.log('zoo-cli tests pending Kilo dependency reconciliation')\"",

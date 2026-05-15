@@ -13,7 +13,7 @@ import { DialogSelect } from "@tui/ui/dialog-select"
 type Organization = { id: string; name: string; role?: string }
 
 function getOrganizationOptions(organizations: Organization[]) {
-	return organizations.map((org) => ({ value: org.id, label: org.name }))
+	return organizations.map((org) => ({ value: org.id, title: org.name }))
 }
 
 function getDefaultOrganizationSelection(organizations: Organization[]) {

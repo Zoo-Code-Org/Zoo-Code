@@ -11,6 +11,7 @@ import { Link } from "@tui/ui/link"
 import { TextAttributes } from "@opentui/core"
 
 type KilocodeProfile = {
+	name?: string
 	email?: string
 	organizations?: Array<{ id: string; name: string; role?: string }>
 }

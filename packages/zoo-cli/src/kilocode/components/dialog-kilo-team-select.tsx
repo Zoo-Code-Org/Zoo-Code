@@ -11,10 +11,10 @@ type Organization = { id: string; name: string; role?: string }
 
 function getOrganizationOptions(organizations: Organization[], current?: string) {
 	return [
-		{ value: null, label: current ? "Personal" : "Personal (current)" },
+		{ value: null, title: current ? "Personal" : "Personal (current)" },
 		...organizations.map((org) => ({
 			value: org.id,
-			label: `${org.name}${org.id === current ? " (current)" : ""}`,
+			title: `${org.name}${org.id === current ? " (current)" : ""}`,
 		})),
 	]
 }

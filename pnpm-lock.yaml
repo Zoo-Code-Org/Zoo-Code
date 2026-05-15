@@ -820,6 +820,9 @@ importers:
       '@types/cross-spawn':
         specifier: 6.0.6
         version: 6.0.6
+      '@types/mime-types':
+        specifier: 3.0.1
+        version: 3.0.1
       '@types/npm-package-arg':
         specifier: 6.1.4
         version: 6.1.4

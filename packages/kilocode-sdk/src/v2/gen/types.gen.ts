@@ -2234,9 +2234,9 @@ export type Model = {
 		}
 	}
 	recommendedIndex?: number
-	prompt?: "codex" | "gemini" | "beast" | "anthropic" | "trinity" | "anthropic_without_todo" | "ling" | "gpt55"
+	prompt?: string
 	isFree?: boolean
-	ai_sdk_provider?: "alibaba" | "anthropic" | "openai" | "openai-compatible" | "openrouter"
+	ai_sdk_provider?: string
 }
 
 export type Provider = {

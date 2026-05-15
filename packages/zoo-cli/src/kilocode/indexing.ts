@@ -1,9 +1,20 @@
 import { Bus } from "@/bus"
 import { BusEvent } from "@/bus/bus-event"
+import type { Config } from "@/config/config"
 import { Schema } from "effect"
 
 export namespace KiloIndexing {
-	export type StatusState = "Disabled" | "Standby" | "In Progress" | "Error"
+	export type StatusState = "Disabled" | "Standby" | "In Progress" | "Complete" | "Error"
+
+	export type SearchMatch = {
+		score: number
+		payload?: {
+			filePath?: string
+			codeChunk?: string
+			startLine?: number
+			endLine?: number
+		}
+	}
 
 	export type Status = {
 		state: StatusState
@@ -14,7 +25,7 @@ export namespace KiloIndexing {
 	}
 
 	const StatusSchema = Schema.Struct({
-		state: Schema.Literals(["Disabled", "Standby", "In Progress", "Error"]),
+		state: Schema.Literals(["Disabled", "Standby", "In Progress", "Complete", "Error"]),
 		message: Schema.String,
 		processedFiles: Schema.Number,
 		totalFiles: Schema.Number,
@@ -52,7 +63,15 @@ export namespace KiloIndexing {
 		return false
 	}
 
-	export async function search(): Promise<[]> {
+	export async function search(_query?: string, _path?: string): Promise<SearchMatch[]> {
 		return []
+	}
+
+	export function input(project?: Config.Indexing, global?: Config.Indexing): Config.Indexing {
+		return {
+			...global,
+			...project,
+			enabled: project?.enabled === true || global?.enabled === true,
+		}
 	}
 }

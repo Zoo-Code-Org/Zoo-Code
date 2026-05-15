@@ -42,7 +42,10 @@ import { Telemetry } from "@kilocode/kilo-telemetry"
 import { InstanceStore } from "./project/instance-store" // kilocode_change
 const ENV_FEATURE = "KILOCODE_FEATURE"
 const ENV_VERSION = "KILOCODE_VERSION"
-async function migrateLegacyKiloAuth(..._args: unknown[]) {}
+async function migrateLegacyKiloAuth(
+	_hasAuth: () => Promise<boolean>,
+	_setAuth: (auth: Auth.Info) => Promise<unknown>,
+) {}
 
 // kilocode_change - set feature for tracking. 'serve' is spawned by other services
 // (extension, cloud) which set their own KILOCODE_FEATURE env var. Direct CLI use

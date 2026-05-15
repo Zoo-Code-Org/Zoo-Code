@@ -1,5 +1,6 @@
 // kilocode_change - new file
 import path from "path"
+import os from "os"
 import { pathToFileURL } from "url"
 import { existsSync } from "fs"
 import z from "zod"
