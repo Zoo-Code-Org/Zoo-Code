@@ -378,7 +378,7 @@
     - **Depends on:** Phase 0 complete.
     - **Can parallelize with:** Phase 1 and Phase 2 tasks.
 
-    - **Progress:** Added focused generated-schema coverage proving `Config.Info.zod` exposes provider, model, default agent, agent, instruction/rules path, and permission keys for `zoo.jsonc`, and accepts a representative Zoo config with provider/model/agent/instructions/top-level and agent-level permissions. Remaining work: decide whether to check in a generated `zoo.jsonc` schema file and wire VS Code JSON validation once the final schema URL/location is settled.
+    - **Progress:** Added focused generated-schema coverage proving `Config.Info.zod` exposes provider, model, default agent, agent, instruction/rules path, and permission keys for `zoo.jsonc`, and accepts a representative Zoo config with provider/model/agent/instructions/top-level and agent-level permissions. `packages/zoo-cli/script/schema.ts` can generate the schema from `Config.Info.zod`, but checking in the generated file and adding VS Code `jsonValidation` are deferred until the product selects a canonical shipped or hosted schema location. A root `schemas/` file would not automatically be packaged in the VSIX, while an extension-local schema needs an explicit package location and `.vscodeignore` decision.
 
 2. Implement unified config loader
 
