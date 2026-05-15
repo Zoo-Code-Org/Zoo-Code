@@ -85,7 +85,7 @@ const WelcomeViewProvider = () => {
 
 	return (
 		<Tab>
-			<TabContent className="flex flex-col gap-4 p-6 justify-center">
+			<TabContent className="flex flex-col gap-4 p-6">
 				<Brain className="size-8" strokeWidth={1.5} />
 				<h2 className="mt-0 mb-0 text-xl">{t("welcome:providerSignup.heading")}</h2>
 

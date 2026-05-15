@@ -34,7 +34,11 @@ vi.mock("../../settings/ApiOptions", () => ({
 // Mock Tab components
 vi.mock("../../common/Tab", () => ({
 	Tab: ({ children }: any) => <div data-testid="tab">{children}</div>,
-	TabContent: ({ children }: any) => <div data-testid="tab-content">{children}</div>,
+	TabContent: ({ children, className }: any) => (
+		<div data-testid="tab-content" className={className}>
+			{children}
+		</div>
+	),
 }))
 
 // Mock RooHero
@@ -133,6 +137,12 @@ describe("WelcomeViewProvider", () => {
 			expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
 		})
 
+		it("keeps the landing screen centered", () => {
+			renderWelcomeViewProvider()
+
+			expect(screen.getByTestId("tab-content")).toHaveClass("justify-center")
+		})
+
 		it("does not enter auth-in-progress state after clicking 'Get Started' on landing", () => {
 			renderWelcomeViewProvider()
 
@@ -170,6 +180,13 @@ describe("WelcomeViewProvider", () => {
 			navigateToProviderSelection()
 
 			expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
+		})
+
+		it("top-aligns provider setup content so tall forms remain reachable", () => {
+			renderWelcomeViewProvider()
+			navigateToProviderSelection()
+
+			expect(screen.getByTestId("tab-content")).not.toHaveClass("justify-center")
 		})
 
 		it("shows API options immediately", () => {
