@@ -42,7 +42,7 @@ const persistPortPlugin = (): Plugin => ({
 			const port = address && typeof address === "object" ? address.port : null
 
 			if (port) {
-				fs.writeFileSync(resolve(__dirname, "..", ".vite-port"), port.toString())
+				fs.writeFileSync(resolve(__dirname, "../../..", ".vite-port"), port.toString())
 				console.log(`[Vite Plugin] Server started on port ${port}`)
 			} else {
 				console.warn("[Vite Plugin] Could not determine server port")
@@ -71,10 +71,10 @@ export default defineConfig(({ mode }) => {
 	// TODO: We can use `@roo-code/build` to generate `define` once the
 	// monorepo is deployed.
 	if (mode === "nightly") {
-		outDir = "../apps/vscode-nightly/build/webview-ui/build"
+		outDir = "../../../apps/vscode-nightly/build/webview-ui/build"
 
 		const nightlyPkg = JSON.parse(
-			fs.readFileSync(path.join(__dirname, "..", "apps", "vscode-nightly", "package.nightly.json"), "utf8"),
+			fs.readFileSync(path.join(__dirname, "../../..", "apps", "vscode-nightly", "package.nightly.json"), "utf8"),
 		)
 
 		define["process.env.PKG_NAME"] = JSON.stringify(nightlyPkg.name)

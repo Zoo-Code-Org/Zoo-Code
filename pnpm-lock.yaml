@@ -770,7 +770,11 @@ importers:
         specifier: ^3.2.3
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.2.1)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0)
 
-  src:
+  packages/zoo-cli: {}
+
+  packages/zoo-sdk: {}
+
+  packages/zoo-vscode/src:
     dependencies:
       '@ai-sdk/amazon-bedrock':
         specifier: ^4.0.51
@@ -825,19 +829,19 @@ importers:
         version: 1.14.0(typescript@5.8.3)
       '@roo-code/cloud':
         specifier: workspace:^
-        version: link:../packages/cloud
+        version: link:../../cloud
       '@roo-code/core':
         specifier: workspace:^
-        version: link:../packages/core
+        version: link:../../core
       '@roo-code/ipc':
         specifier: workspace:^
-        version: link:../packages/ipc
+        version: link:../../ipc
       '@roo-code/telemetry':
         specifier: workspace:^
-        version: link:../packages/telemetry
+        version: link:../../telemetry
       '@roo-code/types':
         specifier: workspace:^
-        version: link:../packages/types
+        version: link:../../types
       '@vscode/codicons':
         specifier: ^0.0.36
         version: 0.0.36
@@ -1054,13 +1058,13 @@ importers:
         version: 2.1.1(ai@6.0.77(zod@3.25.76))(zod@3.25.76)
       '@roo-code/build':
         specifier: workspace:^
-        version: link:../packages/build
+        version: link:../../build
       '@roo-code/config-eslint':
         specifier: workspace:^
-        version: link:../packages/config-eslint
+        version: link:../../config-eslint
       '@roo-code/config-typescript':
         specifier: workspace:^
-        version: link:../packages/config-typescript
+        version: link:../../config-typescript
       '@types/clone-deep':
         specifier: ^4.0.4
         version: 4.0.4
@@ -1167,7 +1171,7 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0(typescript@5.8.3)(zod@3.25.76)
 
-  webview-ui:
+  packages/zoo-vscode/webview-ui:
     dependencies:
       '@radix-ui/react-alert-dialog':
         specifier: ^1.1.6
@@ -1216,7 +1220,7 @@ importers:
         version: 1.2.6(@types/react-dom@18.3.7(@types/react@18.3.23))(@types/react@18.3.23)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@roo-code/types':
         specifier: workspace:^
-        version: link:../packages/types
+        version: link:../../types
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.1.6(vite@6.3.6(@types/node@20.17.57)(jiti@2.4.2)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0))
@@ -1376,10 +1380,10 @@ importers:
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
-        version: link:../packages/config-eslint
+        version: link:../../config-eslint
       '@roo-code/config-typescript':
         specifier: workspace:^
-        version: link:../packages/config-typescript
+        version: link:../../config-typescript
       '@testing-library/jest-dom':
         specifier: ^6.6.3
         version: 6.6.3

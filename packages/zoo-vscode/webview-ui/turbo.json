@@ -6,7 +6,7 @@
 			"outputs": ["../src/webview-ui/**"]
 		},
 		"build:nightly": {
-			"outputs": ["../apps/vscode-nightly/build/webview-ui/**"]
+			"outputs": ["../../../apps/vscode-nightly/build/webview-ui/**"]
 		}
 	}
 }

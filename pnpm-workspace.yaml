@@ -1,5 +1,7 @@
 packages:
-    - "src" # Should be apps/vscode
-    - "webview-ui" # Should be apps/vscode-webview
+    - "packages/zoo-cli"
+    - "packages/zoo-sdk"
+    - "packages/zoo-vscode/src"
+    - "packages/zoo-vscode/webview-ui"
     - "apps/*"
     - "packages/*"

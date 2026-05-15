@@ -10,9 +10,9 @@
 			"type": "extensionHost",
 			"request": "launch",
 			"runtimeExecutable": "${execPath}",
-			"args": ["--extensionDevelopmentPath=${workspaceFolder}/src"],
+			"args": ["--extensionDevelopmentPath=${workspaceFolder}/packages/zoo-vscode/src"],
 			"sourceMaps": true,
-			"outFiles": ["${workspaceFolder}/src/dist/**/*.js"],
+			"outFiles": ["${workspaceFolder}/packages/zoo-vscode/src/dist/**/*.js"],
 			"preLaunchTask": "${defaultBuildTask}",
 			"env": {
 				"NODE_ENV": "development",

@@ -9,7 +9,7 @@
 		"vsix": {
 			"dependsOn": ["bundle"],
 			"inputs": ["dist/**"],
-			"outputs": ["../bin/**"]
+			"outputs": ["../../../bin/**"]
 		},
 		"watch:bundle": {
 			"dependsOn": ["@roo-code/build#build", "@roo-code/types#build"],

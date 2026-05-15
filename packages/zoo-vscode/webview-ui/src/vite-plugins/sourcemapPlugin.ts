@@ -22,7 +22,7 @@ export function sourcemapPlugin(): Plugin {
 				let outDir
 
 				if (mode === "nightly") {
-					outDir = path.resolve("../apps/vscode-nightly/build/webview-ui/build")
+					outDir = path.resolve("../../../apps/vscode-nightly/build/webview-ui/build")
 				} else {
 					outDir = path.resolve("../src/webview-ui/build")
 				}

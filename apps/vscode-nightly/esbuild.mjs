@@ -42,7 +42,7 @@ async function main() {
 		},
 	}
 
-	const srcDir = path.join(__dirname, "..", "..", "src")
+	const srcDir = path.join(__dirname, "..", "..", "packages", "zoo-vscode", "src")
 	const buildDir = path.join(__dirname, "build")
 	const distDir = path.join(buildDir, "dist")
 
@@ -65,10 +65,10 @@ async function main() {
 				build.onEnd(() => {
 					copyPaths(
 						[
-							["../README.md", "README.md"],
-							["../CHANGELOG.md", "CHANGELOG.md"],
-							["../LICENSE", "LICENSE"],
-							["../.env", ".env", { optional: true }],
+							["../../../README.md", "README.md"],
+							["../../../CHANGELOG.md", "CHANGELOG.md"],
+							["../../../LICENSE", "LICENSE"],
+							["../../../.env", ".env", { optional: true }],
 							[".vscodeignore", ".vscodeignore"],
 							["assets", "assets"],
 							["integrations", "integrations"],
