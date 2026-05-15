@@ -106,6 +106,7 @@ type OpenApiSchema = {
 }
 
 type Operation = {
+	operationId?: string
 	parameters?: unknown[]
 	responses?: unknown
 	requestBody?: unknown
@@ -301,6 +302,16 @@ describe("HttpApi server", () => {
 		])
 		expect(responseContentTypes({ spec: effect, path: "/global/event", method: "get", status: "200" })).toEqual([
 			"text/event-stream",
+		])
+	})
+
+	test("documents config warnings route for SDK parity", () => {
+		const effect = effectOpenApi()
+		const route = effect.paths["/config/warnings"]?.get
+
+		expect(route?.operationId).toBe("config.warnings")
+		expect(responseContentTypes({ spec: effect, path: "/config/warnings", method: "get", status: "200" })).toEqual([
+			"application/json",
 		])
 	})
 

@@ -1,5 +1,6 @@
 import { Config } from "@/config/config"
 import { Provider } from "@/provider/provider"
+import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
@@ -7,6 +8,12 @@ import { WorkspaceRoutingMiddleware } from "../middleware/workspace-routing"
 import { described } from "./metadata"
 
 const root = "/config"
+
+const ConfigWarning = Schema.Struct({
+	path: Schema.String,
+	message: Schema.String,
+	detail: Schema.optional(Schema.String),
+})
 
 export const ConfigApi = HttpApi.make("config")
 	.add(
@@ -30,6 +37,15 @@ export const ConfigApi = HttpApi.make("config")
 						identifier: "config.update",
 						summary: "Update configuration",
 						description: "Update OpenCode configuration settings and preferences.",
+					}),
+				),
+				HttpApiEndpoint.get("warnings", `${root}/warnings`, {
+					success: described(Schema.Array(ConfigWarning), "Config warnings"),
+				}).annotateMerge(
+					OpenApi.annotations({
+						identifier: "config.warnings",
+						summary: "Get config warnings",
+						description: "Get warnings generated during config loading.",
 					}),
 				),
 				HttpApiEndpoint.get("providers", `${root}/providers`, {

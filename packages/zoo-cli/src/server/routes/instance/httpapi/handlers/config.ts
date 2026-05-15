@@ -21,6 +21,10 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
 			return ctx.payload
 		})
 
+		const warnings = Effect.fn("ConfigHttpApi.warnings")(function* () {
+			return yield* configSvc.warnings()
+		})
+
 		const providers = Effect.fn("ConfigHttpApi.providers")(function* () {
 			const providers = yield* providerSvc.list()
 			return {
@@ -29,6 +33,10 @@ export const configHandlers = HttpApiBuilder.group(InstanceHttpApi, "config", (h
 			}
 		})
 
-		return handlers.handle("get", get).handle("update", update).handle("providers", providers)
+		return handlers
+			.handle("get", get)
+			.handle("update", update)
+			.handle("warnings", warnings)
+			.handle("providers", providers)
 	}),
 )

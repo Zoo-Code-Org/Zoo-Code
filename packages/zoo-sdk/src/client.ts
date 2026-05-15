@@ -2,8 +2,11 @@ import { createHttpTransport, createIpcTransport, type ZooTransport } from "./tr
 import type {
 	MessageChunk,
 	Mode,
+	ConfigWarning,
 	ConfigProvidersResult,
+	PermissionAlwaysRules,
 	PermissionReply,
+	PermissionRequest,
 	SendMessageOptions,
 	Session,
 	SessionCreateOptions,
@@ -127,6 +130,30 @@ export class ZooClient {
 		})
 	}
 
+	/** List pending portable-core permission requests. */
+	async listPermissions(): Promise<PermissionRequest[]> {
+		return (
+			unwrap(
+				await this.#transport.request<PermissionRequest[] | { data?: PermissionRequest[] }>({
+					path: "/permission",
+				}),
+			) ?? []
+		)
+	}
+
+	/** Save always-allow/deny rules for a pending portable-core permission request. */
+	async savePermissionAlwaysRules(requestID: string, rules: PermissionAlwaysRules): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/permission/${encodeURIComponent(requestID)}/always-rules`,
+					body: rules,
+				}),
+			) ?? false
+		)
+	}
+
 	/** List portable-core agents/modes available for message routing. */
 	async listModes(): Promise<Mode[]> {
 		const result = unwrap(await this.#transport.request<unknown[] | { data?: unknown[] }>({ path: "/agent" })) ?? []
@@ -151,6 +178,30 @@ export class ZooClient {
 	/** Read the portable-core configuration snapshot. */
 	async getConfig(): Promise<ZooConfig> {
 		return unwrap(await this.#transport.request<ZooConfig | { data?: ZooConfig }>({ path: "/config" })) ?? {}
+	}
+
+	/** Update portable-core configuration. */
+	async updateConfig(config: ZooConfig): Promise<ZooConfig> {
+		return (
+			unwrap(
+				await this.#transport.request<ZooConfig | { data?: ZooConfig }>({
+					method: "PATCH",
+					path: "/config",
+					body: config,
+				}),
+			) ?? {}
+		)
+	}
+
+	/** Read warnings produced while loading portable-core configuration. */
+	async getConfigWarnings(): Promise<ConfigWarning[]> {
+		return (
+			unwrap(
+				await this.#transport.request<ConfigWarning[] | { data?: ConfigWarning[] }>({
+					path: "/config/warnings",
+				}),
+			) ?? []
+		)
 	}
 
 	/** Read configured providers/defaults from the portable core. */

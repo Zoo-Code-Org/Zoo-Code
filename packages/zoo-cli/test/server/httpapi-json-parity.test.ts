@@ -143,6 +143,7 @@ describe.skip("HttpApi JSON parity", () => {
 							{ label: "instance.lsp", path: InstancePaths.lsp, headers },
 							{ label: "instance.formatter", path: InstancePaths.formatter, headers },
 							{ label: "config.get", path: "/config", headers },
+							{ label: "config.warnings", path: "/config/warnings", headers },
 							{ label: "config.providers", path: "/config/providers", headers },
 							{ label: "project.list", path: "/project", headers },
 							{ label: "project.current", path: "/project/current", headers },

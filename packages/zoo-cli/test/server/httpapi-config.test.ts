@@ -42,6 +42,19 @@ afterEach(async () => {
 })
 
 describe("config HttpApi", () => {
+	test("serves config warnings through Hono bridge", async () => {
+		await using tmp = await tmpdir({ git: true })
+
+		const response = await app().request("/config/warnings", {
+			headers: {
+				"x-kilo-directory": tmp.path,
+			},
+		})
+
+		expect(response.status).toBe(200)
+		expect(await response.json()).toEqual([])
+	})
+
 	test("serves config update through Hono bridge", async () => {
 		await using tmp = await tmpdir({ config: { formatter: false, lsp: false } })
 		const disposed = waitDisposed(tmp.path)

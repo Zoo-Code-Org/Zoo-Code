@@ -187,6 +187,8 @@
     - **Depends on:** Phase 2, Task 1.
     - **Can parallelize with:** Phase 2, Task 3 after transport contract is agreed.
 
+    - **Progress:** Added route-parity wrappers for pending permissions, config warnings, config updates, and permission always-rule saves. The Effect HttpApi config bridge now also exposes `/config/warnings` to match the legacy Hono route.
+
 3. [✅] Implement IPC/HTTP transport layer
 
     - **What:** Wrap the CLI local IPC/HTTP server API so SDK consumers can connect via `ipcPath` or `httpPort`, following Kilo's SDK pattern.

@@ -147,6 +147,24 @@ export type PermissionRequest = {
 	[key: string]: unknown
 }
 
+/** Config loading warning returned by the portable core. */
+export type ConfigWarning = {
+	/** Config source path or source label that produced the warning. */
+	path: string
+	/** Human-readable warning message. */
+	message: string
+	/** Optional detailed diagnostic text. */
+	detail?: string
+}
+
+/** Always-allow/deny rule selections saved for a pending permission request. */
+export type PermissionAlwaysRules = {
+	/** Patterns approved for future matching requests. */
+	approvedAlways?: string[]
+	/** Patterns denied for future matching requests. */
+	deniedAlways?: string[]
+}
+
 /** Server event emitted by the Zoo CLI event stream. */
 export type ZooServerEvent =
 	| { type: "permission.asked"; properties: PermissionRequest }
