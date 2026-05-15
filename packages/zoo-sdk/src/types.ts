@@ -258,6 +258,65 @@ export type FormatterStatus = {
 	[key: string]: unknown
 }
 
+/** Options for experimental session listing. */
+export type ExperimentalSessionListOptions = WorkspaceRouteOptions & {
+	projectID?: string
+	worktrees?: boolean
+	roots?: boolean | "true" | "false"
+	start?: number
+	cursor?: number
+	search?: string
+	limit?: number
+	archived?: boolean | "true" | "false"
+}
+
+/** Experimental session entry with optional project/worktree metadata. */
+export type ExperimentalSession = Session & {
+	project?: { id: string; name?: string; worktree: string; [key: string]: unknown } | null
+	worktreeName?: string
+	[key: string]: unknown
+}
+
+/** MCP resource metadata returned by experimental resource listing. */
+export type ExperimentalResource = {
+	name: string
+	uri: string
+	description?: string
+	mimeType?: string
+	client: string
+	[key: string]: unknown
+}
+
+/** Experimental resources keyed by resource identifier. */
+export type ExperimentalResourceMap = Record<string, ExperimentalResource>
+
+/** Workspace adapter metadata. */
+export type WorkspaceAdapter = {
+	type: string
+	name: string
+	description: string
+	[key: string]: unknown
+}
+
+/** Portable-core workspace metadata. */
+export type WorkspaceInfo = {
+	id: string
+	type: string
+	name: string
+	branch: string | null
+	directory: string | null
+	extra: unknown | null
+	projectID: string
+	[key: string]: unknown
+}
+
+/** Workspace connection status. */
+export type WorkspaceStatus = {
+	workspaceID: string
+	status: "connected" | "connecting" | "disconnected" | "error" | string
+	[key: string]: unknown
+}
+
 /** Portable-core project metadata. */
 export type Project = {
 	id: string

@@ -145,6 +145,36 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/experimental/tool/ids?directory=%2Frepo%2Froot&workspace=workspace-1") {
 				return { data: ["bash"] }
 			}
+			if (
+				input.path ===
+				"/experimental/session?directory=%2Frepo%2Froot&workspace=workspace-1&projectID=proj_1&worktrees=true&roots=false&limit=10&archived=false"
+			) {
+				return { data: [{ id: "ses_1", title: "Session", project: projectFixture, worktreeName: "root" }] }
+			}
+			if (input.path === "/experimental/resource?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: { docs: { name: "Docs", uri: "file://docs", client: "demo" } } }
+			}
+			if (input.path === "/experimental/workspace/adapter?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: [{ type: "worktree", name: "Worktree", description: "Git worktree" }] }
+			}
+			if (input.path === "/experimental/workspace?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return {
+					data: [
+						{
+							id: "ws_1",
+							type: "worktree",
+							name: "root",
+							branch: "main",
+							directory: "/repo/root",
+							extra: null,
+							projectID: "proj_1",
+						},
+					],
+				}
+			}
+			if (input.path === "/experimental/workspace/status?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: [{ workspaceID: "ws_1", status: "connected" }] }
+			}
 			if (input.path === "/file/content?directory=%2Frepo%2Froot&workspace=workspace-1&path=hello.txt") {
 				return { data: { type: "text", content: "hello" } }
 			}
@@ -608,6 +638,51 @@ describe("ZooClient", () => {
 			{ path: "/find/file?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello&limit=10" },
 			{ path: "/find/symbol?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello" },
 			{ path: "/find?directory=%2Frepo%2Froot&workspace=workspace-1&pattern=sdk-parity" },
+		])
+	})
+
+	test("wraps experimental read routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const scope = { directory: "/repo/root", workspace: "workspace-1" }
+
+		await expect(
+			client.listExperimentalSessions({
+				...scope,
+				projectID: "proj_1",
+				worktrees: true,
+				roots: false,
+				limit: 10,
+				archived: false,
+			}),
+		).resolves.toEqual([{ id: "ses_1", title: "Session", project: projectFixture, worktreeName: "root" }])
+		await expect(client.listResources(scope)).resolves.toEqual({
+			docs: { name: "Docs", uri: "file://docs", client: "demo" },
+		})
+		await expect(client.listWorkspaceAdapters(scope)).resolves.toEqual([
+			{ type: "worktree", name: "Worktree", description: "Git worktree" },
+		])
+		await expect(client.listWorkspaces(scope)).resolves.toEqual([
+			{
+				id: "ws_1",
+				type: "worktree",
+				name: "root",
+				branch: "main",
+				directory: "/repo/root",
+				extra: null,
+				projectID: "proj_1",
+			},
+		])
+		await expect(client.getWorkspaceStatus(scope)).resolves.toEqual([{ workspaceID: "ws_1", status: "connected" }])
+
+		expect(mock.requests.slice(-5)).toEqual([
+			{
+				path: "/experimental/session?directory=%2Frepo%2Froot&workspace=workspace-1&projectID=proj_1&worktrees=true&roots=false&limit=10&archived=false",
+			},
+			{ path: "/experimental/resource?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/experimental/workspace/adapter?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/experimental/workspace?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/experimental/workspace/status?directory=%2Frepo%2Froot&workspace=workspace-1" },
 		])
 	})
 

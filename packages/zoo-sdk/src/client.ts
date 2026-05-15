@@ -1,6 +1,9 @@
 import { createHttpTransport, createIpcTransport, type ZooTransport } from "./transport/index.js"
 import type {
 	CommandInfo,
+	ExperimentalResourceMap,
+	ExperimentalSession,
+	ExperimentalSessionListOptions,
 	FileContent,
 	FileListOptions,
 	FileNode,
@@ -52,7 +55,10 @@ import type {
 	VcsDiffOptions,
 	VcsFileDiff,
 	VcsInfo,
+	WorkspaceAdapter,
+	WorkspaceInfo,
 	WorkspaceRouteOptions,
+	WorkspaceStatus,
 	WorktreeCreateOptions,
 	WorktreeDirectoryOptions,
 	WorktreeDiff,
@@ -129,7 +135,7 @@ function workspaceRouteQuery(options: WorkspaceRouteOptions & { mode?: string } 
 	return query ? `?${query}` : ""
 }
 
-function scopedQuery(options: WorkspaceRouteOptions & Record<string, string | number | undefined> = {}) {
+function scopedQuery(options: WorkspaceRouteOptions & Record<string, string | number | boolean | undefined> = {}) {
 	const params = new URLSearchParams()
 	if (options.directory) params.set("directory", options.directory)
 	if (options.workspace) params.set("workspace", options.workspace)
@@ -616,6 +622,61 @@ export class ZooClient {
 			unwrap(
 				await this.#transport.request<string[] | { data?: string[] }>({
 					path: `/experimental/tool/ids${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List experimental sessions. */
+	async listExperimentalSessions(options: ExperimentalSessionListOptions = {}): Promise<ExperimentalSession[]> {
+		return (
+			unwrap(
+				await this.#transport.request<ExperimentalSession[] | { data?: ExperimentalSession[] }>({
+					path: `/experimental/session${scopedQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List experimental MCP resources. */
+	async listResources(options: WorkspaceRouteOptions = {}): Promise<ExperimentalResourceMap> {
+		return (
+			unwrap(
+				await this.#transport.request<ExperimentalResourceMap | { data?: ExperimentalResourceMap }>({
+					path: `/experimental/resource${workspaceRouteQuery(options)}`,
+				}),
+			) ?? {}
+		)
+	}
+
+	/** List workspace adapters. */
+	async listWorkspaceAdapters(options: WorkspaceRouteOptions = {}): Promise<WorkspaceAdapter[]> {
+		return (
+			unwrap(
+				await this.#transport.request<WorkspaceAdapter[] | { data?: WorkspaceAdapter[] }>({
+					path: `/experimental/workspace/adapter${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List workspaces. */
+	async listWorkspaces(options: WorkspaceRouteOptions = {}): Promise<WorkspaceInfo[]> {
+		return (
+			unwrap(
+				await this.#transport.request<WorkspaceInfo[] | { data?: WorkspaceInfo[] }>({
+					path: `/experimental/workspace${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Read workspace connection status. */
+	async getWorkspaceStatus(options: WorkspaceRouteOptions = {}): Promise<WorkspaceStatus[]> {
+		return (
+			unwrap(
+				await this.#transport.request<WorkspaceStatus[] | { data?: WorkspaceStatus[] }>({
+					path: `/experimental/workspace/status${workspaceRouteQuery(options)}`,
 				}),
 			) ?? []
 		)
