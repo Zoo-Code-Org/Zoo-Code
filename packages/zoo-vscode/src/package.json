@@ -373,6 +373,11 @@
 					"default": true,
 					"description": "%settings.useAgentRules.description%"
 				},
+				"zoo-code.usePortableCore": {
+					"type": "boolean",
+					"default": false,
+					"description": "%settings.usePortableCore.description%"
+				},
 				"zoo-code.apiRequestTimeout": {
 					"type": "number",
 					"default": 600,

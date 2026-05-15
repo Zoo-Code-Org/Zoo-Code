@@ -1,3 +1,7 @@
+import * as vscode from "vscode"
+
+import { Package } from "../shared/package"
+
 export type InjectableConfigType =
 	| string
 	| {
@@ -63,4 +67,9 @@ export async function injectVariables<C extends InjectableConfigType>(
 	}
 
 	return (isObject ? JSON.parse(configString) : configString) as C extends string ? string : C
+}
+
+/** Returns true when the experimental Zoo portable core is enabled for this VS Code extension host. */
+export function usePortableCore(): boolean {
+	return vscode.workspace.getConfiguration(Package.name).get<boolean>("usePortableCore", false)
 }

@@ -1,9 +1,9 @@
 # Zoo Code CLI Integration Handoff
 
 - **Project:** Zoo Code CLI Integration
-- **Current status:** Phase 1 Tasks 1 through 9 and Phase 2 Tasks 1 through 5 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers with mocked/unit coverage.
-- **Last completed task:** Phase 2 Tasks 1-5 — initial Zoo SDK implementation and tests.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 1 audit or Task 2 portable-core feature flag scaffold, then gate SDK-backed VS Code activation paths.
+- **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Task 2 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper for future SDK-gated paths.
+- **Last completed task:** Phase 3 Task 2 — portable-core feature flag scaffold.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 1 audit or Task 3 SDK activation bootstrap behind `usePortableCore()`.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
@@ -107,6 +107,10 @@
     - `packages/zoo-sdk` now builds with `tsc`, exports package-root types and JS from `dist`, and has a real `test` script.
     - `ZooClient` supports session create/list/get/abort and streaming `sendMessage()` over injected, HTTP, or IPC transports.
     - HTTP and Unix-socket IPC transports are covered with mocked/fake local servers. `createZooServer()` can reuse an existing IPC server when reachable or spawn `zoo server --ipc=<path>` with graceful close and capped unexpected-exit restart attempts.
+- Phase 3 Task 2 portable-core feature flag:
+    - `packages/zoo-vscode/src/package.json` contributes `zoo-code.usePortableCore` with default `false`.
+    - `packages/zoo-vscode/src/utils/config.ts` exports `usePortableCore(): boolean`, reading `vscode.workspace.getConfiguration(Package.name).get("usePortableCore", false)`.
+    - `packages/zoo-vscode/src/utils/__tests__/config.spec.ts` covers default false and configured true behavior.
 
 ## How to update this file
 

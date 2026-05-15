@@ -232,7 +232,7 @@
     - **Depends on:** Phase 0 complete.
     - **Can parallelize with:** Phase 1 and Phase 2 tasks.
 
-2. Add portable core feature flag
+2. [✅] Add portable core feature flag
 
     - **What:** Implement `zoo-code.usePortableCore` setting and helper `usePortableCore(): boolean` in `packages/zoo-vscode/src/config/`, defaulting to `false`, exactly before any SDK-based rewire tasks.
     - **Files touched:** `packages/zoo-vscode/package.json` contributes/configuration section, `packages/zoo-vscode/src/config/**`, extension config tests, README.

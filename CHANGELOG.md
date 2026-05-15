@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add `zoo server` as an alias for the headless server command with Unix-socket `--ipc` startup support for portable-core SDK clients.
 - Add a VS Code extension `prepare:cli-binary` script for embedding the built Zoo CLI binary in VSIX assets.
 - Implement the initial `@zoo-code/sdk` package with shared types, `ZooClient`, HTTP/IPC transports, and Zoo CLI process lifecycle helpers.
+- Add the default-off `zoo-code.usePortableCore` VS Code setting and helper for gating future SDK-backed extension paths.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
 ## [3.54.0] - 2026-05-08

@@ -87,7 +87,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -177,6 +177,10 @@ pnpm --filter zoo-code prepare:cli-binary
 ```
 
 Release pipelines can set `ZOO_CLI_BINARY=/path/to/zoo` to copy a prebuilt platform artifact instead of the local `packages/zoo-cli/dist` output.
+
+### Portable Core Feature Flag
+
+The VS Code setting `zoo-code.usePortableCore` defaults to `false`. SDK-backed portable-core paths must check this flag before starting or routing through the Zoo CLI core so the existing extension-host runtime remains the stable default during the migration.
 
 3. **Run the extension**:
 

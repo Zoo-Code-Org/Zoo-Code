@@ -1,6 +1,16 @@
 // npx vitest utils/__tests__/config.spec.ts
 
-import { injectEnv, injectVariables } from "../config"
+const { getConfiguration } = vitest.hoisted(() => ({
+	getConfiguration: vitest.fn(),
+}))
+
+vitest.mock("vscode", () => ({
+	workspace: {
+		getConfiguration,
+	},
+}))
+
+import { injectEnv, injectVariables, usePortableCore } from "../config"
 
 describe("injectEnv", () => {
 	const originalEnv = process.env
@@ -252,4 +262,23 @@ describe("injectVariables", () => {
 	})
 
 	// Variable maps are already tested by `injectEnv` tests above.
+})
+
+describe("usePortableCore", () => {
+	beforeEach(() => {
+		getConfiguration.mockReset()
+	})
+
+	it("defaults to false", () => {
+		getConfiguration.mockReturnValue({ get: (_key: string, fallback: boolean) => fallback })
+
+		expect(usePortableCore()).toBe(false)
+		expect(getConfiguration).toHaveBeenCalledWith("zoo-code")
+	})
+
+	it("returns the configured setting", () => {
+		getConfiguration.mockReturnValue({ get: () => true })
+
+		expect(usePortableCore()).toBe(true)
+	})
 })
