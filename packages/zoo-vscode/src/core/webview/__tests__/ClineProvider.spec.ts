@@ -2557,6 +2557,51 @@ describe("ClineProvider", () => {
 				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
 			])
 		})
+
+		test("ignores legacy profile mutation messages when portable provider config is read-only", async () => {
+			const portableProvider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				undefined,
+				{ listSessions: vi.fn().mockResolvedValue([]) } as any,
+			)
+			await portableProvider.resolveWebviewView(mockWebviewView)
+			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls.at(-1)[0]
+
+			;(portableProvider as any).providerSettingsManager = {
+				saveConfig: vi.fn(),
+				deleteConfig: vi.fn(),
+				getProfile: vi.fn(),
+				listConfig: vi.fn(),
+			} as any
+
+			const testApiConfig = {
+				apiProvider: "anthropic" as const,
+				apiKey: "portable-secret-should-not-save",
+			}
+
+			await messageHandler({
+				type: "saveApiConfiguration",
+				text: "portable-config",
+				apiConfiguration: testApiConfig,
+			})
+			await messageHandler({
+				type: "upsertApiConfiguration",
+				text: "portable-config",
+				apiConfiguration: testApiConfig,
+			})
+			await messageHandler({
+				type: "renameApiConfiguration",
+				values: { oldName: "old-portable", newName: "new-portable" },
+				apiConfiguration: testApiConfig,
+			})
+
+			expect(portableProvider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
+			expect(portableProvider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+			expect(portableProvider.providerSettingsManager.getProfile).not.toHaveBeenCalled()
+		})
 	})
 })
 

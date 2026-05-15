@@ -1475,12 +1475,21 @@ export class ClineProvider
 		return !!this.getProviderProfileEntry(name)
 	}
 
+	public isPortableProviderConfigReadOnly(): boolean {
+		return !!this.portableSessionAdapter
+	}
+
 	async upsertProviderProfile(
 		name: string,
 		providerSettings: ProviderSettings,
 		activate: boolean = true,
 	): Promise<string | undefined> {
 		try {
+			if (this.isPortableProviderConfigReadOnly()) {
+				this.log("Ignoring legacy provider profile upsert because portable provider config is read-only")
+				return undefined
+			}
+
 			// TODO: Do we need to be calling `activateProfile`? It's not
 			// clear to me what the source of truth should be; in some cases
 			// we rely on the `ContextProxy`'s data store and in other cases

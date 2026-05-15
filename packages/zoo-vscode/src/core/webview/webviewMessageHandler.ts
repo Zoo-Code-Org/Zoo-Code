@@ -1794,6 +1794,11 @@ export const webviewMessageHandler = async (
 		}
 		case "saveApiConfiguration":
 			if (message.text && message.apiConfiguration) {
+				if (provider.isPortableProviderConfigReadOnly()) {
+					provider.log("Ignoring legacy provider profile save because portable provider config is read-only")
+					break
+				}
+
 				try {
 					await provider.providerSettingsManager.saveConfig(message.text, message.apiConfiguration)
 					const listApiConfig = await provider.providerSettingsManager.listConfig()
@@ -1813,6 +1818,13 @@ export const webviewMessageHandler = async (
 			break
 		case "renameApiConfiguration":
 			if (message.values && message.apiConfiguration) {
+				if (provider.isPortableProviderConfigReadOnly()) {
+					provider.log(
+						"Ignoring legacy provider profile rename because portable provider config is read-only",
+					)
+					break
+				}
+
 				try {
 					const { oldName, newName } = message.values
 
