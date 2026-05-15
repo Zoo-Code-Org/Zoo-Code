@@ -829,6 +829,37 @@ describe("ClineProvider", () => {
 		])
 	})
 
+	test("portable session adapter adds read-only provider config state", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn(),
+			getConfigProviders: vi.fn().mockResolvedValue({
+				default: { providerID: "openai", modelID: "gpt-5.5" },
+				providers: [{ id: "openai", name: "OpenAI", modelId: "gpt-5.5", secret: "ignored-extra" }],
+			}),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+
+		const state = await portableProvider.getStateToPostToWebview()
+
+		expect(portableSessionAdapter.getConfigProviders).toHaveBeenCalled()
+		expect(state.providerConfigSource).toBe("portable")
+		expect(state.portableProviderConfig).toEqual({
+			readOnly: true,
+			default: { providerID: "openai", modelID: "gpt-5.5" },
+			providers: [{ id: "openai", name: "OpenAI", modelId: "gpt-5.5" }],
+			guidance: "Portable provider config is managed by zoo.jsonc and is read-only in VS Code profiles.",
+		})
+	})
+
 	test("portable session adapter gets sessions for task lookup", async () => {
 		const portableSessionAdapter = {
 			listSessions: vi.fn(),

@@ -76,7 +76,7 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
-import type { PermissionReply, PermissionRequest, Session } from "@zoo-code/sdk"
+import type { ConfigProvidersResult, PermissionReply, PermissionRequest, Session } from "@zoo-code/sdk"
 import type { PortableSessionAdapter } from "../../services/portable-core/PortableSessionAdapter"
 
 import { fileExistsAtPath } from "../../utils/fs"
@@ -2190,6 +2190,7 @@ export class ClineProvider
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
 		const currentTask = this.getCurrentTask()
+		const portableProviderConfig = await this.getPortableProviderConfigState()
 		let zooCodeState: {
 			zooCodeIsAuthenticated: boolean
 			zooCodeUserName: string | undefined
@@ -2226,6 +2227,9 @@ export class ClineProvider
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
 			apiConfiguration,
+			...(portableProviderConfig
+				? { providerConfigSource: "portable" as const, portableProviderConfig }
+				: { providerConfigSource: "vscodeProfiles" as const }),
 			customInstructions,
 			alwaysAllowReadOnly: alwaysAllowReadOnly ?? false,
 			alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? false,
@@ -2349,6 +2353,59 @@ export class ClineProvider
 			})(),
 			...zooCodeState,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
+		}
+	}
+
+	private async getPortableProviderConfigState(): Promise<ExtensionState["portableProviderConfig"] | undefined> {
+		if (!this.portableSessionAdapter || typeof this.portableSessionAdapter.getConfigProviders !== "function") {
+			return undefined
+		}
+
+		try {
+			return this.normalizePortableProviderConfig(await this.portableSessionAdapter.getConfigProviders())
+		} catch (error) {
+			this.log(
+				`Error fetching portable provider config: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			return {
+				readOnly: true,
+				providers: [],
+				guidance: "Portable provider config is managed by zoo.jsonc. Failed to read providers from the CLI.",
+			}
+		}
+	}
+
+	private normalizePortableProviderConfig(result: ConfigProvidersResult): ExtensionState["portableProviderConfig"] {
+		const providerValues = Array.isArray(result.providers)
+			? result.providers
+			: result.providers && typeof result.providers === "object"
+				? Object.values(result.providers)
+				: []
+
+		const providers = providerValues.flatMap((provider) => {
+			if (!provider || typeof provider !== "object") {
+				return []
+			}
+
+			const record = provider as Record<string, unknown>
+			if (typeof record.id !== "string") {
+				return []
+			}
+
+			return [
+				{
+					id: record.id,
+					name: typeof record.name === "string" ? record.name : undefined,
+					modelId: typeof record.modelId === "string" ? record.modelId : undefined,
+				},
+			]
+		})
+
+		return {
+			readOnly: true,
+			default: result.default,
+			providers,
+			guidance: "Portable provider config is managed by zoo.jsonc and is read-only in VS Code profiles.",
 		}
 	}
 

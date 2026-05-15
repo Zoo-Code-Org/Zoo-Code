@@ -313,6 +313,13 @@ export type ExtensionState = Pick<
 	currentTaskItem?: HistoryItem
 	currentTaskTodos?: TodoItem[] // Initial todos for the current task
 	apiConfiguration: ProviderSettings
+	providerConfigSource?: "vscodeProfiles" | "portable"
+	portableProviderConfig?: {
+		readOnly: true
+		default?: unknown
+		providers: Array<{ id: string; name?: string; modelId?: string }>
+		guidance: string
+	}
 	uriScheme?: string
 	shouldShowAnnouncement: boolean
 

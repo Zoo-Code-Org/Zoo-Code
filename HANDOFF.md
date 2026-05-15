@@ -2,8 +2,8 @@
 
 - **Project:** Zoo Code CLI Integration
 - **Current status:** Phase 1 Tasks 1 through 9, Phase 2 Tasks 1 through 5, and Phase 3 Tasks 1 through 7 are implemented on top of the completed Phase 0 foundation. `packages/zoo-cli` now contains Kilo Code's OpenCode-derived `packages/opencode` source, exports Zoo package metadata/bins, prefers Zoo config paths, no longer depends on Kilo gateway/indexing packages, loads project instructions/rules, bridges Roo/Zoo project modes into primary CLI agents, documents/validates Zoo/Roo provider parity, starts headless HTTP or Unix-socket IPC servers for SDK clients, runs deterministic `zoo run` smoke coverage, and can prepare the current-platform CLI binary for VSIX assets. `packages/zoo-sdk` now exports shared types, `ZooClient`, HTTP/IPC transports, lifecycle event callbacks, and Zoo CLI process lifecycle helpers with mocked/unit coverage. VS Code now has the default-off `zoo-code.usePortableCore` setting and `usePortableCore()` helper plus activation-time `PortableCoreService` bootstrap and a `ClineProvider` seam that routes session create/list/get, text-only send/stream, abort, and the first portable tool-approval request/response bridge through `PortableSessionAdapter` when enabled. `docs/extension-rewire-audit.md` maps the VS Code extension host into portable-core migration buckets and recommended rewire order; `docs/webview-message-protocol.md` and `@zoo-code/types` now pin the portable-core webview contract.
-- **Last completed task:** Phase 3 Task 10 first mode-list slice — backend `getModes()` now uses portable-core modes when the adapter is present, and SDK mode/message mapping matches CLI agent fields.
-- **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 9 provider config read seam by adding read-only portable provider/config state without mutating legacy VS Code profiles.
+- **Last completed task:** Phase 3 Task 9 first read-only provider-config slice — posted extension state now includes portable provider metadata when the adapter is present without mutating legacy profiles.
+- **Next task to execute:** Continue `DEVPLAN.md` Phase 4 Task 2 by adding unified `zoo.jsonc` loader coverage for provider/mode/rules precedence.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
     - Open Question 2, runtime/toolchain choice: no longer blocks Phase 1 Task 9 for current-platform VSIX binary preparation, but still affects Phase 6 all-platform release packaging decisions.
@@ -155,10 +155,12 @@
     - `PortableSessionAdapter` forwards mode listing, and `ClineProvider.getModes()` uses `PortableSessionAdapter.listModes()` when the adapter is present while preserving the legacy built-in/custom mode list when absent.
     - Focused coverage verifies SDK agent mapping/send body shape and VS Code portable `getModes()` delegation.
     - Remaining Task 10 work: replace visible webview mode list/state with portable-core mode data where needed and define persistent mode/session selection semantics.
-- Phase 3 Task 9 started, not complete:
+- Phase 3 Task 9 started, first read-only state slice complete:
     - `@zoo-code/sdk` now exposes read-only `getConfig()` and `getConfigProviders()` wrappers for CLI `/config` and `/config/providers`.
-    - `PortableSessionAdapter` forwards portable-core config/provider reads for future VS Code provider state migration.
-    - Remaining Task 9 work: decide and implement how portable config maps into `ExtensionState.apiConfiguration`/settings UI without mutating legacy VS Code profiles, after Phase 4 schema/loader semantics are stable.
+    - `PortableSessionAdapter` forwards portable-core config/provider reads for VS Code provider state migration.
+    - `ExtensionState` now includes optional `providerConfigSource` and `portableProviderConfig` fields. `ClineProvider.getStateToPostToWebview()` populates read-only normalized provider metadata from `getConfigProviders()` when the adapter is present and does not call legacy provider-profile mutation APIs.
+    - Focused coverage verifies portable provider metadata is posted as read-only state.
+    - Remaining Task 9 work: add visible Settings UI read-only guidance/actions and finalize how selected portable defaults map into UI once Phase 4 schema/loader semantics are stable.
 - Phase 4 Task 2 started, not complete:
     - Added CLI config-loader regression coverage for `watcher.ignore` arrays and invalid watcher ignore warnings.
     - Remaining Task 4 work: broaden unified `zoo.jsonc` schema/loader coverage for global/project precedence, providers, modes, rules, `AGENTS.md`, `.zoo/rules`, `.zoo/modes`, and `.zooignore`.

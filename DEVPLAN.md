@@ -322,7 +322,7 @@
     - **Depends on:** Phase 3, Task 3; Phase 4, Tasks 1 and 2.
     - **Can parallelize with:** Phase 3, Task 10 after config schema is stable.
 
-    - **Progress:** SDK and VS Code adapter can read portable-core `/config` and `/config/providers` for future provider-state migration. The VS Code UI still uses legacy profiles until Phase 4 config schema/loader migration semantics are stable.
+    - **Progress:** SDK and VS Code adapter can read portable-core `/config` and `/config/providers`. `ExtensionState` now carries optional read-only portable provider metadata, and `ClineProvider.getStateToPostToWebview()` populates it from `PortableSessionAdapter.getConfigProviders()` when the adapter is present without mutating `ProviderSettingsManager` or legacy VS Code profiles. The visible Settings UI still needs read-only guidance/actions once Phase 4 config schema semantics are stable.
 
 10. Rewire mode selection actions
 
