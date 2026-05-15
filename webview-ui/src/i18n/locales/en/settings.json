@@ -282,6 +282,12 @@
 		"description": "Run these actions without asking for permission. Only enable for actions you fully trust and if you understand the security risks.",
 		"toggleShortcut": "You can configure a keyboard shortcut for this setting <SettingsLink>in your IDE preferences</SettingsLink>.",
 		"enabled": "Auto-Approve Enabled",
+		"enabledOverriddenByYolo": "YOLO mode is active, so auto-approval is effectively enabled and individual auto-approval controls are locked.",
+		"yolo": {
+			"label": "YOLO Mode",
+			"description": "Approve all tool use, MCP use, and terminal commands except denied command prefixes and protected file writes unless protected writes are also enabled.",
+			"controlsDisabled": "Turn YOLO mode off to edit individual auto-approval categories."
+		},
 		"readOnly": {
 			"label": "Read",
 			"description": "When enabled, Zoo will automatically view directory contents and read files without requiring you to click the Approve button.",

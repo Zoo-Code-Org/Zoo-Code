@@ -29,6 +29,7 @@ interface TestExtensionState {
 	autoApprovalEnabled: boolean
 	alwaysAllowFollowupQuestions: boolean
 	followupAutoApproveTimeoutMs: number
+	yoloMode: boolean
 }
 
 const TestExtensionStateContext = createContext<TestExtensionState | undefined>(undefined)
@@ -72,6 +73,7 @@ describe("FollowUpSuggest", () => {
 		autoApprovalEnabled: true,
 		alwaysAllowFollowupQuestions: true,
 		followupAutoApproveTimeoutMs: 3000, // 3 seconds for testing
+		yoloMode: false,
 	}
 
 	beforeEach(() => {
@@ -198,6 +200,7 @@ describe("FollowUpSuggest", () => {
 			autoApprovalEnabled: false,
 			alwaysAllowFollowupQuestions: false,
 			followupAutoApproveTimeoutMs: 3000,
+			yoloMode: false,
 		}
 
 		renderWithTestProviders(
@@ -231,6 +234,20 @@ describe("FollowUpSuggest", () => {
 
 		// Component should not render anything
 		expect(container.firstChild).toBeNull()
+	})
+
+	it("should not display countdown timer when YOLO mode is enabled", () => {
+		renderWithTestProviders(
+			<FollowUpSuggest
+				suggestions={mockSuggestions}
+				onSuggestionClick={mockOnSuggestionClick}
+				ts={123}
+				onCancelAutoApproval={mockOnCancelAutoApproval}
+			/>,
+			{ ...defaultTestState, yoloMode: true },
+		)
+
+		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
 	})
 
 	it("should not render when onSuggestionClick is not provided", () => {

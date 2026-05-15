@@ -28,7 +28,8 @@ export const FollowUpSuggest = ({
 	isAnswered = false,
 	isFollowUpAutoApprovalPaused = false,
 }: FollowUpSuggestProps) => {
-	const { autoApprovalEnabled, alwaysAllowFollowupQuestions, followupAutoApproveTimeoutMs } = useExtensionState()
+	const { autoApprovalEnabled, alwaysAllowFollowupQuestions, followupAutoApproveTimeoutMs, yoloMode } =
+		useExtensionState()
 	const [countdown, setCountdown] = useState<number | null>(null)
 	const [suggestionSelected, setSuggestionSelected] = useState(false)
 	const { t } = useAppTranslation()
@@ -39,6 +40,7 @@ export const FollowUpSuggest = ({
 		// Also stop countdown if the question has been answered or auto-approval is paused (user is typing)
 		if (
 			autoApprovalEnabled &&
+			!yoloMode &&
 			alwaysAllowFollowupQuestions &&
 			suggestions.length > 0 &&
 			!suggestionSelected &&
@@ -77,6 +79,7 @@ export const FollowUpSuggest = ({
 		}
 	}, [
 		autoApprovalEnabled,
+		yoloMode,
 		alwaysAllowFollowupQuestions,
 		suggestions,
 		followupAutoApproveTimeoutMs,

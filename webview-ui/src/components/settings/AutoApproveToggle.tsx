@@ -79,9 +79,10 @@ export const autoApproveSettingsConfig: Record<AutoApproveSetting, AutoApproveCo
 
 type AutoApproveToggleProps = AutoApproveToggles & {
 	onToggle: (key: AutoApproveSetting, value: boolean) => void
+	disabled?: boolean
 }
 
-export const AutoApproveToggle = ({ onToggle, ...props }: AutoApproveToggleProps) => {
+export const AutoApproveToggle = ({ onToggle, disabled = false, ...props }: AutoApproveToggleProps) => {
 	const { t } = useAppTranslation()
 
 	return (
@@ -91,10 +92,14 @@ export const AutoApproveToggle = ({ onToggle, ...props }: AutoApproveToggleProps
 					<Button
 						variant={props[key] ? "primary" : "secondary"}
 						onClick={() => onToggle(key, !props[key])}
+						disabled={disabled}
 						aria-label={t(labelKey)}
 						aria-pressed={!!props[key]}
 						data-testid={testId}
-						className={cn("gap-1.5 text-xs whitespace-nowrap", !props[key] && "opacity-50")}>
+						className={cn(
+							"gap-1.5 text-xs whitespace-nowrap",
+							disabled ? "opacity-40 cursor-not-allowed" : !props[key] && "opacity-50",
+						)}>
 						<span className={`codicon codicon-${icon} text-sm`} />
 						<span>{t(labelKey)}</span>
 					</Button>

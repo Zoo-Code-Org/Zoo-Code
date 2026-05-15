@@ -10,14 +10,14 @@ interface AutoApprovalToggles {
 	alwaysAllowFollowupQuestions?: boolean
 }
 
-export function useAutoApprovalState(toggles: AutoApprovalToggles, autoApprovalEnabled?: boolean) {
+export function useAutoApprovalState(toggles: AutoApprovalToggles, autoApprovalEnabled?: boolean, yoloMode?: boolean) {
 	const hasEnabledOptions = useMemo(() => {
 		return Object.values(toggles).some((value) => !!value)
 	}, [toggles])
 
 	const effectiveAutoApprovalEnabled = useMemo(() => {
-		return autoApprovalEnabled ?? false
-	}, [autoApprovalEnabled])
+		return yoloMode === true || autoApprovalEnabled === true
+	}, [autoApprovalEnabled, yoloMode])
 
 	return {
 		hasEnabledOptions,

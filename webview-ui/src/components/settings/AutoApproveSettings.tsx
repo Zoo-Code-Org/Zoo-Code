@@ -1,4 +1,4 @@
-import { HTMLAttributes, useState } from "react"
+import { HTMLAttributes, useMemo, useState } from "react"
 import { X } from "lucide-react"
 import { Trans } from "react-i18next"
 import { Package } from "@roo/package"
@@ -14,11 +14,11 @@ import { Section } from "./Section"
 import { SearchableSetting } from "./SearchableSetting"
 import { AutoApproveToggle } from "./AutoApproveToggle"
 import { MaxLimitInputs } from "./MaxLimitInputs"
-import { useExtensionState } from "@/context/ExtensionStateContext"
 import { useAutoApprovalState } from "@/hooks/useAutoApprovalState"
-import { useAutoApprovalToggles } from "@/hooks/useAutoApprovalToggles"
 
 type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
+	autoApprovalEnabled?: boolean
+	yoloMode?: boolean
 	alwaysAllowReadOnly?: boolean
 	alwaysAllowReadOnlyOutsideWorkspace?: boolean
 	alwaysAllowWrite?: boolean
@@ -35,6 +35,8 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	allowedMaxCost?: number | undefined
 	deniedCommands?: string[]
 	setCachedStateField: SetCachedStateField<
+		| "autoApprovalEnabled"
+		| "yoloMode"
 		| "alwaysAllowReadOnly"
 		| "alwaysAllowReadOnlyOutsideWorkspace"
 		| "alwaysAllowWrite"
@@ -54,6 +56,8 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 }
 
 export const AutoApproveSettings = ({
+	autoApprovalEnabled,
+	yoloMode,
 	alwaysAllowReadOnly,
 	alwaysAllowReadOnlyOutsideWorkspace,
 	alwaysAllowWrite,
@@ -75,31 +79,54 @@ export const AutoApproveSettings = ({
 	const { t } = useAppTranslation()
 	const [commandInput, setCommandInput] = useState("")
 	const [deniedCommandInput, setDeniedCommandInput] = useState("")
-	const { autoApprovalEnabled, setAutoApprovalEnabled } = useExtensionState()
-
-	const toggles = useAutoApprovalToggles()
-
-	const { effectiveAutoApprovalEnabled } = useAutoApprovalState(toggles, autoApprovalEnabled)
+	const toggles = useMemo(
+		() => ({
+			alwaysAllowReadOnly,
+			alwaysAllowWrite,
+			alwaysAllowExecute,
+			alwaysAllowMcp,
+			alwaysAllowModeSwitch,
+			alwaysAllowSubtasks,
+			alwaysAllowFollowupQuestions,
+		}),
+		[
+			alwaysAllowExecute,
+			alwaysAllowFollowupQuestions,
+			alwaysAllowMcp,
+			alwaysAllowModeSwitch,
+			alwaysAllowReadOnly,
+			alwaysAllowSubtasks,
+			alwaysAllowWrite,
+		],
+	)
+	const { effectiveAutoApprovalEnabled } = useAutoApprovalState(toggles, autoApprovalEnabled, yoloMode)
+	const autoApproveControlsDisabled = yoloMode === true
 
 	const handleAddCommand = () => {
+		if (autoApproveControlsDisabled) {
+			return
+		}
+
 		const currentCommands = allowedCommands ?? []
 
 		if (commandInput && !currentCommands.includes(commandInput)) {
 			const newCommands = [...currentCommands, commandInput]
 			setCachedStateField("allowedCommands", newCommands)
 			setCommandInput("")
-			vscode.postMessage({ type: "updateSettings", updatedSettings: { allowedCommands: newCommands } })
 		}
 	}
 
 	const handleAddDeniedCommand = () => {
+		if (autoApproveControlsDisabled) {
+			return
+		}
+
 		const currentCommands = deniedCommands ?? []
 
 		if (deniedCommandInput && !currentCommands.includes(deniedCommandInput)) {
 			const newCommands = [...currentCommands, deniedCommandInput]
 			setCachedStateField("deniedCommands", newCommands)
 			setDeniedCommandInput("")
-			vscode.postMessage({ type: "updateSettings", updatedSettings: { deniedCommands: newCommands } })
 		}
 	}
 
@@ -115,11 +142,14 @@ export const AutoApproveSettings = ({
 						label={t("settings:autoApprove.enabled")}>
 						<VSCodeCheckbox
 							checked={effectiveAutoApprovalEnabled}
+							disabled={autoApproveControlsDisabled}
 							aria-label={t("settings:autoApprove.toggleAriaLabel")}
 							onChange={() => {
-								const newValue = !(autoApprovalEnabled ?? false)
-								setAutoApprovalEnabled(newValue)
-								vscode.postMessage({ type: "autoApprovalEnabled", bool: newValue })
+								if (autoApproveControlsDisabled) {
+									return
+								}
+
+								setCachedStateField("autoApprovalEnabled", !(autoApprovalEnabled ?? false))
 							}}>
 							<span className="font-medium">{t("settings:autoApprove.enabled")}</span>
 						</VSCodeCheckbox>
@@ -146,26 +176,49 @@ export const AutoApproveSettings = ({
 									}}
 								/>
 							</p>
+							{autoApproveControlsDisabled && <p>{t("settings:autoApprove.enabledOverriddenByYolo")}</p>}
 						</div>
 					</SearchableSetting>
 
-					<AutoApproveToggle
-						alwaysAllowReadOnly={alwaysAllowReadOnly}
-						alwaysAllowWrite={alwaysAllowWrite}
-						alwaysAllowMcp={alwaysAllowMcp}
-						alwaysAllowModeSwitch={alwaysAllowModeSwitch}
-						alwaysAllowSubtasks={alwaysAllowSubtasks}
-						alwaysAllowExecute={alwaysAllowExecute}
-						alwaysAllowFollowupQuestions={alwaysAllowFollowupQuestions}
-						onToggle={(key, value) => setCachedStateField(key, value)}
-					/>
+					<SearchableSetting
+						settingId="auto-approve-yolo-mode"
+						section="autoApprove"
+						label={t("settings:autoApprove.yolo.label")}>
+						<VSCodeCheckbox
+							checked={yoloMode}
+							onChange={(e: any) => setCachedStateField("yoloMode", e.target.checked)}
+							data-testid="yolo-mode-checkbox">
+							<span className="font-medium">{t("settings:autoApprove.yolo.label")}</span>
+						</VSCodeCheckbox>
+						<div className="text-vscode-descriptionForeground text-sm mt-1">
+							<p>{t("settings:autoApprove.yolo.description")}</p>
+							<p>{t("settings:autoApprove.yolo.controlsDisabled")}</p>
+						</div>
+					</SearchableSetting>
 
-					<MaxLimitInputs
-						allowedMaxRequests={allowedMaxRequests}
-						allowedMaxCost={allowedMaxCost}
-						onMaxRequestsChange={(value) => setCachedStateField("allowedMaxRequests", value)}
-						onMaxCostChange={(value) => setCachedStateField("allowedMaxCost", value)}
-					/>
+					<div
+						className={
+							autoApproveControlsDisabled ? "space-y-4 pointer-events-none opacity-50" : "space-y-4"
+						}>
+						<AutoApproveToggle
+							alwaysAllowReadOnly={alwaysAllowReadOnly}
+							alwaysAllowWrite={alwaysAllowWrite}
+							alwaysAllowMcp={alwaysAllowMcp}
+							alwaysAllowModeSwitch={alwaysAllowModeSwitch}
+							alwaysAllowSubtasks={alwaysAllowSubtasks}
+							alwaysAllowExecute={alwaysAllowExecute}
+							alwaysAllowFollowupQuestions={alwaysAllowFollowupQuestions}
+							onToggle={(key, value) => setCachedStateField(key, value)}
+							disabled={autoApproveControlsDisabled}
+						/>
+
+						<MaxLimitInputs
+							allowedMaxRequests={allowedMaxRequests}
+							allowedMaxCost={allowedMaxCost}
+							onMaxRequestsChange={(value) => setCachedStateField("allowedMaxRequests", value)}
+							onMaxCostChange={(value) => setCachedStateField("allowedMaxCost", value)}
+						/>
+					</div>
 				</div>
 
 				{/* ADDITIONAL SETTINGS */}
@@ -182,6 +235,7 @@ export const AutoApproveSettings = ({
 							label={t("settings:autoApprove.readOnly.outsideWorkspace.label")}>
 							<VSCodeCheckbox
 								checked={alwaysAllowReadOnlyOutsideWorkspace}
+								disabled={autoApproveControlsDisabled}
 								onChange={(e: any) =>
 									setCachedStateField("alwaysAllowReadOnlyOutsideWorkspace", e.target.checked)
 								}
@@ -209,6 +263,7 @@ export const AutoApproveSettings = ({
 							label={t("settings:autoApprove.write.outsideWorkspace.label")}>
 							<VSCodeCheckbox
 								checked={alwaysAllowWriteOutsideWorkspace}
+								disabled={autoApproveControlsDisabled}
 								onChange={(e: any) =>
 									setCachedStateField("alwaysAllowWriteOutsideWorkspace", e.target.checked)
 								}
@@ -227,6 +282,7 @@ export const AutoApproveSettings = ({
 							label={t("settings:autoApprove.write.protected.label")}>
 							<VSCodeCheckbox
 								checked={alwaysAllowWriteProtected}
+								disabled={autoApproveControlsDisabled}
 								onChange={(e: any) =>
 									setCachedStateField("alwaysAllowWriteProtected", e.target.checked)
 								}
@@ -256,6 +312,7 @@ export const AutoApproveSettings = ({
 									max={300000}
 									step={1000}
 									value={[followupAutoApproveTimeoutMs]}
+									disabled={autoApproveControlsDisabled}
 									onValueChange={([value]) =>
 										setCachedStateField("followupAutoApproveTimeoutMs", value)
 									}
@@ -301,9 +358,14 @@ export const AutoApproveSettings = ({
 								}}
 								placeholder={t("settings:autoApprove.execute.commandPlaceholder")}
 								className="grow"
+								disabled={autoApproveControlsDisabled}
 								data-testid="command-input"
 							/>
-							<Button className="h-8" onClick={handleAddCommand} data-testid="add-command-button">
+							<Button
+								className="h-8"
+								onClick={handleAddCommand}
+								disabled={autoApproveControlsDisabled}
+								data-testid="add-command-button">
 								{t("settings:autoApprove.execute.addButton")}
 							</Button>
 						</div>
@@ -314,14 +376,10 @@ export const AutoApproveSettings = ({
 									key={index}
 									variant="secondary"
 									data-testid={`remove-command-${index}`}
+									disabled={autoApproveControlsDisabled}
 									onClick={() => {
 										const newCommands = (allowedCommands ?? []).filter((_, i) => i !== index)
 										setCachedStateField("allowedCommands", newCommands)
-
-										vscode.postMessage({
-											type: "updateSettings",
-											updatedSettings: { allowedCommands: newCommands },
-										})
 									}}>
 									<div className="flex flex-row items-center gap-1">
 										<div>{cmd}</div>
@@ -357,11 +415,13 @@ export const AutoApproveSettings = ({
 								}}
 								placeholder={t("settings:autoApprove.execute.deniedCommandPlaceholder")}
 								className="grow"
+								disabled={autoApproveControlsDisabled}
 								data-testid="denied-command-input"
 							/>
 							<Button
 								className="h-8"
 								onClick={handleAddDeniedCommand}
+								disabled={autoApproveControlsDisabled}
 								data-testid="add-denied-command-button">
 								{t("settings:autoApprove.execute.addButton")}
 							</Button>
@@ -373,14 +433,10 @@ export const AutoApproveSettings = ({
 									key={index}
 									variant="secondary"
 									data-testid={`remove-denied-command-${index}`}
+									disabled={autoApproveControlsDisabled}
 									onClick={() => {
 										const newCommands = (deniedCommands ?? []).filter((_, i) => i !== index)
 										setCachedStateField("deniedCommands", newCommands)
-
-										vscode.postMessage({
-											type: "updateSettings",
-											updatedSettings: { deniedCommands: newCommands },
-										})
 									}}>
 									<div className="flex flex-row items-center gap-1">
 										<div>{cmd}</div>

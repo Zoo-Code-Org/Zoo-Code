@@ -30,6 +30,7 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 
 	const {
 		autoApprovalEnabled,
+		yoloMode,
 		setAutoApprovalEnabled,
 		setAlwaysAllowReadOnly,
 		setAlwaysAllowWrite,
@@ -41,9 +42,14 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 	} = useExtensionState()
 
 	const toggles = useAutoApprovalToggles()
+	const isYoloMode = yoloMode === true
 
 	const onAutoApproveToggle = React.useCallback(
 		(key: AutoApproveSetting, value: boolean) => {
+			if (isYoloMode) {
+				return
+			}
+
 			vscode.postMessage({ type: "updateSettings", updatedSettings: { [key]: value } })
 
 			switch (key) {
@@ -77,6 +83,7 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 			}
 		},
 		[
+			isYoloMode,
 			autoApprovalEnabled,
 			setAlwaysAllowReadOnly,
 			setAlwaysAllowWrite,
@@ -90,6 +97,10 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 	)
 
 	const handleSelectAll = React.useCallback(() => {
+		if (isYoloMode) {
+			return
+		}
+
 		// Enable all options
 		Object.keys(autoApproveSettingsConfig).forEach((key) => {
 			onAutoApproveToggle(key as AutoApproveSetting, true)
@@ -99,14 +110,18 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 			setAutoApprovalEnabled(true)
 			vscode.postMessage({ type: "autoApprovalEnabled", bool: true })
 		}
-	}, [onAutoApproveToggle, autoApprovalEnabled, setAutoApprovalEnabled])
+	}, [isYoloMode, onAutoApproveToggle, autoApprovalEnabled, setAutoApprovalEnabled])
 
 	const handleSelectNone = React.useCallback(() => {
+		if (isYoloMode) {
+			return
+		}
+
 		// Disable all options
 		Object.keys(autoApproveSettingsConfig).forEach((key) => {
 			onAutoApproveToggle(key as AutoApproveSetting, false)
 		})
-	}, [onAutoApproveToggle])
+	}, [isYoloMode, onAutoApproveToggle])
 
 	const handleOpenSettings = React.useCallback(
 		() =>
@@ -116,30 +131,49 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 
 	// Handle the main auto-approval toggle
 	const handleAutoApprovalToggle = React.useCallback(() => {
+		if (isYoloMode) {
+			return
+		}
+
 		const newValue = !(autoApprovalEnabled ?? false)
 		setAutoApprovalEnabled(newValue)
 		vscode.postMessage({ type: "autoApprovalEnabled", bool: newValue })
-	}, [autoApprovalEnabled, setAutoApprovalEnabled])
+	}, [isYoloMode, autoApprovalEnabled, setAutoApprovalEnabled])
 
 	// Calculate enabled and total counts as separate properties
 	const settingsArray = Object.values(autoApproveSettingsConfig)
+	const displayedToggles = React.useMemo(() => {
+		if (!isYoloMode) {
+			return toggles
+		}
+
+		return settingsArray.reduce(
+			(acc, setting) => {
+				acc[setting.key] = true
+				return acc
+			},
+			{} as Record<AutoApproveSetting, boolean>,
+		)
+	}, [isYoloMode, settingsArray, toggles])
 
 	const enabledCount = React.useMemo(() => {
-		return Object.values(toggles).filter((value) => !!value).length
-	}, [toggles])
+		return Object.values(displayedToggles).filter((value) => !!value).length
+	}, [displayedToggles])
 
 	const totalCount = React.useMemo(() => {
 		return Object.keys(toggles).length
 	}, [toggles])
 
-	const { effectiveAutoApprovalEnabled } = useAutoApprovalState(toggles, autoApprovalEnabled)
+	const { effectiveAutoApprovalEnabled } = useAutoApprovalState(toggles, autoApprovalEnabled, yoloMode)
+	const quickControlsDisabled = !effectiveAutoApprovalEnabled || isYoloMode
 
-	const tooltipText =
-		!effectiveAutoApprovalEnabled || enabledCount === 0
+	const tooltipText = isYoloMode
+		? t("chat:autoApprove.tooltipYolo")
+		: !effectiveAutoApprovalEnabled || enabledCount === 0
 			? t("chat:autoApprove.tooltipManage")
 			: t("chat:autoApprove.tooltipStatus", {
 					toggles: settingsArray
-						.filter((setting) => toggles[setting.key])
+						.filter((setting) => displayedToggles[setting.key])
 						.map((setting) => t(setting.labelKey))
 						.join(", "),
 				})
@@ -203,10 +237,15 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 						<p className="m-0 text-xs text-vscode-descriptionForeground">
 							{t("chat:autoApprove.description")}
 						</p>
+						{isYoloMode && (
+							<p className="m-0 mt-2 text-xs text-vscode-descriptionForeground">
+								{t("chat:autoApprove.yoloDescription")}
+							</p>
+						)}
 					</div>
 					<div className="grid grid-cols-1 min-[340px]:grid-cols-2 gap-x-2 gap-y-2 p-3">
 						{settingsArray.map(({ key, labelKey, descriptionKey, icon }) => {
-							const isEnabled = toggles[key]
+							const isEnabled = displayedToggles[key] === true
 							return (
 								<StandardTooltip key={key} content={t(descriptionKey)}>
 									<Button
@@ -215,11 +254,10 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 										className={cn(
 											"flex items-center gap-2 px-2 py-2 text-sm text-left justify-start h-auto",
 											"transition-all duration-150",
-											!effectiveAutoApprovalEnabled &&
-												"opacity-50 cursor-not-allowed hover:opacity-50",
+											quickControlsDisabled && "opacity-50 cursor-not-allowed hover:opacity-50",
 											!isEnabled && "bg-vscode-button-background/15",
 										)}
-										disabled={!effectiveAutoApprovalEnabled}
+										disabled={quickControlsDisabled}
 										data-testid={`auto-approve-${key}`}>
 										<span className={`codicon codicon-${icon} text-sm flex-shrink-0`} />
 										<span className="flex-1 truncate">{t(labelKey)}</span>
@@ -237,10 +275,10 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 								size="sm"
 								aria-label={t("chat:autoApprove.selectAll")}
 								onClick={handleSelectAll}
-								disabled={!effectiveAutoApprovalEnabled}
+								disabled={quickControlsDisabled}
 								className={cn(
 									"gap-1 px-2 py-1 text-base font-bold h-auto",
-									!effectiveAutoApprovalEnabled && "opacity-50 hover:opacity-50 cursor-not-allowed",
+									quickControlsDisabled && "opacity-50 hover:opacity-50 cursor-not-allowed",
 								)}>
 								<ListChecks className="w-3.5 h-3.5" />
 								<span>{t("chat:autoApprove.all")}</span>
@@ -250,10 +288,10 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 								size="sm"
 								aria-label={t("chat:autoApprove.selectNone")}
 								onClick={handleSelectNone}
-								disabled={!effectiveAutoApprovalEnabled}
+								disabled={quickControlsDisabled}
 								className={cn(
 									"gap-1 px-2 py-1 text-base font-bold h-auto",
-									!effectiveAutoApprovalEnabled && "opacity-50 hover:opacity-50 cursor-not-allowed",
+									quickControlsDisabled && "opacity-50 hover:opacity-50 cursor-not-allowed",
 								)}>
 								<LayoutList className="w-3.5 h-3.5" />
 								<span>{t("chat:autoApprove.none")}</span>
@@ -261,8 +299,16 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 						</div>
 
 						<label
-							className="flex items-center gap-2 pr-2 cursor-pointer"
+							className={cn(
+								"flex items-center gap-2 pr-2",
+								isYoloMode ? "cursor-not-allowed opacity-60" : "cursor-pointer",
+							)}
 							onClick={(e) => {
+								if (isYoloMode) {
+									e.preventDefault()
+									return
+								}
+
 								// Prevent label click when clicking on the toggle switch itself
 								if ((e.target as HTMLElement).closest('[role="switch"]')) {
 									e.preventDefault()
@@ -274,8 +320,11 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 								checked={effectiveAutoApprovalEnabled}
 								aria-label="Toggle auto-approval"
 								onChange={handleAutoApprovalToggle}
+								disabled={isYoloMode}
 							/>
-							<span className={cn("text-sm font-bold select-none")}>Enabled</span>
+							<span className={cn("text-sm font-bold select-none")}>
+								{isYoloMode ? t("chat:autoApprove.yoloActive") : t("chat:autoApprove.enabled")}
+							</span>
 						</label>
 					</div>
 				</div>
