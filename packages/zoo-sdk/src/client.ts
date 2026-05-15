@@ -28,6 +28,8 @@ import type {
 	ProviderOAuthAuthorizeResult,
 	ProviderOAuthCallbackOptions,
 	PromptAsyncOptions,
+	Project,
+	ProjectUpdateOptions,
 	SearchMatch,
 	SendMessageOptions,
 	Session,
@@ -619,6 +621,48 @@ export class ZooClient {
 					path: `/find${scopedQuery(options)}`,
 				}),
 			) ?? []
+		)
+	}
+
+	/** List known portable-core projects. */
+	async listProjects(options: WorkspaceRouteOptions = {}): Promise<Project[]> {
+		return (
+			unwrap(
+				await this.#transport.request<Project[] | { data?: Project[] }>({
+					path: `/project${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Read the current portable-core project. */
+	async getCurrentProject(options: WorkspaceRouteOptions = {}): Promise<Project> {
+		return unwrap(
+			await this.#transport.request<Project | { data?: Project }>({
+				path: `/project/current${workspaceRouteQuery(options)}`,
+			}),
+		)
+	}
+
+	/** Initialize Git for the current portable-core project directory. */
+	async initProjectGit(options: WorkspaceRouteOptions = {}): Promise<Project> {
+		return unwrap(
+			await this.#transport.request<Project | { data?: Project }>({
+				method: "POST",
+				path: `/project/git/init${workspaceRouteQuery(options)}`,
+			}),
+		)
+	}
+
+	/** Update portable-core project metadata. */
+	async updateProject(projectID: string, options: ProjectUpdateOptions): Promise<Project> {
+		const { directory, workspace, ...body } = options
+		return unwrap(
+			await this.#transport.request<Project | { data?: Project }>({
+				method: "PATCH",
+				path: `/project/${encodeURIComponent(projectID)}${workspaceRouteQuery({ directory, workspace })}`,
+				body,
+			}),
 		)
 	}
 

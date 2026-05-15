@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Cover generated SDK `find.symbols()` parity across direct and HttpApi instance read routes.
 - Add generated SDK permission list/reply/always-rules missing-request parity across direct and HttpApi backends.
 - Add generated SDK MCP status parity across direct and HttpApi backends using a disabled local MCP fixture.
+- Add `@zoo-code/sdk` wrappers for portable-core project list/current/init-git/update routes.
 - Add SDK wrappers for portable-core worktree list, create, remove, and reset routes.
 - Add SDK wrappers for legacy portable-core worktree diff, diff summary, and diff-file routes.
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.

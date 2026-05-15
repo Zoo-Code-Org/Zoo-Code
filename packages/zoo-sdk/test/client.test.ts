@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { ZooClient, type ZooTransport } from "../src/index.js"
 
+const projectFixture = {
+	id: "proj_1",
+	worktree: "/repo/root",
+	vcs: "git",
+	name: "Zoo Project",
+	icon: { color: "blue" },
+	commands: { start: "bun dev" },
+	time: { created: 1, updated: 2 },
+	sandboxes: ["/repo/root"],
+}
+
 function transport(): ZooTransport & { requests: any[] } {
 	const requests: any[] = []
 	return {
@@ -144,6 +155,21 @@ function transport(): ZooTransport & { requests: any[] } {
 			}
 			if (input.path === "/find?directory=%2Frepo%2Froot&workspace=workspace-1&pattern=sdk-parity") {
 				return { data: [{ path: { text: "hello.txt" }, lines: { text: "sdk-parity" }, line_number: 1 }] }
+			}
+			if (input.path === "/project?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: [projectFixture] }
+			}
+			if (input.path === "/project/current?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: projectFixture }
+			}
+			if (input.path === "/project/git/init?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: { ...projectFixture, vcs: "git", worktree: "/repo/root" } }
+			}
+			if (
+				input.path === "/project/proj_1?directory=%2Frepo%2Froot&workspace=workspace-1" &&
+				input.method === "PATCH"
+			) {
+				return { data: { ...projectFixture, ...input.body } }
 			}
 			if (input.path === "/agent") {
 				return { data: [{ name: "code", displayName: "Code", description: "Code mode", mode: "primary" }] }
@@ -546,6 +572,42 @@ describe("ZooClient", () => {
 			{ path: "/file/status?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/find/file?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello&limit=10" },
 			{ path: "/find?directory=%2Frepo%2Froot&workspace=workspace-1&pattern=sdk-parity" },
+		])
+	})
+
+	test("wraps project routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const scope = { directory: "/repo/root", workspace: "workspace-1" }
+
+		await expect(client.listProjects(scope)).resolves.toEqual([projectFixture])
+		await expect(client.getCurrentProject(scope)).resolves.toEqual(projectFixture)
+		await expect(client.initProjectGit(scope)).resolves.toEqual({
+			...projectFixture,
+			vcs: "git",
+			worktree: "/repo/root",
+		})
+		await expect(
+			client.updateProject("proj_1", {
+				...scope,
+				name: "Renamed",
+				commands: { start: "bun dev" },
+			}),
+		).resolves.toMatchObject({
+			id: "proj_1",
+			name: "Renamed",
+			commands: { start: "bun dev" },
+		})
+
+		expect(mock.requests.slice(-4)).toEqual([
+			{ path: "/project?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/project/current?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ method: "POST", path: "/project/git/init?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{
+				method: "PATCH",
+				path: "/project/proj_1?directory=%2Frepo%2Froot&workspace=workspace-1",
+				body: { name: "Renamed", commands: { start: "bun dev" } },
+			},
 		])
 	})
 

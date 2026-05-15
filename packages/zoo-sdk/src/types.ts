@@ -232,6 +232,42 @@ export type CommandInfo = {
 	hints: string[]
 }
 
+/** Portable-core project metadata. */
+export type Project = {
+	id: string
+	worktree: string
+	vcs?: "git"
+	name?: string
+	icon?: {
+		url?: string
+		override?: string
+		color?: string
+	}
+	commands?: {
+		start?: string
+	}
+	time: {
+		created: number
+		updated: number
+		initialized?: number
+	}
+	sandboxes: string[]
+	[key: string]: unknown
+}
+
+/** Options for updating portable-core project metadata. */
+export type ProjectUpdateOptions = WorkspaceRouteOptions & {
+	name?: string
+	icon?: {
+		url?: string
+		override?: string
+		color?: string
+	}
+	commands?: {
+		start?: string
+	}
+}
+
 /** Options for reading one file. */
 export type FileReadOptions = WorkspaceRouteOptions & {
 	path: string
