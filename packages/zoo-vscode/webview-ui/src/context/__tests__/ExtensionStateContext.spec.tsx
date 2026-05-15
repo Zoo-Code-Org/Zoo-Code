@@ -1,4 +1,4 @@
-import { render, screen, act } from "@/utils/test-utils"
+import { render, screen, act, waitFor } from "@/utils/test-utils"
 
 import {
 	type ProviderSettings,
@@ -45,6 +45,11 @@ const ApiConfigTestComponent = () => {
 			</button>
 		</div>
 	)
+}
+
+const AvailableModesTestComponent = () => {
+	const { availableModes } = useExtensionState()
+	return <div data-testid="available-modes">{JSON.stringify(availableModes ?? [])}</div>
 }
 
 describe("ExtensionStateContext", () => {
@@ -104,6 +109,27 @@ describe("ExtensionStateContext", () => {
 		})
 
 		expect(JSON.parse(screen.getByTestId("allowed-commands").textContent!)).toEqual(["npm install", "git status"])
+	})
+
+	it("updates availableModes from modes messages", async () => {
+		render(
+			<ExtensionStateContextProvider>
+				<AvailableModesTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.postMessage(
+				{ type: "modes", modes: [{ slug: "review", name: "Review", description: "Review changes" }] },
+				"*",
+			)
+		})
+
+		await waitFor(() => {
+			expect(JSON.parse(screen.getByTestId("available-modes").textContent!)).toEqual([
+				{ slug: "review", name: "Review", description: "Review changes" },
+			])
+		})
 	})
 
 	it("throws error when used outside provider", () => {

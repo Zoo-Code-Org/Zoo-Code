@@ -12,6 +12,7 @@ import {
 	type CloudOrganizationMembership,
 	type ExtensionMessage,
 	type ExtensionState,
+	type ModeOption,
 	type MarketplaceInstalledMetadata,
 	type SkillMetadata,
 	type Command,
@@ -108,6 +109,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setAutoApprovalEnabled: (value: boolean) => void
 	customModes: ModeConfig[]
 	setCustomModes: (value: ModeConfig[]) => void
+	availableModes?: ModeOption[]
 	setMaxOpenTabsContext: (value: number) => void
 	maxWorkspaceFiles: number
 	setMaxWorkspaceFiles: (value: number) => void
@@ -219,6 +221,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		hasOpenedModeSelector: false, // Default to false (not opened yet)
 		autoApprovalEnabled: false,
 		customModes: [],
+		availableModes: undefined,
 		maxOpenTabsContext: 20,
 		maxWorkspaceFiles: 200,
 		cwd: "",
@@ -367,6 +370,10 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 				}
 				case "commands": {
 					setCommands(message.commands ?? [])
+					break
+				}
+				case "modes": {
+					setState((prevState) => ({ ...prevState, availableModes: message.modes ?? [] }))
 					break
 				}
 				case "messageUpdated": {

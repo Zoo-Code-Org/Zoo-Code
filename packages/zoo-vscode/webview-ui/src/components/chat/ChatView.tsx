@@ -81,6 +81,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		setMode,
 		alwaysAllowModeSwitch,
 		customModes,
+		availableModes,
+		providerConfigSource,
 		telemetrySetting,
 		soundEnabled,
 		soundVolume,
@@ -90,6 +92,16 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	// Show a WarningRow when the user sends a message with a retired provider.
 	const [showRetiredProviderWarning, setShowRetiredProviderWarning] = useState(false)
+	const selectableModes = useMemo(
+		() => (providerConfigSource === "portable" ? (availableModes ?? []) : getAllModes(customModes)),
+		[availableModes, customModes, providerConfigSource],
+	)
+
+	useEffect(() => {
+		if (providerConfigSource === "portable") {
+			vscode.postMessage({ type: "requestModes" })
+		}
+	}, [providerConfigSource])
 
 	// When the provider changes, clear the retired-provider warning.
 	const providerName = apiConfiguration?.apiProvider
@@ -1478,21 +1490,27 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	// Function to handle mode switching
 	const switchToNextMode = useCallback(() => {
-		const allModes = getAllModes(customModes)
-		const currentModeIndex = allModes.findIndex((m) => m.slug === mode)
-		const nextModeIndex = (currentModeIndex + 1) % allModes.length
+		if (selectableModes.length === 0) {
+			return
+		}
+
+		const currentModeIndex = selectableModes.findIndex((m) => m.slug === mode)
+		const nextModeIndex = (currentModeIndex + 1) % selectableModes.length
 		// Update local state and notify extension to sync mode change
-		switchToMode(allModes[nextModeIndex].slug)
-	}, [mode, customModes, switchToMode])
+		switchToMode(selectableModes[nextModeIndex].slug)
+	}, [mode, selectableModes, switchToMode])
 
 	// Function to handle switching to previous mode
 	const switchToPreviousMode = useCallback(() => {
-		const allModes = getAllModes(customModes)
-		const currentModeIndex = allModes.findIndex((m) => m.slug === mode)
-		const previousModeIndex = (currentModeIndex - 1 + allModes.length) % allModes.length
+		if (selectableModes.length === 0) {
+			return
+		}
+
+		const currentModeIndex = selectableModes.findIndex((m) => m.slug === mode)
+		const previousModeIndex = (currentModeIndex - 1 + selectableModes.length) % selectableModes.length
 		// Update local state and notify extension to sync mode change
-		switchToMode(allModes[previousModeIndex].slug)
-	}, [mode, customModes, switchToMode])
+		switchToMode(selectableModes[previousModeIndex].slug)
+	}, [mode, selectableModes, switchToMode])
 
 	// Mode switching keyboard handler. Scroll-intent keyboard detection
 	// (PageUp, Home, ArrowUp) is handled by useScrollLifecycle.

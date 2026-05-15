@@ -179,7 +179,7 @@ export interface ExtensionMessage {
 	organizationId?: string | null // For organizationSwitchResult
 	tools?: SerializedCustomToolDefinition[] // For customToolsResult
 	skills?: SkillMetadata[] // For skills response
-	modes?: { slug: string; name: string }[] // For modes response
+	modes?: ModeOption[] // For modes response
 	aggregatedCosts?: {
 		// For taskWithAggregatedCosts response
 		totalCost: number
@@ -243,6 +243,12 @@ export interface OpenAiCodexRateLimitsMessage {
 	type: "openAiCodexRateLimits"
 	values?: OpenAiCodexRateLimitInfo
 	error?: string
+}
+
+export type ModeOption = {
+	slug: string
+	name: string
+	description?: string
 }
 
 export type ExtensionState = Pick<
@@ -343,6 +349,7 @@ export type ExtensionState = Pick<
 
 	mode: string
 	customModes: ModeConfig[]
+	availableModes?: ModeOption[]
 	toolRequirements?: Record<string, boolean> // Map of tool names to their requirements (e.g. {"apply_diff": true})
 
 	cwd?: string // Current working directory

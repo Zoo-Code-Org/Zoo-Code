@@ -4,11 +4,12 @@ import { Trans } from "react-i18next"
 import { t } from "i18next"
 import { Settings } from "lucide-react"
 
-import type { ModeConfig, Command } from "@zoo-code/types"
+import type { Command } from "@zoo-code/types"
 
 import {
 	ContextMenuOptionType,
 	ContextMenuQueryItem,
+	ContextMenuMode,
 	getContextMenuOptions,
 	SearchResult,
 } from "@src/utils/context-mentions"
@@ -26,7 +27,7 @@ interface ContextMenuProps {
 	setSelectedIndex: (index: number) => void
 	selectedType: ContextMenuOptionType | null
 	queryItems: ContextMenuQueryItem[]
-	modes?: ModeConfig[]
+	modes?: ContextMenuMode[]
 	loading?: boolean
 	dynamicSearchResults?: SearchResult[]
 	commands?: Command[]

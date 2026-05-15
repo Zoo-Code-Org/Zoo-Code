@@ -2,7 +2,7 @@ import React from "react"
 import { Fzf } from "fzf"
 import { Check, X } from "lucide-react"
 
-import { type ModeConfig, type CustomModePrompts, TelemetryEventName } from "@zoo-code/types"
+import { type ModeConfig, type CustomModePrompts, type ModeOption, TelemetryEventName } from "@zoo-code/types"
 
 import { type Mode, getAllModes, defaultModeSlug } from "@roo/modes"
 
@@ -26,6 +26,8 @@ interface ModeSelectorProps {
 	triggerClassName?: string
 	modeShortcutText: string
 	customModes?: ModeConfig[]
+	modes?: ModeOption[]
+	showManagementControls?: boolean
 	customModePrompts?: CustomModePrompts
 	disableSearch?: boolean
 }
@@ -38,6 +40,8 @@ export const ModeSelector = ({
 	triggerClassName = "",
 	modeShortcutText,
 	customModes,
+	modes: providedModes,
+	showManagementControls = true,
 	customModePrompts,
 	disableSearch = false,
 }: ModeSelectorProps) => {
@@ -64,13 +68,13 @@ export const ModeSelector = ({
 
 	// Get all modes including custom modes and merge custom prompt descriptions.
 	const modes = React.useMemo(() => {
-		const allModes = getAllModes(customModes)
+		const allModes = providedModes ?? getAllModes(customModes)
 
 		return allModes.map((mode) => ({
 			...mode,
 			description: customModePrompts?.[mode.slug]?.description ?? mode.description,
 		}))
-	}, [customModes, customModePrompts])
+	}, [customModes, customModePrompts, providedModes])
 
 	// Find the selected mode, falling back to default if current mode doesn't exist (e.g., after workspace switch)
 	const selectedMode = React.useMemo(() => {
@@ -310,35 +314,39 @@ export const ModeSelector = ({
 
 					{/* Bottom bar with buttons on left and title on right */}
 					<div className="flex flex-row items-center justify-between px-2 py-2 border-t border-vscode-dropdown-border">
-						<div className="flex flex-row gap-1">
-							<IconButton
-								iconClass="codicon-extensions"
-								title={t("chat:modeSelector.marketplace")}
-								onClick={() => {
-									window.postMessage(
-										{
-											type: "action",
-											action: "marketplaceButtonClicked",
-											values: { marketplaceTab: "mode" },
-										},
-										"*",
-									)
-									setOpen(false)
-								}}
-							/>
-							<IconButton
-								iconClass="codicon-settings-gear"
-								title={t("chat:modeSelector.settings")}
-								onClick={() => {
-									vscode.postMessage({
-										type: "switchTab",
-										tab: "settings",
-										values: { section: "modes" },
-									})
-									setOpen(false)
-								}}
-							/>
-						</div>
+						{showManagementControls ? (
+							<div className="flex flex-row gap-1">
+								<IconButton
+									iconClass="codicon-extensions"
+									title={t("chat:modeSelector.marketplace")}
+									onClick={() => {
+										window.postMessage(
+											{
+												type: "action",
+												action: "marketplaceButtonClicked",
+												values: { marketplaceTab: "mode" },
+											},
+											"*",
+										)
+										setOpen(false)
+									}}
+								/>
+								<IconButton
+									iconClass="codicon-settings-gear"
+									title={t("chat:modeSelector.settings")}
+									onClick={() => {
+										vscode.postMessage({
+											type: "switchTab",
+											tab: "settings",
+											values: { section: "modes" },
+										})
+										setOpen(false)
+									}}
+								/>
+							</div>
+						) : (
+							<div />
+						)}
 
 						{/* Info icon and title on the right - only show info icon when search bar is visible */}
 						<div className="flex items-center gap-1 pr-1">

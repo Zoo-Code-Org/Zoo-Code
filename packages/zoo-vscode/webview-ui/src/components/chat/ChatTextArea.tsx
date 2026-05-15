@@ -89,6 +89,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			currentApiConfigName,
 			listApiConfigMeta,
 			customModes,
+			availableModes,
+			providerConfigSource,
 			customModePrompts,
 			cwd,
 			pinnedApiConfigs,
@@ -254,7 +256,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			}
 		}, [inputValue, setInputValue, t])
 
-		const allModes = useMemo(() => getAllModes(customModes), [customModes])
+		const portableModes = useMemo(
+			() => (providerConfigSource === "portable" ? (availableModes ?? []) : undefined),
+			[availableModes, providerConfigSource],
+		)
+		const allModes = useMemo(() => portableModes ?? getAllModes(customModes), [customModes, portableModes])
 
 		// Memoized check for whether the input has content (text or images)
 		const hasInputContent = useMemo(() => {
@@ -1304,6 +1310,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							triggerClassName="text-ellipsis overflow-hidden flex-shrink-0"
 							modeShortcutText={modeShortcutText}
 							customModes={customModes}
+							modes={portableModes}
+							showManagementControls={!portableModes}
 							customModePrompts={customModePrompts}
 						/>
 						<ApiConfigSelector

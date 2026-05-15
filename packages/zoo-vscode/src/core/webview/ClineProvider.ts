@@ -98,7 +98,7 @@ import { CustomModesManager } from "../config/CustomModesManager"
 import { Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
-import type { ClineMessage, ClineSayTool, TodoItem } from "@zoo-code/types"
+import type { ClineMessage, ClineSayTool, ModeOption, TodoItem } from "@zoo-code/types"
 import { readApiMessages, saveApiMessages, saveTaskMessages, TaskHistoryStore } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
@@ -3449,11 +3449,11 @@ export class ClineProvider
 
 	// Modes
 
-	public async getModes(): Promise<{ slug: string; name: string }[]> {
+	public async getModes(): Promise<ModeOption[]> {
 		if (this.portableSessionAdapter) {
 			try {
 				const modes = await this.portableSessionAdapter.listModes()
-				return modes.map(({ id, name }) => ({ slug: id, name }))
+				return modes.map(({ id, name, description }) => ({ slug: id, name, description }))
 			} catch (error) {
 				this.log(`Error fetching portable modes: ${error instanceof Error ? error.message : String(error)}`)
 				return []
@@ -3462,9 +3462,13 @@ export class ClineProvider
 
 		try {
 			const customModes = await this.customModesManager.getCustomModes()
-			return [...DEFAULT_MODES, ...customModes].map(({ slug, name }) => ({ slug, name }))
+			return [...DEFAULT_MODES, ...customModes].map(({ slug, name, description }) => ({
+				slug,
+				name,
+				description,
+			}))
 		} catch (error) {
-			return DEFAULT_MODES.map(({ slug, name }) => ({ slug, name }))
+			return DEFAULT_MODES.map(({ slug, name, description }) => ({ slug, name, description }))
 		}
 	}
 

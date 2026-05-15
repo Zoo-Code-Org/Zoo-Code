@@ -228,6 +228,38 @@ describe("ModeSelector", () => {
 		expect(infoIcon).toBeInTheDocument()
 	})
 
+	test("renders provided modes without custom mode management controls", () => {
+		mockModes = [
+			{
+				slug: "code",
+				name: "Code",
+				description: "Built-in code mode",
+				roleDefinition: "Role definition",
+				groups: ["read", "edit"],
+			},
+		]
+
+		render(
+			<ModeSelector
+				title="Mode Selector"
+				value={"portable-review" as Mode}
+				onChange={vi.fn()}
+				modeShortcutText="Ctrl+M"
+				modes={[{ slug: "portable-review", name: "Portable Review", description: "CLI review agent" }]}
+				showManagementControls={false}
+			/>,
+		)
+
+		expect(screen.getByTestId("mode-selector-trigger")).toHaveTextContent("Portable Review")
+		fireEvent.click(screen.getByTestId("mode-selector-trigger"))
+
+		expect(screen.getAllByText("Portable Review")).toHaveLength(2)
+		expect(screen.getByText("CLI review agent")).toBeInTheDocument()
+		expect(screen.queryByText("Code")).not.toBeInTheDocument()
+		expect(screen.queryByLabelText("chat:modeSelector.marketplace")).not.toBeInTheDocument()
+		expect(screen.queryByLabelText("chat:modeSelector.settings")).not.toBeInTheDocument()
+	})
+
 	test("falls back to default mode when current mode is not available", async () => {
 		// Set up modes including "code" as the default mode (which getAllModes returns first)
 		mockModes = [

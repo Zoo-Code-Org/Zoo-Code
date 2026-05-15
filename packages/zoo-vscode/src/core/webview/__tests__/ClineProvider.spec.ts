@@ -1248,7 +1248,7 @@ describe("ClineProvider", () => {
 			getSession: vi.fn(),
 			createSession: vi.fn(),
 			listModes: vi.fn().mockResolvedValue([
-				{ id: "code", name: "Code" },
+				{ id: "code", name: "Code", description: "Write code" },
 				{ id: "review", name: "Review" },
 			]),
 		}
@@ -1262,7 +1262,7 @@ describe("ClineProvider", () => {
 		)
 
 		await expect(portableProvider.getModes()).resolves.toEqual([
-			{ slug: "code", name: "Code" },
+			{ slug: "code", name: "Code", description: "Write code" },
 			{ slug: "review", name: "Review" },
 		])
 		expect(portableSessionAdapter.listModes).toHaveBeenCalled()

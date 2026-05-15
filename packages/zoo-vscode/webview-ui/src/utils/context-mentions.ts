@@ -1,6 +1,6 @@
 import { Fzf } from "fzf"
 
-import type { ModeConfig, Command } from "@zoo-code/types"
+import type { ModeConfig, Command, ModeOption } from "@zoo-code/types"
 
 import { mentionRegex } from "@roo/context-mentions"
 
@@ -10,8 +10,15 @@ import { escapeSpaces } from "./path-mentions"
  * Gets the description for a mode, prioritizing description > whenToUse > roleDefinition
  * and taking only the first line
  */
-function getModeDescription(mode: ModeConfig): string {
-	return (mode.description || mode.whenToUse || mode.roleDefinition).split("\n")[0]
+export type ContextMenuMode = ModeConfig | ModeOption
+
+function getModeDescription(mode: ContextMenuMode): string {
+	return (
+		mode.description ||
+		("whenToUse" in mode ? mode.whenToUse : undefined) ||
+		("roleDefinition" in mode ? mode.roleDefinition : undefined) ||
+		mode.name
+	).split("\n")[0]
 }
 
 export interface SearchResult {
@@ -126,7 +133,7 @@ export function getContextMenuOptions(
 	selectedType: ContextMenuOptionType | null = null,
 	queryItems: ContextMenuQueryItem[],
 	dynamicSearchResults: SearchResult[] = [],
-	modes?: ModeConfig[],
+	modes?: ContextMenuMode[],
 	commands?: Command[],
 ): ContextMenuQueryItem[] {
 	// Handle slash commands for modes and commands
