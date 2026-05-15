@@ -131,7 +131,7 @@
     - **Depends on:** Phase 1, Task 3.
     - **Can parallelize with:** Phase 1, Task 5.
 
-7. Audit and merge missing Zoo/Roo providers
+7. [✅] Audit and merge missing Zoo/Roo providers
 
     - **What:** Compare `packages/zoo-cli/src/providers/` with current Zoo/Roo provider implementations and merge missing providers required for Zoo Code's 500+ model support.
     - **Files touched:** `packages/zoo-cli/src/providers/**`, provider registry, provider config types, provider tests, README provider docs.

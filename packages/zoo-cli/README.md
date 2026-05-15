@@ -44,6 +44,8 @@ Zoo Code CLI uses the same `models.dev` provider catalog and onboarding pattern 
 
 Zoo Code does not provide a bundled Zoo inference gateway or credit-backed model provider. Kilo gateway and indexing integrations are intentionally disabled in this package.
 
+OpenAI-compatible providers can be configured directly in `zoo.jsonc`, including local/proxy providers such as Ollama `/v1`, LM Studio, LiteLLM, Unbound, and SambaNova. Catalog-backed OpenAI-compatible providers such as Requesty, Baseten, Poe, and LM Studio are loaded from the bundled `models.dev` snapshot when available.
+
 See `docs/provider-parity.md` for the current Zoo/Roo VS Code provider parity audit.
 
 ## Commands
