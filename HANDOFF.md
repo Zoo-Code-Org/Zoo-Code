@@ -6,7 +6,7 @@
 - **Next task to execute:** Continue `DEVPLAN.md` Phase 3 Task 1 audit or Task 3 SDK activation bootstrap behind `usePortableCore()`.
 - **Blocked on:**
     - Open Question 1, OpenCode fork vs. Kilo CLI fork as base: resolved for the current implementation by using Kilo `packages/opencode` per `spec.md`.
-    - Open Question 2, runtime/toolchain choice: blocks final implementation details for `DEVPLAN.md` Phase 1, Task 9 and may affect Phase 6 packaging tasks.
+    - Open Question 2, runtime/toolchain choice: no longer blocks Phase 1 Task 9 for current-platform VSIX binary preparation, but still affects Phase 6 all-platform release packaging decisions.
     - Open Question 3, cloud services/gateway strategy: resolved for Phase 1 by disabling Kilo gateway/indexing and using OpenCode-style BYOK providers from `models.dev`; no built-in Zoo inference provider exists for now. Later cloud features remain out of scope until explicitly planned.
     - Open Question 4, inline autocomplete scope: blocks only any future autocomplete work; current `DEVPLAN.md` treats it as out of scope pending Phase 5, Task 7.
     - Open Question 5, JetBrains/other IDE support: blocks only future IDE packages; current `DEVPLAN.md` treats it as out of scope pending Phase 5, Task 7.
@@ -24,7 +24,7 @@
 - CLI binaries must be `zoo` and `zoo-code` from `@zoo-code/cli`.
 - SDK bootstrap pattern: on VS Code activation, check for an existing Zoo CLI server; if absent, spawn `zoo server --ipc /tmp/zoo-{pid}.sock`; connect using `ZooClient.connect({ ipcPath })`; on deactivation, shut down gracefully; on unexpected exit, retry up to three times before surfacing an error.
 - Phase execution order is 0 through 6. Phases 1, 2, and 4 can parallelize after Phase 0. Phase 3 depends on Phase 2. Phase 5 depends on Phase 3. Phase 6 hardens tests, CI, and release.
-- `packages/zoo-cli` is no longer scaffold-only. `packages/zoo-sdk` remains scaffold-only.
+- `packages/zoo-cli` is no longer scaffold-only. `packages/zoo-sdk` now has an initial typed client, transports, lifecycle helpers, and tests.
 - GitHub CLI is authenticated as `mojomast`.
 - Local git was initialized in `/home/mojo/projects/zoocode` for this integration workspace.
 - Zoo Code fork/reference: GitHub would not create a second fork of `Zoo-Code-Org/Zoo-Code` because `mojomast/roo-code-cloud-alternate-auth` already exists in the same Roo/Zoo fork network. This existing fork is recorded as the target Zoo fork reference: `https://github.com/mojomast/roo-code-cloud-alternate-auth`.
@@ -36,7 +36,7 @@
 - Source repositories were verified with non-destructive `gh repo view` commands; local remotes were verified with `git remote -v`.
 - `DEVPLAN.md` Phase 0, Task 2 was clarified because this local workspace initially contained only planning docs; implementing the task required first materializing `zoo-upstream/main` into the working tree before the mechanical `src/` and `webview-ui/` relocation could happen.
 - `packages/zoo-vscode/src` contains the relocated VS Code extension package, and `packages/zoo-vscode/webview-ui` contains the relocated React webview package. This preserves the existing package manifests while grouping both under `packages/zoo-vscode/`.
-- `packages/zoo-cli` is no longer scaffold-only. `packages/zoo-sdk` remains scaffold-only.
+- `packages/zoo-cli` is no longer scaffold-only. `packages/zoo-sdk` now builds and tests as a real SDK package.
 - `pnpm-workspace.yaml` now discovers `packages/zoo-cli`, `packages/zoo-sdk`, `packages/zoo-vscode/src`, and `packages/zoo-vscode/webview-ui` alongside existing `apps/*` and `packages/*` packages.
 - Path-sensitive build references were adjusted for the relocation, including extension/webview scripts, VS Code launch config, nightly build source path, webview Vite output paths, and workspace lockfile links.
 - Phase 0 Tasks 2 and 3 verification completed: `pnpm list --depth -1 --recursive`, `pnpm --filter @zoo-code/cli build`, `pnpm --filter @zoo-code/sdk build`, `pnpm --filter zoo-code check-types`, `pnpm --filter @zoo-code/vscode-webview check-types`, `pnpm --filter @zoo-code/vscode-webview build`, `pnpm --filter @zoo-code/build build`, and `pnpm --filter zoo-code bundle`.
