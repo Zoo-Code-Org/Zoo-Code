@@ -120,6 +120,31 @@ function transport(): ZooTransport & { requests: any[] } {
 					],
 				}
 			}
+			if (input.path === "/file/content?directory=%2Frepo%2Froot&workspace=workspace-1&path=hello.txt") {
+				return { data: { type: "text", content: "hello" } }
+			}
+			if (input.path === "/file?directory=%2Frepo%2Froot&workspace=workspace-1&path=.") {
+				return {
+					data: [
+						{
+							name: "hello.txt",
+							path: "hello.txt",
+							absolute: "/repo/root/hello.txt",
+							type: "file",
+							ignored: false,
+						},
+					],
+				}
+			}
+			if (input.path === "/file/status?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: [{ path: "hello.txt", added: 1, removed: 0, status: "modified" }] }
+			}
+			if (input.path === "/find/file?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello&limit=10") {
+				return { data: ["hello.txt"] }
+			}
+			if (input.path === "/find?directory=%2Frepo%2Froot&workspace=workspace-1&pattern=sdk-parity") {
+				return { data: [{ path: { text: "hello.txt" }, lines: { text: "sdk-parity" }, line_number: 1 }] }
+			}
 			if (input.path === "/agent") {
 				return { data: [{ name: "code", displayName: "Code", description: "Code mode", mode: "primary" }] }
 			}
@@ -492,6 +517,35 @@ describe("ZooClient", () => {
 			{ path: "/vcs?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/vcs/diff?directory=%2Frepo%2Froot&workspace=workspace-1&mode=branch" },
 			{ path: "/command?directory=%2Frepo%2Froot&workspace=workspace-1" },
+		])
+	})
+
+	test("wraps file and find read routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const scope = { directory: "/repo/root", workspace: "workspace-1" }
+
+		await expect(client.readFile({ ...scope, path: "hello.txt" })).resolves.toEqual({
+			type: "text",
+			content: "hello",
+		})
+		await expect(client.listFiles({ ...scope, path: "." })).resolves.toEqual([
+			{ name: "hello.txt", path: "hello.txt", absolute: "/repo/root/hello.txt", type: "file", ignored: false },
+		])
+		await expect(client.getFileStatus(scope)).resolves.toEqual([
+			{ path: "hello.txt", added: 1, removed: 0, status: "modified" },
+		])
+		await expect(client.findFiles({ ...scope, query: "hello", limit: 10 })).resolves.toEqual(["hello.txt"])
+		await expect(client.findText({ ...scope, pattern: "sdk-parity" })).resolves.toEqual([
+			{ path: { text: "hello.txt" }, lines: { text: "sdk-parity" }, line_number: 1 },
+		])
+
+		expect(mock.requests.slice(-5)).toEqual([
+			{ path: "/file/content?directory=%2Frepo%2Froot&workspace=workspace-1&path=hello.txt" },
+			{ path: "/file?directory=%2Frepo%2Froot&workspace=workspace-1&path=." },
+			{ path: "/file/status?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/find/file?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello&limit=10" },
+			{ path: "/find?directory=%2Frepo%2Froot&workspace=workspace-1&pattern=sdk-parity" },
 		])
 	})
 

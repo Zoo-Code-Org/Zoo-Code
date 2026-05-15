@@ -1,6 +1,13 @@
 import { createHttpTransport, createIpcTransport, type ZooTransport } from "./transport/index.js"
 import type {
 	CommandInfo,
+	FileContent,
+	FileListOptions,
+	FileNode,
+	FileReadOptions,
+	FileStatus,
+	FindFilesOptions,
+	FindTextOptions,
 	MessageChunk,
 	MessageListOptions,
 	MessagePart,
@@ -21,6 +28,7 @@ import type {
 	ProviderOAuthAuthorizeResult,
 	ProviderOAuthCallbackOptions,
 	PromptAsyncOptions,
+	SearchMatch,
 	SendMessageOptions,
 	Session,
 	SessionCreateOptions,
@@ -109,6 +117,18 @@ function workspaceRouteQuery(options: WorkspaceRouteOptions & { mode?: string } 
 	if (options.directory) params.set("directory", options.directory)
 	if (options.workspace) params.set("workspace", options.workspace)
 	if (options.mode) params.set("mode", options.mode)
+	const query = params.toString()
+	return query ? `?${query}` : ""
+}
+
+function scopedQuery(options: WorkspaceRouteOptions & Record<string, string | number | undefined> = {}) {
+	const params = new URLSearchParams()
+	if (options.directory) params.set("directory", options.directory)
+	if (options.workspace) params.set("workspace", options.workspace)
+	for (const [key, value] of Object.entries(options)) {
+		if (key === "directory" || key === "workspace" || value === undefined) continue
+		params.set(key, String(value))
+	}
 	const query = params.toString()
 	return query ? `?${query}` : ""
 }
@@ -544,6 +564,59 @@ export class ZooClient {
 			unwrap(
 				await this.#transport.request<CommandInfo[] | { data?: CommandInfo[] }>({
 					path: `/command${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Read one file's content. */
+	async readFile(options: FileReadOptions): Promise<FileContent> {
+		return unwrap(
+			await this.#transport.request<FileContent | { data?: FileContent }>({
+				path: `/file/content${scopedQuery(options)}`,
+			}),
+		)
+	}
+
+	/** List files under a workspace path. */
+	async listFiles(options: FileListOptions): Promise<FileNode[]> {
+		return (
+			unwrap(
+				await this.#transport.request<FileNode[] | { data?: FileNode[] }>({
+					path: `/file${scopedQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Read current file status entries. */
+	async getFileStatus(options: WorkspaceRouteOptions = {}): Promise<FileStatus[]> {
+		return (
+			unwrap(
+				await this.#transport.request<FileStatus[] | { data?: FileStatus[] }>({
+					path: `/file/status${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Find files by query. */
+	async findFiles(options: FindFilesOptions): Promise<string[]> {
+		return (
+			unwrap(
+				await this.#transport.request<string[] | { data?: string[] }>({
+					path: `/find/file${scopedQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** Find text matches by pattern. */
+	async findText(options: FindTextOptions): Promise<SearchMatch[]> {
+		return (
+			unwrap(
+				await this.#transport.request<SearchMatch[] | { data?: SearchMatch[] }>({
+					path: `/find${scopedQuery(options)}`,
 				}),
 			) ?? []
 		)

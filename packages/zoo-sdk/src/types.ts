@@ -232,6 +232,68 @@ export type CommandInfo = {
 	hints: string[]
 }
 
+/** Options for reading one file. */
+export type FileReadOptions = WorkspaceRouteOptions & {
+	path: string
+}
+
+/** Options for listing files under a path. */
+export type FileListOptions = WorkspaceRouteOptions & {
+	path: string
+}
+
+/** File content returned by portable core. */
+export type FileContent = {
+	type: "text" | "binary" | string
+	content: string
+	diff?: string
+	encoding?: "base64" | string
+	mimeType?: string
+	[key: string]: unknown
+}
+
+/** File tree node returned by portable core. */
+export type FileNode = {
+	name: string
+	path: string
+	absolute: string
+	type: "file" | "directory" | string
+	ignored: boolean
+	[key: string]: unknown
+}
+
+/** File status entry returned by portable core. */
+export type FileStatus = {
+	path: string
+	added: number
+	removed: number
+	status: "added" | "deleted" | "modified" | string
+	[key: string]: unknown
+}
+
+/** Options for finding files. */
+export type FindFilesOptions = WorkspaceRouteOptions & {
+	query: string
+	dirs?: "true" | "false"
+	type?: "file" | "directory"
+	limit?: number
+}
+
+/** Options for finding text. */
+export type FindTextOptions = WorkspaceRouteOptions & {
+	pattern: string
+}
+
+/** Text search match returned by portable core. */
+export type SearchMatch = {
+	path?: { text: string }
+	lines?: { text: string }
+	line_number?: number
+	absolute_offset?: number
+	submatches?: Array<{ match: { text: string }; start: number; end: number }>
+	[key: string]: unknown
+}
+
 /** A portable-core permission rule or decision. */
 export type Permission = {
 	/** Permission capability, such as `bash` or `edit`. */
