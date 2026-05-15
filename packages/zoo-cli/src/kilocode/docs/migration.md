@@ -1,6 +1,6 @@
 # Kilocode Migration
 
-This document explains how Kilocode configurations are automatically migrated to Opencode.
+This document explains how legacy Kilocode configurations are migrated into Zoo CLI's OpenCode-compatible config model. Zoo's native portable config paths are `~/.config/zoo-code/zoo.jsonc`, project `zoo.jsonc`, `.zoo/modes/*.json`, `.zoo/rules/*.md`, and `.zooignore`; the legacy locations below are fallback migration inputs only.
 
 ## Table of Contents
 
@@ -9,7 +9,7 @@ This document explains how Kilocode configurations are automatically migrated to
 - [Rules Migration](#rules-migration)
 - [Workflows Migration](#workflows-migration)
 - [MCP Migration](#mcp-migration)
-- [Kilo Notifications](#kilo-notifications)
+- [Kilo Gateway Notifications](#kilo-gateway-notifications)
 
 ---
 
@@ -19,7 +19,7 @@ This section explains how Kilocode custom modes are automatically migrated to Op
 
 ## Overview
 
-Kilocode stores custom modes in YAML files. When Opencode starts, it reads these files and converts them to Opencode's agent format, injecting them via the `OPENCODE_CONFIG_CONTENT` mechanism.
+Kilocode stores custom modes in YAML files. When Zoo CLI starts, it reads these files and converts them to the OpenCode-compatible agent format, injecting them via the `KILO_CONFIG_CONTENT` mechanism.
 
 ## Source Locations
 
@@ -350,49 +350,16 @@ Use a top-level `"mcp"` object. Each key is the server name. For a local server,
 
 ---
 
-# Kilo Notifications
+# Kilo Gateway Notifications
 
-When connected to Kilo Gateway, the CLI fetches and displays notifications from the Kilo API. This allows Kilo to communicate important announcements, feature updates, and tips to users.
+Zoo CLI does not bundle Kilo Gateway notification integration. The imported Kilo/OpenCode codebase previously documented a Kilo API notification flow, but Zoo portable core intentionally runs without Kilo Gateway or Kilo indexing package dependencies.
 
-## How It Works
+## Migration Behavior
 
-1. **On startup**, if the user is authenticated with Kilo Gateway, the CLI fetches notifications from `https://api.kilo.ai/api/users/notifications`
-2. **Filtering**: Only notifications with `showIn` containing `"cli"` (or no `showIn` restriction) are displayed
-3. **Display**: The first notification is shown as a toast notification after a 2-second delay
+- Existing local config files are still read where they are migration fallbacks for modes, rules, workflows, skills, or MCP settings.
+- Gateway-backed notification state is not migrated into Zoo portable config.
+- Users should configure providers directly in `zoo.jsonc`; no Kilo account or gateway is required for local Zoo CLI use.
 
-## Notification Data Structure
+## Deferred Cloud Behavior
 
-```typescript
-interface KilocodeNotification {
-	id: string // Unique identifier
-	title: string // Notification title (e.g., "Agent skills now supported!")
-	message: string // Description text
-	action?: {
-		actionText: string // Link text (e.g., "Learn More")
-		actionURL: string // URL destination
-	}
-	showIn?: string[] // Target platforms: ["cli", "vscode"]
-}
-```
-
-## Example Notification
-
-```
-Title: Agent skills now supported!
-Message: Define reusable skills and workflows for your AI agent.
-Action: Learn More -> https://docs.kilo.ai/skills
-```
-
-## Display Conditions
-
-| Condition                 | Notifications Shown |
-| ------------------------- | ------------------- |
-| Connected to Kilo Gateway | Yes                 |
-| Not connected to Kilo     | No                  |
-| No notifications from API | No                  |
-
-## Related Files
-
-- [`notifications.ts`](../../../../kilo-gateway/src/api/notifications.ts) - Fetch function and types
-- [`routes.ts`](../../../../kilo-gateway/src/server/routes.ts) - Server endpoint `/kilo/notifications`
-- [`app.tsx`](../../cli/cmd/tui/app.tsx) - TUI notification display logic
+If Zoo later adds a cloud service, its API, provider IDs, notification model, and migration semantics should be documented as a new Zoo-specific feature rather than reusing the removed Kilo Gateway paths.
