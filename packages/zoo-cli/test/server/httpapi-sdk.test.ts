@@ -317,6 +317,7 @@ describe("HttpApi SDK", () => {
 				yield* Effect.all([
 					expectStatus(() => sdk.project.current(), 200),
 					expectStatus(() => sdk.config.get(), 200),
+					expectStatus(() => sdk.config.warnings(), 200),
 					expectStatus(() => sdk.find.files({ query: "hello", limit: 10 }), 200),
 				])
 			}),
@@ -390,6 +391,7 @@ describe("HttpApi SDK", () => {
 				const projects = yield* capture(() => sdk.project.list())
 				const paths = yield* capture(() => sdk.path.get())
 				const config = yield* capture(() => sdk.config.get())
+				const configWarnings = yield* capture(() => sdk.config.warnings())
 				const file = yield* capture(() => sdk.file.read({ path: "hello.txt" }))
 				const files = yield* capture(() => sdk.file.list({ path: "." }))
 				const fileStatus = yield* capture(() => sdk.file.status())
@@ -407,6 +409,7 @@ describe("HttpApi SDK", () => {
 						projects,
 						paths,
 						config,
+						configWarnings,
 						file,
 						files,
 						fileStatus,
