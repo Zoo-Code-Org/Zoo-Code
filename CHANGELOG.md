@@ -44,6 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add generated SDK MCP status parity across direct and HttpApi backends using a disabled local MCP fixture.
 - Add `@zoo-code/sdk` wrappers for portable-core project list/current/init-git/update routes.
 - Add an `@zoo-code/sdk` wrapper for portable-core workspace symbol search.
+- Add an `@zoo-code/sdk` wrapper for portable-core MCP status.
 - Add SDK wrappers for portable-core worktree list, create, remove, and reset routes.
 - Add SDK wrappers for legacy portable-core worktree diff, diff summary, and diff-file routes.
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.

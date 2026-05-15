@@ -9,6 +9,7 @@ import type {
 	FindFilesOptions,
 	FindSymbolsOptions,
 	FindTextOptions,
+	McpStatusMap,
 	MessageChunk,
 	MessageListOptions,
 	MessagePart,
@@ -714,6 +715,17 @@ export class ZooClient {
 			unwrap(
 				await this.#transport.request<ConfigProvidersResult | { data?: ConfigProvidersResult }>({
 					path: "/config/providers",
+				}),
+			) ?? {}
+		)
+	}
+
+	/** Read MCP server status from the portable core. */
+	async getMcpStatus(): Promise<McpStatusMap> {
+		return (
+			unwrap(
+				await this.#transport.request<McpStatusMap | { data?: McpStatusMap }>({
+					path: "/mcp",
 				}),
 			) ?? {}
 		)

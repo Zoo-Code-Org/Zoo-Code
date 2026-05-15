@@ -181,6 +181,7 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/config" && input.method === "PATCH") return { data: input.body }
 			if (input.path === "/config") return { data: { model: "anthropic/claude" } }
 			if (input.path === "/config/providers") return { data: { default: "anthropic", providers: [] } }
+			if (input.path === "/mcp") return { data: { demo: { status: "disabled" } } }
 			if (input.path === "/global/dispose") return { data: true }
 			if (input.path === "/provider") {
 				return {
@@ -625,6 +626,14 @@ describe("ZooClient", () => {
 		await expect(client.getConfig()).resolves.toEqual({ model: "anthropic/claude" })
 		await expect(client.getConfigProviders()).resolves.toEqual({ default: "anthropic", providers: [] })
 		expect(mock.requests.slice(-2)).toEqual([{ path: "/config" }, { path: "/config/providers" }])
+	})
+
+	test("reads MCP status", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(client.getMcpStatus()).resolves.toEqual({ demo: { status: "disabled" } })
+		expect(mock.requests.at(-1)).toEqual({ path: "/mcp" })
 	})
 
 	test("updates config and reads config warnings", async () => {

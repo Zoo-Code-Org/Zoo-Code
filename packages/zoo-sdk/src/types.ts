@@ -344,6 +344,16 @@ export type SymbolInfo = {
 	[key: string]: unknown
 }
 
+/** MCP server status returned by portable core. */
+export type McpStatus = {
+	status: string
+	error?: string
+	[key: string]: unknown
+}
+
+/** MCP status keyed by configured server name. */
+export type McpStatusMap = Record<string, McpStatus>
+
 /** A portable-core permission rule or decision. */
 export type Permission = {
 	/** Permission capability, such as `bash` or `edit`. */
