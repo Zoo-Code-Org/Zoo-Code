@@ -3,6 +3,7 @@ import { z } from "zod"
 import { modelInfoSchema, reasoningEffortSettingSchema, verbosityLevelsSchema, serviceTierSchema } from "./model.js"
 import { codebaseIndexProviderSchema } from "./codebase-index.js"
 import {
+	aetherapiModels,
 	anthropicModels,
 	basetenModels,
 	bedrockModels,
@@ -112,6 +113,7 @@ export const providerNames = [
 	...internalProviders,
 	...customProviders,
 	...fauxProviders,
+	"aetherapi",
 	"anthropic",
 	"bedrock",
 	"baseten",
@@ -387,6 +389,11 @@ const zaiSchema = apiModelIdProviderModelSchema.extend({
 	zaiApiLine: zaiApiLineSchema.optional(),
 })
 
+const aetherapiSchema = apiModelIdProviderModelSchema.extend({
+	aetherapiApiKey: z.string().optional(),
+	aetherapiBaseUrl: z.string().optional(),
+})
+
 const fireworksSchema = apiModelIdProviderModelSchema.extend({
 	fireworksApiKey: z.string().optional(),
 })
@@ -414,6 +421,7 @@ const defaultSchema = z.object({
 })
 
 export const providerSettingsSchemaDiscriminated = z.discriminatedUnion("apiProvider", [
+	aetherapiSchema.merge(z.object({ apiProvider: z.literal("aetherapi") })),
 	anthropicSchema.merge(z.object({ apiProvider: z.literal("anthropic") })),
 	openRouterSchema.merge(z.object({ apiProvider: z.literal("openrouter") })),
 	bedrockSchema.merge(z.object({ apiProvider: z.literal("bedrock") })),
@@ -449,6 +457,7 @@ export const providerSettingsSchemaDiscriminated = z.discriminatedUnion("apiProv
 
 export const providerSettingsSchema = z.object({
 	apiProvider: providerNamesWithRetiredSchema.optional(),
+	...aetherapiSchema.shape,
 	...anthropicSchema.shape,
 	...openRouterSchema.shape,
 	...bedrockSchema.shape,
@@ -529,6 +538,7 @@ export const isTypicalProvider = (key: unknown): key is TypicalProvider =>
 	isProviderName(key) && !isInternalProvider(key) && !isCustomProvider(key) && !isFauxProvider(key)
 
 export const modelIdKeysByProvider: Record<TypicalProvider, ModelIdKey> = {
+	aetherapi: "apiModelId",
 	anthropic: "apiModelId",
 	openrouter: "openRouterModelId",
 	bedrock: "apiModelId",
@@ -590,6 +600,11 @@ export const MODELS_BY_PROVIDER: Record<
 	Exclude<ProviderName, "fake-ai" | "gemini-cli" | "openai">,
 	{ id: ProviderName; label: string; models: string[] }
 > = {
+	aetherapi: {
+		id: "aetherapi",
+		label: "AetherAPI",
+		models: Object.keys(aetherapiModels),
+	},
 	anthropic: {
 		id: "anthropic",
 		label: "Anthropic",

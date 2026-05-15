@@ -1,5 +1,6 @@
 import type { ProviderName, ModelInfo, ProviderSettings } from "@roo-code/types"
 import {
+	aetherapiDefaultModelId,
 	anthropicDefaultModelId,
 	bedrockDefaultModelId,
 	deepSeekDefaultModelId,
@@ -27,6 +28,7 @@ export interface ProviderServiceConfig {
 }
 
 export const PROVIDER_SERVICE_CONFIG: Partial<Record<ProviderName, ProviderServiceConfig>> = {
+	aetherapi: { serviceName: "AetherAPI", serviceUrl: "https://aetherapi.dev" },
 	anthropic: { serviceName: "Anthropic", serviceUrl: "https://console.anthropic.com" },
 	bedrock: { serviceName: "Amazon Bedrock", serviceUrl: "https://aws.amazon.com/bedrock" },
 	deepseek: { serviceName: "DeepSeek", serviceUrl: "https://platform.deepseek.com" },
@@ -52,6 +54,7 @@ export const PROVIDER_SERVICE_CONFIG: Partial<Record<ProviderName, ProviderServi
 }
 
 export const PROVIDER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> = {
+	aetherapi: aetherapiDefaultModelId,
 	anthropic: anthropicDefaultModelId,
 	bedrock: bedrockDefaultModelId,
 	deepseek: deepSeekDefaultModelId,

@@ -34,6 +34,7 @@ import {
 	minimaxDefaultModelId,
 	mimoDefaultModelId,
 	unboundDefaultModelId,
+	aetherapiDefaultModelId,
 } from "@roo-code/types"
 
 import {
@@ -69,6 +70,7 @@ import {
 } from "@src/components/ui"
 
 import {
+	Aetherapi,
 	Anthropic,
 	Baseten,
 	Bedrock,
@@ -340,6 +342,7 @@ const ApiOptions = ({
 				requesty: { field: "requestyModelId", default: requestyDefaultModelId },
 				unbound: { field: "unboundModelId", default: unboundDefaultModelId },
 				litellm: { field: "litellmModelId", default: litellmDefaultModelId },
+				aetherapi: { field: "apiModelId", default: aetherapiDefaultModelId },
 				anthropic: { field: "apiModelId", default: anthropicDefaultModelId },
 				"openai-codex": { field: "apiModelId", default: openAiCodexDefaultModelId },
 				"qwen-code": { field: "apiModelId", default: qwenCodeDefaultModelId },
@@ -699,6 +702,13 @@ const ApiOptions = ({
 							organizationAllowList={organizationAllowList}
 							modelValidationError={modelValidationError}
 							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === "aetherapi" && (
+						<Aetherapi
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
 						/>
 					)}
 

@@ -7,6 +7,7 @@ import { getRouterRemovalMessage } from "../core/config/routerRemoval"
 import { ApiStream } from "./transform/stream"
 
 import {
+	AetherapiHandler,
 	AnthropicHandler,
 	AwsBedrockHandler,
 	OpenRouterHandler,
@@ -125,6 +126,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 	}
 
 	switch (apiProvider) {
+		case "aetherapi":
+			return new AetherapiHandler(options)
 		case "anthropic":
 			return new AnthropicHandler(options)
 		case "openrouter":

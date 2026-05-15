@@ -1,3 +1,4 @@
+export * from "./aetherapi.js"
 export * from "./anthropic.js"
 export * from "./baseten.js"
 export * from "./bedrock.js"
@@ -27,6 +28,7 @@ export * from "./zai.js"
 export * from "./minimax.js"
 export * from "./mimo.js"
 
+import { aetherapiDefaultModelId } from "./aetherapi.js"
 import { anthropicDefaultModelId } from "./anthropic.js"
 import { basetenDefaultModelId } from "./baseten.js"
 import { bedrockDefaultModelId } from "./bedrock.js"
@@ -65,6 +67,8 @@ export function getProviderDefaultModelId(
 	options: { isChina?: boolean } = { isChina: false },
 ): string {
 	switch (provider) {
+		case "aetherapi":
+			return aetherapiDefaultModelId
 		case "openrouter":
 			return openRouterDefaultModelId
 		case "requesty":
