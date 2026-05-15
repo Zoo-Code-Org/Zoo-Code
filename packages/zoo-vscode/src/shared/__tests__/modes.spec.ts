@@ -1,6 +1,6 @@
 // npx vitest run shared/__tests__/modes.spec.ts
 
-import type { ModeConfig, PromptComponent } from "@roo-code/types"
+import type { ModeConfig, PromptComponent } from "@zoo-code/types"
 
 // Mock setup must come before imports
 vi.mock("vscode")

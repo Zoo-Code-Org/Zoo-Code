@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server"
 
-import { taskEventSchema } from "@roo-code/types"
-import { findRun } from "@roo-code/evals"
+import { taskEventSchema } from "@zoo-code/types"
+import { findRun } from "@zoo-code/evals"
 
 import { SSEStream } from "@/lib/server/sse-stream"
 import { redisClient } from "@/lib/server/redis"

@@ -1,6 +1,6 @@
 import { execa } from "execa"
 
-import { type TaskEvent, RooCodeEventName } from "@roo-code/types"
+import { type TaskEvent, RooCodeEventName } from "@zoo-code/types"
 
 import { findRun, findTask, updateTask } from "../db/index"
 
@@ -84,7 +84,7 @@ export const processTaskInContainer = async ({
 	]
 
 	if (jobToken) {
-		baseArgs.push(`-e ROO_CODE_CLOUD_TOKEN=${jobToken}`)
+		baseArgs.push(`-e ZOO_CODE_CLOUD_TOKEN=${jobToken}`)
 	}
 
 	// Pass API keys to the container so the CLI can authenticate
@@ -103,7 +103,7 @@ export const processTaskInContainer = async ({
 		}
 	}
 
-	const command = `pnpm --filter @roo-code/evals cli --taskId ${taskId}`
+	const command = `pnpm --filter @zoo-code/evals cli --taskId ${taskId}`
 	logger.info(command)
 
 	for (let attempt = 0; attempt <= maxRetries; attempt++) {

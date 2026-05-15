@@ -37,9 +37,9 @@
 
 4. Add attribution inventory
 
-    - **What:** Preserve upstream Roo Code and OpenCode/Kilo attribution requirements before copied code is edited. Add or update `ATTRIBUTIONS.md` with upstream repositories and Apache 2.0 license notes.
+    - **What:** Preserve upstream Zoo Code, Roo Code, OpenCode, and Kilo Code attribution requirements before copied code is edited. Add or update `ATTRIBUTIONS.md` with upstream repositories and license notes. Zoo Code/Roo Code are Apache 2.0; Kilo Code/OpenCode are MIT as currently published upstream.
     - **Files touched:** `ATTRIBUTIONS.md`, existing license files only if required by copied source headers.
-    - **Acceptance criteria:** Upstream Zoo/Roo/OpenCode/Kilo sources are listed with license names and repository URLs; existing upstream license headers are not removed.
+    - **Acceptance criteria:** Upstream Zoo/Roo/OpenCode/Kilo sources are listed with accurate license names and repository URLs; existing upstream license headers are not removed.
     - **Tests required:** None.
     - **Docs required:** `ATTRIBUTIONS.md`; update `HANDOFF.md`.
     - **Commit message:** `docs(legal): record upstream attributions`

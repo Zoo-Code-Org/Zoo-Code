@@ -1,5 +1,5 @@
 {
-	"extends": "@roo-code/config-typescript/nextjs.json",
+	"extends": "@zoo-code/config-typescript/nextjs.json",
 	"compilerOptions": {
 		"paths": { "@/*": ["./src/*"] }
 	},

@@ -46,7 +46,7 @@ describe("TerminalRegistry", () => {
 				iconPath: expect.any(Object),
 				env: {
 					PAGER,
-					ROO_ACTIVE: "true",
+					ZOO_ACTIVE: "true",
 					VTE_VERSION: "0",
 					PROMPT_EOL_MARK: "",
 				},
@@ -67,7 +67,7 @@ describe("TerminalRegistry", () => {
 					iconPath: expect.any(Object),
 					env: {
 						PAGER,
-						ROO_ACTIVE: "true",
+						ZOO_ACTIVE: "true",
 						PROMPT_COMMAND: "sleep 0.05",
 						VTE_VERSION: "0",
 						PROMPT_EOL_MARK: "",
@@ -90,7 +90,7 @@ describe("TerminalRegistry", () => {
 					iconPath: expect.any(Object),
 					env: {
 						PAGER,
-						ROO_ACTIVE: "true",
+						ZOO_ACTIVE: "true",
 						VTE_VERSION: "0",
 						PROMPT_EOL_MARK: "",
 						ITERM_SHELL_INTEGRATION_INSTALLED: "Yes",
@@ -112,7 +112,7 @@ describe("TerminalRegistry", () => {
 					iconPath: expect.any(Object),
 					env: {
 						PAGER,
-						ROO_ACTIVE: "true",
+						ZOO_ACTIVE: "true",
 						VTE_VERSION: "0",
 						PROMPT_EOL_MARK: "",
 						POWERLEVEL9K_TERM_SHELL_INTEGRATION: "true",

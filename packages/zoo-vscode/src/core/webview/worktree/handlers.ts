@@ -15,8 +15,8 @@ import type {
 	WorktreeIncludeStatus,
 	WorktreeListResponse,
 	WorktreeDefaultsResponse,
-} from "@roo-code/types"
-import { worktreeService, worktreeIncludeService, type CopyProgressCallback } from "@roo-code/core"
+} from "@zoo-code/types"
+import { worktreeService, worktreeIncludeService, type CopyProgressCallback } from "@zoo-code/core"
 
 import type { ClineProvider } from "../ClineProvider"
 

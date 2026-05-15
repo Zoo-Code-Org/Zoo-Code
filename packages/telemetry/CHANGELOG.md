@@ -1,3 +1,3 @@
-# @roo-code/telemetry
+# @zoo-code/telemetry
 
 ## 0.0.1

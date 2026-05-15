@@ -12,8 +12,8 @@ import {
 	RooCodeEventName,
 	IpcMessageType,
 	EVALS_SETTINGS,
-} from "@roo-code/types"
-import { IpcClient } from "@roo-code/ipc"
+} from "@zoo-code/types"
+import { IpcClient } from "@zoo-code/ipc"
 
 import { updateTask, createTaskMetrics, updateTaskMetrics, createToolError } from "../db/index"
 import { EVALS_REPO_PATH } from "../exercises/index"
@@ -27,7 +27,7 @@ export const runTaskInVscode = async ({ run, task, publish, logger, jobToken }: 
 	const prompt = fs.readFileSync(path.resolve(EVALS_REPO_PATH, `prompts/${language}.md`), "utf-8")
 	const workspacePath = path.resolve(EVALS_REPO_PATH, language, exercise)
 	const ipcSocketPath = path.resolve(os.tmpdir(), `evals-${run.id}-${task.id}.sock`)
-	const env = { ROO_CODE_IPC_SOCKET_PATH: ipcSocketPath }
+	const env = { ZOO_CODE_IPC_SOCKET_PATH: ipcSocketPath }
 	const controller = new AbortController()
 	const cancelSignal = controller.signal
 	const containerized = isDockerContainer()
@@ -38,7 +38,7 @@ export const runTaskInVscode = async ({ run, task, publish, logger, jobToken }: 
 		: `code --disable-workspace-trust -n ${workspacePath}`
 
 	if (jobToken) {
-		codeCommand = `ROO_CODE_CLOUD_TOKEN=${jobToken} ${codeCommand}`
+		codeCommand = `ZOO_CODE_CLOUD_TOKEN=${jobToken} ${codeCommand}`
 	}
 
 	logger.info(codeCommand)

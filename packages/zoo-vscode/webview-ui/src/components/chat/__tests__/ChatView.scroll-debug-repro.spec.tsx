@@ -2,7 +2,7 @@ import React, { useEffect, useImperativeHandle, useRef } from "react"
 import { act, fireEvent, render } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
-import type { ClineMessage } from "@roo-code/types"
+import type { ClineMessage } from "@zoo-code/types"
 
 import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 

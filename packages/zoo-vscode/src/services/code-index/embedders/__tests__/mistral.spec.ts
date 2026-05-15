@@ -7,7 +7,7 @@ import { OpenAICompatibleEmbedder } from "../openai-compatible"
 vitest.mock("../openai-compatible")
 
 // Mock TelemetryService
-vitest.mock("@roo-code/telemetry", () => ({
+vitest.mock("@zoo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureEvent: vitest.fn(),

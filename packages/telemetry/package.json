@@ -1,6 +1,6 @@
 {
-	"name": "@roo-code/telemetry",
-	"description": "Roo Code telemetry service and clients.",
+	"name": "@zoo-code/telemetry",
+	"description": "Zoo Code telemetry service and clients.",
 	"version": "0.0.1",
 	"type": "module",
 	"exports": "./src/index.ts",
@@ -12,13 +12,13 @@
 		"clean": "rimraf .turbo"
 	},
 	"dependencies": {
-		"@roo-code/types": "workspace:^",
+		"@zoo-code/types": "workspace:^",
 		"posthog-node": "^5.0.0",
 		"zod": "^3.25.61"
 	},
 	"devDependencies": {
-		"@roo-code/config-eslint": "workspace:^",
-		"@roo-code/config-typescript": "workspace:^",
+		"@zoo-code/config-eslint": "workspace:^",
+		"@zoo-code/config-typescript": "workspace:^",
 		"@types/node": "20.x",
 		"@types/vscode": "^1.84.0",
 		"@vitest/coverage-v8": "^3.2.3",

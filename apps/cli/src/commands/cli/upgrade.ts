@@ -3,9 +3,9 @@ import { spawn } from "child_process"
 import { VERSION } from "@/lib/utils/version.js"
 import { isRecord } from "@/lib/utils/guards.js"
 
-const RELEASES_URL = "https://api.github.com/repos/RooCodeInc/Roo-Code/releases?per_page=100"
+const RELEASES_URL = "https://api.github.com/repos/Zoo-Code-Org/Zoo-Code/releases?per_page=100"
 export const INSTALL_SCRIPT_COMMAND =
-	"curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh | sh"
+	"curl -fsSL https://raw.githubusercontent.com/Zoo-Code-Org/Zoo-Code/main/apps/cli/install.sh | sh"
 
 export interface UpgradeOptions {
 	currentVersion?: string
@@ -69,7 +69,7 @@ export async function getLatestCliVersion(fetchImpl: typeof fetch = fetch): Prom
 	const response = await fetchImpl(RELEASES_URL, {
 		headers: {
 			Accept: "application/vnd.github+json",
-			"User-Agent": "roo-cli",
+			"User-Agent": "zoo-legacy-cli",
 		},
 	})
 
@@ -111,7 +111,7 @@ export async function getLatestCliVersion(fetchImpl: typeof fetch = fetch): Prom
 
 export function runUpgradeInstaller(version?: string, spawnImpl: typeof spawn = spawn): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const env = version ? { ...process.env, ROO_VERSION: version } : process.env
+		const env = version ? { ...process.env, ZOO_VERSION: version } : process.env
 		const child = spawnImpl("sh", ["-c", INSTALL_SCRIPT_COMMAND], { stdio: "inherit", env })
 
 		child.once("error", (error) => {
@@ -141,11 +141,11 @@ export async function upgrade(options: UpgradeOptions = {}): Promise<void> {
 	console.log(`Latest version: ${latestVersion}`)
 
 	if (compareVersions(latestVersion, currentVersion) <= 0) {
-		console.log("Roo CLI is already up to date.")
+		console.log("Zoo CLI is already up to date.")
 		return
 	}
 
-	console.log(`Upgrading Roo CLI from ${currentVersion} to ${latestVersion}...`)
+	console.log(`Upgrading Zoo CLI from ${currentVersion} to ${latestVersion}...`)
 	if (runInstaller) {
 		await runInstaller()
 	} else {

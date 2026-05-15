@@ -4,7 +4,7 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import * as os from "os"
 
-import type { HistoryItem } from "@roo-code/types"
+import type { HistoryItem } from "@zoo-code/types"
 
 import { TaskHistoryStore } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"

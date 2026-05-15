@@ -1,6 +1,6 @@
 // npx vitest run src/core/tools/__tests__/executeCommandTool.spec.ts
 
-import type { ToolUsage } from "@roo-code/types"
+import type { ToolUsage } from "@zoo-code/types"
 import * as vscode from "vscode"
 
 import { Task } from "../../task/Task"
@@ -48,7 +48,7 @@ describe("executeCommandTool", () => {
 	let mockHandleError: any
 	let mockPushToolResult: any
 	let mockToolUse: ToolUse<"execute_command">
-	const originalCliRuntime = process.env.ROO_CLI_RUNTIME
+	const originalCliRuntime = process.env.ZOO_CLI_RUNTIME
 
 	beforeEach(() => {
 		// Reset mocks
@@ -109,7 +109,7 @@ describe("executeCommandTool", () => {
 	})
 
 	afterEach(() => {
-		process.env.ROO_CLI_RUNTIME = originalCliRuntime
+		process.env.ZOO_CLI_RUNTIME = originalCliRuntime
 		vitest.useRealTimers()
 	})
 
@@ -294,12 +294,12 @@ describe("executeCommandTool", () => {
 		})
 
 		it("should ignore model timeout in CLI runtime", () => {
-			process.env.ROO_CLI_RUNTIME = "1"
+			process.env.ZOO_CLI_RUNTIME = "1"
 			expect(executeCommandModule.resolveAgentTimeoutMs(30)).toBe(0)
 		})
 
 		it("should honor model timeout outside CLI runtime", () => {
-			delete process.env.ROO_CLI_RUNTIME
+			delete process.env.ZOO_CLI_RUNTIME
 			expect(executeCommandModule.resolveAgentTimeoutMs(30)).toBe(30_000)
 		})
 	})

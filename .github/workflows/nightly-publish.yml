@@ -56,8 +56,8 @@ jobs:
         env:
           PKG_RELEASE_CHANNEL: prerelease
         run: |
-          pnpm --filter @roo-code/build build
-          pnpm --filter @roo-code/vscode-webview build
+          pnpm --filter @zoo-code/build build
+          pnpm --filter @zoo-code/vscode-webview build
 
       - name: Package pre-release VSIX
         env:

@@ -1,5 +1,5 @@
 import { useCallback } from "react"
-import type { WebviewMessage } from "@roo-code/types"
+import type { WebviewMessage } from "@zoo-code/types"
 
 import type {
 	AutocompletePickerState,

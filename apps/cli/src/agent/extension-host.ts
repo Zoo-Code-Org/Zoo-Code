@@ -22,9 +22,9 @@ import type {
 	ReasoningEffortExtended,
 	RooCodeSettings,
 	WebviewMessage,
-} from "@roo-code/types"
-import { createVSCodeAPI, IExtensionHost, ExtensionHostEventMap, setRuntimeConfigValues } from "@roo-code/vscode-shim"
-import { DebugLogger, setDebugLogEnabled } from "@roo-code/core/cli"
+} from "@zoo-code/types"
+import { createVSCodeAPI, IExtensionHost, ExtensionHostEventMap, setRuntimeConfigValues } from "@zoo-code/vscode-shim"
+import { DebugLogger, setDebugLogEnabled } from "@zoo-code/core/cli"
 
 import { DEFAULT_FLAGS, type SupportedProvider } from "@/types/index.js"
 import type { User } from "@/lib/sdk/index.js"
@@ -42,7 +42,7 @@ import { AskDispatcher } from "./ask-dispatcher.js"
 const cliLogger = new DebugLogger("CLI")
 
 // Get the CLI package root directory (for finding node_modules/@vscode/ripgrep)
-// When running from a release tarball, ROO_CLI_ROOT is set by the wrapper script.
+// When running from a release tarball, ZOO_CLI_ROOT is set by the wrapper script.
 // In development, we fall back to finding the CLI package root by walking up to package.json.
 // This works whether running from dist/ (bundled) or src/agent/ (tsx dev).
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -61,7 +61,7 @@ function findCliPackageRoot(): string {
 	return path.resolve(__dirname, "..")
 }
 
-const CLI_PACKAGE_ROOT = process.env.ROO_CLI_ROOT || findCliPackageRoot()
+const CLI_PACKAGE_ROOT = process.env.ZOO_CLI_ROOT || findCliPackageRoot()
 
 export interface ExtensionHostOptions {
 	mode: string
@@ -178,8 +178,8 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		this.options = options
 		// Mark this process as CLI runtime so extension code can apply
 		// CLI-specific behavior without affecting VS Code desktop usage.
-		this.previousCliRuntimeEnv = process.env.ROO_CLI_RUNTIME
-		process.env.ROO_CLI_RUNTIME = "1"
+		this.previousCliRuntimeEnv = process.env.ZOO_CLI_RUNTIME
+		process.env.ZOO_CLI_RUNTIME = "1"
 
 		// Enable file-based debug logging only when --debug is passed.
 		if (options.debug) {
@@ -606,9 +606,9 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 
 		// Restore previous CLI runtime marker for process hygiene in tests.
 		if (this.previousCliRuntimeEnv === undefined) {
-			delete process.env.ROO_CLI_RUNTIME
+			delete process.env.ZOO_CLI_RUNTIME
 		} else {
-			process.env.ROO_CLI_RUNTIME = this.previousCliRuntimeEnv
+			process.env.ZOO_CLI_RUNTIME = this.previousCliRuntimeEnv
 		}
 	}
 }

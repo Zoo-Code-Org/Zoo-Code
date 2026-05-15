@@ -1,10 +1,10 @@
-// pnpm --filter @roo-code/cli test src/agent/__tests__/extension-host.test.ts
+// pnpm --filter @zoo-code/cli test src/agent/__tests__/extension-host.test.ts
 
 import { EventEmitter } from "events"
 import fs from "fs"
 
-import type { ExtensionMessage, WebviewMessage } from "@roo-code/types"
-import { setRuntimeConfigValues } from "@roo-code/vscode-shim"
+import type { ExtensionMessage, WebviewMessage } from "@zoo-code/types"
+import { setRuntimeConfigValues } from "@zoo-code/vscode-shim"
 
 import { DEFAULT_FLAGS } from "@/types/index.js"
 
@@ -12,7 +12,7 @@ import { type ExtensionHostOptions, ExtensionHost } from "../extension-host.js"
 import { ExtensionClient } from "../extension-client.js"
 import { AgentLoopState } from "../agent-state.js"
 
-vi.mock("@roo-code/vscode-shim", () => ({
+vi.mock("@zoo-code/vscode-shim", () => ({
 	createVSCodeAPI: vi.fn(() => ({
 		context: { extensionPath: "/test/extension" },
 	})),
@@ -83,14 +83,14 @@ function spyOnPrivate(host: ExtensionHost, method: string) {
 }
 
 describe("ExtensionHost", () => {
-	const initialRooCliRuntimeEnv = process.env.ROO_CLI_RUNTIME
+	const initialRooCliRuntimeEnv = process.env.ZOO_CLI_RUNTIME
 
 	beforeEach(() => {
 		vi.resetAllMocks()
 		if (initialRooCliRuntimeEnv === undefined) {
-			delete process.env.ROO_CLI_RUNTIME
+			delete process.env.ZOO_CLI_RUNTIME
 		} else {
-			process.env.ROO_CLI_RUNTIME = initialRooCliRuntimeEnv
+			process.env.ZOO_CLI_RUNTIME = initialRooCliRuntimeEnv
 		}
 		// Clean up globals
 		delete (global as Record<string, unknown>).vscode
@@ -99,9 +99,9 @@ describe("ExtensionHost", () => {
 
 	afterAll(() => {
 		if (initialRooCliRuntimeEnv === undefined) {
-			delete process.env.ROO_CLI_RUNTIME
+			delete process.env.ZOO_CLI_RUNTIME
 		} else {
-			process.env.ROO_CLI_RUNTIME = initialRooCliRuntimeEnv
+			process.env.ZOO_CLI_RUNTIME = initialRooCliRuntimeEnv
 		}
 	})
 
@@ -155,9 +155,9 @@ describe("ExtensionHost", () => {
 		})
 
 		it("should mark process as CLI runtime", () => {
-			delete process.env.ROO_CLI_RUNTIME
+			delete process.env.ZOO_CLI_RUNTIME
 			createTestHost()
-			expect(process.env.ROO_CLI_RUNTIME).toBe("1")
+			expect(process.env.ZOO_CLI_RUNTIME).toBe("1")
 		})
 
 		it("should set execaShellPath in initialSettings when terminalShell is provided", () => {
@@ -498,24 +498,24 @@ describe("ExtensionHost", () => {
 			expect(restoreConsoleSpy).toHaveBeenCalled()
 		})
 
-		it("should clear ROO_CLI_RUNTIME on dispose when it was previously unset", async () => {
-			delete process.env.ROO_CLI_RUNTIME
+		it("should clear ZOO_CLI_RUNTIME on dispose when it was previously unset", async () => {
+			delete process.env.ZOO_CLI_RUNTIME
 			host = createTestHost()
-			expect(process.env.ROO_CLI_RUNTIME).toBe("1")
+			expect(process.env.ZOO_CLI_RUNTIME).toBe("1")
 
 			await host.dispose()
 
-			expect(process.env.ROO_CLI_RUNTIME).toBeUndefined()
+			expect(process.env.ZOO_CLI_RUNTIME).toBeUndefined()
 		})
 
-		it("should restore prior ROO_CLI_RUNTIME value on dispose", async () => {
-			process.env.ROO_CLI_RUNTIME = "preexisting-value"
+		it("should restore prior ZOO_CLI_RUNTIME value on dispose", async () => {
+			process.env.ZOO_CLI_RUNTIME = "preexisting-value"
 			host = createTestHost()
-			expect(process.env.ROO_CLI_RUNTIME).toBe("1")
+			expect(process.env.ZOO_CLI_RUNTIME).toBe("1")
 
 			await host.dispose()
 
-			expect(process.env.ROO_CLI_RUNTIME).toBe("preexisting-value")
+			expect(process.env.ZOO_CLI_RUNTIME).toBe("preexisting-value")
 		})
 	})
 

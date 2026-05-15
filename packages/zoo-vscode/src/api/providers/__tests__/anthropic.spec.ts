@@ -4,7 +4,7 @@ import { AnthropicHandler } from "../anthropic"
 import { ApiHandlerOptions } from "../../../shared/api"
 
 // Mock TelemetryService
-vitest.mock("@roo-code/telemetry", () => ({
+vitest.mock("@zoo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureException: vitest.fn(),

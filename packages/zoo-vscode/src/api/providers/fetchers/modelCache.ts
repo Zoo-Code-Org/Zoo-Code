@@ -5,9 +5,9 @@ import * as fsSync from "fs"
 import NodeCache from "node-cache"
 import { z } from "zod"
 
-import type { ProviderName, ModelRecord } from "@roo-code/types"
-import { modelInfoSchema, TelemetryEventName } from "@roo-code/types"
-import { TelemetryService } from "@roo-code/telemetry"
+import type { ProviderName, ModelRecord } from "@zoo-code/types"
+import { modelInfoSchema, TelemetryEventName } from "@zoo-code/types"
+import { TelemetryService } from "@zoo-code/telemetry"
 
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
@@ -89,7 +89,7 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 			break
 		case "roo": {
 			// Roo Code Cloud provider requires baseUrl and optional apiKey
-			const rooBaseUrl = options.baseUrl ?? process.env.ROO_CODE_PROVIDER_URL ?? "https://api.roocode.com/proxy"
+			const rooBaseUrl = options.baseUrl ?? process.env.ZOO_CODE_PROVIDER_URL ?? "https://api.roocode.com/proxy"
 			models = await getRooModels(rooBaseUrl, options.apiKey)
 			break
 		}

@@ -8,7 +8,7 @@ import {
 	type RooCliStreamEvent,
 	type RooCliToolResult,
 	type RooCliToolUse,
-} from "@roo-code/types"
+} from "@zoo-code/types"
 
 /**
  * JSON Event Types for Structured CLI Output

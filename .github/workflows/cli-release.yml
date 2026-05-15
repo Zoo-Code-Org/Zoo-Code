@@ -57,7 +57,7 @@ jobs:
         run: pnpm bundle
 
       - name: Build CLI
-        run: pnpm --filter @roo-code/cli build
+        run: pnpm --filter @zoo-code/legacy-cli build
 
       - name: Create release tarball
         id: tarball
@@ -86,7 +86,7 @@ jobs:
           node -e "
             const pkg = require('./apps/cli/package.json');
             const newPkg = {
-              name: '@roo-code/cli',
+              name: '@zoo-code/legacy-cli',
               version: '$VERSION',
               type: 'module',
               dependencies: {
@@ -137,9 +137,9 @@ jobs:
             'const __dirname = dirname(__filename);' \
             '' \
             '// Set environment variables for the CLI' \
-            "process.env.ROO_CLI_ROOT = join(__dirname, '..');" \
-            "process.env.ROO_EXTENSION_PATH = join(__dirname, '..', 'extension');" \
-            "process.env.ROO_RIPGREP_PATH = join(__dirname, 'rg');" \
+            "process.env.ZOO_CLI_ROOT = join(__dirname, '..');" \
+            "process.env.ZOO_EXTENSION_PATH = join(__dirname, '..', 'extension');" \
+            "process.env.ZOO_RIPGREP_PATH = join(__dirname, 'rg');" \
             '' \
             '// Import and run the actual CLI' \
             "await import(join(__dirname, '..', 'lib', 'index.js'));" \
@@ -325,7 +325,7 @@ jobs:
           echo "" >> "$NOTES_FILE"
           echo "Or install a specific version:" >> "$NOTES_FILE"
           echo '```bash' >> "$NOTES_FILE"
-          echo "ROO_VERSION=$VERSION curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh | sh" >> "$NOTES_FILE"
+          echo "ZOO_VERSION=$VERSION curl -fsSL https://raw.githubusercontent.com/Zoo-Code-Org/Zoo-Code/main/apps/cli/install.sh | sh" >> "$NOTES_FILE"
           echo '```' >> "$NOTES_FILE"
           echo "" >> "$NOTES_FILE"
           echo "## Requirements" >> "$NOTES_FILE"
@@ -357,7 +357,7 @@ jobs:
           echo '```' >> "$NOTES_FILE"
 
           gh release create "$TAG" \
-            --title "Roo Code CLI v$VERSION" \
+            --title "Zoo Code Legacy CLI v$VERSION" \
             --notes-file "$NOTES_FILE" \
             --prerelease \
             release/*

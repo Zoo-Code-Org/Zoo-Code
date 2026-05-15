@@ -1,5 +1,5 @@
 /**
- * Serve script for Roo Code extension development
+ * Serve script for Zoo Code extension development
  *
  * Usage:
  *   pnpm code-server:install    # Build and install the extension into code-server
@@ -20,7 +20,7 @@ const CYAN = "\x1b[36m"
 const RED = "\x1b[31m"
 
 // Build vsix to a fixed path in temp directory
-const VSIX_PATH = path.join(os.tmpdir(), "roo-code-serve.vsix")
+const VSIX_PATH = path.join(os.tmpdir(), "zoo-code-serve.vsix")
 
 function log(message) {
 	console.log(`${CYAN}[code-server]${RESET} ${message}`)
@@ -39,7 +39,7 @@ function logError(message) {
 }
 
 async function main() {
-	console.log(`\n${BOLD}🔧 Roo Code - Install Extension${RESET}\n`)
+	console.log(`\n${BOLD}🔧 Zoo Code - Install Extension${RESET}\n`)
 
 	// Build vsix to temp directory
 	log(`Building vsix to ${VSIX_PATH}...`)

@@ -29,7 +29,7 @@ wait_for_db() {
 run_migrations() {
     echo "🔄 Running database migrations..."
 
-    if pnpm --filter @roo-code/evals db:migrate; then
+    if pnpm --filter @zoo-code/evals db:migrate; then
         echo "✅ Database migrations completed successfully!"
     else
         echo "❌ Database migration failed!"
@@ -42,7 +42,7 @@ main() {
     run_migrations
 
     echo "🌐 Starting web service..."
-    pnpm --filter @roo-code/web-evals start
+    pnpm --filter @zoo-code/web-evals start
 }
 
 main "$@"

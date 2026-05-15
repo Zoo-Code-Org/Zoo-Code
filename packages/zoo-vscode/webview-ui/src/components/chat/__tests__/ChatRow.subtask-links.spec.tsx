@@ -2,7 +2,7 @@ import React from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ChatRowContent } from "../ChatRow"
-import type { HistoryItem, ClineMessage } from "@roo-code/types"
+import type { HistoryItem, ClineMessage } from "@zoo-code/types"
 
 // Mock vscode API
 const mockPostMessage = vi.fn()

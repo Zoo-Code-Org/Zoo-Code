@@ -3,17 +3,17 @@
 The Zoo Code extension exposes an API that can be used by other extensions.
 
 > Note: The npm package and exported API type names intentionally retain the
-> legacy `@roo-code` and `RooCodeAPI` names for backward compatibility after the
+> legacy `RooCodeAPI` type name for backward compatibility after the
 > extension rebrand to Zoo Code.
 
 To use this API in your extension:
 
-1. Install `@roo-code/types` with npm, pnpm, or yarn.
+1. Install `@zoo-code/types` with npm, pnpm, or yarn.
 2. Import the `RooCodeAPI` type.
 3. Load the extension API.
 
 ```typescript
-import { RooCodeAPI } from "@roo-code/types"
+import { RooCodeAPI } from "@zoo-code/types"
 
 const extension = vscode.extensions.getExtension<RooCodeAPI>("ZooCodeOrganization.zoo-code")
 

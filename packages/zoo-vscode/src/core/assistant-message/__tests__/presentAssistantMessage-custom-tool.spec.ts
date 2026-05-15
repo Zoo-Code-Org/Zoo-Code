@@ -16,14 +16,14 @@ vi.mock("../../tools/validateToolUse", () => ({
 }))
 
 // Mock custom tool registry - must be done inline without external variable references
-vi.mock("@roo-code/core", () => ({
+vi.mock("@zoo-code/core", () => ({
 	customToolRegistry: {
 		has: vi.fn(),
 		get: vi.fn(),
 	},
 }))
 
-vi.mock("@roo-code/telemetry", () => ({
+vi.mock("@zoo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureToolUsage: vi.fn(),
@@ -32,8 +32,8 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
-import { TelemetryService } from "@roo-code/telemetry"
-import { customToolRegistry } from "@roo-code/core"
+import { TelemetryService } from "@zoo-code/telemetry"
+import { customToolRegistry } from "@zoo-code/core"
 
 describe("presentAssistantMessage - Custom Tool Recording", () => {
 	let mockTask: any

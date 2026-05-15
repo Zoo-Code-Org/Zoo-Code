@@ -17,7 +17,7 @@ import {
 	fireworksModels,
 	minimaxModels,
 	basetenModels,
-} from "@roo-code/types"
+} from "@zoo-code/types"
 
 export const MODELS_BY_PROVIDER: Partial<Record<ProviderName, Record<string, ModelInfo>>> = {
 	anthropic: anthropicModels,

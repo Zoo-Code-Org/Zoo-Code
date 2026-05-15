@@ -1,5 +1,5 @@
-import type { ModelRecord } from "@roo-code/types"
-import { deepSeekModels, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import type { ModelRecord } from "@zoo-code/types"
+import { deepSeekModels, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@zoo-code/types"
 
 import { DEFAULT_HEADERS } from "../constants"
 

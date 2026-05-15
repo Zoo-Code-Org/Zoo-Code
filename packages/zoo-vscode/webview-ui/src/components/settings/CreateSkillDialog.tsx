@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from "react"
-import { validateSkillName as validateSkillNameShared, SkillNameValidationError } from "@roo-code/types"
+import { validateSkillName as validateSkillNameShared, SkillNameValidationError } from "@zoo-code/types"
 
 import { getAllModes } from "@roo/modes"
 
@@ -46,7 +46,7 @@ const getSkillNameErrorTranslationKey = (error: SkillNameValidationError): strin
 }
 
 /**
- * Validate skill name using shared validation from @roo-code/types.
+ * Validate skill name using shared validation from @zoo-code/types.
  * Returns a translation key for the error, or null if valid.
  */
 const validateSkillName = (name: string): string | null => {

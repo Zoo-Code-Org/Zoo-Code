@@ -4,8 +4,8 @@ import * as os from "node:os"
 import pWaitFor from "p-wait-for"
 import { execa } from "execa"
 
-import { type ToolUsage, TaskCommandName, RooCodeEventName, IpcMessageType } from "@roo-code/types"
-import { IpcClient } from "@roo-code/ipc"
+import { type ToolUsage, TaskCommandName, RooCodeEventName, IpcMessageType } from "@zoo-code/types"
+import { IpcClient } from "@zoo-code/ipc"
 
 import { updateTask, createTaskMetrics, updateTaskMetrics, createToolError } from "../db/index"
 import { EVALS_REPO_PATH } from "../exercises/index"
@@ -14,7 +14,7 @@ import { type RunTaskOptions } from "./types"
 import { mergeToolUsage, waitForSubprocessWithTimeout } from "./utils"
 
 /**
- * Run a task using the Roo Code CLI (headless mode).
+ * Run a task using the Zoo Code CLI (headless mode).
  * Uses the same IPC protocol as VSCode since the CLI loads the same extension bundle.
  */
 export const runTaskWithCli = async ({ run, task, publish, logger, jobToken }: RunTaskOptions) => {
@@ -25,11 +25,11 @@ export const runTaskWithCli = async ({ run, task, publish, logger, jobToken }: R
 
 	const env: Record<string, string> = {
 		...(process.env as Record<string, string>),
-		ROO_CODE_IPC_SOCKET_PATH: ipcSocketPath,
+		ZOO_CODE_IPC_SOCKET_PATH: ipcSocketPath,
 	}
 
 	if (jobToken) {
-		env.ROO_CODE_CLOUD_TOKEN = jobToken
+		env.ZOO_CODE_CLOUD_TOKEN = jobToken
 	}
 
 	const controller = new AbortController()
@@ -37,7 +37,7 @@ export const runTaskWithCli = async ({ run, task, publish, logger, jobToken }: R
 
 	const cliArgs = [
 		"--filter",
-		"@roo-code/cli",
+		"@zoo-code/cli",
 		"start",
 		"--prompt-file",
 		promptSourcePath,

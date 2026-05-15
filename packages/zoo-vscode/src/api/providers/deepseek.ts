@@ -7,7 +7,7 @@ import {
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
 	type ModelInfo,
-} from "@roo-code/types"
+} from "@zoo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 

@@ -1,6 +1,6 @@
 {
-	"name": "@roo-code/ipc",
-	"description": "IPC server and client for remote Roo Code access.",
+	"name": "@zoo-code/ipc",
+	"description": "IPC server and client for remote Zoo Code access.",
 	"version": "0.0.1",
 	"type": "module",
 	"exports": "./src/index.ts",
@@ -10,12 +10,12 @@
 		"clean": "rimraf .turbo"
 	},
 	"dependencies": {
-		"@roo-code/types": "workspace:^",
+		"@zoo-code/types": "workspace:^",
 		"node-ipc": "^12.0.0"
 	},
 	"devDependencies": {
-		"@roo-code/config-eslint": "workspace:^",
-		"@roo-code/config-typescript": "workspace:^",
+		"@zoo-code/config-eslint": "workspace:^",
+		"@zoo-code/config-typescript": "workspace:^",
 		"@types/node": "20.x",
 		"@types/node-ipc": "^9.2.3",
 		"vitest": "^3.2.3"

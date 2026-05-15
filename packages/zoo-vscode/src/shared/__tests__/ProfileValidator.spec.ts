@@ -1,6 +1,6 @@
 // npx vitest run src/shared/__tests__/ProfileValidator.spec.ts
 
-import type { ProviderSettings, OrganizationAllowList } from "@roo-code/types"
+import type { ProviderSettings, OrganizationAllowList } from "@zoo-code/types"
 
 import { ProfileValidator } from "../ProfileValidator"
 

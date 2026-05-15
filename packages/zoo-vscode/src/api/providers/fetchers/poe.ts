@@ -1,4 +1,4 @@
-import type { ModelInfo, ModelRecord } from "@roo-code/types"
+import type { ModelInfo, ModelRecord } from "@zoo-code/types"
 import { fetchPoeModels, getModels } from "ai-sdk-provider-poe/code"
 
 export async function getPoeModels(apiKey?: string, baseURL?: string): Promise<ModelRecord> {

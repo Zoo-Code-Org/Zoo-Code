@@ -10,9 +10,9 @@ describe("getDefaultExtensionPath", () => {
 
 	beforeEach(() => {
 		vi.resetAllMocks()
-		// Reset process.env to avoid ROO_EXTENSION_PATH from installed CLI affecting tests.
+		// Reset process.env to avoid ZOO_EXTENSION_PATH from installed CLI affecting tests.
 		process.env = { ...originalEnv }
-		delete process.env.ROO_EXTENSION_PATH
+		delete process.env.ZOO_EXTENSION_PATH
 	})
 
 	afterEach(() => {

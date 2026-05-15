@@ -2,7 +2,7 @@
 
 import type { ExtensionContext } from "vscode"
 
-import type { AuthService } from "@roo-code/types"
+import type { AuthService } from "@zoo-code/types"
 
 import { CloudSettingsService } from "../CloudSettingsService.js"
 

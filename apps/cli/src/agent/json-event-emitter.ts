@@ -14,7 +14,7 @@
  * - `done` flag instead of partial:false
  */
 
-import type { ClineMessage } from "@roo-code/types"
+import type { ClineMessage } from "@zoo-code/types"
 
 import type { JsonEvent, JsonEventCost, JsonEventQueueItem, JsonFinalOutput } from "@/types/json-events.js"
 

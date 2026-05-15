@@ -8,7 +8,7 @@ import {
 	LEGACY_PROVIDER_PREFERENCE_ROO,
 	OnboardingProviderChoice,
 } from "@/types/index.js"
-import { safeWriteJson } from "../../../../../src/utils/safeWriteJson.js"
+import { safeWriteJson } from "../../../../../packages/zoo-vscode/src/utils/safeWriteJson.js"
 
 import { getConfigDir } from "./index.js"
 

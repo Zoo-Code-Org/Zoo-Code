@@ -1,4 +1,4 @@
-# @roo-code/types
+# @zoo-code/types
 
 ## 0.0.1
 

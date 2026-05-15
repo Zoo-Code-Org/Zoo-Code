@@ -15,8 +15,8 @@ import {
 	type ReasoningEffortExtended,
 	type ServiceTier,
 	ApiProviderError,
-} from "@roo-code/types"
-import { TelemetryService } from "@roo-code/telemetry"
+} from "@zoo-code/types"
+import { TelemetryService } from "@zoo-code/telemetry"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 

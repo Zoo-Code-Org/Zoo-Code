@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react"
 
-import type { ProviderSettings } from "@roo-code/types"
+import type { ProviderSettings } from "@zoo-code/types"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { validateApiConfiguration } from "@src/utils/validate"

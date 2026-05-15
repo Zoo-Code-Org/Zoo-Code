@@ -316,7 +316,7 @@ fi
 check_docker_services
 
 echo -n "🗄️ Syncing Roo Code evals database... "
-pnpm --filter @roo-code/evals db:push --force &>/dev/null || exit 1
+pnpm --filter @zoo-code/evals db:push --force &>/dev/null || exit 1
 echo "✅ Done"
 
 if ! grep -q "OPENROUTER_API_KEY" .env.local; then
@@ -339,9 +339,9 @@ if ! nc -z localhost 3446; then
   read -p "🌐 Would you like to start the evals web app? (Y/n): " start_evals
 
   if [[ "$start_evals" =~ ^[Yy]|^$ ]]; then
-    pnpm --filter @roo-code/web-evals dev
+    pnpm --filter @zoo-code/web-evals dev
   else
-    echo "💡 You can start it anytime with 'pnpm --filter @roo-code/web-evals dev'."
+    echo "💡 You can start it anytime with 'pnpm --filter @zoo-code/web-evals dev'."
   fi
 else
   echo "👟 The evals web app is running at http://localhost:3446"

@@ -8,7 +8,7 @@ import {
 	rooCodeTelemetryEventSchema,
 	TelemetryPropertiesProvider,
 	TelemetryEventSubscription,
-} from "@roo-code/types"
+} from "@zoo-code/types"
 
 import { getRooCodeApiUrl } from "./config.js"
 import type { RetryQueue } from "./retry-queue/index.js"
@@ -264,7 +264,7 @@ export class CloudTelemetryClient extends BaseTelemetryClient {
 	public override updateTelemetryState(_didUserOptIn: boolean) {}
 
 	public override isTelemetryEnabled(): boolean {
-		if (process.env.ROO_CODE_DISABLE_TELEMETRY === "1") {
+		if (process.env.ZOO_CODE_DISABLE_TELEMETRY === "1") {
 			return false
 		}
 

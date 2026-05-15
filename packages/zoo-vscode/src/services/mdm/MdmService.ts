@@ -3,7 +3,7 @@ import * as path from "path"
 import * as os from "os"
 import { z } from "zod"
 
-import { CloudService, getClerkBaseUrl, PRODUCTION_CLERK_BASE_URL } from "@roo-code/cloud"
+import { CloudService, getClerkBaseUrl, PRODUCTION_CLERK_BASE_URL } from "@zoo-code/cloud"
 
 import { t } from "../../i18n"
 
@@ -153,8 +153,8 @@ export class MdmService {
 			}
 
 			case "darwin":
-				// macOS: /Library/Application Support/RooCode/mdm.json or mdm.dev.json
-				return `/Library/Application Support/RooCode/${configFileName}`
+				// macOS: /Library/Application Support/ZooCode/mdm.json or mdm.dev.json
+				return `/Library/Application Support/ZooCode/${configFileName}`
 
 			case "linux":
 			default:

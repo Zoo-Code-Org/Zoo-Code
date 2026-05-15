@@ -1,6 +1,6 @@
 {
-	"name": "@roo-code/evals",
-	"description": "Roo Code evals.",
+	"name": "@zoo-code/evals",
+	"description": "Zoo Code evals.",
 	"version": "0.0.1",
 	"type": "module",
 	"exports": "./src/index.ts",
@@ -28,8 +28,8 @@
 		"services:down": "dotenvx run -f .env.development .env.local -- docker compose down db redis"
 	},
 	"dependencies": {
-		"@roo-code/ipc": "workspace:^",
-		"@roo-code/types": "workspace:^",
+		"@zoo-code/ipc": "workspace:^",
+		"@zoo-code/types": "workspace:^",
 		"cmd-ts": "^0.13.0",
 		"drizzle-orm": "^0.44.1",
 		"execa": "^9.6.0",
@@ -43,8 +43,8 @@
 		"zod": "^3.25.61"
 	},
 	"devDependencies": {
-		"@roo-code/config-eslint": "workspace:^",
-		"@roo-code/config-typescript": "workspace:^",
+		"@zoo-code/config-eslint": "workspace:^",
+		"@zoo-code/config-typescript": "workspace:^",
 		"@types/node": "20.x",
 		"@types/node-ipc": "^9.2.3",
 		"@types/ps-tree": "^1.1.6",

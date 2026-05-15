@@ -1,5 +1,5 @@
 {
-	"name": "@roo-code/web-roo-code",
+	"name": "@zoo-code/web-zoo-code",
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
@@ -17,8 +17,8 @@
 		"@radix-ui/react-dialog": "^1.1.15",
 		"@radix-ui/react-navigation-menu": "^1.2.14",
 		"@radix-ui/react-slot": "^1.2.4",
-		"@roo-code/evals": "workspace:^",
-		"@roo-code/types": "^1.108.0",
+		"@zoo-code/evals": "workspace:^",
+		"@zoo-code/types": "workspace:^",
 		"@tanstack/react-query": "^5.90.20",
 		"@vercel/og": "^0.8.6",
 		"class-variance-authority": "^0.7.1",
@@ -46,8 +46,8 @@
 		"zod": "^3.25.61"
 	},
 	"devDependencies": {
-		"@roo-code/config-eslint": "workspace:^",
-		"@roo-code/config-typescript": "workspace:^",
+		"@zoo-code/config-eslint": "workspace:^",
+		"@zoo-code/config-typescript": "workspace:^",
 		"@tailwindcss/typography": "^0.5.19",
 		"@types/node": "20.x",
 		"@types/react": "^18.3.23",

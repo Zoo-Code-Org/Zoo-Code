@@ -26,4 +26,4 @@ jobs:
             - name: Install xvfb
               run: sudo apt-get install -y xvfb
             - name: Run mocked E2E tests
-              run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:ci:mock
+              run: xvfb-run -a pnpm --filter @zoo-code/vscode-e2e test:ci:mock

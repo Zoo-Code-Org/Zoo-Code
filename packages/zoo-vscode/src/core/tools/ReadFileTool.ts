@@ -12,8 +12,8 @@ import path from "path"
 import * as fs from "fs/promises"
 import { isBinaryFile } from "isbinaryfile"
 
-import type { ReadFileParams, ReadFileMode, ReadFileToolParams, FileEntry, LineRange } from "@roo-code/types"
-import { isLegacyReadFileParams, type ClineSayTool } from "@roo-code/types"
+import type { ReadFileParams, ReadFileMode, ReadFileToolParams, FileEntry, LineRange } from "@zoo-code/types"
+import { isLegacyReadFileParams, type ClineSayTool } from "@zoo-code/types"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"

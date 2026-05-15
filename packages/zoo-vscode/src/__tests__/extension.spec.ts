@@ -1,7 +1,7 @@
 // npx vitest run __tests__/extension.spec.ts
 
 import type * as vscode from "vscode"
-import type { AuthState } from "@roo-code/types"
+import type { AuthState } from "@zoo-code/types"
 
 vi.mock("vscode", () => ({
 	window: {
@@ -61,7 +61,7 @@ const mockCloudServiceInstance = {
 	},
 }
 
-vi.mock("@roo-code/cloud", () => ({
+vi.mock("@zoo-code/cloud", () => ({
 	CloudService: {
 		createInstance: vi.fn(),
 		hasInstance: vi.fn().mockReturnValue(true),
@@ -72,7 +72,7 @@ vi.mock("@roo-code/cloud", () => ({
 	getRooCodeApiUrl: vi.fn().mockReturnValue("https://app.roocode.com"),
 }))
 
-vi.mock("@roo-code/telemetry", () => ({
+vi.mock("@zoo-code/telemetry", () => ({
 	TelemetryService: {
 		createInstance: vi.fn().mockReturnValue({
 			register: vi.fn(),
@@ -267,7 +267,7 @@ describe("extension.ts", () => {
 		})
 
 		test("auth state changes still post webview state without Roo model cache side effects", async () => {
-			const { CloudService } = await import("@roo-code/cloud")
+			const { CloudService } = await import("@zoo-code/cloud")
 			const { ClineProvider } = await import("../core/webview/ClineProvider")
 
 			vi.mocked(CloudService.createInstance).mockImplementation(async (_context, _logger, handlers) => {
@@ -301,7 +301,7 @@ describe("extension.ts", () => {
 		})
 
 		test("activation continues when CloudService initialization fails", async () => {
-			const { CloudService } = await import("@roo-code/cloud")
+			const { CloudService } = await import("@zoo-code/cloud")
 
 			vi.mocked(CloudService.createInstance).mockRejectedValue(new Error("cloud init failed"))
 			vi.mocked(CloudService.hasInstance).mockReturnValue(false)

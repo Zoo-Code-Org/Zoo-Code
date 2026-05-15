@@ -14,7 +14,7 @@ export function OnboardingScreen({ onSelect }: OnboardingScreenProps) {
 				{ASCII_ROO}
 			</Text>
 			<Text dimColor>
-				Welcome! Roo Code works without login. Choose how you want to connect to an LLM provider.
+				Welcome! Zoo Code works without login. Choose how you want to connect to an LLM provider.
 			</Text>
 			<Select
 				options={[{ label: "Continue with your own API key", value: OnboardingProviderChoice.Byok }]}

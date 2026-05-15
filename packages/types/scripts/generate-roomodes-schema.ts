@@ -3,7 +3,7 @@
  * schemas defined in packages/types/src/mode.ts.
  *
  * This ensures the schema stays in sync with the TypeScript types. Run via:
- *   pnpm --filter @roo-code/types generate:schema
+ *   pnpm --filter @zoo-code/types generate:schema
  *
  * The output is written to schemas/roomodes.json at the repository root.
  */

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Roo Code CLI Local Build Script
+# Zoo Code CLI Local Build Script
 #
 # Usage:
 #   ./apps/cli/scripts/build.sh [options]
@@ -116,7 +116,7 @@ build() {
     pnpm bundle
 
     step "3/6" "Building CLI..."
-    pnpm --filter @roo-code/cli build
+    pnpm --filter @zoo-code/legacy-cli build
 
     info "Build complete"
 }
@@ -146,7 +146,7 @@ create_tarball() {
     node -e "
       const pkg = require('$CLI_DIR/package.json');
       const newPkg = {
-        name: '@roo-code/cli',
+        name: '@zoo-code/legacy-cli',
         version: '$VERSION',
         type: 'module',
         dependencies: {
@@ -199,11 +199,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Set environment variables for the CLI
-process.env.ROO_CLI_ROOT = join(__dirname, '..');
-process.env.ROO_EXTENSION_PATH = join(__dirname, '..', 'extension');
+process.env.ZOO_CLI_ROOT = join(__dirname, '..');
+process.env.ZOO_EXTENSION_PATH = join(__dirname, '..', 'extension');
 const ripgrepPath = join(__dirname, 'rg');
 if (existsSync(ripgrepPath)) {
-  process.env.ROO_RIPGREP_PATH = ripgrepPath;
+  process.env.ZOO_RIPGREP_PATH = ripgrepPath;
 }
 
 // Import and run the actual CLI
@@ -258,10 +258,10 @@ verify_local_install() {
 
     TARBALL_PATH="$REPO_ROOT/$TARBALL"
 
-    ROO_LOCAL_TARBALL="$TARBALL_PATH" \
-    ROO_INSTALL_DIR="$VERIFY_INSTALL_DIR" \
-    ROO_BIN_DIR="$VERIFY_BIN_DIR" \
-    ROO_VERSION="$VERSION" \
+    ZOO_LOCAL_TARBALL="$TARBALL_PATH" \
+    ZOO_INSTALL_DIR="$VERIFY_INSTALL_DIR" \
+    ZOO_BIN_DIR="$VERIFY_BIN_DIR" \
+    ZOO_VERSION="$VERSION" \
     "$CLI_DIR/install.sh" || {
         rm -rf "$VERIFY_DIR"
         error "Installation verification failed!"
@@ -298,8 +298,8 @@ install_local() {
 
     TARBALL_PATH="$REPO_ROOT/$TARBALL"
 
-    ROO_LOCAL_TARBALL="$TARBALL_PATH" \
-    ROO_VERSION="$VERSION" \
+    ZOO_LOCAL_TARBALL="$TARBALL_PATH" \
+    ZOO_VERSION="$VERSION" \
     "$CLI_DIR/install.sh" || {
         error "Local installation failed!"
     }
@@ -324,7 +324,7 @@ print_summary() {
         echo "    roo --help"
     else
         echo "  To install manually:"
-        echo "    ROO_LOCAL_TARBALL=$REPO_ROOT/$TARBALL ./apps/cli/install.sh"
+        echo "    ZOO_LOCAL_TARBALL=$REPO_ROOT/$TARBALL ./apps/cli/install.sh"
         echo ""
         echo "  Or re-run with --install:"
         echo "    ./apps/cli/scripts/build.sh --install"
@@ -340,7 +340,7 @@ main() {
     echo ""
     printf "${BLUE}${BOLD}"
     echo "  ╭─────────────────────────────────╮"
-    echo "  │   Roo Code CLI Local Build      │"
+    echo "  │   Zoo Code CLI Local Build      │"
     echo "  ╰─────────────────────────────────╯"
     printf "${NC}"
     echo ""

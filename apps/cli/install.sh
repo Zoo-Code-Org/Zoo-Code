@@ -1,18 +1,18 @@
 #!/bin/sh
-# Roo Code CLI Installer
+# Zoo Code CLI Installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh | sh
 #
 # Environment variables:
-#   ROO_INSTALL_DIR   - Installation directory (default: ~/.roo/cli)
-#   ROO_BIN_DIR       - Binary symlink directory (default: ~/.local/bin)
-#   ROO_VERSION       - Specific version to install (default: latest)
-#   ROO_LOCAL_TARBALL - Path to local tarball to install (skips download)
+#   ZOO_INSTALL_DIR   - Installation directory (default: ~/.zoo/cli)
+#   ZOO_BIN_DIR       - Binary symlink directory (default: ~/.local/bin)
+#   ZOO_VERSION       - Specific version to install (default: latest)
+#   ZOO_LOCAL_TARBALL - Path to local tarball to install (skips download)
 
 set -e
 
 # Configuration
-INSTALL_DIR="${ROO_INSTALL_DIR:-$HOME/.roo/cli}"
-BIN_DIR="${ROO_BIN_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${ZOO_INSTALL_DIR:-$HOME/.zoo/cli}"
+BIN_DIR="${ZOO_BIN_DIR:-$HOME/.local/bin}"
 REPO="RooCodeInc/Roo-Code"
 MIN_NODE_VERSION=20
 
@@ -85,14 +85,14 @@ detect_platform() {
 # Get latest release version or use specified version
 get_version() {
     # Skip version fetch if using local tarball
-    if [ -n "$ROO_LOCAL_TARBALL" ]; then
-        VERSION="${ROO_VERSION:-local}"
+	if [ -n "$ZOO_LOCAL_TARBALL" ]; then
+        VERSION="${ZOO_VERSION:-local}"
         info "Using local tarball (version: $VERSION)"
         return
     fi
     
-    if [ -n "$ROO_VERSION" ]; then
-        VERSION="$ROO_VERSION"
+    if [ -n "$ZOO_VERSION" ]; then
+        VERSION="$ZOO_VERSION"
         info "Using specified version: $VERSION"
         return
     fi
@@ -175,12 +175,12 @@ download_and_install() {
     trap "rm -rf $TMP_DIR" EXIT
     
     # Use local tarball if provided, otherwise download
-    if [ -n "$ROO_LOCAL_TARBALL" ]; then
-        if [ ! -f "$ROO_LOCAL_TARBALL" ]; then
-            error "Local tarball not found: $ROO_LOCAL_TARBALL"
-        fi
-        info "Using local tarball: $ROO_LOCAL_TARBALL"
-        cp "$ROO_LOCAL_TARBALL" "$TMP_DIR/$TARBALL"
+	if [ -n "$ZOO_LOCAL_TARBALL" ]; then
+		if [ ! -f "$ZOO_LOCAL_TARBALL" ]; then
+			error "Local tarball not found: $ZOO_LOCAL_TARBALL"
+		fi
+		info "Using local tarball: $ZOO_LOCAL_TARBALL"
+		cp "$ZOO_LOCAL_TARBALL" "$TMP_DIR/$TARBALL"
     else
         URL="https://github.com/$REPO/releases/download/cli-v${VERSION}/${TARBALL}"
         
@@ -315,7 +315,7 @@ verify_install() {
 # Print success message
 print_success() {
     echo ""
-    printf "${GREEN}${BOLD}✓ Roo Code CLI installed successfully!${NC}\n"
+    printf "${GREEN}${BOLD}✓ Zoo Code CLI installed successfully!${NC}\n"
     echo ""
     echo "  Installation: $INSTALL_DIR"
     echo "  Binary: $BIN_DIR/roo"
@@ -335,7 +335,7 @@ main() {
     echo ""
     printf "${BLUE}${BOLD}"
     echo "  ╭─────────────────────────────────╮"
-    echo "  │     Roo Code CLI Installer      │"
+    echo "  │     Zoo Code CLI Installer      │"
     echo "  ╰─────────────────────────────────╯"
     printf "${NC}"
     echo ""

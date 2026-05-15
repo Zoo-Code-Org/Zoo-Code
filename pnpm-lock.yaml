@@ -25,9 +25,6 @@ importers:
       '@dotenvx/dotenvx':
         specifier: ^1.34.0
         version: 1.66.0
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:packages/config-typescript
       '@types/glob':
         specifier: ^9.0.0
         version: 9.0.0
@@ -37,6 +34,9 @@ importers:
       '@vscode/vsce':
         specifier: 3.3.2
         version: 3.3.2
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:packages/config-typescript
       esbuild:
         specifier: '>=0.25.0'
         version: 0.25.9
@@ -85,21 +85,21 @@ importers:
       '@inkjs/ui':
         specifier: ^2.0.0
         version: 2.0.0(ink@6.6.0(@types/react@18.3.23)(react@19.2.3))
-      '@roo-code/core':
-        specifier: workspace:^
-        version: link:../../packages/core
-      '@roo-code/types':
-        specifier: workspace:^
-        version: link:../../packages/types
-      '@roo-code/vscode-shim':
-        specifier: workspace:^
-        version: link:../../packages/vscode-shim
       '@trpc/client':
         specifier: ^11.8.1
         version: 11.8.1(@trpc/server@11.8.1(typescript@5.8.3))(typescript@5.8.3)
       '@vscode/ripgrep':
         specifier: ^1.15.9
         version: 1.17.0
+      '@zoo-code/core':
+        specifier: workspace:^
+        version: link:../../packages/core
+      '@zoo-code/types':
+        specifier: workspace:^
+        version: link:../../packages/types
+      '@zoo-code/vscode-shim':
+        specifier: workspace:^
+        version: link:../../packages/vscode-shim
       commander:
         specifier: ^12.1.0
         version: 12.1.0
@@ -128,12 +128,6 @@ importers:
         specifier: ^5.0.0
         version: 5.0.9(@types/react@18.3.23)(react@19.2.3)
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../../packages/config-typescript
       '@types/node':
         specifier: ^24.1.0
         version: 24.2.1
@@ -143,6 +137,12 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.2.3
         version: 3.2.4(vitest@3.2.4)
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../../packages/config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../../packages/config-typescript
       ink-testing-library:
         specifier: ^4.0.0
         version: 4.0.0(@types/react@18.3.23)
@@ -161,15 +161,6 @@ importers:
       '@copilotkit/aimock':
         specifier: ^1.15.1
         version: 1.15.1(vitest@4.0.18(@opentelemetry/api@1.9.0)(@types/node@20.17.57)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0))
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../../packages/config-typescript
-      '@roo-code/types':
-        specifier: workspace:^
-        version: link:../../packages/types
       '@types/mocha':
         specifier: ^10.0.10
         version: 10.0.10
@@ -185,6 +176,15 @@ importers:
       '@vscode/test-electron':
         specifier: ^2.4.0
         version: 2.5.2
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../../packages/config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../../packages/config-typescript
+      '@zoo-code/types':
+        specifier: workspace:^
+        version: link:../../packages/types
       glob:
         specifier: '>=11.1.0'
         version: 11.1.0
@@ -197,7 +197,7 @@ importers:
 
   apps/vscode-nightly:
     devDependencies:
-      '@roo-code/build':
+      '@zoo-code/build':
         specifier: workspace:^
         version: link:../../packages/build
 
@@ -245,15 +245,15 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: ^1.2.8
         version: 1.2.8(@types/react-dom@18.3.7(@types/react@18.3.23))(@types/react@18.3.23)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@roo-code/evals':
-        specifier: workspace:^
-        version: link:../../packages/evals
-      '@roo-code/types':
-        specifier: workspace:^
-        version: link:../../packages/types
       '@tanstack/react-query':
         specifier: ^5.69.0
         version: 5.76.1(react@18.3.1)
+      '@zoo-code/evals':
+        specifier: workspace:^
+        version: link:../../packages/evals
+      '@zoo-code/types':
+        specifier: workspace:^
+        version: link:../../packages/types
       archiver:
         specifier: ^7.0.1
         version: 7.0.1
@@ -312,12 +312,6 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../../packages/config-typescript
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.1.8
@@ -333,6 +327,12 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.5
         version: 18.3.7(@types/react@18.3.23)
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../../packages/config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../../packages/config-typescript
       tailwindcss:
         specifier: ^4
         version: 4.1.6
@@ -351,18 +351,18 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.2.4
         version: 1.2.4(@types/react@18.3.23)(react@18.3.1)
-      '@roo-code/evals':
-        specifier: workspace:^
-        version: link:../../packages/evals
-      '@roo-code/types':
-        specifier: ^1.108.0
-        version: 1.115.0
       '@tanstack/react-query':
         specifier: ^5.90.20
         version: 5.90.20(react@18.3.1)
       '@vercel/og':
         specifier: ^0.8.6
         version: 0.8.6
+      '@zoo-code/evals':
+        specifier: workspace:^
+        version: link:../../packages/evals
+      '@zoo-code/types':
+        specifier: workspace:^
+        version: link:../../packages/types
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -433,12 +433,6 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../../packages/config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../../packages/config-typescript
       '@tailwindcss/typography':
         specifier: ^0.5.19
         version: 0.5.19(tailwindcss@3.4.17)
@@ -451,6 +445,12 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.5
         version: 18.3.7(@types/react@18.3.23)
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../../packages/config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../../packages/config-typescript
       autoprefixer:
         specifier: ^10.4.23
         version: 10.4.23(postcss@8.5.6)
@@ -473,22 +473,22 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../config-typescript
       '@types/node':
         specifier: 20.x
         version: 20.17.57
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
       vitest:
         specifier: ^3.2.3
         version: 3.2.4(@types/debug@4.1.12)(@types/node@20.17.57)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0)
 
   packages/cloud:
     dependencies:
-      '@roo-code/types':
+      '@zoo-code/types':
         specifier: workspace:^
         version: link:../types
       ioredis:
@@ -504,12 +504,6 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../config-typescript
       '@types/node':
         specifier: ^24.1.0
         version: 24.2.1
@@ -519,6 +513,12 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
       globals:
         specifier: ^16.3.0
         version: 16.3.0
@@ -563,7 +563,7 @@ importers:
 
   packages/core:
     dependencies:
-      '@roo-code/types':
+      '@zoo-code/types':
         specifier: workspace:^
         version: link:../types
       esbuild:
@@ -582,28 +582,31 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../config-typescript
       '@types/node':
         specifier: ^24.1.0
         version: 24.2.1
       '@vitest/coverage-v8':
         specifier: ^3.2.3
         version: 3.2.4(vitest@3.2.4)
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
+      esbuild-wasm:
+        specifier: ^0.25.0
+        version: 0.25.12
       vitest:
         specifier: ^3.2.3
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.2.1)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0)
 
   packages/evals:
     dependencies:
-      '@roo-code/ipc':
+      '@zoo-code/ipc':
         specifier: workspace:^
         version: link:../ipc
-      '@roo-code/types':
+      '@zoo-code/types':
         specifier: workspace:^
         version: link:../types
       cmd-ts:
@@ -640,12 +643,6 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../config-typescript
       '@types/node':
         specifier: 20.x
         version: 20.17.57
@@ -655,6 +652,12 @@ importers:
       '@types/ps-tree':
         specifier: ^1.1.6
         version: 1.1.6
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
       drizzle-kit:
         specifier: ^0.31.1
         version: 0.31.4
@@ -667,32 +670,32 @@ importers:
 
   packages/ipc:
     dependencies:
-      '@roo-code/types':
+      '@zoo-code/types':
         specifier: workspace:^
         version: link:../types
       node-ipc:
         specifier: ^12.0.0
         version: 12.0.0
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../config-typescript
       '@types/node':
         specifier: 20.x
         version: 20.17.57
       '@types/node-ipc':
         specifier: ^9.2.3
         version: 9.2.3
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
       vitest:
         specifier: ^3.2.3
         version: 3.2.4(@types/debug@4.1.12)(@types/node@20.17.57)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0)
 
   packages/telemetry:
     dependencies:
-      '@roo-code/types':
+      '@zoo-code/types':
         specifier: workspace:^
         version: link:../types
       posthog-node:
@@ -702,12 +705,6 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../config-typescript
       '@types/node':
         specifier: 20.x
         version: 20.17.57
@@ -717,6 +714,12 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.2.3
         version: 3.2.4(vitest@3.2.4)
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
       vitest:
         specifier: ^3.2.3
         version: 3.2.4(@types/debug@4.1.12)(@types/node@20.17.57)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0)
@@ -730,15 +733,15 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../config-typescript
       '@types/node':
         specifier: ^24.1.0
         version: 24.2.1
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
       ajv:
         specifier: ^8.18.0
         version: 8.18.0
@@ -757,15 +760,15 @@ importers:
 
   packages/vscode-shim:
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../config-typescript
       '@types/node':
         specifier: ^24.1.0
         version: 24.2.1
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../config-typescript
       vitest:
         specifier: ^3.2.3
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.2.1)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0)
@@ -827,24 +830,24 @@ importers:
       '@qdrant/js-client-rest':
         specifier: ^1.14.0
         version: 1.14.0(typescript@5.8.3)
-      '@roo-code/cloud':
-        specifier: workspace:^
-        version: link:../../cloud
-      '@roo-code/core':
-        specifier: workspace:^
-        version: link:../../core
-      '@roo-code/ipc':
-        specifier: workspace:^
-        version: link:../../ipc
-      '@roo-code/telemetry':
-        specifier: workspace:^
-        version: link:../../telemetry
-      '@roo-code/types':
-        specifier: workspace:^
-        version: link:../../types
       '@vscode/codicons':
         specifier: ^0.0.36
         version: 0.0.36
+      '@zoo-code/cloud':
+        specifier: workspace:^
+        version: link:../../cloud
+      '@zoo-code/core':
+        specifier: workspace:^
+        version: link:../../core
+      '@zoo-code/ipc':
+        specifier: workspace:^
+        version: link:../../ipc
+      '@zoo-code/telemetry':
+        specifier: workspace:^
+        version: link:../../telemetry
+      '@zoo-code/types':
+        specifier: workspace:^
+        version: link:../../types
       ai-sdk-provider-poe:
         specifier: 2.0.18
         version: 2.0.18(ai@6.0.77(zod@3.25.76))(zod@3.25.76)
@@ -1056,15 +1059,6 @@ importers:
       '@openrouter/ai-sdk-provider':
         specifier: ^2.1.1
         version: 2.1.1(ai@6.0.77(zod@3.25.76))(zod@3.25.76)
-      '@roo-code/build':
-        specifier: workspace:^
-        version: link:../../build
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../../config-typescript
       '@types/clone-deep':
         specifier: ^4.0.4
         version: 4.0.4
@@ -1131,6 +1125,15 @@ importers:
       '@vscode/vsce':
         specifier: 3.3.2
         version: 3.3.2
+      '@zoo-code/build':
+        specifier: workspace:^
+        version: link:../../build
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../../config-typescript
       ai:
         specifier: ^6.0.75
         version: 6.0.77(zod@3.25.76)
@@ -1218,9 +1221,6 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: ^1.1.8
         version: 1.2.6(@types/react-dom@18.3.7(@types/react@18.3.23))(@types/react@18.3.23)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@roo-code/types':
-        specifier: workspace:^
-        version: link:../../types
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.1.6(vite@6.3.6(@types/node@20.17.57)(jiti@2.4.2)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.9.0))
@@ -1233,6 +1233,9 @@ importers:
       '@vscode/webview-ui-toolkit':
         specifier: ^1.4.0
         version: 1.4.0(react@18.3.1)
+      '@zoo-code/types':
+        specifier: workspace:^
+        version: link:../../types
       ansi-to-html:
         specifier: ^0.7.2
         version: 0.7.2
@@ -1378,12 +1381,6 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@roo-code/config-eslint':
-        specifier: workspace:^
-        version: link:../../config-eslint
-      '@roo-code/config-typescript':
-        specifier: workspace:^
-        version: link:../../config-typescript
       '@testing-library/jest-dom':
         specifier: ^6.6.3
         version: 6.6.3
@@ -1429,6 +1426,12 @@ importers:
       '@vitest/ui':
         specifier: ^3.2.3
         version: 3.2.4(vitest@3.2.4)
+      '@zoo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../../config-eslint
+      '@zoo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../../config-typescript
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
@@ -3942,9 +3945,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@roo-code/types@1.115.0':
-    resolution: {integrity: sha512-aJT8RhxoVdGRyiU7roQKgJRxget+4oOosQj/6XYufLHHGQnrGOkKCPRM7jGAMo88/8CRAmLgJcLAjEEsbpg8Qw==}
-
   '@sec-ant/readable-stream@0.4.1':
     resolution: {integrity: sha512-831qok9r2t8AlxLko40y2ebgSDhenenCatLVeW/uBtnHPyhHOvG0C7TvfgecV+wHzIm5KUICgzmVpWS+IMEAeg==}
 
@@ -4647,9 +4647,6 @@ packages:
 
   '@types/node@20.17.57':
     resolution: {integrity: sha512-f3T4y6VU4fVQDKVqJV4Uppy8c1p/sVvS3peyqxyWnzkqXFJLRU7Y1Bl7rMS1Qe9z0v4M6McY0Fp9yBsgHJUsWQ==}
-
-  '@types/node@20.19.41':
-    resolution: {integrity: sha512-ECymXOukMnOoVkC2bb1Vc/w/836DXncOg5m8Xj1RH7xSHZJWNYY6Zh7EH477vcnD5egKNNfy2RpNOmuChhFPgQ==}
 
   '@types/node@24.2.1':
     resolution: {integrity: sha512-DRh5K+ka5eJic8CjH7td8QpYEV6Zo10gfRkjHCO3weqZHWDtAaSTFtl4+VMqOJ4N5jcuhZ9/l+yy8rVgw7BQeQ==}
@@ -10531,9 +10528,6 @@ packages:
   undici-types@6.19.8:
     resolution: {integrity: sha512-ve2KP6f/JnbPBFyobGHuerC9g1FYGn/F8n1LWTwNxCEzd6IfqTwUQcNXgEtmmQ6DlRrC1hrSrBnCZPokRrDHjw==}
 
-  undici-types@6.21.0:
-    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
-
   undici-types@7.10.0:
     resolution: {integrity: sha512-t5Fy/nfn+14LuOc2KNYg75vZqClpAiqscVvMygNnlsHBFpSXdJaYtXMcdNLpl/Qvc3P2cB3s6lOV51nqsFq4ag==}
 
@@ -14131,10 +14125,6 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.40.2':
     optional: true
 
-  '@roo-code/types@1.115.0':
-    dependencies:
-      zod: 3.25.76
-
   '@sec-ant/readable-stream@0.4.1': {}
 
   '@sevinf/maybe@0.5.0': {}
@@ -14959,11 +14949,6 @@ snapshots:
     dependencies:
       undici-types: 6.19.8
 
-  '@types/node@20.19.41':
-    dependencies:
-      undici-types: 6.21.0
-    optional: true
-
   '@types/node@24.2.1':
     dependencies:
       undici-types: 7.10.0
@@ -15033,7 +15018,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 20.19.41
+      '@types/node': 24.2.1
     optional: true
 
   '@types/yargs-parser@21.0.3': {}
@@ -21833,9 +21818,6 @@ snapshots:
   undici-types@5.26.5: {}
 
   undici-types@6.19.8: {}
-
-  undici-types@6.21.0:
-    optional: true
 
   undici-types@7.10.0: {}
 

@@ -1,3 +1,3 @@
-# @roo-code/cloud
+# @zoo-code/cloud
 
 ## 0.0.1

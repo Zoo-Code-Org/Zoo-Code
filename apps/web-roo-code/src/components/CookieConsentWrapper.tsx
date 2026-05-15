@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react"
 import ReactCookieConsent from "react-cookie-consent"
 import { Cookie } from "lucide-react"
 import { getDomain } from "tldts"
-import { CONSENT_COOKIE_NAME } from "@roo-code/types"
+import { CONSENT_COOKIE_NAME } from "@zoo-code/types"
 import { handleConsentAccept, handleConsentReject } from "@/lib/analytics/consent-manager"
 
 /**

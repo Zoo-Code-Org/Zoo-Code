@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-vi.mock("@roo-code/cloud", () => ({
+vi.mock("@zoo-code/cloud", () => ({
 	CloudService: {
 		hasInstance: vi.fn(),
 		instance: {
@@ -10,7 +10,7 @@ vi.mock("@roo-code/cloud", () => ({
 	},
 }))
 
-vi.mock("@roo-code/telemetry", () => ({
+vi.mock("@zoo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureEvent: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock("vscode", () => ({
 
 import * as vscode from "vscode"
 
-import { CloudService } from "@roo-code/cloud"
+import { CloudService } from "@zoo-code/cloud"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
 

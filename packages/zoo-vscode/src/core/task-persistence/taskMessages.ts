@@ -2,7 +2,7 @@ import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
 import * as fs from "fs/promises"
 
-import type { ClineMessage } from "@roo-code/types"
+import type { ClineMessage } from "@zoo-code/types"
 
 import { fileExistsAtPath } from "../../utils/fs"
 

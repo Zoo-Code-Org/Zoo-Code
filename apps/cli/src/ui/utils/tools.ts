@@ -1,4 +1,4 @@
-import type { TodoItem } from "@roo-code/types"
+import type { TodoItem } from "@zoo-code/types"
 
 import type { ToolData } from "../types.js"
 

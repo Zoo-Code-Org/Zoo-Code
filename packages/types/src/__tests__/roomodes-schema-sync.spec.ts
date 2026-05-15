@@ -9,7 +9,7 @@ import { generateRoomodesJsonSchema } from "../roomodes-schema.js"
  * This test verifies that the checked-in schemas/roomodes.json matches what
  * would be generated from the current Zod schemas. If this test fails, run:
  *
- *   pnpm --filter @roo-code/types generate:schema
+ *   pnpm --filter @zoo-code/types generate:schema
  *
  * to regenerate the schema file.
  */

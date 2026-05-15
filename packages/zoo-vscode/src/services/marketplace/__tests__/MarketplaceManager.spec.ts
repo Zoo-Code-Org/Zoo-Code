@@ -1,11 +1,11 @@
 // npx vitest services/marketplace/__tests__/MarketplaceManager.spec.ts
 
-import type { MarketplaceItem } from "@roo-code/types"
+import type { MarketplaceItem } from "@zoo-code/types"
 
 import { MarketplaceManager } from "../MarketplaceManager"
 
 // Mock TelemetryService
-vi.mock("../../../../packages/telemetry/src/TelemetryService", () => ({
+vi.mock("@zoo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureMarketplaceItemInstalled: vi.fn(),

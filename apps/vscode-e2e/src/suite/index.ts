@@ -3,7 +3,7 @@ import Mocha from "mocha"
 import { glob } from "glob"
 import * as vscode from "vscode"
 
-import type { RooCodeAPI, RooCodeEventName } from "@roo-code/types"
+import type { RooCodeAPI, RooCodeEventName } from "@zoo-code/types"
 
 import { waitFor } from "./utils"
 

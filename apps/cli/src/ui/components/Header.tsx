@@ -1,7 +1,7 @@
 import { memo } from "react"
 import { Text, Box } from "ink"
 
-import type { TokenUsage } from "@roo-code/types"
+import type { TokenUsage } from "@zoo-code/types"
 
 import { ASCII_ROO } from "@/types/constants.js"
 
@@ -32,7 +32,7 @@ function Header({
 	const { columns } = useTerminalSize()
 
 	const homeDir = process.env.HOME || process.env.USERPROFILE || ""
-	const title = `Roo Code CLI v${version}`
+	const title = `Zoo Code CLI v${version}`
 	const remainingDashes = Math.max(0, columns - `── ${title} `.length)
 
 	return (

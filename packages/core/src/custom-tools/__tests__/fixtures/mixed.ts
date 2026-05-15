@@ -1,4 +1,4 @@
-import { parametersSchema, defineCustomTool } from "@roo-code/types"
+import { parametersSchema, defineCustomTool } from "@zoo-code/types"
 
 // This is a valid tool.
 export const validTool = defineCustomTool({

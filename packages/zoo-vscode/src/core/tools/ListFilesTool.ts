@@ -1,6 +1,6 @@
 import * as path from "path"
 
-import { type ClineSayTool } from "@roo-code/types"
+import { type ClineSayTool } from "@zoo-code/types"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"

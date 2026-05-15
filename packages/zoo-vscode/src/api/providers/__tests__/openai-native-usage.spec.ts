@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { OpenAiNativeHandler } from "../openai-native"
-import { openAiNativeModels } from "@roo-code/types"
+import { openAiNativeModels } from "@zoo-code/types"
 
 describe("OpenAiNativeHandler - normalizeUsage", () => {
 	let handler: OpenAiNativeHandler

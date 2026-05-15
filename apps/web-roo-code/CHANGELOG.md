@@ -1,3 +1,3 @@
-# @roo-code/web-roo-code
+# @zoo-code/web-zoo-code
 
 ## 0.0.1

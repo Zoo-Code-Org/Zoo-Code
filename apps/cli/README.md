@@ -1,19 +1,19 @@
-# @roo-code/cli
+# @zoo-code/legacy-cli
 
-Command Line Interface for Roo Code - Run the Roo Code agent from the terminal without VSCode.
+Command Line Interface for Zoo Code - Run the Zoo Code agent from the terminal without VS Code.
 
 ## Overview
 
-This CLI uses the `@roo-code/vscode-shim` package to provide a VSCode API compatibility layer, allowing the main Roo Code extension to run in a Node.js environment.
+This CLI uses the `@zoo-code/vscode-shim` package to provide a VS Code API compatibility layer, allowing the main Zoo Code extension to run in a Node.js environment.
 
 ## Installation
 
 ### Quick Install (Recommended)
 
-Install the Roo Code CLI with a single command:
+Install the Zoo Code CLI with a single command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Zoo-Code-Org/Zoo-Code/main/apps/cli/install.sh | sh
 ```
 
 **Requirements:**
@@ -24,13 +24,13 @@ curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/i
 **Custom installation directory:**
 
 ```bash
-ROO_INSTALL_DIR=/opt/roo-code ROO_BIN_DIR=/usr/local/bin curl -fsSL ... | sh
+ZOO_INSTALL_DIR=/opt/zoo-code ZOO_BIN_DIR=/usr/local/bin curl -fsSL ... | sh
 ```
 
 **Install a specific version:**
 
 ```bash
-ROO_VERSION=0.1.0 curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh | sh
+ZOO_VERSION=0.1.0 curl -fsSL https://raw.githubusercontent.com/Zoo-Code-Org/Zoo-Code/main/apps/cli/install.sh | sh
 ```
 
 ### Updating
@@ -38,19 +38,19 @@ ROO_VERSION=0.1.0 curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Co
 Re-run the install script to update to the latest version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Zoo-Code-Org/Zoo-Code/main/apps/cli/install.sh | sh
 ```
 
 Or run:
 
 ```bash
-roo upgrade
+zoo-legacy upgrade
 ```
 
 ### Uninstalling
 
 ```bash
-rm -rf ~/.roo/cli ~/.local/bin/roo
+rm -rf ~/.zoo/cli ~/.local/bin/zoo-legacy
 ```
 
 ### Development Installation
@@ -65,7 +65,7 @@ pnpm install
 pnpm --filter ./src bundle
 
 # Build the CLI.
-pnpm --filter @roo-code/cli build
+pnpm --filter @zoo-code/legacy-cli build
 ```
 
 ## Usage
@@ -77,13 +77,13 @@ By default, the CLI auto-approves actions and runs in interactive TUI mode:
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-...
 
-roo "What is this project?" -w ~/Documents/my-project
+zoo-legacy "What is this project?" -w ~/Documents/my-project
 ```
 
 You can also run without a prompt and enter it interactively in TUI mode:
 
 ```bash
-roo -w ~/Documents/my-project
+zoo-legacy -w ~/Documents/my-project
 ```
 
 In interactive mode:
@@ -98,7 +98,7 @@ In interactive mode:
 If you want manual approval prompts, enable approval-required mode:
 
 ```bash
-roo "Refactor the utils.ts file" --require-approval -w ~/Documents/my-project
+zoo-legacy "Refactor the utils.ts file" --require-approval -w ~/Documents/my-project
 ```
 
 In approval-required mode:
@@ -112,10 +112,10 @@ Use `--print` for non-interactive execution and machine-readable output:
 
 ```bash
 # Prompt is required
-roo --print "Summarize this repository"
+zoo-legacy --print "Summarize this repository"
 
 # Create a new task with a specific session ID (UUID)
-roo --print --create-with-session-id 018f7fc8-7c96-7f7c-98aa-2ec4ff7f6d87 "Summarize this repository"
+zoo-legacy --print --create-with-session-id 018f7fc8-7c96-7f7c-98aa-2ec4ff7f6d87 "Summarize this repository"
 ```
 
 ### Stdin Stream Mode (`--stdin-prompt-stream`)
@@ -124,10 +124,10 @@ For programmatic control (one process, multiple prompts), use `--stdin-prompt-st
 Send NDJSON commands via stdin:
 
 ```bash
-printf '{"command":"start","requestId":"1","prompt":"1+1=?"}\n' | roo --print --stdin-prompt-stream --output-format stream-json
+printf '{"command":"start","requestId":"1","prompt":"1+1=?"}\n' | zoo-legacy --print --stdin-prompt-stream --output-format stream-json
 
 # Optional: provide taskId per start command
-printf '{"command":"start","requestId":"1","taskId":"018f7fc8-7c96-7f7c-98aa-2ec4ff7f6d87","prompt":"1+1=?"}\n' | roo --print --stdin-prompt-stream --output-format stream-json
+printf '{"command":"start","requestId":"1","taskId":"018f7fc8-7c96-7f7c-98aa-2ec4ff7f6d87","prompt":"1+1=?"}\n' | zoo-legacy --print --stdin-prompt-stream --output-format stream-json
 ```
 
 ### Legacy Roo Auth Token Cleanup
@@ -138,10 +138,10 @@ Roo Code Router has been removed from the CLI. The remaining `auth` commands onl
 
 ```bash
 # Check whether a legacy Roo auth token is still stored
-roo auth status
+zoo-legacy auth status
 
 # Remove an old stored Roo auth token
-roo auth logout
+zoo-legacy auth logout
 ```
 
 If you never used Roo Code Router, you can ignore this section entirely.
@@ -172,10 +172,10 @@ If you never used Roo Code Router, you can ignore this section entirely.
 
 ## Auth Commands
 
-| Command           | Description                          |
-| ----------------- | ------------------------------------ |
-| `roo auth logout` | Clear a stored legacy Roo auth token |
-| `roo auth status` | Show legacy Roo token status         |
+| Command                  | Description                          |
+| ------------------------ | ------------------------------------ |
+| `zoo-legacy auth logout` | Clear a stored legacy Roo auth token |
+| `zoo-legacy auth status` | Show legacy Roo token status         |
 
 ## Environment Variables
 
@@ -219,7 +219,7 @@ The CLI will look for API keys in environment variables if not provided via `--a
 
 2. **ExtensionHost** (`extension-host.ts`):
 
-    - Creates a VSCode API mock using `@roo-code/vscode-shim`
+    - Creates a VSCode API mock using `@zoo-code/vscode-shim`
     - Intercepts `require('vscode')` to return the mock
     - Loads and activates the extension bundle
     - Manages bidirectional message flow
@@ -244,10 +244,10 @@ pnpm check-types
 pnpm lint
 ```
 
-By default the dev script still points `ROO_CODE_PROVIDER_URL` at `http://localhost:8080/proxy` for local extension-host development. The CLI provider selection itself should use a non-Router provider such as OpenRouter. To point the backend URL at production instead, override the environment variable:
+By default the dev script still points `ZOO_CODE_PROVIDER_URL` at `http://localhost:8080/proxy` for local extension-host development. The CLI provider selection itself should use a non-Router provider such as OpenRouter. To point the backend URL at production instead, override the environment variable:
 
 ```bash
-ROO_CODE_PROVIDER_URL=https://api.roocode.com/proxy pnpm dev --provider openrouter --api-key $OPENROUTER_API_KEY --print "Hello"
+ZOO_CODE_PROVIDER_URL=https://api.zoocode.com/proxy pnpm dev --provider openrouter --api-key $OPENROUTER_API_KEY --print "Hello"
 ```
 
 ## Releasing

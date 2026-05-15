@@ -4,8 +4,8 @@ import { IEmbedder } from "./interfaces/embedder"
 import { IVectorStore } from "./interfaces/vector-store"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CodeIndexStateManager } from "./state-manager"
-import { TelemetryService } from "@roo-code/telemetry"
-import { TelemetryEventName } from "@roo-code/types"
+import { TelemetryService } from "@zoo-code/telemetry"
+import { TelemetryEventName } from "@zoo-code/types"
 
 /**
  * Service responsible for searching the code index.

@@ -1,7 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { isRetiredProvider, type ProviderSettings, type ModelInfo } from "@roo-code/types"
+import { isRetiredProvider, type ProviderSettings, type ModelInfo } from "@zoo-code/types"
 
 import { getRouterRemovalMessage } from "../core/config/routerRemoval"
 import { ApiStream } from "./transform/stream"

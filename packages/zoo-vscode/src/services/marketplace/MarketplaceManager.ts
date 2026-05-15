@@ -4,8 +4,8 @@ import * as path from "path"
 import * as vscode from "vscode"
 import * as yaml from "yaml"
 
-import type { MarketplaceItem, MarketplaceItemType } from "@roo-code/types"
-import { TelemetryService } from "@roo-code/telemetry"
+import type { MarketplaceItem, MarketplaceItemType } from "@zoo-code/types"
+import { TelemetryService } from "@zoo-code/telemetry"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { ensureSettingsDirectoryExists } from "../../utils/globalContext"

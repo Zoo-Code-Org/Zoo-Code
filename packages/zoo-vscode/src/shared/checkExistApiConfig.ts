@@ -1,4 +1,4 @@
-import { SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS, ProviderSettings } from "@roo-code/types"
+import { SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS, ProviderSettings } from "@zoo-code/types"
 
 export function checkExistKey(config: ProviderSettings | undefined) {
 	if (!config) {

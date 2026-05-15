@@ -4,6 +4,12 @@ All notable changes to Zoo Code will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Zoo Code uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Rebrand exported workspace package surfaces, CLI-facing examples, and VS Code provider metadata to Zoo Code while preserving legacy Roo migration references.
+
 ## [3.54.0] - 2026-05-08
 
 ### Added

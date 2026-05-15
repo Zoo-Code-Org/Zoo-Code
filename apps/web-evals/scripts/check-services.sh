@@ -7,13 +7,13 @@ fi
 
 if ! nc -z postgres 5433 2>/dev/null; then
   echo "❌ PostgreSQL is not running on port 5432"
-  echo "💡 Start it with: pnpm --filter @roo-code/evals db:up"
+  echo "💡 Start it with: pnpm --filter @zoo-code/evals db:up"
   exit 1
 fi
 
 if ! nc -z redis 6380 2>/dev/null; then
   echo "❌ Redis is not running on port 6379"
-  echo "💡 Start it with: pnpm --filter @roo-code/evals redis:up"
+  echo "💡 Start it with: pnpm --filter @zoo-code/evals redis:up"
   exit 1
 fi
 

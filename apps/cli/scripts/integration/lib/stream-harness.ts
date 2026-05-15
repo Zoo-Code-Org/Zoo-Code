@@ -64,7 +64,7 @@ function parseEvent(line: string): StreamEvent | null {
 }
 
 export async function runStreamCase(options: RunStreamCaseOptions): Promise<void> {
-	const cliRoot = process.env.ROO_CLI_ROOT ? path.resolve(process.env.ROO_CLI_ROOT) : defaultCliRoot
+	const cliRoot = process.env.ZOO_CLI_ROOT ? path.resolve(process.env.ZOO_CLI_ROOT) : defaultCliRoot
 	const timeoutMs = options.timeoutMs ?? 120_000
 
 	const child = execa(

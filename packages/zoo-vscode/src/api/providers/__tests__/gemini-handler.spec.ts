@@ -3,7 +3,7 @@ import { FunctionCallingConfigMode } from "@google/genai"
 
 const mockCaptureException = vi.fn()
 
-vi.mock("@roo-code/telemetry", () => ({
+vi.mock("@zoo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureException: (...args: unknown[]) => mockCaptureException(...args),
