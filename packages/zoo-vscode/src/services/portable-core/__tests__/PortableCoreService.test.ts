@@ -81,6 +81,29 @@ describe("PortableCoreService", () => {
 		)
 	})
 
+	it("creates a session adapter wired to the connected client", async () => {
+		usePortableCore.mockReturnValue(true)
+		const client = {
+			createSession: vitest.fn().mockResolvedValue({ id: "session-1" }),
+			listSessions: vitest.fn().mockResolvedValue([]),
+			getSession: vitest.fn().mockResolvedValue({ id: "session-1" }),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		const handle = {
+			ipcPath: "/tmp/zoo-test.sock",
+			reused: false,
+			connect: vitest.fn().mockResolvedValue(client),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		createZooServer.mockResolvedValue(handle)
+
+		const service = await PortableCoreService.create(createContext() as any, createOutputChannel() as any)
+		const adapter = service!.createSessionAdapter()
+
+		await adapter.createSession({ title: "Adapter smoke" })
+		expect(client.createSession).toHaveBeenCalledWith({ title: "Adapter smoke" })
+	})
+
 	it("continues with the legacy runtime when SDK startup fails", async () => {
 		usePortableCore.mockReturnValue(true)
 		createZooServer.mockRejectedValue(new Error("missing zoo binary"))

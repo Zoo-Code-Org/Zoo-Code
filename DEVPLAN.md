@@ -265,7 +265,7 @@
     - **Depends on:** Phase 3, Tasks 1 and 2.
     - **Can parallelize with:** Phase 3, Task 3.
 
-5. Rewire session creation and lookup paths
+5. [✅] Rewire session creation and lookup paths
 
     - **What:** Replace extension-host session create/get/list flows with `ZooClient.createSession()`, `getSession()`, and `listSessions()` when the feature flag is true; preserve old behavior when false.
     - **Files touched:** Session services/controllers in `packages/zoo-vscode/src/**`, SDK bootstrap service, tests.

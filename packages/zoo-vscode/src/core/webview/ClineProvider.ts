@@ -76,6 +76,8 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
+import type { Session } from "@zoo-code/sdk"
+import type { PortableSessionAdapter } from "../../services/portable-core/PortableSessionAdapter"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
@@ -179,6 +181,7 @@ export class ClineProvider
 		private readonly renderContext: "sidebar" | "editor" = "sidebar",
 		public readonly contextProxy: ContextProxy,
 		mdmService?: MdmService,
+		private readonly portableSessionAdapter?: PortableSessionAdapter,
 	) {
 		super()
 		this.currentWorkspacePath = getWorkspacePath()
@@ -1724,6 +1727,19 @@ export class ClineProvider
 		uiMessagesFilePath: string
 		apiConversationHistory: Anthropic.MessageParam[]
 	}> {
+		if (this.portableSessionAdapter) {
+			const session = await this.portableSessionAdapter.getSession(id)
+			const historyItem = this.sessionToHistoryItem(session)
+
+			return {
+				historyItem,
+				taskDirPath: "",
+				apiConversationHistoryFilePath: "",
+				uiMessagesFilePath: "",
+				apiConversationHistory: [],
+			}
+		}
+
 		const historyItem =
 			this.taskHistoryStore.get(id) ?? (this.getGlobalState("taskHistory") ?? []).find((item) => item.id === id)
 
@@ -2054,6 +2070,7 @@ export class ClineProvider
 	async getStateToPostToWebview(): Promise<ExtensionState> {
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
+		const portableTaskHistory = await this.getPortableTaskHistory()
 
 		const {
 			apiConfiguration,
@@ -2222,7 +2239,9 @@ export class ClineProvider
 			clineMessages: currentTask?.clineMessages || [],
 			currentTaskTodos: currentTask?.todoList || [],
 			messageQueue: currentTask?.messageQueueService?.messages,
-			taskHistory: this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task),
+			taskHistory:
+				portableTaskHistory ??
+				this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task),
 			soundEnabled: soundEnabled ?? false,
 			ttsEnabled: ttsEnabled ?? false,
 			ttsSpeed: ttsSpeed ?? 1.0,
@@ -2830,6 +2849,11 @@ export class ClineProvider
 		options: CreateTaskOptions = {},
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
+		if (this.portableSessionAdapter && !parentTask && !options.taskId) {
+			const session = await this.portableSessionAdapter.createSession({ title: text })
+			options = { ...options, taskId: session.id }
+		}
+
 		if (configuration) {
 			await this.setValues(configuration)
 
@@ -2914,6 +2938,46 @@ export class ClineProvider
 		)
 
 		return task
+	}
+
+	private async getPortableTaskHistory(): Promise<HistoryItem[] | undefined> {
+		if (!this.portableSessionAdapter) {
+			return undefined
+		}
+
+		const sessions = await this.portableSessionAdapter.listSessions({ directory: this.cwd })
+		return sessions.map((session) => this.sessionToHistoryItem(session))
+	}
+
+	private sessionToHistoryItem(session: Session): HistoryItem {
+		const createdAt = this.sessionTimestamp(session.createdAt)
+
+		return {
+			id: session.id,
+			rootTaskId: typeof session.parentID === "string" ? session.parentID : undefined,
+			number: 1,
+			ts: createdAt,
+			task: typeof session.title === "string" && session.title.length > 0 ? session.title : session.id,
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			workspace: this.cwd,
+		}
+	}
+
+	private sessionTimestamp(value: Session["createdAt"]): number {
+		if (typeof value === "number" && Number.isFinite(value)) {
+			return value
+		}
+
+		if (typeof value === "string") {
+			const parsed = Date.parse(value)
+			if (Number.isFinite(parsed)) {
+				return parsed
+			}
+		}
+
+		return Date.now()
 	}
 
 	public async cancelTask(): Promise<void> {

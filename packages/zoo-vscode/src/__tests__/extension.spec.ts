@@ -336,10 +336,34 @@ describe("extension.ts", () => {
 			expect(PortableCoreService.create).toHaveBeenCalledWith(mockContext, expect.any(Object))
 		})
 
+		test("activation passes portable session adapter to ClineProvider when enabled", async () => {
+			const adapter = { createSession: vi.fn(), listSessions: vi.fn(), getSession: vi.fn() }
+			const createSessionAdapter = vi.fn().mockReturnValue(adapter)
+			const { PortableCoreService } = await import("../services/portable-core/PortableCoreService")
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
+			vi.mocked(PortableCoreService.create).mockResolvedValue({ createSessionAdapter, dispose: vi.fn() } as any)
+
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			expect(createSessionAdapter).toHaveBeenCalledTimes(1)
+			expect(ClineProvider).toHaveBeenCalledWith(
+				mockContext,
+				expect.any(Object),
+				"sidebar",
+				expect.any(Object),
+				null,
+				adapter,
+			)
+		})
+
 		test("deactivation disposes the portable-core bootstrap", async () => {
 			const dispose = vi.fn().mockResolvedValue(undefined)
 			const { PortableCoreService } = await import("../services/portable-core/PortableCoreService")
-			vi.mocked(PortableCoreService.create).mockResolvedValue({ dispose } as any)
+			vi.mocked(PortableCoreService.create).mockResolvedValue({
+				dispose,
+				createSessionAdapter: vi.fn().mockReturnValue(undefined),
+			} as any)
 
 			const { activate, deactivate } = await import("../extension")
 			await activate(mockContext)

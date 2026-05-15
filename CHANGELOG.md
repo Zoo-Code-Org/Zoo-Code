@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add the default-off `zoo-code.usePortableCore` VS Code setting and helper for gating future SDK-backed extension paths.
 - Add activation-time portable-core SDK bootstrap wiring behind `zoo-code.usePortableCore` without changing the default extension-host runtime.
 - Version and document the host-webview protocol contract used by upcoming portable-core SDK adapter paths.
+- Route VS Code session create, list, and lookup seams through the Zoo SDK when `zoo-code.usePortableCore` is enabled while preserving the default extension-host path.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
 ## [3.54.0] - 2026-05-08

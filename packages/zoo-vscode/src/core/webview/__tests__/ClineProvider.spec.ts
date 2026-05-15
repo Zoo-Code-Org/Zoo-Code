@@ -190,11 +190,12 @@ vi.mock("../../task/Task", () => ({
 		apiConversationHistory: [],
 		overwriteClineMessages: vi.fn(),
 		overwriteApiConversationHistory: vi.fn(),
+		start: vi.fn(),
 		getTaskNumber: vi.fn().mockReturnValue(0),
 		setTaskNumber: vi.fn(),
 		setParentTask: vi.fn(),
 		setRootTask: vi.fn(),
-		taskId: options?.historyItem?.id || "test-task-id",
+		taskId: options?.historyItem?.id || options?.taskId || "test-task-id",
 		emit: vi.fn(),
 	})),
 }))
@@ -319,11 +320,12 @@ describe("ClineProvider", () => {
 				apiConversationHistory: [],
 				overwriteClineMessages: vi.fn(),
 				overwriteApiConversationHistory: vi.fn(),
+				start: vi.fn(),
 				getTaskNumber: vi.fn().mockReturnValue(0),
 				setTaskNumber: vi.fn(),
 				setParentTask: vi.fn(),
 				setRootTask: vi.fn(),
-				taskId: options?.historyItem?.id || "test-task-id",
+				taskId: options?.historyItem?.id || options?.taskId || "test-task-id",
 				emit: vi.fn(),
 			}
 
@@ -790,6 +792,98 @@ describe("ClineProvider", () => {
 		expect(state).toHaveProperty("soundEnabled")
 		expect(state).toHaveProperty("ttsEnabled")
 		expect(state).toHaveProperty("writeDelayMs")
+	})
+
+	test("portable session adapter lists sessions for posted state", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi
+				.fn()
+				.mockResolvedValue([
+					{ id: "portable-session-1", title: "Portable task", createdAt: "2026-05-15T00:00:00.000Z" },
+				]),
+			getSession: vi.fn(),
+			createSession: vi.fn(),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+
+		const state = await portableProvider.getStateToPostToWebview()
+
+		expect(portableSessionAdapter.listSessions).toHaveBeenCalledWith({ directory: portableProvider.cwd })
+		expect(state.taskHistory).toEqual([
+			expect.objectContaining({
+				id: "portable-session-1",
+				task: "Portable task",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}),
+		])
+	})
+
+	test("portable session adapter gets sessions for task lookup", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn(),
+			getSession: vi.fn().mockResolvedValue({ id: "portable-session-2", title: "Lookup task", createdAt: 1234 }),
+			createSession: vi.fn(),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+
+		const result = await portableProvider.getTaskWithId("portable-session-2")
+
+		expect(portableSessionAdapter.getSession).toHaveBeenCalledWith("portable-session-2")
+		expect(result.historyItem).toEqual(
+			expect.objectContaining({ id: "portable-session-2", task: "Lookup task", ts: 1234 }),
+		)
+	})
+
+	test("portable session adapter creates sessions before legacy task shell", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn(),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-created-session", title: "Create task" }),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+
+		const task = await portableProvider.createTask("Create task")
+
+		expect(portableSessionAdapter.createSession).toHaveBeenCalledWith({ title: "Create task" })
+		expect(task.taskId).toBe("portable-created-session")
+	})
+
+	test("legacy provider does not call SDK session APIs", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn(),
+			getSession: vi.fn(),
+			createSession: vi.fn(),
+		}
+
+		await provider.createTask("Legacy task")
+		await provider.getStateToPostToWebview()
+
+		expect(portableSessionAdapter.createSession).not.toHaveBeenCalled()
+		expect(portableSessionAdapter.listSessions).not.toHaveBeenCalled()
+		expect(portableSessionAdapter.getSession).not.toHaveBeenCalled()
 	})
 
 	test("language is set to VSCode language", async () => {
