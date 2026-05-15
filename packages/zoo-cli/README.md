@@ -71,6 +71,47 @@ Zoo Code reads and writes its primary global config at `~/.config/zoo-code/zoo.j
 Project rules live in `{project}/.zoo/rules/*.md`, project modes in `{project}/.zoo/modes/*.json`, and file access ignore patterns in `{project}/.zooignore`.
 Legacy Kilo/OpenCode paths may still be read as lower-priority migration fallbacks.
 
+## Roo/Zoo portable config migration
+
+Migration is additive: Zoo Code reads the new portable locations without deleting existing Roo configuration. Move shared team settings into Zoo files when you are ready.
+
+| Old/source location               | Zoo portable target                                                          |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| VS Code provider/profile settings | `~/.config/zoo-code/zoo.jsonc` for user defaults or `{project}/zoo.jsonc`    |
+| Project config                    | `{project}/zoo.jsonc`                                                        |
+| Roo project modes / `.roomodes`   | `{project}/.zoo/modes/*.json`; `.roomodes` remains a lower-priority fallback |
+| Project rules                     | `{project}/.zoo/rules/*.md`                                                  |
+| Ignore patterns                   | `{project}/.zooignore`                                                       |
+| Project instructions              | `{project}/AGENTS.md`                                                        |
+
+Portable provider config is managed in `zoo.jsonc`. For example:
+
+```jsonc
+{
+	"provider": {
+		"openai": {
+			"npm": "@ai-sdk/openai",
+			"models": {
+				"gpt-5.5": {},
+			},
+		},
+	},
+	"model": "openai/gpt-5.5",
+}
+```
+
+Modes can be split into files such as `{project}/.zoo/modes/architect.json`:
+
+```json
+{
+	"name": "architect",
+	"mode": "primary",
+	"description": "Plan architecture and migrations"
+}
+```
+
+`.zoo/modes/*.json` takes precedence over `.roomodes` for duplicate mode slugs. `.zooignore` uses gitignore-style patterns, including `!` negation, to shape file access permissions.
+
 ## Modes
 
 Zoo Code CLI supports custom modes from `{project}/.zoo/modes/*.json` and reads existing `{project}/.roomodes` files during Roo/Zoo migration. Use `zoo run --mode <name> "<task>"` or `zoo --mode <name>` to select a mode; invalid mode names fail with an actionable error.

@@ -53,6 +53,19 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
+Portable-core migration is additive and does not delete existing Roo configuration. The shared Zoo targets are:
+
+| Old/source location               | Zoo portable target                                                          |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| VS Code provider/profile settings | `~/.config/zoo-code/zoo.jsonc` for user defaults or `{project}/zoo.jsonc`    |
+| Project config                    | `{project}/zoo.jsonc`                                                        |
+| Roo project modes / `.roomodes`   | `{project}/.zoo/modes/*.json`; `.roomodes` remains a lower-priority fallback |
+| Project rules                     | `{project}/.zoo/rules/*.md`                                                  |
+| Ignore patterns                   | `{project}/.zooignore`                                                       |
+| Project instructions              | `{project}/AGENTS.md`                                                        |
+
+When `zoo-code.usePortableCore` is enabled, provider config comes from `zoo.jsonc` through the CLI portable core and is shown read-only in VS Code settings. Portable modes are CLI-managed: the VS Code mode selector uses modes from portable core, and `.zoo/modes/*.json` takes precedence over `.roomodes` for duplicate mode slugs.
+
 ## What's New in v3.55.0
 
 **Initial Zoo Code release** — establishes Zoo Code as an independent extension
@@ -87,7 +100,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 
@@ -182,7 +195,7 @@ Release pipelines can set `ZOO_CLI_BINARY=/path/to/zoo` to copy a prebuilt platf
 
 The VS Code setting `zoo-code.usePortableCore` defaults to `false`. SDK-backed portable-core paths must check this flag before starting or routing through the Zoo CLI core so the existing extension-host runtime remains the stable default during the migration.
 
-When the flag is enabled in development builds, activation initializes an isolated `@zoo-code/sdk` bootstrap that starts or reuses a local `zoo server --ipc` process and disposes it during extension deactivation. The bootstrap does not route chat/session behavior yet; it only validates lifecycle wiring for the upcoming SDK-backed adapter paths.
+When the flag is enabled in development builds, activation initializes an isolated `@zoo-code/sdk` bootstrap that starts or reuses a local `zoo server --ipc` process and disposes it during extension deactivation. Current SDK-backed seams cover session create/list/get, text streaming, abort, tool approval replies, read-only provider config, portable mode listing/selection, and portable config file watching while preserving the legacy runtime when disabled.
 
 3. **Run the extension**:
 

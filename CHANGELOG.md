@@ -54,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add Zoo CLI config-loader coverage for project `zoo.jsonc` precedence over global Zoo config.
 - Add Zoo CLI config-loader coverage for global/project Zoo object merge and instruction array semantics.
 - Add Zoo CLI instruction coverage for project `AGENTS.md` ordering ahead of sorted `.zoo/rules` markdown.
+- Document Roo-to-Zoo portable config migration paths for `zoo.jsonc`, `.zoo/modes`, `.zoo/rules`, `.zooignore`, read-only portable provider config, and CLI-managed mode selection.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 
 ## [3.54.0] - 2026-05-08
