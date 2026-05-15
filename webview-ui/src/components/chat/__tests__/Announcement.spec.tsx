@@ -49,8 +49,8 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 				"chat:announcement.handoff.heading": "The Roo Code plugin is not going away.",
 			}
 
-			if (key === "chat:announcement.title") {
-				return `Roo Code ${options?.version ?? ""} Released`
+			if (key === "chat:announcement.title" || key === "chat:announcement.finalRelease.title") {
+				return `Zoo Code ${options?.version ?? ""} Released`
 			}
 
 			return translations[key] ?? key
@@ -62,7 +62,7 @@ describe("Announcement", () => {
 	it("renders the v3.53.0 announcement title and highlights", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getByText("Roo Code 3.53.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("Zoo Code 3.53.0 Released")).toBeInTheDocument()
 		expect(
 			screen.getByText(
 				"GPT-5.5 via OpenAI Codex: Added GPT-5.5 support in the OpenAI Codex provider so you can use the latest model straight from Roo Code.",

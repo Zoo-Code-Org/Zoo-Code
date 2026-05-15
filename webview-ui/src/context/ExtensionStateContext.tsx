@@ -118,7 +118,6 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setMaxImageFileSize: (value: number) => void
 	maxTotalImageSize: number
 	setMaxTotalImageSize: (value: number) => void
-	machineId?: string
 	pinnedApiConfigs?: Record<string, boolean>
 	setPinnedApiConfigs: (value: Record<string, boolean>) => void
 	togglePinnedApiConfig: (configName: string) => void
@@ -144,6 +143,9 @@ export interface ExtensionStateContextType extends ExtensionState {
 	showWorktreesInHomeScreen: boolean
 	setShowWorktreesInHomeScreen: (value: boolean) => void
 	skills?: SkillMetadata[]
+	telemetrySetting: ExtensionState["telemetrySetting"]
+	telemetryKey?: string
+	machineId?: string
 }
 
 export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
@@ -164,7 +166,7 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	const rest = { ...prevRest, ...newRest }
 
 	// Protect clineMessages from stale state pushes using sequence numbering.
-	// Multiple async event sources (cloud auth, settings, task streaming) can trigger
+	// Multiple async event sources (settings, task streaming) can trigger
 	// concurrent state pushes. If a stale push arrives after a newer one, its clineMessages
 	// would overwrite the newer messages. The sequence number prevents this by only applying
 	// clineMessages when the incoming seq is strictly greater than the last applied seq.
@@ -222,7 +224,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		maxOpenTabsContext: 20,
 		maxWorkspaceFiles: 200,
 		cwd: "",
-		telemetrySetting: "unset",
 		showRooIgnoredFiles: true, // Default to showing .rooignore'd files with lock symbol (current behavior).
 		enableSubfolderRules: false, // Default to disabled - must be enabled to load rules from subdirectories
 		renderContext: "sidebar",
@@ -263,6 +264,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		includeCurrentTime: true,
 		includeCurrentCost: true,
 		lockApiConfigAcrossModes: false,
+		telemetrySetting: "unset",
 	})
 
 	const [didHydrateState, setDidHydrateState] = useState(false)
@@ -330,13 +332,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 					if ((newState as any).includeCurrentCost !== undefined) {
 						setIncludeCurrentCost((newState as any).includeCurrentCost)
 					}
-					// Handle marketplace data if present in state message
-					if (newState.marketplaceItems !== undefined) {
-						setMarketplaceItems(newState.marketplaceItems)
-					}
-					if (newState.marketplaceInstalledMetadata !== undefined) {
-						setMarketplaceInstalledMetadata(newState.marketplaceInstalledMetadata)
-					}
 					break
 				}
 				case "action": {
@@ -380,7 +375,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 							return { ...prevState, clineMessages: newClineMessages }
 						}
 						// Log a warning if messageUpdated arrives for a timestamp not in the
-						// frontend's clineMessages. With the seq guard and cloud event isolation
+						// frontend's clineMessages. With the sequence guard in place,
 						// (layers 1+2), this should not happen under normal conditions. If it
 						// does, it signals a state synchronization issue worth investigating.
 						console.warn(
@@ -488,15 +483,16 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		ttsSpeed: state.ttsSpeed,
 		writeDelayMs: state.writeDelayMs,
 		routerModels: extensionRouterModels,
-		cloudIsAuthenticated: state.cloudIsAuthenticated ?? false,
-		cloudOrganizations: state.cloudOrganizations ?? [],
+		profileThresholds: state.profileThresholds ?? {},
 		organizationSettingsVersion: state.organizationSettingsVersion ?? -1,
+		cloudIsAuthenticated: state.cloudIsAuthenticated ?? false,
+		cloudOrganizations: state.cloudOrganizations,
+		sharingEnabled: state.sharingEnabled ?? false,
+		publicSharingEnabled: state.publicSharingEnabled ?? false,
 		marketplaceItems,
 		marketplaceInstalledMetadata,
-		profileThresholds: state.profileThresholds ?? {},
 		alwaysAllowFollowupQuestions,
 		followupAutoApproveTimeoutMs,
-		taskSyncEnabled: state.taskSyncEnabled,
 		setExperimentEnabled: (id, enabled) =>
 			setState((prevState) => ({ ...prevState, experiments: { ...prevState.experiments, [id]: enabled } })),
 		setApiConfiguration,
@@ -534,7 +530,8 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 			setState((prevState) => ({ ...prevState, terminalShellIntegrationDisabled: value })),
 		setTerminalZdotdir: (value) => setState((prevState) => ({ ...prevState, terminalZdotdir: value })),
 		setMcpEnabled: (value) => setState((prevState) => ({ ...prevState, mcpEnabled: value })),
-		setTaskSyncEnabled: (value) => setState((prevState) => ({ ...prevState, taskSyncEnabled: value }) as any),
+		taskSyncEnabled: state.taskSyncEnabled ?? false,
+		setTaskSyncEnabled: (value) => setState((prevState) => ({ ...prevState, taskSyncEnabled: value })),
 		setCurrentApiConfigName: (value) => setState((prevState) => ({ ...prevState, currentApiConfigName: value })),
 		setListApiConfigMeta,
 		setMode: (value: Mode) => setState((prevState) => ({ ...prevState, mode: value })),

@@ -78,15 +78,7 @@ export function getStructuredData(): StructuredDataGraph {
 			height: 512,
 		},
 		alternateName: ["RooCode"],
-		sameAs: [
-			EXTERNAL_LINKS.GITHUB,
-			EXTERNAL_LINKS.MARKETPLACE,
-			EXTERNAL_LINKS.X,
-			EXTERNAL_LINKS.LINKEDIN,
-			EXTERNAL_LINKS.REDDIT,
-			EXTERNAL_LINKS.DISCORD,
-			EXTERNAL_LINKS.YOUTUBE,
-		],
+		sameAs: [EXTERNAL_LINKS.GITHUB, EXTERNAL_LINKS.MARKETPLACE, EXTERNAL_LINKS.X, EXTERNAL_LINKS.LINKEDIN],
 	}
 
 	const website: WebSite = {

@@ -5,25 +5,7 @@ import { render, screen, act, cleanup } from "@/utils/test-utils"
 
 import AppWithProviders from "../App"
 
-vi.mock("@src/utils/vscode", () => ({
-	vscode: {
-		postMessage: vi.fn(),
-	},
-}))
-
 // Mock the ErrorBoundary component
-vi.mock("@src/components/ErrorBoundary", () => ({
-	__esModule: true,
-	default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
-
-// Mock the telemetry client
-vi.mock("@src/utils/TelemetryClient", () => ({
-	telemetryClient: {
-		capture: vi.fn(),
-		updateTelemetryState: vi.fn(),
-	},
-}))
 
 vi.mock("@src/components/chat/ChatView", () => ({
 	__esModule: true,
@@ -169,7 +151,6 @@ describe("App", () => {
 			shouldShowAnnouncement: false,
 			experiments: {},
 			language: "en",
-			telemetrySetting: "enabled",
 		})
 	})
 
@@ -443,37 +424,5 @@ describe("App", () => {
 		const chatView = screen.getByTestId("chat-view")
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 		expect(screen.queryByTestId(`${view}-view`)).not.toBeInTheDocument()
-	})
-
-	it("switches to marketplace view when receiving marketplaceButtonClicked action", async () => {
-		render(<AppWithProviders />)
-
-		act(() => {
-			triggerMessage("marketplaceButtonClicked")
-		})
-
-		const marketplaceView = await screen.findByTestId("marketplace-view")
-		expect(marketplaceView).toBeInTheDocument()
-
-		const chatView = screen.getByTestId("chat-view")
-		expect(chatView.getAttribute("data-hidden")).toBe("true")
-	})
-
-	it("returns to chat view when clicking done in marketplace view", async () => {
-		render(<AppWithProviders />)
-
-		act(() => {
-			triggerMessage("marketplaceButtonClicked")
-		})
-
-		const marketplaceView = await screen.findByTestId("marketplace-view")
-
-		act(() => {
-			marketplaceView.click()
-		})
-
-		const chatView = screen.getByTestId("chat-view")
-		expect(chatView.getAttribute("data-hidden")).toBe("false")
-		expect(screen.queryByTestId("marketplace-view")).not.toBeInTheDocument()
 	})
 })

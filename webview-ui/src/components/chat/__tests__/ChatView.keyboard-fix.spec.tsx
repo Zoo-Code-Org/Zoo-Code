@@ -18,43 +18,10 @@ vi.mock("@src/utils/vscode", () => ({
 
 // Mock use-sound hook
 vi.mock("use-sound", () => ({
-	default: vi.fn().mockImplementation(() => {
-		return [vi.fn()]
-	}),
+	default: vi.fn(() => [vi.fn()]),
 }))
 
 // Mock components
-vi.mock("../ChatRow", () => ({
-	default: () => null,
-}))
-
-vi.mock("../AutoApproveMenu", () => ({
-	default: () => null,
-}))
-
-vi.mock("../../common/VersionIndicator", () => ({
-	default: () => null,
-}))
-
-vi.mock("@src/components/modals/Announcement", () => ({
-	default: () => null,
-}))
-
-vi.mock("@src/components/welcome/RooCloudCTA", () => ({
-	default: () => null,
-}))
-
-vi.mock("@src/components/welcome/RooTips", () => ({
-	default: () => null,
-}))
-
-vi.mock("@src/components/welcome/RooHero", () => ({
-	default: () => null,
-}))
-
-vi.mock("../common/TelemetryBanner", () => ({
-	default: () => null,
-}))
 
 // Mock i18n
 vi.mock("react-i18next", () => ({
@@ -104,7 +71,6 @@ const mockPostMessage = (state: any) => {
 				allowedCommands: [],
 				alwaysAllowExecute: false,
 				cloudIsAuthenticated: false,
-				telemetrySetting: "enabled",
 				mode: "code",
 				customModes: [],
 				...state,

@@ -46,12 +46,6 @@ export enum OnboardingProviderChoice {
 	Byok = "byok",
 }
 
-export const LEGACY_PROVIDER_PREFERENCE_ROO = "roo" as const
-export const LEGACY_ONBOARDING_PROVIDER_CHOICE_ROO = "roo" as const
-
-export type CliProviderPreference = SupportedProvider | typeof LEGACY_PROVIDER_PREFERENCE_ROO
-export type CliOnboardingProviderChoice = OnboardingProviderChoice | typeof LEGACY_ONBOARDING_PROVIDER_CHOICE_ROO
-
 export interface OnboardingResult {
 	choice: OnboardingProviderChoice
 	token?: string
@@ -59,11 +53,11 @@ export interface OnboardingResult {
 }
 
 export interface CliSettings {
-	onboardingProviderChoice?: CliOnboardingProviderChoice
+	onboardingProviderChoice?: OnboardingProviderChoice
 	/** Default mode to use (e.g., "code", "architect", "ask", "debug") */
 	mode?: string
 	/** Default provider to use */
-	provider?: CliProviderPreference
+	provider?: SupportedProvider
 	/** Default model to use */
 	model?: string
 	/** Default reasoning effort level */
