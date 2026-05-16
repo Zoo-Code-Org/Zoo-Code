@@ -3,7 +3,8 @@
 		{
 			"match": {
 				"model": "deepseek-v4-flash",
-				"userMessage": "deepseek-v4-e2e:deepseek-v4-flash:reasoning-on"
+				"userMessage": "deepseek-v4-e2e:deepseek-v4-flash:reasoning-on",
+				"sequenceIndex": 0
 			},
 			"response": {
 				"toolCalls": [
@@ -33,7 +34,8 @@
 		{
 			"match": {
 				"model": "deepseek-v4-flash",
-				"userMessage": "deepseek-v4-e2e:deepseek-v4-flash:reasoning-off"
+				"userMessage": "deepseek-v4-e2e:deepseek-v4-flash:reasoning-off",
+				"sequenceIndex": 0
 			},
 			"response": {
 				"toolCalls": [
@@ -63,7 +65,8 @@
 		{
 			"match": {
 				"model": "deepseek-v4-pro",
-				"userMessage": "deepseek-v4-e2e:deepseek-v4-pro:reasoning-on"
+				"userMessage": "deepseek-v4-e2e:deepseek-v4-pro:reasoning-on",
+				"sequenceIndex": 0
 			},
 			"response": {
 				"toolCalls": [
@@ -93,7 +96,8 @@
 		{
 			"match": {
 				"model": "deepseek-v4-pro",
-				"userMessage": "deepseek-v4-e2e:deepseek-v4-pro:reasoning-off"
+				"userMessage": "deepseek-v4-e2e:deepseek-v4-pro:reasoning-off",
+				"sequenceIndex": 0
 			},
 			"response": {
 				"toolCalls": [

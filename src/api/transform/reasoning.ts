@@ -178,5 +178,5 @@ export const getGeminiReasoning = ({
 		return undefined
 	}
 
-	return { thinkingLevel: effortToUse, includeThoughts: true }
+	return { thinkingLevel: effortToUse as unknown as GeminiReasoningParams["thinkingLevel"], includeThoughts: true }
 }
