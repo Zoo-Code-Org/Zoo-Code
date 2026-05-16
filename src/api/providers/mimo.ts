@@ -19,7 +19,7 @@ import type { ApiHandlerCreateMessageMetadata } from "../index"
  * CRITICAL: Per MiMo's official docs, reasoning_content MUST be passed back
  * in multi-turn conversations with tool calls. Without it, the API returns 400.
  *
- * Reference: https://platform.xiaomimimo.com/static/docs/usage-guide/passing-back-reasoning_content.md
+ * Reference: https://platform.xiaomimimo.com/#/docs/usage-guide/passing-back-reasoning_content
  */
 export class MimoHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
@@ -219,7 +219,7 @@ export class MimoHandler extends OpenAiHandler {
 		const tools = this.convertToolsForOpenAI(metadata?.tools)
 
 		// Build request per MiMo's OpenAI-compatible API
-		// https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md
+		// https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
 		const params: Record<string, any> = {
 			model: modelId,
 			temperature,
