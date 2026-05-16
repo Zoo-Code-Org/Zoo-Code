@@ -43,7 +43,7 @@ export function KiloClawView() {
 	// user during onboarding via patchBotIdentity). Falls back to the literal
 	// "KiloClaw" while loading or for instances that skipped onboarding,
 	// matching the web UI's fallback chain.
-	const botName = createMemo(() => status()?.botName ?? "KiloClaw")
+	const botName = createMemo(() => status()?.botName ?? "ZooClaw")
 
 	// Register escape to navigate back
 	useKeyboard((evt) => {
@@ -65,7 +65,7 @@ export function KiloClawView() {
 				value: "kiloclaw.back",
 				title: "Back",
 				description: "Return to the previous view",
-				category: "KiloClaw",
+				category: "ZooClaw",
 				slash: { name: "back" },
 				keybind: "escape" as any,
 				onSelect: () => {
@@ -76,8 +76,8 @@ export function KiloClawView() {
 			{
 				value: "kiloclaw.new",
 				title: "New conversation",
-				description: "Start a new KiloClaw conversation",
-				category: "KiloClaw",
+				description: "Start a new ZooClaw conversation",
+				category: "ZooClaw",
 				slash: { name: "new" },
 				enabled: ready,
 				hidden: !ready,
@@ -89,8 +89,8 @@ export function KiloClawView() {
 			{
 				value: "kiloclaw.conversations",
 				title: "Conversations",
-				description: "Browse, rename, and delete KiloClaw conversations",
-				category: "KiloClaw",
+				description: "Browse, rename, and delete ZooClaw conversations",
+				category: "ZooClaw",
 				slash: { name: "conversations", aliases: ["chats"] },
 				enabled: ready,
 				hidden: !ready,

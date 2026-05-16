@@ -1744,7 +1744,7 @@ export class ClineProvider
 		apiConversationHistory: Anthropic.MessageParam[]
 	}> {
 		if (this.portableSessionAdapter) {
-			const session = await this.portableSessionAdapter.getSession(id)
+			const session = await this.portableSessionAdapter.getSession(id, this.getPortableScope())
 			const historyItem = this.sessionToHistoryItem(session)
 
 			return {
@@ -2371,7 +2371,9 @@ export class ClineProvider
 		}
 
 		try {
-			return this.normalizePortableProviderConfig(await this.portableSessionAdapter.getConfigProviders())
+			return this.normalizePortableProviderConfig(
+				await this.portableSessionAdapter.getConfigProviders(this.getPortableScope()),
+			)
 		} catch (error) {
 			this.log(
 				`Error fetching portable provider config: ${error instanceof Error ? error.message : String(error)}`,
@@ -2923,7 +2925,7 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (this.portableSessionAdapter && !parentTask && !options.taskId) {
-			const session = await this.portableSessionAdapter.createSession({ title: text })
+			const session = await this.portableSessionAdapter.createSession({ title: text, ...this.getPortableScope() })
 			options = { ...options, taskId: session.id }
 		}
 
@@ -3337,8 +3339,12 @@ export class ClineProvider
 			return undefined
 		}
 
-		const sessions = await this.portableSessionAdapter.listSessions({ directory: this.cwd })
+		const sessions = await this.portableSessionAdapter.listSessions(this.getPortableScope())
 		return sessions.map((session) => this.sessionToHistoryItem(session))
+	}
+
+	private getPortableScope(): { directory: string } {
+		return { directory: this.cwd }
 	}
 
 	private sessionToHistoryItem(session: Session): HistoryItem {

@@ -22,13 +22,18 @@ describe("PortableSessionAdapter", () => {
 		const client = createClient()
 		const adapter = new PortableSessionAdapter(client as any)
 
-		await expect(adapter.createSession({ title: "Task" })).resolves.toEqual({ id: "session-1", title: "Task" })
-		await expect(adapter.listSessions({ directory: "/workspace" })).resolves.toEqual([{ id: "session-1" }])
-		await expect(adapter.getSession("session-1")).resolves.toEqual({ id: "session-1" })
+		const scope = { directory: "/workspace", workspace: "workspace-1" }
 
-		expect(client.createSession).toHaveBeenCalledWith({ title: "Task" })
-		expect(client.listSessions).toHaveBeenCalledWith({ directory: "/workspace" })
-		expect(client.getSession).toHaveBeenCalledWith("session-1")
+		await expect(adapter.createSession({ title: "Task", ...scope })).resolves.toEqual({
+			id: "session-1",
+			title: "Task",
+		})
+		await expect(adapter.listSessions(scope)).resolves.toEqual([{ id: "session-1" }])
+		await expect(adapter.getSession("session-1", scope)).resolves.toEqual({ id: "session-1" })
+
+		expect(client.createSession).toHaveBeenCalledWith({ title: "Task", ...scope })
+		expect(client.listSessions).toHaveBeenCalledWith(scope)
+		expect(client.getSession).toHaveBeenCalledWith("session-1", scope)
 	})
 
 	it("maps send and abort calls to the Zoo SDK client", async () => {
@@ -152,13 +157,15 @@ describe("PortableSessionAdapter", () => {
 		const client = createClient()
 		const adapter = new PortableSessionAdapter(client as any)
 
-		await expect(adapter.getConfig()).resolves.toEqual({ model: "anthropic/claude" })
-		await expect(adapter.getConfigProviders()).resolves.toEqual({
+		const scope = { directory: "/workspace", workspace: "workspace-1" }
+
+		await expect(adapter.getConfig(scope)).resolves.toEqual({ model: "anthropic/claude" })
+		await expect(adapter.getConfigProviders(scope)).resolves.toEqual({
 			default: { providerID: "anthropic" },
 			providers: [],
 		})
-		expect(client.getConfig).toHaveBeenCalledTimes(1)
-		expect(client.getConfigProviders).toHaveBeenCalledTimes(1)
+		expect(client.getConfig).toHaveBeenCalledWith(scope)
+		expect(client.getConfigProviders).toHaveBeenCalledWith(scope)
 	})
 
 	it("rejects malformed modes and provider config results", async () => {

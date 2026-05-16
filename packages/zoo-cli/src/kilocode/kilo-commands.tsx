@@ -49,9 +49,9 @@ export function registerKiloCommands(useSDK: () => UseSDK) {
 		// /kiloclaw command
 		{
 			value: "kilo.claw",
-			title: "KiloClaw",
-			description: "Open KiloClaw chat & dashboard",
-			category: "Kilo",
+			title: "ZooClaw",
+			description: "Open ZooClaw chat & dashboard",
+			category: "Zoo Code",
 			slash: { name: "kiloclaw", aliases: ["claw"] },
 			enabled: isKiloConnected(),
 			hidden: !isKiloConnected(),
@@ -90,7 +90,7 @@ export function registerKiloCommands(useSDK: () => UseSDK) {
 			value: "remote.toggle",
 			title: "Toggle remote",
 			description: "Enable or disable remote session relay",
-			category: "Kilo",
+			category: "Zoo Code",
 			slash: { name: "remote" },
 			enabled: isKiloConnected(),
 			hidden: !isKiloConnected(),
@@ -128,8 +128,8 @@ export function registerKiloCommands(useSDK: () => UseSDK) {
 		{
 			value: "kilo.profile",
 			title: "Profile",
-			description: "View your Kilo Gateway profile",
-			category: "Kilo",
+			description: "View your Zoo Code profile",
+			category: "Zoo Code",
 			slash: { name: "profile", aliases: ["me", "whoami"] },
 			enabled: isKiloConnected(),
 			hidden: !isKiloConnected(),
@@ -142,7 +142,7 @@ export function registerKiloCommands(useSDK: () => UseSDK) {
 						dialog.replace(() => (
 							<DialogAlert
 								title="Error"
-								message="Failed to fetch profile. Please ensure you're authenticated with Kilo Gateway."
+								message="Failed to fetch profile. Please ensure you're authenticated with Zoo Code."
 							/>
 						))
 						return
@@ -166,7 +166,7 @@ export function registerKiloCommands(useSDK: () => UseSDK) {
 						value: "kilo.indexing",
 						title: "Indexing",
 						description: "Configure codebase indexing",
-						category: "Kilo",
+						category: "Zoo Code",
 						slash: { name: "indexing", aliases: ["index", "embedding"] },
 						onSelect: () => {
 							dialog.replace(() => <DialogIndexing useSDK={useSDK} />)
@@ -179,8 +179,8 @@ export function registerKiloCommands(useSDK: () => UseSDK) {
 		{
 			value: "kilo.teams",
 			title: "Teams",
-			description: "Switch between Kilo Gateway teams",
-			category: "Kilo",
+			description: "Switch between Zoo Code teams",
+			category: "Zoo Code",
 			slash: { name: "teams", aliases: ["team", "org", "orgs"] },
 			enabled: isKiloConnected(),
 			hidden: !isKiloConnected(),
@@ -193,7 +193,7 @@ export function registerKiloCommands(useSDK: () => UseSDK) {
 						dialog.replace(() => (
 							<DialogAlert
 								title="Error"
-								message="Failed to fetch teams. Please ensure you're authenticated with Kilo Gateway."
+								message="Failed to fetch teams. Please ensure you're authenticated with Zoo Code."
 							/>
 						))
 						return

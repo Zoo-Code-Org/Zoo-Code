@@ -55,7 +55,7 @@ export function DialogStatus() {
 				</text>
 			</box>
 			{/* kilocode_change start */}
-			<text fg={theme.textMuted}>Kilo v{InstallationVersion}</text>
+			<text fg={theme.textMuted}>Zoo Code v{InstallationVersion}</text>
 			{/* kilocode_change end */}
 			{/* kilocode_change start */}
 			<box>
@@ -103,7 +103,7 @@ export function DialogStatus() {
 											</Match>
 											<Match when={item.status === "disabled"}>Disabled in configuration</Match>
 											<Match when={(item.status as string) === "needs_auth"}>
-												Needs authentication (run: kilo mcp auth {key}){/* kilocode_change */}
+												Needs authentication (run: zoo mcp auth {key}){/* kilocode_change */}
 											</Match>
 											<Match
 												when={(item.status as string) === "needs_client_registration" && item}>

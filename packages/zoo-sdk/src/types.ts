@@ -643,7 +643,7 @@ export type WorktreeDiffItem = WorktreeDiff & {
 }
 
 /** Options used to create a new session. */
-export type SessionCreateOptions = {
+export type SessionCreateOptions = WorkspaceRouteOptions & {
 	/** Optional title for display in history. */
 	title?: string
 	/** Initial permission rules. */
@@ -651,10 +651,19 @@ export type SessionCreateOptions = {
 }
 
 /** Options for listing sessions. */
-export type SessionListOptions = {
-	/** Optional project/workspace directory filter. */
-	directory?: string
-}
+export type SessionListOptions = WorkspaceRouteOptions
+
+/** Options for fetching a session. */
+export type SessionGetOptions = WorkspaceRouteOptions
+
+/** Options for reading portable-core configuration. */
+export type ConfigReadOptions = WorkspaceRouteOptions
+
+/** Options for reading portable-core configuration warnings. */
+export type ConfigWarningsOptions = WorkspaceRouteOptions
+
+/** Options for reading configured portable-core providers. */
+export type ConfigProvidersOptions = WorkspaceRouteOptions
 
 /** Viewed-session state tracked by editor clients. */
 export type SessionViewedOptions = {

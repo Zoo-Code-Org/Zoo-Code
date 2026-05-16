@@ -51,7 +51,7 @@ function View(props: { api: TuiPluginApi }) {
 								✕
 							</text>
 						</box>
-						<text fg={theme().textMuted}>Kilo includes free models so you can start immediately.</text>
+						<text fg={theme().textMuted}>Zoo Code includes free models so you can start immediately.</text>
 						<text fg={theme().textMuted}>
 							Connect from 75+ providers to use other models, including Claude, GPT, Gemini etc
 						</text>
@@ -69,7 +69,7 @@ function View(props: { api: TuiPluginApi }) {
 			<text fg={theme().textMuted}>
 				<span style={{ fg: theme().success }}>•</span>{" "}
 				<span style={{ fg: theme().text }}>
-					<b>Kilo</b>
+					<b>Zoo Code</b>
 				</span>{" "}
 				<span>{props.api.app.version}</span>
 			</text>

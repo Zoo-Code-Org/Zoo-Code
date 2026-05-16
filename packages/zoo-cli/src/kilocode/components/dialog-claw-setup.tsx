@@ -29,7 +29,7 @@ export function DialogClawSetup(props: { orgId?: string | null }) {
 		<box paddingLeft={2} paddingRight={2} gap={1}>
 			<box flexDirection="row" justifyContent="space-between">
 				<text attributes={TextAttributes.BOLD} fg={theme.text}>
-					KiloClaw
+					ZooClaw
 				</text>
 				<text fg={theme.textMuted}>esc</text>
 			</box>
@@ -40,8 +40,8 @@ export function DialogClawSetup(props: { orgId?: string | null }) {
 				</text>
 
 				<text fg={theme.textMuted} wrapMode="word">
-					KiloClaw gives you a personal AI that reads email, manages your calendar, monitors your projects,
-					and lives in Telegram, Slack — whatever you already use.
+					ZooClaw gives you a personal AI that reads email, manages your calendar, monitors your projects, and
+					lives in Telegram, Slack — whatever you already use.
 				</text>
 
 				<text fg={theme.textMuted} wrapMode="word">
@@ -59,7 +59,7 @@ export function DialogClawSetup(props: { orgId?: string | null }) {
 				<box paddingLeft={3} paddingRight={3} backgroundColor={theme.primary} flexDirection="row">
 					<text fg={theme.text}>{"🦀 "}</text>
 					<Link href={url} fg={theme.selectedListItemText}>
-						Try KiloClaw
+						Try ZooClaw
 					</Link>
 				</box>
 			</box>

@@ -577,7 +577,7 @@ export class Agent implements ACPAgent {
 			},
 			authMethods: [authMethod],
 			agentInfo: {
-				name: "Kilo", // kilocode_change
+				name: "Zoo Code", // kilocode_change
 				version: InstallationVersion,
 			},
 		}

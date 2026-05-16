@@ -26103,7 +26103,7 @@ export const snapshot = {
 		env: ["KILO_API_KEY"],
 		npm: "@ai-sdk/openai-compatible",
 		api: "https://api.kilo.ai/api/gateway",
-		name: "Kilo Gateway",
+		name: "Zoo Code Gateway",
 		doc: "https://kilo.ai",
 		models: {
 			"rekaai/reka-edge": {
@@ -26768,7 +26768,7 @@ export const snapshot = {
 			},
 			"kilo-auto/balanced": {
 				id: "kilo-auto/balanced",
-				name: "Kilo Auto Balanced",
+				name: "Zoo Code Auto Balanced",
 				attachment: false,
 				reasoning: true,
 				tool_call: true,
@@ -26782,7 +26782,7 @@ export const snapshot = {
 			},
 			"kilo-auto/frontier": {
 				id: "kilo-auto/frontier",
-				name: "Kilo Auto Frontier",
+				name: "Zoo Code Auto Frontier",
 				attachment: true,
 				reasoning: true,
 				tool_call: true,
@@ -26796,7 +26796,7 @@ export const snapshot = {
 			},
 			"kilo-auto/small": {
 				id: "kilo-auto/small",
-				name: "Kilo Auto Small",
+				name: "Zoo Code Auto Small",
 				attachment: true,
 				reasoning: true,
 				tool_call: true,
@@ -26810,7 +26810,7 @@ export const snapshot = {
 			},
 			"kilo-auto/free": {
 				id: "kilo-auto/free",
-				name: "Kilo Auto Free",
+				name: "Zoo Code Auto Free",
 				attachment: false,
 				reasoning: true,
 				tool_call: true,

@@ -42,6 +42,8 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/permission")
 				return { data: [{ id: "perm_1", sessionID: "ses_1", permission: "bash" }] }
 			if (input.path === "/permission/perm_1/always-rules") return { data: true }
+			if (input.path === "/session?directory=%2Frepo%2Froot&workspace=workspace-1")
+				return input.method === "POST" ? { data: { id: "ses_1" } } : { data: [{ id: "ses_1" }] }
 			if (input.path === "/session")
 				return input.method === "POST" ? { data: { id: "ses_1" } } : { data: [{ id: "ses_1" }] }
 			if (input.path === "/session/status") return { data: { ses_1: { type: "idle" } } }
@@ -72,7 +74,11 @@ function transport(): ZooTransport & { requests: any[] } {
 					],
 				}
 			}
-			if (input.path === "/session/ses_1") return { data: { id: "ses_1" } }
+			if (
+				input.path === "/session/ses_1" ||
+				input.path === "/session/ses_1?directory=%2Frepo%2Froot&workspace=workspace-1"
+			)
+				return { data: { id: "ses_1" } }
 			if (input.path.startsWith("/session/ses_1/prompt_async")) return { data: undefined }
 			if (input.path === "/session/ses_1/message?limit=2&before=cursor+1") {
 				return {
@@ -253,10 +259,19 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/agent") {
 				return { data: [{ name: "code", displayName: "Code", description: "Code mode", mode: "primary" }] }
 			}
-			if (input.path === "/config/warnings") return { data: [{ path: "zoo.jsonc", message: "Invalid config" }] }
+			if (
+				input.path === "/config/warnings" ||
+				input.path === "/config/warnings?directory=%2Frepo%2Froot&workspace=workspace-1"
+			)
+				return { data: [{ path: "zoo.jsonc", message: "Invalid config" }] }
 			if (input.path === "/config" && input.method === "PATCH") return { data: input.body }
-			if (input.path === "/config") return { data: { model: "anthropic/claude" } }
-			if (input.path === "/config/providers") return { data: { default: "anthropic", providers: [] } }
+			if (input.path === "/config" || input.path === "/config?directory=%2Frepo%2Froot&workspace=workspace-1")
+				return { data: { model: "anthropic/claude" } }
+			if (
+				input.path === "/config/providers" ||
+				input.path === "/config/providers?directory=%2Frepo%2Froot&workspace=workspace-1"
+			)
+				return { data: { default: "anthropic", providers: [] } }
 			if (input.path === "/mcp") return { data: { demo: { status: "disabled" } } }
 			if (input.path === "/global/dispose") return { data: true }
 			if (input.path === "/provider") {
@@ -377,6 +392,26 @@ describe("ZooClient", () => {
 			["GET", "/session"],
 			["GET", "/session/ses_1"],
 			["POST", "/session/ses_1/abort"],
+		])
+	})
+
+	test("constructs scoped session requests", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const scope = { directory: "/repo/root", workspace: "workspace-1" }
+
+		expect(await client.createSession({ title: "Smoke", ...scope })).toEqual({ id: "ses_1" })
+		expect(await client.listSessions(scope)).toEqual([{ id: "ses_1" }])
+		expect(await client.getSession("ses_1", scope)).toEqual({ id: "ses_1" })
+
+		expect(mock.requests.slice(-3)).toEqual([
+			{
+				method: "POST",
+				path: "/session?directory=%2Frepo%2Froot&workspace=workspace-1",
+				body: { title: "Smoke" },
+			},
+			{ path: "/session?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/session/ses_1?directory=%2Frepo%2Froot&workspace=workspace-1" },
 		])
 	})
 
@@ -860,6 +895,24 @@ describe("ZooClient", () => {
 		await expect(client.getConfig()).resolves.toEqual({ model: "anthropic/claude" })
 		await expect(client.getConfigProviders()).resolves.toEqual({ default: "anthropic", providers: [] })
 		expect(mock.requests.slice(-2)).toEqual([{ path: "/config" }, { path: "/config/providers" }])
+	})
+
+	test("reads scoped portable core config", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const scope = { directory: "/repo/root", workspace: "workspace-1" }
+
+		await expect(client.getConfig(scope)).resolves.toEqual({ model: "anthropic/claude" })
+		await expect(client.getConfigProviders(scope)).resolves.toEqual({ default: "anthropic", providers: [] })
+		await expect(client.getConfigWarnings(scope)).resolves.toEqual([
+			{ path: "zoo.jsonc", message: "Invalid config" },
+		])
+
+		expect(mock.requests.slice(-3)).toEqual([
+			{ path: "/config?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/config/providers?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/config/warnings?directory=%2Frepo%2Froot&workspace=workspace-1" },
+		])
 	})
 
 	test("reads MCP status", async () => {

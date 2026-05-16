@@ -1,10 +1,13 @@
 import type {
+	ConfigProvidersOptions,
 	MessageChunk,
 	Mode,
 	ConfigProvidersResult,
+	ConfigReadOptions,
 	PermissionReply,
 	Session,
 	SessionCreateOptions,
+	SessionGetOptions,
 	SessionListOptions,
 	ZooClient,
 	ZooConfig,
@@ -36,8 +39,8 @@ export class PortableSessionAdapter {
 	}
 
 	/** Fetch a portable-core session snapshot. */
-	async getSession(sessionID: string): Promise<Session> {
-		return validateSession(await this.client.getSession(sessionID), "getSession")
+	async getSession(sessionID: string, options: SessionGetOptions = {}): Promise<Session> {
+		return validateSession(await this.client.getSession(sessionID, options), "getSession")
 	}
 
 	/** Send a message to the portable core and stream response chunks. */
@@ -70,13 +73,13 @@ export class PortableSessionAdapter {
 	}
 
 	/** Read the portable-core configuration snapshot. */
-	getConfig(): Promise<ZooConfig> {
-		return this.client.getConfig()
+	getConfig(options: ConfigReadOptions = {}): Promise<ZooConfig> {
+		return this.client.getConfig(options)
 	}
 
 	/** Read configured providers/defaults from the portable core. */
-	getConfigProviders(): Promise<ConfigProvidersResult> {
-		return this.client.getConfigProviders().then(validateConfigProvidersResult)
+	getConfigProviders(options: ConfigProvidersOptions = {}): Promise<ConfigProvidersResult> {
+		return this.client.getConfigProviders(options).then(validateConfigProvidersResult)
 	}
 }
 

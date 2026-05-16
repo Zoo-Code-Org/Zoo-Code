@@ -21,13 +21,13 @@ export { KiloClawView } from "@/kilocode/claw/view"
 // ---------------------------------------------------------------------------
 
 /** Default terminal window title. */
-export const APP_TITLE = "Zoo CLI"
+export const APP_TITLE = "Zoo Code"
 
 /** Public docs URL shown in the command palette. */
-export const DOCS_URL = "https://kilo.ai/docs"
+export const DOCS_URL = "https://github.com/Zoo-Code-Org/Zoo-Code"
 
 /** Human-readable product name used in user-facing messages. */
-export const APP_NAME = "Kilo"
+export const APP_NAME = "Zoo Code"
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -86,7 +86,7 @@ export function getTerminalTitle(
 	route: ReturnType<typeof import("@tui/context/route").useRoute>,
 	base: string,
 ): string | undefined {
-	if (route.data.type === "kiloclaw") return `${base} | KiloClaw`
+	if (route.data.type === "kiloclaw") return `${base} | ZooClaw`
 	return undefined
 }
 

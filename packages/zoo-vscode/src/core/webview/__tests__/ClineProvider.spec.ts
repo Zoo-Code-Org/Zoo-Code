@@ -851,7 +851,7 @@ describe("ClineProvider", () => {
 
 		const state = await portableProvider.getStateToPostToWebview()
 
-		expect(portableSessionAdapter.getConfigProviders).toHaveBeenCalled()
+		expect(portableSessionAdapter.getConfigProviders).toHaveBeenCalledWith({ directory: portableProvider.cwd })
 		expect(state.providerConfigSource).toBe("portable")
 		expect(state.portableProviderConfig).toEqual({
 			readOnly: true,
@@ -878,7 +878,9 @@ describe("ClineProvider", () => {
 
 		const result = await portableProvider.getTaskWithId("portable-session-2")
 
-		expect(portableSessionAdapter.getSession).toHaveBeenCalledWith("portable-session-2")
+		expect(portableSessionAdapter.getSession).toHaveBeenCalledWith("portable-session-2", {
+			directory: portableProvider.cwd,
+		})
 		expect(result.historyItem).toEqual(
 			expect.objectContaining({ id: "portable-session-2", task: "Lookup task", ts: 1234 }),
 		)
@@ -902,7 +904,10 @@ describe("ClineProvider", () => {
 
 		const task = await portableProvider.createTask("Create task")
 
-		expect(portableSessionAdapter.createSession).toHaveBeenCalledWith({ title: "Create task" })
+		expect(portableSessionAdapter.createSession).toHaveBeenCalledWith({
+			title: "Create task",
+			directory: portableProvider.cwd,
+		})
 		expect(task.taskId).toBe("portable-created-session")
 	})
 
@@ -1023,7 +1028,10 @@ describe("ClineProvider", () => {
 
 		const task = await portableProvider.createTask("Image task", ["data:image/png;base64,abc"])
 
-		expect(portableSessionAdapter.createSession).toHaveBeenCalledWith({ title: "Image task" })
+		expect(portableSessionAdapter.createSession).toHaveBeenCalledWith({
+			title: "Image task",
+			directory: portableProvider.cwd,
+		})
 		expect(portableSessionAdapter.sendMessage).not.toHaveBeenCalled()
 		expect(task.start).not.toHaveBeenCalled()
 		expect(task.clineMessages).toContainEqual(

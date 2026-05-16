@@ -64,6 +64,7 @@ export const PROVIDER_DESCRIPTIONS: Record<string, string> = {
 }
 
 export const PROVIDER_TITLES: Record<string, string> = {
+	kilo: "Zoo Code",
 	openai: "OpenAI / Codex",
 }
 
@@ -116,13 +117,8 @@ export function renderApiDescription(
 	if (providerID !== "kilo") return undefined
 	return () => (
 		<box gap={1}>
-			<text fg={theme.textMuted}>
-				Kilo Gateway gives you access to all the best coding models at the cheapest prices with a single API
-				key.
-			</text>
-			<text fg={theme.text}>
-				Go to <span style={{ fg: theme.primary }}>https://kilo.ai/gateway</span> to get a key
-			</text>
+			<text fg={theme.textMuted}>Zoo Code gives you access to coding models through a single API key.</text>
+			<text fg={theme.text}>Go to your configured Zoo Code provider portal to get a key</text>
 		</box>
 	)
 }

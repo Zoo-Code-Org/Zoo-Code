@@ -40,7 +40,7 @@ export function KiloErrorBlock(props: KiloErrorBlockProps) {
 					borderColor={theme.primary}>
 					<text fg={theme.text}>{title()}</text>
 					<text fg={theme.textMuted}>{description()}</text>
-					<text fg={theme.primary}>{"Run /connect or `kilo auth login` to connect to Kilo Gateway"}</text>
+					<text fg={theme.primary}>{"Run /connect or `zoo auth login` to connect to Zoo Code"}</text>
 				</box>
 			</Match>
 		</Switch>

@@ -1,6 +1,7 @@
 import { createHttpTransport, createIpcTransport, type ZooTransport } from "./transport/index.js"
 import type {
 	CommandInfo,
+	ConfigProvidersOptions,
 	ExperimentalResourceMap,
 	ExperimentalSession,
 	ExperimentalSessionListOptions,
@@ -22,6 +23,8 @@ import type {
 	Mode,
 	ConfigWarning,
 	ConfigProvidersResult,
+	ConfigReadOptions,
+	ConfigWarningsOptions,
 	PathInfo,
 	PermissionAlwaysRules,
 	PermissionReply,
@@ -46,6 +49,7 @@ import type {
 	SessionDiffOptions,
 	SessionFileDiff,
 	SessionForkOptions,
+	SessionGetOptions,
 	SessionListOptions,
 	SessionRevertOptions,
 	SessionStatusMap,
@@ -184,20 +188,24 @@ export class ZooClient {
 
 	/** Create a new agent session. */
 	async createSession(options: SessionCreateOptions = {}): Promise<Session> {
+		const { directory, workspace, ...body } = options
 		return unwrap(
 			await this.#transport.request<Session | { data?: Session }>({
 				method: "POST",
-				path: "/session",
-				body: options,
+				path: `/session${workspaceRouteQuery({ directory, workspace })}`,
+				body,
 			}),
 		)
 	}
 
 	/** List known sessions. */
 	async listSessions(options: SessionListOptions = {}): Promise<Session[]> {
-		const query = options.directory ? `?directory=${encodeURIComponent(options.directory)}` : ""
 		return (
-			unwrap(await this.#transport.request<Session[] | { data?: Session[] }>({ path: `/session${query}` })) ?? []
+			unwrap(
+				await this.#transport.request<Session[] | { data?: Session[] }>({
+					path: `/session${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
 		)
 	}
 
@@ -215,10 +223,10 @@ export class ZooClient {
 	}
 
 	/** Fetch a session by id. */
-	async getSession(sessionID: string): Promise<Session> {
+	async getSession(sessionID: string, options: SessionGetOptions = {}): Promise<Session> {
 		return unwrap(
 			await this.#transport.request<Session | { data?: Session }>({
-				path: `/session/${encodeURIComponent(sessionID)}`,
+				path: `/session/${encodeURIComponent(sessionID)}${workspaceRouteQuery(options)}`,
 			}),
 		)
 	}
@@ -966,8 +974,14 @@ export class ZooClient {
 	}
 
 	/** Read the portable-core configuration snapshot. */
-	async getConfig(): Promise<ZooConfig> {
-		return unwrap(await this.#transport.request<ZooConfig | { data?: ZooConfig }>({ path: "/config" })) ?? {}
+	async getConfig(options: ConfigReadOptions = {}): Promise<ZooConfig> {
+		return (
+			unwrap(
+				await this.#transport.request<ZooConfig | { data?: ZooConfig }>({
+					path: `/config${workspaceRouteQuery(options)}`,
+				}),
+			) ?? {}
+		)
 	}
 
 	/** Update portable-core configuration. */
@@ -984,22 +998,22 @@ export class ZooClient {
 	}
 
 	/** Read warnings produced while loading portable-core configuration. */
-	async getConfigWarnings(): Promise<ConfigWarning[]> {
+	async getConfigWarnings(options: ConfigWarningsOptions = {}): Promise<ConfigWarning[]> {
 		return (
 			unwrap(
 				await this.#transport.request<ConfigWarning[] | { data?: ConfigWarning[] }>({
-					path: "/config/warnings",
+					path: `/config/warnings${workspaceRouteQuery(options)}`,
 				}),
 			) ?? []
 		)
 	}
 
 	/** Read configured providers/defaults from the portable core. */
-	async getConfigProviders(): Promise<ConfigProvidersResult> {
+	async getConfigProviders(options: ConfigProvidersOptions = {}): Promise<ConfigProvidersResult> {
 		return (
 			unwrap(
 				await this.#transport.request<ConfigProvidersResult | { data?: ConfigProvidersResult }>({
-					path: "/config/providers",
+					path: `/config/providers${workspaceRouteQuery(options)}`,
 				}),
 			) ?? {}
 		)

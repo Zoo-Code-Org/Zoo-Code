@@ -75,6 +75,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Route VS Code task cancellation through `ZooClient.abortSession()` in portable-core mode while preserving the default extension-host cancellation path.
 - Surface portable-core Zoo CLI process restart, restart-exhaustion, and process-error lifecycle events through the VS Code output channel.
 - Validate portable-core session, message chunk, server event, permission request, mode-list, and provider-config shapes at the VS Code adapter boundary before they reach webview state.
+- Scope portable-core SDK session/config reads and VS Code adapter calls to the active workspace directory to avoid accidentally using global/default CLI state.
+- Rebrand visible Zoo CLI TUI tips, banners, status labels, provider labels, and generated model display names from Kilo to Zoo Code.
 - Reject malformed non-permission portable-core event properties at the VS Code adapter boundary while ignoring valid non-permission events in the approval bridge.
 - Add deterministic VS Code coverage proving portable approval events flow through adapter validation before reaching `ClineProvider` replies.
 - Add SDK and VS Code adapter methods for portable-core event subscriptions and permission replies, enabling the upcoming tool approval bridge.
