@@ -4,6 +4,28 @@ All notable changes to Zoo Code will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Zoo Code uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 3.54.1
+
+### Patch Changes
+
+- Fix Anthropic Opus 4.7 when reasoning is enabled (PR #111 by @app/roomote)
+- Fix the OpenAI Compatible onboarding form starting above the viewport (PR #113 by @app/roomote)
+- Fix settings and Marketplace access after importing Roo Router settings (PR #109 by @app/roomote)
+- Fix the setup announcement origin and load LM Studio models on first open (PR #97 by @app/roomote)
+- Fix Discord invite links that still pointed to the old Zoo Code server (PR #107 by @app/roomote)
+- Fix support links that opened the wrong GitHub repository (PR #77 by @app/roomote)
+- Refresh Zoo Code branding across docs and metadata (PR #85 by @taltas)
+- Clarify Zoo Code migration messaging in the README (PR #99 by @taltas)
+- Keep settings regression coverage in the webview-ui test suite (PR #95 by @app/roomote)
+- Clean up skipped extension package tests (PR #110 by @app/roomote)
+- Add DeepSeek V4 end-to-end coverage (PR #72 by @app/roomote)
+- Use repo collaborators as the default code owners (PR #96 by @app/roomote)
+- Use a single PR flow for extension releases (PR #142 by @app/roomote)
+- Update `isbinaryfile` to `5.0.7` (PR #88 by @f14XuanLv)
+- Update `@dotenvx/dotenvx` to `1.66.0` (PR #61 by @app/renovate)
+- Update `lint-staged` to `16.4.0` (PR #64 by @app/renovate)
+- Update Node.js to `20.20.2` (PR #65 by @app/renovate)
+
 ## [3.54.0] - 2026-05-08
 
 ### Added
