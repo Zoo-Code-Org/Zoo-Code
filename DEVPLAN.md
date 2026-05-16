@@ -433,6 +433,7 @@
 - **Progress addendum:** Fixed generated SDK parameter handling to preserve explicitly supplied empty bodies, closing the `sync.history.list({ body: {} })` direct-vs-HttpApi parity gap.
 - **Progress addendum:** Fixed ripgrep executable resolution to prefer the packaged `ripgrep` npm executable before network download, resolving the HttpApi file text search 500 in empty-cache/no-network environments.
 - **Progress addendum:** Added generated SDK command-list parity across direct and HttpApi backends by making local-review templates lazy until awaited and normalizing HttpApi list serialization for those inert templates.
+- **Progress addendum:** Added generated SDK agent and provider discovery parity across direct and HttpApi backends, using stable response projections and disabling background model fetches for the provider fixture.
 - **Progress addendum:** Added a hand-written `@zoo-code/sdk` wrapper for sync history reads with mocked transport coverage, keeping sync start/replay excluded.
 
 - **Progress:** Fixed the focused generated SDK no-reply prompt route parity test by supplying explicit fake model metadata, keeping the route test out of provider discovery while preserving no-LLM behavior.

@@ -25,6 +25,7 @@ const original = {
 	KILO_EXPERIMENTAL_HTTPAPI: Flag.KILO_EXPERIMENTAL_HTTPAPI,
 	KILO_SERVER_PASSWORD: Flag.KILO_SERVER_PASSWORD,
 	KILO_SERVER_USERNAME: Flag.KILO_SERVER_USERNAME,
+	KILO_DISABLE_MODELS_FETCH: Flag.KILO_DISABLE_MODELS_FETCH,
 }
 
 type Backend = "legacy" | "httpapi"
@@ -344,6 +345,7 @@ afterEach(async () => {
 	Flag.KILO_EXPERIMENTAL_HTTPAPI = original.KILO_EXPERIMENTAL_HTTPAPI
 	Flag.KILO_SERVER_PASSWORD = original.KILO_SERVER_PASSWORD
 	Flag.KILO_SERVER_USERNAME = original.KILO_SERVER_USERNAME
+	Flag.KILO_DISABLE_MODELS_FETCH = original.KILO_DISABLE_MODELS_FETCH
 	await disposeAllInstances()
 	await resetDatabase()
 })
@@ -452,7 +454,7 @@ describe("HttpApi SDK", () => {
 		),
 	)
 
-	// kilocode_change start - keep provider and agent discovery excluded until Kilo overlays are isolated
+	// kilocode_change start - keep provider discovery in a separate fixture to isolate model fetches
 	parity("matches generated SDK instance read routes across backends", (backend) =>
 		withStandardProject(backend, ({ sdk, directory }) =>
 			Effect.gen(function* () {
@@ -467,6 +469,7 @@ describe("HttpApi SDK", () => {
 				const findFiles = yield* capture(() => sdk.find.files({ query: "hello", limit: 10 }))
 				const findText = yield* capture(() => sdk.find.text({ pattern: "sdk-parity" }))
 				const findSymbols = yield* capture(() => sdk.find.symbols({ query: "needle" }))
+				const agents = yield* capture(() => sdk.app.agents())
 				const skills = yield* capture(() => sdk.app.skills())
 				const tools = yield* capture(() => sdk.tool.ids())
 				const vcs = yield* capture(() => sdk.vcs.get())
@@ -489,6 +492,7 @@ describe("HttpApi SDK", () => {
 						findFiles,
 						findText,
 						findSymbols,
+						agents,
 						skills,
 						tools,
 						vcs,
@@ -505,6 +509,12 @@ describe("HttpApi SDK", () => {
 					foundFile: JSON.stringify(findFiles.data).includes("hello.txt"),
 					foundText: JSON.stringify(findText.data ?? null).includes("sdk-parity"),
 					symbols: findSymbols.data,
+					agents: array(agents.data)
+						.map((item) => {
+							const row = record(item)
+							return { name: row.name, mode: row.mode, native: row.native === true }
+						})
+						.sort((a, b) => String(a.name).localeCompare(String(b.name))),
 					listedFile: JSON.stringify(files.data).includes("hello.txt"),
 					ptyShells: array(ptyShells.data)
 						.map((item) => {
@@ -518,6 +528,32 @@ describe("HttpApi SDK", () => {
 		),
 	)
 	// kilocode_change end
+
+	parity("matches generated SDK provider discovery across backends", (backend) =>
+		withProject(backend, { git: false, config: providerConfig("http://127.0.0.1:9") }, ({ sdk }) =>
+			Effect.gen(function* () {
+				Flag.KILO_DISABLE_MODELS_FETCH = true
+				const providers = yield* capture(() => sdk.provider.list())
+				const data = record(providers.data)
+				const testProvider = array(data.all).find((item) => record(item).id === "test")
+
+				return {
+					statuses: statuses({ providers }),
+					default: data.default,
+					connected: array(data.connected).sort(),
+					failed: array(data.failed).sort(),
+					testProvider: testProvider
+						? {
+								id: record(testProvider).id,
+								name: record(testProvider).name,
+								source: record(testProvider).source,
+								models: Object.keys(record(record(testProvider).models)).sort(),
+							}
+						: undefined,
+				}
+			}),
+		),
+	)
 
 	parity("matches generated SDK command list across backends", (backend) =>
 		withProject(backend, { git: true }, ({ sdk }) =>
