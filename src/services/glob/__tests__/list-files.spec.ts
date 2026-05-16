@@ -120,7 +120,7 @@ describe("list-files symlink support", () => {
 
 		const lastArg = args[args.length - 1]
 		expect(lastArg).toBe(".")
-		expect(options).toMatchObject({ cwd: testDir })
+		expect(options).toMatchObject({ cwd: path.resolve(testDir) })
 	})
 
 	it("should include --follow flag for recursive listings too", async () => {
@@ -142,7 +142,7 @@ describe("list-files symlink support", () => {
 
 		const lastArg = args[args.length - 1]
 		expect(lastArg).toBe(".")
-		expect(options).toMatchObject({ cwd: testDir })
+		expect(options).toMatchObject({ cwd: path.resolve(testDir) })
 	})
 
 	it("should keep ignored ancestor directories like /tmp from excluding recursive file results", async () => {
@@ -156,7 +156,7 @@ describe("list-files symlink support", () => {
 		const [, args, options] = mockSpawn.mock.calls[0]
 		expect(args).toContain("!**/tmp/**")
 		expect(args[args.length - 1]).toBe(".")
-		expect(options).toMatchObject({ cwd: testDir })
+		expect(options).toMatchObject({ cwd: path.resolve(testDir) })
 		expect(files).toContain(path.join(testDir, "nested", "deep", "deep-nested-file.ts"))
 	})
 
