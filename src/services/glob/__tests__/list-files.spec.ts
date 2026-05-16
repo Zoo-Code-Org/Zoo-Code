@@ -157,7 +157,7 @@ describe("list-files symlink support", () => {
 		expect(args).toContain("!**/tmp/**")
 		expect(args[args.length - 1]).toBe(".")
 		expect(options).toMatchObject({ cwd: path.resolve(testDir) })
-		expect(files).toContain(path.join(testDir, "nested", "deep", "deep-nested-file.ts"))
+		expect(files).toContain(path.resolve(testDir, "nested", "deep", "deep-nested-file.ts"))
 	})
 
 	it("should ensure first-level directories are included when limit is reached", async () => {
