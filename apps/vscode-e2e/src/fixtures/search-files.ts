@@ -28,7 +28,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			id: "call_search_files_todo_002",
 		},
 		{
-			userMessagePattern: "SEARCH_FILES_TYPESCRIPT_SMOKE",
+			userMessagePattern: "TypeScript interfaces you find",
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"interface\\\\s+\\\\w+","file_pattern":"*.ts"}',
 			toolCallId: "call_search_files_typescript_001",
@@ -36,7 +36,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			id: "call_search_files_typescript_002",
 		},
 		{
-			userMessagePattern: "SEARCH_FILES_JSON_SMOKE",
+			userMessagePattern: "JSON configuration keys",
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"\\"\\\\w+\\":\\\\s*","file_pattern":"*.json"}',
 			toolCallId: "call_search_files_json_001",
@@ -44,7 +44,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			id: "call_search_files_json_002",
 		},
 		{
-			userMessagePattern: "SEARCH_FILES_NESTED_SMOKE",
+			userMessagePattern: "formatCurrency and debounce",
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"function\\\\s+(format|debounce)"}',
 			toolCallId: "call_search_files_nested_001",
@@ -52,7 +52,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			id: "call_search_files_nested_002",
 		},
 		{
-			userMessagePattern: "SEARCH_FILES_COMPLEX_REGEX_SMOKE",
+			userMessagePattern: "import and export statements",
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"(import|export).*","file_pattern":"*.{js,ts}"}',
 			toolCallId: "call_search_files_complex_regex_001",

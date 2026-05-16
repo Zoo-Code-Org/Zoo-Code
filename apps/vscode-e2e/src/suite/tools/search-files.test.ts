@@ -433,7 +433,7 @@ The search should find matches across different file types and provide context f
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "SEARCH_FILES_TYPESCRIPT_SMOKE",
+				text: "Search for interface definitions using the regex interface\\s+\\w+ with file_pattern *.ts in the search-files-tool-fixture directory and report the TypeScript interfaces you find.",
 			})
 
 			// Wait for task completion
@@ -485,7 +485,7 @@ The search should find matches across different file types and provide context f
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "SEARCH_FILES_JSON_SMOKE",
+				text: 'Search for JSON configuration keys using the regex "\\w+":\\s* with file_pattern *.json in the search-files-tool-fixture directory and report the keys you find.',
 			})
 
 			// Wait for task completion
@@ -540,7 +540,7 @@ The search should find matches across different file types and provide context f
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "SEARCH_FILES_NESTED_SMOKE",
+				text: "Search for the utility functions formatCurrency and debounce using the regex function\\s+(format|debounce) in the search-files-tool-fixture directory and report what you find in the nested subdirectory.",
 			})
 
 			// Wait for task completion
@@ -592,7 +592,7 @@ The search should find matches across different file types and provide context f
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "SEARCH_FILES_COMPLEX_REGEX_SMOKE",
+				text: "Search for import and export statements using the regex (import|export).* with file_pattern *.{js,ts} in the search-files-tool-fixture directory and report the module exports you find.",
 			})
 
 			// Wait for task completion

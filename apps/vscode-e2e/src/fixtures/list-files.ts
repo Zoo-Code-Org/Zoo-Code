@@ -28,7 +28,7 @@ function toolResultContains(req: ChatCompletionRequest, toolCallId: string, expe
 export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 	const fixtures: ListFilesFixture[] = [
 		{
-			userMessagePattern: "LIST_FILES_NON_RECURSIVE_SMOKE",
+			userMessagePattern: "without recursing into subdirectories",
 			toolName: "list_files",
 			arguments: '{"path":"list-files-tool-fixture","recursive":false}',
 			toolCallId: "call_list_files_non_recursive_001",
@@ -45,7 +45,7 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 			id: "call_list_files_recursive_002",
 		},
 		{
-			userMessagePattern: "LIST_FILES_SYMLINK_SMOKE",
+			userMessagePattern: "list-files-symlink-fixture.*recursive=false",
 			toolName: "list_files",
 			arguments: '{"path":"list-files-symlink-fixture","recursive":false}',
 			toolCallId: "call_list_files_symlink_001",
