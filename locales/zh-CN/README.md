@@ -30,7 +30,7 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.55.0 新增内容
+## v3.54.1 新增内容
 
 **Zoo Code 首次发布** —— Zoo Code 现已作为独立扩展在 VS Code Marketplace 上线，标识为 `ZooCodeOrganization.zoo-code`，并会在每次 merge 到 `main` 后自动发布 pre-release 构建。
 
@@ -62,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

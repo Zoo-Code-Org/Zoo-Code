@@ -30,7 +30,7 @@
 
 Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/VxfP4Vx3gX)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
 
-## v3.55.0의 새로운 기능
+## v3.54.1의 새로운 기능
 
 **Zoo Code의 첫 릴리스** — `ZooCodeOrganization.zoo-code`라는 이름으로 VS Code Marketplace에 독립적인 확장 프로그램으로 자리 잡았고, `main`에 merge 될 때마다 pre-release 빌드가 자동으로 게시됩니다.
 
@@ -62,7 +62,7 @@ Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 
