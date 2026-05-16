@@ -158,16 +158,32 @@ export class MimoHandler extends OpenAiHandler {
 				}
 				converted.push(assistantMsg)
 			} else if (msg.role === "user" && Array.isArray(msg.content)) {
-				// Process user messages: separate tool_results from text
+				// Process user messages: separate tool_results, text, and media
 				const toolResults: Anthropic.ToolResultBlockParam[] = []
 				const textBlocks: string[] = []
+				const mediaParts: any[] = []
 
 				for (const block of msg.content) {
 					if (block.type === "tool_result") {
 						toolResults.push(block)
 					} else if (block.type === "text") {
 						textBlocks.push(block.text)
+					} else if (block.type === "image") {
+						// Convert Anthropic image block to OpenAI image_url format
+						const src = (block as any).source
+						if (src?.type === "base64" && src?.media_type) {
+							mediaParts.push({
+								type: "image_url",
+								image_url: { url: `data:${src.media_type};base64,${src.data}` },
+							})
+						} else if (src?.type === "url") {
+							mediaParts.push({
+								type: "image_url",
+								image_url: { url: src.url },
+							})
+						}
 					}
+					// audio/video blocks are not supported in OpenAI chat format — skip silently
 				}
 
 				// Add tool results as role:"tool" messages (MiMo supports this)
@@ -188,12 +204,16 @@ export class MimoHandler extends OpenAiHandler {
 					})
 				}
 
-				// Add text content as user message
-				if (textBlocks.length > 0) {
-					converted.push({
-						role: "user",
-						content: textBlocks.join("\n"),
-					})
+				// Build user message content — plain string or multimodal array
+				if (mediaParts.length > 0) {
+					const content: any[] = []
+					if (textBlocks.length > 0) {
+						content.push({ type: "text", text: textBlocks.join("\n") })
+					}
+					content.push(...mediaParts)
+					converted.push({ role: "user", content })
+				} else if (textBlocks.length > 0) {
+					converted.push({ role: "user", content: textBlocks.join("\n") })
 				}
 			} else if (msg.role === "user" && typeof msg.content === "string") {
 				converted.push({
