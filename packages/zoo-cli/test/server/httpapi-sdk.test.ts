@@ -541,13 +541,15 @@ describe("HttpApi SDK", () => {
 	parity("matches generated SDK sync history read route across backends", (backend) =>
 		withProject(backend, { git: false, setup: () => seedSyncHistory() }, ({ sdk }) =>
 			Effect.gen(function* () {
+				const empty = yield* capture(() => sdk.sync.history.list({ body: {} }))
 				const all = yield* capture(() => sdk.sync.history.list({ body: { agg_other: 0 } }))
 				const afterZero = yield* capture(() => sdk.sync.history.list({ body: { agg_sync_history: 0 } }))
 				const excluded = yield* capture(() => sdk.sync.history.list({ body: { agg_sync_history: 1 } }))
 				const invalid = yield* capture(() => sdk.sync.history.list({ body: { agg_sync_history: -1 } }))
 
 				return {
-					statuses: statuses({ all, afterZero, excluded, invalid }),
+					statuses: statuses({ empty, all, afterZero, excluded, invalid }),
+					empty: syncEventRows(empty.data),
 					all: syncEventRows(all.data),
 					afterZero: syncEventRows(afterZero.data),
 					excluded: syncEventRows(excluded.data),

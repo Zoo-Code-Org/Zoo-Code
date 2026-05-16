@@ -94,9 +94,9 @@ interface Params {
 	query: Record<string, unknown>
 }
 
-const stripEmptySlots = (params: Params) => {
+const stripEmptySlots = (params: Params, keep: Partial<Record<Slot, boolean>> = {}) => {
 	for (const [slot, value] of Object.entries(params)) {
-		if (value && typeof value === "object" && !Object.keys(value).length) {
+		if (!keep[slot as Slot] && value && typeof value === "object" && !Object.keys(value).length) {
 			delete params[slot as Slot]
 		}
 	}
@@ -109,6 +109,7 @@ export const buildClientParams = (args: ReadonlyArray<unknown>, fields: FieldsCo
 		path: {},
 		query: {},
 	}
+	const keep: Partial<Record<Slot, boolean>> = {}
 
 	const map = buildKeyMap(fields)
 
@@ -132,6 +133,7 @@ export const buildClientParams = (args: ReadonlyArray<unknown>, fields: FieldsCo
 				}
 			} else {
 				params.body = arg
+				keep.body = true
 			}
 		} else {
 			for (const [key, value] of Object.entries(arg ?? {})) {
@@ -143,6 +145,7 @@ export const buildClientParams = (args: ReadonlyArray<unknown>, fields: FieldsCo
 						;(params[field.in] as Record<string, unknown>)[name] = value
 					} else {
 						params[field.map] = value
+						keep[field.map] = true
 					}
 				} else {
 					const extra = extraPrefixes.find(([prefix]) => key.startsWith(prefix))
@@ -163,7 +166,7 @@ export const buildClientParams = (args: ReadonlyArray<unknown>, fields: FieldsCo
 		}
 	}
 
-	stripEmptySlots(params)
+	stripEmptySlots(params, keep)
 
 	return params
 }

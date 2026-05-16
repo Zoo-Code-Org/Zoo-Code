@@ -51,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add generated SDK worktree diff route parity across direct and HttpApi backends.
 - Add generated SDK PTY shells/list read parity across direct and HttpApi backends.
 - Add generated SDK sync history read parity across direct and HttpApi backends.
+- Fix generated SDK parameter handling so explicitly provided empty JSON bodies are preserved for routes such as sync history.
 - Add `@zoo-code/sdk` wrappers for portable-core PTY shells/list read routes.
 - Add `@zoo-code/sdk` wrappers for portable-core TUI prompt/dialog/command/toast/session routes.
 - Add an `@zoo-code/sdk` wrapper for portable-core sync history reads.
