@@ -93,14 +93,6 @@ describe("MimoHandler", () => {
 			expect(model.info.outputPrice).toBe(2.0)
 		})
 
-		it("should return correct model info for mimo-v2-flash", () => {
-			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2-flash" })
-			const model = h.getModel()
-			expect(model.id).toBe("mimo-v2-flash")
-			expect(model.info.contextWindow).toBe(262_144)
-			expect(model.info.maxTokens).toBe(65_536)
-		})
-
 		it("should fallback to default model for unknown model ID", () => {
 			const h = new MimoHandler({ ...mockOptions, apiModelId: "unknown-model" })
 			const model = h.getModel()

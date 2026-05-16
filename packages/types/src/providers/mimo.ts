@@ -32,16 +32,6 @@ export const mimoModels = {
 		description:
 			"MiMo V2.5 - Full modal understanding model with 1M context, deep thinking, tool calling, and structured output.",
 	},
-	"mimo-v2-flash": {
-		maxTokens: 65_536,
-		contextWindow: 262_144,
-		supportsImages: false,
-		supportsPromptCache: false,
-		preserveReasoning: true,
-		inputPrice: 0.1, // $0.10 per million tokens (cache miss)
-		outputPrice: 0.3, // $0.30 per million tokens
-		description: "MiMo V2 Flash - Fast and cost-effective reasoning model with tool calling support.",
-	},
 } as const satisfies Record<string, ModelInfo>
 
 export const mimoDefaultModelInfo: ModelInfo = mimoModels[mimoDefaultModelId]
