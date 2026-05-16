@@ -51,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add generated SDK worktree diff route parity across direct and HttpApi backends.
 - Add generated SDK PTY shells/list read parity across direct and HttpApi backends.
 - Add `@zoo-code/sdk` wrappers for portable-core PTY shells/list read routes.
+- Add `@zoo-code/sdk` wrappers for portable-core TUI prompt/help/command/toast/session routes.
 - Add SDK wrappers for portable-core worktree list, create, remove, and reset routes.
 - Add SDK wrappers for legacy portable-core worktree diff, diff summary, and diff-file routes.
 - Add Effect HttpApi parity for portable-core worktree diff, diff summary, and diff-file routes.

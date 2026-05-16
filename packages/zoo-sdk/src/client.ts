@@ -54,6 +54,11 @@ import type {
 	SkillInfo,
 	SymbolInfo,
 	Todo,
+	TuiAppendPromptOptions,
+	TuiExecuteCommandOptions,
+	TuiScope,
+	TuiSelectSessionOptions,
+	TuiShowToastOptions,
 	VcsDiffOptions,
 	VcsFileDiff,
 	VcsInfo,
@@ -648,6 +653,74 @@ export class ZooClient {
 					path: `/pty${workspaceRouteQuery(options)}`,
 				}),
 			) ?? []
+		)
+	}
+
+	/** Append text to the portable-core TUI prompt. */
+	async appendTuiPrompt(options: TuiAppendPromptOptions): Promise<boolean> {
+		const { directory, workspace, ...body } = options
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/append-prompt${workspaceRouteQuery({ directory, workspace })}`,
+					body,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Open the portable-core TUI help dialog. */
+	async openTuiHelp(options: TuiScope = {}): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/open-help${workspaceRouteQuery(options)}`,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Execute a portable-core TUI command. */
+	async executeTuiCommand(options: TuiExecuteCommandOptions): Promise<boolean> {
+		const { directory, workspace, ...body } = options
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/execute-command${workspaceRouteQuery({ directory, workspace })}`,
+					body,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Show a portable-core TUI toast. */
+	async showTuiToast(options: TuiShowToastOptions): Promise<boolean> {
+		const { directory, workspace, ...body } = options
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/show-toast${workspaceRouteQuery({ directory, workspace })}`,
+					body,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Select a session in the portable-core TUI. */
+	async selectTuiSession(options: TuiSelectSessionOptions): Promise<boolean> {
+		const { directory, workspace, ...body } = options
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/select-session${workspaceRouteQuery({ directory, workspace })}`,
+					body,
+				}),
+			) ?? false
 		)
 	}
 

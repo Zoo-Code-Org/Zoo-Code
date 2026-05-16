@@ -163,6 +163,7 @@ function transport(): ZooTransport & { requests: any[] } {
 					],
 				}
 			}
+			if (input.path?.startsWith("/tui/")) return { data: true }
 			if (
 				input.path ===
 				"/experimental/session?directory=%2Frepo%2Froot&workspace=workspace-1&projectID=proj_1&worktrees=true&roots=false&limit=10&archived=false"
@@ -672,6 +673,44 @@ describe("ZooClient", () => {
 			{ path: "/find/file?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello&limit=10" },
 			{ path: "/find/symbol?directory=%2Frepo%2Froot&workspace=workspace-1&query=hello" },
 			{ path: "/find?directory=%2Frepo%2Froot&workspace=workspace-1&pattern=sdk-parity" },
+		])
+	})
+
+	test("wraps TUI command routes", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+		const scope = { directory: "/repo/root", workspace: "workspace-1" }
+
+		await expect(client.appendTuiPrompt({ ...scope, text: "hello" })).resolves.toBe(true)
+		await expect(client.openTuiHelp(scope)).resolves.toBe(true)
+		await expect(client.executeTuiCommand({ ...scope, command: "session_new" })).resolves.toBe(true)
+		await expect(client.showTuiToast({ ...scope, title: "SDK", message: "hello", variant: "info" })).resolves.toBe(
+			true,
+		)
+		await expect(client.selectTuiSession({ ...scope, sessionID: "ses_test" })).resolves.toBe(true)
+
+		expect(mock.requests.slice(-5)).toEqual([
+			{
+				method: "POST",
+				path: "/tui/append-prompt?directory=%2Frepo%2Froot&workspace=workspace-1",
+				body: { text: "hello" },
+			},
+			{ method: "POST", path: "/tui/open-help?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{
+				method: "POST",
+				path: "/tui/execute-command?directory=%2Frepo%2Froot&workspace=workspace-1",
+				body: { command: "session_new" },
+			},
+			{
+				method: "POST",
+				path: "/tui/show-toast?directory=%2Frepo%2Froot&workspace=workspace-1",
+				body: { title: "SDK", message: "hello", variant: "info" },
+			},
+			{
+				method: "POST",
+				path: "/tui/select-session?directory=%2Frepo%2Froot&workspace=workspace-1",
+				body: { sessionID: "ses_test" },
+			},
 		])
 	})
 

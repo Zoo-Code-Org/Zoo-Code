@@ -276,6 +276,35 @@ export type PtySession = {
 	pid: number
 }
 
+/** Optional workspace scoping for TUI commands. */
+export type TuiScope = WorkspaceRouteOptions
+
+/** TUI toast variant. */
+export type TuiToastVariant = "info" | "success" | "warning" | "error" | string
+
+/** Options for appending text to the TUI prompt. */
+export type TuiAppendPromptOptions = TuiScope & {
+	text: string
+}
+
+/** Options for executing a TUI command. */
+export type TuiExecuteCommandOptions = TuiScope & {
+	command: string
+}
+
+/** Options for showing a TUI toast. */
+export type TuiShowToastOptions = TuiScope & {
+	title?: string
+	message: string
+	variant?: TuiToastVariant
+	duration?: number
+}
+
+/** Options for selecting a TUI session. */
+export type TuiSelectSessionOptions = TuiScope & {
+	sessionID: string
+}
+
 /** Options for experimental session listing. */
 export type ExperimentalSessionListOptions = WorkspaceRouteOptions & {
 	projectID?: string
