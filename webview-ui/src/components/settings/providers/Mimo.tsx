@@ -38,16 +38,16 @@ export const Mimo = ({ apiConfiguration, setApiConfigurationField }: MimoProps) 
 					onChange={handleInputChange("mimoBaseUrl")}
 					className={cn("w-full")}>
 					<VSCodeOption value="https://token-plan-sgp.xiaomimimo.com/v1" className="p-2">
-						Token Plan - Singapore (Default)
+						{t("settings:providers.mimoBaseUrlSingapore")}
 					</VSCodeOption>
 					<VSCodeOption value="https://token-plan-cn.xiaomimimo.com/v1" className="p-2">
-						Token Plan - China
+						{t("settings:providers.mimoBaseUrlChina")}
 					</VSCodeOption>
 					<VSCodeOption value="https://token-plan-ams.xiaomimimo.com/v1" className="p-2">
-						Token Plan - Europe (AMS)
+						{t("settings:providers.mimoBaseUrlEurope")}
 					</VSCodeOption>
 					<VSCodeOption value="https://api.xiaomimimo.com/v1" className="p-2">
-						Pay-as-you-go
+						{t("settings:providers.mimoBaseUrlPayg")}
 					</VSCodeOption>
 				</VSCodeDropdown>
 			</div>

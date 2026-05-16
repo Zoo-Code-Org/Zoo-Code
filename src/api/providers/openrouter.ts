@@ -238,7 +238,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			{ role: "system", content: systemPrompt },
 			...convertToOpenAiMessages(
 				messages,
-				isMistral ? { normalizeToolCallId: normalizeMistralToolCallId, modelId } : { modelId },
+				isMistral ? { normalizeToolCallId: normalizeMistralToolCallId } : undefined,
 			),
 		]
 

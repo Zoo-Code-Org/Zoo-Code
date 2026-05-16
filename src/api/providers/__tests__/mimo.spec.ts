@@ -473,7 +473,7 @@ describe("MimoHandler", () => {
 			)
 		})
 
-		it("should not send parallel_tool_calls or stream_options", async () => {
+		it("should not send parallel_tool_calls or tool_choice", async () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
@@ -485,8 +485,21 @@ describe("MimoHandler", () => {
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.parallel_tool_calls).toBeUndefined()
-			expect(params.stream_options).toBeUndefined()
 			expect(params.tool_choice).toBeUndefined()
+		})
+
+		it("should send stream_options with include_usage", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.stream_options).toEqual({ include_usage: true })
 		})
 
 		it("should include tools when provided", async () => {

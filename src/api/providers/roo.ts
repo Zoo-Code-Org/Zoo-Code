@@ -100,10 +100,7 @@ export class RooHandler extends BaseOpenAiCompatibleProvider<string> {
 			model,
 			max_tokens,
 			temperature,
-			messages: [
-				{ role: "system", content: systemPrompt },
-				...convertToOpenAiMessages(messages, { modelId: model }),
-			],
+			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
 			stream: true,
 			stream_options: { include_usage: true },
 			...(reasoning && { reasoning }),

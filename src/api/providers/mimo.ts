@@ -219,11 +219,13 @@ export class MimoHandler extends OpenAiHandler {
 		const tools = this.convertToolsForOpenAI(metadata?.tools)
 
 		// Build request per MiMo's OpenAI-compatible API
+		// https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md
 		const params: Record<string, any> = {
 			model: modelId,
 			temperature,
 			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
 			stream: true,
+			stream_options: { include_usage: true },
 			// MiMo requires thinking to be enabled via extra_body
 			extra_body: { thinking: { type: "enabled" } },
 		}

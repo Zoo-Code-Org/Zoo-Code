@@ -116,10 +116,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	): ApiStream {
 		const { id: modelId, info } = await this.fetchModel()
 
-		const openAiMessages = convertToOpenAiMessages(messages, {
-			modelId,
-			normalizeToolCallId: sanitizeOpenAiCallId,
-		})
+		const openAiMessages = convertToOpenAiMessages(messages)
 
 		// Prepare messages with cache control if enabled and supported
 		let systemMessage: OpenAI.Chat.ChatCompletionMessageParam
