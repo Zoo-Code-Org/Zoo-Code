@@ -5,6 +5,7 @@ import type { PlatformError } from "effect/PlatformError"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { rgPath as packagedRipgrepPath } from "ripgrep"
 
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Global } from "@opencode-ai/core/global"
@@ -291,6 +292,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
 				Effect.gen(function* () {
 					const system = yield* Effect.sync(() => which(process.platform === "win32" ? "rg.exe" : "rg"))
 					if (system && (yield* fs.isFile(system).pipe(Effect.orDie))) return system
+					if (yield* fs.isFile(packagedRipgrepPath).pipe(Effect.orDie)) return packagedRipgrepPath
 
 					const target = path.join(Global.Path.bin, `rg${process.platform === "win32" ? ".exe" : ""}`)
 					if (yield* fs.isFile(target).pipe(Effect.orDie)) return target
