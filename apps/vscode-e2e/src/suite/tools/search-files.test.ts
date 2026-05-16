@@ -323,7 +323,7 @@ The search should find matches across different file types and provide context f
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "SEARCH_FILES_FUNCTIONS_SMOKE",
+				text: "Search the search-files-tool-fixture directory for JavaScript function declarations using the regex function\\s+\\w+ and report the function names you find.",
 			})
 
 			console.log("Task ID:", taskId)
@@ -379,7 +379,7 @@ The search should find matches across different file types and provide context f
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "SEARCH_FILES_TODO_SMOKE",
+				text: "Search the search-files-tool-fixture directory for TODO comments using the regex TODO.* and report the matching TODO entries.",
 			})
 
 			// Wait for task completion
@@ -649,7 +649,7 @@ The search should find matches across different file types and provide context f
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "SEARCH_FILES_NO_MATCH_SMOKE",
+				text: "Search the search-files-tool-fixture directory for nonExistentPattern12345 and report that there are no matches if the regex finds nothing.",
 			})
 
 			// Wait for task completion
@@ -724,7 +724,7 @@ The search should find matches across different file types and provide context f
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "SEARCH_FILES_CLASS_METHOD_SMOKE",
+				text: "Search the search-files-tool-fixture directory for TypeScript class definitions and async methods using the regex (class\\s+\\w+|async\\s+\\w+) with file_pattern *.ts, then report what you find.",
 			})
 
 			// Wait for task completion

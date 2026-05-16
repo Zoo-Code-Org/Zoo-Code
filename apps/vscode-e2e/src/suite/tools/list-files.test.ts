@@ -262,7 +262,7 @@ This directory contains various files and subdirectories for testing the list_fi
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "LIST_FILES_RECURSIVE_SMOKE",
+				text: "List every file in the list-files-tool-fixture directory recursively and confirm that the nested path for deep-nested-file.ts is included.",
 			})
 
 			console.log("Task ID:", taskId)
@@ -275,7 +275,8 @@ This directory contains various files and subdirectories for testing the list_fi
 					m.type === "say" &&
 					(m.say === "completion_result" || m.say === "text") &&
 					m.text?.includes("nested/") &&
-					m.text?.includes("deep/"),
+					m.text?.includes("deep/") &&
+					m.text?.includes("deep-nested-file.ts"),
 			)
 			assert.ok(completionMessage, "AI should have summarized the recursive directory contents")
 
@@ -403,7 +404,7 @@ This directory contains various files and subdirectories for testing the list_fi
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: "LIST_FILES_WORKSPACE_ROOT_SMOKE",
+				text: "List the files in the workspace root directory without recursing and confirm whether list-files-tool-fixture or list-files-symlink-fixture is present.",
 			})
 
 			console.log("Task ID:", taskId)
@@ -416,7 +417,7 @@ This directory contains various files and subdirectories for testing the list_fi
 				(m) =>
 					m.type === "say" &&
 					(m.say === "completion_result" || m.say === "text") &&
-					(m.text?.includes("apps") || m.text?.includes("packages") || m.text?.includes("workspace")),
+					(m.text?.includes("list-files-tool-fixture") || m.text?.includes("list-files-symlink-fixture")),
 			)
 			assert.ok(completionMessage, "AI should have mentioned workspace contents")
 

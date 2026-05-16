@@ -15,7 +15,7 @@ type SearchFilesFixture = {
 export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 	const fixtures: SearchFilesFixture[] = [
 		{
-			userMessagePattern: "SEARCH_FILES_FUNCTIONS_SMOKE",
+			userMessagePattern: "JavaScript function declarations",
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"function\\\\s+\\\\w+"}',
 			toolCallId: "call_search_files_functions_001",
@@ -28,7 +28,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			id: "call_search_files_functions_002",
 		},
 		{
-			userMessagePattern: "SEARCH_FILES_TODO_SMOKE",
+			userMessagePattern: "matching TODO entries",
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"TODO.*"}',
 			toolCallId: "call_search_files_todo_001",
@@ -85,7 +85,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			id: "call_search_files_complex_regex_002",
 		},
 		{
-			userMessagePattern: "SEARCH_FILES_NO_MATCH_SMOKE",
+			userMessagePattern: "nonExistentPattern12345 and report that there are no matches",
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"nonExistentPattern12345"}',
 			toolCallId: "call_search_files_no_match_001",
@@ -94,7 +94,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			id: "call_search_files_no_match_002",
 		},
 		{
-			userMessagePattern: "SEARCH_FILES_CLASS_METHOD_SMOKE",
+			userMessagePattern: "TypeScript class definitions and async methods",
 			toolName: "search_files",
 			arguments:
 				'{"path":"search-files-tool-fixture","regex":"(class\\\\s+\\\\w+|async\\\\s+\\\\w+)","file_pattern":"*.ts"}',

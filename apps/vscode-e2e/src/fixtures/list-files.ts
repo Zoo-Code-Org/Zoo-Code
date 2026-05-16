@@ -24,11 +24,11 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 			id: "call_list_files_non_recursive_002",
 		},
 		{
-			userMessagePattern: "LIST_FILES_RECURSIVE_SMOKE",
+			userMessagePattern: "deep-nested-file.ts is included",
 			toolName: "list_files",
 			arguments: '{"path":"list-files-tool-fixture","recursive":true}',
 			toolCallId: "call_list_files_recursive_001",
-			expected: ["nested/", "nested/deep/"],
+			expected: ["nested/", "nested/deep/", "deep-nested-file.ts"],
 			result: "The recursive listing for `list-files-tool-fixture` reached the nested structure and includes `nested/`, `deep/`, and `deep-nested-file.ts`.",
 			id: "call_list_files_recursive_002",
 		},
@@ -42,7 +42,7 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 			id: "call_list_files_symlink_002",
 		},
 		{
-			userMessagePattern: "LIST_FILES_WORKSPACE_ROOT_SMOKE",
+			userMessagePattern: "confirm whether list-files-tool-fixture or list-files-symlink-fixture is present",
 			toolName: "list_files",
 			arguments: '{"path":".","recursive":false}',
 			toolCallId: "call_list_files_workspace_root_001",
