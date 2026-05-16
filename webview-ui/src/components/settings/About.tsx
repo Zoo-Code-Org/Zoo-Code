@@ -1,7 +1,7 @@
 import { HTMLAttributes } from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { Trans } from "react-i18next"
-import { Download, Upload, TriangleAlert, Bug, Shield, Lightbulb, MessagesSquare } from "lucide-react"
+import { Download, Upload, TriangleAlert, Bug, Lightbulb, Shield, MessagesSquare } from "lucide-react"
 import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 
 import type { TelemetrySetting } from "@roo-code/types"
@@ -61,7 +61,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 			</Section>
 
 			<Section className="space-y-0">
-				<h3>{t("settings:about.contact")}</h3>
+				<h3>{t("settings:about.contactAndCommunity")}</h3>
 				<div className="flex flex-col gap-3">
 					<div className="flex items-start gap-2">
 						<Bug className="size-4 text-vscode-descriptionForeground shrink-0" />

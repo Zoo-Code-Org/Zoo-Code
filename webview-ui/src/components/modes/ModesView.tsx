@@ -653,6 +653,24 @@ const ModesView = () => {
 									</div>
 								)}
 							</div>
+							<StandardTooltip content={t("chat:modeSelector.marketplace")}>
+								<Button
+									variant="ghost"
+									size="icon"
+									onClick={() => {
+										window.postMessage(
+											{
+												type: "action",
+												action: "marketplaceButtonClicked",
+												values: { marketplaceTab: "mode" },
+											},
+											"*",
+										)
+									}}>
+									<span className="codicon codicon-extensions"></span>
+								</Button>
+							</StandardTooltip>
+
 							<StandardTooltip content={t("prompts:modes.importMode")}>
 								<Button
 									variant="ghost"
