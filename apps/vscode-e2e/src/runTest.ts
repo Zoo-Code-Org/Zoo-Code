@@ -130,7 +130,7 @@ async function main() {
 			...(testGrep && { TEST_GREP: testGrep }),
 			...(testFile && { TEST_FILE: testFile }),
 			...(mock && { AIMOCK_URL: mock.url }),
-			...(mock && isDeepSeekTest && { E2E_MOCK_MODEL_LIST_FALLBACK: "true" }),
+			...(mock && { E2E_MOCK_MODEL_LIST_FALLBACK: "true" }),
 		}
 
 		// Download VS Code, unzip it and run the integration test

@@ -38,7 +38,7 @@ export type GeminiReasoningParams = GenerateContentConfig["thinkingConfig"] & {
 export type GetModelReasoningOptions = {
 	model: ModelInfo
 	reasoningBudget: number | undefined
-	reasoningEffort: ReasoningEffortExtended | "disable" | undefined
+	reasoningEffort?: ReasoningEffortExtended | "disable" | undefined
 	settings: ProviderSettings
 }
 
@@ -121,7 +121,7 @@ export const getAnthropicProviderReasoning = ({
 		return { type: "adaptive" }
 	}
 
-	return getAnthropicReasoning({ model, reasoningBudget, reasoningEffort: undefined, settings })
+	return getAnthropicReasoning({ model, reasoningBudget, settings })
 }
 
 export const getOpenAiReasoning = ({
