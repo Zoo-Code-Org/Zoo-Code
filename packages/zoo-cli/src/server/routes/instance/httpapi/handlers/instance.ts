@@ -46,7 +46,19 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
 		})
 
 		const getCommand = Effect.fn("InstanceHttpApi.command")(function* () {
-			return yield* command.list()
+			return (yield* command.list()).map((item) => ({
+				name: item.name,
+				description: item.description,
+				agent: item.agent,
+				model: item.model,
+				source: item.source,
+				template:
+					item.name === Command.Default.LOCAL_REVIEW || item.name === Command.Default.LOCAL_REVIEW_UNCOMMITTED
+						? {}
+						: item.template,
+				subtask: item.subtask,
+				hints: item.hints,
+			}))
 		})
 
 		const getAgent = Effect.fn("InstanceHttpApi.agent")(function* () {

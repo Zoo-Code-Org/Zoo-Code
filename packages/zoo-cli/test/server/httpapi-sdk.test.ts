@@ -519,6 +519,28 @@ describe("HttpApi SDK", () => {
 	)
 	// kilocode_change end
 
+	parity("matches generated SDK command list across backends", (backend) =>
+		withProject(backend, { git: true }, ({ sdk }) =>
+			Effect.gen(function* () {
+				const commands = yield* capture(() => sdk.command.list())
+				const rows = array(commands.data).map((item) => {
+					const row = record(item)
+					return {
+						name: row.name,
+						hasTemplate: typeof row.template === "string",
+					}
+				})
+
+				return {
+					statuses: statuses({ commands }),
+					names: rows.map((row) => row.name).sort(),
+					localReview: rows.find((row) => row.name === "local-review")?.hasTemplate,
+					localReviewUncommitted: rows.find((row) => row.name === "local-review-uncommitted")?.hasTemplate,
+				}
+			}),
+		),
+	)
+
 	parity("matches generated SDK worktree diff routes across backends", (backend) =>
 		withProject(backend, { setup: writeWorktreeDiffFiles }, ({ sdk }) =>
 			Effect.gen(function* () {

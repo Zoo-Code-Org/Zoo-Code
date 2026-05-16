@@ -1,7 +1,7 @@
 import { BusEvent } from "@/bus/bus-event"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectBridge } from "@/effect/bridge"
-import type { InstanceContext } from "@/project/instance"
+import { Instance, type InstanceContext } from "@/project/instance"
 import { SessionID, MessageID } from "@/session/schema"
 import { Effect, Layer, Context, Schema } from "effect"
 import z from "zod"
@@ -11,6 +11,7 @@ import { Config } from "@/config/config"
 import { MCP } from "../mcp"
 import { Skill } from "../skill"
 import { localReviewCommand, localReviewUncommittedCommand } from "@/kilocode/review/command" // kilocode_change
+import { Review } from "@/kilocode/review/review" // kilocode_change
 import { makeRuntime } from "@/effect/run-service" // kilocode_change
 import PROMPT_INITIALIZE from "./template/initialize.txt"
 import PROMPT_REVIEW from "./template/review.txt"
@@ -107,8 +108,12 @@ export const layer = Layer.effect(
 			}
 
 			// kilocode_change start
-			commands[Default.LOCAL_REVIEW] = localReviewCommand()
-			commands[Default.LOCAL_REVIEW_UNCOMMITTED] = localReviewUncommittedCommand()
+			commands[Default.LOCAL_REVIEW] = localReviewCommand(() =>
+				Instance.restore(ctx, () => Review.buildReviewPromptBranch()),
+			)
+			commands[Default.LOCAL_REVIEW_UNCOMMITTED] = localReviewUncommittedCommand(() =>
+				Instance.restore(ctx, () => Review.buildReviewPromptUncommitted()),
+			)
 			// kilocode_change end
 
 			for (const [name, command] of Object.entries(cfg.command ?? {})) {
