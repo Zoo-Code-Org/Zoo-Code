@@ -152,6 +152,32 @@ describe("PortableCoreService", () => {
 		)
 	})
 
+	it("ignores portable core config reloads after disposal", async () => {
+		usePortableCore.mockReturnValue(true)
+		const client = {
+			invalidateConfig: vitest.fn().mockResolvedValue(true),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		const handle = {
+			ipcPath: "/tmp/zoo-test.sock",
+			reused: false,
+			connect: vitest.fn().mockResolvedValue(client),
+			close: vitest.fn().mockResolvedValue(undefined),
+		}
+		createZooServer.mockResolvedValue(handle)
+		const outputChannel = createOutputChannel()
+
+		const service = await PortableCoreService.create(createContext() as any, outputChannel as any)
+		await service!.dispose()
+		await service!.reloadConfig("zoo.jsonc")
+
+		expect(client.invalidateConfig).not.toHaveBeenCalled()
+		expect(outputChannel.appendLine).not.toHaveBeenCalledWith("[PortableCore] Reloaded config after zoo.jsonc")
+		expect(outputChannel.appendLine).not.toHaveBeenCalledWith(
+			expect.stringContaining("[PortableCore] Failed to reload config after zoo.jsonc"),
+		)
+	})
+
 	it("logs SDK server restart lifecycle events", async () => {
 		usePortableCore.mockReturnValue(true)
 		const handle = {

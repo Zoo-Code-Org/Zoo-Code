@@ -66,6 +66,10 @@ export class PortableCoreService implements vscode.Disposable {
 
 	/** Invalidate portable-core config caches after local config files change. */
 	async reloadConfig(reason: string): Promise<void> {
+		if (this.#disposed) {
+			return
+		}
+
 		try {
 			await this.client.invalidateConfig()
 			this.#outputChannel.appendLine(`[PortableCore] Reloaded config after ${reason}`)
