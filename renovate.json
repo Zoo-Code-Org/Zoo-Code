@@ -6,9 +6,6 @@
 	"prConcurrentLimit": 5,
 	"prCreation": "not-pending",
 	"ignoreDeps": ["@vscode/vsce"],
-	"major": {
-		"dependencyDashboardApproval": true
-	},
 	"packageRules": [
 		{
 			"description": "Group GitHub Actions updates for one review pass.",
@@ -58,6 +55,18 @@
 			"matchUpdateTypes": ["minor", "patch"],
 			"groupName": "Frontend and UI stack",
 			"schedule": ["* 21-23 * * 0"]
+		},
+		{
+			"description": "Require approval before opening major React stack updates.",
+			"matchPackageNames": [
+				"react",
+				"react-dom",
+				"react-compiler-runtime",
+				"/^@types\\/react(?:-dom)?$/",
+				"/^@vitejs\\/plugin-react$/"
+			],
+			"matchUpdateTypes": ["major"],
+			"dependencyDashboardApproval": true
 		},
 		{
 			"description": "Group test and build tooling patch/minor updates.",
