@@ -1,12 +1,28 @@
 import { LLMock } from "@copilotkit/aimock"
+import type { ChatCompletionRequest, ChatMessage } from "@copilotkit/aimock"
 
 type ListFilesFixture = {
 	userMessagePattern: string
 	toolName: string
 	arguments: string
 	toolCallId: string
+	expected?: string[]
 	result: string
 	id: string
+}
+
+function toolResultContains(req: ChatCompletionRequest, toolCallId: string, expected: string[]) {
+	const messages = Array.isArray(req?.messages) ? req.messages : []
+	const toolMessage = messages.find(
+		(message: ChatMessage) => message?.role === "tool" && message.tool_call_id === toolCallId,
+	)
+
+	const content = toolMessage?.content
+	if (typeof content !== "string") {
+		return false
+	}
+
+	return expected.every((text) => content.includes(text))
 }
 
 export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
@@ -24,6 +40,7 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 			toolName: "list_files",
 			arguments: '{"path":"list-files-tool-fixture","recursive":true}',
 			toolCallId: "call_list_files_recursive_001",
+			expected: ["nested/", "nested/deep/"],
 			result: "The recursive listing for `list-files-tool-fixture` reached the nested structure and includes `nested/`, `deep/`, and `deep-nested-file.ts`.",
 			id: "call_list_files_recursive_002",
 		},
@@ -32,6 +49,7 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 			toolName: "list_files",
 			arguments: '{"path":"list-files-symlink-fixture","recursive":false}',
 			toolCallId: "call_list_files_symlink_001",
+			expected: ["link-to-file.txt", "source/"],
 			result: "The symlink fixture listing shows the original `source/` directory and its `source-file.txt`, alongside the symlinked entries in `list-files-symlink-fixture`.",
 			id: "call_list_files_symlink_002",
 		},
@@ -40,7 +58,8 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 			toolName: "list_files",
 			arguments: '{"path":".","recursive":false}',
 			toolCallId: "call_list_files_workspace_root_001",
-			result: "The workspace root listing includes top-level directories like `apps/` and `packages/`, plus files such as `README.md`.",
+			expected: ["list-files-tool-fixture/"],
+			result: "The workspace root currently contains the `list-files-tool-fixture/` and `list-files-symlink-fixture/` test directories.",
 			id: "call_list_files_workspace_root_002",
 		},
 	]
@@ -64,6 +83,9 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 		mock.addFixture({
 			match: {
 				toolCallId: fixture.toolCallId,
+				...(fixture.expected && {
+					predicate: (req) => toolResultContains(req, fixture.toolCallId, fixture.expected!),
+				}),
 			},
 			response: {
 				toolCalls: [
