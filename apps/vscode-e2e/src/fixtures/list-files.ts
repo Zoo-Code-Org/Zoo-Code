@@ -29,7 +29,7 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 			arguments: '{"path":"list-files-tool-fixture","recursive":true}',
 			toolCallId: "call_list_files_recursive_001",
 			expected: ["nested/", "nested/deep/", "deep-nested-file.ts"],
-			result: "The recursive listing for `list-files-tool-fixture` reached the nested structure and includes `nested/`, `deep/`, and `deep-nested-file.ts`.",
+			result: "The recursive listing for `list-files-tool-fixture` reached the nested structure and includes `nested/`, `nested/deep/`, and `deep-nested-file.ts`.",
 			id: "call_list_files_recursive_002",
 		},
 		{

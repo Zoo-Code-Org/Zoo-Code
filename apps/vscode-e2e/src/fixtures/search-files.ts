@@ -28,7 +28,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			id: "call_search_files_functions_002",
 		},
 		{
-			userMessagePattern: "matching TODO entries",
+			userMessagePattern: "TODO comments using the regex TODO",
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"TODO.*"}',
 			toolCallId: "call_search_files_todo_001",

@@ -274,8 +274,7 @@ This directory contains various files and subdirectories for testing the list_fi
 				(m) =>
 					m.type === "say" &&
 					(m.say === "completion_result" || m.say === "text") &&
-					m.text?.includes("nested/") &&
-					m.text?.includes("deep/") &&
+					m.text?.includes("nested/deep/") &&
 					m.text?.includes("deep-nested-file.ts"),
 			)
 			assert.ok(completionMessage, "AI should have summarized the recursive directory contents")
