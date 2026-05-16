@@ -13,6 +13,8 @@ import { MessageV2 } from "../../src/session/message-v2"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import type { Config } from "@/config/config"
 import { Session as SessionNs } from "@/session/session"
+import { Database } from "@/storage/db"
+import { EventSequenceTable, EventTable } from "@/sync/event.sql"
 import { TestLLMServer } from "../lib/llm-server"
 import path from "path"
 import { resetDatabase } from "../fixture/db"
@@ -265,6 +267,45 @@ function writeWorktreeDiffFiles(dir: string) {
 	})
 }
 
+function seedSyncHistory() {
+	return Effect.sync(() => {
+		Database.use((db) => {
+			db.insert(EventSequenceTable).values({ aggregate_id: "agg_sync_history", seq: 1 }).run()
+			db.insert(EventTable)
+				.values([
+					{
+						id: "evt_sync_history_0",
+						aggregate_id: "agg_sync_history",
+						seq: 0,
+						type: "test.sync",
+						data: { value: "first" },
+					},
+					{
+						id: "evt_sync_history_1",
+						aggregate_id: "agg_sync_history",
+						seq: 1,
+						type: "test.sync",
+						data: { value: "second" },
+					},
+				])
+				.run()
+		})
+	})
+}
+
+function syncEventRows(value: unknown) {
+	return array(value).map((item) => {
+		const row = record(item)
+		return {
+			id: row.id,
+			aggregate_id: row.aggregate_id,
+			seq: row.seq,
+			type: row.type,
+			data: row.data,
+		}
+	})
+}
+
 function seedMessage(directory: string, sessionID: string) {
 	const id = SessionID.make(sessionID)
 	return call(
@@ -492,6 +533,24 @@ describe("HttpApi SDK", () => {
 					summary: worktreeDiffRows(summary.data),
 					file: worktreeDiffRows([file.data])[0],
 					missing: missing.data,
+				}
+			}),
+		),
+	)
+
+	parity("matches generated SDK sync history read route across backends", (backend) =>
+		withProject(backend, { git: false, setup: () => seedSyncHistory() }, ({ sdk }) =>
+			Effect.gen(function* () {
+				const all = yield* capture(() => sdk.sync.history.list({ body: { agg_other: 0 } }))
+				const afterZero = yield* capture(() => sdk.sync.history.list({ body: { agg_sync_history: 0 } }))
+				const excluded = yield* capture(() => sdk.sync.history.list({ body: { agg_sync_history: 1 } }))
+				const invalid = yield* capture(() => sdk.sync.history.list({ body: { agg_sync_history: -1 } }))
+
+				return {
+					statuses: statuses({ all, afterZero, excluded, invalid }),
+					all: syncEventRows(all.data),
+					afterZero: syncEventRows(afterZero.data),
+					excluded: syncEventRows(excluded.data),
 				}
 			}),
 		),

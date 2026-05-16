@@ -429,6 +429,7 @@
 - **Progress addendum:** Added generated SDK PTY shells/list read parity across direct and HttpApi backends without creating or connecting PTYs.
 - **Progress addendum:** Added hand-written `@zoo-code/sdk` wrappers for PTY shells/list read routes with mocked transport coverage.
 - **Progress addendum:** Added hand-written `@zoo-code/sdk` wrappers for portable-core TUI prompt append, help, command, toast, and session selection routes with mocked transport coverage.
+- **Progress addendum:** Added generated SDK sync history read parity across direct and HttpApi backends with seeded event rows, while excluding sync start/replay side effects.
 
 - **Progress:** Fixed the focused generated SDK no-reply prompt route parity test by supplying explicit fake model metadata, keeping the route test out of provider discovery while preserving no-LLM behavior.
 
