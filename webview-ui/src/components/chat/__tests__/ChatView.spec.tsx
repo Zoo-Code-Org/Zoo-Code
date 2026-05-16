@@ -140,6 +140,13 @@ vi.mock("@src/components/welcome/RooHero", () => ({
 	},
 }))
 
+// Mock TelemetryBanner component
+vi.mock("../common/TelemetryBanner", () => ({
+	default: function MockTelemetryBanner() {
+		return null // Don't render anything to avoid interference
+	},
+}))
+
 // Mock i18n
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
@@ -269,6 +276,7 @@ const mockPostMessage = (state: Partial<ExtensionState>) => {
 				allowedCommands: [],
 				alwaysAllowExecute: false,
 				cloudIsAuthenticated: false,
+				telemetrySetting: "enabled",
 				...state,
 			},
 		},
@@ -662,6 +670,7 @@ describe("ChatView - Welcome Screen Display Tests", () => {
 		const { getByTestId, queryByTestId } = renderChatView()
 
 		mockPostMessage({
+			cloudIsAuthenticated: false,
 			taskHistory: [
 				{ id: "1", ts: Date.now() - 6000 },
 				{ id: "2", ts: Date.now() - 5000 },
@@ -684,6 +693,7 @@ describe("ChatView - Welcome Screen Display Tests", () => {
 		const { queryByTestId } = renderChatView()
 
 		mockPostMessage({
+			cloudIsAuthenticated: false,
 			taskHistory: [
 				{ id: "1", ts: Date.now() - 3000 },
 				{ id: "2", ts: Date.now() - 2000 },

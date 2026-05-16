@@ -199,24 +199,24 @@ describe("mergeExtensionState", () => {
 			maxOpenTabsContext: 20,
 			maxWorkspaceFiles: 100,
 			apiConfiguration: { providerId: "openrouter" } as ProviderSettings,
+			telemetrySetting: "unset",
 			showRooIgnoredFiles: true,
 			enableSubfolderRules: false,
 			renderContext: "sidebar",
+			cloudUserInfo: null,
 			organizationAllowList: { allowAll: true, providers: {} },
 			autoCondenseContext: true,
 			autoCondenseContextPercent: 100,
-			profileThresholds: {},
-			hasOpenedModeSelector: false,
-			maxImageFileSize: 5,
-			maxTotalImageSize: 20,
-			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
-			maxReadFileLine: -1,
-			telemetrySetting: "unset" as const,
-			cloudUserInfo: null,
 			cloudIsAuthenticated: false,
 			sharingEnabled: false,
 			publicSharingEnabled: false,
+			profileThresholds: {},
+			hasOpenedModeSelector: false, // Add the new required property
+			maxImageFileSize: 5,
+			maxTotalImageSize: 20,
 			taskSyncEnabled: false,
+			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Add the checkpoint timeout property
+			maxReadFileLine: -1,
 		}
 
 		const prevState: ExtensionState = {
@@ -268,24 +268,24 @@ describe("mergeExtensionState", () => {
 			maxOpenTabsContext: 20,
 			maxWorkspaceFiles: 100,
 			apiConfiguration: {},
+			telemetrySetting: "unset",
 			showRooIgnoredFiles: true,
 			enableSubfolderRules: false,
 			renderContext: "sidebar",
+			cloudUserInfo: null,
 			organizationAllowList: { allowAll: true, providers: {} },
 			autoCondenseContext: true,
 			autoCondenseContextPercent: 100,
+			cloudIsAuthenticated: false,
+			sharingEnabled: false,
+			publicSharingEnabled: false,
 			profileThresholds: {},
 			hasOpenedModeSelector: false,
 			maxImageFileSize: 5,
 			maxTotalImageSize: 20,
+			taskSyncEnabled: false,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 			maxReadFileLine: -1,
-			telemetrySetting: "unset" as const,
-			cloudUserInfo: null,
-			cloudIsAuthenticated: false,
-			sharingEnabled: false,
-			publicSharingEnabled: false,
-			taskSyncEnabled: false,
 		}
 
 		const makeMessage = (ts: number, text: string): ClineMessage =>
@@ -349,7 +349,7 @@ describe("mergeExtensionState", () => {
 			expect(result.clineMessagesSeq).toBe(4)
 		})
 
-		it("preserves clineMessages when newState does not include them", () => {
+		it("preserves clineMessages when newState does not include them (cloud event path)", () => {
 			const existingMessages = [makeMessage(1, "hello"), makeMessage(2, "world")]
 
 			const prevState: ExtensionState = {
@@ -358,8 +358,9 @@ describe("mergeExtensionState", () => {
 				clineMessagesSeq: 5,
 			}
 
+			// Simulate a cloud event push that omits clineMessages and clineMessagesSeq
 			const result = mergeExtensionState(prevState, {
-				currentApiConfigName: "updated",
+				cloudIsAuthenticated: true,
 			})
 
 			expect(result.clineMessages).toBe(existingMessages)

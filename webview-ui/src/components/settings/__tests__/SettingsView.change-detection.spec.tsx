@@ -275,6 +275,7 @@ describe("SettingsView - Change Detection Fix", () => {
 		ttsEnabled: false,
 		ttsSpeed: 1.0,
 		soundVolume: 0.5,
+		telemetrySetting: "unset" as const,
 		terminalOutputLineLimit: 500,
 		terminalOutputCharacterLimit: 50000,
 		terminalShellIntegrationTimeout: 3000,

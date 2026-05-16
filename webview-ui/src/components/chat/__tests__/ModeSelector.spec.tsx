@@ -6,13 +6,33 @@ import type { Mode } from "@roo/modes"
 
 import { ModeSelector } from "../ModeSelector"
 
-const mockSetHasOpenedModeSelector = vi.hoisted(() => vi.fn())
+vi.mock("@/utils/vscode", () => ({
+	vscode: {
+		postMessage: vi.fn(),
+	},
+}))
 
 vi.mock("@/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({
 		hasOpenedModeSelector: false,
-		setHasOpenedModeSelector: mockSetHasOpenedModeSelector,
+		setHasOpenedModeSelector: vi.fn(),
 	}),
+}))
+
+vi.mock("@/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
+		t: (key: string) => key,
+	}),
+}))
+
+vi.mock("@/components/ui/hooks/useRooPortal", () => ({
+	useRooPortal: () => document.body,
+}))
+
+vi.mock("@/utils/TelemetryClient", () => ({
+	telemetryClient: {
+		capture: vi.fn(),
+	},
 }))
 
 // Create a variable to control what getAllModes returns.
