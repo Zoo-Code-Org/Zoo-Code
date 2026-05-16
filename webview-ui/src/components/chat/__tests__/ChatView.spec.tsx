@@ -9,6 +9,14 @@ import { vscode } from "@src/utils/vscode"
 
 import ChatView, { ChatViewProps } from "../ChatView"
 
+const mockVirtuosoState = vi.hoisted(() => ({
+	lastConfig: null as {
+		computeItemKey?: (index: number, item: ClineMessage) => React.Key
+		defaultItemHeight?: number
+		increaseViewportBy?: number | { top?: number; bottom?: number }
+	} | null,
+}))
+
 // Define minimal types needed for testing
 interface ClineMessage {
 	type: "say" | "ask"
@@ -61,14 +69,26 @@ vi.mock("react-virtuoso", () => ({
 	Virtuoso: function MockVirtuoso({
 		data,
 		itemContent,
+		computeItemKey,
+		defaultItemHeight,
+		increaseViewportBy,
 	}: {
 		data: ClineMessage[]
 		itemContent: (index: number, item: ClineMessage) => React.ReactNode
+		computeItemKey?: (index: number, item: ClineMessage) => React.Key
+		defaultItemHeight?: number
+		increaseViewportBy?: number | { top?: number; bottom?: number }
 	}) {
+		mockVirtuosoState.lastConfig = {
+			computeItemKey,
+			defaultItemHeight,
+			increaseViewportBy,
+		}
+
 		return (
 			<div data-testid="virtuoso-item-list">
 				{data.map((item, index) => (
-					<div key={item.ts} data-testid={`virtuoso-item-${index}`}>
+					<div key={computeItemKey?.(index, item) ?? item.ts} data-testid={`virtuoso-item-${index}`}>
 						{itemContent(index, item)}
 					</div>
 				))}
@@ -451,6 +471,45 @@ describe("ChatView - Sound Playing Tests", () => {
 
 		// Should not play sound for completion when resuming from history
 		expect(mockPlayFunction).not.toHaveBeenCalled()
+	})
+})
+
+describe("ChatView - Virtualization Configuration", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockVirtuosoState.lastConfig = null
+	})
+
+	it("keeps the off-screen render buffer tight for chat rows", async () => {
+		renderChatView()
+
+		const taskTs = Date.now() - 100
+		const rowTs = Date.now()
+
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: taskTs,
+					text: "Initial task",
+				},
+				{
+					type: "say",
+					say: "text",
+					ts: rowTs,
+					text: "Visible row",
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(mockVirtuosoState.lastConfig).not.toBeNull()
+		})
+
+		expect(mockVirtuosoState.lastConfig?.defaultItemHeight).toBe(180)
+		expect(mockVirtuosoState.lastConfig?.increaseViewportBy).toEqual({ top: 600, bottom: 800 })
+		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs })).toBe(rowTs)
 	})
 })
 
