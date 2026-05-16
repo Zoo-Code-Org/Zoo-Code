@@ -438,6 +438,7 @@
 - **Progress addendum:** Hardened VS Code portable-core lifecycle handling so late config reload callbacks after service disposal cannot call a closed SDK client.
 - **Progress addendum:** Added a VSIX-shipped Zoo config schema at `packages/zoo-vscode/src/schemas/zoo-config.schema.json` and wired `zoo.jsonc` JSON validation to the local packaged schema; hosted/public schema URL remains deferred.
 - **Progress addendum:** Restored full `@opencode-ai/core` package-local test coverage by updating the intentional Kilo temp namespace assertion and isolating npm-config registry tests from ambient `npm_config_registry` environment overrides.
+- **Progress addendum:** Hardened VS Code portable-core task creation/follow-up handling so unsupported image attachments and empty text inputs surface deterministic portable errors instead of starting or invoking the legacy task runtime.
 - **Progress addendum:** Added a hand-written `@zoo-code/sdk` wrapper for sync history reads with mocked transport coverage, keeping sync start/replay excluded.
 
 - **Progress:** Fixed the focused generated SDK no-reply prompt route parity test by supplying explicit fake model metadata, keeping the route test out of provider discovery while preserving no-LLM behavior.

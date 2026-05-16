@@ -3006,7 +3006,7 @@ export class ClineProvider
 		await this.addClineToStack(task)
 		const handledByPortableCore = await this.sendPortableUserMessage(task, text, images)
 
-		if (!handledByPortableCore) {
+		if (!handledByPortableCore && !this.portableSessionAdapter) {
 			task.start()
 		}
 
@@ -3033,8 +3033,14 @@ export class ClineProvider
 			return
 		}
 
-		if (askResponse === "messageResponse" && (await this.sendPortableUserMessage(task, text, images))) {
-			return
+		if (askResponse === "messageResponse") {
+			if (await this.sendPortableUserMessage(task, text, images)) {
+				return
+			}
+
+			if (this.portableSessionAdapter) {
+				return
+			}
 		}
 
 		task.handleWebviewAskResponse(askResponse, text, images)
@@ -3238,13 +3244,22 @@ export class ClineProvider
 	}
 
 	private async sendPortableUserMessage(task: Task, text?: string, images?: string[]): Promise<boolean> {
-		if (!this.portableSessionAdapter || images?.length) {
+		if (!this.portableSessionAdapter) {
 			return false
+		}
+
+		if (images?.length) {
+			await this.appendPortableUnsupportedMessage(
+				task,
+				"Portable core does not yet support image attachments in VS Code. Remove the image and send a text-only message.",
+			)
+			return true
 		}
 
 		const message = text?.trim()
 		if (!message) {
-			return false
+			await this.appendPortableUnsupportedMessage(task, "Portable core requires a non-empty text message.")
+			return true
 		}
 
 		const userMessage: ClineMessage = { ts: Date.now(), type: "say", say: "text", text: message }
@@ -3286,6 +3301,20 @@ export class ClineProvider
 		}
 
 		return true
+	}
+
+	private async appendPortableUnsupportedMessage(task: Task, message: string): Promise<void> {
+		const errorMessage: ClineMessage = {
+			ts: Date.now(),
+			type: "say",
+			say: "error",
+			text: message,
+			partial: false,
+		}
+
+		task.clineMessages = [...task.clineMessages, errorMessage]
+		await task.overwriteClineMessages(task.clineMessages)
+		await this.postMessageToWebview({ type: "messageUpdated", clineMessage: errorMessage })
 	}
 
 	private getPortableChunkText(chunk: unknown): string | undefined {

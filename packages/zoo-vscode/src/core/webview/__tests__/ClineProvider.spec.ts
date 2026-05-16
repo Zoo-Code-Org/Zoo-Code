@@ -1004,6 +1004,76 @@ describe("ClineProvider", () => {
 		expect(task.start).not.toHaveBeenCalled()
 	})
 
+	test("portable session adapter rejects image tasks without starting legacy runtime", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-image-session", title: "Image task" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		const postMessageSpy = vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		const task = await portableProvider.createTask("Image task", ["data:image/png;base64,abc"])
+
+		expect(portableSessionAdapter.createSession).toHaveBeenCalledWith({ title: "Image task" })
+		expect(portableSessionAdapter.sendMessage).not.toHaveBeenCalled()
+		expect(task.start).not.toHaveBeenCalled()
+		expect(task.clineMessages).toContainEqual(
+			expect.objectContaining({
+				type: "say",
+				say: "error",
+				text: expect.stringContaining("does not yet support image attachments"),
+				partial: false,
+			}),
+		)
+		expect(postMessageSpy).toHaveBeenCalledWith({
+			type: "messageUpdated",
+			clineMessage: expect.objectContaining({ say: "error" }),
+		})
+	})
+
+	test("portable session adapter rejects empty follow-ups without legacy fallback", async () => {
+		const portableSessionAdapter = {
+			listSessions: vi.fn().mockResolvedValue([]),
+			getSession: vi.fn(),
+			createSession: vi.fn().mockResolvedValue({ id: "portable-empty-session", title: "Initial" }),
+			sendMessage: vi.fn().mockImplementation(async function* () {}),
+		}
+		const portableProvider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			undefined,
+			portableSessionAdapter as any,
+		)
+		vi.spyOn(portableProvider, "postMessageToWebview").mockResolvedValue(undefined)
+		const task = await portableProvider.createTask("Initial")
+		vi.mocked(task.handleWebviewAskResponse).mockClear()
+		portableSessionAdapter.sendMessage.mockClear()
+
+		await portableProvider.handleWebviewAskResponse("messageResponse", "   ")
+
+		expect(portableSessionAdapter.sendMessage).not.toHaveBeenCalled()
+		expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
+		expect(task.clineMessages).toContainEqual(
+			expect.objectContaining({
+				type: "say",
+				say: "error",
+				text: "Portable core requires a non-empty text message.",
+				partial: false,
+			}),
+		)
+	})
+
 	test("portable permission asks display bash command approval", async () => {
 		let emitPermission!: (event: any) => void
 		const permissionEvent = new Promise<any>((resolve) => {
