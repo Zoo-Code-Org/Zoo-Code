@@ -53,6 +53,8 @@ import type {
 	SessionViewedOptions,
 	SkillInfo,
 	SymbolInfo,
+	SyncHistoryEvent,
+	SyncHistoryListOptions,
 	Todo,
 	TuiAppendPromptOptions,
 	TuiExecuteCommandOptions,
@@ -721,6 +723,20 @@ export class ZooClient {
 					body,
 				}),
 			) ?? false
+		)
+	}
+
+	/** List sync event history using aggregate sequence cursors. */
+	async listSyncHistory(options: SyncHistoryListOptions): Promise<SyncHistoryEvent[]> {
+		const { directory, workspace, body } = options
+		return (
+			unwrap(
+				await this.#transport.request<SyncHistoryEvent[] | { data?: SyncHistoryEvent[] }>({
+					method: "POST",
+					path: `/sync/history${workspaceRouteQuery({ directory, workspace })}`,
+					body,
+				}),
+			) ?? []
 		)
 	}
 

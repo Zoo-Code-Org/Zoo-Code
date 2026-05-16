@@ -305,6 +305,23 @@ export type TuiSelectSessionOptions = TuiScope & {
 	sessionID: string
 }
 
+/** Aggregate sequence cursors for sync history reads. */
+export type SyncHistoryCursor = Record<string, number>
+
+/** Options for listing sync event history. */
+export type SyncHistoryListOptions = WorkspaceRouteOptions & {
+	body: SyncHistoryCursor
+}
+
+/** Persisted sync event history row. */
+export type SyncHistoryEvent = {
+	id: string
+	aggregate_id: string
+	seq: number
+	type: string
+	data: Record<string, unknown>
+}
+
 /** Options for experimental session listing. */
 export type ExperimentalSessionListOptions = WorkspaceRouteOptions & {
 	projectID?: string

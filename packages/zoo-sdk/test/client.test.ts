@@ -164,6 +164,19 @@ function transport(): ZooTransport & { requests: any[] } {
 				}
 			}
 			if (input.path?.startsWith("/tui/")) return { data: true }
+			if (input.path === "/sync/history?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return {
+					data: [
+						{
+							id: "evt_sync_history_1",
+							aggregate_id: "agg_sync_history",
+							seq: 1,
+							type: "session.updated",
+							data: { title: "Synced" },
+						},
+					],
+				}
+			}
 			if (
 				input.path ===
 				"/experimental/session?directory=%2Frepo%2Froot&workspace=workspace-1&projectID=proj_1&worktrees=true&roots=false&limit=10&archived=false"
@@ -712,6 +725,33 @@ describe("ZooClient", () => {
 				body: { sessionID: "ses_test" },
 			},
 		])
+	})
+
+	test("wraps sync history read route", async () => {
+		const mock = transport()
+		const client = await ZooClient.connect({ transport: mock })
+
+		await expect(
+			client.listSyncHistory({
+				directory: "/repo/root",
+				workspace: "workspace-1",
+				body: { agg_sync_history: 0 },
+			}),
+		).resolves.toEqual([
+			{
+				id: "evt_sync_history_1",
+				aggregate_id: "agg_sync_history",
+				seq: 1,
+				type: "session.updated",
+				data: { title: "Synced" },
+			},
+		])
+
+		expect(mock.requests.at(-1)).toEqual({
+			method: "POST",
+			path: "/sync/history?directory=%2Frepo%2Froot&workspace=workspace-1",
+			body: { agg_sync_history: 0 },
+		})
 	})
 
 	test("wraps experimental read routes", async () => {
