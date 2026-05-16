@@ -100,21 +100,24 @@ mode: code
     ```bash
     git switch main
     git pull origin main
-    git rev-parse --short HEAD
+    REVIEWED_SHA=$(git rev-parse HEAD)
+    git rev-parse --short "$REVIEWED_SHA"
     ```
 
     - Review the merged release state before any publish step.
     - Confirm that `src/package.json`, `CHANGELOG.md`, `src/CHANGELOG.md`, and the Marketplace-facing `README.md` all reflect the intended release.
     - Check that the release PR checks passed and that the merged commit is the one you want to ship.
-    - Share that review summary with the user and wait for explicit confirmation before creating the tag.
+    - Share that review summary, including `REVIEWED_SHA`, with the user and wait for explicit confirmation before creating the tag.
     - Do not create the tag or trigger publishing until the user says to proceed.
 
 13. Only after explicit confirmation, create the release tag on that reviewed `main` commit:
 
     ```bash
-    git tag v[version]
+    git tag v[version] "$REVIEWED_SHA"
     git push origin v[version]
     ```
+
+    - If `main` advances after the review pause, keep using the pinned `REVIEWED_SHA` for the tag instead of silently tagging a newer commit.
 
 14. The stable publish workflow runs from the `v[version]` tag.
 
