@@ -432,6 +432,8 @@ describe("HttpApi SDK", () => {
 				const vcsDiff = yield* capture(() => sdk.vcs.diff({ mode: "git" }))
 				const formatter = yield* capture(() => sdk.formatter.status())
 				const lsp = yield* capture(() => sdk.lsp.status())
+				const ptyShells = yield* capture(() => sdk.pty.shells())
+				const ptyList = yield* capture(() => sdk.pty.list())
 
 				return {
 					statuses: statuses({
@@ -452,6 +454,8 @@ describe("HttpApi SDK", () => {
 						vcsDiff,
 						formatter,
 						lsp,
+						ptyShells,
+						ptyList,
 					}),
 					project: { worktreeSelected: record(project.data).worktree === directory },
 					paths: { directorySelected: record(paths.data).directory === directory },
@@ -461,6 +465,13 @@ describe("HttpApi SDK", () => {
 					foundText: JSON.stringify(findText.data ?? null).includes("sdk-parity"),
 					symbols: findSymbols.data,
 					listedFile: JSON.stringify(files.data).includes("hello.txt"),
+					ptyShells: array(ptyShells.data)
+						.map((item) => {
+							const shell = record(item)
+							return { path: shell.path, name: shell.name, acceptable: shell.acceptable }
+						})
+						.sort((a, b) => String(a.path).localeCompare(String(b.path))),
+					ptyList: array(ptyList.data),
 				}
 			}),
 		),
