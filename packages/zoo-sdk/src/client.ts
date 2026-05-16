@@ -684,6 +684,66 @@ export class ZooClient {
 		)
 	}
 
+	/** Open the portable-core TUI sessions dialog. */
+	async openTuiSessions(options: TuiScope = {}): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/open-sessions${workspaceRouteQuery(options)}`,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Open the portable-core TUI themes dialog. */
+	async openTuiThemes(options: TuiScope = {}): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/open-themes${workspaceRouteQuery(options)}`,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Open the portable-core TUI models dialog. */
+	async openTuiModels(options: TuiScope = {}): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/open-models${workspaceRouteQuery(options)}`,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Submit the current portable-core TUI prompt. */
+	async submitTuiPrompt(options: TuiScope = {}): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/submit-prompt${workspaceRouteQuery(options)}`,
+				}),
+			) ?? false
+		)
+	}
+
+	/** Clear the current portable-core TUI prompt. */
+	async clearTuiPrompt(options: TuiScope = {}): Promise<boolean> {
+		return (
+			unwrap(
+				await this.#transport.request<boolean | { data?: boolean }>({
+					method: "POST",
+					path: `/tui/clear-prompt${workspaceRouteQuery(options)}`,
+				}),
+			) ?? false
+		)
+	}
+
 	/** Execute a portable-core TUI command. */
 	async executeTuiCommand(options: TuiExecuteCommandOptions): Promise<boolean> {
 		const { directory, workspace, ...body } = options

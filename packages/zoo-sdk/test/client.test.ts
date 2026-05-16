@@ -696,19 +696,29 @@ describe("ZooClient", () => {
 
 		await expect(client.appendTuiPrompt({ ...scope, text: "hello" })).resolves.toBe(true)
 		await expect(client.openTuiHelp(scope)).resolves.toBe(true)
+		await expect(client.openTuiSessions(scope)).resolves.toBe(true)
+		await expect(client.openTuiThemes(scope)).resolves.toBe(true)
+		await expect(client.openTuiModels(scope)).resolves.toBe(true)
+		await expect(client.submitTuiPrompt(scope)).resolves.toBe(true)
+		await expect(client.clearTuiPrompt(scope)).resolves.toBe(true)
 		await expect(client.executeTuiCommand({ ...scope, command: "session_new" })).resolves.toBe(true)
 		await expect(client.showTuiToast({ ...scope, title: "SDK", message: "hello", variant: "info" })).resolves.toBe(
 			true,
 		)
 		await expect(client.selectTuiSession({ ...scope, sessionID: "ses_test" })).resolves.toBe(true)
 
-		expect(mock.requests.slice(-5)).toEqual([
+		expect(mock.requests.slice(-10)).toEqual([
 			{
 				method: "POST",
 				path: "/tui/append-prompt?directory=%2Frepo%2Froot&workspace=workspace-1",
 				body: { text: "hello" },
 			},
 			{ method: "POST", path: "/tui/open-help?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ method: "POST", path: "/tui/open-sessions?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ method: "POST", path: "/tui/open-themes?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ method: "POST", path: "/tui/open-models?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ method: "POST", path: "/tui/submit-prompt?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ method: "POST", path: "/tui/clear-prompt?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{
 				method: "POST",
 				path: "/tui/execute-command?directory=%2Frepo%2Froot&workspace=workspace-1",

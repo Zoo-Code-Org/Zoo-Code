@@ -428,7 +428,7 @@
 - **Progress addendum:** Added generated SDK worktree diff, diff summary, and diff-file route parity across direct and HttpApi backends using a deterministic temp git fixture.
 - **Progress addendum:** Added generated SDK PTY shells/list read parity across direct and HttpApi backends without creating or connecting PTYs.
 - **Progress addendum:** Added hand-written `@zoo-code/sdk` wrappers for PTY shells/list read routes with mocked transport coverage.
-- **Progress addendum:** Added hand-written `@zoo-code/sdk` wrappers for portable-core TUI prompt append, help, command, toast, and session selection routes with mocked transport coverage.
+- **Progress addendum:** Added hand-written `@zoo-code/sdk` wrappers for portable-core TUI prompt append/submit/clear, help/sessions/themes/models dialogs, command, toast, and session selection routes with mocked transport coverage.
 - **Progress addendum:** Added generated SDK sync history read parity across direct and HttpApi backends with seeded event rows, while excluding sync start/replay side effects.
 - **Progress addendum:** Added a hand-written `@zoo-code/sdk` wrapper for sync history reads with mocked transport coverage, keeping sync start/replay excluded.
 
