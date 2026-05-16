@@ -57,18 +57,6 @@
 			"schedule": ["* 21-23 * * 0"]
 		},
 		{
-			"description": "Require approval before opening major React stack updates.",
-			"matchPackageNames": [
-				"react",
-				"react-dom",
-				"react-compiler-runtime",
-				"/^@types\\/react(?:-dom)?$/",
-				"/^@vitejs\\/plugin-react$/"
-			],
-			"matchUpdateTypes": ["major"],
-			"dependencyDashboardApproval": true
-		},
-		{
 			"description": "Group test and build tooling patch/minor updates.",
 			"matchPackageNames": [
 				"vitest",
