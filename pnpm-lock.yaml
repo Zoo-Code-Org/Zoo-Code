@@ -780,7 +780,7 @@ importers:
         version: 1.0.50(zod@3.25.76)
       '@ai-sdk/deepseek':
         specifier: ^2.0.18
-        version: 2.0.18(zod@3.25.76)
+        version: 2.0.35(zod@3.25.76)
       '@ai-sdk/fireworks':
         specifier: ^2.0.32
         version: 2.0.32(zod@3.25.76)
@@ -1476,8 +1476,8 @@ packages:
     peerDependencies:
       zod: 3.25.76
 
-  '@ai-sdk/deepseek@2.0.18':
-    resolution: {integrity: sha512-AwtmFm7acnCsz3z82Yu5QKklSZz+cBwtxrc2hbw47tPF/38xr1zX3Vf/pP627EHwWkLV18UWivIxg0SHPP2w3A==}
+  '@ai-sdk/deepseek@2.0.35':
+    resolution: {integrity: sha512-9DhYurbAvcurOEGN6u2myYDybrrzGfcrkG8hwmFjwTrePW6KCMggm0YxP7e8RkLYcQKqCEMgFlyEB4BM6EmiKg==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: 3.25.76
@@ -11337,10 +11337,10 @@ snapshots:
       '@basetenlabs/performance-client': 0.0.10
       zod: 3.25.76
 
-  '@ai-sdk/deepseek@2.0.18(zod@3.25.76)':
+  '@ai-sdk/deepseek@2.0.35(zod@3.25.76)':
     dependencies:
-      '@ai-sdk/provider': 3.0.8
-      '@ai-sdk/provider-utils': 4.0.14(zod@3.25.76)
+      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider-utils': 4.0.27(zod@3.25.76)
       zod: 3.25.76
 
   '@ai-sdk/fireworks@2.0.32(zod@3.25.76)':
@@ -11429,7 +11429,7 @@ snapshots:
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.0.6
+      eventsource-parser: 3.0.8
       zod: 3.25.76
 
   '@ai-sdk/provider-utils@4.0.27(zod@3.25.76)':
