@@ -234,8 +234,15 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 		[setApiConfigurationField],
 	)
 
+	const clearMaxOutputTokensOverride = useCallback(() => {
+		setApiConfigurationField("awsModelMaxOutputTokens", undefined)
+		setApiConfigurationField("awsModelMaxOutputTokensTargetId", undefined)
+	}, [setApiConfigurationField])
+
 	const handleTargetChange = useCallback(
 		(value: string) => {
+			clearMaxOutputTokensOverride()
+
 			if (value === MANUAL_ARN_TARGET) {
 				setApiConfigurationField("awsBedrockTargetKind", "custom-arn")
 				setApiConfigurationField("awsBedrockInvokeTarget", apiConfiguration.awsCustomArn || "", false)
@@ -252,7 +259,7 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 			setApiConfigurationField("awsBedrockTargetKind", selectedTarget.targetKind)
 			setApiConfigurationField("apiModelId", selectedTarget.baseModelId)
 		},
-		[apiConfiguration.awsCustomArn, availableTargets, setApiConfigurationField],
+		[apiConfiguration.awsCustomArn, availableTargets, clearMaxOutputTokensOverride, setApiConfigurationField],
 	)
 
 	const handleCustomArnChange = useCallback(
@@ -260,6 +267,7 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 			const value = (event.target as HTMLInputElement).value
 			const baseModelId = parseBedrockBaseModelId(value)
 
+			clearMaxOutputTokensOverride()
 			setApiConfigurationField("awsCustomArn", value)
 			setApiConfigurationField("awsBedrockInvokeTarget", value, false)
 			setApiConfigurationField("awsBedrockTargetKind", "custom-arn", false)
@@ -267,7 +275,7 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 				setApiConfigurationField("apiModelId", baseModelId, false)
 			}
 		},
-		[setApiConfigurationField],
+		[clearMaxOutputTokensOverride, setApiConfigurationField],
 	)
 
 	return (
@@ -356,7 +364,10 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 				<label className="block font-medium mb-1">{t("settings:providers.awsRegion")}</label>
 				<Select
 					value={apiConfiguration?.awsRegion || ""}
-					onValueChange={(value) => setApiConfigurationField("awsRegion", value)}>
+					onValueChange={(value) => {
+						clearMaxOutputTokensOverride()
+						setApiConfigurationField("awsRegion", value)
+					}}>
 					<SelectTrigger className="w-full">
 						<SelectValue placeholder={t("settings:common.select")} />
 					</SelectTrigger>
@@ -439,6 +450,7 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 				<Checkbox
 					checked={apiConfiguration?.awsUseGlobalInference || false}
 					onChange={(checked: boolean) => {
+						clearMaxOutputTokensOverride()
 						setApiConfigurationField("awsUseGlobalInference", checked)
 					}}
 					disabled={isExplicitTargetSelection}>
@@ -448,6 +460,7 @@ export const Bedrock = ({ apiConfiguration, setApiConfigurationField, selectedMo
 			<Checkbox
 				checked={apiConfiguration?.awsUseCrossRegionInference || false}
 				onChange={(checked: boolean) => {
+					clearMaxOutputTokensOverride()
 					setApiConfigurationField("awsUseCrossRegionInference", checked)
 				}}
 				disabled={isExplicitTargetSelection}>

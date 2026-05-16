@@ -8,7 +8,9 @@ import {
 	BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS,
 	bedrockModels,
 	expandBedrockTargetsWith1MVariants,
+	guessBedrockModelInfoFromId,
 	hasBedrock1MContextIndicator,
+	resolveBedrockMaxOutputTokensOverride,
 	resolveBedrockModelInfo,
 	stripBedrock1MContextSuffix,
 } from "../providers/bedrock.js"
@@ -65,6 +67,11 @@ describe("Bedrock model catalog", () => {
 		expect((bedrockModels["anthropic.claude-haiku-4-5-20251001-v1:0"] as ModelInfo).promptCacheTtl).toBe("1h")
 		expect((bedrockModels["anthropic.claude-opus-4-5-20251101-v1:0"] as ModelInfo).promptCacheTtl).toBe("1h")
 	})
+
+	it("prefers specific guessed Opus patterns before generic Claude 4 patterns", () => {
+		const guessed = guessBedrockModelInfoFromId("arn:aws:bedrock:us-west-2::foundation-model/claude-4-opus-custom")
+		expect(guessed.maxTokens).toBe(4096)
+	})
 })
 
 describe("resolveBedrockModelInfo", () => {
@@ -93,6 +100,24 @@ describe("resolveBedrockModelInfo", () => {
 			modelMaxTokens: 32_000,
 		})
 		expect(info.maxTokens).toBe(32_000)
+	})
+
+	it("applies max-output overrides only to the target that was probed", () => {
+		expect(
+			resolveBedrockMaxOutputTokensOverride({
+				currentTargetId: "global.anthropic.claude-opus-4-7",
+				overrideTargetId: "global.anthropic.claude-opus-4-7",
+				maxOutputTokensOverride: 128_000,
+			}),
+		).toBe(128_000)
+
+		expect(
+			resolveBedrockMaxOutputTokensOverride({
+				currentTargetId: "anthropic.claude-haiku-4-5-20251001-v1:0",
+				overrideTargetId: "global.anthropic.claude-opus-4-7",
+				maxOutputTokensOverride: 128_000,
+			}),
+		).toBeUndefined()
 	})
 })
 

@@ -34,6 +34,8 @@ import {
 	ApiProviderError,
 	inferBedrockInvokeTargetKind,
 	parseBedrockBaseModelId,
+	resolveBedrockInvokeTargetId,
+	resolveBedrockMaxOutputTokensOverride,
 	resolveBedrockModelInfo,
 	shouldUseBedrock1MContext,
 	stripBedrock1MContextSuffix,
@@ -379,7 +381,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// parseBaseModelId strips cross-region inference prefixes (e.g. `us.`, `eu.`) and the
 		// synthetic `:1m` dropdown suffix.
 		const baseModelId = this.parseBaseModelId(modelConfig.id)
-		const requiresAdaptiveThinking = BEDROCK_ADAPTIVE_THINKING_MODEL_IDS.includes(baseModelId as any)
+		const requiresAdaptiveThinking = BEDROCK_ADAPTIVE_THINKING_MODEL_IDS.includes(
+			baseModelId as (typeof BEDROCK_ADAPTIVE_THINKING_MODEL_IDS)[number],
+		)
 
 		// Determine if thinking should be enabled
 		// metadata?.thinking?.enabled: Explicitly enabled through API metadata (direct request)
@@ -443,7 +447,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		const configuredTargetForIndicator =
 			this.options.awsBedrockInvokeTarget || this.options.awsCustomArn || modelConfig.id
 		const is1MContextEnabled =
-			BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any) &&
+			BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_1M_CONTEXT_MODEL_IDS)[number]) &&
 			shouldUseBedrock1MContext({
 				targetId: configuredTargetForIndicator,
 				baseModelId,
@@ -456,11 +460,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// the fine-grained-tool-streaming beta, so we must omit anthropic_beta entirely
 		// for those models. Older Claudes silently accept (and effectively ignore) them,
 		// so we keep the current behavior for them.
-		const skipAnthropicBetaFlags = BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any)
+		const skipAnthropicBetaFlags = BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS.includes(
+			baseModelId as (typeof BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS)[number],
+		)
 
 		// Determine if service tier should be applied (checked later when building payload)
 		const useServiceTier =
-			this.options.awsBedrockServiceTier && BEDROCK_SERVICE_TIER_MODEL_IDS.includes(baseModelId as any)
+			this.options.awsBedrockServiceTier &&
+			BEDROCK_SERVICE_TIER_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_SERVICE_TIER_MODEL_IDS)[number])
 		if (useServiceTier) {
 			logger.info("Service tier specified for Bedrock request", {
 				ctx: "bedrock",
@@ -1133,6 +1140,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		return parseBedrockBaseModelId(modelId)
 	}
 
+	private getScopedMaxOutputTokensOverride(): number | undefined {
+		return resolveBedrockMaxOutputTokensOverride({
+			currentTargetId: resolveBedrockInvokeTargetId(this.options),
+			overrideTargetId: this.options.awsModelMaxOutputTokensTargetId,
+			maxOutputTokensOverride: this.options.awsModelMaxOutputTokens,
+		})
+	}
+
 	//Prompt Router responses come back in a different sequence and the model used is in the response and must be fetched by name
 	getModelById(modelId: string, modelType?: string): { id: BedrockModelId | string; info: ModelInfo } {
 		let model
@@ -1143,8 +1158,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			modelMaxTokens: this.options.modelMaxTokens,
 			contextWindowOverride: this.options.awsModelContextWindow,
 			// Empirically detected per-config max output tokens (from the "Detect" probe in the
-			// settings UI) widens the static cap so downstream request builders pick it up too.
-			maxOutputTokensOverride: this.options.awsModelMaxOutputTokens,
+			// settings UI) widens the static cap only for the exact AWS target that was probed.
+			maxOutputTokensOverride: this.getScopedMaxOutputTokensOverride(),
 		})
 
 		if (resolved.baseModelId in bedrockModels) {
@@ -1227,7 +1242,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				const baseIdForGlobal = this.parseBaseModelId(modelConfig.id)
 				if (
 					this.options.awsUseGlobalInference &&
-					BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(baseIdForGlobal as any)
+					BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(
+						baseIdForGlobal as (typeof BEDROCK_GLOBAL_INFERENCE_MODEL_IDS)[number],
+					)
 				) {
 					modelConfig.id = `global.${baseIdForGlobal}`
 				}
@@ -1244,7 +1261,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// Check if 1M context is enabled for supported Claude 4 models
 		// Use parseBaseModelId to handle cross-region inference prefixes
 		const baseModelId = this.parseBaseModelId(modelConfig.id)
-		if (BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any) && this.options.awsBedrock1MContext) {
+		if (
+			BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_1M_CONTEXT_MODEL_IDS)[number]) &&
+			this.options.awsBedrock1MContext
+		) {
 			// Update context window and pricing to 1M tier when 1M context beta is enabled
 			const tier = modelConfig.info.tiers?.[0]
 			modelConfig.info = {
@@ -1268,7 +1288,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		// Apply service tier pricing if specified and model supports it
 		const baseModelIdForTier = this.parseBaseModelId(modelConfig.id)
-		if (this.options.awsBedrockServiceTier && BEDROCK_SERVICE_TIER_MODEL_IDS.includes(baseModelIdForTier as any)) {
+		if (
+			this.options.awsBedrockServiceTier &&
+			BEDROCK_SERVICE_TIER_MODEL_IDS.includes(
+				baseModelIdForTier as (typeof BEDROCK_SERVICE_TIER_MODEL_IDS)[number],
+			)
+		) {
 			const pricingMultiplier = BEDROCK_SERVICE_TIER_PRICING[this.options.awsBedrockServiceTier]
 			if (pricingMultiplier && pricingMultiplier !== 1.0) {
 				// Apply pricing multiplier to all price fields

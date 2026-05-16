@@ -899,24 +899,6 @@ export const shouldUseBedrock1MContext = ({
 
 export const guessBedrockModelInfoFromId = (modelId: string): Partial<ModelInfo> => {
 	const modelConfigMap: Record<string, Partial<ModelInfo>> = {
-		"claude-4": {
-			maxTokens: 8192,
-			contextWindow: 200_000,
-			supportsImages: true,
-			supportsPromptCache: true,
-		},
-		"claude-3-7": {
-			maxTokens: 8192,
-			contextWindow: 200_000,
-			supportsImages: true,
-			supportsPromptCache: true,
-		},
-		"claude-3-5": {
-			maxTokens: 8192,
-			contextWindow: 200_000,
-			supportsImages: true,
-			supportsPromptCache: true,
-		},
 		"claude-4-opus": {
 			maxTokens: 4096,
 			contextWindow: 200_000,
@@ -931,6 +913,24 @@ export const guessBedrockModelInfoFromId = (modelId: string): Partial<ModelInfo>
 		},
 		"claude-3-haiku": {
 			maxTokens: 4096,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+		"claude-4": {
+			maxTokens: 8192,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+		"claude-3-7": {
+			maxTokens: 8192,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+		},
+		"claude-3-5": {
+			maxTokens: 8192,
 			contextWindow: 200_000,
 			supportsImages: true,
 			supportsPromptCache: true,
@@ -950,6 +950,24 @@ export const guessBedrockModelInfoFromId = (modelId: string): Partial<ModelInfo>
 		supportsImages: false,
 		supportsPromptCache: false,
 	}
+}
+
+export const resolveBedrockMaxOutputTokensOverride = ({
+	currentTargetId,
+	overrideTargetId,
+	maxOutputTokensOverride,
+}: {
+	currentTargetId?: string
+	overrideTargetId?: string
+	maxOutputTokensOverride?: number
+}): number | undefined => {
+	if (!currentTargetId || !overrideTargetId || !maxOutputTokensOverride || maxOutputTokensOverride <= 0) {
+		return undefined
+	}
+
+	return stripBedrock1MContextSuffix(currentTargetId) === stripBedrock1MContextSuffix(overrideTargetId)
+		? maxOutputTokensOverride
+		: undefined
 }
 
 export const resolveBedrockModelInfo = ({

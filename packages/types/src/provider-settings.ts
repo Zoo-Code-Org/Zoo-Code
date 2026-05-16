@@ -236,8 +236,10 @@ const bedrockSchema = apiModelIdProviderModelSchema.extend({
 		.optional(),
 	awsModelContextWindow: z.number().optional(),
 	// Empirically detected (or manually entered) per-config cap on the model's max output tokens.
-	// Takes precedence over the static `bedrockModels.<id>.maxTokens` table when present.
+	// Takes precedence over the static `bedrockModels.<id>.maxTokens` table when present
+	// and scoped to the target id recorded in `awsModelMaxOutputTokensTargetId`.
 	awsModelMaxOutputTokens: z.number().optional(),
+	awsModelMaxOutputTokensTargetId: z.string().optional(),
 	awsBedrockEndpointEnabled: z.boolean().optional(),
 	awsBedrockEndpoint: z.string().optional(),
 	awsBedrock1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.

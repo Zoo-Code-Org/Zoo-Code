@@ -61,6 +61,20 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 
 // Mock the UI components
 vi.mock("@src/components/ui", () => ({
+	Button: ({ children, disabled, onClick, type = "button" }: any) => (
+		<button type={type} disabled={disabled} onClick={onClick}>
+			{children}
+		</button>
+	),
+	SearchableSelect: ({ value, onValueChange, options, placeholder }: any) => (
+		<select aria-label={placeholder} value={value} onChange={(e) => onValueChange && onValueChange(e.target.value)}>
+			{options.map((option: { value: string; label: string }) => (
+				<option key={option.value} value={option.value}>
+					{option.label}
+				</option>
+			))}
+		</select>
+	),
 	Select: ({ children, value, onValueChange }: any) => (
 		<select value={value} onChange={(e) => onValueChange && onValueChange(e.target.value)}>
 			{children}

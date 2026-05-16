@@ -21,6 +21,8 @@ import {
 
 import { Package } from "../../shared/package"
 
+export const BEDROCK_DISCOVERY_TIMEOUT_MS = 15_000
+
 // The two AWS SDK packages we use here (`@aws-sdk/client-bedrock` for control-plane discovery
 // and `@aws-sdk/client-bedrock-runtime` for Converse probes) each ship their own discriminated
 // `Config` interface where `token`/`credentials` are tagged with package-private branded types.
@@ -152,7 +154,31 @@ const buildInferenceProfileTarget = (summary: InferenceProfileSummary): BedrockD
 	}
 }
 
-const listInferenceProfiles = async (client: BedrockClient) => {
+const withTimeout = async <T>(
+	label: string,
+	timeoutMs: number,
+	operation: (abortSignal: AbortSignal) => Promise<T>,
+): Promise<T> => {
+	const abortController = new AbortController()
+	let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+	const timeoutPromise = new Promise<never>((_, reject) => {
+		timeoutId = setTimeout(() => {
+			abortController.abort()
+			reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+		}, timeoutMs)
+	})
+
+	try {
+		return await Promise.race([operation(abortController.signal), timeoutPromise])
+	} finally {
+		if (timeoutId) {
+			clearTimeout(timeoutId)
+		}
+	}
+}
+
+const listInferenceProfiles = async (client: BedrockClient, abortSignal?: AbortSignal) => {
 	const results: InferenceProfileSummary[] = []
 	let nextToken: string | undefined
 
@@ -162,6 +188,7 @@ const listInferenceProfiles = async (client: BedrockClient) => {
 				nextToken,
 				maxResults: 100,
 			}),
+			{ abortSignal },
 		)
 
 		results.push(...(response.inferenceProfileSummaries ?? []))
@@ -178,10 +205,15 @@ export const discoverBedrockTargets = async (options: ProviderSettings): Promise
 
 	const client = new BedrockClient(toBedrockClientConfig(options))
 
-	const [foundationModelsResponse, inferenceProfiles] = await Promise.all([
-		client.send(new ListFoundationModelsCommand({})),
-		listInferenceProfiles(client),
-	])
+	const [foundationModelsResponse, inferenceProfiles] = await withTimeout(
+		"Bedrock discovery",
+		BEDROCK_DISCOVERY_TIMEOUT_MS,
+		(abortSignal) =>
+			Promise.all([
+				client.send(new ListFoundationModelsCommand({}), { abortSignal }),
+				listInferenceProfiles(client, abortSignal),
+			]),
+	)
 
 	const targets = [
 		...(foundationModelsResponse.modelSummaries ?? [])

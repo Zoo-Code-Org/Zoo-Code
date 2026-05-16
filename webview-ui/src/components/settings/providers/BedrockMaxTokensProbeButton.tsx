@@ -1,6 +1,10 @@
-import { useCallback, type ReactNode } from "react"
+import { useCallback, useEffect, type ReactNode } from "react"
 
-import { resolveBedrockInvokeTargetId, type ProviderSettings } from "@roo-code/types"
+import {
+	resolveBedrockInvokeTargetId,
+	resolveBedrockMaxOutputTokensOverride,
+	type ProviderSettings,
+} from "@roo-code/types"
 
 import { Button, StandardTooltip } from "@src/components/ui"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -69,8 +73,8 @@ const formatProbeStatus = (
  * Renders the AWS-probe affordance that lives next to the max-output-tokens slider
  * when the active provider is Bedrock. Clicking "Detect" sends a tiny Converse probe
  * via the extension-side helper and persists the discovered cap into
- * `apiConfiguration.awsModelMaxOutputTokens`. "Reset to default" clears the override
- * so the static `bedrockModels` table takes over again.
+ * `apiConfiguration.awsModelMaxOutputTokens`, scoped by the probed target id.
+ * "Reset to default" clears the override so the static `bedrockModels` table takes over again.
  *
  * The component renders both the buttons (returned via `buttonSlot`) and the helper
  * status text (returned via `helperText`) so the parent (`ThinkingBudget`) can place
@@ -82,7 +86,19 @@ export const useBedrockMaxTokensProbeUi = ({
 	modelId,
 }: BedrockMaxTokensProbeButtonProps): { buttonSlot: ReactNode; helperText: ReactNode } => {
 	const { t } = useAppTranslation()
-	const { probe, isProbing, lastResult, lastError } = useBedrockMaxTokensProbe()
+	const { probe, isProbing, lastResult, lastError, reset } = useBedrockMaxTokensProbe()
+	const resolvedTargetId = resolveBedrockInvokeTargetId(apiConfiguration)
+	const targetModelId = resolvedTargetId || modelId || apiConfiguration.apiModelId || ""
+	const activeOverride = resolveBedrockMaxOutputTokensOverride({
+		currentTargetId: targetModelId,
+		overrideTargetId: apiConfiguration.awsModelMaxOutputTokensTargetId,
+		maxOutputTokensOverride: apiConfiguration.awsModelMaxOutputTokens,
+	})
+	const lastResultForTarget = lastResult?.modelId === targetModelId ? lastResult : undefined
+
+	useEffect(() => {
+		reset()
+	}, [reset, targetModelId])
 
 	const onDetect = useCallback(async () => {
 		// Mirror the runtime's invoke-target resolution (system/application profile id,
@@ -91,14 +107,13 @@ export const useBedrockMaxTokensProbeUi = ({
 		// send the bare base model id (e.g. `anthropic.claude-opus-4-7`) and AWS rejects
 		// it with "on-demand throughput isn't supported" for models that require an
 		// inference profile.
-		const resolvedTargetId = resolveBedrockInvokeTargetId(apiConfiguration)
-		const targetModelId = resolvedTargetId || modelId || apiConfiguration.apiModelId || ""
 		if (!targetModelId) {
 			return
 		}
 		try {
 			const result = await probe(apiConfiguration, targetModelId)
 			setApiConfigurationField("awsModelMaxOutputTokens", result.maxOutputTokens)
+			setApiConfigurationField("awsModelMaxOutputTokensTargetId", targetModelId)
 			// If the user's existing `modelMaxTokens` request value would now exceed the
 			// detected cap, optimistically lower it. Never raise it - that's the user's call.
 			if (
@@ -110,14 +125,16 @@ export const useBedrockMaxTokensProbeUi = ({
 		} catch {
 			// Error surfaced through the hook's lastError state; no-op here.
 		}
-	}, [apiConfiguration, modelId, probe, setApiConfigurationField])
+	}, [apiConfiguration, probe, setApiConfigurationField, targetModelId])
 
 	const onReset = useCallback(() => {
 		setApiConfigurationField("awsModelMaxOutputTokens", undefined)
-	}, [setApiConfigurationField])
+		setApiConfigurationField("awsModelMaxOutputTokensTargetId", undefined)
+		reset()
+	}, [reset, setApiConfigurationField])
 
-	const detectDisabled = isProbing || !apiConfiguration.awsRegion || !(modelId || apiConfiguration.apiModelId)
-	const resetDisabled = isProbing || !apiConfiguration.awsModelMaxOutputTokens
+	const detectDisabled = isProbing || !apiConfiguration.awsRegion || !targetModelId
+	const resetDisabled = isProbing || !activeOverride
 
 	const buttonSlot = (
 		<div className="flex items-center gap-1">
@@ -134,7 +151,7 @@ export const useBedrockMaxTokensProbeUi = ({
 						: t("settings:providers.bedrock.detectMaxTokens")}
 				</Button>
 			</StandardTooltip>
-			{apiConfiguration.awsModelMaxOutputTokens ? (
+			{activeOverride ? (
 				<Button
 					variant="ghost"
 					size="sm"
@@ -148,7 +165,7 @@ export const useBedrockMaxTokensProbeUi = ({
 		</div>
 	)
 
-	const helperText = formatProbeStatus(t, isProbing, lastResult, lastError, apiConfiguration.awsModelMaxOutputTokens)
+	const helperText = formatProbeStatus(t, isProbing, lastResultForTarget, lastError, activeOverride)
 
 	return { buttonSlot, helperText }
 }
