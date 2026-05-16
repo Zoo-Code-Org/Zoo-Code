@@ -21,6 +21,7 @@
 		"vsix:nightly": "turbo vsix:nightly --log-order grouped --output-logs new-only",
 		"clean": "turbo clean --log-order grouped --output-logs new-only && rimraf dist out bin .vite-port .turbo",
 		"install:vsix": "pnpm install --frozen-lockfile && pnpm clean && pnpm vsix && node scripts/install-vsix.js",
+		"install:vsix:force": "pnpm install --frozen-lockfile && pnpm clean && turbo bundle --force && turbo vsix --force && node scripts/install-vsix.js",
 		"install:vsix:nightly": "pnpm install --frozen-lockfile && pnpm clean && pnpm vsix:nightly && node scripts/install-vsix.js --nightly",
 		"code-server:install": "node scripts/code-server.js",
 		"changeset:version": "cp CHANGELOG.md src/CHANGELOG.md && changeset version && cp -vf src/CHANGELOG.md .",

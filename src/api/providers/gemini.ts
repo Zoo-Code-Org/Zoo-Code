@@ -33,6 +33,76 @@ type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
 }
 
+// Gemini documents function declaration schemas as a selected OpenAPI-style
+// subset with single-value `type` plus `nullable`. In practice, third-party
+// MCP schemas often include broader JSON Schema metadata/composition that has
+// produced opaque INVALID_ARGUMENT responses. Keep the outbound schema narrow.
+const GEMINI_SCHEMA_COMPATIBILITY_DROP_KEYS = new Set([
+	"$schema",
+	"$id",
+	"$defs",
+	"additionalProperties",
+	"default",
+	"definitions",
+])
+
+function sanitizeSchemaForGemini(schema: unknown): unknown {
+	if (!schema || typeof schema !== "object") {
+		return schema
+	}
+
+	if (Array.isArray(schema)) {
+		return schema.map((item) => sanitizeSchemaForGemini(item))
+	}
+
+	const source = schema as Record<string, unknown>
+	const result: Record<string, unknown> = {}
+	let nullable = source.nullable === true
+
+	const composition = source.anyOf ?? source.oneOf
+	if (Array.isArray(composition)) {
+		const variants = composition.filter((variant) => {
+			return variant && typeof variant === "object" && !Array.isArray(variant)
+				? (variant as Record<string, unknown>).type !== "null"
+				: true
+		})
+		nullable = nullable || variants.length < composition.length
+		Object.assign(result, sanitizeSchemaForGemini(variants[0] ?? {}))
+	}
+
+	if (Array.isArray(source.allOf)) {
+		for (const variant of source.allOf) {
+			const sanitized = sanitizeSchemaForGemini(variant)
+			if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
+				Object.assign(result, sanitized)
+			}
+		}
+	}
+
+	for (const [key, value] of Object.entries(source)) {
+		if (GEMINI_SCHEMA_COMPATIBILITY_DROP_KEYS.has(key) || key === "anyOf" || key === "oneOf" || key === "allOf") {
+			continue
+		}
+
+		if (key === "type" && Array.isArray(value)) {
+			const nonNullTypes = value.filter((item) => item !== "null")
+			if (nonNullTypes.length > 0) {
+				result.type = nonNullTypes[0]
+			}
+			nullable = nullable || nonNullTypes.length < value.length
+			continue
+		}
+
+		result[key] = sanitizeSchemaForGemini(value)
+	}
+
+	if (nullable) {
+		result.nullable = true
+	}
+
+	return result
+}
+
 export class GeminiHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 
@@ -132,13 +202,16 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		// Google built-in tools (Grounding, URL Context) are mutually exclusive
 		// with function declarations in the Gemini API, so we always use
 		// function declarations when tools are provided.
+		const functionDeclarations = (metadata?.tools ?? []).map((tool) => ({
+			name: (tool as any).function.name,
+			description: (tool as any).function.description,
+			parametersJsonSchema: sanitizeSchemaForGemini((tool as any).function.parameters),
+		}))
+		const availableFunctionNameSet = new Set(functionDeclarations.map((declaration) => declaration.name))
+
 		const tools: GenerateContentConfig["tools"] = [
 			{
-				functionDeclarations: (metadata?.tools ?? []).map((tool) => ({
-					name: (tool as any).function.name,
-					description: (tool as any).function.description,
-					parametersJsonSchema: (tool as any).function.parameters,
-				})),
+				functionDeclarations,
 			},
 		]
 
@@ -161,19 +234,13 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			...(tools.length > 0 ? { tools } : {}),
 		}
 
-		// Handle allowedFunctionNames for mode-restricted tool access.
-		// When provided, all tool definitions are passed to the model (so it can reference
-		// historical tool calls in conversation), but only the specified tools can be invoked.
-		// This takes precedence over tool_choice to ensure mode restrictions are honored.
-		if (metadata?.allowedFunctionNames && metadata.allowedFunctionNames.length > 0) {
-			config.toolConfig = {
-				functionCallingConfig: {
-					// Use ANY mode to allow calling any of the allowed functions
-					mode: FunctionCallingConfigMode.ANY,
-					allowedFunctionNames: metadata.allowedFunctionNames,
-				},
-			}
-		} else if (metadata?.tool_choice) {
+		// Do not pass metadata.allowedFunctionNames to Gemini. Live API testing showed
+		// that declarations can exceed 25 entries, but allowedFunctionNames starts
+		// returning generic 400 INVALID_ARGUMENT responses at 26 names. It can also
+		// reject prior function calls if their names are absent from the current
+		// allowed list. We still pass all declarations for history compatibility;
+		// mode/tool restrictions are enforced by the tool execution layer.
+		if (metadata?.tool_choice) {
 			const choice = metadata.tool_choice
 			let mode: FunctionCallingConfigMode
 			let allowedFunctionNames: string[] | undefined
@@ -186,8 +253,13 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				// "required" means the model must call at least one tool; Gemini uses ANY for this.
 				mode = FunctionCallingConfigMode.ANY
 			} else if (typeof choice === "object" && "function" in choice && choice.type === "function") {
-				mode = FunctionCallingConfigMode.ANY
-				allowedFunctionNames = [choice.function.name]
+				const selectedToolName = choice.function.name
+				if (availableFunctionNameSet.has(selectedToolName)) {
+					mode = FunctionCallingConfigMode.ANY
+					allowedFunctionNames = [selectedToolName]
+				} else {
+					mode = FunctionCallingConfigMode.AUTO
+				}
 			} else {
 				// Fall back to AUTO for unknown values to avoid unintentionally broadening tool access.
 				mode = FunctionCallingConfigMode.AUTO

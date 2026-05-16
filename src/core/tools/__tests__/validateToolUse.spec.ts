@@ -186,6 +186,14 @@ describe("mode-validator", () => {
 			)
 		})
 
+		it("blocks mode-disallowed tools even if a provider declared them", () => {
+			// Gemini may receive all tool declarations for history compatibility, so
+			// execution-time validation must remain the final mode restriction guard.
+			expect(() => validateToolUse("write_to_file", askMode, [])).toThrow(
+				'Tool "write_to_file" is not allowed in ask mode.',
+			)
+		})
+
 		it("does not throw for allowed tools in architect mode", () => {
 			expect(() => validateToolUse("read_file", "architect", [])).not.toThrow()
 		})
