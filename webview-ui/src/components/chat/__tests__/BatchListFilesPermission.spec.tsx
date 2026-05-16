@@ -11,8 +11,8 @@ describe("BatchListFilesPermission", () => {
 			path: "apps/cli",
 		},
 		{
-			key: "apps/web-roo-code",
-			path: "apps/web-roo-code",
+			key: "apps/vscode-e2e",
+			path: "apps/vscode-e2e",
 		},
 		{
 			key: "packages/core",
@@ -32,7 +32,7 @@ describe("BatchListFilesPermission", () => {
 		)
 
 		expect(screen.getByText("apps/cli")).toBeInTheDocument()
-		expect(screen.getByText("apps/web-roo-code")).toBeInTheDocument()
+		expect(screen.getByText("apps/vscode-e2e")).toBeInTheDocument()
 		expect(screen.getByText("packages/core")).toBeInTheDocument()
 	})
 
