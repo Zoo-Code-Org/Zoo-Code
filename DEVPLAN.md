@@ -427,6 +427,7 @@
 - **Progress addendum:** Added generated SDK project update parity for project name, icon color, and start command metadata across direct and HttpApi backends.
 - **Progress addendum:** Added generated SDK worktree diff, diff summary, and diff-file route parity across direct and HttpApi backends using a deterministic temp git fixture.
 - **Progress addendum:** Added generated SDK PTY shells/list read parity across direct and HttpApi backends without creating or connecting PTYs.
+- **Progress addendum:** Added hand-written `@zoo-code/sdk` wrappers for PTY shells/list read routes with mocked transport coverage.
 
 - **Progress:** Fixed the focused generated SDK no-reply prompt route parity test by supplying explicit fake model metadata, keeping the route test out of provider discovery while preserving no-LLM behavior.
 

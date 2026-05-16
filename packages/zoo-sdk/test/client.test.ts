@@ -145,6 +145,24 @@ function transport(): ZooTransport & { requests: any[] } {
 			if (input.path === "/experimental/tool/ids?directory=%2Frepo%2Froot&workspace=workspace-1") {
 				return { data: ["bash"] }
 			}
+			if (input.path === "/pty/shells?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return { data: [{ path: "/bin/bash", name: "bash", acceptable: true }] }
+			}
+			if (input.path === "/pty?directory=%2Frepo%2Froot&workspace=workspace-1") {
+				return {
+					data: [
+						{
+							id: "pty_1",
+							title: "Terminal",
+							command: "bash",
+							args: ["-l"],
+							cwd: "/repo/root",
+							status: "running",
+							pid: 1234,
+						},
+					],
+				}
+			}
 			if (
 				input.path ===
 				"/experimental/session?directory=%2Frepo%2Froot&workspace=workspace-1&projectID=proj_1&worktrees=true&roots=false&limit=10&archived=false"
@@ -595,8 +613,22 @@ describe("ZooClient", () => {
 			{ name: "prettier", extensions: ["ts"], enabled: true },
 		])
 		await expect(client.listToolIDs(scope)).resolves.toEqual(["bash"])
+		await expect(client.listPtyShells(scope)).resolves.toEqual([
+			{ path: "/bin/bash", name: "bash", acceptable: true },
+		])
+		await expect(client.listPtySessions(scope)).resolves.toEqual([
+			{
+				id: "pty_1",
+				title: "Terminal",
+				command: "bash",
+				args: ["-l"],
+				cwd: "/repo/root",
+				status: "running",
+				pid: 1234,
+			},
+		])
 
-		expect(mock.requests.slice(-8)).toEqual([
+		expect(mock.requests.slice(-10)).toEqual([
 			{ path: "/path?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/vcs?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/vcs/diff?directory=%2Frepo%2Froot&workspace=workspace-1&mode=branch" },
@@ -605,6 +637,8 @@ describe("ZooClient", () => {
 			{ path: "/lsp?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/formatter?directory=%2Frepo%2Froot&workspace=workspace-1" },
 			{ path: "/experimental/tool/ids?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/pty/shells?directory=%2Frepo%2Froot&workspace=workspace-1" },
+			{ path: "/pty?directory=%2Frepo%2Froot&workspace=workspace-1" },
 		])
 	})
 

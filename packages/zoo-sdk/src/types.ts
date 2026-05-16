@@ -258,6 +258,24 @@ export type FormatterStatus = {
 	[key: string]: unknown
 }
 
+/** Available PTY shell metadata. */
+export type PtyShell = {
+	path: string
+	name: string
+	acceptable: boolean
+}
+
+/** Active PTY session metadata. */
+export type PtySession = {
+	id: string
+	title: string
+	command: string
+	args: string[]
+	cwd: string
+	status: "running" | "exited"
+	pid: number
+}
+
 /** Options for experimental session listing. */
 export type ExperimentalSessionListOptions = WorkspaceRouteOptions & {
 	projectID?: string

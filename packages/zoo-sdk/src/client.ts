@@ -37,6 +37,8 @@ import type {
 	PromptAsyncOptions,
 	Project,
 	ProjectUpdateOptions,
+	PtySession,
+	PtyShell,
 	SearchMatch,
 	SendMessageOptions,
 	Session,
@@ -622,6 +624,28 @@ export class ZooClient {
 			unwrap(
 				await this.#transport.request<string[] | { data?: string[] }>({
 					path: `/experimental/tool/ids${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List available PTY shells. */
+	async listPtyShells(options: WorkspaceRouteOptions = {}): Promise<PtyShell[]> {
+		return (
+			unwrap(
+				await this.#transport.request<PtyShell[] | { data?: PtyShell[] }>({
+					path: `/pty/shells${workspaceRouteQuery(options)}`,
+				}),
+			) ?? []
+		)
+	}
+
+	/** List active PTY sessions. */
+	async listPtySessions(options: WorkspaceRouteOptions = {}): Promise<PtySession[]> {
+		return (
+			unwrap(
+				await this.#transport.request<PtySession[] | { data?: PtySession[] }>({
+					path: `/pty${workspaceRouteQuery(options)}`,
 				}),
 			) ?? []
 		)
