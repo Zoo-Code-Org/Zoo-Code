@@ -58,6 +58,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Document and test that `@zoo-code/sdk` intentionally wraps sync history only, leaving sync start/replay as generated low-level side-effect APIs.
 - Ignore portable-core config reload requests after VS Code portable-core service disposal.
 - Ship a local Zoo config JSON schema in the VS Code extension and wire `zoo.jsonc` JSON validation to it.
+- Restore full `@opencode-ai/core` package-local test coverage by aligning Kilo temp-path expectations and isolating npm registry env in npm-config tests.
 - Add `@zoo-code/sdk` wrappers for portable-core PTY shells/list read routes.
 - Add `@zoo-code/sdk` wrappers for portable-core TUI prompt/dialog/command/toast/session routes.
 - Add an `@zoo-code/sdk` wrapper for portable-core sync history reads.
