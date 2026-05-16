@@ -39,6 +39,14 @@ export async function run() {
 		}
 	})
 
+	if (!aimockUrl) {
+		api.on("message" as RooCodeEventName.Message, ({ message }) => {
+			if (message.type === "say" && !message.partial) {
+				console.log(`[say:${message.say}]`, message.text?.slice(0, 300))
+			}
+		})
+	}
+
 	globalThis.api = api
 
 	const mochaOptions: Mocha.MochaOptions = {
