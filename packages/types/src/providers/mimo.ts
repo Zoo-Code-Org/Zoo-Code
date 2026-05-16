@@ -2,6 +2,13 @@ import type { ModelInfo } from "../model.js"
 
 // https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
 // https://developer.puter.com/ai/xiaomi/mimo-v2.5/
+//
+// NOTE: mimo-v2-flash is not included here. Its thinking mode defaults to
+// disabled and it doesn't reliably handle reasoning_content passthrough
+// during multi-turn tool calling, which causes 400 errors from the proxy.
+// If flash support is needed later, it should be validated against the API
+// first — the tool-calling + thinking flow is what makes MiMo useful as
+// an agentic provider, and flash just can't do that yet.
 export type MimoModelId = keyof typeof mimoModels
 
 export const mimoDefaultModelId: MimoModelId = "mimo-v2.5-pro"

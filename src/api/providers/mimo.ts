@@ -33,6 +33,12 @@ export class MimoHandler extends OpenAiHandler {
 		})
 	}
 
+	/**
+	 * Maps the configured model ID to its MiMo model info and parameters.
+	 * Falls back to the default model (mimo-v2.5-pro) if the stored ID
+	 * doesn't match any known model — this can happen when users manually
+	 * type a model name in settings.
+	 */
 	override getModel() {
 		const id = this.options.apiModelId ?? mimoDefaultModelId
 		const info: ModelInfo = mimoModels[id as keyof typeof mimoModels] || mimoModels[mimoDefaultModelId]
@@ -72,6 +78,11 @@ export class MimoHandler extends OpenAiHandler {
 		})
 	}
 
+	/**
+	 * Recursively walks a JSON Schema object and removes OpenAI-specific
+	 * fields (additionalProperties, strict) that MiMo's proxy doesn't
+	 * recognize. Without this, every tool call would 400.
+	 */
 	private stripOpenAiExtensions(schema: any): any {
 		if (!schema || typeof schema !== "object") {
 			return schema
@@ -226,6 +237,16 @@ export class MimoHandler extends OpenAiHandler {
 		return converted
 	}
 
+	/**
+	 * Streams a chat completion from MiMo's OpenAI-compatible API.
+	 *
+	 * Key differences from the base OpenAiHandler:
+	 * - Uses convertMessagesForMiMo instead of convertToOpenAiMessages to
+	 *   preserve reasoning_content in the conversation history.
+	 * - Enables thinking mode via extra_body.thinking.
+	 * - Includes stream_options.include_usage for cost tracking.
+	 * - Strips OpenAI-specific fields from tool definitions.
+	 */
 	override async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
