@@ -786,7 +786,11 @@ export class ZooClient {
 		)
 	}
 
-	/** List sync event history using aggregate sequence cursors. */
+	/**
+	 * List sync event history using aggregate sequence cursors.
+	 * Sync start/replay are intentionally not wrapped here because they start
+	 * workspace sync loops or replay events into mutable session state.
+	 */
 	async listSyncHistory(options: SyncHistoryListOptions): Promise<SyncHistoryEvent[]> {
 		const { directory, workspace, body } = options
 		return (

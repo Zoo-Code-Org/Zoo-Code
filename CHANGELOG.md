@@ -55,6 +55,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fix portable-core ripgrep resolution to use the packaged executable before attempting network downloads, making file text search tests hermetic.
 - Fix generated SDK command-list parity by preventing lazy local-review templates from starting git work during list serialization.
 - Add generated SDK agent and provider discovery parity across direct and HttpApi backends using deterministic fixtures.
+- Document and test that `@zoo-code/sdk` intentionally wraps sync history only, leaving sync start/replay as generated low-level side-effect APIs.
 - Add `@zoo-code/sdk` wrappers for portable-core PTY shells/list read routes.
 - Add `@zoo-code/sdk` wrappers for portable-core TUI prompt/dialog/command/toast/session routes.
 - Add an `@zoo-code/sdk` wrapper for portable-core sync history reads.

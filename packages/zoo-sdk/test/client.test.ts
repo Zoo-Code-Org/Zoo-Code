@@ -764,6 +764,14 @@ describe("ZooClient", () => {
 		})
 	})
 
+	test("does not wrap side-effecting sync operations", async () => {
+		const client = await ZooClient.connect({ transport: transport() })
+		const syncClient = client as unknown as Record<string, unknown>
+
+		expect(syncClient.startSync).toBeUndefined()
+		expect(syncClient.replaySync).toBeUndefined()
+	})
+
 	test("wraps experimental read routes", async () => {
 		const mock = transport()
 		const client = await ZooClient.connect({ transport: mock })
