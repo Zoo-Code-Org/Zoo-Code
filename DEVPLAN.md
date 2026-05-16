@@ -380,7 +380,7 @@
     - **Depends on:** Phase 0 complete.
     - **Can parallelize with:** Phase 1 and Phase 2 tasks.
 
-    - **Progress:** Added focused generated-schema coverage proving `Config.Info.zod` exposes provider, model, default agent, agent, instruction/rules path, and permission keys for `zoo.jsonc`, and accepts a representative Zoo config with provider/model/agent/instructions/top-level and agent-level permissions. `packages/zoo-cli/script/schema.ts` can generate the schema from `Config.Info.zod`, but checking in the generated file and adding VS Code `jsonValidation` are deferred until the product selects a canonical shipped or hosted schema location. A root `schemas/` file would not automatically be packaged in the VSIX, while an extension-local schema needs an explicit package location and `.vscodeignore` decision.
+    - **Progress:** Added focused generated-schema coverage proving `Config.Info.zod` exposes provider, model, default agent, agent, instruction/rules path, and permission keys for `zoo.jsonc`, and accepts a representative Zoo config with provider/model/agent/instructions/top-level and agent-level permissions. `packages/zoo-cli/script/schema.ts` generates the schema from `Config.Info.zod`; the generated schema now ships in the VS Code extension at `schemas/zoo-config.schema.json` and `package.json` contributes local `zoo.jsonc` JSON validation. A public hosted schema URL remains deferred.
 
 2. Implement unified config loader
 
@@ -436,6 +436,7 @@
 - **Progress addendum:** Added generated SDK agent and provider discovery parity across direct and HttpApi backends, using stable response projections and disabling background model fetches for the provider fixture.
 - **Progress addendum:** Documented and tested the sync route wrapper boundary: `@zoo-code/sdk` wraps sync history reads only, while sync start/replay remain excluded because they start background loops or mutate session/sync state.
 - **Progress addendum:** Hardened VS Code portable-core lifecycle handling so late config reload callbacks after service disposal cannot call a closed SDK client.
+- **Progress addendum:** Added a VSIX-shipped Zoo config schema at `packages/zoo-vscode/src/schemas/zoo-config.schema.json` and wired `zoo.jsonc` JSON validation to the local packaged schema; hosted/public schema URL remains deferred.
 - **Progress addendum:** Added a hand-written `@zoo-code/sdk` wrapper for sync history reads with mocked transport coverage, keeping sync start/replay excluded.
 
 - **Progress:** Fixed the focused generated SDK no-reply prompt route parity test by supplying explicit fake model metadata, keeping the route test out of provider discovery while preserving no-LLM behavior.

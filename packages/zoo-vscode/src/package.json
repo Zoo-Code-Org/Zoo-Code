@@ -51,6 +51,14 @@
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
+		"jsonValidation": [
+			{
+				"fileMatch": [
+					"zoo.jsonc"
+				],
+				"url": "./schemas/zoo-config.schema.json"
+			}
+		],
 		"viewsContainers": {
 			"activitybar": [
 				{

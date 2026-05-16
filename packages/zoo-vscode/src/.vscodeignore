@@ -26,6 +26,9 @@
 # Include default themes JSON files used in getTheme
 !integrations/theme/default-themes/**
 
+# Include Zoo config schema for VS Code JSON validation
+!schemas/**
+
 # Include icons and images
 !assets/codicons/**
 !assets/bin/**

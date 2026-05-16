@@ -579,12 +579,23 @@ test("merges Zoo config objects deeply while only instructions arrays concatenat
 	}
 })
 
-test("generated zoo.jsonc schema covers provider model agent rules and permissions", () => {
+test("generated zoo.jsonc schema covers provider model agent rules and permissions", async () => {
 	const schema = z.toJSONSchema(Config.Info.zod, { io: "input" }) as { properties?: Record<string, unknown> }
+	const shippedSchema = JSON.parse(
+		await fs.readFile(
+			path.resolve(import.meta.dir, "../../../zoo-vscode/src/schemas/zoo-config.schema.json"),
+			"utf8",
+		),
+	) as { properties?: Record<string, unknown>; allowComments?: boolean; allowTrailingCommas?: boolean }
 
 	expect(Object.keys(schema.properties ?? {})).toEqual(
 		expect.arrayContaining(["provider", "model", "default_agent", "agent", "instructions", "permission", "mcp"]),
 	)
+	expect(Object.keys(shippedSchema.properties ?? {})).toEqual(
+		expect.arrayContaining(["provider", "model", "default_agent", "agent", "instructions", "permission", "mcp"]),
+	)
+	expect(shippedSchema.allowComments).toBe(true)
+	expect(shippedSchema.allowTrailingCommas).toBe(true)
 
 	const parsed = Config.Info.zod.safeParse({
 		$schema: "https://zoo-code.ai/config.json",

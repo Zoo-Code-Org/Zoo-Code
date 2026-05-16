@@ -57,6 +57,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add generated SDK agent and provider discovery parity across direct and HttpApi backends using deterministic fixtures.
 - Document and test that `@zoo-code/sdk` intentionally wraps sync history only, leaving sync start/replay as generated low-level side-effect APIs.
 - Ignore portable-core config reload requests after VS Code portable-core service disposal.
+- Ship a local Zoo config JSON schema in the VS Code extension and wire `zoo.jsonc` JSON validation to it.
 - Add `@zoo-code/sdk` wrappers for portable-core PTY shells/list read routes.
 - Add `@zoo-code/sdk` wrappers for portable-core TUI prompt/dialog/command/toast/session routes.
 - Add an `@zoo-code/sdk` wrapper for portable-core sync history reads.
@@ -91,7 +92,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Add Zoo CLI config-loader coverage for project `zoo.jsonc` precedence over global Zoo config.
 - Add Zoo CLI config-loader coverage for global/project Zoo object merge and instruction array semantics.
 - Add Zoo CLI instruction coverage for project `AGENTS.md` ordering ahead of sorted `.zoo/rules` markdown.
-- Document that `zoo.jsonc` schema check-in and VS Code `jsonValidation` are deferred until the shipped or hosted schema location is selected.
+- Document that a public hosted `zoo.jsonc` schema URL remains deferred while VS Code uses the shipped local schema.
 - Document Roo-to-Zoo portable config migration paths for `zoo.jsonc`, `.zoo/modes`, `.zoo/rules`, `.zooignore`, read-only portable provider config, and CLI-managed mode selection.
 - Restore real Zoo CLI build, typecheck, and broader imported CLI test coverage through local Kilo/OpenCode compatibility packages and explicit quarantine for upstream tests that assert removed Kilo gateway/indexing behavior.
 - Clean up imported CLI config migration docs to label legacy Kilo paths as fallbacks, point to Zoo portable config paths, and remove bundled Kilo Gateway notification guidance.
