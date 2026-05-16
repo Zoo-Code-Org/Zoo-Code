@@ -594,5 +594,209 @@ describe("MimoHandler", () => {
 			expect(reasoningChunks).toHaveLength(1)
 			expect(reasoningChunks[0].text).toBe("Thinking...")
 		})
+
+		it("should yield tool_call_partial chunks from stream", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_abc",
+											function: { name: "read_file", arguments: '{"path' },
+										},
+									],
+								},
+								index: 0,
+							},
+						],
+						usage: null,
+					}
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											function: { arguments: '":"test.ts"}' },
+										},
+									],
+								},
+								index: 0,
+							},
+						],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "tool_calls" }],
+						usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Read test.ts" }] },
+			]
+
+			const chunks: any[] = []
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
+			expect(toolChunks).toHaveLength(2)
+			expect(toolChunks[0].id).toBe("call_abc")
+			expect(toolChunks[0].name).toBe("read_file")
+			expect(toolChunks[0].arguments).toBe('{"path')
+			expect(toolChunks[1].arguments).toBe('":"test.ts"}')
+		})
+
+		it("should yield usage with cache tokens", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Hi" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: {
+							prompt_tokens: 100,
+							completion_tokens: 20,
+							total_tokens: 120,
+							prompt_tokens_details: {
+								cache_write_tokens: 50,
+								cached_tokens: 30,
+							},
+						},
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: any[] = []
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const usageChunks = chunks.filter((c) => c.type === "usage")
+			expect(usageChunks).toHaveLength(1)
+			expect(usageChunks[0].inputTokens).toBe(100)
+			expect(usageChunks[0].outputTokens).toBe(20)
+			expect(usageChunks[0].cacheWriteTokens).toBe(50)
+			expect(usageChunks[0].cacheReadTokens).toBe(30)
+			expect(usageChunks[0].totalCost).toBeGreaterThan(0)
+		})
+
+		it("should handle API errors gracefully", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("400 Param Incorrect"))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages)
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+		})
+
+		it("should send converted Anthropic messages to API", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Read the file" }],
+				},
+				{
+					role: "assistant",
+					content: [
+						{ type: "text" as const, text: "I'll read it" },
+						{
+							type: "tool_use" as const,
+							id: "call_1",
+							name: "read_file",
+							input: { path: "README.md" },
+						},
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result" as const,
+							tool_use_id: "call_1",
+							content: "# Hello",
+						},
+					],
+				},
+			]
+
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.messages).toHaveLength(4) // system + user + assistant + tool
+			expect(params.messages[0].role).toBe("system")
+			expect(params.messages[0].content).toBe("System prompt")
+			expect(params.messages[1].role).toBe("user")
+			expect(params.messages[2].role).toBe("assistant")
+			expect(params.messages[2].reasoning_content).toBeUndefined()
+			expect(params.messages[2].tool_calls).toHaveLength(1)
+			expect(params.messages[3].role).toBe("tool")
+			expect(params.messages[3].tool_call_id).toBe("call_1")
+		})
+
+		it("should not include tools param when no tools provided", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.tools).toBeUndefined()
+		})
+
+		it("should handle empty delta chunks without errors", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { choices: [{}], usage: null }
+					yield { choices: [{ delta: {} }], usage: null }
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: any[] = []
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks).toHaveLength(0)
+		})
 	})
 })
