@@ -347,7 +347,7 @@ This directory contains various files and subdirectories for testing the list_fi
 
 			console.log("Symlink test Task ID:", taskId)
 
-			// Wait for task completion
+			// 120s: real models may loop before finding the symlink fixture path.
 			await waitFor(() => taskCompleted, { timeout: 120_000 })
 
 			const completionMessage = messages.find((m) => {

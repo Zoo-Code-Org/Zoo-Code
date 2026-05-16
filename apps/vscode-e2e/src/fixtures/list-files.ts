@@ -1,5 +1,6 @@
 import { LLMock } from "@copilotkit/aimock"
-import type { ChatCompletionRequest, ChatMessage } from "@copilotkit/aimock"
+
+import { toolResultContains } from "./fixture-utils"
 
 type ListFilesFixture = {
 	userMessagePattern: string
@@ -9,20 +10,6 @@ type ListFilesFixture = {
 	expected: string[]
 	result: string
 	id: string
-}
-
-function toolResultContains(req: ChatCompletionRequest, toolCallId: string, expected: string[]) {
-	const messages = Array.isArray(req?.messages) ? req.messages : []
-	const toolMessage = messages.find(
-		(message: ChatMessage) => message?.role === "tool" && message.tool_call_id === toolCallId,
-	)
-
-	const content = toolMessage?.content
-	if (typeof content !== "string") {
-		return false
-	}
-
-	return expected.every((text) => content.includes(text))
 }
 
 export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
@@ -46,7 +33,7 @@ export function addListFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
 			id: "call_list_files_recursive_002",
 		},
 		{
-			userMessagePattern: "list-files-symlink-fixture.*recursive=false",
+			userMessagePattern: "path='list-files-symlink-fixture'",
 			toolName: "list_files",
 			arguments: '{"path":"list-files-symlink-fixture","recursive":false}',
 			toolCallId: "call_list_files_symlink_001",

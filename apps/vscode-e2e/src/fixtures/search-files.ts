@@ -1,5 +1,6 @@
 import { LLMock } from "@copilotkit/aimock"
-import type { ChatCompletionRequest, ChatMessage } from "@copilotkit/aimock"
+
+import { toolResultContains } from "./fixture-utils"
 
 type SearchFilesFixture = {
 	userMessagePattern: string
@@ -9,20 +10,6 @@ type SearchFilesFixture = {
 	expected: string[]
 	result: string
 	id: string
-}
-
-function toolResultContains(req: ChatCompletionRequest, toolCallId: string, expected: string[]) {
-	const messages = Array.isArray(req?.messages) ? req.messages : []
-	const toolMessage = messages.find(
-		(message: ChatMessage) => message?.role === "tool" && message.tool_call_id === toolCallId,
-	)
-
-	const content = toolMessage?.content
-	if (typeof content !== "string") {
-		return false
-	}
-
-	return expected.every((text) => content.includes(text))
 }
 
 export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) {
@@ -102,7 +89,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"nonExistentPattern12345"}',
 			toolCallId: "call_search_files_no_match_001",
-			expected: ["Found 0 results."],
+			expected: ["No results found"],
 			result: "No matches were found for `nonExistentPattern12345` in the search fixture directory.",
 			id: "call_search_files_no_match_002",
 		},
