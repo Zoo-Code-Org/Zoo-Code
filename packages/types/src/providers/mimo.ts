@@ -32,17 +32,6 @@ export const mimoModels = {
 		description:
 			"MiMo V2.5 - Full modal understanding model with 1M context, deep thinking, tool calling, and structured output.",
 	},
-	"mimo-v2-pro": {
-		maxTokens: 131_072,
-		contextWindow: 1_000_000,
-		supportsImages: false,
-		supportsPromptCache: false,
-		preserveReasoning: true,
-		inputPrice: 1.0,
-		outputPrice: 3.0,
-		description:
-			"MiMo V2 Pro - Xiaomi's previous generation reasoning model with 1M context, thinking, tool calling, and structured output.",
-	},
 } as const satisfies Record<string, ModelInfo>
 
 export const mimoDefaultModelInfo: ModelInfo = mimoModels[mimoDefaultModelId]
