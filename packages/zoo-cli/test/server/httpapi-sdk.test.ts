@@ -1,4 +1,5 @@
 import { afterEach, describe, expect } from "bun:test"
+import { $ } from "bun"
 import { ConfigProvider, Effect, Layer } from "effect"
 import type * as Scope from "effect/Scope"
 import { HttpRouter } from "effect/unstable/http"
@@ -167,6 +168,23 @@ function sessionTitles(value: unknown) {
 		.sort()
 }
 
+function worktreeDiffRows(value: unknown) {
+	return array(value)
+		.map((item) => {
+			const row = record(item)
+			return {
+				file: row.file,
+				before: row.before,
+				after: row.after,
+				additions: row.additions,
+				deletions: row.deletions,
+				status: row.status,
+				summarized: row.summarized,
+			}
+		})
+		.sort((a, b) => String(a.file).localeCompare(String(b.file)))
+}
+
 function resetState() {
 	return Effect.promise(async () => {
 		await disposeAllInstances()
@@ -235,6 +253,16 @@ function writeStandardFiles(dir: string) {
 		call(() => Bun.write(path.join(dir, "hello.txt"), "hello")),
 		call(() => Bun.write(path.join(dir, "needle.ts"), "export const needle = 'sdk-parity'\n")),
 	]).pipe(Effect.asVoid)
+}
+
+function writeWorktreeDiffFiles(dir: string) {
+	return Effect.gen(function* () {
+		yield* call(() => Bun.write(path.join(dir, "tracked.txt"), "before\nkeep\n"))
+		yield* call(() => $`git add tracked.txt`.cwd(dir).quiet())
+		yield* call(() => $`git commit -m "seed worktree diff fixture"`.cwd(dir).quiet())
+		yield* call(() => Bun.write(path.join(dir, "tracked.txt"), "after\nkeep\nnew\n"))
+		yield* call(() => Bun.write(path.join(dir, "created.txt"), "created\n"))
+	})
 }
 
 function seedMessage(directory: string, sessionID: string) {
@@ -438,6 +466,25 @@ describe("HttpApi SDK", () => {
 		),
 	)
 	// kilocode_change end
+
+	parity("matches generated SDK worktree diff routes across backends", (backend) =>
+		withProject(backend, { setup: writeWorktreeDiffFiles }, ({ sdk }) =>
+			Effect.gen(function* () {
+				const full = yield* capture(() => sdk.worktree.diff({ base: "HEAD" }))
+				const summary = yield* capture(() => sdk.worktree.diffSummary({ base: "HEAD" }))
+				const file = yield* capture(() => sdk.worktree.diffFile({ base: "HEAD", file: "tracked.txt" }))
+				const missing = yield* capture(() => sdk.worktree.diffFile({ base: "HEAD", file: "missing.txt" }))
+
+				return {
+					statuses: statuses({ full, summary, file, missing }),
+					full: worktreeDiffRows(full.data),
+					summary: worktreeDiffRows(summary.data),
+					file: worktreeDiffRows([file.data])[0],
+					missing: missing.data,
+				}
+			}),
+		),
+	)
 
 	parity("matches generated SDK project update behavior across backends", (backend) =>
 		withStandardProject(backend, ({ sdk }) =>
