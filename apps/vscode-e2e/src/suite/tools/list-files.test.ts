@@ -350,15 +350,18 @@ This directory contains various files and subdirectories for testing the list_fi
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 120_000 })
 
-			const completionMessage = messages.find(
-				(m) =>
-					m.type === "say" &&
-					(m.say === "completion_result" || m.say === "text") &&
-					(m.text?.includes("source-file.txt") ||
-						m.text?.includes("link-to-file.txt") ||
-						m.text?.includes("source/")),
-			)
-			assert.ok(completionMessage, "AI should have summarized the symlink directory contents")
+			const completionMessage = messages.find((m) => {
+				if (m.type !== "say" || (m.say !== "completion_result" && m.say !== "text")) {
+					return false
+				}
+
+				const text = m.text ?? ""
+				const mentionsOriginalEntry = text.includes("source-file.txt") || text.includes("source/")
+				const mentionsSymlinkEntry = text.includes("link-to-file.txt") || text.includes("link-to-dir")
+
+				return mentionsOriginalEntry && mentionsSymlinkEntry
+			})
+			assert.ok(completionMessage, "AI should have summarized both the original and symlinked directory contents")
 
 			console.log("Test passed! Symlinked files and directories are now visible")
 
