@@ -1,7 +1,7 @@
 import { memo, type ReactNode, useState } from "react"
 import { Trans } from "react-i18next"
+import { SiDiscord, SiReddit, SiX } from "react-icons/si"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
-import { SiX, SiDiscord, SiReddit } from "react-icons/si"
 
 import { Package } from "@roo/package"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -104,6 +104,7 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 const SocialLink = ({ icon, label, href }: { icon: ReactNode; label: string; href: string }) => (
 	<VSCodeLink
 		href={href}
+		className="inline-flex items-center gap-1"
 		onClick={(e) => {
 			e.preventDefault()
 			vscode.postMessage({ type: "openExternal", url: href })
