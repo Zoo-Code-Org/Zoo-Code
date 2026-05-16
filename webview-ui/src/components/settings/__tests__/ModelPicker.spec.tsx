@@ -262,7 +262,7 @@ describe("ModelPicker", () => {
 				)
 			})
 
-			expect(screen.queryByText(/automaticFetch/)).not.toBeInTheDocument()
+			expect(screen.queryByTestId("automatic-fetch-hint")).not.toBeInTheDocument()
 		})
 
 		it("shows the automatic fetch hint for non-MiMo providers", async () => {
@@ -274,7 +274,7 @@ describe("ModelPicker", () => {
 				)
 			})
 
-			expect(screen.getByText(/automaticFetch/)).toBeInTheDocument()
+			expect(screen.getByTestId("automatic-fetch-hint")).toBeInTheDocument()
 		})
 	})
 })
