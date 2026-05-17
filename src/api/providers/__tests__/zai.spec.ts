@@ -475,6 +475,34 @@ describe("ZAiHandler", () => {
 	})
 
 	describe("GLM-4.7 Thinking Mode", () => {
+		it("should cap GLM-5.1 max_tokens to 20% of context window by default", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.1",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.1",
+					max_tokens: 40_000,
+				}),
+			)
+		})
+
 		it("should enable thinking by default for GLM-4.7 (default reasoningEffort is medium)", async () => {
 			const handlerWithModel = new ZAiHandler({
 				apiModelId: "glm-4.7",
