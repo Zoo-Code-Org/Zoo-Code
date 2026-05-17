@@ -46,16 +46,33 @@ const GEMINI_SCHEMA_COMPATIBILITY_DROP_KEYS = new Set([
 	"definitions",
 ])
 
-function sanitizeSchemaForGemini(schema: unknown): unknown {
+function sanitizeSchemaForGemini(schema: unknown, defs?: Record<string, unknown>): unknown {
 	if (!schema || typeof schema !== "object") {
 		return schema
 	}
 
 	if (Array.isArray(schema)) {
-		return schema.map((item) => sanitizeSchemaForGemini(item))
+		return schema.map((item) => sanitizeSchemaForGemini(item, defs))
 	}
 
 	const source = schema as Record<string, unknown>
+
+	// Extract $defs / definitions from the root schema on the first call so
+	// they can be used to resolve $ref entries encountered deeper in the tree.
+	const resolvedDefs = defs ?? ((source.$defs ?? source.definitions) as Record<string, unknown> | undefined)
+
+	// Resolve local JSON Pointer $ref before any other processing.
+	// Without this, dropping $defs leaves dangling references that Gemini rejects.
+	if (typeof source.$ref === "string" && resolvedDefs) {
+		const match = source.$ref.match(/^#\/(?:\$defs|definitions)\/(.+)$/)
+		if (match) {
+			const resolved = resolvedDefs[match[1]]
+			if (resolved !== undefined) {
+				return sanitizeSchemaForGemini(resolved, resolvedDefs)
+			}
+		}
+	}
+
 	const result: Record<string, unknown> = {}
 	let nullable = source.nullable === true
 
@@ -67,14 +84,28 @@ function sanitizeSchemaForGemini(schema: unknown): unknown {
 				: true
 		})
 		nullable = nullable || variants.length < composition.length
-		Object.assign(result, sanitizeSchemaForGemini(variants[0] ?? {}))
+		Object.assign(result, sanitizeSchemaForGemini(variants[0] ?? {}, resolvedDefs))
 	}
 
 	if (Array.isArray(source.allOf)) {
 		for (const variant of source.allOf) {
-			const sanitized = sanitizeSchemaForGemini(variant)
+			const sanitized = sanitizeSchemaForGemini(variant, resolvedDefs)
 			if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
-				Object.assign(result, sanitized)
+				const s = sanitized as Record<string, unknown>
+				// Deep-merge properties so later allOf fragments don't overwrite
+				// earlier ones (last-write-wins Object.assign drops prior keys).
+				if (s.properties && typeof s.properties === "object") {
+					result.properties = {
+						...(result.properties as Record<string, unknown> | undefined),
+						...(s.properties as Record<string, unknown>),
+					}
+				}
+				if (Array.isArray(s.required)) {
+					const existing = Array.isArray(result.required) ? (result.required as string[]) : []
+					result.required = [...new Set([...existing, ...(s.required as string[])])]
+				}
+				const { properties: _p, required: _r, ...rest } = s
+				Object.assign(result, rest)
 			}
 		}
 	}
@@ -93,7 +124,7 @@ function sanitizeSchemaForGemini(schema: unknown): unknown {
 			continue
 		}
 
-		result[key] = sanitizeSchemaForGemini(value)
+		result[key] = sanitizeSchemaForGemini(value, resolvedDefs)
 	}
 
 	if (nullable) {

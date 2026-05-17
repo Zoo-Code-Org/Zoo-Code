@@ -493,5 +493,99 @@ describe("GeminiHandler backend support", () => {
 				},
 			})
 		})
+
+		it("should deep-merge allOf fragments instead of overwriting earlier properties", async () => {
+			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const handler = new GeminiHandler(options)
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			// @ts-ignore access private client
+			handler["client"].models.generateContentStream = stub
+
+			await handler
+				.createMessage("test", [] as any, {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "multi_allof_tool",
+								description: "Tool with multi-fragment allOf",
+								parameters: {
+									allOf: [
+										{
+											type: "object",
+											properties: { a: { type: "string" } },
+											required: ["a"],
+										},
+										{
+											type: "object",
+											properties: { b: { type: "integer" } },
+											required: ["b"],
+										},
+									],
+								},
+							},
+						},
+					],
+				})
+				.next()
+
+			const schema = stub.mock.calls[0][0].config.tools[0].functionDeclarations[0].parametersJsonSchema
+			// Both property blocks must survive the merge — previously `b` overwrote `a`
+			expect(schema.properties).toEqual({
+				a: { type: "string" },
+				b: { type: "integer" },
+			})
+			expect(schema.required).toEqual(expect.arrayContaining(["a", "b"]))
+		})
+
+		it("should resolve $ref entries before dropping $defs", async () => {
+			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const handler = new GeminiHandler(options)
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			// @ts-ignore access private client
+			handler["client"].models.generateContentStream = stub
+
+			await handler
+				.createMessage("test", [] as any, {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "ref_tool",
+								description: "Tool with $ref",
+								parameters: {
+									type: "object",
+									$defs: {
+										Config: {
+											type: "object",
+											properties: { timeout: { type: "integer" } },
+											required: ["timeout"],
+										},
+									},
+									properties: {
+										cfg: { $ref: "#/$defs/Config" },
+										name: { type: "string" },
+									},
+									required: ["cfg", "name"],
+								},
+							},
+						},
+					],
+				})
+				.next()
+
+			const schema = stub.mock.calls[0][0].config.tools[0].functionDeclarations[0].parametersJsonSchema
+			// $defs must be gone, $ref must be inlined
+			expect(JSON.stringify(schema)).not.toContain("$defs")
+			expect(JSON.stringify(schema)).not.toContain("$ref")
+			expect(schema.properties.cfg).toEqual({
+				type: "object",
+				properties: { timeout: { type: "integer" } },
+				required: ["timeout"],
+			})
+			expect(schema.properties.name).toEqual({ type: "string" })
+		})
 	})
 })
