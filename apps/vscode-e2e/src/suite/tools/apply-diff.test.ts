@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
-import { waitFor, sleep } from "../utils"
+import { waitUntilCompleted, sleep } from "../utils"
 import { setDefaultSuiteTimeout } from "../test-utils"
 
 const TEST_DIR_NAME = "apply-diff-tool-fixture"
@@ -104,11 +104,6 @@ suite("Roo Code apply_diff Tool", function () {
 
 	let workspaceDir: string
 	let testDir: string
-	const toolApprovalHandler = ({ message }: { message: ClineMessage }) => {
-		if (message.type === "ask" && message.ask === "tool") {
-			void globalThis.api.approveCurrentAsk()
-		}
-	}
 
 	suiteSetup(async () => {
 		const aimockUrl = process.env.AIMOCK_URL
@@ -120,7 +115,6 @@ suite("Roo Code apply_diff Tool", function () {
 			openRouterModelId: "anthropic/claude-sonnet-4.5",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
 		})
-		globalThis.api.on(RooCodeEventName.Message, toolApprovalHandler)
 
 		const workspaceFolders = vscode.workspace.workspaceFolders
 		if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -147,7 +141,6 @@ suite("Roo Code apply_diff Tool", function () {
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
 		})
-		globalThis.api.off(RooCodeEventName.Message, toolApprovalHandler)
 
 		await fs.rm(testDir, { recursive: true, force: true })
 	})
@@ -182,7 +175,6 @@ suite("Roo Code apply_diff Tool", function () {
 	test("Should apply diff to modify existing file content", async function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
-		let taskCompleted = false
 		let errorOccurred: string | null = null
 
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
@@ -193,27 +185,22 @@ suite("Roo Code apply_diff Tool", function () {
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		const taskCompletedHandler = (id: string) => {
-			if (id === taskId) {
-				taskCompleted = true
-			}
-		}
-		api.on(RooCodeEventName.TaskCompleted, taskCompletedHandler)
-
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-					alwaysAllowReadOnly: true,
-					alwaysAllowReadOnlyOutsideWorkspace: true,
-				},
-				text: "APPLY_DIFF_SIMPLE_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowWrite: true,
+							alwaysAllowReadOnly: true,
+							alwaysAllowReadOnlyOutsideWorkspace: true,
+						},
+						text: "APPLY_DIFF_SIMPLE_SMOKE",
+					}),
+				timeout: 60_000,
 			})
-
-			await waitFor(() => taskCompleted, { timeout: 60_000 })
 			await sleep(1_000)
 
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
@@ -237,14 +224,12 @@ suite("Roo Code apply_diff Tool", function () {
 			assert.ok(completionMessage, "AI should have acknowledged the updated file content")
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
-			api.off(RooCodeEventName.TaskCompleted, taskCompletedHandler)
 		}
 	})
 
 	test("Should apply multiple search/replace blocks in single diff", async function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
-		let taskCompleted = false
 		let errorOccurred: string | null = null
 
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
@@ -255,27 +240,22 @@ suite("Roo Code apply_diff Tool", function () {
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		const taskCompletedHandler = (id: string) => {
-			if (id === taskId) {
-				taskCompleted = true
-			}
-		}
-		api.on(RooCodeEventName.TaskCompleted, taskCompletedHandler)
-
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-					alwaysAllowReadOnly: true,
-					alwaysAllowReadOnlyOutsideWorkspace: true,
-				},
-				text: "APPLY_DIFF_MULTI_REPLACE_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowWrite: true,
+							alwaysAllowReadOnly: true,
+							alwaysAllowReadOnlyOutsideWorkspace: true,
+						},
+						text: "APPLY_DIFF_MULTI_REPLACE_SMOKE",
+					}),
+				timeout: 60_000,
 			})
-
-			await waitFor(() => taskCompleted, { timeout: 60_000 })
 			await sleep(1_000)
 
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
@@ -299,14 +279,12 @@ suite("Roo Code apply_diff Tool", function () {
 			assert.ok(completionMessage, "AI should have acknowledged the multiple replacements")
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
-			api.off(RooCodeEventName.TaskCompleted, taskCompletedHandler)
 		}
 	})
 
 	test("Should handle apply_diff with line number hints", async function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
-		let taskCompleted = false
 		let errorOccurred: string | null = null
 
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
@@ -317,27 +295,22 @@ suite("Roo Code apply_diff Tool", function () {
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		const taskCompletedHandler = (id: string) => {
-			if (id === taskId) {
-				taskCompleted = true
-			}
-		}
-		api.on(RooCodeEventName.TaskCompleted, taskCompletedHandler)
-
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-					alwaysAllowReadOnly: true,
-					alwaysAllowReadOnlyOutsideWorkspace: true,
-				},
-				text: "APPLY_DIFF_LINE_HINTS_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowWrite: true,
+							alwaysAllowReadOnly: true,
+							alwaysAllowReadOnlyOutsideWorkspace: true,
+						},
+						text: "APPLY_DIFF_LINE_HINTS_SMOKE",
+					}),
+				timeout: 60_000,
 			})
-
-			await waitFor(() => taskCompleted, { timeout: 60_000 })
 			await sleep(1_000)
 
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
@@ -358,41 +331,34 @@ suite("Roo Code apply_diff Tool", function () {
 			assert.ok(completionMessage, "AI should have acknowledged the targeted change")
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
-			api.off(RooCodeEventName.TaskCompleted, taskCompletedHandler)
 		}
 	})
 
 	test("Should handle apply_diff errors gracefully", async function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
-		let taskCompleted = false
 
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
 			messages.push(message)
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		const taskCompletedHandler = (id: string) => {
-			if (id === taskId) {
-				taskCompleted = true
-			}
-		}
-		api.on(RooCodeEventName.TaskCompleted, taskCompletedHandler)
-
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-					alwaysAllowReadOnly: true,
-					alwaysAllowReadOnlyOutsideWorkspace: true,
-				},
-				text: "APPLY_DIFF_ERROR_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowWrite: true,
+							alwaysAllowReadOnly: true,
+							alwaysAllowReadOnlyOutsideWorkspace: true,
+						},
+						text: "APPLY_DIFF_ERROR_SMOKE",
+					}),
+				timeout: 60_000,
 			})
-
-			await waitFor(() => taskCompleted, { timeout: 60_000 })
 			await sleep(1_000)
 
 			const actualContent = await fs.readFile(
@@ -409,19 +375,17 @@ suite("Roo Code apply_diff Tool", function () {
 				(message) =>
 					message.type === "say" &&
 					(message.say === "completion_result" || message.say === "text") &&
-					message.text?.includes("left unchanged"),
+					message.text?.includes("did not match"),
 			)
 			assert.ok(completionMessage, "AI should have acknowledged the graceful apply_diff failure")
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
-			api.off(RooCodeEventName.TaskCompleted, taskCompletedHandler)
 		}
 	})
 
 	test("Should apply multiple search/replace blocks to edit two separate functions", async function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
-		let taskCompleted = false
 		let errorOccurred: string | null = null
 
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
@@ -432,27 +396,22 @@ suite("Roo Code apply_diff Tool", function () {
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		const taskCompletedHandler = (id: string) => {
-			if (id === taskId) {
-				taskCompleted = true
-			}
-		}
-		api.on(RooCodeEventName.TaskCompleted, taskCompletedHandler)
-
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-					alwaysAllowReadOnly: true,
-					alwaysAllowReadOnlyOutsideWorkspace: true,
-				},
-				text: "APPLY_DIFF_MULTI_BLOCK_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowWrite: true,
+							alwaysAllowReadOnly: true,
+							alwaysAllowReadOnlyOutsideWorkspace: true,
+						},
+						text: "APPLY_DIFF_MULTI_BLOCK_SMOKE",
+					}),
+				timeout: 60_000,
 			})
-
-			await waitFor(() => taskCompleted, { timeout: 60_000 })
 			await sleep(1_000)
 
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
@@ -476,7 +435,6 @@ suite("Roo Code apply_diff Tool", function () {
 			assert.ok(completionMessage, "AI should have acknowledged the multi-block apply_diff update")
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
-			api.off(RooCodeEventName.TaskCompleted, taskCompletedHandler)
 		}
 	})
 })

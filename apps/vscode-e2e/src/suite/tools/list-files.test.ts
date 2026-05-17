@@ -36,7 +36,6 @@ suite("Roo Code list_files Tool", function () {
 			throw new Error("No workspace folder found")
 		}
 		workspaceDir = workspaceFolders[0]!.uri.fsPath
-		console.log("Workspace directory:", workspaceDir)
 
 		// Create test directory structure
 		const testDir = path.join(workspaceDir, TEST_DIR_NAME)
@@ -126,9 +125,6 @@ This directory contains various files and subdirectories for testing the list_fi
 - Hidden file
 - Configuration files (yaml)`,
 		)
-
-		console.log("Test directory structure created:", testDir)
-		console.log("Test files:", testFiles)
 	})
 
 	// Clean up test files and directories after all tests
@@ -146,9 +142,8 @@ This directory contains various files and subdirectories for testing the list_fi
 
 		try {
 			await fs.rm(testDir, { recursive: true, force: true })
-			console.log("Cleaned up test directory:", testDir)
-		} catch (error) {
-			console.log("Failed to clean up test directory:", error)
+		} catch {
+			// cleanup failure is non-fatal
 		}
 	})
 
@@ -210,8 +205,6 @@ This directory contains various files and subdirectories for testing the list_fi
 				text: "List the files in the list-files-tool-fixture directory without recursing into subdirectories, and report what you find.",
 			})
 
-			console.log("Task ID:", taskId)
-
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
 
@@ -224,8 +217,6 @@ This directory contains various files and subdirectories for testing the list_fi
 					m.text?.includes("nested/"),
 			)
 			assert.ok(completionMessage, "AI should have summarized the non-recursive directory contents")
-
-			console.log("Test passed! Directory listing (non-recursive) executed successfully")
 		} finally {
 			// Clean up
 			api.off(RooCodeEventName.Message, messageHandler)
@@ -265,8 +256,6 @@ This directory contains various files and subdirectories for testing the list_fi
 				text: "List every file in the list-files-tool-fixture directory recursively and confirm that the nested path for deep-nested-file.ts is included.",
 			})
 
-			console.log("Task ID:", taskId)
-
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
 
@@ -278,8 +267,6 @@ This directory contains various files and subdirectories for testing the list_fi
 					m.text?.includes("deep-nested-file.ts"),
 			)
 			assert.ok(completionMessage, "AI should have summarized the recursive directory contents")
-
-			console.log("Test passed! Directory listing (recursive) executed successfully")
 		} finally {
 			// Clean up
 			api.off(RooCodeEventName.Message, messageHandler)
@@ -326,11 +313,7 @@ This directory contains various files and subdirectories for testing the list_fi
 			try {
 				await fs.symlink(sourceFile, symlinkFile)
 				await fs.symlink(sourceDir, symlinkDir)
-				console.log("Created symlinks successfully")
-			} catch (symlinkError) {
-				console.log("Symlink creation failed (might be platform limitation):", symlinkError)
-				// Skip test if symlinks can't be created
-				console.log("Skipping symlink test - platform doesn't support symlinks")
+			} catch {
 				return
 			}
 
@@ -344,8 +327,6 @@ This directory contains various files and subdirectories for testing the list_fi
 				},
 				text: "Call list_files with path='list-files-symlink-fixture' and recursive=false. Report everything the tool returns.",
 			})
-
-			console.log("Symlink test Task ID:", taskId)
 
 			// 120s: real models may loop before finding the symlink fixture path.
 			await waitFor(() => taskCompleted, { timeout: 120_000 })
@@ -362,8 +343,6 @@ This directory contains various files and subdirectories for testing the list_fi
 				return mentionsOriginalEntry && mentionsSymlinkEntry
 			})
 			assert.ok(completionMessage, "AI should have summarized both the original and symlinked directory contents")
-
-			console.log("Test passed! Symlinked files and directories are now visible")
 
 			// Cleanup
 			await fs.rm(testDir, { recursive: true, force: true })
@@ -406,8 +385,6 @@ This directory contains various files and subdirectories for testing the list_fi
 				text: "List the files in the workspace root directory without recursing and confirm whether list-files-tool-fixture or list-files-symlink-fixture is present.",
 			})
 
-			console.log("Task ID:", taskId)
-
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
 
@@ -419,8 +396,6 @@ This directory contains various files and subdirectories for testing the list_fi
 					(m.text?.includes("list-files-tool-fixture") || m.text?.includes("list-files-symlink-fixture")),
 			)
 			assert.ok(completionMessage, "AI should have mentioned workspace contents")
-
-			console.log("Test passed! Workspace root directory listing executed successfully")
 		} finally {
 			// Clean up
 			api.off(RooCodeEventName.Message, messageHandler)

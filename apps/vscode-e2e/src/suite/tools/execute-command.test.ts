@@ -21,6 +21,16 @@ suite("Roo Code execute_command Tool", function () {
 	let testDir: string
 
 	suiteSetup(async () => {
+		const aimockUrl = process.env.AIMOCK_URL
+		const isRecord = process.env.AIMOCK_RECORD === "true"
+
+		await globalThis.api.setConfiguration({
+			apiProvider: "openrouter" as const,
+			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
+			openRouterModelId: "anthropic/claude-sonnet-4.5",
+			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
+		})
+
 		const workspaceFolders = vscode.workspace.workspaceFolders
 		if (!workspaceFolders || workspaceFolders.length === 0) {
 			throw new Error("No workspace folder found")
@@ -37,6 +47,15 @@ suite("Roo Code execute_command Tool", function () {
 		} catch {
 			// Task might not be running
 		}
+
+		const aimockUrl = process.env.AIMOCK_URL
+		const isRecord = process.env.AIMOCK_RECORD === "true"
+		await globalThis.api.setConfiguration({
+			apiProvider: "openrouter" as const,
+			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
+			openRouterModelId: "openai/gpt-4.1",
+			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
+		})
 
 		await fs.rm(testDir, { recursive: true, force: true })
 	})
@@ -76,20 +95,22 @@ suite("Roo Code execute_command Tool", function () {
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowExecute: true,
-					allowedCommands: ["*"],
-					terminalShellIntegrationDisabled: true,
-				},
-				text: "EXECUTE_COMMAND_SIMPLE_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowExecute: true,
+							allowedCommands: ["*"],
+							terminalShellIntegrationDisabled: true,
+						},
+						text: "EXECUTE_COMMAND_SIMPLE_SMOKE",
+					}),
+				timeout: 60_000,
 			})
-
-			await waitUntilCompleted({ api, taskId, timeout: 60_000 })
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 
 			const content = await fs.readFile(path.join(workspaceDir, SIMPLE_FILE_RELATIVE_PATH), "utf-8")
@@ -120,20 +141,22 @@ suite("Roo Code execute_command Tool", function () {
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowExecute: true,
-					allowedCommands: ["*"],
-					terminalShellIntegrationDisabled: true,
-				},
-				text: "EXECUTE_COMMAND_CWD_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowExecute: true,
+							allowedCommands: ["*"],
+							terminalShellIntegrationDisabled: true,
+						},
+						text: "EXECUTE_COMMAND_CWD_SMOKE",
+					}),
+				timeout: 60_000,
 			})
-
-			await waitUntilCompleted({ api, taskId, timeout: 60_000 })
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 
 			const content = await fs.readFile(path.join(workspaceDir, CUSTOM_CWD_OUTPUT_RELATIVE_PATH), "utf-8")
@@ -164,20 +187,22 @@ suite("Roo Code execute_command Tool", function () {
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowExecute: true,
-					allowedCommands: ["*"],
-					terminalShellIntegrationDisabled: true,
-				},
-				text: "EXECUTE_COMMAND_MULTI_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowExecute: true,
+							allowedCommands: ["*"],
+							terminalShellIntegrationDisabled: true,
+						},
+						text: "EXECUTE_COMMAND_MULTI_SMOKE",
+					}),
+				timeout: 90_000,
 			})
-
-			await waitUntilCompleted({ api, taskId, timeout: 90_000 })
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 
 			const content = await fs.readFile(path.join(workspaceDir, MULTI_COMMAND_FILE_RELATIVE_PATH), "utf-8")
@@ -215,20 +240,22 @@ suite("Roo Code execute_command Tool", function () {
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
-		let taskId: string
 		try {
-			taskId = await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowExecute: true,
-					allowedCommands: ["*"],
-					terminalShellIntegrationDisabled: true,
-				},
-				text: "EXECUTE_COMMAND_LONG_RUNNING_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowExecute: true,
+							allowedCommands: ["*"],
+							terminalShellIntegrationDisabled: true,
+						},
+						text: "EXECUTE_COMMAND_LONG_RUNNING_SMOKE",
+					}),
+				timeout: 60_000,
 			})
-
-			await waitUntilCompleted({ api, taskId, timeout: 60_000 })
 			await sleep(500)
 
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)

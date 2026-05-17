@@ -25,7 +25,7 @@ export function addApplyDiffResultFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 		{
 			toolCallId: "call_apply_diff_error_001",
-			result: "Attempted `apply_diff` on `apply-diff-tool-fixture/error-handling.txt`, but the search text was not found so the file was left unchanged.",
+			result: "The apply_diff operation on `apply-diff-tool-fixture/error-handling.txt` was rejected — the search content did not match any content in the file, so it was not modified.",
 			id: "call_apply_diff_error_002",
 		},
 		{

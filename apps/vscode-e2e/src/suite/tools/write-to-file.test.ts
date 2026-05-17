@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
-import { waitFor, sleep } from "../utils"
+import { waitUntilCompleted, sleep } from "../utils"
 import { setDefaultSuiteTimeout } from "../test-utils"
 
 const TEST_DIR_NAME = "write-to-file-tool-fixture"
@@ -19,11 +19,6 @@ suite("Roo Code write_to_file Tool", function () {
 
 	let workspaceDir: string
 	let testDir: string
-	const toolApprovalHandler = ({ message }: { message: ClineMessage }) => {
-		if (message.type === "ask" && message.ask === "tool") {
-			void globalThis.api.approveCurrentAsk()
-		}
-	}
 
 	suiteSetup(async () => {
 		const aimockUrl = process.env.AIMOCK_URL
@@ -35,7 +30,6 @@ suite("Roo Code write_to_file Tool", function () {
 			openRouterModelId: "anthropic/claude-sonnet-4.5",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
 		})
-		globalThis.api.on(RooCodeEventName.Message, toolApprovalHandler)
 
 		const workspaceFolders = vscode.workspace.workspaceFolders
 		if (!workspaceFolders || workspaceFolders.length === 0) {
@@ -62,7 +56,6 @@ suite("Roo Code write_to_file Tool", function () {
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
 		})
-		globalThis.api.off(RooCodeEventName.Message, toolApprovalHandler)
 
 		await fs.rm(testDir, { recursive: true, force: true })
 	})
@@ -104,28 +97,21 @@ suite("Roo Code write_to_file Tool", function () {
 		api.on(RooCodeEventName.Message, messageHandler)
 
 		try {
-			await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-					alwaysAllowReadOnly: true,
-					alwaysAllowReadOnlyOutsideWorkspace: true,
-				},
-				text: "WRITE_TO_FILE_CREATE_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowWrite: true,
+							alwaysAllowReadOnly: true,
+							alwaysAllowReadOnlyOutsideWorkspace: true,
+						},
+						text: "WRITE_TO_FILE_CREATE_SMOKE",
+					}),
+				timeout: 45_000,
 			})
-
-			await waitFor(
-				async () => {
-					try {
-						const content = await fs.readFile(targetPath, "utf-8")
-						return content.trim() === SIMPLE_FILE_CONTENT
-					} catch {
-						return false
-					}
-				},
-				{ timeout: 45_000 },
-			)
 
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 
@@ -159,28 +145,21 @@ suite("Roo Code write_to_file Tool", function () {
 		api.on(RooCodeEventName.Message, messageHandler)
 
 		try {
-			await api.startNewTask({
-				configuration: {
-					mode: "code",
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-					alwaysAllowReadOnly: true,
-					alwaysAllowReadOnlyOutsideWorkspace: true,
-				},
-				text: "WRITE_TO_FILE_NESTED_SMOKE",
+			await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "code",
+							autoApprovalEnabled: true,
+							alwaysAllowWrite: true,
+							alwaysAllowReadOnly: true,
+							alwaysAllowReadOnlyOutsideWorkspace: true,
+						},
+						text: "WRITE_TO_FILE_NESTED_SMOKE",
+					}),
+				timeout: 45_000,
 			})
-
-			await waitFor(
-				async () => {
-					try {
-						const content = await fs.readFile(targetPath, "utf-8")
-						return content.trim() === NESTED_FILE_CONTENT
-					} catch {
-						return false
-					}
-				},
-				{ timeout: 45_000 },
-			)
 
 			assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 
