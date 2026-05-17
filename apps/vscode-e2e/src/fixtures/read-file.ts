@@ -1,35 +1,17 @@
 import { LLMock } from "@copilotkit/aimock"
-import type { ChatCompletionRequest, ChatMessage } from "@copilotkit/aimock"
 
-type ToolResultExpectation = { toolCallId: string; expected: string[] }
+import {
+	isToolResultExpectation,
+	toolResultContains,
+	toolResultsContain,
+	type ToolResultExpectation,
+} from "./tool-result"
 
 type ReadFileResultFixture = {
 	toolCallId: string
 	expected: string[] | ToolResultExpectation[]
 	result: string
 	id: string
-}
-
-function isToolResultExpectation(value: unknown): value is ToolResultExpectation {
-	return typeof value === "object" && value !== null && "toolCallId" in value && "expected" in value
-}
-
-function toolResultContains(req: ChatCompletionRequest, toolCallId: string, expected: string[]) {
-	const messages = Array.isArray(req?.messages) ? req.messages : []
-	const toolMessage = messages.find(
-		(message: ChatMessage) => message?.role === "tool" && message.tool_call_id === toolCallId,
-	)
-
-	const content = toolMessage?.content
-	if (typeof content !== "string") {
-		return false
-	}
-
-	return expected.every((text) => content.includes(text))
-}
-
-function toolResultsContain(req: ChatCompletionRequest, expectations: ToolResultExpectation[]) {
-	return expectations.every(({ toolCallId, expected }) => toolResultContains(req, toolCallId, expected))
 }
 
 export function addReadFileResultFixtures(mock: InstanceType<typeof LLMock>) {
