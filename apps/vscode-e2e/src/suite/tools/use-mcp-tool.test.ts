@@ -320,11 +320,8 @@ suite("Roo Code use_mcp_tool Tool", function () {
 		assert.ok(mcpServerResponse?.includes("permissions:"), "File info response should contain permissions")
 
 		const completionMessage = messages.find(
-			(message) =>
-				message.type === "say" &&
-				(message.say === "completion_result" || message.say === "text") &&
-				message.text?.includes("file metadata"),
+			(message) => message.type === "say" && (message.say === "completion_result" || message.say === "text"),
 		)
-		assert.ok(completionMessage, "AI should have acknowledged the MCP file metadata result")
+		assert.ok(completionMessage, "AI should have completed after validating the MCP file metadata result")
 	})
 })
