@@ -11,7 +11,8 @@ import { sleep, waitFor, waitUntilAborted } from "../utils"
 const XAI_API_KEY = process.env.XAI_API_KEY
 const XAI_BASE_URL = "https://api.x.ai/v1"
 const XAI_RESPONSES_URL = `${XAI_BASE_URL}/responses`
-const XAI_MODEL_ID = "grok-4.20"
+const XAI_MODEL_ID = "grok-4-1-fast-non-reasoning"
+const XAI_REASONING_MODEL_ID = "grok-4-1-fast-reasoning"
 
 type CapturedXAIRequest = {
 	model?: string
@@ -343,6 +344,9 @@ suite("xAI provider", function () {
 	const requests: CapturedXAIRequest[] = []
 
 	suiteSetup(async () => {
+		// readCallId must match what the first-turn fixture returns so the second-turn
+		// fixture can recognise it in functionCallOutputIds. Only relevant in mock mode;
+		// passthrough ignores the fixture resolver entirely.
 		const readCallId = "call_xai_read_001"
 		restoreFetch = installXAIFetchInterceptor(
 			requests,
@@ -444,6 +448,67 @@ suite("xAI provider", function () {
 		assert.ok(
 			secondRequest.functionCallOutputIds.length > 0,
 			`xAI should send the read_file tool result back to the Responses API.\n${diagnostics}`,
+		)
+		assert.ok(result.completed, `Task should complete cleanly.\n${diagnostics}`)
+		assert.strictEqual(
+			result.mistakeLimitReached,
+			false,
+			`Task should not hit the consecutive mistake limit.\n${diagnostics}`,
+		)
+		assert.strictEqual(
+			result.noToolErrors,
+			0,
+			`Task should not emit MODEL_NO_TOOLS_USED while handling a tool-using probe.\n${diagnostics}`,
+		)
+		assert.ok(
+			result.transcript.some((line) => line.startsWith("completion_result:")),
+			`Task should reach the completion_result ask after the xAI tool loop.\n${diagnostics}`,
+		)
+	})
+
+	test("Should complete a tool-using task end-to-end via xAI Responses API (reasoning model)", async () => {
+		const { result } = await runXAIToolProbe(XAI_REASONING_MODEL_ID, requests)
+		const diagnostics = formatDiagnostics(result)
+		const [firstRequest, secondRequest] = result.requests
+
+		assert.ok(firstRequest, `xAI reasoning model should issue an initial API request.\n${diagnostics}`)
+		assert.ok(
+			secondRequest,
+			`xAI reasoning model should issue a follow-up request after the tool result.\n${diagnostics}`,
+		)
+		assert.strictEqual(
+			firstRequest.model,
+			XAI_REASONING_MODEL_ID,
+			`xAI should request the expected reasoning model.\n${diagnostics}`,
+		)
+		assert.strictEqual(
+			firstRequest.maxOutputTokens,
+			65_536,
+			`xAI reasoning model should request the model's documented max output tokens.\n${diagnostics}`,
+		)
+		assert.deepStrictEqual(
+			firstRequest.include,
+			["reasoning.encrypted_content"],
+			`xAI reasoning model should request encrypted reasoning content from the Responses API.\n${diagnostics}`,
+		)
+		assert.strictEqual(
+			firstRequest.toolChoice,
+			"auto",
+			`xAI reasoning model should enable auto tool choice.\n${diagnostics}`,
+		)
+		assert.strictEqual(
+			firstRequest.parallelToolCalls,
+			true,
+			`xAI reasoning model should keep parallel tool calls enabled.\n${diagnostics}`,
+		)
+		assert.strictEqual(
+			firstRequest.hasTools,
+			true,
+			`xAI reasoning model should advertise tools on the initial request.\n${diagnostics}`,
+		)
+		assert.ok(
+			secondRequest.functionCallOutputIds.length > 0,
+			`xAI reasoning model should send the read_file tool result back to the Responses API.\n${diagnostics}`,
 		)
 		assert.ok(result.completed, `Task should complete cleanly.\n${diagnostics}`)
 		assert.strictEqual(
