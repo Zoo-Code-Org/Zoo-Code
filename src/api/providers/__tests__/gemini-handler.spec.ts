@@ -587,5 +587,47 @@ describe("GeminiHandler backend support", () => {
 			})
 			expect(schema.properties.name).toEqual({ type: "string" })
 		})
+
+		it("should preserve top-level properties and required entries when allOf is also present", async () => {
+			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const handler = new GeminiHandler(options)
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			// @ts-ignore access private client
+			handler["client"].models.generateContentStream = stub
+
+			await handler
+				.createMessage("test", [] as any, {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "mixed_allof_tool",
+								description: "Tool with top-level and allOf schema fragments",
+								parameters: {
+									type: "object",
+									properties: { a: { type: "string" } },
+									required: ["a"],
+									allOf: [
+										{
+											type: "object",
+											properties: { b: { type: "integer" } },
+											required: ["b"],
+										},
+									],
+								},
+							},
+						},
+					],
+				})
+				.next()
+
+			const schema = stub.mock.calls[0][0].config.tools[0].functionDeclarations[0].parametersJsonSchema
+			expect(schema.properties).toEqual({
+				a: { type: "string" },
+				b: { type: "integer" },
+			})
+			expect(schema.required).toEqual(expect.arrayContaining(["a", "b"]))
+		})
 	})
 })

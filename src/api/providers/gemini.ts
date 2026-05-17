@@ -115,6 +115,25 @@ function sanitizeSchemaForGemini(schema: unknown, defs?: Record<string, unknown>
 			continue
 		}
 
+		if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
+			const sanitizedProperties = sanitizeSchemaForGemini(value, resolvedDefs)
+			if (sanitizedProperties && typeof sanitizedProperties === "object" && !Array.isArray(sanitizedProperties)) {
+				result.properties = {
+					...(result.properties as Record<string, unknown> | undefined),
+					...(sanitizedProperties as Record<string, unknown>),
+				}
+			}
+			continue
+		}
+
+		if (key === "required" && Array.isArray(value)) {
+			const existing = Array.isArray(result.required) ? (result.required as string[]) : []
+			result.required = [
+				...new Set([...existing, ...value.filter((item): item is string => typeof item === "string")]),
+			]
+			continue
+		}
+
 		if (key === "type" && Array.isArray(value)) {
 			const nonNullTypes = value.filter((item) => item !== "null")
 			if (nonNullTypes.length > 0) {
