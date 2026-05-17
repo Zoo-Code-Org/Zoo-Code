@@ -6,6 +6,7 @@ node_modules
 package-lock.json
 coverage/
 mock/
+*.tsbuildinfo
 
 .DS_Store
 
@@ -17,6 +18,8 @@ bin/
 !packages/zoo-cli/bin/
 !packages/zoo-cli/bin/zoo
 *.vsix
+.next/
+build/
 
 # Local prompts and rules
 /local-prompts

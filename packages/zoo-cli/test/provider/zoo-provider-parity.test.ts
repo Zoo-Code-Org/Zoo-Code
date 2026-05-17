@@ -10,6 +10,8 @@ import { Instance } from "../../src/project/instance"
 import { ProviderID } from "../../src/provider/schema"
 import { tmpdir } from "../fixture/fixture"
 
+const bundledProviders = snapshot as Record<string, { npm?: string; api?: string; env?: string[] } | undefined>
+
 async function listProviders() {
 	return AppRuntime.runPromise(
 		Effect.gen(function* () {
@@ -20,20 +22,20 @@ async function listProviders() {
 }
 
 test("Zoo/Roo catalog-backed providers are present in the bundled model snapshot", () => {
-	expect(snapshot.requesty?.npm).toBe("@ai-sdk/openai-compatible")
-	expect(snapshot.requesty?.api).toBe("https://router.requesty.ai/v1")
-	expect(snapshot.requesty?.env).toContain("REQUESTY_API_KEY")
+	expect(bundledProviders.requesty?.npm).toBe("@ai-sdk/openai-compatible")
+	expect(bundledProviders.requesty?.api).toBe("https://router.requesty.ai/v1")
+	expect(bundledProviders.requesty?.env).toContain("REQUESTY_API_KEY")
 
-	expect(snapshot.baseten?.npm).toBe("@ai-sdk/openai-compatible")
-	expect(snapshot.baseten?.api).toBe("https://inference.baseten.co/v1")
-	expect(snapshot.baseten?.env).toContain("BASETEN_API_KEY")
+	expect(bundledProviders.baseten?.npm).toBe("@ai-sdk/openai-compatible")
+	expect(bundledProviders.baseten?.api).toBe("https://inference.baseten.co/v1")
+	expect(bundledProviders.baseten?.env).toContain("BASETEN_API_KEY")
 
-	expect(snapshot.poe?.npm).toBe("@ai-sdk/openai-compatible")
-	expect(snapshot.poe?.api).toBe("https://api.poe.com/v1")
-	expect(snapshot.poe?.env).toContain("POE_API_KEY")
+	expect(bundledProviders.poe?.npm).toBe("@ai-sdk/openai-compatible")
+	expect(bundledProviders.poe?.api).toBe("https://api.poe.com/v1")
+	expect(bundledProviders.poe?.env).toContain("POE_API_KEY")
 
-	expect(snapshot.lmstudio?.npm).toBe("@ai-sdk/openai-compatible")
-	expect(snapshot.lmstudio?.api).toBe("http://127.0.0.1:1234/v1")
+	expect(bundledProviders.lmstudio?.npm).toBe("@ai-sdk/openai-compatible")
+	expect(bundledProviders.lmstudio?.api).toBe("http://127.0.0.1:1234/v1")
 })
 
 test("config-only Zoo/Roo providers load as OpenAI-compatible custom providers", async () => {
