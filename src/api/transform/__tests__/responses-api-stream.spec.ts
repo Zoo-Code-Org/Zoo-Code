@@ -235,6 +235,37 @@ describe("processResponsesApiStream", () => {
 				},
 			])
 		})
+
+		it("should fall back to output_item.done when delta omits the tool name", async () => {
+			const stream = mockStream([
+				{
+					type: "response.function_call_arguments.delta",
+					call_id: "call_123",
+					delta: '{"path":',
+					index: 0,
+				},
+				{
+					type: "response.output_item.done",
+					item: {
+						type: "function_call",
+						call_id: "call_123",
+						name: "read_file",
+						arguments: '{"path":"/tmp/test.txt"}',
+					},
+				},
+			])
+
+			const chunks = await collectChunks(processResponsesApiStream(stream, noopUsage))
+
+			expect(chunks).toEqual([
+				{
+					type: "tool_call",
+					id: "call_123",
+					name: "read_file",
+					arguments: '{"path":"/tmp/test.txt"}',
+				},
+			])
+		})
 	})
 
 	describe("completion and usage", () => {

@@ -83,7 +83,7 @@ export async function* processResponsesApiStream(
 		) {
 			const callId = event.call_id || event.tool_call_id || event.id || event.item_id
 			const name = event.name || event.function_name
-			if (typeof callId === "string" && callId.length > 0) {
+			if (typeof callId === "string" && callId.length > 0 && typeof name === "string" && name.length > 0) {
 				streamedCallIds.add(callId)
 				yield {
 					type: "tool_call_partial",
