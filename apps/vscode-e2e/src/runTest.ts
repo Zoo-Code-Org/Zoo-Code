@@ -10,6 +10,7 @@ import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
 import { addSearchFilesResultFixtures } from "./fixtures/search-files"
+import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 
 function getCliFlagValue(flag: string) {
@@ -59,6 +60,10 @@ async function main() {
 	let testWorkspace: string | undefined
 
 	try {
+		// Create a temporary workspace folder for tests before installing fixtures that
+		// need workspace-specific paths.
+		testWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "roo-test-workspace-"))
+
 		if (useMock) {
 			const fixturesDir = path.resolve(__dirname, "../fixtures")
 
@@ -87,6 +92,7 @@ async function main() {
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
+				addUseMcpToolResultFixtures(mock, testWorkspace)
 				addWriteToFileResultFixtures(mock)
 
 				// The modes test (switch_mode → ask) triggers a second API call whose last
@@ -110,9 +116,6 @@ async function main() {
 
 			await mock.start()
 		}
-
-		// Create a temporary workspace folder for tests
-		testWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "roo-test-workspace-"))
 		// Get test filter from command line arguments or environment variable
 		// Usage examples:
 		// - npm run test:e2e -- --grep "write-to-file"
