@@ -1,0 +1,51 @@
+{
+	"$schema": "https://json.schemastore.org/package.json",
+	"version": "7.2.52",
+	"name": "@opencode-ai/core",
+	"type": "module",
+	"license": "MIT",
+	"private": true,
+	"scripts": {
+		"test": "bun test --timeout 30000",
+		"test:ci": "mkdir -p .artifacts/unit && bun test --timeout 30000 --reporter=junit --reporter-outfile=.artifacts/unit/junit.xml",
+		"typecheck": "tsgo --noEmit"
+	},
+	"exports": {
+		"./*": "./src/*.ts"
+	},
+	"imports": {},
+	"devDependencies": {
+		"@tsconfig/bun": "1.0.9",
+		"@types/bun": "1.3.12",
+		"@types/cross-spawn": "6.0.6",
+		"@types/mime-types": "3.0.1",
+		"@types/npm-package-arg": "6.1.4",
+		"@types/npmcli__arborist": "6.3.3",
+		"@types/semver": "^7.5.8",
+		"@typescript/native-preview": "7.0.0-dev.20260316.1"
+	},
+	"dependencies": {
+		"@effect/opentelemetry": "4.0.0-beta.57",
+		"@effect/platform-node": "4.0.0-beta.57",
+		"@npmcli/arborist": "9.4.0",
+		"@npmcli/config": "10.8.1",
+		"@opentelemetry/api": "1.9.0",
+		"@opentelemetry/context-async-hooks": "2.6.1",
+		"@opentelemetry/exporter-trace-otlp-http": "0.214.0",
+		"@opentelemetry/sdk-trace-base": "2.6.1",
+		"effect": "4.0.0-beta.57",
+		"cross-spawn": "7.0.6",
+		"glob": "13.0.5",
+		"mime-types": "3.0.2",
+		"minimatch": "10.2.5",
+		"npm-package-arg": "13.0.2",
+		"rotating-file-stream": "3.2.9",
+		"semver": "^7.6.3",
+		"xdg-basedir": "5.1.0",
+		"zod": "4.1.8"
+	},
+	"overrides": {
+		"drizzle-orm": "1.0.0-beta.19-d95b7a4"
+	},
+	"peerDependencies": {}
+}

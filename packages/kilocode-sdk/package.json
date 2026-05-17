@@ -1,0 +1,40 @@
+{
+	"$schema": "https://json.schemastore.org/package.json",
+	"name": "@kilocode/sdk",
+	"version": "7.2.52",
+	"type": "module",
+	"license": "MIT",
+	"scripts": {
+		"typecheck": "tsgo --noEmit",
+		"build": "node -e \"console.log('kilocode sdk source package; build not required')\""
+	},
+	"exports": {
+		".": "./src/index.ts",
+		"./client": "./src/client.ts",
+		"./server": "./src/server.ts",
+		"./v2": "./src/v2/index.ts",
+		"./v2/client": "./src/v2/client.ts",
+		"./v2/gen/client": "./src/v2/gen/client/index.ts",
+		"./v2/server": "./src/v2/server.ts"
+	},
+	"files": [
+		"dist"
+	],
+	"devDependencies": {
+		"@hey-api/openapi-ts": "0.90.10",
+		"@tsconfig/node22": "22.0.2",
+		"@types/cross-spawn": "6.0.6",
+		"@types/node": "22.13.9",
+		"@typescript/native-preview": "7.0.0-dev.20260316.1",
+		"typescript": "5.8.2"
+	},
+	"dependencies": {
+		"cross-spawn": "7.0.6"
+	},
+	"peerDependencies": {},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Kilo-Org/kilocode",
+		"directory": "packages/sdk/js"
+	}
+}

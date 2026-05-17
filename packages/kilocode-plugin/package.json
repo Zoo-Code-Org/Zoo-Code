@@ -1,0 +1,49 @@
+{
+	"$schema": "https://json.schemastore.org/package.json",
+	"name": "@kilocode/plugin",
+	"version": "7.2.52",
+	"type": "module",
+	"license": "MIT",
+	"scripts": {
+		"typecheck": "tsgo --noEmit",
+		"build": "node -e \"console.log('kilocode plugin source package; build not required')\""
+	},
+	"exports": {
+		".": "./src/index.ts",
+		"./tool": "./src/tool.ts",
+		"./tui": "./src/tui.ts"
+	},
+	"files": [
+		"dist"
+	],
+	"dependencies": {
+		"@kilocode/sdk": "workspace:*",
+		"effect": "4.0.0-beta.57",
+		"zod": "4.1.8"
+	},
+	"peerDependencies": {
+		"@opentui/core": ">=0.2.2",
+		"@opentui/solid": ">=0.2.2"
+	},
+	"peerDependenciesMeta": {
+		"@opentui/core": {
+			"optional": true
+		},
+		"@opentui/solid": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@opentui/core": "0.2.2",
+		"@opentui/solid": "0.2.2",
+		"@tsconfig/node22": "22.0.2",
+		"@types/node": "22.13.9",
+		"typescript": "5.8.2",
+		"@typescript/native-preview": "7.0.0-dev.20260316.1"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Kilo-Org/kilocode",
+		"directory": "packages/plugin"
+	}
+}

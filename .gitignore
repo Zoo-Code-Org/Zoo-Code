@@ -15,6 +15,7 @@ mock/
 # Builds
 bin/
 *.vsix
+*.tsbuildinfo
 
 # Local prompts and rules
 /local-prompts
