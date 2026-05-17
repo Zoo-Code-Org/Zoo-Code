@@ -153,6 +153,39 @@ ZAI_API_KEY=<key> TEST_FILE=zai.test pnpm --filter @roo-code/vscode-e2e test:ci
 
 When adding a new test to this suite, add a matching fixture to the `installZAiFetchInterceptor` call in `suiteSetup`. Use a short unique prefix (e.g. `"zai-glm-e2e-mytest:"`) that won't appear in `<environment_details>`.
 
+### xAI Grok (`suite/providers/xai.test.ts`)
+
+xAI uses the **Responses API** (`POST https://api.x.ai/v1/responses`), which is not OpenAI-compatible. aimock can't intercept it. The suite instead patches `globalThis.fetch` to intercept requests to that endpoint. By default it replays hand-crafted SSE events; when a local `fixtures/xai.json` recording exists, it can replay recorded real-API SSE events for reference.
+
+The local `fixtures/xai.json` file is gitignored. It keeps an empty top-level `fixtures` array so aimock can scan the directory without warnings. xAI recordings live under `xaiResponses`, which maps each model ID to `{ readCallId, turn1, turn2 }`:
+
+- **`turn1`** — raw SSE events from the real API for the first API call (should contain a `read_file` function call)
+- **`readCallId`** — the `call_id` extracted from turn 1's `response.output_item.done` event; used to match the turn 2 request
+- **`turn2`** — raw SSE events for the second API call (should contain an `attempt_completion` call with the correct result text)
+
+Having real-API events in the fixture guarantees:
+
+1. The SSE format expected by the stream processor is correct.
+2. The `attempt_completion.result` field contains the actual marker value (not an empty string).
+
+**Recording** (populate or refresh the fixture from the real xAI API):
+
+```sh
+XAI_API_KEY=<key> XAI_RECORD=true TEST_FILE=providers/xai.test.js pnpm --filter @roo-code/vscode-e2e test:run
+```
+
+This routes all xAI requests through the real API, captures the SSE events per turn, and writes the local gitignored `fixtures/xai.json` on teardown.
+
+**Verifying the recorded fixture in mock mode** (no API key needed):
+
+```sh
+TEST_FILE=xai.test pnpm --filter @roo-code/vscode-e2e test:ci:mock
+```
+
+When no local recording exists for a model, the interceptor falls back to hand-crafted SSE events (using a hardcoded `readCallId`). CI should use this fallback so the suite remains deterministic and does not depend on large raw provider recordings.
+
+When adding a new test to this suite, update the hand-crafted interceptor response unless the behavior specifically needs a real xAI SSE recording for local debugging. Use a short unique probe tag (e.g. `"xai-e2e:grok-4.20"`) that won't appear in `<environment_details>`.
+
 ### DeepSeek V4 (`suite/providers/deepseek-v4.test.ts`)
 
 DeepSeek exposes `deepSeekBaseUrl`, so the suite redirects the OpenAI-compatible DeepSeek client through aimock with `deepSeekBaseUrl: ${AIMOCK_URL}/v1`. The test still installs a lightweight fetch capture for request-shape assertions, but responses should come from aimock fixtures or aimock record mode.

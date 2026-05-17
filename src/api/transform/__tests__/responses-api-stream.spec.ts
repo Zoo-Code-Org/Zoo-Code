@@ -188,6 +188,53 @@ describe("processResponsesApiStream", () => {
 				},
 			])
 		})
+
+		it("should not yield duplicate tool_call when arguments were streamed as deltas", async () => {
+			const stream = mockStream([
+				{
+					type: "response.function_call_arguments.delta",
+					call_id: "call_123",
+					name: "read_file",
+					delta: '{"path":',
+					index: 0,
+				},
+				{
+					type: "response.function_call_arguments.delta",
+					call_id: "call_123",
+					name: "read_file",
+					delta: '"/tmp/test.txt"}',
+					index: 0,
+				},
+				{
+					type: "response.output_item.done",
+					item: {
+						type: "function_call",
+						call_id: "call_123",
+						name: "read_file",
+						arguments: '{"path":"/tmp/test.txt"}',
+					},
+				},
+			])
+
+			const chunks = await collectChunks(processResponsesApiStream(stream, noopUsage))
+
+			expect(chunks).toEqual([
+				{
+					type: "tool_call_partial",
+					index: 0,
+					id: "call_123",
+					name: "read_file",
+					arguments: '{"path":',
+				},
+				{
+					type: "tool_call_partial",
+					index: 0,
+					id: "call_123",
+					name: "read_file",
+					arguments: '"/tmp/test.txt"}',
+				},
+			])
+		})
 	})
 
 	describe("completion and usage", () => {
