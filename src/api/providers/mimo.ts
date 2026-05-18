@@ -181,7 +181,6 @@ export class MimoHandler extends OpenAiHandler {
 					} else if (block.type === "text") {
 						textBlocks.push(block.text)
 					} else if (block.type === "image") {
-						// Convert Anthropic image block to OpenAI image_url format
 						const src = (block as any).source
 						if (src?.type === "base64" && src?.media_type) {
 							mediaParts.push({
@@ -195,10 +194,9 @@ export class MimoHandler extends OpenAiHandler {
 							})
 						}
 					}
-					// audio/video blocks are not supported in OpenAI chat format — skip silently
 				}
 
-				// Add tool results as role:"tool" messages (MiMo supports this)
+				// Add tool results as role:"tool" messages
 				for (const tr of toolResults) {
 					let content: string
 					if (typeof tr.content === "string") {
@@ -216,8 +214,18 @@ export class MimoHandler extends OpenAiHandler {
 					})
 				}
 
-				// Build user message content — plain string or multimodal array
-				if (mediaParts.length > 0) {
+				// When both tool_results and text exist in the same user turn (happens
+				// during resume/delegate flows where <environment_details> is appended),
+				// fold the text into the last tool message instead of creating a separate
+				// user message. A fresh role:"user" after tool results drops reasoning
+				// continuity for thinking models.
+				if (toolResults.length > 0 && textBlocks.length > 0 && mediaParts.length === 0) {
+					const lastToolIdx = converted.length - 1
+					const lastTool = converted[lastToolIdx] as any
+					if (lastTool?.role === "tool") {
+						lastTool.content += "\n" + textBlocks.join("\n")
+					}
+				} else if (mediaParts.length > 0) {
 					const content: any[] = []
 					if (textBlocks.length > 0) {
 						content.push({ type: "text", text: textBlocks.join("\n") })

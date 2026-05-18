@@ -376,7 +376,7 @@ describe("MimoHandler", () => {
 			expect(result[0].content).toBe("(empty)")
 		})
 
-		it("should separate tool_results from text in user messages", () => {
+		it("should merge text into last tool message when both exist in same turn", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{
 					role: "user",
@@ -386,15 +386,28 @@ describe("MimoHandler", () => {
 							tool_use_id: "call_1",
 							content: "result",
 						},
-						{ type: "text" as const, text: "Here are the results" },
+						{ type: "text" as const, text: "<environment_details>..." },
 					],
 				},
 			]
 			const result = (handler as any).convertMessagesForMiMo(messages)
-			expect(result).toHaveLength(2)
+			expect(result).toHaveLength(1)
 			expect(result[0].role).toBe("tool")
-			expect(result[1].role).toBe("user")
-			expect(result[1].content).toBe("Here are the results")
+			expect(result[0].content).toContain("result")
+			expect(result[0].content).toContain("<environment_details>...")
+		})
+
+		it("should keep text as separate user message when no tool_results present", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			]
+			const result = (handler as any).convertMessagesForMiMo(messages)
+			expect(result).toHaveLength(1)
+			expect(result[0].role).toBe("user")
+			expect(result[0].content).toBe("Hello")
 		})
 
 		it("should handle user message with string content", () => {
