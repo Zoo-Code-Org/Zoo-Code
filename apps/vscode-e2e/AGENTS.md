@@ -137,6 +137,13 @@ Background API calls from the extension (usage collection, initialization) hit a
 
 Some suites can't redirect their provider through aimock. These suites patch `globalThis.fetch` directly — the OpenAI SDK resolves `fetch` at API client construction time (which happens lazily at task start), so installing the interceptor before `api.startNewTask()` is sufficient. Installing it before `api.setConfiguration()` (as done below) is the conservative, recommended order.
 
+Keep fetch-interceptor suites hermetic across test cases:
+
+- reset in-memory request/event capture in `setup()` or allocate a fresh per-test buffer instead of reusing shared mutable state implicitly
+- scope request-shape assertions to the current probe or test tag only; do not pull in older requests just because they contain tool outputs
+- assume late async requests from the prior task can still arrive after a shared array/map was cleared, so tags or other per-probe identity should be the source of truth
+- when changing persisted provider/model settings in tests, use the path that clears prior provider fields instead of partial mutation
+
 ### Z.ai GLM (`suite/providers/zai.test.ts`)
 
 Z.ai doesn't expose a user-configurable base URL (it uses a fixed set of regional endpoints), so we deliberately avoided adding a hidden test-only override to the schema. The suite instead patches `globalThis.fetch` to intercept requests to `api.z.ai` and return a crafted OpenAI-compatible SSE response.

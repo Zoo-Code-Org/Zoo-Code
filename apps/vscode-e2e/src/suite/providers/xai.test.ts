@@ -408,9 +408,10 @@ async function runXAIToolProbe(
 				noToolErrors,
 				mistakeLimitReached,
 				completionText,
-				requests: requests.filter(
-					(request) => request.probeTag === probeTag || request.functionCallOutputIds.length > 0,
-				),
+				// Late retries from the previous probe can still reach the shared capture
+				// after requests.length = 0. Scope assertions and diagnostics to the
+				// current probe tag so older tool-result traffic cannot contaminate them.
+				requests: requests.filter((request) => request.probeTag === probeTag),
 				transcript,
 			},
 		}
@@ -441,6 +442,10 @@ suite("xAI provider", function () {
 	const requests: CapturedXAIRequest[] = []
 	let loadedFixtures: XAIFixtureFile = {}
 	let completedRecordings: Map<string, XAIModelFixture> | undefined
+
+	setup(() => {
+		requests.length = 0
+	})
 
 	suiteSetup(async () => {
 		const isRecord = !!XAI_API_KEY && process.env.XAI_RECORD === "true"
