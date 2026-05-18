@@ -54,66 +54,11 @@ export class MimoHandler extends OpenAiHandler {
 	}
 
 	/**
-	 * Strip OpenAI-specific extensions that MiMo's Token Plan proxy rejects.
-	 * The official API docs list `strict` as supported (default false), but the
-	 * proxy endpoints have historically returned 400 for it. Kept as a safety
-	 * net until the proxy is confirmed to handle these fields correctly.
-	 */
-	protected override convertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
-		if (!tools) {
-			return undefined
-		}
-
-		return tools.map((tool) => {
-			if (tool.type !== "function") {
-				return tool
-			}
-
-			return {
-				type: "function",
-				function: {
-					name: tool.function.name,
-					description: tool.function.description,
-					parameters: this.stripOpenAiExtensions(tool.function.parameters),
-				},
-			}
-		})
-	}
-
-	/**
-	 * Recursively walks a JSON Schema object and removes OpenAI-specific
-	 * fields (additionalProperties, strict) that MiMo's proxy doesn't
-	 * recognize. Without this, every tool call would 400.
-	 */
-	private stripOpenAiExtensions(schema: any): any {
-		if (!schema || typeof schema !== "object") {
-			return schema
-		}
-
-		const { additionalProperties, ...rest } = schema
-
-		if (rest.properties) {
-			const newProps: Record<string, any> = {}
-			for (const [key, prop] of Object.entries(rest.properties)) {
-				newProps[key] = this.stripOpenAiExtensions(prop)
-			}
-			rest.properties = newProps
-		}
-
-		if (rest.items && typeof rest.items === "object") {
-			rest.items = this.stripOpenAiExtensions(rest.items)
-		}
-
-		return rest
-	}
-
-	/**
 	 * Streams a chat completion from MiMo's OpenAI-compatible API.
 	 *
 	 * Uses convertToR1Format (shared with DeepSeek/Z.ai) for message conversion
 	 * with mergeToolResultText and normalizeToolCallId options enabled.
-	 * MiMo-specific: enables thinking mode via extra_body.thinking, strips
-	 * OpenAI-specific fields from tool definitions via convertToolsForOpenAI.
+	 * MiMo-specific: enables thinking mode via extra_body.thinking.
 	 *
 	 * supportsPromptCache is false because MiMo doesn't support client-side
 	 * cache_control injection. However, MiMo's server-side cache CAN return
@@ -133,7 +78,7 @@ export class MimoHandler extends OpenAiHandler {
 			normalizeToolCallId: sanitizeOpenAiCallId,
 		})
 
-		const tools = this.convertToolsForOpenAI(metadata?.tools)
+		const tools = metadata?.tools
 
 		// Build request per MiMo's OpenAI-compatible API
 		// https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
