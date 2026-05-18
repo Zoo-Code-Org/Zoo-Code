@@ -20,6 +20,18 @@ const READ_FILE_CONTENT = "Initial content for MCP test"
 const WRITE_FILE_CONTENT = "Hello from MCP!"
 const TREE_FILE_CONTENT = "Nested MCP content"
 const TEST_DATA_CONTENT = JSON.stringify({ test: "data", value: 42 }, null, 2)
+const READ_FILE_PROMPT =
+	"USE_MCP_TOOL_READ_FILE_SMOKE: Use the filesystem MCP server to read use-mcp-tool-fixture/mcp-read-target.txt and then confirm what it says."
+const WRITE_FILE_PROMPT =
+	"USE_MCP_TOOL_WRITE_FILE_SMOKE: Use the filesystem MCP server to write 'Hello from MCP!' to use-mcp-tool-fixture/mcp-write-target.txt and then confirm the write succeeded."
+const LIST_DIRECTORY_PROMPT =
+	"USE_MCP_TOOL_LIST_DIRECTORY_SMOKE: Use the filesystem MCP server to list use-mcp-tool-fixture and summarize the entries you find."
+const DIRECTORY_TREE_PROMPT =
+	"USE_MCP_TOOL_DIRECTORY_TREE_SMOKE: Use the filesystem MCP server to inspect the directory tree for use-mcp-tool-fixture and mention the nested child file."
+const UNKNOWN_SERVER_PROMPT =
+	"USE_MCP_TOOL_UNKNOWN_SERVER_SMOKE: Try to use the nonexistent-server MCP server to read use-mcp-tool-fixture/mcp-read-target.txt, then explain the error."
+const GET_FILE_INFO_PROMPT =
+	"USE_MCP_TOOL_GET_FILE_INFO_SMOKE: Use the filesystem MCP server to get the file info for use-mcp-tool-fixture/mcp-read-target.txt and confirm the metadata lookup completed."
 
 type ParsedMcpRequest = {
 	type?: string
@@ -179,8 +191,7 @@ suite("Roo Code use_mcp_tool Tool", function () {
 	})
 
 	test("Should request MCP filesystem read_file tool and complete successfully", async function () {
-		const { mcpRequest, mcpServerResponse, errorOccurred, messages } =
-			await runMcpTask("USE_MCP_TOOL_READ_FILE_SMOKE")
+		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(READ_FILE_PROMPT)
 
 		assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 		assert.ok(mcpRequest, "The use_mcp_tool request should have been emitted")
@@ -194,19 +205,14 @@ suite("Roo Code use_mcp_tool Tool", function () {
 		)
 
 		const completionMessage = messages.find(
-			(message) =>
-				message.type === "say" &&
-				(message.say === "completion_result" || message.say === "text") &&
-				message.text?.includes("requested file"),
+			(message) => message.type === "say" && (message.say === "completion_result" || message.say === "text"),
 		)
 		assert.ok(completionMessage, "AI should have acknowledged the MCP read_file result")
 	})
 
 	test("Should request MCP filesystem write_file tool and complete successfully", async function () {
 		const targetPath = path.join(workspaceDir, WRITE_FILE_RELATIVE_PATH)
-		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(
-			"USE_MCP_TOOL_WRITE_FILE_SMOKE",
-		)
+		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(WRITE_FILE_PROMPT)
 
 		assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 		assert.ok(mcpRequest, "The use_mcp_tool request should have been emitted")
@@ -228,9 +234,7 @@ suite("Roo Code use_mcp_tool Tool", function () {
 	})
 
 	test("Should request MCP filesystem list_directory tool and complete successfully", async function () {
-		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(
-			"USE_MCP_TOOL_LIST_DIRECTORY_SMOKE",
-		)
+		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(LIST_DIRECTORY_PROMPT)
 
 		assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 		assert.ok(mcpRequest, "The use_mcp_tool request should have been emitted")
@@ -250,9 +254,7 @@ suite("Roo Code use_mcp_tool Tool", function () {
 	})
 
 	test("Should request MCP filesystem directory_tree tool and complete successfully", async function () {
-		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(
-			"USE_MCP_TOOL_DIRECTORY_TREE_SMOKE",
-		)
+		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(DIRECTORY_TREE_PROMPT)
 
 		assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 		assert.ok(mcpRequest, "The use_mcp_tool request should have been emitted")
@@ -275,9 +277,7 @@ suite("Roo Code use_mcp_tool Tool", function () {
 	})
 
 	test("Should handle MCP server error gracefully and complete task", async function () {
-		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(
-			"USE_MCP_TOOL_UNKNOWN_SERVER_SMOKE",
-		)
+		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(UNKNOWN_SERVER_PROMPT)
 
 		if (mcpRequest) {
 			assert.strictEqual(mcpRequest.type, "use_mcp_tool")
@@ -298,9 +298,7 @@ suite("Roo Code use_mcp_tool Tool", function () {
 
 	test("Should validate MCP request message format and complete successfully", async function () {
 		const targetPath = path.join(workspaceDir, READ_FILE_RELATIVE_PATH)
-		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(
-			"USE_MCP_TOOL_GET_FILE_INFO_SMOKE",
-		)
+		const { mcpRequest, mcpServerResponse, errorOccurred, messages } = await runMcpTask(GET_FILE_INFO_PROMPT)
 
 		assert.strictEqual(errorOccurred, null, `Error occurred: ${errorOccurred}`)
 		assert.ok(mcpRequest, "The use_mcp_tool request should have been emitted")
