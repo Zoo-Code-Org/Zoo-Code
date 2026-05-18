@@ -138,15 +138,8 @@ export const getModelMaxOutputTokens = ({
 		// Check if this is a GPT-5 model (case-insensitive)
 		const isGpt5Model = modelId.toLowerCase().includes("gpt-5")
 
-		// Z.ai models have hand-curated maxTokens values from Z.ai's own documentation
-		// (e.g. glm-5.1 supports 128k output on a 200k context window) — bypass the cap.
-		// Note: ZAiHandler.createStreamWithThinking bypasses this function entirely because
-		// ApiHandlerOptions omits apiProvider; this bypass serves callers that pass full
-		// ProviderSettings (Task.ts context management, model-params.ts).
-		const isZaiProvider = settings?.apiProvider === "zai"
-
 		// GPT-5 models bypass the 20% cap and use their full configured max tokens
-		if (isGpt5Model || isZaiProvider) {
+		if (isGpt5Model) {
 			return model.maxTokens
 		}
 
