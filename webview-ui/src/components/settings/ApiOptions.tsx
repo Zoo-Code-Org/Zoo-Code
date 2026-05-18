@@ -644,11 +644,7 @@ const ApiOptions = ({
 					)}
 
 					{selectedProvider === "mimo" && (
-						<Mimo
-							apiConfiguration={apiConfiguration}
-							setApiConfigurationField={setApiConfigurationField}
-							simplifySettings={fromWelcomeView}
-						/>
+						<Mimo apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 					)}
 
 					{selectedProvider === "vscode-lm" && (

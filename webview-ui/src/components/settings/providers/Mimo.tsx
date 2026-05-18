@@ -12,7 +12,6 @@ import { cn } from "@/lib/utils"
 type MimoProps = {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
-	simplifySettings?: boolean
 }
 
 export const Mimo = ({ apiConfiguration, setApiConfigurationField }: MimoProps) => {

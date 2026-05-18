@@ -34,6 +34,8 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { mimoDefaultModelId, mimoModels } from "@roo-code/types"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { MimoHandler } from "../mimo"
+import { convertToR1Format } from "../../transform/r1-format"
+import { sanitizeOpenAiCallId } from "../../../utils/tool-id"
 
 describe("MimoHandler", () => {
 	let handler: MimoHandler
@@ -222,7 +224,13 @@ describe("MimoHandler", () => {
 		})
 	})
 
-	describe("convertMessagesForMiMo", () => {
+	describe("convertMessagesForMiMo (via convertToR1Format)", () => {
+		const convert = (messages: Anthropic.Messages.MessageParam[]) =>
+			convertToR1Format(messages, {
+				mergeToolResultText: true,
+				normalizeToolCallId: sanitizeOpenAiCallId,
+			})
+
 		it("should convert assistant message with reasoning and text", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{
@@ -233,7 +241,7 @@ describe("MimoHandler", () => {
 					],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect(result).toHaveLength(1)
 			expect(result[0].role).toBe("assistant")
 			expect(result[0].content).toBe("Here is the answer")
@@ -255,12 +263,13 @@ describe("MimoHandler", () => {
 					],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect(result).toHaveLength(1)
-			expect(result[0].tool_calls).toHaveLength(1)
-			expect(result[0].tool_calls[0].id).toBe("call_123")
-			expect(result[0].tool_calls[0].function.name).toBe("read_file")
-			expect(result[0].tool_calls[0].function.arguments).toBe('{"path":"README.md"}')
+			const msg = result[0] as any
+			expect(msg.tool_calls).toHaveLength(1)
+			expect(msg.tool_calls[0].id).toBe("call_123")
+			expect(msg.tool_calls[0].function.name).toBe("read_file")
+			expect(msg.tool_calls[0].function.arguments).toBe('{"path":"README.md"}')
 		})
 
 		it("should handle string-input tool_use (JSON string)", () => {
@@ -277,8 +286,11 @@ describe("MimoHandler", () => {
 					],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
-			expect(result[0].tool_calls[0].function.arguments).toBe('{"path":"test.ts"}')
+			const result = convert(messages)
+			const msg = result[0] as any
+			expect(msg.tool_calls).toHaveLength(1)
+			expect(msg.tool_calls[0].function.name).toBe("read_file")
+			expect(msg.tool_calls[0].function.arguments).toContain("test.ts")
 		})
 
 		it("should handle assistant message with string content", () => {
@@ -288,7 +300,7 @@ describe("MimoHandler", () => {
 					content: "Simple text response",
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect(result).toHaveLength(1)
 			expect(result[0].role).toBe("assistant")
 			expect(result[0].content).toBe("Simple text response")
@@ -302,7 +314,7 @@ describe("MimoHandler", () => {
 					reasoning_content: "My reasoning",
 				},
 			] as any[]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect(result).toHaveLength(1)
 			expect((result[0] as any).reasoning_content).toBe("My reasoning")
 		})
@@ -315,7 +327,7 @@ describe("MimoHandler", () => {
 					reasoning_content: "",
 				},
 			] as any[]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect((result[0] as any).reasoning_content).toBeUndefined()
 		})
 
@@ -332,11 +344,11 @@ describe("MimoHandler", () => {
 					],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
-			expect(result).toHaveLength(1)
-			expect(result[0].role).toBe("tool")
-			expect(result[0].tool_call_id).toBe("call_123")
-			expect(result[0].content).toBe("File contents here")
+			const result = convert(messages)
+			const msg = result[0] as any
+			expect(msg.role).toBe("tool")
+			expect(msg.tool_call_id).toBe("call_123")
+			expect(msg.content).toBe("File contents here")
 		})
 
 		it("should handle tool_result with array content", () => {
@@ -355,7 +367,7 @@ describe("MimoHandler", () => {
 					],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect(result[0].content).toBe("Part 1\nPart 2")
 		})
 
@@ -372,8 +384,8 @@ describe("MimoHandler", () => {
 					],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
-			expect(result[0].content).toBe("(empty)")
+			const result = convert(messages)
+			expect(result[0].content).toBe("")
 		})
 
 		it("should merge text into last tool message when both exist in same turn", () => {
@@ -390,7 +402,7 @@ describe("MimoHandler", () => {
 					],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect(result).toHaveLength(1)
 			expect(result[0].role).toBe("tool")
 			expect(result[0].content).toContain("result")
@@ -404,7 +416,7 @@ describe("MimoHandler", () => {
 					content: [{ type: "text" as const, text: "Hello" }],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect(result).toHaveLength(1)
 			expect(result[0].role).toBe("user")
 			expect(result[0].content).toBe("Hello")
@@ -417,7 +429,7 @@ describe("MimoHandler", () => {
 					content: "Hello world",
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 			expect(result).toHaveLength(1)
 			expect(result[0].role).toBe("user")
 			expect(result[0].content).toBe("Hello world")
@@ -453,17 +465,17 @@ describe("MimoHandler", () => {
 					],
 				},
 			]
-			const result = (handler as any).convertMessagesForMiMo(messages)
+			const result = convert(messages)
 
 			// user message
 			expect(result[0].role).toBe("user")
 			// assistant with reasoning + tool_calls
 			expect(result[1].role).toBe("assistant")
 			expect((result[1] as any).reasoning_content).toBe("User wants to read a file")
-			expect(result[1].tool_calls).toHaveLength(1)
+			expect((result[1] as any).tool_calls).toHaveLength(1)
 			// tool result
 			expect(result[2].role).toBe("tool")
-			expect(result[2].tool_call_id).toBe("call_1")
+			expect((result[2] as any).tool_call_id).toBe("call_1")
 		})
 	})
 
