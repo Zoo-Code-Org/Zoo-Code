@@ -629,5 +629,57 @@ describe("GeminiHandler backend support", () => {
 			})
 			expect(schema.required).toEqual(expect.arrayContaining(["a", "b"]))
 		})
+
+		it("should stop recursive $ref expansion before the sanitized schema becomes cyclic", async () => {
+			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const handler = new GeminiHandler(options)
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			// @ts-ignore access private client
+			handler["client"].models.generateContentStream = stub
+
+			await handler
+				.createMessage("test", [] as any, {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "recursive_ref_tool",
+								description: "Tool with recursive $ref",
+								parameters: {
+									type: "object",
+									$defs: {
+										Node: {
+											type: "object",
+											properties: {
+												value: { type: "string" },
+												next: { $ref: "#/$defs/Node" },
+											},
+											required: ["value"],
+										},
+									},
+									properties: {
+										root: { $ref: "#/$defs/Node" },
+									},
+									required: ["root"],
+								},
+							},
+						},
+					],
+				})
+				.next()
+
+			const schema = stub.mock.calls[0][0].config.tools[0].functionDeclarations[0].parametersJsonSchema
+			expect(() => JSON.stringify(schema)).not.toThrow()
+			expect(JSON.stringify(schema)).not.toContain("$ref")
+			expect(schema.properties.root).toEqual({
+				type: "object",
+				properties: {
+					value: { type: "string" },
+					next: {},
+				},
+				required: ["value"],
+			})
+		})
 	})
 })

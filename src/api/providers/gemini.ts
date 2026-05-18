@@ -46,13 +46,17 @@ const GEMINI_SCHEMA_COMPATIBILITY_DROP_KEYS = new Set([
 	"definitions",
 ])
 
-function sanitizeSchemaForGemini(schema: unknown, defs?: Record<string, unknown>): unknown {
+function sanitizeSchemaForGemini(
+	schema: unknown,
+	defs?: Record<string, unknown>,
+	activeRefs: Set<string> = new Set(),
+): unknown {
 	if (!schema || typeof schema !== "object") {
 		return schema
 	}
 
 	if (Array.isArray(schema)) {
-		return schema.map((item) => sanitizeSchemaForGemini(item, defs))
+		return schema.map((item) => sanitizeSchemaForGemini(item, defs, activeRefs))
 	}
 
 	const source = schema as Record<string, unknown>
@@ -68,7 +72,19 @@ function sanitizeSchemaForGemini(schema: unknown, defs?: Record<string, unknown>
 		if (match) {
 			const resolved = resolvedDefs[match[1]]
 			if (resolved !== undefined) {
-				return sanitizeSchemaForGemini(resolved, resolvedDefs)
+				// Recursive MCP schemas are valid JSON Schema but not something Gemini
+				// can consume directly. Stop at the recursive edge so we still send a
+				// finite, serializable schema instead of overflowing the stack.
+				if (activeRefs.has(match[1])) {
+					return {}
+				}
+
+				activeRefs.add(match[1])
+				try {
+					return sanitizeSchemaForGemini(resolved, resolvedDefs, activeRefs)
+				} finally {
+					activeRefs.delete(match[1])
+				}
 			}
 		}
 	}
@@ -84,12 +100,12 @@ function sanitizeSchemaForGemini(schema: unknown, defs?: Record<string, unknown>
 				: true
 		})
 		nullable = nullable || variants.length < composition.length
-		Object.assign(result, sanitizeSchemaForGemini(variants[0] ?? {}, resolvedDefs))
+		Object.assign(result, sanitizeSchemaForGemini(variants[0] ?? {}, resolvedDefs, activeRefs))
 	}
 
 	if (Array.isArray(source.allOf)) {
 		for (const variant of source.allOf) {
-			const sanitized = sanitizeSchemaForGemini(variant, resolvedDefs)
+			const sanitized = sanitizeSchemaForGemini(variant, resolvedDefs, activeRefs)
 			if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
 				const s = sanitized as Record<string, unknown>
 				// Deep-merge properties so later allOf fragments don't overwrite
@@ -116,7 +132,7 @@ function sanitizeSchemaForGemini(schema: unknown, defs?: Record<string, unknown>
 		}
 
 		if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
-			const sanitizedProperties = sanitizeSchemaForGemini(value, resolvedDefs)
+			const sanitizedProperties = sanitizeSchemaForGemini(value, resolvedDefs, activeRefs)
 			if (sanitizedProperties && typeof sanitizedProperties === "object" && !Array.isArray(sanitizedProperties)) {
 				result.properties = {
 					...(result.properties as Record<string, unknown> | undefined),
@@ -143,7 +159,7 @@ function sanitizeSchemaForGemini(schema: unknown, defs?: Record<string, unknown>
 			continue
 		}
 
-		result[key] = sanitizeSchemaForGemini(value, resolvedDefs)
+		result[key] = sanitizeSchemaForGemini(value, resolvedDefs, activeRefs)
 	}
 
 	if (nullable) {
