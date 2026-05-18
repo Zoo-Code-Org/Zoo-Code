@@ -54,9 +54,10 @@ export class MimoHandler extends OpenAiHandler {
 	}
 
 	/**
-	 * Strip OpenAI-specific extensions that MiMo's proxy rejects:
-	 * - strict: true on tools
-	 * - additionalProperties: false on schemas
+	 * Strip OpenAI-specific extensions that MiMo's Token Plan proxy rejects.
+	 * The official API docs list `strict` as supported (default false), but the
+	 * proxy endpoints have historically returned 400 for it. Kept as a safety
+	 * net until the proxy is confirmed to handle these fields correctly.
 	 */
 	protected override convertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
 		if (!tools) {
@@ -124,7 +125,7 @@ export class MimoHandler extends OpenAiHandler {
 		messages: any[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info: modelInfo, temperature } = this.getModel()
+		const { id: modelId, info: modelInfo } = this.getModel()
 
 		// Use shared R1-format conversion with tool ID sanitization and text merging
 		const convertedMessages = convertToR1Format(messages, {
@@ -136,9 +137,10 @@ export class MimoHandler extends OpenAiHandler {
 
 		// Build request per MiMo's OpenAI-compatible API
 		// https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
+		// Note: temperature is omitted because MiMo forces it to 1.0 when thinking mode
+		// is enabled, regardless of what is passed (see model-hyperparameters docs).
 		const params: Record<string, any> = {
 			model: modelId,
-			temperature,
 			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
 			stream: true,
 			stream_options: { include_usage: true },

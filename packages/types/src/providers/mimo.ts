@@ -2,6 +2,7 @@ import type { ModelInfo } from "../model.js"
 
 // https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
 // https://developer.puter.com/ai/xiaomi/mimo-v2.5/
+// https://platform.xiaomimimo.com/docs/en-US/quick-start/model-hyperparameters
 //
 // NOTE: mimo-v2-flash is not included here. Its thinking mode defaults to
 // disabled and it doesn't reliably handle reasoning_content passthrough
@@ -21,9 +22,18 @@ export const mimoModels = {
 		supportsPromptCache: false,
 		preserveReasoning: true,
 		inputPrice: 1.0, // $1.00/1M tokens (cache miss, ≤256K)
-		outputPrice: 3.0, // $3.00/1M tokens
-		cacheReadsPrice: 0.2, // $0.20/1M tokens (cache hit)
+		outputPrice: 3.0, // $3.00/1M tokens (≤256K)
+		cacheReadsPrice: 0.2, // $0.20/1M tokens (cache hit, ≤256K)
 		cacheWritesPrice: 0, // Free for limited time
+		// MiMo charges 2x for input >256K context
+		tiers: [
+			{
+				contextWindow: 256_001,
+				inputPrice: 2.0, // $2.00/1M tokens (>256K)
+				outputPrice: 6.0, // $6.00/1M tokens (>256K)
+				cacheReadsPrice: 0.4, // $0.40/1M tokens (>256K)
+			},
+		],
 		description:
 			"MiMo V2.5 Pro - Xiaomi's flagship reasoning model with 1M context, deep thinking, tool calling, and structured output.",
 	},
@@ -34,9 +44,18 @@ export const mimoModels = {
 		supportsPromptCache: false,
 		preserveReasoning: true,
 		inputPrice: 0.4, // $0.40/1M tokens (cache miss, ≤256K)
-		outputPrice: 2.0, // $2.00/1M tokens
-		cacheReadsPrice: 0.08, // $0.08/1M tokens (cache hit)
+		outputPrice: 2.0, // $2.00/1M tokens (≤256K)
+		cacheReadsPrice: 0.08, // $0.08/1M tokens (cache hit, ≤256K)
 		cacheWritesPrice: 0, // Free for limited time
+		// MiMo charges 2x for input >256K context
+		tiers: [
+			{
+				contextWindow: 256_001,
+				inputPrice: 0.8, // $0.80/1M tokens (>256K)
+				outputPrice: 4.0, // $4.00/1M tokens (>256K)
+				cacheReadsPrice: 0.16, // $0.16/1M tokens (>256K)
+			},
+		],
 		description:
 			"MiMo V2.5 - Full-modal understanding model (text, image, audio, video) with 1M context, deep thinking, tool calling, and structured output.",
 	},
