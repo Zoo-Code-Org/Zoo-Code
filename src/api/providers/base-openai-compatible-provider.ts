@@ -224,7 +224,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
 			model: modelId,
-			messages: [{ role: "user", content: prompt }], // No history, no MiMo strip needed
+			messages: [{ role: "user", content: prompt }],
 		}
 
 		// Add thinking parameter if reasoning is enabled and model supports it

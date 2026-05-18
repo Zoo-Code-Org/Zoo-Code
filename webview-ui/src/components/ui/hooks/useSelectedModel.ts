@@ -253,7 +253,7 @@ function getSelectedModel({
 		}
 		case "mimo": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = mimoModels[id as keyof typeof mimoModels]
+			const info = mimoModels[id as keyof typeof mimoModels] ?? mimoModels["mimo-v2.5-pro"]
 			return { id, info }
 		}
 		case "zai": {

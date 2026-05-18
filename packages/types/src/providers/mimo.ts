@@ -18,7 +18,7 @@ export const mimoModels = {
 		maxTokens: 131_072,
 		contextWindow: 1_048_576,
 		supportsImages: false, // Pro series is text-only
-		supportsPromptCache: true,
+		supportsPromptCache: false,
 		preserveReasoning: true,
 		inputPrice: 1.0, // $1.00/1M tokens (cache miss, ≤256K)
 		outputPrice: 3.0, // $3.00/1M tokens
@@ -31,7 +31,7 @@ export const mimoModels = {
 		maxTokens: 131_072,
 		contextWindow: 1_048_576,
 		supportsImages: true, // Full-modal: text, image, audio, video input
-		supportsPromptCache: true,
+		supportsPromptCache: false,
 		preserveReasoning: true,
 		inputPrice: 0.4, // $0.40/1M tokens (cache miss, ≤256K)
 		outputPrice: 2.0, // $2.00/1M tokens

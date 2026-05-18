@@ -12,6 +12,7 @@ import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { OpenAiHandler } from "./openai"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
+import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
 /**
  * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
@@ -148,7 +149,7 @@ export class MimoHandler extends OpenAiHandler {
 				// Add tool_calls if present
 				if (toolUseParts.length > 0) {
 					assistantMsg.tool_calls = toolUseParts.map((block) => ({
-						id: block.id,
+						id: sanitizeOpenAiCallId(block.id),
 						type: "function" as const,
 						function: {
 							name: block.name,
@@ -210,7 +211,7 @@ export class MimoHandler extends OpenAiHandler {
 
 					converted.push({
 						role: "tool",
-						tool_call_id: tr.tool_use_id,
+						tool_call_id: sanitizeOpenAiCallId(tr.tool_use_id),
 						content: content || "(empty)",
 					})
 				}
@@ -279,8 +280,8 @@ export class MimoHandler extends OpenAiHandler {
 		try {
 			stream = (await this.client.chat.completions.create(params as any)) as any
 		} catch (error) {
-			const { handleOpenAIError } = await import("./utils/openai-error-handler")
-			throw handleOpenAIError(error, "MiMo")
+			const { handleProviderError } = await import("./utils/error-handler")
+			throw handleProviderError(error, "MiMo")
 		}
 
 		let lastUsage: OpenAI.CompletionUsage | undefined
