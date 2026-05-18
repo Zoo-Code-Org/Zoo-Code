@@ -67,6 +67,8 @@ describe("Vertex", () => {
 			// The expected list is the imported VERTEX_REGIONS itself
 			expect(VERTEX_REGIONS).toEqual([
 				{ value: "global", label: "global" },
+				{ value: "us", label: "us" },
+				{ value: "eu", label: "eu" },
 				{ value: "us-central1", label: "us-central1" },
 				{ value: "us-east1", label: "us-east1" },
 				{ value: "us-east4", label: "us-east4" },
