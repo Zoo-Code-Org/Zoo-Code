@@ -85,7 +85,7 @@ describe("RooIgnore Response Formatting", () => {
 			await controller.initialize()
 
 			// Mock validateAccess to control which files are ignored
-			controller.validateAccess = vi.fn().mockImplementation((filePath: string) => {
+			controller.validateAccess = vi.fn().mockImplementation(function (filePath: string) {
 				// Only allow files not matching these patterns
 				return (
 					!filePath.includes("node_modules") &&
@@ -129,7 +129,7 @@ describe("RooIgnore Response Formatting", () => {
 			await controller.initialize()
 
 			// Mock validateAccess to control which files are ignored
-			controller.validateAccess = vi.fn().mockImplementation((filePath: string) => {
+			controller.validateAccess = vi.fn().mockImplementation(function (filePath: string) {
 				// Only allow files not matching these patterns
 				return (
 					!filePath.includes("node_modules") &&

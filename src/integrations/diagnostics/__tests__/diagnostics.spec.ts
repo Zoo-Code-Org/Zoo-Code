@@ -36,16 +36,20 @@ vitest.mock("vscode", () => ({
 			toString: vitest.fn(() => path),
 		})),
 	},
-	Diagnostic: vitest.fn().mockImplementation((range, message, severity) => ({
-		range,
-		message,
-		severity,
-		source: "test",
-	})),
-	Range: vitest.fn().mockImplementation((startLine, startChar, endLine, endChar) => ({
-		start: { line: startLine, character: startChar },
-		end: { line: endLine, character: endChar },
-	})),
+	Diagnostic: vitest.fn().mockImplementation(function (range, message, severity) {
+		return {
+			range,
+			message,
+			severity,
+			source: "test",
+		}
+	}),
+	Range: vitest.fn().mockImplementation(function (startLine, startChar, endLine, endChar) {
+		return {
+			start: { line: startLine, character: startChar },
+			end: { line: endLine, character: endChar },
+		}
+	}),
 	DiagnosticSeverity: {
 		Error: 0,
 		Warning: 1,

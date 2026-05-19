@@ -6,7 +6,7 @@ vi.mock("fs/promises")
 // Mock path.resolve and path.join to be predictable in tests
 vi.mock("path", async () => ({
 	...(await vi.importActual("path")),
-	resolve: vi.fn().mockImplementation((...args) => {
+	resolve: vi.fn().mockImplementation(function (...args) {
 		// On Windows, use backslashes; on Unix, use forward slashes
 		const separator = process.platform === "win32" ? "\\" : "/"
 		// Filter out empty strings and normalize separators
@@ -28,7 +28,7 @@ vi.mock("path", async () => ({
 			return cleanArgs.join(separator)
 		}
 	}),
-	join: vi.fn().mockImplementation((...args) => {
+	join: vi.fn().mockImplementation(function (...args) {
 		const separator = process.platform === "win32" ? "\\" : "/"
 		// Filter out empty strings and normalize separators
 		const cleanArgs = args
@@ -36,7 +36,7 @@ vi.mock("path", async () => ({
 			.map((arg) => arg.toString().replace(/[/\\]+/g, separator))
 		return cleanArgs.join(separator)
 	}),
-	relative: vi.fn().mockImplementation((from, to) => {
+	relative: vi.fn().mockImplementation(function (from, to) {
 		// Simple relative path computation for test scenarios
 		const separator = process.platform === "win32" ? "\\" : "/"
 		const normalizedFrom = from.replace(/[/\\]+$/, "") // Remove trailing slashes
@@ -46,7 +46,7 @@ vi.mock("path", async () => ({
 		}
 		return to
 	}),
-	dirname: vi.fn().mockImplementation((path) => {
+	dirname: vi.fn().mockImplementation(function (path) {
 		const separator = process.platform === "win32" ? "\\" : "/"
 		const parts = path.split(/[/\\]/)
 		return parts.slice(0, -1).join(separator)
@@ -127,7 +127,7 @@ describe("loadRuleFiles", () => {
 	it("should not combine content from multiple rule files when they exist", async () => {
 		// Simulate no .roo/rules directory
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			if (filePath.toString().endsWith(".roorules")) {
 				return Promise.resolve("roo rules content")
 			}
@@ -153,7 +153,7 @@ describe("loadRuleFiles", () => {
 	it("should skip directories with same name as rule files", async () => {
 		// Simulate no .roo/rules directory
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			if (filePath.toString().endsWith(".roorules")) {
 				return Promise.reject({ code: "EISDIR" })
 			}
@@ -179,7 +179,7 @@ describe("loadRuleFiles", () => {
 			{ name: "file2.txt", isFile: () => true, isSymbolicLink: () => false, parentPath: "/fake/path/.roo/rules" },
 		] as any)
 
-		statMock.mockImplementation((path) => {
+		statMock.mockImplementation(function (path) {
 			// Handle both Unix and Windows path separators
 			const normalizedPath = path.toString().replace(/\\/g, "/")
 			if (
@@ -195,7 +195,7 @@ describe("loadRuleFiles", () => {
 			}) as any
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			// Handle both Unix and Windows path separators
 			const normalizedPath = pathStr.replace(/\\/g, "/")
@@ -260,13 +260,13 @@ describe("loadRuleFiles", () => {
 			},
 		] as any)
 
-		statMock.mockImplementation((path) => {
+		statMock.mockImplementation(function (path) {
 			return Promise.resolve({
 				isFile: vi.fn().mockReturnValue(true),
 			}) as any
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			const normalizedPath = pathStr.replace(/\\/g, "/")
 
@@ -342,7 +342,7 @@ describe("loadRuleFiles", () => {
 		readdirMock.mockResolvedValueOnce([])
 
 		// Simulate .roorules exists
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			if (filePath.toString().endsWith(".roorules")) {
 				return Promise.resolve("roo rules content")
 			}
@@ -363,7 +363,7 @@ describe("loadRuleFiles", () => {
 		readdirMock.mockRejectedValueOnce(new Error("Failed to read directory"))
 
 		// Simulate .roorules exists
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			if (filePath.toString().endsWith(".roorules")) {
 				return Promise.resolve("roo rules content")
 			}
@@ -412,7 +412,7 @@ describe("loadRuleFiles", () => {
 			},
 		] as any)
 
-		statMock.mockImplementation((path: string) => {
+		statMock.mockImplementation(function (path: string) {
 			// Handle both Unix and Windows path separators
 			const normalizedPath = path.toString().replace(/\\/g, "/")
 			if (normalizedPath.endsWith("txt")) {
@@ -427,7 +427,7 @@ describe("loadRuleFiles", () => {
 			} as any)
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			// Handle both Unix and Windows path separators
 			const normalizedPath = pathStr.replace(/\\/g, "/")
@@ -518,7 +518,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate AGENTS.md is NOT a symlink
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve({
@@ -528,7 +528,7 @@ describe("addCustomInstructions", () => {
 			return Promise.reject({ code: "ENOENT" })
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve("Agent rules from AGENTS.md file")
@@ -559,7 +559,7 @@ describe("addCustomInstructions", () => {
 		// Simulate no .roo/rules-test-mode directory
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve("Agent rules from AGENTS.md file")
@@ -590,7 +590,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate AGENTS.md is NOT a symlink
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve({
@@ -600,7 +600,7 @@ describe("addCustomInstructions", () => {
 			return Promise.reject({ code: "ENOENT" })
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve("Agent rules from AGENTS.md file")
@@ -651,7 +651,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate AGENTS.md is NOT a symlink
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve({
@@ -661,7 +661,7 @@ describe("addCustomInstructions", () => {
 			return Promise.reject({ code: "ENOENT" })
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve("Agent rules content")
@@ -698,7 +698,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate AGENTS.md is a symlink
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve({
@@ -709,7 +709,7 @@ describe("addCustomInstructions", () => {
 		})
 
 		// Mock readlink to return the symlink target
-		readlinkMock.mockImplementation((filePath: PathLike) => {
+		readlinkMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve("../actual-agents-file.md")
@@ -718,7 +718,7 @@ describe("addCustomInstructions", () => {
 		})
 
 		// Mock stat to indicate the resolved target is a file
-		statMock.mockImplementation((filePath: PathLike) => {
+		statMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			const normalizedPath = pathStr.replace(/\\/g, "/")
 			if (normalizedPath.endsWith("actual-agents-file.md")) {
@@ -730,7 +730,7 @@ describe("addCustomInstructions", () => {
 		})
 
 		// Mock readFile to return content from the resolved path
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			const normalizedPath = pathStr.replace(/\\/g, "/")
 			if (normalizedPath.endsWith("actual-agents-file.md")) {
@@ -771,7 +771,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate AGENTS.md is NOT a symlink
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve({
@@ -782,7 +782,7 @@ describe("addCustomInstructions", () => {
 		})
 
 		// Mock readFile to return content directly from AGENTS.md
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve("Agent rules from regular file")
@@ -822,7 +822,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate AGENTS.md doesn't exist but AGENT.md does
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.reject({ code: "ENOENT" })
@@ -835,7 +835,7 @@ describe("addCustomInstructions", () => {
 			return Promise.reject({ code: "ENOENT" })
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENT.md")) {
 				return Promise.resolve("Agent rules from AGENT.md file (singular)")
@@ -867,7 +867,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate both files exist
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md") || pathStr.endsWith("AGENT.md")) {
 				return Promise.resolve({
@@ -877,7 +877,7 @@ describe("addCustomInstructions", () => {
 			return Promise.reject({ code: "ENOENT" })
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve("Agent rules from AGENTS.md file (plural)")
@@ -973,7 +973,7 @@ describe("addCustomInstructions", () => {
 		// Simulate no .roo/rules-test-mode directory
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			if (filePath.toString().includes(".clinerules-test-mode")) {
 				return Promise.reject({ code: "EISDIR" })
 			}
@@ -1014,7 +1014,7 @@ describe("addCustomInstructions", () => {
 			},
 		] as any)
 
-		statMock.mockImplementation((path) => {
+		statMock.mockImplementation(function (path) {
 			// Handle both Unix and Windows path separators
 			const normalizedPath = path.toString().replace(/\\/g, "/")
 			if (
@@ -1030,7 +1030,7 @@ describe("addCustomInstructions", () => {
 			}) as any
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			// Handle both Unix and Windows path separators
 			const normalizedPath = pathStr.replace(/\\/g, "/")
@@ -1086,7 +1086,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Simulate .roorules-test-mode exists
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			if (filePath.toString().includes(".roorules-test-mode")) {
 				return Promise.resolve("mode specific rules from file")
 			}
@@ -1108,7 +1108,7 @@ describe("addCustomInstructions", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Simulate file reading
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			if (filePath.toString().includes(".roorules-test-mode")) {
 				return Promise.reject({ code: "ENOENT" })
 			}
@@ -1148,7 +1148,7 @@ describe("addCustomInstructions", () => {
 
 		// Set up stat mock for checking files
 		let statCallCount = 0
-		statMock.mockImplementation((filePath) => {
+		statMock.mockImplementation(function (filePath) {
 			statCallCount++
 			// Handle both Unix and Windows path separators
 			const normalizedPath = filePath.toString().replace(/\\/g, "/")
@@ -1164,7 +1164,7 @@ describe("addCustomInstructions", () => {
 			} as any)
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			// Handle both Unix and Windows path separators
 			const normalizedPath = pathStr.replace(/\\/g, "/")
@@ -1280,7 +1280,7 @@ describe("Rules directory reading", () => {
 
 		// Reset and set up the stat mock with more granular control
 		statMock.mockReset()
-		statMock.mockImplementation((path: string) => {
+		statMock.mockImplementation(function (path: string) {
 			// For directory check
 			if (path === "/fake/path/.roo/rules" || path.endsWith("dir")) {
 				return Promise.resolve({
@@ -1306,7 +1306,7 @@ describe("Rules directory reading", () => {
 		})
 
 		// Simulate file content reading
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			// Handle both Unix and Windows path separators
 			const normalizedPath = pathStr.replace(/\\/g, "/")
@@ -1375,7 +1375,7 @@ describe("Rules directory reading", () => {
 			{ name: "file3.txt", isFile: () => true, parentPath: "/fake/path/.roo/rules" },
 		] as any)
 
-		statMock.mockImplementation((path) => {
+		statMock.mockImplementation(function (path) {
 			// Handle both Unix and Windows path separators
 			const normalizedPath = path.toString().replace(/\\/g, "/")
 			expect([
@@ -1389,7 +1389,7 @@ describe("Rules directory reading", () => {
 			}) as any
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			// Handle both Unix and Windows path separators
 			const normalizedPath = pathStr.replace(/\\/g, "/")
@@ -1436,13 +1436,13 @@ describe("Rules directory reading", () => {
 			{ name: "Beta.txt", isFile: () => true, parentPath: "/fake/path/.roo/rules" }, // Test case-insensitive sorting
 		] as any)
 
-		statMock.mockImplementation((path) => {
+		statMock.mockImplementation(function (path) {
 			return Promise.resolve({
 				isFile: vi.fn().mockReturnValue(true),
 			}) as any
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			const normalizedPath = pathStr.replace(/\\/g, "/")
 			if (normalizedPath === "/fake/path/.roo/rules/zebra.txt") {
@@ -1520,7 +1520,7 @@ describe("Rules directory reading", () => {
 			.mockResolvedValueOnce("../../targets/mmm-middle.txt") // 03-third.link -> mmm-middle.txt
 
 		// Set up stat mock for the remaining calls
-		statMock.mockImplementation((path) => {
+		statMock.mockImplementation(function (path) {
 			const normalizedPath = path.toString().replace(/\\/g, "/")
 			// Target files exist and are files
 			if (normalizedPath.endsWith(".txt")) {
@@ -1535,7 +1535,7 @@ describe("Rules directory reading", () => {
 			} as any)
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			const normalizedPath = pathStr.replace(/\\/g, "/")
 			if (normalizedPath.endsWith("zzz-last.txt")) {
@@ -1593,7 +1593,7 @@ describe("Rules directory reading", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate both AGENTS.md and AGENTS.local.md exist (not symlinks)
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md") || pathStr.endsWith("AGENTS.local.md")) {
 				return Promise.resolve({
@@ -1603,7 +1603,7 @@ describe("Rules directory reading", () => {
 			return Promise.reject({ code: "ENOENT" })
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.local.md")) {
 				return Promise.resolve("Local overrides from AGENTS.local.md")
@@ -1640,7 +1640,7 @@ describe("Rules directory reading", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate only AGENTS.local.md exists (no base file)
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.local.md")) {
 				return Promise.resolve({
@@ -1650,7 +1650,7 @@ describe("Rules directory reading", () => {
 			return Promise.reject({ code: "ENOENT" })
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.local.md")) {
 				return Promise.resolve("Local overrides without base file")
@@ -1682,7 +1682,7 @@ describe("Rules directory reading", () => {
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })
 
 		// Mock lstat to indicate only AGENTS.md exists (no local override)
-		lstatMock.mockImplementation((filePath: PathLike) => {
+		lstatMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve({
@@ -1692,7 +1692,7 @@ describe("Rules directory reading", () => {
 			return Promise.reject({ code: "ENOENT" })
 		})
 
-		readFileMock.mockImplementation((filePath: PathLike) => {
+		readFileMock.mockImplementation(function (filePath: PathLike) {
 			const pathStr = filePath.toString()
 			if (pathStr.endsWith("AGENTS.md")) {
 				return Promise.resolve("Base rules from AGENTS.md only")

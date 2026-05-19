@@ -13,7 +13,7 @@ vitest.mock("@anthropic-ai/vertex-sdk", () => ({
 	AnthropicVertex: vitest.fn().mockImplementation(function () {
 		return {
 			messages: {
-				create: vitest.fn().mockImplementation(async (options) => {
+				create: vitest.fn().mockImplementation(async function (options) {
 					if (!options.stream) {
 						return {
 							id: "test-completion",
@@ -621,7 +621,7 @@ describe("VertexHandler", () => {
 				vertexRegion: "us-central1",
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) => {
+			const mockCreate = vitest.fn().mockImplementation(async function (options) {
 				return {
 					async *[Symbol.asyncIterator]() {
 						yield {
@@ -703,7 +703,7 @@ describe("VertexHandler", () => {
 				vertexRegion: "us-central1",
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) => {
+			const mockCreate = vitest.fn().mockImplementation(async function (options) {
 				return {
 					async *[Symbol.asyncIterator]() {
 						yield {
@@ -1117,7 +1117,7 @@ describe("VertexHandler", () => {
 				modelMaxThinkingTokens: 4096,
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) => {
+			const mockCreate = vitest.fn().mockImplementation(async function (options) {
 				if (!options.stream) {
 					return {
 						id: "test-completion",

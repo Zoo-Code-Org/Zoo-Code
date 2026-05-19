@@ -70,7 +70,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 		;(vscode.workspace as any).workspaceFolders = mockWorkspaceFolders
 		;(vscode.workspace.onDidSaveTextDocument as Mock).mockReturnValue({ dispose: vi.fn() })
 		;(getWorkspacePath as Mock).mockReturnValue(mockWorkspacePath)
-		;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
+		;(fileExistsAtPath as Mock).mockImplementation(async function (path: string) {
 			return path === mockSettingsPath || path === mockRoomodes
 		})
 		;(fs.mkdir as Mock).mockResolvedValue(undefined)
@@ -78,7 +78,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 		;(fs.stat as Mock).mockResolvedValue({ isDirectory: () => true })
 		;(fs.readdir as Mock).mockResolvedValue([])
 		;(fs.rm as Mock).mockResolvedValue(undefined)
-		;(fs.readFile as Mock).mockImplementation(async (path: string) => {
+		;(fs.readFile as Mock).mockImplementation(async function (path: string) {
 			if (path === mockSettingsPath) {
 				return yaml.stringify({ customModes: [] })
 			}
@@ -106,10 +106,10 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 				],
 			}
 
-			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
+			;(fileExistsAtPath as Mock).mockImplementation(async function (path: string) {
 				return path === mockRoomodes
 			})
-			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
+			;(fs.readFile as Mock).mockImplementation(async function (path: string) {
 				if (path === mockRoomodes) {
 					return yaml.stringify(roomodesContent)
 				}
@@ -159,10 +159,10 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 				],
 			}
 
-			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
+			;(fileExistsAtPath as Mock).mockImplementation(async function (path: string) {
 				return path === mockRoomodes
 			})
-			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
+			;(fs.readFile as Mock).mockImplementation(async function (path: string) {
 				if (path === mockRoomodes) {
 					return yaml.stringify(roomodesContent)
 				}
@@ -229,17 +229,17 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 			let writtenFiles: Record<string, string> = {}
 			let createdDirs: string[] = []
 
-			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
+			;(fs.readFile as Mock).mockImplementation(async function (path: string) {
 				if (path === mockSettingsPath) {
 					return yaml.stringify({ customModes: [] })
 				}
 				throw new Error("File not found")
 			})
-			;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
+			;(fs.writeFile as Mock).mockImplementation(async function (path: string, content: string) {
 				writtenFiles[path] = content
 				return Promise.resolve()
 			})
-			;(fs.mkdir as Mock).mockImplementation(async (path: string) => {
+			;(fs.mkdir as Mock).mockImplementation(async function (path: string) {
 				createdDirs.push(path)
 				return Promise.resolve()
 			})
@@ -288,13 +288,13 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 
 			let writtenFiles: Record<string, string> = {}
 
-			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
+			;(fs.readFile as Mock).mockImplementation(async function (path: string) {
 				if (path === mockSettingsPath) {
 					return yaml.stringify({ customModes: [] })
 				}
 				throw new Error("File not found")
 			})
-			;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
+			;(fs.writeFile as Mock).mockImplementation(async function (path: string, content: string) {
 				writtenFiles[path] = content
 				return Promise.resolve()
 			})
@@ -348,13 +348,13 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 
 			let writtenFiles: Record<string, string> = {}
 
-			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
+			;(fs.readFile as Mock).mockImplementation(async function (path: string) {
 				if (path === mockSettingsPath) {
 					return yaml.stringify({ customModes: [] })
 				}
 				throw new Error("File not found")
 			})
-			;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
+			;(fs.writeFile as Mock).mockImplementation(async function (path: string, content: string) {
 				writtenFiles[path] = content
 				return Promise.resolve()
 			})
@@ -384,10 +384,10 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 				groups: ["read"],
 			}
 
-			;(fileExistsAtPath as Mock).mockImplementation(async (path: string) => {
+			;(fileExistsAtPath as Mock).mockImplementation(async function (path: string) {
 				return path === mockRoomodes
 			})
-			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
+			;(fs.readFile as Mock).mockImplementation(async function (path: string) {
 				if (path === mockRoomodes) {
 					return yaml.stringify({ customModes: [originalMode] })
 				}
@@ -414,7 +414,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 
 			// Step 4: Import with the new slug
 			let writtenFiles: Record<string, string> = {}
-			;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
+			;(fs.writeFile as Mock).mockImplementation(async function (path: string, content: string) {
 				writtenFiles[path] = content
 				return Promise.resolve()
 			})

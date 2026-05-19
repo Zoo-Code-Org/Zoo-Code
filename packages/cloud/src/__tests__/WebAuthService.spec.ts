@@ -97,7 +97,9 @@ describe("WebAuthService", () => {
 			reset: vi.fn(),
 		}
 		const MockedRefreshTimer = vi.mocked(RefreshTimer)
-		MockedRefreshTimer.mockImplementation(() => mockTimer as unknown as RefreshTimer)
+		MockedRefreshTimer.mockImplementation(function () {
+			return mockTimer as unknown as RefreshTimer
+		})
 
 		// Setup config mocks - use production URL by default to maintain existing test behavior
 		vi.mocked(getClerkBaseUrl).mockReturnValue("https://clerk.roocode.com")
@@ -211,7 +213,7 @@ describe("WebAuthService", () => {
 		it("should handle credentials change events", async () => {
 			let onDidChangeCallback: (e: { key: string }) => void
 
-			mockContext.secrets.onDidChange.mockImplementation((callback: (e: { key: string }) => void) => {
+			mockContext.secrets.onDidChange.mockImplementation(function (callback: (e: { key: string }) => void) {
 				onDidChangeCallback = callback
 				return { dispose: vi.fn() }
 			})
@@ -302,7 +304,7 @@ describe("WebAuthService", () => {
 		})
 
 		it("should handle errors during login", async () => {
-			vi.mocked(crypto.randomBytes).mockImplementation(() => {
+			vi.mocked(crypto.randomBytes).mockImplementation(function () {
 				throw new Error("Crypto error")
 			})
 
@@ -1190,7 +1192,7 @@ describe("WebAuthService", () => {
 
 			let onDidChangeCallback: (e: { key: string }) => void
 
-			mockContext.secrets.onDidChange.mockImplementation((callback: (e: { key: string }) => void) => {
+			mockContext.secrets.onDidChange.mockImplementation(function (callback: (e: { key: string }) => void) {
 				onDidChangeCallback = callback
 				return { dispose: vi.fn() }
 			})
@@ -1220,7 +1222,7 @@ describe("WebAuthService", () => {
 
 			let onDidChangeCallback: (e: { key: string }) => void
 
-			mockContext.secrets.onDidChange.mockImplementation((callback: (e: { key: string }) => void) => {
+			mockContext.secrets.onDidChange.mockImplementation(function (callback: (e: { key: string }) => void) {
 				onDidChangeCallback = callback
 				return { dispose: vi.fn() }
 			})
@@ -1246,7 +1248,7 @@ describe("WebAuthService", () => {
 
 			let onDidChangeCallback: (e: { key: string }) => void
 
-			mockContext.secrets.onDidChange.mockImplementation((callback: (e: { key: string }) => void) => {
+			mockContext.secrets.onDidChange.mockImplementation(function (callback: (e: { key: string }) => void) {
 				onDidChangeCallback = callback
 				return { dispose: vi.fn() }
 			})

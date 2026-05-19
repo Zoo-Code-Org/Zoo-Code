@@ -158,7 +158,9 @@ vi.mock("../utils/autoImportSettings", () => ({
 }))
 
 vi.mock("../extension/api", () => ({
-	API: vi.fn().mockImplementation(() => ({})),
+	API: vi.fn().mockImplementation(function () {
+		return {}
+	}),
 }))
 
 vi.mock("../activate", () => ({
@@ -166,9 +168,11 @@ vi.mock("../activate", () => ({
 	registerCommands: vi.fn(),
 	registerCodeActions: vi.fn(),
 	registerTerminalActions: vi.fn(),
-	CodeActionProvider: vi.fn().mockImplementation(() => ({
-		providedCodeActionKinds: [],
-	})),
+	CodeActionProvider: vi.fn().mockImplementation(function () {
+		return {
+			providedCodeActionKinds: [],
+		}
+	}),
 }))
 
 vi.mock("../i18n", () => ({
@@ -192,7 +196,9 @@ vi.mock("../core/webview/ClineProvider", async () => {
 	}
 	return {
 		ClineProvider: Object.assign(
-			vi.fn().mockImplementation(() => mockInstance),
+			vi.fn().mockImplementation(function () {
+				return mockInstance
+			}),
 			{
 				// Static method used by extension.ts
 				getVisibleInstance: vi.fn().mockReturnValue(mockInstance),
@@ -270,7 +276,7 @@ describe("extension.ts", () => {
 			const { CloudService } = await import("@roo-code/cloud")
 			const { ClineProvider } = await import("../core/webview/ClineProvider")
 
-			vi.mocked(CloudService.createInstance).mockImplementation(async (_context, _logger, handlers) => {
+			vi.mocked(CloudService.createInstance).mockImplementation(async function (_context, _logger, handlers) {
 				if (handlers?.["auth-state-changed"]) {
 					authStateChangedHandler = handlers["auth-state-changed"]
 				}

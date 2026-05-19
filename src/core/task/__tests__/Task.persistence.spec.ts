@@ -79,17 +79,19 @@ vi.mock("../../task-persistence", () => ({
 	readApiMessages: mockReadApiMessages,
 	readTaskMessages: mockReadTaskMessages,
 	taskMetadata: mockTaskMetadata,
-	TaskHistoryStore: vi.fn().mockImplementation(() => ({
-		initialize: vi.fn().mockResolvedValue(undefined),
-		dispose: vi.fn(),
-		get: vi.fn(),
-		getAll: vi.fn().mockReturnValue([]),
-		upsert: vi.fn().mockResolvedValue([]),
-		delete: vi.fn().mockResolvedValue(undefined),
-		deleteMany: vi.fn().mockResolvedValue(undefined),
-		reconcile: vi.fn().mockResolvedValue(undefined),
-		initialized: Promise.resolve(),
-	})),
+	TaskHistoryStore: vi.fn().mockImplementation(function () {
+		return {
+			initialize: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn(),
+			get: vi.fn(),
+			getAll: vi.fn().mockReturnValue([]),
+			upsert: vi.fn().mockResolvedValue([]),
+			delete: vi.fn().mockResolvedValue(undefined),
+			deleteMany: vi.fn().mockResolvedValue(undefined),
+			reconcile: vi.fn().mockResolvedValue(undefined),
+			initialized: Promise.resolve(),
+		}
+	}),
 }))
 
 vi.mock("vscode", () => {
@@ -140,7 +142,9 @@ vi.mock("vscode", () => {
 			uriScheme: "vscode",
 			language: "en",
 		},
-		EventEmitter: vi.fn().mockImplementation(() => mockEventEmitter),
+		EventEmitter: vi.fn().mockImplementation(function () {
+			return mockEventEmitter
+		}),
 		Disposable: {
 			from: vi.fn(),
 		},
@@ -149,7 +153,7 @@ vi.mock("vscode", () => {
 })
 
 vi.mock("../../mentions", () => ({
-	parseMentions: vi.fn().mockImplementation((text) => {
+	parseMentions: vi.fn().mockImplementation(function (text) {
 		return Promise.resolve({ text: `processed: ${text}`, mode: undefined, contentBlocks: [] })
 	}),
 	openMention: vi.fn(),
@@ -180,12 +184,12 @@ vi.mock("../../condense", async (importOriginal) => {
 })
 
 vi.mock("../../../utils/storage", () => ({
-	getTaskDirectoryPath: vi
-		.fn()
-		.mockImplementation((globalStoragePath, taskId) => Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)),
-	getSettingsDirectoryPath: vi
-		.fn()
-		.mockImplementation((globalStoragePath) => Promise.resolve(`${globalStoragePath}/settings`)),
+	getTaskDirectoryPath: vi.fn().mockImplementation(function (globalStoragePath, taskId) {
+		return Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)
+	}),
+	getSettingsDirectoryPath: vi.fn().mockImplementation(function (globalStoragePath) {
+		return Promise.resolve(`${globalStoragePath}/settings`)
+	}),
 }))
 
 vi.mock("../../../utils/fs", () => ({
@@ -211,20 +215,34 @@ describe("Task persistence", () => {
 
 		mockExtensionContext = {
 			globalState: {
-				get: vi.fn().mockImplementation((_key: keyof GlobalState) => undefined),
-				update: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
+				get: vi.fn().mockImplementation(function (_key: keyof GlobalState) {
+					return undefined
+				}),
+				update: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
 				keys: vi.fn().mockReturnValue([]),
 			},
 			globalStorageUri: storageUri,
 			workspaceState: {
-				get: vi.fn().mockImplementation((_key) => undefined),
-				update: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
+				get: vi.fn().mockImplementation(function (_key) {
+					return undefined
+				}),
+				update: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
 				keys: vi.fn().mockReturnValue([]),
 			},
 			secrets: {
-				get: vi.fn().mockImplementation((_key) => Promise.resolve(undefined)),
-				store: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
-				delete: vi.fn().mockImplementation((_key) => Promise.resolve()),
+				get: vi.fn().mockImplementation(function (_key) {
+					return Promise.resolve(undefined)
+				}),
+				store: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
+				delete: vi.fn().mockImplementation(function (_key) {
+					return Promise.resolve()
+				}),
 			},
 			extensionUri: { fsPath: "/mock/extension/path" },
 			extension: { packageJSON: { version: "1.0.0" } },

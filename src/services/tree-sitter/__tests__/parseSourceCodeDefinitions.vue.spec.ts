@@ -22,7 +22,9 @@ vi.mock("../languageParser", () => ({
 
 // Mock file existence check
 vi.mock("../../../utils/fs", () => ({
-	fileExistsAtPath: vi.fn().mockImplementation(() => Promise.resolve(true)),
+	fileExistsAtPath: vi.fn().mockImplementation(function () {
+		return Promise.resolve(true)
+	}),
 }))
 
 describe("Vue Source Code Definition Tests", () => {

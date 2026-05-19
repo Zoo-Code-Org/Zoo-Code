@@ -59,9 +59,11 @@ vi.mock("vscode", () => ({
 			get: vi.fn().mockReturnValue([]),
 			update: vi.fn(),
 		}),
-		onDidChangeConfiguration: vi.fn().mockImplementation(() => ({
-			dispose: vi.fn(),
-		})),
+		onDidChangeConfiguration: vi.fn().mockImplementation(function () {
+			return {
+				dispose: vi.fn(),
+			}
+		}),
 	},
 	env: {
 		uriScheme: "vscode",
@@ -161,14 +163,26 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			extensionPath: "/test/path",
 			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
-				get: vi.fn().mockImplementation((key: string) => globalState[key]),
-				update: vi.fn().mockImplementation((key: string, value: any) => (globalState[key] = value)),
-				keys: vi.fn().mockImplementation(() => Object.keys(globalState)),
+				get: vi.fn().mockImplementation(function (key: string) {
+					return globalState[key]
+				}),
+				update: vi.fn().mockImplementation(function (key: string, value: any) {
+					return (globalState[key] = value)
+				}),
+				keys: vi.fn().mockImplementation(function () {
+					return Object.keys(globalState)
+				}),
 			},
 			secrets: {
-				get: vi.fn().mockImplementation((key: string) => secrets[key]),
-				store: vi.fn().mockImplementation((key: string, value: string | undefined) => (secrets[key] = value)),
-				delete: vi.fn().mockImplementation((key: string) => delete secrets[key]),
+				get: vi.fn().mockImplementation(function (key: string) {
+					return secrets[key]
+				}),
+				store: vi.fn().mockImplementation(function (key: string, value: string | undefined) {
+					return (secrets[key] = value)
+				}),
+				delete: vi.fn().mockImplementation(function (key: string) {
+					return delete secrets[key]
+				}),
 			},
 			workspaceState: {
 				get: vi.fn().mockReturnValue(undefined),
@@ -201,11 +215,13 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				asWebviewUri: vi.fn(),
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
+			onDidDispose: vi.fn().mockImplementation(function (callback) {
 				callback()
 				return { dispose: vi.fn() }
 			}),
-			onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			onDidChangeVisibility: vi.fn().mockImplementation(function () {
+				return { dispose: vi.fn() }
+			}),
 		} as unknown as vscode.WebviewView
 
 		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))

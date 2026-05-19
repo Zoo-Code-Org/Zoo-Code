@@ -15,14 +15,16 @@ const mockListLoaded = vi.fn()
 const mockListDownloadedModels = vi.fn()
 vi.mock("@lmstudio/sdk", () => {
 	return {
-		LMStudioClient: vi.fn().mockImplementation(() => ({
-			llm: {
-				listLoaded: mockListLoaded,
-			},
-			system: {
-				listDownloadedModels: mockListDownloadedModels,
-			},
-		})),
+		LMStudioClient: vi.fn().mockImplementation(function () {
+			return {
+				llm: {
+					listLoaded: mockListLoaded,
+				},
+				system: {
+					listDownloadedModels: mockListDownloadedModels,
+				},
+			}
+		}),
 	}
 })
 const MockedLMStudioClientConstructor = LMStudioClient as any
@@ -400,7 +402,7 @@ describe("LMStudio Fetcher", () => {
 		})
 
 		it("should return an empty object and log error if axios.get fails with a generic error", async () => {
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 			const networkError = new Error("Network connection failed")
 			mockedAxios.get.mockRejectedValueOnce(networkError)
 
@@ -418,7 +420,7 @@ describe("LMStudio Fetcher", () => {
 		})
 
 		it("should return an empty object and log info if axios.get fails with ECONNREFUSED", async () => {
-			const consoleInfoSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			const consoleInfoSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
 			const econnrefusedError = new Error("Connection refused")
 			;(econnrefusedError as any).code = "ECONNREFUSED"
 			mockedAxios.get.mockRejectedValueOnce(econnrefusedError)
@@ -435,7 +437,7 @@ describe("LMStudio Fetcher", () => {
 		})
 
 		it("should return an empty object and log error if listDownloadedModels fails", async () => {
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 			const listError = new Error("LMStudio SDK internal error")
 
 			mockedAxios.get.mockResolvedValueOnce({ data: {} })

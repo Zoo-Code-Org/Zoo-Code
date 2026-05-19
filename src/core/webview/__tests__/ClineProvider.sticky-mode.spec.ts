@@ -33,9 +33,11 @@ vi.mock("vscode", () => ({
 			get: vi.fn().mockReturnValue([]),
 			update: vi.fn(),
 		}),
-		onDidChangeConfiguration: vi.fn().mockImplementation(() => ({
-			dispose: vi.fn(),
-		})),
+		onDidChangeConfiguration: vi.fn().mockImplementation(function () {
+			return {
+				dispose: vi.fn(),
+			}
+		}),
 		onDidSaveTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
@@ -58,23 +60,25 @@ vi.mock("vscode", () => ({
 let taskIdCounter = 0
 
 vi.mock("../../task/Task", () => ({
-	Task: vi.fn().mockImplementation((options) => ({
-		taskId: options.taskId || `test-task-id-${++taskIdCounter}`,
-		saveClineMessages: vi.fn(),
-		clineMessages: [],
-		apiConversationHistory: [],
-		overwriteClineMessages: vi.fn(),
-		overwriteApiConversationHistory: vi.fn(),
-		abortTask: vi.fn(),
-		handleWebviewAskResponse: vi.fn(),
-		getTaskNumber: vi.fn().mockReturnValue(0),
-		setTaskNumber: vi.fn(),
-		setParentTask: vi.fn(),
-		setRootTask: vi.fn(),
-		emit: vi.fn(),
-		parentTask: options.parentTask,
-		updateApiConfiguration: vi.fn(),
-	})),
+	Task: vi.fn().mockImplementation(function (options) {
+		return {
+			taskId: options.taskId || `test-task-id-${++taskIdCounter}`,
+			saveClineMessages: vi.fn(),
+			clineMessages: [],
+			apiConversationHistory: [],
+			overwriteClineMessages: vi.fn(),
+			overwriteApiConversationHistory: vi.fn(),
+			abortTask: vi.fn(),
+			handleWebviewAskResponse: vi.fn(),
+			getTaskNumber: vi.fn().mockReturnValue(0),
+			setTaskNumber: vi.fn(),
+			setParentTask: vi.fn(),
+			setRootTask: vi.fn(),
+			emit: vi.fn(),
+			parentTask: options.parentTask,
+			updateApiConfiguration: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("../../prompts/sections/custom-instructions")
@@ -90,17 +94,21 @@ vi.mock("../../../api", () => ({
 }))
 
 vi.mock("../../../integrations/workspace/WorkspaceTracker", () => ({
-	default: vi.fn().mockImplementation(() => ({
-		initializeFilePaths: vi.fn(),
-		dispose: vi.fn(),
-	})),
+	default: vi.fn().mockImplementation(function () {
+		return {
+			initializeFilePaths: vi.fn(),
+			dispose: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("../../diff/strategies/multi-search-replace", () => ({
-	MultiSearchReplaceDiffStrategy: vi.fn().mockImplementation(() => ({
-		getName: () => "test-strategy",
-		applyDiff: vi.fn(),
-	})),
+	MultiSearchReplaceDiffStrategy: vi.fn().mockImplementation(function () {
+		return {
+			getName: () => "test-strategy",
+			applyDiff: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("@roo-code/cloud", () => ({
@@ -155,7 +163,9 @@ vi.mock("../../../integrations/misc/extract-text", () => ({
 }))
 
 vi.mock("p-wait-for", () => ({
-	default: vi.fn().mockImplementation(async () => Promise.resolve()),
+	default: vi.fn().mockImplementation(async function () {
+		return Promise.resolve()
+	}),
 }))
 
 vi.mock("fs/promises", () => ({
@@ -173,7 +183,9 @@ vi.mock("../../../utils/storage", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../../utils/storage")>()
 	return {
 		...actual,
-		getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
+		getStorageBasePath: vi.fn().mockImplementation(function (defaultPath: string) {
+			return defaultPath
+		}),
 		getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
 		getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
 	}
@@ -219,20 +231,26 @@ describe("ClineProvider - Sticky Mode", () => {
 			extensionPath: "/test/path",
 			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
-				get: vi.fn().mockImplementation((key: string) => globalState[key]),
-				update: vi.fn().mockImplementation((key: string, value: string | undefined) => {
+				get: vi.fn().mockImplementation(function (key: string) {
+					return globalState[key]
+				}),
+				update: vi.fn().mockImplementation(function (key: string, value: string | undefined) {
 					globalState[key] = value
 					return Promise.resolve()
 				}),
-				keys: vi.fn().mockImplementation(() => Object.keys(globalState)),
+				keys: vi.fn().mockImplementation(function () {
+					return Object.keys(globalState)
+				}),
 			},
 			secrets: {
-				get: vi.fn().mockImplementation((key: string) => secrets[key]),
-				store: vi.fn().mockImplementation((key: string, value: string | undefined) => {
+				get: vi.fn().mockImplementation(function (key: string) {
+					return secrets[key]
+				}),
+				store: vi.fn().mockImplementation(function (key: string, value: string | undefined) {
 					secrets[key] = value
 					return Promise.resolve()
 				}),
-				delete: vi.fn().mockImplementation((key: string) => {
+				delete: vi.fn().mockImplementation(function (key: string) {
 					delete secrets[key]
 					return Promise.resolve()
 				}),
@@ -269,11 +287,13 @@ describe("ClineProvider - Sticky Mode", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
+			onDidDispose: vi.fn().mockImplementation(function (callback) {
 				callback()
 				return { dispose: vi.fn() }
 			}),
-			onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
+			onDidChangeVisibility: vi.fn().mockImplementation(function () {
+				return { dispose: vi.fn() }
+			}),
 		} as unknown as vscode.WebviewView
 
 		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
@@ -322,9 +342,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			])
 
 			// Mock updateTaskHistory to track calls
-			const updateTaskHistorySpy = vi
-				.spyOn(provider, "updateTaskHistory")
-				.mockImplementation(() => Promise.resolve([]))
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(function () {
+				return Promise.resolve([])
+			})
 
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask)
@@ -375,7 +395,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			])
 
 			// Mock updateTaskHistory
-			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => Promise.resolve([]))
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(function () {
+				return Promise.resolve([])
+			})
 
 			// Switch mode
 			await provider.handleModeSwitch("architect")
@@ -413,9 +435,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			])
 
 			// Mock updateTaskHistory to track calls
-			const updateTaskHistorySpy = vi
-				.spyOn(provider, "updateTaskHistory")
-				.mockImplementation(() => Promise.resolve([]))
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(function () {
+				return Promise.resolve([])
+			})
 
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask)
@@ -465,7 +487,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// Set current mode
-			mockContext.globalState.get = vi.fn().mockImplementation((key: string) => {
+			mockContext.globalState.get = vi.fn().mockImplementation(function (key: string) {
 				if (key === "mode") return "code"
 				return undefined
 			})
@@ -537,7 +559,7 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			// Mock updateTaskHistory to capture the updated history item
 			let updatedHistoryItem: any
-			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item) => {
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(function (item) {
 				updatedHistoryItem = item
 				return Promise.resolve([item])
 			})
@@ -580,7 +602,7 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			// Mock getGlobalState to return task history
 			const getGlobalStateMock = vi.spyOn(provider as any, "getGlobalState")
-			getGlobalStateMock.mockImplementation((key) => {
+			getGlobalStateMock.mockImplementation(function (key) {
 				if (key === "taskHistory") {
 					return Object.entries(taskModes).map(([id, mode]) => ({
 						id,
@@ -601,7 +623,7 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			// Mock updateTaskHistory to track mode changes
 			const updateTaskHistoryMock = vi.spyOn(provider, "updateTaskHistory")
-			updateTaskHistoryMock.mockImplementation((item) => {
+			updateTaskHistoryMock.mockImplementation(function (item) {
 				// The handleModeSwitch method updates the task history for the current task
 				// We should only update the task that matches the item.id
 				if (item.id && item.mode !== undefined) {
@@ -823,9 +845,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			])
 
 			// Mock updateTaskHistory
-			const updateTaskHistorySpy = vi
-				.spyOn(provider, "updateTaskHistory")
-				.mockImplementation(() => Promise.resolve([]))
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(function () {
+				return Promise.resolve([])
+			})
 
 			// Clear previous calls to globalState.update
 			vi.mocked(mockContext.globalState.update).mockClear()
@@ -862,7 +884,7 @@ describe("ClineProvider - Sticky Mode", () => {
 				taskId: "test-task-id",
 				_taskMode: "code",
 				emit: vi.fn(),
-				saveClineMessages: vi.fn().mockImplementation(async () => {
+				saveClineMessages: vi.fn().mockImplementation(async function () {
 					// Simulate slow save
 					await new Promise((resolve) => setTimeout(resolve, 100))
 				}),
@@ -891,7 +913,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			])
 
 			// Mock updateTaskHistory
-			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => Promise.resolve([]))
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(function () {
+				return Promise.resolve([])
+			})
 
 			// Start a save operation
 			const savePromise = mockTask.saveClineMessages()
@@ -944,7 +968,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			const mockTask = {
 				taskId: "test-task-id",
 				_taskMode: "code",
-				emit: vi.fn().mockImplementation((event) => {
+				emit: vi.fn().mockImplementation(function (event) {
 					emitCallCount++
 					// Only throw on the second emit call (taskModeSwitched event)
 					// The first call is for TaskFocused in addClineToStack
@@ -977,10 +1001,12 @@ describe("ClineProvider - Sticky Mode", () => {
 			])
 
 			// Mock updateTaskHistory
-			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => Promise.resolve([]))
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(function () {
+				return Promise.resolve([])
+			})
 
 			// Mock console.error to suppress error output
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// Clear previous mock calls to isolate this test
 			vi.mocked(mockContext.globalState.update).mockClear()
@@ -1036,7 +1062,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			vi.spyOn(provider, "updateTaskHistory").mockRejectedValue(new Error("Update failed"))
 
 			// Mock console.error
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// The updateTaskHistory failure will cause handleModeSwitch to throw
 			// This is the actual behavior based on the test failure
@@ -1127,9 +1153,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			])
 
 			// Mock updateTaskHistory
-			const updateTaskHistorySpy = vi
-				.spyOn(provider, "updateTaskHistory")
-				.mockImplementation(() => Promise.resolve([]))
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockImplementation(function () {
+				return Promise.resolve([])
+			})
 
 			// Mock getCurrentTask to return different tasks
 			const getCurrentTaskSpy = vi.spyOn(provider, "getCurrentTask")
@@ -1177,7 +1203,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			}
 
 			// Mock getTaskWithId to be slow
-			vi.spyOn(provider, "getTaskWithId").mockImplementation(async () => {
+			vi.spyOn(provider, "getTaskWithId").mockImplementation(async function () {
 				await new Promise((resolve) => setTimeout(resolve, 100))
 				return {
 					historyItem,

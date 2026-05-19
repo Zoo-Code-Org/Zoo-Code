@@ -238,7 +238,7 @@ describe("Ollama Fetcher", () => {
 		it("should return an empty list if the initial /api/tags call fails", async () => {
 			const baseUrl = "http://localhost:11434"
 			mockedAxios.get.mockRejectedValueOnce(new Error("Network error"))
-			const consoleInfoSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Spy and suppress output
+			const consoleInfoSpy = vi.spyOn(console, "error").mockImplementation(function () {}) // Spy and suppress output
 
 			const result = await getOllamaModels(baseUrl)
 
@@ -250,7 +250,7 @@ describe("Ollama Fetcher", () => {
 
 		it("should log an info message and return an empty object on ECONNREFUSED", async () => {
 			const baseUrl = "http://localhost:11434"
-			const consoleInfoSpy = vi.spyOn(console, "warn").mockImplementation(() => {}) // Spy and suppress output
+			const consoleInfoSpy = vi.spyOn(console, "warn").mockImplementation(function () {}) // Spy and suppress output
 
 			const econnrefusedError = new Error("Connection refused") as any
 			econnrefusedError.code = "ECONNREFUSED"

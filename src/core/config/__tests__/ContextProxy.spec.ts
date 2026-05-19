@@ -437,7 +437,7 @@ describe("ContextProxy", () => {
 	describe("invalid apiProvider migration", () => {
 		it("should clear Roo provider state during initialization", async () => {
 			vi.clearAllMocks()
-			mockGlobalState.get.mockImplementation((key: string) => {
+			mockGlobalState.get.mockImplementation(function (key: string) {
 				if (key === "apiProvider") {
 					return "roo"
 				}
@@ -461,7 +461,7 @@ describe("ContextProxy", () => {
 		it("should clear invalid apiProvider from storage during initialization", async () => {
 			// Reset and create a new proxy with invalid provider in state
 			vi.clearAllMocks()
-			mockGlobalState.get.mockImplementation((key: string) => {
+			mockGlobalState.get.mockImplementation(function (key: string) {
 				if (key === "apiProvider") {
 					return "invalid-removed-provider" // Invalid/removed provider
 				}
@@ -478,7 +478,7 @@ describe("ContextProxy", () => {
 		it("should not clear retired apiProvider from storage during initialization", async () => {
 			// Reset and create a new proxy with retired provider in state
 			vi.clearAllMocks()
-			mockGlobalState.get.mockImplementation((key: string) => {
+			mockGlobalState.get.mockImplementation(function (key: string) {
 				if (key === "apiProvider") {
 					return "groq" // Retired provider
 				}
@@ -497,7 +497,7 @@ describe("ContextProxy", () => {
 		it("should not modify valid apiProvider during initialization", async () => {
 			// Reset and create a new proxy with valid provider in state
 			vi.clearAllMocks()
-			mockGlobalState.get.mockImplementation((key: string) => {
+			mockGlobalState.get.mockImplementation(function (key: string) {
 				if (key === "apiProvider") {
 					return "anthropic" // Valid provider
 				}
@@ -532,7 +532,7 @@ describe("ContextProxy", () => {
 		it("should sanitize invalid apiProvider before parsing", async () => {
 			// Reset and create a new proxy with an unknown provider in state
 			vi.clearAllMocks()
-			mockGlobalState.get.mockImplementation((key: string) => {
+			mockGlobalState.get.mockImplementation(function (key: string) {
 				if (key === "apiProvider") {
 					return "invalid-removed-provider"
 				}
@@ -635,7 +635,7 @@ Output only the summary of the conversation so far, without any additional comme
 		it("should clear old v1 default condensing prompt from customSupportPrompts during initialization", async () => {
 			// Reset and create a new proxy with old v1 default prompt in customSupportPrompts
 			vi.clearAllMocks()
-			mockGlobalState.get.mockImplementation((key: string) => {
+			mockGlobalState.get.mockImplementation(function (key: string) {
 				if (key === "customSupportPrompts") {
 					return { CONDENSE: OLD_V1_DEFAULT_CONDENSE_PROMPT }
 				}
@@ -653,7 +653,7 @@ Output only the summary of the conversation so far, without any additional comme
 		it("should preserve other custom prompts when clearing old v1 default", async () => {
 			// Reset and create a new proxy with old v1 default plus other custom prompts
 			vi.clearAllMocks()
-			mockGlobalState.get.mockImplementation((key: string) => {
+			mockGlobalState.get.mockImplementation(function (key: string) {
 				if (key === "customSupportPrompts") {
 					return {
 						CONDENSE: OLD_V1_DEFAULT_CONDENSE_PROMPT,
@@ -676,7 +676,7 @@ Output only the summary of the conversation so far, without any additional comme
 			// Reset and create a new proxy with a truly customized condensing prompt
 			vi.clearAllMocks()
 			const customPrompt = "My custom condensing instructions"
-			mockGlobalState.get.mockImplementation((key: string) => {
+			mockGlobalState.get.mockImplementation(function (key: string) {
 				if (key === "customSupportPrompts") {
 					return { CONDENSE: customPrompt }
 				}

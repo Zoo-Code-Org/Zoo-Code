@@ -23,7 +23,7 @@ vitest.mock("@roo-code/telemetry", () => ({
 }))
 
 vitest.mock("../fetchers/modelCache", () => ({
-	getModels: vitest.fn().mockImplementation(() => {
+	getModels: vitest.fn().mockImplementation(function () {
 		return Promise.resolve({
 			"anthropic/claude-sonnet-4": {
 				maxTokens: 8192,

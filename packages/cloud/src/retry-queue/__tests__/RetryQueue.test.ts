@@ -403,7 +403,9 @@ describe("RetryQueue", () => {
 			await retryQueue.enqueue("https://api.example.com/test", { method: "POST" }, "telemetry")
 
 			// Mock a slow response
-			fetchMock.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 100)))
+			fetchMock.mockImplementation(function () {
+				return new Promise((resolve) => setTimeout(() => resolve({ ok: true }), 100))
+			})
 
 			// Start first retryAll (don't await)
 			const firstCall = retryQueue.retryAll()

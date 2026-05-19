@@ -66,7 +66,7 @@ vi.mock("../../../utils/safeWriteJson")
 
 // Mock buildApiHandler to avoid issues with provider instantiation in tests
 vi.mock("../../../api", () => ({
-	buildApiHandler: vi.fn().mockImplementation((config) => {
+	buildApiHandler: vi.fn().mockImplementation(function (config) {
 		// Return different model info based on the provider and model
 		const getModelInfo = () => {
 			if (config.apiProvider === "anthropic" && config.apiModelId === "claude-3-5-sonnet-20241022") {
@@ -116,7 +116,9 @@ describe("importExport", () => {
 		mockContextProxy = {
 			setValues: vi.fn(),
 			setValue: vi.fn(),
-			export: vi.fn().mockImplementation(() => Promise.resolve({})),
+			export: vi.fn().mockImplementation(function () {
+				return Promise.resolve({})
+			}),
 			setProviderSettings: vi.fn(),
 			getValue: vi.fn(),
 		} as unknown as ReturnType<typeof vi.mocked<ContextProxy>>
@@ -129,8 +131,12 @@ describe("importExport", () => {
 
 		mockExtensionContext = {
 			secrets: {
-				get: vi.fn().mockImplementation((key: string) => map.get(key)),
-				store: vi.fn().mockImplementation((key: string, value: string) => map.set(key, value)),
+				get: vi.fn().mockImplementation(function (key: string) {
+					return map.get(key)
+				}),
+				store: vi.fn().mockImplementation(function (key: string, value: string) {
+					return map.set(key, value)
+				}),
 			},
 		} as unknown as ReturnType<typeof vi.mocked<vscode.ExtensionContext>>
 	})
@@ -734,7 +740,7 @@ describe("importExport", () => {
 				const seenImportedAt: Array<number | undefined> = []
 				const mockProvider = {
 					settingsImportedAt: undefined as number | undefined,
-					postStateToWebview: vi.fn().mockImplementation(async () => {
+					postStateToWebview: vi.fn().mockImplementation(async function () {
 						seenImportedAt.push(mockProvider.settingsImportedAt)
 					}),
 				}
@@ -743,7 +749,7 @@ describe("importExport", () => {
 				const showInfoMessageSpy = vi
 					.spyOn(vscode.window, "showInformationMessage")
 					.mockResolvedValue(undefined)
-				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
 
 				await importSettingsWithFeedback(
 					{
@@ -810,7 +816,7 @@ describe("importExport", () => {
 				const seenImportedAt: Array<number | undefined> = []
 				const mockProvider = {
 					settingsImportedAt: undefined as number | undefined,
-					postStateToWebview: vi.fn().mockImplementation(async () => {
+					postStateToWebview: vi.fn().mockImplementation(async function () {
 						seenImportedAt.push(mockProvider.settingsImportedAt)
 					}),
 				}
@@ -1085,7 +1091,7 @@ describe("importExport", () => {
 				}
 
 				const showWarningMessageSpy = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined)
-				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
 
 				await importSettingsWithFeedback(
 					{
@@ -1947,7 +1953,7 @@ describe("importExport", () => {
 			}
 
 			// Mock getGlobalState to return undefined for model dimension
-			mockContextProxy.getGlobalState = vi.fn().mockImplementation((key: string) => {
+			mockContextProxy.getGlobalState = vi.fn().mockImplementation(function (key: string) {
 				if (key === "codebaseIndexOpenAiCompatibleBaseUrl") {
 					return "https://api.example.com/v1"
 				}

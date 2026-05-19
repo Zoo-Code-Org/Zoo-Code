@@ -34,7 +34,9 @@ vi.mock("path", async () => {
 	return {
 		default: originalPath,
 		...originalPath,
-		resolve: vi.fn().mockImplementation((...args) => args.join("/")),
+		resolve: vi.fn().mockImplementation(function (...args) {
+			return args.join("/")
+		}),
 	}
 })
 
@@ -47,7 +49,7 @@ vi.mock("isbinaryfile")
 
 vi.mock("../../../integrations/misc/extract-text", () => ({
 	extractTextFromFile: vi.fn(),
-	addLineNumbers: vi.fn().mockImplementation((text: string, startLine = 1) => {
+	addLineNumbers: vi.fn().mockImplementation(function (text: string, startLine = 1) {
 		if (!text) return ""
 		const lines = text.split("\n")
 		return lines.map((line, i) => `${startLine + i} | ${line}`).join("\n")
@@ -66,10 +68,12 @@ vi.mock("../helpers/imageHelpers", () => ({
 	isSupportedImageFormat: vi.fn(),
 	validateImageForProcessing: vi.fn(),
 	processImageFile: vi.fn(),
-	ImageMemoryTracker: vi.fn().mockImplementation(() => ({
-		getTotalMemoryUsed: vi.fn().mockReturnValue(0),
-		addMemoryUsage: vi.fn(),
-	})),
+	ImageMemoryTracker: vi.fn().mockImplementation(function () {
+		return {
+			getTotalMemoryUsed: vi.fn().mockReturnValue(0),
+			addMemoryUsage: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("../../prompts/responses", () => ({

@@ -114,7 +114,7 @@ describe("skillsMessageHandler", () => {
 
 		it("handles errors and returns empty skills", async () => {
 			const provider = createMockProvider(true)
-			mockGetSkillsMetadata.mockImplementation(() => {
+			mockGetSkillsMetadata.mockImplementation(function () {
 				throw new Error("Test error")
 			})
 

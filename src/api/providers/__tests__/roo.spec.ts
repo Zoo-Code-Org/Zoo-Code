@@ -11,44 +11,46 @@ const mockCreate = vitest.fn()
 vitest.mock("openai", () => {
 	return {
 		__esModule: true,
-		default: vitest.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate.mockImplementation(async (options) => {
-						if (!options.stream) {
-							return {
-								id: "test-completion",
-								choices: [
-									{
-										message: { role: "assistant", content: "Test response" },
-										finish_reason: "stop",
-										index: 0,
+		default: vitest.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate.mockImplementation(async function (options) {
+							if (!options.stream) {
+								return {
+									id: "test-completion",
+									choices: [
+										{
+											message: { role: "assistant", content: "Test response" },
+											finish_reason: "stop",
+											index: 0,
+										},
+									],
+									usage: {
+										prompt_tokens: 10,
+										completion_tokens: 5,
+										total_tokens: 15,
 									},
-								],
-								usage: {
-									prompt_tokens: 10,
-									completion_tokens: 5,
-									total_tokens: 15,
+								}
+							}
+
+							return {
+								[Symbol.asyncIterator]: async function* () {
+									yield {
+										choices: [{ delta: { content: "Test response" }, index: 0 }],
+										usage: null,
+									}
+									yield {
+										choices: [{ delta: {}, index: 0 }],
+										usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+									}
 								},
 							}
-						}
-
-						return {
-							[Symbol.asyncIterator]: async function* () {
-								yield {
-									choices: [{ delta: { content: "Test response" }, index: 0 }],
-									usage: null,
-								}
-								yield {
-									choices: [{ delta: {}, index: 0 }],
-									usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-								}
-							},
-						}
-					}),
+						}),
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 
@@ -482,7 +484,9 @@ describe("RooHandler", () => {
 			const originalGetSessionToken = mockGetSessionTokenFn.getMockImplementation()
 
 			// Temporarily make authService return undefined
-			mockGetSessionTokenFn.mockImplementation(() => undefined)
+			mockGetSessionTokenFn.mockImplementation(function () {
+				return undefined
+			})
 
 			try {
 				Object.defineProperty(CloudService, "instance", {

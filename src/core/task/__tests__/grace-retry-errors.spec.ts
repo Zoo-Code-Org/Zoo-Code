@@ -35,7 +35,9 @@ vi.mock("fs/promises", async (importOriginal) => {
 	const mockFunctions = {
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
-		readFile: vi.fn().mockImplementation(() => Promise.resolve("[]")),
+		readFile: vi.fn().mockImplementation(function () {
+			return Promise.resolve("[]")
+		}),
 		unlink: vi.fn().mockResolvedValue(undefined),
 		rmdir: vi.fn().mockResolvedValue(undefined),
 	}
@@ -48,7 +50,9 @@ vi.mock("fs/promises", async (importOriginal) => {
 })
 
 vi.mock("p-wait-for", () => ({
-	default: vi.fn().mockImplementation(async () => Promise.resolve()),
+	default: vi.fn().mockImplementation(async function () {
+		return Promise.resolve()
+	}),
 }))
 
 vi.mock("vscode", () => {
@@ -101,7 +105,9 @@ vi.mock("vscode", () => {
 			uriScheme: "vscode",
 			language: "en",
 		},
-		EventEmitter: vi.fn().mockImplementation(() => mockEventEmitter),
+		EventEmitter: vi.fn().mockImplementation(function () {
+			return mockEventEmitter
+		}),
 		Disposable: {
 			from: vi.fn(),
 		},
@@ -110,7 +116,7 @@ vi.mock("vscode", () => {
 })
 
 vi.mock("../../mentions", () => ({
-	parseMentions: vi.fn().mockImplementation((text) => {
+	parseMentions: vi.fn().mockImplementation(function (text) {
 		return Promise.resolve({ text: `processed: ${text}`, mode: undefined, contentBlocks: [] })
 	}),
 	openMention: vi.fn(),
@@ -128,16 +134,18 @@ vi.mock("../../environment/getEnvironmentDetails", () => ({
 vi.mock("../../ignore/RooIgnoreController")
 
 vi.mock("../../../utils/storage", () => ({
-	getTaskDirectoryPath: vi
-		.fn()
-		.mockImplementation((globalStoragePath, taskId) => Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)),
-	getSettingsDirectoryPath: vi
-		.fn()
-		.mockImplementation((globalStoragePath) => Promise.resolve(`${globalStoragePath}/settings`)),
+	getTaskDirectoryPath: vi.fn().mockImplementation(function (globalStoragePath, taskId) {
+		return Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)
+	}),
+	getSettingsDirectoryPath: vi.fn().mockImplementation(function (globalStoragePath) {
+		return Promise.resolve(`${globalStoragePath}/settings`)
+	}),
 }))
 
 vi.mock("../../../utils/fs", () => ({
-	fileExistsAtPath: vi.fn().mockImplementation(() => false),
+	fileExistsAtPath: vi.fn().mockImplementation(function () {
+		return false
+	}),
 }))
 
 describe("Grace Retry Error Handling", () => {
@@ -157,20 +165,34 @@ describe("Grace Retry Error Handling", () => {
 
 		mockExtensionContext = {
 			globalState: {
-				get: vi.fn().mockImplementation((_key: keyof GlobalState) => undefined),
-				update: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
+				get: vi.fn().mockImplementation(function (_key: keyof GlobalState) {
+					return undefined
+				}),
+				update: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
 				keys: vi.fn().mockReturnValue([]),
 			},
 			globalStorageUri: storageUri,
 			workspaceState: {
-				get: vi.fn().mockImplementation((_key) => undefined),
-				update: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
+				get: vi.fn().mockImplementation(function (_key) {
+					return undefined
+				}),
+				update: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
 				keys: vi.fn().mockReturnValue([]),
 			},
 			secrets: {
-				get: vi.fn().mockImplementation((_key) => Promise.resolve(undefined)),
-				store: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
-				delete: vi.fn().mockImplementation((_key) => Promise.resolve()),
+				get: vi.fn().mockImplementation(function (_key) {
+					return Promise.resolve(undefined)
+				}),
+				store: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
+				delete: vi.fn().mockImplementation(function (_key) {
+					return Promise.resolve()
+				}),
 			},
 			extensionUri: {
 				fsPath: "/mock/extension/path",
@@ -234,7 +256,7 @@ describe("Grace Retry Error Handling", () => {
 			task.consecutiveNoAssistantMessagesCount = 5
 
 			// Mock dispose to prevent actual cleanup
-			vi.spyOn(task, "dispose").mockImplementation(() => {})
+			vi.spyOn(task, "dispose").mockImplementation(function () {})
 
 			await task.abortTask()
 
@@ -254,7 +276,7 @@ describe("Grace Retry Error Handling", () => {
 			task.consecutiveNoToolUseCount = 4
 
 			// Mock dispose to prevent actual cleanup
-			vi.spyOn(task, "dispose").mockImplementation(() => {})
+			vi.spyOn(task, "dispose").mockImplementation(function () {})
 
 			await task.abortTask()
 

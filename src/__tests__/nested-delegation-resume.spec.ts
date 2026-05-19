@@ -111,25 +111,26 @@ describe("Nested delegation resume (A → B → C)", () => {
 		}
 
 		const emitSpy = vi.fn()
-		const removeClineFromStack = vi.fn().mockImplementation(async () => {
+		const removeClineFromStack = vi.fn().mockImplementation(async function () {
 			// Simulate closing current child
 			currentActiveId = undefined
 		})
-		const createTaskWithHistoryItem = vi
-			.fn()
-			.mockImplementation(async (historyItem: any, opts?: { startTask?: boolean }) => {
-				// Assert startTask:false to avoid resume asks
-				expect(opts).toEqual(expect.objectContaining({ startTask: false }))
-				// Reopen the parent
-				currentActiveId = historyItem.id
-				// Return minimal parent instance with resumeAfterDelegation
-				return {
-					taskId: historyItem.id,
-					resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
-					overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
-					overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
-				}
-			})
+		const createTaskWithHistoryItem = vi.fn().mockImplementation(async function (
+			historyItem: any,
+			opts?: { startTask?: boolean },
+		) {
+			// Assert startTask:false to avoid resume asks
+			expect(opts).toEqual(expect.objectContaining({ startTask: false }))
+			// Reopen the parent
+			currentActiveId = historyItem.id
+			// Return minimal parent instance with resumeAfterDelegation
+			return {
+				taskId: historyItem.id,
+				resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
+				overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
+				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
+			}
+		})
 
 		const getTaskWithId = vi.fn(async (id: string) => {
 			if (!historyIndex[id]) throw new Error("Task not found")

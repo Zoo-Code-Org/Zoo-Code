@@ -66,7 +66,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		} as any
 
 		// Default mock: return distinct model maps per provider so we can verify keys
-		getModelsMock.mockImplementation(async (options: any) => {
+		getModelsMock.mockImplementation(async function (options: any) {
 			switch (options?.provider) {
 				case "openrouter":
 					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
@@ -147,7 +147,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			},
 		})
 
-		getModelsMock.mockImplementation(async (options: any) => {
+		getModelsMock.mockImplementation(async function (options: any) {
 			if (options?.provider === "deepseek") {
 				return { "deepseek-chat": { contextWindow: 128000, supportsPromptCache: true } }
 			}
@@ -195,7 +195,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			},
 		})
 
-		getModelsMock.mockImplementation(async (options: any) => {
+		getModelsMock.mockImplementation(async function (options: any) {
 			if (options?.provider === "deepseek") {
 				throw new Error("DeepSeek API error")
 			}

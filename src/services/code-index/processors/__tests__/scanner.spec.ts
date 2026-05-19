@@ -44,7 +44,9 @@ vi.mock("vscode", () => ({
 		},
 	},
 	Uri: {
-		file: vi.fn().mockImplementation((path) => path),
+		file: vi.fn().mockImplementation(function (path) {
+			return path
+		}),
 	},
 	window: {
 		activeTextEditor: {
@@ -242,7 +244,7 @@ describe("DirectoryScanner", () => {
 
 			// Mock parseFile to track which files are actually processed
 			const processedFiles: string[] = []
-			;(mockCodeParser.parseFile as any).mockImplementation((filePath: string) => {
+			;(mockCodeParser.parseFile as any).mockImplementation(function (filePath: string) {
 				processedFiles.push(filePath)
 				return []
 			})
@@ -312,7 +314,7 @@ describe("DirectoryScanner", () => {
 			]
 
 			// Mock parseFile to return different blocks based on file extension
-			;(mockCodeParser.parseFile as any).mockImplementation((filePath: string) => {
+			;(mockCodeParser.parseFile as any).mockImplementation(function (filePath: string) {
 				if (filePath.endsWith(".md")) {
 					return mockMarkdownBlocks
 				} else if (filePath.endsWith(".markdown")) {
@@ -430,7 +432,7 @@ describe("DirectoryScanner", () => {
 			]
 
 			// Abort after first file is parsed
-			;(mockCodeParser.parseFile as any).mockImplementation(async () => {
+			;(mockCodeParser.parseFile as any).mockImplementation(async function () {
 				controller.abort()
 				return mockBlocks
 			})

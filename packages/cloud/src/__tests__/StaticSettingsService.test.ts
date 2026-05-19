@@ -81,7 +81,7 @@ describe("StaticSettingsService", () => {
 		})
 
 		it("should use console.log as default logger for errors", () => {
-			const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+			const consoleSpy = vi.spyOn(console, "log").mockImplementation(function () {})
 			expect(() => new StaticSettingsService("invalid-base64!@#")).toThrow()
 
 			expect(consoleSpy).toHaveBeenCalledWith(

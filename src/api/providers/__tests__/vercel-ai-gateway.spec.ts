@@ -14,7 +14,7 @@ import { vercelAiGatewayDefaultModelId, VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE } 
 vitest.mock("openai")
 vitest.mock("delay", () => ({ default: vitest.fn(() => Promise.resolve()) }))
 vitest.mock("../fetchers/modelCache", () => ({
-	getModels: vitest.fn().mockImplementation(() => {
+	getModels: vitest.fn().mockImplementation(function () {
 		return Promise.resolve({
 			"anthropic/claude-sonnet-4": {
 				maxTokens: 64000,
@@ -61,13 +61,15 @@ vitest.mock("../../transform/caching/vercel-ai-gateway", () => ({
 const mockCreate = vitest.fn()
 const mockConstructor = vitest.fn()
 
-;(OpenAI as any).mockImplementation(() => ({
-	chat: {
-		completions: {
-			create: mockCreate,
+;(OpenAI as any).mockImplementation(function () {
+	return {
+		chat: {
+			completions: {
+				create: mockCreate,
+			},
 		},
-	},
-}))
+	}
+})
 ;(OpenAI as any).mockImplementation = mockConstructor.mockReturnValue({
 	chat: {
 		completions: {
@@ -131,37 +133,39 @@ describe("VercelAiGatewayHandler", () => {
 
 	describe("createMessage", () => {
 		beforeEach(() => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [
-							{
-								delta: { content: "Test response" },
-								index: 0,
+			mockCreate.mockImplementation(async function () {
+				return {
+					[Symbol.asyncIterator]: async function* () {
+						yield {
+							choices: [
+								{
+									delta: { content: "Test response" },
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						yield {
+							choices: [
+								{
+									delta: {},
+									index: 0,
+								},
+							],
+							usage: {
+								prompt_tokens: 10,
+								completion_tokens: 5,
+								total_tokens: 15,
+								cache_creation_input_tokens: 2,
+								prompt_tokens_details: {
+									cached_tokens: 3,
+								},
+								cost: 0.005,
 							},
-						],
-						usage: null,
-					}
-					yield {
-						choices: [
-							{
-								delta: {},
-								index: 0,
-							},
-						],
-						usage: {
-							prompt_tokens: 10,
-							completion_tokens: 5,
-							total_tokens: 15,
-							cache_creation_input_tokens: 2,
-							prompt_tokens_details: {
-								cached_tokens: 3,
-							},
-							cost: 0.005,
-						},
-					}
-				},
-			}))
+						}
+					},
+				}
+			})
 		})
 
 		it("streams text content correctly", async () => {
@@ -295,18 +299,20 @@ describe("VercelAiGatewayHandler", () => {
 			]
 
 			beforeEach(() => {
-				mockCreate.mockImplementation(async () => ({
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							choices: [
-								{
-									delta: {},
-									index: 0,
-								},
-							],
-						}
-					},
-				}))
+				mockCreate.mockImplementation(async function () {
+					return {
+						[Symbol.asyncIterator]: async function* () {
+							yield {
+								choices: [
+									{
+										delta: {},
+										index: 0,
+									},
+								],
+							}
+						},
+					}
+				})
 			})
 
 			it("should include tools when provided", async () => {
@@ -384,58 +390,60 @@ describe("VercelAiGatewayHandler", () => {
 			})
 
 			it("should yield tool_call_partial chunks when streaming tool calls", async () => {
-				mockCreate.mockImplementation(async () => ({
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [
-											{
-												index: 0,
-												id: "call_123",
-												function: {
-													name: "test_tool",
-													arguments: '{"arg1":',
+				mockCreate.mockImplementation(async function () {
+					return {
+						[Symbol.asyncIterator]: async function* () {
+							yield {
+								choices: [
+									{
+										delta: {
+											tool_calls: [
+												{
+													index: 0,
+													id: "call_123",
+													function: {
+														name: "test_tool",
+														arguments: '{"arg1":',
+													},
 												},
-											},
-										],
+											],
+										},
+										index: 0,
 									},
-									index: 0,
-								},
-							],
-						}
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [
-											{
-												index: 0,
-												function: {
-													arguments: '"value"}',
+								],
+							}
+							yield {
+								choices: [
+									{
+										delta: {
+											tool_calls: [
+												{
+													index: 0,
+													function: {
+														arguments: '"value"}',
+													},
 												},
-											},
-										],
+											],
+										},
+										index: 0,
 									},
-									index: 0,
+								],
+							}
+							yield {
+								choices: [
+									{
+										delta: {},
+										index: 0,
+									},
+								],
+								usage: {
+									prompt_tokens: 10,
+									completion_tokens: 5,
 								},
-							],
-						}
-						yield {
-							choices: [
-								{
-									delta: {},
-									index: 0,
-								},
-							],
-							usage: {
-								prompt_tokens: 10,
-								completion_tokens: 5,
-							},
-						}
-					},
-				}))
+							}
+						},
+					}
+				})
 
 				const handler = new VercelAiGatewayHandler(mockOptions)
 
@@ -486,20 +494,22 @@ describe("VercelAiGatewayHandler", () => {
 
 	describe("completePrompt", () => {
 		beforeEach(() => {
-			mockCreate.mockImplementation(async () => ({
-				choices: [
-					{
-						message: { role: "assistant", content: "Test completion response" },
-						finish_reason: "stop",
-						index: 0,
+			mockCreate.mockImplementation(async function () {
+				return {
+					choices: [
+						{
+							message: { role: "assistant", content: "Test completion response" },
+							finish_reason: "stop",
+							index: 0,
+						},
+					],
+					usage: {
+						prompt_tokens: 8,
+						completion_tokens: 4,
+						total_tokens: 12,
 					},
-				],
-				usage: {
-					prompt_tokens: 8,
-					completion_tokens: 4,
-					total_tokens: 12,
-				},
-			}))
+				}
+			})
 		})
 
 		it("completes prompt correctly", async () => {
@@ -540,7 +550,7 @@ describe("VercelAiGatewayHandler", () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)
 			const errorMessage = "API error"
 
-			mockCreate.mockImplementation(() => {
+			mockCreate.mockImplementation(function () {
 				throw new Error(errorMessage)
 			})
 
@@ -552,15 +562,17 @@ describe("VercelAiGatewayHandler", () => {
 		it("returns empty string when no content in response", async () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)
 
-			mockCreate.mockImplementation(async () => ({
-				choices: [
-					{
-						message: { role: "assistant", content: null },
-						finish_reason: "stop",
-						index: 0,
-					},
-				],
-			}))
+			mockCreate.mockImplementation(async function () {
+				return {
+					choices: [
+						{
+							message: { role: "assistant", content: null },
+							finish_reason: "stop",
+							index: 0,
+						},
+					],
+				}
+			})
 
 			const result = await handler.completePrompt("Test")
 			expect(result).toBe("")

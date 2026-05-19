@@ -18,11 +18,11 @@ vi.mock("fs/promises", () => ({
 		readFile: vi.fn().mockResolvedValue("{}"),
 		unlink: vi.fn().mockResolvedValue(undefined),
 		rename: vi.fn().mockResolvedValue(undefined),
-		lstat: vi.fn().mockImplementation(() =>
-			Promise.resolve({
+		lstat: vi.fn().mockImplementation(function () {
+			return Promise.resolve({
 				isDirectory: () => true,
-			}),
-		),
+			})
+		}),
 		mkdir: vi.fn().mockResolvedValue(undefined),
 	},
 	access: vi.fn().mockResolvedValue(undefined),
@@ -30,11 +30,11 @@ vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("{}"),
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rename: vi.fn().mockResolvedValue(undefined),
-	lstat: vi.fn().mockImplementation(() =>
-		Promise.resolve({
+	lstat: vi.fn().mockImplementation(function () {
+		return Promise.resolve({
 			isDirectory: () => true,
-		}),
-	),
+		})
+	}),
 	mkdir: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -72,7 +72,7 @@ vi.mock("vscode", () => ({
 		createTextEditorDecorationType: vi.fn().mockReturnValue({
 			dispose: vi.fn(),
 		}),
-		withProgress: vi.fn().mockImplementation((_options: any, task: any) => {
+		withProgress: vi.fn().mockImplementation(function (_options: any, task: any) {
 			const progress = { report: vi.fn() }
 			const tokenListeners: Array<() => void> = []
 			const cancellationToken = {
@@ -221,7 +221,9 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation(() => mockTransport)
+			StdioClientTransport.mockImplementation(function () {
+				return mockTransport
+			})
 
 			// Mock Client
 			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
@@ -234,7 +236,9 @@ describe("McpHub", () => {
 				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
 			}
 
-			Client.mockImplementation(() => mockClient)
+			Client.mockImplementation(function () {
+				return mockClient
+			})
 
 			// Mock the config file read
 			vi.mocked(fs.readFile).mockResolvedValue(
@@ -389,7 +393,9 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation(() => mockTransport)
+			StdioClientTransport.mockImplementation(function () {
+				return mockTransport
+			})
 
 			// Mock Client
 			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
@@ -402,7 +408,9 @@ describe("McpHub", () => {
 				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
 			}
 
-			Client.mockImplementation(() => mockClient)
+			Client.mockImplementation(function () {
+				return mockClient
+			})
 
 			// Create server with watchPaths
 			vi.mocked(fs.readFile).mockResolvedValue(
@@ -444,7 +452,7 @@ describe("McpHub", () => {
 
 			// Return different watchers for different paths
 			let watcherIndex = 0
-			vi.mocked(chokidar.watch).mockImplementation(() => {
+			vi.mocked(chokidar.watch).mockImplementation(function () {
 				return (watcherIndex++ === 0 ? mockWatcher1 : mockWatcher2) as any
 			})
 
@@ -462,7 +470,9 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation(() => mockTransport)
+			StdioClientTransport.mockImplementation(function () {
+				return mockTransport
+			})
 
 			// Mock Client
 			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
@@ -475,7 +485,9 @@ describe("McpHub", () => {
 				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
 			}
 
-			Client.mockImplementation(() => mockClient)
+			Client.mockImplementation(function () {
+				return mockClient
+			})
 
 			// Create server with multiple watchPaths
 			vi.mocked(fs.readFile).mockResolvedValue(
@@ -672,7 +684,9 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation(() => mockTransport)
+			StdioClientTransport.mockImplementation(function () {
+				return mockTransport
+			})
 
 			// Mock Client
 			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
@@ -685,7 +699,9 @@ describe("McpHub", () => {
 				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
 			}
 
-			Client.mockImplementation(() => mockClient)
+			Client.mockImplementation(function () {
+				return mockClient
+			})
 
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
@@ -744,7 +760,9 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation(() => mockTransport)
+			StdioClientTransport.mockImplementation(function () {
+				return mockTransport
+			})
 
 			// Mock Client
 			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
@@ -757,7 +775,9 @@ describe("McpHub", () => {
 				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
 			}
 
-			Client.mockImplementation(() => mockClient)
+			Client.mockImplementation(function () {
+				return mockClient
+			})
 
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
@@ -1775,7 +1795,9 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation(() => mockTransport)
+			StdioClientTransport.mockImplementation(function () {
+				return mockTransport
+			})
 
 			// Mock Client
 			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
@@ -1788,7 +1810,9 @@ describe("McpHub", () => {
 				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
 			}
 
-			Client.mockImplementation(() => mockClient)
+			Client.mockImplementation(function () {
+				return mockClient
+			})
 
 			// Start with MCP enabled
 			mockProvider.getState = vi.fn().mockResolvedValue({ mcpEnabled: true })
@@ -1895,18 +1919,22 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation(() => mockTransport)
+			StdioClientTransport.mockImplementation(function () {
+				return mockTransport
+			})
 
 			// Mock Client
 			const clientModule = await import("@modelcontextprotocol/sdk/client/index.js")
 			const Client = clientModule.Client as ReturnType<typeof vi.fn>
 
-			Client.mockImplementation(() => ({
-				connect: vi.fn().mockResolvedValue(undefined),
-				close: vi.fn().mockResolvedValue(undefined),
-				getInstructions: vi.fn().mockReturnValue("test instructions"),
-				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
-			}))
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn().mockReturnValue("test instructions"),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				}
+			})
 
 			// Mock provider with mcpEnabled: true
 			const enabledMockProvider = {
@@ -2074,7 +2102,7 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation((config: any) => {
+			StdioClientTransport.mockImplementation(function (config: any) {
 				// Verify that cmd.exe wrapping is applied
 				expect(config.command).toBe("cmd.exe")
 				expect(config.args).toEqual([
@@ -2088,12 +2116,14 @@ describe("McpHub", () => {
 			})
 
 			// Mock Client
-			Client.mockImplementation(() => ({
-				connect: vi.fn().mockResolvedValue(undefined),
-				close: vi.fn().mockResolvedValue(undefined),
-				getInstructions: vi.fn().mockReturnValue("test instructions"),
-				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
-			}))
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn().mockReturnValue("test instructions"),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				}
+			})
 
 			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
@@ -2142,7 +2172,7 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation((config: any) => {
+			StdioClientTransport.mockImplementation(function (config: any) {
 				// Verify that no cmd.exe wrapping is applied
 				expect(config.command).toBe("npx")
 				expect(config.args).toEqual(["-y", "@modelcontextprotocol/server-filesystem", "/test/path"])
@@ -2150,12 +2180,14 @@ describe("McpHub", () => {
 			})
 
 			// Mock Client
-			Client.mockImplementation(() => ({
-				connect: vi.fn().mockResolvedValue(undefined),
-				close: vi.fn().mockResolvedValue(undefined),
-				getInstructions: vi.fn().mockReturnValue("test instructions"),
-				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
-			}))
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn().mockReturnValue("test instructions"),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				}
+			})
 
 			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
@@ -2204,7 +2236,7 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation((config: any) => {
+			StdioClientTransport.mockImplementation(function (config: any) {
 				// Verify that cmd.exe is not double-wrapped
 				expect(config.command).toBe("cmd.exe")
 				expect(config.args).toEqual(["/c", "echo", "test"])
@@ -2212,12 +2244,14 @@ describe("McpHub", () => {
 			})
 
 			// Mock Client
-			Client.mockImplementation(() => ({
-				connect: vi.fn().mockResolvedValue(undefined),
-				close: vi.fn().mockResolvedValue(undefined),
-				getInstructions: vi.fn().mockReturnValue("test instructions"),
-				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
-			}))
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn().mockReturnValue("test instructions"),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				}
+			})
 
 			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
@@ -2267,7 +2301,7 @@ describe("McpHub", () => {
 			}
 
 			let callCount = 0
-			StdioClientTransport.mockImplementation((config: any) => {
+			StdioClientTransport.mockImplementation(function (config: any) {
 				callCount++
 				// First call would fail with ENOENT if not wrapped
 				// Second call should be wrapped with cmd.exe
@@ -2281,12 +2315,14 @@ describe("McpHub", () => {
 			})
 
 			// Mock Client
-			Client.mockImplementation(() => ({
-				connect: vi.fn().mockResolvedValue(undefined),
-				close: vi.fn().mockResolvedValue(undefined),
-				getInstructions: vi.fn().mockReturnValue("test instructions"),
-				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
-			}))
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn().mockReturnValue("test instructions"),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				}
+			})
 
 			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
@@ -2346,7 +2382,7 @@ describe("McpHub", () => {
 				onclose: null,
 			}
 
-			StdioClientTransport.mockImplementation((config: any) => {
+			StdioClientTransport.mockImplementation(function (config: any) {
 				// Verify that CMD (uppercase) is not double-wrapped
 				expect(config.command).toBe("CMD")
 				expect(config.args).toEqual(["/c", "echo", "test"])
@@ -2354,12 +2390,14 @@ describe("McpHub", () => {
 			})
 
 			// Mock Client
-			Client.mockImplementation(() => ({
-				connect: vi.fn().mockResolvedValue(undefined),
-				close: vi.fn().mockResolvedValue(undefined),
-				getInstructions: vi.fn().mockReturnValue("test instructions"),
-				request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
-			}))
+			Client.mockImplementation(function () {
+				return {
+					connect: vi.fn().mockResolvedValue(undefined),
+					close: vi.fn().mockResolvedValue(undefined),
+					getInstructions: vi.fn().mockReturnValue("test instructions"),
+					request: vi.fn().mockResolvedValue({ tools: [], resources: [], resourceTemplates: [] }),
+				}
+			})
 
 			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
@@ -2496,9 +2534,11 @@ describe("McpHub", () => {
 		})
 
 		it("should resolve when cross-window tokens arrive", async () => {
-			vsc.window.showInformationMessage.mockImplementation(() => new Promise(() => {}))
+			vsc.window.showInformationMessage.mockImplementation(function () {
+				return new Promise(() => {})
+			})
 
-			mockSecretStorage.onDidChange.mockImplementation((_key: string, cb: () => void) => {
+			mockSecretStorage.onDidChange.mockImplementation(function (_key: string, cb: () => void) {
 				Promise.resolve().then(() => {
 					mockSecretStorage.getOAuthData.mockResolvedValue({
 						expires_at: Date.now() + 10 * 60 * 1000,
@@ -2584,7 +2624,9 @@ describe("McpHub", () => {
 
 		it("should disconnect and flag error when OAuth flow times out", async () => {
 			vi.useFakeTimers()
-			vsc.window.showInformationMessage.mockImplementation(() => new Promise(() => {}))
+			vsc.window.showInformationMessage.mockImplementation(function () {
+				return new Promise(() => {})
+			})
 
 			const flowPromise = (mcpHub as any)._initiateOAuthFlow(
 				serverName,
@@ -2703,9 +2745,11 @@ describe("McpHub", () => {
 
 		it("should not reconnect when hub is disposed while cross-window tokens arrive", async () => {
 			vi.useFakeTimers()
-			vsc.window.showInformationMessage.mockImplementation(() => new Promise(() => {}))
+			vsc.window.showInformationMessage.mockImplementation(function () {
+				return new Promise(() => {})
+			})
 
-			mockSecretStorage.onDidChange.mockImplementation((_key: string, cb: () => void) => {
+			mockSecretStorage.onDidChange.mockImplementation(function (_key: string, cb: () => void) {
 				Promise.resolve().then(() => {
 					// Dispose the hub before the token callback runs
 					;(mcpHub as any).isDisposed = true
@@ -2735,11 +2779,13 @@ describe("McpHub", () => {
 
 		it("should not reconnect when cross-window watcher fires but token is missing or expired", async () => {
 			vi.useFakeTimers()
-			vsc.window.showInformationMessage.mockImplementation(() => new Promise(() => {}))
+			vsc.window.showInformationMessage.mockImplementation(function () {
+				return new Promise(() => {})
+			})
 
 			// onDidChange fires immediately (simulates a storage event during the read gap)
 			// but getOAuthData returns undefined — no valid token written.
-			mockSecretStorage.onDidChange.mockImplementation((_key: string, cb: () => void) => {
+			mockSecretStorage.onDidChange.mockImplementation(function (_key: string, cb: () => void) {
 				cb() // fires synchronously — sets crossWindowTokenWritten flag
 				return vi.fn()
 			})
@@ -2778,7 +2824,7 @@ describe("McpHub", () => {
 				.mockResolvedValueOnce({ expires_at: Date.now() + 10 * 60 * 1000 })
 
 			// Watcher fires synchronously before getOAuthData resolves
-			mockSecretStorage.onDidChange.mockImplementation((_key: string, cb: () => void) => {
+			mockSecretStorage.onDidChange.mockImplementation(function (_key: string, cb: () => void) {
 				cb()
 				return vi.fn()
 			})
@@ -2804,7 +2850,9 @@ describe("McpHub", () => {
 
 		it("should cancel the previous watcher when called again for the same server", async () => {
 			vi.useFakeTimers()
-			vsc.window.showInformationMessage.mockImplementation(() => new Promise(() => {}))
+			vsc.window.showInformationMessage.mockImplementation(function () {
+				return new Promise(() => {})
+			})
 
 			// Start first flow (intentionally not awaited — the second call orphans it)
 			;(mcpHub as any)._initiateOAuthFlow(

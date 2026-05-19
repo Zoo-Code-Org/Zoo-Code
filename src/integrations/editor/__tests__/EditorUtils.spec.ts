@@ -73,10 +73,10 @@ describe("EditorUtils", () => {
 			// Simulate a caret (empty selection) on line 2 at character 5.
 			const initialRange = new vscode.Range(new vscode.Position(2, 5), new vscode.Position(2, 5))
 			// Return non-empty text for any line with text (lines 1, 2, and 3).
-			mockDocument.lineAt.mockImplementation((line: number) => {
+			mockDocument.lineAt.mockImplementation(function (line: number) {
 				return { text: `Line ${line} text`, lineNumber: line }
 			})
-			mockDocument.getText.mockImplementation((range: any) => {
+			mockDocument.getText.mockImplementation(function (range: any) {
 				// If the range is exactly the empty initial selection, return an empty string.
 				if (
 					range.start.line === initialRange.start.line &&

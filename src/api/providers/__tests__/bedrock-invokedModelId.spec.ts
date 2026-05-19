@@ -18,7 +18,7 @@ vitest.mock("@smithy/smithy-client", () => ({
 }))
 
 // Create a mock send function that we can reference
-const mockSend = vitest.fn().mockImplementation(async () => {
+const mockSend = vitest.fn().mockImplementation(async function () {
 	return {
 		$metadata: {
 			httpStatusCode: 200,
@@ -324,7 +324,7 @@ describe("AwsBedrockHandler with invokedModelId", () => {
 		})
 
 		// Mock getModel to throw an error when called with the model name
-		vitest.spyOn(handler, "getModel").mockImplementation((modelName?: string) => {
+		vitest.spyOn(handler, "getModel").mockImplementation(function (modelName?: string) {
 			if (modelName === "anthropic.claude-3-sonnet-20240229-v1:0") {
 				throw new Error("Test error during model lookup")
 			}

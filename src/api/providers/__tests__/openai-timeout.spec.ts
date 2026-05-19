@@ -17,7 +17,7 @@ const mockAzureOpenAIConstructor = vitest.fn()
 vitest.mock("openai", () => {
 	return {
 		__esModule: true,
-		default: vitest.fn().mockImplementation((config) => {
+		default: vitest.fn().mockImplementation(function (config) {
 			mockOpenAIConstructor(config)
 			return {
 				chat: {
@@ -27,7 +27,7 @@ vitest.mock("openai", () => {
 				},
 			}
 		}),
-		AzureOpenAI: vitest.fn().mockImplementation((config) => {
+		AzureOpenAI: vitest.fn().mockImplementation(function (config) {
 			mockAzureOpenAIConstructor(config)
 			return {
 				chat: {

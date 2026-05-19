@@ -186,7 +186,7 @@ describe("safeWriteJson", () => {
 
 		// Mock rename to succeed on first call (filePath -> tempBackupFilePath)
 		// and fail on second call (tempNewFilePath -> filePath)
-		renameSpy.mockImplementation(async (oldPath, newPath) => {
+		renameSpy.mockImplementation(async function (oldPath, newPath) {
 			renameCallCount++
 			if (renameCallCount === 1) {
 				// First call: filePath -> tempBackupFilePath (should succeed)
@@ -315,7 +315,7 @@ describe("safeWriteJson", () => {
 
 	// Test for console error suppression during backup deletion
 	test("should suppress console.error when backup deletion fails", async () => {
-		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {}) // Suppress console.error
 		const initialData = { message: "Initial" }
 		const newData = { message: "New" }
 
@@ -323,7 +323,7 @@ describe("safeWriteJson", () => {
 
 		// Mock unlink to fail when deleting backup files
 		const unlinkSpy = vi.spyOn(fs, "unlink")
-		unlinkSpy.mockImplementation(async (filePath: any) => {
+		unlinkSpy.mockImplementation(async function (filePath: any) {
 			if (filePath.toString().includes(".bak_")) {
 				throw new Error("Backup deletion failed")
 			}
@@ -355,7 +355,7 @@ describe("safeWriteJson", () => {
 		// might be more relevant or adaptable here.
 
 		let renameCallCount = 0
-		renameSpy.mockImplementation(async (oldPath, newPath) => {
+		renameSpy.mockImplementation(async function (oldPath, newPath) {
 			renameCallCount++
 			if (renameCallCount === 2) {
 				// Second call: tempNewFilePath -> filePath (should fail)
@@ -449,10 +449,10 @@ describe("safeWriteJson", () => {
 		await originalFsPromisesWriteFile(currentTestFilePath, JSON.stringify(initialData))
 
 		const renameSpy = vi.spyOn(fs, "rename")
-		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {}) // Suppress console.error
 
 		let renameCallCount = 0
-		renameSpy.mockImplementation(async (oldPath, newPath) => {
+		renameSpy.mockImplementation(async function (oldPath, newPath) {
 			renameCallCount++
 			if (renameCallCount === 2) {
 				// Second call: tempNewFilePath -> filePath (fail)

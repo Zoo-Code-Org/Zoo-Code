@@ -18,7 +18,7 @@ vitest.mock("@anthropic-ai/sdk", () => {
 	const mockAnthropicConstructor = vitest.fn().mockImplementation(function () {
 		return {
 			messages: {
-				create: mockCreate.mockImplementation(async (options) => {
+				create: mockCreate.mockImplementation(async function (options) {
 					if (!options.stream) {
 						return {
 							id: "test-completion",

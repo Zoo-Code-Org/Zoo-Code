@@ -19,12 +19,14 @@ vi.mock("path", async () => {
 	const originalPath = await vi.importActual("path")
 	return {
 		...originalPath,
-		resolve: vi.fn().mockImplementation((...args) => {
+		resolve: vi.fn().mockImplementation(function (...args) {
 			const separator = process.platform === "win32" ? "\\" : "/"
 			return args.join(separator)
 		}),
 		isAbsolute: vi.fn().mockReturnValue(false),
-		relative: vi.fn().mockImplementation((from, to) => to),
+		relative: vi.fn().mockImplementation(function (from, to) {
+			return to
+		}),
 	}
 })
 

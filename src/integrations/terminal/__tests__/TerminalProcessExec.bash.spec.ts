@@ -25,15 +25,15 @@ vi.mock("vscode", () => {
 		},
 		window: {
 			createTerminal: vi.fn(),
-			onDidStartTerminalShellExecution: vi.fn().mockImplementation((handler) => {
+			onDidStartTerminalShellExecution: vi.fn().mockImplementation(function (handler) {
 				eventHandlers.startTerminalShellExecution = handler
 				return { dispose: vi.fn() }
 			}),
-			onDidEndTerminalShellExecution: vi.fn().mockImplementation((handler) => {
+			onDidEndTerminalShellExecution: vi.fn().mockImplementation(function (handler) {
 				eventHandlers.endTerminalShellExecution = handler
 				return { dispose: vi.fn() }
 			}),
-			onDidCloseTerminal: vi.fn().mockImplementation((handler) => {
+			onDidCloseTerminal: vi.fn().mockImplementation(function (handler) {
 				eventHandlers.closeTerminal = handler
 				return { dispose: vi.fn() }
 			}),
@@ -176,7 +176,7 @@ async function testTerminalCommand(
 		const { stream, exitCode } = createRealCommandStream(command)
 
 		// Configure the mock terminal to return our stream
-		mockTerminal.shellIntegration.executeCommand.mockImplementation(() => {
+		mockTerminal.shellIntegration.executeCommand.mockImplementation(function () {
 			return {
 				read: vi.fn().mockReturnValue(stream),
 			}

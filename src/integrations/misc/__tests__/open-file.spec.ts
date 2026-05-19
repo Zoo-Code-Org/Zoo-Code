@@ -68,7 +68,7 @@ vi.mock("../../i18n", () => ({
 describe("openFile", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		vi.spyOn(console, "warn").mockImplementation(() => {})
+		vi.spyOn(console, "warn").mockImplementation(function () {})
 	})
 
 	afterEach(() => {

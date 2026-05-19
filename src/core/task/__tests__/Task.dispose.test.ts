@@ -109,7 +109,7 @@ describe("Task dispose method", () => {
 		})
 
 		// Spy on console.error
-		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 		// Call dispose - should not throw
 		expect(() => task.dispose()).not.toThrow()
@@ -124,7 +124,7 @@ describe("Task dispose method", () => {
 
 	test("should clean up all resources in correct order", () => {
 		const removeAllListenersSpy = vi.spyOn(task, "removeAllListeners")
-		const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(function () {})
 
 		// Call dispose
 		task.dispose()

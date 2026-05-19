@@ -59,7 +59,7 @@ describe("checkpointRestoreHandler", () => {
 		}
 
 		// Mock pWaitFor to resolve immediately
-		;(pWaitFor as any).mockImplementation(async (condition: () => boolean) => {
+		;(pWaitFor as any).mockImplementation(async function (condition: () => boolean) {
 			// Simulate the condition being met
 			return Promise.resolve()
 		})
@@ -147,7 +147,7 @@ describe("checkpointRestoreHandler", () => {
 
 		it("should save messages after delete operation", async () => {
 			// Mock the checkpoint restore to simulate message deletion
-			mockCline.checkpointRestore.mockImplementation(async () => {
+			mockCline.checkpointRestore.mockImplementation(async function () {
 				mockCline.clineMessages = mockCline.clineMessages.slice(0, 2)
 			})
 

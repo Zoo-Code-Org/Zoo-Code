@@ -604,7 +604,7 @@ describe("Cache Strategy", () => {
 				},
 			}
 
-			const mockSend = vitest.fn().mockImplementation(() => {
+			const mockSend = vitest.fn().mockImplementation(function () {
 				return Promise.resolve({
 					stream: mockStream,
 				})

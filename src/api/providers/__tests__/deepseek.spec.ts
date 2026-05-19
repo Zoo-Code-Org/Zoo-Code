@@ -13,7 +13,7 @@ vi.mock("openai", () => {
 		default: constructorMock(() => ({
 			chat: {
 				completions: {
-					create: mockCreate.mockImplementation(async (options) => {
+					create: mockCreate.mockImplementation(async function (options) {
 						if (!options.stream) {
 							return {
 								id: "test-completion",

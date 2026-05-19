@@ -20,7 +20,7 @@ vitest.mock("openai", () => {
 	const mockConstructor = constructorMock(() => ({
 		chat: {
 			completions: {
-				create: mockCreate.mockImplementation(async (options) => {
+				create: mockCreate.mockImplementation(async function (options) {
 					if (!options.stream) {
 						return {
 							id: "test-completion",
@@ -227,7 +227,7 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should handle tool calls in streaming responses", async () => {
-			mockCreate.mockImplementation(async (options) => {
+			mockCreate.mockImplementation(async function (options) {
 				return {
 					[Symbol.asyncIterator]: async function* () {
 						yield {
@@ -309,7 +309,7 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should yield tool calls even when finish_reason is not set (fallback behavior)", async () => {
-			mockCreate.mockImplementation(async (options) => {
+			mockCreate.mockImplementation(async function (options) {
 				return {
 					[Symbol.asyncIterator]: async function* () {
 						yield {
@@ -816,7 +816,7 @@ describe("OpenAiHandler", () => {
 		it("should handle tool calls with O3 model in streaming mode", async () => {
 			const o3Handler = new OpenAiHandler(o3Options)
 
-			mockCreate.mockImplementation(async (options) => {
+			mockCreate.mockImplementation(async function (options) {
 				return {
 					[Symbol.asyncIterator]: async function* () {
 						yield {
@@ -881,7 +881,7 @@ describe("OpenAiHandler", () => {
 		it("should yield tool calls for O3 model even when finish_reason is not set (fallback behavior)", async () => {
 			const o3Handler = new OpenAiHandler(o3Options)
 
-			mockCreate.mockImplementation(async (options) => {
+			mockCreate.mockImplementation(async function (options) {
 				return {
 					[Symbol.asyncIterator]: async function* () {
 						yield {

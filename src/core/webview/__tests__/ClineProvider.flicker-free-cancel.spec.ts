@@ -22,10 +22,12 @@ vi.mock("vscode", () => {
 			uriScheme: "vscode",
 			language: "en",
 		},
-		EventEmitter: vi.fn().mockImplementation(() => ({
-			event: vi.fn(),
-			fire: vi.fn(),
-		})),
+		EventEmitter: vi.fn().mockImplementation(function () {
+			return {
+				event: vi.fn(),
+				fire: vi.fn(),
+			}
+		}),
 		Disposable: {
 			from: vi.fn(),
 		},
@@ -152,8 +154,8 @@ describe("ClineProvider flicker-free cancel", () => {
 		;(provider as any).updateGlobalState = vi.fn().mockResolvedValue(undefined)
 		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 		provider.performPreparationTasks = vi.fn().mockResolvedValue(undefined)
-		provider.getTaskWithId = vi.fn().mockImplementation((id) =>
-			Promise.resolve({
+		provider.getTaskWithId = vi.fn().mockImplementation(function (id) {
+			return Promise.resolve({
 				historyItem: {
 					id,
 					number: 1,
@@ -164,8 +166,8 @@ describe("ClineProvider flicker-free cancel", () => {
 					totalCost: 0.001,
 					workspace: "/test/workspace",
 				},
-			}),
-		)
+			})
+		})
 
 		// Setup mock tasks
 		mockTask1 = {
@@ -188,7 +190,9 @@ describe("ClineProvider flicker-free cancel", () => {
 		}
 
 		// Mock Task constructor
-		vi.mocked(Task).mockImplementation(() => mockTask2 as any)
+		vi.mocked(Task).mockImplementation(function () {
+			return mockTask2 as any
+		})
 	})
 
 	it("should not remove current task from stack when rehydrating same taskId", async () => {

@@ -75,7 +75,9 @@ vi.mock("vscode", () => {
 			uriScheme: "vscode",
 			language: "en",
 		},
-		EventEmitter: vi.fn().mockImplementation(() => mockEventEmitter),
+		EventEmitter: vi.fn().mockImplementation(function () {
+			return mockEventEmitter
+		}),
 		Disposable: {
 			from: vi.fn(),
 		},
@@ -91,7 +93,9 @@ vi.mock("../../environment/getEnvironmentDetails", () => ({
 vi.mock("../../ignore/RooIgnoreController")
 
 vi.mock("p-wait-for", () => ({
-	default: vi.fn().mockImplementation(async () => Promise.resolve()),
+	default: vi.fn().mockImplementation(async function () {
+		return Promise.resolve()
+	}),
 }))
 
 vi.mock("delay", () => ({
@@ -116,7 +120,9 @@ describe("Task - sticky provider profile init race", () => {
 			context: {
 				globalStorageUri: { fsPath: "/test/storage" },
 			},
-			getState: vi.fn().mockImplementation(() => getStatePromise),
+			getState: vi.fn().mockImplementation(function () {
+				return getStatePromise
+			}),
 			log: vi.fn(),
 			on: vi.fn(),
 			off: vi.fn(),

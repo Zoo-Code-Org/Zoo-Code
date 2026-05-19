@@ -46,7 +46,7 @@ describe("file-search", () => {
 				get: vi.fn(() => 10000),
 			}
 
-			;(vscode.workspace.getConfiguration as any).mockImplementation((section: string) => {
+			;(vscode.workspace.getConfiguration as any).mockImplementation(function (section: string) {
 				if (section === "search") return mockSearchConfig
 				if (section === "zoo-code") return mockRooConfig
 				return { get: vi.fn() }
@@ -68,7 +68,7 @@ describe("file-search", () => {
 				}),
 			}
 
-			;(vscode.workspace.getConfiguration as any).mockImplementation((section: string) => {
+			;(vscode.workspace.getConfiguration as any).mockImplementation(function (section: string) {
 				if (section === Package.name) return mockRooConfig
 				return { get: vi.fn() }
 			})
@@ -86,7 +86,7 @@ describe("file-search", () => {
 				get: vi.fn((key: string, defaultValue: number) => defaultValue),
 			}
 
-			;(vscode.workspace.getConfiguration as any).mockImplementation((section: string) => {
+			;(vscode.workspace.getConfiguration as any).mockImplementation(function (section: string) {
 				if (section === Package.name) return mockRooConfig
 				return { get: vi.fn() }
 			})

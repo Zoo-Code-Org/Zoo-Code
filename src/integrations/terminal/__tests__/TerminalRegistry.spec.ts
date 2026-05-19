@@ -14,26 +14,25 @@ describe("TerminalRegistry", () => {
 	let mockCreateTerminal: any
 
 	beforeEach(() => {
-		mockCreateTerminal = vi.spyOn(vscode.window, "createTerminal").mockImplementation(
-			(...args: any[]) =>
-				({
-					exitStatus: undefined,
-					name: "Roo Code",
-					processId: Promise.resolve(123),
-					creationOptions: {},
-					state: {
-						isInteractedWith: true,
-						shell: { id: "test-shell", executable: "/bin/bash", args: [] },
-					},
-					dispose: vi.fn(),
-					hide: vi.fn(),
-					show: vi.fn(),
-					sendText: vi.fn(),
-					shellIntegration: {
-						executeCommand: vi.fn(),
-					},
-				}) as any,
-		)
+		mockCreateTerminal = vi.spyOn(vscode.window, "createTerminal").mockImplementation(function (...args: any[]) {
+			return {
+				exitStatus: undefined,
+				name: "Roo Code",
+				processId: Promise.resolve(123),
+				creationOptions: {},
+				state: {
+					isInteractedWith: true,
+					shell: { id: "test-shell", executable: "/bin/bash", args: [] },
+				},
+				dispose: vi.fn(),
+				hide: vi.fn(),
+				show: vi.fn(),
+				sendText: vi.fn(),
+				shellIntegration: {
+					executeCommand: vi.fn(),
+				},
+			} as any
+		})
 	})
 
 	describe("createTerminal", () => {

@@ -87,7 +87,7 @@ describe("ReadCommandOutputTool", () => {
 			const content = "Line 1\nLine 2\nLine 3\n"
 			const buffer = Buffer.from(content)
 
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				buffer.copy(buf)
 				return Promise.resolve({ bytesRead: buffer.length })
 			})
@@ -109,7 +109,7 @@ describe("ReadCommandOutputTool", () => {
 			const content = "First line\nSecond line\nThird line\n"
 			const buffer = Buffer.from(content)
 
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				buffer.copy(buf)
 				return Promise.resolve({ bytesRead: buffer.length })
 			})
@@ -129,7 +129,7 @@ describe("ReadCommandOutputTool", () => {
 			const buffer = Buffer.from(content)
 
 			vi.mocked(fs.stat).mockResolvedValue({ size: fileSize } as any)
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				buffer.copy(buf)
 				return Promise.resolve({ bytesRead: buffer.length })
 			})
@@ -147,7 +147,7 @@ describe("ReadCommandOutputTool", () => {
 			const content = "Test"
 			const buffer = Buffer.from(content)
 
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				buffer.copy(buf)
 				return Promise.resolve({ bytesRead: buffer.length })
 			})
@@ -167,7 +167,7 @@ describe("ReadCommandOutputTool", () => {
 			vi.mocked(fs.stat).mockResolvedValue({ size: fileSize } as any)
 
 			// Mock read to return only up to default limit (40KB)
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				const defaultLimit = 40 * 1024
 				const bytesToRead = Math.min(buf.length, defaultLimit)
 				buf.write(largeContent.slice(0, bytesToRead))
@@ -191,22 +191,25 @@ describe("ReadCommandOutputTool", () => {
 			// Mock first read for offset calculation (returns content before offset)
 			// Mock second read for actual content
 			let readCallCount = 0
-			mockFileHandle.read.mockImplementation(
-				(buf: Buffer, bufOffset: number, length: number, position: number | null) => {
-					readCallCount++
-					if (position === 0) {
-						// First read: prefix for line number calculation
-						const prefixContent = content.slice(0, offset)
-						buf.write(prefixContent)
-						return Promise.resolve({ bytesRead: prefixContent.length })
-					} else {
-						// Second read: actual content from offset
-						const actualContent = content.slice(offset)
-						buf.write(actualContent)
-						return Promise.resolve({ bytesRead: actualContent.length })
-					}
-				},
-			)
+			mockFileHandle.read.mockImplementation(function (
+				buf: Buffer,
+				bufOffset: number,
+				length: number,
+				position: number | null,
+			) {
+				readCallCount++
+				if (position === 0) {
+					// First read: prefix for line number calculation
+					const prefixContent = content.slice(0, offset)
+					buf.write(prefixContent)
+					return Promise.resolve({ bytesRead: prefixContent.length })
+				} else {
+					// Second read: actual content from offset
+					const actualContent = content.slice(offset)
+					buf.write(actualContent)
+					return Promise.resolve({ bytesRead: actualContent.length })
+				}
+			})
 
 			await tool.execute({ artifact_id: artifactId, offset }, mockTask, mockCallbacks)
 
@@ -223,7 +226,7 @@ describe("ReadCommandOutputTool", () => {
 
 			vi.mocked(fs.stat).mockResolvedValue({ size: fileSize } as any)
 
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				const bytesToRead = Math.min(buf.length, customLimit)
 				buf.write(largeContent.slice(0, bytesToRead))
 				return Promise.resolve({ bytesRead: bytesToRead })
@@ -243,7 +246,7 @@ describe("ReadCommandOutputTool", () => {
 
 			vi.mocked(fs.stat).mockResolvedValue({ size: fileSize } as any)
 
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				const content = "x".repeat(limit)
 				buf.write(content)
 				return Promise.resolve({ bytesRead: limit })
@@ -262,7 +265,7 @@ describe("ReadCommandOutputTool", () => {
 
 			vi.mocked(fs.stat).mockResolvedValue({ size: fileSize } as any)
 
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				buf.write(content)
 				return Promise.resolve({ bytesRead: fileSize })
 			})
@@ -283,17 +286,20 @@ describe("ReadCommandOutputTool", () => {
 			vi.mocked(fs.stat).mockResolvedValue({ size: fileSize } as any)
 
 			// Mock streaming read - return entire content in one chunk (simulates small file)
-			mockFileHandle.read.mockImplementation(
-				(buf: Buffer, bufOffset: number, length: number, position: number | null) => {
-					const pos = position ?? 0
-					if (pos >= fileSize) {
-						return Promise.resolve({ bytesRead: 0 })
-					}
-					const bytesToRead = Math.min(length, fileSize - pos)
-					buffer.copy(buf, 0, pos, pos + bytesToRead)
-					return Promise.resolve({ bytesRead: bytesToRead })
-				},
-			)
+			mockFileHandle.read.mockImplementation(function (
+				buf: Buffer,
+				bufOffset: number,
+				length: number,
+				position: number | null,
+			) {
+				const pos = position ?? 0
+				if (pos >= fileSize) {
+					return Promise.resolve({ bytesRead: 0 })
+				}
+				const bytesToRead = Math.min(length, fileSize - pos)
+				buffer.copy(buf, 0, pos, pos + bytesToRead)
+				return Promise.resolve({ bytesRead: bytesToRead })
+			})
 		}
 
 		it("should filter lines matching pattern", async () => {
@@ -425,7 +431,7 @@ describe("ReadCommandOutputTool", () => {
 			const content = "Test"
 			const buffer = Buffer.from(content)
 
-			mockFileHandle.read.mockImplementation((buf: Buffer) => {
+			mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 				buffer.copy(buf)
 				return Promise.resolve({ bytesRead: buffer.length })
 			})
@@ -529,7 +535,7 @@ describe("ReadCommandOutputTool", () => {
 				const buffer = Buffer.from(content)
 
 				vi.mocked(fs.stat).mockResolvedValue({ size } as any)
-				mockFileHandle.read.mockImplementation((buf: Buffer) => {
+				mockFileHandle.read.mockImplementation(function (buf: Buffer) {
 					buffer.copy(buf)
 					return Promise.resolve({ bytesRead: buffer.length })
 				})
@@ -552,22 +558,25 @@ describe("ReadCommandOutputTool", () => {
 			vi.mocked(fs.stat).mockResolvedValue({ size: fileSize } as any)
 
 			let readCallCount = 0
-			mockFileHandle.read.mockImplementation(
-				(buf: Buffer, bufOffset: number, length: number, position: number | null) => {
-					readCallCount++
-					if (position === 0) {
-						// Read prefix for line counting
-						const prefix = content.slice(0, offset)
-						buf.write(prefix)
-						return Promise.resolve({ bytesRead: prefix.length })
-					} else {
-						// Read actual content from offset
-						const actualContent = content.slice(offset)
-						buf.write(actualContent)
-						return Promise.resolve({ bytesRead: actualContent.length })
-					}
-				},
-			)
+			mockFileHandle.read.mockImplementation(function (
+				buf: Buffer,
+				bufOffset: number,
+				length: number,
+				position: number | null,
+			) {
+				readCallCount++
+				if (position === 0) {
+					// Read prefix for line counting
+					const prefix = content.slice(0, offset)
+					buf.write(prefix)
+					return Promise.resolve({ bytesRead: prefix.length })
+				} else {
+					// Read actual content from offset
+					const actualContent = content.slice(offset)
+					buf.write(actualContent)
+					return Promise.resolve({ bytesRead: actualContent.length })
+				}
+			})
 
 			await tool.execute({ artifact_id: artifactId, offset }, mockTask, mockCallbacks)
 

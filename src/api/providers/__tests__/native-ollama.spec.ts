@@ -8,9 +8,11 @@ import { getOllamaModels } from "../fetchers/ollama"
 const mockChat = vitest.fn()
 vitest.mock("ollama", () => {
 	return {
-		Ollama: vitest.fn().mockImplementation(() => ({
-			chat: mockChat,
-		})),
+		Ollama: vitest.fn().mockImplementation(function () {
+			return {
+				chat: mockChat,
+			}
+		}),
 		Message: vitest.fn(),
 	}
 })

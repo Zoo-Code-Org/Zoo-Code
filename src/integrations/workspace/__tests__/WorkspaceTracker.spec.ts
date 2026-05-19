@@ -266,7 +266,7 @@ describe("WorkspaceTracker", () => {
 		})
 
 		// Setup listFiles to use our controlled promise
-		;(listFiles as Mock).mockImplementation(() => {
+		;(listFiles as Mock).mockImplementation(function () {
 			// Change workspace path before listFiles resolves
 			;(getWorkspacePath as Mock).mockReturnValue("/test/changed-workspace")
 			return listFilesPromise

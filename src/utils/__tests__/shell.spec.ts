@@ -329,7 +329,7 @@ describe("Shell Detection Tests", () => {
 		it("handles userInfo errors gracefully, falling back to environment variable if present", () => {
 			Object.defineProperty(process, "platform", { value: "darwin" })
 			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
-			vi.mocked(userInfo).mockImplementation(() => {
+			vi.mocked(userInfo).mockImplementation(function () {
 				throw new Error("userInfo error")
 			})
 			process.env.SHELL = "/bin/zsh"
@@ -341,7 +341,7 @@ describe("Shell Detection Tests", () => {
 			vscode.workspace.getConfiguration = () => {
 				throw new Error("Configuration error")
 			}
-			vi.mocked(userInfo).mockImplementation(() => {
+			vi.mocked(userInfo).mockImplementation(function () {
 				throw new Error("userInfo error")
 			})
 			delete process.env.SHELL

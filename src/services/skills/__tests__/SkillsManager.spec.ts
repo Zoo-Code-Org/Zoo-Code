@@ -153,31 +153,33 @@ describe("SkillsManager", () => {
 			const pdfSkillMd = p(pdfSkillDir, "SKILL.md")
 
 			// Setup mocks
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["pdf-processing"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === pdfSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === pdfSkillMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === pdfSkillMd) {
 					return `---
 name: pdf-processing
@@ -204,31 +206,33 @@ Instructions here...`
 			const codeReviewDir = p(projectSkillsDir, "code-review")
 			const codeReviewMd = p(codeReviewDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === projectSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === projectSkillsDir) {
 					return ["code-review"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === codeReviewDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === codeReviewMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === codeReviewMd) {
 					return `---
 name: code-review
@@ -254,31 +258,33 @@ Instructions here...`
 			const refactoringDir = p(globalSkillsCodeDir, "refactoring")
 			const refactoringMd = p(refactoringDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsCodeDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsCodeDir) {
 					return ["refactoring"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === refactoringDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === refactoringMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === refactoringMd) {
 					return `---
 name: refactoring
@@ -304,31 +310,33 @@ Instructions here...`
 			const invalidSkillDir = p(globalSkillsDir, "invalid-skill")
 			const invalidSkillMd = p(invalidSkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["invalid-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === invalidSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === invalidSkillMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === invalidSkillMd) {
 					return `---
 name: invalid-skill
@@ -349,31 +357,33 @@ name: invalid-skill
 			const mySkillDir = p(globalSkillsDir, "my-skill")
 			const mySkillMd = p(mySkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["my-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === mySkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === mySkillMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === mySkillMd) {
 					return `---
 name: different-name
@@ -399,22 +409,28 @@ description: Name doesn't match directory
 				"pdf--processing", // consecutive hyphens
 			]
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
-			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? invalidNames : []))
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
+				return dir === globalSkillsDir
+			})
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
+			mockReaddir.mockImplementation(async function (dir: string) {
+				return dir === globalSkillsDir ? invalidNames : []
+			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (invalidNames.some((name) => pathArg === p(globalSkillsDir, name))) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return invalidNames.some((name) => file === p(globalSkillsDir, name, "SKILL.md"))
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				const match = invalidNames.find((name) => file === p(globalSkillsDir, name, "SKILL.md"))
 				if (!match) throw new Error("File not found")
 				return `---
@@ -435,16 +451,24 @@ description: Invalid name format
 			const longDir = p(globalSkillsDir, longName)
 			const longMd = p(longDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
-			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? [longName] : []))
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
+				return dir === globalSkillsDir
+			})
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
+			mockReaddir.mockImplementation(async function (dir: string) {
+				return dir === globalSkillsDir ? [longName] : []
+			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === longDir) return { isDirectory: () => true }
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => file === longMd)
+			mockFileExists.mockImplementation(async function (file: string) {
+				return file === longMd
+			})
 			mockReadFile.mockResolvedValue(`---
 name: ${longName}
 description: Too long name
@@ -461,14 +485,22 @@ description: Too long name
 			const skillDir = p(globalSkillsDir, "valid-name")
 			const skillMd = p(skillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
-			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["valid-name"] : []))
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
+				return dir === globalSkillsDir
+			})
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
+			mockReaddir.mockImplementation(async function (dir: string) {
+				return dir === globalSkillsDir ? ["valid-name"] : []
+			})
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === skillDir) return { isDirectory: () => true }
 				throw new Error("Not found")
 			})
-			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockFileExists.mockImplementation(async function (file: string) {
+				return file === skillMd
+			})
 			mockReadFile.mockResolvedValue(`---
 name: valid-name
 description: "   "
@@ -486,14 +518,22 @@ description: "   "
 			const skillMd = p(skillDir, "SKILL.md")
 			const longDescription = "d".repeat(1025)
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
-			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["valid-name"] : []))
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
+				return dir === globalSkillsDir
+			})
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
+			mockReaddir.mockImplementation(async function (dir: string) {
+				return dir === globalSkillsDir ? ["valid-name"] : []
+			})
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === skillDir) return { isDirectory: () => true }
 				throw new Error("Not found")
 			})
-			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockFileExists.mockImplementation(async function (file: string) {
+				return file === skillMd
+			})
 			mockReadFile.mockResolvedValue(`---
 name: valid-name
 description: ${longDescription}
@@ -511,37 +551,37 @@ description: ${longDescription}
 			const sharedSkillMd = p(sharedSkillDir, "SKILL.md")
 
 			// Simulate .roo/skills being a symlink to /shared/skills
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
 			// realpath resolves the symlink to the actual directory
-			mockRealpath.mockImplementation(async (pathArg: string) => {
+			mockRealpath.mockImplementation(async function (pathArg: string) {
 				if (pathArg === globalSkillsDir) {
 					return SHARED_DIR
 				}
 				return pathArg
 			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === SHARED_DIR) {
 					return ["shared-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === sharedSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === sharedSkillMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === sharedSkillMd) {
 					return `---
 name: shared-skill
@@ -568,13 +608,15 @@ Instructions here...`
 			const myAliasMd = p(myAliasDir, "SKILL.md")
 
 			// Simulate .roo/skills/my-alias being a symlink to /external/actual-skill
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["my-alias"]
 				}
@@ -582,19 +624,19 @@ Instructions here...`
 			})
 
 			// fs.stat follows symlinks, so it returns the target directory info
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === myAliasDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === myAliasMd
 			})
 
 			// The skill name in frontmatter must match the symlink name (my-alias)
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === myAliasMd) {
 					return `---
 name: my-alias
@@ -620,31 +662,33 @@ Instructions here...`
 			const agentSkillDir = p(globalAgentsSkillsDir, "agent-skill")
 			const agentSkillMd = p(agentSkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalAgentsSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalAgentsSkillsDir) {
 					return ["agent-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === agentSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === agentSkillMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === agentSkillMd) {
 					return `---
 name: agent-skill
@@ -671,31 +715,33 @@ Instructions here...`
 			const projectAgentSkillDir = p(projectAgentsSkillsDir, "project-agent-skill")
 			const projectAgentSkillMd = p(projectAgentSkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === projectAgentsSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === projectAgentsSkillsDir) {
 					return ["project-agent-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === projectAgentSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === projectAgentSkillMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === projectAgentSkillMd) {
 					return `---
 name: project-agent-skill
@@ -723,31 +769,33 @@ Instructions here...`
 			const rooSkillDir = p(globalSkillsDir, "common-skill")
 			const rooSkillMd = p(rooSkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalAgentsSkillsDir || dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalAgentsSkillsDir || dir === globalSkillsDir) {
 					return ["common-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === agentSkillDir || pathArg === rooSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === agentSkillMd || file === rooSkillMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === agentSkillMd) {
 					return `---
 name: common-skill
@@ -780,31 +828,33 @@ description: Roo version (should take priority)
 			const agentCodeSkillDir = p(globalAgentsSkillsCodeDir, "agent-code-skill")
 			const agentCodeSkillMd = p(agentCodeSkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalAgentsSkillsCodeDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalAgentsSkillsCodeDir) {
 					return ["agent-code-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === agentCodeSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === agentCodeSkillMd
 			})
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file === agentCodeSkillMd) {
 					return `---
 name: agent-code-skill
@@ -833,13 +883,15 @@ Instructions here...`
 			const codeSkillDir = p(globalSkillsCodeDir, "code-skill")
 
 			// Setup skills for testing
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return [globalSkillsDir, globalSkillsCodeDir].includes(dir)
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["generic-skill"]
 				}
@@ -849,7 +901,7 @@ Instructions here...`
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === genericSkillDir || pathArg === codeSkillDir) {
 					return { isDirectory: () => true }
 				}
@@ -858,7 +910,7 @@ Instructions here...`
 
 			mockFileExists.mockResolvedValue(true)
 
-			mockReadFile.mockImplementation(async (file: string) => {
+			mockReadFile.mockImplementation(async function (file: string) {
 				if (file.includes("generic-skill")) {
 					return `---
 name: generic-skill
@@ -890,13 +942,15 @@ Instructions`
 			const globalSharedSkillDir = p(globalSkillsDir, "shared-skill")
 			const projectSharedSkillDir = p(projectSkillsDir, "shared-skill")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return [globalSkillsDir, projectSkillsDir].includes(dir)
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["shared-skill"]
 				}
@@ -906,7 +960,7 @@ Instructions`
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === globalSharedSkillDir || pathArg === projectSharedSkillDir) {
 					return { isDirectory: () => true }
 				}
@@ -934,13 +988,15 @@ Instructions`)
 			const genericTestSkillDir = p(globalSkillsDir, "test-skill")
 			const codeTestSkillDir = p(globalSkillsCodeDir, "test-skill")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return [globalSkillsDir, globalSkillsCodeDir].includes(dir)
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["test-skill"]
 				}
@@ -950,7 +1006,7 @@ Instructions`)
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === genericTestSkillDir || pathArg === codeTestSkillDir) {
 					return { isDirectory: () => true }
 				}
@@ -977,20 +1033,22 @@ Instructions`)
 		it("should not include mode-specific skills for other modes", async () => {
 			const architectOnlyDir = p(globalSkillsArchitectDir, "architect-only")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsArchitectDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsArchitectDir) {
 					return ["architect-only"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === architectOnlyDir) {
 					return { isDirectory: () => true }
 				}
@@ -1019,27 +1077,29 @@ Instructions`)
 			const testSkillDir = p(globalSkillsDir, "test-skill")
 			const testSkillMd = p(testSkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["test-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === testSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === testSkillMd
 			})
 
@@ -1069,7 +1129,9 @@ description: A test skill
 
 		it("should return null for non-existent skill", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
-			mockRealpath.mockImplementation(async (p: string) => p)
+			mockRealpath.mockImplementation(async function (p: string) {
+				return p
+			})
 			mockReaddir.mockResolvedValue([])
 
 			await skillsManager.discoverSkills()
@@ -1094,27 +1156,29 @@ description: A test skill
 			const testSkillDir = p(globalSkillsDir, "test-skill")
 			const testSkillMd = p(testSkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["test-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === testSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === testSkillMd
 			})
 
@@ -1139,27 +1203,29 @@ Instructions`)
 			const testSkillDir = p(globalSkillsDir, "test-skill")
 			const testSkillMd = p(testSkillDir, "SKILL.md")
 
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["test-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === testSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === testSkillMd
 			})
 
@@ -1180,7 +1246,9 @@ Instructions`)
 
 		it("should return undefined for non-existent skill", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
-			mockRealpath.mockImplementation(async (p: string) => p)
+			mockRealpath.mockImplementation(async function (p: string) {
+				return p
+			})
 			mockReaddir.mockResolvedValue([])
 
 			await skillsManager.discoverSkills()
@@ -1195,7 +1263,9 @@ Instructions`)
 		it("should create a new global skill", async () => {
 			// Setup: no existing skills
 			mockDirectoryExists.mockResolvedValue(false)
-			mockRealpath.mockImplementation(async (p: string) => p)
+			mockRealpath.mockImplementation(async function (p: string) {
+				return p
+			})
 			mockReaddir.mockResolvedValue([])
 			mockFileExists.mockResolvedValue(false)
 			mockMkdir.mockResolvedValue(undefined)
@@ -1216,7 +1286,9 @@ Instructions`)
 
 		it("should create a mode-specific skill with modeSlugs array", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
-			mockRealpath.mockImplementation(async (p: string) => p)
+			mockRealpath.mockImplementation(async function (p: string) {
+				return p
+			})
 			mockReaddir.mockResolvedValue([])
 			mockFileExists.mockResolvedValue(false)
 			mockMkdir.mockResolvedValue(undefined)
@@ -1235,7 +1307,9 @@ Instructions`)
 
 		it("should create a project skill", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
-			mockRealpath.mockImplementation(async (p: string) => p)
+			mockRealpath.mockImplementation(async function (p: string) {
+				return p
+			})
 			mockReaddir.mockResolvedValue([])
 			mockFileExists.mockResolvedValue(false)
 			mockMkdir.mockResolvedValue(undefined)
@@ -1305,27 +1379,29 @@ Instructions`)
 			const testSkillMd = p(testSkillDir, "SKILL.md")
 
 			// Setup: skill exists
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["test-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === testSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === testSkillMd
 			})
 
@@ -1350,7 +1426,9 @@ Instructions`)
 
 		it("should throw error if skill does not exist", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
-			mockRealpath.mockImplementation(async (p: string) => p)
+			mockRealpath.mockImplementation(async function (p: string) {
+				return p
+			})
 			mockReaddir.mockResolvedValue([])
 
 			await skillsManager.discoverSkills()
@@ -1367,27 +1445,29 @@ Instructions`)
 			const destSkillsDir = p(GLOBAL_ROO_DIR, "skills-code")
 
 			// Setup: skill exists in generic skills directory
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["test-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === sourceDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				// Skill exists in source
 				if (file === testSkillMd) return true
 				// Skill does not exist in destination
@@ -1424,27 +1504,29 @@ Instructions`)
 			const destSkillsDir = p(GLOBAL_ROO_DIR, "skills-architect")
 
 			// Setup: skill exists in code mode directory
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === sourceSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === sourceSkillsDir) {
 					return ["test-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === sourceDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				// Skill exists in source
 				if (file === testSkillMd) return true
 				// Skill does not exist in destination
@@ -1480,27 +1562,29 @@ Instructions`)
 			const destDir = p(globalSkillsDir, "test-skill")
 
 			// Setup: skill exists in code mode directory
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === sourceSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === sourceSkillsDir) {
 					return ["test-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === sourceDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				// Skill exists in source
 				if (file === testSkillMd) return true
 				// Skill does not exist in destination
@@ -1530,13 +1614,15 @@ Instructions`)
 		})
 
 		it("should not do anything when source and destination modes are the same", async () => {
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["test-skill"]
 				}
@@ -1544,14 +1630,14 @@ Instructions`)
 			})
 
 			const testSkillDir = p(globalSkillsDir, "test-skill")
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === testSkillDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				return file === p(testSkillDir, "SKILL.md")
 			})
 
@@ -1572,7 +1658,9 @@ Instructions`)
 
 		it("should throw error if skill does not exist", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
-			mockRealpath.mockImplementation(async (p: string) => p)
+			mockRealpath.mockImplementation(async function (p: string) {
+				return p
+			})
 			mockReaddir.mockResolvedValue([])
 
 			await skillsManager.discoverSkills()
@@ -1589,27 +1677,29 @@ Instructions`)
 			const destSkillMd = p(destDir, "SKILL.md")
 
 			// Setup: skill exists in both locations
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === globalSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === globalSkillsDir) {
 					return ["test-skill"]
 				}
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === sourceDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				// Skill exists in both source and destination
 				if (file === testSkillMd) return true
 				if (file === destSkillMd) return true
@@ -1637,15 +1727,17 @@ Instructions`)
 			const destSkillsDir = p(GLOBAL_ROO_DIR, "skills-architect")
 
 			// Setup: skill exists in code mode directory
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === sourceSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
 			// Track readdir calls - return skill for discovery, empty for cleanup check
 			let readdirCallCount = 0
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === sourceSkillsDir) {
 					readdirCallCount++
 					// First call is for discovery, return the skill
@@ -1658,14 +1750,14 @@ Instructions`)
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === sourceDir) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				// Skill exists in source
 				if (file === testSkillMd) return true
 				// Skill does not exist in destination
@@ -1700,15 +1792,17 @@ Instructions`)
 			const destSkillsDir = p(GLOBAL_ROO_DIR, "skills-architect")
 
 			// Setup: skill exists in code mode directory along with another skill
-			mockDirectoryExists.mockImplementation(async (dir: string) => {
+			mockDirectoryExists.mockImplementation(async function (dir: string) {
 				return dir === sourceSkillsDir
 			})
 
-			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockRealpath.mockImplementation(async function (pathArg: string) {
+				return pathArg
+			})
 
 			// Track readdir calls - return skill for discovery, non-empty for cleanup check
 			let readdirCallCount = 0
-			mockReaddir.mockImplementation(async (dir: string) => {
+			mockReaddir.mockImplementation(async function (dir: string) {
 				if (dir === sourceSkillsDir) {
 					readdirCallCount++
 					// First call is for discovery
@@ -1721,14 +1815,14 @@ Instructions`)
 				return []
 			})
 
-			mockStat.mockImplementation(async (pathArg: string) => {
+			mockStat.mockImplementation(async function (pathArg: string) {
 				if (pathArg === sourceDir || pathArg === p(sourceSkillsDir, "another-skill")) {
 					return { isDirectory: () => true }
 				}
 				throw new Error("Not found")
 			})
 
-			mockFileExists.mockImplementation(async (file: string) => {
+			mockFileExists.mockImplementation(async function (file: string) {
 				// Skill exists in source
 				if (file === testSkillMd) return true
 				if (file === p(sourceSkillsDir, "another-skill", "SKILL.md")) return true

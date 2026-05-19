@@ -7,7 +7,9 @@ vi.mock("../languageParser", () => ({
 }))
 
 vi.mock("../../../utils/fs", () => ({
-	fileExistsAtPath: vi.fn().mockImplementation(() => Promise.resolve(true)),
+	fileExistsAtPath: vi.fn().mockImplementation(function () {
+		return Promise.resolve(true)
+	}),
 }))
 
 import { rubyQuery } from "../queries"

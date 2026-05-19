@@ -25,7 +25,7 @@ describe("ClineProvider.removeClineFromStack() delegation awareness", () => {
 		const updateTaskHistory = vi.fn().mockResolvedValue([])
 		const getTaskWithId = opts.getTaskWithIdError
 			? vi.fn().mockRejectedValue(opts.getTaskWithIdError)
-			: vi.fn().mockImplementation(async (id: string) => {
+			: vi.fn().mockImplementation(async function (id: string) {
 					if (id === opts.parentTaskId && opts.parentHistoryItem) {
 						return { historyItem: { ...opts.parentHistoryItem } }
 					}
@@ -249,7 +249,7 @@ describe("ClineProvider.removeClineFromStack() delegation awareness", () => {
 			abortTask: vi.fn().mockResolvedValue(undefined),
 		}
 
-		const getTaskWithId = vi.fn().mockImplementation(async (id: string) => {
+		const getTaskWithId = vi.fn().mockImplementation(async function (id: string) {
 			if (id === "task-A") {
 				return { historyItem: { ...grandparentHistory } }
 			}

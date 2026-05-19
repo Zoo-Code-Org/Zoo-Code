@@ -17,9 +17,11 @@ vitest.mock("openai", () => {
 
 	return {
 		__esModule: true,
-		default: mockConstructor.mockImplementation(() => ({
-			responses: { create: mockResponsesCreate },
-		})),
+		default: mockConstructor.mockImplementation(function () {
+			return {
+				responses: { create: mockResponsesCreate },
+			}
+		}),
 	}
 })
 

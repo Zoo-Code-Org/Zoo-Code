@@ -457,7 +457,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		const provider = {
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
-			getTaskWithId: vi.fn().mockImplementation(async (id: string) => {
+			getTaskWithId: vi.fn().mockImplementation(async function (id: string) {
 				if (id === "parent-rpd06") {
 					return {
 						historyItem: {
@@ -580,7 +580,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		const provider = {
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
-			getTaskWithId: vi.fn().mockImplementation(async (id: string) => {
+			getTaskWithId: vi.fn().mockImplementation(async function (id: string) {
 				if (id === "parent-rpd02") {
 					return {
 						historyItem: {
@@ -651,7 +651,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 		}
 
-		const updateTaskHistory = vi.fn().mockImplementation(async (historyItem: { id?: string }) => {
+		const updateTaskHistory = vi.fn().mockImplementation(async function (historyItem: { id?: string }) {
 			if (historyItem.id === "child-rpd04") {
 				throw new Error("child status persist failed")
 			}
@@ -660,7 +660,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		const provider = {
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
-			getTaskWithId: vi.fn().mockImplementation(async (id: string) => {
+			getTaskWithId: vi.fn().mockImplementation(async function (id: string) {
 				if (id === "parent-rpd04") {
 					return {
 						historyItem: {

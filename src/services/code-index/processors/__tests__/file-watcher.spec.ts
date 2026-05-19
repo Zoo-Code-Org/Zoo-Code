@@ -16,21 +16,25 @@ vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
 // Mock dependencies
 vi.mock("../../cache-manager")
 vi.mock("../../../core/ignore/RooIgnoreController", () => ({
-	RooIgnoreController: vi.fn().mockImplementation(() => ({
-		validateAccess: vi.fn().mockReturnValue(true),
-	})),
+	RooIgnoreController: vi.fn().mockImplementation(function () {
+		return {
+			validateAccess: vi.fn().mockReturnValue(true),
+		}
+	}),
 }))
 vi.mock("ignore")
 vi.mock("../parser", () => ({
 	codeParser: {
-		parseFile: vi.fn().mockImplementation(async (filePath: string) => [
-			{
-				file_path: filePath,
-				content: "test content",
-				start_line: 1,
-				end_line: 1,
-			},
-		]),
+		parseFile: vi.fn().mockImplementation(async function (filePath: string) {
+			return [
+				{
+					file_path: filePath,
+					content: "test content",
+					start_line: 1,
+					end_line: 1,
+				},
+			]
+		}),
 	},
 }))
 
@@ -71,11 +75,17 @@ vi.mock("vscode", () => ({
 			readFile: vi.fn().mockResolvedValue(Buffer.from("test content")),
 		},
 	},
-	RelativePattern: vi.fn().mockImplementation((base, pattern) => ({ base, pattern })),
+	RelativePattern: vi.fn().mockImplementation(function (base, pattern) {
+		return { base, pattern }
+	}),
 	Uri: {
-		file: vi.fn().mockImplementation((path) => ({ fsPath: path })),
+		file: vi.fn().mockImplementation(function (path) {
+			return { fsPath: path }
+		}),
 	},
-	EventEmitter: vi.fn().mockImplementation(() => createMockEventEmitter()),
+	EventEmitter: vi.fn().mockImplementation(function () {
+		return createMockEventEmitter()
+	}),
 	ExtensionContext: vi.fn(),
 }))
 
@@ -115,15 +125,15 @@ describe("FileWatcher", () => {
 
 		// Create mock watcher
 		mockWatcher = {
-			onDidCreate: vi.fn().mockImplementation((handler) => {
+			onDidCreate: vi.fn().mockImplementation(function (handler) {
 				mockOnDidCreate = handler
 				return { dispose: vi.fn() }
 			}),
-			onDidChange: vi.fn().mockImplementation((handler) => {
+			onDidChange: vi.fn().mockImplementation(function (handler) {
 				mockOnDidChange = handler
 				return { dispose: vi.fn() }
 			}),
-			onDidDelete: vi.fn().mockImplementation((handler) => {
+			onDidDelete: vi.fn().mockImplementation(function (handler) {
 				mockOnDidDelete = handler
 				return { dispose: vi.fn() }
 			}),
@@ -256,7 +266,7 @@ describe("FileWatcher", () => {
 			await fileWatcher.initialize()
 
 			const deletedFiles: string[] = []
-			mockVectorStore.deletePointsByMultipleFilePaths.mockImplementation(async (filePaths: string[]) => {
+			mockVectorStore.deletePointsByMultipleFilePaths.mockImplementation(async function (filePaths: string[]) {
 				deletedFiles.push(...filePaths)
 			})
 			const batchPromise = waitForNextBatch()

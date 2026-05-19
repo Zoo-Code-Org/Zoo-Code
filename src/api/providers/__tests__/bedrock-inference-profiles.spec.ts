@@ -7,10 +7,12 @@ import { ApiHandlerOptions } from "../../../shared/api"
 // Mock AWS SDK
 vitest.mock("@aws-sdk/client-bedrock-runtime", () => {
 	return {
-		BedrockRuntimeClient: vitest.fn().mockImplementation(() => ({
-			send: vitest.fn(),
-			config: { region: "us-east-1" },
-		})),
+		BedrockRuntimeClient: vitest.fn().mockImplementation(function () {
+			return {
+				send: vitest.fn(),
+				config: { region: "us-east-1" },
+			}
+		}),
 		ConverseCommand: vitest.fn(),
 		ConverseStreamCommand: vitest.fn(),
 	}

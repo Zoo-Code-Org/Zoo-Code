@@ -41,7 +41,7 @@ vi.mock("fs/promises", async (importOriginal) => {
 	const mockFunctions = {
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
-		readFile: vi.fn().mockImplementation((filePath) => {
+		readFile: vi.fn().mockImplementation(function (filePath) {
 			if (filePath.includes("ui_messages.json")) {
 				return Promise.resolve(JSON.stringify(mockMessages))
 			}
@@ -77,7 +77,9 @@ vi.mock("fs/promises", async (importOriginal) => {
 })
 
 vi.mock("p-wait-for", () => ({
-	default: vi.fn().mockImplementation(async () => Promise.resolve()),
+	default: vi.fn().mockImplementation(async function () {
+		return Promise.resolve()
+	}),
 }))
 
 vi.mock("vscode", () => {
@@ -130,7 +132,9 @@ vi.mock("vscode", () => {
 			uriScheme: "vscode",
 			language: "en",
 		},
-		EventEmitter: vi.fn().mockImplementation(() => mockEventEmitter),
+		EventEmitter: vi.fn().mockImplementation(function () {
+			return mockEventEmitter
+		}),
 		Disposable: {
 			from: vi.fn(),
 		},
@@ -139,7 +143,7 @@ vi.mock("vscode", () => {
 })
 
 vi.mock("../../mentions", () => ({
-	parseMentions: vi.fn().mockImplementation((text) => {
+	parseMentions: vi.fn().mockImplementation(function (text) {
 		return Promise.resolve({ text: `processed: ${text}`, mode: undefined, contentBlocks: [] })
 	}),
 	openMention: vi.fn(),
@@ -170,16 +174,16 @@ vi.mock("../../condense", async (importOriginal) => {
 })
 // Mock storagePathManager to prevent dynamic import issues.
 vi.mock("../../../utils/storage", () => ({
-	getTaskDirectoryPath: vi
-		.fn()
-		.mockImplementation((globalStoragePath, taskId) => Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)),
-	getSettingsDirectoryPath: vi
-		.fn()
-		.mockImplementation((globalStoragePath) => Promise.resolve(`${globalStoragePath}/settings`)),
+	getTaskDirectoryPath: vi.fn().mockImplementation(function (globalStoragePath, taskId) {
+		return Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)
+	}),
+	getSettingsDirectoryPath: vi.fn().mockImplementation(function (globalStoragePath) {
+		return Promise.resolve(`${globalStoragePath}/settings`)
+	}),
 }))
 
 vi.mock("../../../utils/fs", () => ({
-	fileExistsAtPath: vi.fn().mockImplementation((filePath) => {
+	fileExistsAtPath: vi.fn().mockImplementation(function (filePath) {
 		return filePath.includes("ui_messages.json") || filePath.includes("api_conversation_history.json")
 	}),
 }))
@@ -211,7 +215,7 @@ describe("Cline", () => {
 
 		mockExtensionContext = {
 			globalState: {
-				get: vi.fn().mockImplementation((key: keyof GlobalState) => {
+				get: vi.fn().mockImplementation(function (key: keyof GlobalState) {
 					if (key === "taskHistory") {
 						return [
 							{
@@ -230,19 +234,31 @@ describe("Cline", () => {
 
 					return undefined
 				}),
-				update: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
+				update: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
 				keys: vi.fn().mockReturnValue([]),
 			},
 			globalStorageUri: storageUri,
 			workspaceState: {
-				get: vi.fn().mockImplementation((_key) => undefined),
-				update: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
+				get: vi.fn().mockImplementation(function (_key) {
+					return undefined
+				}),
+				update: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
 				keys: vi.fn().mockReturnValue([]),
 			},
 			secrets: {
-				get: vi.fn().mockImplementation((_key) => Promise.resolve(undefined)),
-				store: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
-				delete: vi.fn().mockImplementation((_key) => Promise.resolve()),
+				get: vi.fn().mockImplementation(function (_key) {
+					return Promise.resolve(undefined)
+				}),
+				store: vi.fn().mockImplementation(function (_key, _value) {
+					return Promise.resolve()
+				}),
+				delete: vi.fn().mockImplementation(function (_key) {
+					return Promise.resolve()
+				}),
 			},
 			extensionUri: {
 				fsPath: "/mock/extension/path",
@@ -283,33 +299,35 @@ describe("Cline", () => {
 		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
-		mockProvider.getTaskWithId = vi.fn().mockImplementation(async (id) => ({
-			historyItem: {
-				id,
-				ts: Date.now(),
-				task: "historical task",
-				tokensIn: 100,
-				tokensOut: 200,
-				cacheWrites: 0,
-				cacheReads: 0,
-				totalCost: 0.001,
-			},
-			taskDirPath: "/mock/storage/path/tasks/123",
-			apiConversationHistoryFilePath: "/mock/storage/path/tasks/123/api_conversation_history.json",
-			uiMessagesFilePath: "/mock/storage/path/tasks/123/ui_messages.json",
-			apiConversationHistory: [
-				{
-					role: "user",
-					content: [{ type: "text", text: "historical task" }],
+		mockProvider.getTaskWithId = vi.fn().mockImplementation(async function (id) {
+			return {
+				historyItem: {
+					id,
 					ts: Date.now(),
+					task: "historical task",
+					tokensIn: 100,
+					tokensOut: 200,
+					cacheWrites: 0,
+					cacheReads: 0,
+					totalCost: 0.001,
 				},
-				{
-					role: "assistant",
-					content: [{ type: "text", text: "I'll help you with that task." }],
-					ts: Date.now(),
-				},
-			],
-		}))
+				taskDirPath: "/mock/storage/path/tasks/123",
+				apiConversationHistoryFilePath: "/mock/storage/path/tasks/123/api_conversation_history.json",
+				uiMessagesFilePath: "/mock/storage/path/tasks/123/ui_messages.json",
+				apiConversationHistory: [
+					{
+						role: "user",
+						content: [{ type: "text", text: "historical task" }],
+						ts: Date.now(),
+					},
+					{
+						role: "assistant",
+						content: [{ type: "text", text: "I'll help you with that task." }],
+						ts: Date.now(),
+					},
+				],
+			}
+		})
 	})
 
 	describe("constructor", () => {
@@ -637,7 +655,7 @@ describe("Cline", () => {
 
 				// Mock createMessage to fail first then succeed
 				let firstAttempt = true
-				vi.spyOn(cline.api, "createMessage").mockImplementation(() => {
+				vi.spyOn(cline.api, "createMessage").mockImplementation(function () {
 					if (firstAttempt) {
 						firstAttempt = false
 						return mockFailedStream
@@ -725,7 +743,7 @@ describe("Cline", () => {
 
 				// Mock createMessage to fail first then succeed
 				let firstAttempt = true
-				vi.spyOn(cline.api, "createMessage").mockImplementation(() => {
+				vi.spyOn(cline.api, "createMessage").mockImplementation(function () {
 					if (firstAttempt) {
 						firstAttempt = false
 						return mockFailedStream
@@ -855,7 +873,9 @@ describe("Cline", () => {
 					context: {
 						globalStorageUri: { fsPath: "/test/storage" },
 						globalState: {
-							get: vi.fn().mockImplementation(() => undefined),
+							get: vi.fn().mockImplementation(function () {
+								return undefined
+							}),
 							update: vi.fn().mockResolvedValue(undefined),
 							keys: vi.fn().mockReturnValue([]),
 						},
@@ -1474,7 +1494,7 @@ describe("Cline", () => {
 				})
 
 				// Spy on console.error to verify error is logged
-				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 				// Should log error but not throw
 				task.submitUserMessage("test message")
@@ -1501,7 +1521,7 @@ describe("Cline", () => {
 			const emitSpy = vi.spyOn(task, "emit")
 
 			// Mock the dispose method to avoid actual cleanup
-			vi.spyOn(task, "dispose").mockImplementation(() => {})
+			vi.spyOn(task, "dispose").mockImplementation(function () {})
 
 			// Call abortTask
 			await task.abortTask()
@@ -1522,7 +1542,7 @@ describe("Cline", () => {
 			})
 
 			// Mock the dispose method to track cleanup
-			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {})
+			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(function () {})
 
 			// Call abortTask
 			await task.abortTask()
@@ -1547,7 +1567,7 @@ describe("Cline", () => {
 			expect(typeof taskLike.abortTask).toBe("function")
 
 			// Mock the dispose method to avoid actual cleanup
-			vi.spyOn(task, "dispose").mockImplementation(() => {})
+			vi.spyOn(task, "dispose").mockImplementation(function () {})
 
 			// Call abortTask through interface
 			await taskLike.abortTask()
@@ -1566,12 +1586,12 @@ describe("Cline", () => {
 
 			// Mock dispose to throw an error
 			const mockError = new Error("Disposal failed")
-			vi.spyOn(task, "dispose").mockImplementation(() => {
+			vi.spyOn(task, "dispose").mockImplementation(function () {
 				throw mockError
 			})
 
 			// Spy on console.error to verify error is logged
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// abortTask should not throw even if dispose fails
 			await expect(task.abortTask()).resolves.not.toThrow()
@@ -1595,7 +1615,7 @@ describe("Cline", () => {
 				})
 
 				// Spy on console.error to verify error logging
-				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 				// Spy on abortTask to verify it's NOT called for stream failures
 				const abortTaskSpy = vi.spyOn(task, "abortTask").mockResolvedValue(undefined)
@@ -1651,7 +1671,7 @@ describe("Cline", () => {
 				task.currentRequestAbortController = mockAbortController
 
 				// Spy on console.log
-				const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+				const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(function () {})
 
 				// Call cancelCurrentRequest
 				task.cancelCurrentRequest()
@@ -1696,11 +1716,13 @@ describe("Cline", () => {
 				const cancelSpy = vi.spyOn(task, "cancelCurrentRequest")
 
 				// Mock other dispose operations
-				vi.spyOn(task.messageQueueService, "removeListener").mockImplementation(
-					() => task.messageQueueService as any,
-				)
-				vi.spyOn(task.messageQueueService, "dispose").mockImplementation(() => {})
-				vi.spyOn(task, "removeAllListeners").mockImplementation(() => task as any)
+				vi.spyOn(task.messageQueueService, "removeListener").mockImplementation(function () {
+					return task.messageQueueService as any
+				})
+				vi.spyOn(task.messageQueueService, "dispose").mockImplementation(function () {})
+				vi.spyOn(task, "removeAllListeners").mockImplementation(function () {
+					return task as any
+				})
 
 				// Call dispose
 				task.dispose()
@@ -1721,7 +1743,7 @@ describe("Cline", () => {
 			})
 
 			// Manually trigger start
-			const startTaskSpy = vi.spyOn(task as any, "startTask").mockImplementation(async () => {})
+			const startTaskSpy = vi.spyOn(task as any, "startTask").mockImplementation(async function () {})
 			task.start()
 
 			expect(startTaskSpy).toHaveBeenCalledTimes(1)
@@ -1734,7 +1756,7 @@ describe("Cline", () => {
 		it("should not call startTask if already started via constructor", () => {
 			// Create a task that starts immediately (startTask defaults to true)
 			// but mock startTask to prevent actual execution
-			const startTaskSpy = vi.spyOn(Task.prototype as any, "startTask").mockImplementation(async () => {})
+			const startTaskSpy = vi.spyOn(Task.prototype as any, "startTask").mockImplementation(async function () {})
 
 			const task = new Task({
 				provider: mockProvider,
@@ -1760,13 +1782,17 @@ describe("Queued message processing after condense", () => {
 		const storageUri = { fsPath: path.join(os.tmpdir(), "test-storage") }
 		const ctx = {
 			globalState: {
-				get: vi.fn().mockImplementation((_key: keyof GlobalState) => undefined),
+				get: vi.fn().mockImplementation(function (_key: keyof GlobalState) {
+					return undefined
+				}),
 				update: vi.fn().mockResolvedValue(undefined),
 				keys: vi.fn().mockReturnValue([]),
 			},
 			globalStorageUri: storageUri,
 			workspaceState: {
-				get: vi.fn().mockImplementation((_key) => undefined),
+				get: vi.fn().mockImplementation(function (_key) {
+					return undefined
+				}),
 				update: vi.fn().mockResolvedValue(undefined),
 				keys: vi.fn().mockReturnValue([]),
 			},
@@ -1891,13 +1917,17 @@ describe("pushToolResultToUserContent", () => {
 		const storageUri = { fsPath: path.join(os.tmpdir(), "test-storage") }
 		const mockExtensionContext = {
 			globalState: {
-				get: vi.fn().mockImplementation((_key: keyof GlobalState) => undefined),
+				get: vi.fn().mockImplementation(function (_key: keyof GlobalState) {
+					return undefined
+				}),
 				update: vi.fn().mockResolvedValue(undefined),
 				keys: vi.fn().mockReturnValue([]),
 			},
 			globalStorageUri: storageUri,
 			workspaceState: {
-				get: vi.fn().mockImplementation((_key) => undefined),
+				get: vi.fn().mockImplementation(function (_key) {
+					return undefined
+				}),
 				update: vi.fn().mockResolvedValue(undefined),
 				keys: vi.fn().mockReturnValue([]),
 			},
@@ -1975,7 +2005,7 @@ describe("pushToolResultToUserContent", () => {
 		}
 
 		// Spy on console.warn to verify warning is logged
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
 
 		// Add first result - should succeed
 		const added1 = task.pushToolResultToUserContent(toolResult1)

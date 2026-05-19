@@ -31,10 +31,12 @@ vi.mock("vscode", () => ({
 		showErrorMessage: vi.fn(),
 		showTextDocument: vi.fn(),
 	},
-	Range: vi.fn().mockImplementation((startLine, startChar, endLine, endChar) => ({
-		start: { line: startLine, character: startChar },
-		end: { line: endLine, character: endChar },
-	})),
+	Range: vi.fn().mockImplementation(function (startLine, startChar, endLine, endChar) {
+		return {
+			start: { line: startLine, character: startChar },
+			end: { line: endLine, character: endChar },
+		}
+	}),
 }))
 
 const mockContext = {

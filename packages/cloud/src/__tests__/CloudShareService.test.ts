@@ -302,7 +302,7 @@ describe("CloudShareService", () => {
 		})
 
 		it("should handle errors gracefully", async () => {
-			;(mockSettingsService.getSettings as any).mockImplementation(() => {
+			;(mockSettingsService.getSettings as any).mockImplementation(function () {
 				throw new Error("Settings error")
 			})
 

@@ -81,7 +81,7 @@ describe("presentAssistantMessage - Custom Tool Recording", () => {
 		}
 
 		// Add pushToolResultToUserContent method after mockTask is created so it can reference mockTask
-		mockTask.pushToolResultToUserContent = vi.fn().mockImplementation((toolResult: any) => {
+		mockTask.pushToolResultToUserContent = vi.fn().mockImplementation(function (toolResult: any) {
 			const existingResult = mockTask.userMessageContent.find(
 				(block: any) => block.type === "tool_result" && block.tool_use_id === toolResult.tool_use_id,
 			)

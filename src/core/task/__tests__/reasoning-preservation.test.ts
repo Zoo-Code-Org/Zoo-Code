@@ -108,7 +108,9 @@ vi.mock("fs/promises", () => ({
 
 // Mock mentions
 vi.mock("../../mentions", () => ({
-	parseMentions: vi.fn().mockImplementation((text) => Promise.resolve({ text, mode: undefined, contentBlocks: [] })),
+	parseMentions: vi.fn().mockImplementation(function (text) {
+		return Promise.resolve({ text, mode: undefined, contentBlocks: [] })
+	}),
 	openMention: vi.fn(),
 	getLatestTerminalOutput: vi.fn(),
 }))
@@ -138,12 +140,12 @@ vi.mock("../../condense", () => ({
 
 // Mock storage utilities
 vi.mock("../../../utils/storage", () => ({
-	getTaskDirectoryPath: vi
-		.fn()
-		.mockImplementation((globalStoragePath, taskId) => Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)),
-	getSettingsDirectoryPath: vi
-		.fn()
-		.mockImplementation((globalStoragePath) => Promise.resolve(`${globalStoragePath}/settings`)),
+	getTaskDirectoryPath: vi.fn().mockImplementation(function (globalStoragePath, taskId) {
+		return Promise.resolve(`${globalStoragePath}/tasks/${taskId}`)
+	}),
+	getSettingsDirectoryPath: vi.fn().mockImplementation(function (globalStoragePath) {
+		return Promise.resolve(`${globalStoragePath}/settings`)
+	}),
 }))
 
 // Mock fs utilities

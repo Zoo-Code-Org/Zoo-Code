@@ -328,7 +328,7 @@ describe("MessageEnhancer", () => {
 		})
 
 		it("should handle malformed messages gracefully", () => {
-			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// Create messages that will cause errors when accessed
 			const malformedMessages = [
@@ -349,7 +349,7 @@ describe("MessageEnhancer", () => {
 		})
 
 		it("should handle messages with circular references", () => {
-			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// Create a message with circular reference
 			const circularMessage: any = { type: "ask", text: "Test" }

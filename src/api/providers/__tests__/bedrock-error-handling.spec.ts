@@ -22,9 +22,11 @@ vi.mock("@aws-sdk/credential-providers", () => {
 })
 
 vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
-	BedrockRuntimeClient: vi.fn().mockImplementation(() => ({
-		send: mockSend,
-	})),
+	BedrockRuntimeClient: vi.fn().mockImplementation(function () {
+		return {
+			send: mockSend,
+		}
+	}),
 	ConverseStreamCommand: vi.fn(),
 	ConverseCommand: vi.fn(),
 }))

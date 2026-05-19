@@ -45,7 +45,7 @@ describe("ConfigLoader", () => {
 	    url: "https://github.com/test/second-mcp"
 	    content: '{"command": "second-test"}'`.replace(/^\t/gm, "")
 
-			mockedReadFile.mockImplementation(async (filePath) => {
+			mockedReadFile.mockImplementation(async function (filePath) {
 				if (String(filePath).endsWith("modes.yml")) {
 					return mockModesYaml
 				}
@@ -114,7 +114,7 @@ describe("ConfigLoader", () => {
     url: "https://github.com/test/test-mcp"
     content: "test content"`
 
-			mockedReadFile.mockImplementation(async (filePath) => {
+			mockedReadFile.mockImplementation(async function (filePath) {
 				if (String(filePath).endsWith("modes.yml")) {
 					return mockModesYaml
 				}
@@ -145,7 +145,7 @@ describe("ConfigLoader", () => {
     url: "https://github.com/test/test-mcp"
     content: "test content"`
 
-			mockedReadFile.mockImplementation(async (filePath) => {
+			mockedReadFile.mockImplementation(async function (filePath) {
 				if (String(filePath).endsWith("modes.yml")) {
 					return invalidModesYaml
 				}
@@ -174,7 +174,7 @@ describe("ConfigLoader", () => {
     url: "https://github.com/test/test-mcp"
     content: "test content"`
 
-			mockedReadFile.mockImplementation(async (filePath) => {
+			mockedReadFile.mockImplementation(async function (filePath) {
 				if (String(filePath).endsWith("modes.yml")) {
 					return mockModesYaml
 				}
@@ -208,5 +208,4 @@ describe("ConfigLoader", () => {
 			expect(notFound).toBeNull()
 		})
 	})
-
 })

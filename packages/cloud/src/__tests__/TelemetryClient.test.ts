@@ -50,8 +50,8 @@ describe("TelemetryClient", () => {
 			json: vi.fn().mockResolvedValue({}),
 		})
 
-		vi.spyOn(console, "info").mockImplementation(() => {})
-		vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.spyOn(console, "info").mockImplementation(function () {})
+		vi.spyOn(console, "error").mockImplementation(function () {})
 	})
 
 	afterEach(() => {
