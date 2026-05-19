@@ -92,7 +92,7 @@ async function main() {
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
-				addUseMcpToolResultFixtures(mock, testWorkspace)
+				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 
 				// The modes test (switch_mode → ask) triggers a second API call whose last
