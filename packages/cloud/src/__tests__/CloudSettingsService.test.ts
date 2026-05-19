@@ -1,7 +1,7 @@
 import type { ExtensionContext } from "vscode"
 import type { Mock } from "vitest"
 
-import type { OrganizationSettings, AuthService } from "@roo-code/types"
+import type { OrganizationSettings, AuthService, AuthServiceEvents } from "@roo-code/types"
 
 import { CloudSettingsService } from "../CloudSettingsService.js"
 import { RefreshTimer } from "../RefreshTimer.js"
@@ -14,14 +14,14 @@ vi.mock("../config", () => ({
 
 global.fetch = vi.fn()
 
-type AuthStateChangedListener = (data: unknown) => unknown
+type AuthStateChangedListener = (data: AuthServiceEvents["auth-state-changed"][0]) => unknown
 
 describe("CloudSettingsService", () => {
 	let mockContext: ExtensionContext
 	let mockAuthService: {
-		getState: Mock<() => string>
+		getState: Mock<AuthService["getState"]>
 		getSessionToken: Mock<() => string | undefined | null>
-		hasActiveSession: Mock<() => boolean>
+		hasActiveSession: Mock<AuthService["hasActiveSession"]>
 		on: Mock<(event: string, listener: AuthStateChangedListener) => void>
 		getStoredOrganizationId: Mock<() => string | null>
 	}

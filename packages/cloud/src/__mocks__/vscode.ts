@@ -1,15 +1,10 @@
-type VscodeWindowMock = {
-	showInformationMessage: (message: string) => void
-	showErrorMessage: (message: string) => void
-}
+import type * as vscode from "vscode"
 
-type VscodeEnvMock = {
-	openExternal: (uri: unknown) => Promise<void>
-}
+type VscodeWindowMock = Pick<typeof vscode.window, "showInformationMessage" | "showErrorMessage">
 
-type VscodeCommandsMock = {
-	executeCommand: (command: string, ...args: unknown[]) => Promise<unknown>
-}
+type VscodeEnvMock = Pick<typeof vscode.env, "openExternal">
+
+type VscodeCommandsMock = Pick<typeof vscode.commands, "executeCommand">
 
 export const window: VscodeWindowMock = {
 	showInformationMessage: vi.fn(),
