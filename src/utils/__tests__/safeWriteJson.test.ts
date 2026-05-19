@@ -1,16 +1,9 @@
-import * as actualFsPromises from "fs/promises"
 import * as fsSyncActual from "fs"
 import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
 import { safeWriteJson } from "../safeWriteJson"
-
-const originalFsPromisesRename = actualFsPromises.rename
-const originalFsPromisesUnlink = actualFsPromises.unlink
-const originalFsPromisesWriteFile = actualFsPromises.writeFile
-const _originalFsPromisesAccess = actualFsPromises.access
-const originalFsPromisesMkdir = actualFsPromises.mkdir
 
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
@@ -44,6 +37,11 @@ vi.mock("fs", async () => {
 })
 
 import * as fs from "fs/promises" // This will now be the mocked version
+
+const originalFsPromises = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+const originalFsPromisesRename = originalFsPromises.rename
+const originalFsPromisesUnlink = originalFsPromises.unlink
+const originalFsPromisesWriteFile = originalFsPromises.writeFile
 
 describe("safeWriteJson", () => {
 	let originalConsoleError: typeof console.error

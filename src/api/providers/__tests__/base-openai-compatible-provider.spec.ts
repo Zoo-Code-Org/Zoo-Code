@@ -12,13 +12,15 @@ const mockCreate = vi.fn()
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
-	default: vi.fn(() => ({
-		chat: {
-			completions: {
-				create: mockCreate,
+	default: vi.fn(function () {
+		return {
+			chat: {
+				completions: {
+					create: mockCreate,
+				},
 			},
-		},
-	})),
+		}
+	}),
 }))
 
 // Create a concrete test implementation of the abstract base class

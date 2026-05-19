@@ -17,11 +17,13 @@ import { MiniMaxHandler } from "../minimax"
 vitest.mock("@anthropic-ai/sdk", () => {
 	const mockCreate = vitest.fn()
 	return {
-		Anthropic: vitest.fn(() => ({
-			messages: {
-				create: mockCreate,
-			},
-		})),
+		Anthropic: vitest.fn(function () {
+			return {
+				messages: {
+					create: mockCreate,
+				},
+			}
+		}),
 	}
 })
 

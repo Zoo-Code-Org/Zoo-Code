@@ -22,14 +22,16 @@ vi.mock("vscode", () => {
 				dispose: vi.fn(),
 			})),
 		},
-		CancellationTokenSource: vi.fn(() => ({
-			token: {
-				isCancellationRequested: false,
-				onCancellationRequested: vi.fn(),
-			},
-			cancel: vi.fn(),
-			dispose: vi.fn(),
-		})),
+		CancellationTokenSource: vi.fn(function () {
+			return {
+				token: {
+					isCancellationRequested: false,
+					onCancellationRequested: vi.fn(),
+				},
+				cancel: vi.fn(),
+				dispose: vi.fn(),
+			}
+		}),
 		CancellationError: class CancellationError extends Error {
 			constructor() {
 				super("Operation cancelled")

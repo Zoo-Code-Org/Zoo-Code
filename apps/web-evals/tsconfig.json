@@ -1,7 +1,7 @@
 {
 	"extends": "@roo-code/config-typescript/nextjs.json",
 	"compilerOptions": {
-		"types": ["vitest/globals"],
+		"types": ["node", "vitest/globals"],
 		"plugins": [{ "name": "next" }],
 		"paths": { "@/*": ["./src/*"] }
 	},

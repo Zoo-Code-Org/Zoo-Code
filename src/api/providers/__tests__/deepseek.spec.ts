@@ -3,101 +3,19 @@ const mockCreate = vi.fn()
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
-		default: vi.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate.mockImplementation(async (options) => {
-						if (!options.stream) {
-							return {
-								id: "test-completion",
-								choices: [
-									{
-										message: { role: "assistant", content: "Test response", refusal: null },
-										finish_reason: "stop",
-										index: 0,
-									},
-								],
-								usage: {
-									prompt_tokens: 10,
-									completion_tokens: 5,
-									total_tokens: 15,
-									prompt_tokens_details: {
-										cache_miss_tokens: 8,
-										cached_tokens: 2,
-									},
-								},
-							}
-						}
-
-						// Check if this is a reasoning_content test by looking at thinking mode
-						const isThinkingModel = options.thinking?.type === "enabled"
-						const isToolCallTest = options.tools?.length > 0
-
-						// Return async iterator for streaming
-						return {
-							[Symbol.asyncIterator]: async function* () {
-								// For thinking models, emit reasoning_content first
-								if (isThinkingModel) {
-									yield {
-										choices: [
-											{
-												delta: { reasoning_content: "Let me think about this..." },
-												index: 0,
-											},
-										],
-										usage: null,
-									}
-									yield {
-										choices: [
-											{
-												delta: { reasoning_content: " I'll analyze step by step." },
-												index: 0,
-											},
-										],
-										usage: null,
-									}
-								}
-
-								// For tool call tests with thinking mode, emit tool call
-								if (isThinkingModel && isToolCallTest) {
-									yield {
-										choices: [
-											{
-												delta: {
-													tool_calls: [
-														{
-															index: 0,
-															id: "call_123",
-															function: {
-																name: "get_weather",
-																arguments: '{"location":"SF"}',
-															},
-														},
-													],
-												},
-												index: 0,
-											},
-										],
-										usage: null,
-									}
-								} else {
-									yield {
-										choices: [
-											{
-												delta: { content: "Test response" },
-												index: 0,
-											},
-										],
-										usage: null,
-									}
-								}
-
-								yield {
+		default: vi.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate.mockImplementation(async (options) => {
+							if (!options.stream) {
+								return {
+									id: "test-completion",
 									choices: [
 										{
-											delta: {},
+											message: { role: "assistant", content: "Test response", refusal: null },
+											finish_reason: "stop",
 											index: 0,
-											finish_reason: isToolCallTest ? "tool_calls" : "stop",
 										},
 									],
 									usage: {
@@ -110,12 +28,96 @@ vi.mock("openai", () => {
 										},
 									},
 								}
-							},
-						}
-					}),
+							}
+
+							// Check if this is a reasoning_content test by looking at thinking mode
+							const isThinkingModel = options.thinking?.type === "enabled"
+							const isToolCallTest = options.tools?.length > 0
+
+							// Return async iterator for streaming
+							return {
+								[Symbol.asyncIterator]: async function* () {
+									// For thinking models, emit reasoning_content first
+									if (isThinkingModel) {
+										yield {
+											choices: [
+												{
+													delta: { reasoning_content: "Let me think about this..." },
+													index: 0,
+												},
+											],
+											usage: null,
+										}
+										yield {
+											choices: [
+												{
+													delta: { reasoning_content: " I'll analyze step by step." },
+													index: 0,
+												},
+											],
+											usage: null,
+										}
+									}
+
+									// For tool call tests with thinking mode, emit tool call
+									if (isThinkingModel && isToolCallTest) {
+										yield {
+											choices: [
+												{
+													delta: {
+														tool_calls: [
+															{
+																index: 0,
+																id: "call_123",
+																function: {
+																	name: "get_weather",
+																	arguments: '{"location":"SF"}',
+																},
+															},
+														],
+													},
+													index: 0,
+												},
+											],
+											usage: null,
+										}
+									} else {
+										yield {
+											choices: [
+												{
+													delta: { content: "Test response" },
+													index: 0,
+												},
+											],
+											usage: null,
+										}
+									}
+
+									yield {
+										choices: [
+											{
+												delta: {},
+												index: 0,
+												finish_reason: isToolCallTest ? "tool_calls" : "stop",
+											},
+										],
+										usage: {
+											prompt_tokens: 10,
+											completion_tokens: 5,
+											total_tokens: 15,
+											prompt_tokens_details: {
+												cache_miss_tokens: 8,
+												cached_tokens: 2,
+											},
+										},
+									}
+								},
+							}
+						}),
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 

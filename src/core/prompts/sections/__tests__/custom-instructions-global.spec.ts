@@ -59,6 +59,10 @@ describe("custom-instructions global .roo support", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockStat.mockReset()
+		mockReadFile.mockReset()
+		mockReaddir.mockReset()
+		mockLstat.mockReset()
 		mockHomedir.mockReturnValue(mockHomeDir)
 		mockGetRooDirectoriesForCwd.mockReturnValue([globalRooDir, projectRooDir])
 		// getAllRooDirectoriesForCwd is now async and returns the same directories by default
@@ -267,7 +271,6 @@ describe("custom-instructions global .roo support", () => {
 			// Mock legacy mode file reading
 			mockReadFile
 				.mockResolvedValueOnce("legacy mode rule content") // .roorules-code
-				.mockResolvedValueOnce("") // AGENTS.md file (empty)
 				.mockResolvedValueOnce("") // generic .roorules (empty)
 				.mockResolvedValueOnce("") // generic .clinerules (empty)
 

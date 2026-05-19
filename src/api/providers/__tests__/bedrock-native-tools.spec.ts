@@ -12,14 +12,18 @@ const mockSend = vi.fn()
 
 vi.mock("@aws-sdk/client-bedrock-runtime", () => {
 	return {
-		BedrockRuntimeClient: vi.fn().mockImplementation(() => ({
-			send: mockSend,
-			config: { region: "us-east-1" },
-		})),
-		ConverseStreamCommand: vi.fn((params) => ({
-			...params,
-			input: params,
-		})),
+		BedrockRuntimeClient: vi.fn().mockImplementation(function () {
+			return {
+				send: mockSend,
+				config: { region: "us-east-1" },
+			}
+		}),
+		ConverseStreamCommand: vi.fn(function (params) {
+			return {
+				...params,
+				input: params,
+			}
+		}),
 		ConverseCommand: vi.fn(),
 	}
 })
