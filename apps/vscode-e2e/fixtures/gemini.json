@@ -2,7 +2,7 @@
 	"fixtures": [
 		{
 			"match": {
-				"model": "gemini-3.1-pro-preview",
+				"model": "gemini-3-flash-preview",
 				"userMessage": "gemini-e2e:reasoning-high: what is 2+2? Reply with only the number."
 			},
 			"response": {
@@ -17,7 +17,7 @@
 		},
 		{
 			"match": {
-				"model": "gemini-3.1-pro-preview",
+				"model": "gemini-3-flash-preview",
 				"userMessage": "gemini-e2e:reasoning-low: what is 2+2? Reply with only the number."
 			},
 			"response": {
@@ -32,7 +32,7 @@
 		},
 		{
 			"match": {
-				"model": "gemini-3.1-pro-preview",
+				"model": "gemini-3-flash-preview",
 				"userMessage": "gemini-e2e:reasoning-disable: what is 2+2? Reply with only the number."
 			},
 			"response": {

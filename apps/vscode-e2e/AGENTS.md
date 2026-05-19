@@ -160,6 +160,26 @@ ZAI_API_KEY=<key> TEST_FILE=zai.test pnpm --filter @roo-code/vscode-e2e test:ci
 
 When adding a new test to this suite, add a matching fixture to the `installZAiFetchInterceptor` call in `suiteSetup`. Use a short unique prefix (e.g. `"zai-glm-e2e-mytest:"`) that won't appear in `<environment_details>`.
 
+### Gemini (`suite/providers/gemini.test.ts`)
+
+Gemini routes through aimock via `googleGeminiBaseUrl: aimockUrl`. aimock has native Gemini SSE support and can proxy to `https://generativelanguage.googleapis.com` in record mode. The model ID defaults to `gemini-3-flash-preview` but can be overridden via `GEMINI_MODEL_ID`.
+
+The test only runs when aimock is active (replay or record). Live runs without aimock are not supported because `GEMINI_MODEL_ID` must match the fixture.
+
+**Record** (refresh fixtures from the real Gemini API):
+
+```sh
+GEMINI_API_KEY=<key> TEST_FILE=providers/gemini.test pnpm --filter @roo-code/vscode-e2e test:record
+```
+
+After recording, inspect the generated `fixtures/gemini-*.json`, extract the response blocks into `fixtures/gemini.json`, then delete the raw files.
+
+**Verify in mock mode** (no key needed):
+
+```sh
+TEST_FILE=providers/gemini.test pnpm --filter @roo-code/vscode-e2e test:ci:mock
+```
+
 ### xAI Grok (`suite/providers/xai.test.ts`)
 
 xAI uses the **Responses API** (`POST https://api.x.ai/v1/responses`), which is not OpenAI-compatible. aimock can't intercept it. The suite instead patches `globalThis.fetch` to intercept requests to that endpoint. By default it replays hand-crafted SSE events; when a local `fixtures/xai.json` recording exists, it can replay recorded real-API SSE events for reference.

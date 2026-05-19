@@ -6,7 +6,7 @@ import { setDefaultSuiteTimeout } from "../test-utils"
 import { waitUntilCompleted } from "../utils"
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
-const GEMINI_MODEL_ID = "gemini-3.1-pro-preview"
+const GEMINI_MODEL_ID = process.env.GEMINI_MODEL_ID ?? "gemini-3-flash-preview"
 
 type FunctionDeclaration = {
 	name: string
@@ -167,8 +167,11 @@ suite("Gemini provider", function () {
 	const requests: CapturedGeminiRequest[] = []
 
 	setup(function () {
-		const isReplay = process.env.AIMOCK_URL && process.env.AIMOCK_RECORD !== "true"
-		if (!isReplay && !GEMINI_API_KEY) {
+		const aimockUrl = process.env.AIMOCK_URL
+		const isReplay = aimockUrl && process.env.AIMOCK_RECORD !== "true"
+		const isRecordRun = aimockUrl && process.env.AIMOCK_RECORD === "true" && !!GEMINI_API_KEY
+		// Live runs without aimock are not supported — GEMINI_MODEL_ID must match the fixture.
+		if (!isReplay && !isRecordRun) {
 			this.skip()
 		}
 	})
