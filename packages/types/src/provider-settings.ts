@@ -20,6 +20,7 @@ import {
 	xaiModels,
 	internationalZAiModels,
 	minimaxModels,
+	mimoModels,
 } from "./providers/index.js"
 
 /**
@@ -129,6 +130,7 @@ export const providerNames = [
 	"vertex",
 	"xai",
 	"zai",
+	"mimo",
 ] as const
 
 export const providerNamesSchema = z.enum(providerNames)
@@ -334,6 +336,11 @@ const minimaxSchema = apiModelIdProviderModelSchema.extend({
 	minimaxApiKey: z.string().optional(),
 })
 
+const mimoSchema = apiModelIdProviderModelSchema.extend({
+	mimoApiKey: z.string().optional(),
+	mimoBaseUrl: z.string().optional(),
+})
+
 const requestySchema = baseProviderSettingsSchema.extend({
 	requestyBaseUrl: z.string().optional(),
 	requestyApiKey: z.string().optional(),
@@ -417,6 +424,7 @@ export const providerSettingsSchemaDiscriminated = z.discriminatedUnion("apiProv
 	poeSchema.merge(z.object({ apiProvider: z.literal("poe") })),
 	moonshotSchema.merge(z.object({ apiProvider: z.literal("moonshot") })),
 	minimaxSchema.merge(z.object({ apiProvider: z.literal("minimax") })),
+	mimoSchema.merge(z.object({ apiProvider: z.literal("mimo") })),
 	requestySchema.merge(z.object({ apiProvider: z.literal("requesty") })),
 	unboundSchema.merge(z.object({ apiProvider: z.literal("unbound") })),
 	fakeAiSchema.merge(z.object({ apiProvider: z.literal("fake-ai") })),
@@ -451,6 +459,7 @@ export const providerSettingsSchema = z.object({
 	...poeSchema.shape,
 	...moonshotSchema.shape,
 	...minimaxSchema.shape,
+	...mimoSchema.shape,
 	...requestySchema.shape,
 	...unboundSchema.shape,
 	...fakeAiSchema.shape,
@@ -525,6 +534,7 @@ export const modelIdKeysByProvider: Record<TypicalProvider, ModelIdKey> = {
 	mistral: "apiModelId",
 	moonshot: "apiModelId",
 	minimax: "apiModelId",
+	mimo: "apiModelId",
 	deepseek: "apiModelId",
 	poe: "apiModelId",
 	"qwen-code": "apiModelId",
@@ -616,6 +626,11 @@ export const MODELS_BY_PROVIDER: Record<
 		id: "minimax",
 		label: "MiniMax",
 		models: Object.keys(minimaxModels),
+	},
+	mimo: {
+		id: "mimo",
+		label: "MiMo (Xiaomi)",
+		models: Object.keys(mimoModels),
 	},
 	"openai-codex": {
 		id: "openai-codex",
