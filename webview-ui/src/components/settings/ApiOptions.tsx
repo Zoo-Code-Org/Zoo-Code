@@ -31,6 +31,7 @@ import {
 	fireworksDefaultModelId,
 	vercelAiGatewayDefaultModelId,
 	minimaxDefaultModelId,
+	mimoDefaultModelId,
 	unboundDefaultModelId,
 } from "@roo-code/types"
 
@@ -93,6 +94,7 @@ import {
 	Fireworks,
 	VercelAiGateway,
 	MiniMax,
+	Mimo,
 } from "./providers"
 
 import { MODELS_BY_PROVIDER, PROVIDERS } from "./constants"
@@ -346,6 +348,7 @@ const ApiOptions = ({
 				deepseek: { field: "apiModelId", default: deepSeekDefaultModelId },
 				moonshot: { field: "apiModelId", default: moonshotDefaultModelId },
 				minimax: { field: "apiModelId", default: minimaxDefaultModelId },
+				mimo: { field: "apiModelId", default: mimoDefaultModelId },
 				mistral: { field: "apiModelId", default: mistralDefaultModelId },
 				xai: { field: "apiModelId", default: xaiDefaultModelId },
 				baseten: { field: "apiModelId", default: basetenDefaultModelId },
@@ -638,6 +641,10 @@ const ApiOptions = ({
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
+					)}
+
+					{selectedProvider === "mimo" && (
+						<Mimo apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 					)}
 
 					{selectedProvider === "vscode-lm" && (
