@@ -16,7 +16,6 @@ import { ConfigLoader } from "./ConfigLoader"
 import { SimpleInstaller } from "./SimpleInstaller"
 
 export interface MarketplaceItemsResponse {
-	organizationMcps: MarketplaceItem[]
 	marketplaceItems: MarketplaceItem[]
 	errors?: string[]
 }
@@ -38,7 +37,6 @@ export class MarketplaceManager {
 			const marketplaceItems = await this.configLoader.loadAllItems()
 
 			return {
-				organizationMcps: [],
 				marketplaceItems,
 			}
 		} catch (error) {
@@ -46,7 +44,6 @@ export class MarketplaceManager {
 			console.error("Failed to load marketplace items:", error)
 
 			return {
-				organizationMcps: [],
 				marketplaceItems: [],
 				errors: [errorMessage],
 			}
@@ -55,7 +52,7 @@ export class MarketplaceManager {
 
 	async getCurrentItems(): Promise<MarketplaceItem[]> {
 		const result = await this.getMarketplaceItems()
-		return [...result.organizationMcps, ...result.marketplaceItems]
+		return [...result.marketplaceItems]
 	}
 
 	filterItems(

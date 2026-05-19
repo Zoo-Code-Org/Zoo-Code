@@ -18,9 +18,7 @@ vi.mock("@/i18n/TranslationContext", () => ({
 const mockTransition = vi.fn()
 const mockState: ViewState = {
 	allItems: [],
-	organizationMcps: [],
 	displayItems: [],
-	displayOrganizationMcps: [],
 	isFetching: false,
 	activeTab: "mcp",
 	filters: {

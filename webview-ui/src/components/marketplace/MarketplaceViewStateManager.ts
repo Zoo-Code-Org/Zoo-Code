@@ -18,9 +18,7 @@ import { WebviewMessage } from "../../../../src/shared/WebviewMessage"
 
 export interface ViewState {
 	allItems: MarketplaceItem[]
-	organizationMcps: MarketplaceItem[]
 	displayItems?: MarketplaceItem[] // Items currently being displayed (filtered or all)
-	displayOrganizationMcps?: MarketplaceItem[] // Organization MCPs currently being displayed (filtered or all)
 	isFetching: boolean
 	activeTab: "mcp" | "mode"
 	filters: {
@@ -59,9 +57,7 @@ export class MarketplaceViewStateManager {
 	private getDefaultState(): ViewState {
 		return {
 			allItems: [],
-			organizationMcps: [],
 			displayItems: [], // Always initialize as empty array, not undefined
-			displayOrganizationMcps: [], // Always initialize as empty array, not undefined
 			isFetching: true, // Start with loading state for initial load
 			activeTab: "mcp",
 			filters: {
@@ -104,22 +100,16 @@ export class MarketplaceViewStateManager {
 	public getState(): ViewState {
 		// Only create new arrays if they exist and have items
 		const allItems = this.state.allItems.length ? [...this.state.allItems] : []
-		const organizationMcps = this.state.organizationMcps.length ? [...this.state.organizationMcps] : []
 		// Ensure displayItems is always an array, never undefined
 		// If displayItems is undefined or null, fall back to allItems
 		const displayItems = this.state.displayItems ? [...this.state.displayItems] : [...allItems]
-		const displayOrganizationMcps = this.state.displayOrganizationMcps
-			? [...this.state.displayOrganizationMcps]
-			: [...organizationMcps]
 		const tags = this.state.filters.tags.length ? [...this.state.filters.tags] : []
 
 		// Create minimal new state object
 		return {
 			...this.state,
 			allItems,
-			organizationMcps,
 			displayItems,
-			displayOrganizationMcps,
 			filters: {
 				...this.state.filters,
 				tags,
@@ -191,17 +181,11 @@ export class MarketplaceViewStateManager {
 
 				// Calculate display items based on current filters
 				let newDisplayItems: MarketplaceItem[]
-				let newDisplayOrganizationMcps: MarketplaceItem[]
 				if (this.isFilterActive()) {
 					newDisplayItems = this.filterItems([...items], this.state.installedMetadata)
-					newDisplayOrganizationMcps = this.filterItems(
-						[...this.state.organizationMcps],
-						this.state.installedMetadata,
-					)
 				} else {
 					// No filters active - show all items
 					newDisplayItems = [...items]
-					newDisplayOrganizationMcps = [...this.state.organizationMcps]
 				}
 
 				// Update allItems as source of truth
@@ -209,7 +193,6 @@ export class MarketplaceViewStateManager {
 					...this.state,
 					allItems: [...items],
 					displayItems: newDisplayItems,
-					displayOrganizationMcps: newDisplayOrganizationMcps,
 					isFetching: false,
 				}
 
@@ -267,18 +250,13 @@ export class MarketplaceViewStateManager {
 					filters: updatedFilters,
 				}
 
-				// Apply filters to displayItems and displayOrganizationMcps with the updated filters
+				// Apply filters to displayItems with the updated filters
 				const newDisplayItems = this.filterItems(this.state.allItems, this.state.installedMetadata)
-				const newDisplayOrganizationMcps = this.filterItems(
-					this.state.organizationMcps,
-					this.state.installedMetadata,
-				)
 
 				// Update state with filtered items
 				this.state = {
 					...this.state,
 					displayItems: newDisplayItems,
-					displayOrganizationMcps: newDisplayOrganizationMcps,
 				}
 
 				// Send filter message
@@ -385,17 +363,11 @@ export class MarketplaceViewStateManager {
 				// If no filters are active, show all items
 				// If filters are active, apply filtering
 				let newDisplayItems: MarketplaceItem[]
-				let newDisplayOrganizationMcps: MarketplaceItem[]
 				if (this.isFilterActive()) {
 					newDisplayItems = this.filterItems(items, this.state.installedMetadata)
-					newDisplayOrganizationMcps = this.filterItems(
-						this.state.organizationMcps,
-						this.state.installedMetadata,
-					)
 				} else {
 					// No filters active - show all items
 					newDisplayItems = items
-					newDisplayOrganizationMcps = this.state.organizationMcps
 				}
 
 				// Update state in a single operation
@@ -404,7 +376,6 @@ export class MarketplaceViewStateManager {
 					isFetching: false,
 					allItems: items,
 					displayItems: newDisplayItems,
-					displayOrganizationMcps: newDisplayOrganizationMcps,
 					installedMetadata: marketplaceInstalledMetadata || this.state.installedMetadata,
 				}
 				// Notification is handled below after all state parts are processed
@@ -446,14 +417,12 @@ export class MarketplaceViewStateManager {
 		// Handle marketplace data updates (fetched on demand)
 		if (message.type === "marketplaceData") {
 			const marketplaceItems = message.marketplaceItems
-			const organizationMcps = message.organizationMcps || []
 			const marketplaceInstalledMetadata = message.marketplaceInstalledMetadata
 
 			if (marketplaceItems !== undefined) {
 				// Always use the marketplace items from the extension when they're provided
 				// This ensures fresh data is always displayed
 				const items = [...marketplaceItems]
-				const orgMcps = [...organizationMcps]
 
 				// Update installed metadata if provided
 				if (marketplaceInstalledMetadata !== undefined) {
@@ -463,18 +432,13 @@ export class MarketplaceViewStateManager {
 				const newDisplayItems = this.isFilterActive()
 					? this.filterItems(items, this.state.installedMetadata)
 					: items
-				const newDisplayOrganizationMcps = this.isFilterActive()
-					? this.filterItems(orgMcps, this.state.installedMetadata)
-					: orgMcps
 
 				// Update state in a single operation
 				this.state = {
 					...this.state,
 					isFetching: false,
 					allItems: items,
-					organizationMcps: orgMcps,
 					displayItems: newDisplayItems,
-					displayOrganizationMcps: newDisplayOrganizationMcps,
 					installedMetadata: marketplaceInstalledMetadata || this.state.installedMetadata,
 				}
 			}

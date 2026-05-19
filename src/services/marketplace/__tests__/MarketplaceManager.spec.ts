@@ -159,7 +159,6 @@ describe("MarketplaceManager", () => {
 
 			expect(result.marketplaceItems).toHaveLength(1)
 			expect(result.marketplaceItems[0].name).toBe("Test Mode")
-			expect(result.organizationMcps).toHaveLength(0)
 		})
 
 		it("should handle bundled marketplace loading errors gracefully", async () => {
@@ -171,7 +170,6 @@ describe("MarketplaceManager", () => {
 			const result = await manager.getMarketplaceItems()
 
 			expect(result.marketplaceItems).toHaveLength(0)
-			expect(result.organizationMcps).toHaveLength(0)
 			expect(result.errors).toEqual(["Marketplace asset load failed"])
 		})
 
@@ -191,7 +189,6 @@ describe("MarketplaceManager", () => {
 
 			const result = await manager.getMarketplaceItems()
 
-			expect(result.organizationMcps).toEqual([])
 			expect(result.marketplaceItems).toHaveLength(1)
 			expect(result.marketplaceItems[0].name).toBe("Test MCP")
 		})
@@ -222,7 +219,6 @@ describe("MarketplaceManager", () => {
 
 			expect(result.marketplaceItems).toHaveLength(2)
 			expect(result.marketplaceItems.map((item) => item.name)).toEqual(["Visible MCP", "Second MCP"])
-			expect(result.organizationMcps).toHaveLength(0)
 		})
 	})
 
