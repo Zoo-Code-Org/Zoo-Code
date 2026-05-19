@@ -30,7 +30,6 @@ describe("GeminiHandler backend support", () => {
 		} as ApiHandlerOptions
 		const handler = new GeminiHandler(options)
 		const stub = vi.fn().mockReturnValue((async function* () {})())
-		// @ts-ignore access private client
 		handler["client"].models.generateContentStream = stub
 		await handler.createMessage("instr", [] as any).next()
 		const config = stub.mock.calls[0][0].config
@@ -47,7 +46,6 @@ describe("GeminiHandler backend support", () => {
 		} as ApiHandlerOptions
 		const handler = new GeminiHandler(options)
 		const stub = vi.fn().mockResolvedValue({ text: "ok" })
-		// @ts-ignore access private client
 		handler["client"].models.generateContent = stub
 		const res = await handler.completePrompt("hi")
 		expect(res).toBe("ok")
@@ -78,7 +76,6 @@ describe("GeminiHandler backend support", () => {
 			}
 
 			const stub = vi.fn().mockReturnValue(mockStream())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			const messages = []
@@ -117,7 +114,6 @@ describe("GeminiHandler backend support", () => {
 			}
 
 			const stub = vi.fn().mockReturnValue(mockStream())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			const messages = []
@@ -152,7 +148,6 @@ describe("GeminiHandler backend support", () => {
 
 			const mockError = new Error("API rate limit exceeded")
 			const stub = vi.fn().mockRejectedValue(mockError)
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await expect(async () => {
@@ -196,7 +191,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -217,7 +211,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -240,7 +233,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			const manyTools = Array.from({ length: 30 }, (_, index) => ({
@@ -271,7 +263,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			const manyTools = Array.from({ length: 30 }, (_, index) => ({
@@ -308,7 +299,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -331,7 +321,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -355,7 +344,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -378,7 +366,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -439,7 +426,6 @@ describe("GeminiHandler backend support", () => {
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -498,7 +484,6 @@ describe("GeminiHandler backend support", () => {
 			const options = { apiProvider: "gemini" } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -543,7 +528,6 @@ describe("GeminiHandler backend support", () => {
 			const options = { apiProvider: "gemini" } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -592,7 +576,6 @@ describe("GeminiHandler backend support", () => {
 			const options = { apiProvider: "gemini" } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -634,7 +617,6 @@ describe("GeminiHandler backend support", () => {
 			const options = { apiProvider: "gemini" } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
 			handler["client"].models.generateContentStream = stub
 
 			await handler
@@ -680,6 +662,47 @@ describe("GeminiHandler backend support", () => {
 				},
 				required: ["value"],
 			})
+		})
+
+		it("should preserve parameter names that collide with stripped schema keywords", async () => {
+			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const handler = new GeminiHandler(options)
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			handler["client"].models.generateContentStream = stub
+
+			await handler
+				.createMessage("test", [] as any, {
+					taskId: "test-task",
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "keyword_param_tool",
+								description: "Tool whose parameter names match JSON Schema keywords",
+								parameters: {
+									type: "object",
+									properties: {
+										default: { type: "string" },
+										additionalProperties: { type: "boolean" },
+										$schema: { type: "string" },
+										normal: { type: "integer" },
+									},
+									required: ["default", "additionalProperties"],
+								},
+							},
+						},
+					],
+				})
+				.next()
+
+			const schema = stub.mock.calls[0][0].config.tools[0].functionDeclarations[0].parametersJsonSchema
+			expect(schema.properties).toEqual({
+				default: { type: "string" },
+				additionalProperties: { type: "boolean" },
+				$schema: { type: "string" },
+				normal: { type: "integer" },
+			})
+			expect(schema.required).toEqual(expect.arrayContaining(["default", "additionalProperties"]))
 		})
 	})
 })

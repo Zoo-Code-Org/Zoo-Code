@@ -132,12 +132,16 @@ function sanitizeSchemaForGemini(
 		}
 
 		if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
-			const sanitizedProperties = sanitizeSchemaForGemini(value, resolvedDefs, activeRefs)
-			if (sanitizedProperties && typeof sanitizedProperties === "object" && !Array.isArray(sanitizedProperties)) {
-				result.properties = {
-					...(result.properties as Record<string, unknown> | undefined),
-					...(sanitizedProperties as Record<string, unknown>),
-				}
+			// Iterate the property map directly so that property names that happen
+			// to match schema keywords (e.g. "default", "additionalProperties") are
+			// preserved as-is; only each property's schema value is sanitized.
+			const sanitizedProperties: Record<string, unknown> = {}
+			for (const [propName, propSchema] of Object.entries(value as Record<string, unknown>)) {
+				sanitizedProperties[propName] = sanitizeSchemaForGemini(propSchema, resolvedDefs, activeRefs)
+			}
+			result.properties = {
+				...(result.properties as Record<string, unknown> | undefined),
+				...sanitizedProperties,
 			}
 			continue
 		}
@@ -301,8 +305,8 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 
 		// Do not pass metadata.allowedFunctionNames to Gemini. Live API testing showed
-		// that declarations can exceed 25 entries, but allowedFunctionNames starts
-		// returning generic 400 INVALID_ARGUMENT responses at 26 names. It can also
+		// that allowedFunctionNames triggers a generic 400 INVALID_ARGUMENT at 26 or more
+		// names. It can also
 		// reject prior function calls if their names are absent from the current
 		// allowed list. We still pass all declarations for history compatibility;
 		// mode/tool restrictions are enforced by the tool execution layer.
