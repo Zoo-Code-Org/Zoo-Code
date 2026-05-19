@@ -316,4 +316,82 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect((provider as any).clineStack[0]).toBe(mockParentTask)
 		expect((provider as any).clineStack[1]).toBe(mockTask2)
 	})
+
+	it("detaches a cancelled delegated child before rehydrating it", async () => {
+		const mockRootTask = { taskId: "root-1" }
+		const mockParentTask = { taskId: "parent-1" }
+		const childHistory: HistoryItem = {
+			id: "child-1",
+			number: 2,
+			task: "child task",
+			ts: Date.now(),
+			tokensIn: 10,
+			tokensOut: 20,
+			totalCost: 0.001,
+			workspace: "/test/workspace",
+			parentTaskId: "parent-1",
+			rootTaskId: "root-1",
+		}
+		const parentHistory: HistoryItem = {
+			id: "parent-1",
+			number: 1,
+			task: "parent task",
+			ts: Date.now(),
+			tokensIn: 10,
+			tokensOut: 20,
+			totalCost: 0.001,
+			workspace: "/test/workspace",
+			status: "delegated",
+			awaitingChildId: "child-1",
+			delegatedToId: "child-1",
+		}
+
+		Object.assign(mockTask1, {
+			taskId: "child-1",
+			instanceId: "instance-child",
+			rootTask: mockRootTask,
+			parentTask: mockParentTask,
+			parentTaskId: "parent-1",
+			cancelCurrentRequest: vi.fn(),
+			abortTask: vi.fn(),
+			abandoned: false,
+			isStreaming: false,
+			didFinishAbortingStream: true,
+			isWaitingForFirstChunk: false,
+		})
+		;(provider as any).clineStack = [mockTask1]
+		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
+			if (id === "child-1") {
+				return Promise.resolve({ historyItem: childHistory })
+			}
+			if (id === "parent-1") {
+				return Promise.resolve({ historyItem: parentHistory })
+			}
+			throw new Error(`unexpected task lookup: ${id}`)
+		}) as any
+
+		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+		const createTaskWithHistoryItemSpy = vi
+			.spyOn(provider, "createTaskWithHistoryItem")
+			.mockResolvedValue(undefined as any)
+
+		await provider.cancelTask()
+
+		expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: "parent-1",
+				status: "active",
+				awaitingChildId: undefined,
+			}),
+		)
+		expect(createTaskWithHistoryItemSpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: "child-1",
+				parentTaskId: undefined,
+				rootTaskId: undefined,
+				parentTask: undefined,
+				rootTask: undefined,
+			}),
+		)
+	})
 })

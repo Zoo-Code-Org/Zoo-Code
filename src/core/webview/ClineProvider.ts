@@ -2903,8 +2903,8 @@ export class ClineProvider
 		}
 
 		// Preserve parent and root task information for history item.
-		const rootTask = task.rootTask
-		const parentTask = task.parentTask
+		let rootTask = task.rootTask
+		let parentTask = task.parentTask
 
 		// Mark this as a user-initiated cancellation so provider-only rehydration can occur
 		task.abortReason = "user_cancelled"
@@ -2960,6 +2960,34 @@ export class ClineProvider
 
 		if (!historyItem) {
 			return
+		}
+
+		if (task.parentTaskId) {
+			try {
+				const { historyItem: parentHistory } = await this.getTaskWithId(task.parentTaskId)
+
+				if (parentHistory.status === "delegated" && parentHistory.awaitingChildId === task.taskId) {
+					await this.updateTaskHistory({
+						...parentHistory,
+						status: "active",
+						awaitingChildId: undefined,
+					})
+
+					historyItem = {
+						...historyItem,
+						parentTaskId: undefined,
+						rootTaskId: undefined,
+					}
+					parentTask = undefined
+					rootTask = undefined
+				}
+			} catch (error) {
+				this.log(
+					`[cancelTask] Failed to detach delegated parent for ${task.taskId}: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
 		}
 
 		// Clears task again, so we need to abortTask manually above.
