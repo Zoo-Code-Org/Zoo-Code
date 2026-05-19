@@ -74,6 +74,8 @@ function prepareAssistantMessage(
 
 		prependContentBlock(messageWithTs, thinkingBlock)
 	} else if (reasoning && !reasoningDetails) {
+		// The original Task.ts also duck-typed getSummary?.(), but no provider implements it.
+		// Keep the explicit empty summary to preserve the existing reasoning-block wire shape.
 		const reasoningBlock = {
 			type: "reasoning",
 			text: reasoning,
