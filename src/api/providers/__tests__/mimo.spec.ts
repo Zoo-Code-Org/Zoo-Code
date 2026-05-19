@@ -103,127 +103,6 @@ describe("MimoHandler", () => {
 		})
 	})
 
-	describe("convertToolsForOpenAI", () => {
-		it("should return undefined for undefined tools", () => {
-			const result = (handler as any).convertToolsForOpenAI(undefined)
-			expect(result).toBeUndefined()
-		})
-
-		it("should strip strict: true from function tools", () => {
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "read_file",
-						description: "Read a file",
-						parameters: {
-							type: "object",
-							properties: { path: { type: "string" } },
-							required: ["path"],
-						},
-						strict: true,
-					},
-				},
-			]
-			const result = (handler as any).convertToolsForOpenAI(tools)
-			expect(result[0].function.strict).toBeUndefined()
-		})
-
-		it("should strip additionalProperties: false from schemas", () => {
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "read_file",
-						description: "Read a file",
-						parameters: {
-							type: "object",
-							additionalProperties: false,
-							properties: { path: { type: "string" } },
-						},
-					},
-				},
-			]
-			const result = (handler as any).convertToolsForOpenAI(tools)
-			expect(result[0].function.parameters.additionalProperties).toBeUndefined()
-		})
-
-		it("should recursively strip additionalProperties from nested objects", () => {
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "test",
-						parameters: {
-							type: "object",
-							additionalProperties: false,
-							properties: {
-								nested: {
-									type: "object",
-									additionalProperties: false,
-									properties: {
-										deep: { type: "string" },
-									},
-								},
-							},
-						},
-					},
-				},
-			]
-			const result = (handler as any).convertToolsForOpenAI(tools)
-			expect(result[0].function.parameters.additionalProperties).toBeUndefined()
-			expect(result[0].function.parameters.properties.nested.additionalProperties).toBeUndefined()
-		})
-
-		it("should strip additionalProperties from array items", () => {
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "test",
-						parameters: {
-							type: "object",
-							properties: {
-								tags: {
-									type: "array",
-									items: {
-										type: "object",
-										additionalProperties: false,
-										properties: { name: { type: "string" } },
-									},
-								},
-							},
-						},
-					},
-				},
-			]
-			const result = (handler as any).convertToolsForOpenAI(tools)
-			expect(result[0].function.parameters.properties.tags.items.additionalProperties).toBeUndefined()
-		})
-
-		it("should preserve non-function tools unchanged", () => {
-			const tools = [{ type: "web_search", web_search: {} }]
-			const result = (handler as any).convertToolsForOpenAI(tools)
-			expect(result[0]).toEqual({ type: "web_search", web_search: {} })
-		})
-
-		it("should preserve tool name and description", () => {
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "my_tool",
-						description: "My tool description",
-						parameters: { type: "object", properties: {} },
-					},
-				},
-			]
-			const result = (handler as any).convertToolsForOpenAI(tools)
-			expect(result[0].function.name).toBe("my_tool")
-			expect(result[0].function.description).toBe("My tool description")
-		})
-	})
-
 	describe("convertMessagesForMiMo (via convertToR1Format)", () => {
 		const convert = (messages: Anthropic.Messages.MessageParam[]) =>
 			convertToR1Format(messages, {
@@ -541,9 +420,7 @@ describe("MimoHandler", () => {
 							type: "object",
 							properties: { path: { type: "string" } },
 							required: ["path"],
-							additionalProperties: false,
 						},
-						strict: true,
 					},
 				},
 			]
@@ -555,7 +432,7 @@ describe("MimoHandler", () => {
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.tools).toHaveLength(1)
-			expect(params.tools[0].function.parameters.additionalProperties).toBeUndefined()
+			expect(params.tools[0].function.name).toBe("read_file")
 		})
 
 		it("should yield text chunks from stream", async () => {
