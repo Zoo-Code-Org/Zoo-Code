@@ -74,7 +74,7 @@ describe("generateErrorDiagnostics", () => {
 		})
 
 		expect(result.success).toBe(true)
-		expect(result.filePath).toContain("roo-diagnostics-")
+		expect(result.filePath).toContain("zoo-diagnostics-")
 
 		// Verify we attempted to read API history
 		expect(fs.readFile).toHaveBeenCalledWith(path.join("/mock/task-dir", "api_conversation_history.json"), "utf8")
@@ -83,7 +83,7 @@ describe("generateErrorDiagnostics", () => {
 		expect(fs.writeFile).toHaveBeenCalledTimes(1)
 		const [writtenPath, writtenContent] = vi.mocked(fs.writeFile).mock.calls[0]
 		// taskId.slice(0, 8) = "test-tas" from "test-task-id"
-		expect(String(writtenPath)).toContain("roo-diagnostics-test-tas")
+		expect(String(writtenPath)).toContain("zoo-diagnostics-test-tas")
 		expect(String(writtenContent)).toContain(
 			"// Please share this file with Zoo Code Support (support@zoocode.dev) to diagnose the issue faster",
 		)
