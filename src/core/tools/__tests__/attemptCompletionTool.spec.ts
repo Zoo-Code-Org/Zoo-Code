@@ -1,6 +1,8 @@
+import type { Mock } from "vitest"
+
 import { RooCodeEventName, TodoItem } from "@roo-code/types"
 
-import { AttemptCompletionToolUse } from "../../../shared/tools"
+import { AskApproval, AttemptCompletionToolUse, HandleError, PushToolResult } from "../../../shared/tools"
 
 // Mock the formatResponse module before importing the tool
 vi.mock("../../prompts/responses", () => ({
@@ -44,28 +46,35 @@ import * as vscode from "vscode"
 
 describe("attemptCompletionTool", () => {
 	let mockTask: Partial<Task>
-	let mockPushToolResult: ReturnType<typeof vi.fn>
-	let mockAskApproval: ReturnType<typeof vi.fn>
-	let mockHandleError: ReturnType<typeof vi.fn>
-	let mockToolDescription: ReturnType<typeof vi.fn>
-	let mockAskFinishSubTaskApproval: ReturnType<typeof vi.fn>
-	let mockGetConfiguration: ReturnType<typeof vi.fn>
+	let mockPushToolResult: Mock<PushToolResult>
+	let mockAskApproval: Mock<AskApproval>
+	let mockHandleError: Mock<HandleError>
+	let mockToolDescription: Mock<() => string>
+	let mockAskFinishSubTaskApproval: Mock<() => Promise<boolean>>
+	let mockGetConfiguration: Mock<typeof vscode.workspace.getConfiguration>
+	const workspaceConfigurationWithOpenTodoCompletionPrevention = (
+		preventCompletionWithOpenTodos: boolean,
+	): vscode.WorkspaceConfiguration =>
+		({
+			get: <T>(key: string, defaultValue: T): T => {
+				if (key === "preventCompletionWithOpenTodos") {
+					return preventCompletionWithOpenTodos as T
+				}
+
+				return defaultValue
+			},
+		}) as vscode.WorkspaceConfiguration
 
 	beforeEach(() => {
 		mockCaptureTaskCompleted.mockReset()
-		mockPushToolResult = vi.fn()
-		mockAskApproval = vi.fn()
-		mockHandleError = vi.fn()
-		mockToolDescription = vi.fn()
-		mockAskFinishSubTaskApproval = vi.fn()
-		mockGetConfiguration = vi.fn(() => ({
-			get: vi.fn((key: string, defaultValue: any) => {
-				if (key === "preventCompletionWithOpenTodos") {
-					return defaultValue // Default to false unless overridden in test
-				}
-				return defaultValue
-			}),
-		}))
+		mockPushToolResult = vi.fn<PushToolResult>()
+		mockAskApproval = vi.fn<AskApproval>()
+		mockHandleError = vi.fn<HandleError>()
+		mockToolDescription = vi.fn<() => string>()
+		mockAskFinishSubTaskApproval = vi.fn<() => Promise<boolean>>()
+		mockGetConfiguration = vi.fn<typeof vscode.workspace.getConfiguration>(() =>
+			workspaceConfigurationWithOpenTodoCompletionPrevention(false),
+		)
 
 		// Setup vscode mock
 		vi.mocked(vscode.workspace.getConfiguration).mockImplementation(mockGetConfiguration)
@@ -182,14 +191,7 @@ describe("attemptCompletionTool", () => {
 			mockTask.todoList = todosWithPending
 
 			// Enable the setting to prevent completion with open todos
-			mockGetConfiguration.mockReturnValue({
-				get: vi.fn((key: string, defaultValue: any) => {
-					if (key === "preventCompletionWithOpenTodos") {
-						return true // Setting is enabled
-					}
-					return defaultValue
-				}),
-			})
+			mockGetConfiguration.mockReturnValue(workspaceConfigurationWithOpenTodoCompletionPrevention(true))
 
 			const callbacks: AttemptCompletionCallbacks = {
 				askApproval: mockAskApproval,
@@ -224,14 +226,7 @@ describe("attemptCompletionTool", () => {
 			mockTask.todoList = todosWithInProgress
 
 			// Enable the setting to prevent completion with open todos
-			mockGetConfiguration.mockReturnValue({
-				get: vi.fn((key: string, defaultValue: any) => {
-					if (key === "preventCompletionWithOpenTodos") {
-						return true // Setting is enabled
-					}
-					return defaultValue
-				}),
-			})
+			mockGetConfiguration.mockReturnValue(workspaceConfigurationWithOpenTodoCompletionPrevention(true))
 
 			const callbacks: AttemptCompletionCallbacks = {
 				askApproval: mockAskApproval,
@@ -267,14 +262,7 @@ describe("attemptCompletionTool", () => {
 			mockTask.todoList = mixedTodos
 
 			// Enable the setting to prevent completion with open todos
-			mockGetConfiguration.mockReturnValue({
-				get: vi.fn((key: string, defaultValue: any) => {
-					if (key === "preventCompletionWithOpenTodos") {
-						return true // Setting is enabled
-					}
-					return defaultValue
-				}),
-			})
+			mockGetConfiguration.mockReturnValue(workspaceConfigurationWithOpenTodoCompletionPrevention(true))
 
 			const callbacks: AttemptCompletionCallbacks = {
 				askApproval: mockAskApproval,
@@ -309,14 +297,7 @@ describe("attemptCompletionTool", () => {
 			mockTask.todoList = todosWithPending
 
 			// Ensure the setting is disabled (default behavior)
-			mockGetConfiguration.mockReturnValue({
-				get: vi.fn((key: string, defaultValue: any) => {
-					if (key === "preventCompletionWithOpenTodos") {
-						return false // Setting is disabled
-					}
-					return defaultValue
-				}),
-			})
+			mockGetConfiguration.mockReturnValue(workspaceConfigurationWithOpenTodoCompletionPrevention(false))
 
 			const callbacks: AttemptCompletionCallbacks = {
 				askApproval: mockAskApproval,
@@ -352,14 +333,7 @@ describe("attemptCompletionTool", () => {
 			mockTask.todoList = todosWithPending
 
 			// Enable the setting
-			mockGetConfiguration.mockReturnValue({
-				get: vi.fn((key: string, defaultValue: any) => {
-					if (key === "preventCompletionWithOpenTodos") {
-						return true // Setting is enabled
-					}
-					return defaultValue
-				}),
-			})
+			mockGetConfiguration.mockReturnValue(workspaceConfigurationWithOpenTodoCompletionPrevention(true))
 
 			const callbacks: AttemptCompletionCallbacks = {
 				askApproval: mockAskApproval,
@@ -395,14 +369,7 @@ describe("attemptCompletionTool", () => {
 			mockTask.todoList = completedTodos
 
 			// Enable the setting
-			mockGetConfiguration.mockReturnValue({
-				get: vi.fn((key: string, defaultValue: any) => {
-					if (key === "preventCompletionWithOpenTodos") {
-						return true // Setting is enabled
-					}
-					return defaultValue
-				}),
-			})
+			mockGetConfiguration.mockReturnValue(workspaceConfigurationWithOpenTodoCompletionPrevention(true))
 
 			const callbacks: AttemptCompletionCallbacks = {
 				askApproval: mockAskApproval,

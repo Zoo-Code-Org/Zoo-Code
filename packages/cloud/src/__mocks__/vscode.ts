@@ -1,11 +1,22 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+type VscodeWindowMock = {
+	showInformationMessage: (message: string) => void
+	showErrorMessage: (message: string) => void
+}
 
-export const window = {
+type VscodeEnvMock = {
+	openExternal: (uri: unknown) => Promise<void>
+}
+
+type VscodeCommandsMock = {
+	executeCommand: (command: string, ...args: unknown[]) => Promise<unknown>
+}
+
+export const window: VscodeWindowMock = {
 	showInformationMessage: vi.fn(),
 	showErrorMessage: vi.fn(),
 }
 
-export const env = {
+export const env: VscodeEnvMock = {
 	openExternal: vi.fn(),
 }
 
@@ -13,7 +24,7 @@ export const Uri = {
 	parse: vi.fn((uri: string) => ({ toString: () => uri })),
 }
 
-export const commands = {
+export const commands: VscodeCommandsMock = {
 	executeCommand: vi.fn().mockResolvedValue(undefined),
 }
 
@@ -28,9 +39,9 @@ export interface ExtensionContext {
 	}
 	globalState: {
 		get: <T>(key: string) => T | undefined
-		update: (key: string, value: any) => Promise<void>
+		update: (key: string, value: unknown) => Promise<void>
 	}
-	subscriptions: any[]
+	subscriptions: unknown[]
 	extension?: {
 		packageJSON?: {
 			version?: string

@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "vscode"
+import type { Mock } from "vitest"
 
 import type { OrganizationSettings, AuthService } from "@roo-code/types"
 
@@ -13,21 +14,23 @@ vi.mock("../config", () => ({
 
 global.fetch = vi.fn()
 
+type AuthStateChangedListener = (data: unknown) => unknown
+
 describe("CloudSettingsService", () => {
 	let mockContext: ExtensionContext
 	let mockAuthService: {
-		getState: ReturnType<typeof vi.fn>
-		getSessionToken: ReturnType<typeof vi.fn>
-		hasActiveSession: ReturnType<typeof vi.fn>
-		on: ReturnType<typeof vi.fn>
-		getStoredOrganizationId: ReturnType<typeof vi.fn>
+		getState: Mock<() => string>
+		getSessionToken: Mock<() => string | undefined | null>
+		hasActiveSession: Mock<() => boolean>
+		on: Mock<(event: string, listener: AuthStateChangedListener) => void>
+		getStoredOrganizationId: Mock<() => string | null>
 	}
 	let mockRefreshTimer: {
-		start: ReturnType<typeof vi.fn>
-		stop: ReturnType<typeof vi.fn>
+		start: Mock<() => void>
+		stop: Mock<() => void>
 	}
 	let cloudSettingsService: CloudSettingsService
-	let mockLog: ReturnType<typeof vi.fn>
+	let mockLog: Mock<(...args: unknown[]) => void>
 
 	const mockSettings: OrganizationSettings = {
 		version: 1,
@@ -72,10 +75,12 @@ describe("CloudSettingsService", () => {
 			stop: vi.fn(),
 		}
 
-		mockLog = vi.fn()
+		mockLog = vi.fn<(...args: unknown[]) => void>()
 
 		// Mock RefreshTimer constructor
-		vi.mocked(RefreshTimer).mockImplementation(() => mockRefreshTimer as unknown as RefreshTimer)
+		vi.mocked(RefreshTimer).mockImplementation(function () {
+			return mockRefreshTimer as unknown as RefreshTimer
+		})
 
 		cloudSettingsService = new CloudSettingsService(mockContext, mockAuthService as unknown as AuthService, mockLog)
 	})
@@ -502,10 +507,9 @@ describe("CloudSettingsService", () => {
 			await cloudSettingsService.initialize()
 
 			// Get the auth-state-changed handler
-			const authStateChangedHandler = mockAuthService.on.mock.calls.find(
-				(call: string[]) => call[0] === "auth-state-changed",
-			)?.[1]
-			expect(authStateChangedHandler).toBeDefined()
+			const [, authStateChangedHandler] = mockAuthService.on.mock.calls.find(
+				([event]) => event === "auth-state-changed",
+			) as [string, AuthStateChangedListener]
 
 			// Simulate active-session state change
 			authStateChangedHandler({
@@ -519,10 +523,9 @@ describe("CloudSettingsService", () => {
 			await cloudSettingsService.initialize()
 
 			// Get the auth-state-changed handler
-			const authStateChangedHandler = mockAuthService.on.mock.calls.find(
-				(call: string[]) => call[0] === "auth-state-changed",
-			)?.[1]
-			expect(authStateChangedHandler).toBeDefined()
+			const [, authStateChangedHandler] = mockAuthService.on.mock.calls.find(
+				([event]) => event === "auth-state-changed",
+			) as [string, AuthStateChangedListener]
 
 			// Simulate logged-out state change from active-session
 			await authStateChangedHandler({

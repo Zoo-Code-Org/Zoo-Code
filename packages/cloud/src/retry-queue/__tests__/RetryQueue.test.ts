@@ -173,7 +173,7 @@ describe("RetryQueue", () => {
 
 		it("should not process retries when paused", async () => {
 			const fetchMock = vi.fn().mockResolvedValue({ ok: true })
-			global.fetch = fetchMock
+			global.fetch = fetchMock as typeof fetch
 
 			await retryQueue.enqueue("https://api.example.com/test", { method: "POST" }, "telemetry")
 
@@ -303,7 +303,7 @@ describe("RetryQueue", () => {
 		beforeEach(() => {
 			// Mock global fetch
 			fetchMock = vi.fn()
-			global.fetch = fetchMock
+			global.fetch = fetchMock as typeof fetch
 		})
 
 		afterEach(() => {
