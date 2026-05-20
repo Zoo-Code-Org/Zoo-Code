@@ -54,7 +54,10 @@ describe.sequential("WorktreeService integration", () => {
 		})
 
 		expect(createResult.success).toBe(true)
-		expect(createResult.worktree).toMatchObject({
+		const worktrees = await service.listWorktrees(repoDir)
+		const createdWorktree = worktrees.find((worktree) => worktree.path === worktreePath)
+
+		expect(createdWorktree).toMatchObject({
 			path: worktreePath,
 			branch: "feature/integration",
 		})
@@ -65,7 +68,6 @@ describe.sequential("WorktreeService integration", () => {
 			.catch(() => false)
 		expect(readmeExists).toBe(true)
 
-		const worktrees = await service.listWorktrees(repoDir)
 		expect(worktrees.some((worktree) => worktree.path === worktreePath)).toBe(true)
 
 		const deleteResult = await service.deleteWorktree(repoDir, worktreePath)
