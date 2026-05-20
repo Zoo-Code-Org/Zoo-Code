@@ -65,7 +65,7 @@ jobs:
                   restore-keys: |
                       ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-
                       ${{ runner.os }}-turbo-
-            - name: Run unit tests with coverage
+            - name: Run test coverage with split core integration lane
               run: pnpm test:coverage
             - name: Upload coverage to Codecov
               uses: codecov/codecov-action@v4
@@ -73,7 +73,8 @@ jobs:
                   files: >-
                       src/coverage/lcov.info,
                       webview-ui/coverage/lcov.info,
-                      packages/core/coverage/lcov.info,
+                      packages/core/coverage/unit/lcov.info,
+                      packages/core/coverage/integration/lcov.info,
                       packages/cloud/coverage/lcov.info,
                       packages/telemetry/coverage/lcov.info,
                       apps/cli/coverage/lcov.info
