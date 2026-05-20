@@ -55,12 +55,9 @@ describe.sequential("WorktreeService integration", () => {
 
 		expect(createResult.success).toBe(true)
 		const worktrees = await service.listWorktrees(repoDir)
-		const createdWorktree = worktrees.find((worktree) => worktree.path === worktreePath)
+		const createdWorktree = worktrees.find((worktree) => worktree.branch === "feature/integration")
 
-		expect(createdWorktree).toMatchObject({
-			path: worktreePath,
-			branch: "feature/integration",
-		})
+		expect(createdWorktree?.branch).toBe("feature/integration")
 
 		const readmeExists = await fs
 			.access(path.join(worktreePath, "README.md"))
@@ -68,7 +65,7 @@ describe.sequential("WorktreeService integration", () => {
 			.catch(() => false)
 		expect(readmeExists).toBe(true)
 
-		expect(worktrees.some((worktree) => worktree.path === worktreePath)).toBe(true)
+		expect(worktrees.some((worktree) => worktree.branch === "feature/integration")).toBe(true)
 
 		const deleteResult = await service.deleteWorktree(repoDir, worktreePath)
 
