@@ -96,18 +96,21 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 							// This shows the user the completion result and waits for acceptance
 							// without injecting another tool_result to the parent
 						} else if (status === "active") {
-							// Normal subtask completion - do delegation
-							const delegation = await this.delegateToParent(
-								task,
-								result,
-								provider,
-								askFinishSubTaskApproval,
-								pushToolResult,
-							)
-							if (delegation === "delegated") {
-								this.emitTaskCompleted(task)
+							const { historyItem: parentHistory } = await provider.getTaskWithId(task.parentTaskId)
+
+							if (parentHistory.status === "delegated" && parentHistory.awaitingChildId === task.taskId) {
+								const delegation = await this.delegateToParent(
+									task,
+									result,
+									provider,
+									askFinishSubTaskApproval,
+									pushToolResult,
+								)
+								if (delegation === "delegated") {
+									this.emitTaskCompleted(task)
+								}
+								if (delegation !== "continue") return
 							}
-							if (delegation !== "continue") return
 						} else {
 							// Unexpected status (undefined or "delegated") - log error and skip delegation
 							// undefined indicates a bug in status persistence during child creation

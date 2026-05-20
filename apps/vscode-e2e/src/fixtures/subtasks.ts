@@ -2,15 +2,18 @@ import { LLMock } from "@copilotkit/aimock"
 
 import { toolResultContains } from "./tool-result"
 
-export const SUBTASK_PARENT_PROMPT = "SUBTASK_PARENT_CANCELLATION_SMOKE"
-export const SUBTASK_CHILD_PROMPT = "SUBTASK_CHILD_CALCULATOR_SMOKE"
+const SUBTASK_PARENT_MARKER = "SUBTASK_PARENT_CANCELLATION_SMOKE"
+const SUBTASK_CHILD_MARKER = "SUBTASK_CHILD_CALCULATOR_SMOKE"
+
+export const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
+export const SUBTASK_PARENT_PROMPT = `${SUBTASK_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_CHILD_PROMPT}" Do not answer directly.`
 export const SUBTASK_CHILD_FOLLOWUP_ANSWER = "9"
 const INTERRUPTED_TOOL_RESULT = "Task was interrupted before this tool call could be completed."
 
 export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_PARENT_PROMPT),
+			userMessage: new RegExp(SUBTASK_PARENT_MARKER),
 		},
 		response: {
 			toolCalls: [
@@ -28,7 +31,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_CHILD_PROMPT),
+			userMessage: new RegExp(SUBTASK_CHILD_MARKER),
 		},
 		response: {
 			toolCalls: [

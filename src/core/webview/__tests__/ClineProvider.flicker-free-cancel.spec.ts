@@ -317,7 +317,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect((provider as any).clineStack[1]).toBe(mockTask2)
 	})
 
-	it("detaches a cancelled delegated child before rehydrating it", async () => {
+	it("detaches runtime parent links for a cancelled delegated child while preserving history lineage", async () => {
 		const mockRootTask = { taskId: "root-1" }
 		const mockParentTask = { taskId: "parent-1" }
 		const childHistory: HistoryItem = {
@@ -387,10 +387,70 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect(createTaskWithHistoryItemSpy).toHaveBeenCalledWith(
 			expect.objectContaining({
 				id: "child-1",
-				parentTaskId: undefined,
-				rootTaskId: undefined,
+				parentTaskId: "parent-1",
+				rootTaskId: "root-1",
 				parentTask: undefined,
 				rootTask: undefined,
+			}),
+		)
+	})
+
+	it("continues rehydrating a cancelled child when delegated parent detach fails", async () => {
+		const mockRootTask = { taskId: "root-1" }
+		const mockParentTask = { taskId: "parent-1" }
+		const childHistory: HistoryItem = {
+			id: "child-1",
+			number: 2,
+			task: "child task",
+			ts: Date.now(),
+			tokensIn: 10,
+			tokensOut: 20,
+			totalCost: 0.001,
+			workspace: "/test/workspace",
+			parentTaskId: "parent-1",
+			rootTaskId: "root-1",
+		}
+
+		Object.assign(mockTask1, {
+			taskId: "child-1",
+			instanceId: "instance-child",
+			rootTask: mockRootTask,
+			parentTask: mockParentTask,
+			parentTaskId: "parent-1",
+			cancelCurrentRequest: vi.fn(),
+			abortTask: vi.fn(),
+			abandoned: false,
+			isStreaming: false,
+			didFinishAbortingStream: true,
+			isWaitingForFirstChunk: false,
+		})
+		;(provider as any).clineStack = [mockTask1]
+		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
+			if (id === "child-1") {
+				return Promise.resolve({ historyItem: childHistory })
+			}
+			if (id === "parent-1") {
+				return Promise.reject(new Error("parent lookup failed"))
+			}
+			throw new Error(`unexpected task lookup: ${id}`)
+		}) as any
+
+		const createTaskWithHistoryItemSpy = vi
+			.spyOn(provider, "createTaskWithHistoryItem")
+			.mockResolvedValue(undefined as any)
+
+		await provider.cancelTask()
+
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("[cancelTask] Failed to detach delegated parent for child-1: parent lookup failed"),
+		)
+		expect(createTaskWithHistoryItemSpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: "child-1",
+				parentTaskId: "parent-1",
+				rootTaskId: "root-1",
+				parentTask: mockParentTask,
+				rootTask: mockRootTask,
 			}),
 		)
 	})
