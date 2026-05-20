@@ -13,6 +13,8 @@ on:
             - "pnpm-lock.yaml"
             - "turbo.json"
             - ".github/actions/setup-node-pnpm/**"
+    merge_group:
+        types: [checks_requested]
 
 jobs:
     e2e-mock:
