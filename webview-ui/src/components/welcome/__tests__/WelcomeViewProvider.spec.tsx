@@ -70,6 +70,12 @@ vi.mock("react-i18next", () => ({
 	},
 }))
 
+vi.mock("i18next", () => ({
+	default: {
+		t: (key: string) => key,
+	},
+}))
+
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string) => key,
@@ -226,7 +232,12 @@ describe("WelcomeViewProvider", () => {
 	})
 
 	it("saves the configured provider from setup", () => {
-		renderWelcomeViewProvider({ apiConfiguration: { apiProvider: "openrouter" } })
+		const apiConfiguration = {
+			apiProvider: "openrouter" as const,
+			openRouterApiKey: "test-key",
+			openRouterModelId: openRouterDefaultModelId,
+		}
+		renderWelcomeViewProvider({ apiConfiguration })
 
 		fireEvent.click(screen.getByTestId("button-primary"))
 		fireEvent.click(screen.getByText(/welcome:providerSignup.finish/))
@@ -234,9 +245,7 @@ describe("WelcomeViewProvider", () => {
 		expect(vscode.postMessage).toHaveBeenCalledWith({
 			type: "upsertApiConfiguration",
 			text: "default",
-			apiConfiguration: {
-				apiProvider: "openrouter",
-			},
+			apiConfiguration,
 		})
 	})
 

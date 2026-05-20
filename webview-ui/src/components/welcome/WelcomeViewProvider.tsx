@@ -21,11 +21,14 @@ const DEFAULT_WELCOME_API_CONFIGURATION: ProviderSettings = {
 }
 
 const getWelcomeApiConfiguration = (apiConfiguration?: ProviderSettings): ProviderSettings => {
+	// validateApiConfiguration treats a missing apiProvider as valid (no switch case matches),
+	// so we explicitly fall back here before delegating to it for incomplete-but-set configs.
 	if (!apiConfiguration?.apiProvider) {
 		return DEFAULT_WELCOME_API_CONFIGURATION
 	}
 
-	if (apiConfiguration.apiProvider === "anthropic" && !apiConfiguration.apiKey) {
+	const validationError = validateApiConfiguration(apiConfiguration)
+	if (validationError) {
 		return DEFAULT_WELCOME_API_CONFIGURATION
 	}
 
