@@ -1435,7 +1435,7 @@ importers:
         specifier: ^26.0.0
         version: 26.1.0
       vite:
-        specifier: 8.0.13
+        specifier: ^8.0.13
         version: 8.0.13(@types/node@20.19.25)(esbuild@0.25.9)(jiti@2.7.0)(tsx@4.19.4)(yaml@2.9.0)
       vitest:
         specifier: ^3.2.3
