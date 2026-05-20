@@ -110,6 +110,15 @@ export class MimoHandler extends OpenAiHandler {
 		for await (const chunk of stream) {
 			const delta = chunk.choices?.[0]?.delta ?? {}
 			const finishReason = chunk.choices?.[0]?.finish_reason
+			const sanitizedDelta = delta.tool_calls
+				? {
+						...delta,
+						tool_calls: delta.tool_calls.map((toolCall) => ({
+							...toolCall,
+							id: toolCall.id ? sanitizeOpenAiCallId(toolCall.id) : toolCall.id,
+						})),
+					}
+				: delta
 
 			if (delta.content) {
 				yield {
@@ -125,7 +134,7 @@ export class MimoHandler extends OpenAiHandler {
 				}
 			}
 
-			yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
+			yield* this.processToolCalls(sanitizedDelta, finishReason, activeToolCallIds)
 
 			if (chunk.usage) {
 				lastUsage = chunk.usage

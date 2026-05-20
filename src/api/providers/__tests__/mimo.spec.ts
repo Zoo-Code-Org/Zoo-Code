@@ -855,8 +855,8 @@ describe("MimoHandler", () => {
 
 			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
 			expect(toolChunks.length).toBeGreaterThan(0)
-			expect(toolChunks[0].id).toBeDefined()
-			expect(typeof toolChunks[0].id).toBe("string")
+			expect(toolChunks[0].id).toBe(sanitizeOpenAiCallId("call_with-special.chars@123"))
+			expect(toolChunks[0].id).not.toMatch(/[^a-zA-Z0-9_-]/)
 		})
 
 		it("should convert system prompt to system message for MiMo", async () => {
