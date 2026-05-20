@@ -52,7 +52,7 @@
 		"@types/node": "20.x",
 		"@types/react": "^18.3.23",
 		"@types/react-dom": "^18.3.7",
-		"@vitejs/plugin-react": "^5.2.0",
+		"@vitejs/plugin-react": "^4.7.0",
 		"autoprefixer": "^10.4.23",
 		"next-sitemap": "^4.2.3",
 		"postcss": "^8.5.6",
