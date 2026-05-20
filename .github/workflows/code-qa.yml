@@ -67,16 +67,32 @@ jobs:
                       ${{ runner.os }}-turbo-
             - name: Run test coverage with split core integration lane
               run: pnpm test:coverage
-            - name: Upload coverage to Codecov
+            # Coverage is uploaded in three separate steps so each LCOV gets the
+            # correct flag set. Codecov double-counts overlapping lines when a
+            # single upload carries multiple flags whose paths overlap, so the
+            # two core lanes (which both cover packages/core/src/**) must be
+            # uploaded individually with their own lane flag.
+            # See https://docs.codecov.com/docs/flags
+            - name: Upload non-core coverage to Codecov
               uses: codecov/codecov-action@v4
               with:
                   files: >-
                       src/coverage/lcov.info,
                       webview-ui/coverage/lcov.info,
-                      packages/core/coverage/unit/lcov.info,
-                      packages/core/coverage/integration/lcov.info,
                       packages/cloud/coverage/lcov.info,
                       packages/telemetry/coverage/lcov.info,
                       apps/cli/coverage/lcov.info
                   flags: ${{ matrix.codecov-flag }}
+                  token: ${{ secrets.CODECOV_TOKEN }}
+            - name: Upload core unit coverage to Codecov
+              uses: codecov/codecov-action@v4
+              with:
+                  files: packages/core/coverage/unit/lcov.info
+                  flags: ${{ matrix.codecov-flag }},core-unit
+                  token: ${{ secrets.CODECOV_TOKEN }}
+            - name: Upload core integration coverage to Codecov
+              uses: codecov/codecov-action@v4
+              with:
+                  files: packages/core/coverage/integration/lcov.info
+                  flags: ${{ matrix.codecov-flag }},core-integration
                   token: ${{ secrets.CODECOV_TOKEN }}
