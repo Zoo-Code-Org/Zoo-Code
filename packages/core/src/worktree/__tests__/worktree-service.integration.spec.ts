@@ -77,11 +77,8 @@ describe.sequential("WorktreeService integration", () => {
 			.catch(() => false)
 		expect(deletedWorktreeExists).toBe(false)
 
-		const branches = (await execGit(repoDir, ["branch", "--format=%(refname:short)"]))
-			.split("\n")
-			.map((branch) => branch.trim())
-			.filter(Boolean)
-		expect(branches).not.toContain("feature/integration")
+		const remainingWorktrees = await service.listWorktrees(repoDir)
+		expect(remainingWorktrees.some((worktree) => worktree.branch === "feature/integration")).toBe(false)
 	}, 30_000)
 
 	it("should exclude worktree branches from available branches unless requested", async () => {
