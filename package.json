@@ -12,7 +12,7 @@
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
 		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
-		"test:coverage": "pnpm turbo run test:coverage --filter=\"!@roo-code/core\" --log-order grouped --output-logs new-only && pnpm turbo run test:coverage:unit --filter=\"@roo-code/core\" --log-order grouped --output-logs new-only && pnpm turbo run test:coverage:integration --filter=\"@roo-code/core\" --log-order grouped --output-logs new-only",
+		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
 		"format": "turbo format --log-order grouped --output-logs new-only",
 		"build": "turbo build --log-order grouped --output-logs new-only",
 		"bundle": "turbo bundle --log-order grouped --output-logs new-only",

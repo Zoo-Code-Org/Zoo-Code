@@ -53,6 +53,18 @@
 				"vitest.integration.config.ts"
 			],
 			"outputs": ["coverage/integration/**"]
+		},
+		"test:coverage": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": [
+				"src/**",
+				"package.json",
+				"tsconfig.json",
+				"vitest.config.ts",
+				"vitest.unit.config.ts",
+				"vitest.integration.config.ts"
+			],
+			"outputs": ["coverage/unit/**", "coverage/integration/**"]
 		}
 	}
 }
