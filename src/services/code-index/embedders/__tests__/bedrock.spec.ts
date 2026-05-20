@@ -98,6 +98,14 @@ describe("BedrockEmbedder", () => {
 			const profileEmbedder = new BedrockEmbedder("us-west-2", "dev-profile")
 			expect(profileEmbedder).toBeDefined()
 		})
+
+		it("should identify itself as Zoo Code in the AWS client app id", () => {
+			expect(BedrockRuntimeClient).toHaveBeenCalledWith(
+				expect.objectContaining({
+					userAgentAppId: expect.stringMatching(/^ZooCode#/),
+				}),
+			)
+		})
 	})
 
 	describe("createEmbeddings", () => {

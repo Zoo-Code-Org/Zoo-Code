@@ -211,7 +211,7 @@ export function buildAuthorizationUrl(codeChallenge: string, state: string): str
 		state,
 		// Codex-specific parameters
 		codex_cli_simplified_flow: "true",
-		originator: "roo-code",
+		originator: "zoo-code",
 	})
 
 	return `${OPENAI_CODEX_OAUTH_CONFIG.authorizationEndpoint}?${params.toString()}`

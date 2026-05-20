@@ -73,6 +73,14 @@ describe("AwsBedrockHandler", () => {
 			expect(modelInfo.info.contextWindow).toBeDefined()
 		})
 
+		it("should identify itself as Zoo Code in the AWS client app id", () => {
+			expect(mockBedrockRuntimeClient).toHaveBeenCalledWith(
+				expect.objectContaining({
+					userAgentAppId: expect.stringMatching(/^ZooCode#/),
+				}),
+			)
+		})
+
 		it("should use custom ARN when provided", () => {
 			// This test is incompatible with the refactored implementation
 			// The implementation now extracts the model ID from the ARN instead of using the ARN directly
