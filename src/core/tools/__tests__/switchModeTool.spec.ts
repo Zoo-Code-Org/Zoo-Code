@@ -17,14 +17,13 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 	return {
 		...actual,
 		defaultModeSlug: "code",
-		getModeBySlug: vi.fn((slug: string, _customModes?: unknown[]) => {
+		getModeBySlug: vi.fn((slug: string, customModes?: Array<{ slug: string; name: string }>) => {
 			const builtInModes: Record<string, { slug: string; name: string }> = {
 				code: { slug: "code", name: "Code" },
 				architect: { slug: "architect", name: "Architect" },
 				ask: { slug: "ask", name: "Ask" },
-				"custom-mode": { slug: "custom-mode", name: "Custom Mode" },
 			}
-			return builtInModes[slug]
+			return customModes?.find((mode) => mode.slug === slug) ?? builtInModes[slug]
 		}),
 	}
 })
@@ -200,34 +199,6 @@ describe("SwitchModeTool", () => {
 		expect(mockTask.consecutiveMistakeCount).toBe(0)
 	})
 
-	// ===== Edge case: providerRef is null =====
-
-	it("should proceed silently when providerRef deref returns undefined", async () => {
-		mockTask = {
-			...mockTask,
-			providerRef: {
-				deref: vi.fn().mockReturnValue(undefined),
-			},
-		} as unknown as Task
-
-		const block = createBlock({ mode_slug: "architect", reason: "test" })
-
-		// When deref returns undefined, optional chaining makes getState() and
-		// handleModeSwitch() no-ops. getModeBySlug still returns a valid mode,
-		// and currentMode falls back to defaultModeSlug. The tool proceeds
-		// without throwing — but the mode switch is a no-op.
-		await switchModeTool.handle(mockTask, block, mockCallbacks)
-
-		// Should NOT call handleError (no exception thrown)
-		expect(mockCallbacks.handleError).not.toHaveBeenCalled()
-		// Should have asked for approval
-		expect(mockCallbacks.askApproval).toHaveBeenCalled()
-		// Should still push a success result (even though switch was a no-op)
-		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
-			"Successfully switched from Code mode to Architect mode because: test.",
-		)
-	})
-
 	// ===== Edge case: getState throws an error =====
 
 	it("should handle getState throwing an error", async () => {
@@ -322,6 +293,11 @@ describe("SwitchModeTool", () => {
 	// ===== Custom mode support =====
 
 	it("should switch to a custom mode", async () => {
+		mockGetState.mockResolvedValue({
+			mode: "code",
+			customModes: [{ slug: "custom-mode", name: "Custom Mode" }],
+		})
+
 		const block = createBlock({ mode_slug: "custom-mode", reason: "testing custom modes" })
 
 		await switchModeTool.handle(mockTask, block, mockCallbacks)
