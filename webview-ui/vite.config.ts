@@ -107,7 +107,7 @@ export default defineConfig(({ mode }) => {
 			// Generate complete source maps with original TypeScript sources
 			sourcemap: true,
 			// Vite 8 uses Rolldown/Oxc by default; keep non-production modes readable.
-			minify: mode === "production" || mode === "nightly",
+			minify: mode === "production",
 			// Use a single combined CSS bundle so all webviews share styles
 			cssCodeSplit: false,
 			rolldownOptions: {
