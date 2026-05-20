@@ -65,8 +65,12 @@ jobs:
                   restore-keys: |
                       ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-
                       ${{ runner.os }}-turbo-
-            - name: Run test coverage with split core integration lane
-              run: pnpm test:coverage
+            - name: Run non-core coverage
+              run: pnpm turbo run test:coverage --filter="!@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run core unit coverage
+              run: pnpm turbo run test:coverage:unit --filter="@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run core integration coverage
+              run: pnpm turbo run test:coverage:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
             # Coverage is uploaded in three separate steps so each LCOV gets the
             # correct flag set. Codecov double-counts overlapping lines when a
             # single upload carries multiple flags whose paths overlap, so the
