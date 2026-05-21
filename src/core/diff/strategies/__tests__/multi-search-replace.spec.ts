@@ -1204,4 +1204,87 @@ function sum(a, b) {
 			expect(result.error).toContain(":start_line:5    <-- Invalid location")
 		})
 	})
+
+	describe("repairTruncatedDiff", () => {
+		let strategy: MultiSearchReplaceDiffStrategy
+
+		beforeEach(() => {
+			strategy = new MultiSearchReplaceDiffStrategy()
+		})
+
+		it("should not modify a complete diff", () => {
+			const diff = "<<<<<<< SEARCH\n" + "original content\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(diff)
+		})
+
+		it("should not modify a diff with multiple complete blocks", () => {
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				"content1\n" +
+				"=======\n" +
+				"new1\n" +
+				">>>>>>> REPLACE\n\n" +
+				"<<<<<<< SEARCH\n" +
+				"content2\n" +
+				"=======\n" +
+				"new2\n" +
+				">>>>>>> REPLACE"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(diff)
+		})
+
+		it("should repair diff missing ======= and >>>>>>> REPLACE", () => {
+			const diff = "<<<<<<< SEARCH\n" + "original content\n" + "new content"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" + "original content\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE",
+			)
+		})
+
+		it("should repair diff missing only >>>>>>> REPLACE", () => {
+			const diff = "<<<<<<< SEARCH\n" + "original content\n" + "=======\n" + "new content"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" + "original content\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE",
+			)
+		})
+
+		it("should repair first truncated block while preserving subsequent complete blocks", () => {
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				"content1\n" +
+				"new1\n\n" +
+				"<<<<<<< SEARCH\n" +
+				"content2\n" +
+				"=======\n" +
+				"new2\n" +
+				">>>>>>> REPLACE"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" +
+					"content1\n" +
+					"=======\n" +
+					"new1\n" +
+					">>>>>>> REPLACE\n\n" +
+					"<<<<<<< SEARCH\n" +
+					"content2\n" +
+					"=======\n" +
+					"new2\n" +
+					">>>>>>> REPLACE",
+			)
+		})
+
+		it("should handle empty search content with missing replace marker", () => {
+			const diff = "<<<<<<< SEARCH\n" + "replacement text"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe("<<<<<<< SEARCH\n" + "=======\n" + "replacement text\n" + ">>>>>>> REPLACE")
+		})
+
+		it("should not add trailing newline if content already ends with one", () => {
+			const diff = "<<<<<<< SEARCH\n" + "original\n" + "=======\n" + "new content\n"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe("<<<<<<< SEARCH\n" + "original\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE")
+		})
+	})
 })

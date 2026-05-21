@@ -242,12 +242,95 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				}
 	}
 
+	/**
+	 * Repairs truncated diffs (common with Grok) by adding missing ======= and >>>>>>> REPLACE markers.
+	 * When the model's output gets cut off mid-stream, the diff may end after SEARCH content
+	 * without the separator or closing marker. This method detects that pattern and appends
+	 * the missing markers so the diff can still be parsed and applied.
+	 */
+	private repairTruncatedDiff(diffContent: string): string {
+		// Only repair if the diff has at least one SEARCH marker
+		if (!/(?<!\\)<<<<<<< SEARCH/.test(diffContent)) {
+			return diffContent
+		}
+
+		// Split into blocks based on SEARCH markers
+		const blocks = diffContent.split(/(?=(?<!\\)<<<<<<< SEARCH)/)
+
+		let repaired = ""
+		let needsRepair = false
+
+		for (let i = 0; i < blocks.length; i++) {
+			const block = blocks[i]
+
+			if (block.trim() === "") {
+				continue
+			}
+
+			// Skip prefix blocks that don't contain a SEARCH marker
+			// (e.g., the filename line before the first <<<<<<< SEARCH)
+			if (!/(?<!\\)<<<<<<< SEARCH/.test(block)) {
+				repaired += block
+				continue
+			}
+
+			// Check if this block is complete (has both ======= and >>>>>>> REPLACE)
+			const hasSeparator = /(?<=\n)(?<!\\)=======\s*\n/.test(block)
+			const hasCloser = /(?<=\n)(?<!\\)>>>>>>> REPLACE(?=\n|$)/.test(block)
+
+			if (hasSeparator && hasCloser) {
+				// Block is complete — emit verbatim (keeps its own trailing separator)
+				repaired += block
+				continue
+			}
+
+			// Block needs repair. Build a clean block ending at >>>>>>> REPLACE, then
+			// re-add an inter-block separator if more (non-empty) blocks follow, so the
+			// appended closer never gets glued to the next "<<<<<<< SEARCH".
+			needsRepair = true
+			const isLast = blocks.slice(i + 1).every((b) => b.trim() === "")
+			const separator = isLast ? "" : "\n\n"
+
+			if (hasSeparator && !hasCloser) {
+				// Has ======= but missing >>>>>>> REPLACE — append closing marker
+				const body = block.replace(/\s+$/, "")
+				repaired += body + "\n>>>>>>> REPLACE" + separator
+			} else {
+				// Missing both ======= and >>>>>>> REPLACE
+				const searchMatch = block.match(/^<<<<<<< SEARCH\n?([\s\S]*)$/)
+				const content = (searchMatch?.[1] ?? "").replace(/\s+$/, "")
+				const firstNewlineIdx = content.indexOf("\n")
+				if (firstNewlineIdx !== -1) {
+					// First line is SEARCH content, rest is REPLACE content
+					const searchContent = content.substring(0, firstNewlineIdx)
+					const replaceContent = content.substring(firstNewlineIdx + 1)
+					repaired +=
+						"<<<<<<< SEARCH\n" +
+						searchContent +
+						"\n=======\n" +
+						replaceContent +
+						"\n>>>>>>> REPLACE" +
+						separator
+				} else {
+					// Single line — treat as empty SEARCH with content as REPLACE
+					repaired += "<<<<<<< SEARCH\n=======\n" + content + "\n>>>>>>> REPLACE" + separator
+				}
+			}
+		}
+
+		return repaired || diffContent
+	}
+
 	async applyDiff(
 		originalContent: string,
 		diffContent: string,
 		_paramStartLine?: number,
 		_paramEndLine?: number,
 	): Promise<DiffResult> {
+		// Repair truncated diffs before validation (common with Grok and other models
+		// whose output gets cut off mid-stream, leaving missing ======= and >>>>>>> REPLACE markers)
+		diffContent = this.repairTruncatedDiff(diffContent)
+
 		const validseq = this.validateMarkerSequencing(diffContent)
 		if (!validseq.success) {
 			return {
