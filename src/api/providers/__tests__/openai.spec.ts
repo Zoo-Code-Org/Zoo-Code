@@ -391,6 +391,33 @@ describe("OpenAiHandler", () => {
 			expect(callArgs.reasoning_effort).toBeUndefined()
 		})
 
+		it("should omit temperature when the model sets supportsTemperature to false", async () => {
+			const noTempOptions: ApiHandlerOptions = {
+				...mockOptions,
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					supportsTemperature: false,
+				},
+			}
+			const noTempHandler = new OpenAiHandler(noTempOptions)
+			const stream = noTempHandler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+			}
+			expect(mockCreate).toHaveBeenCalled()
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs).not.toHaveProperty("temperature")
+		})
+
+		it("should include temperature by default when supportsTemperature is not set", async () => {
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+			}
+			expect(mockCreate).toHaveBeenCalled()
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs).toHaveProperty("temperature")
+		})
+
 		it("should include max_tokens when includeMaxTokens is true", async () => {
 			const optionsWithMaxTokens: ApiHandlerOptions = {
 				...mockOptions,
