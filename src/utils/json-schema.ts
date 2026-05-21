@@ -302,3 +302,99 @@ export function normalizeToolSchema(schema: Record<string, unknown>): Record<str
 	const result = NormalizedToolSchemaInternal.safeParse(flattenedSchema)
 	return result.success ? result.data : flattenedSchema
 }
+
+/**
+ * Keys that Bedrock's strict structured-output mode rejects on numeric schemas.
+ * Verified empirically by pydantic-ai (PR #4237): Bedrock returns ValidationException
+ * when these appear under strict, even on models that otherwise support structured output.
+ */
+const BEDROCK_STRICT_INCOMPATIBLE_NUMERIC_KEYS = [
+	"minimum",
+	"maximum",
+	"exclusiveMinimum",
+	"exclusiveMaximum",
+	"multipleOf",
+] as const
+
+/**
+ * Recursively strips JSON Schema constraints that Bedrock rejects under strict mode
+ * (structured output), appending the stripped values to the schema's description as a
+ * hint to the model. This is the fix for schemas like `{type: "integer", minimum: 1}`
+ * or `{type: "array", minItems: 1, maxItems: 4}` that would otherwise cause a 400
+ * ValidationException — without this, the retry loop would wrongly classify the model
+ * as unsupported and cache it for 30 days.
+ *
+ * Per https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html and
+ * empirical testing, Bedrock strict mode:
+ * - rejects numeric `minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf`
+ * - rejects `maxItems` on arrays
+ * - rejects `minItems > 1` on arrays (accepts 0 or 1)
+ * - preserves `minLength`, `maxLength`, `pattern`, `format`, `enum`, `const`, `default`,
+ *   `$ref`/`$defs`, `anyOf`
+ *
+ * Safe to call on already-normalized schemas. No-op for non-object inputs.
+ *
+ * @param schema - A JSON Schema that has already been passed through `normalizeToolSchema`.
+ * @returns A new schema with Bedrock-incompatible constraints stripped and their former
+ *   values appended to the description when present.
+ */
+export function stripBedrockStrictIncompatibleConstraints(schema: Record<string, unknown>): Record<string, unknown> {
+	if (typeof schema !== "object" || schema === null) {
+		return schema
+	}
+	return transformForBedrockStrict(schema) as Record<string, unknown>
+}
+
+function transformForBedrockStrict(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map((entry) => transformForBedrockStrict(entry))
+	}
+	if (typeof value !== "object" || value === null) {
+		return value
+	}
+
+	const source = value as Record<string, unknown>
+	const result: Record<string, unknown> = {}
+	const strippedNotes: string[] = []
+
+	for (const [key, v] of Object.entries(source)) {
+		const isNumericKey = (BEDROCK_STRICT_INCOMPATIBLE_NUMERIC_KEYS as readonly string[]).includes(key)
+		if (isNumericKey && isNumericContext(source)) {
+			strippedNotes.push(`${key}=${JSON.stringify(v)}`)
+			continue
+		}
+		if (isArrayContext(source)) {
+			if (key === "maxItems") {
+				strippedNotes.push(`${key}=${JSON.stringify(v)}`)
+				continue
+			}
+			if (key === "minItems" && typeof v === "number" && v > 1) {
+				strippedNotes.push(`${key}=${JSON.stringify(v)}`)
+				continue
+			}
+		}
+		result[key] = transformForBedrockStrict(v)
+	}
+
+	if (strippedNotes.length > 0) {
+		const note = strippedNotes.join(", ")
+		const existing = typeof result.description === "string" ? result.description : undefined
+		result.description = existing ? `${existing} (${note})` : note
+	}
+
+	return result
+}
+
+function schemaType(schema: Record<string, unknown>): string | undefined {
+	const t = schema.type
+	return typeof t === "string" ? t : undefined
+}
+
+function isNumericContext(schema: Record<string, unknown>): boolean {
+	const t = schemaType(schema)
+	return t === "number" || t === "integer"
+}
+
+function isArrayContext(schema: Record<string, unknown>): boolean {
+	return schemaType(schema) === "array"
+}

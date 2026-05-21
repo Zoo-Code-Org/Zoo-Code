@@ -1,6 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { ContentBlock, SystemContentBlock, Message, ConversationRole } from "@aws-sdk/client-bedrock-runtime"
-import { CacheStrategyConfig, CacheResult, CachePointPlacement } from "./types"
+import { CacheStrategyConfig, CacheResult, CachePointPlacement, CachePoint } from "./types"
 
 export abstract class CacheStrategy {
 	/**
@@ -51,7 +51,13 @@ export abstract class CacheStrategy {
 	 * Create a cache point content block
 	 */
 	protected createCachePoint(): ContentBlock {
-		return { cachePoint: { type: "default" } } as unknown as ContentBlock
+		const cachePoint: CachePoint = { type: "default" }
+
+		if (this.config.modelInfo.promptCacheTtl) {
+			cachePoint.ttl = this.config.modelInfo.promptCacheTtl
+		}
+
+		return { cachePoint } as unknown as ContentBlock
 	}
 
 	/**

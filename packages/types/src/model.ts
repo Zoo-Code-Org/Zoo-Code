@@ -98,6 +98,8 @@ export const modelInfoSchema = z.object({
 	outputPrice: z.number().optional(),
 	cacheWritesPrice: z.number().optional(),
 	cacheReadsPrice: z.number().optional(),
+	// Bedrock Converse cachePoint TTL values. Omitted means provider default.
+	promptCacheTtl: z.enum(["5m", "1h"]).optional(),
 	longContextPricing: z
 		.object({
 			thresholdTokens: z.number(),

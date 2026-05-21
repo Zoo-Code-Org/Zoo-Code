@@ -61,6 +61,7 @@ import { searchCommits } from "../../utils/git"
 import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
+import { discoverBedrockTargets, probeBedrockMaxOutputTokens } from "../../api/providers/bedrock-discovery"
 import { openMention } from "../mentions"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -1111,6 +1112,62 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				// Silently fail - user hasn't configured LM Studio yet.
 				console.debug("LM Studio models fetch failed:", error)
+			}
+			break
+		}
+		case "requestBedrockDiscovery": {
+			const requestId = message.requestId
+			try {
+				const { apiConfiguration } = message
+				if (!apiConfiguration?.awsRegion) {
+					provider.postMessageToWebview({
+						type: "bedrockDiscovery",
+						requestId,
+						bedrockDiscovery: [],
+					})
+					break
+				}
+
+				const bedrockDiscovery = await discoverBedrockTargets(apiConfiguration)
+				provider.postMessageToWebview({
+					type: "bedrockDiscovery",
+					requestId,
+					bedrockDiscovery,
+				})
+			} catch (error) {
+				provider.postMessageToWebview({
+					type: "bedrockDiscovery",
+					requestId,
+					bedrockDiscovery: [],
+					error: error instanceof Error ? error.message : String(error),
+				})
+			}
+			break
+		}
+		case "requestBedrockMaxTokensProbe": {
+			const requestId = message.requestId
+			try {
+				const { apiConfiguration } = message
+				const modelId = message.text
+				if (!apiConfiguration?.awsRegion) {
+					throw new Error("AWS region is required to probe Bedrock max output tokens")
+				}
+				if (!modelId) {
+					throw new Error("Model id is required to probe Bedrock max output tokens")
+				}
+
+				const result = await probeBedrockMaxOutputTokens({ options: apiConfiguration, modelId })
+				provider.postMessageToWebview({
+					type: "bedrockMaxTokensProbe",
+					requestId,
+					bedrockMaxTokensProbe: { ...result, modelId },
+				})
+			} catch (error) {
+				provider.postMessageToWebview({
+					type: "bedrockMaxTokensProbe",
+					requestId,
+					error: error instanceof Error ? error.message : String(error),
+				})
 			}
 			break
 		}

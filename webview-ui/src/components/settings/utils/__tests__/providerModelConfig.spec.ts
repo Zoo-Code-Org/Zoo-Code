@@ -135,10 +135,10 @@ describe("providerModelConfig", () => {
 			expect(Object.keys(models).length).toBeGreaterThan(0)
 		})
 
-		it("adds custom-arn option for bedrock provider", () => {
+		it("returns the static Bedrock model catalog without injecting a fake custom target", () => {
 			const models = getStaticModelsForProvider("bedrock", "Use Custom ARN")
-			expect(models["custom-arn"]).toBeDefined()
-			expect(models["custom-arn"].description).toBe("Use Custom ARN")
+			expect(Object.keys(models).length).toBeGreaterThan(0)
+			expect(models["custom-arn"]).toBeUndefined()
 		})
 
 		it("returns empty object for providers without static models", () => {
@@ -168,25 +168,25 @@ describe("providerModelConfig", () => {
 			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain("ollama")
 			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain("lmstudio")
 			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain("vscode-lm")
+			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain("bedrock")
 		})
 
-		it("does not include static providers using generic picker", () => {
+		it("does not include static providers using the generic picker", () => {
 			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).not.toContain("anthropic")
 			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).not.toContain("gemini")
-			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).not.toContain("bedrock")
 		})
 	})
 
 	describe("shouldUseGenericModelPicker", () => {
 		it("returns true for static providers without custom UI", () => {
 			expect(shouldUseGenericModelPicker("anthropic")).toBe(true)
-			expect(shouldUseGenericModelPicker("bedrock")).toBe(true)
 			expect(shouldUseGenericModelPicker("gemini")).toBe(true)
 			expect(shouldUseGenericModelPicker("deepseek")).toBe(true)
 		})
 
 		it("returns false for providers with custom model UI", () => {
 			expect(shouldUseGenericModelPicker("openrouter")).toBe(false)
+			expect(shouldUseGenericModelPicker("bedrock")).toBe(false)
 			expect(shouldUseGenericModelPicker("ollama")).toBe(false)
 			expect(shouldUseGenericModelPicker("lmstudio")).toBe(false)
 			expect(shouldUseGenericModelPicker("vscode-lm")).toBe(false)

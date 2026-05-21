@@ -9,9 +9,10 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 type BedrockCustomArnProps = {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
+	onInput?: (event: Event) => void
 }
 
-export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }: BedrockCustomArnProps) => {
+export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField, onInput }: BedrockCustomArnProps) => {
 	const { t } = useAppTranslation()
 
 	const validation = useMemo(() => {
@@ -23,7 +24,11 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 		<>
 			<VSCodeTextField
 				value={apiConfiguration?.awsCustomArn || ""}
-				onInput={(e) => setApiConfigurationField("awsCustomArn", (e.target as HTMLInputElement).value)}
+				onInput={(e) =>
+					onInput
+						? onInput(e as unknown as Event)
+						: setApiConfigurationField("awsCustomArn", (e.target as HTMLInputElement).value)
+				}
 				placeholder={t("settings:placeholders.customArn")}
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:labels.customArn")}</label>

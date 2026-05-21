@@ -4,6 +4,8 @@ import { SystemContentBlock, Message } from "@aws-sdk/client-bedrock-runtime"
 /**
  * Information about a model's capabilities and constraints
  */
+export type CachePointTtl = "5m" | "1h"
+
 export interface ModelInfo {
 	/** Maximum number of tokens the model can generate */
 	maxTokens: number
@@ -17,6 +19,8 @@ export interface ModelInfo {
 	minTokensPerCachePoint: number
 	/** Fields that can be cached */
 	cachableFields: Array<"system" | "messages" | "tools">
+	/** Optional Bedrock cachePoint TTL to request */
+	promptCacheTtl?: CachePointTtl
 }
 
 /**
@@ -25,6 +29,8 @@ export interface ModelInfo {
 export interface CachePoint {
 	/** Type of cache point */
 	type: "default"
+	/** Optional Bedrock cachePoint TTL */
+	ttl?: CachePointTtl
 }
 
 /**

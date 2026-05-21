@@ -71,6 +71,7 @@ import {
 	Anthropic,
 	Baseten,
 	Bedrock,
+	BedrockThinkingBudget,
 	DeepSeek,
 	Gemini,
 	LMStudio,
@@ -107,7 +108,6 @@ import { TodoListSettingsControl } from "./TodoListSettingsControl"
 import { TemperatureControl } from "./TemperatureControl"
 import { RateLimitSecondsControl } from "./RateLimitSecondsControl"
 import { ConsecutiveMistakeLimitControl } from "./ConsecutiveMistakeLimitControl"
-import { BedrockCustomArn } from "./providers/BedrockCustomArn"
 import { buildDocLink } from "@src/utils/docLinks"
 import { BookOpenText } from "lucide-react"
 
@@ -739,24 +739,26 @@ const ApiOptions = ({
 									)
 								}
 							/>
-
-							{selectedProvider === "bedrock" && selectedModelId === "custom-arn" && (
-								<BedrockCustomArn
-									apiConfiguration={apiConfiguration}
-									setApiConfigurationField={setApiConfigurationField}
-								/>
-							)}
 						</>
 					)}
 
-					{!fromWelcomeView && (
-						<ThinkingBudget
-							key={`${selectedProvider}-${selectedModelId}`}
-							apiConfiguration={apiConfiguration}
-							setApiConfigurationField={setApiConfigurationField}
-							modelInfo={selectedModelInfo}
-						/>
-					)}
+					{!fromWelcomeView &&
+						(selectedProvider === "bedrock" ? (
+							<BedrockThinkingBudget
+								key={`${selectedProvider}-${selectedModelId}`}
+								apiConfiguration={apiConfiguration}
+								setApiConfigurationField={setApiConfigurationField}
+								modelInfo={selectedModelInfo}
+								modelId={selectedModelId}
+							/>
+						) : (
+							<ThinkingBudget
+								key={`${selectedProvider}-${selectedModelId}`}
+								apiConfiguration={apiConfiguration}
+								setApiConfigurationField={setApiConfigurationField}
+								modelInfo={selectedModelInfo}
+							/>
+						))}
 
 					{/* Gate Verbosity UI by capability flag */}
 					{!fromWelcomeView && selectedModelInfo?.supportsVerbosity && (

@@ -1,6 +1,7 @@
 import {
 	BedrockRuntimeClient,
 	ConverseStreamCommand,
+	ConverseStreamCommandOutput,
 	ConverseCommand,
 	BedrockRuntimeClientConfig,
 	ContentBlock,
@@ -23,14 +24,21 @@ import {
 	bedrockModels,
 	bedrockDefaultPromptRouterModelId,
 	BEDROCK_DEFAULT_TEMPERATURE,
-	BEDROCK_MAX_TOKENS,
-	BEDROCK_DEFAULT_CONTEXT,
 	AWS_INFERENCE_PROFILE_MAPPING,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
+	BEDROCK_ADAPTIVE_THINKING_MODEL_IDS,
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
+	BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
 	ApiProviderError,
+	inferBedrockInvokeTargetKind,
+	parseBedrockBaseModelId,
+	resolveBedrockInvokeTargetId,
+	resolveBedrockMaxOutputTokensOverride,
+	resolveBedrockModelInfo,
+	shouldUseBedrock1MContext,
+	stripBedrock1MContextSuffix,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -39,11 +47,11 @@ import { BaseProvider } from "./base-provider"
 import { logger } from "../../utils/logging"
 import { Package } from "../../shared/package"
 import { MultiPointStrategy } from "../transform/cache-strategy/multi-point-strategy"
-import { ModelInfo as CacheModelInfo } from "../transform/cache-strategy/types"
+import type { ModelInfo as CacheModelInfo, CachePointTtl } from "../transform/cache-strategy/types"
 import { convertToBedrockConverseMessages as sharedConverter } from "../transform/bedrock-converse-format"
 import { getModelParams } from "../transform/model-params"
 import { shouldUseReasoningBudget } from "../../shared/api"
-import { normalizeToolSchema } from "../../utils/json-schema"
+import { normalizeToolSchema, stripBedrockStrictIncompatibleConstraints } from "../../utils/json-schema"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 
 /************************************************************************************
@@ -60,11 +68,13 @@ interface BedrockInferenceConfig {
 
 // Define interface for Bedrock additional model request fields
 // This includes thinking configuration, 1M context beta, and other model-specific parameters
+//
+// Two shapes are supported for the `thinking` field:
+//   - Legacy (Claude Sonnet/Opus 4.x, Claude 3.7): { type: "enabled", budget_tokens: N }
+//   - Adaptive (Claude Opus 4.7+):                 { type: "adaptive" } paired with a
+//     top-level `output_config.effort` string on the payload itself.
 interface BedrockAdditionalModelFields {
-	thinking?: {
-		type: "enabled"
-		budget_tokens: number
-	}
+	thinking?: { type: "enabled"; budget_tokens: number } | { type: "adaptive" }
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
 }
@@ -78,6 +88,49 @@ interface BedrockPayload {
 	anthropic_version?: string
 	additionalModelRequestFields?: BedrockAdditionalModelFields
 	toolConfig?: ToolConfiguration
+	// Adaptive-thinking models (e.g. Claude Opus 4.7 on Bedrock) use this top-level
+	// `output_config.effort` knob instead of the legacy `thinking.budget_tokens` number.
+	output_config?: { effort: "low" | "medium" | "high" }
+}
+
+/**
+ * Map a reasoning budget (in tokens) to a coarse effort bucket for the adaptive
+ * thinking payload. Used only when invoking Bedrock models that require the newer
+ * `thinking: { type: "adaptive" }` + `output_config.effort` shape.
+ *
+ * The thresholds mirror the historical budget ranges exposed by the reasoning UI:
+ *   <=  4096 tokens → "low"
+ *   <= 16384 tokens → "medium"
+ *    > 16384 tokens → "high"
+ */
+function mapReasoningBudgetToBedrockEffort(budget: number | undefined): "low" | "medium" | "high" {
+	const b = typeof budget === "number" && Number.isFinite(budget) && budget > 0 ? budget : 0
+	if (b <= 4096) return "low"
+	if (b <= 16384) return "medium"
+	return "high"
+}
+
+/**
+ * Normalize a freeform reasoning-effort setting string to the three buckets Bedrock
+ * accepts on `output_config.effort`. Unknown or disabled values return undefined so
+ * the caller can fall back to the budget-derived mapping.
+ */
+function normalizeReasoningEffortForBedrock(value: unknown): "low" | "medium" | "high" | undefined {
+	if (typeof value !== "string") return undefined
+	const v = value.toLowerCase()
+	if (v === "low" || v === "medium" || v === "high") return v
+	if (v === "minimal") return "low"
+	return undefined
+}
+
+function normalizeBedrockPromptCacheTtl(value: unknown): CachePointTtl | undefined {
+	return value === "5m" || value === "1h" ? value : undefined
+}
+
+function createBedrockCachePointContentBlock(ttl?: CachePointTtl): ContentBlock {
+	return {
+		cachePoint: ttl ? { type: "default", ttl } : { type: "default" },
+	} as unknown as ContentBlock
 }
 
 // Extended payload type that includes service_tier as a top-level parameter
@@ -286,65 +339,6 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		this.client = new BedrockRuntimeClient(clientConfig)
 	}
 
-	// Helper to guess model info from custom modelId string if not in bedrockModels
-	private guessModelInfoFromId(modelId: string): Partial<ModelInfo> {
-		// Define a mapping for model ID patterns and their configurations
-		const modelConfigMap: Record<string, Partial<ModelInfo>> = {
-			"claude-4": {
-				maxTokens: 8192,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-3-7": {
-				maxTokens: 8192,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-3-5": {
-				maxTokens: 8192,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-4-opus": {
-				maxTokens: 4096,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-3-opus": {
-				maxTokens: 4096,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-			"claude-3-haiku": {
-				maxTokens: 4096,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-			},
-		}
-
-		// Match the model ID to a configuration
-		const id = modelId.toLowerCase()
-		for (const [pattern, config] of Object.entries(modelConfigMap)) {
-			if (id.includes(pattern)) {
-				return config
-			}
-		}
-
-		// Default fallback
-		return {
-			maxTokens: BEDROCK_MAX_TOKENS,
-			contextWindow: BEDROCK_DEFAULT_CONTEXT,
-			supportsImages: false,
-			supportsPromptCache: false,
-		}
-	}
-
 	override async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
@@ -380,6 +374,16 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		let additionalModelRequestFields: BedrockAdditionalModelFields | undefined
 		let thinkingEnabled = false
+		let adaptiveThinkingEffort: "low" | "medium" | "high" | undefined
+
+		// Resolve the base model id first so the thinking branch can decide between the
+		// legacy budget_tokens payload and the newer adaptive + output_config.effort payload.
+		// parseBaseModelId strips cross-region inference prefixes (e.g. `us.`, `eu.`) and the
+		// synthetic `:1m` dropdown suffix.
+		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		const requiresAdaptiveThinking = BEDROCK_ADAPTIVE_THINKING_MODEL_IDS.includes(
+			baseModelId as (typeof BEDROCK_ADAPTIVE_THINKING_MODEL_IDS)[number],
+		)
 
 		// Determine if thinking should be enabled
 		// metadata?.thinking?.enabled: Explicitly enabled through API metadata (direct request)
@@ -392,17 +396,42 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		if ((isThinkingExplicitlyEnabled || isThinkingEnabledBySettings) && modelConfig.info.supportsReasoningBudget) {
 			thinkingEnabled = true
-			additionalModelRequestFields = {
-				thinking: {
-					type: "enabled",
-					budget_tokens: metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096,
-				},
+			const effectiveBudget = metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096
+
+			if (requiresAdaptiveThinking) {
+				// Newer Claude models on Bedrock (e.g. Opus 4.7) reject the legacy
+				// `thinking: { type: "enabled", budget_tokens: N }` shape with:
+				//   invalid_request_error: "thinking.type.enabled" is not supported for this model.
+				//   Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.
+				// Honor that by emitting `thinking: { type: "adaptive" }` plus a top-level
+				// `output_config.effort`. Effort comes from the user's reasoningEffort setting
+				// when present, otherwise we derive it from the token budget.
+				adaptiveThinkingEffort =
+					normalizeReasoningEffortForBedrock(
+						(this.options as ProviderSettings & { reasoningEffort?: unknown }).reasoningEffort,
+					) ?? mapReasoningBudgetToBedrockEffort(effectiveBudget)
+				additionalModelRequestFields = {
+					thinking: { type: "adaptive" },
+				}
+				logger.info("Adaptive thinking enabled for Bedrock request", {
+					ctx: "bedrock",
+					modelId: modelConfig.id,
+					thinking: additionalModelRequestFields.thinking,
+					effort: adaptiveThinkingEffort,
+				})
+			} else {
+				additionalModelRequestFields = {
+					thinking: {
+						type: "enabled",
+						budget_tokens: effectiveBudget,
+					},
+				}
+				logger.info("Extended thinking enabled for Bedrock request", {
+					ctx: "bedrock",
+					modelId: modelConfig.id,
+					thinking: additionalModelRequestFields.thinking,
+				})
 			}
-			logger.info("Extended thinking enabled for Bedrock request", {
-				ctx: "bedrock",
-				modelId: modelConfig.id,
-				thinking: additionalModelRequestFields.thinking,
-			})
 		}
 
 		const inferenceConfig: BedrockInferenceConfig = {
@@ -410,15 +439,35 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			temperature: modelConfig.temperature ?? (this.options.modelTemperature as number),
 		}
 
-		// Check if 1M context is enabled for supported Claude 4 models
-		// Use parseBaseModelId to handle cross-region inference prefixes
-		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		// Check if 1M context is enabled for supported Claude 4 models.
+		// 1M is enabled when ANY of:
+		//   - the configured target id contains the `:1m` / `[1m]` indicator (user picked the
+		//     1M variant from the dropdown), OR
+		//   - the awsBedrock1MContext opt-in toggle is set by the user.
+		const configuredTargetForIndicator =
+			this.options.awsBedrockInvokeTarget || this.options.awsCustomArn || modelConfig.id
 		const is1MContextEnabled =
-			BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any) && this.options.awsBedrock1MContext
+			BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_1M_CONTEXT_MODEL_IDS)[number]) &&
+			shouldUseBedrock1MContext({
+				targetId: configuredTargetForIndicator,
+				baseModelId,
+				optIn1MContext: this.options.awsBedrock1MContext,
+			}).enabled
+
+		// AWS Bedrock Converse validates anthropic_beta against a per-model allow list
+		// and returns `invalid_request_error: invalid beta flag` for unknown values.
+		// Newer Claudes (Opus 4.7) have native 1M context and reject BOTH the 1M beta and
+		// the fine-grained-tool-streaming beta, so we must omit anthropic_beta entirely
+		// for those models. Older Claudes silently accept (and effectively ignore) them,
+		// so we keep the current behavior for them.
+		const skipAnthropicBetaFlags = BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS.includes(
+			baseModelId as (typeof BEDROCK_NATIVE_1M_CONTEXT_MODEL_IDS)[number],
+		)
 
 		// Determine if service tier should be applied (checked later when building payload)
 		const useServiceTier =
-			this.options.awsBedrockServiceTier && BEDROCK_SERVICE_TIER_MODEL_IDS.includes(baseModelId as any)
+			this.options.awsBedrockServiceTier &&
+			BEDROCK_SERVICE_TIER_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_SERVICE_TIER_MODEL_IDS)[number])
 		if (useServiceTier) {
 			logger.info("Service tier specified for Bedrock request", {
 				ctx: "bedrock",
@@ -431,15 +480,17 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// Start with an empty array and add betas as needed
 		const anthropicBetas: string[] = []
 
-		// Add 1M context beta if enabled
-		if (is1MContextEnabled) {
-			anthropicBetas.push("context-1m-2025-08-07")
-		}
+		if (!skipAnthropicBetaFlags) {
+			// Add 1M context beta if enabled
+			if (is1MContextEnabled) {
+				anthropicBetas.push("context-1m-2025-08-07")
+			}
 
-		// Add fine-grained tool streaming beta for Claude models
-		// This enables proper tool use streaming for Anthropic models on Bedrock
-		if (baseModelId.includes("claude")) {
-			anthropicBetas.push("fine-grained-tool-streaming-2025-05-14")
+			// Add fine-grained tool streaming beta for Claude models.
+			// This enables proper tool use streaming for Anthropic models on Bedrock.
+			if (baseModelId.includes("claude")) {
+				anthropicBetas.push("fine-grained-tool-streaming-2025-05-14")
+			}
 		}
 
 		// Apply anthropic_beta to additionalModelRequestFields if any betas are needed
@@ -450,15 +501,21 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			additionalModelRequestFields.anthropic_beta = anthropicBetas
 		}
 
-		const toolConfig: ToolConfiguration = {
-			tools: this.convertToolsForBedrock(metadata?.tools ?? []),
-			toolChoice: this.convertToolChoiceForBedrock(metadata?.tool_choice),
-		}
+		// Decide whether to attempt strict structured output on this request. The profile
+		// toggle defaults to ON (enabled when the setting is missing). Strict is only useful
+		// when native tools are present, and we skip it for models we've cached as
+		// unsupported (30-day TTL, see bedrock-structured-output-cache helper).
+		const profileWantsStructuredOutput = this.options.awsBedrockStructuredOutput ?? true
+		const haveNativeTools = (metadata?.tools?.length ?? 0) > 0
+		const modelKnownUnsupported = metadata?.isModelStructuredOutputUnsupported?.(modelConfig.id) ?? false
+		let useStrictStructuredOutput = profileWantsStructuredOutput && haveNativeTools && !modelKnownUnsupported
 
-		// Build payload with optional service_tier at top level
-		// Service tier is a top-level parameter per AWS documentation, NOT inside additionalModelRequestFields
-		// https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html
-		const payload: BedrockPayloadWithServiceTier = {
+		const buildToolConfig = (strict: boolean): ToolConfiguration => ({
+			tools: this.convertToolsForBedrock(metadata?.tools ?? [], { strict }),
+			toolChoice: this.convertToolChoiceForBedrock(metadata?.tool_choice),
+		})
+
+		const buildPayload = (strict: boolean): BedrockPayloadWithServiceTier => ({
 			modelId: modelConfig.id,
 			messages: formatted.messages,
 			system: formatted.system,
@@ -466,10 +523,25 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(additionalModelRequestFields && { additionalModelRequestFields }),
 			// Add anthropic_version at top level when using thinking features
 			...(thinkingEnabled && { anthropic_version: "bedrock-2023-05-31" }),
-			toolConfig,
+			// Adaptive-thinking models require the effort knob at the top level alongside
+			// `thinking: { type: "adaptive" }` inside additionalModelRequestFields.
+			...(adaptiveThinkingEffort && { output_config: { effort: adaptiveThinkingEffort } }),
+			toolConfig: buildToolConfig(strict),
 			// Add service_tier as a top-level parameter (not inside additionalModelRequestFields)
 			...(useServiceTier && { service_tier: this.options.awsBedrockServiceTier }),
-		}
+		})
+
+		let payload: BedrockPayloadWithServiceTier = buildPayload(useStrictStructuredOutput)
+
+		// Schema-compile backoff parameters. AWS docs say first-time compilation can take
+		// "up to a few minutes"; we cap total wait at 180s over at most 6 attempts.
+		const COMPILE_INITIAL_DELAY_MS = 3000
+		const COMPILE_GROWTH_FACTOR = 1.7
+		const COMPILE_MAX_STEP_MS = 45_000
+		const COMPILE_MAX_TOTAL_MS = 180_000
+		const COMPILE_MAX_ATTEMPTS = 6
+		let compileAttempts = 0
+		let compileCumulativeMs = 0
 
 		// Create AbortController with 10 minute timeout
 		const controller = new AbortController()
@@ -483,12 +555,85 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				10 * 60 * 1000,
 			)
 
-			const command = new ConverseStreamCommand(payload)
-			const response = await this.client.send(command, {
-				abortSignal: controller.signal,
-			})
+			// Retry wrapper for silent recovery from two Bedrock-specific failures at
+			// command-send time (before any stream chunks are yielded):
+			// 1. STRUCTURED_OUTPUT_UNSUPPORTED (400) — strip strict and retry once
+			// 2. STRUCTURED_OUTPUT_COMPILING (400/503) — wait with backoff and retry
+			// Other errors (and any error thrown once the stream has started) fall through
+			// to the existing error handler below.
+			let response: ConverseStreamCommandOutput | undefined
+			while (true) {
+				try {
+					const command = new ConverseStreamCommand(payload)
+					response = await this.client.send(command, {
+						abortSignal: controller.signal,
+					})
+					break
+				} catch (innerError: unknown) {
+					const innerType = this.getErrorType(innerError)
 
-			if (!response.stream) {
+					// STRUCTURED_OUTPUT_UNSUPPORTED: cache the model as unsupported, emit a
+					// user-visible notice containing the verbatim Bedrock error, and retry
+					// once with strict mode stripped.
+					if (innerType === "STRUCTURED_OUTPUT_UNSUPPORTED" && useStrictStructuredOutput) {
+						metadata?.markModelStructuredOutputUnsupported?.(modelConfig.id)
+						const notice = this.formatErrorMessage(innerError, innerType, true)
+						logger.warn(notice, {
+							ctx: "bedrock",
+							modelId: modelConfig.id,
+							errorType: innerType,
+							errorMessage: innerError instanceof Error ? innerError.message : String(innerError),
+						})
+						yield { type: "text", text: notice + "\n" }
+						useStrictStructuredOutput = false
+						payload = buildPayload(false)
+						continue // retry without strict
+					}
+
+					// STRUCTURED_OUTPUT_COMPILING: Bedrock is compiling the schema grammar
+					// for first-time use. Wait with bounded exponential backoff and poll.
+					if (
+						innerType === "STRUCTURED_OUTPUT_COMPILING" &&
+						compileAttempts < COMPILE_MAX_ATTEMPTS &&
+						compileCumulativeMs < COMPILE_MAX_TOTAL_MS
+					) {
+						const delay = Math.min(
+							COMPILE_INITIAL_DELAY_MS * Math.pow(COMPILE_GROWTH_FACTOR, compileAttempts),
+							COMPILE_MAX_STEP_MS,
+						)
+						const waitSec = Math.round(delay / 1000)
+						const notice = `Bedrock is compiling the tool schema for ${modelConfig.id}. First-time compilation can take a few minutes. Waiting ${waitSec}s before retry ${compileAttempts + 2}/${COMPILE_MAX_ATTEMPTS + 1}...`
+						logger.info(notice, {
+							ctx: "bedrock",
+							modelId: modelConfig.id,
+							errorType: innerType,
+							attempt: compileAttempts + 1,
+						})
+						yield { type: "text", text: notice + "\n" }
+						await new Promise<void>((resolve, reject) => {
+							const handle = setTimeout(resolve, delay)
+							const onAbort = () => {
+								clearTimeout(handle)
+								reject(new Error("Request aborted while waiting for Bedrock schema compile"))
+							}
+							if (controller.signal.aborted) {
+								clearTimeout(handle)
+								reject(new Error("Request aborted before Bedrock schema compile wait"))
+							} else {
+								controller.signal.addEventListener("abort", onAbort, { once: true })
+							}
+						})
+						compileCumulativeMs += delay
+						compileAttempts++
+						continue // poll again
+					}
+
+					// Any other error — or exhausted retry budgets — propagate to the outer handler.
+					throw innerError
+				}
+			}
+
+			if (!response || !response.stream) {
 				clearTimeout(timeoutId)
 				throw new Error("No stream available in the response")
 			}
@@ -682,9 +827,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			// Clear timeout on error
 			clearTimeout(timeoutId)
 
-			// Capture error in telemetry before processing
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, modelConfig.id, "createMessage")
+			const telemetryErrorMessage = error instanceof Error ? error.message : String(error)
+			const apiError = new ApiProviderError(
+				telemetryErrorMessage,
+				this.providerName,
+				this.getModel().id,
+				"createMessage",
+			)
 			TelemetryService.instance.captureException(apiError)
 
 			// Check if this is a throttling error that should trigger retry logic
@@ -790,7 +939,6 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 			return ""
 		} catch (error) {
-			// Capture error in telemetry
 			const model = this.getModel()
 			const telemetryErrorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(telemetryErrorMessage, this.providerName, model.id, "completePrompt")
@@ -845,6 +993,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Convert model info to expected format for cache strategy
+		const promptCacheTtl = normalizeBedrockPromptCacheTtl(modelInfo?.promptCacheTtl)
 		const cacheModelInfo: CacheModelInfo = {
 			maxTokens: modelInfo?.maxTokens || 8192,
 			contextWindow: modelInfo?.contextWindow || 200_000,
@@ -852,6 +1001,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			maxCachePoints: modelInfo?.maxCachePoints || 0,
 			minTokensPerCachePoint: modelInfo?.minTokensPerCachePoint || 50,
 			cachableFields: modelInfo?.cachableFields || [],
+			promptCacheTtl,
 		}
 
 		// Get previous cache point placements for this conversation if available
@@ -884,7 +1034,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			if (placement) {
 				return {
 					...msg,
-					content: [...(msg.content || []), { cachePoint: { type: "default" } } as ContentBlock],
+					content: [...(msg.content || []), createBedrockCachePointContentBlock(promptCacheTtl)],
 				}
 			}
 			return msg
@@ -987,62 +1137,46 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 	//This strips any region prefix that used on cross-region model inference ARNs
 	private parseBaseModelId(modelId: string): string {
-		if (!modelId) {
-			return modelId
-		}
+		return parseBedrockBaseModelId(modelId)
+	}
 
-		// Remove AWS cross-region inference profile prefixes
-		// as defined in AWS_INFERENCE_PROFILE_MAPPING
-		for (const [_, inferenceProfile] of AWS_INFERENCE_PROFILE_MAPPING) {
-			if (modelId.startsWith(inferenceProfile)) {
-				// Remove the inference profile prefix from the model ID
-				return modelId.substring(inferenceProfile.length)
-			}
-		}
-
-		// Also strip Global Inference profile prefix if present
-		if (modelId.startsWith("global.")) {
-			return modelId.substring("global.".length)
-		}
-
-		// Return the model ID as-is for all other cases
-		return modelId
+	private getScopedMaxOutputTokensOverride(): number | undefined {
+		return resolveBedrockMaxOutputTokensOverride({
+			currentTargetId: resolveBedrockInvokeTargetId(this.options),
+			overrideTargetId: this.options.awsModelMaxOutputTokensTargetId,
+			maxOutputTokensOverride: this.options.awsModelMaxOutputTokens,
+		})
 	}
 
 	//Prompt Router responses come back in a different sequence and the model used is in the response and must be fetched by name
 	getModelById(modelId: string, modelType?: string): { id: BedrockModelId | string; info: ModelInfo } {
-		// Try to find the model in bedrockModels
-		const baseModelId = this.parseBaseModelId(modelId) as BedrockModelId
-
 		let model
-		if (baseModelId in bedrockModels) {
+		const resolved = resolveBedrockModelInfo({
+			baseModelId: this.parseBaseModelId(modelId),
+			targetId: modelId,
+			optIn1MContext: this.options.awsBedrock1MContext,
+			modelMaxTokens: this.options.modelMaxTokens,
+			contextWindowOverride: this.options.awsModelContextWindow,
+			// Empirically detected per-config max output tokens (from the "Detect" probe in the
+			// settings UI) widens the static cap only for the exact AWS target that was probed.
+			maxOutputTokensOverride: this.getScopedMaxOutputTokensOverride(),
+		})
+
+		if (resolved.baseModelId in bedrockModels) {
 			//Do a deep copy of the model info so that later in the code the model id and maxTokens can be set.
 			// The bedrockModels array is a constant and updating the model ID from the returned invokedModelID value
 			// in a prompt router response isn't possible on the constant.
-			model = { id: baseModelId, info: JSON.parse(JSON.stringify(bedrockModels[baseModelId])) }
+			model = { id: resolved.baseModelId, info: resolved.info }
 		} else if (modelType && modelType.includes("router")) {
 			model = {
 				id: bedrockDefaultPromptRouterModelId,
 				info: JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultPromptRouterModelId])),
 			}
 		} else {
-			// Use heuristics for model info, then allow overrides from ProviderSettings
-			const guessed = this.guessModelInfoFromId(modelId)
 			model = {
-				id: bedrockDefaultModelId,
-				info: {
-					...JSON.parse(JSON.stringify(bedrockModels[bedrockDefaultModelId])),
-					...guessed,
-				},
+				id: resolved.baseModelId || bedrockDefaultModelId,
+				info: resolved.info,
 			}
-		}
-
-		// Always allow user to override detected/guessed maxTokens and contextWindow
-		if (this.options.modelMaxTokens && this.options.modelMaxTokens > 0) {
-			model.info.maxTokens = this.options.modelMaxTokens
-		}
-		if (this.options.awsModelContextWindow && this.options.awsModelContextWindow > 0) {
-			model.info.contextWindow = this.options.awsModelContextWindow
 		}
 
 		return model
@@ -1069,6 +1203,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		let modelConfig = undefined
+		const explicitTargetKind = this.options.awsCustomArn
+			? "custom-arn"
+			: inferBedrockInvokeTargetKind({
+					targetId: this.options.awsBedrockInvokeTarget || (this.options.apiModelId as string),
+					explicitKind: this.options.awsBedrockTargetKind,
+				})
 
 		// If custom ARN is provided, use it
 		if (this.options.awsCustomArn) {
@@ -1079,22 +1219,41 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			//Otherwise the ARN is not a foundation-model resource type that ARN should be used as the identifier in Bedrock interactions
 			if (this.arnInfo.modelType !== "foundation-model") modelConfig.id = this.options.awsCustomArn
 		} else {
-			//a model was selected from the drop down
-			modelConfig = this.getModelById(this.options.apiModelId as string)
+			const configuredTargetId = this.options.awsBedrockInvokeTarget || (this.options.apiModelId as string)
 
-			// Apply Global Inference prefix if enabled and supported (takes precedence over cross-region)
-			const baseIdForGlobal = this.parseBaseModelId(modelConfig.id)
+			// A discovered/profile target was explicitly selected, so invoke it directly.
 			if (
-				this.options.awsUseGlobalInference &&
-				BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(baseIdForGlobal as any)
+				explicitTargetKind === "system-profile" ||
+				explicitTargetKind === "application-profile" ||
+				explicitTargetKind === "prompt-router"
 			) {
-				modelConfig.id = `global.${baseIdForGlobal}`
-			}
-			// Otherwise, add cross-region inference prefix if enabled
-			else if (this.options.awsUseCrossRegionInference && this.options.awsRegion) {
-				const prefix = AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)
-				if (prefix) {
-					modelConfig.id = `${prefix}${modelConfig.id}`
+				modelConfig = this.getModelById(configuredTargetId)
+				// Strip any synthetic `:1m` (or `[1m]`) suffix before sending to AWS.
+				// The suffix is purely a UI marker for the 1M-context variant and is not
+				// a real part of the AWS inference profile / foundation model id.
+				// The 1M context-window and `context-1m-2025-08-07` beta header have
+				// already been applied inside getModelById via resolveBedrockModelInfo.
+				modelConfig.id = stripBedrock1MContextSuffix(configuredTargetId)
+			} else {
+				// A foundation model was selected, so optional routing toggles still apply.
+				modelConfig = this.getModelById(configuredTargetId)
+
+				// Apply Global Inference prefix if enabled and supported (takes precedence over cross-region)
+				const baseIdForGlobal = this.parseBaseModelId(modelConfig.id)
+				if (
+					this.options.awsUseGlobalInference &&
+					BEDROCK_GLOBAL_INFERENCE_MODEL_IDS.includes(
+						baseIdForGlobal as (typeof BEDROCK_GLOBAL_INFERENCE_MODEL_IDS)[number],
+					)
+				) {
+					modelConfig.id = `global.${baseIdForGlobal}`
+				}
+				// Otherwise, add cross-region inference prefix if enabled
+				else if (this.options.awsUseCrossRegionInference && this.options.awsRegion) {
+					const prefix = AwsBedrockHandler.getPrefixForRegion(this.options.awsRegion)
+					if (prefix) {
+						modelConfig.id = `${prefix}${modelConfig.id}`
+					}
 				}
 			}
 		}
@@ -1102,7 +1261,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// Check if 1M context is enabled for supported Claude 4 models
 		// Use parseBaseModelId to handle cross-region inference prefixes
 		const baseModelId = this.parseBaseModelId(modelConfig.id)
-		if (BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any) && this.options.awsBedrock1MContext) {
+		if (
+			BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as (typeof BEDROCK_1M_CONTEXT_MODEL_IDS)[number]) &&
+			this.options.awsBedrock1MContext
+		) {
 			// Update context window and pricing to 1M tier when 1M context beta is enabled
 			const tier = modelConfig.info.tiers?.[0]
 			modelConfig.info = {
@@ -1126,7 +1288,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		// Apply service tier pricing if specified and model supports it
 		const baseModelIdForTier = this.parseBaseModelId(modelConfig.id)
-		if (this.options.awsBedrockServiceTier && BEDROCK_SERVICE_TIER_MODEL_IDS.includes(baseModelIdForTier as any)) {
+		if (
+			this.options.awsBedrockServiceTier &&
+			BEDROCK_SERVICE_TIER_MODEL_IDS.includes(
+				baseModelIdForTier as (typeof BEDROCK_SERVICE_TIER_MODEL_IDS)[number],
+			)
+		) {
 			const pricingMultiplier = BEDROCK_SERVICE_TIER_PRICING[this.options.awsBedrockServiceTier]
 			if (pricingMultiplier && pricingMultiplier !== 1.0) {
 				// Apply pricing multiplier to all price fields
@@ -1204,26 +1371,49 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	/**
 	 * Convert OpenAI tool definitions to Bedrock Converse format
 	 * Transforms JSON Schema to draft 2020-12 compliant format required by Claude models.
+	 * When `opts.strict` is true, sets `strict: true` on each toolSpec so Bedrock enforces
+	 * the tool input schema (structured output). Models that don't support strict return a
+	 * 400 ValidationException; the caller is responsible for detecting that and retrying.
 	 * @param tools Array of OpenAI ChatCompletionTool definitions
+	 * @param opts Configuration options; `strict` enables Bedrock strict structured output.
 	 * @returns Array of Bedrock Tool definitions
 	 */
-	private convertToolsForBedrock(tools: OpenAI.Chat.ChatCompletionTool[]): Tool[] {
+	private convertToolsForBedrock(
+		tools: OpenAI.Chat.ChatCompletionTool[],
+		opts: { strict: boolean } = { strict: false },
+	): Tool[] {
 		return tools
 			.filter((tool) => tool.type === "function")
-			.map(
-				(tool) =>
-					({
-						toolSpec: {
-							name: tool.function.name,
-							description: tool.function.description,
-							inputSchema: {
-								// Normalize schema to JSON Schema draft 2020-12 compliant format
-								// This converts type: ["T", "null"] to anyOf: [{type: "T"}, {type: "null"}]
-								json: normalizeToolSchema(tool.function.parameters as Record<string, unknown>),
-							},
-						},
-					}) as Tool,
-			)
+			.map((tool) => {
+				// The AWS SDK's `ToolSpecification` type doesn't yet expose the `strict` field,
+				// so we build it as a locally-typed object and cast. The field is supported by
+				// the Converse API for models that advertise structured-output capability.
+				// Normalize schema to JSON Schema draft 2020-12 compliant format.
+				// Then, when strict is enabled, strip Bedrock-incompatible constraints
+				// (numeric `minimum`/`maximum`/etc., array `maxItems`, array `minItems > 1`)
+				// that Bedrock strict mode rejects even on supported models. Stripped values
+				// are appended to the schema's description so the model still sees them as hints.
+				let inputSchemaJson = normalizeToolSchema(tool.function.parameters as Record<string, unknown>)
+				if (opts.strict) {
+					inputSchemaJson = stripBedrockStrictIncompatibleConstraints(inputSchemaJson)
+				}
+				const toolSpec: {
+					name: string
+					description?: string
+					inputSchema: { json: Record<string, unknown> }
+					strict?: boolean
+				} = {
+					name: tool.function.name,
+					description: tool.function.description,
+					inputSchema: {
+						json: inputSchemaJson,
+					},
+				}
+				if (opts.strict) {
+					toolSpec.strict = true
+				}
+				return { toolSpec } as unknown as Tool
+			})
 	}
 
 	/**
@@ -1452,6 +1642,35 @@ Please check:
 - Model ID is correct for the requested features`,
 			logLevel: "error",
 		},
+		STRUCTURED_OUTPUT_UNSUPPORTED: {
+			patterns: [
+				"does not support strict",
+				"strict is not supported",
+				"strict schema is not supported",
+				"structured output is not supported",
+				"strict tool",
+				"strict mode is not supported",
+				"strict: true",
+				"textformat is not supported",
+				"output_config is not supported",
+				"outputconfig.textformat",
+			],
+			messageTemplate: `Model {modelId} does not appear to support strict structured output. Bedrock returned: {errorMessage}. Disabling structured output for this model for 30 days; retrying without strict mode.`,
+			logLevel: "warn",
+		},
+		STRUCTURED_OUTPUT_COMPILING: {
+			patterns: [
+				"schema is being compiled",
+				"schema compilation in progress",
+				"compiling schema",
+				"compiling grammar",
+				"grammar compilation",
+				"schema is being prepared",
+				"schema compile",
+			],
+			messageTemplate: `Bedrock is compiling the tool schema for {modelId}. First-time compilation can take a few minutes. Waiting and retrying...`,
+			logLevel: "info",
+		},
 		// Default/generic error
 		GENERIC: {
 			patterns: [], // Empty patterns array means this is the default
@@ -1480,6 +1699,36 @@ Please check:
 
 		const errorMessage = error.message.toLowerCase()
 		const errorName = error.name.toLowerCase()
+		const httpStatus =
+			typeof (error as any).status === "number"
+				? (error as any).status
+				: typeof (error as any).$metadata?.httpStatusCode === "number"
+					? (error as any).$metadata.httpStatusCode
+					: undefined
+
+		// Structured output errors are checked first so they don't get swallowed by the
+		// broad VALIDATION_ERROR / INTERNAL_SERVER_ERROR patterns. Gated by HTTP status
+		// to avoid misclassifying unrelated 4xx/5xx errors that happen to mention "schema".
+		if (httpStatus === 400 || httpStatus === undefined) {
+			const structuredUnsupported = AwsBedrockHandler.ERROR_TYPES.STRUCTURED_OUTPUT_UNSUPPORTED
+			if (
+				structuredUnsupported.patterns.some(
+					(pattern) => errorMessage.includes(pattern) || errorName.includes(pattern),
+				)
+			) {
+				return "STRUCTURED_OUTPUT_UNSUPPORTED"
+			}
+		}
+		if (httpStatus === 400 || httpStatus === 503 || httpStatus === undefined) {
+			const structuredCompiling = AwsBedrockHandler.ERROR_TYPES.STRUCTURED_OUTPUT_COMPILING
+			if (
+				structuredCompiling.patterns.some(
+					(pattern) => errorMessage.includes(pattern) || errorName.includes(pattern),
+				)
+			) {
+				return "STRUCTURED_OUTPUT_COMPILING"
+			}
+		}
 
 		// Check each error type's patterns in order of specificity (most specific first)
 		const errorTypeOrder = [
