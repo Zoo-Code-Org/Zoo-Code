@@ -295,10 +295,28 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				// Has ======= but missing >>>>>>> REPLACE — append closing marker
 				const body = block.replace(/\s+$/, "")
 				repaired += body + "\n>>>>>>> REPLACE" + separator
+			} else if (hasCloser && !hasSeparator) {
+				// Has >>>>>>> REPLACE but missing the ======= separator. Don't synthesize a
+				// second closer; splice the separator in right before the existing closer so
+				// everything above it becomes the SEARCH section.
+				const body = block.replace(/\s+$/, "")
+				repaired += body.replace(/(\n)(>>>>>>> REPLACE)(?=\n|$)/, "$1=======\n$2") + separator
 			} else {
-				// Missing both ======= and >>>>>>> REPLACE
+				// Missing both ======= and >>>>>>> REPLACE.
 				const searchMatch = block.match(/^<<<<<<< SEARCH\n?([\s\S]*)$/)
-				const content = (searchMatch?.[1] ?? "").replace(/\s+$/, "")
+				let content = (searchMatch?.[1] ?? "").replace(/\s+$/, "")
+
+				// Peel off any leading Grok header directives (:start_line:, :end_line:, -------)
+				// so the "first line is SEARCH" heuristic sees real content, not metadata. The
+				// directives are preserved as a header on the SEARCH section.
+				let header = ""
+				const directiveLine = /^(?::start_line:\s*\d+|:end_line:\s*\d+|-------)\s*$/
+				let nlIdx: number
+				while ((nlIdx = content.indexOf("\n")) !== -1 && directiveLine.test(content.slice(0, nlIdx))) {
+					header += content.slice(0, nlIdx + 1)
+					content = content.slice(nlIdx + 1)
+				}
+
 				const firstNewlineIdx = content.indexOf("\n")
 				if (firstNewlineIdx !== -1) {
 					// First line is SEARCH content, rest is REPLACE content
@@ -306,11 +324,16 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					const replaceContent = content.substring(firstNewlineIdx + 1)
 					repaired +=
 						"<<<<<<< SEARCH\n" +
+						header +
 						searchContent +
 						"\n=======\n" +
 						replaceContent +
 						"\n>>>>>>> REPLACE" +
 						separator
+				} else if (header) {
+					// Only a directive header plus a single content line: that line is the SEARCH
+					// target (the user pinned it with start_line); the REPLACE section is empty.
+					repaired += "<<<<<<< SEARCH\n" + header + content + "\n=======\n\n>>>>>>> REPLACE" + separator
 				} else {
 					// Single line — treat as empty SEARCH with content as REPLACE
 					repaired += "<<<<<<< SEARCH\n=======\n" + content + "\n>>>>>>> REPLACE" + separator
@@ -329,9 +352,9 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 	): Promise<DiffResult> {
 		// Repair truncated diffs before validation (common with Grok and other models
 		// whose output gets cut off mid-stream, leaving missing ======= and >>>>>>> REPLACE markers)
-		diffContent = this.repairTruncatedDiff(diffContent)
+		const repairedDiff = this.repairTruncatedDiff(diffContent)
 
-		const validseq = this.validateMarkerSequencing(diffContent)
+		const validseq = this.validateMarkerSequencing(repairedDiff)
 		if (!validseq.success) {
 			return {
 				success: false,
@@ -371,7 +394,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 		*/
 
 		let matches = [
-			...diffContent.matchAll(
+			...repairedDiff.matchAll(
 				/(?:^|\n)(?<!\\)<<<<<<< SEARCH>?\s*\n((?:\:start_line:\s*(\d+)\s*\n))?((?:\:end_line:\s*(\d+)\s*\n))?((?<!\\)-------\s*\n)?([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)=======\s*\n)([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)>>>>>>> REPLACE)(?=\n|$)/g,
 			),
 		]

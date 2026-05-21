@@ -1286,6 +1286,44 @@ function sum(a, b) {
 			const result = strategy["repairTruncatedDiff"](diff)
 			expect(result).toBe("<<<<<<< SEARCH\n" + "original\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE")
 		})
+
+		it("inserts ======= before an existing closer instead of synthesizing a second one", () => {
+			// Has >>>>>>> REPLACE but no ======= separator.
+			const diff = "<<<<<<< SEARCH\n" + "old line\n" + ">>>>>>> REPLACE"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe("<<<<<<< SEARCH\n" + "old line\n" + "=======\n" + ">>>>>>> REPLACE")
+			// Exactly one closer, exactly one separator.
+			expect(result.match(/>>>>>>> REPLACE/g)).toHaveLength(1)
+			expect(result.match(/^=======$/gm)).toHaveLength(1)
+		})
+
+		it("preserves :start_line: / ------- directives instead of treating them as SEARCH content", () => {
+			const diff = "<<<<<<< SEARCH\n" + ":start_line:5\n" + "-------\n" + "old line\n" + "new line"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" +
+					":start_line:5\n" +
+					"-------\n" +
+					"old line\n" +
+					"=======\n" +
+					"new line\n" +
+					">>>>>>> REPLACE",
+			)
+		})
+
+		it("treats a single content line after a directive header as the SEARCH target", () => {
+			const diff = "<<<<<<< SEARCH\n" + ":start_line:5\n" + "-------\n" + "old line"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" +
+					":start_line:5\n" +
+					"-------\n" +
+					"old line\n" +
+					"=======\n" +
+					"\n" +
+					">>>>>>> REPLACE",
+			)
+		})
 	})
 
 	// Regression guards for #186: Grok sometimes truncates the streamed diff and drops
