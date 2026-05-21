@@ -86,6 +86,27 @@ async function main() {
 			},
 		},
 		{
+			name: "copyRipgrep",
+			setup(build) {
+				build.onEnd(async () => {
+					// Copy the ripgrep binary into dist/bin/ so it ships inside the
+					// VSIX. getBinPath() in src/services/ripgrep/index.ts falls back
+					// to this bundled copy when ripgrep cannot be located in the VS
+					// Code installation (e.g. VS Code Insiders' staged-install layout).
+					const { rgPath } = await import("@vscode/ripgrep")
+					if (!rgPath) {
+						throw new Error("[copyRipgrep] @vscode/ripgrep did not provide rgPath")
+					}
+					const rgDestDir = path.join(distDir, "bin")
+					fs.mkdirSync(rgDestDir, { recursive: true })
+					const rgDest = path.join(rgDestDir, path.basename(rgPath))
+					fs.copyFileSync(rgPath, rgDest)
+					fs.chmodSync(rgDest, 0o755)
+					console.log(`[copyRipgrep] Copied ${rgPath} to ${rgDest}`)
+				})
+			},
+		},
+		{
 			name: "copyWasms",
 			setup(build) {
 				build.onEnd(() => copyWasms(srcDir, distDir))
