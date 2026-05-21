@@ -1287,4 +1287,53 @@ function sum(a, b) {
 			expect(result).toBe("<<<<<<< SEARCH\n" + "original\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE")
 		})
 	})
+
+	// Regression guards for #186: Grok sometimes truncates the streamed diff and drops
+	// the closing markers, which previously surfaced as "Unable to apply diff - Expected
+	// '=======' was not found". These fixtures exercise the full applyDiff() path end-to-end.
+	describe("truncated Grok diff regression (#186)", () => {
+		const grokStrategy = new MultiSearchReplaceDiffStrategy(1.0, 5)
+		const originalContent = 'function greet() {\n\treturn "hello"\n}\n'
+		const expectedContent = 'function greet() {\n\treturn "hi there"\n}\n'
+
+		it("applies a diff whose closing >>>>>>> REPLACE marker was truncated", async () => {
+			const diff =
+				"src/greet.ts\n" + "<<<<<<< SEARCH\n" + '\treturn "hello"\n' + "=======\n" + '\treturn "hi there"'
+			const result = await grokStrategy.applyDiff(originalContent, diff)
+			expect(result.success).toBe(true)
+			if (result.success) {
+				expect(result.content).toBe(expectedContent)
+			}
+		})
+
+		it("applies a diff truncated before the ======= separator", async () => {
+			const diff = "src/greet.ts\n" + "<<<<<<< SEARCH\n" + '\treturn "hello"\n' + '\treturn "hi there"'
+			const result = await grokStrategy.applyDiff(originalContent, diff)
+			expect(result.success).toBe(true)
+			if (result.success) {
+				expect(result.content).toBe(expectedContent)
+			}
+		})
+
+		it("leaves a well-formed multi-block diff unchanged", async () => {
+			const multiBlock = "export const a = 1\nexport const b = 2\n"
+			const diff =
+				"src/consts.ts\n" +
+				"<<<<<<< SEARCH\n" +
+				"export const a = 1\n" +
+				"=======\n" +
+				"export const a = 10\n" +
+				">>>>>>> REPLACE\n" +
+				"<<<<<<< SEARCH\n" +
+				"export const b = 2\n" +
+				"=======\n" +
+				"export const b = 20\n" +
+				">>>>>>> REPLACE"
+			const result = await grokStrategy.applyDiff(multiBlock, diff)
+			expect(result.success).toBe(true)
+			if (result.success) {
+				expect(result.content).toBe("export const a = 10\nexport const b = 20\n")
+			}
+		})
+	})
 })
