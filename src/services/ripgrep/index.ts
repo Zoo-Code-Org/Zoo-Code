@@ -80,7 +80,21 @@ export function truncateLine(line: string, maxLength: number = MAX_LINE_LENGTH):
 	return line.length > maxLength ? line.substring(0, maxLength) + " [truncated...]" : line
 }
 /**
- * Get the path to the ripgrep binary within the VSCode installation
+ * Path to the ripgrep binary bundled inside the extension itself.
+ *
+ * esbuild copies the platform `rg`/`rg.exe` into `dist/bin/` at build time
+ * (see the `copyRipgrep` plugin in esbuild.mjs). At runtime this module is
+ * bundled into `dist/extension.js`, so `__dirname` is the extension's `dist/`
+ * directory.
+ */
+export const bundledRgPath = path.join(__dirname, "bin", binName)
+
+/**
+ * Get the path to the ripgrep binary.
+ *
+ * Prefers the copy shipped inside the VS Code installation; falls back to the
+ * binary bundled with this extension when the VS Code copy cannot be located
+ * (e.g. VS Code Insiders' staged-install layout, see microsoft/vscode#252063).
  */
 export async function getBinPath(vscodeAppRoot: string): Promise<string | undefined> {
 	const checkPath = async (pkgFolder: string) => {
@@ -92,7 +106,8 @@ export async function getBinPath(vscodeAppRoot: string): Promise<string | undefi
 		(await checkPath("node_modules/@vscode/ripgrep/bin/")) ||
 		(await checkPath("node_modules/vscode-ripgrep/bin")) ||
 		(await checkPath("node_modules.asar.unpacked/vscode-ripgrep/bin/")) ||
-		(await checkPath("node_modules.asar.unpacked/@vscode/ripgrep/bin/"))
+		(await checkPath("node_modules.asar.unpacked/@vscode/ripgrep/bin/")) ||
+		((await fileExistsAtPath(bundledRgPath)) ? bundledRgPath : undefined)
 	)
 }
 

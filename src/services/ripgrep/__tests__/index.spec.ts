@@ -1,6 +1,16 @@
 // npx vitest run src/services/ripgrep/__tests__/index.spec.ts
 
-import { truncateLine } from "../index"
+import path from "path"
+import { vi, describe, it, expect, beforeEach } from "vitest"
+
+import { truncateLine, getBinPath, bundledRgPath } from "../index"
+import { fileExistsAtPath } from "../../../utils/fs"
+
+vi.mock("../../../utils/fs", () => ({
+	fileExistsAtPath: vi.fn(),
+}))
+
+const mockFileExists = vi.mocked(fileExistsAtPath)
 
 describe("Ripgrep line truncation", () => {
 	// The default MAX_LINE_LENGTH is 500 in the implementation
@@ -46,5 +56,40 @@ describe("Ripgrep line truncation", () => {
 
 		expect(truncated.length).toEqual(customLength + " [truncated...]".length)
 		expect(truncated).toContain("[truncated...]")
+	})
+})
+
+describe("getBinPath bundled-ripgrep fallback", () => {
+	beforeEach(() => {
+		mockFileExists.mockReset()
+	})
+
+	it("falls back to the bundled ripgrep when ripgrep is absent under the VS Code app root", async () => {
+		// VS Code Insiders' staged-install layout: nothing under appRoot.
+		mockFileExists.mockImplementation(async (p: string) => p === bundledRgPath)
+
+		const result = await getBinPath("/fake/vscode/app/root")
+
+		expect(result).toBe(bundledRgPath)
+	})
+
+	it("prefers VS Code's own ripgrep over the bundled copy", async () => {
+		const appRoot = "/fake/vscode/app/root"
+		// Derive the binary name from bundledRgPath so this test tracks the
+		// module's own platform logic instead of duplicating it.
+		const vscodeRg = path.join(appRoot, "node_modules/@vscode/ripgrep/bin", path.basename(bundledRgPath))
+		mockFileExists.mockImplementation(async (p: string) => p === vscodeRg || p === bundledRgPath)
+
+		const result = await getBinPath(appRoot)
+
+		expect(result).toBe(vscodeRg)
+	})
+
+	it("returns undefined when ripgrep exists nowhere", async () => {
+		mockFileExists.mockResolvedValue(false)
+
+		const result = await getBinPath("/fake/vscode/app/root")
+
+		expect(result).toBeUndefined()
 	})
 })
