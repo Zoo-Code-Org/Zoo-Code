@@ -366,9 +366,9 @@
 		},
 		"release": {
 			"heading": "Yang Baru:",
-			"gpt55": "Provider Xiaomi MiMo: Xiaomi MiMo ditambahkan sebagai provider API kelas utama agar kamu bisa mengatur model MiMo langsung di Zoo Code.",
-			"claudeOpus47": "Handoff upstream Zoo Code: Merge upstream sunset terbaru dan pembaruan platform terkait diambil agar Zoo Code tetap selaras dengan kerja handoff komunitas.",
-			"checkpointNav": "Perbaikan stabilitas di chat dan provider: Memperbaiki teks sign-in MCP, request Gemini dengan tool set penuh, penanganan temperature OpenAI, dan render Markdown untuk single tilde."
+			"highlight1": "Provider Xiaomi MiMo: Xiaomi MiMo ditambahkan sebagai provider API kelas utama agar kamu bisa mengatur model MiMo langsung di Zoo Code.",
+			"highlight2": "Handoff upstream Zoo Code: Merge upstream sunset terbaru dan pembaruan platform terkait diambil agar Zoo Code tetap selaras dengan kerja handoff komunitas.",
+			"highlight3": "Perbaikan stabilitas di chat dan provider: Memperbaiki teks sign-in MCP, request Gemini dengan tool set penuh, penanganan temperature OpenAI, dan render Markdown untuk single tilde."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

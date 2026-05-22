@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "Novetats:",
-			"gpt55": "Proveïdor Xiaomi MiMo: S'ha afegit Xiaomi MiMo com a proveïdor d'API de primer nivell perquè puguis configurar els models MiMo directament a Zoo Code.",
-			"claudeOpus47": "Traspàs upstream de Zoo Code: S'ha incorporat l'última fusió upstream del sunset i les actualitzacions relacionades de la plataforma per mantenir Zoo Code alineat amb el treball de traspàs de la comunitat.",
-			"checkpointNav": "Correccions d'estabilitat al xat i als proveïdors: S'han corregit els textos de l'inici de sessió d'MCP, les sol·licituds completes d'eines de Gemini, la gestió de la temperatura d'OpenAI i el renderitzat del text amb una sola titlla a Markdown."
+			"highlight1": "Proveïdor Xiaomi MiMo: S'ha afegit Xiaomi MiMo com a proveïdor d'API de primer nivell perquè puguis configurar els models MiMo directament a Zoo Code.",
+			"highlight2": "Traspàs upstream de Zoo Code: S'ha incorporat l'última fusió upstream del sunset i les actualitzacions relacionades de la plataforma per mantenir Zoo Code alineat amb el treball de traspàs de la comunitat.",
+			"highlight3": "Correccions d'estabilitat al xat i als proveïdors: S'han corregit els textos de l'inici de sessió d'MCP, les sol·licituds completes d'eines de Gemini, la gestió de la temperatura d'OpenAI i el renderitzat del text amb una sola titlla a Markdown."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

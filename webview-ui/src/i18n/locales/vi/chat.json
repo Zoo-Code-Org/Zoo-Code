@@ -338,9 +338,9 @@
 		},
 		"release": {
 			"heading": "Có gì mới:",
-			"gpt55": "Provider Xiaomi MiMo: Đã thêm Xiaomi MiMo như một provider API hạng nhất để bạn có thể cấu hình model MiMo trực tiếp trong Zoo Code.",
-			"claudeOpus47": "Handoff upstream của Zoo Code: Đã lấy merge upstream sunset mới nhất cùng các cập nhật nền tảng liên quan để giữ Zoo Code đồng bộ với công việc handoff của cộng đồng.",
-			"checkpointNav": "Các bản sửa ổn định cho chat và provider: Đã sửa nội dung sign-in của MCP, các request Gemini với đầy đủ tool, cách xử lý temperature của OpenAI và render Markdown với single tilde."
+			"highlight1": "Provider Xiaomi MiMo: Đã thêm Xiaomi MiMo như một provider API hạng nhất để bạn có thể cấu hình model MiMo trực tiếp trong Zoo Code.",
+			"highlight2": "Handoff upstream của Zoo Code: Đã lấy merge upstream sunset mới nhất cùng các cập nhật nền tảng liên quan để giữ Zoo Code đồng bộ với công việc handoff của cộng đồng.",
+			"highlight3": "Các bản sửa ổn định cho chat và provider: Đã sửa nội dung sign-in của MCP, các request Gemini với đầy đủ tool, cách xử lý temperature của OpenAI và render Markdown với single tilde."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",

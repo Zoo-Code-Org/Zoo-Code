@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "नया क्या है:",
-			"gpt55": "Xiaomi MiMo provider: Xiaomi MiMo को first-class API provider के रूप में जोड़ा गया है, ताकि आप MiMo models को सीधे Zoo Code में configure कर सकें।",
-			"claudeOpus47": "Zoo Code upstream handoff: Community handoff work के साथ Zoo Code को aligned रखने के लिए latest upstream sunset merge और जुड़े platform updates को शामिल किया गया है।",
-			"checkpointNav": "Chat और providers में stability fixes: MCP sign-in copy, Gemini की full-tool requests, OpenAI temperature handling, और Markdown single-tilde rendering को ठीक किया गया है।"
+			"highlight1": "Xiaomi MiMo provider: Xiaomi MiMo को first-class API provider के रूप में जोड़ा गया है, ताकि आप MiMo models को सीधे Zoo Code में configure कर सकें।",
+			"highlight2": "Zoo Code upstream handoff: Community handoff work के साथ Zoo Code को aligned रखने के लिए latest upstream sunset merge और जुड़े platform updates को शामिल किया गया है।",
+			"highlight3": "Chat और providers में stability fixes: MCP sign-in copy, Gemini की full-tool requests, OpenAI temperature handling, और Markdown single-tilde rendering को ठीक किया गया है।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",
