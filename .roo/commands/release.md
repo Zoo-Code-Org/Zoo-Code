@@ -24,6 +24,11 @@ mode: code
 
 4. Summarize the changes. If the user did not specify a release type, ask whether this should be a major, minor, or patch release.
 
+    - Before choosing the target release version, treat the nightly pre-release lane as separate from the stable lane.
+    - Zoo Code nightlies publish from the next odd minor version with a large patch number (for example, stable `3.54.x` nightlies become `3.55.x` pre-releases).
+    - Stable releases should stay on the even-minor lane. If the latest pre-release line is `3.55.x`, the corresponding stable release should be `3.56.0`, not `3.55.0`.
+    - Do not reuse an odd-minor pre-release lane for a stable release unless the workflow has been intentionally changed first.
+
 5. Review and update the Marketplace-facing root `README.md`.
 
     - Treat root `README.md` as the source of truth for Marketplace content.
