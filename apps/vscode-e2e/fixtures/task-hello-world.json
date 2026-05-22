@@ -8,7 +8,7 @@
 				"toolCalls": [
 					{
 						"name": "attempt_completion",
-						"arguments": "{\"result\":\"My name is Roo! I'm your AI coding assistant, here to help you with development tasks.\"}",
+						"arguments": "{\"result\":\"My name is Zoo! I'm your AI coding assistant, here to help you with development tasks.\"}",
 						"id": "call_task_hello_world_001"
 					}
 				]

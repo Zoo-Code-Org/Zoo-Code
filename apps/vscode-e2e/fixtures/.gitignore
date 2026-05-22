@@ -2,3 +2,4 @@
 # Contributors should extract stable fixtures manually from these files, then delete them.
 openai-*.json
 anthropic-*.json
+xai.json

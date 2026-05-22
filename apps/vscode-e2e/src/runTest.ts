@@ -5,6 +5,14 @@ import * as fs from "fs/promises"
 import { runTests } from "@vscode/test-electron"
 import { LLMock } from "@copilotkit/aimock"
 
+import { addApplyDiffResultFixtures } from "./fixtures/apply-diff"
+import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
+import { addListFilesResultFixtures } from "./fixtures/list-files"
+import { addReadFileResultFixtures } from "./fixtures/read-file"
+import { addSearchFilesResultFixtures } from "./fixtures/search-files"
+import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
+import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
+
 function getCliFlagValue(flag: string) {
 	return process.argv.find((arg, index) => process.argv[index - 1] === flag)
 }
@@ -23,12 +31,17 @@ async function main() {
 	const testGrep = getCliFlagValue("--grep") || process.env.TEST_GREP
 	const testFile = getCliFlagValue("--file") || process.env.TEST_FILE
 	const isDeepSeekTest = isDeepSeekTargetedRun(testFile, testGrep)
+	const isGeminiTest = testFile?.toLowerCase().includes("gemini.test") ?? false
 
 	if (isRecord && isDeepSeekTest && !process.env.DEEPSEEK_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
 	}
 
-	if (isRecord && !isDeepSeekTest && !process.env.OPENROUTER_API_KEY) {
+	if (isRecord && isGeminiTest && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+		throw new Error("AIMOCK_RECORD=true requires GEMINI_API_KEY to record Gemini fixtures")
+	}
+
+	if (isRecord && !isDeepSeekTest && !isGeminiTest && !process.env.OPENROUTER_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires OPENROUTER_API_KEY to record fixtures")
 	}
 
@@ -52,6 +65,10 @@ async function main() {
 	let testWorkspace: string | undefined
 
 	try {
+		// Create a temporary workspace folder for tests before installing fixtures that
+		// need workspace-specific paths.
+		testWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "roo-test-workspace-"))
+
 		if (useMock) {
 			const fixturesDir = path.resolve(__dirname, "../fixtures")
 
@@ -66,6 +83,8 @@ async function main() {
 							openai: isDeepSeekTest ? "https://api.deepseek.com" : "https://openrouter.ai/api",
 							// aimock forwards the x-api-key header from the Anthropic SDK to the real API.
 							anthropic: "https://api.anthropic.com",
+							// aimock forwards the x-goog-api-key header from the Google AI SDK.
+							...(isGeminiTest && { gemini: "https://generativelanguage.googleapis.com" }),
 						},
 						fixturePath: fixturesDir,
 					},
@@ -75,13 +94,23 @@ async function main() {
 			mock.loadFixtureDir(fixturesDir)
 
 			if (!isRecord) {
+				addApplyDiffResultFixtures(mock)
+				addExecuteCommandResultFixtures(mock)
+				addListFilesResultFixtures(mock)
+				addReadFileResultFixtures(mock)
+				addSearchFilesResultFixtures(mock)
+				addUseMcpToolResultFixtures(mock)
+				addWriteToFileResultFixtures(mock)
+
 				// The modes test (switch_mode → ask) triggers a second API call whose last
 				// user message starts with <environment_details> directly — no <user_message>
 				// wrapper. JSON fixtures use substring matching so a bare "<environment_details>"
 				// match would collide with all other requests. A regex anchored to the start
-				// uniquely identifies this post-switch turn.
+				// uniquely identifies this post-switch turn. Scope this fixture to the
+				// OpenRouter default model so provider-specific suites (e.g. DeepSeek)
+				// cannot accidentally match it.
 				mock.addFixture({
-					match: { userMessage: /^<environment_details>/ },
+					match: { model: "openai/gpt-4.1", userMessage: /^<environment_details>/ },
 					response: {
 						toolCalls: [
 							{
@@ -96,9 +125,6 @@ async function main() {
 
 			await mock.start()
 		}
-
-		// Create a temporary workspace folder for tests
-		testWorkspace = await fs.mkdtemp(path.join(os.tmpdir(), "roo-test-workspace-"))
 		// Get test filter from command line arguments or environment variable
 		// Usage examples:
 		// - npm run test:e2e -- --grep "write-to-file"
@@ -111,6 +137,7 @@ async function main() {
 			...(testGrep && { TEST_GREP: testGrep }),
 			...(testFile && { TEST_FILE: testFile }),
 			...(mock && { AIMOCK_URL: mock.url }),
+			...(mock && { E2E_MOCK_MODEL_LIST_FALLBACK: "true" }),
 		}
 
 		// Download VS Code, unzip it and run the integration test

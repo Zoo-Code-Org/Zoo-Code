@@ -38,7 +38,10 @@ export type DeepSeekAssistantMessage = AssistantMessage & {
  */
 export function convertToR1Format(
 	messages: AnthropicMessage[],
-	options?: { mergeToolResultText?: boolean },
+	options?: {
+		mergeToolResultText?: boolean
+		normalizeToolCallId?: (id: string) => string
+	},
 ): Message[] {
 	const result: Message[] = []
 
@@ -90,7 +93,9 @@ export function convertToR1Format(
 				for (const toolResult of toolResults) {
 					const toolMessage: ToolMessage = {
 						role: "tool",
-						tool_call_id: toolResult.tool_use_id,
+						tool_call_id: options?.normalizeToolCallId
+							? options.normalizeToolCallId(toolResult.tool_use_id)
+							: toolResult.tool_use_id,
 						content: toolResult.content,
 					}
 					result.push(toolMessage)
@@ -174,7 +179,7 @@ export function convertToR1Format(
 						textParts.push(part.text)
 					} else if (part.type === "tool_use") {
 						toolCalls.push({
-							id: part.id,
+							id: options?.normalizeToolCallId ? options.normalizeToolCallId(part.id) : part.id,
 							type: "function",
 							function: {
 								name: part.name,

@@ -30,7 +30,7 @@
 
 Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
-## v3.55.0 の新機能
+## v3.54.1 の新機能
 
 **Zoo Code の初回リリース** — `ZooCodeOrganization.zoo-code` として VS Code Marketplace 上の独立した拡張機能となり、`main` への merge ごとに pre-release ビルドが自動公開されます。
 
@@ -62,7 +62,7 @@ Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

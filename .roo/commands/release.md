@@ -95,16 +95,31 @@ mode: code
     - If the release includes translated README or package-localization updates, include those files in the same PR.
     - Let the release validation workflow and normal PR checks run before merge.
 
-12. After the release PR is merged, create the release tag on the resulting `main` commit:
+12. After the release PR is merged, stop for a release review on the resulting `main` commit.
 
     ```bash
     git switch main
     git pull origin main
-    git tag v[version]
+    REVIEWED_SHA=$(git rev-parse HEAD)
+    git rev-parse --short "$REVIEWED_SHA"
+    ```
+
+    - Review the merged release state before any publish step.
+    - Confirm that `src/package.json`, `CHANGELOG.md`, `src/CHANGELOG.md`, and the Marketplace-facing `README.md` all reflect the intended release.
+    - Check that the release PR checks passed and that the merged commit is the one you want to ship.
+    - Share that review summary, including `REVIEWED_SHA`, with the user and wait for explicit confirmation before creating the tag.
+    - Do not create the tag or trigger publishing until the user says to proceed.
+
+13. Only after explicit confirmation, create the release tag on that reviewed `main` commit:
+
+    ```bash
+    git tag v[version] "$REVIEWED_SHA"
     git push origin v[version]
     ```
 
-13. The stable publish workflow runs from the `v[version]` tag.
+    - If `main` advances after the review pause, keep using the pinned `REVIEWED_SHA` for the tag instead of silently tagging a newer commit.
+
+14. The stable publish workflow runs from the `v[version]` tag.
 
     - Do not create the tag before the release PR is merged.
     - The publish workflow validates that the tag version matches `src/package.json`.

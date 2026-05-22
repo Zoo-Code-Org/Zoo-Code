@@ -30,7 +30,7 @@
 
 Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku migracji Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chcemy jak najlepiej pomagać użytkownikom w czasie przejścia i właśnie do tego służą nasze [Reddit](https://www.reddit.com/r/ZooCode) oraz [Discord](https://discord.gg/VxfP4Vx3gX). Jeśli masz problem albo pytanie, wpadaj i pytaj.
 
-## Nowości w v3.55.0
+## Nowości w v3.54.1
 
 **Pierwsze wydanie Zoo Code** — ustanawia Zoo Code jako niezależne rozszerzenie w VS Code Marketplace pod nazwą `ZooCodeOrganization.zoo-code`, a buildy pre-release są publikowane automatycznie po każdym merge do `main`.
 
@@ -62,7 +62,7 @@ Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

@@ -30,7 +30,7 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
-## v3.55.0'daki Yenilikler
+## v3.54.1'daki Yenilikler
 
 **Zoo Code'un ilk sürümü** — Zoo Code'u `ZooCodeOrganization.zoo-code` adıyla VS Code Marketplace'te bağımsız bir uzantı olarak konumlandırır ve `main` dalına yapılan her merge sonrasında pre-release sürümleri otomatik olarak yayımlar.
 
@@ -62,7 +62,7 @@ Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş reh
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

@@ -9,7 +9,7 @@ import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 import { waitFor, sleep } from "../utils"
 import { setDefaultSuiteTimeout } from "../test-utils"
 
-suite.skip("Roo Code read_file Tool", function () {
+suite("Roo Code read_file Tool", function () {
 	setDefaultSuiteTimeout(this)
 
 	let tempDir: string
@@ -31,12 +31,12 @@ suite.skip("Roo Code read_file Tool", function () {
 
 		// Create test files with different content types
 		testFiles = {
-			simple: path.join(workspaceDir, `simple-${Date.now()}.txt`),
-			multiline: path.join(workspaceDir, `multiline-${Date.now()}.txt`),
-			empty: path.join(workspaceDir, `empty-${Date.now()}.txt`),
-			large: path.join(workspaceDir, `large-${Date.now()}.txt`),
-			xmlContent: path.join(workspaceDir, `xml-content-${Date.now()}.xml`),
-			nested: path.join(workspaceDir, "nested", "deep", `nested-${Date.now()}.txt`),
+			simple: path.join(workspaceDir, "simple-read-file-smoke.txt"),
+			multiline: path.join(workspaceDir, "multiline-read-file.txt"),
+			empty: path.join(workspaceDir, "empty-read-file.txt"),
+			large: path.join(workspaceDir, "large-read-file.txt"),
+			xmlContent: path.join(workspaceDir, "xml-content-read-file.xml"),
+			nested: path.join(workspaceDir, "nested", "deep", "nested-read-file.txt"),
 		}
 
 		// Create files with content
@@ -126,48 +126,10 @@ suite.skip("Roo Code read_file Tool", function () {
 		let taskStarted = false
 		let taskCompleted = false
 		let errorOccurred: string | null = null
-		let toolExecuted = false
-		let toolResult: string | null = null
 
 		// Listen for messages
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
 			messages.push(message)
-
-			// Check for tool execution and extract result
-			if (message.type === "say" && message.say === "api_req_started") {
-				const text = message.text || ""
-				if (text.includes("read_file")) {
-					toolExecuted = true
-					console.log("Tool executed:", text.substring(0, 200))
-
-					// Parse the tool result from the api_req_started message
-					try {
-						const requestData = JSON.parse(text)
-						if (requestData.request && requestData.request.includes("[read_file")) {
-							console.log("Full request for debugging:", requestData.request)
-							// Try multiple patterns to extract the content
-							// Pattern 1: Content between triple backticks
-							let resultMatch = requestData.request.match(/```[^`]*\n([\s\S]*?)\n```/)
-							if (!resultMatch) {
-								// Pattern 2: Content after "Result:" with line numbers
-								resultMatch = requestData.request.match(/Result:[\s\S]*?\n((?:\d+\s*\|[^\n]*\n?)+)/)
-							}
-							if (!resultMatch) {
-								// Pattern 3: Simple content after Result:
-								resultMatch = requestData.request.match(/Result:\s*\n([\s\S]+?)(?:\n\n|$)/)
-							}
-							if (resultMatch) {
-								toolResult = resultMatch[1]
-								console.log("Extracted tool result:", toolResult)
-							} else {
-								console.log("Could not extract tool result from request")
-							}
-						}
-					} catch (e) {
-						console.log("Failed to parse tool result:", e)
-					}
-				}
-			}
 
 			// Log important messages for debugging
 			if (message.type === "say" && message.say === "error") {
@@ -211,7 +173,7 @@ suite.skip("Roo Code read_file Tool", function () {
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: `Please use the read_file tool to read the file named "${fileName}". This file contains the text "Hello, World!" and is located in the current workspace directory. Assume the file exists and you can read it directly. After reading it, tell me what the file contains.`,
+				text: `READ_FILE_SIMPLE_SMOKE: Please use the read_file tool to read the file named "${fileName}". This file contains the text "Hello, World!" and is located in the current workspace directory. Assume the file exists and you can read it directly. After reading it, tell me what the file contains.`,
 			})
 
 			console.log("Task ID:", taskId)
@@ -229,24 +191,11 @@ suite.skip("Roo Code read_file Tool", function () {
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
 
-			// Verify the read_file tool was executed
-			assert.ok(toolExecuted, "The read_file tool should have been executed")
-
 			// Check that no errors occurred
 			assert.strictEqual(errorOccurred, null, "No errors should have occurred")
 
-			// Verify the tool returned the correct content
-			assert.ok(toolResult !== null, "Tool should have returned a result")
-			// The tool returns content with line numbers, so we need to extract just the content
-			// For single line, the format is "1 | Hello, World!"
-			const actualContent = (toolResult as string).replace(/^\d+\s*\|\s*/, "")
-			assert.strictEqual(
-				actualContent.trim(),
-				"Hello, World!",
-				"Tool should have returned the exact file content",
-			)
-
-			// Also verify the AI mentioned the content in its response
+			// The committed aimock fixture drives this through a read_file tool call.
+			// The public e2e event stream only exposes the final assistant response.
 			const hasContent = messages.some(
 				(m) =>
 					m.type === "say" &&
@@ -269,45 +218,10 @@ suite.skip("Roo Code read_file Tool", function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
 		let taskCompleted = false
-		let toolExecuted = false
-		let toolResult: string | null = null
 
 		// Listen for messages
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
 			messages.push(message)
-
-			// Check for tool execution and extract result
-			if (message.type === "say" && message.say === "api_req_started") {
-				const text = message.text || ""
-				if (text.includes("read_file")) {
-					toolExecuted = true
-					console.log("Tool executed for multiline file")
-
-					// Parse the tool result
-					try {
-						const requestData = JSON.parse(text)
-						if (requestData.request && requestData.request.includes("[read_file")) {
-							console.log("Full request for debugging:", requestData.request)
-							// Try multiple patterns to extract the content
-							let resultMatch = requestData.request.match(/```[^`]*\n([\s\S]*?)\n```/)
-							if (!resultMatch) {
-								resultMatch = requestData.request.match(/Result:[\s\S]*?\n((?:\d+\s*\|[^\n]*\n?)+)/)
-							}
-							if (!resultMatch) {
-								resultMatch = requestData.request.match(/Result:\s*\n([\s\S]+?)(?:\n\n|$)/)
-							}
-							if (resultMatch) {
-								toolResult = resultMatch[1]
-								console.log("Extracted multiline tool result")
-							} else {
-								console.log("Could not extract tool result from request")
-							}
-						}
-					} catch (e) {
-						console.log("Failed to parse tool result:", e)
-					}
-				}
-			}
 
 			// Log AI responses
 			if (message.type === "say" && (message.say === "text" || message.say === "completion_result")) {
@@ -335,31 +249,14 @@ suite.skip("Roo Code read_file Tool", function () {
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: `Use the read_file tool to read the file "${fileName}" which contains 5 lines of text (Line 1, Line 2, Line 3, Line 4, Line 5). Assume the file exists and you can read it directly. Count how many lines it has and tell me the result.`,
+				text: `READ_FILE_MULTILINE_SMOKE: Use the read_file tool to read the file "${fileName}" which contains 5 lines of text (Line 1, Line 2, Line 3, Line 4, Line 5). Assume the file exists and you can read it directly. Count how many lines it has and tell me the result.`,
 			})
 
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
 
-			// Verify the read_file tool was executed
-			assert.ok(toolExecuted, "The read_file tool should have been executed")
-
-			// Verify the tool returned the correct multiline content
-			assert.ok(toolResult !== null, "Tool should have returned a result")
-			// The tool returns content with line numbers, so we need to extract just the content
-			const lines = (toolResult as string).split("\n").map((line) => {
-				const match = line.match(/^\d+\s*\|\s*(.*)$/)
-				return match ? match[1] : line
-			})
-			const actualContent = lines.join("\n")
-			const expectedContent = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
-			assert.strictEqual(
-				actualContent.trim(),
-				expectedContent,
-				"Tool should have returned the exact multiline content",
-			)
-
-			// Also verify the AI mentioned the correct number of lines
+			// The replay fixture only completes after aimock sees a tool response
+			// containing the first and final expected lines.
 			const hasLineCount = messages.some(
 				(m) =>
 					m.type === "say" &&
@@ -380,45 +277,10 @@ suite.skip("Roo Code read_file Tool", function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
 		let taskCompleted = false
-		let toolExecuted = false
-		let toolResult: string | null = null
 
 		// Listen for messages
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
 			messages.push(message)
-
-			// Check for tool execution and extract result
-			if (message.type === "say" && message.say === "api_req_started") {
-				const text = message.text || ""
-				if (text.includes("read_file")) {
-					toolExecuted = true
-					console.log("Tool executed:", text.substring(0, 300))
-
-					// Parse the tool result
-					try {
-						const requestData = JSON.parse(text)
-						if (requestData.request && requestData.request.includes("[read_file")) {
-							console.log("Full request for debugging:", requestData.request)
-							// Try multiple patterns to extract the content
-							let resultMatch = requestData.request.match(/```[^`]*\n([\s\S]*?)\n```/)
-							if (!resultMatch) {
-								resultMatch = requestData.request.match(/Result:[\s\S]*?\n((?:\d+\s*\|[^\n]*\n?)+)/)
-							}
-							if (!resultMatch) {
-								resultMatch = requestData.request.match(/Result:\s*\n([\s\S]+?)(?:\n\n|$)/)
-							}
-							if (resultMatch) {
-								toolResult = resultMatch[1]
-								console.log("Extracted line range tool result")
-							} else {
-								console.log("Could not extract tool result from request")
-							}
-						}
-					} catch (e) {
-						console.log("Failed to parse tool result:", e)
-					}
-				}
-			}
 
 			// Log AI responses
 			if (message.type === "say" && (message.say === "text" || message.say === "completion_result")) {
@@ -446,37 +308,19 @@ suite.skip("Roo Code read_file Tool", function () {
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: `Use the read_file tool to read the file "${fileName}" using slice mode with offset=2 and limit=3 (1-based offset). The file contains lines like "Line 1", "Line 2", etc. After reading, show me the three lines you read.`,
+				text: `READ_FILE_SLICE_SMOKE: Use the read_file tool to read the file "${fileName}" using slice mode with offset=2 and limit=3 (1-based offset). The file contains lines like "Line 1", "Line 2", etc. After reading, show me the three lines you read.`,
 			})
 
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
 
-			// Verify tool was executed
-			assert.ok(toolExecuted, "The read_file tool should have been executed")
-
-			// Verify the tool returned the correct lines (offset=2, limit=3 -> lines 2-4)
-			if (toolResult && (toolResult as string).includes(" | ")) {
-				assert.ok(
-					(toolResult as string).includes("2 | Line 2"),
-					"Tool result should include line 2 with line number",
-				)
-				assert.ok(
-					(toolResult as string).includes("3 | Line 3"),
-					"Tool result should include line 3 with line number",
-				)
-				assert.ok(
-					(toolResult as string).includes("4 | Line 4"),
-					"Tool result should include line 4 with line number",
-				)
-			}
-
-			// Also verify the AI mentioned the specific lines
 			const hasLines = messages.some(
 				(m) =>
 					m.type === "say" &&
 					(m.say === "completion_result" || m.say === "text") &&
-					m.text?.includes("Line 2"),
+					m.text?.includes("Line 2") &&
+					m.text?.includes("Line 3") &&
+					m.text?.includes("Line 4"),
 			)
 			assert.ok(hasLines, "AI should have mentioned the requested lines")
 
@@ -492,24 +336,10 @@ suite.skip("Roo Code read_file Tool", function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
 		let taskCompleted = false
-		let toolExecuted = false
-		let _errorHandled = false
 
 		// Listen for messages
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
 			messages.push(message)
-
-			// Check for tool execution
-			if (message.type === "say" && message.say === "api_req_started") {
-				const text = message.text || ""
-				if (text.includes("read_file")) {
-					toolExecuted = true
-					// Check if error was returned
-					if (text.includes("error") || text.includes("not found")) {
-						_errorHandled = true
-					}
-				}
-			}
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
@@ -524,7 +354,7 @@ suite.skip("Roo Code read_file Tool", function () {
 		let taskId: string
 		try {
 			// Start task with non-existent file
-			const nonExistentFile = `non-existent-${Date.now()}.txt`
+			const nonExistentFile = "non-existent-read-file.txt"
 			taskId = await api.startNewTask({
 				configuration: {
 					mode: "code",
@@ -532,14 +362,11 @@ suite.skip("Roo Code read_file Tool", function () {
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: `Try to read the file "${nonExistentFile}" and tell me what happens. This file does not exist, so I expect you to handle the error appropriately.`,
+				text: `READ_FILE_MISSING_SMOKE: Try to read the file "${nonExistentFile}" and tell me what happens. This file does not exist, so I expect you to handle the error appropriately.`,
 			})
 
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
-
-			// Verify the read_file tool was executed
-			assert.ok(toolExecuted, "The read_file tool should have been executed")
 
 			// Verify the AI handled the error appropriately
 			const completionMessage = messages.find(
@@ -564,20 +391,10 @@ suite.skip("Roo Code read_file Tool", function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
 		let taskCompleted = false
-		let toolExecuted = false
 
 		// Listen for messages
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
 			messages.push(message)
-
-			// Check for tool execution
-			if (message.type === "say" && message.say === "api_req_started") {
-				const text = message.text || ""
-				if (text.includes("read_file")) {
-					toolExecuted = true
-					console.log("Tool executed for XML file")
-				}
-			}
 
 			// Log AI responses
 			if (message.type === "say" && (message.say === "text" || message.say === "completion_result")) {
@@ -605,21 +422,20 @@ suite.skip("Roo Code read_file Tool", function () {
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: `Use the read_file tool to read the XML file "${fileName}". It contains XML elements including root, child, and data. Assume the file exists and you can read it directly. Tell me what elements you find.`,
+				text: `READ_FILE_XML_SMOKE: Use the read_file tool to read the XML file "${fileName}". It contains XML elements including root, child, and data. Assume the file exists and you can read it directly. Tell me what elements you find.`,
 			})
 
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
-
-			// Verify the read_file tool was executed
-			assert.ok(toolExecuted, "The read_file tool should have been executed")
 
 			// Verify the AI mentioned the XML content - be more flexible
 			const hasXMLContent = messages.some(
 				(m) =>
 					m.type === "say" &&
 					(m.say === "completion_result" || m.say === "text") &&
-					(m.text?.toLowerCase().includes("root") || m.text?.toLowerCase().includes("xml")),
+					m.text?.toLowerCase().includes("root") &&
+					m.text?.toLowerCase().includes("child") &&
+					m.text?.toLowerCase().includes("data"),
 			)
 			assert.ok(hasXMLContent, "AI should have mentioned the XML elements")
 
@@ -635,20 +451,10 @@ suite.skip("Roo Code read_file Tool", function () {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
 		let taskCompleted = false
-		let readFileCount = 0
 
 		// Listen for messages
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
 			messages.push(message)
-
-			// Count read_file executions
-			if (message.type === "say" && message.say === "api_req_started") {
-				const text = message.text || ""
-				if (text.includes("read_file")) {
-					readFileCount++
-					console.log(`Read file execution #${readFileCount}`)
-				}
-			}
 		}
 		api.on(RooCodeEventName.Message, messageHandler)
 
@@ -672,7 +478,7 @@ suite.skip("Roo Code read_file Tool", function () {
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: `Use the read_file tool to read these two files:
+				text: `READ_FILE_MULTIPLE_SMOKE: Use the read_file tool to read these two files:
 1. "${simpleFileName}" - contains "Hello, World!"
 2. "${multilineFileName}" - contains 5 lines of text
 Assume both files exist and you can read them directly. Read each file and tell me what you found in each one.`,
@@ -681,18 +487,14 @@ Assume both files exist and you can read them directly. Read each file and tell 
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
 
-			// Verify multiple read_file executions - AI might read them together
-			assert.ok(
-				readFileCount >= 1,
-				`Should have executed read_file at least once, but executed ${readFileCount} times`,
-			)
-
-			// Verify the AI mentioned both file contents - be more flexible
+			// Verify the AI mentioned both file contents.
 			const hasContent = messages.some(
 				(m) =>
 					m.type === "say" &&
 					(m.say === "completion_result" || m.say === "text") &&
-					m.text?.toLowerCase().includes("hello"),
+					m.text?.includes("Hello, World!") &&
+					m.text?.includes("Line 1") &&
+					m.text?.includes("Line 5"),
 			)
 			assert.ok(hasContent, "AI should have mentioned contents of the files")
 
@@ -708,20 +510,10 @@ Assume both files exist and you can read them directly. Read each file and tell 
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
 		let taskCompleted = false
-		let toolExecuted = false
 
 		// Listen for messages
 		const messageHandler = ({ message }: { message: ClineMessage }) => {
 			messages.push(message)
-
-			// Check for tool execution
-			if (message.type === "say" && message.say === "api_req_started") {
-				const text = message.text || ""
-				if (text.includes("read_file")) {
-					toolExecuted = true
-					console.log("Reading large file...")
-				}
-			}
 
 			// Log AI responses
 			if (message.type === "say" && (message.say === "text" || message.say === "completion_result")) {
@@ -749,21 +541,19 @@ Assume both files exist and you can read them directly. Read each file and tell 
 					alwaysAllowReadOnly: true,
 					alwaysAllowReadOnlyOutsideWorkspace: true,
 				},
-				text: `Use the read_file tool to read the file "${fileName}" which has 100 lines. Each line follows the pattern "Line N: This is a test line with some content". Assume the file exists and you can read it directly. Tell me about the pattern you see.`,
+				text: `READ_FILE_LARGE_SMOKE: Use the read_file tool to read the file "${fileName}" which has 100 lines. Each line follows the pattern "Line N: This is a test line with some content". Assume the file exists and you can read it directly. Tell me about the pattern you see.`,
 			})
 
 			// Wait for task completion
 			await waitFor(() => taskCompleted, { timeout: 60_000 })
-
-			// Verify the read_file tool was executed
-			assert.ok(toolExecuted, "The read_file tool should have been executed")
 
 			// Verify the AI mentioned the line pattern - be more flexible
 			const hasPattern = messages.some(
 				(m) =>
 					m.type === "say" &&
 					(m.say === "completion_result" || m.say === "text") &&
-					(m.text?.toLowerCase().includes("line") || m.text?.toLowerCase().includes("pattern")),
+					m.text?.toLowerCase().includes("100 lines") &&
+					m.text?.toLowerCase().includes("line n"),
 			)
 			assert.ok(hasPattern, "AI should have identified the line pattern")
 

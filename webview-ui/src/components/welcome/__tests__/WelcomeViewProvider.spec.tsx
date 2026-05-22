@@ -2,11 +2,13 @@
 
 import React from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
+import { openRouterDefaultModelId } from "@roo-code/types"
 
 import * as ExtensionStateContext from "@src/context/ExtensionStateContext"
 const { ExtensionStateContextProvider } = ExtensionStateContext
 
 import WelcomeViewProvider from "../WelcomeViewProvider"
+import { vscode } from "@src/utils/vscode"
 
 // Mock VSCode components
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
@@ -17,7 +19,6 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	),
 }))
 
-// Mock Button component
 vi.mock("@src/components/ui", () => ({
 	Button: ({ children, onClick, variant }: any) => (
 		<button onClick={onClick} data-testid={`button-${variant}`}>
@@ -26,12 +27,17 @@ vi.mock("@src/components/ui", () => ({
 	),
 }))
 
-// Mock ApiOptions
 vi.mock("../../settings/ApiOptions", () => ({
-	default: () => <div data-testid="api-options">API Options Component</div>,
+	default: ({ apiConfiguration }: any) => (
+		<div
+			data-testid="api-options"
+			data-provider={apiConfiguration.apiProvider}
+			data-model={apiConfiguration.openRouterModelId}>
+			API Options Component
+		</div>
+	),
 }))
 
-// Mock Tab components
 vi.mock("../../common/Tab", () => ({
 	Tab: ({ children }: any) => <div data-testid="tab">{children}</div>,
 	TabContent: ({ children, className }: any) => (
@@ -41,28 +47,21 @@ vi.mock("../../common/Tab", () => ({
 	),
 }))
 
-// Mock RooHero
 vi.mock("../RooHero", () => ({
 	default: () => <div data-testid="roo-hero">Roo Hero</div>,
 }))
 
-// Mock lucide-react icons
 vi.mock("lucide-react", () => ({
-	ArrowLeft: () => <span data-testid="arrow-left-icon">←</span>,
-	ArrowRight: () => <span data-testid="arrow-right-icon">→</span>,
-	BadgeInfo: () => <span data-testid="badge-info-icon">ℹ</span>,
-	Brain: () => <span data-testid="brain-icon">🧠</span>,
-	TriangleAlert: () => <span data-testid="triangle-alert-icon">⚠</span>,
+	ArrowLeft: () => <span data-testid="arrow-left-icon">left</span>,
+	Brain: () => <span data-testid="brain-icon">brain</span>,
 }))
 
-// Mock vscode utility
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
 		postMessage: vi.fn(),
 	},
 }))
 
-// Mock react-i18next
 vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey, children }: any) => <span data-testid={`trans-${i18nKey}`}>{children || i18nKey}</span>,
 	initReactI18next: {
@@ -71,7 +70,12 @@ vi.mock("react-i18next", () => ({
 	},
 }))
 
-// Mock the translation hook
+vi.mock("i18next", () => ({
+	default: {
+		t: (key: string) => key,
+	},
+}))
+
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string) => key,
@@ -85,12 +89,12 @@ vi.mock("@/utils/docLinks", () => ({
 
 const renderWelcomeViewProvider = (extensionState = {}) => {
 	const useExtensionStateMock = vi.spyOn(ExtensionStateContext, "useExtensionState")
+	const setApiConfiguration = vi.fn()
 	useExtensionStateMock.mockReturnValue({
 		apiConfiguration: {},
 		currentApiConfigName: "default",
-		setApiConfiguration: vi.fn(),
+		setApiConfiguration,
 		uriScheme: "vscode",
-		cloudIsAuthenticated: false,
 		...extensionState,
 	} as any)
 
@@ -100,7 +104,7 @@ const renderWelcomeViewProvider = (extensionState = {}) => {
 		</ExtensionStateContextProvider>,
 	)
 
-	return useExtensionStateMock
+	return { useExtensionStateMock, setApiConfiguration }
 }
 
 describe("WelcomeViewProvider", () => {
@@ -108,58 +112,77 @@ describe("WelcomeViewProvider", () => {
 		vi.clearAllMocks()
 	})
 
-	describe("Landing Screen", () => {
-		it("renders landing screen by default", () => {
-			renderWelcomeViewProvider()
+	it("renders the landing screen by default", () => {
+		renderWelcomeViewProvider()
 
-			// Should show the landing greeting
-			expect(screen.getByText(/welcome:landing.greeting/)).toBeInTheDocument()
+		expect(screen.getByText(/welcome:landing.greeting/)).toBeInTheDocument()
+		expect(screen.getByTestId("trans-welcome:landing.introduction")).toBeInTheDocument()
+		expect(screen.getByTestId("button-primary")).toBeInTheDocument()
+		expect(screen.getByText(/welcome:importSettings/)).toBeInTheDocument()
+	})
 
-			// Should show introduction
-			expect(screen.getByTestId("trans-welcome:landing.introduction")).toBeInTheDocument()
+	it("opens provider setup when Get Started is clicked", () => {
+		const { setApiConfiguration } = renderWelcomeViewProvider()
 
-			// Router account marketing copy should be removed
-			expect(screen.queryByTestId("trans-welcome:landing.accountMention")).not.toBeInTheDocument()
+		fireEvent.click(screen.getByTestId("button-primary"))
 
-			// Should show "Get Started" button
-			expect(screen.getByTestId("button-primary")).toBeInTheDocument()
+		// Router account marketing copy should be removed
+		expect(screen.queryByTestId("trans-welcome:landing.accountMention")).not.toBeInTheDocument()
+		expect(screen.queryByText(/welcome:landing.noAccount/)).not.toBeInTheDocument()
 
-			expect(screen.queryByText(/welcome:landing.noAccount/)).not.toBeInTheDocument()
+		expect(screen.getByTestId("api-options")).toBeInTheDocument()
+		expect(screen.getByTestId("api-options")).toHaveAttribute("data-provider", "openrouter")
+		expect(screen.getByTestId("api-options")).toHaveAttribute("data-model", openRouterDefaultModelId)
+		expect(setApiConfiguration).toHaveBeenCalledWith({
+			apiProvider: "openrouter",
+			openRouterModelId: openRouterDefaultModelId,
+		})
+		expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+	})
+
+	it("moves to provider selection when 'Get Started' is clicked on landing", () => {
+		renderWelcomeViewProvider()
+
+		const getStartedButton = screen.getByTestId("button-primary")
+		fireEvent.click(getStartedButton)
+
+		expect(screen.getByTestId("api-options")).toBeInTheDocument()
+		expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
+	})
+
+	it("treats the built-in Anthropic default as empty onboarding config", () => {
+		const { setApiConfiguration } = renderWelcomeViewProvider({
+			apiConfiguration: {
+				apiProvider: "anthropic",
+				apiModelId: "claude-sonnet-4-5",
+			},
 		})
 
-		it("moves to provider selection when 'Get Started' is clicked on landing", () => {
-			renderWelcomeViewProvider()
+		fireEvent.click(screen.getByTestId("button-primary"))
 
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
-
-			expect(screen.getByTestId("api-options")).toBeInTheDocument()
-			expect(screen.getByTestId("trans-welcome:providerSignup.chooseProvider")).toBeInTheDocument()
+		expect(screen.getByTestId("api-options")).toHaveAttribute("data-provider", "openrouter")
+		expect(screen.getByTestId("api-options")).toHaveAttribute("data-model", openRouterDefaultModelId)
+		expect(setApiConfiguration).toHaveBeenCalledWith({
+			apiProvider: "openrouter",
+			openRouterModelId: openRouterDefaultModelId,
 		})
+	})
 
-		it("keeps the landing screen centered", () => {
-			renderWelcomeViewProvider()
+	it("keeps the landing screen centered", () => {
+		renderWelcomeViewProvider()
 
-			expect(screen.getByTestId("tab-content")).toHaveClass("justify-center")
-		})
+		expect(screen.getByTestId("tab-content")).toHaveClass("justify-center")
+	})
 
-		it("does not enter auth-in-progress state after clicking 'Get Started' on landing", () => {
-			renderWelcomeViewProvider()
+	it("does not enter auth-in-progress state after clicking 'Get Started' on landing", () => {
+		renderWelcomeViewProvider()
 
-			const getStartedButton = screen.getByTestId("button-primary")
-			fireEvent.click(getStartedButton)
+		const getStartedButton = screen.getByTestId("button-primary")
+		fireEvent.click(getStartedButton)
 
-			expect(screen.queryByTestId("progress-ring")).not.toBeInTheDocument()
-			expect(screen.getByTestId("api-options")).toBeInTheDocument()
-		})
-
-		it("does not render the retired Roo onboarding option", () => {
-			renderWelcomeViewProvider()
-			fireEvent.click(screen.getByTestId("button-primary"))
-
-			expect(screen.queryByTestId("radio-roo")).not.toBeInTheDocument()
-			expect(screen.queryByText(/welcome:providerSignup.rooCloudProvider/)).not.toBeInTheDocument()
-		})
+		expect(screen.queryByTestId("progress-ring")).not.toBeInTheDocument()
+		expect(screen.getByTestId("api-options")).toBeInTheDocument()
 	})
 
 	describe("Provider Selection Screen", () => {
@@ -206,5 +229,41 @@ describe("WelcomeViewProvider", () => {
 			expect(screen.getByText(/welcome:landing.greeting/)).toBeInTheDocument()
 			expect(screen.queryByTestId("api-options")).not.toBeInTheDocument()
 		})
+	})
+
+	it("saves the configured provider from setup", () => {
+		const apiConfiguration = {
+			apiProvider: "openrouter" as const,
+			openRouterApiKey: "test-key",
+			openRouterModelId: openRouterDefaultModelId,
+		}
+		renderWelcomeViewProvider({ apiConfiguration })
+
+		fireEvent.click(screen.getByTestId("button-primary"))
+		fireEvent.click(screen.getByText(/welcome:providerSignup.finish/))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration,
+		})
+	})
+
+	it("returns to landing from provider setup", () => {
+		renderWelcomeViewProvider()
+
+		fireEvent.click(screen.getByTestId("button-primary"))
+		fireEvent.click(screen.getByTestId("button-secondary"))
+
+		expect(screen.getByText(/welcome:landing.greeting/)).toBeInTheDocument()
+		expect(screen.queryByTestId("api-options")).not.toBeInTheDocument()
+	})
+
+	it("imports settings from the landing screen", () => {
+		renderWelcomeViewProvider()
+
+		fireEvent.click(screen.getByText(/welcome:importSettings/))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "importSettings" })
 	})
 })

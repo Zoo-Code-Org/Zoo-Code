@@ -30,7 +30,7 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.55.0
+## Điểm mới trong v3.54.1
 
 **Bản phát hành đầu tiên của Zoo Code** — đưa Zoo Code trở thành một extension độc lập trên VS Code Marketplace với tên `ZooCodeOrganization.zoo-code`, đồng thời các bản build pre-release sẽ được phát hành tự động sau mỗi lần merge vào `main`.
 
@@ -62,7 +62,7 @@ Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo C
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

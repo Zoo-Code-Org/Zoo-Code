@@ -33,6 +33,7 @@ import {
 	FireworksHandler,
 	VercelAiGatewayHandler,
 	MiniMaxHandler,
+	MimoHandler,
 	BasetenHandler,
 } from "./providers"
 import { NativeOllamaHandler } from "./providers/native-ollama"
@@ -167,6 +168,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new LiteLLMHandler(options)
 		case "sambanova":
 			return new SambaNovaHandler(options)
+		case "mimo":
+			return new MimoHandler(options)
 		case "zai":
 			return new ZAiHandler(options)
 		case "fireworks":

@@ -1,0 +1,74 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "APPLY_DIFF_SIMPLE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "apply_diff",
+						"arguments": "{\"path\":\"apply-diff-tool-fixture/simple-modify.txt\",\"diff\":\"<<<<<<< SEARCH\\n:start_line:1\\n-------\\nHello World\\n=======\\nHello Universe\\n>>>>>>> REPLACE\"}",
+						"id": "call_apply_diff_simple_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "APPLY_DIFF_MULTI_REPLACE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "apply_diff",
+						"arguments": "{\"path\":\"apply-diff-tool-fixture/multiple-replace.js\",\"diff\":\"<<<<<<< SEARCH\\n:start_line:1\\n-------\\nfunction calculate(x, y) {\\n\\tconst sum = x + y\\n\\tconst product = x * y\\n\\treturn { sum: sum, product: product }\\n}\\n=======\\nfunction compute(a, b) {\\n\\tconst total = a + b\\n\\tconst result = a * b\\n\\treturn { total: total, result: result }\\n}\\n>>>>>>> REPLACE\"}",
+						"id": "call_apply_diff_multi_replace_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "APPLY_DIFF_LINE_HINTS_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "apply_diff",
+						"arguments": "{\"path\":\"apply-diff-tool-fixture/line-hints.js\",\"diff\":\"<<<<<<< SEARCH\\n:start_line:2\\n-------\\nfunction oldFunction() {\\n\\tconsole.log(\\\"Old implementation\\\")\\n}\\n=======\\nfunction newFunction() {\\n\\tconsole.log(\\\"New implementation\\\")\\n}\\n>>>>>>> REPLACE\"}",
+						"id": "call_apply_diff_line_hints_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "APPLY_DIFF_ERROR_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "apply_diff",
+						"arguments": "{\"path\":\"apply-diff-tool-fixture/error-handling.txt\",\"diff\":\"<<<<<<< SEARCH\\n:start_line:1\\n-------\\nThis content does not exist\\n=======\\nNew content\\n>>>>>>> REPLACE\"}",
+						"id": "call_apply_diff_error_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "APPLY_DIFF_MULTI_BLOCK_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "apply_diff",
+						"arguments": "{\"path\":\"apply-diff-tool-fixture/multi-search-replace.js\",\"diff\":\"<<<<<<< SEARCH\\n:start_line:1\\n-------\\nfunction processData(data) {\\n\\tconsole.log(\\\"Processing data\\\")\\n=======\\nfunction transformData(data) {\\n\\tconsole.log(\\\"Transforming data\\\")\\n>>>>>>> REPLACE\\n\\n<<<<<<< SEARCH\\n:start_line:12\\n-------\\nfunction validateInput(input) {\\n\\tconsole.log(\\\"Validating input\\\")\\n=======\\nfunction checkInput(input) {\\n\\tconsole.log(\\\"Checking input\\\")\\n>>>>>>> REPLACE\"}",
+						"id": "call_apply_diff_multi_block_001"
+					}
+				]
+			}
+		}
+	]
+}
