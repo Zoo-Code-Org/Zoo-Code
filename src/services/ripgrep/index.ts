@@ -103,6 +103,10 @@ export const bundledRgPath = path.join(__dirname, "bin", `${process.platform}-${
  * (e.g. VS Code Insiders' staged-install layout, see microsoft/vscode#252063).
  */
 export async function getBinPath(vscodeAppRoot: string): Promise<string | undefined> {
+	/**
+	 * Resolve `<pkgFolder>/<binName>` under the VS Code application root,
+	 * returning the absolute path when the ripgrep binary exists there.
+	 */
 	const checkPath = async (pkgFolder: string) => {
 		const fullPath = path.join(vscodeAppRoot, pkgFolder, binName)
 		return (await fileExistsAtPath(fullPath)) ? fullPath : undefined
