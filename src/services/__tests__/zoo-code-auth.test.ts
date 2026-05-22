@@ -27,6 +27,13 @@ vi.mock("vscode", () => ({
 		showErrorMessage: vi.fn(),
 		showInformationMessage: vi.fn(),
 	},
+	env: {
+		asExternalUri: vi.fn(async (uri: any) => uri),
+		openExternal: vi.fn(),
+	},
+	Uri: {
+		parse: vi.fn((value: string) => ({ toString: () => value })),
+	},
 }))
 
 vi.mock("../i18n", () => ({
@@ -256,6 +263,43 @@ describe("zoo-code-auth", () => {
 			await setZooCodeToken("zoo_ext_token2")
 
 			expect(getCachedSubscriptionStatus()).toBe("unknown")
+		})
+	})
+
+	describe("handleAuthCallback", () => {
+		it("does not persist invalid prefixed tokens", async () => {
+			await initZooCodeAuth(mockContext)
+
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ valid: false }),
+			})
+
+			const success = await handleAuthCallback("zoo_ext_fake_token")
+
+			expect(success).toBe(false)
+			expect(getCachedZooCodeToken()).toBe("")
+			expect(mockSecrets.store).not.toHaveBeenCalledWith("zoo-code-session-token", "zoo_ext_fake_token")
+		})
+
+		it("persists token only after backend verification succeeds", async () => {
+			await initZooCodeAuth(mockContext)
+
+			mockFetch
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({ valid: true }),
+				})
+				.mockResolvedValueOnce({
+					ok: true,
+					json: async () => ({ isSubscriber: true }),
+				})
+
+			const success = await handleAuthCallback("zoo_ext_real_token")
+
+			expect(success).toBe(true)
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_real_token")
+			expect(mockSecrets.store).toHaveBeenCalledWith("zoo-code-session-token", "zoo_ext_real_token")
 		})
 	})
 

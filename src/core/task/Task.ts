@@ -3160,6 +3160,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cost: tokens.total ?? costResult.totalCost,
 								})
 
+								const mode = await this.getTaskMode().catch(() => defaultModeSlug)
+
 								// Zoo Code observability telemetry
 								import("../../services/zoo-telemetry")
 									.then(async ({ sendLlmTelemetry }) => {

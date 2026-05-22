@@ -209,6 +209,23 @@ export async function clearZooCodeToken(): Promise<void> {
 }
 
 export function getZooCodeBaseUrl(): string {
+	const config = vscode.workspace.getConfiguration("zoo-code")
+	return config.get<string>("baseUrl") || process.env.ZOO_CODE_BASE_URL || "https://www.zoocode.dev"
+}
+
+export async function startZooCodeAuth(): Promise<void> {
+	const baseUrl = getZooCodeBaseUrl()
+	const deviceName = os.hostname()
+	const editor = "VS Code"
+	const version = Package.version
+
+	const callbackUri = await vscode.env.asExternalUri(
+		vscode.Uri.parse(`vscode://${Package.publisher}.${Package.name}/auth-callback`),
+	)
+
+	const authUrl = `${baseUrl}/dashboard/connect?device=${encodeURIComponent(deviceName)}&editor=${encodeURIComponent(editor)}&version=${encodeURIComponent(version)}&callback_uri=${encodeURIComponent(callbackUri.toString())}`
+
+	await vscode.env.openExternal(vscode.Uri.parse(authUrl))
 	return process.env.ZOO_CODE_BASE_URL || "https://www.zoocode.dev"
 }
 
@@ -239,6 +256,12 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
 		return false
 	}
 
+	const isValid = await verifyZooCodeTokenValue(token)
+	if (!isValid) {
+		vscode.window.showErrorMessage("Zoo Code: Authentication failed. Please try signing in again.")
+		return false
+	}
+
 	await setZooCodeToken(token)
 
 	// Check subscription status after successful auth
@@ -263,6 +286,16 @@ export async function verifyZooCodeToken(): Promise<"valid" | "invalid" | "unrea
 
 	const baseUrl = getZooCodeBaseUrl()
 
+	const isValid = await verifyZooCodeTokenValue(token, baseUrl)
+	if (!isValid) {
+		await clearZooCodeToken()
+		return false
+	}
+
+	return true
+}
+
+async function verifyZooCodeTokenValue(token: string, baseUrl = getZooCodeBaseUrl()): Promise<boolean> {
 	try {
 		const response = await fetch(`${baseUrl}/api/extension/auth/verify`, {
 			headers: { Authorization: `Bearer ${token}` },
@@ -270,6 +303,11 @@ export async function verifyZooCodeToken(): Promise<"valid" | "invalid" | "unrea
 		})
 
 		if (!response.ok) {
+			return false
+		}
+
+		const data = (await response.json()) as { valid?: boolean }
+		return data.valid === true
 			return "invalid"
 		}
 

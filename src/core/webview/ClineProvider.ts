@@ -2182,19 +2182,21 @@ export class ClineProvider
 			deviceName: os.hostname(),
 		}
 
+		const userInfo = getCachedZooCodeUserInfo()
 		try {
 			const { isZooCodeAuthenticated, getCachedZooCodeUserInfo, getZooCodeBaseUrl } = await import(
 				"../../services/zoo-code-auth"
 			)
-			const userInfo = getCachedZooCodeUserInfo()
 			zooCodeState = {
 				zooCodeIsAuthenticated: await isZooCodeAuthenticated(),
-				zooCodeUserName: userInfo.name,
-				zooCodeUserEmail: userInfo.email,
-				zooCodeUserImage: userInfo.image,
+				zooCodeUserName: userInfo?.name,
+				zooCodeUserEmail: userInfo?.email,
+				zooCodeUserImage: userInfo?.image,
 				zooCodeBaseUrl: getZooCodeBaseUrl(),
 				deviceName: os.hostname(),
 			}
+		} catch {
+			// Keep unauthenticated defaults if the optional auth service is unavailable.
 		} catch {
 			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
 		}
