@@ -258,7 +258,6 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 		const blocks = diffContent.split(/(?=(?<!\\)<<<<<<< SEARCH)/)
 
 		let repaired = ""
-		let needsRepair = false
 
 		for (let i = 0; i < blocks.length; i++) {
 			const block = blocks[i]
@@ -287,7 +286,6 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 			// Block needs repair. Build a clean block ending at >>>>>>> REPLACE, then
 			// re-add an inter-block separator if more (non-empty) blocks follow, so the
 			// appended closer never gets glued to the next "<<<<<<< SEARCH".
-			needsRepair = true
 			const isLast = blocks.slice(i + 1).every((b) => b.trim() === "")
 			const separator = isLast ? "" : "\n\n"
 
