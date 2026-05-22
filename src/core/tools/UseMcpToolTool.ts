@@ -111,7 +111,14 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			return { isValid: false }
 		}
 
-		// Native-only: arguments are already a structured object.
+		// Some LLMs emit arguments as JSON-encoded strings rather than objects.
+		// Parse them early so the type check below sees the unwrapped object.
+		if (typeof params.arguments === "string") {
+			try {
+				params.arguments = JSON.parse(params.arguments)
+			} catch {}
+		}
+
 		let parsedArguments: Record<string, unknown> | undefined
 		if (params.arguments !== undefined) {
 			if (typeof params.arguments !== "object" || params.arguments === null || Array.isArray(params.arguments)) {
