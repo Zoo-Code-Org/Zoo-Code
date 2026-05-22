@@ -92,4 +92,11 @@ describe("getBinPath bundled-ripgrep fallback", () => {
 
 		expect(result).toBeUndefined()
 	})
+
+	it("scopes the bundled ripgrep path to the current platform and arch", () => {
+		// Guards the universal VSIX from handing a wrong-OS binary to the
+		// fallback: the path must carry a <platform>-<arch> segment so a
+		// macOS host never resolves a Linux-built `dist/bin/rg`.
+		expect(bundledRgPath).toContain(path.join("bin", `${process.platform}-${process.arch}`))
+	})
 })

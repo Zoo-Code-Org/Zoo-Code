@@ -89,15 +89,19 @@ async function main() {
 			name: "copyRipgrep",
 			setup(build) {
 				build.onEnd(async () => {
-					// Copy the ripgrep binary into dist/bin/ so it ships inside the
-					// VSIX. getBinPath() in src/services/ripgrep/index.ts falls back
-					// to this bundled copy when ripgrep cannot be located in the VS
-					// Code installation (e.g. VS Code Insiders' staged-install layout).
+					// Copy the ripgrep binary into dist/bin/<platform>-<arch>/ so it
+					// ships inside the universal VSIX. getBinPath() in
+					// src/services/ripgrep/index.ts falls back to this bundled copy
+					// when ripgrep cannot be located in the VS Code installation
+					// (e.g. VS Code Insiders' staged-install layout). The
+					// <platform>-<arch> subfolder keeps the runtime fallback from
+					// picking a binary built for a different OS (the name `rg` is
+					// shared by Linux and macOS).
 					const { rgPath } = await import("@vscode/ripgrep")
 					if (!rgPath) {
 						throw new Error("[copyRipgrep] @vscode/ripgrep did not provide rgPath")
 					}
-					const rgDestDir = path.join(distDir, "bin")
+					const rgDestDir = path.join(distDir, "bin", `${process.platform}-${process.arch}`)
 					fs.mkdirSync(rgDestDir, { recursive: true })
 					const rgDest = path.join(rgDestDir, path.basename(rgPath))
 					fs.copyFileSync(rgPath, rgDest)

@@ -82,12 +82,18 @@ export function truncateLine(line: string, maxLength: number = MAX_LINE_LENGTH):
 /**
  * Path to the ripgrep binary bundled inside the extension itself.
  *
- * esbuild copies the platform `rg`/`rg.exe` into `dist/bin/` at build time
- * (see the `copyRipgrep` plugin in esbuild.mjs). At runtime this module is
- * bundled into `dist/extension.js`, so `__dirname` is the extension's `dist/`
- * directory.
+ * esbuild copies the platform `rg`/`rg.exe` into `dist/bin/<platform>-<arch>/`
+ * at build time (see the `copyRipgrep` plugin in esbuild.mjs). At runtime this
+ * module is bundled into `dist/extension.js`, so `__dirname` is the extension's
+ * `dist/` directory.
+ *
+ * The `<platform>-<arch>` segment is required: the published VSIX is universal
+ * but carries only the build host's binary. Without it, a macOS user would
+ * resolve a Linux-built `dist/bin/rg` (the binary name `rg` is shared by Linux
+ * and macOS) and execute an incompatible binary. With it, the fallback resolves
+ * only on a host matching the bundled binary.
  */
-export const bundledRgPath = path.join(__dirname, "bin", binName)
+export const bundledRgPath = path.join(__dirname, "bin", `${process.platform}-${process.arch}`, binName)
 
 /**
  * Get the path to the ripgrep binary.

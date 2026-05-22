@@ -63,7 +63,7 @@ jobs:
           grep -q "extension/webview-ui/build/assets/index.js" /tmp/zoo-code-vsix-contents.txt
           grep -q "extension/assets/codicons/codicon.ttf" /tmp/zoo-code-vsix-contents.txt
           grep -q "extension/assets/vscode-material-icons/icons/3d.svg" /tmp/zoo-code-vsix-contents.txt
-          grep -q "extension/dist/bin/rg" /tmp/zoo-code-vsix-contents.txt
+          grep -qE "extension/dist/bin/[^/]+/rg" /tmp/zoo-code-vsix-contents.txt
 
       - name: Validate packaged manifest identity
         run: |
