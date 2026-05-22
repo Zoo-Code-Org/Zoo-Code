@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "Selamat datang di Roo Code!",
-		"introduction": "Dengan berbagai Mode bawaan dan dapat diperluas, Roo Code memungkinkan Anda merencanakan, merancang, coding, debug, dan meningkatkan produktivitas seperti yang belum pernah terjadi sebelumnya.",
+		"greeting": "Selamat datang di Zoo Code!",
+		"introduction": "Dengan berbagai Mode bawaan dan dapat diperluas, Zoo Code memungkinkan Anda merencanakan, merancang, coding, debug, dan meningkatkan produktivitas seperti yang belum pernah terjadi sebelumnya.",
 		"getStarted": "Pilih penyedia Anda"
 	},
 	"providerSignup": {
 		"heading": "Pilih penyedia Anda",
-		"chooseProvider": "Roo memerlukan penyedia LLM untuk bekerja. Pilih satu untuk memulai, Anda dapat menambahkan lebih banyak nanti.",
+		"chooseProvider": "Zoo Code memerlukan penyedia LLM untuk bekerja. Pilih satu untuk memulai, Anda dapat menambahkan lebih banyak nanti.",
 		"goBack": "Kembali",
 		"finish": "Selesai"
 	},

@@ -250,5 +250,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Ungültiger Authentifizierungstoken empfangen.",
+			"token_verification_failed": "Zoo Code: Token-Überprüfung fehlgeschlagen.",
+			"invalid_token": "Zoo Code: Ungültiger Token.",
+			"could_not_verify_token": "Zoo Code: Token konnte nicht verifiziert werden."
+		},
+		"info": {
+			"connected": "Zoo Code: Erfolgreich verbunden! Du kannst Zoo Code jetzt als KI-Anbieter verwenden.",
+			"disconnected": "Zoo Code: Erfolgreich getrennt."
+		}
 	}
 }

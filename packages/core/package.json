@@ -12,6 +12,7 @@
 		"lint": "eslint src --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
 		"test": "vitest run",
+		"test:coverage": "vitest run --coverage",
 		"clean": "rimraf .turbo"
 	},
 	"dependencies": {
@@ -26,6 +27,7 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "^24.1.0",
+		"@vitest/coverage-v8": "^3.2.3",
 		"vitest": "^3.2.3"
 	}
 }

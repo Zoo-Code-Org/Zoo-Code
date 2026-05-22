@@ -262,5 +262,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Nhận được token xác thực không hợp lệ.",
+			"token_verification_failed": "Zoo Code: Xác minh token thất bại.",
+			"invalid_token": "Zoo Code: Token không hợp lệ.",
+			"could_not_verify_token": "Zoo Code: Không thể xác minh token."
+		},
+		"info": {
+			"connected": "Zoo Code: Kết nối thành công! Bạn có thể sử dụng Zoo Code làm nhà cung cấp AI.",
+			"disconnected": "Zoo Code: Đã ngắt kết nối thành công."
+		}
 	}
 }

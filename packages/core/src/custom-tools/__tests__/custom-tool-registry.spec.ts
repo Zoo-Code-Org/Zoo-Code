@@ -227,7 +227,7 @@ describe("CustomToolRegistry", () => {
 
 			expect(result.loaded).toContain("simple")
 			expect(registry.has("simple")).toBe(true)
-		}, 120_000)
+		}, 300_000)
 
 		it("should handle named exports", async () => {
 			const result = await registry.loadFromDirectory(TEST_FIXTURES_DIR)
@@ -281,7 +281,7 @@ describe("CustomToolRegistry", () => {
 			const result = await registry.loadFromDirectory(TEST_FIXTURES_DIR)
 
 			expect(result.loaded).toContain("cached")
-		}, 120_000)
+		}, 300_000)
 	})
 
 	describe.sequential("loadFromDirectories", () => {

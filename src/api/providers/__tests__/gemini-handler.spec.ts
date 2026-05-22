@@ -1,10 +1,24 @@
 import { t } from "i18next"
 import { FunctionCallingConfigMode } from "@google/genai"
 
+const mockCaptureException = vi.fn()
+
+vi.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			captureException: (...args: unknown[]) => mockCaptureException(...args),
+		},
+	},
+}))
+
 import { GeminiHandler } from "../gemini"
 import type { ApiHandlerOptions } from "../../../shared/api"
 
 describe("GeminiHandler backend support", () => {
+	beforeEach(() => {
+		mockCaptureException.mockClear()
+	})
+
 	it("createMessage uses function declarations (URL context and grounding are only for completePrompt)", async () => {
 		// URL context and grounding are mutually exclusive with function declarations
 		// in Gemini API, so createMessage only uses function declarations.

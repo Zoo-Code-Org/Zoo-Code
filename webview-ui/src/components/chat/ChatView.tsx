@@ -1260,7 +1260,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	useEffect(() => {
 		checkpointJumpCursorRef.current = null
-	}, [task?.ts, checkpointIndices])
+	}, [task?.ts, checkpointIndices.length])
 
 	// Scroll lifecycle is managed by a dedicated hook to keep ChatView focused
 	// on message handling and UI orchestration.

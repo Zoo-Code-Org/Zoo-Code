@@ -331,8 +331,8 @@
 		"title": "Rilasciato Zoo Code {{version}}",
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"handoff": {
-			"heading": "Zoo Code è tornato, ora come plugin mantenuto dalla community chiamato Zoo Code!!",
-			"description": "Se non l'hai seguito, il team di Zoo Code ha annunciato di recente che interromperà lo sviluppo di Zoo Code e archivierà il lavoro svolto. Ma niente paura: la community si è fatta avanti per continuare l'eredità di Zoo Code con un nuovo nome e una nuova casa! Non siamo più solo un singolo \"Roo\", ma una community, uno \"Zoo\" se vuoi. Zoo Code è un plugin mantenuto dalla community che riprende da dove Zoo Code si era fermato, e ci impegniamo a mantenere vivo lo spirito di Roo introducendo anche nuove funzionalità e miglioramenti. Vogliamo ringraziare di cuore tutto il team di Zoo Code per il lavoro incredibile e per aver creato uno strumento così straordinario per gli sviluppatori. Siamo entusiasti di continuare a costruire sulla loro base e di vedere dove la community porterà Zoo Code in futuro!",
+			"heading": "Roo Code è tornato! Ora come plugin mantenuto dalla community chiamato Zoo Code!!",
+			"description": "Se non l'hai seguito, il team di Roo Code ha annunciato di recente che interromperà lo sviluppo di Roo Code e archivierà il lavoro svolto. Ma niente paura: la community si è fatta avanti per continuare l'eredità di Roo Code con un nuovo nome e una nuova casa! Non siamo più solo un singolo \"Roo\", ma una community, uno \"Zoo\" se vuoi. Zoo Code è un plugin mantenuto dalla community che riprende da dove Zoo Code si era fermato, e ci impegniamo a mantenere vivo lo spirito di Roo introducendo anche nuove funzionalità e miglioramenti. Vogliamo ringraziare di cuore tutto il team di Roo Code per il lavoro incredibile e per aver creato uno strumento così straordinario per gli sviluppatori. Siamo entusiasti di continuare a costruire sulla loro base e di vedere dove la community porterà Zoo Code in futuro!",
 			"readMore": "Vai alla nuova home page di Zoo Code e leggi l'annuncio completo"
 		},
 		"release": {

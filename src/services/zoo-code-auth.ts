@@ -1,7 +1,6 @@
 import * as vscode from "vscode"
-import os from "os"
 
-import { Package } from "../shared/package"
+import { t } from "../i18n"
 
 const ZOO_CODE_TOKEN_KEY = "zoo-code-session-token"
 const ZOO_CODE_USER_NAME_KEY = "zoo-code-user-name"
@@ -33,9 +32,21 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 	_cachedUserEmail = await secretStorage.get(ZOO_CODE_USER_EMAIL_KEY)
 	_cachedUserImage = await secretStorage.get(ZOO_CODE_USER_IMAGE_KEY)
 
-	// Check subscription status on init if authenticated
+	// Validate persisted auth state on init before reporting the user as connected.
 	if (_cachedToken) {
-		checkSubscriptionStatus().catch(() => {})
+		const result = await verifyZooCodeToken()
+		if (result === "invalid") {
+			// Token is definitively rejected by the backend — clear everything.
+			await clearZooCodeUserInfo()
+			await clearZooCodeToken()
+		} else if (result === "unreachable") {
+			// Network is temporarily down; keep the cached session but mark subscription
+			// status as unknown so callers know it hasn't been confirmed.
+			_cachedSubscriptionStatus = "unknown"
+		} else {
+			// result === "valid"
+			void checkSubscriptionStatus().catch(() => {})
+		}
 	}
 
 	// Watch for secret changes and update cache
@@ -149,7 +160,7 @@ export async function setZooCodeToken(token: string): Promise<void> {
 
 export async function setZooCodeUserInfo(info: {
 	name?: string | null
-	email?: string
+	email?: string | null
 	image?: string | null
 }): Promise<void> {
 	if (!secretStorage) return
@@ -165,6 +176,9 @@ export async function setZooCodeUserInfo(info: {
 	if (info.email) {
 		await secretStorage.store(ZOO_CODE_USER_EMAIL_KEY, info.email)
 		_cachedUserEmail = info.email
+	} else if (info.email === null) {
+		await secretStorage.delete(ZOO_CODE_USER_EMAIL_KEY)
+		_cachedUserEmail = undefined
 	}
 
 	if (info.image) {
@@ -192,7 +206,6 @@ export async function clearZooCodeToken(): Promise<void> {
 	_cachedToken = undefined
 	_cachedSubscriptionStatus = "unknown"
 	_lastSubscriptionCheck = 0
-	await clearZooCodeUserInfo()
 }
 
 export function getZooCodeBaseUrl(): string {
@@ -213,11 +226,33 @@ export async function startZooCodeAuth(): Promise<void> {
 	const authUrl = `${baseUrl}/dashboard/connect?device=${encodeURIComponent(deviceName)}&editor=${encodeURIComponent(editor)}&version=${encodeURIComponent(version)}&callback_uri=${encodeURIComponent(callbackUri.toString())}`
 
 	await vscode.env.openExternal(vscode.Uri.parse(authUrl))
+	return process.env.ZOO_CODE_BASE_URL || "https://www.zoocode.dev"
 }
 
 export async function handleAuthCallback(token: string): Promise<boolean> {
 	if (!token || !token.startsWith("zoo_ext_")) {
-		vscode.window.showErrorMessage("Zoo Code: Invalid authentication token received.")
+		vscode.window.showErrorMessage(t("common:zooAuth.errors.invalid_token_received"))
+		return false
+	}
+
+	// Verify token with backend before storing
+	const baseUrl = getZooCodeBaseUrl()
+	try {
+		const response = await fetch(`${baseUrl}/api/extension/auth/verify`, {
+			headers: { Authorization: `Bearer ${token}` },
+			signal: AbortSignal.timeout(10_000),
+		})
+		if (!response.ok) {
+			vscode.window.showErrorMessage(t("common:zooAuth.errors.token_verification_failed"))
+			return false
+		}
+		const data = (await response.json()) as { valid?: boolean }
+		if (!data.valid) {
+			vscode.window.showErrorMessage(t("common:zooAuth.errors.invalid_token"))
+			return false
+		}
+	} catch {
+		vscode.window.showErrorMessage(t("common:zooAuth.errors.could_not_verify_token"))
 		return false
 	}
 
@@ -232,15 +267,22 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
 	// Check subscription status after successful auth
 	await checkSubscriptionStatus().catch(() => {})
 
-	vscode.window.showInformationMessage(
-		"Zoo Code: Successfully connected! You can now use Zoo Code as your AI provider.",
-	)
+	vscode.window.showInformationMessage(t("common:zooAuth.info.connected"))
 	return true
 }
 
-export async function verifyZooCodeToken(): Promise<boolean> {
+/**
+ * Verify the stored token against the backend.
+ * Returns:
+ *   - "valid"       — backend confirmed the token is good
+ *   - "invalid"     — backend explicitly rejected the token (HTTP error or valid: false)
+ *   - "unreachable" — network error / timeout; token state is unknown
+ *
+ * This function has no side-effects; callers are responsible for acting on the result.
+ */
+export async function verifyZooCodeToken(): Promise<"valid" | "invalid" | "unreachable"> {
 	const token = await getZooCodeToken()
-	if (!token) return false
+	if (!token) return "invalid"
 
 	const baseUrl = getZooCodeBaseUrl()
 
@@ -266,8 +308,13 @@ async function verifyZooCodeTokenValue(token: string, baseUrl = getZooCodeBaseUr
 
 		const data = (await response.json()) as { valid?: boolean }
 		return data.valid === true
+			return "invalid"
+		}
+
+		const data = (await response.json()) as { valid?: boolean }
+		return data.valid === true ? "valid" : "invalid"
 	} catch {
-		return false
+		return "unreachable"
 	}
 }
 
@@ -278,20 +325,20 @@ export async function isZooCodeAuthenticated(): Promise<boolean> {
 
 export async function disconnectZooCode(): Promise<void> {
 	const token = await getZooCodeToken()
-	if (!token) return
+	if (token) {
+		const baseUrl = getZooCodeBaseUrl()
 
-	const baseUrl = getZooCodeBaseUrl()
-
-	try {
-		await fetch(`${baseUrl}/api/extension/auth/revoke`, {
-			method: "POST",
-			headers: { Authorization: `Bearer ${token}` },
-			signal: AbortSignal.timeout(10_000),
-		})
-	} catch {
-		// Ignore errors during revocation
+		try {
+			await fetch(`${baseUrl}/api/extension/auth/revoke`, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${token}` },
+				signal: AbortSignal.timeout(10_000),
+			})
+		} catch {
+			// Ignore errors during revocation
+		}
 	}
-
 	await clearZooCodeToken()
-	vscode.window.showInformationMessage("Zoo Code: Disconnected successfully.")
+	await clearZooCodeUserInfo()
+	vscode.window.showInformationMessage(t("common:zooAuth.info.disconnected"))
 }

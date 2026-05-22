@@ -123,6 +123,17 @@ describe("getModelParams", () => {
 			expect(result.temperature).toBe(0.3)
 		})
 
+		it("should omit temperature for anthropic models that do not support it", () => {
+			const result = getModelParams({
+				...anthropicParams,
+				settings: { modelTemperature: 0.7 },
+				model: { ...baseModel, supportsTemperature: false },
+				defaultTemperature: 0.5,
+			})
+
+			expect(result.temperature).toBeUndefined()
+		})
+
 		it("should use model maxTokens when available", () => {
 			const model: ModelInfo = {
 				...baseModel,

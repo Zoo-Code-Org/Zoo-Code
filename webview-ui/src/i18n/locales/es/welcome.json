@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "¡Bienvenido a Roo Code!",
-		"introduction": "Con una variedad de Modos integrados y extensibles, Roo Code te permite planificar, arquitectar, codificar, depurar y aumentar tu productividad como nunca antes.",
+		"greeting": "¡Bienvenido a Zoo Code!",
+		"introduction": "Con una variedad de Modos integrados y extensibles, Zoo Code te permite planificar, arquitectar, codificar, depurar y aumentar tu productividad como nunca antes.",
 		"getStarted": "Elige tu proveedor"
 	},
 	"providerSignup": {
 		"heading": "Elige tu proveedor",
-		"chooseProvider": "Roo necesita un proveedor de LLM para funcionar. Elige uno para comenzar, puedes añadir más después.",
+		"chooseProvider": "Zoo Code necesita un proveedor de LLM para funcionar. Elige uno para comenzar, puedes añadir más después.",
 		"goBack": "Atrás",
 		"finish": "Finalizar"
 	},

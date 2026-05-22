@@ -331,8 +331,8 @@
 		"title": "S'ha publicat Zoo Code {{version}}",
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"handoff": {
-			"heading": "Zoo Code ha tornat, ara com a connector mantingut per la comunitat anomenat Zoo Code!!",
-			"description": "Per si no ho havies seguit, l'equip de Zoo Code ha anunciat fa poc que deixa de desenvolupar Zoo Code i n'arxiva la feina feta. Però no pateixis: la comunitat ha fet un pas endavant per continuar el llegat de Zoo Code amb un nom nou i una llar nova! Ja no som només un sol \"Roo\", som una comunitat, un \"Zoo\" si vols. Zoo Code és un connector mantingut per la comunitat que reprèn el camí on Zoo Code ho va deixar, i ens comprometem a mantenir viu l'esperit de Roo mentre també hi incorporem funcions i millores noves. Volem donar un enorme agraïment a tot l'equip de Zoo Code per la feina increïble que han fet i per haver creat una eina tan extraordinària per als desenvolupadors. Ens fa molta il·lusió continuar construint sobre la seva base i veure fins on porta la comunitat Zoo Code en el futur!",
+			"heading": "Roo Code ha tornat! Ara com a connector mantingut per la comunitat anomenat Zoo Code!!",
+			"description": "Per si no ho havies seguit, l'equip de Roo Code ha anunciat fa poc que deixa de desenvolupar Roo Code i n'arxiva la feina feta. Però no pateixis: la comunitat ha fet un pas endavant per continuar el llegat de Roo Code amb un nom nou i una llar nova! Ja no som només un sol \"Roo\", som una comunitat, un \"Zoo\" si vols. Zoo Code és un connector mantingut per la comunitat que reprèn el camí on Zoo Code ho va deixar, i ens comprometem a mantenir viu l'esperit de Roo mentre també hi incorporem funcions i millores noves. Volem donar un enorme agraïment a tot l'equip de Roo Code per la feina increïble que han fet i per haver creat una eina tan extraordinària per als desenvolupadors. Ens fa molta il·lusió continuar construint sobre la seva base i veure fins on porta la comunitat Zoo Code en el futur!",
 			"readMore": "Mira la nova pàgina principal de Zoo Code i llegeix l'anunci complet"
 		},
 		"release": {

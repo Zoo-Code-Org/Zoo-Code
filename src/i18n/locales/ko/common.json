@@ -255,5 +255,17 @@
 	"docsLink": {
 		"label": "Docs",
 		"url": "https://docs.roocode.com"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: 잘못된 인증 token을 수신했습니다.",
+			"token_verification_failed": "Zoo Code: Token 검증에 실패했습니다.",
+			"invalid_token": "Zoo Code: 잘못된 token입니다.",
+			"could_not_verify_token": "Zoo Code: Token을 검증할 수 없습니다."
+		},
+		"info": {
+			"connected": "Zoo Code: 연결에 성공했습니다! 이제 Zoo Code를 AI 제공자로 사용할 수 있습니다.",
+			"disconnected": "Zoo Code: 연결이 해제되었습니다."
+		}
 	}
 }

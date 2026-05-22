@@ -2,9 +2,11 @@
 
 import * as fs from "fs"
 import * as path from "path"
+import * as yaml from "yaml"
 
 describe("dist assets", () => {
 	const distPath = path.join(__dirname, "../dist")
+	const marketplaceAssetsPath = path.join(distPath, "assets/marketplace")
 
 	describe("tiktoken", () => {
 		it("should have tiktoken wasm file", () => {
@@ -54,6 +56,19 @@ describe("dist assets", () => {
 
 		test.each(treeSitterFiles)("should have %s file", (filename) => {
 			expect(fs.existsSync(path.join(distPath, filename))).toBe(true)
+		})
+	})
+
+	describe("marketplace assets", () => {
+		const marketplaceFiles = ["modes.yml", "mcps.yml"]
+
+		test.each(marketplaceFiles)("should include bundled %s marketplace asset with multiple items", (filename) => {
+			const assetPath = path.join(marketplaceAssetsPath, filename)
+			expect(fs.existsSync(assetPath)).toBe(true)
+
+			const parsed = yaml.parse(fs.readFileSync(assetPath, "utf-8"))
+			expect(Array.isArray(parsed?.items)).toBe(true)
+			expect(parsed.items.length).toBeGreaterThan(1)
 		})
 	})
 })
