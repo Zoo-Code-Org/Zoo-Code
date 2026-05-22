@@ -11,9 +11,9 @@
 </sub>
 </div>
 
-# Berkontribusi pada Roo Code
+# Berkontribusi pada Zoo Code
 
-Roo Code adalah proyek yang digerakkan oleh komunitas, dan kami sangat menghargai setiap kontribusi. Untuk menyederhanakan kolaborasi, kami beroperasi dengan dasar [Pendekatan Masalah-Dulu](#pendekatan-masalah-dulu), yang berarti semua [Pull Request (PR)](#mengajukan-pull-request) harus terlebih dahulu ditautkan ke Masalah GitHub. Harap tinjau panduan ini dengan cermat.
+Zoo Code adalah proyek yang digerakkan oleh komunitas, dan kami sangat menghargai setiap kontribusi. Untuk menyederhanakan kolaborasi, kami beroperasi dengan dasar [Pendekatan Masalah-Dulu](#pendekatan-masalah-dulu), yang berarti semua [Pull Request (PR)](#mengajukan-pull-request) harus terlebih dahulu ditautkan ke Masalah GitHub. Harap tinjau panduan ini dengan cermat.
 
 ## Daftar Isi
 
@@ -52,10 +52,10 @@ Peta jalan kami memandu arah proyek. Sejajarkan kontribusi Anda dengan tujuan-tu
 
 Sebutkan keselarasan dengan area-area ini di PR Anda.
 
-### 3. Bergabunglah dengan Komunitas Roo Code
+### 3. Bergabunglah dengan Komunitas Zoo Code
 
-- **Utama:** Bergabunglah dengan [Discord](https://discord.gg/roocode) kami dan kirim DM ke **Hannes Rudolph (`hrudolph`)**.
-- **Alternatif:** Kontributor berpengalaman dapat terlibat langsung melalui [Proyek GitHub](https://github.com/orgs/RooCodeInc/projects/1).
+- **Discord:** Bergabunglah dengan [Discord](https://discord.gg/VxfP4Vx3gX) kami.
+- **Reddit:** Bergabunglah dengan [Reddit](https://www.reddit.com/r/ZooCode/) kami.
 
 ## Menemukan & Merencanakan Kontribusi Anda
 
@@ -69,26 +69,26 @@ Sebutkan keselarasan dengan area-area ini di PR Anda.
 
 Semua kontribusi dimulai dengan Masalah GitHub menggunakan template ramping kami.
 
-- **Periksa masalah yang ada**: Cari di [Masalah GitHub](https://github.com/RooCodeInc/Roo-Code/issues).
+- **Periksa masalah yang ada**: Cari di [Masalah GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
 - **Buat masalah** menggunakan:
     - **Penyempurnaan:** Template "Permintaan Penyempurnaan" (bahasa sederhana yang berfokus pada manfaat pengguna).
     - **Bug:** Template "Laporan Bug" (repro minimal + yang diharapkan vs aktual + versi).
-- **Ingin mengerjakannya?** Beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke **Hannes Rudolph (`hrudolph`)** di [Discord](https://discord.gg/roocode) untuk ditugaskan. Penugasan akan dikonfirmasi di utas.
+- **Ingin mengerjakannya?** Beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke tim inti di [Discord](https://discord.gg/VxfP4Vx3gX) untuk ditugaskan. Penugasan akan dikonfirmasi di utas.
 - **PR harus menautkan ke masalah.** PR yang tidak tertaut dapat ditutup.
 
 ### Memutuskan Apa yang Akan Dikerjakan
 
-- Periksa [Proyek GitHub](https://github.com/orgs/RooCodeInc/projects/1) untuk masalah "Masalah [Belum Ditugaskan]".
-- Untuk dokumentasi, kunjungi [Dokumentasi Roo Code](https://github.com/RooCodeInc/Roo-Code-Docs).
+- Periksa [halaman GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues) untuk melihat issues.
+- Untuk dokumentasi, kunjungi [Dokumentasi Zoo Code](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
 
 ### Melaporkan Bug
 
 - Periksa laporan yang ada terlebih dahulu.
-- Buat bug baru menggunakan [template "Laporan Bug"](https://github.com/RooCodeInc/Roo-Code/issues/new/choose) dengan:
+- Buat bug baru menggunakan [template "Laporan Bug"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) dengan:
     - Langkah-langkah reproduksi yang jelas dan bernomor
     - Hasil yang diharapkan vs aktual
-    - Versi Roo Code (wajib); penyedia/model API jika relevan
-- **Masalah keamanan**: Laporkan secara pribadi melalui [saran keamanan](https://github.com/RooCodeInc/Roo-Code/security/advisories/new).
+    - Versi Zoo Code (wajib); penyedia/model API jika relevan
+- **Masalah keamanan**: Laporkan secara pribadi melalui [saran keamanan](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
 
 ## Proses Pengembangan & Pengajuan
 
@@ -97,7 +97,7 @@ Semua kontribusi dimulai dengan Masalah GitHub menggunakan template ramping kami
 1. **Fork & Klon:**
 
 ```
-git clone https://github.com/NAMA_PENGGUNA_ANDA/Roo-Code.git
+git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
 2. **Instal Ketergantungan:**
@@ -126,7 +126,7 @@ pnpm install
 
 ### Kebijakan Pull Request
 
-- Harus merujuk pada Masalah GitHub yang ditugaskan. Untuk ditugaskan: beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke **Hannes Rudolph (`hrudolph`)** di [Discord](https://discord.gg/roocode). Penugasan akan dikonfirmasi di utas.
+- Harus merujuk pada Masalah GitHub yang ditugaskan. Untuk ditugaskan: beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke tim inti di [Discord](https://discord.gg/VxfP4Vx3gX). Penugasan akan dikonfirmasi di utas.
 - PR yang tidak tertaut dapat ditutup.
 - PR harus lulus tes CI, selaras dengan peta jalan, dan memiliki dokumentasi yang jelas.
 
@@ -138,4 +138,4 @@ pnpm install
 
 ## Hukum
 
-Dengan berkontribusi, Anda setuju bahwa kontribusi Anda akan dilisensikan di bawah Lisensi Apache 2.0, sesuai dengan lisensi Roo Code.
+Dengan berkontribusi, Anda setuju bahwa kontribusi Anda akan dilisensikan di bawah Lisensi Apache 2.0, sesuai dengan lisensi Zoo Code.

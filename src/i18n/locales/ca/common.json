@@ -115,7 +115,7 @@
 			"thinking_complete_recitation": "(Pensament completat, però la sortida s'ha bloquejat a causa de la comprovació de recitació.)"
 		},
 		"roo": {
-			"authenticationRequired": "El proveïdor Zoo requereix autenticació al núvol. Si us plau, inicieu sessió a Zoo Code Cloud.",
+			"authenticationRequired": "El proveïdor Roo requereix autenticació al núvol. Si us plau, inicieu sessió a Roo Code Cloud.",
 			"routerRemoved": "S'ha eliminat Roo Code Router. Selecciona i configura un proveïdor diferent."
 		},
 		"openAiCodex": {
@@ -254,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: S'ha rebut un token d'autenticació no vàlid.",
+			"token_verification_failed": "Zoo Code: Ha fallat la verificació del token.",
+			"invalid_token": "Zoo Code: Token no vàlid.",
+			"could_not_verify_token": "Zoo Code: No s'ha pogut verificar el token."
+		},
+		"info": {
+			"connected": "Zoo Code: Connectat correctament! Ara podeu utilitzar Zoo Code com a proveïdor d'IA.",
+			"disconnected": "Zoo Code: Desconnectat correctament."
+		}
 	}
 }

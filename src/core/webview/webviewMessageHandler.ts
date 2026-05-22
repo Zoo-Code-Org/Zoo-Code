@@ -72,6 +72,7 @@ import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
+import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -926,8 +927,8 @@ export const webviewMessageHandler = async (
 						unbound: {},
 						ollama: {},
 						lmstudio: {},
-						roo: {},
 						poe: {},
+						deepseek: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -993,6 +994,21 @@ export const webviewMessageHandler = async (
 				candidates.push({
 					key: "poe",
 					options: { provider: "poe", apiKey: poeApiKey, baseUrl: poeBaseUrl },
+				})
+			}
+
+			// DeepSeek is conditional on apiKey
+			const deepSeekApiKey = message?.values?.deepSeekApiKey ?? apiConfiguration.deepSeekApiKey
+			const deepSeekBaseUrl = message?.values?.deepSeekBaseUrl ?? apiConfiguration.deepSeekBaseUrl
+
+			if (deepSeekApiKey) {
+				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
+					await flushModels({ provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl }, true)
+				}
+
+				candidates.push({
+					key: "deepseek",
+					options: { provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
 				})
 			}
 
@@ -1070,14 +1086,20 @@ export const webviewMessageHandler = async (
 			// Specific handler for LM Studio models only.
 			const { apiConfiguration: lmStudioApiConfig } = await provider.getState()
 			try {
-				const lmStudioOptions = {
-					provider: "lmstudio" as const,
-					baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
+				const requestedBaseUrl = message.values?.baseUrl
+				const hasPreviewBaseUrl = typeof requestedBaseUrl === "string"
+				let lmStudioModels: ModelRecord
+				if (hasPreviewBaseUrl) {
+					lmStudioModels = await getLMStudioModels(requestedBaseUrl)
+				} else {
+					const lmStudioOptions = {
+						provider: "lmstudio" as const,
+						baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
+					}
+					// Flush cache and refresh to ensure fresh models.
+					await flushModels(lmStudioOptions, true)
+					lmStudioModels = await getModels(lmStudioOptions)
 				}
-				// Flush cache and refresh to ensure fresh models.
-				await flushModels(lmStudioOptions, true)
-
-				const lmStudioModels = await getModels(lmStudioOptions)
 
 				if (Object.keys(lmStudioModels).length > 0) {
 					provider.postMessageToWebview({
@@ -2403,6 +2425,18 @@ export const webviewMessageHandler = async (
 			// Clear the flag that indicates auth completed without model selection
 			await provider.context.globalState.update("roo-auth-skip-model", undefined)
 			await provider.postStateToWebview()
+			break
+		}
+		case "zooCodeSignOut": {
+			try {
+				const { disconnectZooCode } = await import("../../services/zoo-code-auth")
+				await disconnectZooCode()
+				await provider.postStateToWebview()
+			} catch (error) {
+				provider.log(
+					`Failed to sign out of Zoo Code: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
 			break
 		}
 		case "switchOrganization": {

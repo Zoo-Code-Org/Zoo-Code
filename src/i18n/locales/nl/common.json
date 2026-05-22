@@ -91,7 +91,7 @@
 			"errorOutput": "Foutuitvoer: {{output}}",
 			"processExitedWithError": "Claude Code proces beëindigd met code {{exitCode}}. Foutuitvoer: {{output}}",
 			"stoppedWithReason": "Claude Code gestopt om reden: {{reason}}",
-			"apiKeyModelPlanMismatch": "API keys and subscription plans allow different models. Make sure the selected model is included in your plan."
+			"apiKeyModelPlanMismatch": "API-sleutels en abonnementsplannen staan verschillende modellen toe. Controleer of het geselecteerde model in je plan is inbegrepen."
 		},
 		"message": {
 			"no_active_task_to_delete": "Geen actieve taak om berichten uit te verwijderen",
@@ -112,7 +112,7 @@
 			"thinking_complete_recitation": "(Nadenken voltooid, maar uitvoer is geblokkeerd vanwege recitatiecontrole.)"
 		},
 		"roo": {
-			"authenticationRequired": "Zoo provider vereist cloud authenticatie. Log in bij Zoo Code Cloud.",
+			"authenticationRequired": "Roo provider vereist cloud authenticatie. Log in bij Roo Code Cloud.",
 			"routerRemoved": "Roo Code Router is verwijderd. Selecteer en configureer een andere provider."
 		},
 		"api": {
@@ -254,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Ongeldig authenticatietoken ontvangen.",
+			"token_verification_failed": "Zoo Code: Tokenverificatie mislukt.",
+			"invalid_token": "Zoo Code: Ongeldig token.",
+			"could_not_verify_token": "Zoo Code: Token kon niet worden geverifieerd."
+		},
+		"info": {
+			"connected": "Zoo Code: Succesvol verbonden! Je kunt Zoo Code nu gebruiken als AI-provider.",
+			"disconnected": "Zoo Code: Succesvol losgekoppeld."
+		}
 	}
 }

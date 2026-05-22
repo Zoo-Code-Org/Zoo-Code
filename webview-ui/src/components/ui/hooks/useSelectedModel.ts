@@ -9,6 +9,7 @@ import {
 	deepSeekModels,
 	moonshotModels,
 	minimaxModels,
+	mimoModels,
 	geminiModels,
 	mistralModels,
 	openAiModelInfoSaneDefaults,
@@ -51,7 +52,7 @@ function getValidatedModelId(
 }
 
 export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
-	const provider = apiConfiguration?.apiProvider || "anthropic"
+	const provider = apiConfiguration?.apiProvider || "openrouter"
 	const activeProvider: ProviderName | undefined = isRetiredProvider(provider) ? undefined : provider
 	const dynamicProvider = activeProvider && isDynamicProvider(activeProvider) ? activeProvider : undefined
 	const openRouterModelId = activeProvider === "openrouter" ? apiConfiguration?.openRouterModelId : undefined
@@ -99,7 +100,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 					lmStudioModels: (lmStudioModels.data || undefined) as ModelRecord | undefined,
 					ollamaModels: (ollamaModels.data || undefined) as ModelRecord | undefined,
 				})
-			: { id: getProviderDefaultModelId(activeProvider ?? "anthropic"), info: undefined }
+			: { id: getProviderDefaultModelId(activeProvider ?? "openrouter"), info: undefined }
 
 	return {
 		provider,
@@ -232,9 +233,13 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case "deepseek": {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = deepSeekModels[id as keyof typeof deepSeekModels]
-			return { id, info }
+			const availableModels = routerModels.deepseek
+				? { ...deepSeekModels, ...routerModels.deepseek }
+				: deepSeekModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels.deepseek?.[id]
+			const staticInfo = deepSeekModels[id as keyof typeof deepSeekModels]
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case "moonshot": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
@@ -244,6 +249,11 @@ function getSelectedModel({
 		case "minimax": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = minimaxModels[id as keyof typeof minimaxModels]
+			return { id, info }
+		}
+		case "mimo": {
+			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const info = mimoModels[id as keyof typeof mimoModels] ?? mimoModels["mimo-v2.5-pro"]
 			return { id, info }
 		}
 		case "zai": {
@@ -310,11 +320,6 @@ function getSelectedModel({
 		case "fireworks": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = fireworksModels[id as keyof typeof fireworksModels]
-			return { id, info }
-		}
-		case "roo": {
-			const id = getValidatedModelId(apiConfiguration.apiModelId, routerModels.roo, defaultModelId)
-			const info = routerModels.roo?.[id]
 			return { id, info }
 		}
 		case "poe": {

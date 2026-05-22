@@ -56,7 +56,7 @@
 			"label": "Menemukan kerentanan?",
 			"link": "Ikuti proses pengungkapan kami"
 		},
-		"community": "Ingin tips atau hanya nongkrong dengan pengguna Zoo Code lainnya? Bergabunglah dengan <redditLink>reddit.com/r/RooCode</redditLink> atau <discordLink>discord.gg/roocode</discordLink>",
+		"community": "Ingin tips atau hanya nongkrong dengan pengguna Zoo Code lainnya? Bergabunglah dengan <redditLink>reddit.com/r/ZooCode</redditLink> atau <discordLink>discord.gg/VxfP4Vx3gX</discordLink>",
 		"contactAndCommunity": "Kontak & Komunitas",
 		"manageSettings": "Kelola Pengaturan",
 		"debugMode": {
@@ -394,6 +394,13 @@
 		"minimaxApiKey": "Kunci API MiniMax",
 		"getMiniMaxApiKey": "Dapatkan Kunci API MiniMax",
 		"minimaxBaseUrl": "Titik Masuk MiniMax",
+		"mimoApiKey": "Kunci API MiMo",
+		"getMimoApiKey": "Dapatkan Kunci API MiMo",
+		"mimoBaseUrl": "Titik Masuk MiMo",
+		"mimoBaseUrlSingapore": "Token Plan - Singapura (Default)",
+		"mimoBaseUrlChina": "Token Plan - Tiongkok",
+		"mimoBaseUrlEurope": "Token Plan - Eropa (AMS)",
+		"mimoBaseUrlPayg": "Bayar sesuai penggunaan",
 		"geminiApiKey": "Gemini API Key",
 		"getSambaNovaApiKey": "Dapatkan SambaNova API Key",
 		"sambaNovaApiKey": "SambaNova API Key",

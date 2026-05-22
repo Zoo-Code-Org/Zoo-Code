@@ -112,7 +112,7 @@
 			"thinking_complete_recitation": "(Размышление завершено, но вывод заблокирован проверкой цитирования.)"
 		},
 		"roo": {
-			"authenticationRequired": "Провайдер Zoo требует облачной аутентификации. Войдите в Zoo Code Cloud.",
+			"authenticationRequired": "Провайдер Roo требует облачной аутентификации. Войдите в Roo Code Cloud.",
 			"routerRemoved": "Roo Code Router был удалён. Выберите и настройте другого провайдера."
 		},
 		"api": {
@@ -254,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Получен недействительный token аутентификации.",
+			"token_verification_failed": "Zoo Code: Не удалось проверить token.",
+			"invalid_token": "Zoo Code: Недействительный token.",
+			"could_not_verify_token": "Zoo Code: Не удалось проверить token."
+		},
+		"info": {
+			"connected": "Zoo Code: Успешно подключено! Теперь ты можешь использовать Zoo Code в качестве AI-провайдера.",
+			"disconnected": "Zoo Code: Успешно отключено."
+		}
 	}
 }

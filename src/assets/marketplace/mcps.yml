@@ -1,0 +1,3032 @@
+items:
+  - id: apify
+    name: Apify Actors
+    description: Enables AI assistants to interact with Apify's web scraping and automation actors, providing access to
+      tools for data extraction, web searching, social media analysis, and more.
+    author: apify
+    url: https://github.com/apify/actors-mcp-server
+    tags:
+      - web-scraping
+      - data-extraction
+      - automation
+      - actor-management
+      - apify-platform
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@apify/actors-mcp-server"],
+            "env": {
+              "APIFY_TOKEN": "{{APIFY_TOKEN}}"
+            }
+          }
+      - name: NPX with Specific Actors
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@apify/actors-mcp-server", "--actors", "{{ACTOR_LIST}}"],
+            "env": {
+              "APIFY_TOKEN": "{{APIFY_TOKEN}}"
+            }
+          }
+        parameters:
+          - name: Actor List
+            key: ACTOR_LIST
+            placeholder: lukaskrivka/google-maps-with-contact-details,apify/instagram-scraper
+      - name: Remote MCP - SSE
+        content: |
+          {
+            "type": "sse",
+            "url": "https://actors-mcp-server.apify.actor/sse",
+            "env": {
+              "APIFY_TOKEN": "{{APIFY_TOKEN}}"
+            }
+          }
+    parameters:
+      - name: Apify API Token
+        key: APIFY_TOKEN
+        placeholder: your_apify_api_token
+  - id: atlassian
+    name: Atlassian
+    description: Comprehensive MCP server for Atlassian tools (Confluence and Jira) supporting both Cloud and Server/Data
+      Center deployments with multiple authentication methods including API tokens, Personal Access Tokens, and OAuth
+      2.0.
+    author: sooperset
+    url: https://github.com/sooperset/mcp-atlassian
+    tags:
+      - atlassian
+      - jira
+      - confluence
+      - project-management
+      - issue-tracking
+      - documentation
+      - collaboration
+      - oauth
+      - api-integration
+    prerequisites:
+      - Docker
+      - Atlassian account (Cloud or Server/Data Center)
+    content:
+      - name: Docker
+        prerequisites:
+          - Docker
+          - Atlassian Cloud account
+        content: >
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "-e", "CONFLUENCE_URL", "-e", "CONFLUENCE_USERNAME", "-e", "CONFLUENCE_API_TOKEN", "-e", "JIRA_URL", "-e", "JIRA_USERNAME", "-e", "JIRA_API_TOKEN", "ghcr.io/sooperset/mcp-atlassian@sha256:27c8e5b890e16134a443f49683eaa794fdb48ed5bef785c1b4c88a0cd729df56"],
+            "env": {
+              "CONFLUENCE_URL": "{{CONFLUENCE_URL}}",
+              "CONFLUENCE_USERNAME": "{{CONFLUENCE_USERNAME}}",
+              "CONFLUENCE_API_TOKEN": "{{CONFLUENCE_API_TOKEN}}",
+              "JIRA_URL": "{{JIRA_URL}}",
+              "JIRA_USERNAME": "{{JIRA_USERNAME}}",
+              "JIRA_API_TOKEN": "{{JIRA_API_TOKEN}}"
+            }
+          }
+        parameters:
+          - name: Confluence URL
+            key: CONFLUENCE_URL
+            placeholder: https://your-company.atlassian.net/wiki
+          - name: Confluence Username
+            key: CONFLUENCE_USERNAME
+            placeholder: your.email@company.com
+          - name: Confluence API Token
+            key: CONFLUENCE_API_TOKEN
+            placeholder: your_confluence_api_token
+          - name: Jira URL
+            key: JIRA_URL
+            placeholder: https://your-company.atlassian.net
+          - name: Jira Username
+            key: JIRA_USERNAME
+            placeholder: your.email@company.com
+          - name: Jira API Token
+            key: JIRA_API_TOKEN
+            placeholder: your_jira_api_token
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: >
+          {
+            "command": "uvx",
+            "args": ["--from", "mcp-atlassian==0.11.9", "--hash", "sha256:1ba6a171b5299e554d4e0eff98279e74cdc4eb1c12c8e62be924103d9cd38e5e", "mcp-atlassian"],
+            "env": {
+              "CONFLUENCE_URL": "{{CONFLUENCE_URL}}",
+              "CONFLUENCE_USERNAME": "{{CONFLUENCE_USERNAME}}",
+              "CONFLUENCE_API_TOKEN": "{{CONFLUENCE_API_TOKEN}}",
+              "JIRA_URL": "{{JIRA_URL}}",
+              "JIRA_USERNAME": "{{JIRA_USERNAME}}",
+              "JIRA_API_TOKEN": "{{JIRA_API_TOKEN}}"
+            }
+          }
+        parameters:
+          - name: Confluence URL
+            key: CONFLUENCE_URL
+            placeholder: https://your-company.atlassian.net/wiki
+          - name: Confluence Username
+            key: CONFLUENCE_USERNAME
+            placeholder: your.email@company.com
+          - name: Confluence API Token
+            key: CONFLUENCE_API_TOKEN
+            placeholder: your_confluence_api_token
+          - name: Jira URL
+            key: JIRA_URL
+            placeholder: https://your-company.atlassian.net
+          - name: Jira Username
+            key: JIRA_USERNAME
+            placeholder: your.email@company.com
+          - name: Jira API Token
+            key: JIRA_API_TOKEN
+            placeholder: your_jira_api_token
+  - id: aws-kb-retrieval-server
+    name: AWS Knowledge Base
+    description: Retrieves information from AWS Knowledge Base using Bedrock Agent Runtime, supporting RAG-based queries
+      with customizable result counts.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/aws-kb-retrieval-server
+    tags:
+      - aws
+      - bedrock
+      - rag
+      - knowledge-retrieval
+      - search
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-aws-kb-retrieval"],
+            "env": {
+              "AWS_ACCESS_KEY_ID": "{{AWS_ACCESS_KEY_ID}}",
+              "AWS_SECRET_ACCESS_KEY": "{{AWS_SECRET_ACCESS_KEY}}",
+              "AWS_REGION": "{{AWS_REGION}}"
+            }
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: >
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "-e", "AWS_ACCESS_KEY_ID", "-e", "AWS_SECRET_ACCESS_KEY", "-e", "AWS_REGION", "mcp/aws-kb-retrieval-server"],
+            "env": {
+              "AWS_ACCESS_KEY_ID": "{{AWS_ACCESS_KEY_ID}}",
+              "AWS_SECRET_ACCESS_KEY": "{{AWS_SECRET_ACCESS_KEY}}",
+              "AWS_REGION": "{{AWS_REGION}}"
+            }
+          }
+    parameters:
+      - name: AWS Access Key ID
+        key: AWS_ACCESS_KEY_ID
+        placeholder: your_aws_access_key_id
+      - name: AWS Secret Access Key
+        key: AWS_SECRET_ACCESS_KEY
+        placeholder: your_aws_secret_access_key
+      - name: AWS Region
+        key: AWS_REGION
+        placeholder: us-east-1
+  - id: axiom
+    name: Axiom
+    description: Query and analyze data using Axiom Processing Language (APL), enabling AI agents to interact with Axiom
+      datasets through natural language.
+    author: axiomhq
+    url: https://github.com/axiomhq/mcp-server-axiom
+    tags:
+      - data-query
+      - log-analysis
+      - apl
+      - datasets
+      - analytics
+    content:
+      - name: Go Binary
+        content: |
+          {
+            "command": "{{AXIOM_BINARY_PATH}}/axiom-mcp",
+            "args": ["--config", "{{AXIOM_CONFIG_PATH}}"]
+          }
+        parameters:
+          - name: Axiom Config Path
+            key: AXIOM_CONFIG_PATH
+            placeholder: /path/to/config.txt
+      - name: Go Binary with Environment Variables
+        content: |
+          {
+            "command": "{{AXIOM_BINARY_PATH}}/axiom-mcp",
+            "env": {
+              "AXIOM_TOKEN": "{{AXIOM_TOKEN}}",
+              "AXIOM_URL": "{{AXIOM_URL}}",
+              "AXIOM_ORG_ID": "{{AXIOM_ORG_ID}}"
+            }
+          }
+      - name: Go Binary with Command Line Flags
+        content: |
+          {
+            "command": "{{AXIOM_BINARY_PATH}}/axiom-mcp",
+            "args": [
+              "-token", "{{AXIOM_TOKEN}}",
+              "-url", "{{AXIOM_URL}}",
+              "-query-rate", "1",
+              "-query-burst", "1",
+              "-datasets-rate", "1",
+              "-datasets-burst", "1"
+            ]
+          }
+    parameters:
+      - name: Axiom Binary Path
+        key: AXIOM_BINARY_PATH
+        placeholder: /path/to/axiom-mcp
+      - name: Axiom Token
+        key: AXIOM_TOKEN
+        placeholder: xaat-your-token
+      - name: Axiom URL
+        key: AXIOM_URL
+        placeholder: https://api.axiom.co
+      - name: Axiom Org ID
+        key: AXIOM_ORG_ID
+        placeholder: your-org-id
+        optional: true
+  - id: azure-devops
+    name: Azure DevOps
+    description: Official Microsoft MCP server for Azure DevOps integration, bringing comprehensive Azure DevOps
+      functionality directly to your AI agents. Supports work items, repositories, builds, releases, test plans, and
+      search across your Azure DevOps organization with 50+ tools for complete DevOps automation.
+    author: microsoft
+    url: https://github.com/microsoft/azure-devops-mcp
+    tags:
+      - azure-devops
+      - microsoft
+      - devops
+      - work-items
+      - repositories
+      - builds
+      - releases
+      - test-plans
+      - project-management
+      - ci-cd
+      - version-control
+      - pull-requests
+      - search
+      - official
+    prerequisites:
+      - Azure DevOps organization
+      - Azure CLI authentication
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+          - Azure CLI (logged in with az login)
+        content: >
+          {
+            "command": "npx",
+            "args": ["-y", "@azure-devops/mcp@1.0.0", "--hash", "sha1:742d3aa74ec8a13283a62c77c9fc5c2a0d276624", "{{AZURE_DEVOPS_ORG}}"]
+          }
+        parameters:
+          - name: Azure DevOps Organization
+            key: AZURE_DEVOPS_ORG
+            placeholder: contoso
+  - id: brave-search
+    name: Brave Search
+    description: Integrates Brave Search API to provide comprehensive web and local search capabilities with smart
+      filtering, pagination, and automatic fallbacks.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/brave-search
+    tags:
+      - search-engine
+      - local-search
+      - web-search
+      - brave-api
+      - content-discovery
+    prerequisites:
+      - Brave Search account
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+            "env": {
+              "BRAVE_API_KEY": "{{BRAVE_API_KEY}}"
+            }
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "-e", "BRAVE_API_KEY", "mcp/brave-search"],
+            "env": {
+              "BRAVE_API_KEY": "{{BRAVE_API_KEY}}"
+            }
+          }
+    parameters:
+      - name: Brave API Key
+        key: BRAVE_API_KEY
+        placeholder: your_brave_api_key_here
+  - id: browserbase
+    name: Browserbase
+    description: Cloud browser automation server enabling LLMs to interact with web pages, take screenshots, extract data,
+      and execute JavaScript using Browserbase and Puppeteer.
+    author: browserbase
+    url: https://github.com/browserbase/mcp-server-browserbase
+    tags:
+      - web-automation
+      - puppeteer
+      - screenshot-capture
+      - data-extraction
+      - javascript-execution
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["@browserbasehq/mcp"],
+            "env": {
+              "BROWSERBASE_API_KEY": "{{BROWSERBASE_API_KEY}}",
+              "BROWSERBASE_PROJECT_ID": "{{BROWSERBASE_PROJECT_ID}}"
+            }
+          }
+      - name: NPX with Proxies
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["@browserbasehq/mcp", "--proxies"],
+            "env": {
+              "BROWSERBASE_API_KEY": "{{BROWSERBASE_API_KEY}}",
+              "BROWSERBASE_PROJECT_ID": "{{BROWSERBASE_PROJECT_ID}}"
+            }
+          }
+      - name: NPX with Advanced Stealth
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["@browserbasehq/mcp", "--advancedStealth"],
+            "env": {
+              "BROWSERBASE_API_KEY": "{{BROWSERBASE_API_KEY}}",
+              "BROWSERBASE_PROJECT_ID": "{{BROWSERBASE_PROJECT_ID}}"
+            }
+          }
+      - name: NPX with Custom Context
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["@browserbasehq/mcp", "--contextId", "{{BROWSERBASE_CONTEXT_ID}}"],
+            "env": {
+              "BROWSERBASE_API_KEY": "{{BROWSERBASE_API_KEY}}",
+              "BROWSERBASE_PROJECT_ID": "{{BROWSERBASE_PROJECT_ID}}"
+            }
+          }
+        parameters:
+          - name: Browserbase Context ID
+            key: BROWSERBASE_CONTEXT_ID
+            placeholder: your_browserbase_context_id
+    parameters:
+      - name: Browserbase API Key
+        key: BROWSERBASE_API_KEY
+        placeholder: your_browserbase_api_key
+      - name: Browserbase Project ID
+        key: BROWSERBASE_PROJECT_ID
+        placeholder: your_browserbase_project_id
+  - id: clickup
+    name: ClickUp
+    description: Comprehensive ClickUp MCP server for project management integration with AI through Model Context Protocol.
+      Supports task management, time tracking, workspace organization, document management, member management, and tag
+      operations with 36 available tools for complete ClickUp automation.
+    author: taazkareem
+    url: https://github.com/TaazKareem/clickup-mcp-server
+    tags:
+      - clickup
+      - project-management
+      - task-management
+      - time-tracking
+      - productivity
+      - automation
+      - workflow
+      - team-collaboration
+      - workspace
+      - api-integration
+    prerequisites:
+      - ClickUp account
+      - ClickUp API key
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: >
+          {
+            "command": "npx",
+            "args": ["-y", "@taazkareem/clickup-mcp-server@0.8.4", "--hash", "sha512:TuWPCubHFrRNbghj34th+QFdOqwGljs0QP55s+d73JhsFVoKaXFuS4c5bHat8qwV9UyF6hAeX87UP0SmeH/QRg=="],
+            "env": {
+              "CLICKUP_API_KEY": "{{CLICKUP_API_KEY}}",
+              "CLICKUP_TEAM_ID": "{{CLICKUP_TEAM_ID}}",
+              "DOCUMENT_SUPPORT": "{{DOCUMENT_SUPPORT}}"
+            }
+          }
+        parameters:
+          - name: ClickUp API Key
+            key: CLICKUP_API_KEY
+            placeholder: pk_your_clickup_api_key
+          - name: ClickUp Team ID
+            key: CLICKUP_TEAM_ID
+            placeholder: your_team_id
+          - name: Document Support
+            key: DOCUMENT_SUPPORT
+            placeholder: "true"
+            optional: true
+  - id: cloudflare
+    name: Cloudflare
+    description: Manages Cloudflare resources including Workers, KV stores, R2 storage, D1 databases, and analytics through
+      natural language interactions.
+    author: cloudflare
+    url: https://github.com/cloudflare/mcp-server-cloudflare
+    tags:
+      - cloudflare
+      - serverless
+      - edge-computing
+      - cloud-storage
+      - database-management
+    content:
+      - name: Remote MCP - Observability
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["mcp-remote", "https://observability.mcp.cloudflare.com/sse"]
+          }
+      - name: Remote MCP - Workers Bindings
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["mcp-remote", "https://bindings.mcp.cloudflare.com/sse"]
+          }
+      - name: Remote MCP - Documentation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["mcp-remote", "https://docs.mcp.cloudflare.com/sse"]
+          }
+      - name: Remote MCP - Workers Builds
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["mcp-remote", "https://builds.mcp.cloudflare.com/sse"]
+          }
+      - name: Remote MCP - Radar
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["mcp-remote", "https://radar.mcp.cloudflare.com/sse"]
+          }
+      - name: Remote MCP - Browser Rendering
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["mcp-remote", "https://browser.mcp.cloudflare.com/sse"]
+          }
+    parameters:
+      - name: Cloudflare API Token
+        key: CLOUDFLARE_API_TOKEN
+        placeholder: your_cloudflare_api_token_here
+  - id: codegen
+    name: Codegen
+    description: Enables parsing codebases and executing codemods through standardized model inference, supporting various
+      LLM providers via integration with the Codegen SDK.
+    author: codegen-sh
+    url: https://github.com/codegen-sh/codegen-sdk/tree/develop/codegen-examples/examples/codegen-mcp-server
+    tags:
+      - code-generation
+      - codemod
+      - code-parsing
+      - sdk-integration
+      - llm-tools
+    prerequisites:
+      - uv
+      - Python 3.12+
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: >
+          {
+            "command": "uvx",
+            "args": [
+              "--from",
+              "git+https://github.com/codegen-sh/codegen-sdk.git#egg=codegen-mcp-server&subdirectory=codegen-examples/examples/codegen-mcp-server",
+              "codegen-mcp-server"
+            ]
+          }
+      - name: Direct Execution
+        prerequisites:
+          - Python
+          - uv
+        content: >
+          {
+            "command": "uvx",
+            "args": ["--from", "git+https://github.com/codegen-sh/codegen-sdk.git#egg=codegen-mcp-server&subdirectory=codegen-examples/examples/codegen-mcp-server", "codegen-mcp-server"]
+          }
+    parameters:
+      - name: Prerequisites
+        key: PREREQUISITES
+        placeholder: Requires uv and Python 3.12+
+  - id: composer-trade
+    name: Composer
+    description: Official Composer MCP server that enables creation of automated investing strategies, backtesting, strategy
+      discovery, portfolio monitoring, and live trading through the Composer platform.
+    author: invest-composer
+    url: https://github.com/invest-composer/composer-trade-mcp
+    tags:
+      - trading
+      - investing
+      - backtesting
+      - portfolio-management
+      - financial-automation
+      - strategy-creation
+      - market-analysis
+      - composer-api
+      - algorithmic-trading
+      - risk-management
+    content: >
+      {
+        "command": "uvx",
+        "args": ["composer-trade-mcp==0.1.4", "--hash", "sha256:37d8fcfd6ddc9c8155633f755159f3fcb1a63e7acc2a32513613341a851c84e2"],
+        "env": {
+          "COMPOSER_API_KEY": "{{COMPOSER_API_KEY}}",
+          "COMPOSER_SECRET_KEY": "{{COMPOSER_SECRET_KEY}}"
+        }
+      }
+    parameters:
+      - name: Composer API Key
+        key: COMPOSER_API_KEY
+        placeholder: your_composer_api_key
+        optional: true
+      - name: Composer Secret Key
+        key: COMPOSER_SECRET_KEY
+        placeholder: your_composer_secret_key
+        optional: true
+    prerequisites:
+      - Python and uv
+      - Composer.trade account (optional for backtesting)
+      - Composer.trade subscription (required for live trading)
+  - id: context7
+    name: Context7
+    description: Up-to-date code documentation for LLMs and AI code editors. Provides version-specific documentation and
+      code examples straight from the source, eliminating outdated or hallucinated API information.
+    author: upstash
+    url: https://github.com/upstash/context7
+    tags:
+      - documentation
+      - code-examples
+      - library-docs
+      - up-to-date
+      - api-reference
+      - development
+    content:
+      - name: NPX
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@upstash/context7-mcp"],
+            "env": {
+              "DEFAULT_MINIMUM_TOKENS": "{{DEFAULT_MINIMUM_TOKENS}}"
+            }
+          }
+        parameters:
+          - name: Default Minimum Tokens
+            key: DEFAULT_MINIMUM_TOKENS
+            placeholder: "6000"
+            optional: true
+        prerequisites:
+          - Node.js
+      - name: Remote Server
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://mcp.context7.com/mcp"
+          }
+  - id: dbt
+    name: dbt
+    description: A MCP server for interacting with dbt, providing AI agents with context from dbt Core, dbt Fusion, and dbt
+      Platform. Supports SQL execution, Semantic Layer queries, project discovery, dbt CLI operations, Admin API
+      management, code generation, and column-level lineage tracing.
+    author: dbt-labs
+    url: https://github.com/dbt-labs/dbt-mcp
+    tags:
+      - dbt
+      - data-engineering
+      - data-analytics
+      - sql
+      - semantic-layer
+      - data-modeling
+      - mcp-server
+      - llm
+    prerequisites:
+      - Python and uv
+    content:
+      - name: UVX (dbt Cloud)
+        description: Uses OAuth to authenticate with your dbt Cloud account. Provides platform features (Discovery API, Semantic
+          Layer, job management) without local CLI commands.
+        prerequisites:
+          - dbt Cloud account with static subdomain
+        content: |
+          {
+            "command": "uvx",
+            "args": ["dbt-mcp"],
+            "env": {
+              "DBT_HOST": "{{DBT_HOST}}"
+            }
+          }
+      - name: UVX (dbt Cloud + CLI)
+        description: Uses OAuth with dbt Cloud and also enables local dbt CLI commands for running, building, and testing dbt
+          projects.
+        prerequisites:
+          - dbt Cloud account with static subdomain
+          - dbt CLI installed locally
+        content: |
+          {
+            "command": "uvx",
+            "args": ["dbt-mcp"],
+            "env": {
+              "DBT_HOST": "{{DBT_HOST}}",
+              "DBT_PROJECT_DIR": "{{DBT_PROJECT_DIR}}",
+              "DBT_PATH": "{{DBT_PATH}}"
+            }
+          }
+        parameters:
+          - name: dbt Project Directory
+            key: DBT_PROJECT_DIR
+            placeholder: /path/to/your/dbt/project
+          - name: dbt Executable Path
+            key: DBT_PATH
+            placeholder: /path/to/your/dbt/executable
+      - name: UVX (CLI only)
+        description: Runs dbt MCP locally with your dbt project using dbt Core or Fusion CLI. No dbt Cloud account required.
+        prerequisites:
+          - dbt CLI installed locally
+        content: |
+          {
+            "command": "uvx",
+            "args": ["dbt-mcp"],
+            "env": {
+              "DBT_PROJECT_DIR": "{{DBT_PROJECT_DIR}}",
+              "DBT_PATH": "{{DBT_PATH}}"
+            }
+          }
+        parameters:
+          - name: dbt Project Directory
+            key: DBT_PROJECT_DIR
+            placeholder: /path/to/your/dbt/project
+          - name: dbt Executable Path
+            key: DBT_PATH
+            placeholder: /path/to/your/dbt/executable
+      - name: Docker
+        description: Container-based installation using a dbt Cloud service token for authentication. Provides platform features
+          without local dbt installation.
+        prerequisites:
+          - Docker
+          - dbt Cloud account
+          - dbt Cloud service token
+        content: >
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "-e", "DBT_HOST", "-e", "DBT_TOKEN", "-e", "DBT_PROD_ENV_ID", "ghcr.io/dbt-labs/dbt-mcp:latest"],
+            "env": {
+              "DBT_HOST": "{{DBT_HOST}}",
+              "DBT_TOKEN": "{{DBT_TOKEN}}",
+              "DBT_PROD_ENV_ID": "{{DBT_PROD_ENV_ID}}"
+            }
+          }
+        parameters:
+          - name: dbt Production Environment ID
+            key: DBT_PROD_ENV_ID
+            placeholder: your_production_environment_id
+          - name: dbt Service Token
+            key: DBT_TOKEN
+            placeholder: your_dbt_service_token
+    parameters:
+      - name: dbt Host
+        key: DBT_HOST
+        placeholder: cloud.getdbt.com
+  - id: e2b
+    name: Code Interpreter
+    description: Adds secure code execution capabilities to Claude Desktop using E2B Sandbox, supporting both JavaScript and
+      Python environments.
+    author: e2b-dev
+    url: https://github.com/e2b-dev/mcp-server
+    tags:
+      - code-execution
+      - sandbox
+      - javascript
+      - python
+      - claude-integration
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@e2b/mcp-server"],
+            "env": {
+              "E2B_API_KEY": "{{E2B_API_KEY}}"
+            }
+          }
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["@smithery/cli", "install", "e2b", "--client", "claude"]
+          }
+      - name: Local Development
+        content: |
+          {
+            "command": "node",
+            "args": ["{{E2B_PATH}}/packages/js/dist/index.js"],
+            "env": {
+              "E2B_API_KEY": "{{E2B_API_KEY}}"
+            }
+          }
+        parameters:
+          - name: E2B Path
+            key: E2B_PATH
+            placeholder: /path/to/e2b-mcp-server
+            optional: true
+    parameters:
+      - name: E2B API Key
+        key: E2B_API_KEY
+        placeholder: your_e2b_api_key
+  - id: esignatures
+    name: eSignatures
+    description: Manages digital contract workflows including creation, sending, and template management for electronic
+      signatures through the eSignatures platform.
+    author: esignaturescom
+    url: https://github.com/esignaturescom/mcp-server-esignatures
+    tags:
+      - digital-signatures
+      - contracts
+      - document-management
+      - templates
+      - collaboration
+    content:
+      - name: UVX
+        prerequisites:
+          - Python
+          - uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-esignatures"],
+            "env": {
+              "ESIGNATURES_SECRET_TOKEN": "{{ESIGNATURES_SECRET_TOKEN}}"
+            }
+          }
+      - name: UV Development
+        prerequisites:
+          - Python
+          - uv
+        content: |
+          {
+            "command": "uv",
+            "args": [
+              "--directory",
+              "{{ESIGNATURES_PATH}}",
+              "run",
+              "mcp-server-esignatures"
+            ],
+            "env": {
+              "ESIGNATURES_SECRET_TOKEN": "{{ESIGNATURES_SECRET_TOKEN}}"
+            }
+          }
+        parameters:
+          - name: eSignatures Path
+            key: ESIGNATURES_PATH
+            placeholder: /path/to/mcp-server-esignatures
+            optional: true
+    parameters:
+      - name: eSignatures Secret Token
+        key: ESIGNATURES_SECRET_TOKEN
+        placeholder: your_esignatures_api_secret_token
+  - id: exa
+    name: Exa Search
+    description: Enables AI assistants to perform real-time web searches using Exa's AI Search API, providing structured
+      results with titles, URLs, and content snippets.
+    author: exa-labs
+    url: https://github.com/exa-labs/exa-mcp-server
+    tags:
+      - web-search
+      - exa-api
+      - real-time-data
+      - content-discovery
+      - information-retrieval
+    prerequisites:
+      - Exa account
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "exa-mcp-server"],
+            "env": {
+              "EXA_API_KEY": "{{EXA_API_KEY}}"
+            }
+          }
+      - name: NPX with Specific Tools
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "exa-mcp-server", "--tools=web_search_exa,research_paper_search,company_research"],
+            "env": {
+              "EXA_API_KEY": "{{EXA_API_KEY}}"
+            }
+          }
+      - name: Remote MCP
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "mcp-remote", "https://mcp.exa.ai/mcp?exaApiKey={{EXA_API_KEY}}"]
+          }
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@smithery/cli", "install", "exa", "--client", "claude"]
+          }
+    parameters:
+      - name: Exa API Key
+        key: EXA_API_KEY
+        placeholder: your_exa_api_key_here
+  - id: figma-dev-mode
+    name: Figma Dev Mode
+    description: Brings Figma directly into your workflow by providing important design information and context to AI agents
+      generating code from Figma design files. Enables code generation from selected frames, design context extraction,
+      and Code Connect integration.
+    author: figma
+    url: https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Dev-Mode-MCP-Server
+    tags:
+      - figma
+      - design-to-code
+      - ui-development
+      - design-systems
+      - code-generation
+      - dev-mode
+    content:
+      - name: Figma Dev Mode
+        content: |
+          {
+            "type": "sse",
+            "url": "http://127.0.0.1:3845/sse"
+          }
+  - id: filesystem
+    name: File System
+    description: Provides comprehensive filesystem operations including reading, writing, moving files, directory
+      management, and advanced file editing with pattern matching and formatting capabilities.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem
+    tags:
+      - filesystem
+      - file-management
+      - directory-operations
+      - file-search
+      - file-editing
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "{{ALLOWED_DIRECTORY}}"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: >
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "--mount", "type=bind,src={{ALLOWED_DIRECTORY}},dst=/projects", "mcp/filesystem", "/projects"]
+          }
+    parameters:
+      - name: Allowed Directory
+        key: ALLOWED_DIRECTORY
+        placeholder: /Users/username/Documents
+  - id: firebase
+    name: Firebase
+    description: The Firebase MCP server allows AI-powered development tools to work with your Firebase projects. It can
+      create and manage Firebase projects, manage Authentication users, work with data in Cloud Firestore and Data
+      Connect, retrieve schemas, understand security rules, and send messages with Cloud Messaging.
+    author: firebase
+    url: https://firebase.google.com/docs/cli/mcp-server
+    tags:
+      - firebase
+      - gcp
+      - firestore
+      - authentication
+      - cloud-functions
+      - hosting
+      - storage
+      - data-connect
+      - cloud-messaging
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "firebase-tools@14.15.2", "experimental:mcp"]
+          }
+      - name: NPX with Options
+        prerequisites:
+          - Node.js
+        content: >
+          {
+            "command": "npx",
+            "args": ["-y", "firebase-tools@14.15.2", "experimental:mcp", "--dir", "{{FIREBASE_DIR}}", "--only", "{{FIREBASE_ONLY}}"]
+          }
+        parameters:
+          - name: Project Directory
+            key: FIREBASE_DIR
+            placeholder: /Users/turing/my-project
+            optional: true
+          - name: Feature Groups
+            key: FIREBASE_ONLY
+            placeholder: auth,firestore,storage
+            optional: true
+  - id: fireproof
+    name: Fireproof
+    description: A JSON document store server providing CRUD operations and field-based sorting queries, powered by
+      Fireproof database for seamless integration with AI systems.
+    author: fireproof-storage
+    url: https://github.com/fireproof-storage/mcp-database-server
+    tags:
+      - document-store
+      - json
+      - crud
+      - database
+      - storage
+    content:
+      - name: Node.js
+        content: |
+          {
+            "command": "node",
+            "args": ["{{FIREPROOF_PATH}}/build/index.js"]
+          }
+      - name: NPM Development
+        content: |
+          {
+            "command": "npm",
+            "args": ["start"],
+            "cwd": "{{FIREPROOF_PATH}}"
+          }
+    parameters:
+      - name: Fireproof MCP Path
+        key: FIREPROOF_PATH
+        placeholder: /path/to/fireproof-mcp
+        optional: true
+  - id: gdrive
+    name: Google Drive
+    description: Enables searching, listing, and reading files from Google Drive, with automatic export of Google Workspace
+      files to common formats like Markdown, CSV, and PNG.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/gdrive
+    tags:
+      - google-drive
+      - file-management
+      - document-storage
+      - workspace
+      - file-search
+    prerequisites:
+      - Google account with Drive API access
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-gdrive"],
+            "env": {
+              "GDRIVE_CREDENTIALS_PATH": "{{GDRIVE_CREDENTIALS_PATH}}"
+            }
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: >
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "-v", "mcp-gdrive:/gdrive-server", "-e", "GDRIVE_CREDENTIALS_PATH=/gdrive-server/credentials.json", "mcp/gdrive"]
+          }
+    parameters:
+      - name: Google Drive Credentials Path
+        key: GDRIVE_CREDENTIALS_PATH
+        placeholder: /path/to/.gdrive-server-credentials.json
+  - id: genkit
+    name: Genkit Integration
+    description: Enables bi-directional integration with Model Context Protocol, allowing applications to both consume MCP
+      tools/prompts as a client and expose Genkit tools/prompts as an MCP server.
+    author: firebase
+    url: https://github.com/firebase/genkit/tree/HEAD/js/plugins/mcp
+    tags:
+      - mcp-integration
+      - client-server
+      - tools-prompts
+      - plugin
+      - genkit
+    prerequisites:
+      - Node.js 18+
+      - Genkit SDK
+    content:
+      - name: NPM Installation
+        prerequisites:
+          - Node.js 18+
+        content: |
+          {
+            "command": "npm",
+            "args": ["install", "@genkit-ai/mcp"]
+          }
+      - name: Custom MCP Server Setup
+        content: |
+          {
+            "command": "node",
+            "args": ["your-genkit-mcp-server.js"]
+          }
+    parameters:
+      - name: Prerequisites
+        key: PREREQUISITES
+        placeholder: Requires Node.js 18+ and Genkit SDK installation
+  - id: git
+    name: Git Tools
+    description: Provides Git repository interaction and automation tools for reading, searching, and manipulating Git
+      repositories through commands like status, diff, commit, branch management, and more.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers/tree/main/src/git
+    tags:
+      - git
+      - version-control
+      - repository-management
+      - source-control
+      - development
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-git", "--repository", "{{REPOSITORY_PATH}}"]
+          }
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: >
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/inspector", "uvx", "mcp-server-git", "--repository", "{{REPOSITORY_PATH}}"]
+          }
+      - name: Python/Pip
+        prerequisites:
+          - Python
+        content: |
+          {
+            "command": "python",
+            "args": ["-m", "mcp_server_git", "--repository", "{{REPOSITORY_PATH}}"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "--rm", "-i", "--mount", "type=bind,src={{REPOSITORY_PATH}},dst=/workspace", "mcp/git"]
+          }
+    parameters:
+      - name: Repository Path
+        key: REPOSITORY_PATH
+        placeholder: /path/to/git/repo
+  - id: git-mcp
+    name: GitMCP
+    description: GitMCP is a free, open-source, remote MCP server that transforms any GitHub project (repositories or GitHub
+      pages) into a documentation hub. It enables AI tools like Cursor to access up-to-date documentation and code, even
+      if the LLM has never encountered them, thereby eliminating code hallucinations seamlessly.
+    author: idosal
+    url: https://github.com/idosal/git-mcp
+    tags:
+      - git
+      - github
+      - documentation
+      - code-search
+      - repository-management
+      - hallucination-reduction
+    content:
+      - name: SSE
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://gitmcp.io/{{OWNER}}/{{REPO}}"
+          }
+        parameters:
+          - name: Owner
+            key: OWNER
+            placeholder: microsoft
+          - name: Repo
+            key: REPO
+            placeholder: typescript
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "mcp-remote@0.1.29", "https://gitmcp.io/{{OWNER}}/{{REPO}}"]
+          }
+        parameters:
+          - name: Owner
+            key: OWNER
+            placeholder: microsoft
+          - name: Repo
+            key: REPO
+            placeholder: typescript
+  - id: github
+    name: GitHub
+    description: GitHub's official MCP Server that provides seamless integration with GitHub APIs, enabling advanced
+      automation and interaction capabilities for developers and tools.
+    author: github
+    url: https://github.com/github/github-mcp-server
+    tags:
+      - github
+      - git
+      - repository-management
+      - issue-tracking
+      - pull-requests
+      - code-scanning
+      - collaboration
+      - api-integration
+    prerequisites:
+      - Node.js
+      - GitHub account
+      - Classic GitHub Personal Access Token (generate at https://github.com/settings/tokens/new)
+    content: |
+      {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "{{GITHUB_PERSONAL_ACCESS_TOKEN}}"
+        }
+      }
+    parameters:
+      - name: GitHub Personal Access Token
+        key: GITHUB_PERSONAL_ACCESS_TOKEN
+        placeholder: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (classic PAT from https://github.com/settings/tokens/new)
+  - id: gitlab
+    name: GitLab
+    description: Enables comprehensive GitLab project management including file operations, issue tracking, merge requests,
+      and repository management through the GitLab API.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers/tree/main/src/gitlab
+    tags:
+      - gitlab
+      - git
+      - repository-management
+      - collaboration
+      - ci-cd
+    prerequisites:
+      - GitLab account
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-gitlab"],
+            "env": {
+              "GITLAB_PERSONAL_ACCESS_TOKEN": "{{GITLAB_PERSONAL_ACCESS_TOKEN}}",
+              "GITLAB_API_URL": "{{GITLAB_API_URL}}"
+            }
+          }
+      - name: Python/Pip
+        prerequisites:
+          - Python
+        content: |
+          {
+            "command": "python",
+            "args": ["-m", "mcp_server_gitlab"],
+            "env": {
+              "GITLAB_PERSONAL_ACCESS_TOKEN": "{{GITLAB_PERSONAL_ACCESS_TOKEN}}",
+              "GITLAB_API_URL": "{{GITLAB_API_URL}}"
+            }
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "mcp/gitlab"],
+            "env": {
+              "GITLAB_PERSONAL_ACCESS_TOKEN": "{{GITLAB_PERSONAL_ACCESS_TOKEN}}",
+              "GITLAB_API_URL": "{{GITLAB_API_URL}}"
+            }
+          }
+    parameters:
+      - name: GitLab Personal Access Token
+        key: GITLAB_PERSONAL_ACCESS_TOKEN
+        placeholder: your_gitlab_personal_access_token
+      - name: GitLab API URL
+        key: GITLAB_API_URL
+        placeholder: https://gitlab.com/api/v4
+  - id: google-maps
+    name: Google Maps
+    description: Provides comprehensive access to Google Maps services including geocoding, place search, directions,
+      distance calculations, and elevation data through the Google Maps API.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers/tree/main/src/google-maps
+    tags:
+      - maps
+      - geocoding
+      - navigation
+      - places-api
+      - location-data
+    prerequisites:
+      - Google Cloud account with Maps API enabled
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-google-maps"],
+            "env": {
+              "GOOGLE_MAPS_API_KEY": "{{GOOGLE_MAPS_API_KEY}}"
+            }
+          }
+      - name: Python/Pip
+        prerequisites:
+          - Python
+        content: |
+          {
+            "command": "python",
+            "args": ["-m", "mcp_server_google_maps"],
+            "env": {
+              "GOOGLE_MAPS_API_KEY": "{{GOOGLE_MAPS_API_KEY}}"
+            }
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "mcp/google-maps"],
+            "env": {
+              "GOOGLE_MAPS_API_KEY": "{{GOOGLE_MAPS_API_KEY}}"
+            }
+          }
+    parameters:
+      - name: Google Maps API Key
+        key: GOOGLE_MAPS_API_KEY
+        placeholder: your_google_maps_api_key
+  - id: google-maps-platform-code-assist
+    name: Google Maps Platform Code Assist
+    description: Official Google Maps Platform MCP for AI-powered code assistance. Provides tools to generate client-side
+      and server-side code for Maps, Routes, and Places APIs, helping developers build geospatial applications faster.
+    author: googlemaps
+    url: https://github.com/googlemaps/platform-ai
+    tags:
+      - google-maps
+      - code-generation
+      - geospatial
+      - maps
+      - routes
+      - places
+      - api-integration
+      - ai-assistant
+      - official
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@googlemaps/code-assist-mcp@0.2.0"]
+          }
+  - id: google-workspace
+    name: Google Workspace
+    description: Control Gmail, Google Calendar, Docs, Sheets, Slides, Chat, Forms, Tasks, Search & Drive with AI. The most
+      feature-complete Google Workspace / G Suite MCP server.
+    author: taylorwilsdon
+    url: https://github.com/taylorwilsdon/google_workspace_mcp
+    tags:
+      - google-workspace
+      - g-suite
+      - google-drive
+      - google-sheets
+      - google-docs
+      - gmail
+      - google-calendar
+      - automation
+      - api-integration
+    prerequisites:
+      - Google Cloud Project with OAuth 2.0 credentials
+    content:
+      - name: UVX (Local)
+        prerequisites:
+          - Python and uv
+        content: >
+          {
+            "command": "uvx",
+            "args": ["--from", "workspace-mcp==1.4.7", "--hash", "sha256:4e98810f46bd370007e7c9a9337bcaf47cb91e21fed8fb59cf7c68d5a539a49f", "workspace-mcp", "--tool-tier", "core"],
+            "env": {
+              "GOOGLE_OAUTH_CLIENT_ID": "{{GOOGLE_OAUTH_CLIENT_ID}}",
+              "GOOGLE_OAUTH_CLIENT_SECRET": "{{GOOGLE_OAUTH_CLIENT_SECRET}}",
+              "OAUTHLIB_INSECURE_TRANSPORT": "1"
+            }
+          }
+    parameters:
+      - name: Google OAuth Client ID
+        key: GOOGLE_OAUTH_CLIENT_ID
+        placeholder: your-google-oauth-client-id
+      - name: Google OAuth Client Secret
+        key: GOOGLE_OAUTH_CLIENT_SECRET
+        placeholder: your-google-oauth-client-secret
+  - id: ida-pro
+    name: IDA Pro
+    description: An MCP server for interacting with the IDA Pro disassembler.
+    author: mrexodia
+    url: https://github.com/mrexodia/ida-pro-mcp
+    tags:
+      - ida-pro
+      - reverse-engineering
+      - disassembler
+      - debugging
+      - security
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+          - Git
+        content: >
+          {
+            "command": "uvx",
+            "args": ["--from", "git+https://github.com/mrexodia/ida-pro-mcp.git@f0af9fba733fb60fc13365b297b10c82db3771d7", "ida-pro-mcp"]
+          }
+  - id: kagi
+    name: Kagi Search
+    description: Integrates Kagi's advanced search API to provide AI assistants with up-to-date web search capabilities and
+      accurate information retrieval.
+    author: kagisearch
+    url: https://github.com/kagisearch/kagimcp
+    tags:
+      - web-search
+      - information-retrieval
+      - kagi-api
+      - real-time-data
+      - search-engine
+    prerequisites:
+      - Kagi account
+    content:
+      - name: UVX
+        prerequisites:
+          - Python
+          - uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["kagimcp"],
+            "env": {
+              "KAGI_API_KEY": "{{KAGI_API_KEY}}",
+              "KAGI_SUMMARIZER_ENGINE": "{{KAGI_SUMMARIZER_ENGINE}}"
+            }
+          }
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@smithery/cli", "install", "kagimcp", "--client", "claude"]
+          }
+      - name: Local Development
+        content: |
+          {
+            "command": "uv",
+            "args": ["--directory", "{{KAGI_PATH}}", "run", "kagimcp"],
+            "env": {
+              "KAGI_API_KEY": "{{KAGI_API_KEY}}",
+              "KAGI_SUMMARIZER_ENGINE": "{{KAGI_SUMMARIZER_ENGINE}}"
+            }
+          }
+        parameters:
+          - name: Kagi Path
+            key: KAGI_PATH
+            placeholder: /path/to/kagimcp
+            optional: true
+    parameters:
+      - name: Kagi API Key
+        key: KAGI_API_KEY
+        placeholder: your_kagi_api_key_here
+      - name: Kagi Summarizer Engine
+        key: KAGI_SUMMARIZER_ENGINE
+        placeholder: cecil
+        optional: true
+  - id: laravel-boost
+    name: Laravel Boost
+    description: Official Laravel MCP server providing comprehensive AI-powered development tools including database schema
+      inspection, query execution, route analysis, artisan command access, configuration management, documentation
+      search, error tracking, and extensible skills system for Laravel applications.
+    author: laravel
+    url: https://github.com/laravel/boost
+    tags:
+      - laravel
+      - php
+      - database
+      - artisan
+      - routes
+      - configuration
+      - documentation
+      - error-tracking
+      - ai-integration
+      - web-development
+      - official
+    prerequisites:
+      - PHP 8.1 or higher
+      - Laravel 10.x, 11.x, or 12.x
+      - Composer
+      - Laravel Boost package installed via composer require laravel/boost --dev
+    content:
+      - name: PHP Artisan
+        prerequisites:
+          - PHP 8.1+
+          - Laravel 10.x/11.x/12.x
+          - Laravel Boost package installed
+        content: |
+          {
+            "command": "php",
+            "args": ["artisan", "boost:mcp"]
+          }
+    parameters: []
+  - id: linear
+    name: Linear
+    description: Facilitates project management with the Linear API, enabling issue tracking, project organization, and team
+      management through comprehensive tools for creating, updating, and managing work items.
+    author: cline
+    url: https://github.com/cline/linear-mcp
+    tags:
+      - project-management
+      - issue-tracking
+      - team-collaboration
+      - linear-api
+      - workflow
+    content:
+      - name: Node.js
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "node",
+            "args": ["{{LINEAR_PATH}}/build/index.js"],
+            "env": {
+              "LINEAR_API_KEY": "{{LINEAR_API_KEY}}"
+            }
+          }
+      - name: NPM Development
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npm",
+            "args": ["start"],
+            "cwd": "{{LINEAR_PATH}}",
+            "env": {
+              "LINEAR_API_KEY": "{{LINEAR_API_KEY}}"
+            }
+          }
+    parameters:
+      - name: Linear API Key
+        key: LINEAR_API_KEY
+        placeholder: your_linear_api_key
+      - name: Linear MCP Path
+        key: LINEAR_PATH
+        placeholder: /path/to/linear-mcp
+        optional: true
+  - id: memory
+    name: Knowledge Graph Memory
+    description: A persistent memory system using a local knowledge graph that enables AI assistants to remember information
+      about users across conversations through entities, relations, and observations.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers/tree/main/src/memory
+    tags:
+      - knowledge-graph
+      - persistent-memory
+      - entity-management
+      - graph-database
+      - memory-storage
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-memory"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "-v", "claude-memory:/app/dist", "--rm", "mcp/memory"]
+          }
+      - name: NPX with Custom Memory File
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-memory"],
+            "env": {
+              "MEMORY_FILE_PATH": "{{MEMORY_FILE_PATH}}"
+            }
+          }
+        parameters:
+          - name: Memory File Path
+            key: MEMORY_FILE_PATH
+            placeholder: /path/to/custom/memory.json
+  - id: metoro
+    name: Kubernetes Observer
+    description: Enables interaction with Kubernetes clusters through Metoro's observability platform, providing eBPF-based
+      telemetry and monitoring capabilities via natural language queries.
+    author: metoro-io
+    url: https://github.com/metoro-io/metoro-mcp-server
+    tags:
+      - kubernetes
+      - observability
+      - ebpf
+      - telemetry
+      - microservices
+    content:
+      - name: Go Binary
+        content: |
+          {
+            "command": "{{METORO_BINARY_PATH}}/metoro-mcp-server",
+            "args": [],
+            "env": {
+              "METORO_AUTH_TOKEN": "{{METORO_AUTH_TOKEN}}",
+              "METORO_API_URL": "{{METORO_API_URL}}"
+            }
+          }
+      - name: Demo Cluster
+        content: >
+          {
+            "command": "{{METORO_BINARY_PATH}}/metoro-mcp-server",
+            "args": [],
+            "env": {
+              "METORO_AUTH_TOKEN": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJjdXN0b21lcklkIjoiOThlZDU1M2QtYzY4ZC00MDRhLWFhZjItNDM2ODllNWJiMGUzIiwiZW1haWwiOiJ0ZXN0QGNocmlzYmF0dGFyYmVlLmNvbSIsImV4cCI6MTgyMTI0NzIzN30.7G6alDpcZh_OThYj293Jce5rjeOBqAhOlANR_Fl5auw",
+              "METORO_API_URL": "https://demo.us-east.metoro.io"
+            }
+          }
+    parameters:
+      - name: Metoro Binary Path
+        key: METORO_BINARY_PATH
+        placeholder: /path/to/metoro-mcp-server
+      - name: Metoro Auth Token
+        key: METORO_AUTH_TOKEN
+        placeholder: your_metoro_auth_token
+      - name: Metoro API URL
+        key: METORO_API_URL
+        placeholder: https://us-east.metoro.io
+  - id: microsoft-learn
+    name: Microsoft Learn
+    description: Official Microsoft Learn MCP server that provides access to Microsoft Learn content, including
+      documentation, tutorials, and learning paths.
+    author: microsoft
+    url: https://github.com/microsoftdocs/mcp
+    tags:
+      - microsoft
+      - documentation
+      - learning
+      - tutorials
+      - azure
+      - official
+    content:
+      - name: Remote MCP
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://learn.microsoft.com/api/mcp"
+          }
+  - id: motherduck
+    name: MotherDuck
+    description: Enables database operations with MotherDuck and local DuckDB, providing tools for connection
+      initialization, schema reading, and query execution.
+    author: motherduckdb
+    url: https://github.com/motherduckdb/mcp-server-motherduck
+    tags:
+      - duckdb
+      - motherduck
+      - sql
+      - database-management
+      - query-execution
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-motherduck", "--db-path", "md:", "--motherduck-token", "{{MOTHERDUCK_TOKEN}}"]
+          }
+      - name: UVX with Local DuckDB
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-motherduck", "--db-path", "{{DB_PATH}}"]
+          }
+        parameters:
+          - name: Database Path
+            key: DB_PATH
+            placeholder: /path/to/your/local.db
+      - name: UVX with In-Memory Database
+        prerequisites:
+          - Python
+          - uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-motherduck", "--db-path", ":memory:"]
+          }
+      - name: UVX with Read-Only Mode
+        prerequisites:
+          - Python
+          - uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-motherduck", "--db-path", "{{DB_PATH}}", "--read-only"]
+          }
+      - name: UVX with SaaS Mode
+        prerequisites:
+          - Python
+          - uv
+        content: >
+          {
+            "command": "uvx",
+            "args": ["mcp-server-motherduck", "--db-path", "md:", "--motherduck-token", "{{MOTHERDUCK_TOKEN}}", "--saas-mode"]
+          }
+    parameters:
+      - name: MotherDuck Token
+        key: MOTHERDUCK_TOKEN
+        placeholder: your_motherduck_token_here
+  - id: n8n-mcp
+    name: n8n-MCP
+    description: A Model Context Protocol (MCP) server that provides AI assistants with comprehensive access to n8n node
+      documentation, properties, and operations. Deploy in minutes to give Claude and other AI assistants deep knowledge
+      about n8n's 525+ workflow automation nodes.
+    author: czlonkowski
+    url: https://github.com/czlonkowski/n8n-mcp
+    tags:
+      - n8n
+      - workflow-automation
+      - devops
+      - nodes
+      - automation
+      - ai-tools
+      - no-code
+      - low-code
+    content:
+      - name: NPX (Docs only)
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "n8n-mcp@2.12.2"],
+            "env": {
+              "MCP_MODE": "stdio",
+              "LOG_LEVEL": "error",
+              "DISABLE_CONSOLE_OUTPUT": "true"
+            }
+          }
+      - name: NPX (Full)
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "n8n-mcp@2.12.2"],
+            "env": {
+              "MCP_MODE": "stdio",
+              "LOG_LEVEL": "error",
+              "DISABLE_CONSOLE_OUTPUT": "true",
+              "N8N_API_URL": "{{N8N_API_URL}}",
+              "N8N_API_KEY": "{{N8N_API_KEY}}"
+            }
+          }
+        parameters:
+          - name: n8n API URL
+            key: N8N_API_URL
+            placeholder: https://your-n8n-instance.com
+          - name: n8n API Key
+            key: N8N_API_KEY
+            placeholder: your-api-key
+      - name: Docker (Docs only)
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": [
+              "run",
+              "-i",
+              "--rm",
+              "--init",
+              "-e", "MCP_MODE=stdio",
+              "-e", "LOG_LEVEL=error",
+              "-e", "DISABLE_CONSOLE_OUTPUT=true",
+              "ghcr.io/czlonkowski/n8n-mcp@sha256:80613ac30c3fe39a7b9d343104603804edfbc34c1cdc27e95459b15b7c651dd2"
+            ]
+          }
+      - name: Docker (Full)
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": [
+              "run",
+              "-i",
+              "--rm",
+              "--init",
+              "-e", "MCP_MODE=stdio",
+              "-e", "LOG_LEVEL=error",
+              "-e", "DISABLE_CONSOLE_OUTPUT=true",
+              "-e", "N8N_API_URL={{N8N_API_URL}}",
+              "-e", "N8N_API_KEY={{N8N_API_KEY}}",
+              "ghcr.io/czlonkowski/n8n-mcp@sha256:80613ac30c3fe39a7b9d343104603804edfbc34c1cdc27e95459b15b7c651dd2"
+            ]
+          }
+        parameters:
+          - name: n8n API URL
+            key: N8N_API_URL
+            placeholder: https://your-n8n-instance.com
+          - name: n8n API Key
+            key: N8N_API_KEY
+            placeholder: your-api-key
+  - id: needle
+    name: Needle Search
+    description: Enables document management and natural language search capabilities through the Needle platform, allowing
+      users to organize, store, and retrieve documents using Claude's language model.
+    author: needle-ai
+    url: https://github.com/needle-ai/needle-mcp
+    tags:
+      - document-management
+      - search
+      - knowledge-base
+      - needle-api
+      - content-organization
+    content:
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@smithery/cli", "install", "needle-mcp", "--client", "claude"]
+          }
+      - name: UV with Local Development
+        content: |
+          {
+            "command": "uv",
+            "args": ["--directory", "{{NEEDLE_PATH}}", "run", "needle-mcp"],
+            "env": {
+              "NEEDLE_API_KEY": "{{NEEDLE_API_KEY}}"
+            }
+          }
+        parameters:
+          - name: Needle Path
+            key: NEEDLE_PATH
+            placeholder: /path/to/needle-mcp
+            optional: true
+    parameters:
+      - name: Needle API Key
+        key: NEEDLE_API_KEY
+        placeholder: your_needle_api_key
+  - id: neon
+    name: Neon Database
+    description: Enables natural language interaction with Neon PostgreSQL databases, supporting project management, schema
+      migrations, SQL queries, and database operations through the Neon API.
+    author: neondatabase
+    url: https://github.com/neondatabase/mcp-server-neon
+    tags:
+      - postgresql
+      - database-management
+      - migrations
+      - sql
+      - neon-api
+    content:
+      - name: Remote MCP
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "mcp-remote", "https://mcp.neon.tech/sse"]
+          }
+      - name: NPX with API Key
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@neondatabase/mcp-server-neon", "start", "{{NEON_API_KEY}}"]
+          }
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@smithery/cli", "install", "neon", "--client", "claude"]
+          }
+      - name: Windows CMD
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "cmd",
+            "args": ["/c", "npx", "-y", "@neondatabase/mcp-server-neon", "start", "{{NEON_API_KEY}}"]
+          }
+      - name: Windows WSL
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "wsl",
+            "args": ["npx", "-y", "@neondatabase/mcp-server-neon", "start", "{{NEON_API_KEY}}"]
+          }
+    parameters:
+      - name: Neon API Key
+        key: NEON_API_KEY
+        placeholder: your_neon_api_key
+        optional: true
+  - id: nia
+    name: Nia
+    description: Nia is an API and MCP layer that gives agents continuously updated context from libraries, research papers,
+      and docs, so they don't hallucinate and you skip manual ingestion.
+    author: Nozomio Labs
+    url: https://docs.trynia.ai
+    tags:
+      - documentation
+      - knowledge-base
+      - repository-indexing
+      - semantic-search
+      - research-papers
+      - code-context
+      - ai-research
+    prerequisites:
+      - Nia account (https://app.trynia.ai)
+    content:
+      - name: Remote Server
+        content: |
+          {
+            "type": "streamable-http",
+            "url": "https://apigcp.trynia.ai/mcp",
+            "headers": {
+              "Authorization": "Bearer {{NIA_API_KEY}}"
+            }
+          }
+    parameters:
+      - name: Nia API Key
+        key: NIA_API_KEY
+        placeholder: your_nia_api_key_here
+  - id: notion
+    name: Notion
+    description: Official Notion MCP Server that provides seamless integration with Notion APIs, enabling advanced
+      automation and interaction capabilities for managing pages, databases, comments, and content within Notion
+      workspaces.
+    author: makenotion
+    url: https://github.com/makenotion/notion-mcp-server
+    tags:
+      - notion
+      - productivity
+      - note-taking
+      - database-management
+      - content-management
+      - collaboration
+      - workspace
+      - api-integration
+    prerequisites:
+      - Notion account with integration access
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: >
+          {
+            "command": "npx",
+            "args": ["-y", "@notionhq/notion-mcp-server"],
+            "env": {
+              "OPENAPI_MCP_HEADERS": "{\"Authorization\": \"Bearer {{NOTION_API_KEY}}\", \"Notion-Version\": \"2022-06-28\"}"
+            }
+          }
+      - name: Docker Hub Image
+        prerequisites:
+          - Docker
+        content: >
+          {
+            "command": "docker",
+            "args": [
+              "run",
+              "--rm",
+              "-i",
+              "-e", "OPENAPI_MCP_HEADERS",
+              "mcp/notion"
+            ],
+            "env": {
+              "OPENAPI_MCP_HEADERS": "{\"Authorization\": \"Bearer {{NOTION_API_KEY}}\", \"Notion-Version\": \"2022-06-28\"}"
+            }
+          }
+      - name: Docker Local Build
+        prerequisites:
+          - Docker
+        content: >
+          {
+            "command": "docker",
+            "args": [
+              "run",
+              "--rm",
+              "-i",
+              "-e",
+              "OPENAPI_MCP_HEADERS={\"Authorization\": \"Bearer {{NOTION_API_KEY}}\", \"Notion-Version\": \"2022-06-28\"}",
+              "notion-mcp-server"
+            ]
+          }
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@smithery/cli", "install", "@makenotion/notion-mcp-server", "--client", "claude"]
+          }
+    parameters:
+      - name: Notion API Key
+        key: NOTION_API_KEY
+        placeholder: ntn_your_notion_integration_token
+  - id: oxylabs
+    name: Oxylabs Scraper
+    description: Advanced web scraping tool using Oxylabs Web Scraper API, supporting JavaScript rendering, HTML parsing,
+      and content transformation with flexible parsing options.
+    author: oxylabs
+    url: https://github.com/oxylabs/oxylabs-mcp
+    tags:
+      - web-scraping
+      - content-extraction
+      - javascript-rendering
+      - html-parsing
+      - data-collection
+    content:
+      - name: UVX
+        prerequisites:
+          - Python
+          - uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["oxylabs-mcp"],
+            "env": {
+              "OXYLABS_USERNAME": "{{OXYLABS_USERNAME}}",
+              "OXYLABS_PASSWORD": "{{OXYLABS_PASSWORD}}"
+            }
+          }
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@smithery/cli", "install", "@oxylabs/oxylabs-mcp", "--client", "claude"]
+          }
+      - name: UV with Local Development
+        content: |
+          {
+            "command": "uv",
+            "args": ["--directory", "{{OXYLABS_PATH}}", "run", "oxylabs-mcp"],
+            "env": {
+              "OXYLABS_USERNAME": "{{OXYLABS_USERNAME}}",
+              "OXYLABS_PASSWORD": "{{OXYLABS_PASSWORD}}"
+            }
+          }
+        parameters:
+          - name: Oxylabs Path
+            key: OXYLABS_PATH
+            placeholder: /path/to/oxylabs-mcp
+            optional: true
+    parameters:
+      - name: Oxylabs Username
+        key: OXYLABS_USERNAME
+        placeholder: your_oxylabs_username
+      - name: Oxylabs Password
+        key: OXYLABS_PASSWORD
+        placeholder: your_oxylabs_password
+  - id: playwright
+    name: Playwright
+    description: Official Microsoft MCP server providing browser automation capabilities using Playwright. Enables LLMs to
+      interact with web pages through structured accessibility snapshots, bypassing the need for screenshots or
+      visually-tuned models. Supports fast and lightweight automation with deterministic tool application.
+    author: microsoft
+    url: https://github.com/microsoft/playwright-mcp
+    tags:
+      - browser-automation
+      - web-testing
+      - playwright
+      - microsoft
+      - accessibility
+      - web-scraping
+      - ui-automation
+      - headless-browser
+      - official
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js 18+
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@playwright/mcp@0.0.38"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: >
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "--init", "--pull=always", "mcr.microsoft.com/playwright/mcp@sha256:48cfafeaaf213c618fff8d2e311f33b170dd1eab87a351260cdb9c24a785fc50"]
+          }
+      - name: NPX with Chrome Extension
+        prerequisites:
+          - Node.js 18+
+          - Chrome browser
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@playwright/mcp@0.0.38", "--port={{PORT}}", "--extension"]
+          }
+        parameters:
+          - name: Port
+            key: PORT
+            placeholder: "4242"
+            optional: true
+      - name: NPX with Storage State
+        prerequisites:
+          - Node.js 18+
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@playwright/mcp@0.0.38", "--isolated", "--storage-state={{STORAGE_STATE_PATH}}"]
+          }
+        parameters:
+          - name: Storage State Path
+            key: STORAGE_STATE_PATH
+            placeholder: /path/to/storage.json
+  - id: postgres
+    name: PostgreSQL Reader
+    description: Provides read-only access to PostgreSQL databases, allowing LLMs to inspect database schemas and execute
+      read-only queries within protected transactions.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/postgres
+    tags:
+      - postgresql
+      - database-queries
+      - schema-inspection
+      - read-only
+      - sql
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-postgres", "{{POSTGRESQL_URL}}"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "mcp/postgres", "{{POSTGRESQL_URL}}"]
+          }
+    parameters:
+      - name: PostgreSQL URL
+        key: POSTGRESQL_URL
+        placeholder: postgresql://user:password@localhost:5432/mydb
+  - id: postgrest
+    name: Postgrest
+    description: Enables database operations on PostgreSQL through PostgREST, supporting SQL-to-REST conversion and direct
+      API requests for querying and modifying data.
+    author: supabase-community
+    url: https://github.com/supabase-community/mcp-supabase/tree/HEAD/packages/mcp-server-postgrest
+    tags:
+      - postgresql
+      - postgrest
+      - database-api
+      - sql
+      - supabase
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": [
+              "-y",
+              "@supabase/mcp-server-postgrest@0.0.11",
+              "--apiUrl",
+              "{{POSTGREST_API_URL}}",
+              "--apiKey",
+              "{{POSTGREST_API_KEY}}",
+              "--schema",
+              "{{POSTGREST_SCHEMA}}"
+            ]
+          }
+      - name: NPX with Supabase
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": [
+              "-y",
+              "@supabase/mcp-server-postgrest@0.0.11",
+              "--apiUrl",
+              "https://{{SUPABASE_PROJECT_REF}}.supabase.co/rest/v1",
+              "--apiKey",
+              "{{SUPABASE_ANON_KEY}}",
+              "--schema",
+              "public"
+            ]
+          }
+        parameters:
+          - name: Supabase Project Reference
+            key: SUPABASE_PROJECT_REF
+            placeholder: your-project-ref
+          - name: Supabase Anon Key
+            key: SUPABASE_ANON_KEY
+            placeholder: your_supabase_anon_key
+      - name: Local Development
+        content: |
+          {
+            "command": "node",
+            "args": ["{{POSTGREST_PATH}}/dist/index.js"],
+            "env": {
+              "POSTGREST_API_URL": "{{POSTGREST_API_URL}}",
+              "POSTGREST_API_KEY": "{{POSTGREST_API_KEY}}",
+              "POSTGREST_SCHEMA": "{{POSTGREST_SCHEMA}}"
+            }
+          }
+        parameters:
+          - name: PostgREST MCP Path
+            key: POSTGREST_PATH
+            placeholder: /path/to/mcp-server-postgrest
+            optional: true
+    parameters:
+      - name: PostgREST API URL
+        key: POSTGREST_API_URL
+        placeholder: https://your-project-ref.supabase.co/rest/v1
+      - name: PostgREST API Key
+        key: POSTGREST_API_KEY
+        placeholder: your_postgrest_api_key
+        optional: true
+      - name: PostgREST Schema
+        key: POSTGREST_SCHEMA
+        placeholder: public
+  - id: puppeteer
+    name: Puppeteer
+    description: Provides browser automation capabilities using Puppeteer, enabling web page interaction, screenshots, and
+      JavaScript execution in a real browser environment.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/puppeteer
+    tags:
+      - web-automation
+      - screenshots
+      - browser-control
+      - javascript
+      - testing
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "--init", "-e", "DOCKER_CONTAINER=true", "mcp/puppeteer"]
+          }
+  - id: qdrant
+    name: Qdrant
+    description: A semantic memory layer enabling storage and retrieval of vector-based memories using the Qdrant vector
+      search engine, with support for both cloud and local deployments.
+    author: qdrant
+    url: https://github.com/qdrant/mcp-server-qdrant
+    tags:
+      - vector-search
+      - semantic-memory
+      - embeddings
+      - storage
+      - retrieval
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-qdrant"],
+            "env": {
+              "QDRANT_URL": "{{QDRANT_URL}}",
+              "QDRANT_API_KEY": "{{QDRANT_API_KEY}}",
+              "COLLECTION_NAME": "{{COLLECTION_NAME}}",
+              "EMBEDDING_MODEL": "{{EMBEDDING_MODEL}}"
+            }
+          }
+      - name: UVX with Local Database
+        prerequisites:
+          - Python
+          - uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-qdrant"],
+            "env": {
+              "QDRANT_LOCAL_PATH": "{{QDRANT_LOCAL_PATH}}",
+              "COLLECTION_NAME": "{{COLLECTION_NAME}}",
+              "EMBEDDING_MODEL": "{{EMBEDDING_MODEL}}"
+            }
+          }
+        parameters:
+          - name: Qdrant Local Path
+            key: QDRANT_LOCAL_PATH
+            placeholder: /path/to/qdrant/database
+      - name: UVX with SSE Transport
+        prerequisites:
+          - Python
+          - uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-qdrant", "--transport", "sse"],
+            "env": {
+              "QDRANT_URL": "{{QDRANT_URL}}",
+              "QDRANT_API_KEY": "{{QDRANT_API_KEY}}",
+              "COLLECTION_NAME": "{{COLLECTION_NAME}}",
+              "FASTMCP_PORT": "{{FASTMCP_PORT}}"
+            }
+          }
+        parameters:
+          - name: FastMCP Port
+            key: FASTMCP_PORT
+            placeholder: "8000"
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: >
+          {
+            "command": "docker",
+            "args": ["run", "-p", "8000:8000", "-e", "QDRANT_URL", "-e", "QDRANT_API_KEY", "-e", "COLLECTION_NAME", "mcp-server-qdrant"],
+            "env": {
+              "QDRANT_URL": "{{QDRANT_URL}}",
+              "QDRANT_API_KEY": "{{QDRANT_API_KEY}}",
+              "COLLECTION_NAME": "{{COLLECTION_NAME}}"
+            }
+          }
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["@smithery/cli", "install", "mcp-server-qdrant", "--client", "claude"]
+          }
+    parameters:
+      - name: Qdrant URL
+        key: QDRANT_URL
+        placeholder: https://xyz-example.eu-central.aws.cloud.qdrant.io:6333
+      - name: Qdrant API Key
+        key: QDRANT_API_KEY
+        placeholder: your_qdrant_api_key
+      - name: Collection Name
+        key: COLLECTION_NAME
+        placeholder: your-collection-name
+      - name: Embedding Model
+        key: EMBEDDING_MODEL
+        placeholder: sentence-transformers/all-MiniLM-L6-v2
+        optional: true
+  - id: raygun
+    name: Raygun
+    description: Provides comprehensive access to Raygun's error tracking, crash reporting, and real user monitoring
+      features through API integration, enabling management of applications, errors, deployments, and performance
+      metrics.
+    author: MindscapeHQ
+    url: https://github.com/MindscapeHQ/mcp-server-raygun
+    tags:
+      - error-tracking
+      - crash-reporting
+      - performance-monitoring
+      - debugging
+      - application-monitoring
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@raygun.io/mcp-server-raygun"],
+            "env": {
+              "RAYGUN_PAT_TOKEN": "{{RAYGUN_PAT_TOKEN}}"
+            }
+          }
+      - name: Node.js
+        content: |
+          {
+            "command": "node",
+            "args": ["{{RAYGUN_PATH}}/build/index.js"],
+            "env": {
+              "RAYGUN_PAT_TOKEN": "{{RAYGUN_PAT_TOKEN}}",
+              "SOURCEMAP_ALLOWED_DIRS": "{{SOURCEMAP_ALLOWED_DIRS}}"
+            }
+          }
+        parameters:
+          - name: Source Map Allowed Directories
+            key: SOURCEMAP_ALLOWED_DIRS
+            placeholder: /path/to/sourcemaps,/another/path
+          - name: Raygun MCP Path
+            key: RAYGUN_PATH
+            placeholder: /path/to/mcp-server-raygun
+    parameters:
+      - name: Raygun PAT Token
+        key: RAYGUN_PAT_TOKEN
+        placeholder: your_raygun_pat_token
+  - id: redis
+    name: Redis
+    description: Provides access to Redis key-value stores, enabling operations like setting, getting, deleting, and listing
+      keys with optional expiration time support.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers/tree/main/src/redis
+    tags:
+      - redis
+      - key-value-store
+      - caching
+      - data-storage
+      - database-operations
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-redis", "--url", "{{REDIS_URL}}"]
+          }
+      - name: Python/Pip
+        prerequisites:
+          - Python
+        content: |
+          {
+            "command": "python",
+            "args": ["-m", "mcp_server_redis", "--url", "{{REDIS_URL}}"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "mcp/redis", "--url", "{{REDIS_URL}}"]
+          }
+      - name: UVX with Authentication
+        prerequisites:
+          - Python
+          - uv
+        content: >
+          {
+            "command": "uvx",
+            "args": ["mcp-server-redis", "--url", "{{REDIS_URL}}", "--username", "{{REDIS_USERNAME}}", "--password", "{{REDIS_PASSWORD}}"]
+          }
+        parameters:
+          - name: Redis Username
+            key: REDIS_USERNAME
+            placeholder: your_redis_username
+          - name: Redis Password
+            key: REDIS_PASSWORD
+            placeholder: your_redis_password
+      - name: Python/Pip with Authentication
+        prerequisites:
+          - Python
+        content: >
+          {
+            "command": "python",
+            "args": ["-m", "mcp_server_redis", "--url", "{{REDIS_URL}}", "--username", "{{REDIS_USERNAME}}", "--password", "{{REDIS_PASSWORD}}"]
+          }
+        parameters:
+          - name: Redis Username
+            key: REDIS_USERNAME
+            placeholder: your_redis_username
+          - name: Redis Password
+            key: REDIS_PASSWORD
+            placeholder: your_redis_password
+    parameters:
+      - name: Redis URL
+        key: REDIS_URL
+        placeholder: redis://localhost:6379
+  - id: riza
+    name: Riza
+    description: Provides a secure code interpreter for executing LLM-generated code, with features for creating, saving,
+      managing, and executing code tools in an isolated environment.
+    author: riza-io
+    url: https://github.com/riza-io/riza-mcp
+    tags:
+      - code-execution
+      - sandbox
+      - code-interpreter
+      - tool-management
+      - security
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["@riza-io/riza-mcp"],
+            "env": {
+              "RIZA_API_KEY": "{{RIZA_API_KEY}}"
+            }
+          }
+    parameters:
+      - name: Riza API Key
+        key: RIZA_API_KEY
+        placeholder: your_riza_api_key
+  - id: sentry
+    name: Sentry
+    description: Retrieves and analyzes error reports, stacktraces, and debugging information from Sentry.io, enabling AI
+      assistants to inspect and understand application issues.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/sentry
+    tags:
+      - error-tracking
+      - debugging
+      - stacktraces
+      - issue-monitoring
+      - application-monitoring
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-sentry", "--auth-token", "{{SENTRY_AUTH_TOKEN}}"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "mcp/sentry", "--auth-token", "{{SENTRY_AUTH_TOKEN}}"]
+          }
+      - name: Python/Pip
+        prerequisites:
+          - Python
+        content: |
+          {
+            "command": "python",
+            "args": ["-m", "mcp_server_sentry", "--auth-token", "{{SENTRY_AUTH_TOKEN}}"]
+          }
+    parameters:
+      - name: Sentry Auth Token
+        key: SENTRY_AUTH_TOKEN
+        placeholder: your_sentry_auth_token_here
+  - id: sequentialthinking
+    name: Sequential Thinking
+    description: A structured problem-solving tool that enables step-by-step analysis, thought revision, and branching logic
+      for complex reasoning tasks.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking
+    tags:
+      - problem-solving
+      - reasoning
+      - analysis
+      - structured-thinking
+      - decision-making
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "--rm", "-i", "mcp/sequentialthinking"]
+          }
+  - id: slack
+    name: Slack
+    description: Enables AI assistants to interact with Slack workspaces, providing tools for messaging, channel management,
+      reactions, user profiles, and thread management.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/slack
+    tags:
+      - slack
+      - messaging
+      - team-collaboration
+      - chat
+      - workspace-management
+    prerequisites:
+      - Slack workspace with bot permissions
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-slack"],
+            "env": {
+              "SLACK_BOT_TOKEN": "{{SLACK_BOT_TOKEN}}",
+              "SLACK_TEAM_ID": "{{SLACK_TEAM_ID}}",
+              "SLACK_CHANNEL_IDS": "{{SLACK_CHANNEL_IDS}}"
+            }
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: >
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "-e", "SLACK_BOT_TOKEN", "-e", "SLACK_TEAM_ID", "-e", "SLACK_CHANNEL_IDS", "mcp/slack"],
+            "env": {
+              "SLACK_BOT_TOKEN": "{{SLACK_BOT_TOKEN}}",
+              "SLACK_TEAM_ID": "{{SLACK_TEAM_ID}}",
+              "SLACK_CHANNEL_IDS": "{{SLACK_CHANNEL_IDS}}"
+            }
+          }
+    parameters:
+      - name: Slack Bot Token
+        key: SLACK_BOT_TOKEN
+        placeholder: xoxb-your-bot-token
+      - name: Slack Team ID
+        key: SLACK_TEAM_ID
+        placeholder: T01234567
+      - name: Slack Channel IDs
+        key: SLACK_CHANNEL_IDS
+        placeholder: C01234567,C76543210
+        optional: true
+  - id: smartsheet
+    name: Smartsheet
+    description: A Model Context Protocol (MCP) server for interacting with the Smartsheet API. This server provides tools
+      for searching, retrieving, and updating Smartsheet sheets through the MCP protocol. Please follow the installation
+      instructions at https://github.com/smartsheet-platform/smar-mcp before using this server.
+    author: smartsheet-platform
+    url: https://github.com/smartsheet-platform/smar-mcp
+    tags:
+      - smartsheet
+      - project-management
+      - collaboration
+      - api-integration
+      - automation
+      - sheets
+    content:
+      - name: Local Development
+        prerequisites:
+          - Node.js
+          - npm
+          - Git
+        content: |
+          {
+            "command": "npm",
+            "args": ["start"],
+            "cwd": "{{SMARTSHEET_MCP_PATH}}",
+            "env": {
+              "SMARTSHEET_API_KEY": "{{SMARTSHEET_API_KEY}}"
+            }
+          }
+    parameters:
+      - name: Smartsheet API Key
+        key: SMARTSHEET_API_KEY
+        placeholder: your_smartsheet_api_token
+      - name: Smartsheet MCP Path
+        key: SMARTSHEET_MCP_PATH
+        placeholder: /path/to/smar-mcp
+        optional: true
+  - id: sqlite
+    name: SQLite
+    description: Provides database interaction and business intelligence capabilities through SQLite, enabling SQL queries,
+      data analysis, and automated business insight generation.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers-archived/tree/main/src/sqlite
+    tags:
+      - sql
+      - data-analysis
+      - business-intelligence
+      - database-management
+      - sqlite
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-sqlite", "--db-path", "{{DB_PATH}}"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "--rm", "-i", "-v", "mcp-sqlite:/mcp", "mcp/sqlite", "--db-path", "{{DB_PATH}}"]
+          }
+    parameters:
+      - name: Database Path
+        key: DB_PATH
+        placeholder: /path/to/database.db
+  - id: stripe
+    name: Stripe
+    description: Enables AI agents to interact with Stripe APIs, supporting operations like customer management, payment
+      processing, product creation, and invoice handling through function calling.
+    author: stripe
+    url: https://github.com/stripe/agent-toolkit
+    tags:
+      - payments
+      - billing
+      - invoicing
+      - stripe-api
+      - financial-services
+    prerequisites:
+      - Stripe account
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@stripe/mcp", "--tools=all", "--api-key={{STRIPE_SECRET_KEY}}"]
+          }
+      - name: NPX with Environment Variable
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@stripe/mcp", "--tools=all"],
+            "env": {
+              "STRIPE_SECRET_KEY": "{{STRIPE_SECRET_KEY}}"
+            }
+          }
+    parameters:
+      - name: Stripe Secret Key
+        key: STRIPE_SECRET_KEY
+        placeholder: sk_test_your_stripe_secret_key
+  - id: supabase
+    name: Supabase
+    description: The official Supabase MCP server connects your AI tools to Supabase to perform tasks like launching
+      databases, managing tables, fetching config, and querying data on your behalf.
+    author: supabase
+    url: https://supabase.com/docs/guides/mcp
+    tags:
+      - supabase
+      - database
+      - postgres
+      - authentication
+      - storage
+      - realtime
+      - official
+    prerequisites:
+      - Supabase account
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@supabase/mcp-server-supabase@0.5.5", "--access-token", "{{SUPABASE_ACCESS_TOKEN}}"]
+          }
+    parameters:
+      - name: Supabase Personal Access Token
+        key: SUPABASE_ACCESS_TOKEN
+        placeholder: sbp_your_supabase_pat
+  - id: tavily
+    name: Tavily
+    description: Enables real-time web search and data extraction capabilities through Tavily's API, providing AI assistants
+      with filtered search results and intelligent content extraction from web pages.
+    author: tavily-ai
+    url: https://github.com/tavily-ai/tavily-mcp
+    tags:
+      - web-search
+      - data-extraction
+      - real-time-information
+      - content-filtering
+      - news-search
+    prerequisites:
+      - Tavily account
+    content:
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "tavily-mcp@0.2.3"],
+            "env": {
+              "TAVILY_API_KEY": "{{TAVILY_API_KEY}}"
+            }
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": [
+              "run",
+              "-i",
+              "--rm",
+              "-e",
+              "TAVILY_API_KEY",
+              "mcp/tavily"
+            ],
+            "env": {
+              "TAVILY_API_KEY": "{{TAVILY_API_KEY}}"
+            }
+          }
+    parameters:
+      - name: Tavily API Key
+        key: TAVILY_API_KEY
+        placeholder: your-tavily-apikey-here
+  - id: time
+    name: Time
+    description: Provides time and timezone conversion capabilities using IANA timezone names, with automatic system
+      timezone detection and support for current time queries.
+    author: modelcontextprotocol
+    url: https://github.com/modelcontextprotocol/servers/tree/main/src/time
+    tags:
+      - timezone
+      - time-conversion
+      - datetime
+      - scheduling
+      - automation
+    content:
+      - name: UVX
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-time"]
+          }
+      - name: Python/Pip
+        prerequisites:
+          - Python
+        content: |
+          {
+            "command": "python",
+            "args": ["-m", "mcp_server_time"]
+          }
+      - name: Docker
+        prerequisites:
+          - Docker
+        content: |
+          {
+            "command": "docker",
+            "args": ["run", "-i", "--rm", "mcp/time"]
+          }
+      - name: UVX with Custom Timezone
+        prerequisites:
+          - Python and uv
+        content: |
+          {
+            "command": "uvx",
+            "args": ["mcp-server-time", "--local-timezone={{LOCAL_TIMEZONE}}"]
+          }
+        parameters:
+          - name: Local Timezone
+            key: LOCAL_TIMEZONE
+            placeholder: America/New_York
+      - name: Python/Pip with Custom Timezone
+        prerequisites:
+          - Python
+        content: |
+          {
+            "command": "python",
+            "args": ["-m", "mcp_server_time", "--local-timezone={{LOCAL_TIMEZONE}}"]
+          }
+        parameters:
+          - name: Local Timezone
+            key: LOCAL_TIMEZONE
+            placeholder: America/New_York
+  - id: verodat
+    name: Verodat
+    description: Enables AI systems to interact with Verodat's data management platform, providing capabilities for dataset
+      creation, querying, and AI-powered analysis across workspaces and accounts.
+    author: Verodat
+    url: https://github.com/Verodat/verodat-mcp-server
+    tags:
+      - data-management
+      - dataset-operations
+      - workspace-management
+      - data-validation
+      - ai-integration
+    content:
+      - name: Smithery Installation
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@smithery/cli", "install", "@Verodat/verodat-mcp-server", "--client", "claude"]
+          }
+      - name: Node.js - Consume Tools
+        content: |
+          {
+            "command": "node",
+            "args": ["{{VERODAT_PATH}}/build/src/consume.js"],
+            "env": {
+              "VERODAT_AI_API_KEY": "{{VERODAT_AI_API_KEY}}",
+              "VERODAT_API_BASE_URL": "{{VERODAT_API_BASE_URL}}"
+            }
+          }
+      - name: Node.js - Design Tools
+        content: |
+          {
+            "command": "node",
+            "args": ["{{VERODAT_PATH}}/build/src/design.js"],
+            "env": {
+              "VERODAT_AI_API_KEY": "{{VERODAT_AI_API_KEY}}",
+              "VERODAT_API_BASE_URL": "{{VERODAT_API_BASE_URL}}"
+            }
+          }
+      - name: Node.js - Manage Tools
+        content: |
+          {
+            "command": "node",
+            "args": ["{{VERODAT_PATH}}/build/src/manage.js"],
+            "env": {
+              "VERODAT_AI_API_KEY": "{{VERODAT_AI_API_KEY}}",
+              "VERODAT_API_BASE_URL": "{{VERODAT_API_BASE_URL}}"
+            }
+          }
+    parameters:
+      - name: Verodat AI API Key
+        key: VERODAT_AI_API_KEY
+        placeholder: your_verodat_ai_api_key
+      - name: Verodat API Base URL
+        key: VERODAT_API_BASE_URL
+        placeholder: https://verodat.io/api/v3
+      - name: Verodat MCP Path
+        key: VERODAT_PATH
+        placeholder: /path/to/verodat-mcp-server
+        optional: true
+  - id: watsonx
+    name: WatsonX Flows
+    description: Enables integration with watsonx.ai Flows Engine, providing tools for Google Books and Wikipedia searches
+      through a TypeScript-based MCP server implementation.
+    author: IBM
+    url: https://github.com/IBM/wxflows/tree/main/examples/mcp/javascript
+    tags:
+      - watsonx
+      - flows-engine
+      - tool-integration
+      - search-tools
+      - ibm-cloud
+    content:
+      - name: Node.js
+        content: |
+          {
+            "command": "node",
+            "args": ["{{WXFLOWS_PATH}}/build/index.js"],
+            "env": {
+              "WXFLOWS_APIKEY": "{{WXFLOWS_APIKEY}}",
+              "WXFLOWS_ENDPOINT": "{{WXFLOWS_ENDPOINT}}"
+            }
+          }
+      - name: NPM Development
+        content: |
+          {
+            "command": "npm",
+            "args": ["start"],
+            "cwd": "{{WXFLOWS_PATH}}",
+            "env": {
+              "WXFLOWS_APIKEY": "{{WXFLOWS_APIKEY}}",
+              "WXFLOWS_ENDPOINT": "{{WXFLOWS_ENDPOINT}}"
+            }
+          }
+    parameters:
+      - name: WatsonX API Key
+        key: WXFLOWS_APIKEY
+        placeholder: your_wxflows_api_key
+      - name: WatsonX Endpoint
+        key: WXFLOWS_ENDPOINT
+        placeholder: your_wxflows_endpoint
+      - name: WatsonX Flows Path
+        key: WXFLOWS_PATH
+        placeholder: /path/to/wxflows/examples/mcp/javascript
+        optional: true
+  - id: youtube
+    name: YouTube Subtitles
+    description: Downloads and extracts YouTube video subtitles using yt-dlp, enabling AI assistants to analyze and
+      summarize video content through subtitle text.
+    author: anaisbetts
+    url: https://github.com/anaisbetts/mcp-youtube
+    tags:
+      - youtube
+      - subtitles
+      - video-analysis
+      - content-summarization
+      - yt-dlp
+    prerequisites:
+      - yt-dlp (install via Homebrew or WinGet)
+    content:
+      - name: MCP Installer
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@anaisbetts/mcp-installer", "@anaisbetts/mcp-youtube"]
+          }
+      - name: NPX
+        prerequisites:
+          - Node.js
+        content: |
+          {
+            "command": "npx",
+            "args": ["-y", "@anaisbetts/mcp-youtube"]
+          }
+    parameters:
+      - name: Prerequisites
+        key: PREREQUISITES
+        placeholder: Install yt-dlp via Homebrew or WinGet first

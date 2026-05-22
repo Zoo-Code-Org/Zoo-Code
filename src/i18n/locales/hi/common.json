@@ -112,7 +112,7 @@
 			"thinking_complete_recitation": "(सोचना पूरा हुआ, लेकिन पाठ जाँच के कारण आउटपुट अवरुद्ध कर दिया गया।)"
 		},
 		"roo": {
-			"authenticationRequired": "Zoo प्रदाता को क्लाउड प्रमाणीकरण की आवश्यकता है। कृपया Zoo Code Cloud में साइन इन करें।",
+			"authenticationRequired": "Roo प्रदाता को क्लाउड प्रमाणीकरण की आवश्यकता है। कृपया Roo Code Cloud में साइन इन करें।",
 			"routerRemoved": "Roo Code Router हटा दिया गया है। कृपया कोई दूसरा प्रदाता चुनें और कॉन्फ़िगर करें।"
 		},
 		"api": {
@@ -254,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: अमान्य प्रमाणीकरण token प्राप्त हुआ।",
+			"token_verification_failed": "Zoo Code: Token सत्यापन विफल रहा।",
+			"invalid_token": "Zoo Code: अमान्य token।",
+			"could_not_verify_token": "Zoo Code: Token सत्यापित नहीं किया जा सका।"
+		},
+		"info": {
+			"connected": "Zoo Code: सफलतापूर्वक कनेक्ट हो गया! अब तुम Zoo Code को अपने AI प्रदाता के रूप में उपयोग कर सकते हो।",
+			"disconnected": "Zoo Code: सफलतापूर्वक डिस्कनेक्ट हो गया।"
+		}
 	}
 }

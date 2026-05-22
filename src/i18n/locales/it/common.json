@@ -112,7 +112,7 @@
 			"thinking_complete_recitation": "(Pensiero completato, ma l'output è stato bloccato a causa del controllo di recitazione.)"
 		},
 		"roo": {
-			"authenticationRequired": "Il provider Zoo richiede l'autenticazione cloud. Accedi a Zoo Code Cloud.",
+			"authenticationRequired": "Il provider Roo richiede l'autenticazione cloud. Accedi a Roo Code Cloud.",
 			"routerRemoved": "Roo Code Router è stato rimosso. Seleziona e configura un provider diverso."
 		},
 		"api": {
@@ -254,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Ricevuto un token di autenticazione non valido.",
+			"token_verification_failed": "Zoo Code: Verifica del token non riuscita.",
+			"invalid_token": "Zoo Code: Token non valido.",
+			"could_not_verify_token": "Zoo Code: Impossibile verificare il token."
+		},
+		"info": {
+			"connected": "Zoo Code: Connesso con successo! Ora puoi usare Zoo Code come fornitore AI.",
+			"disconnected": "Zoo Code: Disconnesso con successo."
+		}
 	}
 }

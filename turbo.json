@@ -6,6 +6,10 @@
 		"test": {
 			"dependsOn": ["@roo-code/types#build"]
 		},
+		"test:coverage": {
+			"dependsOn": ["@roo-code/types#build"],
+			"outputs": ["coverage/**"]
+		},
 		"format": {},
 		"clean": {
 			"cache": false

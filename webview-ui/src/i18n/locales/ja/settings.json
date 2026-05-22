@@ -56,7 +56,7 @@
 			"label": "脆弱性を発見しましたか？",
 			"link": "開示プロセスに従ってください"
 		},
-		"community": "ヒントが欲しいですか、または他のZoo Codeユーザーと交流したいですか？<redditLink>reddit.com/r/RooCode</redditLink>または<discordLink>discord.gg/roocode</discordLink>に参加してください",
+		"community": "ヒントが欲しいですか、または他のZoo Codeユーザーと交流したいですか？<redditLink>reddit.com/r/ZooCode</redditLink>または<discordLink>discord.gg/VxfP4Vx3gX</discordLink>に参加してください",
 		"contactAndCommunity": "お問い合わせとコミュニティ",
 		"manageSettings": "設定を管理",
 		"debugMode": {
@@ -394,6 +394,13 @@
 		"minimaxApiKey": "MiniMax APIキー",
 		"getMiniMaxApiKey": "MiniMax APIキーを取得",
 		"minimaxBaseUrl": "MiniMax エントリーポイント",
+		"mimoApiKey": "MiMo APIキー",
+		"getMimoApiKey": "MiMo APIキーを取得",
+		"mimoBaseUrl": "MiMo エントリーポイント",
+		"mimoBaseUrlSingapore": "トークンプラン - シンガポール（デフォルト）",
+		"mimoBaseUrlChina": "トークンプラン - 中国",
+		"mimoBaseUrlEurope": "トークンプラン - ヨーロッパ（AMS）",
+		"mimoBaseUrlPayg": "従量課金",
 		"geminiApiKey": "Gemini APIキー",
 		"getSambaNovaApiKey": "SambaNova APIキーを取得",
 		"sambaNovaApiKey": "SambaNova APIキー",

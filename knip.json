@@ -8,8 +8,7 @@
 		"src/workers/countTokens.ts",
 		"src/extension.ts",
 		"scripts/**",
-		"apps/cli/scripts/**",
-		"apps/web-roo-code/next-sitemap.config.cjs"
+		"apps/cli/scripts/**"
 	],
 	"workspaces": {
 		"src": {
@@ -20,7 +19,7 @@
 			"entry": ["src/index.tsx"],
 			"project": ["src/**/*.{ts,tsx}", "../src/shared/*.ts"]
 		},
-		"packages/{build,cloud,evals,ipc,telemetry,types}": {
+		"packages/{build,cloud,ipc,telemetry,types}": {
 			"project": ["src/**/*.ts"]
 		}
 	}

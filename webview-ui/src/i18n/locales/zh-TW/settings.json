@@ -56,7 +56,7 @@
 			"label": "發現安全漏洞？",
 			"link": "遵循我們的揭露流程"
 		},
-		"community": "想要取得使用技巧或與其他 Zoo Code 使用者交流？加入 <redditLink>reddit.com/r/RooCode</redditLink> 或 <discordLink>discord.gg/roocode</discordLink>",
+		"community": "想要取得使用技巧或與其他 Zoo Code 使用者交流？加入 <redditLink>reddit.com/r/ZooCode</redditLink> 或 <discordLink>discord.gg/VxfP4Vx3gX</discordLink>",
 		"contactAndCommunity": "聯絡與社群",
 		"manageSettings": "管理設定",
 		"debugMode": {
@@ -400,6 +400,13 @@
 		"minimaxApiKey": "MiniMax API 金鑰",
 		"getMiniMaxApiKey": "取得 MiniMax API 金鑰",
 		"minimaxBaseUrl": "MiniMax 服務端點",
+		"mimoApiKey": "MiMo API 金鑰",
+		"getMimoApiKey": "取得 MiMo API 金鑰",
+		"mimoBaseUrl": "MiMo 入口點",
+		"mimoBaseUrlSingapore": "Token 方案 - 新加坡（預設）",
+		"mimoBaseUrlChina": "Token 方案 - 中國",
+		"mimoBaseUrlEurope": "Token 方案 - 歐洲（AMS）",
+		"mimoBaseUrlPayg": "隨選付費",
 		"zaiApiKey": "Z AI API 金鑰",
 		"getZaiApiKey": "取得 Z AI API 金鑰",
 		"zaiEntrypoint": "Z AI 服務端點",

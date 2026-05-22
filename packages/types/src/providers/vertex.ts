@@ -384,6 +384,7 @@ export const vertexModels = {
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
+		supportsTemperature: false,
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')
 		tiers: [
 			{
@@ -598,6 +599,8 @@ export const VERTEX_1M_CONTEXT_MODEL_IDS = [
 
 export const VERTEX_REGIONS = [
 	{ value: "global", label: "global" },
+	{ value: "us", label: "us" },
+	{ value: "eu", label: "eu" },
 	{ value: "us-central1", label: "us-central1" },
 	{ value: "us-east1", label: "us-east1" },
 	{ value: "us-east4", label: "us-east4" },

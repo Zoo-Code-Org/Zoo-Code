@@ -56,7 +56,7 @@
 			"label": "Phát hiện lỗ hổng bảo mật?",
 			"link": "Làm theo quy trình công bố của chúng tôi"
 		},
-		"community": "Muốn nhận mẹo hoặc chỉ muốn giao lưu với những người dùng Zoo Code khác? Tham gia <redditLink>reddit.com/r/RooCode</redditLink> hoặc <discordLink>discord.gg/roocode</discordLink>",
+		"community": "Muốn nhận mẹo hoặc chỉ muốn giao lưu với những người dùng Zoo Code khác? Tham gia <redditLink>reddit.com/r/ZooCode</redditLink> hoặc <discordLink>discord.gg/VxfP4Vx3gX</discordLink>",
 		"contactAndCommunity": "Liên Hệ & Cộng Đồng",
 		"manageSettings": "Quản Lý Cài Đặt",
 		"debugMode": {
@@ -394,6 +394,13 @@
 		"minimaxApiKey": "Khóa API MiniMax",
 		"getMiniMaxApiKey": "Lấy khóa API MiniMax",
 		"minimaxBaseUrl": "Điểm vào MiniMax",
+		"mimoApiKey": "Khóa API MiMo",
+		"getMimoApiKey": "Lấy khóa API MiMo",
+		"mimoBaseUrl": "Điểm vào MiMo",
+		"mimoBaseUrlSingapore": "Token Plan - Singapore (Mặc định)",
+		"mimoBaseUrlChina": "Token Plan - Trung Quốc",
+		"mimoBaseUrlEurope": "Token Plan - Châu Âu (AMS)",
+		"mimoBaseUrlPayg": "Trả theo lượt sử dụng",
 		"geminiApiKey": "Khóa API Gemini",
 		"getSambaNovaApiKey": "Lấy khóa API SambaNova",
 		"sambaNovaApiKey": "Khóa API SambaNova",

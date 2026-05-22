@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "OAuth कॉलबैक - Roo Code",
+			"title": "OAuth कॉलबैक - Zoo Code",
 			"success": "सफलता!",
 			"failed": "विफल",
 			"auth_failed": "प्रमाणीकरण विफल रहा। कृपया MCP सर्वर लॉग की जाँच करें।",

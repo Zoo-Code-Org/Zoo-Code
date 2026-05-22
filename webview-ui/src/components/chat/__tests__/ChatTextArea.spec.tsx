@@ -1081,7 +1081,7 @@ describe("ChatTextArea", () => {
 				expect(shiftEnterEvent.defaultPrevented).toBe(false)
 			})
 
-			it("should treat Ctrl/Cmd/Shift+Enter as send and plain Enter as newline in newline mode", () => {
+			it("should send only on Ctrl/Cmd+Enter and allow Shift+Enter in newline mode", () => {
 				const onSend = vi.fn()
 
 				;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -1118,8 +1118,8 @@ describe("ChatTextArea", () => {
 					cancelable: true,
 				})
 				fireEvent(textarea, shiftEnterEvent)
-				expect(onSend).toHaveBeenCalledTimes(2)
-				expect(shiftEnterEvent.defaultPrevented).toBe(true)
+				expect(onSend).toHaveBeenCalledTimes(1)
+				expect(shiftEnterEvent.defaultPrevented).toBe(false)
 			})
 		})
 	})

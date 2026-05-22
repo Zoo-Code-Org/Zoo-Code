@@ -19,7 +19,7 @@ vi.mock("../config-dir.js", () => ({
 
 // Import after mocking
 import { loadSettings, saveSettings, resetOnboarding, getSettingsPath } from "../settings.js"
-import { DEFAULT_PROVIDER, OnboardingProviderChoice } from "@/types/index.js"
+import { OnboardingProviderChoice } from "@/types/index.js"
 
 // Re-derive the test config dir for use in tests (must match the hoisted one)
 const actualTestConfigDir = getTestConfigDir()
@@ -68,32 +68,6 @@ describe("Settings Storage", () => {
 
 			const loaded = await loadSettings()
 			expect(loaded).toEqual(settingsData)
-		})
-
-		it("migrates legacy Roo provider settings to the default provider path", async () => {
-			const legacySettings = {
-				onboardingProviderChoice: "roo",
-				provider: "roo",
-				mode: "architect",
-			}
-
-			await fs.mkdir(actualTestConfigDir, { recursive: true })
-			await fs.writeFile(expectedSettingsFile, JSON.stringify(legacySettings), "utf-8")
-
-			const loaded = await loadSettings()
-
-			expect(loaded).toEqual({
-				onboardingProviderChoice: OnboardingProviderChoice.Byok,
-				provider: DEFAULT_PROVIDER,
-				mode: "architect",
-			})
-
-			const rewritten = JSON.parse(await fs.readFile(expectedSettingsFile, "utf-8"))
-			expect(rewritten).toEqual({
-				onboardingProviderChoice: OnboardingProviderChoice.Byok,
-				provider: DEFAULT_PROVIDER,
-				mode: "architect",
-			})
 		})
 
 		it("should load settings with only some fields set", async () => {

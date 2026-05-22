@@ -21,6 +21,10 @@ export async function* processResponsesApiStream(
 	stream: AsyncIterable<any>,
 	normalizeUsage: (usage: any) => ApiStreamUsageChunk | undefined,
 ): ApiStream {
+	// Track call_ids that were streamed via delta events so we don't double-execute
+	// when response.output_item.done arrives for the same function call.
+	const streamedCallIds = new Set<string>()
+
 	for await (const event of stream) {
 		// Text content deltas
 		if (event?.type === "response.output_text.delta" || event?.type === "response.text.delta") {
@@ -58,11 +62,14 @@ export async function* processResponsesApiStream(
 							: ""
 
 				if (typeof callId === "string" && callId.length > 0 && typeof name === "string" && name.length > 0) {
-					yield {
-						type: "tool_call",
-						id: callId,
-						name,
-						arguments: args,
+					// Skip if already handled via streaming deltas — NativeToolCallParser will finalize it
+					if (!streamedCallIds.has(callId)) {
+						yield {
+							type: "tool_call",
+							id: callId,
+							name,
+							arguments: args,
+						}
 					}
 				}
 			}
@@ -76,7 +83,8 @@ export async function* processResponsesApiStream(
 		) {
 			const callId = event.call_id || event.tool_call_id || event.id || event.item_id
 			const name = event.name || event.function_name
-			if (typeof callId === "string" && callId.length > 0) {
+			if (typeof callId === "string" && callId.length > 0 && typeof name === "string" && name.length > 0) {
+				streamedCallIds.add(callId)
 				yield {
 					type: "tool_call_partial",
 					index: event.index ?? 0,

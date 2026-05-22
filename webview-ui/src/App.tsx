@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useEvent } from "react-use"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
@@ -54,6 +54,7 @@ const App = () => {
 	const {
 		didHydrateState,
 		showWelcome,
+		settingsImportedAt,
 		shouldShowAnnouncement,
 		telemetrySetting,
 		telemetryKey,
@@ -67,6 +68,7 @@ const App = () => {
 
 	const [showAnnouncement, setShowAnnouncement] = useState(false)
 	const [tab, setTab] = useState<Tab>("chat")
+	const handledImportRef = useRef<number | undefined>(undefined)
 
 	const [deleteMessageDialogState, setDeleteMessageDialogState] = useState<DeleteMessageDialogState>({
 		isOpen: false,
@@ -170,6 +172,19 @@ const App = () => {
 	}, [shouldShowAnnouncement, tab])
 
 	useEffect(() => {
+		const isRecoverableTab = tab === "settings" || tab === "marketplace"
+
+		if (showWelcome && settingsImportedAt && settingsImportedAt !== handledImportRef.current) {
+			handledImportRef.current = settingsImportedAt
+			if (!isRecoverableTab) {
+				setCurrentSection("providers")
+				setCurrentMarketplaceTab(undefined)
+				setTab("settings")
+			}
+		}
+	}, [showWelcome, settingsImportedAt, tab])
+
+	useEffect(() => {
 		if (didHydrateState) {
 			telemetryClient.updateTelemetryState(telemetrySetting, telemetryKey, machineId)
 		}
@@ -214,7 +229,9 @@ const App = () => {
 
 	// Do not conditionally load ChatView, it's expensive and there's state we
 	// don't want to lose (user input, disableInput, askResponse promise, etc.)
-	return showWelcome ? (
+	const isSetupGatedTab = showWelcome && tab !== "settings" && tab !== "marketplace"
+
+	return isSetupGatedTab ? (
 		<WelcomeView />
 	) : (
 		<>

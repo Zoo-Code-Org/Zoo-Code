@@ -398,95 +398,71 @@ describe("Cline", () => {
 
 	describe("getEnvironmentDetails", () => {
 		describe("API conversation handling", () => {
-			it.skip("should clean conversation history before sending to API", async () => {
-				// Cline.create will now use our mocked getEnvironmentDetails
-				const [cline, task] = Task.create({
+			beforeEach(() => {
+				Task.resetGlobalApiRequestTime()
+			})
+
+			afterEach(() => {
+				Task.resetGlobalApiRequestTime()
+			})
+
+			it("should strip non-protocol fields from API conversation history before sending to the API", async () => {
+				const cline = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "test task",
+					startTask: false,
 				})
+				vi.spyOn(cline as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
-				cline.abandoned = true
-				await task
+				const mockStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "response" }
+					},
+					async next() {
+						return { done: true, value: { type: "text", text: "response" } }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(error: any) {
+						throw error
+					},
+					async [Symbol.asyncDispose]() {
+						// Cleanup
+					},
+				} as AsyncGenerator<ApiStreamChunk>
+				const createMessageSpy = vi.spyOn(cline.api, "createMessage").mockReturnValue(mockStream)
 
-				// Set up mock stream.
-				const mockStreamForClean = (async function* () {
-					yield { type: "text", text: "test response" }
-				})()
-
-				// Set up spy.
-				const cleanMessageSpy = vi.fn().mockReturnValue(mockStreamForClean)
-				vi.spyOn(cline.api, "createMessage").mockImplementation(cleanMessageSpy)
-
-				// Add test message to conversation history.
 				cline.apiConversationHistory = [
 					{
 						role: "user" as const,
 						content: [{ type: "text" as const, text: "test message" }],
 						ts: Date.now(),
+						extraProp: "should be removed",
 					},
-				]
+				] as any
 
-				// Mock abort state
-				Object.defineProperty(cline, "abort", {
-					get: () => false,
-					set: () => {},
-					configurable: true,
-				})
+				const iterator = cline.attemptApiRequest(0)
+				await iterator.next()
 
-				// Add a message with extra properties to the conversation history
-				const messageWithExtra = {
-					role: "user" as const,
-					content: [{ type: "text" as const, text: "test message" }],
-					ts: Date.now(),
-					extraProp: "should be removed",
-				}
+				const [, cleanConversationHistory] = createMessageSpy.mock.calls[0]!
 
-				cline.apiConversationHistory = [messageWithExtra]
-
-				// Trigger an API request
-				await cline.recursivelyMakeClineRequests([{ type: "text", text: "test request" }], false)
-
-				// Get the conversation history from the first API call
-				expect(cleanMessageSpy.mock.calls.length).toBeGreaterThan(0)
-				const history = cleanMessageSpy.mock.calls[0]?.[1]
-				expect(history).toBeDefined()
-				expect(history.length).toBeGreaterThan(0)
-
-				// Find our test message
-				const cleanedMessage = history.find((msg: { content?: Array<{ text: string }> }) =>
-					msg.content?.some((content) => content.text === "test message"),
-				)
-				expect(cleanedMessage).toBeDefined()
-				expect(cleanedMessage).toEqual({
-					role: "user",
-					content: [{ type: "text", text: "test message" }],
-				})
-
-				// Verify extra properties were removed
-				expect(Object.keys(cleanedMessage!)).toEqual(["role", "content"])
+				expect(cleanConversationHistory).toEqual([
+					{
+						role: "user",
+						content: [{ type: "text", text: "test message" }],
+					},
+				])
+				expect(Object.keys(cleanConversationHistory[0]!)).toEqual(["role", "content"])
 			})
 
-			it.skip("should handle image blocks based on model capabilities", async () => {
-				// Create two configurations - one with image support, one without
-				const configWithImages = {
-					...mockApiConfig,
-					apiModelId: "claude-3-sonnet",
-				}
-				const configWithoutImages = {
-					...mockApiConfig,
-					apiModelId: "gpt-3.5-turbo",
-				}
-
-				// Create test conversation history with mixed content
-				const conversationHistory: (Anthropic.MessageParam & { ts?: number })[] = [
+			it("should shape image blocks for API compatibility before request construction", async () => {
+				const conversationHistory = [
 					{
 						role: "user" as const,
 						content: [
-							{
-								type: "text" as const,
-								text: "Here is an image",
-							} satisfies Anthropic.TextBlockParam,
+							{ type: "text" as const, text: "Here is an image" },
 							{
 								type: "image" as const,
 								source: {
@@ -494,29 +470,23 @@ describe("Cline", () => {
 									media_type: "image/jpeg",
 									data: "base64data",
 								},
-							} satisfies Anthropic.ImageBlockParam,
-						],
-					},
-					{
-						role: "assistant" as const,
-						content: [
-							{
-								type: "text" as const,
-								text: "I see the image",
-							} satisfies Anthropic.TextBlockParam,
+							},
 						],
 					},
 				]
 
-				// Test with model that supports images
-				const [clineWithImages, taskWithImages] = Task.create({
+				const withImages = new Task({
 					provider: mockProvider,
-					apiConfiguration: configWithImages,
+					apiConfiguration: {
+						...mockApiConfig,
+						apiModelId: "claude-3-sonnet",
+					},
 					task: "test task",
+					startTask: false,
 				})
+				vi.spyOn(withImages as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
-				// Mock the model info to indicate image support
-				vi.spyOn(clineWithImages.api, "getModel").mockReturnValue({
+				vi.spyOn(withImages.api, "getModel").mockReturnValue({
 					id: "claude-3-sonnet",
 					info: {
 						supportsImages: true,
@@ -528,17 +498,18 @@ describe("Cline", () => {
 					} as ModelInfo,
 				})
 
-				clineWithImages.apiConversationHistory = conversationHistory
-
-				// Test with model that doesn't support images
-				const [clineWithoutImages, taskWithoutImages] = Task.create({
+				const withoutImages = new Task({
 					provider: mockProvider,
-					apiConfiguration: configWithoutImages,
+					apiConfiguration: {
+						...mockApiConfig,
+						apiModelId: "gpt-3.5-turbo",
+					},
 					task: "test task",
+					startTask: false,
 				})
+				vi.spyOn(withoutImages as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
-				// Mock the model info to indicate no image support
-				vi.spyOn(clineWithoutImages.api, "getModel").mockReturnValue({
+				vi.spyOn(withoutImages.api, "getModel").mockReturnValue({
 					id: "gpt-3.5-turbo",
 					info: {
 						supportsImages: false,
@@ -550,88 +521,72 @@ describe("Cline", () => {
 					} as ModelInfo,
 				})
 
-				clineWithoutImages.apiConversationHistory = conversationHistory
+				const mockStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "response" }
+					},
+					async next() {
+						return { done: true, value: { type: "text", text: "response" } }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(error: any) {
+						throw error
+					},
+					async [Symbol.asyncDispose]() {
+						// Cleanup
+					},
+				} as AsyncGenerator<ApiStreamChunk>
+				const withImagesSpy = vi.spyOn(withImages.api, "createMessage").mockReturnValue(mockStream)
+				const withoutImagesSpy = vi.spyOn(withoutImages.api, "createMessage").mockReturnValue(mockStream)
 
-				// Mock abort state for both instances
-				Object.defineProperty(clineWithImages, "abort", {
-					get: () => false,
-					set: () => {},
-					configurable: true,
-				})
+				withImages.apiConversationHistory = conversationHistory as any
+				withoutImages.apiConversationHistory = conversationHistory as any
 
-				Object.defineProperty(clineWithoutImages, "abort", {
-					get: () => false,
-					set: () => {},
-					configurable: true,
-				})
+				const withImagesIterator = withImages.attemptApiRequest(0)
+				await withImagesIterator.next()
+				const withoutImagesIterator = withoutImages.attemptApiRequest(0)
+				await withoutImagesIterator.next()
 
-				// Set up mock streams
-				const mockStreamWithImages = (async function* () {
-					yield { type: "text", text: "test response" }
-				})()
+				const [, historyWithImages] = withImagesSpy.mock.calls[0]!
+				const [, historyWithoutImages] = withoutImagesSpy.mock.calls[0]!
 
-				const mockStreamWithoutImages = (async function* () {
-					yield { type: "text", text: "test response" }
-				})()
-
-				// Set up spies
-				const imagesSpy = vi.fn().mockReturnValue(mockStreamWithImages)
-				const noImagesSpy = vi.fn().mockReturnValue(mockStreamWithoutImages)
-
-				vi.spyOn(clineWithImages.api, "createMessage").mockImplementation(imagesSpy)
-				vi.spyOn(clineWithoutImages.api, "createMessage").mockImplementation(noImagesSpy)
-
-				// Set up conversation history with images
-				clineWithImages.apiConversationHistory = [
+				expect(historyWithImages).toEqual([
 					{
 						role: "user",
 						content: [
 							{ type: "text", text: "Here is an image" },
-							{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: "base64data" } },
+							{
+								type: "image",
+								source: {
+									type: "base64",
+									media_type: "image/jpeg",
+									data: "base64data",
+								},
+							},
 						],
 					},
-				]
-
-				clineWithImages.abandoned = true
-				await taskWithImages.catch(() => {})
-
-				clineWithoutImages.abandoned = true
-				await taskWithoutImages.catch(() => {})
-
-				// Trigger API requests
-				await clineWithImages.recursivelyMakeClineRequests([{ type: "text", text: "test request" }])
-				await clineWithoutImages.recursivelyMakeClineRequests([{ type: "text", text: "test request" }])
-
-				// Get the calls
-				const imagesCalls = imagesSpy.mock.calls
-				const noImagesCalls = noImagesSpy.mock.calls
-
-				// Verify model with image support preserves image blocks
-				expect(imagesCalls.length).toBeGreaterThan(0)
-				if (imagesCalls[0]?.[1]?.[0]?.content) {
-					expect(imagesCalls[0][1][0].content).toHaveLength(2)
-					expect(imagesCalls[0][1][0].content[0]).toEqual({ type: "text", text: "Here is an image" })
-					expect(imagesCalls[0][1][0].content[1]).toHaveProperty("type", "image")
-				}
-
-				// Verify model without image support converts image blocks to text
-				expect(noImagesCalls.length).toBeGreaterThan(0)
-				if (noImagesCalls[0]?.[1]?.[0]?.content) {
-					expect(noImagesCalls[0][1][0].content).toHaveLength(2)
-					expect(noImagesCalls[0][1][0].content[0]).toEqual({ type: "text", text: "Here is an image" })
-					expect(noImagesCalls[0][1][0].content[1]).toEqual({
-						type: "text",
-						text: "[Referenced image in conversation]",
-					})
-				}
+				])
+				expect(historyWithoutImages).toEqual([
+					{
+						role: "user",
+						content: [
+							{ type: "text", text: "Here is an image" },
+							{ type: "text", text: "[Referenced image in conversation]" },
+						],
+					},
+				])
 			})
 
-			it.skip("should handle API retry with countdown", async () => {
-				const [cline, task] = Task.create({
+			it("should handle API retry with countdown", async () => {
+				const cline = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "test task",
+					startTask: false,
 				})
+				vi.spyOn(cline as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
 				// Mock delay to track countdown timing
 				const mockDelay = vi.fn().mockResolvedValue(undefined)
@@ -689,70 +644,37 @@ describe("Cline", () => {
 					}
 					return mockSuccessStream
 				})
-
-				// Set up mock state
-				mockProvider.getState = vi.fn().mockResolvedValue({})
-
-				// Mock previous API request message
-				cline.clineMessages = [
-					{
-						ts: Date.now(),
-						type: "say",
-						say: "api_req_started",
-						text: JSON.stringify({
-							tokensIn: 100,
-							tokensOut: 50,
-							cacheWrites: 0,
-							cacheReads: 0,
-						}),
-					},
-				]
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 3,
+				})
 
 				// Trigger API request
 				const iterator = cline.attemptApiRequest(0)
 				await iterator.next()
 
-				// Calculate expected delay for first retry
-				const baseDelay = 3 // test retry delay
-
-				// Verify countdown messages
-				for (let i = baseDelay; i > 0; i--) {
-					expect(saySpy).toHaveBeenCalledWith(
-						"api_req_retry_delayed",
-						expect.stringContaining(`Retrying in ${i} seconds`),
-						undefined,
-						true,
-					)
-				}
-
-				expect(saySpy).toHaveBeenCalledWith(
-					"api_req_retry_delayed",
-					expect.stringContaining("Retrying now"),
-					undefined,
-					false,
-				)
-
-				// Calculate expected delay calls for countdown
-				const totalExpectedDelays = baseDelay // One delay per second for countdown
-				expect(mockDelay).toHaveBeenCalledTimes(totalExpectedDelays)
+				const retryMessages = saySpy.mock.calls.filter((call) => call[0] === "api_req_retry_delayed")
+				expect(retryMessages).toEqual([
+					["api_req_retry_delayed", "API Error\n<retry_timer>3</retry_timer>", undefined, true],
+					["api_req_retry_delayed", "API Error\n<retry_timer>2</retry_timer>", undefined, true],
+					["api_req_retry_delayed", "API Error\n<retry_timer>1</retry_timer>", undefined, true],
+					["api_req_retry_delayed", "API Error\n", undefined, false],
+				])
+				expect(mockDelay).toHaveBeenCalledTimes(3)
 				expect(mockDelay).toHaveBeenCalledWith(1000)
-
-				// Verify error message content
-				const errorMessage = saySpy.mock.calls.find((call) => call[1]?.includes(mockError.message))?.[1]
-				expect(errorMessage).toBe(
-					`${mockError.message}\n\nRetry attempt 1\nRetrying in ${baseDelay} seconds...`,
-				)
-
-				await cline.abortTask(true)
-				await task.catch(() => {})
 			})
 
-			it.skip("should not apply retry delay twice", async () => {
-				const [cline, task] = Task.create({
+			it("should not apply retry delay twice", async () => {
+				const cline = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "test task",
+					startTask: false,
 				})
+				vi.spyOn(cline as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
 				// Mock delay to track countdown timing
 				const mockDelay = vi.fn().mockResolvedValue(undefined)
@@ -810,61 +732,30 @@ describe("Cline", () => {
 					}
 					return mockSuccessStream
 				})
-
-				// Set up mock state
-				mockProvider.getState = vi.fn().mockResolvedValue({})
-
-				// Mock previous API request message
-				cline.clineMessages = [
-					{
-						ts: Date.now(),
-						type: "say",
-						say: "api_req_started",
-						text: JSON.stringify({
-							tokensIn: 100,
-							tokensOut: 50,
-							cacheWrites: 0,
-							cacheReads: 0,
-						}),
-					},
-				]
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 3,
+				})
 
 				// Trigger API request
 				const iterator = cline.attemptApiRequest(0)
 				await iterator.next()
 
-				// Verify delay is only applied for the countdown
-				const baseDelay = 3 // test retry delay
-				const expectedDelayCount = baseDelay // One delay per second for countdown
-				expect(mockDelay).toHaveBeenCalledTimes(expectedDelayCount)
+				expect(mockDelay).toHaveBeenCalledTimes(3)
 				expect(mockDelay).toHaveBeenCalledWith(1000) // Each delay should be 1 second
 
 				// Verify countdown messages were only shown once
 				const retryMessages = saySpy.mock.calls.filter(
-					(call) => call[0] === "api_req_retry_delayed" && call[1]?.includes("Retrying in"),
+					(call) => call[0] === "api_req_retry_delayed" && call[3] === true,
 				)
-				expect(retryMessages).toHaveLength(baseDelay)
-
-				// Verify the retry message sequence
-				for (let i = baseDelay; i > 0; i--) {
-					expect(saySpy).toHaveBeenCalledWith(
-						"api_req_retry_delayed",
-						expect.stringContaining(`Retrying in ${i} seconds`),
-						undefined,
-						true,
-					)
-				}
-
-				// Verify final retry message
-				expect(saySpy).toHaveBeenCalledWith(
-					"api_req_retry_delayed",
-					expect.stringContaining("Retrying now"),
-					undefined,
-					false,
-				)
-
-				await cline.abortTask(true)
-				await task.catch(() => {})
+				expect(retryMessages).toEqual([
+					["api_req_retry_delayed", "API Error\n<retry_timer>3</retry_timer>", undefined, true],
+					["api_req_retry_delayed", "API Error\n<retry_timer>2</retry_timer>", undefined, true],
+					["api_req_retry_delayed", "API Error\n<retry_timer>1</retry_timer>", undefined, true],
+				])
 			})
 
 			describe("processUserContentMentions", () => {

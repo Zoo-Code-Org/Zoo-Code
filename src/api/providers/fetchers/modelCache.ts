@@ -25,7 +25,7 @@ import { GetModelsOptions } from "../../../shared/api"
 import { getOllamaModels } from "./ollama"
 import { getLMStudioModels } from "./lmstudio"
 import { getPoeModels } from "./poe"
-import { getRooModels } from "./roo"
+import { getDeepSeekModels } from "./deepseek"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
 
@@ -86,14 +86,11 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 		case "vercel-ai-gateway":
 			models = await getVercelAiGatewayModels()
 			break
-		case "roo": {
-			// Roo Code Cloud provider requires baseUrl and optional apiKey
-			const rooBaseUrl = options.baseUrl ?? process.env.ROO_CODE_PROVIDER_URL ?? "https://api.roocode.com/proxy"
-			models = await getRooModels(rooBaseUrl, options.apiKey)
-			break
-		}
 		case "poe":
 			models = await getPoeModels(options.apiKey, options.baseUrl)
+			break
+		case "deepseek":
+			models = await getDeepSeekModels(options.baseUrl, options.apiKey)
 			break
 		default: {
 			// Ensures router is exhaustively checked if RouterName is a strict union.

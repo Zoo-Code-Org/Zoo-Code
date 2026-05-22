@@ -1,0 +1,114 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "READ_FILE_SIMPLE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"simple-read-file-smoke.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":2000,\"indentation\":{\"anchor_line\":1,\"max_levels\":0,\"include_siblings\":false,\"include_header\":true,\"max_lines\":2000}}",
+						"id": "call_read_file_simple_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "READ_FILE_MULTILINE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"multiline-read-file.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":20,\"indentation\":{\"anchor_line\":1,\"max_levels\":0,\"include_siblings\":false,\"include_header\":true,\"max_lines\":20}}",
+						"id": "call_read_file_multiline_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "READ_FILE_SLICE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"multiline-read-file.txt\",\"mode\":\"slice\",\"offset\":2,\"limit\":3,\"indentation\":{\"anchor_line\":1,\"max_levels\":0,\"include_siblings\":false,\"include_header\":true,\"max_lines\":2000}}",
+						"id": "call_read_file_slice_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "READ_FILE_MISSING_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"non-existent-read-file.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":2000,\"indentation\":{\"anchor_line\":1,\"max_levels\":0,\"include_siblings\":false,\"include_header\":true,\"max_lines\":2000}}",
+						"id": "call_read_file_missing_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "READ_FILE_XML_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"xml-content-read-file.xml\",\"mode\":\"slice\",\"offset\":1,\"limit\":50,\"indentation\":{\"anchor_line\":1,\"max_levels\":0,\"include_siblings\":false,\"include_header\":true,\"max_lines\":50}}",
+						"id": "call_read_file_xml_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "READ_FILE_MULTIPLE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"simple-read-file-smoke.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":20,\"indentation\":{\"anchor_line\":1,\"max_levels\":0,\"include_siblings\":false,\"include_header\":true,\"max_lines\":20}}",
+						"id": "call_read_file_multiple_simple_001"
+					},
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"multiline-read-file.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":20,\"indentation\":{\"anchor_line\":1,\"max_levels\":0,\"include_siblings\":false,\"include_header\":true,\"max_lines\":20}}",
+						"id": "call_read_file_multiple_multiline_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "READ_FILE_LARGE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"large-read-file.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":1000,\"indentation\":{\"anchor_line\":1,\"max_levels\":0,\"include_siblings\":false,\"include_header\":true,\"max_lines\":2000}}",
+						"id": "call_read_file_large_001"
+					}
+				]
+			}
+		}
+	]
+}

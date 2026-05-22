@@ -56,7 +56,7 @@
 			"label": "¿Descubriste una vulnerabilidad?",
 			"link": "Sigue nuestro proceso de divulgación"
 		},
-		"community": "¿Quieres consejos o simplemente pasar el rato con otros usuarios de Zoo Code? Únete a <redditLink>reddit.com/r/RooCode</redditLink> o <discordLink>discord.gg/roocode</discordLink>",
+		"community": "¿Quieres consejos o simplemente pasar el rato con otros usuarios de Zoo Code? Únete a <redditLink>reddit.com/r/ZooCode</redditLink> o <discordLink>discord.gg/VxfP4Vx3gX</discordLink>",
 		"contactAndCommunity": "Contacto y Comunidad",
 		"manageSettings": "Gestionar Configuración",
 		"debugMode": {
@@ -394,6 +394,13 @@
 		"minimaxApiKey": "Clave API de MiniMax",
 		"getMiniMaxApiKey": "Obtener clave API de MiniMax",
 		"minimaxBaseUrl": "Punto de entrada de MiniMax",
+		"mimoApiKey": "Clave API de MiMo",
+		"getMimoApiKey": "Obtener clave API de MiMo",
+		"mimoBaseUrl": "Punto de entrada de MiMo",
+		"mimoBaseUrlSingapore": "Token Plan - Singapur (Predeterminado)",
+		"mimoBaseUrlChina": "Token Plan - China",
+		"mimoBaseUrlEurope": "Token Plan - Europa (AMS)",
+		"mimoBaseUrlPayg": "Pago por uso",
 		"geminiApiKey": "Clave API de Gemini",
 		"getSambaNovaApiKey": "Obtener clave API de SambaNova",
 		"sambaNovaApiKey": "Clave API de SambaNova",

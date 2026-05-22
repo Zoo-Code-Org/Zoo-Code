@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "OAuth Callback - Roo Code",
+			"title": "OAuth Callback - Zoo Code",
 			"success": "Thành công!",
 			"failed": "Thất bại",
 			"auth_failed": "Xác thực thất bại. Vui lòng kiểm tra nhật ký máy chủ MCP.",

@@ -14,10 +14,10 @@ vi.mock("vscode", () => ({
 // Mock Package module
 vi.mock("../../../shared/package", () => ({
 	Package: {
-		name: "roo-cline",
-		publisher: "RooVeterinaryInc",
+		name: "zoo-code",
+		publisher: "ZooCodeOrganization",
 		version: "1.0.0",
-		outputChannel: "Roo-Code",
+		outputChannel: "Zoo-Code",
 	},
 }))
 
@@ -563,11 +563,11 @@ describe("newTaskTool", () => {
 			})
 
 			// Verify that VSCode configuration was accessed with Package.name
-			expect(mockGetConfiguration).toHaveBeenCalledWith("roo-cline")
+			expect(mockGetConfiguration).toHaveBeenCalledWith("zoo-code")
 			expect(mockGet).toHaveBeenCalledWith("newTaskRequireTodos", false)
 		})
 
-		it("should use current Package.name value (roo-code-nightly) when accessing VSCode configuration", async () => {
+		it("should use current Package.name value (zoo-code-nightly) when accessing VSCode configuration", async () => {
 			// Arrange: capture calls to VSCode configuration and ensure we can assert the namespace
 			const mockGet = vi.fn().mockReturnValue(false)
 			const mockGetConfiguration = vi.fn().mockReturnValue({
@@ -575,29 +575,33 @@ describe("newTaskTool", () => {
 			} as any)
 			vi.mocked(vscode.workspace.getConfiguration).mockImplementation(mockGetConfiguration)
 
-			// Mutate the mocked Package.name dynamically to simulate a different build variant
 			const pkg = await import("../../../shared/package")
-			;(pkg.Package as any).name = "roo-code-nightly"
+			const originalName = (pkg.Package as any).name
+			;(pkg.Package as any).name = "zoo-code-nightly"
 
-			const block: ToolUse<"new_task"> = {
-				type: "tool_use",
-				name: "new_task",
-				params: {
-					mode: "code",
-					message: "Test message",
-				},
-				partial: false,
+			try {
+				const block: ToolUse<"new_task"> = {
+					type: "tool_use",
+					name: "new_task",
+					params: {
+						mode: "code",
+						message: "Test message",
+					},
+					partial: false,
+				}
+
+				await newTaskTool.handle(mockCline as any, withNativeArgs(block), {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+				})
+
+				// Assert: configuration was read using the dynamic nightly namespace
+				expect(mockGetConfiguration).toHaveBeenCalledWith("zoo-code-nightly")
+				expect(mockGet).toHaveBeenCalledWith("newTaskRequireTodos", false)
+			} finally {
+				;(pkg.Package as any).name = originalName
 			}
-
-			await newTaskTool.handle(mockCline as any, withNativeArgs(block), {
-				askApproval: mockAskApproval,
-				handleError: mockHandleError,
-				pushToolResult: mockPushToolResult,
-			})
-
-			// Assert: configuration was read using the dynamic nightly namespace
-			expect(mockGetConfiguration).toHaveBeenCalledWith("roo-code-nightly")
-			expect(mockGet).toHaveBeenCalledWith("newTaskRequireTodos", false)
 		})
 	})
 

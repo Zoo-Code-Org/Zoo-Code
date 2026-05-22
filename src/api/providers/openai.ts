@@ -154,7 +154,13 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
-				temperature: this.options.modelTemperature ?? (deepseekReasoner ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
+				// Some OpenAI-Compatible models (e.g. claude-opus-4-7) reject `temperature` as
+				// deprecated/unsupported. Honor the model's `supportsTemperature` flag and omit it
+				// when explicitly set to false (undefined still sends temperature, preserving behavior).
+				...(modelInfo.supportsTemperature !== false && {
+					temperature:
+						this.options.modelTemperature ?? (deepseekReasoner ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
+				}),
 				messages: convertedMessages,
 				stream: true as const,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
@@ -463,7 +469,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	 * @param finishReason - The finish_reason from the stream chunk
 	 * @param activeToolCallIds - Set to track active tool call IDs (mutated in place)
 	 */
-	private *processToolCalls(
+	protected *processToolCalls(
 		delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta | undefined,
 		finishReason: string | null | undefined,
 		activeToolCallIds: Set<string>,

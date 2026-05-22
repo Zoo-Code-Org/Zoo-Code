@@ -112,7 +112,7 @@
 			"thinking_complete_recitation": "(Düşünme tamamlandı, ancak çıktı okuma kontrolü nedeniyle engellendi.)"
 		},
 		"roo": {
-			"authenticationRequired": "Zoo sağlayıcısı bulut kimlik doğrulaması gerektirir. Lütfen Zoo Code Cloud'a giriş yapın.",
+			"authenticationRequired": "Roo sağlayıcısı bulut kimlik doğrulaması gerektirir. Lütfen Roo Code Cloud'a giriş yapın.",
 			"routerRemoved": "Roo Code Router kaldırıldı. Lütfen farklı bir sağlayıcı seçip yapılandırın."
 		},
 		"api": {
@@ -254,6 +254,18 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Geçersiz kimlik doğrulama token'ı alındı.",
+			"token_verification_failed": "Zoo Code: Token doğrulaması başarısız oldu.",
+			"invalid_token": "Zoo Code: Geçersiz token.",
+			"could_not_verify_token": "Zoo Code: Token doğrulanamadı."
+		},
+		"info": {
+			"connected": "Zoo Code: Başarıyla bağlandı! Artık Zoo Code'u AI sağlayıcısı olarak kullanabilirsin.",
+			"disconnected": "Zoo Code: Başarıyla bağlantı kesildi."
+		}
 	}
 }

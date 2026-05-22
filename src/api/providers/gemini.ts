@@ -33,6 +33,146 @@ type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
 }
 
+// Gemini documents function declaration schemas as a selected OpenAPI-style
+// subset with single-value `type` plus `nullable`. In practice, third-party
+// MCP schemas often include broader JSON Schema metadata/composition that has
+// produced opaque INVALID_ARGUMENT responses. Keep the outbound schema narrow.
+const GEMINI_SCHEMA_COMPATIBILITY_DROP_KEYS = new Set([
+	"$schema",
+	"$id",
+	"$defs",
+	"additionalProperties",
+	"default",
+	"definitions",
+])
+
+function sanitizeSchemaForGemini(
+	schema: unknown,
+	defs?: Record<string, unknown>,
+	activeRefs: Set<string> = new Set(),
+): unknown {
+	if (!schema || typeof schema !== "object") {
+		return schema
+	}
+
+	if (Array.isArray(schema)) {
+		return schema.map((item) => sanitizeSchemaForGemini(item, defs, activeRefs))
+	}
+
+	const source = schema as Record<string, unknown>
+
+	// Extract $defs / definitions from the root schema on the first call so
+	// they can be used to resolve $ref entries encountered deeper in the tree.
+	const resolvedDefs = defs ?? ((source.$defs ?? source.definitions) as Record<string, unknown> | undefined)
+
+	// Resolve local JSON Pointer $ref before any other processing.
+	// Without this, dropping $defs leaves dangling references that Gemini rejects.
+	if (typeof source.$ref === "string" && resolvedDefs) {
+		const match = source.$ref.match(/^#\/(?:\$defs|definitions)\/(.+)$/)
+		if (match) {
+			const resolved = resolvedDefs[match[1]]
+			if (resolved !== undefined) {
+				// Recursive MCP schemas are valid JSON Schema but not something Gemini
+				// can consume directly. Stop at the recursive edge so we still send a
+				// finite, serializable schema instead of overflowing the stack.
+				if (activeRefs.has(match[1])) {
+					return {}
+				}
+
+				activeRefs.add(match[1])
+				try {
+					return sanitizeSchemaForGemini(resolved, resolvedDefs, activeRefs)
+				} finally {
+					activeRefs.delete(match[1])
+				}
+			}
+		}
+	}
+
+	const result: Record<string, unknown> = {}
+	let nullable = source.nullable === true
+
+	const composition = source.anyOf ?? source.oneOf
+	if (Array.isArray(composition)) {
+		const variants = composition.filter((variant) => {
+			return variant && typeof variant === "object" && !Array.isArray(variant)
+				? (variant as Record<string, unknown>).type !== "null"
+				: true
+		})
+		nullable = nullable || variants.length < composition.length
+		Object.assign(result, sanitizeSchemaForGemini(variants[0] ?? {}, resolvedDefs, activeRefs))
+	}
+
+	if (Array.isArray(source.allOf)) {
+		for (const variant of source.allOf) {
+			const sanitized = sanitizeSchemaForGemini(variant, resolvedDefs, activeRefs)
+			if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
+				const s = sanitized as Record<string, unknown>
+				// Deep-merge properties so later allOf fragments don't overwrite
+				// earlier ones (last-write-wins Object.assign drops prior keys).
+				if (s.properties && typeof s.properties === "object") {
+					result.properties = {
+						...(result.properties as Record<string, unknown> | undefined),
+						...(s.properties as Record<string, unknown>),
+					}
+				}
+				if (Array.isArray(s.required)) {
+					const existing = Array.isArray(result.required) ? (result.required as string[]) : []
+					result.required = [...new Set([...existing, ...(s.required as string[])])]
+				}
+				const { properties: _p, required: _r, ...rest } = s
+				Object.assign(result, rest)
+			}
+		}
+	}
+
+	for (const [key, value] of Object.entries(source)) {
+		if (GEMINI_SCHEMA_COMPATIBILITY_DROP_KEYS.has(key) || key === "anyOf" || key === "oneOf" || key === "allOf") {
+			continue
+		}
+
+		if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
+			// Iterate the property map directly so that property names that happen
+			// to match schema keywords (e.g. "default", "additionalProperties") are
+			// preserved as-is; only each property's schema value is sanitized.
+			const sanitizedProperties: Record<string, unknown> = {}
+			for (const [propName, propSchema] of Object.entries(value as Record<string, unknown>)) {
+				sanitizedProperties[propName] = sanitizeSchemaForGemini(propSchema, resolvedDefs, activeRefs)
+			}
+			result.properties = {
+				...(result.properties as Record<string, unknown> | undefined),
+				...sanitizedProperties,
+			}
+			continue
+		}
+
+		if (key === "required" && Array.isArray(value)) {
+			const existing = Array.isArray(result.required) ? (result.required as string[]) : []
+			result.required = [
+				...new Set([...existing, ...value.filter((item): item is string => typeof item === "string")]),
+			]
+			continue
+		}
+
+		if (key === "type" && Array.isArray(value)) {
+			const nonNullTypes = value.filter((item) => item !== "null")
+			if (nonNullTypes.length > 0) {
+				result.type = nonNullTypes[0]
+			}
+			nullable = nullable || nonNullTypes.length < value.length
+			continue
+		}
+
+		result[key] = sanitizeSchemaForGemini(value, resolvedDefs, activeRefs)
+	}
+
+	if (nullable) {
+		result.nullable = true
+	}
+
+	return result
+}
+
 export class GeminiHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 
@@ -132,13 +272,16 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		// Google built-in tools (Grounding, URL Context) are mutually exclusive
 		// with function declarations in the Gemini API, so we always use
 		// function declarations when tools are provided.
+		const functionDeclarations = (metadata?.tools ?? []).map((tool) => ({
+			name: (tool as any).function.name,
+			description: (tool as any).function.description,
+			parametersJsonSchema: sanitizeSchemaForGemini((tool as any).function.parameters),
+		}))
+		const availableFunctionNameSet = new Set(functionDeclarations.map((declaration) => declaration.name))
+
 		const tools: GenerateContentConfig["tools"] = [
 			{
-				functionDeclarations: (metadata?.tools ?? []).map((tool) => ({
-					name: (tool as any).function.name,
-					description: (tool as any).function.description,
-					parametersJsonSchema: (tool as any).function.parameters,
-				})),
+				functionDeclarations,
 			},
 		]
 
@@ -161,19 +304,13 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			...(tools.length > 0 ? { tools } : {}),
 		}
 
-		// Handle allowedFunctionNames for mode-restricted tool access.
-		// When provided, all tool definitions are passed to the model (so it can reference
-		// historical tool calls in conversation), but only the specified tools can be invoked.
-		// This takes precedence over tool_choice to ensure mode restrictions are honored.
-		if (metadata?.allowedFunctionNames && metadata.allowedFunctionNames.length > 0) {
-			config.toolConfig = {
-				functionCallingConfig: {
-					// Use ANY mode to allow calling any of the allowed functions
-					mode: FunctionCallingConfigMode.ANY,
-					allowedFunctionNames: metadata.allowedFunctionNames,
-				},
-			}
-		} else if (metadata?.tool_choice) {
+		// Do not pass metadata.allowedFunctionNames to Gemini. Live API testing showed
+		// that allowedFunctionNames triggers a generic 400 INVALID_ARGUMENT at 26 or more
+		// names. It can also
+		// reject prior function calls if their names are absent from the current
+		// allowed list. We still pass all declarations for history compatibility;
+		// mode/tool restrictions are enforced by the tool execution layer.
+		if (metadata?.tool_choice) {
 			const choice = metadata.tool_choice
 			let mode: FunctionCallingConfigMode
 			let allowedFunctionNames: string[] | undefined
@@ -186,8 +323,13 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				// "required" means the model must call at least one tool; Gemini uses ANY for this.
 				mode = FunctionCallingConfigMode.ANY
 			} else if (typeof choice === "object" && "function" in choice && choice.type === "function") {
-				mode = FunctionCallingConfigMode.ANY
-				allowedFunctionNames = [choice.function.name]
+				const selectedToolName = choice.function.name
+				if (availableFunctionNameSet.has(selectedToolName)) {
+					mode = FunctionCallingConfigMode.ANY
+					allowedFunctionNames = [selectedToolName]
+				} else {
+					mode = FunctionCallingConfigMode.AUTO
+				}
 			} else {
 				// Fall back to AUTO for unknown values to avoid unintentionally broadening tool access.
 				mode = FunctionCallingConfigMode.AUTO

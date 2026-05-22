@@ -56,7 +56,7 @@
 			"label": "Has descobert una vulnerabilitat?",
 			"link": "Segueix el nostre procés de divulgació"
 		},
-		"community": "Vols consells o simplement passar l'estona amb altres usuaris de Zoo Code? Uneix-te a <redditLink>reddit.com/r/RooCode</redditLink> o <discordLink>discord.gg/roocode</discordLink>",
+		"community": "Vols consells o simplement passar l'estona amb altres usuaris de Zoo Code? Uneix-te a <redditLink>reddit.com/r/ZooCode</redditLink> o <discordLink>discord.gg/VxfP4Vx3gX</discordLink>",
 		"contactAndCommunity": "Contacte i Comunitat",
 		"manageSettings": "Gestionar Configuració",
 		"debugMode": {
@@ -394,6 +394,13 @@
 		"minimaxApiKey": "Clau API de MiniMax",
 		"getMiniMaxApiKey": "Obtenir clau API de MiniMax",
 		"minimaxBaseUrl": "Punt d'entrada de MiniMax",
+		"mimoApiKey": "Clau API de MiMo",
+		"getMimoApiKey": "Obtenir clau API de MiMo",
+		"mimoBaseUrl": "Punt d'entrada de MiMo",
+		"mimoBaseUrlSingapore": "Token Plan - Singapur (Predeterminat)",
+		"mimoBaseUrlChina": "Token Plan - Xina",
+		"mimoBaseUrlEurope": "Token Plan - Europa (AMS)",
+		"mimoBaseUrlPayg": "Pagament segons ús",
 		"geminiApiKey": "Clau API de Gemini",
 		"getSambaNovaApiKey": "Obtenir clau API de SambaNova",
 		"sambaNovaApiKey": "Clau API de SambaNova",

@@ -103,6 +103,7 @@ import { getUri } from "./getUri"
 import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { ProviderProfileManager } from "./ProviderProfileManager"
+import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
 
 /**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
@@ -111,16 +112,6 @@ import { ProviderProfileManager } from "./ProviderProfileManager"
 
 export type ClineProviderEvents = {
 	clineCreated: [cline: Task]
-}
-
-interface PendingEditOperation {
-	messageTs: number
-	editedContent: string
-	images?: string[]
-	messageIndex: number
-	apiConversationHistoryIndex: number
-	timeoutId: NodeJS.Timeout
-	createdAt: number
 }
 
 export class ClineProvider
@@ -154,8 +145,8 @@ export class ClineProvider
 	private taskHistoryStoreInitialized = false
 	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
-	private pendingOperations: Map<string, PendingEditOperation> = new Map()
 	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
+	private readonly pendingEditOperations: PendingEditOperationStore
 
 	private cloudOrganizationsCache: CloudOrganizationMembership[] | null = null
 	private cloudOrganizationsCacheTimestamp: number | null = null
@@ -183,6 +174,10 @@ export class ClineProvider
 	) {
 		super()
 		this.currentWorkspacePath = getWorkspacePath()
+		this.pendingEditOperations = new PendingEditOperationStore(
+			ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
+			(message) => this.log(message),
+		)
 
 		ClineProvider.activeInstances.add(this)
 
@@ -254,8 +249,9 @@ export class ClineProvider
 
 			// Create named listener functions so we can remove them later.
 			const onTaskStarted = () => this.emit(RooCodeEventName.TaskStarted, instance.taskId)
-			const onTaskCompleted = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) =>
+			const onTaskCompleted = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) => {
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
+			}
 			const onTaskAborted = async () => {
 				this.emit(RooCodeEventName.TaskAborted, instance.taskId)
 
@@ -537,65 +533,29 @@ export class ClineProvider
 	/**
 	 * Sets a pending edit operation with automatic timeout cleanup
 	 */
-	public setPendingEditOperation(
-		operationId: string,
-		editData: {
-			messageTs: number
-			editedContent: string
-			images?: string[]
-			messageIndex: number
-			apiConversationHistoryIndex: number
-		},
-	): void {
-		// Clear any existing operation with the same ID
-		this.clearPendingEditOperation(operationId)
-
-		// Create timeout for automatic cleanup
-		const timeoutId = setTimeout(() => {
-			this.clearPendingEditOperation(operationId)
-			this.log(`[setPendingEditOperation] Automatically cleared stale pending operation: ${operationId}`)
-		}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
-
-		// Store the operation
-		this.pendingOperations.set(operationId, {
-			...editData,
-			timeoutId,
-			createdAt: Date.now(),
-		})
-
-		this.log(`[setPendingEditOperation] Set pending operation: ${operationId}`)
+	public setPendingEditOperation(operationId: string, editData: PendingEditOperationInput): void {
+		this.pendingEditOperations.set(operationId, editData)
 	}
 
 	/**
 	 * Gets a pending edit operation by ID
 	 */
-	private getPendingEditOperation(operationId: string): PendingEditOperation | undefined {
-		return this.pendingOperations.get(operationId)
+	private getPendingEditOperation(operationId: string) {
+		return this.pendingEditOperations.get(operationId)
 	}
 
 	/**
 	 * Clears a specific pending edit operation
 	 */
 	private clearPendingEditOperation(operationId: string): boolean {
-		const operation = this.pendingOperations.get(operationId)
-		if (operation) {
-			clearTimeout(operation.timeoutId)
-			this.pendingOperations.delete(operationId)
-			this.log(`[clearPendingEditOperation] Cleared pending operation: ${operationId}`)
-			return true
-		}
-		return false
+		return this.pendingEditOperations.clear(operationId)
 	}
 
 	/**
 	 * Clears all pending edit operations
 	 */
 	private clearAllPendingEditOperations(): void {
-		for (const [operationId, operation] of this.pendingOperations) {
-			clearTimeout(operation.timeoutId)
-		}
-		this.pendingOperations.clear()
-		this.log(`[clearAllPendingEditOperations] Cleared all pending operations`)
+		this.pendingEditOperations.clearAll()
 	}
 
 	/*
@@ -1211,7 +1171,7 @@ export class ClineProvider
 			"default-src 'none'",
 			`font-src ${webview.cspSource} data:`,
 			`style-src ${webview.cspSource} 'unsafe-inline' https://* http://${localServerUrl} http://0.0.0.0:${localPort}`,
-			`img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com data:`,
+			`img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:`,
 			`media-src ${webview.cspSource}`,
 			`script-src 'unsafe-eval' ${webview.cspSource} https://* https://*.posthog.com http://${localServerUrl} http://0.0.0.0:${localPort} 'nonce-${nonce}'`,
 			`connect-src ${webview.cspSource} ${openRouterDomain} https://* https://*.posthog.com ws://${localServerUrl} ws://0.0.0.0:${localPort} http://${localServerUrl} http://0.0.0.0:${localPort}`,
@@ -1302,7 +1262,7 @@ export class ClineProvider
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
             <meta name="theme-color" content="#000000">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com data:; media-src ${webview.cspSource}; script-src ${webview.cspSource} 'wasm-unsafe-eval' 'nonce-${nonce}' https://ph.roocode.com 'strict-dynamic'; connect-src ${webview.cspSource} ${openRouterDomain} https://api.requesty.ai https://ph.roocode.com;">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:; media-src ${webview.cspSource}; script-src ${webview.cspSource} 'wasm-unsafe-eval' 'nonce-${nonce}' 'strict-dynamic'; connect-src ${webview.cspSource} ${openRouterDomain} https://api.requesty.ai https://us.i.posthog.com;">
             <link rel="stylesheet" type="text/css" href="${stylesUri}">
 			<link href="${codiconsUri}" rel="stylesheet" />
 			<script nonce="${nonce}">
@@ -1530,6 +1490,15 @@ export class ClineProvider
 		}
 
 		await this.upsertProviderProfile(currentApiConfigName, newConfiguration)
+	}
+
+	// Zoo Code Auth (for observability telemetry)
+
+	async handleZooCodeCallback(_token: string) {
+		// Auth mutation (token storage, subscription check, success toast) was already
+		// performed by handleAuthCallback() in handleUri.ts before this method was called.
+		// This method only needs to refresh the webview state to reflect the new auth status.
+		await this.postStateToWebview()
 	}
 
 	// Requesty
@@ -1967,6 +1936,38 @@ export class ClineProvider
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
 		const currentTask = this.getCurrentTask()
+		let zooCodeState: {
+			zooCodeIsAuthenticated: boolean
+			zooCodeUserName: string | undefined
+			zooCodeUserEmail: string | undefined
+			zooCodeUserImage: string | undefined
+			zooCodeBaseUrl: string
+			deviceName: string
+		} = {
+			zooCodeIsAuthenticated: false,
+			zooCodeUserName: undefined,
+			zooCodeUserEmail: undefined,
+			zooCodeUserImage: undefined,
+			zooCodeBaseUrl: "https://www.zoocode.dev",
+			deviceName: os.hostname(),
+		}
+
+		try {
+			const { isZooCodeAuthenticated, getCachedZooCodeUserInfo, getZooCodeBaseUrl } = await import(
+				"../../services/zoo-code-auth"
+			)
+			const userInfo = getCachedZooCodeUserInfo()
+			zooCodeState = {
+				zooCodeIsAuthenticated: await isZooCodeAuthenticated(),
+				zooCodeUserName: userInfo.name,
+				zooCodeUserEmail: userInfo.email,
+				zooCodeUserImage: userInfo.image,
+				zooCodeBaseUrl: getZooCodeBaseUrl(),
+				deviceName: os.hostname(),
+			}
+		} catch {
+			// Keep the default unauthenticated state if the optional Zoo Code auth service is unavailable.
+		}
 
 		return {
 			version: this.context.extension?.packageJSON?.version ?? "",
@@ -2090,6 +2091,7 @@ export class ClineProvider
 					return false
 				}
 			})(),
+			...zooCodeState,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
 		}
 	}
@@ -2836,6 +2838,7 @@ export class ClineProvider
 			this._appProperties = {
 				appName: packageJSON?.name ?? Package.name,
 				appVersion: packageJSON?.version ?? Package.version,
+				releaseChannel: Package.releaseChannel,
 				vscodeVersion: vscode.version,
 				platform: process.platform,
 				editorName: vscode.env.appName,

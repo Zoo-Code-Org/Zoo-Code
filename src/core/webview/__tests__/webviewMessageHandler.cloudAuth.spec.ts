@@ -67,7 +67,7 @@ describe("webviewMessageHandler cloud auth fallbacks", () => {
 
 		await webviewMessageHandler(mockProvider, {
 			type: "rooCloudManualUrl",
-			text: "vscode://RooVeterinaryInc.roo-cline/auth/clerk/callback?code=test-code&state=test-state",
+			text: "vscode://ZooCodeOrganization.zoo-code/auth/clerk/callback?code=test-code&state=test-state",
 		} as any)
 
 		expect(CloudService.instance.handleAuthCallback).not.toHaveBeenCalled()

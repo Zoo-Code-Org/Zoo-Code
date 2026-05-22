@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "OAuth 回呼 - Roo Code",
+			"title": "OAuth 回呼 - Zoo Code",
 			"success": "成功！",
 			"failed": "失敗",
 			"auth_failed": "身分驗證失敗。請檢查 MCP 伺服器日誌。",

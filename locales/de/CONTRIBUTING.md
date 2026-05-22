@@ -11,9 +11,9 @@
 </sub>
 </div>
 
-# Beitrag zu Roo Code
+# Beitrag zu Zoo Code
 
-Roo Code ist ein von der Community getragenes Projekt, und wir schätzen jeden Beitrag sehr. Um die Zusammenarbeit zu optimieren, arbeiten wir nach dem [Issue-First-Ansatz](#issue-first-ansatz), was bedeutet, dass alle [Pull Requests (PRs)](#einen-pull-request-einreichen) zuerst mit einem GitHub-Issue verknüpft sein müssen. Bitte lies diesen Leitfaden sorgfältig durch.
+Zoo Code ist ein von der Community getragenes Projekt, und wir schätzen jeden Beitrag sehr. Um die Zusammenarbeit zu optimieren, arbeiten wir nach dem [Issue-First-Ansatz](#issue-first-ansatz), was bedeutet, dass alle [Pull Requests (PRs)](#einen-pull-request-einreichen) zuerst mit einem GitHub-Issue verknüpft sein müssen. Bitte lies diesen Leitfaden sorgfältig durch.
 
 ## Inhaltsverzeichnis
 
@@ -52,10 +52,10 @@ Unsere Roadmap gibt die Richtung des Projekts vor. Richte deine Beiträge an die
 
 Erwähne die Ausrichtung auf diese Bereiche in deinen PRs.
 
-### 3. Tritt der Roo Code Community bei
+### 3. Tritt der Zoo Code Community bei
 
-- **Primär:** Tritt unserem [Discord](https://discord.gg/roocode) bei und schreibe eine DM an **Hannes Rudolph (`hrudolph`)**.
-- **Alternative:** Erfahrene Mitwirkende können sich direkt über [GitHub-Projekte](https://github.com/orgs/RooCodeInc/projects/1) beteiligen.
+- **Discord:** Tritt unserem [Discord](https://discord.gg/VxfP4Vx3gX) bei.
+- **Reddit:** Tritt unserem [Reddit](https://www.reddit.com/r/ZooCode/) bei.
 
 ## Deinen Beitrag finden und planen
 
@@ -69,26 +69,26 @@ Erwähne die Ausrichtung auf diese Bereiche in deinen PRs.
 
 Alle Beiträge beginnen mit einem GitHub-Issue unter Verwendung unserer schlanken Vorlagen.
 
-- **Überprüfe bestehende Issues**: Suche in den [GitHub Issues](https://github.com/RooCodeInc/Roo-Code/issues).
+- **Überprüfe bestehende Issues**: Suche in den [GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
 - **Erstelle ein Issue** mit:
     - **Verbesserungen:** Vorlage „Verbesserungsvorschlag“ (einfache Sprache mit Fokus auf den Nutzen für den Benutzer).
     - **Fehler:** Vorlage „Fehlerbericht“ (minimale Reproduktion + erwartet vs. tatsächlich + Version).
-- **Möchtest du daran arbeiten?** Kommentiere „Claiming“ im Issue und schreibe eine DM an **Hannes Rudolph (`hrudolph`)** auf [Discord](https://discord.gg/roocode), um zugewiesen zu werden. Die Zuweisung wird im Thread bestätigt.
+- **Möchtest du daran arbeiten?** Kommentiere „Claiming“ im Issue und schreibe dem Core-Team eine DM auf [Discord](https://discord.gg/VxfP4Vx3gX), um zugewiesen zu werden. Die Zuweisung wird im Thread bestätigt.
 - **PRs müssen auf das Issue verweisen.** Nicht verknüpfte PRs können geschlossen werden.
 
 ### Entscheiden, woran du arbeiten möchtest
 
-- Überprüfe das [GitHub-Projekt](https://github.com/orgs/RooCodeInc/projects/1) auf „Issue [Unassigned]“-Issues.
-- Für Dokumentation besuche [Roo Code Docs](https://github.com/RooCodeInc/Roo-Code-Docs).
+- Prüfe die [GitHub-Issues-Seite](https://github.com/Zoo-Code-Org/Zoo-Code/issues) auf Issues.
+- Für Dokumentation besuche [Zoo Code Docs](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
 
 ### Fehler melden
 
 - Überprüfe zuerst, ob bereits Berichte vorhanden sind.
-- Erstelle einen neuen Fehler mit der [Vorlage „Fehlerbericht“](https://github.com/RooCodeInc/Roo-Code/issues/new/choose) mit:
+- Erstelle einen neuen Fehler mit der [Vorlage „Fehlerbericht“](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) mit:
     - Klaren, nummerierten Reproduktionsschritten
     - Erwartetes vs. tatsächliches Ergebnis
-    - Roo Code-Version (erforderlich); API-Anbieter/Modell, falls relevant
-- **Sicherheitsprobleme**: Melde sie privat über [Sicherheitshinweise](https://github.com/RooCodeInc/Roo-Code/security/advisories/new).
+    - Zoo Code-Version (erforderlich); API-Anbieter/Modell, falls relevant
+- **Sicherheitsprobleme**: Melde sie privat über [Sicherheitshinweise](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
 
 ## Entwicklungs- und Einreichungsprozess
 
@@ -97,7 +97,7 @@ Alle Beiträge beginnen mit einem GitHub-Issue unter Verwendung unserer schlanke
 1. **Fork & Klonen:**
 
 ```
-git clone https://github.com/DEIN_BENUTZERNAME/Roo-Code.git
+git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
 2. **Abhängigkeiten installieren:**
@@ -126,7 +126,7 @@ pnpm install
 
 ### Pull-Request-Richtlinie
 
-- Muss auf ein zugewiesenes GitHub-Issue verweisen. Um zugewiesen zu werden: Kommentiere „Claiming“ im Issue und schreibe eine DM an **Hannes Rudolph (`hrudolph`)** auf [Discord](https://discord.gg/roocode). Die Zuweisung wird im Thread bestätigt.
+- Muss auf ein zugewiesenes GitHub-Issue verweisen. Um zugewiesen zu werden: Kommentiere „Claiming“ im Issue und schreibe dem Core-Team eine DM auf [Discord](https://discord.gg/VxfP4Vx3gX). Die Zuweisung wird im Thread bestätigt.
 - Nicht verknüpfte PRs können geschlossen werden.
 - PRs müssen die CI-Tests bestehen, mit der Roadmap übereinstimmen und eine klare Dokumentation haben.
 
@@ -138,4 +138,4 @@ pnpm install
 
 ## Rechtliches
 
-Indem du einen Beitrag leistest, stimmst du zu, dass deine Beiträge unter der Apache-2.0-Lizenz lizenziert werden, die mit der Lizenzierung von Roo Code übereinstimmt.
+Indem du einen Beitrag leistest, stimmst du zu, dass deine Beiträge unter der Apache-2.0-Lizenz lizenziert werden, die mit der Lizenzierung von Zoo Code übereinstimmt.

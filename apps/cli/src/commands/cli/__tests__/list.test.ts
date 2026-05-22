@@ -1,4 +1,5 @@
 import { readWorkspaceTaskSessions } from "@/lib/task-history/index.js"
+import { isRecord } from "@/lib/utils/guards.js"
 
 import { listSessions, parseFormat } from "../list.js"
 
@@ -35,6 +36,33 @@ describe("parseFormat", () => {
 
 	it("throws on empty string", () => {
 		expect(() => parseFormat("")).toThrow("Invalid format")
+	})
+})
+
+describe("router model extraction", () => {
+	// This mirrors the extraction logic in requestOpenRouterModels (list.ts:226-228)
+	const extractOpenRouterModels = (routerModelsRaw: unknown) => {
+		const routerModels = isRecord(routerModelsRaw) ? routerModelsRaw : {}
+		const openRouterModels = routerModels.openrouter
+		return isRecord(openRouterModels) ? openRouterModels : {}
+	}
+
+	it("extracts openrouter models from valid routerModels", () => {
+		const models = { "openai/gpt-4.1": { contextWindow: 128000, supportsPromptCache: false } }
+		const result = extractOpenRouterModels({ openrouter: models })
+		expect(result).toEqual(models)
+	})
+
+	it("returns empty object when routerModels is null", () => {
+		expect(extractOpenRouterModels(null)).toEqual({})
+	})
+
+	it("returns empty object when openrouter key is missing", () => {
+		expect(extractOpenRouterModels({ requesty: {} })).toEqual({})
+	})
+
+	it("returns empty object when openrouter value is not a record", () => {
+		expect(extractOpenRouterModels({ openrouter: "invalid" })).toEqual({})
 	})
 })
 

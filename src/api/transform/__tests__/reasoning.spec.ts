@@ -5,12 +5,14 @@ import type { ModelInfo, ProviderSettings, ReasoningEffortWithMinimal } from "@r
 import {
 	getOpenRouterReasoning,
 	getAnthropicReasoning,
+	getAnthropicProviderReasoning,
 	getOpenAiReasoning,
 	getRooReasoning,
 	getGeminiReasoning,
 	GetModelReasoningOptions,
 	OpenRouterReasoningParams,
 	AnthropicReasoningParams,
+	AnthropicProviderReasoningParams,
 	OpenAiReasoningParams,
 	RooReasoningParams,
 	GeminiReasoningParams,
@@ -457,6 +459,56 @@ describe("reasoning.ts", () => {
 			const result = getAnthropicReasoning(options)
 
 			expect(result).toBeUndefined()
+		})
+	})
+
+	describe("getAnthropicProviderReasoning", () => {
+		it("should use adaptive thinking for Claude Opus 4.7 when reasoning is enabled", () => {
+			const modelWithBinaryReasoning: ModelInfo = {
+				...baseModel,
+				supportsReasoningBinary: true,
+			}
+
+			const result = getAnthropicProviderReasoning({
+				...baseOptions,
+				model: modelWithBinaryReasoning,
+				settings: { enableReasoningEffort: true },
+				reasoningBudget: undefined,
+			})
+
+			expect(result).toEqual({ type: "adaptive" })
+		})
+
+		it("should omit thinking for Claude Opus 4.7 when reasoning is disabled", () => {
+			const modelWithBinaryReasoning: ModelInfo = {
+				...baseModel,
+				supportsReasoningBinary: true,
+			}
+
+			const result = getAnthropicProviderReasoning({
+				...baseOptions,
+				model: modelWithBinaryReasoning,
+				settings: { enableReasoningEffort: false },
+				reasoningBudget: undefined,
+			})
+
+			expect(result).toBeUndefined()
+		})
+
+		it("should preserve budget thinking for older Anthropic reasoning-budget models", () => {
+			const modelWithBudgetReasoning: ModelInfo = {
+				...baseModel,
+				supportsReasoningBudget: true,
+			}
+
+			const result = getAnthropicProviderReasoning({
+				...baseOptions,
+				model: modelWithBudgetReasoning,
+				settings: { enableReasoningEffort: true },
+				reasoningBudget: 1000,
+			})
+
+			expect(result).toEqual({ type: "enabled", budget_tokens: 1000 })
 		})
 	})
 
@@ -1122,6 +1174,22 @@ describe("reasoning.ts", () => {
 				expect(result).toHaveProperty("type", "enabled")
 				expect(result).toHaveProperty("budget_tokens")
 			}
+		})
+
+		it("should return correct types for Anthropic provider reasoning params", () => {
+			const modelWithBinaryReasoning: ModelInfo = {
+				...baseModel,
+				supportsReasoningBinary: true,
+			}
+
+			const result: AnthropicProviderReasoningParams | undefined = getAnthropicProviderReasoning({
+				...baseOptions,
+				model: modelWithBinaryReasoning,
+				settings: { enableReasoningEffort: true },
+				reasoningBudget: undefined,
+			})
+
+			expect(result).toEqual({ type: "adaptive" })
 		})
 
 		it("should return correct types for OpenAI reasoning params", () => {

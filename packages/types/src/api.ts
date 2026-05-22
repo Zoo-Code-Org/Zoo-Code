@@ -66,6 +66,12 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	pressSecondaryButton(): Promise<void>
 	/**
+	 * Programmatically approves the current pending ask on the active task.
+	 * Equivalent to the user clicking "Yes" for tool/command approvals, or
+	 * confirming a completion result. No-ops if no task is active.
+	 */
+	approveCurrentAsk(): Promise<void>
+	/**
 	 * Returns true if the API is ready to use.
 	 */
 	isReady(): boolean

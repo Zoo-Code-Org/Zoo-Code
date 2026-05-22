@@ -1,5 +1,5 @@
 <!--
-Thank you for contributing to Roo Code!
+Thank you for contributing to Zoo Code!
 
 Before submitting your PR, please ensure:
 - It's linked to an approved GitHub Issue.
@@ -11,14 +11,6 @@ Before submitting your PR, please ensure:
 <!-- Every PR MUST be linked to an approved issue. -->
 
 Closes: # <!-- Replace with the issue number, e.g., Closes: #123 -->
-
-### Roo Code Task Context (Optional)
-
-<!--
-If you used Roo Code to help create this PR, you can share public task links here.
-This helps reviewers understand your development process and provides additional context.
-Example: https://app.roocode.com/share/task-id
--->
 
 ### Description
 

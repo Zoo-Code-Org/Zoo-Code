@@ -7,6 +7,7 @@ import { Package } from "@roo/package"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { vscode } from "@src/utils/vscode"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@src/components/ui"
+import { EXTERNAL_LINKS } from "@src/constants/externalLinks"
 
 interface AnnouncementProps {
 	hideAnnouncement: () => void
@@ -49,12 +50,12 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 							<Trans i18nKey="chat:announcement.handoff.description" components={{ bold: <strong /> }} />
 						</p>
 						<VSCodeLink
-							href="https://x.com/mattrubens/status/2046636598859559114"
+							href="https://www.zoocode.dev?utm_source=zoocode&utm_medium=announcement&utm_campaign=community_handoff"
 							onClick={(e) => {
 								e.preventDefault()
 								vscode.postMessage({
 									type: "openExternal",
-									url: "https://x.com/mattrubens/status/2046636598859559114",
+									url: "https://www.zoocode.dev?utm_source=zoocode&utm_medium=announcement&utm_campaign=community_handoff",
 								})
 							}}>
 							{t("chat:announcement.handoff.readMore")}
@@ -76,17 +77,17 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 							<SocialLink
 								icon={<SiX className="w-4 h-4" aria-hidden />}
 								label="X"
-								href="https://x.com/roocode"
+								href="https://x.com/ZooCodeDev"
 							/>
 							<SocialLink
 								icon={<SiDiscord className="w-4 h-4" aria-hidden />}
 								label="Discord"
-								href="https://discord.gg/rCQcvT7Fnt"
+								href="https://discord.gg/VxfP4Vx3gX"
 							/>
 							<SocialLink
 								icon={<SiReddit className="w-4 h-4" aria-hidden />}
 								label="Reddit"
-								href="https://www.reddit.com/r/RooCode/"
+								href="https://www.reddit.com/r/ZooCode/"
 							/>
 						</div>
 					</div>
@@ -115,10 +116,10 @@ const SocialLink = ({ icon, label, href }: { icon: ReactNode; label: string; hre
 
 const GitHubLink = ({ children }: { children?: ReactNode }) => (
 	<VSCodeLink
-		href="https://github.com/RooCodeInc/Roo-Code"
+		href={EXTERNAL_LINKS.GITHUB_REPO}
 		onClick={(e) => {
 			e.preventDefault()
-			vscode.postMessage({ type: "openExternal", url: "https://github.com/RooCodeInc/Roo-Code" })
+			vscode.postMessage({ type: "openExternal", url: EXTERNAL_LINKS.GITHUB_REPO })
 		}}>
 		{children}
 	</VSCodeLink>
