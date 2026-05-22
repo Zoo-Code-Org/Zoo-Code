@@ -8,7 +8,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Minor Changes
 
-- ![3.55.0 Release - MiMo and stability updates](/releases/3.55.0-release.png)
 - Add Xiaomi MiMo as a first-class API provider (#80 by @capitanfeeder, PR #81 by @capitanfeeder)
 - Merge the Roo Code upstream sunset into Zoo Code and pull in related handoff updates (PR #123 by @edelauna)
 - Fix Gemini requests when users enable the full MCP tool set (PR #148 by @app/roomote)
