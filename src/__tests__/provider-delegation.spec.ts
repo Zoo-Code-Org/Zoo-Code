@@ -98,7 +98,11 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("calls child.start() only after parent metadata is persisted (no race condition)", async () => {
 		const callOrder: string[] = []
 
-		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+		const parentTask = {
+			taskId: "parent-1",
+			emit: vi.fn(),
+			getTaskMode: vi.fn().mockResolvedValue("architect"),
+		} as any
 		const childStart = vi.fn(() => callOrder.push("child.start"))
 
 		const updateTaskHistory = vi.fn(async () => {
@@ -143,25 +147,32 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(callOrder).toEqual(["createTask", "updateTaskHistory", "child.start"])
 	})
 
-	it("does not start the child when parent delegation metadata cannot be persisted", async () => {
-		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+	it("removes the paused child when parent delegation metadata cannot be persisted", async () => {
+		const parentTask = {
+			taskId: "parent-1",
+			emit: vi.fn(),
+			getTaskMode: vi.fn().mockResolvedValue("architect"),
+		} as any
 		const childStart = vi.fn()
 		const persistError = new Error("history write failed")
 
 		const providerEmit = vi.fn()
 		const updateTaskHistory = vi.fn().mockRejectedValue(persistError)
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
+		const deleteTaskFromState = vi.fn().mockResolvedValue(undefined)
 		const createTask = vi.fn().mockResolvedValue({ taskId: "child-1", start: childStart })
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
 		const handleModeSwitch = vi.fn().mockResolvedValue(undefined)
+		const parentHistory = {
+			id: "parent-1",
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			childIds: [],
+		}
 		const getTaskWithId = vi.fn().mockResolvedValue({
-			historyItem: {
-				id: "parent-1",
-				task: "Parent",
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-				childIds: [],
-			},
+			historyItem: parentHistory,
 		})
 
 		const provider = {
@@ -171,6 +182,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			createTask,
 			getTaskWithId,
 			updateTaskHistory,
+			deleteTaskFromState,
+			createTaskWithHistoryItem,
 			handleModeSwitch,
 			log: vi.fn(),
 		} as unknown as ClineProvider
@@ -190,6 +203,72 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			startTask: false,
 		})
 		expect(childStart).not.toHaveBeenCalled()
+		expect(removeClineFromStack).toHaveBeenNthCalledWith(1, { skipDelegationRepair: true })
+		expect(removeClineFromStack).toHaveBeenNthCalledWith(2, { skipDelegationRepair: true })
+		expect(deleteTaskFromState).toHaveBeenCalledWith("child-1")
+		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(
+			{ ...parentHistory, mode: "architect" },
+			{ startTask: false },
+		)
 		expect(providerEmit).not.toHaveBeenCalledWith(RooCodeEventName.TaskDelegated, "parent-1", "child-1")
+	})
+
+	it("logs rollback cleanup failures while preserving the parent metadata error", async () => {
+		const parentTask = {
+			taskId: "parent-1",
+			emit: vi.fn(),
+			getTaskMode: vi.fn().mockRejectedValue(new Error("mode unavailable")),
+		} as any
+		const childStart = vi.fn()
+		const persistError = new Error("history write failed")
+		const log = vi.fn()
+
+		const removeClineFromStack = vi
+			.fn()
+			.mockResolvedValueOnce(undefined)
+			.mockRejectedValueOnce(new Error("child stack cleanup failed"))
+		const deleteTaskFromState = vi.fn().mockRejectedValue(new Error("child history cleanup failed"))
+		const createTaskWithHistoryItem = vi.fn().mockRejectedValue(new Error("parent rehydrate failed"))
+		const parentHistory = {
+			id: "parent-1",
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			childIds: [],
+			mode: "ask",
+		}
+
+		const provider = {
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack,
+			createTask: vi.fn().mockResolvedValue({ taskId: "child-1", start: childStart }),
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistory }),
+			updateTaskHistory: vi.fn().mockRejectedValue(persistError),
+			deleteTaskFromState,
+			createTaskWithHistoryItem,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log,
+		} as unknown as ClineProvider
+
+		await expect(
+			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).rejects.toThrow("history write failed")
+
+		expect(childStart).not.toHaveBeenCalled()
+		expect(deleteTaskFromState).toHaveBeenCalledWith("child-1")
+		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(parentHistory, { startTask: false })
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("Failed to capture parent mode"))
+		expect(log).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to remove child child-1 after parent metadata"),
+		)
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("Failed to remove child child-1 history"))
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("Failed to rehydrate parent parent-1"))
 	})
 })

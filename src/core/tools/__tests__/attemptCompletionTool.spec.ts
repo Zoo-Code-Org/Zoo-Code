@@ -534,7 +534,7 @@ describe("attemptCompletionTool", () => {
 				expect(mockPushToolResult).toHaveBeenCalledWith("")
 			})
 
-			it("does not delegate a lineage-preserving subtask when the parent is no longer awaiting it", async () => {
+			it("does not resume the parent when the parent is no longer awaiting this child", async () => {
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",
 					name: "attempt_completion",

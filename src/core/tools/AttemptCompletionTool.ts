@@ -86,6 +86,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				// to prevent duplicate tool_results when user revisits from history
 				const provider = task.providerRef.deref() as DelegationProvider | undefined
 				if (provider) {
+					let historyLookupTaskId = task.taskId
 					try {
 						const { historyItem } = await provider.getTaskWithId(task.taskId)
 						const status = historyItem?.status
@@ -96,9 +97,13 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 							// This shows the user the completion result and waits for acceptance
 							// without injecting another tool_result to the parent
 						} else if (status === "active") {
+							historyLookupTaskId = task.parentTaskId
 							const { historyItem: parentHistory } = await provider.getTaskWithId(task.parentTaskId)
 
-							if (parentHistory.status === "delegated" && parentHistory.awaitingChildId === task.taskId) {
+							if (
+								parentHistory?.status === "delegated" &&
+								parentHistory?.awaitingChildId === task.taskId
+							) {
 								const delegation = await this.delegateToParent(
 									task,
 									result,
@@ -110,6 +115,9 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 									this.emitTaskCompleted(task)
 								}
 								if (delegation !== "continue") return
+							} else {
+								// Parent already detached, such as when the user cancelled this child.
+								// Fall through to the normal completion ask flow.
 							}
 						} else {
 							// Unexpected status (undefined or "delegated") - log error and skip delegation
@@ -124,7 +132,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 					} catch (err) {
 						// If we can't get the history, log error and skip delegation
 						console.error(
-							`[AttemptCompletionTool] Failed to get history for task ${task.taskId}: ${(err as Error)?.message ?? String(err)}. ` +
+							`[AttemptCompletionTool] Failed to get history for task ${historyLookupTaskId}: ${(err as Error)?.message ?? String(err)}. ` +
 								`Skipping delegation.`,
 						)
 						// Fall through to normal completion ask flow
