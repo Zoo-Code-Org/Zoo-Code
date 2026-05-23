@@ -12,7 +12,11 @@
 		"lint": "eslint src --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
 		"test": "vitest run",
-		"test:coverage": "vitest run --coverage",
+		"test:unit": "vitest run --config vitest.unit.config.ts",
+		"test:integration": "vitest run --config vitest.integration.config.ts",
+		"test:coverage": "pnpm test:coverage:unit && pnpm test:coverage:integration",
+		"test:coverage:unit": "vitest run --config vitest.unit.config.ts --coverage",
+		"test:coverage:integration": "vitest run --config vitest.integration.config.ts --coverage",
 		"clean": "rimraf .turbo"
 	},
 	"dependencies": {

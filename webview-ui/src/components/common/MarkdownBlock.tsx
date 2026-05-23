@@ -307,7 +307,9 @@ const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
 		<StyledMarkdown>
 			<ReactMarkdown
 				remarkPlugins={[
-					remarkGfm,
+					// singleTilde: false so a single "~" around text (e.g. "1~3", "~10") is not
+					// rendered as strikethrough; only "~~text~~" is. Matches VS Code's markdown. (#154)
+					[remarkGfm, { singleTilde: false }],
 					remarkMath,
 					() => {
 						return (tree: any) => {

@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "नया क्या है:",
-			"gpt55": "OpenAI Codex के माध्यम से GPT-5.5: OpenAI Codex provider में GPT-5.5 सपोर्ट जोड़ा गया, ताकि आप नवीनतम मॉडल का उपयोग सीधे Zoo Code से कर सकें।",
-			"claudeOpus47": "Vertex AI पर Claude Opus 4.7: Anthropic के नवीनतम flagship reasoning मॉडल के लिए Vertex AI provider में Claude Opus 4.7 जोड़ा गया।",
-			"checkpointNav": "पिछले Checkpoint की Navigation: चैट में controls जोड़े गए ताकि आप पिछले checkpoints पर वापस जा सकें, पूर्ण i18n सपोर्ट के साथ।"
+			"highlight1": "Xiaomi MiMo provider: Xiaomi MiMo को first-class API provider के रूप में जोड़ा गया है, ताकि आप MiMo models को सीधे Zoo Code में configure कर सकें।",
+			"highlight2": "Zoo Code upstream handoff: Community handoff work के साथ Zoo Code को aligned रखने के लिए latest upstream sunset merge और जुड़े platform updates को शामिल किया गया है।",
+			"highlight3": "Chat और providers में stability fixes: MCP sign-in copy, Gemini की full-tool requests, OpenAI temperature handling, और Markdown single-tilde rendering को ठीक किया गया है।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",

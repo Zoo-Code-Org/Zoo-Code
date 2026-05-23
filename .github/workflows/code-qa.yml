@@ -6,6 +6,8 @@ on:
         branches: [main]
     pull_request:
         types: [opened, reopened, ready_for_review, synchronize]
+    merge_group:
+        types: [checks_requested]
 
 jobs:
     check-translations:
@@ -49,33 +51,73 @@ jobs:
                     - os: ubuntu-latest
                       name: ubuntu-latest
                       codecov-flag: ubuntu
+                      upload-coverage: true
                     - os: windows-latest
                       name: windows-latest
                       codecov-flag: windows
+                      upload-coverage: false
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
             - name: Setup Node.js and pnpm
               uses: ./.github/actions/setup-node-pnpm
-            - name: Cache Turbo
-              uses: actions/cache@v4
+            - name: Restore Turbo cache
+              id: turbo-cache
+              uses: actions/cache/restore@v4
               with:
                   path: .turbo/cache
                   key: ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-${{ github.sha }}
                   restore-keys: |
                       ${{ runner.os }}-turbo-${{ hashFiles('**/pnpm-lock.yaml') }}-
                       ${{ runner.os }}-turbo-
-            - name: Run unit tests with coverage
-              run: pnpm test:coverage
-            - name: Upload coverage to Codecov
+            - name: Run non-core coverage
+              run: pnpm turbo run test:coverage --filter="!@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run core unit coverage
+              run: pnpm turbo run test:coverage:unit --filter="@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Run core integration coverage
+              run: pnpm turbo run test:coverage:integration --filter="@roo-code/core" --log-order grouped --output-logs new-only
+            - name: Save Turbo cache
+              if: steps.turbo-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v4
+              with:
+                  path: .turbo/cache
+                  key: ${{ steps.turbo-cache.outputs.cache-primary-key }}
+            # Only ubuntu uploads coverage. Windows still runs the same test
+            # lanes for behavioral confidence, but duplicating coverage uploads
+            # there mostly adds Codecov overhead without changing pass/fail
+            # behavior.
+            # Coverage is uploaded in three separate steps so each LCOV gets the
+            # correct flag set. Codecov double-counts overlapping lines when a
+            # single upload carries multiple flags whose paths overlap, so the
+            # two core lanes (which both cover packages/core/src/**) must be
+            # uploaded individually with their own lane flag.
+            # See https://docs.codecov.com/docs/flags
+            - name: Upload non-core coverage to Codecov
+              if: matrix.upload-coverage
               uses: codecov/codecov-action@v4
               with:
                   files: >-
                       src/coverage/lcov.info,
                       webview-ui/coverage/lcov.info,
-                      packages/core/coverage/lcov.info,
                       packages/cloud/coverage/lcov.info,
                       packages/telemetry/coverage/lcov.info,
                       apps/cli/coverage/lcov.info
+                  disable_search: true
                   flags: ${{ matrix.codecov-flag }}
+                  token: ${{ secrets.CODECOV_TOKEN }}
+            - name: Upload core unit coverage to Codecov
+              if: matrix.upload-coverage
+              uses: codecov/codecov-action@v4
+              with:
+                  files: packages/core/coverage/unit/lcov.info
+                  disable_search: true
+                  flags: ${{ matrix.codecov-flag }},core-unit
+                  token: ${{ secrets.CODECOV_TOKEN }}
+            - name: Upload core integration coverage to Codecov
+              if: matrix.upload-coverage
+              uses: codecov/codecov-action@v4
+              with:
+                  files: packages/core/coverage/integration/lcov.info
+                  disable_search: true
+                  flags: ${{ matrix.codecov-flag }},core-integration
                   token: ${{ secrets.CODECOV_TOKEN }}

@@ -359,9 +359,9 @@
 		},
 		"release": {
 			"heading": "新增功能：",
-			"gpt55": "透過 OpenAI Codex 支援 GPT-5.5：已在 OpenAI Codex 供應商中新增 GPT-5.5 支援，讓你可以直接在 Zoo Code 中使用最新模型。",
-			"claudeOpus47": "Vertex AI 上的 Claude Opus 4.7：已將 Anthropic 最新旗艦推理模型 Claude Opus 4.7 新增至 Vertex AI 供應商。",
-			"checkpointNav": "前一個存檔點導覽：在聊天中新增控制項，可回到此前的存檔點，並提供完整的 i18n 支援。"
+			"highlight1": "Xiaomi MiMo 供應商：已將 Xiaomi MiMo 新增為一級 API 供應商，讓你可以直接在 Zoo Code 中設定 MiMo 模型。",
+			"highlight2": "Zoo Code 上游交接：已合入最新的上游 sunset merge 與相關平台更新，讓 Zoo Code 持續與社群交接工作保持一致。",
+			"highlight3": "聊天與供應商穩定性修正：已修正 MCP 登入文案、Gemini 全工具組請求、OpenAI temperature 處理，以及 Markdown 單波浪號渲染。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

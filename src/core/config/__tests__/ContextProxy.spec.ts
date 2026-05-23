@@ -515,20 +515,6 @@ describe("ContextProxy", () => {
 	})
 
 	describe("getProviderSettings", () => {
-		it("should sanitize Roo provider into a setup-needed fallback", async () => {
-			await proxy.setValues({
-				apiProvider: "roo",
-				apiModelId: "roo/code-supernova",
-				rooApiKey: "router-key",
-			})
-
-			const settings = proxy.getProviderSettings()
-
-			expect(settings.apiProvider).toBeUndefined()
-			expect(settings.apiModelId).toBeUndefined()
-			expect(settings.rooApiKey).toBeUndefined()
-		})
-
 		it("should sanitize invalid apiProvider before parsing", async () => {
 			// Reset and create a new proxy with an unknown provider in state
 			vi.clearAllMocks()

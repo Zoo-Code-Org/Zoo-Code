@@ -705,5 +705,249 @@ describe("MimoHandler", () => {
 			const textChunks = chunks.filter((c) => c.type === "text")
 			expect(textChunks).toHaveLength(0)
 		})
+
+		it("should handle multiple tool calls in single response", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_1",
+											function: { name: "read_file", arguments: '{"path":' },
+										},
+										{
+											index: 1,
+											id: "call_2",
+											function: { name: "list_files", arguments: '{"path":' },
+										},
+									],
+								},
+								index: 0,
+							},
+						],
+						usage: null,
+					}
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{ index: 0, function: { arguments: '"a.txt"}' } },
+										{ index: 1, function: { arguments: '"./"}' } },
+									],
+								},
+								index: 0,
+							},
+						],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+					}
+				},
+			}))
+
+			const tools: any[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+				{
+					type: "function",
+					function: { name: "list_files", description: "List", parameters: {} },
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: any[] = []
+			const stream = handler.createMessage("System", messages, { taskId: "test", tools })
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
+			const readChunks = toolChunks.filter((c) => c.name === "read_file")
+			const listChunks = toolChunks.filter((c) => c.name === "list_files")
+			expect(readChunks.length).toBeGreaterThan(0)
+			expect(listChunks.length).toBeGreaterThan(0)
+		})
+
+		it("should handle stream interruption gracefully", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Partial " }, index: 0 }],
+						usage: null,
+					}
+					// Stream ends without finish_reason (connection dropped)
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: any[] = []
+			const stream = handler.createMessage("System", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks).toHaveLength(1)
+			expect(textChunks[0].text).toBe("Partial ")
+
+			const usageChunks = chunks.filter((c) => c.type === "usage")
+			expect(usageChunks).toHaveLength(0)
+		})
+
+		it("should sanitize tool call IDs with invalid characters", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_with-special.chars@123",
+											function: { name: "test_tool", arguments: "{}" },
+										},
+									],
+								},
+								index: 0,
+							},
+						],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const tools: any[] = [
+				{
+					type: "function",
+					function: { name: "test_tool", description: "Test", parameters: {} },
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: any[] = []
+			const stream = handler.createMessage("System", messages, { taskId: "test", tools })
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
+			expect(toolChunks.length).toBeGreaterThan(0)
+			expect(toolChunks[0].id).toBe(sanitizeOpenAiCallId("call_with-special.chars@123"))
+			expect(toolChunks[0].id).not.toMatch(/[^a-zA-Z0-9_-]/)
+		})
+
+		it("should convert system prompt to system message for MiMo", async () => {
+			const userMessages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("You are a helpful assistant", userMessages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.messages[0].role).toBe("system")
+			expect(params.messages[0].content).toBe("You are a helpful assistant")
+			expect(params.messages[1].role).toBe("user")
+		})
+	})
+
+	describe("completePrompt", () => {
+		it("should complete prompt successfully", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "Test response" } }],
+			})
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe("Test response")
+		})
+
+		it("should send correct parameters to the API", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "Response" } }],
+			})
+
+			await handler.completePrompt("What is 2+2?")
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.model).toBe("mimo-v2.5-pro")
+			expect(params.messages).toHaveLength(1)
+			expect(params.messages[0].role).toBe("user")
+			expect(params.messages[0].content).toBe("What is 2+2?")
+		})
+
+		it("should handle API errors with provider prefix", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("401 Unauthorized"))
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error:")
+		})
+
+		it("should return empty string when choices array is empty", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [] })
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe("")
+		})
+
+		it("should return empty string when message content is null", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: null } }],
+			})
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe("")
+		})
+
+		it("should propagate network errors with provider prefix", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("ECONNREFUSED"))
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error:")
+		})
+
+		it("should propagate rate limit errors with provider prefix", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("429 Too Many Requests"))
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error:")
+		})
+
+		it("should use correct model ID for mimo-v2.5 variant", async () => {
+			const v25Handler = new MimoHandler({
+				...mockOptions,
+				apiModelId: "mimo-v2.5",
+			})
+
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "Response" } }],
+			})
+
+			await v25Handler.completePrompt("Test")
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.model).toBe("mimo-v2.5")
+		})
 	})
 })

@@ -73,7 +73,7 @@ export async function generateErrorDiagnostics(params: GenerateDiagnosticsParams
 		// Create a temporary diagnostics file
 		const tmpDir = os.tmpdir()
 		const timestamp = Date.now()
-		const tempFileName = `roo-diagnostics-${taskId.slice(0, 8)}-${timestamp}.json`
+		const tempFileName = `zoo-diagnostics-${taskId.slice(0, 8)}-${timestamp}.json`
 		const tempFilePath = path.join(tmpDir, tempFileName)
 
 		await fs.writeFile(tempFilePath, fullContent, "utf8")

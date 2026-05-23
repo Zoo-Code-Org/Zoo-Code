@@ -927,7 +927,6 @@ export const webviewMessageHandler = async (
 						unbound: {},
 						ollama: {},
 						lmstudio: {},
-						roo: {},
 						poe: {},
 						deepseek: {},
 					}

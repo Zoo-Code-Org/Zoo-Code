@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react"
+import { Trans } from "react-i18next"
+import { ArrowLeft, Brain } from "lucide-react"
 
-import type { ProviderSettings } from "@roo-code/types"
+import { openRouterDefaultModelId, type ProviderSettings } from "@roo-code/types"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { validateApiConfiguration } from "@src/utils/validate"
@@ -12,31 +14,58 @@ import ApiOptions from "../settings/ApiOptions"
 import { Tab, TabContent } from "../common/Tab"
 
 import RooHero from "./RooHero"
-import { Trans } from "react-i18next"
-import { ArrowLeft, Brain } from "lucide-react"
+
+const DEFAULT_WELCOME_API_CONFIGURATION: ProviderSettings = {
+	apiProvider: "openrouter",
+	openRouterModelId: openRouterDefaultModelId,
+}
+
+const getWelcomeApiConfiguration = (apiConfiguration?: ProviderSettings): ProviderSettings => {
+	// validateApiConfiguration treats a missing apiProvider as valid (no switch case matches),
+	// so we explicitly fall back here before delegating to it for incomplete-but-set configs.
+	if (!apiConfiguration?.apiProvider) {
+		return DEFAULT_WELCOME_API_CONFIGURATION
+	}
+
+	const validationError = validateApiConfiguration(apiConfiguration)
+	if (validationError) {
+		return DEFAULT_WELCOME_API_CONFIGURATION
+	}
+
+	return apiConfiguration
+}
 
 const WelcomeViewProvider = () => {
 	const { apiConfiguration, currentApiConfigName, setApiConfiguration, uriScheme } = useExtensionState()
 	const { t } = useAppTranslation()
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 	const [showProviderSetup, setShowProviderSetup] = useState(false)
+	const [welcomeApiConfiguration, setWelcomeApiConfiguration] = useState<ProviderSettings>()
+	const effectiveApiConfiguration = welcomeApiConfiguration ?? getWelcomeApiConfiguration(apiConfiguration)
 
-	// Memoize the setApiConfigurationField function to pass to ApiOptions
 	const setApiConfigurationFieldForApiOptions = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) => {
+			setWelcomeApiConfiguration((current) => ({
+				...(current ?? effectiveApiConfiguration),
+				[field]: value,
+			}))
 			setApiConfiguration({ [field]: value })
 		},
-		[setApiConfiguration], // setApiConfiguration from context is stable
+		[effectiveApiConfiguration, setApiConfiguration],
 	)
 
 	const handleGetStarted = useCallback(() => {
 		if (!showProviderSetup) {
+			const initialApiConfiguration = getWelcomeApiConfiguration(apiConfiguration)
+			setWelcomeApiConfiguration(initialApiConfiguration)
+
+			setApiConfiguration(initialApiConfiguration)
+
 			setShowProviderSetup(true)
-			setErrorMessage(undefined)
 			return
 		}
 
-		const error = apiConfiguration ? validateApiConfiguration(apiConfiguration) : undefined
+		const error = validateApiConfiguration(effectiveApiConfiguration)
 
 		if (error) {
 			setErrorMessage(error)
@@ -44,13 +73,12 @@ const WelcomeViewProvider = () => {
 		}
 
 		setErrorMessage(undefined)
-		vscode.postMessage({ type: "upsertApiConfiguration", text: currentApiConfigName, apiConfiguration })
-	}, [showProviderSetup, apiConfiguration, currentApiConfigName])
-
-	const handleBackToLanding = useCallback(() => {
-		setShowProviderSetup(false)
-		setErrorMessage(undefined)
-	}, [])
+		vscode.postMessage({
+			type: "upsertApiConfiguration",
+			text: currentApiConfigName,
+			apiConfiguration: effectiveApiConfiguration,
+		})
+	}, [showProviderSetup, apiConfiguration, setApiConfiguration, effectiveApiConfiguration, currentApiConfigName])
 
 	if (!showProviderSetup) {
 		return (
@@ -96,7 +124,7 @@ const WelcomeViewProvider = () => {
 				<div className="mb-8">
 					<ApiOptions
 						fromWelcomeView
-						apiConfiguration={apiConfiguration || {}}
+						apiConfiguration={effectiveApiConfiguration}
 						uriScheme={uriScheme}
 						setApiConfigurationField={setApiConfigurationFieldForApiOptions}
 						errorMessage={errorMessage}
@@ -105,7 +133,7 @@ const WelcomeViewProvider = () => {
 				</div>
 
 				<div className="-mt-4 flex gap-2">
-					<Button onClick={handleBackToLanding} variant="secondary">
+					<Button onClick={() => setShowProviderSetup(false)} variant="secondary">
 						<ArrowLeft className="size-4" />
 						{t("welcome:providerSignup.goBack")}
 					</Button>

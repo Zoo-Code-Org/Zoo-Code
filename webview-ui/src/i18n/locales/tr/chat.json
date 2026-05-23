@@ -338,9 +338,9 @@
 		},
 		"release": {
 			"heading": "Yenilikler:",
-			"gpt55": "OpenAI Codex üzerinden GPT-5.5: En son modeli doğrudan Zoo Code'dan kullanabilmen için OpenAI Codex sağlayıcısına GPT-5.5 desteği eklendi.",
-			"claudeOpus47": "Vertex AI'da Claude Opus 4.7: Anthropic'in en yeni amiral gemisi akıl yürütme modeli olan Claude Opus 4.7 Vertex AI sağlayıcısına eklendi.",
-			"checkpointNav": "Önceki Checkpoint Navigasyonu: Sohbetten önceki checkpoint'lere geri atlayabilmen için kontroller eklendi ve tam i18n desteği sunuluyor."
+			"highlight1": "Xiaomi MiMo sağlayıcısı: Xiaomi MiMo, MiMo modellerini doğrudan Zoo Code içinde yapılandırabilmen için birinci sınıf bir API sağlayıcısı olarak eklendi.",
+			"highlight2": "Zoo Code upstream handoff'u: Zoo Code'u topluluk handoff çalışmasıyla uyumlu tutmak için en son upstream sunset merge'i ve ilgili platform güncellemeleri alındı.",
+			"highlight3": "Sohbet ve sağlayıcılarda kararlılık düzeltmeleri: MCP oturum açma metni, Gemini tam araç seti istekleri, OpenAI temperature işleme ve Markdown single-tilde renderingi düzeltildi."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

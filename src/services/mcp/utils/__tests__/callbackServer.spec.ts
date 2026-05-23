@@ -6,6 +6,30 @@ vi.mock("http", () => ({
 	createServer: vi.fn(),
 }))
 
+function createMockServer() {
+	const mockServer = {
+		listen: vi.fn((port, host, callback) => {
+			callback()
+			return mockServer
+		}),
+		address: vi.fn(() => ({ port: 3000 })),
+		on: vi.fn(),
+		close: vi.fn(),
+	}
+
+	return mockServer
+}
+
+function createMockResponse() {
+	return {
+		writeHead: vi.fn(),
+		end: vi.fn(),
+		on: vi.fn((event, cb) => {
+			if (event === "finish") setImmediate(cb)
+		}),
+	}
+}
+
 describe("startCallbackServer", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks()
@@ -13,15 +37,7 @@ describe("startCallbackServer", () => {
 	})
 
 	it("should start server and resolve with callback result", async () => {
-		const mockServer = {
-			listen: vi.fn((port, host, callback) => {
-				callback()
-				return mockServer
-			}),
-			address: vi.fn(() => ({ port: 3000 })),
-			on: vi.fn(),
-			close: vi.fn(),
-		}
+		const mockServer = createMockServer()
 
 		;(http.createServer as any).mockReturnValue(mockServer)
 
@@ -38,31 +54,24 @@ describe("startCallbackServer", () => {
 			url: "/callback?code=test-code&state=test-state",
 			method: "GET",
 		}
-		const mockRes = {
-			writeHead: vi.fn(),
-			end: vi.fn(),
-			on: vi.fn((event, cb) => {
-				if (event === "finish") setImmediate(cb)
-			}),
-		}
+		const mockRes = createMockResponse()
 
 		requestHandler(mockReq, mockRes)
 
 		const callbackResult = await result
 		expect(callbackResult.code).toBe("test-code")
 		expect(callbackResult.state).toBe("test-state")
+		expect(mockRes.writeHead).toHaveBeenCalledWith(
+			200,
+			expect.objectContaining({
+				"Content-Type": "text/html; charset=utf-8",
+			}),
+		)
+		expect(mockRes.end).toHaveBeenCalledWith(expect.stringContaining('<meta charset="utf-8">'))
 	})
 
 	it("should reject invalid state", async () => {
-		const mockServer = {
-			listen: vi.fn((port, host, callback) => {
-				callback()
-				return mockServer
-			}),
-			address: vi.fn(() => ({ port: 3000 })),
-			on: vi.fn(),
-			close: vi.fn(),
-		}
+		const mockServer = createMockServer()
 
 		;(http.createServer as any).mockReturnValue(mockServer)
 
@@ -76,17 +85,18 @@ describe("startCallbackServer", () => {
 			url: "/callback?code=test-code&state=wrong-state",
 			method: "GET",
 		}
-		const mockRes = {
-			writeHead: vi.fn(),
-			end: vi.fn(),
-			on: vi.fn((event, cb) => {
-				if (event === "finish") setImmediate(cb)
-			}),
-		}
+		const mockRes = createMockResponse()
 
 		requestHandler(mockReq, mockRes)
 
 		await expect(result).rejects.toThrow("Invalid state parameter")
+		expect(mockRes.writeHead).toHaveBeenCalledWith(
+			400,
+			expect.objectContaining({
+				"Content-Type": "text/html; charset=utf-8",
+			}),
+		)
+		expect(mockRes.end).toHaveBeenCalledWith(expect.stringContaining('<meta charset="utf-8">'))
 	})
 })
 

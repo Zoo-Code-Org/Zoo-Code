@@ -30,15 +30,15 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.54.1
+## Yang Baru di v3.55.0
 
-**Rilis awal Zoo Code** — menetapkan Zoo Code sebagai extension independen di VS Code Marketplace dengan nama `ZooCodeOrganization.zoo-code`, dengan build pre-release yang dipublikasikan otomatis setiap kali ada merge ke `main`.
+**Rilis fitur pertama Zoo Code** melanjutkan handoff Marketplace dengan provider baru, merge upstream sunset Roo Code, dan serangkaian perbaikan yang langsung terasa di chat, pengaturan provider, dan rendering.
 
-- Menambahkan dukungan GPT-5.5 melalui provider OpenAI Codex.
-- Menambahkan dukungan Claude Opus 4.7 di Vertex AI.
-- Menambahkan kontrol navigasi ke checkpoint sebelumnya di chat.
-- Dukungan DeepSeek V4 dengan pengambilan model dinamis.
-- Dukungan klien OAuth MCP.
+- Menambahkan Xiaomi MiMo sebagai provider API kelas utama.
+- Mengambil merge upstream sunset Roo Code beserta pembaruan platform terkait.
+- Memperbaiki teks sign-in MCP, request Gemini dengan tool set penuh, dan penanganan temperature OpenAI untuk model yang tidak mendukungnya.
+- Memperbaiki render Markdown untuk single tilde dan penamaan file sementara diagnostik.
+- Meningkatkan default provider dan cakupan region untuk Z.AI, GLM, dan Vertex AI.
 
 <details>
   <summary>🌐 Bahasa yang tersedia</summary>
@@ -62,7 +62,7 @@ Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 

@@ -31,12 +31,17 @@ async function main() {
 	const testGrep = getCliFlagValue("--grep") || process.env.TEST_GREP
 	const testFile = getCliFlagValue("--file") || process.env.TEST_FILE
 	const isDeepSeekTest = isDeepSeekTargetedRun(testFile, testGrep)
+	const isGeminiTest = testFile?.toLowerCase().includes("gemini.test") ?? false
 
 	if (isRecord && isDeepSeekTest && !process.env.DEEPSEEK_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
 	}
 
-	if (isRecord && !isDeepSeekTest && !process.env.OPENROUTER_API_KEY) {
+	if (isRecord && isGeminiTest && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+		throw new Error("AIMOCK_RECORD=true requires GEMINI_API_KEY to record Gemini fixtures")
+	}
+
+	if (isRecord && !isDeepSeekTest && !isGeminiTest && !process.env.OPENROUTER_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires OPENROUTER_API_KEY to record fixtures")
 	}
 
@@ -78,6 +83,8 @@ async function main() {
 							openai: isDeepSeekTest ? "https://api.deepseek.com" : "https://openrouter.ai/api",
 							// aimock forwards the x-api-key header from the Anthropic SDK to the real API.
 							anthropic: "https://api.anthropic.com",
+							// aimock forwards the x-goog-api-key header from the Google AI SDK.
+							...(isGeminiTest && { gemini: "https://generativelanguage.googleapis.com" }),
 						},
 						fixturePath: fixturesDir,
 					},
@@ -99,9 +106,11 @@ async function main() {
 				// user message starts with <environment_details> directly — no <user_message>
 				// wrapper. JSON fixtures use substring matching so a bare "<environment_details>"
 				// match would collide with all other requests. A regex anchored to the start
-				// uniquely identifies this post-switch turn.
+				// uniquely identifies this post-switch turn. Scope this fixture to the
+				// OpenRouter default model so provider-specific suites (e.g. DeepSeek)
+				// cannot accidentally match it.
 				mock.addFixture({
-					match: { userMessage: /^<environment_details>/ },
+					match: { model: "openai/gpt-4.1", userMessage: /^<environment_details>/ },
 					response: {
 						toolCalls: [
 							{
@@ -128,6 +137,7 @@ async function main() {
 			...(testGrep && { TEST_GREP: testGrep }),
 			...(testFile && { TEST_FILE: testFile }),
 			...(mock && { AIMOCK_URL: mock.url }),
+			...(mock && { E2E_MOCK_MODEL_LIST_FALLBACK: "true" }),
 		}
 
 		// Download VS Code, unzip it and run the integration test

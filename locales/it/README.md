@@ -30,15 +30,15 @@
 
 Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida alla migrazione Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Vogliamo aiutare gli utenti il più possibile durante la transizione, e per questo abbiamo il nostro [Reddit](https://www.reddit.com/r/ZooCode) e il nostro [Discord](https://discord.gg/VxfP4Vx3gX). Se hai problemi o domande, passa pure e chiedi.
 
-## Novità in v3.54.1
+## Novità in v3.55.0
 
-**Release iniziale di Zoo Code** — rende Zoo Code un'estensione indipendente sul VS Code Marketplace con il nome `ZooCodeOrganization.zoo-code`, con build pre-release pubblicate automaticamente a ogni merge su `main`.
+**La prima release di funzionalità di Zoo Code** si basa sull'handoff al Marketplace con un nuovo provider, il merge upstream del sunset di Roo Code e una serie di correzioni visibili all'utente in chat, nelle impostazioni dei provider e nel rendering.
 
-- Aggiunto supporto a GPT-5.5 tramite il provider OpenAI Codex.
-- Aggiunto supporto a Claude Opus 4.7 su Vertex AI.
-- Aggiunti controlli di navigazione ai checkpoint precedenti nella chat.
-- Supporto per DeepSeek V4 con recupero dinamico dei modelli.
-- Supporto per il client OAuth MCP.
+- Aggiunto Xiaomi MiMo come provider API di primo livello.
+- Integrato il merge upstream del sunset di Roo Code e i relativi aggiornamenti di piattaforma.
+- Corretti il testo del sign-in MCP, le richieste Gemini con il set completo di strumenti e la gestione della temperatura OpenAI per i modelli che non la supportano.
+- Corretti il rendering Markdown con tilde singola e la denominazione dei file temporanei di diagnostica.
+- Migliorati i valori predefiniti dei provider e la copertura regionale per Z.AI, GLM e Vertex AI.
 
 <details>
   <summary>🌐 Lingue disponibili</summary>
@@ -62,7 +62,7 @@ Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida al
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
