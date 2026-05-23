@@ -15,8 +15,6 @@ export default defineConfig({
 		testTimeout: 20_000,
 		hookTimeout: 20_000,
 		onConsoleLog,
-		// Vitest 4 replacement for poolOptions.forks.singleFork: true — runs all
-		// tests in a single worker process to stabilise Windows CI coverage.
 		maxWorkers: isWindowsCI ? 1 : undefined,
 		isolate: isWindowsCI ? false : undefined,
 		coverage: {
