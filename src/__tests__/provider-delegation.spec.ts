@@ -142,4 +142,54 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		// Verify ordering: createTask → updateTaskHistory → child.start
 		expect(callOrder).toEqual(["createTask", "updateTaskHistory", "child.start"])
 	})
+
+	it("does not start the child when parent delegation metadata cannot be persisted", async () => {
+		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+		const childStart = vi.fn()
+		const persistError = new Error("history write failed")
+
+		const providerEmit = vi.fn()
+		const updateTaskHistory = vi.fn().mockRejectedValue(persistError)
+		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn().mockResolvedValue({ taskId: "child-1", start: childStart })
+		const handleModeSwitch = vi.fn().mockResolvedValue(undefined)
+		const getTaskWithId = vi.fn().mockResolvedValue({
+			historyItem: {
+				id: "parent-1",
+				task: "Parent",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				childIds: [],
+			},
+		})
+
+		const provider = {
+			emit: providerEmit,
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack,
+			createTask,
+			getTaskWithId,
+			updateTaskHistory,
+			handleModeSwitch,
+			log: vi.fn(),
+		} as unknown as ClineProvider
+
+		await expect(
+			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).rejects.toThrow("history write failed")
+
+		expect(createTask).toHaveBeenCalledWith("Do something", undefined, parentTask, {
+			initialTodos: [],
+			initialStatus: "active",
+			startTask: false,
+		})
+		expect(childStart).not.toHaveBeenCalled()
+		expect(providerEmit).not.toHaveBeenCalledWith(RooCodeEventName.TaskDelegated, "parent-1", "child-1")
+	})
 })
