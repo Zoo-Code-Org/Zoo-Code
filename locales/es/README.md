@@ -30,15 +30,15 @@
 
 Puedes encontrar una guía rápida para pasar de Roo Code a Zoo Code en la [guía de migración Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Queremos ayudar a los usuarios durante la transición, y para eso tenemos nuestro [Reddit](https://www.reddit.com/r/ZooCode) y [Discord](https://discord.gg/VxfP4Vx3gX). Si tienes problemas o alguna pregunta, entra y pregúntanos.
 
-## Novedades de la v3.54.1
+## Novedades de la v3.55.0
 
-**Lanzamiento inicial de Zoo Code** — establece Zoo Code como una extensión independiente en VS Code Marketplace bajo `ZooCodeOrganization.zoo-code`, con compilaciones pre-release publicadas automáticamente en cada merge a `main`.
+**La primera versión con nuevas funciones de Zoo Code** se apoya en el traspaso al Marketplace con un nuevo proveedor, el merge upstream del sunset de Roo Code y una ronda de correcciones visibles para el usuario en el chat, la configuración de proveedores y el renderizado.
 
-- Se añadió soporte para GPT-5.5 a través del proveedor OpenAI Codex.
-- Se añadió soporte para Claude Opus 4.7 en Vertex AI.
-- Se añadieron controles de navegación a checkpoints anteriores en el chat.
-- Soporte para DeepSeek V4 con obtención dinámica de modelos.
-- Soporte para el cliente OAuth de MCP.
+- Se añadió Xiaomi MiMo como proveedor de API de primera clase.
+- Se incorporó el merge upstream del sunset de Roo Code y las actualizaciones relacionadas de la plataforma.
+- Se corrigieron los textos del inicio de sesión de MCP, las solicitudes de Gemini con todo el conjunto de herramientas y el manejo de la temperatura de OpenAI para modelos que no la admiten.
+- Se corrigieron el renderizado de Markdown con una sola tilde y el nombre de los archivos temporales de diagnósticos.
+- Se mejoraron los valores predeterminados y la cobertura regional de Z.AI, GLM y Vertex AI.
 
 <details>
   <summary>🌐 Idiomas disponibles</summary>
@@ -62,7 +62,7 @@ Puedes encontrar una guía rápida para pasar de Roo Code a Zoo Code en la [guí
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 

@@ -65,7 +65,6 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		const thinking = getAnthropicProviderReasoning({
 			model: info,
 			reasoningBudget,
-			reasoningEffort: undefined,
 			settings: this.options,
 		})
 

@@ -1,0 +1,72 @@
+{
+	"$schema": "https://turbo.build/schema.json",
+	"extends": ["//"],
+	"tasks": {
+		"test:unit": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": [
+				"src/**",
+				"!src/**/*.integration.spec.ts",
+				"!src/custom-tools/__tests__/fixtures*/**",
+				"package.json",
+				"tsconfig.json",
+				"vitest.config.ts",
+				"vitest.unit.config.ts"
+			]
+		},
+		"test:integration": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": [
+				"src/custom-tools/*.ts",
+				"src/custom-tools/**/*.integration.spec.ts",
+				"src/custom-tools/__tests__/fixtures*/**",
+				"src/worktree/*.ts",
+				"src/worktree/**/*.integration.spec.ts",
+				"package.json",
+				"tsconfig.json",
+				"vitest.config.ts",
+				"vitest.integration.config.ts"
+			]
+		},
+		"test:coverage:unit": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": [
+				"src/**",
+				"!src/**/*.integration.spec.ts",
+				"!src/custom-tools/__tests__/fixtures*/**",
+				"package.json",
+				"tsconfig.json",
+				"vitest.config.ts",
+				"vitest.unit.config.ts"
+			],
+			"outputs": ["coverage/unit/**"]
+		},
+		"test:coverage:integration": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": [
+				"src/custom-tools/*.ts",
+				"src/custom-tools/**/*.integration.spec.ts",
+				"src/custom-tools/__tests__/fixtures*/**",
+				"src/worktree/*.ts",
+				"src/worktree/**/*.integration.spec.ts",
+				"package.json",
+				"tsconfig.json",
+				"vitest.config.ts",
+				"vitest.integration.config.ts"
+			],
+			"outputs": ["coverage/integration/**"]
+		},
+		"test:coverage": {
+			"dependsOn": ["@roo-code/types#build"],
+			"inputs": [
+				"src/**",
+				"package.json",
+				"tsconfig.json",
+				"vitest.config.ts",
+				"vitest.unit.config.ts",
+				"vitest.integration.config.ts"
+			],
+			"outputs": ["coverage/unit/**", "coverage/integration/**"]
+		}
+	}
+}

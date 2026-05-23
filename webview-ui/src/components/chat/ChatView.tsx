@@ -81,11 +81,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		setMode,
 		alwaysAllowModeSwitch,
 		customModes,
-		telemetrySetting,
 		soundEnabled,
 		soundVolume,
 		messageQueue = [],
 		showWorktreesInHomeScreen,
+		telemetrySetting,
 	} = useExtensionState()
 
 	// Show a WarningRow when the user sends a message with a retired provider.

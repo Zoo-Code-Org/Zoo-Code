@@ -30,15 +30,15 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.54.1
+## Novetats a la v3.55.0
 
-**Llançament inicial de Zoo Code** — estableix Zoo Code com una extensió independent al VS Code Marketplace sota `ZooCodeOrganization.zoo-code`, amb versions pre-release publicades automàticament a cada merge a `main`.
+**La primera release de funcionalitats de Zoo Code** es basa en el traspàs al Marketplace amb un proveïdor nou, la fusió upstream del sunset de Roo Code i una ronda de correccions visibles per a l'usuari al xat, la configuració dels proveïdors i el renderitzat.
 
-- S'ha afegit suport per a GPT-5.5 a través del proveïdor OpenAI Codex.
-- S'ha afegit suport per a Claude Opus 4.7 a Vertex AI.
-- S'han afegit controls de navegació cap als checkpoints anteriors al xat.
-- Suport per a DeepSeek V4 amb obtenció dinàmica de models.
-- Suport per al client OAuth de MCP.
+- S'ha afegit Xiaomi MiMo com a proveïdor d'API de primer nivell.
+- S'ha incorporat la fusió upstream del sunset de Roo Code i les actualitzacions relacionades de la plataforma.
+- S'han corregit els textos de l'inici de sessió d'MCP, les sol·licituds completes d'eines de Gemini i la gestió de la temperatura d'OpenAI per a models que no l'admeten.
+- S'ha corregit el renderitzat del text amb una sola titlla a Markdown i el nom dels fitxers temporals de diagnòstic.
+- S'han millorat els valors per defecte dels proveïdors i la cobertura de regions per a Z.AI, GLM i Vertex AI.
 
 <details>
   <summary>🌐 Idiomes disponibles</summary>
@@ -62,7 +62,7 @@ Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de mig
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 

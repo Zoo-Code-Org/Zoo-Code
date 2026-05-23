@@ -22,15 +22,6 @@ export const IMAGE_GENERATION_MODELS: ImageGenerationModel[] = [
 	{ value: "openai/gpt-5-image-mini", label: "GPT-5 Image Mini", provider: "openrouter" },
 	{ value: "black-forest-labs/flux.2-flex", label: "Black Forest Labs FLUX.2 Flex", provider: "openrouter" },
 	{ value: "black-forest-labs/flux.2-pro", label: "Black Forest Labs FLUX.2 Pro", provider: "openrouter" },
-	// Roo Code Cloud models
-	{ value: "google/gemini-2.5-flash-image", label: "Gemini 2.5 Flash Image", provider: "roo" },
-	{ value: "google/gemini-3-pro-image", label: "Gemini 3 Pro Image", provider: "roo" },
-	{
-		value: "bfl/flux-2-pro:free",
-		label: "Black Forest Labs FLUX.2 Pro (Free)",
-		provider: "roo",
-		apiMethod: "images_api",
-	},
 ]
 
 /**
@@ -41,17 +32,17 @@ export const IMAGE_GENERATION_MODEL_IDS = IMAGE_GENERATION_MODELS.map((m) => m.v
 /**
  * Image generation provider type
  */
-export type ImageGenerationProvider = "openrouter" | "roo"
+export type ImageGenerationProvider = "openrouter"
 
 /**
  * Get the image generation provider with backwards compatibility
- * - Legacy "roo" selections are downgraded to "openrouter"
- * - If provider is explicitly set to "openrouter", keep it
- * - Otherwise default to "openrouter"
+ * - If provider is explicitly set, use it
+ * - If a model is already configured (existing users), default to "openrouter"
+ * - Otherwise default to "openrouter" (new users)
  */
 export function getImageGenerationProvider(
 	explicitProvider: ImageGenerationProvider | undefined,
 	_hasExistingModel: boolean,
 ): ImageGenerationProvider {
-	return explicitProvider === "openrouter" ? "openrouter" : "openrouter"
+	return explicitProvider !== undefined ? explicitProvider : "openrouter"
 }

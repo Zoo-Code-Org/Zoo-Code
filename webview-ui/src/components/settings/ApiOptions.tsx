@@ -184,13 +184,11 @@ const ApiOptions = ({
 		id: selectedModelId,
 		info: selectedModelInfo,
 	} = useSelectedModel(apiConfiguration)
-	const isLegacyRooSelected = apiConfiguration.apiProvider === "roo"
 	const activeSelectedProvider: ProviderName | undefined = isRetiredProvider(selectedProvider)
 		? undefined
 		: selectedProvider
 	const isRetiredSelectedProvider =
-		isLegacyRooSelected ||
-		(typeof apiConfiguration.apiProvider === "string" && isRetiredProvider(apiConfiguration.apiProvider))
+		typeof apiConfiguration.apiProvider === "string" && isRetiredProvider(apiConfiguration.apiProvider)
 
 	const { data: routerModels, refetch: refetchRouterModels } = useRouterModels()
 
@@ -449,15 +447,8 @@ const ApiOptions = ({
 			}
 		}
 
-		if (isLegacyRooSelected) {
-			options.unshift({
-				value: "roo",
-				label: "Roo Code Router",
-			})
-		}
-
 		return options
-	}, [organizationAllowList, apiConfiguration.apiProvider, fromWelcomeView, isLegacyRooSelected])
+	}, [organizationAllowList, apiConfiguration.apiProvider, fromWelcomeView])
 
 	return (
 		<div className="flex flex-col gap-3">

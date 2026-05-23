@@ -13,6 +13,7 @@ import { DEFAULT_HEADERS } from "../constants"
 export async function getDeepSeekModels(baseUrl?: string, apiKey?: string): Promise<ModelRecord> {
 	const normalizedBase = (baseUrl || "https://api.deepseek.com").replace(/\/?v1\/?$/, "")
 	const url = `${normalizedBase}/models`
+	const allowModelListFallback = process.env.E2E_MOCK_MODEL_LIST_FALLBACK === "true"
 
 	const headers: Record<string, string> = {
 		"Content-Type": "application/json",
@@ -46,6 +47,16 @@ export async function getDeepSeekModels(baseUrl?: string, apiKey?: string): Prom
 				url,
 				body: errorBody,
 			})
+
+			// In mocked e2e environments, /models may be intentionally unimplemented.
+			// Allow an explicit test-only fallback to static DeepSeek model metadata.
+			if (allowModelListFallback && response.status === 404) {
+				const models: ModelRecord = Object.create(null)
+				for (const [modelId, modelInfo] of Object.entries(deepSeekModels)) {
+					models[modelId] = { ...modelInfo }
+				}
+				return models
+			}
 
 			throw new Error(`HTTP ${response.status}: ${response.statusText}`)
 		}

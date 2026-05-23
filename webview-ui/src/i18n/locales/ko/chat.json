@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "새로운 기능:",
-			"gpt55": "OpenAI Codex를 통한 GPT-5.5: OpenAI Codex 제공업체에 GPT-5.5 지원을 추가해, Zoo Code에서 바로 최신 모델을 사용할 수 있어요.",
-			"claudeOpus47": "Vertex AI에서 Claude Opus 4.7: Anthropic의 최신 플래그십 추론 모델인 Claude Opus 4.7을 Vertex AI 제공업체에 추가했어요.",
-			"checkpointNav": "이전 체크포인트 탐색: 이전 체크포인트로 돌아갈 수 있는 컨트롤을 채팅에 추가했고, i18n을 완벽하게 지원해요."
+			"highlight1": "Xiaomi MiMo provider: Xiaomi MiMo를 first-class API provider로 추가해 MiMo 모델을 Zoo Code에서 직접 설정할 수 있게 했어요.",
+			"highlight2": "Zoo Code upstream handoff: 최신 upstream sunset merge와 관련 platform 업데이트를 반영해 Zoo Code가 커뮤니티 handoff 작업과 계속 맞춰지도록 했어요.",
+			"highlight3": "채팅과 provider 안정성 수정: MCP sign-in 문구, Gemini의 full-tool 요청, OpenAI temperature 처리, Markdown single-tilde 렌더링을 수정했어요."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",
