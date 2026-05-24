@@ -1,5 +1,7 @@
 // npx vitest run src/components/settings/__tests__/TerminalSettings.profile.spec.tsx
 
+import * as React from "react"
+
 import { render, screen, fireEvent, act } from "@/utils/test-utils"
 
 import { TerminalSettings } from "../TerminalSettings"
@@ -51,7 +53,6 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 
 // Helper used by the Select mock to render SelectItem children as buttons.
 function renderSelectChildren(children: any, onValueChange: (value: string) => void): any {
-	const React = require("react")
 	return React.Children.map(children, (child: any) => {
 		if (!child || typeof child !== "object") return child
 		const itemValue = child.props?.value ?? child.props?.["data-item-value"]
