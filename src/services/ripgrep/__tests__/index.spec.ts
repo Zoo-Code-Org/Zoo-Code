@@ -1,6 +1,16 @@
 // npx vitest run src/services/ripgrep/__tests__/index.spec.ts
 
-import { truncateLine } from "../index"
+import path from "path"
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
+
+import { truncateLine, getBinPath } from "../index"
+import { fileExistsAtPath } from "../../../utils/fs"
+
+vi.mock("../../../utils/fs", () => ({
+	fileExistsAtPath: vi.fn(),
+}))
+
+const mockFileExists = vi.mocked(fileExistsAtPath)
 
 describe("Ripgrep line truncation", () => {
 	// The default MAX_LINE_LENGTH is 500 in the implementation
@@ -46,5 +56,63 @@ describe("Ripgrep line truncation", () => {
 
 		expect(truncated.length).toEqual(customLength + " [truncated...]".length)
 		expect(truncated).toContain("[truncated...]")
+	})
+})
+
+describe("getBinPath", () => {
+	const appRoot = "/fake/vscode/appRoot"
+	const binName = process.platform.startsWith("win") ? "rg.exe" : "rg"
+	const platformDir = `${process.platform}-${process.arch}`
+	const originalPath = process.env.PATH
+
+	beforeEach(() => {
+		mockFileExists.mockReset()
+		mockFileExists.mockResolvedValue(false)
+	})
+
+	afterEach(() => {
+		if (originalPath === undefined) {
+			delete process.env.PATH
+		} else {
+			process.env.PATH = originalPath
+		}
+	})
+
+	it("resolves ripgrep from the classic @vscode/ripgrep layout", async () => {
+		const rg = path.join(appRoot, "node_modules/@vscode/ripgrep/bin", binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("resolves ripgrep from the @vscode/ripgrep-universal layout (VS Code Insiders)", async () => {
+		const rg = path.join(appRoot, "node_modules/@vscode/ripgrep-universal/bin", platformDir, binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("falls back to ripgrep on the system PATH when the VS Code copy is absent", async () => {
+		process.env.PATH = ["/fake/empty", "/fake/tools"].join(path.delimiter)
+		const rg = path.join("/fake/tools", binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("prefers the VS Code copy over the system PATH", async () => {
+		process.env.PATH = "/fake/tools"
+		const vscodeRg = path.join(appRoot, "node_modules/@vscode/ripgrep/bin", binName)
+		const pathRg = path.join("/fake/tools", binName)
+		mockFileExists.mockImplementation(async (p: string) => p === vscodeRg || p === pathRg)
+
+		expect(await getBinPath(appRoot)).toBe(vscodeRg)
+	})
+
+	it("returns undefined when ripgrep cannot be found anywhere", async () => {
+		process.env.PATH = "/fake/empty"
+		mockFileExists.mockResolvedValue(false)
+
+		expect(await getBinPath(appRoot)).toBeUndefined()
 	})
 })
