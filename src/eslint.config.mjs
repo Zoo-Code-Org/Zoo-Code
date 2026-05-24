@@ -30,6 +30,20 @@ export default [
 		},
 	},
 	{
+		// Ratchet: enforce no-floating-promises directory by directory. Each
+		// directory is added here once its floating promises are resolved.
+		files: ["activate/**/*.ts"],
+		languageOptions: {
+			parserOptions: {
+				project: true,
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+		rules: {
+			"@typescript-eslint/no-floating-promises": "error",
+		},
+	},
+	{
 		ignores: ["webview-ui", "out"],
 	},
 ]
