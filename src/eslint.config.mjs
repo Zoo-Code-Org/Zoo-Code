@@ -5,7 +5,7 @@ export default [
 	...config,
 	{
 		rules: {
-			// TODO: These should be fixed and the rules re-enabled.
+			// TODO: The rules listed below should be re-enabled once their existing violations are fixed.
 			"no-useless-escape": "off",
 			"no-empty": "off",
 			"prefer-const": "off",
