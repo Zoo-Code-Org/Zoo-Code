@@ -97,6 +97,26 @@ describe("Terminal inline terminal profile (#119)", () => {
 			})
 		})
 
+		it("preserves the profile's env and sanitizes non-string/null values", () => {
+			stubProfiles({
+				linux: {
+					"Custom Bash": {
+						path: "/bin/bash",
+						env: { LANG: "en_US.UTF-8", UNSET_ME: null, BAD: 123 },
+					},
+				},
+			})
+
+			Terminal.setTerminalProfile("Custom Bash")
+
+			expect(Terminal.getProfileShell("linux")).toEqual({
+				shellPath: "/bin/bash",
+				shellArgs: undefined,
+				// `null` is preserved (unsets the var); the numeric `BAD` is dropped.
+				env: { LANG: "en_US.UTF-8", UNSET_ME: null },
+			})
+		})
+
 		it("uses the first path candidate when path is an array", () => {
 			stubProfiles({
 				windows: {

@@ -1519,6 +1519,38 @@ export const webviewMessageHandler = async (
 
 			break
 
+		case "requestTerminalProfiles": {
+			// Allowlisted request: read VS Code's terminal profiles server-side and
+			// return only the sanitized profile names. The terminal profile dropdown
+			// only needs names, so this avoids routing it through the generic
+			// `getVSCodeSetting` handler (which reads any key the webview supplies).
+			try {
+				const names = new Set<string>()
+
+				for (const platform of ["windows", "osx", "linux"] as const) {
+					const profiles = vscode.workspace
+						.getConfiguration("terminal.integrated.profiles")
+						.get<Record<string, unknown>>(platform)
+
+					if (profiles && typeof profiles === "object") {
+						for (const name of Object.keys(profiles)) {
+							names.add(name)
+						}
+					}
+				}
+
+				await provider.postMessageToWebview({
+					type: "terminalProfiles",
+					profiles: Array.from(names).sort(),
+				})
+			} catch (error) {
+				console.error("Failed to get terminal profiles:", error)
+				await provider.postMessageToWebview({ type: "terminalProfiles", profiles: [] })
+			}
+
+			break
+		}
+
 		case "mode":
 			await provider.handleModeSwitch(message.text as Mode)
 			break

@@ -24,7 +24,7 @@ export class Terminal extends BaseTerminal {
 			const options: vscode.TerminalOptions = { cwd, name: "Roo Code", iconPath, env }
 
 			// When the user has chosen a specific terminal profile, resolve it to a
-			// shell path/args so the inline terminal uses that shell (e.g. Git Bash
+			// shell path/args/env so the inline terminal uses that shell (e.g. Git Bash
 			// with a UTF-8 charset on Windows). When unset, we leave shellPath/shellArgs
 			// undefined so VS Code's default terminal behavior is preserved (#119).
 			const profileShell = Terminal.getProfileShell()
@@ -34,6 +34,12 @@ export class Terminal extends BaseTerminal {
 
 				if (profileShell.shellArgs) {
 					options.shellArgs = profileShell.shellArgs
+				}
+
+				// Merge the profile's own env on top of the base env so profile-specific
+				// variables (e.g. locale/PATH) are not lost. A `null` value unsets one.
+				if (profileShell.env) {
+					options.env = { ...env, ...profileShell.env }
 				}
 			}
 
@@ -243,7 +249,7 @@ export class Terminal extends BaseTerminal {
 	 */
 	public static getProfileShell(
 		platform: NodeJS.Platform = process.platform,
-	): { shellPath: string; shellArgs?: string[] } | undefined {
+	): { shellPath: string; shellArgs?: string[]; env?: Record<string, string | null> } | undefined {
 		const profileName = Terminal.getTerminalProfile()
 
 		if (!profileName) {
@@ -257,7 +263,12 @@ export class Terminal extends BaseTerminal {
 			.get<Record<string, unknown>>(platformKey)
 
 		const profile = profiles?.[profileName] as
-			| { path?: string | string[]; args?: string | string[]; source?: string }
+			| {
+					path?: string | string[]
+					args?: string | string[]
+					source?: string
+					env?: Record<string, unknown>
+			  }
 			| null
 			| undefined
 
@@ -285,6 +296,26 @@ export class Terminal extends BaseTerminal {
 				? [profile.args]
 				: undefined
 
-		return { shellPath: pathValue, shellArgs }
+		// VS Code profiles may declare their own `env` (e.g. to set a UTF-8 locale or
+		// a custom PATH). Preserve it so the inline terminal doesn't lose environment
+		// the user configured on the profile. A `null` value unsets that variable.
+		// Values come from user `settings.json`, so sanitize to string/null only.
+		let env: Record<string, string | null> | undefined
+
+		if (profile.env && typeof profile.env === "object") {
+			const sanitized: Record<string, string | null> = {}
+
+			for (const [key, val] of Object.entries(profile.env)) {
+				if (typeof val === "string" || val === null) {
+					sanitized[key] = val
+				}
+			}
+
+			if (Object.keys(sanitized).length > 0) {
+				env = sanitized
+			}
+		}
+
+		return { shellPath: pathValue, shellArgs, env }
 	}
 }

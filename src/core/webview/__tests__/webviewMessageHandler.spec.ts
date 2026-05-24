@@ -167,6 +167,7 @@ vi.mock("../../mentions/resolveImageMentions", () => ({
 }))
 
 import { resolveImageMentions } from "../../mentions/resolveImageMentions"
+import { Terminal } from "../../../integrations/terminal/Terminal"
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
@@ -863,6 +864,38 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 
 		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("webviewMessageHandler - terminalProfile", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("bridges a saved terminalProfile from updateSettings into the process-wide terminal state", async () => {
+		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: "Git Bash" },
+		})
+
+		expect(setTerminalProfileSpy).toHaveBeenCalledWith("Git Bash")
+
+		setTerminalProfileSpy.mockRestore()
+	})
+
+	it("clears the terminal profile when updateSettings sends undefined", async () => {
+		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: undefined },
+		})
+
+		expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
+
+		setTerminalProfileSpy.mockRestore()
 	})
 })
 

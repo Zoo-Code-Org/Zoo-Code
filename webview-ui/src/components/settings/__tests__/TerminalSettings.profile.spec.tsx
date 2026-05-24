@@ -33,11 +33,7 @@ vi.mock("@/components/ui", () => ({
 	SelectContent: ({ children }: any) => <div>{children}</div>,
 	SelectItem: ({ children, value }: any) => <div data-item-value={value}>{children}</div>,
 	Slider: ({ value, onValueChange }: any) => (
-		<input
-			type="range"
-			value={value?.[0] ?? 0}
-			onChange={(e) => onValueChange([parseFloat(e.target.value)])}
-		/>
+		<input type="range" value={value?.[0] ?? 0} onChange={(e) => onValueChange([parseFloat(e.target.value)])} />
 	),
 }))
 
@@ -88,13 +84,11 @@ describe("TerminalSettings inline terminal profile (#119)", () => {
 		return { setCachedStateField }
 	}
 
-	it("requests the VS Code terminal profile lists on mount", () => {
+	it("requests the terminal profile names on mount via the allowlisted message", () => {
 		setup()
 
-		const requested = postMessageMock.mock.calls.map((c) => c[0]?.setting)
-		expect(requested).toContain("terminal.integrated.profiles.windows")
-		expect(requested).toContain("terminal.integrated.profiles.osx")
-		expect(requested).toContain("terminal.integrated.profiles.linux")
+		const types = postMessageMock.mock.calls.map((c) => c[0]?.type)
+		expect(types).toContain("requestTerminalProfiles")
 	})
 
 	it("does not call setCachedStateField on init (only the Default option is shown)", () => {
@@ -104,18 +98,14 @@ describe("TerminalSettings inline terminal profile (#119)", () => {
 		expect(setCachedStateField).not.toHaveBeenCalled()
 	})
 
-	it("populates the dropdown from received profile lists and selecting one sets the profile name", () => {
+	it("populates the dropdown from the received profile names and selecting one sets the profile name", () => {
 		const { setCachedStateField } = setup()
 
-		// Simulate the extension responding with a Windows profile list.
+		// Simulate the extension responding with the sanitized profile names.
 		act(() => {
 			window.dispatchEvent(
 				new MessageEvent("message", {
-					data: {
-						type: "vsCodeSetting",
-						setting: "terminal.integrated.profiles.windows",
-						value: { "Git Bash": { path: "C:/Program Files/Git/bin/bash.exe" }, PowerShell: {} },
-					},
+					data: { type: "terminalProfiles", profiles: ["Git Bash", "PowerShell"] },
 				}),
 			)
 		})

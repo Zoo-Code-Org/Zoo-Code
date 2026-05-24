@@ -45,14 +45,6 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 // empty-string item value, so we map it to/from `undefined` in the handler.
 const DEFAULT_PROFILE_VALUE = "__default__"
 
-// VS Code stores terminal profiles per platform; we request all of them so the
-// profile dropdown works regardless of which OS the extension host runs on.
-const PROFILE_SETTING_KEYS = [
-	"terminal.integrated.profiles.windows",
-	"terminal.integrated.profiles.osx",
-	"terminal.integrated.profiles.linux",
-]
-
 export const TerminalSettings = ({
 	terminalOutputPreviewSize,
 	terminalShellIntegrationTimeout,
@@ -75,7 +67,9 @@ export const TerminalSettings = ({
 
 	useMount(() => {
 		vscode.postMessage({ type: "getVSCodeSetting", setting: "terminal.integrated.inheritEnv" })
-		PROFILE_SETTING_KEYS.forEach((setting) => vscode.postMessage({ type: "getVSCodeSetting", setting }))
+		// Request the terminal profile names through a dedicated, allowlisted message
+		// (the extension reads the profiles and returns only sanitized names).
+		vscode.postMessage({ type: "requestTerminalProfiles" })
 	})
 
 	const onMessage = useCallback((event: MessageEvent) => {
@@ -83,20 +77,12 @@ export const TerminalSettings = ({
 
 		switch (message.type) {
 			case "vsCodeSetting":
-				switch (message.setting) {
-					case "terminal.integrated.inheritEnv":
-						setInheritEnv(message.value ?? true)
-						break
-					case "terminal.integrated.profiles.windows":
-					case "terminal.integrated.profiles.osx":
-					case "terminal.integrated.profiles.linux": {
-						const names = message.value && typeof message.value === "object" ? Object.keys(message.value) : []
-						setProfileNames((prev) => Array.from(new Set([...prev, ...names])).sort())
-						break
-					}
-					default:
-						break
+				if (message.setting === "terminal.integrated.inheritEnv") {
+					setInheritEnv(message.value ?? true)
 				}
+				break
+			case "terminalProfiles":
+				setProfileNames(message.profiles ?? [])
 				break
 			default:
 				break

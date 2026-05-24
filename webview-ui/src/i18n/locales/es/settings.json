@@ -745,7 +745,7 @@
 		"profile": {
 			"label": "Perfil de terminal en línea",
 			"default": "Predeterminado (shell predeterminado de VS Code)",
-			"description": "Elige qué perfil de terminal de VS Code usa el terminal en línea. Selecciona un shell UTF-8 como Git Bash si el shell predeterminado distorsiona la salida no ASCII (por ejemplo, en Windows con página de códigos GBK). Déjalo en Predeterminado para mantener el comportamiento predeterminado de VS Code."
+			"description": "Elige qué shell lanza el Terminal en línea, usando la ruta y argumentos de un perfil de terminal de VS Code. Esto solo cambia el binario del shell — el Terminal en línea sigue evitando la integración del shell, prompts y plugins. Útil para elegir un shell UTF-8 como Git Bash cuando el predeterminado distorsiona la salida no ASCII (por ejemplo, en Windows con página de códigos GBK). Déjalo en Predeterminado para mantener el shell predeterminado de VS Code."
 		}
 	},
 	"advancedSettings": {
