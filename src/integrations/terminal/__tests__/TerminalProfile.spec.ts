@@ -10,8 +10,10 @@ vi.mock("execa", () => ({
 }))
 
 describe("Terminal inline terminal profile (#119)", () => {
-	let getConfigurationSpy: ReturnType<typeof vi.spyOn>
-	let createTerminalSpy: ReturnType<typeof vi.spyOn>
+	// VS Code's getConfiguration/createTerminal are overloaded, so the precise
+	// spy MockInstance type isn't worth fighting in a test — `any` keeps it simple.
+	let getConfigurationSpy: any
+	let createTerminalSpy: any
 
 	const mockTerminal = () =>
 		({
