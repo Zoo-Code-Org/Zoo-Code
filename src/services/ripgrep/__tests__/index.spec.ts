@@ -1,19 +1,16 @@
 // npx vitest run src/services/ripgrep/__tests__/index.spec.ts
 
+import path from "path"
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
 import { truncateLine, getBinPath } from "../index"
+import { fileExistsAtPath } from "../../../utils/fs"
 
-const ripgrepMock = vi.hoisted(() => ({ value: undefined as string | undefined, throws: false }))
-
-vi.mock("@vscode/ripgrep", () => ({
-	get rgPath() {
-		if (ripgrepMock.throws) {
-			throw new Error("simulated @vscode/ripgrep failure")
-		}
-		return ripgrepMock.value
-	},
+vi.mock("../../../utils/fs", () => ({
+	fileExistsAtPath: vi.fn(),
 }))
+
+const mockFileExists = vi.mocked(fileExistsAtPath)
 
 describe("Ripgrep line truncation", () => {
 	// The default MAX_LINE_LENGTH is 500 in the implementation
@@ -63,34 +60,32 @@ describe("Ripgrep line truncation", () => {
 })
 
 describe("getBinPath", () => {
+	const appRoot = "/fake/vscode/appRoot"
+	const binName = process.platform.startsWith("win") ? "rg.exe" : "rg"
+	const platformDir = `${process.platform}-${process.arch}`
+
 	beforeEach(() => {
-		ripgrepMock.value = undefined
-		ripgrepMock.throws = false
+		mockFileExists.mockReset()
+		mockFileExists.mockResolvedValue(false)
 	})
 
-	it("returns the rgPath exported by @vscode/ripgrep", async () => {
-		ripgrepMock.value = "/path/to/rg"
+	it("resolves ripgrep from the classic @vscode/ripgrep layout", async () => {
+		const rg = path.join(appRoot, "node_modules/@vscode/ripgrep/bin", binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
 
-		expect(await getBinPath("/ignored")).toBe("/path/to/rg")
+		expect(await getBinPath(appRoot)).toBe(rg)
 	})
 
-	it("rewrites node_modules.asar to node_modules.asar.unpacked", async () => {
-		ripgrepMock.value = "/app/node_modules.asar/@vscode/ripgrep-universal/bin/win32-x64/rg.exe"
+	it("resolves ripgrep from the @vscode/ripgrep-universal layout (VS Code Insiders)", async () => {
+		const rg = path.join(appRoot, "node_modules/@vscode/ripgrep-universal/bin", platformDir, binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
 
-		expect(await getBinPath("/ignored")).toBe(
-			"/app/node_modules.asar.unpacked/@vscode/ripgrep-universal/bin/win32-x64/rg.exe",
-		)
+		expect(await getBinPath(appRoot)).toBe(rg)
 	})
 
-	it("returns undefined when rgPath is not exported", async () => {
-		ripgrepMock.value = undefined
+	it("returns undefined when ripgrep cannot be found", async () => {
+		mockFileExists.mockResolvedValue(false)
 
-		expect(await getBinPath("/ignored")).toBeUndefined()
-	})
-
-	it("returns undefined when rgPath resolution throws", async () => {
-		ripgrepMock.throws = true
-
-		expect(await getBinPath("/ignored")).toBeUndefined()
+		expect(await getBinPath(appRoot)).toBeUndefined()
 	})
 })

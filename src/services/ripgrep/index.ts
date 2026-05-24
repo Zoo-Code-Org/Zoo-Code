@@ -5,12 +5,13 @@ import * as readline from "readline"
 import * as vscode from "vscode"
 
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
+import { fileExistsAtPath } from "../../utils/fs"
 /*
 This file provides functionality to perform regex searches on files using ripgrep.
 Inspired by: https://github.com/DiscreteTom/vscode-ripgrep-utils
 
 Key components:
-1. getBinPath: Resolves the ripgrep binary via the `@vscode/ripgrep` package — VS Code's require interceptor aliases it to the bundled binary at runtime.
+1. getBinPath: Locates the ripgrep binary (in the VS Code install, or on the system PATH).
 2. execRipgrep: Executes the ripgrep command and returns the output.
 3. regexSearchFiles: The main function that performs regex searches on files.
    - Parameters:
@@ -50,6 +51,11 @@ rel/path/to/helper.ts
 const isWindows = process.platform.startsWith("win")
 const binName = isWindows ? "rg.exe" : "rg"
 
+// VS Code's @vscode/ripgrep-universal package (used by recent VS Code builds,
+// including the Insiders staged-install layout) nests the binary under
+// bin/<platform>-<arch>/ rather than directly in bin/.
+const ripgrepUniversalBinDir = `bin/${process.platform}-${process.arch}`
+
 interface SearchFileResult {
 	file: string
 	searchResults: SearchResult[]
@@ -79,27 +85,28 @@ export function truncateLine(line: string, maxLength: number = MAX_LINE_LENGTH):
 	return line.length > maxLength ? line.substring(0, maxLength) + " [truncated...]" : line
 }
 /**
- * Get the path to the ripgrep binary.
+ * Get the path to the ripgrep binary shipped inside the VS Code installation.
  *
- * Imports `@vscode/ripgrep` and returns its `rgPath` export. In the extension
- * host this import is intercepted by VS Code (see microsoft/vscode
- * `src/vs/workbench/api/common/extHostRequireInterceptor.ts`) and aliased to
- * VS Code's own `@vscode/ripgrep-universal`, so we inherit whatever ripgrep
- * VS Code ships with — including the Insiders staged-install layout that the
- * old hardcoded path list missed (microsoft/vscode#252063). The
- * `node_modules.asar` → `node_modules.asar.unpacked` substitution mirrors
- * VS Code's own resolution in `src/vs/base/node/ripgrep.ts`.
+ * Both the long-standing `@vscode/ripgrep` layout and the newer
+ * `@vscode/ripgrep-universal` layout are checked — the latter is what VS Code
+ * Insiders' staged-install builds use (see microsoft/vscode#252063).
  *
- * The `vscodeAppRoot` parameter is retained for API stability and ignored.
- * Returns `undefined` if `@vscode/ripgrep` is unavailable.
+ * Returns `undefined` when ripgrep cannot be located.
  */
-export async function getBinPath(_vscodeAppRoot: string): Promise<string | undefined> {
-	try {
-		const m = await import("@vscode/ripgrep")
-		return m.rgPath?.replace(/\bnode_modules\.asar\b/, "node_modules.asar.unpacked")
-	} catch {
-		return undefined
+export async function getBinPath(vscodeAppRoot: string): Promise<string | undefined> {
+	const checkPath = async (pkgFolder: string) => {
+		const fullPath = path.join(vscodeAppRoot, pkgFolder, binName)
+		return (await fileExistsAtPath(fullPath)) ? fullPath : undefined
 	}
+
+	return (
+		(await checkPath("node_modules/@vscode/ripgrep/bin/")) ||
+		(await checkPath("node_modules/vscode-ripgrep/bin")) ||
+		(await checkPath("node_modules.asar.unpacked/vscode-ripgrep/bin/")) ||
+		(await checkPath("node_modules.asar.unpacked/@vscode/ripgrep/bin/")) ||
+		(await checkPath(`node_modules/@vscode/ripgrep-universal/${ripgrepUniversalBinDir}`)) ||
+		(await checkPath(`node_modules.asar.unpacked/@vscode/ripgrep-universal/${ripgrepUniversalBinDir}`))
+	)
 }
 
 async function execRipgrep(bin: string, args: string[]): Promise<string> {
