@@ -365,7 +365,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	private presentAssistantMessageSafe(): void {
 		void presentAssistantMessage(this).catch((error) => {
-			if (this.abort) {
+			// Discriminate on the error message rather than `this.abort` state,
+			// which can flip between the throw and the catch microtask running:
+			// a real failure followed by an abort flip would otherwise be
+			// silently swallowed, and a stale abort error logged as a failure.
+			// The abort throw site in presentAssistantMessage emits a message
+			// ending in "aborted" (matching the other abort-throw contracts in
+			// this file), so we suppress exactly that.
+			if (error instanceof Error && error.message.endsWith("aborted")) {
 				return
 			}
 			console.error(`[Task#presentAssistantMessage] task ${this.taskId}.${this.instanceId} failed:`, error)

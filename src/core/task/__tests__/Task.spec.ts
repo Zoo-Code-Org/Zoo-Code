@@ -2513,6 +2513,67 @@ describe("Cline", () => {
 				boom,
 			)
 		})
+
+		it("logs a non-abort error even when this.abort flips true after the throw", async () => {
+			// Pins that the message-based discriminator is load-bearing, not the
+			// state check. Under the previous `if (this.abort) return` guard this
+			// case (a genuine downstream failure racing with an abort flip between
+			// the throw and the catch microtask) would silently swallow the error.
+			const assistantMessageModule = await import("../../assistant-message")
+			const realError = new Error("genuine downstream failure")
+			const presentSpy = vi.spyOn(assistantMessageModule, "presentAssistantMessage").mockRejectedValue(realError)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await flushMicrotasks()
+			consoleErrorSpy.mockClear()
+
+			// Simulate the TOCTOU race: abort flips between throw and catch.
+			task.abort = true
+			;(task as any).presentAssistantMessageSafe()
+			await flushMicrotasks()
+
+			expect(presentSpy).toHaveBeenCalledTimes(1)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[Task#presentAssistantMessage] task"),
+				realError,
+			)
+		})
+
+		it("suppresses an abort-pattern error by message match even when this.abort is false", async () => {
+			// Pins the inverse: message wins over state. A stale abort rejection
+			// arriving before `this.abort` has been observed as true must still be
+			// suppressed, so the catch handler never logs the expected
+			// cancellation rejection as a real failure.
+			const assistantMessageModule = await import("../../assistant-message")
+			const abortError = new Error("[Task#presentAssistantMessage] task t.i aborted")
+			const presentSpy = vi.spyOn(assistantMessageModule, "presentAssistantMessage").mockRejectedValue(abortError)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await flushMicrotasks()
+			consoleErrorSpy.mockClear()
+
+			expect(task.abort).toBeFalsy()
+			;(task as any).presentAssistantMessageSafe()
+			await flushMicrotasks()
+
+			expect(presentSpy).toHaveBeenCalledTimes(1)
+			const presentErrors = consoleErrorSpy.mock.calls.filter(
+				(call) => typeof call[0] === "string" && call[0].includes("[Task#presentAssistantMessage]"),
+			)
+			expect(presentErrors).toHaveLength(0)
+		})
 	})
 })
 
