@@ -73,7 +73,15 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 	context.subscriptions.push(registerRipgrepDiagnosticCommand())
 }
 
-const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOptions): Record<CommandId, any> => ({
+// `showRipgrepDiagnostic` is registered separately by
+// `registerRipgrepDiagnosticCommand` (above), which owns the OutputChannel
+// lifecycle alongside the command registration, so it's intentionally
+// excluded from this map.
+const getCommandsMap = ({
+	context,
+	outputChannel,
+	provider,
+}: RegisterCommandOptions): Record<Exclude<CommandId, "showRipgrepDiagnostic">, any> => ({
 	activationCompleted: () => {},
 	plusButtonClicked: async () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)

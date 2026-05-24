@@ -7,7 +7,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 import { getRipgrepDiagnostic } from "../diagnostic"
 
 const ripgrepMock = vi.hoisted(() => ({
-	value: undefined as { rgPath?: string } | undefined,
+	value: undefined as { rgPath?: string; loadError?: string } | undefined,
 }))
 
 const fsMock = vi.hoisted(() => ({
@@ -66,12 +66,37 @@ describe("getRipgrepDiagnostic", () => {
 		expect(report).toContain("fileExistsAtPath: true")
 	})
 
+	it("does not double-substitute when rgPath already contains node_modules.asar.unpacked", async () => {
+		// A previous `\b` regex matched the `r`/`.` boundary inside
+		// `node_modules.asar.unpacked`, producing `.unpacked.unpacked`.
+		const rgPath = "/app/node_modules.asar.unpacked/foo/rg"
+		ripgrepMock.value = { rgPath }
+		fsMock.existing = new Set([rgPath])
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).toContain(`after .asar→.asar.unpacked: ${rgPath}`)
+		expect(report).not.toContain("node_modules.asar.unpacked.unpacked")
+		expect(report).toContain("fileExistsAtPath: true")
+	})
+
 	it("reports require failure when loadRipgrep returns undefined", async () => {
 		ripgrepMock.value = undefined
 
 		const report = await getRipgrepDiagnostic(APP_ROOT)
 
 		expect(report).toContain("loadRipgrep() returned undefined (require threw)")
+	})
+
+	it("reports the loadError when loadRipgrep returns a loadError field", async () => {
+		ripgrepMock.value = { loadError: "Cannot find module '@vscode/ripgrep'" }
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).toContain("loadRipgrep() returned loadError: Cannot find module '@vscode/ripgrep'")
+		// Should not also push the success-branch lines.
+		expect(report).not.toContain("after .asar→.asar.unpacked:")
+		expect(report).not.toContain("rgPath:")
 	})
 
 	it("reports rgPath: (undefined) when loadRipgrep returns an object without rgPath", async () => {

@@ -5,12 +5,17 @@
  * `@vscode/ripgrep` resolves through the latter at test time because it's
  * a real devDep installed in `node_modules`.
  *
- * Returns `undefined` if the package can't be loaded for any reason.
+ * On require failure returns `{ loadError }` so the diagnostic can surface
+ * the actual error message instead of dropping it.
  */
-export function loadRipgrep(): { rgPath?: string } | undefined {
+export type LoadRipgrepResult = { rgPath?: string; loadError?: string }
+
+export function loadRipgrep(): LoadRipgrepResult | undefined {
 	try {
-		return require("@vscode/ripgrep") as { rgPath?: string }
-	} catch {
-		return undefined
+		return require("@vscode/ripgrep") as LoadRipgrepResult
+	} catch (error) {
+		return {
+			loadError: error instanceof Error ? error.message : String(error),
+		}
 	}
 }

@@ -162,7 +162,7 @@
 			},
 			{
 				"command": "zoo-code.showRipgrepDiagnostic",
-				"title": "Show Ripgrep Diagnostic",
+				"title": "%command.showRipgrepDiagnostic.title%",
 				"category": "%configuration.title%"
 			},
 			{

@@ -2,6 +2,7 @@ import * as path from "path"
 import * as vscode from "vscode"
 
 import { fileExistsAtPath } from "../../utils/fs"
+import { getCommand } from "../../utils/commands"
 import { loadRipgrep } from "./internal/loadRipgrep"
 
 const binName = process.platform.startsWith("win") ? "rg.exe" : "rg"
@@ -47,12 +48,16 @@ export async function getRipgrepDiagnostic(vscodeAppRoot: string): Promise<strin
 	const m = loadRipgrep()
 	if (!m) {
 		lines.push(`loadRipgrep() returned undefined (require threw)`)
+	} else if (m.loadError) {
+		lines.push(`loadRipgrep() returned loadError: ${m.loadError}`)
 	} else {
 		const keys = Object.keys(m).join(",") || "(none)"
 		lines.push(`loadRipgrep() returned object. keys: ${keys}`)
 		lines.push(`rgPath: ${m.rgPath ?? "(undefined)"}`)
 		if (m.rgPath) {
-			const fixed = m.rgPath.replace(/\bnode_modules\.asar\b/, "node_modules.asar.unpacked")
+			// Path-separator lookahead instead of `\b` — `\b` matches at the `r`/`.` boundary
+			// inside `node_modules.asar.unpacked` too, producing a double `.unpacked.unpacked`.
+			const fixed = m.rgPath.replace(/node_modules\.asar(?=[\\/])/, "node_modules.asar.unpacked")
 			lines.push(`after .asar→.asar.unpacked: ${fixed}`)
 			lines.push(`fileExistsAtPath: ${await fileExistsAtPath(fixed)}`)
 		}
@@ -68,15 +73,21 @@ export async function getRipgrepDiagnostic(vscodeAppRoot: string): Promise<strin
 /**
  * Registers the `zoo-code.showRipgrepDiagnostic` command. Thin wrapper —
  * runs `getRipgrepDiagnostic`, shows the result in an output channel,
- * copies it to the clipboard, and shows an info toast.
+ * copies it to the clipboard, and shows an info toast. The OutputChannel
+ * is created once at registration and disposed alongside the command via
+ * the composite Disposable returned here.
  */
+/* c8 ignore start -- thin vscode wrapper; covered by manual invocation. */
 export function registerRipgrepDiagnosticCommand(): vscode.Disposable {
-	return vscode.commands.registerCommand("zoo-code.showRipgrepDiagnostic", async () => {
+	const channel = vscode.window.createOutputChannel("Zoo Code Ripgrep Diagnostic")
+	const command = vscode.commands.registerCommand(getCommand("showRipgrepDiagnostic"), async () => {
 		const report = await getRipgrepDiagnostic(vscode.env.appRoot)
-		const channel = vscode.window.createOutputChannel("Zoo Code Ripgrep Diagnostic")
+		channel.clear()
 		channel.appendLine(report)
 		channel.show(true)
 		await vscode.env.clipboard.writeText(report)
 		await vscode.window.showInformationMessage("Zoo Code: ripgrep diagnostic copied to clipboard.")
 	})
+	return vscode.Disposable.from(command, channel)
 }
+/* c8 ignore stop */
