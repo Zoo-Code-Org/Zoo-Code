@@ -83,6 +83,13 @@ describe("getBinPath", () => {
 		expect(await getBinPath(appRoot)).toBe(rg)
 	})
 
+	it("resolves ripgrep from the unpacked `@vscode/ripgrep-universal` layout", async () => {
+		const rg = path.join(appRoot, "node_modules.asar.unpacked/@vscode/ripgrep-universal/bin", platformDir, binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
 	it("returns undefined when ripgrep cannot be found", async () => {
 		mockFileExists.mockResolvedValue(false)
 
