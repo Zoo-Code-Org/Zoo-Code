@@ -37,6 +37,18 @@ function probeCandidates(vscodeAppRoot: string): readonly string[] {
  * reports which ones exist on disk.
  */
 export async function getRipgrepDiagnostic(vscodeAppRoot: string): Promise<string> {
+	if (!vscodeAppRoot || vscodeAppRoot.trim() === "") {
+		return [
+			`Zoo Code Ripgrep Diagnostic (${new Date().toISOString()})`,
+			`vscode.version: ${vscode.version}`,
+			`vscode.env.appRoot: (empty)`,
+			``,
+			`Cannot run diagnostic: vscode.env.appRoot is empty. This usually means`,
+			`the extension activated outside a VS Code-style host (e.g., a remote`,
+			`extension host that doesn't expose appRoot). The require-interceptor`,
+			`path may still work; the path-probe step requires a valid appRoot.`,
+		].join("\n")
+	}
 	const lines: string[] = [
 		`Zoo Code Ripgrep Diagnostic (${new Date().toISOString()})`,
 		`vscode.version: ${vscode.version}`,

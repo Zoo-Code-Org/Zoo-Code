@@ -130,4 +130,27 @@ describe("getRipgrepDiagnostic", () => {
 		}
 		expect(report).not.toContain("✓ ")
 	})
+
+	it("rewrites node_modules.asar to node_modules.asar.unpacked on Windows paths (backslash separator)", async () => {
+		// Pure string-substitution test: the literal `win32-x64` segment is
+		// not derived from process.platform/arch, so this runs on any host.
+		const rgPath = "C:\\app\\node_modules.asar\\@vscode\\ripgrep-universal\\bin\\win32-x64\\rg.exe"
+		const substituted = "C:\\app\\node_modules.asar.unpacked\\@vscode\\ripgrep-universal\\bin\\win32-x64\\rg.exe"
+		ripgrepMock.value = { rgPath }
+		fsMock.existing = new Set([substituted])
+
+		const report = await getRipgrepDiagnostic("C:\\app")
+
+		expect(report).toContain(`after .asar→.asar.unpacked: ${substituted}`)
+		expect(report).toContain("fileExistsAtPath: true")
+	})
+
+	it("returns an explanatory report when vscode.env.appRoot is empty", async () => {
+		const report = await getRipgrepDiagnostic("")
+
+		expect(report).toContain("vscode.env.appRoot: (empty)")
+		expect(report).toContain("Cannot run diagnostic")
+		// path probe should NOT have run
+		expect(report).not.toContain("--- step 2: path probe under appRoot ---")
+	})
 })
