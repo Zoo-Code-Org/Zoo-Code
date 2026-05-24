@@ -61,9 +61,20 @@ interface BedrockInferenceConfig {
 // Define interface for Bedrock additional model request fields
 // This includes thinking configuration, 1M context beta, and other model-specific parameters
 interface BedrockAdditionalModelFields {
-	thinking?: {
-		type: "enabled"
-		budget_tokens: number
+	thinking?:
+		| {
+				type: "enabled"
+				budget_tokens: number
+		  }
+		| {
+				// Claude 4.7+ adaptive thinking — no budget_tokens, uses output_config.effort instead
+				type: "adaptive"
+				// "summarized" shows thinking content in UI; omit to keep thinking internal only
+				display?: "summarized" | "none"
+		  }
+	output_config?: {
+		// Claude 4.7+ effort levels: "low" | "medium" | "high" | "xhigh" | "max"
+		effort: string
 	}
 	anthropic_beta?: string[]
 	[key: string]: any // Add index signature to be compatible with DocumentType
@@ -381,6 +392,11 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		let additionalModelRequestFields: BedrockAdditionalModelFields | undefined
 		let thinkingEnabled = false
 
+		// Detect model generation for API compatibility
+		// Claude 4.7+ removed sampling params (temperature/top_p/top_k) and uses adaptive thinking
+		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		const isGen47Model = baseModelId.includes("opus-4-7") || baseModelId.includes("sonnet-4-7")
+
 		// Determine if thinking should be enabled
 		// metadata?.thinking?.enabled: Explicitly enabled through API metadata (direct request)
 		// shouldUseReasoningBudget(): Enabled through user settings (enableReasoningEffort = true)
@@ -392,27 +408,38 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		if ((isThinkingExplicitlyEnabled || isThinkingEnabledBySettings) && modelConfig.info.supportsReasoningBudget) {
 			thinkingEnabled = true
-			additionalModelRequestFields = {
-				thinking: {
-					type: "enabled",
-					budget_tokens: metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096,
-				},
+			if (isGen47Model) {
+				// Claude 4.7+ uses adaptive thinking with effort levels — budget_tokens causes 400 error
+				// display: "summarized" surfaces thinking content in Zoo Code UI
+				additionalModelRequestFields = {
+					thinking: { type: "adaptive", display: "summarized" },
+					output_config: { effort: "xhigh" },
+				}
+			} else {
+				additionalModelRequestFields = {
+					thinking: {
+						type: "enabled",
+						budget_tokens: metadata?.thinking?.maxThinkingTokens || modelConfig.reasoningBudget || 4096,
+					},
+				}
 			}
 			logger.info("Extended thinking enabled for Bedrock request", {
 				ctx: "bedrock",
 				modelId: modelConfig.id,
-				thinking: additionalModelRequestFields.thinking,
+				thinking: additionalModelRequestFields?.thinking,
 			})
 		}
 
 		const inferenceConfig: BedrockInferenceConfig = {
 			maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
-			temperature: modelConfig.temperature ?? (this.options.modelTemperature as number),
+			// Claude 4.7+ removed temperature parameter entirely — causes 400 error if sent
+			...(isGen47Model
+				? {}
+				: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
 		}
 
 		// Check if 1M context is enabled for supported Claude 4 models
-		// Use parseBaseModelId to handle cross-region inference prefixes
-		const baseModelId = this.parseBaseModelId(modelConfig.id)
+		// Use parseBaseModelId to handle cross-region inference prefixes (computed above)
 		const is1MContextEnabled =
 			BEDROCK_1M_CONTEXT_MODEL_IDS.includes(baseModelId as any) && this.options.awsBedrock1MContext
 
