@@ -2486,7 +2486,7 @@ describe("Cline", () => {
 
 			expect(presentSpy).toHaveBeenCalledTimes(1)
 			const presentErrors = consoleErrorSpy.mock.calls.filter(
-				(call) => typeof call[0] === "string" && call[0].includes("[Task#presentAssistantMessage]"),
+				(call: unknown[]) => typeof call[0] === "string" && call[0].includes("[Task#presentAssistantMessage]"),
 			)
 			expect(presentErrors).toHaveLength(0)
 		})
@@ -2570,9 +2570,82 @@ describe("Cline", () => {
 
 			expect(presentSpy).toHaveBeenCalledTimes(1)
 			const presentErrors = consoleErrorSpy.mock.calls.filter(
-				(call) => typeof call[0] === "string" && call[0].includes("[Task#presentAssistantMessage]"),
+				(call: unknown[]) => typeof call[0] === "string" && call[0].includes("[Task#presentAssistantMessage]"),
 			)
 			expect(presentErrors).toHaveLength(0)
+		})
+
+		it("logs (instead of crashing) when updateClineMessage rejects from the say() partial-update path", async () => {
+			// Pins the symmetric .catch arm on the fire-and-forget
+			// updateClineMessage call in say(). The callee's webview post is
+			// internally guarded, but its synchronous emit can throw via a
+			// consumer-attached listener — that path must surface as a log,
+			// not an unhandled rejection.
+			const boom = new Error("updateClineMessage boom")
+			const updateSpy = vi.spyOn(Task.prototype as any, "updateClineMessage").mockImplementation(async () => {
+				throw boom
+			})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Seed a prior partial "say" so the partial-update branch fires.
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "say",
+				say: "text",
+				text: "partial",
+				partial: true,
+			})
+
+			await task.say("text", "updated partial", undefined, true)
+			await flushMicrotasks()
+
+			expect(updateSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#say] updateClineMessage failed:", boom)
+			updateSpy.mockRestore()
+		})
+
+		it("logs (instead of crashing) when updateClineMessage rejects from the ask() complete-partial path", async () => {
+			// Pins the symmetric .catch arm on the fire-and-forget
+			// updateClineMessage call in ask() when finalizing a partial.
+			const boom = new Error("updateClineMessage boom")
+			const updateSpy = vi.spyOn(Task.prototype as any, "updateClineMessage").mockImplementation(async () => {
+				throw boom
+			})
+			const saveSpy = vi.spyOn(Task.prototype as any, "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Seed a prior partial "ask" of type "tool" so the complete-partial
+			// branch fires when ask("tool", ..., false) is called.
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "ask",
+				ask: "tool",
+				text: "partial",
+				partial: true,
+			})
+
+			// ask() resolves only after a response — fire-and-forget so the
+			// promise the suite awaits stays bounded. The .catch on the
+			// pending ask handles the never-resolved promise.
+			void task.ask("tool", "complete", false).catch(() => {})
+			await flushMicrotasks()
+
+			expect(updateSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#ask] updateClineMessage failed:", boom)
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
 		})
 	})
 })

@@ -1197,8 +1197,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// data or one whole message at a time so ignore partial for
 					// saves, and only post parts of partial message instead of
 					// whole array in new listener.
-					/* v8 ignore next -- fire-and-forget webview update; rejection is benign */
-					void this.updateClineMessage(lastMessage)
+					// Fire-and-forget: the webview post is internally guarded, but
+					// the `RooCodeEventName.Message` emit can synchronously throw
+					// if any consumer-attached listener does, which would surface
+					// here as an unhandled rejection. Log it instead.
+					this.updateClineMessage(lastMessage).catch((error) => {
+						console.error("[Task#ask] updateClineMessage failed:", error)
+					})
 					// console.log("Task#ask: current ask promise was ignored (#1)")
 					throw new AskIgnoredError("updating existing partial")
 				} else {
@@ -1239,8 +1244,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						lastMessage.isAnswered = true
 					}
 					await this.saveClineMessages()
-					/* v8 ignore next -- fire-and-forget webview update; rejection is benign */
-					void this.updateClineMessage(lastMessage)
+					// Fire-and-forget: see updateClineMessage call above for the
+					// rationale on the .catch arm.
+					this.updateClineMessage(lastMessage).catch((error) => {
+						console.error("[Task#ask] updateClineMessage failed:", error)
+					})
 				} else {
 					// This is a new and complete message, so add it like normal.
 					this.askResponse = undefined
@@ -1700,8 +1708,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.images = images
 					lastMessage.partial = partial
 					lastMessage.progressStatus = progressStatus
-					// Fire-and-forget: see updateClineMessage call above for the
-					// rationale on the .catch arm.
+					// Fire-and-forget: webview post is internally guarded, but the
+					// `RooCodeEventName.Message` emit can synchronously throw via a
+					// consumer-attached listener. Surface that as a log, not an
+					// unhandled rejection.
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#say] updateClineMessage failed:", error)
 					})
