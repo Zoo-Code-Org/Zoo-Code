@@ -103,9 +103,13 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		void visibleProvider.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
+			.catch((error) => outputChannel.appendLine(`postMessageToWebview failed: ${error}`))
 		// Also explicitly post the visibility message to trigger scroll reliably
-		void visibleProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+			.catch((error) => outputChannel.appendLine(`postMessageToWebview failed: ${error}`))
 	},
 	historyButtonClicked: () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)
@@ -116,12 +120,16 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		void visibleProvider.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
+			.catch((error) => outputChannel.appendLine(`postMessageToWebview failed: ${error}`))
 	},
 	marketplaceButtonClicked: () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)
 		if (!visibleProvider) return
-		void visibleProvider.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
+			.catch((error) => outputChannel.appendLine(`postMessageToWebview failed: ${error}`))
 	},
 	newTask: handleNewTask,
 	setCustomStoragePath: async () => {
@@ -170,7 +178,9 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			return
 		}
 
-		void visibleProvider.postMessageToWebview({ type: "acceptInput" })
+		void visibleProvider
+			.postMessageToWebview({ type: "acceptInput" })
+			.catch((error) => outputChannel.appendLine(`postMessageToWebview failed: ${error}`))
 	},
 	toggleAutoApprove: async () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)

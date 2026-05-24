@@ -246,4 +246,28 @@ describe("registerCommands handlers", () => {
 
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 	})
+
+	// Representative coverage for the .catch arm on all five void-prefixed
+	// postMessageToWebview sites in registerCommands.ts (settingsButtonClicked
+	// posts twice, plus historyButtonClicked, marketplaceButtonClicked, and
+	// acceptInput). Each handler is synchronous, so the .catch arm runs on a
+	// microtask; awaiting Promise.resolve() flushes it before we assert.
+	it.each([
+		{ command: "zoo-code.settingsButtonClicked", expectedCalls: 2 },
+		{ command: "zoo-code.historyButtonClicked", expectedCalls: 1 },
+		{ command: "zoo-code.marketplaceButtonClicked", expectedCalls: 1 },
+		{ command: "zoo-code.acceptInput", expectedCalls: 1 },
+	])("$command logs to outputChannel when postMessageToWebview rejects", async ({ command, expectedCalls }) => {
+		const boom = new Error("boom")
+		mockVisibleProvider.postMessageToWebview.mockReset()
+		mockVisibleProvider.postMessageToWebview.mockRejectedValue(boom)
+
+		handlers[command]()
+
+		// Flush microtasks so the chained .catch arm runs.
+		await new Promise((resolve) => setImmediate(resolve))
+
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledTimes(expectedCalls)
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(`postMessageToWebview failed: ${boom}`)
+	})
 })
