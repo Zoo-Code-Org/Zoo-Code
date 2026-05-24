@@ -221,7 +221,27 @@ describe("registerCommands handlers", () => {
 	})
 
 	it("toggleAutoApprove awaits postMessage with toggleAutoApprove action", async () => {
-		await handlers["zoo-code.toggleAutoApprove"]()
+		// Deferred-promise pattern: pin that the handler actually awaits
+		// postMessageToWebview rather than fire-and-forgetting it. If `await`
+		// were dropped in the handler, handlerPromise would resolve before
+		// resolvePost() is called and `settled` would flip true at the
+		// microtask flush below, failing the pending-state assertion.
+		let resolvePost!: () => void
+		const postPromise = new Promise<void>((resolve) => {
+			resolvePost = resolve
+		})
+		mockVisibleProvider.postMessageToWebview.mockReturnValueOnce(postPromise)
+
+		const handlerPromise = handlers["zoo-code.toggleAutoApprove"]() as Promise<unknown>
+		let settled = false
+		void handlerPromise.then(() => {
+			settled = true
+		})
+		await Promise.resolve()
+		expect(settled).toBe(false)
+
+		resolvePost()
+		await handlerPromise
 
 		expect(mockVisibleProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "action",
@@ -233,7 +253,28 @@ describe("registerCommands handlers", () => {
 		const fakeSidebar = {} as vscode.WebviewView
 		setPanel(fakeSidebar, "sidebar")
 
-		await handlers["zoo-code.focusInput"]()
+		// Same deferred-promise pattern as above. focusInput first awaits
+		// focusPanel() (mocked to resolve sync) and then awaits
+		// provider.postMessageToWebview — so we flush two microtasks before
+		// asserting the pending state, to let the handler advance past the
+		// focusPanel await and suspend on the deferred postPromise.
+		let resolvePost!: () => void
+		const postPromise = new Promise<void>((resolve) => {
+			resolvePost = resolve
+		})
+		mockProvider.postMessageToWebview.mockReturnValueOnce(postPromise)
+
+		const handlerPromise = handlers["zoo-code.focusInput"]() as Promise<unknown>
+		let settled = false
+		void handlerPromise.then(() => {
+			settled = true
+		})
+		await Promise.resolve()
+		await Promise.resolve()
+		expect(settled).toBe(false)
+
+		resolvePost()
+		await handlerPromise
 
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "action",
