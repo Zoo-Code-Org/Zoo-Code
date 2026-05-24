@@ -452,6 +452,7 @@
 			"step3": "3. O crear un compte de servei amb credencials."
 		},
 		"googleCloudCredentials": "Credencials de Google Cloud",
+		"googleCloudCredentialsPathWarning": "Aquest camp espera el contingut JSON d'un fitxer de clau de compte de servei, no una ruta. Si tens una ruta, enganxa-la al camp <strong>Ruta del fitxer de clau de Google Cloud</strong> a continuació, o buida aquest camp i utilitza la variable d'entorn <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ruta del fitxer de clau de Google Cloud",
 		"googleCloudProjectId": "ID del projecte de Google Cloud",
 		"googleCloudRegion": "Regió de Google Cloud",

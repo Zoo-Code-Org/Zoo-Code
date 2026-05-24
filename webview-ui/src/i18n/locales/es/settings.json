@@ -452,6 +452,7 @@
 			"step3": "3. O crear una cuenta de servicio con credenciales."
 		},
 		"googleCloudCredentials": "Credenciales de Google Cloud",
+		"googleCloudCredentialsPathWarning": "Este campo espera el contenido JSON de un archivo de clave de cuenta de servicio, no una ruta. Si tienes una ruta, pégala en el campo <strong>Ruta del archivo de clave de Google Cloud</strong> a continuación, o borra este campo y utiliza la variable de entorno <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ruta del archivo de clave de Google Cloud",
 		"googleCloudProjectId": "ID del proyecto de Google Cloud",
 		"googleCloudRegion": "Región de Google Cloud",

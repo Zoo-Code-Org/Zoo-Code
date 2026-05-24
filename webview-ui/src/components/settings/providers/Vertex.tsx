@@ -1,4 +1,5 @@
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
+import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
@@ -8,6 +9,23 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
+
+// Detects when the "Google Cloud Credentials" field has received a filesystem
+// path instead of the raw JSON contents of a service-account key file. Mirrors
+// the runtime guard in src/api/providers/gemini.ts so the warning the user
+// sees in the UI matches what the runtime would log.
+function looksLikeFilePath(value: string): boolean {
+	const trimmed = value.trim()
+	if (!trimmed) {
+		return false
+	}
+	return (
+		/^[A-Za-z]:[\\/]/.test(trimmed) || // Windows: C:\... or C:/...
+		trimmed.startsWith("/") || // POSIX absolute: /home/...
+		trimmed.startsWith("~") || // POSIX home: ~/...
+		trimmed.startsWith(".") // POSIX relative: ./... or ../...
+	)
+}
 
 type VertexProps = {
 	apiConfiguration: ProviderSettings
@@ -33,6 +51,11 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				setApiConfigurationField(field, transform(event as E))
 			},
 		[setApiConfigurationField],
+	)
+
+	const credentialsLooksLikePath = useMemo(
+		() => looksLikeFilePath(apiConfiguration?.vertexJsonCredentials ?? ""),
+		[apiConfiguration?.vertexJsonCredentials],
 	)
 
 	return (
@@ -68,6 +91,17 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:providers.googleCloudCredentials")}</label>
 			</VSCodeTextField>
+			{credentialsLooksLikePath && (
+				<div data-testid="vertex-credentials-path-warning" className="text-sm text-vscode-errorForeground">
+					<Trans
+						i18nKey="settings:providers.googleCloudCredentialsPathWarning"
+						components={{
+							strong: <strong />,
+							code: <code />,
+						}}
+					/>
+				</div>
+			)}
 			<VSCodeTextField
 				value={apiConfiguration?.vertexKeyFile || ""}
 				onInput={handleInputChange("vertexKeyFile")}

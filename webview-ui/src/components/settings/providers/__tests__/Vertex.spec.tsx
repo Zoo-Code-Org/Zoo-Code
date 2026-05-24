@@ -26,6 +26,13 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({ t: (key: string) => key }),
 }))
 
+// The component uses <Trans> for the path-shape warning so it can interpolate
+// <strong>/<code> elements. The mock just renders the i18n key so the spec
+// can assert on its presence without depending on the English copy.
+vi.mock("react-i18next", () => ({
+	Trans: ({ i18nKey }: { i18nKey: string }) => <>{i18nKey}</>,
+}))
+
 vi.mock("@src/components/ui", () => ({
 	Select: ({ children, value, onValueChange }: any) => (
 		<div data-value={value} data-onvaluechange={onValueChange}>
@@ -123,5 +130,52 @@ describe("Vertex", () => {
 
 		expect(screen.queryByTestId("checkbox-url-context")).not.toBeInTheDocument()
 		expect(screen.queryByTestId("checkbox-grounding-search")).not.toBeInTheDocument()
+	})
+
+	describe("path-shape warning for Google Cloud Credentials field", () => {
+		it("does not render the warning when the credentials field is empty", () => {
+			render(
+				<Vertex
+					apiConfiguration={defaultApiConfiguration}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(screen.queryByTestId("vertex-credentials-path-warning")).not.toBeInTheDocument()
+		})
+
+		it("does not render the warning when the credentials field contains JSON content", () => {
+			render(
+				<Vertex
+					apiConfiguration={{
+						...defaultApiConfiguration,
+						vertexJsonCredentials: '{"type":"service_account","client_email":"x@y.z"}',
+					}}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(screen.queryByTestId("vertex-credentials-path-warning")).not.toBeInTheDocument()
+		})
+
+		it.each([
+			["Windows backslash path", "C:\\Users\\dev\\sa.json"],
+			["Windows forward-slash path", "C:/Users/dev/sa.json"],
+			["POSIX absolute path", "/home/dev/sa.json"],
+			["POSIX home path", "~/sa.json"],
+			["POSIX relative ./", "./sa.json"],
+			["POSIX relative ../", "../sa.json"],
+		])("renders the warning when the credentials field looks like %s", (_label, value) => {
+			render(
+				<Vertex
+					apiConfiguration={{ ...defaultApiConfiguration, vertexJsonCredentials: value }}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			const warning = screen.getByTestId("vertex-credentials-path-warning")
+			expect(warning).toBeInTheDocument()
+			expect(warning.textContent).toContain("settings:providers.googleCloudCredentialsPathWarning")
+		})
 	})
 })

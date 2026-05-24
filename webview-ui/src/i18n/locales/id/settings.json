@@ -452,6 +452,7 @@
 			"step3": "3. Atau buat service account dengan credentials."
 		},
 		"googleCloudCredentials": "Google Cloud Credentials",
+		"googleCloudCredentialsPathWarning": "Bidang ini mengharapkan konten JSON dari file kunci akun layanan, bukan path. Jika Anda memiliki path, tempelkan ke bidang <strong>Path File Key Google Cloud</strong> di bawah, atau kosongkan bidang ini dan gunakan variabel lingkungan <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Path File Key Google Cloud",
 		"googleCloudProjectId": "Google Cloud Project ID",
 		"googleCloudRegion": "Google Cloud Region",

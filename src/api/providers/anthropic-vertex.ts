@@ -1,6 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import { AnthropicVertex } from "@anthropic-ai/vertex-sdk"
-import { GoogleAuth, JWTInput } from "google-auth-library"
+import { GoogleAuth } from "google-auth-library"
 
 import {
 	type ModelInfo,
@@ -10,7 +10,6 @@ import {
 	ANTHROPIC_DEFAULT_MAX_TOKENS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 } from "@roo-code/types"
-import { safeJsonParse } from "@roo-code/core"
 
 import { ApiHandlerOptions } from "../../shared/api"
 
@@ -24,6 +23,7 @@ import {
 } from "../../core/prompts/tools/native-tools/converters"
 
 import { BaseProvider } from "./base-provider"
+import { parseVertexJsonCredentials } from "./gemini"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 
 // https://docs.anthropic.com/en/api/claude-on-vertex-ai
@@ -46,7 +46,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 				region,
 				googleAuth: new GoogleAuth({
 					scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-					credentials: safeJsonParse<JWTInput>(this.options.vertexJsonCredentials, undefined),
+					credentials: parseVertexJsonCredentials(this.options.vertexJsonCredentials),
 				}),
 			})
 		} else if (this.options.vertexKeyFile) {
