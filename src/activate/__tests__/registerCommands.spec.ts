@@ -292,7 +292,7 @@ describe("registerCommands handlers", () => {
 	// postMessageToWebview sites in registerCommands.ts (settingsButtonClicked
 	// posts twice, plus historyButtonClicked, marketplaceButtonClicked, and
 	// acceptInput). Each handler is synchronous, so the .catch arm runs on a
-	// microtask; awaiting Promise.resolve() flushes it before we assert. The
+	// microtask; setImmediate ensures all microtasks are flushed before we assert. The
 	// log messages carry a `[<handlerName>]` prefix so multi-failure logs
 	// remain unambiguous; the prefix is per-handler, not per-call (both of
 	// settingsButtonClicked's posts share the same prefix).
