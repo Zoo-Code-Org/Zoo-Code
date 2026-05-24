@@ -183,6 +183,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		terminalZshOhMy,
 		terminalZshP10k,
 		terminalZdotdir,
+		terminalProfile,
 		writeDelayMs,
 		showRooIgnoredFiles,
 		enableSubfolderRules,
@@ -397,6 +398,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					terminalZshOhMy,
 					terminalZshP10k,
 					terminalZdotdir,
+					terminalProfile,
 					terminalOutputPreviewSize: terminalOutputPreviewSize ?? "medium",
 					mcpEnabled,
 					maxOpenTabsContext: Math.min(Math.max(0, maxOpenTabsContext ?? 20), 500),
@@ -864,6 +866,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalZshOhMy={terminalZshOhMy}
 								terminalZshP10k={terminalZshP10k}
 								terminalZdotdir={terminalZdotdir}
+								terminalProfile={terminalProfile}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

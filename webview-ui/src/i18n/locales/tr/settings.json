@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "Ortam değişkenlerini devral",
 			"description": "Ana VS Code işleminden ortam değişkenlerini devralmak için bunu açın. <0>Daha fazla bilgi edinin</0>"
+		},
+		"profile": {
+			"label": "Satır içi terminal profili",
+			"default": "Varsayılan (VS Code varsayılan kabuğu)",
+			"description": "Satır içi terminalin kullanacağı VS Code terminal profilini seçin. Varsayılan kabuk ASCII olmayan çıktıyı bozuyorsa (örneğin GBK kod sayfası olan Windows'ta) Git Bash gibi bir UTF-8 kabuğu seçin. VS Code varsayılan davranışını korumak için Varsayılan olarak bırakın."
 		}
 	},
 	"advancedSettings": {

@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "Warisi variabel lingkungan",
 			"description": "Aktifkan untuk mewarisi variabel lingkungan dari proses induk VS Code. <0>Pelajari lebih lanjut</0>"
+		},
+		"profile": {
+			"label": "Profil terminal sebaris",
+			"default": "Default (shell default VS Code)",
+			"description": "Pilih profil terminal VS Code yang digunakan terminal sebaris. Pilih shell UTF-8 seperti Git Bash jika shell default merusak keluaran non-ASCII (misalnya di Windows dengan code page GBK). Biarkan pada Default untuk mempertahankan perilaku default VS Code."
 		}
 	},
 	"advancedSettings": {

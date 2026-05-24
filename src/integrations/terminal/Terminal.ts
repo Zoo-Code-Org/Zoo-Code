@@ -17,7 +17,28 @@ export class Terminal extends BaseTerminal {
 
 		const env = Terminal.getEnv()
 		const iconPath = new vscode.ThemeIcon("rocket")
-		this.terminal = terminal ?? vscode.window.createTerminal({ cwd, name: "Roo Code", iconPath, env })
+
+		if (terminal) {
+			this.terminal = terminal
+		} else {
+			const options: vscode.TerminalOptions = { cwd, name: "Roo Code", iconPath, env }
+
+			// When the user has chosen a specific terminal profile, resolve it to a
+			// shell path/args so the inline terminal uses that shell (e.g. Git Bash
+			// with a UTF-8 charset on Windows). When unset, we leave shellPath/shellArgs
+			// undefined so VS Code's default terminal behavior is preserved (#119).
+			const profileShell = Terminal.getProfileShell()
+
+			if (profileShell?.shellPath) {
+				options.shellPath = profileShell.shellPath
+
+				if (profileShell.shellArgs) {
+					options.shellArgs = profileShell.shellArgs
+				}
+			}
+
+			this.terminal = vscode.window.createTerminal(options)
+		}
 
 		if (Terminal.getTerminalZdotdir()) {
 			ShellIntegrationManager.terminalTmpDirs.set(id, env.ZDOTDIR)
@@ -190,5 +211,80 @@ export class Terminal extends BaseTerminal {
 		}
 
 		return env
+	}
+
+	/**
+	 * Returns the VS Code config section key (`windows`/`osx`/`linux`) used for
+	 * platform-specific terminal profiles.
+	 */
+	private static getPlatformProfileKey(platform: NodeJS.Platform = process.platform): "windows" | "osx" | "linux" {
+		if (platform === "win32") {
+			return "windows"
+		}
+
+		if (platform === "darwin") {
+			return "osx"
+		}
+
+		return "linux"
+	}
+
+	/**
+	 * Resolves the configured inline terminal profile (see `terminalProfile`
+	 * setting / {@link Terminal.getTerminalProfile}) into a shell path and args by
+	 * reading VS Code's `terminal.integrated.profiles.<platform>` configuration.
+	 *
+	 * This reuses VS Code's terminal profile concept so users can pick, for
+	 * example, a Git Bash profile (UTF-8) instead of the default cmd/PowerShell
+	 * (which may use a non-UTF-8 charset such as GBK) on Windows (#119).
+	 *
+	 * @returns The resolved shell path/args, or undefined when no profile is
+	 *   configured or the profile cannot be resolved (default behavior).
+	 */
+	public static getProfileShell(
+		platform: NodeJS.Platform = process.platform,
+	): { shellPath: string; shellArgs?: string[] } | undefined {
+		const profileName = Terminal.getTerminalProfile()
+
+		if (!profileName) {
+			return undefined
+		}
+
+		const platformKey = Terminal.getPlatformProfileKey(platform)
+
+		const profiles = vscode.workspace
+			.getConfiguration("terminal.integrated.profiles")
+			.get<Record<string, unknown>>(platformKey)
+
+		const profile = profiles?.[profileName] as
+			| { path?: string | string[]; args?: string | string[]; source?: string }
+			| null
+			| undefined
+
+		if (!profile) {
+			console.warn(`[Terminal] Configured terminal profile "${profileName}" not found for ${platformKey}.`)
+			return undefined
+		}
+
+		// A `path` may be a single string or an array of candidate paths (VS Code
+		// picks the first that exists). We pass the first candidate to createTerminal.
+		const pathValue = Array.isArray(profile.path) ? profile.path[0] : profile.path
+
+		if (!pathValue) {
+			// Profiles defined only by `source` (e.g. "PowerShell") can't be mapped to
+			// a shell path here, so we fall back to the default terminal.
+			console.warn(
+				`[Terminal] Terminal profile "${profileName}" has no resolvable "path"; using default terminal.`,
+			)
+			return undefined
+		}
+
+		const shellArgs = Array.isArray(profile.args)
+			? profile.args
+			: typeof profile.args === "string"
+				? [profile.args]
+				: undefined
+
+		return { shellPath: pathValue, shellArgs }
 	}
 }

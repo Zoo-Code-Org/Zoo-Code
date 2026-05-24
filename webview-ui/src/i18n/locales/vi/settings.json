@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "Kế thừa biến môi trường",
 			"description": "Bật tính năng này để kế thừa các biến môi trường từ quy trình mẹ của VS Code. <0>Tìm hiểu thêm</0>"
+		},
+		"profile": {
+			"label": "Hồ sơ terminal nội tuyến",
+			"default": "Mặc định (shell mặc định của VS Code)",
+			"description": "Chọn hồ sơ terminal VS Code mà terminal nội tuyến sử dụng. Chọn một shell UTF-8 như Git Bash nếu shell mặc định làm hỏng đầu ra không phải ASCII (ví dụ trên Windows với bảng mã GBK). Để Mặc định để giữ hành vi mặc định của VS Code."
 		}
 	},
 	"advancedSettings": {

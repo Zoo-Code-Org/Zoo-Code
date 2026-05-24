@@ -756,6 +756,11 @@
 		"inheritEnv": {
 			"label": "繼承環境變數",
 			"description": "啟用此選項以從父 VS Code 程序繼承環境變數。<0>了解更多</0>"
+		},
+		"profile": {
+			"label": "內嵌終端機設定檔",
+			"default": "預設（VS Code 預設 Shell）",
+			"description": "選擇內嵌終端機使用的 VS Code 終端機設定檔。如果預設 Shell 會使非 ASCII 輸出亂碼（例如在使用 GBK 字碼頁的 Windows 上），請選擇 Git Bash 等 UTF-8 Shell。保留為「預設」以維持 VS Code 的預設行為。"
 		}
 	},
 	"advancedSettings": {

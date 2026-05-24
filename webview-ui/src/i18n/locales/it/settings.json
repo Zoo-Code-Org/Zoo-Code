@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "Eredita variabili d'ambiente",
 			"description": "Attiva per ereditare le variabili d'ambiente dal processo padre di VS Code. <0>Scopri di più</0>"
+		},
+		"profile": {
+			"label": "Profilo del terminale inline",
+			"default": "Predefinito (shell predefinita di VS Code)",
+			"description": "Scegli quale profilo del terminale di VS Code usa il terminale inline. Seleziona una shell UTF-8 come Git Bash se la shell predefinita corrompe l'output non ASCII (ad esempio su Windows con codepage GBK). Lascia su Predefinito per mantenere il comportamento predefinito di VS Code."
 		}
 	},
 	"advancedSettings": {

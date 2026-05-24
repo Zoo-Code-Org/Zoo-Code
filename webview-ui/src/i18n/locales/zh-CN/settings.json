@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "继承环境变量",
 			"description": "启用此选项以从父 VS Code 进程继承环境变量。<0>了解更多</0>"
+		},
+		"profile": {
+			"label": "内联终端配置文件",
+			"default": "默认（VS Code 默认 Shell）",
+			"description": "选择内联终端使用的 VS Code 终端配置文件。如果默认 Shell 会使非 ASCII 输出乱码（例如在使用 GBK 代码页的 Windows 上），请选择 Git Bash 等 UTF-8 Shell。保留为“默认”以保持 VS Code 的默认行为。"
 		}
 	},
 	"advancedSettings": {

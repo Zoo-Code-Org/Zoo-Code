@@ -809,6 +809,11 @@
 		"inheritEnv": {
 			"label": "Inherit environment variables",
 			"description": "Turn this on to inherit environment variables from the parent VS Code process. <0>Learn more</0>"
+		},
+		"profile": {
+			"label": "Inline terminal profile",
+			"default": "Default (VS Code default shell)",
+			"description": "Choose which VS Code terminal profile the inline terminal uses. Pick a UTF-8 shell such as Git Bash if the default shell garbles non-ASCII output (e.g. on Windows with a GBK code page). Leave on Default to keep VS Code's default behavior."
 		}
 	},
 	"advancedSettings": {

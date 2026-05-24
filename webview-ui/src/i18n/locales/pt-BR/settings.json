@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "Herdar variáveis de ambiente",
 			"description": "Ative isso para herdar variáveis de ambiente do processo pai do VS Code. <0>Saiba mais</0>"
+		},
+		"profile": {
+			"label": "Perfil do terminal embutido",
+			"default": "Padrão (shell padrão do VS Code)",
+			"description": "Escolha qual perfil de terminal do VS Code o terminal embutido usa. Selecione um shell UTF-8 como o Git Bash se o shell padrão corromper a saída não ASCII (por exemplo, no Windows com página de código GBK). Mantenha em Padrão para preservar o comportamento padrão do VS Code."
 		}
 	},
 	"advancedSettings": {

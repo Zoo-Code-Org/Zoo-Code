@@ -26,6 +26,7 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	terminalZshOhMy?: boolean
 	terminalZshP10k?: boolean
 	terminalZdotdir?: boolean
+	terminalProfile?: string
 	setCachedStateField: SetCachedStateField<
 		| "terminalOutputPreviewSize"
 		| "terminalShellIntegrationTimeout"
@@ -36,8 +37,21 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "terminalZshOhMy"
 		| "terminalZshP10k"
 		| "terminalZdotdir"
+		| "terminalProfile"
 	>
 }
+
+// Sentinel value for the "Default" option; the Select component cannot use an
+// empty-string item value, so we map it to/from `undefined` in the handler.
+const DEFAULT_PROFILE_VALUE = "__default__"
+
+// VS Code stores terminal profiles per platform; we request all of them so the
+// profile dropdown works regardless of which OS the extension host runs on.
+const PROFILE_SETTING_KEYS = [
+	"terminal.integrated.profiles.windows",
+	"terminal.integrated.profiles.osx",
+	"terminal.integrated.profiles.linux",
+]
 
 export const TerminalSettings = ({
 	terminalOutputPreviewSize,
@@ -49,6 +63,7 @@ export const TerminalSettings = ({
 	terminalZshOhMy,
 	terminalZshP10k,
 	terminalZdotdir,
+	terminalProfile,
 	setCachedStateField,
 	className,
 	...props
@@ -56,8 +71,12 @@ export const TerminalSettings = ({
 	const { t } = useAppTranslation()
 
 	const [inheritEnv, setInheritEnv] = useState<boolean>(true)
+	const [profileNames, setProfileNames] = useState<string[]>([])
 
-	useMount(() => vscode.postMessage({ type: "getVSCodeSetting", setting: "terminal.integrated.inheritEnv" }))
+	useMount(() => {
+		vscode.postMessage({ type: "getVSCodeSetting", setting: "terminal.integrated.inheritEnv" })
+		PROFILE_SETTING_KEYS.forEach((setting) => vscode.postMessage({ type: "getVSCodeSetting", setting }))
+	})
 
 	const onMessage = useCallback((event: MessageEvent) => {
 		const message: ExtensionMessage = event.data
@@ -68,6 +87,13 @@ export const TerminalSettings = ({
 					case "terminal.integrated.inheritEnv":
 						setInheritEnv(message.value ?? true)
 						break
+					case "terminal.integrated.profiles.windows":
+					case "terminal.integrated.profiles.osx":
+					case "terminal.integrated.profiles.linux": {
+						const names = message.value && typeof message.value === "object" ? Object.keys(message.value) : []
+						setProfileNames((prev) => Array.from(new Set([...prev, ...names])).sort())
+						break
+					}
 					default:
 						break
 				}
@@ -139,6 +165,38 @@ export const TerminalSettings = ({
 						</div>
 					</div>
 					<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
+						<SearchableSetting
+							settingId="terminal-profile"
+							section="terminal"
+							label={t("settings:terminal.profile.label")}>
+							<label className="block font-medium mb-1">{t("settings:terminal.profile.label")}</label>
+							<Select
+								value={terminalProfile || DEFAULT_PROFILE_VALUE}
+								onValueChange={(value) =>
+									setCachedStateField(
+										"terminalProfile",
+										value === DEFAULT_PROFILE_VALUE ? undefined : value,
+									)
+								}>
+								<SelectTrigger className="w-full" data-testid="terminal-profile-dropdown">
+									<SelectValue placeholder={t("settings:common.select")} />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value={DEFAULT_PROFILE_VALUE}>
+										{t("settings:terminal.profile.default")}
+									</SelectItem>
+									{profileNames.map((name) => (
+										<SelectItem key={name} value={name}>
+											{name}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							<div className="text-vscode-descriptionForeground text-sm mt-1">
+								{t("settings:terminal.profile.description")}
+							</div>
+						</SearchableSetting>
+
 						<SearchableSetting
 							settingId="terminal-shell-integration-disabled"
 							section="terminal"

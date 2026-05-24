@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "환경 변수 상속",
 			"description": "부모 VS Code 프로세���에서 환경 변수를 상속하려면 이 기능을 켜십시오. <0>자세히 알아보기</0>"
+		},
+		"profile": {
+			"label": "인라인 터미널 프로필",
+			"default": "기본값 (VS Code 기본 셸)",
+			"description": "인라인 터미널이 사용할 VS Code 터미널 프로필을 선택합니다. 기본 셸이 ASCII가 아닌 출력을 깨뜨리는 경우(예: GBK 코드 페이지의 Windows) Git Bash와 같은 UTF-8 셸을 선택하세요. VS Code 기본 동작을 유지하려면 기본값으로 두세요."
 		}
 	},
 	"advancedSettings": {

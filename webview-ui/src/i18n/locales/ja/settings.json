@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "環境変数を継承",
 			"description": "親VS Codeプロセスから環境変数を継承するには、これをオンにします。<0>詳細情報</0>"
+		},
+		"profile": {
+			"label": "インラインターミナルプロファイル",
+			"default": "デフォルト（VS Code のデフォルトシェル）",
+			"description": "インラインターミナルが使用する VS Code のターミナルプロファイルを選択します。デフォルトのシェルが ASCII 以外の出力を文字化けさせる場合（例: GBK コードページの Windows）、Git Bash などの UTF-8 シェルを選択してください。VS Code のデフォルト動作を維持するにはデフォルトのままにします。"
 		}
 	},
 	"advancedSettings": {

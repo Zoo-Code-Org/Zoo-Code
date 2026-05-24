@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "Hereta variables d'entorn",
 			"description": "Activa per heretar variables d'entorn del procés pare de VS Code. <0>Aprèn-ne més</0>"
+		},
+		"profile": {
+			"label": "Perfil de terminal en línia",
+			"default": "Predeterminat (intèrpret d'ordres predeterminat de VS Code)",
+			"description": "Tria quin perfil de terminal de VS Code utilitza el terminal en línia. Selecciona un intèrpret d'ordres UTF-8 com Git Bash si el predeterminat distorsiona la sortida no ASCII (per exemple, a Windows amb pàgina de codis GBK). Deixa-ho en Predeterminat per mantenir el comportament per defecte de VS Code."
 		}
 	},
 	"advancedSettings": {

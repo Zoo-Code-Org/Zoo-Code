@@ -161,6 +161,7 @@ export abstract class BaseTerminal implements RooTerminal {
 	private static terminalZshOhMy: boolean = false
 	private static terminalZshP10k: boolean = false
 	private static terminalZdotdir: boolean = false
+	private static terminalProfile: string | undefined = undefined
 	private static execaShellPath: string | undefined = undefined
 
 	/**
@@ -294,6 +295,24 @@ export abstract class BaseTerminal implements RooTerminal {
 	 */
 	public static getTerminalZdotdir(): boolean {
 		return BaseTerminal.terminalZdotdir
+	}
+
+	/**
+	 * Sets the name of the VS Code terminal profile to use for the inline
+	 * (shell-integration) terminal. An empty/undefined value falls back to
+	 * VS Code's default terminal behavior.
+	 * @param profile The terminal profile name, or undefined for the default
+	 */
+	public static setTerminalProfile(profile: string | undefined): void {
+		BaseTerminal.terminalProfile = profile && profile.trim().length > 0 ? profile : undefined
+	}
+
+	/**
+	 * Gets the name of the VS Code terminal profile to use for the inline terminal.
+	 * @returns The terminal profile name, or undefined when the default should be used
+	 */
+	public static getTerminalProfile(): string | undefined {
+		return BaseTerminal.terminalProfile
 	}
 
 	public static setExecaShellPath(shellPath: string | undefined): void {

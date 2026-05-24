@@ -741,6 +741,11 @@
 		"inheritEnv": {
 			"label": "Dziedzicz zmienne środowiskowe",
 			"description": "Włącz, aby dziedziczyć zmienne środowiskowe z procesu nadrzędnego VS Code. <0>Dowiedz się więcej</0>"
+		},
+		"profile": {
+			"label": "Profil terminala wbudowanego",
+			"default": "Domyślny (domyślna powłoka VS Code)",
+			"description": "Wybierz, którego profilu terminala VS Code używa terminal wbudowany. Wybierz powłokę UTF-8, np. Git Bash, jeśli domyślna powłoka zniekształca dane wyjściowe spoza ASCII (np. w systemie Windows ze stroną kodową GBK). Pozostaw Domyślny, aby zachować domyślne zachowanie VS Code."
 		}
 	},
 	"advancedSettings": {

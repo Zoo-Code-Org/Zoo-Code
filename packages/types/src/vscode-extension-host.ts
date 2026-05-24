@@ -275,6 +275,7 @@ export type ExtensionState = Pick<
 	| "terminalZshOhMy"
 	| "terminalZshP10k"
 	| "terminalZdotdir"
+	| "terminalProfile"
 	| "execaShellPath"
 	| "diagnosticsEnabled"
 	| "language"

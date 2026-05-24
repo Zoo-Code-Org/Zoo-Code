@@ -286,6 +286,7 @@ describe("SettingsView - Change Detection Fix", () => {
 		terminalZshOhMy: false,
 		terminalZshP10k: false,
 		terminalZdotdir: false,
+		terminalProfile: undefined,
 		writeDelayMs: 0,
 		showRooIgnoredFiles: false,
 		maxReadFileLine: -1,
