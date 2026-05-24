@@ -292,23 +292,48 @@ describe("registerCommands handlers", () => {
 	// postMessageToWebview sites in registerCommands.ts (settingsButtonClicked
 	// posts twice, plus historyButtonClicked, marketplaceButtonClicked, and
 	// acceptInput). Each handler is synchronous, so the .catch arm runs on a
-	// microtask; awaiting Promise.resolve() flushes it before we assert.
+	// microtask; awaiting Promise.resolve() flushes it before we assert. The
+	// log messages carry a `[<handlerName>]` prefix so multi-failure logs
+	// remain unambiguous; the prefix is per-handler, not per-call (both of
+	// settingsButtonClicked's posts share the same prefix).
 	it.each([
-		{ command: "zoo-code.settingsButtonClicked", expectedCalls: 2 },
-		{ command: "zoo-code.historyButtonClicked", expectedCalls: 1 },
-		{ command: "zoo-code.marketplaceButtonClicked", expectedCalls: 1 },
-		{ command: "zoo-code.acceptInput", expectedCalls: 1 },
-	])("$command logs to outputChannel when postMessageToWebview rejects", async ({ command, expectedCalls }) => {
+		{ command: "zoo-code.settingsButtonClicked", prefix: "settingsButtonClicked", expectedCalls: 2 },
+		{ command: "zoo-code.historyButtonClicked", prefix: "historyButtonClicked", expectedCalls: 1 },
+		{ command: "zoo-code.marketplaceButtonClicked", prefix: "marketplaceButtonClicked", expectedCalls: 1 },
+		{ command: "zoo-code.acceptInput", prefix: "acceptInput", expectedCalls: 1 },
+	])(
+		"$command logs to outputChannel when postMessageToWebview rejects",
+		async ({ command, prefix, expectedCalls }) => {
+			const boom = new Error("boom")
+			mockVisibleProvider.postMessageToWebview.mockReset()
+			mockVisibleProvider.postMessageToWebview.mockRejectedValue(boom)
+
+			handlers[command]()
+
+			// Flush microtasks so the chained .catch arm runs.
+			await new Promise((resolve) => setImmediate(resolve))
+
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledTimes(expectedCalls)
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				`[${prefix}] postMessageToWebview failed: ${boom}`,
+			)
+		},
+	)
+
+	it("toggleAutoApprove logs to outputChannel when postMessageToWebview rejects", async () => {
+		// toggleAutoApprove is `async` and awaits postMessageToWebview inside a
+		// try/catch (rather than relying on a `.catch` microtask like the
+		// void-prefixed sites), so awaiting the handler itself is sufficient to
+		// observe the appendLine call.
 		const boom = new Error("boom")
 		mockVisibleProvider.postMessageToWebview.mockReset()
 		mockVisibleProvider.postMessageToWebview.mockRejectedValue(boom)
 
-		handlers[command]()
+		await handlers["zoo-code.toggleAutoApprove"]()
 
-		// Flush microtasks so the chained .catch arm runs.
-		await new Promise((resolve) => setImmediate(resolve))
-
-		expect(mockOutputChannel.appendLine).toHaveBeenCalledTimes(expectedCalls)
-		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(`postMessageToWebview failed: ${boom}`)
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledTimes(1)
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			`[toggleAutoApprove] postMessageToWebview failed: ${boom}`,
+		)
 	})
 })
