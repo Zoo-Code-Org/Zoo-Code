@@ -13,6 +13,7 @@ import { handleNewTask } from "./handleTask"
 import { CodeIndexManager } from "../services/code-index/manager"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
+import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
 import { t } from "../i18n"
 
 /**
@@ -68,6 +69,8 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 		const command = getCommand(id as CommandId)
 		context.subscriptions.push(vscode.commands.registerCommand(command, callback))
 	}
+
+	context.subscriptions.push(registerRipgrepDiagnosticCommand())
 }
 
 const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOptions): Record<CommandId, any> => ({
