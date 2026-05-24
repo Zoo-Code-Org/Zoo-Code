@@ -85,47 +85,13 @@ export function truncateLine(line: string, maxLength: number = MAX_LINE_LENGTH):
 	return line.length > maxLength ? line.substring(0, maxLength) + " [truncated...]" : line
 }
 /**
- * Look up the ripgrep binary on the system PATH.
+ * Get the path to the ripgrep binary shipped inside the VS Code installation.
  *
- * Used as a fallback after the VS Code installation has been checked. Covers
- * VS Code forks whose install layout is not recognized by getBinPath, headless
- * / CLI hosts with no VS Code installation, and machines where the user has
- * installed ripgrep themselves.
- */
-async function findRipgrepOnPath(): Promise<string | undefined> {
-	const pathEnv = process.env.PATH
-
-	if (!pathEnv) {
-		return undefined
-	}
-
-	for (const dir of pathEnv.split(path.delimiter)) {
-		if (dir.length === 0) {
-			continue
-		}
-
-		const candidate = path.join(dir, binName)
-
-		if (await fileExistsAtPath(candidate)) {
-			return candidate
-		}
-	}
-
-	return undefined
-}
-
-/**
- * Get the path to the ripgrep binary.
+ * Both the long-standing `@vscode/ripgrep` layout and the newer
+ * `@vscode/ripgrep-universal` layout are checked — the latter is what VS Code
+ * Insiders' staged-install builds use (see microsoft/vscode#252063).
  *
- * Resolution order:
- *  1. ripgrep shipped inside the VS Code installation. Both the long-standing
- *     `@vscode/ripgrep` layout and the newer `@vscode/ripgrep-universal`
- *     layout are checked — the latter is what VS Code Insiders' staged-install
- *     builds use (see microsoft/vscode#252063).
- *  2. ripgrep on the system PATH — covers VS Code forks with an unrecognized
- *     install layout, headless / CLI hosts, and a user-installed ripgrep.
- *
- * Returns `undefined` when ripgrep cannot be located anywhere.
+ * Returns `undefined` when ripgrep cannot be located.
  */
 export async function getBinPath(vscodeAppRoot: string): Promise<string | undefined> {
 	const checkPath = async (pkgFolder: string) => {
@@ -139,8 +105,7 @@ export async function getBinPath(vscodeAppRoot: string): Promise<string | undefi
 		(await checkPath("node_modules.asar.unpacked/vscode-ripgrep/bin/")) ||
 		(await checkPath("node_modules.asar.unpacked/@vscode/ripgrep/bin/")) ||
 		(await checkPath(`node_modules/@vscode/ripgrep-universal/${ripgrepUniversalBinDir}`)) ||
-		(await checkPath(`node_modules.asar.unpacked/@vscode/ripgrep-universal/${ripgrepUniversalBinDir}`)) ||
-		(await findRipgrepOnPath())
+		(await checkPath(`node_modules.asar.unpacked/@vscode/ripgrep-universal/${ripgrepUniversalBinDir}`))
 	)
 }
 
