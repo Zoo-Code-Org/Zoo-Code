@@ -788,6 +788,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.2.3
         version: 3.2.4(vitest@3.2.4)
+      '@vscode/ripgrep':
+        specifier: ^1.17.0
+        version: 1.17.0
       '@vscode/test-electron':
         specifier: ^2.5.2
         version: 2.5.2
