@@ -45,9 +45,10 @@ vitest.mock("@anthropic-ai/vertex-sdk", () => ({
 	})),
 }))
 
-import { GeminiHandler, parseVertexJsonCredentials } from "../gemini"
+import { GeminiHandler } from "../gemini"
 import { VertexHandler } from "../vertex"
 import { AnthropicVertexHandler } from "../anthropic-vertex"
+import { parseVertexJsonCredentials } from "../utils/vertex-credentials"
 
 const VALID_CREDS_JSON = JSON.stringify({
 	type: "service_account",
@@ -155,7 +156,7 @@ describe("GeminiHandler vertex credentials wiring", () => {
 		expect(args.googleAuthOptions.credentials).toMatchObject({ type: "service_account" })
 	})
 
-	it("warns and passes undefined credentials when the field looks like a path", () => {
+	it("warns and falls through past the JSON branch when the field looks like a path", () => {
 		new GeminiHandler({
 			apiModelId: "gemini-2.0-flash-001",
 			vertexProjectId: "p",
@@ -167,7 +168,34 @@ describe("GeminiHandler vertex credentials wiring", () => {
 		expect(warnSpy).toHaveBeenCalledTimes(1)
 		expect(googleGenAICtor).toHaveBeenCalledTimes(1)
 		const args = googleGenAICtor.mock.calls[0][0]
-		expect(args.googleAuthOptions.credentials).toBeUndefined()
+		// With only a path-shaped vertexJsonCredentials (no vertexKeyFile),
+		// the ternary falls all the way through to the bare isVertex branch:
+		// new GoogleGenAI({ vertexai: true, project, location }) — no
+		// googleAuthOptions block.
+		expect(args.googleAuthOptions).toBeUndefined()
+		expect(args.vertexai).toBe(true)
+		// Generic "Error parsing JSON" must not fire for the path case.
+		expect(errorSpy).not.toHaveBeenCalled()
+	})
+
+	it("uses vertexKeyFile when vertexJsonCredentials is path-shaped AND vertexKeyFile is set", () => {
+		new GeminiHandler({
+			apiModelId: "gemini-2.0-flash-001",
+			vertexProjectId: "p",
+			vertexRegion: "us-central1",
+			vertexJsonCredentials: "C:\\Users\\dev\\sa.json",
+			vertexKeyFile: "my-key-file.json",
+			isVertex: true,
+		})
+
+		expect(googleGenAICtor).toHaveBeenCalledTimes(1)
+		const args = googleGenAICtor.mock.calls[0][0]
+		// The path-shaped input must not poison the JSON branch; the fallback
+		// to the vertexKeyFile branch must take effect.
+		expect(args.googleAuthOptions?.keyFile).toBe("my-key-file.json")
+		expect(args.googleAuthOptions?.credentials).toBeUndefined()
+		// The warning for the path-shaped input still fires.
+		expect(warnSpy).toHaveBeenCalledTimes(1)
 		// Generic "Error parsing JSON" must not fire for the path case.
 		expect(errorSpy).not.toHaveBeenCalled()
 	})
@@ -200,7 +228,7 @@ describe("VertexHandler inherits the path-shape guard from GeminiHandler", () =>
 		warnSpy.mockRestore()
 	})
 
-	it("warns and passes undefined credentials when the field looks like a POSIX path", () => {
+	it("warns and falls through past the JSON branch when the field looks like a POSIX path", () => {
 		new VertexHandler({
 			apiModelId: "gemini-2.0-flash-001",
 			vertexProjectId: "p",
@@ -210,7 +238,11 @@ describe("VertexHandler inherits the path-shape guard from GeminiHandler", () =>
 
 		expect(warnSpy).toHaveBeenCalledTimes(1)
 		const args = googleGenAICtor.mock.calls[0][0]
-		expect(args.googleAuthOptions.credentials).toBeUndefined()
+		// VertexHandler extends GeminiHandler with isVertex:true. With only a
+		// path-shaped vertexJsonCredentials, the ternary falls through to the
+		// bare isVertex branch with no googleAuthOptions.
+		expect(args.googleAuthOptions).toBeUndefined()
+		expect(args.vertexai).toBe(true)
 	})
 })
 
@@ -243,7 +275,7 @@ describe("AnthropicVertexHandler vertex credentials wiring", () => {
 		expect(args.credentials).toMatchObject({ type: "service_account" })
 	})
 
-	it("warns and passes undefined credentials when the field looks like a Windows path", () => {
+	it("warns and skips the GoogleAuth construction when the field looks like a Windows path", () => {
 		new AnthropicVertexHandler({
 			apiModelId: "claude-3-5-sonnet-v2@20241022",
 			vertexProjectId: "p",
@@ -252,9 +284,32 @@ describe("AnthropicVertexHandler vertex credentials wiring", () => {
 		})
 
 		expect(warnSpy).toHaveBeenCalledTimes(1)
+		// With only a path-shaped vertexJsonCredentials (no vertexKeyFile),
+		// every branch in the constructor falls through to the bare
+		// `new AnthropicVertex({ projectId, region })` and GoogleAuth is
+		// never instantiated.
+		expect(googleAuthCtor).not.toHaveBeenCalled()
+		expect(errorSpy).not.toHaveBeenCalled()
+	})
+
+	it("uses vertexKeyFile when vertexJsonCredentials is path-shaped AND vertexKeyFile is set", () => {
+		new AnthropicVertexHandler({
+			apiModelId: "claude-3-5-sonnet-v2@20241022",
+			vertexProjectId: "p",
+			vertexRegion: "us-east5",
+			vertexJsonCredentials: "C:\\Users\\dev\\sa.json",
+			vertexKeyFile: "my-key-file.json",
+		})
+
+		// The path-shaped input must not poison the JSON branch; the fallback
+		// to the vertexKeyFile branch must take effect.
 		expect(googleAuthCtor).toHaveBeenCalledTimes(1)
 		const args = googleAuthCtor.mock.calls[0][0]
+		expect(args.keyFile).toBe("my-key-file.json")
 		expect(args.credentials).toBeUndefined()
+		// The warning for the path-shaped input still fires.
+		expect(warnSpy).toHaveBeenCalledTimes(1)
+		// Generic "Error parsing JSON" must not fire for the path case.
 		expect(errorSpy).not.toHaveBeenCalled()
 	})
 

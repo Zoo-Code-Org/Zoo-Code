@@ -23,7 +23,7 @@ import {
 } from "../../core/prompts/tools/native-tools/converters"
 
 import { BaseProvider } from "./base-provider"
-import { parseVertexJsonCredentials } from "./gemini"
+import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 
 // https://docs.anthropic.com/en/api/claude-on-vertex-ai
@@ -40,13 +40,15 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		const projectId = this.options.vertexProjectId ?? "not-provided"
 		const region = this.options.vertexRegion ?? "us-east5"
 
-		if (this.options.vertexJsonCredentials) {
+		const parsedVertexCredentials = parseVertexJsonCredentials(this.options.vertexJsonCredentials)
+
+		if (parsedVertexCredentials) {
 			this.client = new AnthropicVertex({
 				projectId,
 				region,
 				googleAuth: new GoogleAuth({
 					scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-					credentials: parseVertexJsonCredentials(this.options.vertexJsonCredentials),
+					credentials: parsedVertexCredentials,
 				}),
 			})
 		} else if (this.options.vertexKeyFile) {

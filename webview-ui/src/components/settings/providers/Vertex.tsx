@@ -92,7 +92,11 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				<label className="block font-medium mb-1">{t("settings:providers.googleCloudCredentials")}</label>
 			</VSCodeTextField>
 			{credentialsLooksLikePath && (
-				<div data-testid="vertex-credentials-path-warning" className="text-sm text-vscode-errorForeground">
+				<div
+					data-testid="vertex-credentials-path-warning"
+					role="alert"
+					aria-live="polite"
+					className="text-sm text-vscode-errorForeground">
 					<Trans
 						i18nKey="settings:providers.googleCloudCredentialsPathWarning"
 						components={{
