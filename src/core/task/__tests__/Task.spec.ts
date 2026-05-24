@@ -1479,7 +1479,7 @@ describe("Cline", () => {
 				]
 
 				// Call submitUserMessage
-				task.submitUserMessage("test message", ["image1.png"])
+				await task.submitUserMessage("test message", ["image1.png"])
 
 				// Verify handleWebviewAskResponse was called directly (not webview)
 				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"])
@@ -1499,13 +1499,13 @@ describe("Cline", () => {
 				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
 
 				// Call with empty text and no images
-				task.submitUserMessage("", [])
+				await task.submitUserMessage("", [])
 
 				// Should not call handleWebviewAskResponse for empty messages
 				expect(handleResponseSpy).not.toHaveBeenCalled()
 
 				// Call with whitespace only
-				task.submitUserMessage("   ", [])
+				await task.submitUserMessage("   ", [])
 				expect(handleResponseSpy).not.toHaveBeenCalled()
 			})
 
@@ -1522,7 +1522,7 @@ describe("Cline", () => {
 
 				// Test with no messages (new task scenario)
 				task.clineMessages = []
-				task.submitUserMessage("new task", ["image1.png"])
+				await task.submitUserMessage("new task", ["image1.png"])
 
 				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"])
 
@@ -1538,7 +1538,7 @@ describe("Cline", () => {
 						text: "Initial message",
 					},
 				]
-				task.submitUserMessage("follow-up message", ["image2.png"])
+				await task.submitUserMessage("follow-up message", ["image2.png"])
 
 				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "follow-up message", ["image2.png"])
 			})
@@ -1565,7 +1565,7 @@ describe("Cline", () => {
 				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 				// Should log error but not throw
-				task.submitUserMessage("test message")
+				await task.submitUserMessage("test message")
 
 				expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#submitUserMessage] Provider reference lost")
 				expect(handleResponseSpy).not.toHaveBeenCalled()
@@ -2349,6 +2349,169 @@ describe("Cline", () => {
 			expect(startTaskSpy).toHaveBeenCalledTimes(1)
 
 			startTaskSpy.mockRestore()
+		})
+	})
+
+	describe("unhandled-rejection guards on void async calls", () => {
+		// PR #253 wired `.catch(...)` onto every fire-and-forget async call that
+		// Copilot flagged as a potential unhandled-rejection source. These specs
+		// pin that behavior so a future refactor cannot silently drop the
+		// handler and reintroduce the crash risk on the extension host.
+
+		const flushMicrotasks = () => new Promise<void>((resolve) => setImmediate(resolve))
+
+		let consoleErrorSpy: ReturnType<typeof vi.spyOn>
+
+		beforeEach(() => {
+			consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		})
+
+		afterEach(() => {
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("logs (instead of crashing) when startTask rejects from the constructor", async () => {
+			const boom = new Error("startTask boom")
+			const startTaskSpy = vi.spyOn(Task.prototype as any, "startTask").mockImplementation(async () => {
+				throw boom
+			})
+
+			new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: true,
+			})
+
+			expect(startTaskSpy).toHaveBeenCalledTimes(1)
+			await flushMicrotasks()
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#constructor] startTask failed:", boom)
+			startTaskSpy.mockRestore()
+		})
+
+		it("logs (instead of crashing) when resumeTaskFromHistory rejects from the constructor", async () => {
+			const boom = new Error("resume boom")
+			const resumeSpy = vi.spyOn(Task.prototype as any, "resumeTaskFromHistory").mockImplementation(async () => {
+				throw boom
+			})
+
+			new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "123",
+					number: 0,
+					ts: Date.now(),
+					task: "historical task",
+					tokensIn: 100,
+					tokensOut: 200,
+					cacheWrites: 0,
+					cacheReads: 0,
+					totalCost: 0.001,
+				},
+				startTask: true,
+			})
+
+			expect(resumeSpy).toHaveBeenCalledTimes(1)
+			await flushMicrotasks()
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#constructor] resumeTaskFromHistory failed:", boom)
+			resumeSpy.mockRestore()
+		})
+
+		it("logs (instead of crashing) when postStateToWebviewWithoutTaskHistory rejects from the queue handler", async () => {
+			const boom = new Error("postState boom")
+			mockProvider.postStateToWebviewWithoutTaskHistory = vi.fn().mockRejectedValue(boom)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Triggers messageQueueStateChangedHandler -> void postStateToWebviewWithoutTaskHistory()
+			task.messageQueueService.addMessage("queued text")
+			await flushMicrotasks()
+
+			expect(mockProvider.postStateToWebviewWithoutTaskHistory).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#messageQueueStateChangedHandler] postStateToWebviewWithoutTaskHistory failed:",
+				boom,
+			)
+		})
+
+		it("logs (instead of crashing) when startTask rejects from start()", async () => {
+			const boom = new Error("start() boom")
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			vi.spyOn(task as any, "startTask").mockImplementation(async () => {
+				throw boom
+			})
+
+			task.start()
+			await flushMicrotasks()
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#start] startTask failed:", boom)
+		})
+
+		it("swallows the expected abort rejection from presentAssistantMessageSafe", async () => {
+			const assistantMessageModule = await import("../../assistant-message")
+			const presentSpy = vi
+				.spyOn(assistantMessageModule, "presentAssistantMessage")
+				.mockRejectedValue(new Error("[Task#presentAssistantMessage] task t.i aborted"))
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Drain any unrelated console.error noise emitted by async constructor side effects
+			// (CloudService/getState complaints in the test harness) so we only assert on the
+			// abort-path behavior under test.
+			await flushMicrotasks()
+			consoleErrorSpy.mockClear()
+
+			task.abort = true
+			;(task as any).presentAssistantMessageSafe()
+			await flushMicrotasks()
+
+			expect(presentSpy).toHaveBeenCalledTimes(1)
+			const presentErrors = consoleErrorSpy.mock.calls.filter(
+				(call) => typeof call[0] === "string" && call[0].includes("[Task#presentAssistantMessage]"),
+			)
+			expect(presentErrors).toHaveLength(0)
+		})
+
+		it("logs non-abort rejections from presentAssistantMessageSafe", async () => {
+			const assistantMessageModule = await import("../../assistant-message")
+			const boom = new Error("present boom")
+			const presentSpy = vi.spyOn(assistantMessageModule, "presentAssistantMessage").mockRejectedValue(boom)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(task.abort).toBeFalsy()
+			;(task as any).presentAssistantMessageSafe()
+			await flushMicrotasks()
+
+			expect(presentSpy).toHaveBeenCalledTimes(1)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[Task#presentAssistantMessage] task"),
+				boom,
+			)
 		})
 	})
 })
