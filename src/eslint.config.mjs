@@ -6,7 +6,6 @@ export default [
 	{
 		rules: {
 			// TODO: These should be fixed and the rules re-enabled.
-			"no-regex-spaces": "off",
 			"no-useless-escape": "off",
 			"no-empty": "off",
 			"prefer-const": "off",
