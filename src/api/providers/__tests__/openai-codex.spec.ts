@@ -41,4 +41,12 @@ describe("OpenAiCodexHandler.getModel", () => {
 		expect(model.id).toBe("gpt-5.4-mini")
 		expect(model.info).toBeDefined()
 	})
+
+	it("should expose the full ~1M context window for GPT-5.5", () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.5" })
+		const model = handler.getModel()
+
+		expect(model.id).toBe("gpt-5.5")
+		expect(model.info.contextWindow).toBe(1_050_000)
+	})
 })
