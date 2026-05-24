@@ -11,7 +11,7 @@ This file provides functionality to perform regex searches on files using ripgre
 Inspired by: https://github.com/DiscreteTom/vscode-ripgrep-utils
 
 Key components:
-1. getBinPath: Locates the ripgrep binary (in the VS Code install, or on the system PATH).
+1. getBinPath: Locates the ripgrep binary inside the VS Code installation.
 2. execRipgrep: Executes the ripgrep command and returns the output.
 3. regexSearchFiles: The main function that performs regex searches on files.
    - Parameters:
