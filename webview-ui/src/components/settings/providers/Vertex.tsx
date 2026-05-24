@@ -94,8 +94,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 			{credentialsLooksLikePath && (
 				<div
 					data-testid="vertex-credentials-path-warning"
-					role="alert"
-					aria-live="polite"
+					role="status"
 					className="text-sm text-vscode-errorForeground">
 					<Trans
 						i18nKey="settings:providers.googleCloudCredentialsPathWarning"
