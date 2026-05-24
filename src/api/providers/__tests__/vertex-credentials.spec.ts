@@ -109,11 +109,18 @@ describe("parseVertexJsonCredentials", () => {
 		expect(warnSpy).toHaveBeenCalledTimes(1)
 	})
 
-	it("truncates long path previews in the warning", () => {
-		const longPath = "/" + "a".repeat(200)
-		parseVertexJsonCredentials(longPath)
+	it("does not echo the user's path in the warning (no PII in extension logs)", () => {
+		const sensitivePath = "/home/somerealuser/secrets/sa-key.json"
+		parseVertexJsonCredentials(sensitivePath)
+		expect(warnSpy).toHaveBeenCalledTimes(1)
 		const [message] = warnSpy.mock.calls[0]
-		expect(message).toContain("…")
+		// The warning must identify the field and the env var, but must not
+		// interpolate the user's actual input — usernames and directory names
+		// would leak into extension logs otherwise.
+		expect(message).toContain("Google Cloud Credentials")
+		expect(message).toContain("GOOGLE_APPLICATION_CREDENTIALS")
+		expect(message).not.toContain(sensitivePath)
+		expect(message).not.toContain("somerealuser")
 	})
 
 	it("falls back to the generic JSON parse error path for malformed but non-path input", () => {

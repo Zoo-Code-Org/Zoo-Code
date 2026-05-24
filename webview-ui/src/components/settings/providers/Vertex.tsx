@@ -3,29 +3,12 @@ import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
-import { type ProviderSettings, VERTEX_REGIONS, VERTEX_1M_CONTEXT_MODEL_IDS } from "@roo-code/types"
+import { type ProviderSettings, VERTEX_REGIONS, VERTEX_1M_CONTEXT_MODEL_IDS, looksLikeFilePath } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
-
-// Detects when the "Google Cloud Credentials" field has received a filesystem
-// path instead of the raw JSON contents of a service-account key file. Mirrors
-// the runtime guard in src/api/providers/gemini.ts so the warning the user
-// sees in the UI matches what the runtime would log.
-function looksLikeFilePath(value: string): boolean {
-	const trimmed = value.trim()
-	if (!trimmed) {
-		return false
-	}
-	return (
-		/^[A-Za-z]:[\\/]/.test(trimmed) || // Windows: C:\... or C:/...
-		trimmed.startsWith("/") || // POSIX absolute: /home/...
-		trimmed.startsWith("~") || // POSIX home: ~/...
-		trimmed.startsWith(".") // POSIX relative: ./... or ../...
-	)
-}
 
 type VertexProps = {
 	apiConfiguration: ProviderSettings
@@ -54,7 +37,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 	)
 
 	const credentialsLooksLikePath = useMemo(
-		() => looksLikeFilePath(apiConfiguration?.vertexJsonCredentials ?? ""),
+		() => looksLikeFilePath(apiConfiguration?.vertexJsonCredentials),
 		[apiConfiguration?.vertexJsonCredentials],
 	)
 

@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import { Vertex } from "../Vertex"
 import type { ProviderSettings } from "@roo-code/types"
 import { VERTEX_REGIONS } from "@roo-code/types"
+import enSettings from "@src/i18n/locales/en/settings.json"
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeTextField: ({ children, value, onInput, type }: any) => (
@@ -27,10 +28,24 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 }))
 
 // The component uses <Trans> for the path-shape warning so it can interpolate
-// <strong>/<code> elements. The mock just renders the i18n key so the spec
-// can assert on its presence without depending on the English copy.
+// <strong>/<code> elements. Resolve the i18n key against the real English
+// resource so the test fails if the warning copy drops the "Google Cloud Key
+// File Path" field name or the "GOOGLE_APPLICATION_CREDENTIALS" env var
+// mention — those are the actual remediation hints users need.
 vi.mock("react-i18next", () => ({
-	Trans: ({ i18nKey }: { i18nKey: string }) => <>{i18nKey}</>,
+	Trans: ({ i18nKey }: { i18nKey: string }) => {
+		// Keys are "<namespace>:<dotted.path>"; the spec only renders the
+		// settings namespace so resolve against the imported English bundle.
+		const [, dotted] = i18nKey.split(":")
+		const resolved = dotted
+			.split(".")
+			.reduce<unknown>(
+				(acc, segment) =>
+					acc && typeof acc === "object" ? (acc as Record<string, unknown>)[segment] : undefined,
+				enSettings,
+			)
+		return <>{typeof resolved === "string" ? resolved : i18nKey}</>
+	},
 }))
 
 vi.mock("@src/components/ui", () => ({
@@ -175,7 +190,11 @@ describe("Vertex", () => {
 
 			const warning = screen.getByTestId("vertex-credentials-path-warning")
 			expect(warning).toBeInTheDocument()
-			expect(warning.textContent).toContain("settings:providers.googleCloudCredentialsPathWarning")
+			// The warning resolves through the real English bundle, so a
+			// regression that dropped either of these remediation strings
+			// from the translation would be caught here.
+			expect(warning).toHaveTextContent(/Google Cloud Key File Path/)
+			expect(warning).toHaveTextContent(/GOOGLE_APPLICATION_CREDENTIALS/)
 		})
 	})
 })
