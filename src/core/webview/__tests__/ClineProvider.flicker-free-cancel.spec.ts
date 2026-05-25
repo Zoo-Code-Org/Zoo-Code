@@ -395,7 +395,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		)
 	})
 
-	it("continues rehydrating a cancelled child when delegated parent detach fails", async () => {
+	it("detaches runtime parent links when delegated parent detach fails", async () => {
 		const mockRootTask = { taskId: "root-1" }
 		const mockParentTask = { taskId: "parent-1" }
 		const childHistory: HistoryItem = {
@@ -449,9 +449,10 @@ describe("ClineProvider flicker-free cancel", () => {
 				id: "child-1",
 				parentTaskId: "parent-1",
 				rootTaskId: "root-1",
-				parentTask: mockParentTask,
-				rootTask: mockRootTask,
+				parentTask: undefined,
+				rootTask: undefined,
 			}),
 		)
+		expect((provider as any).cancelledDelegationChildIds.has("child-1")).toBe(true)
 	})
 })

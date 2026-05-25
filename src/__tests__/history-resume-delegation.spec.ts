@@ -110,6 +110,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		// Verify child closed and parent reopened with updated metadata
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
+		expect(removeClineFromStack).toHaveBeenCalledWith({ skipDelegationRepair: true })
 		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(
 			expect.objectContaining({
 				status: "active",
@@ -502,7 +503,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				childTaskId: "child-rpd06",
 				completionResultSummary: "Subtask finished despite overwrite failures",
 			}),
-		).resolves.toBeUndefined()
+		).resolves.toBe(true)
 
 		expect(parentInstance.overwriteClineMessages).toHaveBeenCalledTimes(1)
 		expect(parentInstance.overwriteApiConversationHistory).toHaveBeenCalledTimes(1)
@@ -705,7 +706,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				childTaskId: "child-rpd04",
 				completionResultSummary: "Child completion with persistence failure",
 			}),
-		).resolves.toBeUndefined()
+		).resolves.toBe(true)
 
 		expect(logSpy).toHaveBeenCalledWith(
 			expect.stringContaining(
@@ -760,7 +761,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				childTaskId: "c5",
 				completionResultSummary: "Result",
 			}),
-		).resolves.toBeUndefined()
+		).resolves.toBe(true)
 
 		// Verify saves still occurred with just the injected message
 		expect(saveTaskMessages).toHaveBeenCalledWith(
@@ -783,5 +784,114 @@ describe("History resume delegation - parent metadata transitions", () => {
 				],
 			}),
 		)
+	})
+
+	it("reopenParentFromDelegation aborts when parent is already active (stale-delegation guard)", async () => {
+		const logSpy = vi.fn()
+		const updateTaskHistory = vi.fn()
+		const saveTaskMessagesMock = vi.mocked(saveTaskMessages)
+		const saveApiMessagesMock = vi.mocked(saveApiMessages)
+
+		const makeProvider = (historyItem: object) =>
+			({
+				contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+				getTaskWithId: vi.fn().mockResolvedValue({ historyItem }),
+				emit: vi.fn(),
+				log: logSpy,
+				getCurrentTask: vi.fn(() => null),
+				removeClineFromStack: vi.fn(),
+				createTaskWithHistoryItem: vi.fn(),
+				updateTaskHistory,
+			}) as unknown as ClineProvider
+
+		const providerActive = makeProvider({
+			id: "parent-guard",
+			status: "active",
+			awaitingChildId: undefined,
+		})
+		await expect(
+			(ClineProvider.prototype as any).reopenParentFromDelegation.call(providerActive, {
+				parentTaskId: "parent-guard",
+				childTaskId: "child-guard",
+				completionResultSummary: "should be ignored",
+			}),
+		).resolves.toBe(false)
+		expect(saveTaskMessagesMock).not.toHaveBeenCalled()
+		expect(saveApiMessagesMock).not.toHaveBeenCalled()
+		expect(updateTaskHistory).not.toHaveBeenCalled()
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[reopenParentFromDelegation] Aborting"))
+	})
+
+	it("reopenParentFromDelegation aborts when in-process cancellation failed closed", async () => {
+		const logSpy = vi.fn()
+		const updateTaskHistory = vi.fn()
+		const saveTaskMessagesMock = vi.mocked(saveTaskMessages)
+		const saveApiMessagesMock = vi.mocked(saveApiMessages)
+		const provider = {
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({
+				historyItem: {
+					id: "parent-guard",
+					status: "delegated",
+					awaitingChildId: "child-guard",
+				},
+			}),
+			emit: vi.fn(),
+			log: logSpy,
+			getCurrentTask: vi.fn(() => null),
+			removeClineFromStack: vi.fn(),
+			createTaskWithHistoryItem: vi.fn(),
+			updateTaskHistory,
+			cancelledDelegationChildIds: new Set(["child-guard"]),
+		} as unknown as ClineProvider
+
+		await expect(
+			(ClineProvider.prototype as any).reopenParentFromDelegation.call(provider, {
+				parentTaskId: "parent-guard",
+				childTaskId: "child-guard",
+				completionResultSummary: "should be ignored",
+			}),
+		).resolves.toBe(false)
+
+		expect(saveTaskMessagesMock).not.toHaveBeenCalled()
+		expect(saveApiMessagesMock).not.toHaveBeenCalled()
+		expect(updateTaskHistory).not.toHaveBeenCalled()
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[reopenParentFromDelegation] Aborting"))
+	})
+
+	it("reopenParentFromDelegation aborts when parent awaits a different child (stale-delegation guard)", async () => {
+		const logSpy = vi.fn()
+		const updateTaskHistory = vi.fn()
+		const saveTaskMessagesMock = vi.mocked(saveTaskMessages)
+		const saveApiMessagesMock = vi.mocked(saveApiMessages)
+
+		const makeProvider = (historyItem: object) =>
+			({
+				contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+				getTaskWithId: vi.fn().mockResolvedValue({ historyItem }),
+				emit: vi.fn(),
+				log: logSpy,
+				getCurrentTask: vi.fn(() => null),
+				removeClineFromStack: vi.fn(),
+				createTaskWithHistoryItem: vi.fn(),
+				updateTaskHistory,
+			}) as unknown as ClineProvider
+
+		const providerWrongChild = makeProvider({
+			id: "parent-guard",
+			status: "delegated",
+			awaitingChildId: "other-child",
+		})
+		await expect(
+			(ClineProvider.prototype as any).reopenParentFromDelegation.call(providerWrongChild, {
+				parentTaskId: "parent-guard",
+				childTaskId: "child-guard",
+				completionResultSummary: "should be ignored",
+			}),
+		).resolves.toBe(false)
+		expect(saveTaskMessagesMock).not.toHaveBeenCalled()
+		expect(saveApiMessagesMock).not.toHaveBeenCalled()
+		expect(updateTaskHistory).not.toHaveBeenCalled()
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[reopenParentFromDelegation] Aborting"))
 	})
 })

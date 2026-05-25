@@ -30,7 +30,7 @@ interface DelegationProvider {
 		parentTaskId: string
 		childTaskId: string
 		completionResultSummary: string
-	}): Promise<void>
+	}): Promise<boolean>
 }
 
 export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
@@ -178,14 +178,17 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			return "denied"
 		}
 
-		pushToolResult("")
-
-		await provider.reopenParentFromDelegation({
+		const didReopen = await provider.reopenParentFromDelegation({
 			parentTaskId: task.parentTaskId!,
 			childTaskId: task.taskId,
 			completionResultSummary: result,
 		})
 
+		if (didReopen === false) {
+			return "continue"
+		}
+
+		pushToolResult("")
 		return "delegated"
 	}
 
