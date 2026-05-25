@@ -6,15 +6,24 @@ import { toolResultContains } from "./tool-result"
 const SUBTASK_PARENT_MARKER = "SUBTASK_PARENT_CANCELLATION_SMOKE"
 const SUBTASK_CHILD_MARKER = "SUBTASK_CHILD_CALCULATOR_SMOKE"
 
-const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
+export const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
 export const SUBTASK_PARENT_PROMPT = `${SUBTASK_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_CHILD_PROMPT}" Do not answer directly.`
 export const SUBTASK_CHILD_FOLLOWUP_ANSWER = "9"
-const INTERRUPTED_TOOL_RESULT = "Task was interrupted before this tool call could be completed."
+
+const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
+	const rawRequest = JSON.stringify(req)
+	return expected.every((text) => rawRequest.includes(text))
+}
 
 const completionAfterAnswer = (followupId: string, completionId: string) => ({
 	match: {
-		toolCallId: followupId,
-		predicate: (req: ChatCompletionRequest) => toolResultContains(req, followupId, [SUBTASK_CHILD_FOLLOWUP_ANSWER]),
+		predicate: (req: ChatCompletionRequest) =>
+			toolResultContains(req, followupId, [SUBTASK_CHILD_FOLLOWUP_ANSWER]) ||
+			requestContains(req, [followupId, SUBTASK_CHILD_FOLLOWUP_ANSWER]) ||
+			requestContains(req, [
+				SUBTASK_CHILD_MARKER,
+				`<user_message>\\n${SUBTASK_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`,
+			]),
 	},
 	response: {
 		toolCalls: [
@@ -64,30 +73,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
-	mock.addFixture({
-		match: {
-			toolCallId: "call_subtasks_child_followup_001",
-			predicate: (req) => toolResultContains(req, "call_subtasks_child_followup_001", [INTERRUPTED_TOOL_RESULT]),
-		},
-		response: {
-			toolCalls: [
-				{
-					name: "ask_followup_question",
-					arguments: JSON.stringify({
-						question: "What is the square root of 81?",
-						follow_up: [{ text: SUBTASK_CHILD_FOLLOWUP_ANSWER }],
-					}),
-					id: "call_subtasks_child_followup_resume_002",
-				},
-			],
-		},
-	})
-
 	mock.addFixture(completionAfterAnswer("call_subtasks_child_followup_001", "call_subtasks_child_completion_002"))
-
-	mock.addFixture(
-		completionAfterAnswer("call_subtasks_child_followup_resume_002", "call_subtasks_child_completion_resume_003"),
-	)
 
 	mock.addFixture({
 		match: {

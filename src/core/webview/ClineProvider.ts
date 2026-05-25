@@ -114,13 +114,11 @@ export type ClineProviderEvents = {
 	clineCreated: [cline: Task]
 }
 
-type DelegationLockHost = {
-	delegationTransitionLocks?: Map<string, Promise<void>>
-}
-
-function runDelegationTransition<T>(host: DelegationLockHost, parentTaskId: string, fn: () => Promise<T>): Promise<T> {
-	host.delegationTransitionLocks ??= new Map()
-	const locks = host.delegationTransitionLocks
+function runDelegationTransition<T>(
+	locks: Map<string, Promise<void>>,
+	parentTaskId: string,
+	fn: () => Promise<T>,
+): Promise<T> {
 	const previous = locks.get(parentTaskId) ?? Promise.resolve()
 	const current = previous.then(fn, fn)
 	const tail = current.then(
@@ -153,7 +151,7 @@ export class ClineProvider
 	private webviewDisposables: vscode.Disposable[] = []
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private clineStack: Task[] = []
-	private delegationTransitionLocks = new Map<string, Promise<void>>()
+	private delegationTransitionLocks?: Map<string, Promise<void>>
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
@@ -173,6 +171,11 @@ export class ClineProvider
 	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
+
+	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
+		this.delegationTransitionLocks ??= new Map()
+		return runDelegationTransition(this.delegationTransitionLocks, parentTaskId, fn)
+	}
 	private readonly pendingEditOperations: PendingEditOperationStore
 
 	private cloudOrganizationsCache: CloudOrganizationMembership[] | null = null
@@ -509,7 +512,7 @@ export class ClineProvider
 			// child and will update the parent to point at the new child.
 			if (parentTaskId && childTaskId && !options?.skipDelegationRepair) {
 				try {
-					await runDelegationTransition(this as unknown as DelegationLockHost, parentTaskId, async () => {
+					await ClineProvider.prototype.runDelegationTransition.call(this, parentTaskId, async () => {
 						const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
 
 						if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === childTaskId) {
@@ -2995,7 +2998,7 @@ export class ClineProvider
 
 		if (task.parentTaskId) {
 			try {
-				await runDelegationTransition(this as unknown as DelegationLockHost, task.parentTaskId, async () => {
+				await ClineProvider.prototype.runDelegationTransition.call(this, task.parentTaskId, async () => {
 					const { historyItem: parentHistory } = await this.getTaskWithId(task.parentTaskId!)
 
 					if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === task.taskId) {
@@ -3014,12 +3017,26 @@ export class ClineProvider
 					}
 				})
 			} catch (error) {
-				// Fail closed: if we cannot prove the parent was detached, keep the
-				// rehydrated child disconnected from runtime parent links and prevent
-				// this in-process child completion from reopening the parent later.
+				// Fail closed: if we cannot prove the parent was detached, make the
+				// rehydrated child standalone so later completions cannot reopen a
+				// stale delegated parent, even after a provider reload.
 				parentTask = undefined
 				rootTask = undefined
 				this.cancelledDelegationChildIds.add(task.taskId)
+				historyItem = {
+					...historyItem,
+					parentTaskId: undefined,
+					rootTaskId: undefined,
+				}
+				try {
+					await this.updateTaskHistory(historyItem)
+				} catch (historyError) {
+					this.log(
+						`[cancelTask] Failed to persist standalone child state for ${task.taskId}: ${
+							historyError instanceof Error ? historyError.message : String(historyError)
+						}`,
+					)
+				}
 				this.log(
 					`[cancelTask] Failed to detach delegated parent for ${task.taskId}: ${
 						error instanceof Error ? error.message : String(error)
@@ -3382,7 +3399,7 @@ export class ClineProvider
 		completionResultSummary: string
 	}): Promise<boolean> {
 		const { parentTaskId, childTaskId, completionResultSummary } = params
-		return await runDelegationTransition(this as unknown as DelegationLockHost, parentTaskId, async () => {
+		return await (ClineProvider.prototype.runDelegationTransition.call(this, parentTaskId, async () => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
@@ -3591,7 +3608,7 @@ export class ClineProvider
 
 			;(this.cancelledDelegationChildIds as Set<string> | undefined)?.delete(childTaskId)
 			return true
-		})
+		}) as Promise<boolean>)
 	}
 
 	/**

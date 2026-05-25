@@ -435,6 +435,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			throw new Error(`unexpected task lookup: ${id}`)
 		}) as any
 
+		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 		const createTaskWithHistoryItemSpy = vi
 			.spyOn(provider, "createTaskWithHistoryItem")
 			.mockResolvedValue(undefined as any)
@@ -444,11 +445,18 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 			expect.stringContaining("[cancelTask] Failed to detach delegated parent for child-1: parent lookup failed"),
 		)
+		expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				id: "child-1",
+				parentTaskId: undefined,
+				rootTaskId: undefined,
+			}),
+		)
 		expect(createTaskWithHistoryItemSpy).toHaveBeenCalledWith(
 			expect.objectContaining({
 				id: "child-1",
-				parentTaskId: "parent-1",
-				rootTaskId: "root-1",
+				parentTaskId: undefined,
+				rootTaskId: undefined,
 				parentTask: undefined,
 				rootTask: undefined,
 			}),

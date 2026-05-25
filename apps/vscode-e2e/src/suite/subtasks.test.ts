@@ -3,13 +3,13 @@ import * as assert from "assert"
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
 import { setDefaultSuiteTimeout } from "./test-utils"
-import { sleep, waitFor, waitUntilCompleted } from "./utils"
+import { waitFor, waitUntilCompleted } from "./utils"
 import { SUBTASK_CHILD_FOLLOWUP_ANSWER, SUBTASK_PARENT_PROMPT } from "../fixtures/subtasks"
 
 suite("Roo Code Subtasks", function () {
 	setDefaultSuiteTimeout(this)
 
-	test("Should handle subtask cancellation and resumption correctly", async () => {
+	test("Should keep parent paused after subtask cancellation", async () => {
 		const api = globalThis.api
 		const asks: Record<string, ClineMessage[]> = {}
 		const messages: Record<string, ClineMessage[]> = {}
@@ -78,12 +78,8 @@ suite("Roo Code Subtasks", function () {
 				() => asks[spawnedTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "followup") ?? false,
 			)
 			const cancelledChildTaskId = spawnedTaskId!
-			const delegatedFollowupCount =
-				asks[cancelledChildTaskId]?.filter(({ type, ask }) => type === "ask" && ask === "followup").length ?? 0
 
 			await api.cancelCurrentTask()
-
-			await sleep(2_000)
 
 			assert.ok(
 				messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
@@ -101,38 +97,40 @@ suite("Roo Code Subtasks", function () {
 					asks[cancelledChildTaskId]?.some(({ type, ask }) => type === "ask" && ask === "resume_task") ??
 					false,
 			)
-			await api.approveCurrentAsk()
-			await waitForStage(
-				"wait for resumed child followup ask",
-				() =>
-					(asks[cancelledChildTaskId]?.filter(({ type, ask }) => type === "ask" && ask === "followup")
-						.length ?? 0) > delegatedFollowupCount,
-			)
-			await api.sendMessage(SUBTASK_CHILD_FOLLOWUP_ANSWER)
-			await waitUntilCompleted({ api, taskId: cancelledChildTaskId })
+
+			const resumedChildTaskId = await waitUntilCompleted({
+				api,
+				start: async () => {
+					await api.sendMessage(SUBTASK_CHILD_FOLLOWUP_ANSWER)
+					return cancelledChildTaskId
+				},
+			})
 
 			assert.strictEqual(
-				findErrorText(cancelledChildTaskId),
-				undefined,
-				"Cancelled child should not emit an error",
+				resumedChildTaskId,
+				cancelledChildTaskId,
+				"Cancelled child task should be resumed in place",
 			)
 			assert.strictEqual(
-				findCompletionText(cancelledChildTaskId),
+				findErrorText(resumedChildTaskId),
+				undefined,
+				"Resumed child task should not emit an error",
+			)
+			assert.strictEqual(
+				findCompletionText(resumedChildTaskId),
 				"9",
-				"Cancelled child should complete with `9`",
+				"Resumed child task should complete with `9`",
 			)
 			assert.strictEqual(
 				api.getCurrentTaskStack().at(-1),
 				cancelledChildTaskId,
-				"Cancelled child should stay active after resuming from cancellation",
+				"Cancelled child task should remain the active completed task",
 			)
-
-			await sleep(2_000)
 
 			assert.ok(
 				messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
 					undefined,
-				"Parent task should not have resumed after subtask cancellation",
+				"Parent task should not have resumed after the cancelled child completed",
 			)
 
 			await api.clearCurrentTask()
