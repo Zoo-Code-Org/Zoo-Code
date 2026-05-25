@@ -103,9 +103,13 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		visibleProvider.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
+			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
 		// Also explicitly post the visibility message to trigger scroll reliably
-		visibleProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
 	},
 	historyButtonClicked: () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)
@@ -116,12 +120,18 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		visibleProvider.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
+			.catch((error) => outputChannel.appendLine(`[historyButtonClicked] postMessageToWebview failed: ${error}`))
 	},
 	marketplaceButtonClicked: () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)
 		if (!visibleProvider) return
-		visibleProvider.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
+			.catch((error) =>
+				outputChannel.appendLine(`[marketplaceButtonClicked] postMessageToWebview failed: ${error}`),
+			)
 	},
 	newTask: handleNewTask,
 	setCustomStoragePath: async () => {
@@ -150,7 +160,7 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 
 			// Send focus input message only for sidebar panels
 			if (sidebarPanel && getPanel() === sidebarPanel) {
-				provider.postMessageToWebview({ type: "action", action: "focusInput" })
+				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
 			}
 		} catch (error) {
 			outputChannel.appendLine(`Error focusing input: ${error}`)
@@ -170,7 +180,9 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			return
 		}
 
-		visibleProvider.postMessageToWebview({ type: "acceptInput" })
+		void visibleProvider
+			.postMessageToWebview({ type: "acceptInput" })
+			.catch((error) => outputChannel.appendLine(`[acceptInput] postMessageToWebview failed: ${error}`))
 	},
 	toggleAutoApprove: async () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)
@@ -179,10 +191,14 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			return
 		}
 
-		visibleProvider.postMessageToWebview({
-			type: "action",
-			action: "toggleAutoApprove",
-		})
+		try {
+			await visibleProvider.postMessageToWebview({
+				type: "action",
+				action: "toggleAutoApprove",
+			})
+		} catch (error) {
+			outputChannel.appendLine(`[toggleAutoApprove] postMessageToWebview failed: ${error}`)
+		}
 	},
 })
 

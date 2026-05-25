@@ -30,15 +30,15 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.54.1 新功能
+## v3.55.0 新功能
 
-**Zoo Code 首次發行** —— Zoo Code 現在已作為獨立擴充套件上架 VS Code Marketplace，識別名稱為 `ZooCodeOrganization.zoo-code`，並且每次 merge 到 `main` 後都會自動發佈 pre-release 版本。
+**Zoo Code 首個功能版本** 以 Marketplace 交接為基礎，帶來了一個新的供應商、Roo Code 的上游 sunset merge，以及一輪涵蓋聊天、供應商設定與渲染的使用者可見修正。
 
-- 透過 OpenAI Codex 供應商新增對 GPT-5.5 的支援。
-- 在 Vertex AI 上新增對 Claude Opus 4.7 的支援。
-- 在聊天中新增前一個 checkpoint 的導覽控制項。
-- 支援動態擷取模型的 DeepSeek V4。
-- 支援 MCP OAuth 用戶端。
+- 新增 Xiaomi MiMo 一級 API 供應商支援。
+- 合入 Roo Code 的上游 sunset merge 與相關平台更新。
+- 修正 MCP 登入文案、Gemini 全工具組請求，以及 OpenAI 在不支援 temperature 的模型上的處理。
+- 修正 Markdown 單波浪號渲染與診斷暫存檔命名。
+- 改善 Z.AI、GLM 與 Vertex AI 的供應商預設值與區域覆蓋。
 
 <details>
   <summary>🌐 支援語言</summary>
@@ -62,7 +62,7 @@
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 

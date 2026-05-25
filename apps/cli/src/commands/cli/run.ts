@@ -12,7 +12,6 @@ import {
 	isSupportedProvider,
 	supportedProviders,
 	DEFAULT_FLAGS,
-	DEFAULT_PROVIDER,
 	REASONING_EFFORTS,
 	OutputFormat,
 } from "@/types/index.js"
@@ -22,10 +21,10 @@ import { JsonEventEmitter } from "@/agent/json-event-emitter.js"
 import { loadSettings } from "@/lib/storage/index.js"
 import { readWorkspaceTaskSessions, resolveWorkspaceResumeSessionId } from "@/lib/task-history/index.js"
 import { getEnvVarName, getApiKeyFromEnv } from "@/lib/utils/provider.js"
-import { runOnboarding } from "@/lib/utils/onboarding.js"
 import { validateTerminalShellPath } from "@/lib/utils/shell.js"
 import { getDefaultExtensionPath } from "@/lib/utils/extension.js"
 import { isValidSessionId } from "@/lib/utils/session-id.js"
+import { runOnboarding } from "@/lib/utils/onboarding.js"
 import { VERSION } from "@/lib/utils/version.js"
 
 import { ExtensionHost, ExtensionHostOptions } from "@/agent/index.js"
@@ -48,40 +47,6 @@ async function bootstrapResumeForStdinStream(host: ExtensionHost, sessionId: str
 
 function normalizeError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error))
-}
-
-export function resolveProviderPreference({
-	flagProvider,
-	settingsProvider,
-}: {
-	flagProvider?: string
-	settingsProvider?: string
-}): {
-	provider: string
-	fellBackFromStoredRooPreference: boolean
-	fellBackFromExplicitRooRequest: boolean
-} {
-	if (flagProvider === "roo") {
-		return {
-			provider: DEFAULT_PROVIDER,
-			fellBackFromStoredRooPreference: false,
-			fellBackFromExplicitRooRequest: true,
-		}
-	}
-
-	if (settingsProvider === "roo") {
-		return {
-			provider: DEFAULT_PROVIDER,
-			fellBackFromStoredRooPreference: true,
-			fellBackFromExplicitRooRequest: false,
-		}
-	}
-
-	return {
-		provider: flagProvider ?? settingsProvider ?? DEFAULT_PROVIDER,
-		fellBackFromStoredRooPreference: false,
-		fellBackFromExplicitRooRequest: false,
-	}
 }
 
 export async function run(promptArg: string | undefined, flagOptions: FlagOptions) {
@@ -157,14 +122,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 	const effectiveModel = flagOptions.model || settings.model || DEFAULT_FLAGS.model
 	const effectiveReasoningEffort =
 		flagOptions.reasoningEffort || settings.reasoningEffort || DEFAULT_FLAGS.reasoningEffort
-	const {
-		provider: resolvedProvider,
-		fellBackFromStoredRooPreference,
-		fellBackFromExplicitRooRequest,
-	} = resolveProviderPreference({
-		flagProvider: flagOptions.provider,
-		settingsProvider: settings.provider,
-	})
+	const effectiveProvider = flagOptions.provider ?? settings.provider ?? "openrouter"
 	const effectiveWorkspacePath = flagOptions.workspace ? path.resolve(flagOptions.workspace) : process.cwd()
 	const legacyRequireApprovalFromSettings =
 		settings.requireApproval ??
@@ -175,21 +133,9 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		flagOptions.consecutiveMistakeLimit ?? settings.consecutiveMistakeLimit ?? DEFAULT_FLAGS.consecutiveMistakeLimit
 	const effectiveConsecutiveMistakeLimit = Number(rawConsecutiveMistakeLimit)
 
-	if (fellBackFromStoredRooPreference) {
-		console.warn(
-			`[CLI] Saved Roo Code Router preference detected in CLI settings. Continuing with the default provider (${DEFAULT_PROVIDER}).`,
-		)
-	}
-
-	if (fellBackFromExplicitRooRequest) {
-		console.warn(
-			`[CLI] Roo Code Router is no longer supported by the CLI. Continuing with the default provider (${DEFAULT_PROVIDER}).`,
-		)
-	}
-
-	if (!isSupportedProvider(resolvedProvider)) {
+	if (!isSupportedProvider(effectiveProvider)) {
 		console.error(
-			`[CLI] Error: Invalid provider: ${resolvedProvider}; must be one of: ${supportedProviders.join(", ")}`,
+			`[CLI] Error: Invalid provider: ${effectiveProvider}; must be one of: ${supportedProviders.join(", ")}`,
 		)
 		process.exit(1)
 	}
@@ -219,7 +165,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		reasoningEffort: effectiveReasoningEffort === "unspecified" ? undefined : effectiveReasoningEffort,
 		consecutiveMistakeLimit: effectiveConsecutiveMistakeLimit,
 		user: null,
-		provider: resolvedProvider,
+		provider: effectiveProvider,
 		model: effectiveModel,
 		workspacePath: effectiveWorkspacePath,
 		extensionPath: path.resolve(flagOptions.extension || getDefaultExtensionPath(__dirname)),
@@ -245,7 +191,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 
 	if (!extensionHostOptions.apiKey) {
 		console.error(`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`)
-		console.error(`For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`)
+		console.error(`[CLI] For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`)
 
 		process.exit(1)
 	}

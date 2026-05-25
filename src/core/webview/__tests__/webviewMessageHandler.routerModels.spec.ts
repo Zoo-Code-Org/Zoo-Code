@@ -82,28 +82,6 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		})
 	})
 
-	it("returns an empty Roo result when values.provider is present ('roo')", async () => {
-		await webviewMessageHandler(
-			mockProvider as any,
-			{
-				type: "requestRouterModels",
-				values: { provider: "roo" },
-			} as any,
-		)
-
-		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
-			(c: any[]) => c[0]?.type === "routerModels",
-		)
-		expect(call).toBeTruthy()
-		const payload = call[0]
-		const routerModels = payload.routerModels as Record<string, Record<string, any>>
-
-		// No fetch candidates remain for Roo, so the filtered aggregate payload is empty.
-		expect(routerModels).toEqual({})
-
-		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "roo" }))
-	})
-
 	it("returns explicit removal error for requestRooModels", async () => {
 		await webviewMessageHandler(mockProvider as any, { type: "requestRooModels" } as any)
 
@@ -131,10 +109,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		// Aggregate handler initializes many known routers - ensure a few expected keys exist
 		expect(routerModels).toHaveProperty("openrouter")
-		expect(routerModels).toHaveProperty("roo")
 		expect(routerModels).toHaveProperty("requesty")
 		expect(routerModels).toHaveProperty("deepseek")
-		expect(routerModels.roo).toEqual({})
 		expect(routerModels.deepseek).toEqual({})
 		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "deepseek" }))
 	})

@@ -11,7 +11,7 @@ import {
 	zaiApiLineConfigs,
 } from "@roo-code/types"
 
-import { type ApiHandlerOptions, shouldUseReasoningEffort } from "../../shared/api"
+import { type ApiHandlerOptions, getModelMaxOutputTokens, shouldUseReasoningEffort } from "../../shared/api"
 import { convertToZAiFormat } from "../transform/zai-format"
 
 import type { ApiHandlerCreateMessageMetadata } from "../index"
@@ -79,11 +79,15 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 	) {
 		const { id: model, info } = this.getModel()
 
-		// Use info.maxTokens directly — Z.ai model definitions are hand-curated and accurate.
-		// getModelMaxOutputTokens clamps to 20% of contextWindow (a guard for OpenRouter dynamic
-		// metadata where maxTokens ≈ contextWindow), but ApiHandlerOptions omits apiProvider so
-		// the zai bypass in api.ts never fires. glm-5.1 legitimately supports 128k output.
-		const max_tokens = this.options.modelMaxTokens || (info.maxTokens ?? undefined)
+		const max_tokens =
+			this.options.modelMaxTokens ||
+			(getModelMaxOutputTokens({
+				modelId: model,
+				model: info,
+				settings: this.options,
+				format: "openai",
+			}) ??
+				undefined)
 
 		const temperature = this.options.modelTemperature ?? this.defaultTemperature
 

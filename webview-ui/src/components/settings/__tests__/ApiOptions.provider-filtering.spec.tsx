@@ -131,7 +131,6 @@ describe("ApiOptions Provider Filtering", () => {
 		expect(providerValues).toContain("anthropic") // static provider
 		expect(providerValues).toContain("openrouter") // dynamic provider
 		expect(providerValues).toContain("ollama") // dynamic provider
-		expect(providerValues).not.toContain("roo")
 	})
 
 	it("should hide static providers with empty models", () => {
@@ -295,32 +294,5 @@ describe("ApiOptions Provider Filtering", () => {
 		// Cleanup
 		delete (MODELS_BY_PROVIDER as any).testEmptyProvider
 		PROVIDERS.pop()
-	})
-
-	it("should show a retired Roo option for legacy configurations", () => {
-		vi.mocked(useExtensionState).mockReturnValue({
-			organizationAllowList: undefined,
-			cloudIsAuthenticated: false,
-		} as any)
-		;(useSelectedModel as any).mockReturnValue({
-			provider: "roo",
-			id: undefined,
-			info: null,
-		})
-
-		renderWithProviders({
-			...defaultProps,
-			apiConfiguration: {
-				apiProvider: "roo",
-			} as ProviderSettings,
-		})
-
-		const selectElement = screen.getByTestId("provider-select")
-		const options = JSON.parse(selectElement.getAttribute("data-options") || "[]")
-		const providerValues = options.map((opt: any) => opt.value)
-
-		expect(providerValues).toContain("roo")
-		expect(screen.getByText("Roo Code Router")).toBeInTheDocument()
-		expect(screen.getByText("settings:providers.retiredProviderMessage")).toBeInTheDocument()
 	})
 })

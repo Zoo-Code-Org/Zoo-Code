@@ -6,7 +6,7 @@ import pWaitFor from "p-wait-for"
 
 import type { TaskSessionEntry } from "@roo-code/core/cli"
 import type { Command, ModelRecord, WebviewMessage } from "@roo-code/types"
-import { getProviderDefaultModelId } from "@roo-code/types"
+import { openRouterDefaultModelId } from "@roo-code/types"
 
 import { ExtensionHost, type ExtensionHostOptions } from "@/agent/index.js"
 import { readWorkspaceTaskSessions } from "@/lib/task-history/index.js"
@@ -112,7 +112,7 @@ async function createListHost(options: BaseListOptions, hostOptions: ListHostOpt
 		reasoningEffort: undefined,
 		user: null,
 		provider: "openrouter",
-		model: getProviderDefaultModelId("openrouter"),
+		model: openRouterDefaultModelId,
 		apiKey,
 		workspacePath,
 		extensionPath,
@@ -223,8 +223,9 @@ function requestOpenRouterModels(host: ExtensionHost): Promise<ModelRecord> {
 				return undefined
 			}
 
-			const routerModels = isRecord(message.routerModels) ? message.routerModels : undefined
-			return isRecord(routerModels?.openrouter) ? (routerModels.openrouter as ModelRecord) : {}
+			const routerModels = isRecord(message.routerModels) ? message.routerModels : {}
+			const openRouterModels = routerModels.openrouter
+			return isRecord(openRouterModels) ? (openRouterModels as ModelRecord) : {}
 		},
 	)
 }

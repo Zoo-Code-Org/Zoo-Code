@@ -20,8 +20,9 @@ function createKey(overrides: Partial<Key> = {}): Key {
 		backspace: false,
 		delete: false,
 		meta: false,
+		super: false,
 		...overrides,
-	}
+	} as Key
 }
 
 describe("globalInputSequences", () => {

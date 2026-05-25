@@ -52,13 +52,26 @@ export const waitUntilAborted = async ({ api, taskId, ...options }: WaitUntilAbo
 
 type WaitUntilCompletedOptions = WaitForOptions & {
 	api: RooCodeAPI
-	taskId: string
+	taskId?: string
+	start?: () => Promise<string>
 }
 
-export const waitUntilCompleted = async ({ api, taskId, ...options }: WaitUntilCompletedOptions) => {
-	const set = new Set<string>()
-	api.on(RooCodeEventName.TaskCompleted, (taskId) => set.add(taskId))
-	await waitFor(() => set.has(taskId), options)
+export const waitUntilCompleted = async ({
+	api,
+	taskId: passedTaskId,
+	start,
+	...options
+}: WaitUntilCompletedOptions): Promise<string> => {
+	const completed = new Set<string>()
+	const handler = (id: string) => completed.add(id)
+	api.on(RooCodeEventName.TaskCompleted, handler)
+	try {
+		const taskId = passedTaskId ?? (await start!())
+		await waitFor(() => completed.has(taskId), options)
+		return taskId
+	} finally {
+		api.off(RooCodeEventName.TaskCompleted, handler)
+	}
 }
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))

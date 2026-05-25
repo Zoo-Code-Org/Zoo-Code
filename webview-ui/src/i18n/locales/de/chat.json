@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "Was ist neu:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: GPT-5.5-Unterstützung im OpenAI Codex-Provider hinzugefügt, damit du das neueste Modell direkt in Zoo Code nutzen kannst.",
-			"claudeOpus47": "Claude Opus 4.7 auf Vertex AI: Claude Opus 4.7 zum Vertex AI-Provider hinzugefügt – Anthropics neuestes Flaggschiff-Reasoning-Modell.",
-			"checkpointNav": "Navigation zu vorherigen Checkpoints: Neue Steuerelemente im Chat, um durch frühere Checkpoints zurückzuspringen, mit vollständiger i18n-Unterstützung."
+			"highlight1": "Xiaomi MiMo-Provider: Xiaomi MiMo als vollwertigen API-Provider hinzugefügt, damit du MiMo-Modelle direkt in Zoo Code konfigurieren kannst.",
+			"highlight2": "Upstream-Zoo-Code-Handoff: Den neuesten Upstream-Sunset-Merge und zugehörige Plattform-Updates übernommen, damit Zoo Code mit der Community-Handoff-Arbeit abgestimmt bleibt.",
+			"highlight3": "Stabilitätsfixes für Chat und Provider: Texte auf der MCP-Anmeldeseite, Gemini-Anfragen mit vollem Tool-Set, die OpenAI-Temperaturbehandlung und die Markdown-Darstellung einzelner Tilden korrigiert."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",

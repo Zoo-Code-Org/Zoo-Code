@@ -10,8 +10,7 @@
 		{
 			"description": "Group GitHub Actions updates for one review pass.",
 			"matchManagers": ["github-actions"],
-			"groupName": "GitHub Actions",
-			"schedule": ["* 21-23 * * 0"]
+			"groupName": "GitHub Actions"
 		},
 		{
 			"description": "Group AI SDK and provider patch/minor updates.",
@@ -34,8 +33,7 @@
 				"/^@qdrant\\//"
 			],
 			"matchUpdateTypes": ["minor", "patch"],
-			"groupName": "AI SDKs and providers",
-			"schedule": ["* 21-23 * * 0"]
+			"groupName": "AI SDKs and providers"
 		},
 		{
 			"description": "Group frontend and UI patch/minor updates.",
@@ -53,8 +51,7 @@
 				"/^@tailwindcss\\//"
 			],
 			"matchUpdateTypes": ["minor", "patch"],
-			"groupName": "Frontend and UI stack",
-			"schedule": ["* 21-23 * * 0"]
+			"groupName": "Frontend and UI stack"
 		},
 		{
 			"description": "Group test and build tooling patch/minor updates.",
@@ -77,8 +74,7 @@
 				"/^eslint($|-)/"
 			],
 			"matchUpdateTypes": ["minor", "patch"],
-			"groupName": "Build, lint, and test tooling",
-			"schedule": ["* 21-23 * * 0"]
+			"groupName": "Build, lint, and test tooling"
 		},
 		{
 			"description": "Automerge low-risk patch updates for DefinitelyTyped packages.",

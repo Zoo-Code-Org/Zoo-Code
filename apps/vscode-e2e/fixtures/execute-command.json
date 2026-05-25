@@ -1,0 +1,60 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "EXECUTE_COMMAND_SIMPLE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"printf 'Hello from test\\\\n' > execute-command-tool-fixture/simple-echo.txt\"}",
+						"id": "call_execute_command_simple_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "EXECUTE_COMMAND_CWD_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"printf 'Test in subdirectory\\\\n' > output.txt\",\"cwd\":\"execute-command-tool-fixture/custom-cwd\"}",
+						"id": "call_execute_command_cwd_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "EXECUTE_COMMAND_MULTI_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"printf 'Line 1\\\\n' > execute-command-tool-fixture/multi-command.txt\"}",
+						"id": "call_execute_command_multi_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "EXECUTE_COMMAND_LONG_RUNNING_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"node -e \\\"setTimeout(() => console.log('Command completed after delay'), 1000)\\\"\"}",
+						"id": "call_execute_command_long_running_001"
+					}
+				]
+			}
+		}
+	]
+}

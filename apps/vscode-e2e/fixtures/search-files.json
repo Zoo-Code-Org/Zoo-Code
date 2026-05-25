@@ -1,0 +1,116 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "SEARCH_FILES_FUNCTIONS_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "search_files",
+						"arguments": "{\"path\":\"search-files-tool-fixture\",\"regex\":\"function\\\\s+\\\\w+\"}",
+						"id": "call_search_files_functions_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "SEARCH_FILES_TODO_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "search_files",
+						"arguments": "{\"path\":\"search-files-tool-fixture\",\"regex\":\"TODO.*\"}",
+						"id": "call_search_files_todo_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "SEARCH_FILES_TYPESCRIPT_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "search_files",
+						"arguments": "{\"path\":\"search-files-tool-fixture\",\"regex\":\"interface\\\\s+\\\\w+\",\"file_pattern\":\"*.ts\"}",
+						"id": "call_search_files_typescript_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "SEARCH_FILES_JSON_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "search_files",
+						"arguments": "{\"path\":\"search-files-tool-fixture\",\"regex\":\"\\\"\\\\w+\\\":\\\\s*\",\"file_pattern\":\"*.json\"}",
+						"id": "call_search_files_json_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "SEARCH_FILES_NESTED_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "search_files",
+						"arguments": "{\"path\":\"search-files-tool-fixture\",\"regex\":\"function\\\\s+(format|debounce)\"}",
+						"id": "call_search_files_nested_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "SEARCH_FILES_COMPLEX_REGEX_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "search_files",
+						"arguments": "{\"path\":\"search-files-tool-fixture\",\"regex\":\"(import|export).*\",\"file_pattern\":\"*.{js,ts}\"}",
+						"id": "call_search_files_complex_regex_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "SEARCH_FILES_NO_MATCH_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "search_files",
+						"arguments": "{\"path\":\"search-files-tool-fixture\",\"regex\":\"nonExistentPattern12345\"}",
+						"id": "call_search_files_no_match_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "SEARCH_FILES_CLASS_METHOD_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "search_files",
+						"arguments": "{\"path\":\"search-files-tool-fixture\",\"regex\":\"(class\\\\s+\\\\w+|async\\\\s+\\\\w+)\",\"file_pattern\":\"*.ts\"}",
+						"id": "call_search_files_class_method_001"
+					}
+				]
+			}
+		}
+	]
+}

@@ -251,4 +251,30 @@ describe("ModelPicker", () => {
 			expect(screen.queryByText(errorMessage)).not.toBeInTheDocument()
 		})
 	})
+
+	describe("automaticFetch hint", () => {
+		it("hides the automatic fetch hint for MiMo provider", async () => {
+			await act(async () => {
+				render(
+					<QueryClientProvider client={queryClient}>
+						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: "mimo" }} />
+					</QueryClientProvider>,
+				)
+			})
+
+			expect(screen.queryByTestId("automatic-fetch-hint")).not.toBeInTheDocument()
+		})
+
+		it("shows the automatic fetch hint for non-MiMo providers", async () => {
+			await act(async () => {
+				render(
+					<QueryClientProvider client={queryClient}>
+						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: "openai" }} />
+					</QueryClientProvider>,
+				)
+			})
+
+			expect(screen.getByTestId("automatic-fetch-hint")).toBeInTheDocument()
+		})
+	})
 })

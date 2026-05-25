@@ -19,6 +19,16 @@ import { setDefaultSuiteTimeout } from "../test-utils"
 type ZAiFixture = { match: string; result: string }
 type ZAiRequestCapture = { maxTokens?: number }
 
+function getBaseZAiConfiguration() {
+	return {
+		apiProvider: "zai" as const,
+		zaiApiKey: ZAI_API_KEY ?? "mock-key",
+		zaiApiLine: "international_api" as const,
+		modelMaxTokens: undefined,
+		modelMaxThinkingTokens: undefined,
+	}
+}
+
 function installZAiFetchInterceptor(
 	fixtures: ZAiFixture[],
 	capture?: ZAiRequestCapture,
@@ -151,6 +161,10 @@ suite("Z.ai GLM provider", function () {
 	let restoreFetch: (() => void) | undefined
 	const requestCapture: ZAiRequestCapture = {}
 
+	setup(() => {
+		requestCapture.maxTokens = undefined
+	})
+
 	suiteSetup(async () => {
 		restoreFetch = installZAiFetchInterceptor(
 			[
@@ -161,12 +175,14 @@ suite("Z.ai GLM provider", function () {
 			!!ZAI_API_KEY,
 		)
 
-		await globalThis.api.setConfiguration({
-			apiProvider: "zai" as const,
-			zaiApiKey: ZAI_API_KEY ?? "mock-key",
-			zaiApiLine: "international_api" as const,
-			apiModelId: "glm-5.1",
-		})
+		await globalThis.api.upsertProfile(
+			"default",
+			{
+				...getBaseZAiConfiguration(),
+				apiModelId: "glm-5.1",
+			},
+			true,
+		)
 	})
 
 	suiteTeardown(async () => {
@@ -175,12 +191,16 @@ suite("Z.ai GLM provider", function () {
 
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
-		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
-			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
-			openRouterModelId: "openai/gpt-4.1",
-			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
-		})
+		await globalThis.api.upsertProfile(
+			"default",
+			{
+				apiProvider: "openrouter" as const,
+				openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
+				openRouterModelId: "openai/gpt-4.1",
+				...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
+			},
+			true,
+		)
 	})
 
 	test("Should complete a task end-to-end using glm-5.1 via Z.ai provider", async () => {
@@ -206,22 +226,24 @@ suite("Z.ai GLM provider", function () {
 
 		assert.ok(completionMessage, "Task should complete with the expected Z.ai GLM response")
 
-		// Verify max_tokens is the model's documented limit (131_072), not the 20%-of-context
-		// heuristic cap (40_000) that guards against inaccurate OpenRouter dynamic metadata.
+		// Verify max_tokens uses the restored default clamp (20% of context window)
+		// unless the user explicitly overrides it via modelMaxTokens.
 		assert.strictEqual(
 			requestCapture.maxTokens,
-			131_072,
-			`max_tokens should be the documented glm-5.1 limit (131_072) but was ${requestCapture.maxTokens}`,
+			40_000,
+			`max_tokens should default to the glm-5.1 clamp (40_000) but was ${requestCapture.maxTokens}`,
 		)
 	})
 
 	test("Should complete a task end-to-end using glm-5-turbo via Z.ai provider", async () => {
-		await globalThis.api.setConfiguration({
-			apiProvider: "zai" as const,
-			zaiApiKey: ZAI_API_KEY ?? "mock-key",
-			zaiApiLine: "international_api" as const,
-			apiModelId: "glm-5-turbo",
-		})
+		await globalThis.api.upsertProfile(
+			"default",
+			{
+				...getBaseZAiConfiguration(),
+				apiModelId: "glm-5-turbo",
+			},
+			true,
+		)
 
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
@@ -245,12 +267,12 @@ suite("Z.ai GLM provider", function () {
 
 		assert.ok(completionMessage, "Task should complete with the expected Z.ai GLM-5-Turbo response")
 
-		// Verify max_tokens is the model's documented limit (131_072), not the 20%-of-context
-		// heuristic cap (40_000) that guards against inaccurate OpenRouter dynamic metadata.
+		// Verify max_tokens uses the restored default clamp (20% of context window)
+		// unless the user explicitly overrides it via modelMaxTokens.
 		assert.strictEqual(
 			requestCapture.maxTokens,
-			131_072,
-			`max_tokens should be the documented glm-5-turbo limit (131_072) but was ${requestCapture.maxTokens}`,
+			40_551,
+			`max_tokens should default to the glm-5-turbo clamp (40_551) but was ${requestCapture.maxTokens}`,
 		)
 	})
 })
