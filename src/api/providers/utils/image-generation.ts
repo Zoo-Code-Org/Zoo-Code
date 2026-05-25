@@ -59,7 +59,7 @@ interface ImagesApiOptions {
 }
 
 /**
- * Shared image generation implementation for OpenRouter and Roo Code Cloud providers
+ * Shared image generation implementation for OpenRouter and Zoo Code Cloud providers
  */
 export async function generateImageWithProvider(options: ImageGenerationOptions): Promise<ImageGenerationResult> {
 	const { baseURL, authToken, model, prompt, inputImage } = options
