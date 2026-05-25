@@ -1,5 +1,7 @@
 // npx vitest run src/integrations/terminal/__tests__/TerminalProfile.spec.ts
 
+import { existsSync } from "fs"
+
 import * as vscode from "vscode"
 
 import { Terminal } from "../Terminal"
@@ -8,6 +10,12 @@ import { TerminalRegistry } from "../TerminalRegistry"
 vi.mock("execa", () => ({
 	execa: vi.fn(),
 }))
+
+vi.mock("fs", () => ({
+	existsSync: vi.fn(() => false),
+}))
+
+const mockedExistsSync = existsSync as unknown as ReturnType<typeof vi.fn>
 
 describe("Terminal inline terminal profile (#119)", () => {
 	// VS Code's getConfiguration/createTerminal are overloaded, so the precise
@@ -44,6 +52,9 @@ describe("Terminal inline terminal profile (#119)", () => {
 
 	beforeEach(() => {
 		createTerminalSpy = vi.spyOn(vscode.window, "createTerminal").mockImplementation(() => mockTerminal())
+		// Default: no candidate path exists on disk unless a test says otherwise.
+		mockedExistsSync.mockReset()
+		mockedExistsSync.mockReturnValue(false)
 		// Reset to default (unset) before each test.
 		Terminal.setTerminalProfile(undefined)
 	})
@@ -117,7 +128,7 @@ describe("Terminal inline terminal profile (#119)", () => {
 			})
 		})
 
-		it("uses the first path candidate when path is an array", () => {
+		it("picks the first existing path candidate when path is an array", () => {
 			stubProfiles({
 				windows: {
 					"Git Bash": {
@@ -125,6 +136,26 @@ describe("Terminal inline terminal profile (#119)", () => {
 					},
 				},
 			})
+			// Only the second candidate exists on disk; VS Code would pick it.
+			mockedExistsSync.mockImplementation((p: string) => p === "C:\\Program Files\\Git\\bin\\bash.exe")
+
+			Terminal.setTerminalProfile("Git Bash")
+
+			expect(Terminal.getProfileShell("win32")).toEqual({
+				shellPath: "C:\\Program Files\\Git\\bin\\bash.exe",
+				shellArgs: undefined,
+			})
+		})
+
+		it("falls back to the first non-empty candidate when none of the paths exist", () => {
+			stubProfiles({
+				windows: {
+					"Git Bash": {
+						path: ["C:\\missing\\bash.exe", "C:\\also-missing\\bash.exe"],
+					},
+				},
+			})
+			// existsSync defaults to false for every candidate.
 
 			Terminal.setTerminalProfile("Git Bash")
 

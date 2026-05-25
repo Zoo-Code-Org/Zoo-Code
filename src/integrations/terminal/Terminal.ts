@@ -1,3 +1,5 @@
+import { existsSync } from "fs"
+
 import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
 
@@ -277,9 +279,12 @@ export class Terminal extends BaseTerminal {
 			return undefined
 		}
 
-		// A `path` may be a single string or an array of candidate paths (VS Code
-		// picks the first that exists). We pass the first candidate to createTerminal.
-		const pathValue = Array.isArray(profile.path) ? profile.path[0] : profile.path
+		// A `path` may be a single string or an array of candidate paths. VS Code
+		// picks the first candidate that exists on disk, so mirror that: prefer the
+		// first existing path, otherwise fall back to the first non-empty candidate.
+		const candidates = Array.isArray(profile.path) ? profile.path : [profile.path]
+		const nonEmpty = candidates.filter((p): p is string => typeof p === "string" && p.length > 0)
+		const pathValue = nonEmpty.find((p) => existsSync(p)) ?? nonEmpty[0]
 
 		if (!pathValue) {
 			// Profiles defined only by `source` (e.g. "PowerShell") can't be mapped to
