@@ -272,5 +272,58 @@
 			"connected": "Zoo Code: 连接成功！你现在可以使用 Zoo Code 作为 AI 提供商。",
 			"disconnected": "Zoo Code: 已成功断开连接。"
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code: 提交消息生成器已激活",
+		"gitNotFound": "⚠️ 未找到 Git 仓库或 git 不可用",
+		"gitInitError": "⚠️ Git 初始化错误：{{error}}",
+		"generating": "Zoo：正在生成提交消息...",
+		"noChanges": "Zoo：未找到需要分析的更改",
+		"generated": "Zoo：提交消息已生成！",
+		"generationFailed": "Zoo：生成提交消息失败：{{errorMessage}}",
+		"contextWarnings": "Zoo：Git 上下文警告：{{warnings}}",
+		"generatingFromUnstaged": "Zoo：使用未暂存的更改生成消息",
+		"confirmUnstaged": "未找到已暂存的更改。是否从 {{count}} 个未暂存/未跟踪的更改生成提交消息？",
+		"confirmUnstagedAction": "从未暂存的更改生成",
+		"activationFailed": "Zoo：激活消息生成器失败：{{error}}",
+		"providerRegistered": "Zoo：提交消息提供者已注册",
+		"initializing": "正在初始化...",
+		"discoveringFiles": "正在发现文件...",
+		"foundChanges": "发现 {{count}} 个更改",
+		"gettingContext": "正在获取 Git 上下文...",
+		"errors": {
+			"connectionFailed": "无法连接到 Zoo Code 扩展",
+			"timeout": "请求超时，超过 30 秒",
+			"invalidResponse": "从扩展收到无效的响应格式",
+			"missingMessage": "未从扩展收到提交消息",
+			"noChanges": "未找到需要提交的更改",
+			"noProject": "没有可用的项目",
+			"noWorkspacePath": "无法确定 Git 仓库的工作区路径",
+			"workspaceNotFound": "无法确定 Git 仓库的工作区路径",
+			"processingError": "处理提交消息生成时出错：{{error}}"
+		},
+		"error": {
+			"title": "错误",
+			"workspacePathNotFound": "无法确定 Git 仓库的工作区路径",
+			"generationFailed": "生成提交消息失败：{{error}}",
+			"processingFailed": "处理提交消息生成时出错：{{error}}",
+			"unknown": "未知错误"
+		},
+		"dialogs": {
+			"info": "AI 提交消息",
+			"error": "错误",
+			"success": "成功",
+			"title": "AI 提交消息"
+		},
+		"progress": {
+			"title": "正在生成提交消息",
+			"analyzing": "正在分析更改...",
+			"connecting": "正在连接 Zoo Code...",
+			"generating": "正在生成提交消息..."
+		},
+		"ui": {
+			"generateButton": "生成提交消息",
+			"generateButtonTooltip": "使用 AI 分析代码更改并生成提交消息"
+		}
 	}
 }

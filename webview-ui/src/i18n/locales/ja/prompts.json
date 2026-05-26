@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "新しいタスクを開始",
 				"description": "入力内容で新しいタスクを開始できます。コマンドパレットから利用できます。"
+			},
+			"COMMIT_MESSAGE": {
+				"label": "コミットメッセージ生成",
+				"description": "Gitの変更に基づいて説明的なコミットメッセージを生成します。リポジトリのベストプラクティスに沿ったメッセージを生成するようにプロンプトをカスタマイズできます。"
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "このプロファイルのコミットメッセージを生成するために使用される指示。",
+			"apiConfiguration": "API設定",
+			"apiConfigDescription": "このプロファイルで常に使用するAPI設定を選択するか、現在選択されている設定を使用します。",
+			"useCurrentConfig": "現在選択されているAPI設定を使用",
+			"profiles": {
+				"title": "コミットメッセージプロファイル",
+				"select": "コミットメッセージプロファイルを選択",
+				"description": "編集して生成に使用するコミットメッセージプロファイルを選択します。",
+				"name": "プロファイル名",
+				"nameDescription": "このコミットメッセージプロファイルを識別するためのローカル名。",
+				"add": "プロファイルを追加",
+				"delete": "プロファイルを削除",
+				"limit": "最大{{count}}個のプロファイル。"
+			},
+			"gitContext": {
+				"title": "Gitコンテキスト",
+				"description": "必要なdiffとともに送信される追加のGitコンテキストを制御します。変更サマリー、未追跡ファイルのdiff、バイナリサマリーは正確性のために常に含まれます。",
+				"contextLines": "Diffコンテキスト行数",
+				"contextLinesDescription": "各変更周辺の変更されていない行。コンパクトなdiffには0、通常のGit diffには3、より多くの周囲のコードにはより大きな値を使用してください。",
+				"includeDiffStats": "Diff統計を含める",
+				"includeDiffStatsDescription": "完全なdiffの前にコンパクトなファイル/挿入/削除のサマリーを追加します。",
+				"includeBranch": "現在のブランチ名を含める",
+				"includeBranchDescription": "ブランチ名には、コミットメッセージの形成に役立つissue IDや機能名が含まれることがよくあります。",
+				"includeRecentCommits": "最近のコミットを含める",
+				"recentCommitsDescription": "最近のコミットは、Zooがこのリポジトリのコミットメッセージスタイルに合わせるのに役立ちます。",
+				"recentCommitCount": "最近のコミット数",
+				"recentCommitCountDescription": "スタイルと参照コンテキストのために含める最新コミットの数。",
+				"includeRecentCommitBodies": "最近のコミット説明を含める",
+				"includeRecentCommitBodiesDescription": "コミットタイトルだけでなく、コミット本文も含めます。このリポジトリが詳細なコミットメッセージを書く場合に役立ちます。",
+				"includeRecentCommitStats": "最近のコミットファイル統計を含める",
+				"includeRecentCommitStatsDescription": "完全なパッチを含めずに、最近のコミットのファイルレベルの統計を追加します。",
+				"includeRecentCommitDiffs": "最近のコミットdiffを含める",
+				"includeRecentCommitDiffsDescription": "最近のコミットからのパッチを含めます。これによりスタイルマッチングが改善されますが、多くのコンテキストが追加されます。",
+				"recentCommitDiffCount": "最近のコミットdiff数",
+				"recentCommitDiffCountDescription": "完全なパッチを含めるべき最新コミットの数。最大5に制限されています。"
+			},
+			"attribution": {
+				"title": "AIアトリビューションフッター",
+				"description": "Zooがコミットメッセージを生成した後、オプションでアトリビューションフッターを追加します。これは生成後にローカルで追加され、モデルには要求されません。",
+				"enabled": "AIアトリビューションフッターを追加",
+				"enabledDescription": "プロジェクトでAI支援の貢献に関する開示が必要な場合に使用します。",
+				"template": "アトリビューションテンプレート",
+				"placeholders": "プレースホルダー: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = 使用されたAPIプロバイダー; ${model} = 使用されたモデル; ${providerModel} = プロバイダー/モデル。"
 			}
 		}
 	},

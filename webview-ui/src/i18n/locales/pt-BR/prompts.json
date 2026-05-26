@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Iniciar Nova Tarefa",
 				"description": "Inicie uma nova tarefa com a entrada fornecida. Disponível na paleta de comandos."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Geração de Mensagem de Commit",
+				"description": "Gere mensagens de commit descritivas com base nas suas alterações do Git. Personalize o prompt para gerar mensagens que seguem as melhores práticas do seu repositório."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Instruções usadas para gerar mensagens de commit para este perfil.",
+			"apiConfiguration": "Configuração de API",
+			"apiConfigDescription": "Selecione uma configuração de API para usar sempre neste perfil, ou use a configuração atualmente selecionada.",
+			"useCurrentConfig": "Usar configuração de API atualmente selecionada",
+			"profiles": {
+				"title": "Perfil de mensagem de commit",
+				"select": "Escolha um perfil de mensagem de commit",
+				"description": "Escolha qual perfil de mensagem de commit editar e usar para geração.",
+				"name": "Nome do perfil",
+				"nameDescription": "Um nome local para ajudar a reconhecer este perfil de mensagem de commit.",
+				"add": "Adicionar perfil",
+				"delete": "Excluir perfil",
+				"limit": "Até {{count}} perfis."
+			},
+			"gitContext": {
+				"title": "Contexto Git",
+				"description": "Controle o contexto Git adicional enviado com o diff necessário. Resumo de alterações, diffs de arquivos não rastreados e resumos binários são sempre incluídos para correção.",
+				"contextLines": "Linhas de contexto do diff",
+				"contextLinesDescription": "Linhas inalteradas ao redor de cada alteração. Use 0 para diffs compactos, 3 para diffs Git normais ou um valor maior para mais código ao redor.",
+				"includeDiffStats": "Incluir estatísticas do diff",
+				"includeDiffStatsDescription": "Adiciona um resumo compacto de arquivos/inserções/exclusões antes do diff completo.",
+				"includeBranch": "Incluir nome da branch atual",
+				"includeBranchDescription": "Nomes de branches frequentemente incluem IDs de issues ou nomes de funcionalidades que ajudam a formar a mensagem de commit.",
+				"includeRecentCommits": "Incluir commits recentes",
+				"recentCommitsDescription": "Commits recentes ajudam o Zoo a seguir o estilo de mensagens de commit deste repositório.",
+				"recentCommitCount": "Quantidade de commits recentes",
+				"recentCommitCountDescription": "Quantos commits recentes incluir para contexto de estilo e referência.",
+				"includeRecentCommitBodies": "Incluir descrições de commits recentes",
+				"includeRecentCommitBodiesDescription": "Inclui o corpo dos commits, não apenas os títulos. Útil se este repositório escreve mensagens de commit detalhadas.",
+				"includeRecentCommitStats": "Incluir estatísticas de arquivos de commits recentes",
+				"includeRecentCommitStatsDescription": "Adiciona estatísticas no nível de arquivo para commits recentes sem incluir seus patches completos.",
+				"includeRecentCommitDiffs": "Incluir diffs de commits recentes",
+				"includeRecentCommitDiffsDescription": "Inclui patches de commits recentes. Isso pode melhorar a correspondência de estilo, mas adiciona muito contexto.",
+				"recentCommitDiffCount": "Quantidade de diffs de commits recentes",
+				"recentCommitDiffCountDescription": "Quantos commits recentes devem incluir patches completos. Limitado a 5."
+			},
+			"attribution": {
+				"title": "Rodapé de atribuição de IA",
+				"description": "Opcionalmente, anexe um rodapé de atribuição após o Zoo gerar uma mensagem de commit. Isso é adicionado localmente após a geração e não é solicitado ao modelo.",
+				"enabled": "Adicionar rodapé de atribuição de IA",
+				"enabledDescription": "Use isto quando seu projeto exigir divulgação para contribuições assistidas por IA.",
+				"template": "Modelo de atribuição",
+				"placeholders": "Espaços reservados: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = provedor de API usado; ${model} = modelo usado; ${providerModel} = provedor/modelo."
 			}
 		}
 	},

@@ -262,5 +262,58 @@
 			"connected": "Zoo Code: ¡Conectado correctamente! Ahora puedes usar Zoo Code como proveedor de IA.",
 			"disconnected": "Zoo Code: Desconectado correctamente."
 		}
+	},
+	"commitMessage": {
+		"activated": "Generador de mensajes de commit de Zoo Code activado",
+		"gitNotFound": "⚠️ Repositorio Git no encontrado o Git no disponible",
+		"gitInitError": "⚠️ Error de inicialización de Git: {{error}}",
+		"generating": "Zoo: Generando mensaje de commit...",
+		"noChanges": "Zoo: No se encontraron cambios para analizar",
+		"generated": "Zoo: ¡Mensaje de commit generado!",
+		"generationFailed": "Zoo: Error al generar el mensaje de commit: {{errorMessage}}",
+		"contextWarnings": "Zoo: Advertencia del contexto de Git: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: Generando mensaje con cambios no preparados",
+		"confirmUnstaged": "No se encontraron cambios preparados. ¿Generar un mensaje de commit con {{count}} cambios no preparados/no rastreados?",
+		"confirmUnstagedAction": "Generar con cambios no preparados",
+		"activationFailed": "Zoo: Error al activar el generador de mensajes: {{error}}",
+		"providerRegistered": "Zoo: Proveedor de mensajes de commit registrado",
+		"initializing": "Inicializando...",
+		"discoveringFiles": "Descubriendo archivos...",
+		"foundChanges": "Se encontraron {{count}} cambios",
+		"gettingContext": "Obteniendo contexto de Git...",
+		"errors": {
+			"connectionFailed": "Error al conectar con la extensión Zoo Code",
+			"timeout": "La solicitud superó el tiempo de espera de 30 segundos",
+			"invalidResponse": "Formato de respuesta no válido recibido de la extensión",
+			"missingMessage": "No se recibió mensaje de commit de la extensión",
+			"noChanges": "No se encontraron cambios para hacer commit",
+			"noProject": "No hay proyecto disponible",
+			"noWorkspacePath": "No se pudo determinar la ruta del espacio de trabajo para el repositorio Git",
+			"workspaceNotFound": "No se pudo determinar la ruta del espacio de trabajo para el repositorio Git",
+			"processingError": "Error al procesar la generación del mensaje de commit: {{error}}"
+		},
+		"error": {
+			"title": "Error",
+			"workspacePathNotFound": "No se pudo determinar la ruta del espacio de trabajo para el repositorio Git",
+			"generationFailed": "Error al generar el mensaje de commit: {{error}}",
+			"processingFailed": "Error al procesar la generación del mensaje de commit: {{error}}",
+			"unknown": "Error desconocido"
+		},
+		"dialogs": {
+			"info": "Mensaje de commit con IA",
+			"error": "Error",
+			"success": "Éxito",
+			"title": "Mensaje de commit con IA"
+		},
+		"progress": {
+			"title": "Generando mensaje de commit",
+			"analyzing": "Analizando cambios...",
+			"connecting": "Conectando con Zoo Code...",
+			"generating": "Generando mensaje de commit..."
+		},
+		"ui": {
+			"generateButton": "Generar mensaje de commit",
+			"generateButtonTooltip": "Genera un mensaje de commit usando IA para analizar tus cambios de código"
+		}
 	}
 }

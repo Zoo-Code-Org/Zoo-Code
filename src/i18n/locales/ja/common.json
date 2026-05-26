@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: 接続に成功しました！Zoo Code を AI プロバイダーとして使用できます。",
 			"disconnected": "Zoo Code: 正常に切断されました。"
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code コミットメッセージジェネレーターが有効化されました",
+		"gitNotFound": "⚠️ Gitリポジトリが見つからないか、Gitが利用できません",
+		"gitInitError": "⚠️ Git初期化エラー: {{error}}",
+		"generating": "Zoo: コミットメッセージを生成中...",
+		"noChanges": "Zoo: 分析対象の変更が見つかりません",
+		"generated": "Zoo: コミットメッセージが生成されました！",
+		"generationFailed": "Zoo: コミットメッセージの生成に失敗しました: {{errorMessage}}",
+		"contextWarnings": "Zoo: Gitコンテキスト警告: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: ステージされていない変更を使用してメッセージを生成中",
+		"confirmUnstaged": "ステージされた変更が見つかりません。代わりに{{count}}件のステージされていない/トラックされていない変更からコミットメッセージを生成しますか？",
+		"confirmUnstagedAction": "ステージされていない変更から生成",
+		"activationFailed": "Zoo: メッセージジェネレーターの有効化に失敗しました: {{error}}",
+		"providerRegistered": "Zoo: コミットメッセージプロバイダーが登録されました",
+		"initializing": "初期化中...",
+		"discoveringFiles": "ファイルを検索中...",
+		"foundChanges": "{{count}}件の変更が見つかりました",
+		"gettingContext": "Gitコンテキストを取得中...",
+		"errors": {
+			"connectionFailed": "Zoo Code拡張機能への接続に失敗しました",
+			"timeout": "リクエストが30秒後にタイムアウトしました",
+			"invalidResponse": "拡張機能から無効なレスポンス形式を受信しました",
+			"missingMessage": "拡張機能からコミットメッセージを受信できませんでした",
+			"noChanges": "コミットする変更が見つかりません",
+			"noProject": "利用可能なプロジェクトがありません",
+			"noWorkspacePath": "Gitリポジトリのワークスペースパスを特定できませんでした",
+			"workspaceNotFound": "Gitリポジトリのワークスペースパスを特定できませんでした",
+			"processingError": "コミットメッセージ生成の処理中にエラーが発生しました: {{error}}"
+		},
+		"error": {
+			"title": "エラー",
+			"workspacePathNotFound": "Gitリポジトリのワークスペースパスを特定できませんでした",
+			"generationFailed": "コミットメッセージの生成に失敗しました: {{error}}",
+			"processingFailed": "コミットメッセージ生成の処理中にエラーが発生しました: {{error}}",
+			"unknown": "不明なエラー"
+		},
+		"dialogs": {
+			"info": "AIコミットメッセージ",
+			"error": "エラー",
+			"success": "成功",
+			"title": "AIコミットメッセージ"
+		},
+		"progress": {
+			"title": "コミットメッセージを生成中",
+			"analyzing": "変更を分析中...",
+			"connecting": "Zoo Codeに接続中...",
+			"generating": "コミットメッセージを生成中..."
+		},
+		"ui": {
+			"generateButton": "コミットメッセージを生成",
+			"generateButtonTooltip": "AIを使用してコードの変更を分析し、コミットメッセージを生成します"
+		}
 	}
 }

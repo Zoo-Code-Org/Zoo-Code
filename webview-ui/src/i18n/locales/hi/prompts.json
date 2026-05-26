@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "नया कार्य शुरू करें",
 				"description": "इनपुट के साथ नया कार्य शुरू करें। कमांड पैलेट में उपलब्ध है।"
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Commit Message जनरेशन",
+				"description": "अपने Git changes के आधार पर वर्णनात्मक commit messages उत्पन्न करें। अपने रिपॉज़िटरी की सर्वोत्तम प्रथाओं का पालन करने वाले messages उत्पन्न करने के लिए प्रॉम्प्ट को अनुकूलित करें।"
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "इस प्रोफ़ाइल के लिए commit messages उत्पन्न करने के लिए उपयोग की जाने वाली निर्देश।",
+			"apiConfiguration": "API कॉन्फ़िगरेशन",
+			"apiConfigDescription": "इस प्रोफ़ाइल के लिए हमेशा उपयोग करने के लिए एक API कॉन्फ़िगरेशन चुनें, या वर्तमान में चयनित कॉन्फ़िगरेशन का उपयोग करें।",
+			"useCurrentConfig": "वर्तमान में चयनित API कॉन्फ़िगरेशन का उपयोग करें",
+			"profiles": {
+				"title": "Commit message प्रोफ़ाइल",
+				"select": "एक commit-message प्रोफ़ाइल चुनें",
+				"description": "चुनें कि कौन सी commit-message प्रोफ़ाइल संपादित करनी है और जनरेशन के लिए उपयोग करनी है।",
+				"name": "प्रोफ़ाइल का नाम",
+				"nameDescription": "इस commit-message प्रोफ़ाइल को पहचानने में मदद करने के लिए एक स्थानीय नाम।",
+				"add": "प्रोफ़ाइल जोड़ें",
+				"delete": "प्रोफ़ाइल हटाएँ",
+				"limit": "{{count}} प्रोफ़ाइल तक।"
+			},
+			"gitContext": {
+				"title": "Git संदर्भ",
+				"description": "आवश्यक diff के साथ भेजे जाने वाले अतिरिक्त Git संदर्भ को नियंत्रित करें। परिवर्तन सारांश, अनट्रैक्ड फ़ाइल diff, और बाइनरी सारांश सटीकता के लिए हमेशा शामिल किए जाते हैं।",
+				"contextLines": "Diff संदर्भ लाइनें",
+				"contextLinesDescription": "प्रत्येक परिवर्तन के आसपास की अपरिवर्तित लाइनें। कॉम्पैक्ट diff के लिए 0, सामान्य Git diff के लिए 3, या अधिक आसपास के कोड के लिए बड़ा मान उपयोग करें।",
+				"includeDiffStats": "Diff आंकड़े शामिल करें",
+				"includeDiffStatsDescription": "पूर्ण diff से पहले एक कॉम्पैक्ट फ़ाइल/इन्सर्शन/डिलीशन सारांश जोड़ता है।",
+				"includeBranch": "वर्तमान शाखा का नाम शामिल करें",
+				"includeBranchDescription": "शाखा के नाम में अक्सर issue ID या फ़ीचर नाम शामिल होते हैं जो commit message को आकार देने में मदद करते हैं।",
+				"includeRecentCommits": "हाल के commits शामिल करें",
+				"recentCommitsDescription": "हाल के commits Zoo को इस रिपॉज़िटरी की commit message शैली से मेल खाने में मदद करते हैं।",
+				"recentCommitCount": "हाल के commit की संख्या",
+				"recentCommitCountDescription": "शैली और संदर्भ के लिए कितने नवीनतम commits शामिल करने हैं।",
+				"includeRecentCommitBodies": "हाल के commit विवरण शामिल करें",
+				"includeRecentCommitBodiesDescription": "केवल commit शीर्षकों के बजाय commit बॉडी शामिल करता है। यदि यह रिपॉज़िटरी विस्तृत commit messages लिखती है तो उपयोगी।",
+				"includeRecentCommitStats": "हाल के commit फ़ाइल आंकड़े शामिल करें",
+				"includeRecentCommitStatsDescription": "हाल के commits के लिए फ़ाइल-स्तरीय आंकड़े जोड़ता है बिना उनके पूर्ण patches शामिल किए।",
+				"includeRecentCommitDiffs": "हाल के commit diffs शामिल करें",
+				"includeRecentCommitDiffsDescription": "हाल के commits से patches शामिल करता है। यह शैली मिलान में सुधार कर सकता है लेकिन बहुत सारा संदर्भ जोड़ता है।",
+				"recentCommitDiffCount": "हाल के commit diff की संख्या",
+				"recentCommitDiffCountDescription": "कितने नवीनतम commits में पूर्ण patches शामिल होने चाहिए। अधिकतम 5 तक सीमित।"
+			},
+			"attribution": {
+				"title": "AI एट्रिब्यूशन फ़ुटर",
+				"description": "Zoo द्वारा commit message जनरेट करने के बाद वैकल्पिक रूप से एक एट्रिब्यूशन फ़ुटर जोड़ें। यह जनरेशन के बाद स्थानीय रूप से जोड़ा जाता है और मॉडल से अनुरोध नहीं किया जाता है।",
+				"enabled": "AI एट्रिब्यूशन फ़ुटर जोड़ें",
+				"enabledDescription": "जब आपके प्रोजेक्ट में AI-सहायता प्राप्त योगदानों के लिए प्रकटीकरण आवश्यक हो तो इसका उपयोग करें।",
+				"template": "एट्रिब्यूशन टेम्पलेट",
+				"placeholders": "प्लेसहोल्डर: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = उपयोग किया गया API प्रोवाइडर; ${model} = उपयोग किया गया मॉडल; ${providerModel} = प्रोवाइडर/मॉडल।"
 			}
 		}
 	},

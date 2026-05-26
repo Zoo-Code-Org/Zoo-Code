@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Mulai Tugas Baru",
 				"description": "Mulai tugas baru dengan input pengguna. Tersedia di Command Palette."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Pembuatan Pesan Commit",
+				"description": "Buat pesan commit yang deskriptif berdasarkan perubahan Git Anda. Sesuaikan prompt untuk menghasilkan pesan yang mengikuti praktik terbaik repositori Anda."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Instruksi yang digunakan untuk menghasilkan pesan commit untuk profil ini.",
+			"apiConfiguration": "Konfigurasi API",
+			"apiConfigDescription": "Pilih konfigurasi API yang akan selalu digunakan untuk profil ini, atau gunakan konfigurasi yang sedang dipilih.",
+			"useCurrentConfig": "Gunakan konfigurasi API yang sedang dipilih",
+			"profiles": {
+				"title": "Profil pesan commit",
+				"select": "Pilih profil pesan commit",
+				"description": "Pilih profil pesan commit mana yang akan diedit dan digunakan untuk pembuatan.",
+				"name": "Nama profil",
+				"nameDescription": "Nama lokal untuk membantu Anda mengenali profil pesan commit ini.",
+				"add": "Tambah profil",
+				"delete": "Hapus profil",
+				"limit": "Hingga {{count}} profil."
+			},
+			"gitContext": {
+				"title": "Konteks Git",
+				"description": "Kontrol konteks Git tambahan yang dikirim bersama diff yang diperlukan. Ringkasan perubahan, diff file yang tidak dilacak, dan ringkasan biner selalu disertakan untuk keakuratan.",
+				"contextLines": "Baris konteks diff",
+				"contextLinesDescription": "Baris yang tidak berubah di sekitar setiap perubahan. Gunakan 0 untuk diff ringkas, 3 untuk diff Git normal, atau nilai yang lebih besar untuk lebih banyak kode di sekitarnya.",
+				"includeDiffStats": "Sertakan statistik diff",
+				"includeDiffStatsDescription": "Menambahkan ringkasan file/insertion/deletion yang ringkas sebelum diff lengkap.",
+				"includeBranch": "Sertakan nama branch saat ini",
+				"includeBranchDescription": "Nama branch sering kali menyertakan ID issue atau nama fitur yang membantu membentuk pesan commit.",
+				"includeRecentCommits": "Sertakan commit terbaru",
+				"recentCommitsDescription": "Commit terbaru membantu Zoo menyesuaikan gaya pesan commit repositori ini.",
+				"recentCommitCount": "Jumlah commit terbaru",
+				"recentCommitCountDescription": "Berapa banyak commit terbaru yang akan disertakan untuk konteks gaya dan referensi.",
+				"includeRecentCommitBodies": "Sertakan deskripsi commit terbaru",
+				"includeRecentCommitBodiesDescription": "Menyertakan isi commit, bukan hanya judul commit. Berguna jika repositori ini menulis pesan commit yang detail.",
+				"includeRecentCommitStats": "Sertakan statistik file commit terbaru",
+				"includeRecentCommitStatsDescription": "Menambahkan statistik tingkat file untuk commit terbaru tanpa menyertakan patch lengkapnya.",
+				"includeRecentCommitDiffs": "Sertakan diff commit terbaru",
+				"includeRecentCommitDiffsDescription": "Menyertakan patch dari commit terbaru. Ini dapat meningkatkan pencocokan gaya tetapi menambah banyak konteks.",
+				"recentCommitDiffCount": "Jumlah diff commit terbaru",
+				"recentCommitDiffCountDescription": "Berapa banyak commit terbaru yang harus menyertakan patch lengkap. Dibatasi hingga 5."
+			},
+			"attribution": {
+				"title": "Footer atribusi AI",
+				"description": "Tambahkan footer atribusi secara opsional setelah Zoo menghasilkan pesan commit. Ini ditambahkan secara lokal setelah pembuatan dan tidak diminta dari model.",
+				"enabled": "Tambahkan footer atribusi AI",
+				"enabledDescription": "Gunakan ini ketika proyek Anda memerlukan pengungkapan untuk kontribusi yang dibantu AI.",
+				"template": "Template atribusi",
+				"placeholders": "Placeholder: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = penyedia API yang digunakan; ${model} = model yang digunakan; ${providerModel} = penyedia/model."
 			}
 		}
 	},

@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: Berhasil terhubung! Kamu sekarang bisa menggunakan Zoo Code sebagai penyedia AI.",
 			"disconnected": "Zoo Code: Berhasil terputus."
 		}
+	},
+	"commitMessage": {
+		"activated": "Generator pesan commit Zoo Code telah diaktifkan",
+		"gitNotFound": "⚠️ Repositori Git tidak ditemukan atau git tidak tersedia",
+		"gitInitError": "⚠️ Kesalahan inisialisasi Git: {{error}}",
+		"generating": "Zoo: Membuat pesan commit...",
+		"noChanges": "Zoo: Tidak ada perubahan ditemukan untuk dianalisis",
+		"generated": "Zoo: Pesan commit berhasil dibuat!",
+		"generationFailed": "Zoo: Gagal membuat pesan commit: {{errorMessage}}",
+		"contextWarnings": "Zoo: Peringatan konteks Git: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: Membuat pesan menggunakan perubahan yang belum di-stage",
+		"confirmUnstaged": "Tidak ada perubahan staged yang ditemukan. Buat pesan commit dari {{count}} perubahan unstaged/untracked sebagai gantinya?",
+		"confirmUnstagedAction": "Buat dari perubahan unstaged",
+		"activationFailed": "Zoo: Gagal mengaktifkan generator pesan: {{error}}",
+		"providerRegistered": "Zoo: Penyedia pesan commit terdaftar",
+		"initializing": "Menginisialisasi...",
+		"discoveringFiles": "Menemukan file...",
+		"foundChanges": "Ditemukan {{count}} perubahan",
+		"gettingContext": "Mendapatkan konteks Git...",
+		"errors": {
+			"connectionFailed": "Gagal terhubung ke ekstensi Zoo Code",
+			"timeout": "Permintaan waktu habis setelah 30 detik",
+			"invalidResponse": "Format respons tidak valid diterima dari ekstensi",
+			"missingMessage": "Tidak ada pesan commit yang diterima dari ekstensi",
+			"noChanges": "Tidak ada perubahan ditemukan untuk di-commit",
+			"noProject": "Tidak ada proyek tersedia",
+			"noWorkspacePath": "Tidak dapat menentukan path workspace untuk repositori Git",
+			"workspaceNotFound": "Tidak dapat menentukan path workspace untuk repositori Git",
+			"processingError": "Error memproses pembuatan pesan commit: {{error}}"
+		},
+		"error": {
+			"title": "Error",
+			"workspacePathNotFound": "Tidak dapat menentukan path workspace untuk repositori Git",
+			"generationFailed": "Gagal membuat pesan commit: {{error}}",
+			"processingFailed": "Error memproses pembuatan pesan commit: {{error}}",
+			"unknown": "Error tidak diketahui"
+		},
+		"dialogs": {
+			"info": "Pesan Commit AI",
+			"error": "Error",
+			"success": "Berhasil",
+			"title": "Pesan Commit AI"
+		},
+		"progress": {
+			"title": "Membuat Pesan Commit",
+			"analyzing": "Menganalisis perubahan...",
+			"connecting": "Menghubungkan ke Zoo Code...",
+			"generating": "Membuat pesan commit..."
+		},
+		"ui": {
+			"generateButton": "Buat Pesan Commit",
+			"generateButtonTooltip": "Membuat pesan commit menggunakan AI untuk menganalisis perubahan kode kamu"
+		}
 	}
 }

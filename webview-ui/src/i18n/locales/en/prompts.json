@@ -93,6 +93,52 @@
 			"includeTaskHistory": "Include task history as context",
 			"includeTaskHistoryDescription": "When enabled, the last 10 messages from the current conversation will be included as context when enhancing prompts, helping to generate more relevant and context-aware suggestions."
 		},
+		"commitMessage": {
+			"promptDescription": "Instructions used to generate commit messages for this profile.",
+			"apiConfiguration": "API Configuration",
+			"apiConfigDescription": "Select an API configuration to always use for this profile, or use the currently selected configuration.",
+			"useCurrentConfig": "Use currently selected API configuration",
+			"profiles": {
+				"title": "Commit message profile",
+				"select": "Choose a commit-message profile",
+				"description": "Choose which commit-message profile to edit and use for generation.",
+				"name": "Profile name",
+				"nameDescription": "A local name to help you recognize this commit-message profile.",
+				"add": "Add profile",
+				"delete": "Delete profile",
+				"limit": "Up to {{count}} profiles."
+			},
+			"gitContext": {
+				"title": "Git Context",
+				"description": "Control the additional Git context sent with the required diff. Change summary, untracked file diffs, and binary summaries are always included for correctness.",
+				"contextLines": "Diff context lines",
+				"contextLinesDescription": "Unchanged lines around each change. Use 0 for compact diffs, 3 for normal Git diffs, or a larger value for more surrounding code.",
+				"includeDiffStats": "Include diff stats",
+				"includeDiffStatsDescription": "Adds a compact files/insertions/deletions summary before the full diff.",
+				"includeBranch": "Include current branch name",
+				"includeBranchDescription": "Branch names often include issue IDs or feature names that help shape the commit message.",
+				"includeRecentCommits": "Include recent commits",
+				"recentCommitsDescription": "Recent commits help Zoo match this repository's commit message style.",
+				"recentCommitCount": "Recent commit count",
+				"recentCommitCountDescription": "How many latest commits to include for style and reference context.",
+				"includeRecentCommitBodies": "Include recent commit descriptions",
+				"includeRecentCommitBodiesDescription": "Includes commit bodies, not just commit titles. Useful if this repository writes detailed commit messages.",
+				"includeRecentCommitStats": "Include recent commit file stats",
+				"includeRecentCommitStatsDescription": "Adds file-level stats for recent commits without including their full patches.",
+				"includeRecentCommitDiffs": "Include recent commit diffs",
+				"includeRecentCommitDiffsDescription": "Includes patches from recent commits. This can improve style matching but adds a lot of context.",
+				"recentCommitDiffCount": "Recent commit diff count",
+				"recentCommitDiffCountDescription": "How many latest commits should include full patches. Capped at 5."
+			},
+			"attribution": {
+				"title": "AI attribution footer",
+				"description": "Optionally append an attribution footer after Zoo generates a commit message. This is added locally after generation and is not requested from the model.",
+				"enabled": "Add AI attribution footer",
+				"enabledDescription": "Use this when your project requires disclosure for AI-assisted contributions.",
+				"template": "Attribution template",
+				"placeholders": "Placeholders: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = API provider used; ${model} = model used; ${providerModel} = provider/model."
+			}
+		},
 		"condense": {
 			"apiConfiguration": "API Configuration for Context Condensing",
 			"apiConfigDescription": "Select which API configuration to use for context condensing operations. Leave unselected to use the current active configuration.",
@@ -138,6 +184,10 @@
 			"NEW_TASK": {
 				"label": "Start New Task",
 				"description": "Start a new task with user input. Available in the Command Palette."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Commit Message Generation",
+				"description": "Generate descriptive commit messages based on your Git changes. Customize the prompt to generate messages that follow your repository's best practices."
 			}
 		}
 	},

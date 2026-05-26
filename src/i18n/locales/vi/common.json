@@ -274,5 +274,58 @@
 			"connected": "Zoo Code: Kết nối thành công! Bạn có thể sử dụng Zoo Code làm nhà cung cấp AI.",
 			"disconnected": "Zoo Code: Đã ngắt kết nối thành công."
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code: Trình tạo thông điệp commit đã được kích hoạt",
+		"gitNotFound": "⚠️ Không tìm thấy kho Git hoặc git không khả dụng",
+		"gitInitError": "⚠️ Lỗi khởi tạo Git: {{error}}",
+		"generating": "Zoo: Đang tạo thông điệp commit...",
+		"noChanges": "Zoo: Không tìm thấy thay đổi để phân tích",
+		"generated": "Zoo: Đã tạo thông điệp commit!",
+		"generationFailed": "Zoo: Không thể tạo thông điệp commit: {{errorMessage}}",
+		"contextWarnings": "Zoo: Cảnh báo ngữ cảnh Git: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: Đang tạo thông điệp từ các thay đổi chưa lưu",
+		"confirmUnstaged": "Không tìm thấy thay đổi đã lưu. Tạo thông điệp commit từ {{count}} thay đổi chưa lưu/chưa theo dõi?",
+		"confirmUnstagedAction": "Tạo từ thay đổi chưa lưu",
+		"activationFailed": "Zoo: Không thể kích hoạt trình tạo thông điệp: {{error}}",
+		"providerRegistered": "Zoo: Nhà cung cấp thông điệp commit đã được đăng ký",
+		"initializing": "Đang khởi tạo...",
+		"discoveringFiles": "Đang tìm kiếm tệp...",
+		"foundChanges": "Tìm thấy {{count}} thay đổi",
+		"gettingContext": "Đang lấy ngữ cảnh Git...",
+		"errors": {
+			"connectionFailed": "Không thể kết nối đến tiện ích Zoo Code",
+			"timeout": "Yêu cầu đã hết thời gian chờ sau 30 giây",
+			"invalidResponse": "Nhận được định dạng phản hồi không hợp lệ từ tiện ích",
+			"missingMessage": "Không nhận được thông điệp commit từ tiện ích",
+			"noChanges": "Không tìm thấy thay đổi để commit",
+			"noProject": "Không có dự án nào khả dụng",
+			"noWorkspacePath": "Không thể xác định đường dẫn workspace cho kho Git",
+			"workspaceNotFound": "Không thể xác định đường dẫn workspace cho kho Git",
+			"processingError": "Lỗi xử lý tạo thông điệp commit: {{error}}"
+		},
+		"error": {
+			"title": "Lỗi",
+			"workspacePathNotFound": "Không thể xác định đường dẫn workspace cho kho Git",
+			"generationFailed": "Không thể tạo thông điệp commit: {{error}}",
+			"processingFailed": "Lỗi xử lý tạo thông điệp commit: {{error}}",
+			"unknown": "Lỗi không xác định"
+		},
+		"dialogs": {
+			"info": "Thông điệp commit AI",
+			"error": "Lỗi",
+			"success": "Thành công",
+			"title": "Thông điệp commit AI"
+		},
+		"progress": {
+			"title": "Đang tạo thông điệp commit",
+			"analyzing": "Đang phân tích thay đổi...",
+			"connecting": "Đang kết nối đến Zoo Code...",
+			"generating": "Đang tạo thông điệp commit..."
+		},
+		"ui": {
+			"generateButton": "Tạo thông điệp commit",
+			"generateButtonTooltip": "Tạo thông điệp commit bằng AI để phân tích các thay đổi mã nguồn của bạn"
+		}
 	}
 }

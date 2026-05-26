@@ -5,13 +5,15 @@ import { cn } from "@/lib/utils"
 type SectionHeaderProps = HTMLAttributes<HTMLDivElement> & {
 	children: React.ReactNode
 	description?: string
+	sticky?: boolean
 }
 
-export const SectionHeader = ({ description, children, className, ...props }: SectionHeaderProps) => {
+export const SectionHeader = ({ description, children, className, sticky = true, ...props }: SectionHeaderProps) => {
 	return (
 		<div
 			className={cn(
-				"sticky top-0 z-10 text-vscode-sideBar-foreground bg-vscode-sideBar-background px-5 pt-6 pb-4",
+				sticky && "sticky top-0 z-10",
+				"text-vscode-sideBar-foreground bg-vscode-sideBar-background px-5 pt-6 pb-4",
 				className,
 			)}
 			{...props}>

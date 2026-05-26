@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: Succesvol verbonden! Je kunt Zoo Code nu gebruiken als AI-provider.",
 			"disconnected": "Zoo Code: Succesvol losgekoppeld."
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code commitbericht-generator geactiveerd",
+		"gitNotFound": "⚠️ Git-repository niet gevonden of git niet beschikbaar",
+		"gitInitError": "⚠️ Git-initialisatiefout: {{error}}",
+		"generating": "Zoo: Commitbericht genereren...",
+		"noChanges": "Zoo: Geen wijzigingen gevonden om te analyseren",
+		"generated": "Zoo: Commitbericht gegenereerd!",
+		"generationFailed": "Zoo: Genereren van commitbericht mislukt: {{errorMessage}}",
+		"contextWarnings": "Zoo: Git-contextwaarschuwing: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: Bericht genereren met niet-geünstagede wijzigingen",
+		"confirmUnstaged": "Geen gestagete wijzigingen gevonden. Wil je in plaats daarvan een commitbericht genereren op basis van {{count}} niet-gestagete/ongetraceerde wijzigingen?",
+		"confirmUnstagedAction": "Genereren vanuit niet-gestagete wijzigingen",
+		"activationFailed": "Zoo: Activeren van berichtgenerator mislukt: {{error}}",
+		"providerRegistered": "Zoo: Commitbericht-provider geregistreerd",
+		"initializing": "Initialiseren...",
+		"discoveringFiles": "Bestanden ontdekken...",
+		"foundChanges": "{{count}} wijzigingen gevonden",
+		"gettingContext": "Git-context ophalen...",
+		"errors": {
+			"connectionFailed": "Verbinding met Zoo Code-extensie mislukt",
+			"timeout": "Verzoek verliep na 30 seconden",
+			"invalidResponse": "Ongeldig antwoordformaat ontvangen van extensie",
+			"missingMessage": "Geen commitbericht ontvangen van extensie",
+			"noChanges": "Geen wijzigingen gevonden om te committen",
+			"noProject": "Geen project beschikbaar",
+			"noWorkspacePath": "Kon werkruimtepad voor Git-repository niet bepalen",
+			"workspaceNotFound": "Kon werkruimtepad voor Git-repository niet bepalen",
+			"processingError": "Fout bij verwerken van commitberichtgeneratie: {{error}}"
+		},
+		"error": {
+			"title": "Fout",
+			"workspacePathNotFound": "Kon werkruimtepad voor Git-repository niet bepalen",
+			"generationFailed": "Genereren van commitbericht mislukt: {{error}}",
+			"processingFailed": "Fout bij verwerken van commitberichtgeneratie: {{error}}",
+			"unknown": "Onbekende fout"
+		},
+		"dialogs": {
+			"info": "AI Commitbericht",
+			"error": "Fout",
+			"success": "Succes",
+			"title": "AI Commitbericht"
+		},
+		"progress": {
+			"title": "Commitbericht Genereren",
+			"analyzing": "Wijzigingen analyseren...",
+			"connecting": "Verbinding maken met Zoo Code...",
+			"generating": "Commitbericht genereren..."
+		},
+		"ui": {
+			"generateButton": "Commitbericht Genereren",
+			"generateButtonTooltip": "Genereert commitbericht met AI om je codewijzigingen te analyseren"
+		}
 	}
 }

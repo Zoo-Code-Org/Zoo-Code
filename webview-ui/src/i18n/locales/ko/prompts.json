@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "새 작업 시작",
 				"description": "입력한 내용으로 새 작업을 시작할 수 있습니다. 명령 팔레트에서 이용 가능합니다."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "커밋 메시지 생성",
+				"description": "Git 변경 사항을 기반으로 설명적인 커밋 메시지를 생성합니다. 프롬프트를 사용자 정의하여 저장소의 모범 사례를 따르는 메시지를 생성하세요."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "이 프로필의 커밋 메시지를 생성하는 데 사용되는 지침입니다.",
+			"apiConfiguration": "API 구성",
+			"apiConfigDescription": "이 프로필에 항상 사용할 API 구성을 선택하거나 현재 선택된 구성을 사용하세요.",
+			"useCurrentConfig": "현재 선택된 API 구성 사용",
+			"profiles": {
+				"title": "커밋 메시지 프로필",
+				"select": "커밋 메시지 프로필 선택",
+				"description": "편집하고 생성에 사용할 커밋 메시지 프로필을 선택하세요.",
+				"name": "프로필 이름",
+				"nameDescription": "이 커밋 메시지 프로필을 인식하는 데 도움이 되는 로컬 이름입니다.",
+				"add": "프로필 추가",
+				"delete": "프로필 삭제",
+				"limit": "최대 {{count}}개의 프로필."
+			},
+			"gitContext": {
+				"title": "Git 컨텍스트",
+				"description": "필요한 diff와 함께 전송되는 추가 Git 컨텍스트를 제어합니다. 변경 요약, 추적되지 않은 파일 diff, 이진 요약은 정확성을 위해 항상 포함됩니다.",
+				"contextLines": "Diff 컨텍스트 줄",
+				"contextLinesDescription": "각 변경 주변의 변경되지 않은 줄입니다. compact diff에는 0, 일반 Git diff에는 3, 더 많은 주변 코드에는 더 큰 값을 사용하세요.",
+				"includeDiffStats": "Diff 통계 포함",
+				"includeDiffStatsDescription": "전체 diff 전에 compact한 파일/삽입/삭제 요약을 추가합니다.",
+				"includeBranch": "현재 브랜치 이름 포함",
+				"includeBranchDescription": "브랜치 이름에는 종종 커밋 메시지 형성에 도움이 되는 이슈 ID 또는 기능 이름이 포함됩니다.",
+				"includeRecentCommits": "최근 커밋 포함",
+				"recentCommitsDescription": "최근 커밋은 이 저장소의 커밋 메시지 스타일을 따르는 데 도움이 됩니다.",
+				"recentCommitCount": "최근 커밋 수",
+				"recentCommitCountDescription": "스타일 및 참조 컨텍스트에 포함할 최근 커밋 수입니다.",
+				"includeRecentCommitBodies": "최근 커밋 설명 포함",
+				"includeRecentCommitBodiesDescription": "커밋 제목뿐만 아니라 커밋 본문도 포함합니다. 이 저장소가 상세한 커밋 메시지를 작성하는 경우 유용합니다.",
+				"includeRecentCommitStats": "최근 커밋 파일 통계 포함",
+				"includeRecentCommitStatsDescription": "전체 패치를 포함하지 않고 최근 커밋의 파일 수준 통계를 추가합니다.",
+				"includeRecentCommitDiffs": "최근 커밋 diff 포함",
+				"includeRecentCommitDiffsDescription": "최근 커밋의 패치를 포함합니다. 스타일 매칭을 개선할 수 있지만 많은 컨텍스트가 추가됩니다.",
+				"recentCommitDiffCount": "최근 커밋 diff 수",
+				"recentCommitDiffCountDescription": "전체 패치를 포함할 최근 커밋 수입니다. 최대 5개로 제한됩니다."
+			},
+			"attribution": {
+				"title": "AI 저작자 표시 바닥글",
+				"description": "Zoo가 커밋 메시지를 생성한 후 선택적으로 저작자 표시 바닥글을 추가합니다. 이는 생성 후 로컬에서 추가되며 모델에 요청되지 않습니다.",
+				"enabled": "AI 저작자 표시 바닥글 추가",
+				"enabledDescription": "프로젝트에서 AI 지원 기여에 대한 공개가 필요한 경우 사용하세요.",
+				"template": "저작자 표시 템플릿",
+				"placeholders": "자리 표시자: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = 사용된 API 제공자; ${model} = 사용된 모델; ${providerModel} = 제공자/모델."
 			}
 		}
 	},

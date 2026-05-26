@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Bắt đầu tác vụ mới",
 				"description": "Bắt đầu tác vụ mới với nội dung đã nhập. Có sẵn trong bảng lệnh."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Tạo thông báo commit",
+				"description": "Tạo thông báo commit mô tả dựa trên các thay đổi Git. Tùy chỉnh lời nhắc để tạo thông báo tuân thủ các phương pháp tốt nhất của kho lưu trữ."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Hướng dẫn được sử dụng để tạo thông báo commit cho hồ sơ này.",
+			"apiConfiguration": "Cấu hình API",
+			"apiConfigDescription": "Chọn cấu hình API để luôn sử dụng cho hồ sơ này, hoặc sử dụng cấu hình hiện đang được chọn.",
+			"useCurrentConfig": "Sử dụng cấu hình API hiện tại đã chọn",
+			"profiles": {
+				"title": "Hồ sơ thông báo commit",
+				"select": "Chọn hồ sơ thông báo commit",
+				"description": "Chọn hồ sơ thông báo commit nào để chỉnh sửa và sử dụng cho việc tạo.",
+				"name": "Tên hồ sơ",
+				"nameDescription": "Tên cục bộ để giúp bạn nhận dạng hồ sơ thông báo commit này.",
+				"add": "Thêm hồ sơ",
+				"delete": "Xóa hồ sơ",
+				"limit": "Tối đa {{count}} hồ sơ."
+			},
+			"gitContext": {
+				"title": "Ngữ cảnh Git",
+				"description": "Kiểm soát ngữ cảnh Git bổ sung được gửi cùng với diff bắt buộc. Tóm tắt thay đổi, diff tệp chưa theo dõi và tóm tắt nhị phân luôn được bao gồm để đảm bảo tính chính xác.",
+				"contextLines": "Dòng ngữ cảnh diff",
+				"contextLinesDescription": "Các dòng không thay đổi xung quanh mỗi thay đổi. Sử dụng 0 cho diff gọn, 3 cho diff Git bình thường, hoặc giá trị lớn hơn để có thêm mã xung quanh.",
+				"includeDiffStats": "Bao gồm thống kê diff",
+				"includeDiffStatsDescription": "Thêm tóm tắt gọn về tệp/chèn/xóa trước diff đầy đủ.",
+				"includeBranch": "Bao gồm tên nhánh hiện tại",
+				"includeBranchDescription": "Tên nhánh thường chứa ID vấn đề hoặc tên tính năng giúp định hình thông báo commit.",
+				"includeRecentCommits": "Bao gồm các commit gần đây",
+				"recentCommitsDescription": "Các commit gần đây giúp Zoo khớp với kiểu thông báo commit của kho lưu trữ này.",
+				"recentCommitCount": "Số commit gần đây",
+				"recentCommitCountDescription": "Bao nhiêu commit mới nhất để đưa vào cho kiểu và ngữ cảnh tham chiếu.",
+				"includeRecentCommitBodies": "Bao gồm mô tả commit gần đây",
+				"includeRecentCommitBodiesDescription": "Bao gồm nội dung commit, không chỉ tiêu đề commit. Hữu ích nếu kho lưu trữ này viết thông báo commit chi tiết.",
+				"includeRecentCommitStats": "Bao gồm thống kê tệp commit gần đây",
+				"includeRecentCommitStatsDescription": "Thêm thống kê cấp tệp cho các commit gần đây mà không bao gồm bản vá đầy đủ của chúng.",
+				"includeRecentCommitDiffs": "Bao gồm diff commit gần đây",
+				"includeRecentCommitDiffsDescription": "Bao gồm các bản vá từ commit gần đây. Điều này có thể cải thiện việc khớp kiểu nhưng thêm rất nhiều ngữ cảnh.",
+				"recentCommitDiffCount": "Số diff commit gần đây",
+				"recentCommitDiffCountDescription": "Bao nhiêu commit mới nhất nên bao gồm bản vá đầy đủ. Giới hạn ở 5."
+			},
+			"attribution": {
+				"title": "Chân trang ghi nhận AI",
+				"description": "Tùy chọn thêm chân trang ghi nhận sau khi Zoo tạo thông báo commit. Điều này được thêm cục bộ sau khi tạo và không được yêu cầu từ mô hình.",
+				"enabled": "Thêm chân trang ghi nhận AI",
+				"enabledDescription": "Sử dụng khi dự án của bạn yêu cầu công bố các đóng góp có sự hỗ trợ của AI.",
+				"template": "Mẫu ghi nhận",
+				"placeholders": "Trình giữ chỗ: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = nhà cung cấp API đã sử dụng; ${model} = mô hình đã sử dụng; ${providerModel} = nhà cung cấp/mô hình."
 			}
 		}
 	},

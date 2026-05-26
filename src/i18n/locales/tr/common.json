@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: Başarıyla bağlandı! Artık Zoo Code'u AI sağlayıcısı olarak kullanabilirsin.",
 			"disconnected": "Zoo Code: Başarıyla bağlantı kesildi."
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code commit mesaj üreteci etkinleştirildi",
+		"gitNotFound": "⚠️ Git deposu bulunamadı veya git kullanılamıyor",
+		"gitInitError": "⚠️ Git başlatma hatası: {{error}}",
+		"generating": "Zoo: Commit mesajı oluşturuluyor...",
+		"noChanges": "Zoo: Analiz edilecek değişiklik bulunamadı",
+		"generated": "Zoo: Commit mesajı oluşturuldu!",
+		"generationFailed": "Zoo: Commit mesajı oluşturulamadı: {{errorMessage}}",
+		"contextWarnings": "Zoo: Git bağlam uyarısı: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: İşlenmemiş değişiklikler kullanılarak mesaj oluşturuluyor",
+		"confirmUnstaged": "İşlenmiş değişiklik bulunamadı. {{count}} işlenmemiş/izlenmeyen değişiklikten commit mesajı oluşturulsun mu?",
+		"confirmUnstagedAction": "İşlenmemiş değişikliklerden oluştur",
+		"activationFailed": "Zoo: Mesaj üreteci etkinleştirilemedi: {{error}}",
+		"providerRegistered": "Zoo: Commit mesajı sağlayıcısı kaydedildi",
+		"initializing": "Başlatılıyor...",
+		"discoveringFiles": "Dosyalar keşfediliyor...",
+		"foundChanges": "{{count}} değişiklik bulundu",
+		"gettingContext": "Git bağlamı alınıyor...",
+		"errors": {
+			"connectionFailed": "Zoo Code uzantısına bağlanılamadı",
+			"timeout": "İstek 30 saniye sonra zaman aşımına uğradı",
+			"invalidResponse": "Uzantıdan geçersiz yanıt formatı alındı",
+			"missingMessage": "Uzantıdan commit mesajı alınamadı",
+			"noChanges": "Commit edilecek değişiklik bulunamadı",
+			"noProject": "Kullanılabilir proje yok",
+			"noWorkspacePath": "Git deposu için çalışma alanı yolu belirlenemedi",
+			"workspaceNotFound": "Git deposu için çalışma alanı yolu belirlenemedi",
+			"processingError": "Commit mesajı oluşturma işleminde hata: {{error}}"
+		},
+		"error": {
+			"title": "Hata",
+			"workspacePathNotFound": "Git deposu için çalışma alanı yolu belirlenemedi",
+			"generationFailed": "Commit mesajı oluşturulamadı: {{error}}",
+			"processingFailed": "Commit mesajı oluşturma işleminde hata: {{error}}",
+			"unknown": "Bilinmeyen hata"
+		},
+		"dialogs": {
+			"info": "AI Commit Mesajı",
+			"error": "Hata",
+			"success": "Başarılı",
+			"title": "AI Commit Mesajı"
+		},
+		"progress": {
+			"title": "Commit Mesajı Oluşturuluyor",
+			"analyzing": "Değişiklikler analiz ediliyor...",
+			"connecting": "Zoo Code'a bağlanılıyor...",
+			"generating": "Commit mesajı oluşturuluyor..."
+		},
+		"ui": {
+			"generateButton": "Commit Mesajı Oluştur",
+			"generateButtonTooltip": "Kod değişikliklerinizi analiz ederek AI ile commit mesajı oluşturur"
+		}
 	}
 }

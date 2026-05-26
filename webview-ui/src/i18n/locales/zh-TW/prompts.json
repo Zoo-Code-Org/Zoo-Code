@@ -138,6 +138,56 @@
 			"NEW_TASK": {
 				"label": "開始新工作",
 				"description": "根據使用者輸入開始一個新的任務。可在命令選擇區使用。"
+			},
+			"COMMIT_MESSAGE": {
+				"label": "提交訊息生成",
+				"description": "根據 Git 變更生成描述性提交訊息。自訂提示詞以生成符合儲存庫最佳實踐的訊息。"
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "用於為此設定檔生成提交訊息的指令。",
+			"apiConfiguration": "API 設定",
+			"apiConfigDescription": "選擇一個始終用於此設定檔的 API 設定，或使用目前選擇的設定。",
+			"useCurrentConfig": "使用目前選擇的 API 設定",
+			"profiles": {
+				"title": "提交訊息設定檔",
+				"select": "選擇提交訊息設定檔",
+				"description": "選擇要編輯和用於生成的提交訊息設定檔。",
+				"name": "設定檔名稱",
+				"nameDescription": "幫助您識別此提交訊息設定檔的本機名稱。",
+				"add": "新增設定檔",
+				"delete": "刪除設定檔",
+				"limit": "最多 {{count}} 個設定檔。"
+			},
+			"gitContext": {
+				"title": "Git 上下文",
+				"description": "控制隨必要 diff 傳送的額外 Git 上下文。變更摘要、未追蹤檔案 diff 和二進位摘要始終包含在內以確保正確性。",
+				"contextLines": "Diff 上下文行數",
+				"contextLinesDescription": "每個變更周圍的未變更行數。使用 0 獲取緊湊 diff，3 獲取正常 Git diff，或更大的值以獲取更多周圍程式碼。",
+				"includeDiffStats": "包含 diff 統計",
+				"includeDiffStatsDescription": "在完整 diff 之前新增緊湊的檔案/插入/刪除摘要。",
+				"includeBranch": "包含目前分支名稱",
+				"includeBranchDescription": "分支名稱通常包含有助於形成提交訊息的問題 ID 或功能名稱。",
+				"includeRecentCommits": "包含最近的提交",
+				"recentCommitsDescription": "最近的提交幫助 Zoo 匹配此儲存庫的提交訊息風格。",
+				"recentCommitCount": "最近提交數量",
+				"recentCommitCountDescription": "包含多少個最新提交以用於風格和參考上文。",
+				"includeRecentCommitBodies": "包含最近提交描述",
+				"includeRecentCommitBodiesDescription": "包含提交內文，而不僅僅是提交標題。如果此儲存庫編寫詳細的提交訊息，則很有用。",
+				"includeRecentCommitStats": "包含最近提交檔案統計",
+				"includeRecentCommitStatsDescription": "為最近提交新增檔案級統計，而不包含其完整補丁。",
+				"includeRecentCommitDiffs": "包含最近提交 diff",
+				"includeRecentCommitDiffsDescription": "包含來自最近提交的補丁。這可以改善風格匹配但會新增大量上下文。",
+				"recentCommitDiffCount": "最近提交 diff 數量",
+				"recentCommitDiffCountDescription": "多少個最新提交應包含完整補丁。上限為 5。"
+			},
+			"attribution": {
+				"title": "AI 署名頁尾",
+				"description": "選擇性地在 Zoo 生成提交訊息後附加署名頁尾。此內容在生成後於本機新增，不會向模型請求。",
+				"enabled": "新增 AI 署名頁尾",
+				"enabledDescription": "當您的專案要求揭露 AI 輔助貢獻時使用。",
+				"template": "署名範本",
+				"placeholders": "佔位符：${agentName} = Zoo Code；${toolName} = Zoo Code；${provider} = 所用 API 提供者；${model} = 所用模型；${providerModel} = 提供者/模型。"
 			}
 		}
 	},

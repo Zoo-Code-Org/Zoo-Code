@@ -74,6 +74,8 @@ export enum TelemetryEventName {
 	TELEMETRY_SETTINGS_CHANGED = "Telemetry Settings Changed",
 	MODEL_CACHE_EMPTY_RESPONSE = "Model Cache Empty Response",
 	READ_FILE_LEGACY_FORMAT_USED = "Read File Legacy Format Used",
+
+	COMMIT_MSG_GENERATED = "Commit Message Generated",
 }
 
 /**
@@ -206,6 +208,7 @@ export const rooCodeTelemetryEventSchema = z.discriminatedUnion("type", [
 			TelemetryEventName.MODE_SETTINGS_CHANGED,
 			TelemetryEventName.CUSTOM_MODE_CREATED,
 			TelemetryEventName.READ_FILE_LEGACY_FORMAT_USED,
+			TelemetryEventName.COMMIT_MSG_GENERATED,
 		]),
 		properties: telemetryPropertiesSchema,
 	}),

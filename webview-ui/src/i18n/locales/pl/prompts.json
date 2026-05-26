@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Rozpocznij nowe zadanie",
 				"description": "Rozpocznij nowe zadanie z wprowadzonymi danymi. Dostępne w palecie poleceń."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Generowanie wiadomości commitów",
+				"description": "Generuj opisowe wiadomości commitów na podstawie zmian Git. Dostosuj prompt, aby generować wiadomości zgodne z najlepszymi praktykami Twojego repozytorium."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Instrukcje używane do generowania wiadomości commitów dla tego profilu.",
+			"apiConfiguration": "Konfiguracja API",
+			"apiConfigDescription": "Wybierz konfigurację API, która ma być zawsze używana dla tego profilu, lub użyj aktualnie wybranej konfiguracji.",
+			"useCurrentConfig": "Użyj aktualnie wybranej konfiguracji API",
+			"profiles": {
+				"title": "Profil wiadomości commitów",
+				"select": "Wybierz profil wiadomości commitów",
+				"description": "Wybierz, który profil wiadomości commitów chcesz edytować i używać do generowania.",
+				"name": "Nazwa profilu",
+				"nameDescription": "Lokalna nazwa pomagająca rozpoznać ten profil wiadomości commitów.",
+				"add": "Dodaj profil",
+				"delete": "Usuń profil",
+				"limit": "Do {{count}} profili."
+			},
+			"gitContext": {
+				"title": "Kontekst Git",
+				"description": "Kontroluj dodatkowy kontekst Git wysyłany z wymaganym diffem. Podsumowanie zmian, diffy nieśledzonych plików i podsumowania binarne są zawsze uwzględniane dla poprawności.",
+				"contextLines": "Linie kontekstu diffa",
+				"contextLinesDescription": "Niezmienione linie wokół każdej zmiany. Użyj 0 dla kompaktowych diffów, 3 dla normalnych diffów Git lub większej wartości dla większej ilości otaczającego kodu.",
+				"includeDiffStats": "Uwzględnij statystyki diffów",
+				"includeDiffStatsDescription": "Dodaje kompaktowe podsumowanie plików/insertów/usunięć przed pełnym diffem.",
+				"includeBranch": "Uwzględnij nazwę bieżącej gałęzi",
+				"includeBranchDescription": "Nazwy gałęzi często zawierają ID problemów lub nazwy funkcji, które pomagają kształtować wiadomość commitu.",
+				"includeRecentCommits": "Uwzględnij ostatnie commity",
+				"recentCommitsDescription": "Ostatnie commity pomagają Zoo dopasować styl wiadomości commitów tego repozytorium.",
+				"recentCommitCount": "Liczba ostatnich commitów",
+				"recentCommitCountDescription": "Ile ostatnich commitów uwzględnić dla kontekstu stylu i referencji.",
+				"includeRecentCommitBodies": "Uwzględnij opisy ostatnich commitów",
+				"includeRecentCommitBodiesDescription": "Uwzględnia treści commitów, nie tylko tytuły. Przydatne, jeśli to repozytorium pisze szczegółowe wiadomości commitów.",
+				"includeRecentCommitStats": "Uwzględnij statystyki plików ostatnich commitów",
+				"includeRecentCommitStatsDescription": "Dodaje statystyki na poziomie plików dla ostatnich commitów bez uwzględniania ich pełnych łatek.",
+				"includeRecentCommitDiffs": "Uwzględnij diffy ostatnich commitów",
+				"includeRecentCommitDiffsDescription": "Uwzględnia łatki z ostatnich commitów. Może to poprawić dopasowanie stylu, ale dodaje dużo kontekstu.",
+				"recentCommitDiffCount": "Liczba diffów ostatnich commitów",
+				"recentCommitDiffCountDescription": "Ile ostatnich commitów powinno zawierać pełne łatki. Ograniczone do 5."
+			},
+			"attribution": {
+				"title": "Stopka atrybucji AI",
+				"description": "Opcjonalnie dołącz stopkę atrybucji po wygenerowaniu wiadomości commitu przez Zoo. Jest ona dodawana lokalnie po generacji i nie jest wysyłana do modelu.",
+				"enabled": "Dodaj stopkę atrybucji AI",
+				"enabledDescription": "Użyj tego, gdy Twój projekt wymaga ujawnienia wkładu wspieranego przez AI.",
+				"template": "Szablon atrybucji",
+				"placeholders": "Symbole zastępcze: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = używany dostawca API; ${model} = używany model; ${providerModel} = dostawca/model."
 			}
 		}
 	},

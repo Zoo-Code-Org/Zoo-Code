@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: Connectat correctament! Ara podeu utilitzar Zoo Code com a proveïdor d'IA.",
 			"disconnected": "Zoo Code: Desconnectat correctament."
 		}
+	},
+	"commitMessage": {
+		"activated": "Generador de missatges de commit de Zoo Code activat",
+		"gitNotFound": "⚠️ No s'ha trobat el repositori Git o Git no està disponible",
+		"gitInitError": "⚠️ Error d'inicialització de Git: {{error}}",
+		"generating": "Zoo: Generant missatge de commit...",
+		"noChanges": "Zoo: No s'han trobat canvis per analitzar",
+		"generated": "Zoo: Missatge de commit generat!",
+		"generationFailed": "Zoo: Error en generar el missatge de commit: {{errorMessage}}",
+		"contextWarnings": "Zoo: Avís del context de Git: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: Generant missatge amb els canvis no preparats",
+		"confirmUnstaged": "No s'han trobat canvis preparats. Vols generar un missatge de commit amb {{count}} canvis no preparats/no rastrejats?",
+		"confirmUnstagedAction": "Generar amb canvis no preparats",
+		"activationFailed": "Zoo: Error en activar el generador de missatges: {{error}}",
+		"providerRegistered": "Zoo: Proveïdor de missatges de commit registrat",
+		"initializing": "Inicialitzant...",
+		"discoveringFiles": "Descobrint fitxers...",
+		"foundChanges": "S'han trobat {{count}} canvis",
+		"gettingContext": "Obtenint context de Git...",
+		"errors": {
+			"connectionFailed": "Error en connectar amb l'extensió Zoo Code",
+			"timeout": "La sol·licitud ha superat el temps d'espera de 30 segons",
+			"invalidResponse": "Format de resposta no vàlid rebut de l'extensió",
+			"missingMessage": "No s'ha rebut cap missatge de commit de l'extensió",
+			"noChanges": "No s'han trobat canvis per fer commit",
+			"noProject": "No hi ha cap projecte disponible",
+			"noWorkspacePath": "No s'ha pogut determinar la ruta de l'espai de treball per al repositori Git",
+			"workspaceNotFound": "No s'ha pogut determinar la ruta de l'espai de treball per al repositori Git",
+			"processingError": "Error en processar la generació del missatge de commit: {{error}}"
+		},
+		"error": {
+			"title": "Error",
+			"workspacePathNotFound": "No s'ha pogut determinar la ruta de l'espai de treball per al repositori Git",
+			"generationFailed": "Error en generar el missatge de commit: {{error}}",
+			"processingFailed": "Error en processar la generació del missatge de commit: {{error}}",
+			"unknown": "Error desconegut"
+		},
+		"dialogs": {
+			"info": "Missatge de commit amb IA",
+			"error": "Error",
+			"success": "Èxit",
+			"title": "Missatge de commit amb IA"
+		},
+		"progress": {
+			"title": "Generant missatge de commit",
+			"analyzing": "Analitzant canvis...",
+			"connecting": "Connectant amb Zoo Code...",
+			"generating": "Generant missatge de commit..."
+		},
+		"ui": {
+			"generateButton": "Generar missatge de commit",
+			"generateButtonTooltip": "Genera un missatge de commit utilitzant IA per analitzar els teus canvis de codi"
+		}
 	}
 }

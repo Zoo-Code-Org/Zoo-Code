@@ -23,6 +23,240 @@ import { languagesSchema } from "./vscode.js"
  */
 export const DEFAULT_WRITE_DELAY_MS = 1000
 
+/** Schema for optional Git context included with generated commit message prompts. */
+export const commitMessageGitContextSchema = z.object({
+	diffContextLines: z.number().int().min(0).max(20).optional(),
+	includeDiffStats: z.boolean().optional(),
+	includeCurrentBranch: z.boolean().optional(),
+	includeRecentCommits: z.boolean().optional(),
+	recentCommitCount: z.number().int().min(1).max(20).optional(),
+	includeRecentCommitBodies: z.boolean().optional(),
+	includeRecentCommitStats: z.boolean().optional(),
+	includeRecentCommitDiffs: z.boolean().optional(),
+	recentCommitDiffCount: z.number().int().min(1).max(5).optional(),
+})
+
+export type CommitMessageGitContextSettings = z.infer<typeof commitMessageGitContextSchema>
+
+/** Default Git context options for commit message generation. */
+export const defaultCommitMessageGitContextSettings: Required<CommitMessageGitContextSettings> = {
+	diffContextLines: 3,
+	includeDiffStats: true,
+	includeCurrentBranch: true,
+	includeRecentCommits: true,
+	recentCommitCount: 5,
+	includeRecentCommitBodies: false,
+	includeRecentCommitStats: false,
+	includeRecentCommitDiffs: false,
+	recentCommitDiffCount: 1,
+}
+
+/** Default attribution template appended to generated commit messages when enabled. */
+export const DEFAULT_COMMIT_MESSAGE_ATTRIBUTION_TEMPLATE = "Assisted-by: ${agentName}:${providerModel} [${toolName}]"
+
+/** Schema for the optional attribution footer appended to generated commit messages. */
+export const commitMessageAttributionSchema = z.object({
+	enabled: z.boolean().optional(),
+	template: z.string().optional(),
+})
+
+export type CommitMessageAttributionSettings = z.infer<typeof commitMessageAttributionSchema>
+
+/** Default attribution settings for commit message generation. */
+export const defaultCommitMessageAttributionSettings: Required<CommitMessageAttributionSettings> = {
+	enabled: false,
+	template: DEFAULT_COMMIT_MESSAGE_ATTRIBUTION_TEMPLATE,
+}
+
+/** Maximum number of named commit-message profiles users can store. */
+export const MAX_COMMIT_MESSAGE_PROFILES = 5
+
+/** Stable id used by the synthesized default commit-message profile. */
+export const DEFAULT_COMMIT_MESSAGE_PROFILE_ID = "default"
+
+/** Schema for one named commit-message generation profile. */
+export const commitMessageProfileSchema = z.object({
+	id: z.string().optional(),
+	name: z.string().optional(),
+	prompt: z.string().optional(),
+	apiConfigId: z.string().optional(),
+	gitContext: commitMessageGitContextSchema.optional(),
+	attribution: commitMessageAttributionSchema.optional(),
+})
+
+/** Schema for persisted commit-message profile settings. */
+export const commitMessageProfilesSchema = z.object({
+	activeProfileId: z.string().optional(),
+	profiles: z.array(commitMessageProfileSchema).max(MAX_COMMIT_MESSAGE_PROFILES).optional(),
+})
+
+export type CommitMessageProfileSettings = z.infer<typeof commitMessageProfileSchema>
+export type CommitMessageProfilesSettings = z.infer<typeof commitMessageProfilesSchema>
+
+/** Fully-normalized commit-message profile used by runtime code and UI controls. */
+export type NormalizedCommitMessageProfile = Omit<
+	CommitMessageProfileSettings,
+	"id" | "name" | "gitContext" | "attribution"
+> & {
+	id: string
+	name: string
+	gitContext: Required<CommitMessageGitContextSettings>
+	attribution: Required<CommitMessageAttributionSettings>
+}
+
+export interface NormalizedCommitMessageProfiles {
+	/** Id of the profile currently selected for generation. */
+	activeProfileId: string
+	/** Normalized profiles available for generation. */
+	profiles: NormalizedCommitMessageProfile[]
+}
+
+/** Legacy single-profile settings used when named profiles are not stored yet. */
+export interface CommitMessageProfileFallbackSettings {
+	/** Optional custom prompt from the legacy support prompt setting. */
+	prompt?: string
+	/** Optional API configuration id from the legacy single-profile setting. */
+	apiConfigId?: string
+	/** Optional Git context settings from the legacy single-profile setting. */
+	gitContext?: CommitMessageGitContextSettings
+	/** Optional attribution settings from the legacy single-profile setting. */
+	attribution?: CommitMessageAttributionSettings
+}
+
+/** Normalizes Git context settings and clamps numeric options to supported bounds. */
+export function normalizeCommitMessageGitContextSettings(
+	settings?: CommitMessageGitContextSettings,
+): Required<CommitMessageGitContextSettings> {
+	return {
+		...defaultCommitMessageGitContextSettings,
+		...settings,
+		diffContextLines: clampNumberSetting(
+			settings?.diffContextLines,
+			0,
+			20,
+			defaultCommitMessageGitContextSettings.diffContextLines,
+		),
+		recentCommitCount: clampNumberSetting(
+			settings?.recentCommitCount,
+			1,
+			20,
+			defaultCommitMessageGitContextSettings.recentCommitCount,
+		),
+		recentCommitDiffCount: clampNumberSetting(
+			settings?.recentCommitDiffCount,
+			1,
+			5,
+			defaultCommitMessageGitContextSettings.recentCommitDiffCount,
+		),
+	}
+}
+
+/** Normalizes attribution settings and restores the default template when needed. */
+export function normalizeCommitMessageAttributionSettings(
+	settings?: CommitMessageAttributionSettings,
+): Required<CommitMessageAttributionSettings> {
+	return {
+		...defaultCommitMessageAttributionSettings,
+		...settings,
+		template: normalizeOptionalString(settings?.template) ?? defaultCommitMessageAttributionSettings.template,
+	}
+}
+
+/** Normalizes persisted profiles or creates a default profile from fallback settings. */
+export function normalizeCommitMessageProfiles(
+	settings?: CommitMessageProfilesSettings,
+	fallback: CommitMessageProfileFallbackSettings = {},
+): NormalizedCommitMessageProfiles {
+	const sourceProfiles = settings?.profiles?.length
+		? settings.profiles.slice(0, MAX_COMMIT_MESSAGE_PROFILES)
+		: [
+				{
+					id: DEFAULT_COMMIT_MESSAGE_PROFILE_ID,
+					name: "Default",
+					prompt: fallback.prompt,
+					apiConfigId: fallback.apiConfigId,
+					gitContext: fallback.gitContext,
+					attribution: fallback.attribution,
+				},
+			]
+
+	const profiles: NormalizedCommitMessageProfile[] = sourceProfiles.map((profile, index) => ({
+		id: normalizeProfileId(profile.id, index),
+		name: normalizeProfileName(profile.name, index),
+		prompt: profile.prompt,
+		apiConfigId: normalizeOptionalString(profile.apiConfigId),
+		gitContext: normalizeCommitMessageGitContextSettings(profile.gitContext),
+		attribution: normalizeCommitMessageAttributionSettings(profile.attribution),
+	}))
+	const firstProfile = profiles[0]!
+
+	const activeProfileId = profiles.some((profile) => profile.id === settings?.activeProfileId)
+		? settings!.activeProfileId!
+		: firstProfile.id
+
+	return {
+		activeProfileId,
+		profiles,
+	}
+}
+
+/** Returns the active normalized commit-message profile. */
+export function getActiveCommitMessageProfile(
+	settings?: CommitMessageProfilesSettings,
+	fallback?: CommitMessageProfileFallbackSettings,
+): NormalizedCommitMessageProfile {
+	const normalized = normalizeCommitMessageProfiles(settings, fallback)
+	return normalized.profiles.find((profile) => profile.id === normalized.activeProfileId) ?? normalized.profiles[0]!
+}
+
+/** Creates a locally unique id for a new commit-message profile. */
+export function createCommitMessageProfileId(): string {
+	return `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** Creates the next available display name for a new commit-message profile. */
+export function createCommitMessageProfileName(profiles: Array<{ name?: string }>): string {
+	for (let index = profiles.length + 1; index <= MAX_COMMIT_MESSAGE_PROFILES + 1; index++) {
+		const candidate = `Profile ${index}`
+		if (!profiles.some((profile) => profile.name === candidate)) {
+			return candidate
+		}
+	}
+
+	return `Profile ${profiles.length + 1}`
+}
+
+function normalizeProfileId(id: string | undefined, index: number): string {
+	const normalized = normalizeOptionalString(id)
+	if (normalized) {
+		return normalized
+	}
+
+	return index === 0 ? DEFAULT_COMMIT_MESSAGE_PROFILE_ID : `profile-${index + 1}`
+}
+
+function normalizeProfileName(name: string | undefined, index: number): string {
+	const normalized = normalizeOptionalString(name)
+	return normalized || (index === 0 ? "Default" : `Profile ${index + 1}`)
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+	if (typeof value !== "string") {
+		return undefined
+	}
+
+	const trimmed = value.trim()
+	return trimmed.length > 0 ? trimmed : undefined
+}
+
+function clampNumberSetting(value: number | undefined, min: number, max: number, fallback: number): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) {
+		return fallback
+	}
+
+	return Math.min(Math.max(Math.trunc(value), min), max)
+}
+
 /**
  * Terminal output preview size options for persisted command output.
  *
@@ -232,6 +466,11 @@ export const globalSettingsSchema = z.object({
 	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
+
+	commitMessageApiConfigId: z.string().optional(),
+	commitMessageGitContext: commitMessageGitContextSchema.optional(),
+	commitMessageAttribution: commitMessageAttributionSchema.optional(),
+	commitMessageProfiles: commitMessageProfilesSchema.optional(),
 })
 
 export type GlobalSettings = z.infer<typeof globalSettingsSchema>

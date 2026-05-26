@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: Połączono pomyślnie! Możesz teraz używać Zoo Code jako dostawcy AI.",
 			"disconnected": "Zoo Code: Rozłączono pomyślnie."
 		}
+	},
+	"commitMessage": {
+		"activated": "Generator wiadomości commitów Zoo Code został aktywowany",
+		"gitNotFound": "⚠️ Nie znaleziono repozytorium Git lub Git nie jest dostępny",
+		"gitInitError": "⚠️ Błąd inicjalizacji Git: {{error}}",
+		"generating": "Zoo: Generowanie wiadomości commitu...",
+		"noChanges": "Zoo: Nie znaleziono zmian do analizy",
+		"generated": "Zoo: Wiadomość commitu została wygenerowana!",
+		"generationFailed": "Zoo: Nie udało się wygenerować wiadomości commitu: {{errorMessage}}",
+		"contextWarnings": "Zoo: Ostrzeżenie kontekstu Git: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: Generowanie wiadomości na podstawie niezatwierdzonych zmian",
+		"confirmUnstaged": "Nie znaleziono zatwierdzonych zmian. Wygenerować wiadomość commitu na podstawie {{count}} niezatwierdzonych/nieśledzonych zmian?",
+		"confirmUnstagedAction": "Generuj na podstawie niezatwierdzonych zmian",
+		"activationFailed": "Zoo: Nie udało się aktywować generatora wiadomości: {{error}}",
+		"providerRegistered": "Zoo: Dostawca wiadomości commitów zarejestrowany",
+		"initializing": "Inicjalizacja...",
+		"discoveringFiles": "Wyszukiwanie plików...",
+		"foundChanges": "Znaleziono {{count}} zmian",
+		"gettingContext": "Pobieranie kontekstu Git...",
+		"errors": {
+			"connectionFailed": "Nie udało się połączyć z rozszerzeniem Zoo Code",
+			"timeout": "Przekroczono limit czasu żądania po 30 sekundach",
+			"invalidResponse": "Otrzymano nieprawidłowy format odpowiedzi z rozszerzenia",
+			"missingMessage": "Nie otrzymano wiadomości commitu z rozszerzenia",
+			"noChanges": "Nie znaleziono zmian do commitowania",
+			"noProject": "Brak dostępnego projektu",
+			"noWorkspacePath": "Nie można określić ścieżki obszaru roboczego dla repozytorium Git",
+			"workspaceNotFound": "Nie można określić ścieżki obszaru roboczego dla repozytorium Git",
+			"processingError": "Błąd przetwarzania generowania wiadomości commitu: {{error}}"
+		},
+		"error": {
+			"title": "Błąd",
+			"workspacePathNotFound": "Nie można określić ścieżki obszaru roboczego dla repozytorium Git",
+			"generationFailed": "Nie udało się wygenerować wiadomości commitu: {{error}}",
+			"processingFailed": "Błąd przetwarzania generowania wiadomości commitu: {{error}}",
+			"unknown": "Nieznany błąd"
+		},
+		"dialogs": {
+			"info": "AI Wiadomość Commitu",
+			"error": "Błąd",
+			"success": "Sukces",
+			"title": "AI Wiadomość Commitu"
+		},
+		"progress": {
+			"title": "Generowanie Wiadomości Commitu",
+			"analyzing": "Analizowanie zmian...",
+			"connecting": "Łączenie z Zoo Code...",
+			"generating": "Generowanie wiadomości commitu..."
+		},
+		"ui": {
+			"generateButton": "Generuj Wiadomość Commitu",
+			"generateButtonTooltip": "Generuje wiadomość commitu przy użyciu AI do analizy zmian w kodzie"
+		}
 	}
 }

@@ -16,6 +16,11 @@ import {
 	type SkillMetadata,
 	type Command,
 	type McpServer,
+	type CommitMessageAttributionSettings,
+	type CommitMessageGitContextSettings,
+	type CommitMessageProfilesSettings,
+	defaultCommitMessageGitContextSettings,
+	defaultCommitMessageAttributionSettings,
 	RouterModels,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -104,6 +109,14 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setCustomSupportPrompts: (value: CustomSupportPrompts) => void
 	enhancementApiConfigId?: string
 	setEnhancementApiConfigId: (value: string) => void
+	commitMessageApiConfigId?: string
+	setCommitMessageApiConfigId: (value: string) => void
+	commitMessageGitContext?: CommitMessageGitContextSettings
+	setCommitMessageGitContext: (value: CommitMessageGitContextSettings) => void
+	commitMessageAttribution?: CommitMessageAttributionSettings
+	setCommitMessageAttribution: (value: CommitMessageAttributionSettings) => void
+	commitMessageProfiles?: CommitMessageProfilesSettings
+	setCommitMessageProfiles: (value: CommitMessageProfilesSettings) => void
 	setExperimentEnabled: (id: ExperimentId, enabled: boolean) => void
 	setAutoApprovalEnabled: (value: boolean) => void
 	customModes: ModeConfig[]
@@ -216,6 +229,10 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		customSupportPrompts: {},
 		experiments: experimentDefault,
 		enhancementApiConfigId: "",
+		commitMessageApiConfigId: "",
+		commitMessageGitContext: defaultCommitMessageGitContextSettings,
+		commitMessageAttribution: defaultCommitMessageAttributionSettings,
+		commitMessageProfiles: undefined,
 		hasOpenedModeSelector: false, // Default to false (not opened yet)
 		autoApprovalEnabled: false,
 		customModes: [],
@@ -542,6 +559,13 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		setCustomSupportPrompts: (value) => setState((prevState) => ({ ...prevState, customSupportPrompts: value })),
 		setEnhancementApiConfigId: (value) =>
 			setState((prevState) => ({ ...prevState, enhancementApiConfigId: value })),
+		setCommitMessageApiConfigId: (value) =>
+			setState((prevState) => ({ ...prevState, commitMessageApiConfigId: value })),
+		setCommitMessageGitContext: (value) =>
+			setState((prevState) => ({ ...prevState, commitMessageGitContext: value })),
+		setCommitMessageAttribution: (value) =>
+			setState((prevState) => ({ ...prevState, commitMessageAttribution: value })),
+		setCommitMessageProfiles: (value) => setState((prevState) => ({ ...prevState, commitMessageProfiles: value })),
 		setAutoApprovalEnabled: (value) => setState((prevState) => ({ ...prevState, autoApprovalEnabled: value })),
 		setCustomModes: (value) => setState((prevState) => ({ ...prevState, customModes: value })),
 		setMaxOpenTabsContext: (value) => setState((prevState) => ({ ...prevState, maxOpenTabsContext: value })),

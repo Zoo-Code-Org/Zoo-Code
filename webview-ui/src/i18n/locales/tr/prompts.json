@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Yeni Görev Başlat",
 				"description": "Girdiyle yeni bir görev başlat. Komut paletinde kullanılabilir."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Commit Mesajı Oluşturma",
+				"description": "Git değişikliklerinize göre açıklayıcı commit mesajları oluşturun. Deposunuzun en iyi uygulamalarına uygun mesajlar oluşturmak için promptu özelleştirin."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Bu profil için commit mesajları oluşturmak amacıyla kullanılan talimatlar.",
+			"apiConfiguration": "API Yapılandırması",
+			"apiConfigDescription": "Bu profil için her zaman kullanılacak bir API yapılandırması seçin veya şu anda seçili yapılandırmayı kullanın.",
+			"useCurrentConfig": "Şu anda seçili API yapılandırmasını kullan",
+			"profiles": {
+				"title": "Commit mesajı profili",
+				"select": "Bir commit mesajı profili seçin",
+				"description": "Hangi commit mesajı profilinin düzenleneceğini ve oluşturulmada kullanılacağını seçin.",
+				"name": "Profil adı",
+				"nameDescription": "Bu commit mesajı profilini tanımanıza yardımcı olacak yerel bir ad.",
+				"add": "Profil ekle",
+				"delete": "Profili sil",
+				"limit": "{{count}} profile kadar."
+			},
+			"gitContext": {
+				"title": "Git Bağlamı",
+				"description": "Gerekli diff ile birlikte gönderilen ek Git bağlamını kontrol edin. Değişiklik özeti, izlenmeyen dosya diff'leri ve ikili özetler her zaman doğruluk için dahil edilir.",
+				"contextLines": "Diff bağlam satırları",
+				"contextLinesDescription": "Her değişikliğin etrafındaki değişmemiş satırlar. Kompakt diff'ler için 0, normal Git diff'leri için 3 veya daha fazla çevreleyen kod için daha büyük bir değer kullanın.",
+				"includeDiffStats": "Diff istatistiklerini dahil et",
+				"includeDiffStatsDescription": "Tam diff'den önce kompakt bir dosya/ekleme/silme özeti ekler.",
+				"includeBranch": "Mevcut dal adını dahil et",
+				"includeBranchDescription": "Dal adları genellikle commit mesajını şekillendirmeye yardımcı olan sorun kimlikleri veya özellik adları içerir.",
+				"includeRecentCommits": "Son commit'leri dahil et",
+				"recentCommitsDescription": "Son commit'ler Zoo'nun bu deponun commit mesajı stilini eşleştirmesine yardımcı olur.",
+				"recentCommitCount": "Son commit sayısı",
+				"recentCommitCountDescription": "Stil ve referans bağlamı için kaç son commit'in dahil edileceği.",
+				"includeRecentCommitBodies": "Son commit açıklamalarını dahil et",
+				"includeRecentCommitBodiesDescription": "Sadece commit başlıklarını değil, commit gövdelerini de dahil eder. Bu depo ayrıntılı commit mesajları yazıyorsa kullanışlıdır.",
+				"includeRecentCommitStats": "Son commit dosya istatistiklerini dahil et",
+				"includeRecentCommitStatsDescription": "Son commit'ler için tam yamaları dahil etmeden dosya düzeyinde istatistikler ekler.",
+				"includeRecentCommitDiffs": "Son commit diff'lerini dahil et",
+				"includeRecentCommitDiffsDescription": "Son commit'lerden yamaları dahil eder. Bu stil eşleştirmesini iyileştirebilir ancak çok fazla bağlam ekler.",
+				"recentCommitDiffCount": "Son commit diff sayısı",
+				"recentCommitDiffCountDescription": "Kaç son commit'in tam yama içermesi gerektiği. 5 ile sınırlıdır."
+			},
+			"attribution": {
+				"title": "AI atıf alt bilgisi",
+				"description": "Zoo bir commit mesajı oluşturduktan sonra isteğe bağlı olarak bir atıf alt bilgisi ekleyin. Bu, oluşturulduktan sonra yerel olarak eklenir ve modelden istenmez.",
+				"enabled": "AI atıf alt bilgisi ekle",
+				"enabledDescription": "Projeniz AI destekli katılımların bildirilmesini gerektirdiğinde kullanın.",
+				"template": "Atıf şablonu",
+				"placeholders": "Yer tutucular: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = kullanılan API sağlayıcısı; ${model} = kullanılan model; ${providerModel} = sağlayıcı/model."
 			}
 		}
 	},

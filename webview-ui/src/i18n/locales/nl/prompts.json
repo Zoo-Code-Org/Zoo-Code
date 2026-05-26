@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Nieuwe taak starten",
 				"description": "Start een nieuwe taak met gebruikersinvoer. Beschikbaar via de Command Palette."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Commitbericht genereren",
+				"description": "Genereer beschrijvende commitberichten op basis van je Git-wijzigingen. Pas de prompt aan om berichten te genereren die de beste praktijken van je repository volgen."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Instructies die worden gebruikt om commitberichten voor dit profiel te genereren.",
+			"apiConfiguration": "API-configuratie",
+			"apiConfigDescription": "Selecteer een API-configuratie die altijd voor dit profiel moet worden gebruikt, of gebruik de momenteel geselecteerde configuratie.",
+			"useCurrentConfig": "Gebruik de momenteel geselecteerde API-configuratie",
+			"profiles": {
+				"title": "Commitberichtprofiel",
+				"select": "Kies een commitberichtprofiel",
+				"description": "Kies welk commitberichtprofiel je wilt bewerken en gebruiken voor generatie.",
+				"name": "Profielnaam",
+				"nameDescription": "Een lokale naam om dit commitberichtprofiel te herkennen.",
+				"add": "Profiel toevoegen",
+				"delete": "Profiel verwijderen",
+				"limit": "Tot {{count}} profielen."
+			},
+			"gitContext": {
+				"title": "Git-context",
+				"description": "Beheer de extra Git-context die met de vereiste diff wordt meegestuurd. Wijzigingsoverzicht, niet-getraceerde bestandsdiffs en binaire samenvattingen zijn altijd inbegrepen voor correctheid.",
+				"contextLines": "Diff-contextregels",
+				"contextLinesDescription": "Onveranderde regels rond elke wijziging. Gebruik 0 voor compacte diffs, 3 voor normale Git-diffs of een grotere waarde voor meer omliggende code.",
+				"includeDiffStats": "Diff-statistieken opnemen",
+				"includeDiffStatsDescription": "Voegt een compacte bestanden/invoegingen/verwijderingen samenvatting toe vóór de volledige diff.",
+				"includeBranch": "Huidige branchnaam opnemen",
+				"includeBranchDescription": "Branch namen bevatten vaak issue-ID's of functienamen die helpen bij het vormgeven van het commitbericht.",
+				"includeRecentCommits": "Recente commits opnemen",
+				"recentCommitsDescription": "Recente commits helpen Zoo de commitberichtstijl van deze repository te volgen.",
+				"recentCommitCount": "Aantal recente commits",
+				"recentCommitCountDescription": "Hoeveel laatste commits moeten worden opgenomen voor stijl- en referentiecontext.",
+				"includeRecentCommitBodies": "Recente commitbeschrijvingen opnemen",
+				"includeRecentCommitBodiesDescription": "Neemt commitberichten op, niet alleen commit titels. Nuttig als deze repository gedetailleerde commitberichten schrijft.",
+				"includeRecentCommitStats": "Recente commitbestandsstatistieken opnemen",
+				"includeRecentCommitStatsDescription": "Voegt bestandsniveau-statistieken toe voor recente commits zonder hun volledige patches op te nemen.",
+				"includeRecentCommitDiffs": "Recente commit-diffs opnemen",
+				"includeRecentCommitDiffsDescription": "Neemt patches van recente commits op. Dit kan stijlmatching verbeteren maar voegt veel context toe.",
+				"recentCommitDiffCount": "Aantal recente commit-diffs",
+				"recentCommitDiffCountDescription": "Hoeveel laatste commits volledige patches moeten bevatten. Beperkt tot 5."
+			},
+			"attribution": {
+				"title": "AI-attributievoettekst",
+				"description": "Voeg optioneel een attributievoettekst toe nadat Zoo een commitbericht heeft gegenereerd. Dit wordt lokaal toegevoegd na generatie en wordt niet bij het model aangevraagd.",
+				"enabled": "AI-attributievoettekst toevoegen",
+				"enabledDescription": "Gebruik dit wanneer je project openbaarmaking vereist voor AI-ondersteunde bijdragen.",
+				"template": "Attributiesjabloon",
+				"placeholders": "Tijdelijke aanduidingen: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = gebruikte API-provider; ${model} = gebruikt model; ${providerModel} = provider/model."
 			}
 		}
 	},

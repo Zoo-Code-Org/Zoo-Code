@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Iniciar nueva tarea",
 				"description": "Inicia una nueva tarea con entrada del usuario. Disponible en la Paleta de comandos."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Generación de mensajes de commit",
+				"description": "Genera mensajes de commit descriptivos basados en tus cambios de Git. Personaliza el prompt para generar mensajes que sigan las mejores prácticas de tu repositorio."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Instrucciones utilizadas para generar mensajes de commit para este perfil.",
+			"apiConfiguration": "Configuración de API",
+			"apiConfigDescription": "Selecciona una configuración de API para usar siempre con este perfil, o usa la configuración seleccionada actualmente.",
+			"useCurrentConfig": "Usar la configuración de API actualmente seleccionada",
+			"profiles": {
+				"title": "Perfil de mensaje de commit",
+				"select": "Elige un perfil de mensaje de commit",
+				"description": "Elige qué perfil de mensaje de commit editar y usar para la generación.",
+				"name": "Nombre del perfil",
+				"nameDescription": "Un nombre local para ayudarte a reconocer este perfil de mensaje de commit.",
+				"add": "Agregar perfil",
+				"delete": "Eliminar perfil",
+				"limit": "Hasta {{count}} perfiles."
+			},
+			"gitContext": {
+				"title": "Contexto de Git",
+				"description": "Controla el contexto de Git adicional que se envía con el diff requerido. El resumen de cambios, los diffs de archivos no rastreados y los resúmenes binarios siempre se incluyen para la corrección.",
+				"contextLines": "Líneas de contexto del diff",
+				"contextLinesDescription": "Líneas sin cambios alrededor de cada cambio. Usa 0 para diffs compactos, 3 para diffs de Git normales, o un valor mayor para más código circundante.",
+				"includeDiffStats": "Incluir estadísticas del diff",
+				"includeDiffStatsDescription": "Añade un resumen compacto de archivos/inserciones/eliminaciones antes del diff completo.",
+				"includeBranch": "Incluir nombre de la rama actual",
+				"includeBranchDescription": "Los nombres de rama a menudo incluyen IDs de issues o nombres de características que ayudan a dar forma al mensaje de commit.",
+				"includeRecentCommits": "Incluir commits recientes",
+				"recentCommitsDescription": "Los commits recientes ayudan a Zoo a coincidir con el estilo de mensajes de commit de este repositorio.",
+				"recentCommitCount": "Cantidad de commits recientes",
+				"recentCommitCountDescription": "Cuántos de los últimos commits incluir para el estilo y contexto de referencia.",
+				"includeRecentCommitBodies": "Incluir descripciones de commits recientes",
+				"includeRecentCommitBodiesDescription": "Incluye el cuerpo de los commits, no solo los títulos. Útil si este repositorio escribe mensajes de commit detallados.",
+				"includeRecentCommitStats": "Incluir estadísticas de archivos de commits recientes",
+				"includeRecentCommitStatsDescription": "Añade estadísticas a nivel de archivo para commits recientes sin incluir sus parches completos.",
+				"includeRecentCommitDiffs": "Incluir diffs de commits recientes",
+				"includeRecentCommitDiffsDescription": "Incluye parches de commits recientes. Esto puede mejorar la coincidencia de estilo pero añade mucho contexto.",
+				"recentCommitDiffCount": "Cantidad de diffs de commits recientes",
+				"recentCommitDiffCountDescription": "Cuántos de los últimos commits deben incluir parches completos. Máximo 5."
+			},
+			"attribution": {
+				"title": "Pie de página de atribución de IA",
+				"description": "Añade opcionalmente un pie de página de atribución después de que Zoo genere un mensaje de commit. Se añade localmente después de la generación y no se solicita al modelo.",
+				"enabled": "Añadir pie de página de atribución de IA",
+				"enabledDescription": "Usa esto cuando tu proyecto requiera divulgación de contribuciones asistidas por IA.",
+				"template": "Plantilla de atribución",
+				"placeholders": "Marcadores de posición: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = proveedor de API usado; ${model} = modelo usado; ${providerModel} = proveedor/modelo."
 			}
 		}
 	},

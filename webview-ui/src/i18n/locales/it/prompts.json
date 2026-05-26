@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Avvia nuova attività",
 				"description": "Avvia una nuova attività con il tuo input. Disponibile nella palette dei comandi."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Generazione messaggio di commit",
+				"description": "Genera messaggi di commit descrittivi basati sulle modifiche Git. Personalizza il prompt per generare messaggi che seguono le migliori pratiche del tuo repository."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Istruzioni utilizzate per generare messaggi di commit per questo profilo.",
+			"apiConfiguration": "Configurazione API",
+			"apiConfigDescription": "Seleziona una configurazione API da utilizzare sempre per questo profilo, oppure usa la configurazione attualmente selezionata.",
+			"useCurrentConfig": "Usa la configurazione API attualmente selezionata",
+			"profiles": {
+				"title": "Profilo messaggio di commit",
+				"select": "Scegli un profilo messaggio di commit",
+				"description": "Scegli quale profilo messaggio di commit modificare e utilizzare per la generazione.",
+				"name": "Nome del profilo",
+				"nameDescription": "Un nome locale per aiutarti a riconoscere questo profilo messaggio di commit.",
+				"add": "Aggiungi profilo",
+				"delete": "Elimina profilo",
+				"limit": "Fino a {{count}} profili."
+			},
+			"gitContext": {
+				"title": "Contesto Git",
+				"description": "Controlla il contesto Git aggiuntivo inviato con il diff richiesto. Il riepilogo delle modifiche, i diff dei file non tracciati e i riepiloghi binari sono sempre inclusi per la correttezza.",
+				"contextLines": "Righe di contesto del diff",
+				"contextLinesDescription": "Righe invariate attorno a ogni modifica. Usa 0 per diff compatti, 3 per diff Git normali, o un valore maggiore per più codice circostante.",
+				"includeDiffStats": "Includi statistiche del diff",
+				"includeDiffStatsDescription": "Aggiunge un riepilogo compatto di file/inserimenti/eliminazioni prima del diff completo.",
+				"includeBranch": "Includi nome del branch corrente",
+				"includeBranchDescription": "I nomi dei branch spesso includono ID di issue o nomi di funzionalità che aiutano a definire il messaggio di commit.",
+				"includeRecentCommits": "Includi commit recenti",
+				"recentCommitsDescription": "I commit recenti aiutano Zoo ad abbinare lo stile dei messaggi di commit di questo repository.",
+				"recentCommitCount": "Numero di commit recenti",
+				"recentCommitCountDescription": "Quanti commit recenti includere per il contesto di stile e riferimento.",
+				"includeRecentCommitBodies": "Includi descrizioni dei commit recenti",
+				"includeRecentCommitBodiesDescription": "Include il corpo dei commit, non solo i titoli. Utile se questo repository scrive messaggi di commit dettagliati.",
+				"includeRecentCommitStats": "Includi statistiche file dei commit recenti",
+				"includeRecentCommitStatsDescription": "Aggiunge statistiche a livello di file per i commit recenti senza includere le loro patch complete.",
+				"includeRecentCommitDiffs": "Includi diff dei commit recenti",
+				"includeRecentCommitDiffsDescription": "Include le patch dei commit recenti. Questo può migliorare l'abbinamento dello stile ma aggiunge molti dati di contesto.",
+				"recentCommitDiffCount": "Numero di diff dei commit recenti",
+				"recentCommitDiffCountDescription": "Quanti commit recenti dovrebbero includere patch complete. Limitato a 5."
+			},
+			"attribution": {
+				"title": "Piè di pagina attribuzione AI",
+				"description": "Aggiungi facoltativamente un piè di pagina di attribuzione dopo che Zoo ha generato un messaggio di commit. Questo viene aggiunto localmente dopo la generazione e non viene richiesto al modello.",
+				"enabled": "Aggiungi piè di pagina attribuzione AI",
+				"enabledDescription": "Usa questa opzione quando il tuo progetto richiede la divulgazione per i contributi assistiti dall'AI.",
+				"template": "Modello di attribuzione",
+				"placeholders": "Segnaposto: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = provider API utilizzato; ${model} = modello utilizzato; ${providerModel} = provider/modello."
 			}
 		}
 	},

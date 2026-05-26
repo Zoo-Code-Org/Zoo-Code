@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: 連線成功！你現在可以使用 Zoo Code 作為 AI 提供商。",
 			"disconnected": "Zoo Code: 已成功中斷連線。"
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code：提交訊息產生器已啟用",
+		"gitNotFound": "⚠️ 找不到 Git 儲存庫或 git 不可用",
+		"gitInitError": "⚠️ Git 初始化錯誤：{{error}}",
+		"generating": "Zoo：正在產生提交訊息...",
+		"noChanges": "Zoo：找不到需要分析的變更",
+		"generated": "Zoo：提交訊息已產生！",
+		"generationFailed": "Zoo：產生提交訊息失敗：{{errorMessage}}",
+		"contextWarnings": "Zoo：Git 上下文警告：{{warnings}}",
+		"generatingFromUnstaged": "Zoo：使用未暫存的變更產生訊息",
+		"confirmUnstaged": "找不到已暫存的變更。是否從 {{count}} 個未暫存/未追蹤的變更產生提交訊息？",
+		"confirmUnstagedAction": "從未暫存的變更產生",
+		"activationFailed": "Zoo：啟用訊息產生器失敗：{{error}}",
+		"providerRegistered": "Zoo：提交訊息提供者已註冊",
+		"initializing": "正在初始化...",
+		"discoveringFiles": "正在探索檔案...",
+		"foundChanges": "找到 {{count}} 個變更",
+		"gettingContext": "正在取得 Git 上下文...",
+		"errors": {
+			"connectionFailed": "無法連線到 Zoo Code 擴充套件",
+			"timeout": "請求逾時，超過 30 秒",
+			"invalidResponse": "從擴充套件收到無效的回應格式",
+			"missingMessage": "未從擴充套件收到提交訊息",
+			"noChanges": "找不到需要提交的變更",
+			"noProject": "沒有可用的專案",
+			"noWorkspacePath": "無法確定 Git 儲存庫的工作區路徑",
+			"workspaceNotFound": "無法確定 Git 儲存庫的工作區路徑",
+			"processingError": "處理提交訊息產生時發生錯誤：{{error}}"
+		},
+		"error": {
+			"title": "錯誤",
+			"workspacePathNotFound": "無法確定 Git 儲存庫的工作區路徑",
+			"generationFailed": "產生提交訊息失敗：{{error}}",
+			"processingFailed": "處理提交訊息產生時發生錯誤：{{error}}",
+			"unknown": "未知錯誤"
+		},
+		"dialogs": {
+			"info": "AI 提交訊息",
+			"error": "錯誤",
+			"success": "成功",
+			"title": "AI 提交訊息"
+		},
+		"progress": {
+			"title": "正在產生提交訊息",
+			"analyzing": "正在分析變更...",
+			"connecting": "正在連線到 Zoo Code...",
+			"generating": "正在產生提交訊息..."
+		},
+		"ui": {
+			"generateButton": "產生提交訊息",
+			"generateButtonTooltip": "使用 AI 分析程式碼變更並產生提交訊息"
+		}
 	}
 }

@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: 연결에 성공했습니다! 이제 Zoo Code를 AI 제공자로 사용할 수 있습니다.",
 			"disconnected": "Zoo Code: 연결이 해제되었습니다."
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code 커밋 메시지 생성기 활성화됨",
+		"gitNotFound": "⚠️ Git 저장소를 찾을 수 없거나 Git을 사용할 수 없습니다",
+		"gitInitError": "⚠️ Git 초기화 오류: {{error}}",
+		"generating": "Zoo: 커밋 메시지 생성 중...",
+		"noChanges": "Zoo: 분석할 변경 사항이 없습니다",
+		"generated": "Zoo: 커밋 메시지가 생성되었습니다!",
+		"generationFailed": "Zoo: 커밋 메시지 생성 실패: {{errorMessage}}",
+		"contextWarnings": "Zoo: Git 컨텍스트 경고: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: 스테이징되지 않은 변경 사항으로 메시지 생성 중",
+		"confirmUnstaged": "스테이징된 변경 사항이 없습니다. {{count}}개의 스테이징되지 않은/추적되지 않은 변경 사항으로 커밋 메시지를 생성하시겠습니까?",
+		"confirmUnstagedAction": "스테이징되지 않은 변경 사항에서 생성",
+		"activationFailed": "Zoo: 메시지 생성기 활성화 실패: {{error}}",
+		"providerRegistered": "Zoo: 커밋 메시지 제공자 등록됨",
+		"initializing": "초기화 중...",
+		"discoveringFiles": "파일 검색 중...",
+		"foundChanges": "{{count}}개의 변경 사항 발견",
+		"gettingContext": "Git 컨텍스트 가져오는 중...",
+		"errors": {
+			"connectionFailed": "Zoo Code 확장 프로그램에 연결하지 못했습니다",
+			"timeout": "요청이 30초 후 시간 초과되었습니다",
+			"invalidResponse": "확장 프로그램에서 유효하지 않은 응답 형식을 받았습니다",
+			"missingMessage": "확장 프로그램에서 커밋 메시지를 받지 못했습니다",
+			"noChanges": "커밋할 변경 사항이 없습니다",
+			"noProject": "사용 가능한 프로젝트가 없습니다",
+			"noWorkspacePath": "Git 저장소의 작업 공간 경로를 확인할 수 없습니다",
+			"workspaceNotFound": "Git 저장소의 작업 공간 경로를 확인할 수 없습니다",
+			"processingError": "커밋 메시지 생성 처리 중 오류 발생: {{error}}"
+		},
+		"error": {
+			"title": "오류",
+			"workspacePathNotFound": "Git 저장소의 작업 공간 경로를 확인할 수 없습니다",
+			"generationFailed": "커밋 메시지 생성 실패: {{error}}",
+			"processingFailed": "커밋 메시지 생성 처리 중 오류 발생: {{error}}",
+			"unknown": "알 수 없는 오류"
+		},
+		"dialogs": {
+			"info": "AI 커밋 메시지",
+			"error": "오류",
+			"success": "성공",
+			"title": "AI 커밋 메시지"
+		},
+		"progress": {
+			"title": "커밋 메시지 생성 중",
+			"analyzing": "변경 사항 분석 중...",
+			"connecting": "Zoo Code에 연결 중...",
+			"generating": "커밋 메시지 생성 중..."
+		},
+		"ui": {
+			"generateButton": "커밋 메시지 생성",
+			"generateButtonTooltip": "AI를 사용하여 코드 변경 사항을 분석하고 커밋 메시지를 생성합니다"
+		}
 	}
 }

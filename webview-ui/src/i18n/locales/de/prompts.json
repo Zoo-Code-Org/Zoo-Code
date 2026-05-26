@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Neue Aufgabe starten",
 				"description": "Starte eine neue Aufgabe mit deiner Eingabe. Verfügbar in der Befehlspalette."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Commit-Nachrichten-Generierung",
+				"description": "Generieren Sie beschreibende Commit-Nachrichten basierend auf Ihren Git-Änderungen. Passen Sie den Prompt an, um Nachrichten zu generieren, die den Best Practices Ihres Repositories entsprechen."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Anweisungen zur Generierung von Commit-Nachrichten für dieses Profil.",
+			"apiConfiguration": "API-Konfiguration",
+			"apiConfigDescription": "Wählen Sie eine API-Konfiguration aus, die für dieses Profil immer verwendet werden soll, oder verwenden Sie die aktuell ausgewählte Konfiguration.",
+			"useCurrentConfig": "Aktuell ausgewählte API-Konfiguration verwenden",
+			"profiles": {
+				"title": "Commit-Nachrichten-Profil",
+				"select": "Wähle ein Commit-Nachrichten-Profil",
+				"description": "Wähle, welches Commit-Nachrichten-Profil bearbeitet und für die Generierung verwendet werden soll.",
+				"name": "Profilname",
+				"nameDescription": "Ein lokaler Name, um dieses Commit-Nachrichten-Profil zu erkennen.",
+				"add": "Profil hinzufügen",
+				"delete": "Profil löschen",
+				"limit": "Bis zu {{count}} Profile."
+			},
+			"gitContext": {
+				"title": "Git-Kontext",
+				"description": "Steuern Sie den zusätzlichen Git-Kontext, der mit dem erforderlichen Diff gesendet wird. Änderungszusammenfassung, Diffs nicht verfolgter Dateien und Binärzusammenfassungen werden immer zur Korrektheit einbezogen.",
+				"contextLines": "Diff-Kontextzeilen",
+				"contextLinesDescription": "Unveränderte Zeilen um jede Änderung. Verwenden Sie 0 für kompakte Diffs, 3 für normale Git-Diffs oder einen größeren Wert für mehr umgebenden Code.",
+				"includeDiffStats": "Diff-Statistiken einbeziehen",
+				"includeDiffStatsDescription": "Fügt eine kompakte Zusammenfassung der Dateien/Einfügungen/Löschungen vor dem vollständigen Diff hinzu.",
+				"includeBranch": "Aktuellen Branch-Namen einbeziehen",
+				"includeBranchDescription": "Branch-Namen enthalten oft Issue-IDs oder Feature-Namen, die bei der Formulierung der Commit-Nachricht helfen.",
+				"includeRecentCommits": "Aktuelle Commits einbeziehen",
+				"recentCommitsDescription": "Aktuelle Commits helfen Zoo, den Commit-Nachrichtenstil dieses Repositories zu übernehmen.",
+				"recentCommitCount": "Anzahl aktueller Commits",
+				"recentCommitCountDescription": "Wie viele der letzten Commits für Stil- und Referenzkontext einbezogen werden sollen.",
+				"includeRecentCommitBodies": "Aktuelle Commit-Beschreibungen einbeziehen",
+				"includeRecentCommitBodiesDescription": "Schließt Commit-Textkörper ein, nicht nur Commit-Titel. Nützlich, wenn dieses Repository detaillierte Commit-Nachrichten schreibt.",
+				"includeRecentCommitStats": "Aktuelle Commit-Dateistatistiken einbeziehen",
+				"includeRecentCommitStatsDescription": "Fügt Dateistatistiken für aktuelle Commits hinzu, ohne deren vollständige Patches einzuschließen.",
+				"includeRecentCommitDiffs": "Aktuelle Commit-Diffs einbeziehen",
+				"includeRecentCommitDiffsDescription": "Schließt Patches von aktuellen Commits ein. Dies kann die Stilerkennung verbessern, fügt aber viel Kontext hinzu.",
+				"recentCommitDiffCount": "Anzahl aktueller Commit-Diffs",
+				"recentCommitDiffCountDescription": "Wie viele der letzten Commits vollständige Patches enthalten sollen. Maximal 5."
+			},
+			"attribution": {
+				"title": "KI-Attribuierungs-Fußzeile",
+				"description": "Hängt optional eine Attribuierungs-Fußzeile an, nachdem Zoo eine Commit-Nachricht generiert hat. Diese wird lokal nach der Generierung hinzugefügt und nicht vom Modell angefordert.",
+				"enabled": "KI-Attribuierungs-Fußzeile hinzufügen",
+				"enabledDescription": "Verwenden Sie dies, wenn Ihr Projekt eine Offenlegung für KI-gestützte Beiträge erfordert.",
+				"template": "Attribuierungsvorlage",
+				"placeholders": "Platzhalter: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = verwendeter API-Anbieter; ${model} = verwendetes Modell; ${providerModel} = Anbieter/Modell."
 			}
 		}
 	},

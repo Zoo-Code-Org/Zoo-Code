@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: सफलतापूर्वक कनेक्ट हो गया! अब तुम Zoo Code को अपने AI प्रदाता के रूप में उपयोग कर सकते हो।",
 			"disconnected": "Zoo Code: सफलतापूर्वक डिस्कनेक्ट हो गया।"
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code कमिट मैसेज जनरेटर सक्रिय किया गया",
+		"gitNotFound": "⚠️ Git रिपॉजिटरी नहीं मिली या Git उपलब्ध नहीं है",
+		"gitInitError": "⚠️ Git प्रारंभीकरण त्रुटि: {{error}}",
+		"generating": "Zoo: कमिट मैसेज बनाया जा रहा है...",
+		"noChanges": "Zoo: विश्लेषण के लिए कोई बदलाव नहीं मिला",
+		"generated": "Zoo: कमिट मैसेज बना दिया गया!",
+		"generationFailed": "Zoo: कमिट मैसेज बनाने में विफल: {{errorMessage}}",
+		"contextWarnings": "Zoo: Git संदर्भ चेतावनी: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: अनस्टेज्ड बदलावों का उपयोग करके मैसेज बनाया जा रहा है",
+		"confirmUnstaged": "कोई स्टेज्ड बदलाव नहीं मिले। इसके बजाय {{count}} अनस्टेज्ड/अनट्रैक्ड बदलावों से कमिट मैसेज बनाएं?",
+		"confirmUnstagedAction": "अनस्टेज्ड बदलावों से बनाएं",
+		"activationFailed": "Zoo: मैसेज जनरेटर सक्रिय करने में विफल: {{error}}",
+		"providerRegistered": "Zoo: कमिट मैसेज प्रदाता पंजीकृत किया गया",
+		"initializing": "प्रारंभ हो रहा है...",
+		"discoveringFiles": "फ़ाइलें खोजी जा रही हैं...",
+		"foundChanges": "{{count}} बदलाव मिले",
+		"gettingContext": "Git संदर्भ प्राप्त किया जा रहा है...",
+		"errors": {
+			"connectionFailed": "Zoo Code एक्सटेंशन से कनेक्ट करने में विफल",
+			"timeout": "अनुरोध 30 सेकंड के बाद टाइमआउट हो गया",
+			"invalidResponse": "एक्सटेंशन से अमान्य प्रतिक्रिया फ़ॉर्मेट प्राप्त हुआ",
+			"missingMessage": "एक्सटेंशन से कोई कमिट मैसेज प्राप्त नहीं हुआ",
+			"noChanges": "कमिट करने के लिए कोई बदलाव नहीं मिला",
+			"noProject": "कोई प्रोजेक्ट उपलब्ध नहीं है",
+			"noWorkspacePath": "Git रिपॉजिटरी के लिए वर्कस्पेस पाथ निर्धारित नहीं किया जा सका",
+			"workspaceNotFound": "Git रिपॉजिटरी के लिए वर्कस्पेस पाथ निर्धारित नहीं किया जा सका",
+			"processingError": "कमिट मैसेज जनरेशन प्रोसेस करने में त्रुटि: {{error}}"
+		},
+		"error": {
+			"title": "त्रुटि",
+			"workspacePathNotFound": "Git रिपॉजिटरी के लिए वर्कस्पेस पाथ निर्धारित नहीं किया जा सका",
+			"generationFailed": "कमिट मैसेज बनाने में विफल: {{error}}",
+			"processingFailed": "कमिट मैसेज जनरेशन प्रोसेस करने में त्रुटि: {{error}}",
+			"unknown": "अज्ञात त्रुटि"
+		},
+		"dialogs": {
+			"info": "AI कमिट मैसेज",
+			"error": "त्रुटि",
+			"success": "सफल",
+			"title": "AI कमिट मैसेज"
+		},
+		"progress": {
+			"title": "कमिट मैसेज बनाया जा रहा है",
+			"analyzing": "बदलावों का विश्लेषण किया जा रहा है...",
+			"connecting": "Zoo Code से कनेक्ट हो रहा है...",
+			"generating": "कमिट मैसेज बनाया जा रहा है..."
+		},
+		"ui": {
+			"generateButton": "कमिट मैसेज बनाएं",
+			"generateButtonTooltip": "आपके कोड परिवर्तनों का विश्लेषण करके AI द्वारा कमिट मैसेज बनाता है"
+		}
 	}
 }

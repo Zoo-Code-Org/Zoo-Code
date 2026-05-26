@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Démarrer une nouvelle tâche",
 				"description": "Démarre une nouvelle tâche avec ton entrée. Disponible dans la palette de commandes."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Génération de messages de commit",
+				"description": "Générez des messages de commit descriptifs basés sur vos modifications Git. Personnalisez le prompt pour générer des messages qui suivent les meilleures pratiques de votre dépôt."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Instructions utilisées pour générer des messages de commit pour ce profil.",
+			"apiConfiguration": "Configuration API",
+			"apiConfigDescription": "Sélectionnez une configuration API à toujours utiliser pour ce profil, ou utilisez la configuration actuellement sélectionnée.",
+			"useCurrentConfig": "Utiliser la configuration API actuellement sélectionnée",
+			"profiles": {
+				"title": "Profil de message de commit",
+				"select": "Choisissez un profil de message de commit",
+				"description": "Choisissez le profil de message de commit à modifier et à utiliser pour la génération.",
+				"name": "Nom du profil",
+				"nameDescription": "Un nom local pour vous aider à reconnaître ce profil de message de commit.",
+				"add": "Ajouter un profil",
+				"delete": "Supprimer le profil",
+				"limit": "Jusqu'à {{count}} profils."
+			},
+			"gitContext": {
+				"title": "Contexte Git",
+				"description": "Contrôlez le contexte Git supplémentaire envoyé avec le diff requis. Le résumé des modifications, les diffs des fichiers non suivis et les résumés binaires sont toujours inclus pour la correction.",
+				"contextLines": "Lignes de contexte du diff",
+				"contextLinesDescription": "Lignes inchangées autour de chaque modification. Utilisez 0 pour des diffs compacts, 3 pour des diffs Git normaux, ou une valeur plus grande pour plus de code environnant.",
+				"includeDiffStats": "Inclure les statistiques du diff",
+				"includeDiffStatsDescription": "Ajoute un résumé compact des fichiers/insertions/suppressions avant le diff complet.",
+				"includeBranch": "Inclure le nom de la branche actuelle",
+				"includeBranchDescription": "Les noms de branches incluent souvent des IDs d'issues ou des noms de fonctionnalités qui aident à façonner le message de commit.",
+				"includeRecentCommits": "Inclure les commits récents",
+				"recentCommitsDescription": "Les commits récents aident Zoo à correspondre au style de message de commit de ce dépôt.",
+				"recentCommitCount": "Nombre de commits récents",
+				"recentCommitCountDescription": "Combien des derniers commits inclure pour le style et le contexte de référence.",
+				"includeRecentCommitBodies": "Inclure les descriptions des commits récents",
+				"includeRecentCommitBodiesDescription": "Inclut les corps des commits, pas seulement les titres. Utile si ce dépôt écrit des messages de commit détaillés.",
+				"includeRecentCommitStats": "Inclure les statistiques de fichiers des commits récents",
+				"includeRecentCommitStatsDescription": "Ajoute des statistiques au niveau des fichiers pour les commits récents sans inclure leurs patches complets.",
+				"includeRecentCommitDiffs": "Inclure les diffs des commits récents",
+				"includeRecentCommitDiffsDescription": "Inclut les patches des commits récents. Cela peut améliorer la correspondance de style mais ajoute beaucoup de contexte.",
+				"recentCommitDiffCount": "Nombre de diffs des commits récents",
+				"recentCommitDiffCountDescription": "Combien des derniers commits doivent inclure des patches complets. Limité à 5."
+			},
+			"attribution": {
+				"title": "Pied de page d'attribution IA",
+				"description": "Ajoutez optionnellement un pied de page d'attribution après que Zoo a généré un message de commit. Celui-ci est ajouté localement après la génération et n'est pas demandé au modèle.",
+				"enabled": "Ajouter un pied de page d'attribution IA",
+				"enabledDescription": "Utilisez cette option lorsque votre projet nécessite la divulgation des contributions assistées par IA.",
+				"template": "Modèle d'attribution",
+				"placeholders": "Espaces réservés : ${agentName} = Zoo Code ; ${toolName} = Zoo Code ; ${provider} = fournisseur d'API utilisé ; ${model} = modèle utilisé ; ${providerModel} = fournisseur/modèle."
 			}
 		}
 	},

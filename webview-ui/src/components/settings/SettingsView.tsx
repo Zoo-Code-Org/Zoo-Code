@@ -189,6 +189,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		maxImageFileSize,
 		maxTotalImageSize,
 		customSupportPrompts,
+		commitMessageApiConfigId,
+		commitMessageGitContext,
+		commitMessageAttribution,
+		commitMessageProfiles,
 		profileThresholds,
 		alwaysAllowFollowupQuestions,
 		followupAutoApproveTimeoutMs,
@@ -422,6 +426,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					openRouterImageGenerationSelectedModel,
 					experiments,
 					customSupportPrompts,
+					commitMessageApiConfigId,
+					commitMessageGitContext,
+					commitMessageAttribution,
+					commitMessageProfiles,
 				},
 			})
 
@@ -880,6 +888,22 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<PromptsSettings
 								customSupportPrompts={customSupportPrompts || {}}
 								setCustomSupportPrompts={setCustomSupportPromptsField}
+								commitMessageApiConfigId={commitMessageApiConfigId}
+								setCommitMessageApiConfigId={(value) =>
+									setCachedStateField("commitMessageApiConfigId", value)
+								}
+								commitMessageGitContext={commitMessageGitContext}
+								setCommitMessageGitContext={(value) =>
+									setCachedStateField("commitMessageGitContext", value)
+								}
+								commitMessageAttribution={commitMessageAttribution}
+								setCommitMessageAttribution={(value) =>
+									setCachedStateField("commitMessageAttribution", value)
+								}
+								commitMessageProfiles={commitMessageProfiles}
+								setCommitMessageProfiles={(value) =>
+									setCachedStateField("commitMessageProfiles", value)
+								}
 								includeTaskHistoryInEnhance={includeTaskHistoryInEnhance}
 								setIncludeTaskHistoryInEnhance={(value) =>
 									setCachedStateField("includeTaskHistoryInEnhance", value)

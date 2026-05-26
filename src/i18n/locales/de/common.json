@@ -262,5 +262,58 @@
 			"connected": "Zoo Code: Erfolgreich verbunden! Du kannst Zoo Code jetzt als KI-Anbieter verwenden.",
 			"disconnected": "Zoo Code: Erfolgreich getrennt."
 		}
+	},
+	"commitMessage": {
+		"activated": "Zoo Code Commit-Nachrichtengenerator aktiviert",
+		"gitNotFound": "⚠️ Git-Repository nicht gefunden oder Git nicht verfügbar",
+		"gitInitError": "⚠️ Git-Initialisierungsfehler: {{error}}",
+		"generating": "Zoo: Commit-Nachricht wird generiert...",
+		"noChanges": "Zoo: Keine Änderungen zum Analysieren gefunden",
+		"generated": "Zoo: Commit-Nachricht generiert!",
+		"generationFailed": "Zoo: Fehler beim Generieren der Commit-Nachricht: {{errorMessage}}",
+		"contextWarnings": "Zoo: Git-Kontextwarnung: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: Nachricht wird aus nicht gestagten Änderungen generiert",
+		"confirmUnstaged": "Keine gestagten Änderungen gefunden. Soll eine Commit-Nachricht aus {{count}} nicht gestagten/nicht verfolgten Änderungen generiert werden?",
+		"confirmUnstagedAction": "Aus nicht gestagten Änderungen generieren",
+		"activationFailed": "Zoo: Fehler beim Aktivieren des Nachrichtengenerators: {{error}}",
+		"providerRegistered": "Zoo: Commit-Nachrichtenanbieter registriert",
+		"initializing": "Initialisierung...",
+		"discoveringFiles": "Dateien werden erkannt...",
+		"foundChanges": "{{count}} Änderungen gefunden",
+		"gettingContext": "Git-Kontext wird abgerufen...",
+		"errors": {
+			"connectionFailed": "Verbindung zur Zoo Code-Erweiterung fehlgeschlagen",
+			"timeout": "Zeitüberschreitung der Anfrage nach 30 Sekunden",
+			"invalidResponse": "Ungültiges Antwortformat von der Erweiterung erhalten",
+			"missingMessage": "Keine Commit-Nachricht von der Erweiterung erhalten",
+			"noChanges": "Keine Änderungen zum Committen gefunden",
+			"noProject": "Kein Projekt verfügbar",
+			"noWorkspacePath": "Arbeitsbereichspfad für Git-Repository konnte nicht ermittelt werden",
+			"workspaceNotFound": "Arbeitsbereichspfad für Git-Repository konnte nicht ermittelt werden",
+			"processingError": "Fehler bei der Verarbeitung der Commit-Nachrichtengenerierung: {{error}}"
+		},
+		"error": {
+			"title": "Fehler",
+			"workspacePathNotFound": "Arbeitsbereichspfad für Git-Repository konnte nicht ermittelt werden",
+			"generationFailed": "Fehler beim Generieren der Commit-Nachricht: {{error}}",
+			"processingFailed": "Fehler bei der Verarbeitung der Commit-Nachrichtengenerierung: {{error}}",
+			"unknown": "Unbekannter Fehler"
+		},
+		"dialogs": {
+			"info": "KI-Commit-Nachricht",
+			"error": "Fehler",
+			"success": "Erfolg",
+			"title": "KI-Commit-Nachricht"
+		},
+		"progress": {
+			"title": "Commit-Nachricht wird generiert",
+			"analyzing": "Änderungen werden analysiert...",
+			"connecting": "Verbindung zu Zoo Code wird hergestellt...",
+			"generating": "Commit-Nachricht wird generiert..."
+		},
+		"ui": {
+			"generateButton": "Commit-Nachricht generieren",
+			"generateButtonTooltip": "Generiert eine Commit-Nachricht mithilfe von KI zur Analyse deiner Codeänderungen"
+		}
 	}
 }

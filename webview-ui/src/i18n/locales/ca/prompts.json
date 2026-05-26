@@ -139,6 +139,56 @@
 			"NEW_TASK": {
 				"label": "Iniciar nova tasca",
 				"description": "Inicieu una nova tasca amb l'entrada proporcionada. Disponible a la paleta de comandes."
+			},
+			"COMMIT_MESSAGE": {
+				"label": "Generació de missatges de commit",
+				"description": "Genereu missatges de commit descriptius basats en els vostres canvis de Git. Personalitzeu el prompt per generar missatges que segueixin les millors pràctiques del vostre repositori."
+			}
+		},
+		"commitMessage": {
+			"promptDescription": "Instruccions utilitzades per generar missatges de commit per a aquest perfil.",
+			"apiConfiguration": "Configuració d'API",
+			"apiConfigDescription": "Seleccioneu una configuració d'API per utilitzar sempre per a aquest perfil, o utilitzeu la configuració seleccionada actualment.",
+			"useCurrentConfig": "Utilitzar la configuració d'API seleccionada actualment",
+			"profiles": {
+				"title": "Perfil de missatge de commit",
+				"select": "Trieu un perfil de missatge de commit",
+				"description": "Trieu quin perfil de missatge de commit editar i utilitzar per a la generació.",
+				"name": "Nom del perfil",
+				"nameDescription": "Un nom local per ajudar-vos a reconèixer aquest perfil de missatge de commit.",
+				"add": "Afegir perfil",
+				"delete": "Eliminar perfil",
+				"limit": "Fins a {{count}} perfils."
+			},
+			"gitContext": {
+				"title": "Context de Git",
+				"description": "Controleu el context de Git addicional que s'envia amb el diff requerit. El resum de canvis, els diffs de fitxers no rastrejats i els resums binaris sempre s'inclouen per a la correcció.",
+				"contextLines": "Línies de context del diff",
+				"contextLinesDescription": "Línies sense canvis al voltant de cada canvi. Utilitzeu 0 per a diffs compactes, 3 per a diffs de Git normals, o un valor més gran per a més codi circumdant.",
+				"includeDiffStats": "Incloure estadístiques del diff",
+				"includeDiffStatsDescription": "Afegeix un resum compacte de fitxers/insercions/eliminacions abans del diff complet.",
+				"includeBranch": "Incloure el nom de la branca actual",
+				"includeBranchDescription": "Els noms de branca sovint inclouen IDs d'incidències o noms de funcionalitats que ajuden a configurar el missatge de commit.",
+				"includeRecentCommits": "Incloure commits recents",
+				"recentCommitsDescription": "Els commits recents ajuden a Zoo a coincidir amb l'estil de missatge de commit d'aquest repositori.",
+				"recentCommitCount": "Nombre de commits recents",
+				"recentCommitCountDescription": "Quants dels últims commits incloure per a l'estil i el context de referència.",
+				"includeRecentCommitBodies": "Incloure descripcions de commits recents",
+				"includeRecentCommitBodiesDescription": "Inclou els cossos dels commits, no només els títols. Útil si aquest repositori escriu missatges de commit detallats.",
+				"includeRecentCommitStats": "Incloure estadístiques de fitxers de commits recents",
+				"includeRecentCommitStatsDescription": "Afegeix estadístiques a nivell de fitxer per a commits recents sense incloure els seus pegats complets.",
+				"includeRecentCommitDiffs": "Incloure diffs de commits recents",
+				"includeRecentCommitDiffsDescription": "Inclou pegats de commits recents. Això pot millorar la coincidència d'estil però afegeix molt context.",
+				"recentCommitDiffCount": "Nombre de diffs de commits recents",
+				"recentCommitDiffCountDescription": "Quants dels últims commits haurien d'incloure pegats complets. Limitat a 5."
+			},
+			"attribution": {
+				"title": "Peu d'atribució de la IA",
+				"description": "Afegeix opcionalment un peu d'atribució després que Zoo generi un missatge de commit. S'afegeix localment després de la generació i no es sol·licita al model.",
+				"enabled": "Afegir peu d'atribució de la IA",
+				"enabledDescription": "Utilitzeu-ho quan el vostre projecte requereixi la divulgació de contribucions assistides per IA.",
+				"template": "Plantilla d'atribució",
+				"placeholders": "Marcadors de posició: ${agentName} = Zoo Code; ${toolName} = Zoo Code; ${provider} = proveïdor d'API utilitzat; ${model} = model utilitzat; ${providerModel} = proveïdor/model."
 			}
 		}
 	},

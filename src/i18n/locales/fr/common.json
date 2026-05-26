@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: Connecté avec succès ! Vous pouvez maintenant utiliser Zoo Code comme fournisseur d'IA.",
 			"disconnected": "Zoo Code: Déconnecté avec succès."
 		}
+	},
+	"commitMessage": {
+		"activated": "Générateur de messages de commit Zoo Code activé",
+		"gitNotFound": "⚠️ Dépôt Git introuvable ou Git non disponible",
+		"gitInitError": "⚠️ Erreur d'initialisation de Git : {{error}}",
+		"generating": "Zoo : Génération du message de commit...",
+		"noChanges": "Zoo : Aucun changement trouvé à analyser",
+		"generated": "Zoo : Message de commit généré !",
+		"generationFailed": "Zoo : Erreur lors de la génération du message de commit : {{errorMessage}}",
+		"contextWarnings": "Zoo : Avertissement du contexte Git : {{warnings}}",
+		"generatingFromUnstaged": "Zoo : Génération du message à partir des changements non indexés",
+		"confirmUnstaged": "Aucun changement indexé trouvé. Générer un message de commit à partir de {{count}} changements non indexés/non suivis ?",
+		"confirmUnstagedAction": "Générer à partir des changements non indexés",
+		"activationFailed": "Zoo : Erreur lors de l'activation du générateur de messages : {{error}}",
+		"providerRegistered": "Zoo : Fournisseur de messages de commit enregistré",
+		"initializing": "Initialisation...",
+		"discoveringFiles": "Découverte des fichiers...",
+		"foundChanges": "{{count}} changements trouvés",
+		"gettingContext": "Récupération du contexte Git...",
+		"errors": {
+			"connectionFailed": "Échec de la connexion à l'extension Zoo Code",
+			"timeout": "La requête a expiré après 30 secondes",
+			"invalidResponse": "Format de réponse invalide reçu de l'extension",
+			"missingMessage": "Aucun message de commit reçu de l'extension",
+			"noChanges": "Aucun changement trouvé à committer",
+			"noProject": "Aucun projet disponible",
+			"noWorkspacePath": "Impossible de déterminer le chemin de l'espace de travail pour le dépôt Git",
+			"workspaceNotFound": "Impossible de déterminer le chemin de l'espace de travail pour le dépôt Git",
+			"processingError": "Erreur lors du traitement de la génération du message de commit : {{error}}"
+		},
+		"error": {
+			"title": "Erreur",
+			"workspacePathNotFound": "Impossible de déterminer le chemin de l'espace de travail pour le dépôt Git",
+			"generationFailed": "Erreur lors de la génération du message de commit : {{error}}",
+			"processingFailed": "Erreur lors du traitement de la génération du message de commit : {{error}}",
+			"unknown": "Erreur inconnue"
+		},
+		"dialogs": {
+			"info": "Message de commit IA",
+			"error": "Erreur",
+			"success": "Succès",
+			"title": "Message de commit IA"
+		},
+		"progress": {
+			"title": "Génération du message de commit",
+			"analyzing": "Analyse des changements...",
+			"connecting": "Connexion à Zoo Code...",
+			"generating": "Génération du message de commit..."
+		},
+		"ui": {
+			"generateButton": "Générer le message de commit",
+			"generateButtonTooltip": "Génère un message de commit en utilisant l'IA pour analyser vos modifications de code"
+		}
 	}
 }

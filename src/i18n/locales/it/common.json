@@ -267,5 +267,58 @@
 			"connected": "Zoo Code: Connesso con successo! Ora puoi usare Zoo Code come fornitore AI.",
 			"disconnected": "Zoo Code: Disconnesso con successo."
 		}
+	},
+	"commitMessage": {
+		"activated": "Generatore messaggi commit Zoo Code attivato",
+		"gitNotFound": "⚠️ Repository Git non trovato o git non disponibile",
+		"gitInitError": "⚠️ Errore di inizializzazione Git: {{error}}",
+		"generating": "Zoo: Generazione messaggio commit in corso...",
+		"noChanges": "Zoo: Nessuna modifica trovata da analizzare",
+		"generated": "Zoo: Messaggio commit generato!",
+		"generationFailed": "Zoo: Generazione messaggio commit fallita: {{errorMessage}}",
+		"contextWarnings": "Zoo: Avviso contesto Git: {{warnings}}",
+		"generatingFromUnstaged": "Zoo: Generazione messaggio utilizzando le modifiche non in stage",
+		"confirmUnstaged": "Nessuna modifica in stage trovata. Generare un messaggio commit da {{count}} modifiche unstaged/untracked invece?",
+		"confirmUnstagedAction": "Genera da modifiche unstaged",
+		"activationFailed": "Zoo: Attivazione generatore messaggi fallita: {{error}}",
+		"providerRegistered": "Zoo: Provider messaggi commit registrato",
+		"initializing": "Inizializzazione in corso...",
+		"discoveringFiles": "Ricerca file in corso...",
+		"foundChanges": "Trovate {{count}} modifiche",
+		"gettingContext": "Ottenimento contesto Git in corso...",
+		"errors": {
+			"connectionFailed": "Connessione all'estensione Zoo Code fallita",
+			"timeout": "Richiesta scaduta dopo 30 secondi",
+			"invalidResponse": "Formato di risposta non valido ricevuto dall'estensione",
+			"missingMessage": "Nessun messaggio commit ricevuto dall'estensione",
+			"noChanges": "Nessuna modifica trovata da committare",
+			"noProject": "Nessun progetto disponibile",
+			"noWorkspacePath": "Impossibile determinare il percorso workspace per il repository Git",
+			"workspaceNotFound": "Impossibile determinare il percorso workspace per il repository Git",
+			"processingError": "Errore durante l'elaborazione della generazione del messaggio commit: {{error}}"
+		},
+		"error": {
+			"title": "Errore",
+			"workspacePathNotFound": "Impossibile determinare il percorso workspace per il repository Git",
+			"generationFailed": "Generazione messaggio commit fallita: {{error}}",
+			"processingFailed": "Errore durante l'elaborazione della generazione del messaggio commit: {{error}}",
+			"unknown": "Errore sconosciuto"
+		},
+		"dialogs": {
+			"info": "Messaggio Commit AI",
+			"error": "Errore",
+			"success": "Successo",
+			"title": "Messaggio Commit AI"
+		},
+		"progress": {
+			"title": "Generazione Messaggio Commit",
+			"analyzing": "Analisi delle modifiche in corso...",
+			"connecting": "Connessione a Zoo Code in corso...",
+			"generating": "Generazione messaggio commit in corso..."
+		},
+		"ui": {
+			"generateButton": "Genera Messaggio Commit",
+			"generateButtonTooltip": "Genera il messaggio commit utilizzando l'AI per analizzare le modifiche al codice"
+		}
 	}
 }
