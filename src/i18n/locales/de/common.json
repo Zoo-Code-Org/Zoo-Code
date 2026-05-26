@@ -262,5 +262,11 @@
 			"connected": "Zoo Code: Erfolgreich verbunden! Du kannst Zoo Code jetzt als KI-Anbieter verwenden.",
 			"disconnected": "Zoo Code: Erfolgreich getrennt."
 		}
+	},
+	"codeActions": {
+		"explain": "Mit Zoo Code erklären",
+		"fix": "Mit Zoo Code beheben",
+		"improve": "Mit Zoo Code verbessern",
+		"addToContext": "Zu Zoo Code hinzufügen"
 	}
 }
