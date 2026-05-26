@@ -45,6 +45,12 @@ export class CodeIndexServiceFactory {
 
 		const provider = config.embedderProvider as EmbedderProvider
 
+		if (provider === "semble") {
+			throw new Error(
+				"Semble provider handles its own embedding. Do not call createEmbedder() for semble — use SembleProvider instead.",
+			)
+		}
+
 		if (provider === "openai") {
 			const apiKey = config.openAiOptions?.openAiNativeApiKey
 
@@ -141,6 +147,13 @@ export class CodeIndexServiceFactory {
 		const config = this.configManager.getConfig()
 
 		const provider = config.embedderProvider as EmbedderProvider
+
+		if (provider === "semble") {
+			throw new Error(
+				"Semble provider handles its own vector storage. Do not call createVectorStore() for semble — use SembleProvider instead.",
+			)
+		}
+
 		const defaultModel = getDefaultModelId(provider)
 		// Use the embedding model ID from config, not the chat model IDs
 		const modelId = config.modelId ?? defaultModel

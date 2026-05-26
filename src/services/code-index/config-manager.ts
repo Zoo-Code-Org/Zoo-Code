@@ -22,6 +22,7 @@ export class CodeIndexConfigManager {
 	private vercelAiGatewayOptions?: { apiKey: string }
 	private bedrockOptions?: { region: string; profile?: string }
 	private openRouterOptions?: { apiKey: string; specificProvider?: string }
+	private semblePath?: string
 	private qdrantUrl?: string = "http://localhost:6333"
 	private qdrantApiKey?: string
 	private searchMinScore?: number
@@ -120,6 +121,8 @@ export class CodeIndexConfigManager {
 			this.embedderProvider = "bedrock"
 		} else if (codebaseIndexEmbedderProvider === "openrouter") {
 			this.embedderProvider = "openrouter"
+		} else if (codebaseIndexEmbedderProvider === "semble") {
+			this.embedderProvider = "semble"
 		} else {
 			this.embedderProvider = "openai"
 		}
@@ -148,6 +151,9 @@ export class CodeIndexConfigManager {
 		this.bedrockOptions = bedrockRegion
 			? { region: bedrockRegion, profile: bedrockProfile || undefined }
 			: undefined
+
+		// Semble path (optional — defaults to "semble" in the SembleProvider)
+		this.semblePath = codebaseIndexConfig.codebaseIndexSemblePath || undefined
 	}
 
 	/**
@@ -194,6 +200,7 @@ export class CodeIndexConfigManager {
 			openRouterSpecificProvider: this.openRouterOptions?.specificProvider ?? "",
 			qdrantUrl: this.qdrantUrl ?? "",
 			qdrantApiKey: this.qdrantApiKey ?? "",
+			semblePath: this.semblePath ?? "",
 		}
 
 		// Refresh secrets from VSCode storage to ensure we have the latest values
@@ -231,6 +238,11 @@ export class CodeIndexConfigManager {
 	 * Checks if the service is properly configured based on the embedder type.
 	 */
 	public isConfigured(): boolean {
+		if (this.embedderProvider === "semble") {
+			// Semble requires no API keys or Qdrant — it's always configured
+			return true
+		}
+
 		if (this.embedderProvider === "openai") {
 			const openAiKey = this.openAiOptions?.openAiNativeApiKey
 			const qdrantUrl = this.qdrantUrl
@@ -405,6 +417,13 @@ export class CodeIndexConfigManager {
 			return true
 		}
 
+		// Semble path change requires restart to use the new executable
+		const prevSemblePath = prev?.semblePath ?? ""
+		const currentSemblePath = this.semblePath ?? ""
+		if (prevSemblePath !== currentSemblePath) {
+			return true
+		}
+
 		// Vector dimension changes (still important for compatibility)
 		if (this._hasVectorDimensionChanged(prevProvider, prev?.modelId)) {
 			return true
@@ -540,5 +559,13 @@ export class CodeIndexConfigManager {
 	 */
 	public get currentSearchMaxResults(): number {
 		return this.searchMaxResults ?? DEFAULT_MAX_SEARCH_RESULTS
+	}
+
+	/**
+	 * Gets the configured path to the semble executable.
+	 * Returns undefined if not explicitly configured (provider will use default "semble").
+	 */
+	public get currentSemblePath(): string | undefined {
+		return this.semblePath
 	}
 }

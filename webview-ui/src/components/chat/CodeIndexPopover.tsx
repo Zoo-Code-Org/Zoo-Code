@@ -81,6 +81,7 @@ interface LocalCodeIndexSettings {
 	codebaseIndexVercelAiGatewayApiKey?: string
 	codebaseIndexOpenRouterApiKey?: string
 	codebaseIndexOpenRouterSpecificProvider?: string
+	codebaseIndexSemblePath?: string
 }
 
 // Validation schema for codebase index settings
@@ -176,6 +177,13 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 					.min(1, t("settings:codeIndex.validation.modelSelectionRequired")),
 			})
 
+		case "semble":
+			// Semble requires no API keys, Qdrant URL, or model selection
+			return z.object({
+				codebaseIndexEnabled: z.boolean(),
+				codebaseIndexSemblePath: z.string().optional(),
+			})
+
 		default:
 			return baseSchema
 	}
@@ -225,6 +233,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 		codebaseIndexVercelAiGatewayApiKey: "",
 		codebaseIndexOpenRouterApiKey: "",
 		codebaseIndexOpenRouterSpecificProvider: "",
+		codebaseIndexSemblePath: "",
 	})
 
 	// Initial settings state - stores the settings when popover opens
@@ -265,6 +274,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 				codebaseIndexOpenRouterApiKey: "",
 				codebaseIndexOpenRouterSpecificProvider:
 					codebaseIndexConfig.codebaseIndexOpenRouterSpecificProvider || "",
+				codebaseIndexSemblePath: codebaseIndexConfig.codebaseIndexSemblePath || "",
 			}
 			setInitialSettings(settings)
 			setCurrentSettings(settings)
@@ -760,6 +770,9 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 												</SelectItem>
 												<SelectItem value="openrouter">
 													{t("settings:codeIndex.openRouterProvider")}
+												</SelectItem>
+												<SelectItem value="semble">
+													{t("settings:codeIndex.sembleProvider")}
 												</SelectItem>
 											</SelectContent>
 										</Select>
@@ -1430,54 +1443,98 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										</>
 									)}
 
-									{/* Qdrant Settings */}
-									<div className="space-y-2">
-										<label className="text-sm font-medium">
-											{t("settings:codeIndex.qdrantUrlLabel")}
-										</label>
-										<VSCodeTextField
-											value={currentSettings.codebaseIndexQdrantUrl || ""}
-											onInput={(e: any) =>
-												updateSetting("codebaseIndexQdrantUrl", e.target.value)
-											}
-											onBlur={(e: any) => {
-												// Set default Qdrant URL if field is empty
-												if (!e.target.value.trim()) {
-													currentSettings.codebaseIndexQdrantUrl = DEFAULT_QDRANT_URL
-													updateSetting("codebaseIndexQdrantUrl", DEFAULT_QDRANT_URL)
-												}
-											}}
-											placeholder={t("settings:codeIndex.qdrantUrlPlaceholder")}
-											className={cn("w-full", {
-												"border-red-500": formErrors.codebaseIndexQdrantUrl,
-											})}
-										/>
-										{formErrors.codebaseIndexQdrantUrl && (
-											<p className="text-xs text-vscode-errorForeground mt-1 mb-0">
-												{formErrors.codebaseIndexQdrantUrl}
+									{currentSettings.codebaseIndexEmbedderProvider === "semble" && (
+										<>
+											<div className="rounded border border-vscode-editorWidget-border bg-vscode-editorWidget-background p-3 space-y-1">
+												<p className="text-xs font-medium text-vscode-foreground mb-1">
+													{t("settings:codeIndex.sembleInstallTitle")}
+												</p>
+												<p className="text-xs text-vscode-descriptionForeground">
+													{t("settings:codeIndex.sembleInstallDescription")}
+												</p>
+												<code className="block text-xs font-mono bg-vscode-textCodeBlock-background text-vscode-foreground px-2 py-1 rounded select-all">
+													{t("settings:codeIndex.sembleInstallCommand")}
+												</code>
+												<p className="text-xs text-vscode-descriptionForeground">
+													{t("settings:codeIndex.sembleInstallNote")}
+												</p>
+											</div>
+											<div className="space-y-2">
+												<label className="text-sm font-medium">
+													{t("settings:codeIndex.semblePathLabel")}
+												</label>
+												<VSCodeTextField
+													value={currentSettings.codebaseIndexSemblePath || ""}
+													onInput={(e: any) =>
+														updateSetting("codebaseIndexSemblePath", e.target.value)
+													}
+													placeholder={t("settings:codeIndex.semblePathPlaceholder")}
+													className="w-full"
+												/>
+												<p className="text-xs text-vscode-descriptionForeground mt-1 mb-0">
+													{t("settings:codeIndex.semblePathDescription")}
+												</p>
+											</div>
+											<p className="text-xs text-vscode-descriptionForeground mt-1 mb-0">
+												{t("settings:codeIndex.sembleDescription")}
 											</p>
-										)}
-									</div>
+										</>
+									)}
 
-									<div className="space-y-2">
-										<label className="text-sm font-medium">
-											{t("settings:codeIndex.qdrantApiKeyLabel")}
-										</label>
-										<VSCodeTextField
-											type="password"
-											value={currentSettings.codeIndexQdrantApiKey || ""}
-											onInput={(e: any) => updateSetting("codeIndexQdrantApiKey", e.target.value)}
-											placeholder={t("settings:codeIndex.qdrantApiKeyPlaceholder")}
-											className={cn("w-full", {
-												"border-red-500": formErrors.codeIndexQdrantApiKey,
-											})}
-										/>
-										{formErrors.codeIndexQdrantApiKey && (
-											<p className="text-xs text-vscode-errorForeground mt-1 mb-0">
-												{formErrors.codeIndexQdrantApiKey}
-											</p>
-										)}
-									</div>
+									{/* Qdrant Settings — hidden for semble */}
+									{currentSettings.codebaseIndexEmbedderProvider !== "semble" && (
+										<>
+											<div className="space-y-2">
+												<label className="text-sm font-medium">
+													{t("settings:codeIndex.qdrantUrlLabel")}
+												</label>
+												<VSCodeTextField
+													value={currentSettings.codebaseIndexQdrantUrl || ""}
+													onInput={(e: any) =>
+														updateSetting("codebaseIndexQdrantUrl", e.target.value)
+													}
+													onBlur={(e: any) => {
+														// Set default Qdrant URL if field is empty
+														if (!e.target.value.trim()) {
+															currentSettings.codebaseIndexQdrantUrl = DEFAULT_QDRANT_URL
+															updateSetting("codebaseIndexQdrantUrl", DEFAULT_QDRANT_URL)
+														}
+													}}
+													placeholder={t("settings:codeIndex.qdrantUrlPlaceholder")}
+													className={cn("w-full", {
+														"border-red-500": formErrors.codebaseIndexQdrantUrl,
+													})}
+												/>
+												{formErrors.codebaseIndexQdrantUrl && (
+													<p className="text-xs text-vscode-errorForeground mt-1 mb-0">
+														{formErrors.codebaseIndexQdrantUrl}
+													</p>
+												)}
+											</div>
+
+											<div className="space-y-2">
+												<label className="text-sm font-medium">
+													{t("settings:codeIndex.qdrantApiKeyLabel")}
+												</label>
+												<VSCodeTextField
+													type="password"
+													value={currentSettings.codeIndexQdrantApiKey || ""}
+													onInput={(e: any) =>
+														updateSetting("codeIndexQdrantApiKey", e.target.value)
+													}
+													placeholder={t("settings:codeIndex.qdrantApiKeyPlaceholder")}
+													className={cn("w-full", {
+														"border-red-500": formErrors.codeIndexQdrantApiKey,
+													})}
+												/>
+												{formErrors.codeIndexQdrantApiKey && (
+													<p className="text-xs text-vscode-errorForeground mt-1 mb-0">
+														{formErrors.codeIndexQdrantApiKey}
+													</p>
+												)}
+											</div>
+										</>
+									)}
 								</div>
 							)}
 						</div>
