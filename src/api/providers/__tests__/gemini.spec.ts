@@ -174,6 +174,38 @@ describe("GeminiHandler", () => {
 			expect(modelInfo.id).toBe(geminiDefaultModelId) // Default model
 		})
 
+		it("should honor a custom gemini model id not present in geminiModels (#227)", () => {
+			const customHandler = new GeminiHandler({
+				apiModelId: "gemini-3.5-flash",
+				geminiApiKey: "test-key",
+			})
+			const modelInfo = customHandler.getModel()
+			// The configured id must be invoked, not silently swapped for the default.
+			expect(modelInfo.id).toBe("gemini-3.5-flash")
+			expect(modelInfo.id).not.toBe(geminiDefaultModelId)
+			// A baseline ModelInfo is provided so downstream params resolve.
+			expect(modelInfo.info).toBeDefined()
+			// Pricing is unknown for a custom model, so cost should not be reported
+			// against the default model's rates.
+			expect(modelInfo.info.inputPrice).toBeUndefined()
+			expect(modelInfo.info.outputPrice).toBeUndefined()
+			expect(modelInfo.info.cacheReadsPrice).toBeUndefined()
+			expect(modelInfo.info.cacheWritesPrice).toBeUndefined()
+			expect(modelInfo.info.tiers).toBeUndefined()
+		})
+
+		it("should not treat Object prototype keys as known models", () => {
+			// `"toString" in geminiModels` is true via the prototype chain, which would
+			// otherwise resolve `info` to a function. An own-property check avoids this.
+			const protoHandler = new GeminiHandler({
+				apiModelId: "toString",
+				geminiApiKey: "test-key",
+			})
+			const modelInfo = protoHandler.getModel()
+			expect(modelInfo.id).toBe(geminiDefaultModelId)
+			expect(modelInfo.info).toBeDefined()
+		})
+
 		it("should exclude apply_diff and include edit in tool preferences", () => {
 			const modelInfo = handler.getModel()
 			expect(modelInfo.info.excludedTools).toContain("apply_diff")
