@@ -11,8 +11,33 @@ import { fileExistsAtPath } from "../../../utils/fs"
 import * as fileSearch from "../../../services/search/file-search"
 
 import { RepoPerTaskCheckpointService } from "../RepoPerTaskCheckpointService"
+import { BLOCKED_ENV_KEYS } from "../ShadowCheckpointService"
 
 const tmpDir = path.join(os.tmpdir(), "CheckpointService")
+
+// simple-git ≥3.36 blocks env vars it considers code-execution vectors.
+// Strip them for the duration of this test suite so tests pass for developers
+// who have GIT_EDITOR, GIT_SSH_COMMAND, etc. configured globally.
+// Safe under vitest's default "forks" pool (each worker has its own process.env);
+// would be fragile under "threads" pool where workers share the same process.
+const savedEnv: Partial<Record<string, string>> = {}
+
+beforeAll(() => {
+	for (const key of BLOCKED_ENV_KEYS) {
+		savedEnv[key] = process.env[key]
+		delete process.env[key]
+	}
+})
+
+afterAll(() => {
+	for (const key of BLOCKED_ENV_KEYS) {
+		if (savedEnv[key] !== undefined) {
+			process.env[key] = savedEnv[key]
+		} else {
+			delete process.env[key]
+		}
+	}
+})
 
 const initWorkspaceRepo = async ({
 	workspaceDir,
@@ -35,6 +60,7 @@ const initWorkspaceRepo = async ({
 	await git.init()
 	await git.addConfig("user.name", userName)
 	await git.addConfig("user.email", userEmail)
+	await git.addConfig("commit.gpgSign", "false")
 
 	// Create test file.
 	const testFile = path.join(workspaceDir, testFileName)
@@ -390,6 +416,7 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await mainGit.init()
 				await mainGit.addConfig("user.name", "Roo Code")
 				await mainGit.addConfig("user.email", "support@roocode.com")
+				await mainGit.addConfig("commit.gpgSign", "false")
 
 				// Create a nested repo inside the workspace.
 				const nestedRepoPath = path.join(workspaceDir, "nested-project")
@@ -398,6 +425,7 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await nestedGit.init()
 				await nestedGit.addConfig("user.name", "Roo Code")
 				await nestedGit.addConfig("user.email", "support@roocode.com")
+				await nestedGit.addConfig("commit.gpgSign", "false")
 
 				// Add a file to the nested repo.
 				const nestedFile = path.join(nestedRepoPath, "nested-file.txt")
@@ -460,6 +488,7 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await mainGit.init()
 				await mainGit.addConfig("user.name", "Roo Code")
 				await mainGit.addConfig("user.email", "support@roocode.com")
+				await mainGit.addConfig("commit.gpgSign", "false")
 
 				// Create a test file in the main workspace.
 				const mainFile = path.join(workspaceDir, "main-file.txt")
@@ -873,6 +902,47 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				}
 			})
 
+			it("isolates checkpoint operations from simple-git blocked environment variables", async () => {
+				const testShadowDir = path.join(tmpDir, `shadow-blocked-env-test-${Date.now()}`)
+				const testWorkspaceDir = path.join(tmpDir, `workspace-blocked-env-test-${Date.now()}`)
+				await initWorkspaceRepo({ workspaceDir: testWorkspaceDir })
+
+				// beforeAll strips PREFIX, so it is always undefined here; set it to exercise isolation.
+				process.env.PREFIX = path.join(tmpDir, "git-prefix")
+
+				try {
+					const testService = await klass.create({
+						taskId: `test-blocked-env-${Date.now()}`,
+						shadowDir: testShadowDir,
+						workspaceDir: testWorkspaceDir,
+						log: () => {},
+					})
+					await testService.initShadowGit()
+
+					const testWorkspaceFile = path.join(testWorkspaceDir, "test.txt")
+					await fs.writeFile(testWorkspaceFile, "Modified with PREFIX set")
+					const commit = await testService.saveCheckpoint("Checkpoint with PREFIX set")
+					expect(commit?.commit).toBeTruthy()
+
+					// Verify the checkpoint is accessible and contains the expected change
+					const diff = await testService.getDiff({ to: commit!.commit })
+					expect(diff).toHaveLength(1)
+					expect(diff[0].paths.relative).toBe("test.txt")
+					expect(diff[0].content.after).toBe("Modified with PREFIX set")
+
+					// Verify we can restore the checkpoint
+					await fs.writeFile(testWorkspaceFile, "Another modification")
+					await testService.restoreCheckpoint(commit!.commit)
+					expect(await fs.readFile(testWorkspaceFile, "utf-8")).toBe("Modified with PREFIX set")
+				} finally {
+					// beforeAll guarantees PREFIX was undefined at test start, so always delete it.
+					delete process.env.PREFIX
+
+					await fs.rm(testShadowDir, { recursive: true, force: true })
+					await fs.rm(testWorkspaceDir, { recursive: true, force: true })
+				}
+			})
+
 			it("isolates checkpoint operations from GIT_DIR environment variable", async () => {
 				// This test verifies the fix for the issue where GIT_DIR environment variable
 				// causes checkpoint commits to go to the wrong repository.
@@ -886,6 +956,7 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				await externalGit.init()
 				await externalGit.addConfig("user.name", "External User")
 				await externalGit.addConfig("user.email", "external@example.com")
+				await externalGit.addConfig("commit.gpgSign", "false")
 
 				// Create and commit a file in the external repo
 				const externalFile = path.join(externalGitDir, "external.txt")
@@ -976,6 +1047,7 @@ describe("worktree path comparison", () => {
 			await mainGit.init()
 			await mainGit.addConfig("user.name", "Roo Code")
 			await mainGit.addConfig("user.email", "support@roocode.com")
+			await mainGit.addConfig("commit.gpgSign", "false")
 
 			await fs.writeFile(path.join(workspaceDir, "main.txt"), "main content")
 			await mainGit.add("main.txt")
@@ -1011,6 +1083,7 @@ describe("worktree path comparison", () => {
 			await mainGit.init()
 			await mainGit.addConfig("user.name", "Roo Code")
 			await mainGit.addConfig("user.email", "support@roocode.com")
+			await mainGit.addConfig("commit.gpgSign", "false")
 
 			await fs.writeFile(path.join(workspaceDir, "main.txt"), "main content")
 			await mainGit.add("main.txt")
