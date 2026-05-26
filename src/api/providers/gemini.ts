@@ -490,8 +490,35 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 	override getModel() {
 		const modelId = this.options.apiModelId
-		let id = modelId && modelId in geminiModels ? (modelId as GeminiModelId) : geminiDefaultModelId
-		let info: ModelInfo = geminiModels[id]
+		let id: string
+		let info: ModelInfo
+
+		if (modelId && Object.hasOwn(geminiModels, modelId)) {
+			id = modelId
+			info = geminiModels[modelId as GeminiModelId]
+		} else if (modelId && modelId.toLowerCase().startsWith("gemini-")) {
+			// Honor a custom/unlisted Gemini model id (e.g. a newly released model
+			// not yet in `geminiModels`) instead of silently falling back to the
+			// default. This mirrors the settings UI's "use custom model" option and
+			// the `useSelectedModel` hook, which both keep the configured id. Ids
+			// that don't look like Gemini models still fall back below.
+			id = modelId
+			// Use the default model's structural info as a baseline, but drop the
+			// pricing fields we can't verify for an unknown model so cost reporting
+			// shows "unknown" (calculateCost returns undefined) instead of charging
+			// the default model's rates against a different model.
+			info = {
+				...geminiModels[geminiDefaultModelId],
+				inputPrice: undefined,
+				outputPrice: undefined,
+				cacheReadsPrice: undefined,
+				cacheWritesPrice: undefined,
+				tiers: undefined,
+			}
+		} else {
+			id = geminiDefaultModelId
+			info = geminiModels[geminiDefaultModelId]
+		}
 
 		const params = getModelParams({
 			format: "gemini",
