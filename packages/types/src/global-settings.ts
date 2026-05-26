@@ -23,6 +23,32 @@ import { languagesSchema } from "./vscode.js"
  */
 export const DEFAULT_WRITE_DELAY_MS = 1000
 
+export const commitMessageGitContextSchema = z.object({
+	diffContextLines: z.number().int().min(0).max(20).optional(),
+	includeDiffStats: z.boolean().optional(),
+	includeCurrentBranch: z.boolean().optional(),
+	includeRecentCommits: z.boolean().optional(),
+	recentCommitCount: z.number().int().min(1).max(20).optional(),
+	includeRecentCommitBodies: z.boolean().optional(),
+	includeRecentCommitStats: z.boolean().optional(),
+	includeRecentCommitDiffs: z.boolean().optional(),
+	recentCommitDiffCount: z.number().int().min(1).max(5).optional(),
+})
+
+export type CommitMessageGitContextSettings = z.infer<typeof commitMessageGitContextSchema>
+
+export const defaultCommitMessageGitContextSettings: Required<CommitMessageGitContextSettings> = {
+	diffContextLines: 3,
+	includeDiffStats: true,
+	includeCurrentBranch: true,
+	includeRecentCommits: true,
+	recentCommitCount: 5,
+	includeRecentCommitBodies: false,
+	includeRecentCommitStats: false,
+	includeRecentCommitDiffs: false,
+	recentCommitDiffCount: 1,
+}
+
 /**
  * Terminal output preview size options for persisted command output.
  *
@@ -232,6 +258,9 @@ export const globalSettingsSchema = z.object({
 	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
+
+	commitMessageApiConfigId: z.string().optional(),
+	commitMessageGitContext: commitMessageGitContextSchema.optional(),
 })
 
 export type GlobalSettings = z.infer<typeof globalSettingsSchema>

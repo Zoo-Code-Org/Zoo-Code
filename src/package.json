@@ -164,6 +164,14 @@
 				"command": "zoo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"
+			},
+			{
+				"command": "zoo-code.generateCommitMessage",
+				"title": "%command.generateCommitMessage.title%",
+				"icon": {
+					"light": "assets/icons/panel_light.png",
+					"dark": "assets/icons/panel_dark.png"
+				}
 			}
 		],
 		"menus": {
@@ -205,6 +213,20 @@
 				{
 					"command": "zoo-code.terminalExplainCommand",
 					"group": "1_actions@3"
+				}
+			],
+			"scm/input": [
+				{
+					"command": "zoo-code.generateCommitMessage",
+					"when": "scmProvider == git",
+					"group": "navigation"
+				}
+			],
+			"scm/title": [
+				{
+					"command": "zoo-code.generateCommitMessage",
+					"when": "scmProvider == git",
+					"group": "navigation"
 				}
 			],
 			"view/title": [
