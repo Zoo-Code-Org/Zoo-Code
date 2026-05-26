@@ -18,7 +18,10 @@ export class TagMatcher<Result = TagMatcherResult> {
 	depth = 0
 	pointer = 0
 	private readonly tagNames: string[]
-	private activeTagName?: string
+	private activeTagNames: string[] = []
+	private inCode = false
+	private codeFence = 0
+	private tickRun = 0
 	private candidates: { name: string; index: number }[] = []
 
 	constructor(
@@ -63,7 +66,12 @@ export class TagMatcher<Result = TagMatcherResult> {
 				if (char === "<" && (this.pointer <= this.position + 1 || this.matched)) {
 					this.state = "TAG_OPEN"
 					this.index = 0
-					this.candidates = this.tagNames.map((name) => ({ name, index: 0 }))
+					if (this.depth === 0) {
+						this.candidates = this.tagNames.map((name) => ({ name, index: 0 }))
+					} else {
+						const active = this.activeTagNames.at(-1)
+						this.candidates = active ? [{ name: active, index: 0 }] : []
+					}
 				} else {
 					this.collect()
 				}
@@ -72,7 +80,7 @@ export class TagMatcher<Result = TagMatcherResult> {
 					const matched = this.candidates.find((c) => c.index === c.name.length)
 					if (matched) {
 						this.state = "TEXT"
-						this.activeTagName = matched.name
+						this.activeTagNames.push(matched.name)
 						if (!this.matched) {
 							this.cached = []
 						}
@@ -101,13 +109,13 @@ export class TagMatcher<Result = TagMatcherResult> {
 					}
 				}
 			} else if (this.state === "TAG_CLOSE") {
-				const tagName = this.activeTagName || this.tagNames[0]
+				const tagName = this.activeTagNames.at(-1) || this.tagNames[0]
 				if (char === ">" && this.index === tagName.length) {
 					this.state = "TEXT"
 					this.depth--
+					this.activeTagNames.pop()
 					this.matched = this.depth > 0
 					if (!this.matched) {
-						this.activeTagName = undefined
 						this.cached = []
 					}
 				} else if (char === " " && (this.index === 0 || this.index === tagName.length)) {
@@ -127,11 +135,14 @@ export class TagMatcher<Result = TagMatcherResult> {
 		}
 		this.collect()
 		this.candidates = []
-		this.activeTagName = undefined
+		this.activeTagNames = []
 		return this.pop()
 	}
 	update(chunk: string) {
 		this._update(chunk)
+		if (this.state === "TEXT") {
+			this.collect()
+		}
 		return this.pop()
 	}
 }

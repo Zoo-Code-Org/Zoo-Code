@@ -636,6 +636,360 @@ describe("OpenAiHandler", () => {
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.max_completion_tokens).toBe(4096)
 		})
+
+		describe("TagMatcher reasoning tags", () => {
+			it("should handle <think> tags from stream", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>Let me think" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " about this</think>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "The answer is 42" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks).toEqual([
+					{ type: "reasoning", text: "Let me think" },
+					{ type: "reasoning", text: " about this" },
+					{ type: "text", text: "The answer is 42" },
+				])
+			})
+
+			it("should handle <thought> tags from stream", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<thought>Deep thought" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " here</thought>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "Result: 42" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks).toEqual([
+					{ type: "reasoning", text: "Deep thought" },
+					{ type: "reasoning", text: " here" },
+					{ type: "text", text: "Result: 42" },
+				])
+			})
+
+			it("should not close <think> tag with </thought> tag", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>Thinking" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " but closing with wrong tag</thought>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " still thinking</think>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "final text" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				// The </thought> tag should not match the active <think> tag, so the closing
+				// tag is treated as text. The " still thinking" stays reasoning since <think>
+				// was never closed with </think>.
+				expect(chunks).toEqual([
+					{ type: "reasoning", text: "Thinking" },
+					{ type: "reasoning", text: " but closing with wrong tag</thought>" },
+					{ type: "reasoning", text: " still thinking" },
+					{ type: "text", text: "final text" },
+				])
+			})
+
+			it("should handle text without any tags", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "Just regular text" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " without reasoning" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks).toEqual([
+					{ type: "text", text: "Just regular text" },
+					{ type: "text", text: " without reasoning" },
+				])
+			})
+
+			it("should handle <think> tags that start at beginning of stream", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>reasoning" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " content</think>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " normal text" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks).toEqual([
+					{ type: "reasoning", text: "reasoning" },
+					{ type: "reasoning", text: " content" },
+					{ type: "text", text: " normal text" },
+				])
+			})
+
+			it("should handle incomplete <think> tag at end of stream", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>Incomplete thought" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				// TagMatcher should flush remaining reasoning content on final()
+				expect(chunks.length).toBeGreaterThan(0)
+				expect(
+					chunks.some(
+						(c) => (c.type === "text" || c.type === "reasoning") && c.text.includes("Incomplete thought"),
+					),
+				).toBe(true)
+			})
+
+			it("should handle complete <think> tag in a single chunk", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "text before " } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>Complete thought</think>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " text after" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				// The TagMatcher processes the whole chunk character by character,
+				// so the complete tag is detected and yields reasoning text
+				expect(chunks.length).toBeGreaterThan(0)
+				expect(chunks[0]).toEqual({ type: "text", text: "text before " })
+			})
+
+			it("should handle nested mixed tags with correct closure matching", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>outer" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<thought>inner</thought>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " middle</think>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "final text" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				// With the tag stack fix, </thought> closes <thought> inner tag,
+				// and </think> correctly closes the outer <think> tag.
+				// inner content inside <thought> is reasoning, middle is still reasoning under <think>
+				expect(chunks).toEqual([
+					{ type: "reasoning", text: "outer" },
+					{ type: "reasoning", text: "<thought>inner</thought>" },
+					{ type: "reasoning", text: " middle" },
+					{ type: "text", text: "final text" },
+				])
+			})
+
+			it("should handle nested <think> tags with correct stack unwinding", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>outer" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>inner</think>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " middle</think>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "final text" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				// With the tag stack fix, </thought> closes <thought> inner tag,
+				// and </think> correctly closes the outer <think> tag.
+				// inner content inside <thought> is reasoning, middle is still reasoning under <think>
+				expect(chunks).toEqual([
+					{ type: "reasoning", text: "outer" },
+					{ type: "reasoning", text: "<think>inner</think>" },
+					{ type: "reasoning", text: " middle" },
+					{ type: "text", text: "final text" },
+				])
+			})
+
+			it("should handle reasoning_content alongside tag matching", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { reasoning_content: "native reasoning" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>tag based</think>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " final output" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks).toEqual([
+					{ type: "reasoning", text: "native reasoning" },
+					{ type: "reasoning", text: "tag based" },
+					{ type: "text", text: " final output" },
+				])
+			})
+		})
 	})
 
 	describe("error handling", () => {
