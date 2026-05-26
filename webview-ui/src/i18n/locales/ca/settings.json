@@ -317,6 +317,8 @@
 		"opencodeGoApiKey": "Clau API de Opencode Go",
 		"getOpencodeGoApiKey": "Obtenir clau API de Opencode Go",
 		"apiKeyStorageNotice": "Les claus API s'emmagatzemen de forma segura a l'Emmagatzematge Secret de VSCode",
+		"aetherapiApiKey": "Clau API d'AetherAPI",
+		"getAetherapiApiKey": "Obtenir clau API d'AetherAPI",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",

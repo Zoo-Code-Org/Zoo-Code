@@ -3,8 +3,13 @@
 import { render, screen, fireEvent, within } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
-import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
-import { openAiCodexDefaultModelId } from "@roo-code/types"
+import {
+	type ModelInfo,
+	type ProviderSettings,
+	aetherapiDefaultModelId,
+	openAiCodexDefaultModelId,
+	openAiModelInfoSaneDefaults,
+} from "@roo-code/types"
 
 import * as ExtensionStateContext from "@src/context/ExtensionStateContext"
 const { ExtensionStateContextProvider } = ExtensionStateContext
@@ -13,10 +18,18 @@ import ApiOptions, { ApiOptionsProps } from "../ApiOptions"
 
 // Mock VSCode components
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeTextField: ({ children, value, onBlur }: any) => (
+	VSCodeTextField: ({ children, value, onBlur, onInput, type, placeholder }: any) => (
 		<div>
 			{children}
-			<input type="text" value={value} onChange={onBlur} />
+			<input
+				type={type ?? "text"}
+				value={value}
+				placeholder={placeholder}
+				onChange={(event) => {
+					onInput?.(event)
+					onBlur?.(event)
+				}}
+			/>
 		</div>
 	),
 	VSCodeLink: ({ children, href }: any) => <a href={href}>{children}</a>,
@@ -68,8 +81,8 @@ vi.mock("@/components/ui", () => ({
 		</option>
 	),
 	SelectSeparator: ({ children }: any) => <div className="select-separator-mock">{children}</div>,
-	Button: ({ children, onClick, _variant, role, className }: any) => (
-		<button onClick={onClick} className={`button-mock ${className || ""}`} role={role}>
+	Button: ({ children, onClick, _variant, role, className, ...props }: any) => (
+		<button onClick={onClick} className={`button-mock ${className || ""}`} role={role} {...props}>
 			{children}
 		</button>
 	),
@@ -86,8 +99,8 @@ vi.mock("@/components/ui", () => ({
 			className={className}
 		/>
 	),
-	CommandItem: ({ children, value, onSelect }: any) => (
-		<div className="command-item-mock" onClick={() => onSelect && onSelect(value)}>
+	CommandItem: ({ children, value, onSelect, ...props }: any) => (
+		<div className="command-item-mock" onClick={() => onSelect && onSelect(value)} {...props}>
 			{children}
 		</div>
 	),
@@ -242,6 +255,7 @@ vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 
 			return {
 				provider: apiConfiguration.apiProvider,
+				id: apiConfiguration.apiModelId,
 				info,
 			}
 		} else {
@@ -249,6 +263,7 @@ vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 
 			return {
 				provider: apiConfiguration.apiProvider,
+				id: apiConfiguration.apiModelId,
 				info,
 			}
 		}
@@ -298,6 +313,48 @@ describe("ApiOptions", () => {
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "openai-codex")
 		// Model is reset to the provider default since the previous value is invalid for this provider
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiModelId", openAiCodexDefaultModelId, false)
+	})
+
+	it("wires AetherAPI provider settings and model default", () => {
+		const mockSetApiConfigurationField = vi.fn()
+
+		renderApiOptions({
+			apiConfiguration: {
+				apiProvider: "aetherapi",
+				apiModelId: aetherapiDefaultModelId,
+				aetherapiApiKey: "",
+			},
+			setApiConfigurationField: mockSetApiConfigurationField,
+		})
+
+		expect(screen.getByText("settings:providers.aetherapiApiKey")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.getAetherapiApiKey")).toBeInTheDocument()
+		expect(screen.getByTestId("model-picker-button")).toHaveTextContent(aetherapiDefaultModelId)
+
+		const apiKeyInput = screen.getByPlaceholderText("settings:placeholders.apiKey")
+		fireEvent.change(apiKeyInput, { target: { value: "aether-key" } })
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("aetherapiApiKey", "aether-key")
+	})
+
+	it("resets model to AetherAPI default when switching providers", () => {
+		const mockSetApiConfigurationField = vi.fn()
+
+		renderApiOptions({
+			apiConfiguration: {
+				apiProvider: "anthropic",
+				apiModelId: "claude-3-5-sonnet-20241022",
+			},
+			setApiConfigurationField: mockSetApiConfigurationField,
+		})
+
+		const providerSelectContainer = screen.getByTestId("provider-select")
+		const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
+
+		fireEvent.change(providerSelect, { target: { value: "aetherapi" } })
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "aetherapi")
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiModelId", aetherapiDefaultModelId, false)
 	})
 
 	it("shows temperature and rate limit controls by default", () => {

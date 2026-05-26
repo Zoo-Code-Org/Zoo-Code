@@ -332,6 +332,8 @@
 		"opencodeGoApiKey": "Opencode Go API 金鑰",
 		"getOpencodeGoApiKey": "取得 Opencode Go API 金鑰",
 		"apiKeyStorageNotice": "API 金鑰會安全地儲存在 VS Code 的 Secret Storage 中",
+		"aetherapiApiKey": "AetherAPI API 金鑰",
+		"getAetherapiApiKey": "取得 AetherAPI API 金鑰",
 		"openAiCodexRateLimits": {
 			"title": "Codex 用量限制{{planLabel}}",
 			"loading": "正在載入用量限制...",

@@ -317,6 +317,8 @@
 		"opencodeGoApiKey": "Opencode Go API Key",
 		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"apiKeyStorageNotice": "API key disimpan dengan aman di Secret Storage VSCode",
+		"aetherapiApiKey": "AetherAPI API Key",
+		"getAetherapiApiKey": "Dapatkan AetherAPI API Key",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",

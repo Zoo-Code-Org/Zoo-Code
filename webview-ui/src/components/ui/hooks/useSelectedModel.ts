@@ -4,6 +4,7 @@ import {
 	type ModelInfo,
 	type ModelRecord,
 	type RouterModels,
+	aetherapiModels,
 	anthropicModels,
 	bedrockModels,
 	deepSeekModels,
@@ -356,6 +357,11 @@ function getSelectedModel({
 			// Fall back to the provider's default ModelInfo so capability-driven UI
 			// keeps working when the /models list is empty or unavailable.
 			const info = routerModels["opencode-go"]?.[id] ?? opencodeGoDefaultModelInfo
+			return { id, info }
+		}
+		case "aetherapi": {
+			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const info = aetherapiModels[id as keyof typeof aetherapiModels]
 			return { id, info }
 		}
 		// case "anthropic":

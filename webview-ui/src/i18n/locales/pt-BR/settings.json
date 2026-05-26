@@ -317,6 +317,8 @@
 		"opencodeGoApiKey": "Chave API do Opencode Go",
 		"getOpencodeGoApiKey": "Obter chave API do Opencode Go",
 		"apiKeyStorageNotice": "As chaves de API são armazenadas com segurança no Armazenamento Secreto do VSCode",
+		"aetherapiApiKey": "Chave de API AetherAPI",
+		"getAetherapiApiKey": "Obter chave de API AetherAPI",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",

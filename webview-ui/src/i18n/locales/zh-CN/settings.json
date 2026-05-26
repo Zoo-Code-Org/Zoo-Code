@@ -317,6 +317,8 @@
 		"opencodeGoApiKey": "Opencode Go API 密钥",
 		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"apiKeyStorageNotice": "API 密钥安全存储在 VSCode 的密钥存储中",
+		"aetherapiApiKey": "AetherAPI API 密钥",
+		"getAetherapiApiKey": "获取 AetherAPI API 密钥",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",

@@ -317,6 +317,8 @@
 		"opencodeGoApiKey": "Opencode Go APIキー",
 		"getOpencodeGoApiKey": "Opencode Go APIキーを取得",
 		"apiKeyStorageNotice": "APIキーはVSCodeのシークレットストレージに安全に保存されます",
+		"aetherapiApiKey": "AetherAPI APIキー",
+		"getAetherapiApiKey": "AetherAPI APIキーを取得",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",

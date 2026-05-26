@@ -317,6 +317,8 @@
 		"opencodeGoApiKey": "Opencode Go API कुंजी",
 		"getOpencodeGoApiKey": "Opencode Go API कुंजी प्राप्त करें",
 		"apiKeyStorageNotice": "API कुंजियाँ VSCode के सुरक्षित स्टोरेज में सुरक्षित रूप से संग्रहीत हैं",
+		"aetherapiApiKey": "AetherAPI API कुंजी",
+		"getAetherapiApiKey": "AetherAPI API कुंजी प्राप्त करें",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",
