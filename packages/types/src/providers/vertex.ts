@@ -16,7 +16,7 @@ export const vertexModels = {
 		inputPrice: 1.5,
 		outputPrice: 9,
 		cacheReadsPrice: 0.15,
-		cacheWritesPrice: 0.083,
+		cacheWritesPrice: 1.0,
 		supportsReasoningBudget: false,
 	},
 	"gemini-3.1-pro-preview": {
