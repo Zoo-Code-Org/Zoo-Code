@@ -17,6 +17,7 @@ export const vertexModels = {
 		outputPrice: 9,
 		cacheReadsPrice: 0.15,
 		cacheWritesPrice: 0.083,
+		supportsReasoningBudget: false,
 	},
 	"gemini-3.1-pro-preview": {
 		maxTokens: 65_536,
