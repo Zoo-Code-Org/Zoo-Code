@@ -777,6 +777,55 @@ describe("OpenAiHandler", () => {
 				])
 			})
 
+			it("should treat stray closing tag as plain text when no tag is open", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "final</think>text" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks).toEqual([{ type: "text", text: "final</think>text" }])
+			})
+
+			it("should treat extra closing tag after a closed block as plain text", async () => {
+				mockCreate.mockImplementationOnce(() => ({
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: {
+									choices: [{ delta: { content: "<think>thinking</think>final</think>text" } }],
+								},
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}))
+
+				const stream = handler.createMessage(systemPrompt, messages)
+				const chunks: any[] = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				expect(chunks).toEqual([
+					{ type: "reasoning", text: "thinking" },
+					{ type: "text", text: "final</think>text" },
+				])
+			})
+
 			it("should handle <think> tags that start at beginning of stream", async () => {
 				mockCreate.mockImplementationOnce(() => ({
 					[Symbol.asyncIterator]: () => ({
