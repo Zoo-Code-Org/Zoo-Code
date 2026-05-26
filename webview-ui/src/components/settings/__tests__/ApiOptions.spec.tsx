@@ -25,10 +25,8 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 				type={type ?? "text"}
 				value={value}
 				placeholder={placeholder}
-				onChange={(event) => {
-					onInput?.(event)
-					onBlur?.(event)
-				}}
+				onChange={(event) => onInput?.(event)}
+				onBlur={(event) => onBlur?.(event)}
 			/>
 		</div>
 	),
