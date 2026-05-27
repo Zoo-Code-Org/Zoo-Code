@@ -62,7 +62,7 @@ Puedes encontrar una guía rápida para pasar de Roo Code a Zoo Code en la [guí
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

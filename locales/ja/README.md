@@ -62,7 +62,7 @@ Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

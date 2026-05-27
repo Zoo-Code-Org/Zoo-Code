@@ -62,7 +62,7 @@ Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş reh
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 

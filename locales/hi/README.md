@@ -62,7 +62,7 @@ Roo Code से Zoo Code में आने के लिए एक quick guide
 - [简体中文](../zh-CN/README.md)
 - [繁體中文](../zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 
