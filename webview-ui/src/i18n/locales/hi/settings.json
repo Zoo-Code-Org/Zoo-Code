@@ -454,7 +454,6 @@
 			"step3": "3. या क्रेडेंशियल्स के साथ एक सर्विस अकाउंट बनाएं।"
 		},
 		"googleCloudCredentials": "Google Cloud क्रेडेंशियल्स",
-		"googleCloudCredentialsPathWarning": "इस फ़ील्ड में सर्विस-अकाउंट कुंजी फ़ाइल की JSON सामग्री अपेक्षित है, पथ नहीं। यदि आपके पास पथ है, तो उसे नीचे दिए गए <strong>Google Cloud कुंजी फ़ाइल पथ</strong> फ़ील्ड में पेस्ट करें, या इस फ़ील्ड को खाली करें और <code>GOOGLE_APPLICATION_CREDENTIALS</code> पर्यावरण चर का उपयोग करें।",
 		"googleCloudKeyFile": "Google Cloud कुंजी फ़ाइल पथ",
 		"googleCloudProjectId": "Google Cloud प्रोजेक्ट ID",
 		"googleCloudRegion": "Google Cloud क्षेत्र",
@@ -560,6 +559,13 @@
 			"placeholder": "डिफ़ॉल्ट: claude",
 			"maxTokensLabel": "अधिकतम आउटपुट टोकन",
 			"maxTokensDescription": "Claude Code प्रतिक्रियाओं के लिए आउटपुट टोकन की अधिकतम संख्या। डिफ़ॉल्ट 8000 है।"
+		},
+		"zooGateway": {
+			"account": "Zoo Code खाता",
+			"signInButton": "Zoo Code में साइन इन करें",
+			"signInDescription": "अपने खाते के साथ Zoo Gateway का उपयोग करने के लिए साइन इन करें",
+			"authenticated": "प्रमाणित",
+			"authenticatedAs": "{{name}} के रूप में प्रमाणित"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "एक्सटेंशन <serviceLink>{{serviceName}}</serviceLink> पर उपलब्ध मॉडलों की नवीनतम सूची स्वचालित रूप से प्राप्त करता है। यदि आप अनिश्चित हैं कि कौन सा मॉडल चुनना है, तो Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> के साथ सबसे अच्छा काम करता है। आप वर्तमान में उपलब्ध निःशुल्क विकल्पों के लिए \"free\" भी खोज सकते हैं।",
+		"automaticFetch": "एक्सटेंशन <serviceLink>{{serviceName}}</serviceLink> पर उपलब्ध मॉडलों की नवीनतम सूची स्वचालित रूप से प्राप्त करता है। यदि आप अनिश्चित हैं कि कौन सा मॉडल चुनना है, तो Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> के साथ सबसे अच्छा काम करता है।",
 		"label": "मॉडल",
 		"searchPlaceholder": "खोजें",
 		"noMatchFound": "कोई मिलान नहीं मिला",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "प्रदाता '{{provider}}' आपके संगठन द्वारा अनुमत नहीं है",
 		"modelNotAllowed": "मॉडल '{{model}}' प्रदाता '{{provider}}' के लिए आपके संगठन द्वारा अनुमत नहीं है",
 		"profileInvalid": "इस प्रोफ़ाइल में एक प्रदाता या मॉडल शामिल है जो आपके संगठन द्वारा अनुमत नहीं है",
-		"qwenCodeOauthPath": "आपको एक वैध OAuth क्रेडेंशियल पथ प्रदान करना होगा"
+		"qwenCodeOauthPath": "आपको एक वैध OAuth क्रेडेंशियल पथ प्रदान करना होगा",
+		"zooGatewaySignIn": "Zoo Gateway का उपयोग करने के लिए आपको Zoo Code में साइन इन करना होगा। प्रमाणीकृत करने के लिए 'साइन इन' पर क्लिक करें।"
 	},
 	"placeholders": {
 		"apiKey": "API कुंजी दर्ज करें...",

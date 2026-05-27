@@ -454,7 +454,6 @@
 			"step3": "3. Veya kimlik bilgileriyle bir hizmet hesabı oluşturun."
 		},
 		"googleCloudCredentials": "Google Cloud Kimlik Bilgileri",
-		"googleCloudCredentialsPathWarning": "Bu alan, bir yol değil, bir hizmet hesabı anahtar dosyasının JSON içeriğini bekler. Bir yolunuz varsa, aşağıdaki <strong>Google Cloud Anahtar Dosyası Yolu</strong> alanına yapıştırın veya bu alanı temizleyin ve <code>GOOGLE_APPLICATION_CREDENTIALS</code> ortam değişkenini kullanın.",
 		"googleCloudKeyFile": "Google Cloud Anahtar Dosyası Yolu",
 		"googleCloudProjectId": "Google Cloud Proje Kimliği",
 		"googleCloudRegion": "Google Cloud Bölgesi",
@@ -560,6 +559,13 @@
 			"placeholder": "Varsayılan: claude",
 			"maxTokensLabel": "Maksimum Çıktı Token sayısı",
 			"maxTokensDescription": "Claude Code yanıtları için maksimum çıktı token sayısı. Varsayılan 8000'dir."
+		},
+		"zooGateway": {
+			"account": "Zoo Code Hesabı",
+			"signInButton": "Zoo Code'a giriş yap",
+			"signInDescription": "Hesabınızla Zoo Gateway kullanmak için giriş yapın",
+			"authenticated": "Kimlik doğrulandı",
+			"authenticatedAs": "{{name}} olarak kimlik doğrulandı"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır. Şu anda mevcut olan ücretsiz seçenekleri bulmak için \"free\" araması da yapabilirsiniz.",
+		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır.",
 		"label": "Model",
 		"searchPlaceholder": "Ara",
 		"noMatchFound": "Eşleşme bulunamadı",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "Sağlayıcı '{{provider}}' kuruluşunuz tarafından izin verilmiyor",
 		"modelNotAllowed": "Model '{{model}}' sağlayıcı '{{provider}}' için kuruluşunuz tarafından izin verilmiyor",
 		"profileInvalid": "Bu profil, kuruluşunuz tarafından izin verilmeyen bir sağlayıcı veya model içeriyor",
-		"qwenCodeOauthPath": "Geçerli bir OAuth kimlik bilgileri yolu sağlamalısın"
+		"qwenCodeOauthPath": "Geçerli bir OAuth kimlik bilgileri yolu sağlamalısınız",
+		"zooGatewaySignIn": "Zoo Gateway'i kullanmak için Zoo Code'a giriş yapmalısınız. Kimlik doğrulamak için 'Giriş Yap' düğmesine tıklayın."
 	},
 	"placeholders": {
 		"apiKey": "API anahtarını girin...",

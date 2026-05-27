@@ -31,6 +31,7 @@ import {
 	fireworksDefaultModelId,
 	vercelAiGatewayDefaultModelId,
 	opencodeGoDefaultModelId,
+	zooGatewayDefaultModelId,
 	minimaxDefaultModelId,
 	mimoDefaultModelId,
 	unboundDefaultModelId,
@@ -95,6 +96,7 @@ import {
 	Fireworks,
 	VercelAiGateway,
 	OpenCodeGo,
+	ZooGateway,
 	MiniMax,
 	Mimo,
 } from "./providers"
@@ -135,7 +137,7 @@ const ApiOptions = ({
 	setErrorMessage,
 }: ApiOptionsProps) => {
 	const { t } = useAppTranslation()
-	const { organizationAllowList, openAiCodexIsAuthenticated } = useExtensionState()
+	const { organizationAllowList, openAiCodexIsAuthenticated, zooCodeIsAuthenticated } = useExtensionState()
 
 	const [customHeaders, setCustomHeaders] = useState<[string, string][]>(() => {
 		const headers = apiConfiguration?.openAiHeaders || {}
@@ -272,9 +274,17 @@ const ApiOptions = ({
 			apiConfiguration,
 			routerModels,
 			organizationAllowList,
+			zooCodeIsAuthenticated,
 		)
 		setErrorMessage(apiValidationResult)
-	}, [apiConfiguration, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
+	}, [
+		apiConfiguration,
+		routerModels,
+		organizationAllowList,
+		setErrorMessage,
+		isRetiredSelectedProvider,
+		zooCodeIsAuthenticated,
+	])
 
 	const onProviderChange = useCallback(
 		(value: ProviderName) => {
@@ -366,6 +376,7 @@ const ApiOptions = ({
 				poe: { field: "apiModelId", default: poeDefaultModelId },
 				"vercel-ai-gateway": { field: "vercelAiGatewayModelId", default: vercelAiGatewayDefaultModelId },
 				"opencode-go": { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
+				"zoo-gateway": { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
 				openai: { field: "openAiModelId" },
 				ollama: { field: "ollamaModelId" },
 				lmstudio: { field: "lmStudioModelId" },
@@ -693,6 +704,17 @@ const ApiOptions = ({
 
 					{selectedProvider === "opencode-go" && (
 						<OpenCodeGo
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === "zoo-gateway" && (
+						<ZooGateway
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

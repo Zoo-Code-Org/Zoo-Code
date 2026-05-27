@@ -454,7 +454,6 @@
 			"step3": "3. Lub utworzyć konto usługi z poświadczeniami."
 		},
 		"googleCloudCredentials": "Poświadczenia Google Cloud",
-		"googleCloudCredentialsPathWarning": "To pole oczekuje zawartości JSON pliku klucza konta usługi, a nie ścieżki. Jeśli masz ścieżkę, wklej ją do pola <strong>Ścieżka pliku klucza Google Cloud</strong> poniżej lub wyczyść to pole i użyj zmiennej środowiskowej <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ścieżka pliku klucza Google Cloud",
 		"googleCloudProjectId": "ID projektu Google Cloud",
 		"googleCloudRegion": "Region Google Cloud",
@@ -560,6 +559,13 @@
 			"placeholder": "Domyślnie: claude",
 			"maxTokensLabel": "Maksymalna liczba tokenów wyjściowych",
 			"maxTokensDescription": "Maksymalna liczba tokenów wyjściowych dla odpowiedzi Claude Code. Domyślnie 8000."
+		},
+		"zooGateway": {
+			"account": "Konto Zoo Code",
+			"signInButton": "Zaloguj się do Zoo Code",
+			"signInDescription": "Zaloguj się, aby korzystać z Zoo Gateway ze swoim kontem",
+			"authenticated": "Uwierzytelniono",
+			"authenticatedAs": "Uwierzytelniono jako {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Rozszerzenie automatycznie pobiera najnowszą listę modeli dostępnych w <serviceLink>{{serviceName}}</serviceLink>. Jeśli nie jesteś pewien, który model wybrać, Zoo Code działa najlepiej z <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Możesz również wyszukać \"free\", aby znaleźć obecnie dostępne opcje bezpłatne.",
+		"automaticFetch": "Rozszerzenie automatycznie pobiera najnowszą listę modeli dostępnych w <serviceLink>{{serviceName}}</serviceLink>. Jeśli nie jesteś pewien, który model wybrać, Zoo Code działa najlepiej z <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
 		"label": "Model",
 		"searchPlaceholder": "Wyszukaj",
 		"noMatchFound": "Nie znaleziono dopasowań",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "Dostawca '{{provider}}' nie jest dozwolony przez Twoją organizację",
 		"modelNotAllowed": "Model '{{model}}' nie jest dozwolony dla dostawcy '{{provider}}' przez Twoją organizację",
 		"profileInvalid": "Ten profil zawiera dostawcę lub model, który nie jest dozwolony przez Twoją organizację",
-		"qwenCodeOauthPath": "Musisz podać prawidłową ścieżkę do poświadczeń OAuth"
+		"qwenCodeOauthPath": "Musisz podać prawidłową ścieżkę do poświadczeń OAuth",
+		"zooGatewaySignIn": "Musisz zalogować się do Zoo Code, aby korzystać z Zoo Gateway. Kliknij 'Zaloguj się', aby się uwierzytelnić."
 	},
 	"placeholders": {
 		"apiKey": "Wprowadź klucz API...",
