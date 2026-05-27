@@ -922,6 +922,7 @@ export const webviewMessageHandler = async (
 				: {
 						openrouter: {},
 						"vercel-ai-gateway": {},
+						"zoo-gateway": {},
 						litellm: {},
 						requesty: {},
 						unbound: {},
