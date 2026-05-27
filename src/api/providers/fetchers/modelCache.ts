@@ -180,12 +180,17 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 	// different authenticated user from cache.
 	const shouldSkipCache = provider === "zoo-gateway"
 
-	// Check if there's already an in-flight refresh for this provider
+	// Check if there's already an in-flight refresh for this provider.
 	// This prevents race conditions where multiple concurrent refreshes might
-	// overwrite each other's results
-	const existingRequest = inFlightRefresh.get(provider)
-	if (existingRequest) {
-		return existingRequest
+	// overwrite each other's results. Skip de-duplication for auth-scoped
+	// providers because two concurrent calls may carry different tokens
+	// (e.g., after a sign-out/sign-in within the same session) and we must
+	// not return the first caller's results to the second caller.
+	if (!shouldSkipCache) {
+		const existingRequest = inFlightRefresh.get(provider)
+		if (existingRequest) {
+			return existingRequest
+		}
 	}
 
 	// Create the refresh promise and track it
@@ -233,12 +238,16 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 			return getModelsFromCache(provider) || {}
 		} finally {
 			// Always clean up the in-flight tracking
-			inFlightRefresh.delete(provider)
+			if (!shouldSkipCache) {
+				inFlightRefresh.delete(provider)
+			}
 		}
 	})()
 
-	// Track the in-flight request
-	inFlightRefresh.set(provider, refreshPromise)
+	// Track the in-flight request (auth-scoped providers are excluded; see above).
+	if (!shouldSkipCache) {
+		inFlightRefresh.set(provider, refreshPromise)
+	}
 
 	return refreshPromise
 }

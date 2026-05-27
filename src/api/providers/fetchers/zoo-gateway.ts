@@ -75,7 +75,10 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 			timeout: MODEL_DISCOVERY_TIMEOUT_MS,
 		})
 		const result = zooGatewayModelsResponseSchema.safeParse(response.data)
-		const data = result.success ? result.data.data : response.data.data
+
+		// Fall back to the raw response only when it looks structurally sound; otherwise return
+		// an empty list rather than crashing on `response.data.data` being undefined.
+		const data = result.success ? result.data.data : Array.isArray(response.data?.data) ? response.data.data : []
 
 		if (!result.success) {
 			console.error(`Zoo Gateway models response is invalid ${JSON.stringify(result.error.format())}`)

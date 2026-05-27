@@ -10,6 +10,7 @@ import {
 
 import { ApiHandlerOptions } from "../../shared/api"
 import { getZooCodeBaseUrl } from "../../services/zoo-code-auth"
+import { Package } from "../../shared/package"
 
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -17,8 +18,6 @@ import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { RouterProvider } from "./router-provider"
-
-import { DEFAULT_HEADERS } from "./constants"
 
 // Extend OpenAI's CompletionUsage to include Zoo Gateway specific fields (same as Vercel AI Gateway)
 interface ZooGatewayUsage extends OpenAI.CompletionUsage {
@@ -37,36 +36,25 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			throw new Error("Zoo Gateway requires authentication. Please sign in to Zoo Code first.")
 		}
 
+		// Merge Zoo-specific enrichment headers into openAiHeaders so they flow through
+		// the parent's single OpenAI client. We avoid reassigning `this.client` (which
+		// is declared readonly on RouterProvider) and the wasted client allocation it
+		// caused. Per-request headers (task id / mode) are set in createMessage below.
 		super({
-			options,
+			options: {
+				...options,
+				openAiHeaders: {
+					"X-Zoo-Editor": "vscode",
+					"X-Zoo-Extension-Version": Package.version,
+					...(options.openAiHeaders || {}),
+				},
+			},
 			name: "zoo-gateway",
 			baseURL,
 			apiKey: options.zooSessionToken,
 			modelId: options.zooGatewayModelId,
 			defaultModelId: zooGatewayDefaultModelId,
 			defaultModelInfo: zooGatewayDefaultModelInfo,
-		})
-
-		// Override the client to add Zoo-specific enrichment headers
-		// These headers help with request tracking and analytics
-		const enrichmentHeaders: Record<string, string> = {}
-
-		// Note: These headers will be populated per-request in createMessage
-		// For now we just set static headers that are always available
-		if (typeof process !== "undefined" && process.env?.npm_package_version) {
-			enrichmentHeaders["X-Zoo-Extension-Version"] = process.env.npm_package_version
-		}
-		enrichmentHeaders["X-Zoo-Editor"] = "vscode"
-
-		// Recreate client with enrichment headers
-		;(this as any).client = new OpenAI({
-			baseURL,
-			apiKey: options.zooSessionToken,
-			defaultHeaders: {
-				...DEFAULT_HEADERS,
-				...enrichmentHeaders,
-				...(options.openAiHeaders || {}),
-			},
 		})
 	}
 
