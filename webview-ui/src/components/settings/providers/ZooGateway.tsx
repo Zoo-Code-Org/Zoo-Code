@@ -33,6 +33,9 @@ export const ZooGateway = ({
 		useExtensionState()
 
 	const authUrl = getZooCodeAuthUrl(uriScheme, zooCodeBaseUrl, deviceName)
+	// Resolve the dashboard link off the same base URL the auth/gateway flow uses,
+	// so non-prod environments (staging/dev) point at the matching dashboard.
+	const resolvedDashboardBase = zooCodeBaseUrl?.replace(/\/$/, "") || "https://www.zoocode.dev"
 
 	return (
 		<>
@@ -73,7 +76,7 @@ export const ZooGateway = ({
 				models={routerModels?.["zoo-gateway"] ?? {}}
 				modelIdKey="zooGatewayModelId"
 				serviceName="Zoo Gateway"
-				serviceUrl="https://www.zoocode.dev/dashboard/models"
+				serviceUrl={`${resolvedDashboardBase}/dashboard/models`}
 				organizationAllowList={organizationAllowList}
 				errorMessage={modelValidationError}
 				simplifySettings={simplifySettings}
