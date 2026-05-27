@@ -454,7 +454,6 @@
 			"step3": "3. Или создайте сервисный аккаунт с ключом."
 		},
 		"googleCloudCredentials": "Учётные данные Google Cloud",
-		"googleCloudCredentialsPathWarning": "Это поле ожидает JSON-содержимое файла ключа сервисного аккаунта, а не путь. Если у вас есть путь, вставьте его в поле <strong>Путь к ключу Google Cloud</strong> ниже, либо очистите это поле и используйте переменную окружения <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Путь к ключу Google Cloud",
 		"googleCloudProjectId": "ID проекта Google Cloud",
 		"googleCloudRegion": "Регион Google Cloud",
@@ -560,6 +559,13 @@
 			"placeholder": "По умолчанию: claude",
 			"maxTokensLabel": "Макс. выходных токенов",
 			"maxTokensDescription": "Максимальное количество выходных токенов для ответов Claude Code. По умолчанию 8000."
+		},
+		"zooGateway": {
+			"account": "Учетная запись Zoo Code",
+			"signInButton": "Войти в Zoo Code",
+			"signInDescription": "Войдите, чтобы использовать Zoo Gateway с вашей учетной записью",
+			"authenticated": "Аутентифицирован",
+			"authenticatedAs": "Аутентифицирован как {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Расширение автоматически получает актуальный список моделей на <serviceLink>{{serviceName}}</serviceLink>. Если не уверены, что выбрать, Zoo Code лучше всего работает с <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Также попробуйте поискать \"free\" для бесплатных вариантов.",
+		"automaticFetch": "Расширение автоматически получает актуальный список моделей на <serviceLink>{{serviceName}}</serviceLink>. Если не уверены, что выбрать, Zoo Code лучше всего работает с <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
 		"label": "Модель",
 		"searchPlaceholder": "Поиск",
 		"noMatchFound": "Совпадений не найдено",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "Провайдер '{{provider}}' не разрешен вашей организацией",
 		"modelNotAllowed": "Модель '{{model}}' не разрешена для провайдера '{{provider}}' вашей организацией",
 		"profileInvalid": "Этот профиль содержит провайдера или модель, которые не разрешены вашей организацией",
-		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth"
+		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth",
+		"zooGatewaySignIn": "Для использования Zoo Gateway необходимо войти в Zoo Code. Нажмите «Войти», чтобы пройти аутентификацию."
 	},
 	"placeholders": {
 		"apiKey": "Введите API-ключ...",

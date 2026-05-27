@@ -454,7 +454,6 @@
 			"step3": "3. Oppure creare un account di servizio con credenziali."
 		},
 		"googleCloudCredentials": "Credenziali Google Cloud",
-		"googleCloudCredentialsPathWarning": "Questo campo si aspetta il contenuto JSON di un file di chiave di account di servizio, non un percorso. Se hai un percorso, incollalo nel campo <strong>Percorso file chiave Google Cloud</strong> qui sotto, oppure svuota questo campo e usa la variabile d'ambiente <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Percorso file chiave Google Cloud",
 		"googleCloudProjectId": "ID progetto Google Cloud",
 		"googleCloudRegion": "Regione Google Cloud",
@@ -560,6 +559,13 @@
 			"placeholder": "Predefinito: claude",
 			"maxTokensLabel": "Token di output massimi",
 			"maxTokensDescription": "Numero massimo di token di output per le risposte di Claude Code. Il valore predefinito è 8000."
+		},
+		"zooGateway": {
+			"account": "Account Zoo Code",
+			"signInButton": "Accedi a Zoo Code",
+			"signInDescription": "Accedi per utilizzare Zoo Gateway con il tuo account",
+			"authenticated": "Autenticato",
+			"authenticatedAs": "Autenticato come {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "L'estensione recupera automaticamente l'elenco più recente dei modelli disponibili su <serviceLink>{{serviceName}}</serviceLink>. Se non sei sicuro di quale modello scegliere, Zoo Code funziona meglio con <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Puoi anche cercare \"free\" per opzioni gratuite attualmente disponibili.",
+		"automaticFetch": "L'estensione recupera automaticamente l'elenco più recente dei modelli disponibili su <serviceLink>{{serviceName}}</serviceLink>. Se non sei sicuro di quale modello scegliere, Zoo Code funziona meglio con <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
 		"label": "Modello",
 		"searchPlaceholder": "Cerca",
 		"noMatchFound": "Nessuna corrispondenza trovata",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "Il fornitore '{{provider}}' non è consentito dalla tua organizzazione",
 		"modelNotAllowed": "Il modello '{{model}}' non è consentito per il fornitore '{{provider}}' dalla tua organizzazione.",
 		"profileInvalid": "Questo profilo contiene un fornitore o un modello non consentito dalla tua organizzazione.",
-		"qwenCodeOauthPath": "Devi fornire un percorso valido per le credenziali OAuth"
+		"qwenCodeOauthPath": "Devi fornire un percorso valido per le credenziali OAuth",
+		"zooGatewaySignIn": "Devi accedere a Zoo Code per utilizzare Zoo Gateway. Clicca su 'Accedi' per autenticarti."
 	},
 	"placeholders": {
 		"apiKey": "Inserisci chiave API...",

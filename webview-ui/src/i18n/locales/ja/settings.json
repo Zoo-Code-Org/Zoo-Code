@@ -454,7 +454,6 @@
 			"step3": "3. または、認証情報付きのサービスアカウントを作成します。"
 		},
 		"googleCloudCredentials": "Google Cloud認証情報",
-		"googleCloudCredentialsPathWarning": "このフィールドは、パスではなく、サービスアカウントキーファイルのJSON内容を期待します。パスをお持ちの場合は、下の<strong>Google Cloudキーファイルパス</strong>フィールドに貼り付けるか、このフィールドをクリアして<code>GOOGLE_APPLICATION_CREDENTIALS</code>環境変数を使用してください。",
 		"googleCloudKeyFile": "Google Cloudキーファイルパス",
 		"googleCloudProjectId": "Google Cloudプロジェクトid",
 		"googleCloudRegion": "Google Cloudリージョン",
@@ -560,6 +559,13 @@
 			"placeholder": "デフォルト：claude",
 			"maxTokensLabel": "最大出力トークン",
 			"maxTokensDescription": "Claude Codeレスポンスの最大出力トークン数。デフォルトは8000です。"
+		},
+		"zooGateway": {
+			"account": "Zoo Code アカウント",
+			"signInButton": "Zoo Code にサインイン",
+			"signInDescription": "Zoo Gateway をアカウントで使用するにはサインインしてください",
+			"authenticated": "認証済み",
+			"authenticatedAs": "{{name}} として認証済み"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "拡張機能は<serviceLink>{{serviceName}}</serviceLink>で利用可能な最新のモデルリストを自動的に取得します。どのモデルを選ぶべきか迷っている場合、Zoo Codeは<defaultModelLink>{{defaultModelId}}</defaultModelLink>で最適に動作します。また、「free」で検索すると、現在利用可能な無料オプションを見つけることができます。",
+		"automaticFetch": "拡張機能は<serviceLink>{{serviceName}}</serviceLink>で利用可能な最新のモデルリストを自動的に取得します。どのモデルを選ぶべきか迷っている場合、Zoo Codeは<defaultModelLink>{{defaultModelId}}</defaultModelLink>で最適に動作します。",
 		"label": "モデル",
 		"searchPlaceholder": "検索",
 		"noMatchFound": "一致するものが見つかりません",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "プロバイダー「{{provider}}」は組織によって許可されていません",
 		"modelNotAllowed": "モデル「{{model}}」はプロバイダー「{{provider}}」に対して組織によって許可されていません",
 		"profileInvalid": "このプロファイルには、組織によって許可されていないプロバイダーまたはモデルが含まれています",
-		"qwenCodeOauthPath": "有効なOAuth認証情報のパスを提供する必要があります"
+		"qwenCodeOauthPath": "有効なOAuth認証情報のパスを提供する必要があります",
+		"zooGatewaySignIn": "Zoo Gatewayを使用するにはZoo Codeにサインインする必要があります。認証するには「サインイン」をクリックしてください。"
 	},
 	"placeholders": {
 		"apiKey": "API キーを入力...",

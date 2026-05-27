@@ -454,7 +454,6 @@
 			"step3": "3. Atau buat service account dengan credentials."
 		},
 		"googleCloudCredentials": "Google Cloud Credentials",
-		"googleCloudCredentialsPathWarning": "Bidang ini mengharapkan konten JSON dari file kunci akun layanan, bukan path. Jika Anda memiliki path, tempelkan ke bidang <strong>Path File Key Google Cloud</strong> di bawah, atau kosongkan bidang ini dan gunakan variabel lingkungan <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Path File Key Google Cloud",
 		"googleCloudProjectId": "Google Cloud Project ID",
 		"googleCloudRegion": "Google Cloud Region",
@@ -560,6 +559,13 @@
 			"placeholder": "Default: claude",
 			"maxTokensLabel": "Token Output Maks",
 			"maxTokensDescription": "Jumlah maksimum token output untuk respons Claude Code. Default adalah 8000."
+		},
+		"zooGateway": {
+			"account": "Akun Zoo Code",
+			"signInButton": "Masuk ke Zoo Code",
+			"signInDescription": "Masuk untuk menggunakan Zoo Gateway dengan akun Anda",
+			"authenticated": "Terautentikasi",
+			"authenticatedAs": "Terautentikasi sebagai {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Ekstensi secara otomatis mengambil daftar model terbaru yang tersedia di <serviceLink>{{serviceName}}</serviceLink>. Jika kamu tidak yakin model mana yang harus dipilih, Zoo Code bekerja terbaik dengan <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Kamu juga dapat mencoba mencari \"free\" untuk opsi tanpa biaya yang saat ini tersedia.",
+		"automaticFetch": "Ekstensi secara otomatis mengambil daftar model terbaru yang tersedia di <serviceLink>{{serviceName}}</serviceLink>. Jika kamu tidak yakin model mana yang harus dipilih, Zoo Code bekerja terbaik dengan <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
 		"label": "Model",
 		"searchPlaceholder": "Cari",
 		"noMatchFound": "Tidak ada yang cocok ditemukan",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "Provider '{{provider}}' tidak diizinkan oleh organisasi kamu",
 		"modelNotAllowed": "Model '{{model}}' tidak diizinkan untuk provider '{{provider}}' oleh organisasi kamu",
 		"profileInvalid": "Profil ini berisi provider atau model yang tidak diizinkan oleh organisasi kamu",
-		"qwenCodeOauthPath": "Kamu harus memberikan jalur kredensial OAuth yang valid"
+		"qwenCodeOauthPath": "Kamu harus memberikan jalur kredensial OAuth yang valid",
+		"zooGatewaySignIn": "Kamu harus masuk ke Zoo Code untuk menggunakan Zoo Gateway. Klik 'Masuk' untuk mengautentikasi."
 	},
 	"placeholders": {
 		"apiKey": "Masukkan API Key...",

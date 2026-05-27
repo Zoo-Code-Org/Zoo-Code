@@ -454,7 +454,6 @@
 			"step3": "3. O crear un compte de servei amb credencials."
 		},
 		"googleCloudCredentials": "Credencials de Google Cloud",
-		"googleCloudCredentialsPathWarning": "Aquest camp espera el contingut JSON d'un fitxer de clau de compte de servei, no una ruta. Si tens una ruta, enganxa-la al camp <strong>Ruta del fitxer de clau de Google Cloud</strong> a continuació, o buida aquest camp i utilitza la variable d'entorn <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ruta del fitxer de clau de Google Cloud",
 		"googleCloudProjectId": "ID del projecte de Google Cloud",
 		"googleCloudRegion": "Regió de Google Cloud",
@@ -560,6 +559,13 @@
 			"placeholder": "Per defecte: claude",
 			"maxTokensLabel": "Tokens màxims de sortida",
 			"maxTokensDescription": "Nombre màxim de tokens de sortida per a les respostes de Claude Code. El valor per defecte és 8000."
+		},
+		"zooGateway": {
+			"account": "Compte de Zoo Code",
+			"signInButton": "Iniciar sessió a Zoo Code",
+			"signInDescription": "Inicia sessió per utilitzar Zoo Gateway amb el teu compte",
+			"authenticated": "Autenticat",
+			"authenticatedAs": "Autenticat com a {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "L'extensió obté automàticament la llista més recent de models disponibles a <serviceLink>{{serviceName}}</serviceLink>. Si no esteu segur de quin model triar, Zoo Code funciona millor amb <defaultModelLink>{{defaultModelId}}</defaultModelLink>. També podeu cercar \"free\" per a opcions gratuïtes actualment disponibles.",
+		"automaticFetch": "L'extensió obté automàticament la llista més recent de models disponibles a <serviceLink>{{serviceName}}</serviceLink>. Si no esteu segur de quin model triar, Zoo Code funciona millor amb <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
 		"label": "Model",
 		"searchPlaceholder": "Cerca",
 		"noMatchFound": "No s'ha trobat cap coincidència",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "El proveïdor '{{provider}}' no està permès per la vostra organització",
 		"modelNotAllowed": "El model '{{model}}' no està permès per al proveïdor '{{provider}}' per la vostra organització",
 		"profileInvalid": "Aquest perfil conté un proveïdor o model que no està permès per la vostra organització",
-		"qwenCodeOauthPath": "Has de proporcionar una ruta vàlida de credencials OAuth"
+		"qwenCodeOauthPath": "Has de proporcionar una ruta vàlida de credencials OAuth",
+		"zooGatewaySignIn": "Has d'iniciar sessió a Zoo Code per utilitzar Zoo Gateway. Fes clic a 'Inicia sessió' per autenticar-te."
 	},
 	"placeholders": {
 		"apiKey": "Introduïu la clau API...",

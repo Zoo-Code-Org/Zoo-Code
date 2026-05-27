@@ -454,7 +454,6 @@
 			"step3": "3. Hoặc tạo tài khoản dịch vụ với thông tin xác thực."
 		},
 		"googleCloudCredentials": "Thông tin xác thực Google Cloud",
-		"googleCloudCredentialsPathWarning": "Trường này mong đợi nội dung JSON của tệp khóa tài khoản dịch vụ, không phải đường dẫn. Nếu bạn có đường dẫn, hãy dán vào trường <strong>Đường dẫn tệp khóa Google Cloud</strong> bên dưới, hoặc xóa trường này và sử dụng biến môi trường <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Đường dẫn tệp khóa Google Cloud",
 		"googleCloudProjectId": "ID dự án Google Cloud",
 		"googleCloudRegion": "Vùng Google Cloud",
@@ -560,6 +559,13 @@
 			"placeholder": "Mặc định: claude",
 			"maxTokensLabel": "Số token đầu ra tối đa",
 			"maxTokensDescription": "Số lượng token đầu ra tối đa cho các phản hồi của Claude Code. Mặc định là 8000."
+		},
+		"zooGateway": {
+			"account": "Tài khoản Zoo Code",
+			"signInButton": "Đăng nhập vào Zoo Code",
+			"signInDescription": "Đăng nhập để sử dụng Zoo Gateway với tài khoản của bạn",
+			"authenticated": "Đã xác thực",
+			"authenticatedAs": "Đã xác thực với tên {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Tiện ích mở rộng tự động lấy danh sách mới nhất các mô hình có sẵn trên <serviceLink>{{serviceName}}</serviceLink>. Nếu bạn không chắc chắn nên chọn mô hình nào, Zoo Code hoạt động tốt nhất với <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Bạn cũng có thể thử tìm kiếm \"free\" cho các tùy chọn miễn phí hiện có.",
+		"automaticFetch": "Tiện ích mở rộng tự động lấy danh sách mới nhất các mô hình có sẵn trên <serviceLink>{{serviceName}}</serviceLink>. Nếu bạn không chắc chắn nên chọn mô hình nào, Zoo Code hoạt động tốt nhất với <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
 		"label": "Mô hình",
 		"searchPlaceholder": "Tìm kiếm",
 		"noMatchFound": "Không tìm thấy kết quả",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "Nhà cung cấp '{{provider}}' không được phép bởi tổ chức của bạn",
 		"modelNotAllowed": "Mô hình '{{model}}' không được phép cho nhà cung cấp '{{provider}}' bởi tổ chức của bạn",
 		"profileInvalid": "Hồ sơ này chứa một nhà cung cấp hoặc mô hình không được phép bởi tổ chức của bạn",
-		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ"
+		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ",
+		"zooGatewaySignIn": "Bạn phải đăng nhập vào Zoo Code để sử dụng Zoo Gateway. Nhấp vào 'Đăng nhập' để xác thực."
 	},
 	"placeholders": {
 		"apiKey": "Nhập khóa API...",

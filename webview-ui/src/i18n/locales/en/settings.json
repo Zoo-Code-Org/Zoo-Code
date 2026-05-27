@@ -517,7 +517,6 @@
 			"step3": "3. Or create a service account with credentials."
 		},
 		"googleCloudCredentials": "Google Cloud Credentials",
-		"googleCloudCredentialsPathWarning": "This field expects the JSON contents of a service-account key file, not a path. If you have a path, paste it into the <strong>Google Cloud Key File Path</strong> field below, or clear this field and use the <code>GOOGLE_APPLICATION_CREDENTIALS</code> environment variable.",
 		"googleCloudKeyFile": "Google Cloud Key File Path",
 		"googleCloudProjectId": "Google Cloud Project ID",
 		"googleCloudRegion": "Google Cloud Region",
@@ -547,6 +546,13 @@
 				"description": "OpenRouter routes requests to the best available providers for your model. By default, requests are load balanced across the top providers to maximize uptime. However, you can choose a specific provider to use for this model.",
 				"learnMore": "Learn more about provider routing"
 			}
+		},
+		"zooGateway": {
+			"account": "Zoo Code Account",
+			"signInButton": "Sign in to Zoo Code",
+			"signInDescription": "Sign in to use Zoo Gateway with your account",
+			"authenticated": "Authenticated",
+			"authenticatedAs": "Authenticated as {{name}}"
 		},
 		"customModel": {
 			"capabilities": "Configure the capabilities and pricing for your custom OpenAI-compatible model. Be careful when specifying the model capabilities, as they can affect how Zoo Code performs.",
@@ -926,7 +932,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "The extension automatically fetches the latest list of models available on <serviceLink>{{serviceName}}</serviceLink>. If you're unsure which model to choose, Zoo Code works best with <defaultModelLink>{{defaultModelId}}</defaultModelLink>. You can also try searching \"free\" for no-cost options currently available.",
+		"automaticFetch": "The extension automatically fetches the latest list of models available on <serviceLink>{{serviceName}}</serviceLink>. If you're unsure which model to choose, Zoo Code works best with <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
 		"label": "Model",
 		"searchPlaceholder": "Search",
 		"noMatchFound": "No match found",
@@ -964,7 +970,8 @@
 		"providerNotAllowed": "Provider '{{provider}}' is not allowed by your organization",
 		"modelNotAllowed": "Model '{{model}}' is not allowed for provider '{{provider}}' by your organization",
 		"profileInvalid": "This profile contains a provider or model that is not allowed by your organization",
-		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path."
+		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path.",
+		"zooGatewaySignIn": "You must sign in to Zoo Code to use Zoo Gateway. Click 'Sign In' to authenticate."
 	},
 	"placeholders": {
 		"apiKey": "Enter API Key...",

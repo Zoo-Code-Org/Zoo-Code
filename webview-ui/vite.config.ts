@@ -51,7 +51,7 @@ const persistPortPlugin = (): Plugin => ({
 	},
 })
 
-// https://vite.dev/config/
+// https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
 	let outDir = "../src/webview-ui/build"
 
@@ -98,7 +98,11 @@ export default defineConfig(({ mode }) => {
 	return {
 		plugins,
 		resolve: {
-			tsconfigPaths: true,
+			alias: {
+				"@": resolve(__dirname, "./src"),
+				"@src": resolve(__dirname, "./src"),
+				"@roo": resolve(__dirname, "../src/shared"),
+			},
 		},
 		build: {
 			outDir,
@@ -106,31 +110,67 @@ export default defineConfig(({ mode }) => {
 			reportCompressedSize: false,
 			// Generate complete source maps with original TypeScript sources
 			sourcemap: true,
-			// Vite 8 uses Rolldown/Oxc by default; keep non-production modes readable.
-			minify: mode === "production",
+			// Ensure source maps are properly included in the build
+			minify: mode === "production" ? "esbuild" : false,
 			// Use a single combined CSS bundle so all webviews share styles
 			cssCodeSplit: false,
-			rolldownOptions: {
+			rollupOptions: {
 				// Externalize vscode module - it's imported by file-search.ts which is
 				// dynamically imported by roo-config/index.ts, but should never be bundled
 				// in the webview since it's not available in the browser context
 				external: ["vscode"],
-				input: resolve(__dirname, "index.html"),
+				input: {
+					index: resolve(__dirname, "index.html"),
+				},
 				output: {
-					entryFileNames: "assets/[name].js",
-					chunkFileNames: "assets/[name]-[hash].js",
+					entryFileNames: `assets/[name].js`,
+					chunkFileNames: (chunkInfo) => {
+						if (chunkInfo.name === "mermaid-bundle") {
+							return `assets/mermaid-bundle.js`
+						}
+						// Default naming for other chunks, ensuring uniqueness from entry
+						return `assets/chunk-[hash].js`
+					},
 					assetFileNames: (assetInfo) => {
-						const name = assetInfo.name ?? ""
+						const name = assetInfo.name || ""
 
+						// Force all CSS into a single predictable file used by both webviews
 						if (name.endsWith(".css")) {
 							return "assets/index.css"
 						}
 
-						if (/\.(woff2?|ttf)$/.test(name)) {
+						if (name.endsWith(".woff2") || name.endsWith(".woff") || name.endsWith(".ttf")) {
 							return "assets/fonts/[name][extname]"
 						}
-
+						// Ensure source maps are included in the build
+						if (name.endsWith(".map")) {
+							return "assets/[name]"
+						}
 						return "assets/[name][extname]"
+					},
+					manualChunks: (id, { getModuleInfo }) => {
+						// Consolidate all mermaid code and its direct large dependencies (like dagre)
+						// into a single chunk. The 'channel.js' error often points to dagre.
+						if (
+							id.includes("node_modules/mermaid") ||
+							id.includes("node_modules/dagre") || // dagre is a common dep for graph layout
+							id.includes("node_modules/cytoscape") // another potential graph lib
+							// Add other known large mermaid dependencies if identified
+						) {
+							return "mermaid-bundle"
+						}
+
+						// Check if the module is part of any explicitly defined mermaid-related dynamic import
+						// This is a more advanced check if simple path matching isn't enough.
+						const moduleInfo = getModuleInfo(id)
+						if (moduleInfo?.importers.some((importer) => importer.includes("node_modules/mermaid"))) {
+							return "mermaid-bundle"
+						}
+						if (
+							moduleInfo?.dynamicImporters.some((importer) => importer.includes("node_modules/mermaid"))
+						) {
+							return "mermaid-bundle"
+						}
 					},
 				},
 			},
@@ -148,6 +188,11 @@ export default defineConfig(({ mode }) => {
 		},
 		define,
 		optimizeDeps: {
+			include: [
+				"mermaid",
+				"dagre", // Explicitly include dagre for pre-bundling
+				// Add other known large mermaid dependencies if identified
+			],
 			exclude: ["@vscode/codicons", "vscode-oniguruma", "shiki"],
 		},
 		assetsInclude: ["**/*.wasm", "**/*.wav"],

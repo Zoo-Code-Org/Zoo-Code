@@ -17,8 +17,9 @@ export function validateApiConfiguration(
 	apiConfiguration: ProviderSettings,
 	routerModels?: RouterModels,
 	organizationAllowList?: OrganizationAllowList,
+	zooCodeIsAuthenticated?: boolean,
 ): string | undefined {
-	const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration)
+	const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration, zooCodeIsAuthenticated)
 
 	if (keysAndIdsPresentErrorMessage) {
 		return keysAndIdsPresentErrorMessage
@@ -36,7 +37,10 @@ export function validateApiConfiguration(
 	return validateDynamicProviderModelId(apiConfiguration, routerModels)
 }
 
-function validateModelsAndKeysProvided(apiConfiguration: ProviderSettings): string | undefined {
+function validateModelsAndKeysProvided(
+	apiConfiguration: ProviderSettings,
+	zooCodeIsAuthenticated?: boolean,
+): string | undefined {
 	switch (apiConfiguration.apiProvider) {
 		case "openrouter":
 			if (!apiConfiguration.openRouterApiKey) {
@@ -126,6 +130,11 @@ function validateModelsAndKeysProvided(apiConfiguration: ProviderSettings): stri
 		case "opencode-go":
 			if (!apiConfiguration.opencodeGoApiKey) {
 				return i18next.t("settings:validation.apiKey")
+			}
+			break
+		case "zoo-gateway":
+			if (!apiConfiguration.zooSessionToken && !zooCodeIsAuthenticated) {
+				return i18next.t("settings:validation.zooGatewaySignIn")
 			}
 			break
 		case "baseten":
@@ -287,8 +296,9 @@ export function validateApiConfigurationExcludingModelErrors(
 	apiConfiguration: ProviderSettings,
 	_routerModels?: RouterModels, // Keeping this for compatibility with the old function.
 	organizationAllowList?: OrganizationAllowList,
+	zooCodeIsAuthenticated?: boolean,
 ): string | undefined {
-	const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration)
+	const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration, zooCodeIsAuthenticated)
 
 	if (keysAndIdsPresentErrorMessage) {
 		return keysAndIdsPresentErrorMessage

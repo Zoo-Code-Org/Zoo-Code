@@ -454,7 +454,6 @@
 			"step3": "3. Oder ein Servicekonto mit Anmeldeinformationen erstellen."
 		},
 		"googleCloudCredentials": "Google Cloud Anmeldedaten",
-		"googleCloudCredentialsPathWarning": "Dieses Feld erwartet den JSON-Inhalt einer Dienstkonto-Schlüsseldatei, keinen Pfad. Wenn Sie einen Pfad haben, fügen Sie ihn unten in das Feld <strong>Google Cloud Schlüsseldateipfad</strong> ein, oder leeren Sie dieses Feld und verwenden Sie die Umgebungsvariable <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Google Cloud Schlüsseldateipfad",
 		"googleCloudProjectId": "Google Cloud Projekt-ID",
 		"googleCloudRegion": "Google Cloud Region",
@@ -560,6 +559,13 @@
 			"placeholder": "Standard: claude",
 			"maxTokensLabel": "Maximale Ausgabe-Tokens",
 			"maxTokensDescription": "Maximale Anzahl an Ausgabe-Tokens für Claude Code-Antworten. Standard ist 8000."
+		},
+		"zooGateway": {
+			"account": "Zoo Code Konto",
+			"signInButton": "Bei Zoo Code anmelden",
+			"signInDescription": "Melde dich an, um Zoo Gateway mit deinem Konto zu nutzen",
+			"authenticated": "Authentifiziert",
+			"authenticatedAs": "Authentifiziert als {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -863,7 +869,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Die Erweiterung ruft automatisch die neueste Liste der auf <serviceLink>{{serviceName}}</serviceLink> verfügbaren Modelle ab. Wenn du dir nicht sicher bist, welches Modell du wählen sollst, funktioniert Zoo Code am besten mit <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Du kannst auch versuchen, nach \"kostenlos\" zu suchen, um die derzeit verfügbaren kostenlosen Optionen zu finden.",
+		"automaticFetch": "Die Erweiterung ruft automatisch die neueste Liste der auf <serviceLink>{{serviceName}}</serviceLink> verfügbaren Modelle ab. Wenn du dir nicht sicher bist, welches Modell du wählen sollst, funktioniert Zoo Code am besten mit <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
 		"label": "Modell",
 		"searchPlaceholder": "Suchen",
 		"noMatchFound": "Keine Übereinstimmung gefunden",
@@ -901,7 +907,8 @@
 		"providerNotAllowed": "Anbieter '{{provider}}' ist von deiner Organisation nicht erlaubt",
 		"modelNotAllowed": "Modell '{{model}}' ist für Anbieter '{{provider}}' von deiner Organisation nicht erlaubt",
 		"profileInvalid": "Dieses Profil enthält einen Anbieter oder ein Modell, das von deiner Organisation nicht erlaubt ist",
-		"qwenCodeOauthPath": "Du musst einen gültigen OAuth-Anmeldedaten-Pfad angeben"
+		"qwenCodeOauthPath": "Du musst einen gültigen OAuth-Anmeldedaten-Pfad angeben",
+		"zooGatewaySignIn": "Du musst dich bei Zoo Code anmelden, um Zoo Gateway zu verwenden. Klicke auf 'Anmelden', um dich zu authentifizieren."
 	},
 	"placeholders": {
 		"apiKey": "API-Schlüssel eingeben...",
