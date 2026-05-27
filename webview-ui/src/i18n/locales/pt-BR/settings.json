@@ -454,6 +454,7 @@
 			"step3": "3. Ou criar uma conta de serviço com credenciais."
 		},
 		"googleCloudCredentials": "Credenciais Google Cloud",
+		"googleCloudCredentialsPathWarning": "Este campo espera o conte├║do JSON de um arquivo de chave de conta de servi├ºo, n├úo um caminho. Se voc├¬ tiver um caminho, cole-o no campo <strong>Caminho do Arquivo de Chave Google Cloud</strong> abaixo, ou limpe este campo e use a vari├ível de ambiente <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Caminho do Arquivo de Chave Google Cloud",
 		"googleCloudProjectId": "ID do Projeto Google Cloud",
 		"googleCloudRegion": "Região Google Cloud",
@@ -869,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "A extensão busca automaticamente a lista mais recente de modelos disponíveis em <serviceLink>{{serviceName}}</serviceLink>. Se você não tem certeza sobre qual modelo escolher, o Zoo Code funciona melhor com <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
+		"automaticFetch": "A extens├úo busca automaticamente a lista mais recente de modelos dispon├¡veis em <serviceLink>{{serviceName}}</serviceLink>. Se voc├¬ n├úo tem certeza sobre qual modelo escolher, o Zoo Code funciona melhor com <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Voc├¬ tamb├⌐m pode pesquisar por \"free\" para encontrar op├º├╡es gratuitas atualmente dispon├¡veis.",
 		"label": "Modelo",
 		"searchPlaceholder": "Pesquisar",
 		"noMatchFound": "Nenhuma correspondência encontrada",
