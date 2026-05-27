@@ -5,6 +5,10 @@ import axios from "axios"
 import { getZooGatewayModels, parseZooGatewayModel } from "../zoo-gateway"
 
 vitest.mock("axios")
+vitest.mock("../../../../services/zoo-code-auth", () => ({
+	getCachedZooCodeToken: vitest.fn(() => ""),
+	getZooCodeBaseUrl: vitest.fn(() => "https://example.test"),
+}))
 const mockedAxios = axios as any
 
 describe("Zoo Gateway Fetchers", () => {
