@@ -151,37 +151,43 @@ export const TerminalSettings = ({
 						</div>
 					</div>
 					<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
-						<SearchableSetting
-							settingId="terminal-profile"
-							section="terminal"
-							label={t("settings:terminal.profile.label")}>
-							<label className="block font-medium mb-1">{t("settings:terminal.profile.label")}</label>
-							<Select
-								value={terminalProfile || DEFAULT_PROFILE_VALUE}
-								onValueChange={(value) =>
-									setCachedStateField(
-										"terminalProfile",
-										value === DEFAULT_PROFILE_VALUE ? undefined : value,
-									)
-								}>
-								<SelectTrigger className="w-full" data-testid="terminal-profile-dropdown">
-									<SelectValue placeholder={t("settings:common.select")} />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value={DEFAULT_PROFILE_VALUE}>
-										{t("settings:terminal.profile.default")}
-									</SelectItem>
-									{profileNames.map((name) => (
-										<SelectItem key={name} value={name}>
-											{name}
+						{/* The profile picker only affects inline execution, which is active when shell
+						    integration is disabled. Hide it otherwise so it isn't shown but ineffective
+						    (mirrors the inline-only settings guarded below). Defaults to shown, matching
+						    the checkbox's `?? true`. See PR #277 review. */}
+						{(terminalShellIntegrationDisabled ?? true) && (
+							<SearchableSetting
+								settingId="terminal-profile"
+								section="terminal"
+								label={t("settings:terminal.profile.label")}>
+								<label className="block font-medium mb-1">{t("settings:terminal.profile.label")}</label>
+								<Select
+									value={terminalProfile || DEFAULT_PROFILE_VALUE}
+									onValueChange={(value) =>
+										setCachedStateField(
+											"terminalProfile",
+											value === DEFAULT_PROFILE_VALUE ? undefined : value,
+										)
+									}>
+									<SelectTrigger className="w-full" data-testid="terminal-profile-dropdown">
+										<SelectValue placeholder={t("settings:common.select")} />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value={DEFAULT_PROFILE_VALUE}>
+											{t("settings:terminal.profile.default")}
 										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-							<div className="text-vscode-descriptionForeground text-sm mt-1">
-								{t("settings:terminal.profile.description")}
-							</div>
-						</SearchableSetting>
+										{profileNames.map((name) => (
+											<SelectItem key={name} value={name}>
+												{name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+								<div className="text-vscode-descriptionForeground text-sm mt-1">
+									{t("settings:terminal.profile.description")}
+								</div>
+							</SearchableSetting>
+						)}
 
 						<SearchableSetting
 							settingId="terminal-shell-integration-disabled"

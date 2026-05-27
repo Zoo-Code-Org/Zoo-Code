@@ -72,11 +72,13 @@ describe("TerminalSettings inline terminal profile (#119)", () => {
 		postMessageMock.mockClear()
 	})
 
+	// Inline execution is active when shell integration is disabled, which is when the
+	// profile picker is shown; render in that state for the picker-behavior tests.
 	const setup = (terminalProfile?: string) => {
 		const setCachedStateField = vi.fn()
 		render(
 			<TerminalSettings
-				terminalShellIntegrationDisabled={false}
+				terminalShellIntegrationDisabled={true}
 				terminalProfile={terminalProfile}
 				setCachedStateField={setCachedStateField}
 			/>,
@@ -122,5 +124,13 @@ describe("TerminalSettings inline terminal profile (#119)", () => {
 		fireEvent.click(screen.getByTestId("option-__default__"))
 
 		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", undefined)
+	})
+
+	it("hides the profile picker when inline execution is off (shell integration enabled)", () => {
+		render(<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />)
+		// The picker is inline-only: with shell integration enabled it must not render.
+		expect(screen.queryByTestId("option-__default__")).not.toBeInTheDocument()
+		// But the names are still requested on mount (cheap, harmless, keeps state warm).
+		expect(postMessageMock.mock.calls.map((c) => c[0]?.type)).toContain("requestTerminalProfiles")
 	})
 })
