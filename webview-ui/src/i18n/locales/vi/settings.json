@@ -452,6 +452,7 @@
 			"step3": "3. Hoặc tạo tài khoản dịch vụ với thông tin xác thực."
 		},
 		"googleCloudCredentials": "Thông tin xác thực Google Cloud",
+		"googleCloudCredentialsPathWarning": "Trường này mong đợi nội dung JSON của tệp khóa tài khoản dịch vụ, không phải đường dẫn. Nếu bạn có đường dẫn, hãy dán vào trường <strong>Đường dẫn tệp khóa Google Cloud</strong> bên dưới, hoặc xóa trường này và sử dụng biến môi trường <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Đường dẫn tệp khóa Google Cloud",
 		"googleCloudProjectId": "ID dự án Google Cloud",
 		"googleCloudRegion": "Vùng Google Cloud",

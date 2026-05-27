@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: Başarıyla bağlandı! Artık Zoo Code'u AI sağlayıcısı olarak kullanabilirsin.",
 			"disconnected": "Zoo Code: Başarıyla bağlantı kesildi."
 		}
+	},
+	"codeActions": {
+		"explain": "Zoo Code ile açıkla",
+		"fix": "Zoo Code ile düzelt",
+		"improve": "Zoo Code ile iyileştir",
+		"addToContext": "Zoo Code'a ekle"
 	}
 }

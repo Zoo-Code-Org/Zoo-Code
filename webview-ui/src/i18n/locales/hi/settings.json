@@ -452,6 +452,7 @@
 			"step3": "3. या क्रेडेंशियल्स के साथ एक सर्विस अकाउंट बनाएं।"
 		},
 		"googleCloudCredentials": "Google Cloud क्रेडेंशियल्स",
+		"googleCloudCredentialsPathWarning": "इस फ़ील्ड में सर्विस-अकाउंट कुंजी फ़ाइल की JSON सामग्री अपेक्षित है, पथ नहीं। यदि आपके पास पथ है, तो उसे नीचे दिए गए <strong>Google Cloud कुंजी फ़ाइल पथ</strong> फ़ील्ड में पेस्ट करें, या इस फ़ील्ड को खाली करें और <code>GOOGLE_APPLICATION_CREDENTIALS</code> पर्यावरण चर का उपयोग करें।",
 		"googleCloudKeyFile": "Google Cloud कुंजी फ़ाइल पथ",
 		"googleCloudProjectId": "Google Cloud प्रोजेक्ट ID",
 		"googleCloudRegion": "Google Cloud क्षेत्र",

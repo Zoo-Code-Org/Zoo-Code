@@ -274,5 +274,11 @@
 			"connected": "Zoo Code: Kết nối thành công! Bạn có thể sử dụng Zoo Code làm nhà cung cấp AI.",
 			"disconnected": "Zoo Code: Đã ngắt kết nối thành công."
 		}
+	},
+	"codeActions": {
+		"explain": "Giải thích bằng Zoo Code",
+		"fix": "Sửa bằng Zoo Code",
+		"improve": "Cải thiện bằng Zoo Code",
+		"addToContext": "Thêm vào Zoo Code"
 	}
 }

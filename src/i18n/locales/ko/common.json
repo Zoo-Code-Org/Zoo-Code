@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: 연결에 성공했습니다! 이제 Zoo Code를 AI 제공자로 사용할 수 있습니다.",
 			"disconnected": "Zoo Code: 연결이 해제되었습니다."
 		}
+	},
+	"codeActions": {
+		"explain": "Zoo Code로 설명",
+		"fix": "Zoo Code로 수정",
+		"improve": "Zoo Code로 개선",
+		"addToContext": "Zoo Code에 추가"
 	}
 }

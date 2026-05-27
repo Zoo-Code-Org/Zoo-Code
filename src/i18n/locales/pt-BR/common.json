@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: Conectado com sucesso! Agora você pode usar o Zoo Code como provedor de IA.",
 			"disconnected": "Zoo Code: Desconectado com sucesso."
 		}
+	},
+	"codeActions": {
+		"explain": "Explicar com Zoo Code",
+		"fix": "Corrigir com Zoo Code",
+		"improve": "Melhorar com Zoo Code",
+		"addToContext": "Adicionar ao Zoo Code"
 	}
 }

@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: Connectat correctament! Ara podeu utilitzar Zoo Code com a proveïdor d'IA.",
 			"disconnected": "Zoo Code: Desconnectat correctament."
 		}
+	},
+	"codeActions": {
+		"explain": "Explica amb Zoo Code",
+		"fix": "Corregeix amb Zoo Code",
+		"improve": "Millora amb Zoo Code",
+		"addToContext": "Afegeix a Zoo Code"
 	}
 }

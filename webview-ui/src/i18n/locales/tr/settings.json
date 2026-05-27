@@ -452,6 +452,7 @@
 			"step3": "3. Veya kimlik bilgileriyle bir hizmet hesabı oluşturun."
 		},
 		"googleCloudCredentials": "Google Cloud Kimlik Bilgileri",
+		"googleCloudCredentialsPathWarning": "Bu alan, bir yol değil, bir hizmet hesabı anahtar dosyasının JSON içeriğini bekler. Bir yolunuz varsa, aşağıdaki <strong>Google Cloud Anahtar Dosyası Yolu</strong> alanına yapıştırın veya bu alanı temizleyin ve <code>GOOGLE_APPLICATION_CREDENTIALS</code> ortam değişkenini kullanın.",
 		"googleCloudKeyFile": "Google Cloud Anahtar Dosyası Yolu",
 		"googleCloudProjectId": "Google Cloud Proje Kimliği",
 		"googleCloudRegion": "Google Cloud Bölgesi",

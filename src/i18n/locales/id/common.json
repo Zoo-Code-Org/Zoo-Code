@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: Berhasil terhubung! Kamu sekarang bisa menggunakan Zoo Code sebagai penyedia AI.",
 			"disconnected": "Zoo Code: Berhasil terputus."
 		}
+	},
+	"codeActions": {
+		"explain": "Jelaskan dengan Zoo Code",
+		"fix": "Perbaiki dengan Zoo Code",
+		"improve": "Tingkatkan dengan Zoo Code",
+		"addToContext": "Tambahkan ke Zoo Code"
 	}
 }

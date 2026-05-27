@@ -452,6 +452,7 @@
 			"step3": "3. または、認証情報付きのサービスアカウントを作成します。"
 		},
 		"googleCloudCredentials": "Google Cloud認証情報",
+		"googleCloudCredentialsPathWarning": "このフィールドは、パスではなく、サービスアカウントキーファイルのJSON内容を期待します。パスをお持ちの場合は、下の<strong>Google Cloudキーファイルパス</strong>フィールドに貼り付けるか、このフィールドをクリアして<code>GOOGLE_APPLICATION_CREDENTIALS</code>環境変数を使用してください。",
 		"googleCloudKeyFile": "Google Cloudキーファイルパス",
 		"googleCloudProjectId": "Google Cloudプロジェクトid",
 		"googleCloudRegion": "Google Cloudリージョン",

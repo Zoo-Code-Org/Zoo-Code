@@ -452,6 +452,7 @@
 			"step3": "3. Oder ein Servicekonto mit Anmeldeinformationen erstellen."
 		},
 		"googleCloudCredentials": "Google Cloud Anmeldedaten",
+		"googleCloudCredentialsPathWarning": "Dieses Feld erwartet den JSON-Inhalt einer Dienstkonto-Schlüsseldatei, keinen Pfad. Wenn Sie einen Pfad haben, fügen Sie ihn unten in das Feld <strong>Google Cloud Schlüsseldateipfad</strong> ein, oder leeren Sie dieses Feld und verwenden Sie die Umgebungsvariable <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Google Cloud Schlüsseldateipfad",
 		"googleCloudProjectId": "Google Cloud Projekt-ID",
 		"googleCloudRegion": "Google Cloud Region",
