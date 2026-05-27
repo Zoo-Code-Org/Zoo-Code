@@ -946,6 +946,28 @@ export const webviewMessageHandler = async (
 				}
 			}
 
+			// For zoo-gateway, the token may be stored in a separate zoo-gateway profile
+			// (not the currently active profile). Look it up so the model list populates
+			// even when zoo-gateway isn't the active provider.
+			let zooGatewayToken = apiConfiguration.zooSessionToken
+			let zooGatewayBaseUrl = apiConfiguration.zooGatewayBaseUrl
+
+			if (!zooGatewayToken) {
+				try {
+					const allProfiles = await provider.providerSettingsManager.listConfig()
+					const zooGatewayProfile = allProfiles.find((p) => p.apiProvider === "zoo-gateway")
+					if (zooGatewayProfile) {
+						const fullProfile = await provider.providerSettingsManager.getProfile({
+							name: zooGatewayProfile.name,
+						})
+						zooGatewayToken = fullProfile.zooSessionToken
+						zooGatewayBaseUrl = fullProfile.zooGatewayBaseUrl ?? zooGatewayBaseUrl
+					}
+				} catch (error) {
+					console.debug("Failed to look up zoo-gateway profile for model fetch:", error)
+				}
+			}
+
 			// Base candidates (only those handled by this aggregate fetcher)
 			const candidates: { key: RouterName; options: GetModelsOptions }[] = [
 				{ key: "openrouter", options: { provider: "openrouter" } },
@@ -965,6 +987,14 @@ export const webviewMessageHandler = async (
 					},
 				},
 				{ key: "vercel-ai-gateway", options: { provider: "vercel-ai-gateway" } },
+				{
+					key: "zoo-gateway",
+					options: {
+						provider: "zoo-gateway",
+						apiKey: zooGatewayToken,
+						baseUrl: zooGatewayBaseUrl,
+					},
+				},
 			]
 
 			// LiteLLM is conditional on baseUrl+apiKey
@@ -2438,6 +2468,47 @@ export const webviewMessageHandler = async (
 			try {
 				const { disconnectZooCode } = await import("../../services/zoo-code-auth")
 				await disconnectZooCode()
+
+				// Clear zooSessionToken from ALL provider profiles with apiProvider === "zoo-gateway".
+				// Profiles are user-renameable, so we cannot rely on a hardcoded name like "Zoo Gateway".
+				// We must scan all profiles and clear tokens from any that use the zoo-gateway provider.
+				try {
+					const allProfiles = await provider.providerSettingsManager.listConfig()
+					// Check if Zoo Gateway is the currently active profile by apiProvider identity
+					const currentSettings = provider.contextProxy.getProviderSettings()
+					const isZooGatewayActive = currentSettings.apiProvider === "zoo-gateway"
+					const currentApiConfigName = provider.contextProxy.getValues().currentApiConfigName
+
+					for (const entry of allProfiles) {
+						if (entry.apiProvider === "zoo-gateway") {
+							const profile = await provider.providerSettingsManager.getProfile({ name: entry.name })
+							const { zooSessionToken: _removed, ...cleanedProfile } = profile
+
+							// If this is the currently active profile, ALWAYS push to the in-memory
+							// handler — even when the persisted profile has already been cleared —
+							// because currentSettings (and therefore the live API handler) may still
+							// carry a stale token from before sign-out. Persisted-only profiles get
+							// rewritten only when they previously had a token to avoid no-op disk writes.
+							const isThisProfileActive = isZooGatewayActive && currentApiConfigName === entry.name
+
+							if (isThisProfileActive) {
+								await provider.upsertProviderProfile(entry.name, cleanedProfile, true)
+								provider.log(
+									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
+								)
+							} else if (profile.zooSessionToken) {
+								await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
+								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
+							}
+						}
+					}
+				} catch (profileError) {
+					// Log but don't fail the sign-out if profile cleanup fails
+					provider.log(
+						`[zooCodeSignOut] Failed to clear profile token: ${profileError instanceof Error ? profileError.message : String(profileError)}`,
+					)
+				}
+
 				await provider.postStateToWebview()
 			} catch (error) {
 				provider.log(
