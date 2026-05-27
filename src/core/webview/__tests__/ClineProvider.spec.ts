@@ -230,6 +230,14 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
 }))
 
+vi.mock("../../../services/zoo-code-auth", () => ({
+	getZooCodeBaseUrl: vi.fn(() => "https://www.zoocode.dev"),
+	getCachedZooCodeToken: vi.fn(),
+	handleAuthCallback: vi.fn(),
+	setZooCodeUserInfo: vi.fn(),
+	disconnectZooCode: vi.fn(),
+}))
+
 vi.mock("../../../shared/modes", () => ({
 	modes: [
 		{
@@ -3662,6 +3670,153 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			// Restore the spy
 			vi.mocked(fsUtils.fileExistsAtPath).mockRestore()
+		})
+	})
+
+	describe("Zoo Code auth profile sync", () => {
+		beforeEach(async () => {
+			const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+			vi.mocked(getCachedZooCodeToken).mockReturnValue("")
+		})
+
+		describe("handleZooCodeCallback", () => {
+			it("creates a Zoo Gateway profile when none exists", async () => {
+				vi.spyOn(provider, "getState").mockResolvedValue({
+					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
+				} as any)
+				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
+					apiProvider: "anthropic",
+				} as any)
+				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+					currentApiConfigName: "Anthropic",
+				} as any)
+				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([]),
+				}
+
+				await provider.handleZooCodeCallback("zoo_ext_token")
+
+				expect(upsertSpy).toHaveBeenCalledWith(
+					"Zoo Gateway",
+					expect.objectContaining({
+						apiProvider: "zoo-gateway",
+						zooSessionToken: "zoo_ext_token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+					false,
+				)
+			})
+
+			it("updates every zoo-gateway profile and activates only the active one", async () => {
+				vi.spyOn(provider, "getState").mockResolvedValue({
+					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
+				} as any)
+				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
+					apiProvider: "zoo-gateway",
+				} as any)
+				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+					currentApiConfigName: "Zoo Gateway",
+				} as any)
+				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
+				const saveConfig = vi.fn().mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([
+						{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
+						{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+					]),
+					getProfile: vi
+						.fn()
+						.mockResolvedValueOnce({
+							apiProvider: "zoo-gateway",
+							zooSessionToken: "old-token",
+							zooGatewayBaseUrl: "https://old.example/api/gateway/v1",
+						})
+						.mockResolvedValueOnce({
+							apiProvider: "zoo-gateway",
+							zooSessionToken: "old-token",
+						}),
+					saveConfig,
+				}
+
+				await provider.handleZooCodeCallback("new-token")
+
+				expect(upsertSpy).toHaveBeenCalledWith(
+					"Zoo Gateway",
+					expect.objectContaining({
+						zooSessionToken: "new-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+					true,
+				)
+				expect(saveConfig).toHaveBeenCalledWith(
+					"Backup Zoo",
+					expect.objectContaining({
+						zooSessionToken: "new-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+				)
+			})
+
+			it("logs and posts state when profile persistence fails", async () => {
+				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([]),
+				}
+
+				await provider.handleZooCodeCallback("zoo_ext_token")
+
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining("[handleZooCodeCallback] Failed to save zoo-gateway profile"),
+				)
+			})
+		})
+
+		describe("ensureZooGatewayProfileSeeded", () => {
+			it("does nothing when no cached auth token exists", async () => {
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn(),
+				}
+
+				await (provider as any).ensureZooGatewayProfileSeeded()
+
+				expect(handleSpy).not.toHaveBeenCalled()
+			})
+
+			it("skips seeding when every zoo-gateway profile already has the current token", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					getProfile: vi.fn().mockResolvedValue({ zooSessionToken: "current-token" }),
+				}
+
+				await (provider as any).ensureZooGatewayProfileSeeded()
+
+				expect(handleSpy).not.toHaveBeenCalled()
+			})
+
+			it("re-seeds when any zoo-gateway profile has a stale or missing token", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("fresh-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					getProfile: vi.fn().mockResolvedValue({ zooSessionToken: "stale-token" }),
+				}
+
+				await (provider as any).ensureZooGatewayProfileSeeded()
+
+				expect(handleSpy).toHaveBeenCalledWith("fresh-token")
+			})
 		})
 	})
 })
