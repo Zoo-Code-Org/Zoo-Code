@@ -11,7 +11,6 @@ import {
 import { ApiHandlerOptions } from "../../shared/api"
 import { getCachedZooCodeToken, getZooCodeBaseUrl } from "../../services/zoo-code-auth"
 import { Package } from "../../shared/package"
-import { getZooCodeBaseUrl } from "../../services/zoo-code-auth"
 
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"

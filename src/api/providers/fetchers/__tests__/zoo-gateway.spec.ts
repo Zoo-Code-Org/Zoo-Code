@@ -134,7 +134,6 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(Object.keys(models)).toEqual(["anthropic/claude-sonnet-4"])
 			expect(models["anthropic/claude-sonnet-4"].description).toBe("Claude Sonnet 4")
 		})
-
 		it("returns {} on a structurally broken response instead of throwing", async () => {
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
 			mockedAxios.get.mockResolvedValueOnce({ data: { unexpected: true } })
