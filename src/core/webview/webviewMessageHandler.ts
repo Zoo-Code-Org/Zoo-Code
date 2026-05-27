@@ -930,6 +930,7 @@ export const webviewMessageHandler = async (
 						poe: {},
 						deepseek: {},
 						"opencode-go": {},
+						"zoo-gateway": {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
