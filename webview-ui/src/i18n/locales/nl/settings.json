@@ -454,6 +454,7 @@
 			"step3": "3. Of maak een serviceaccount met referenties."
 		},
 		"googleCloudCredentials": "Google Cloud-referenties",
+		"googleCloudCredentialsPathWarning": "Dit veld verwacht de JSON-inhoud van een serviceaccount-sleutelbestand, geen pad. Als je een pad hebt, plak het dan in het veld <strong>Google Cloud-sleutelbestandspad</strong> hieronder, of leeg dit veld en gebruik de omgevingsvariabele <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Google Cloud-sleutelbestandspad",
 		"googleCloudProjectId": "Google Cloud-project-ID",
 		"googleCloudRegion": "Google Cloud-regio",
@@ -869,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "De extensie haalt automatisch de nieuwste lijst met modellen op van <serviceLink>{{serviceName}}</serviceLink>. Weet je niet welk model je moet kiezen? Zoo Code werkt het beste met <defaultModelLink>{{defaultModelId}}</defaultModelLink>.",
+		"automaticFetch": "De extensie haalt automatisch de nieuwste lijst met modellen op van <serviceLink>{{serviceName}}</serviceLink>. Weet je niet welk model je moet kiezen? Zoo Code werkt het beste met <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Je kunt ook zoeken op 'free' voor gratis opties die nu beschikbaar zijn.",
 		"label": "Model",
 		"searchPlaceholder": "Zoeken",
 		"noMatchFound": "Geen overeenkomsten gevonden",
