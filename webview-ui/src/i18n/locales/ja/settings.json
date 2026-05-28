@@ -454,7 +454,7 @@
 			"step3": "3. または、認証情報付きのサービスアカウントを作成します。"
 		},
 		"googleCloudCredentials": "Google Cloud認証情報",
-		"googleCloudCredentialsPathWarning": "πüôπü«πâòπéúπâ╝πâ½πâëπü»πÇüπâæπé╣πüºπü»πü¬πüÅπÇüπé╡πâ╝πâôπé╣πéóπé½πéªπâ│πâêπé¡πâ╝πâòπéíπéñπâ½πü«JSONσåàσ«╣πéÆµ£ƒσ╛àπüùπü╛πüÖπÇéπâæπé╣πéÆπüèµîüπüíπü«σá┤σÉêπü»πÇüΣ╕ïπü«<strong>Google Cloudπé¡πâ╝πâòπéíπéñπâ½πâæπé╣</strong>πâòπéúπâ╝πâ½πâëπü½Φ▓╝πéèΣ╗ÿπüæπéïπüïπÇüπüôπü«πâòπéúπâ╝πâ½πâëπéÆπé»πâ¬πéóπüùπüª<code>GOOGLE_APPLICATION_CREDENTIALS</code>τÆ░σóâσñëµò░πéÆΣ╜┐τö¿πüùπüªπüÅπüáπüòπüäπÇé",
+		"googleCloudCredentialsPathWarning": "このフィールドは、パスではなく、サービスアカウントキーファイルのJSON内容を期待します。パスをお持ちの場合は、下の<strong>Google Cloudキーファイルパス</strong>フィールドに貼り付けるか、このフィールドをクリアして<code>GOOGLE_APPLICATION_CREDENTIALS</code>環境変数を使用してください。",
 		"googleCloudKeyFile": "Google Cloudキーファイルパス",
 		"googleCloudProjectId": "Google Cloudプロジェクトid",
 		"googleCloudRegion": "Google Cloudリージョン",
@@ -870,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "µïíσ╝╡µ⌐ƒΦâ╜πü»<serviceLink>{{serviceName}}</serviceLink>πüºσê⌐τö¿σÅ»Φâ╜πü¬µ£Çµû░πü«πâóπâçπâ½πâ¬πé╣πâêπéÆΦç¬σïòτÜäπü½σÅûσ╛ùπüùπü╛πüÖπÇéπü⌐πü«πâóπâçπâ½πéÆΘü╕πü╢πü╣πüìπüïΦ┐╖πüúπüªπüäπéïσá┤σÉêπÇüZoo Codeπü»<defaultModelLink>{{defaultModelId}}</defaultModelLink>πüºµ£ÇΘü⌐πü½σïòΣ╜£πüùπü╛πüÖπÇéπü╛πüƒπÇüπÇîfreeπÇìπüºµñ£τ┤óπüÖπéïπü¿πÇüτÅ╛σ£¿σê⌐τö¿σÅ»Φâ╜πü¬τäíµûÖπé¬πâùπé╖πâºπâ│πéÆΦªïπüñπüæπéïπüôπü¿πüîπüºπüìπü╛πüÖπÇé",
+		"automaticFetch": "拡張機能は<serviceLink>{{serviceName}}</serviceLink>で利用可能な最新のモデルリストを自動的に取得します。どのモデルを選ぶべきか迷っている場合、Zoo Codeは<defaultModelLink>{{defaultModelId}}</defaultModelLink>で最適に動作します。また、「free」で検索すると、現在利用可能な無料オプションを見つけることができます。",
 		"label": "モデル",
 		"searchPlaceholder": "検索",
 		"noMatchFound": "一致するものが見つかりません",

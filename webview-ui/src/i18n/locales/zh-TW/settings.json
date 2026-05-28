@@ -464,7 +464,7 @@
 			"step3": "3. 或建立具有憑證的服務帳戶。"
 		},
 		"googleCloudCredentials": "Google Cloud 憑證",
-		"googleCloudCredentialsPathWarning": "µ¡ñµ¼äΣ╜ìΘ£ÇΦªüµ£ìσïÖσ╕│ΦÖƒΘçæΘæ░µ¬öµíêτÜä JSON σàºσ«╣∩╝îΦÇîΣ╕ìµÿ»Φ╖»σ╛æπÇéσªéµ₧£µé¿µ£ëΦ╖»σ╛æ∩╝îΦ½ïσ░çσà╢Φ▓╝σê░Σ╕ïµû╣τÜä<strong>Google Cloud ΘçæΘæ░µ¬öµíêΦ╖»σ╛æ</strong>µ¼äΣ╜ì∩╝îµêûµ╕àΘÖñµ¡ñµ¼äΣ╜ìΣ╕ªΣ╜┐τö¿ <code>GOOGLE_APPLICATION_CREDENTIALS</code> τÆ░σóâΦ«èµò╕πÇé",
+		"googleCloudCredentialsPathWarning": "此欄位需要服務帳號金鑰檔案的 JSON 內容，而不是路徑。如果您有路徑，請將其貼到下方的<strong>Google Cloud 金鑰檔案路徑</strong>欄位，或清除此欄位並使用 <code>GOOGLE_APPLICATION_CREDENTIALS</code> 環境變數。",
 		"googleCloudKeyFile": "Google Cloud 金鑰檔案路徑",
 		"googleCloudProjectId": "Google Cloud 專案 ID",
 		"googleCloudRegion": "Google Cloud 區域",
@@ -880,7 +880,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "µ¡ñµô┤σààσèƒΦâ╜µ£âΦç¬σïòσ╛₧ <serviceLink>{{serviceName}}</serviceLink> σÅûσ╛ùµ£Çµû░τÜäσÅ»τö¿µ¿íσ₧ïµ╕àσû«πÇéσªéµ₧£Σ╕ìτó║σ«ÜΦªüΘü╕σô¬σÇïµ¿íσ₧ï∩╝îσ╗║Φ¡░Σ╜┐τö¿ <defaultModelLink>{{defaultModelId}}</defaultModelLink>∩╝îΘÇÖµÿ»Φêç Zoo Code µ£ÇΣ╜│µÉ¡ΘàìτÜäµ¿íσ₧ïπÇéµé¿Σ╣ƒσÅ»Σ╗ÑµÉ£σ░ïπÇîfreeπÇìΣ╛åµ¬óΦªûτ¢«σëìσÅ»τö¿τÜäσàìΦ▓╗Θü╕ΘáàπÇé",
+		"automaticFetch": "此擴充功能會自動從 <serviceLink>{{serviceName}}</serviceLink> 取得最新的可用模型清單。如果不確定要選哪個模型，建議使用 <defaultModelLink>{{defaultModelId}}</defaultModelLink>，這是與 Zoo Code 最佳搭配的模型。您也可以搜尋「free」來檢視目前可用的免費選項。",
 		"label": "模型",
 		"searchPlaceholder": "搜尋",
 		"noMatchFound": "找不到符合的結果",

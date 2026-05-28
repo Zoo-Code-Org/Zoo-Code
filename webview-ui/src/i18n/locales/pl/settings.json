@@ -454,7 +454,7 @@
 			"step3": "3. Lub utworzyć konto usługi z poświadczeniami."
 		},
 		"googleCloudCredentials": "Poświadczenia Google Cloud",
-		"googleCloudCredentialsPathWarning": "To pole oczekuje zawarto┼¢ci JSON pliku klucza konta us┼éugi, a nie ┼¢cie┼╝ki. Je┼¢li masz ┼¢cie┼╝k─Ö, wklej j─à do pola <strong>┼Ücie┼╝ka pliku klucza Google Cloud</strong> poni┼╝ej lub wyczy┼¢─ç to pole i u┼╝yj zmiennej ┼¢rodowiskowej <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
+		"googleCloudCredentialsPathWarning": "To pole oczekuje zawartości JSON pliku klucza konta usługi, a nie ścieżki. Jeśli masz ścieżkę, wklej ją do pola <strong>Ścieżka pliku klucza Google Cloud</strong> poniżej lub wyczyść to pole i użyj zmiennej środowiskowej <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ścieżka pliku klucza Google Cloud",
 		"googleCloudProjectId": "ID projektu Google Cloud",
 		"googleCloudRegion": "Region Google Cloud",
@@ -870,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Rozszerzenie automatycznie pobiera najnowsz─à list─Ö modeli dost─Öpnych w <serviceLink>{{serviceName}}</serviceLink>. Je┼¢li nie jeste┼¢ pewien, kt├│ry model wybra─ç, Zoo Code dzia┼éa najlepiej z <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Mo┼╝esz r├│wnie┼╝ wyszuka─ç \"free\", aby znale┼║─ç obecnie dost─Öpne opcje bezp┼éatne.",
+		"automaticFetch": "Rozszerzenie automatycznie pobiera najnowszą listę modeli dostępnych w <serviceLink>{{serviceName}}</serviceLink>. Jeśli nie jesteś pewien, który model wybrać, Zoo Code działa najlepiej z <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Możesz również wyszukać \"free\", aby znaleźć obecnie dostępne opcje bezpłatne.",
 		"label": "Model",
 		"searchPlaceholder": "Wyszukaj",
 		"noMatchFound": "Nie znaleziono dopasowań",

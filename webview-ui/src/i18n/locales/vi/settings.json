@@ -454,7 +454,7 @@
 			"step3": "3. Hoặc tạo tài khoản dịch vụ với thông tin xác thực."
 		},
 		"googleCloudCredentials": "Thông tin xác thực Google Cloud",
-		"googleCloudCredentialsPathWarning": "Tr╞░ß╗¥ng n├áy mong ─æß╗úi nß╗Öi dung JSON cß╗ºa tß╗çp kh├│a t├ái khoß║ún dß╗ïch vß╗Ñ, kh├┤ng phß║úi ─æ╞░ß╗¥ng dß║½n. Nß║┐u bß║ín c├│ ─æ╞░ß╗¥ng dß║½n, h├úy d├ín v├áo tr╞░ß╗¥ng <strong>─É╞░ß╗¥ng dß║½n tß╗çp kh├│a Google Cloud</strong> b├¬n d╞░ß╗¢i, hoß║╖c x├│a tr╞░ß╗¥ng n├áy v├á sß╗¡ dß╗Ñng biß║┐n m├┤i tr╞░ß╗¥ng <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
+		"googleCloudCredentialsPathWarning": "Trường này mong đợi nội dung JSON của tệp khóa tài khoản dịch vụ, không phải đường dẫn. Nếu bạn có đường dẫn, hãy dán vào trường <strong>Đường dẫn tệp khóa Google Cloud</strong> bên dưới, hoặc xóa trường này và sử dụng biến môi trường <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Đường dẫn tệp khóa Google Cloud",
 		"googleCloudProjectId": "ID dự án Google Cloud",
 		"googleCloudRegion": "Vùng Google Cloud",
@@ -870,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Tiß╗çn ├¡ch mß╗ƒ rß╗Öng tß╗▒ ─æß╗Öng lß║Ñy danh s├ích mß╗¢i nhß║Ñt c├íc m├┤ h├¼nh c├│ sß║╡n tr├¬n <serviceLink>{{serviceName}}</serviceLink>. Nß║┐u bß║ín kh├┤ng chß║»c chß║»n n├¬n chß╗ìn m├┤ h├¼nh n├áo, Zoo Code hoß║ít ─æß╗Öng tß╗æt nhß║Ñt vß╗¢i <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Bß║ín c┼⌐ng c├│ thß╗â thß╗¡ t├¼m kiß║┐m \"free\" cho c├íc t├╣y chß╗ìn miß╗àn ph├¡ hiß╗çn c├│.",
+		"automaticFetch": "Tiện ích mở rộng tự động lấy danh sách mới nhất các mô hình có sẵn trên <serviceLink>{{serviceName}}</serviceLink>. Nếu bạn không chắc chắn nên chọn mô hình nào, Zoo Code hoạt động tốt nhất với <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Bạn cũng có thể thử tìm kiếm \"free\" cho các tùy chọn miễn phí hiện có.",
 		"label": "Mô hình",
 		"searchPlaceholder": "Tìm kiếm",
 		"noMatchFound": "Không tìm thấy kết quả",
