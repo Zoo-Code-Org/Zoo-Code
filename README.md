@@ -83,7 +83,7 @@ ship ripgrep under `@vscode/ripgrep-universal`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-    </details>
+  </details>
 
 ---
 

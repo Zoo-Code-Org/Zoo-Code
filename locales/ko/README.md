@@ -30,15 +30,11 @@
 
 Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/VxfP4Vx3gX)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
 
-## v3.55.0의 새로운 기능
+## v3.55.1의 새로운 기능
 
-**Zoo Code의 첫 기능 릴리스**는 Marketplace handoff를 바탕으로 새 provider, Roo Code의 upstream sunset merge, 그리고 채팅, provider 설정, rendering 전반의 사용자 체감 수정 사항을 담고 있어요.
+**이번 핫픽스 릴리스는** ripgrep를 `@vscode/ripgrep-universal`로 제공하는 최신 VS Code에서 프롬프트 실행을 복구합니다.
 
-- Xiaomi MiMo를 first-class API provider로 추가했어요.
-- Roo Code의 upstream sunset merge와 관련 platform 업데이트를 반영했어요.
-- MCP sign-in 문구, Gemini의 full-tool 요청, 지원하지 않는 모델에 대한 OpenAI temperature 처리 문제를 수정했어요.
-- Markdown single-tilde 렌더링과 diagnostics temp-file 이름을 수정했어요.
-- Z.AI, GLM, Vertex AI의 provider 기본값과 region 지원 범위를 개선했어요.
+- ripgrep 패키지 이름 변경 이후 VS Code 1.122.0+에서 API 요청이 무한 로딩에 빠지는 문제를 수정했어요.
 
 <details>
   <summary>🌐 사용 가능한 언어</summary>

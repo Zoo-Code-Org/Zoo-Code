@@ -30,15 +30,11 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.55.0
+## Điểm mới trong v3.55.1
 
-**Bản phát hành tính năng đầu tiên của Zoo Code** tiếp tục phần handoff lên Marketplace với một provider mới, merge upstream sunset của Roo Code và một loạt bản sửa lỗi mà người dùng cảm nhận được ở chat, cài đặt provider và phần render.
+**Bản hotfix này** khôi phục việc chạy prompt trên các phiên bản VS Code mới đóng gói ripgrep dưới tên `@vscode/ripgrep-universal`.
 
-- Thêm Xiaomi MiMo như một provider API hạng nhất.
-- Tích hợp merge upstream sunset của Roo Code cùng các cập nhật nền tảng liên quan.
-- Sửa nội dung sign-in của MCP, các request Gemini với đầy đủ tool và cách xử lý temperature của OpenAI cho những model không hỗ trợ.
-- Sửa render Markdown với single tilde và cách đặt tên file tạm cho diagnostics.
-- Cải thiện giá trị mặc định của provider và độ phủ region cho Z.AI, GLM và Vertex AI.
+- Sửa lỗi request API bị treo vô thời hạn trên VS Code 1.122.0+ sau khi gói ripgrep được đổi tên.
 
 <details>
   <summary>🌐 Các ngôn ngữ có sẵn</summary>

@@ -30,15 +30,11 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
-## v3.55.0'daki Yenilikler
+## v3.55.1'daki Yenilikler
 
-**Zoo Code'un ilk özellik sürümü** Marketplace handoff'unu yeni bir sağlayıcı, Roo Code'dan gelen upstream sunset merge'i ve sohbet, sağlayıcı ayarları ile render tarafındaki kullanıcıya görünen düzeltmelerle ileri taşıyor.
+**Bu hotfix sürümü** ripgrep'i `@vscode/ripgrep-universal` altında dağıtan yeni VS Code sürümlerinde prompt çalıştırmayı yeniden düzeltir.
 
-- Xiaomi MiMo, birinci sınıf bir API sağlayıcısı olarak eklendi.
-- Roo Code upstream sunset merge'i ve ilgili platform güncellemeleri içeri alındı.
-- MCP oturum açma metni, Gemini'nin tam araç seti istekleri ve desteklenmeyen modeller için OpenAI temperature işleme düzeltildi.
-- Markdown single-tilde renderingi ve diagnostics temp-file adlandırması düzeltildi.
-- Z.AI, GLM ve Vertex AI için sağlayıcı varsayılanları ile bölge kapsamı iyileştirildi.
+- ripgrep paketinin yeniden adlandırılmasından sonra VS Code 1.122.0+ üzerinde sonsuza kadar bekleyen API isteklerini düzeltir.
 
 <details>
   <summary>🌐 Mevcut diller</summary>

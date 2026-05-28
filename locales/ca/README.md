@@ -30,15 +30,11 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.55.0
+## Novetats a la v3.55.1
 
-**La primera release de funcionalitats de Zoo Code** es basa en el traspàs al Marketplace amb un proveïdor nou, la fusió upstream del sunset de Roo Code i una ronda de correccions visibles per a l'usuari al xat, la configuració dels proveïdors i el renderitzat.
+**Aquesta versió hotfix** restaura l'execució dels prompts a les versions noves de VS Code que inclouen ripgrep sota `@vscode/ripgrep-universal`.
 
-- S'ha afegit Xiaomi MiMo com a proveïdor d'API de primer nivell.
-- S'ha incorporat la fusió upstream del sunset de Roo Code i les actualitzacions relacionades de la plataforma.
-- S'han corregit els textos de l'inici de sessió d'MCP, les sol·licituds completes d'eines de Gemini i la gestió de la temperatura d'OpenAI per a models que no l'admeten.
-- S'ha corregit el renderitzat del text amb una sola titlla a Markdown i el nom dels fitxers temporals de diagnòstic.
-- S'han millorat els valors per defecte dels proveïdors i la cobertura de regions per a Z.AI, GLM i Vertex AI.
+- S'ha corregit el bloqueig indefinit de les sol·licituds d'API a VS Code 1.122.0+ després del canvi de paquet de ripgrep.
 
 <details>
   <summary>🌐 Idiomes disponibles</summary>

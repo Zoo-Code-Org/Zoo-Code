@@ -30,15 +30,11 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.55.0 新增内容
+## v3.55.1 新增内容
 
-**Zoo Code 首个功能版本** 在 Marketplace 交接的基础上，带来了一个新提供商、Roo Code 的上游 sunset merge，以及一轮覆盖聊天、提供商设置和渲染的用户可见修复。
+**这个热修复版本** 恢复了在使用 `@vscode/ripgrep-universal` 打包 ripgrep 的新版本 VS Code 上的提示执行。
 
-- 新增 Xiaomi MiMo 一等 API 提供商支持。
-- 合入 Roo Code 的上游 sunset merge 及相关平台更新。
-- 修复 MCP 登录文案、Gemini 全工具集请求，以及 OpenAI 在不支持 temperature 的模型上的处理。
-- 修复 Markdown 单波浪线渲染和诊断临时文件命名。
-- 改进 Z.AI、GLM 和 Vertex AI 的提供商默认值与区域覆盖。
+- 修复 ripgrep 包重命名后，VS Code 1.122.0+ 中 API 请求无限转圈的问题。
 
 <details>
   <summary>🌐 可用语言</summary>
