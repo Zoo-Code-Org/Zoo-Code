@@ -217,7 +217,12 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				}
 			}
 		} catch (error) {
-			void surfaceGatewayApiError(error)
+			void surfaceGatewayApiError(error).catch((surfaceError) => {
+				console.error(
+					"Failed to surface Zoo Gateway error:",
+					surfaceError instanceof Error ? surfaceError.message : surfaceError,
+				)
+			})
 			throw error
 		}
 	}
@@ -243,7 +248,12 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			const response = await this.client.chat.completions.create(requestOptions)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
-			void surfaceGatewayApiError(error)
+			void surfaceGatewayApiError(error).catch((surfaceError) => {
+				console.error(
+					"Failed to surface Zoo Gateway error:",
+					surfaceError instanceof Error ? surfaceError.message : surfaceError,
+				)
+			})
 			if (error instanceof Error) {
 				throw new Error(`Zoo Gateway completion error: ${error.message}`)
 			}

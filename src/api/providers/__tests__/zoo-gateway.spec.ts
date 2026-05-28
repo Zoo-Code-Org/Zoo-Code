@@ -56,9 +56,11 @@ vitest.mock("../fetchers/modelCache", () => ({
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
 
+const mockGetCachedZooCodeToken = vitest.hoisted(() => vitest.fn<() => string | undefined>(() => undefined))
+
 vitest.mock("../../../services/zoo-code-auth", () => ({
 	getZooCodeBaseUrl: vitest.fn(() => "https://www.zoocode.dev"),
-	getCachedZooCodeToken: vitest.fn(() => undefined),
+	getCachedZooCodeToken: mockGetCachedZooCodeToken,
 	clearZooCodeToken: vitest.fn(async () => undefined),
 }))
 
@@ -91,6 +93,7 @@ describe("ZooGatewayHandler", () => {
 
 	beforeEach(() => {
 		vitest.clearAllMocks()
+		mockGetCachedZooCodeToken.mockReturnValue(undefined)
 		mockCreate.mockClear()
 		showErrorMessage.mockReset()
 		showErrorMessage.mockResolvedValue(undefined)
@@ -124,6 +127,21 @@ describe("ZooGatewayHandler", () => {
 			expect(OpenAI).toHaveBeenCalledWith(
 				expect.objectContaining({
 					apiKey: "not-provided",
+				}),
+			)
+		})
+
+		it("prefers the secret-storage cache over a persisted profile token", () => {
+			mockGetCachedZooCodeToken.mockReturnValue("zoo_ext_cached_token")
+
+			new ZooGatewayHandler({
+				zooSessionToken: "zoo_ext_stale_profile_token",
+				zooGatewayModelId: mockOptions.zooGatewayModelId,
+			})
+
+			expect(OpenAI).toHaveBeenCalledWith(
+				expect.objectContaining({
+					apiKey: "zoo_ext_cached_token",
 				}),
 			)
 		})
