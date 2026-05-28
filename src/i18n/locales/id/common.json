@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: Token autentikasi yang diterima tidak valid.",
 			"token_verification_failed": "Zoo Code: Verifikasi token gagal.",
 			"invalid_token": "Zoo Code: Token tidak valid.",
-			"could_not_verify_token": "Zoo Code: Tidak dapat memverifikasi token."
+			"could_not_verify_token": "Zoo Code: Tidak dapat memverifikasi token.",
+			"session_expired": "Sesi Zoo Code kedaluwarsa. Silakan masuk lagi untuk melanjutkan menggunakan Zoo Gateway.",
+			"out_of_credits": "Zoo Gateway: kredit tidak cukup. Tambahkan kredit untuk melanjutkan.",
+			"account_unavailable": "Zoo Gateway: akun Anda sedang tidak tersedia. Silakan hubungi dukungan.",
+			"budget_exceeded": "Zoo Gateway: anggaran penggunaan tercapai. Tunggu reset anggaran atau isi ulang."
 		},
 		"info": {
 			"connected": "Zoo Code: Berhasil terhubung! Kamu sekarang bisa menggunakan Zoo Code sebagai penyedia AI.",
 			"disconnected": "Zoo Code: Berhasil terputus."
+		},
+		"buttons": {
+			"sign_in": "Masuk",
+			"add_credits": "Tambah Kredit",
+			"contact_support": "Hubungi Dukungan"
 		}
 	},
 	"codeActions": {
