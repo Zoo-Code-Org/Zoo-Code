@@ -108,6 +108,24 @@ export const anthropicModels = {
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
 	},
+	"claude-opus-4-8": {
+		maxTokens: 128_000, // Overridden to 8k if `enableReasoningEffort` is false.
+		contextWindow: 1_000_000, // 1M context window native (no beta header required, same as 4.7)
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 5.0, // $5 per million input tokens (regular tier)
+		outputPrice: 25.0, // $25 per million output tokens (regular tier)
+		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheReadsPrice: 0.5, // $0.50 per million tokens
+		// 4.8 inherits the adaptive-thinking model introduced in 4.7 — no breaking
+		// API changes. supportsReasoningBudget is kept true so the existing token-cap
+		// handling and max-token overrides behave identically.
+		supportsReasoningBudget: true,
+		// 4.8 still rejects budget_tokens-style thinking payloads, so the UI must
+		// expose reasoning as a binary on/off toggle on this provider path.
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+	},
 	"claude-opus-4-5-20251101": {
 		maxTokens: 32_000, // Overridden to 8k if `enableReasoningEffort` is false.
 		contextWindow: 200_000,
