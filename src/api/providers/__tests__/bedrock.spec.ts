@@ -1507,5 +1507,40 @@ describe("AwsBedrockHandler", () => {
 			// 4.6 must still receive temperature.
 			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
 		})
+
+		describe("isAdaptiveThinkingModel detection", () => {
+			// Unit-cover the private guard directly (same pattern the suite uses for
+			// parseBaseModelId / getPrefixForRegion). This exercises all four model
+			// patterns — including the future-proof sonnet-4-7 / sonnet-4-8 branches
+			// that have no registry entry yet — plus negative cases and prefix stripping.
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+			const isAdaptiveThinkingModel = (handler as any).isAdaptiveThinkingModel.bind(handler)
+
+			it("returns true for all adaptive-thinking model patterns (opus/sonnet 4.7 and 4.8)", () => {
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-7")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-8")).toBe(true)
+				// Future-proof Sonnet patterns — guarded even before a registry entry exists.
+				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-7")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-8")).toBe(true)
+			})
+
+			it("returns true when the id carries a cross-region or global prefix", () => {
+				expect(isAdaptiveThinkingModel("us.anthropic.claude-opus-4-8")).toBe(true)
+				expect(isAdaptiveThinkingModel("eu.anthropic.claude-sonnet-4-7")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-4-8")).toBe(true)
+			})
+
+			it("returns false for older / non-adaptive models", () => {
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-6-v1")).toBe(false)
+				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-6")).toBe(false)
+				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
+				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
+			})
+		})
 	})
 })
