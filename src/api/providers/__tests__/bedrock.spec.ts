@@ -1464,5 +1464,48 @@ describe("AwsBedrockHandler", () => {
 			})
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
+
+		it("completePrompt should omit temperature for Claude Opus 4.8 (non-stream path)", async () => {
+			// Regression guard for the non-stream path: completePrompt must guard
+			// temperature the same way createMessage does, otherwise adaptive-thinking
+			// models (4.7/4.8) return a 400 from Bedrock.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const opus48Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-8",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await opus48Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as any
+
+			// 4.8 must NOT receive temperature in the non-stream inferenceConfig.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("completePrompt should still send temperature for older Claude Opus 4.6 (non-stream path)", async () => {
+			// 4.6 and earlier still accept sampling parameters, so completePrompt must
+			// continue to send temperature for them.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const opus46Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-6-v1",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await opus46Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as any
+
+			// 4.6 must still receive temperature.
+			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
+		})
 	})
 })

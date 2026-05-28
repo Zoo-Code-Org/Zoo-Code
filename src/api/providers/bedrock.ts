@@ -297,6 +297,30 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		this.client = new BedrockRuntimeClient(clientConfig)
 	}
 
+	/**
+	 * Detect models that require the adaptive-thinking API contract.
+	 *
+	 * Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
+	 * in Opus 4.8 / Sonnet 4.8, Anthropic removed sampling parameters
+	 * (temperature/top_p/top_k) and replaced budget_tokens-based thinking with
+	 * `thinking.type: "adaptive"` plus `output_config.effort`. The migration guide
+	 * from 4.7 → 4.8 confirms there are no further breaking API changes, so a single
+	 * guard matches both generations. Shared by createMessage and completePrompt so
+	 * both request paths omit temperature for these models (sending it causes a 400).
+	 *
+	 * Accepts a model ID (with or without a cross-region/global prefix) and strips
+	 * the prefix via parseBaseModelId before matching.
+	 */
+	private isAdaptiveThinkingModel(modelId: string): boolean {
+		const baseModelId = this.parseBaseModelId(modelId)
+		return (
+			baseModelId.includes("opus-4-7") ||
+			baseModelId.includes("opus-4-8") ||
+			baseModelId.includes("sonnet-4-7") ||
+			baseModelId.includes("sonnet-4-8")
+		)
+	}
+
 	// Helper to guess model info from custom modelId string if not in bedrockModels
 	private guessModelInfoFromId(modelId: string): Partial<ModelInfo> {
 		// Define a mapping for model ID patterns and their configurations
@@ -392,19 +416,11 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		let additionalModelRequestFields: BedrockAdditionalModelFields | undefined
 		let thinkingEnabled = false
 
-		// Detect models that require the adaptive-thinking API contract.
-		// Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
-		// in Opus 4.8 / Sonnet 4.8, Anthropic removed sampling parameters
-		// (temperature/top_p/top_k) and replaced budget_tokens-based thinking with
-		// `thinking.type: "adaptive"` plus `output_config.effort`. The migration guide
-		// from 4.7 → 4.8 confirms there are no further breaking API changes, so we
-		// keep a single guard here that matches both generations.
+		// Detect models that require the adaptive-thinking API contract (Opus/Sonnet
+		// 4.7 and 4.8). See isAdaptiveThinkingModel for details. The same guard is
+		// reused in completePrompt so both request paths stay consistent.
 		const baseModelId = this.parseBaseModelId(modelConfig.id)
-		const isAdaptiveThinkingModel =
-			baseModelId.includes("opus-4-7") ||
-			baseModelId.includes("opus-4-8") ||
-			baseModelId.includes("sonnet-4-7") ||
-			baseModelId.includes("sonnet-4-8")
+		const isAdaptiveThinkingModel = this.isAdaptiveThinkingModel(modelConfig.id)
 
 		// Determine if thinking should be enabled
 		// metadata?.thinking?.enabled: Explicitly enabled through API metadata (direct request)
@@ -788,7 +804,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 			const inferenceConfig: BedrockInferenceConfig = {
 				maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
-				temperature: modelConfig.temperature ?? (this.options.modelTemperature as number),
+				// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
+				// sending temperature causes a 400 error. Guard the non-stream path the
+				// same way createMessage does so completePrompt also works for these models.
+				...(this.isAdaptiveThinkingModel(modelConfig.id)
+					? {}
+					: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
 			}
 
 			// For completePrompt, use a unique conversation ID based on the prompt
