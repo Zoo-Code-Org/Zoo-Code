@@ -154,9 +154,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
-				// Some OpenAI-Compatible models (e.g. claude-opus-4-7) reject `temperature` as
-				// deprecated/unsupported. Honor the model's `supportsTemperature` flag and omit it
-				// when explicitly set to false (undefined still sends temperature, preserving behavior).
+				// Some OpenAI-Compatible models (e.g. claude-opus-4-7, claude-opus-4-8) reject
+				// `temperature` as deprecated/unsupported. Honor the model's `supportsTemperature`
+				// flag and omit it when explicitly set to false (undefined still sends temperature,
+				// preserving behavior).
 				...(modelInfo.supportsTemperature !== false && {
 					temperature:
 						this.options.modelTemperature ?? (deepseekReasoner ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),

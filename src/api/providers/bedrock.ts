@@ -392,10 +392,19 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		let additionalModelRequestFields: BedrockAdditionalModelFields | undefined
 		let thinkingEnabled = false
 
-		// Detect model generation for API compatibility
-		// Claude 4.7+ removed sampling params (temperature/top_p/top_k) and uses adaptive thinking
+		// Detect models that require the adaptive-thinking API contract.
+		// Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
+		// in Opus 4.8 / Sonnet 4.8, Anthropic removed sampling parameters
+		// (temperature/top_p/top_k) and replaced budget_tokens-based thinking with
+		// `thinking.type: "adaptive"` plus `output_config.effort`. The migration guide
+		// from 4.7 → 4.8 confirms there are no further breaking API changes, so we
+		// keep a single guard here that matches both generations.
 		const baseModelId = this.parseBaseModelId(modelConfig.id)
-		const isGen47Model = baseModelId.includes("opus-4-7") || baseModelId.includes("sonnet-4-7")
+		const isAdaptiveThinkingModel =
+			baseModelId.includes("opus-4-7") ||
+			baseModelId.includes("opus-4-8") ||
+			baseModelId.includes("sonnet-4-7") ||
+			baseModelId.includes("sonnet-4-8")
 
 		// Determine if thinking should be enabled
 		// metadata?.thinking?.enabled: Explicitly enabled through API metadata (direct request)
@@ -408,9 +417,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		if ((isThinkingExplicitlyEnabled || isThinkingEnabledBySettings) && modelConfig.info.supportsReasoningBudget) {
 			thinkingEnabled = true
-			if (isGen47Model) {
-				// Claude 4.7+ uses adaptive thinking with effort levels — budget_tokens causes 400 error
-				// display: "summarized" surfaces thinking content in Zoo Code UI
+			if (isAdaptiveThinkingModel) {
+				// Claude 4.7+ (incl. 4.8) uses adaptive thinking with effort levels —
+				// budget_tokens causes a 400 error.
+				// display: "summarized" surfaces thinking content in Zoo Code UI.
+				// effort "xhigh" remains the recommended level for agentic coding tasks
+				// across both 4.7 and 4.8 (4.8 changed the API default to "high" but
+				// the model continues to honour "xhigh" for deeper reasoning).
 				additionalModelRequestFields = {
 					thinking: { type: "adaptive", display: "summarized" },
 					output_config: { effort: "xhigh" },
@@ -432,8 +445,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 		const inferenceConfig: BedrockInferenceConfig = {
 			maxTokens: modelConfig.maxTokens || (modelConfig.info.maxTokens as number),
-			// Claude 4.7+ removed temperature parameter entirely — causes 400 error if sent
-			...(isGen47Model
+			// Claude 4.7+ (including 4.8) removed sampling parameters entirely —
+			// sending temperature causes a 400 error.
+			...(isAdaptiveThinkingModel
 				? {}
 				: { temperature: modelConfig.temperature ?? (this.options.modelTemperature as number) }),
 		}
