@@ -1,3 +1,4 @@
+import { useEffect, useMemo } from "react"
 import {
 	type ProviderSettings,
 	type OrganizationAllowList,
@@ -20,6 +21,32 @@ type ZooGatewayProps = {
 	simplifySettings?: boolean
 }
 
+function isSonnet45ModelId(id: string) {
+	return /sonnet-4[.-]5|sonnet-4\.5/i.test(id)
+}
+
+function pickZooGatewayDefaultModelId(modelIds: string[]) {
+	if (modelIds.length === 0) {
+		return zooGatewayDefaultModelId
+	}
+
+	const sonnet45 = modelIds.filter(isSonnet45ModelId)
+	if (sonnet45.length > 0) {
+		return (
+			sonnet45.find((id) => id === "anthropic/claude-sonnet-4.5") ??
+			sonnet45.find((id) => id.includes("claude-sonnet-4.5")) ??
+			sonnet45[0]
+		)
+	}
+
+	const sonnet4 = modelIds.filter((id) => /claude/i.test(id) && /sonnet/i.test(id) && /sonnet-4/i.test(id))
+	if (sonnet4.length > 0) {
+		return sonnet4[0]
+	}
+
+	return modelIds[0]
+}
+
 export const ZooGateway = ({
 	apiConfiguration,
 	setApiConfigurationField,
@@ -33,13 +60,25 @@ export const ZooGateway = ({
 		useExtensionState()
 
 	const authUrl = getZooCodeAuthUrl(uriScheme, zooCodeBaseUrl, deviceName)
-	// Resolve the dashboard link off the same base URL the auth/gateway flow uses,
-	// so non-prod environments (staging/dev) point at the matching dashboard.
 	const resolvedDashboardBase = zooCodeBaseUrl?.replace(/\/$/, "") || "https://www.zoocode.dev"
+
+	const zooModels = useMemo(() => routerModels?.["zoo-gateway"] ?? {}, [routerModels])
+	const modelIds = useMemo(() => Object.keys(zooModels), [zooModels])
+	const resolvedDefaultModelId = useMemo(() => pickZooGatewayDefaultModelId(modelIds), [modelIds])
+
+	useEffect(() => {
+		if (modelIds.length === 0) {
+			return
+		}
+
+		const current = apiConfiguration.zooGatewayModelId
+		if (!current || !modelIds.includes(current)) {
+			setApiConfigurationField("zooGatewayModelId", resolvedDefaultModelId)
+		}
+	}, [apiConfiguration.zooGatewayModelId, modelIds, resolvedDefaultModelId, setApiConfigurationField])
 
 	return (
 		<>
-			{/* Zoo Code Authentication Section */}
 			<div className="flex flex-col gap-1 rounded-md border border-vscode-panel-border p-2">
 				<div className="flex items-center justify-between">
 					<label className="block text-sm font-medium">{t("settings:providers.zooGateway.account")}</label>
@@ -72,8 +111,8 @@ export const ZooGateway = ({
 			<ModelPicker
 				apiConfiguration={apiConfiguration}
 				setApiConfigurationField={setApiConfigurationField}
-				defaultModelId={zooGatewayDefaultModelId}
-				models={routerModels?.["zoo-gateway"] ?? {}}
+				defaultModelId={resolvedDefaultModelId}
+				models={zooModels}
 				modelIdKey="zooGatewayModelId"
 				serviceName="Zoo Gateway"
 				serviceUrl={`${resolvedDashboardBase}/dashboard/models`}
