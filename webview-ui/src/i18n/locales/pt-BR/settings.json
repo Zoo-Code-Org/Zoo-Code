@@ -314,6 +314,8 @@
 		"getOpenRouterApiKey": "Obter chave de API OpenRouter",
 		"vercelAiGatewayApiKey": "Chave API do Vercel AI Gateway",
 		"getVercelAiGatewayApiKey": "Obter chave API do Vercel AI Gateway",
+		"opencodeGoApiKey": "Chave API do Opencode Go",
+		"getOpencodeGoApiKey": "Obter chave API do Opencode Go",
 		"apiKeyStorageNotice": "As chaves de API são armazenadas com segurança no Armazenamento Secreto do VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -452,6 +454,7 @@
 			"step3": "3. Ou criar uma conta de serviço com credenciais."
 		},
 		"googleCloudCredentials": "Credenciais Google Cloud",
+		"googleCloudCredentialsPathWarning": "Este campo espera o conteúdo JSON de um arquivo de chave de conta de serviço, não um caminho. Se você tiver um caminho, cole-o no campo <strong>Caminho do Arquivo de Chave Google Cloud</strong> abaixo, ou limpe este campo e use a variável de ambiente <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Caminho do Arquivo de Chave Google Cloud",
 		"googleCloudProjectId": "ID do Projeto Google Cloud",
 		"googleCloudRegion": "Região Google Cloud",

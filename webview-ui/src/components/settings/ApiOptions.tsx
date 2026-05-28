@@ -30,6 +30,7 @@ import {
 	mainlandZAiDefaultModelId,
 	fireworksDefaultModelId,
 	vercelAiGatewayDefaultModelId,
+	opencodeGoDefaultModelId,
 	minimaxDefaultModelId,
 	mimoDefaultModelId,
 	unboundDefaultModelId,
@@ -93,6 +94,7 @@ import {
 	ZAi,
 	Fireworks,
 	VercelAiGateway,
+	OpenCodeGo,
 	MiniMax,
 	Mimo,
 } from "./providers"
@@ -363,6 +365,7 @@ const ApiOptions = ({
 				fireworks: { field: "apiModelId", default: fireworksDefaultModelId },
 				poe: { field: "apiModelId", default: poeDefaultModelId },
 				"vercel-ai-gateway": { field: "vercelAiGatewayModelId", default: vercelAiGatewayDefaultModelId },
+				"opencode-go": { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
 				openai: { field: "openAiModelId" },
 				ollama: { field: "ollamaModelId" },
 				lmstudio: { field: "lmStudioModelId" },
@@ -679,6 +682,17 @@ const ApiOptions = ({
 
 					{selectedProvider === "vercel-ai-gateway" && (
 						<VercelAiGateway
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === "opencode-go" && (
+						<OpenCodeGo
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: Успешно подключено! Теперь ты можешь использовать Zoo Code в качестве AI-провайдера.",
 			"disconnected": "Zoo Code: Успешно отключено."
 		}
+	},
+	"codeActions": {
+		"explain": "Объяснить с Zoo Code",
+		"fix": "Исправить с Zoo Code",
+		"improve": "Улучшить с Zoo Code",
+		"addToContext": "Добавить в Zoo Code"
 	}
 }

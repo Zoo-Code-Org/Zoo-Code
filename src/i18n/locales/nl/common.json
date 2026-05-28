@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: Succesvol verbonden! Je kunt Zoo Code nu gebruiken als AI-provider.",
 			"disconnected": "Zoo Code: Succesvol losgekoppeld."
 		}
+	},
+	"codeActions": {
+		"explain": "Uitleggen met Zoo Code",
+		"fix": "Repareren met Zoo Code",
+		"improve": "Verbeteren met Zoo Code",
+		"addToContext": "Toevoegen aan Zoo Code"
 	}
 }

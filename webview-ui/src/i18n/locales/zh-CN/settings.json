@@ -314,6 +314,8 @@
 		"getOpenRouterApiKey": "获取 OpenRouter API 密钥",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API 密钥",
 		"getVercelAiGatewayApiKey": "获取 Vercel AI Gateway API 密钥",
+		"opencodeGoApiKey": "Opencode Go API 密钥",
+		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"apiKeyStorageNotice": "API 密钥安全存储在 VSCode 的密钥存储中",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -452,6 +454,7 @@
 			"step3": "3. 创建服务账号获取凭证"
 		},
 		"googleCloudCredentials": "Google Cloud 凭证",
+		"googleCloudCredentialsPathWarning": "此字段需要服务账号密钥文件的 JSON 内容，而不是路径。如果您有路径，请将其粘贴到下方的<strong>Google Cloud 密钥文件路径</strong>字段中，或清除此字段并使用 <code>GOOGLE_APPLICATION_CREDENTIALS</code> 环境变量。",
 		"googleCloudKeyFile": "Google Cloud 密钥文件路径",
 		"googleCloudProjectId": "Google Cloud 项目 ID",
 		"googleCloudRegion": "Google Cloud 区域",

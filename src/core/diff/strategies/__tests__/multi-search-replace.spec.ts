@@ -1204,4 +1204,174 @@ function sum(a, b) {
 			expect(result.error).toContain(":start_line:5    <-- Invalid location")
 		})
 	})
+
+	describe("repairTruncatedDiff", () => {
+		let strategy: MultiSearchReplaceDiffStrategy
+
+		beforeEach(() => {
+			strategy = new MultiSearchReplaceDiffStrategy()
+		})
+
+		it("should not modify a complete diff", () => {
+			const diff = "<<<<<<< SEARCH\n" + "original content\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(diff)
+		})
+
+		it("should not modify a diff with multiple complete blocks", () => {
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				"content1\n" +
+				"=======\n" +
+				"new1\n" +
+				">>>>>>> REPLACE\n\n" +
+				"<<<<<<< SEARCH\n" +
+				"content2\n" +
+				"=======\n" +
+				"new2\n" +
+				">>>>>>> REPLACE"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(diff)
+		})
+
+		it("should repair diff missing ======= and >>>>>>> REPLACE", () => {
+			const diff = "<<<<<<< SEARCH\n" + "original content\n" + "new content"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" + "original content\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE",
+			)
+		})
+
+		it("should repair diff missing only >>>>>>> REPLACE", () => {
+			const diff = "<<<<<<< SEARCH\n" + "original content\n" + "=======\n" + "new content"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" + "original content\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE",
+			)
+		})
+
+		it("should repair first truncated block while preserving subsequent complete blocks", () => {
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				"content1\n" +
+				"new1\n\n" +
+				"<<<<<<< SEARCH\n" +
+				"content2\n" +
+				"=======\n" +
+				"new2\n" +
+				">>>>>>> REPLACE"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" +
+					"content1\n" +
+					"=======\n" +
+					"new1\n" +
+					">>>>>>> REPLACE\n\n" +
+					"<<<<<<< SEARCH\n" +
+					"content2\n" +
+					"=======\n" +
+					"new2\n" +
+					">>>>>>> REPLACE",
+			)
+		})
+
+		it("should handle empty search content with missing replace marker", () => {
+			const diff = "<<<<<<< SEARCH\n" + "replacement text"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe("<<<<<<< SEARCH\n" + "=======\n" + "replacement text\n" + ">>>>>>> REPLACE")
+		})
+
+		it("should not add trailing newline if content already ends with one", () => {
+			const diff = "<<<<<<< SEARCH\n" + "original\n" + "=======\n" + "new content\n"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe("<<<<<<< SEARCH\n" + "original\n" + "=======\n" + "new content\n" + ">>>>>>> REPLACE")
+		})
+
+		it("inserts ======= before an existing closer instead of synthesizing a second one", () => {
+			// Has >>>>>>> REPLACE but no ======= separator.
+			const diff = "<<<<<<< SEARCH\n" + "old line\n" + ">>>>>>> REPLACE"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe("<<<<<<< SEARCH\n" + "old line\n" + "=======\n" + ">>>>>>> REPLACE")
+			// Exactly one closer, exactly one separator.
+			expect(result.match(/>>>>>>> REPLACE/g)).toHaveLength(1)
+			expect(result.match(/^=======$/gm)).toHaveLength(1)
+		})
+
+		it("preserves :start_line: / ------- directives instead of treating them as SEARCH content", () => {
+			const diff = "<<<<<<< SEARCH\n" + ":start_line:5\n" + "-------\n" + "old line\n" + "new line"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" +
+					":start_line:5\n" +
+					"-------\n" +
+					"old line\n" +
+					"=======\n" +
+					"new line\n" +
+					">>>>>>> REPLACE",
+			)
+		})
+
+		it("treats a single content line after a directive header as the SEARCH target", () => {
+			const diff = "<<<<<<< SEARCH\n" + ":start_line:5\n" + "-------\n" + "old line"
+			const result = strategy["repairTruncatedDiff"](diff)
+			expect(result).toBe(
+				"<<<<<<< SEARCH\n" +
+					":start_line:5\n" +
+					"-------\n" +
+					"old line\n" +
+					"=======\n" +
+					"\n" +
+					">>>>>>> REPLACE",
+			)
+		})
+	})
+
+	// Regression guards for #186: Grok sometimes truncates the streamed diff and drops
+	// the closing markers, which previously surfaced as "Unable to apply diff - Expected
+	// '=======' was not found". These fixtures exercise the full applyDiff() path end-to-end.
+	describe("truncated Grok diff regression (#186)", () => {
+		const grokStrategy = new MultiSearchReplaceDiffStrategy(1.0, 5)
+		const originalContent = 'function greet() {\n\treturn "hello"\n}\n'
+		const expectedContent = 'function greet() {\n\treturn "hi there"\n}\n'
+
+		it("applies a diff whose closing >>>>>>> REPLACE marker was truncated", async () => {
+			const diff =
+				"src/greet.ts\n" + "<<<<<<< SEARCH\n" + '\treturn "hello"\n' + "=======\n" + '\treturn "hi there"'
+			const result = await grokStrategy.applyDiff(originalContent, diff)
+			expect(result.success).toBe(true)
+			if (result.success) {
+				expect(result.content).toBe(expectedContent)
+			}
+		})
+
+		it("applies a diff truncated before the ======= separator", async () => {
+			const diff = "src/greet.ts\n" + "<<<<<<< SEARCH\n" + '\treturn "hello"\n' + '\treturn "hi there"'
+			const result = await grokStrategy.applyDiff(originalContent, diff)
+			expect(result.success).toBe(true)
+			if (result.success) {
+				expect(result.content).toBe(expectedContent)
+			}
+		})
+
+		it("leaves a well-formed multi-block diff unchanged", async () => {
+			const multiBlock = "export const a = 1\nexport const b = 2\n"
+			const diff =
+				"src/consts.ts\n" +
+				"<<<<<<< SEARCH\n" +
+				"export const a = 1\n" +
+				"=======\n" +
+				"export const a = 10\n" +
+				">>>>>>> REPLACE\n" +
+				"<<<<<<< SEARCH\n" +
+				"export const b = 2\n" +
+				"=======\n" +
+				"export const b = 20\n" +
+				">>>>>>> REPLACE"
+			const result = await grokStrategy.applyDiff(multiBlock, diff)
+			expect(result.success).toBe(true)
+			if (result.success) {
+				expect(result.content).toBe("export const a = 10\nexport const b = 20\n")
+			}
+		})
+	})
 })

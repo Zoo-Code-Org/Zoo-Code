@@ -314,6 +314,8 @@
 		"getOpenRouterApiKey": "OpenRouter API 키 받기",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API 키",
 		"getVercelAiGatewayApiKey": "Vercel AI Gateway API 키 받기",
+		"opencodeGoApiKey": "Opencode Go API 키",
+		"getOpencodeGoApiKey": "Opencode Go API 키 받기",
 		"apiKeyStorageNotice": "API 키는 VSCode의 보안 저장소에 안전하게 저장됩니다",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -452,6 +454,7 @@
 			"step3": "3. 또는 자격 증명이 있는 서비스 계정을 만드세요."
 		},
 		"googleCloudCredentials": "Google Cloud 자격 증명",
+		"googleCloudCredentialsPathWarning": "이 필드는 경로가 아닌 서비스 계정 키 파일의 JSON 내용을 기대합니다. 경로가 있다면 아래의 <strong>Google Cloud 키 파일 경로</strong> 필드에 붙여넣거나, 이 필드를 비우고 <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수를 사용하세요.",
 		"googleCloudKeyFile": "Google Cloud 키 파일 경로",
 		"googleCloudProjectId": "Google Cloud 프로젝트 ID",
 		"googleCloudRegion": "Google Cloud 리전",

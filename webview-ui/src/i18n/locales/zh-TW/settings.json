@@ -324,6 +324,8 @@
 		"getOpenRouterApiKey": "取得 OpenRouter API 金鑰",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API 金鑰",
 		"getVercelAiGatewayApiKey": "取得 Vercel AI Gateway API 金鑰",
+		"opencodeGoApiKey": "Opencode Go API 金鑰",
+		"getOpencodeGoApiKey": "取得 Opencode Go API 金鑰",
 		"apiKeyStorageNotice": "API 金鑰會安全地儲存在 VS Code 的 Secret Storage 中",
 		"openAiCodexRateLimits": {
 			"title": "Codex 用量限制{{planLabel}}",
@@ -462,6 +464,7 @@
 			"step3": "3. 或建立具有憑證的服務帳戶。"
 		},
 		"googleCloudCredentials": "Google Cloud 憑證",
+		"googleCloudCredentialsPathWarning": "此欄位需要服務帳號金鑰檔案的 JSON 內容，而不是路徑。如果您有路徑，請將其貼到下方的<strong>Google Cloud 金鑰檔案路徑</strong>欄位，或清除此欄位並使用 <code>GOOGLE_APPLICATION_CREDENTIALS</code> 環境變數。",
 		"googleCloudKeyFile": "Google Cloud 金鑰檔案路徑",
 		"googleCloudProjectId": "Google Cloud 專案 ID",
 		"googleCloudRegion": "Google Cloud 區域",

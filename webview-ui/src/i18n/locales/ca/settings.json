@@ -314,6 +314,8 @@
 		"getOpenRouterApiKey": "Obtenir clau API d'OpenRouter",
 		"vercelAiGatewayApiKey": "Clau API de Vercel AI Gateway",
 		"getVercelAiGatewayApiKey": "Obtenir clau API de Vercel AI Gateway",
+		"opencodeGoApiKey": "Clau API de Opencode Go",
+		"getOpencodeGoApiKey": "Obtenir clau API de Opencode Go",
 		"apiKeyStorageNotice": "Les claus API s'emmagatzemen de forma segura a l'Emmagatzematge Secret de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -452,6 +454,7 @@
 			"step3": "3. O crear un compte de servei amb credencials."
 		},
 		"googleCloudCredentials": "Credencials de Google Cloud",
+		"googleCloudCredentialsPathWarning": "Aquest camp espera el contingut JSON d'un fitxer de clau de compte de servei, no una ruta. Si tens una ruta, enganxa-la al camp <strong>Ruta del fitxer de clau de Google Cloud</strong> a continuació, o buida aquest camp i utilitza la variable d'entorn <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ruta del fitxer de clau de Google Cloud",
 		"googleCloudProjectId": "ID del projecte de Google Cloud",
 		"googleCloudRegion": "Regió de Google Cloud",

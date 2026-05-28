@@ -46,6 +46,7 @@ describe("Model Validation Functions", () => {
 		"vercel-ai-gateway": {},
 		poe: {},
 		deepseek: {},
+		"opencode-go": {},
 	}
 
 	const allowAllOrganization: OrganizationAllowList = {
@@ -172,6 +173,41 @@ describe("Model Validation Functions", () => {
 				restrictiveOrganization,
 			)
 			expect(result).toBeUndefined() // Should exclude model-specific org errors
+		})
+	})
+
+	describe("Opencode Go validation", () => {
+		it("returns an apiKey error when the Opencode Go API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: "opencode-go",
+				opencodeGoModelId: "glm-5.1",
+				// Missing opencodeGoApiKey
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined for a valid Opencode Go configuration", () => {
+			const config: ProviderSettings = {
+				apiProvider: "opencode-go",
+				opencodeGoApiKey: "valid-key",
+				opencodeGoModelId: "glm-5.1",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+
+		it("returns a modelId error when no Opencode Go model id is set", () => {
+			const config: ProviderSettings = {
+				apiProvider: "opencode-go",
+				opencodeGoApiKey: "valid-key",
+				// Missing opencodeGoModelId
+			}
+
+			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.modelId")
 		})
 	})
 })

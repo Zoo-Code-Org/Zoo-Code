@@ -284,6 +284,22 @@ export class TerminalRegistry {
 	public static releaseTerminalsForTask(taskId: string): void {
 		this.terminals.forEach((terminal) => {
 			if (terminal.taskId === taskId) {
+				// #245: If the terminal is still executing a command when its task is torn
+				// down (user pressed cancel ✕, or the task was switched/removed), abort the
+				// process. Otherwise the command keeps running orphaned and the terminal stays
+				// stuck "busy" — the cancel-doesn't-terminate bug. abort() is safe when idle
+				// (Ctrl+C is gated on an active stream; Execa abort is idempotent).
+				if (terminal.busy) {
+					try {
+						terminal.process?.abort()
+					} catch (error) {
+						console.error(
+							`[TerminalRegistry] Error aborting process for terminal ${terminal.id} on release:`,
+							error,
+						)
+					}
+				}
+
 				terminal.taskId = undefined
 			}
 		})

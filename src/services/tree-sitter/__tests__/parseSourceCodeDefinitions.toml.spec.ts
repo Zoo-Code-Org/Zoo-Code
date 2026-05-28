@@ -41,7 +41,7 @@ describe("TOML Source Code Definition Tests", () => {
 
 	it("should parse table arrays", () => {
 		expect(parseResult).toMatch(/\d+--\d+ \|\s*\[\[products\]\]/)
-		expect(parseResult).toMatch(/\d+--\d+ \|\s*\[\[products\]\]  # Array of tables/)
+		expect(parseResult).toMatch(/\d+--\d+ \|\s*\[\[products\]\] {2}# Array of tables/)
 	})
 
 	it("should parse inline tables", () => {
