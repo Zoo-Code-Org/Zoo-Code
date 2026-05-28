@@ -25,7 +25,8 @@ function isSonnet45ModelId(id: string) {
 	return /sonnet-4[.-]5|sonnet-4\.5/i.test(id)
 }
 
-function pickZooGatewayDefaultModelId(modelIds: string[]) {
+// Exported for unit tests.
+export function pickZooGatewayDefaultModelId(modelIds: string[]) {
 	if (modelIds.length === 0) {
 		return zooGatewayDefaultModelId
 	}
