@@ -1,5 +1,12 @@
 # Zoo Code Changelog
 
+## 3.55.1
+
+### Patch Changes
+
+- ![3.55.1 Release - VS Code 1.122 ripgrep hotfix](/releases/3.55.1-release.png)
+- Fix API requests hanging indefinitely on VS Code 1.122.0+ when Zoo Code could not find the bundled ripgrep binary after the `@vscode/ripgrep-universal` rename (#381 by @greatgradz-svg, PR #248 by @0xMink).
+
 All notable changes to Zoo Code will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Zoo Code uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
