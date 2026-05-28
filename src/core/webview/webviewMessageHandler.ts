@@ -955,13 +955,16 @@ export const webviewMessageHandler = async (
 			if (!zooGatewayToken) {
 				try {
 					const allProfiles = await provider.providerSettingsManager.listConfig()
-					const zooGatewayProfile = allProfiles.find((p) => p.apiProvider === "zoo-gateway")
-					if (zooGatewayProfile) {
+					const zooGatewayProfiles = allProfiles.filter((p) => p.apiProvider === "zoo-gateway")
+					for (const profileMeta of zooGatewayProfiles) {
 						const fullProfile = await provider.providerSettingsManager.getProfile({
-							name: zooGatewayProfile.name,
+							name: profileMeta.name,
 						})
-						zooGatewayToken = fullProfile.zooSessionToken
-						zooGatewayBaseUrl = fullProfile.zooGatewayBaseUrl ?? zooGatewayBaseUrl
+						if (fullProfile.zooSessionToken) {
+							zooGatewayToken = fullProfile.zooSessionToken
+							zooGatewayBaseUrl = fullProfile.zooGatewayBaseUrl ?? zooGatewayBaseUrl
+							break
+						}
 					}
 				} catch (error) {
 					console.debug("Failed to look up zoo-gateway profile for model fetch:", error)

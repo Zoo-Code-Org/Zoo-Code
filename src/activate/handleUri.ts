@@ -63,7 +63,14 @@ export const handleUri = async (uri: vscode.Uri) => {
 					// is cheap (at most a handful of instances) and avoids the race.
 					const allInstances = ClineProvider.getAllInstances()
 					for (const instance of allInstances) {
-						await instance.handleZooCodeCallback(token)
+						try {
+							await instance.handleZooCodeCallback(token)
+						} catch (error) {
+							console.error(
+								"Failed to persist Zoo Gateway token for a provider instance:",
+								error instanceof Error ? error.message : error,
+							)
+						}
 					}
 				}
 			}

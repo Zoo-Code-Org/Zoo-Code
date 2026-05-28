@@ -871,9 +871,10 @@ export class ClineProvider
 	 * Called once per webview init; handleZooCodeCallback is idempotent so repeated calls are safe.
 	 */
 	private async ensureZooGatewayProfileSeeded(): Promise<void> {
-		const { getCachedZooCodeToken } = await import("../../services/zoo-code-auth")
+		const { getCachedZooCodeToken, getZooCodeBaseUrl } = await import("../../services/zoo-code-auth")
 		const token = getCachedZooCodeToken()
 		if (!token) return
+		const expectedGatewayBaseUrl = `${getZooCodeBaseUrl()}/api/gateway/v1`
 
 		// Check ALL zoo-gateway profiles — only skip seeding if every profile has the current token.
 		// Using .find() would miss stale tokens in duplicate/renamed profiles since handleZooCodeCallback
@@ -889,13 +890,12 @@ export class ClineProvider
 			for (const entry of zooGatewayProfiles) {
 				try {
 					const fullProfile = await this.providerSettingsManager.getProfile({ name: entry.name })
-					if (fullProfile.zooSessionToken !== token) {
+					if (
+						fullProfile.zooSessionToken !== token ||
+						fullProfile.zooGatewayBaseUrl !== expectedGatewayBaseUrl
+					) {
 						allUpToDate = false
-						this.log(
-							fullProfile.zooSessionToken
-								? "[ensureZooGatewayProfileSeeded] Token mismatch (stale session?), updating with current token"
-								: "[ensureZooGatewayProfileSeeded] Existing zoo-gateway profile has no token, updating with cached token",
-						)
+						this.log("[ensureZooGatewayProfileSeeded] Existing zoo-gateway profile is stale, updating")
 						break
 					}
 				} catch {

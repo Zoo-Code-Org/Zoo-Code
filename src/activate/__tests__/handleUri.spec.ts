@@ -177,4 +177,24 @@ describe("handleUri", () => {
 
 		expect(order).toEqual(["a:start", "a:end", "b:start", "b:end"])
 	})
+
+	it("continues fan-out when one instance fails to persist the callback token", async () => {
+		mockHandleZooCodeAuthCallback.mockResolvedValue(true)
+
+		const failingProvider = {
+			handleZooCodeCallback: vi.fn(async () => {
+				throw new Error("profile store unavailable")
+			}),
+		} as any
+		const healthyProvider = { handleZooCodeCallback: vi.fn() } as any
+		mockGetAllInstances.mockReturnValue([failingProvider, healthyProvider])
+
+		await handleUri({
+			path: "/auth-callback",
+			query: "token=zoo_ext_test_token",
+		} as any)
+
+		expect(failingProvider.handleZooCodeCallback).toHaveBeenCalledWith("zoo_ext_test_token")
+		expect(healthyProvider.handleZooCodeCallback).toHaveBeenCalledWith("zoo_ext_test_token")
+	})
 })

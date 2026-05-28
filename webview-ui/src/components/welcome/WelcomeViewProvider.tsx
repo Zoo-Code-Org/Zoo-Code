@@ -20,14 +20,17 @@ const DEFAULT_WELCOME_API_CONFIGURATION: ProviderSettings = {
 	openRouterModelId: openRouterDefaultModelId,
 }
 
-const getWelcomeApiConfiguration = (apiConfiguration?: ProviderSettings): ProviderSettings => {
+const getWelcomeApiConfiguration = (
+	apiConfiguration?: ProviderSettings,
+	zooCodeIsAuthenticated?: boolean,
+): ProviderSettings => {
 	// validateApiConfiguration treats a missing apiProvider as valid (no switch case matches),
 	// so we explicitly fall back here before delegating to it for incomplete-but-set configs.
 	if (!apiConfiguration?.apiProvider) {
 		return DEFAULT_WELCOME_API_CONFIGURATION
 	}
 
-	const validationError = validateApiConfiguration(apiConfiguration)
+	const validationError = validateApiConfiguration(apiConfiguration, undefined, undefined, zooCodeIsAuthenticated)
 	if (validationError) {
 		return DEFAULT_WELCOME_API_CONFIGURATION
 	}
@@ -42,7 +45,8 @@ const WelcomeViewProvider = () => {
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 	const [showProviderSetup, setShowProviderSetup] = useState(false)
 	const [welcomeApiConfiguration, setWelcomeApiConfiguration] = useState<ProviderSettings>()
-	const effectiveApiConfiguration = welcomeApiConfiguration ?? getWelcomeApiConfiguration(apiConfiguration)
+	const effectiveApiConfiguration =
+		welcomeApiConfiguration ?? getWelcomeApiConfiguration(apiConfiguration, zooCodeIsAuthenticated)
 
 	const setApiConfigurationFieldForApiOptions = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) => {
@@ -57,7 +61,7 @@ const WelcomeViewProvider = () => {
 
 	const handleGetStarted = useCallback(() => {
 		if (!showProviderSetup) {
-			const initialApiConfiguration = getWelcomeApiConfiguration(apiConfiguration)
+			const initialApiConfiguration = getWelcomeApiConfiguration(apiConfiguration, zooCodeIsAuthenticated)
 			setWelcomeApiConfiguration(initialApiConfiguration)
 
 			setApiConfiguration(initialApiConfiguration)
