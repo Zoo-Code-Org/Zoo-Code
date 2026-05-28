@@ -44,6 +44,8 @@ vitest.mock("../fetchers/modelCache", () => ({
 
 vitest.mock("../../../services/zoo-code-auth", () => ({
 	getZooCodeBaseUrl: vitest.fn(() => "https://www.zoocode.dev"),
+	getCachedZooCodeToken: vitest.fn(() => undefined),
+	clearZooCodeToken: vitest.fn(async () => undefined),
 }))
 
 vitest.mock("../../transform/caching/vercel-ai-gateway", () => ({
