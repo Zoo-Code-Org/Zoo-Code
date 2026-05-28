@@ -454,7 +454,7 @@
 			"step3": "3. O crear un compte de servei amb credencials."
 		},
 		"googleCloudCredentials": "Credencials de Google Cloud",
-		"googleCloudCredentialsPathWarning": "Aquest camp espera el contingut JSON d'un fitxer de clau de compte de servei, no una ruta. Si tens una ruta, enganxa-la al camp <strong>Ruta del fitxer de clau de Google Cloud</strong> a continuaci├│, o buida aquest camp i utilitza la variable d'entorn <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
+		"googleCloudCredentialsPathWarning": "Aquest camp espera el contingut JSON d'un fitxer de clau de compte de servei, no una ruta. Si tens una ruta, enganxa-la al camp <strong>Ruta del fitxer de clau de Google Cloud</strong> a continuació, o buida aquest camp i utilitza la variable d'entorn <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ruta del fitxer de clau de Google Cloud",
 		"googleCloudProjectId": "ID del projecte de Google Cloud",
 		"googleCloudRegion": "Regió de Google Cloud",
@@ -870,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "L'extensi├│ obt├⌐ autom├áticament la llista m├⌐s recent de models disponibles a <serviceLink>{{serviceName}}</serviceLink>. Si no esteu segur de quin model triar, Zoo Code funciona millor amb <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Tamb├⌐ podeu cercar \"free\" per a opcions gratu├»tes actualment disponibles.",
+		"automaticFetch": "L'extensió obté automàticament la llista més recent de models disponibles a <serviceLink>{{serviceName}}</serviceLink>. Si no esteu segur de quin model triar, Zoo Code funciona millor amb <defaultModelLink>{{defaultModelId}}</defaultModelLink>. També podeu cercar \"free\" per a opcions gratuïtes actualment disponibles.",
 		"label": "Model",
 		"searchPlaceholder": "Cerca",
 		"noMatchFound": "No s'ha trobat cap coincidència",

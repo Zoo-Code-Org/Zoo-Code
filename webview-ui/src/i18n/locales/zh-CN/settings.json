@@ -454,7 +454,7 @@
 			"step3": "3. 创建服务账号获取凭证"
 		},
 		"googleCloudCredentials": "Google Cloud 凭证",
-		"googleCloudCredentialsPathWarning": "µ¡ñσ¡ùµ«╡Θ£ÇΦªüµ£ìσèíΦ┤ªσÅ╖σ»åΘÆÑµûçΣ╗╢τÜä JSON σåàσ«╣∩╝îΦÇîΣ╕ìµÿ»Φ╖»σ╛äπÇéσªéµ₧£µé¿µ£ëΦ╖»σ╛ä∩╝îΦ»╖σ░åσà╢τ▓ÿΦ┤┤σê░Σ╕ïµû╣τÜä<strong>Google Cloud σ»åΘÆÑµûçΣ╗╢Φ╖»σ╛ä</strong>σ¡ùµ«╡Σ╕¡∩╝îµêûµ╕àΘÖñµ¡ñσ¡ùµ«╡σ╣╢Σ╜┐τö¿ <code>GOOGLE_APPLICATION_CREDENTIALS</code> τÄ»σóâσÅÿΘçÅπÇé",
+		"googleCloudCredentialsPathWarning": "此字段需要服务账号密钥文件的 JSON 内容，而不是路径。如果您有路径，请将其粘贴到下方的<strong>Google Cloud 密钥文件路径</strong>字段中，或清除此字段并使用 <code>GOOGLE_APPLICATION_CREDENTIALS</code> 环境变量。",
 		"googleCloudKeyFile": "Google Cloud 密钥文件路径",
 		"googleCloudProjectId": "Google Cloud 项目 ID",
 		"googleCloudRegion": "Google Cloud 区域",
@@ -870,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Φç¬σè¿ΦÄ╖σÅû <serviceLink>{{serviceName}}</serviceLink> Σ╕èσÅ»τö¿τÜäµ£Çµû░µ¿íσ₧ïσêùΦí¿πÇéσªéµ₧£µé¿Σ╕ìτí«σ«ÜΘÇëµï⌐σô¬Σ╕¬µ¿íσ₧ï∩╝îZoo Code Σ╕Ä <defaultModelLink>{{defaultModelId}}</defaultModelLink> ΘàìσÉêµ£ÇΣ╜│πÇéµé¿Φ┐ÿσÅ»Σ╗ÑµÉ£τ┤ó\"free\"Σ╗ÑµƒÑµë╛σ╜ôσëìσÅ»τö¿τÜäσàìΦ┤╣ΘÇëΘí╣πÇé",
+		"automaticFetch": "自动获取 <serviceLink>{{serviceName}}</serviceLink> 上可用的最新模型列表。如果您不确定选择哪个模型，Zoo Code 与 <defaultModelLink>{{defaultModelId}}</defaultModelLink> 配合最佳。您还可以搜索\"free\"以查找当前可用的免费选项。",
 		"label": "模型",
 		"searchPlaceholder": "搜索",
 		"noMatchFound": "未找到匹配项",

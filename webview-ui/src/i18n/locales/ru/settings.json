@@ -454,7 +454,7 @@
 			"step3": "3. Или создайте сервисный аккаунт с ключом."
 		},
 		"googleCloudCredentials": "Учётные данные Google Cloud",
-		"googleCloudCredentialsPathWarning": "╨¡╤é╨╛ ╨┐╨╛╨╗╨╡ ╨╛╨╢╨╕╨┤╨░╨╡╤é JSON-╤ü╨╛╨┤╨╡╤Ç╨╢╨╕╨╝╨╛╨╡ ╤ä╨░╨╣╨╗╨░ ╨║╨╗╤Ä╤ç╨░ ╤ü╨╡╤Ç╨▓╨╕╤ü╨╜╨╛╨│╨╛ ╨░╨║╨║╨░╤â╨╜╤é╨░, ╨░ ╨╜╨╡ ╨┐╤â╤é╤î. ╨ò╤ü╨╗╨╕ ╤â ╨▓╨░╤ü ╨╡╤ü╤é╤î ╨┐╤â╤é╤î, ╨▓╤ü╤é╨░╨▓╤î╤é╨╡ ╨╡╨│╨╛ ╨▓ ╨┐╨╛╨╗╨╡ <strong>╨ƒ╤â╤é╤î ╨║ ╨║╨╗╤Ä╤ç╤â Google Cloud</strong> ╨╜╨╕╨╢╨╡, ╨╗╨╕╨▒╨╛ ╨╛╤ç╨╕╤ü╤é╨╕╤é╨╡ ╤ì╤é╨╛ ╨┐╨╛╨╗╨╡ ╨╕ ╨╕╤ü╨┐╨╛╨╗╤î╨╖╤â╨╣╤é╨╡ ╨┐╨╡╤Ç╨╡╨╝╨╡╨╜╨╜╤â╤Ä ╨╛╨║╤Ç╤â╨╢╨╡╨╜╨╕╤Å <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
+		"googleCloudCredentialsPathWarning": "Это поле ожидает JSON-содержимое файла ключа сервисного аккаунта, а не путь. Если у вас есть путь, вставьте его в поле <strong>Путь к ключу Google Cloud</strong> ниже, либо очистите это поле и используйте переменную окружения <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Путь к ключу Google Cloud",
 		"googleCloudProjectId": "ID проекта Google Cloud",
 		"googleCloudRegion": "Регион Google Cloud",
@@ -870,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "╨á╨░╤ü╤ê╨╕╤Ç╨╡╨╜╨╕╨╡ ╨░╨▓╤é╨╛╨╝╨░╤é╨╕╤ç╨╡╤ü╨║╨╕ ╨┐╨╛╨╗╤â╤ç╨░╨╡╤é ╨░╨║╤é╤â╨░╨╗╤î╨╜╤ï╨╣ ╤ü╨┐╨╕╤ü╨╛╨║ ╨╝╨╛╨┤╨╡╨╗╨╡╨╣ ╨╜╨░ <serviceLink>{{serviceName}}</serviceLink>. ╨ò╤ü╨╗╨╕ ╨╜╨╡ ╤â╨▓╨╡╤Ç╨╡╨╜╤ï, ╤ç╤é╨╛ ╨▓╤ï╨▒╤Ç╨░╤é╤î, Zoo Code ╨╗╤â╤ç╤ê╨╡ ╨▓╤ü╨╡╨│╨╛ ╤Ç╨░╨▒╨╛╤é╨░╨╡╤é ╤ü <defaultModelLink>{{defaultModelId}}</defaultModelLink>. ╨ó╨░╨║╨╢╨╡ ╨┐╨╛╨┐╤Ç╨╛╨▒╤â╨╣╤é╨╡ ╨┐╨╛╨╕╤ü╨║╨░╤é╤î \"free\" ╨┤╨╗╤Å ╨▒╨╡╤ü╨┐╨╗╨░╤é╨╜╤ï╤à ╨▓╨░╤Ç╨╕╨░╨╜╤é╨╛╨▓.",
+		"automaticFetch": "Расширение автоматически получает актуальный список моделей на <serviceLink>{{serviceName}}</serviceLink>. Если не уверены, что выбрать, Zoo Code лучше всего работает с <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Также попробуйте поискать \"free\" для бесплатных вариантов.",
 		"label": "Модель",
 		"searchPlaceholder": "Поиск",
 		"noMatchFound": "Совпадений не найдено",

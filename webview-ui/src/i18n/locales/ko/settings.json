@@ -454,7 +454,7 @@
 			"step3": "3. 또는 자격 증명이 있는 서비스 계정을 만드세요."
 		},
 		"googleCloudCredentials": "Google Cloud 자격 증명",
-		"googleCloudCredentialsPathWarning": "∞¥┤ φòäδô£δèö Ω▓╜δí£Ω░Ç ∞òäδïî ∞ä£δ╣ä∞èñ Ω│ä∞áò φéñ φîî∞¥╝∞¥ÿ JSON δé┤∞Ü⌐∞¥ä Ω╕░δîÇφò⌐δïêδïñ. Ω▓╜δí£Ω░Ç ∞₧êδïñδ⌐┤ ∞òäδ₧ÿ∞¥ÿ <strong>Google Cloud φéñ φîî∞¥╝ Ω▓╜δí£</strong> φòäδô£∞ùÉ δ╢Ö∞ù¼δäúΩ▒░δéÿ, ∞¥┤ φòäδô£δÑ╝ δ╣ä∞Ü░Ω│á <code>GOOGLE_APPLICATION_CREDENTIALS</code> φÖÿΩ▓╜ δ│Ç∞êÿδÑ╝ ∞é¼∞Ü⌐φòÿ∞ä╕∞Üö.",
+		"googleCloudCredentialsPathWarning": "이 필드는 경로가 아닌 서비스 계정 키 파일의 JSON 내용을 기대합니다. 경로가 있다면 아래의 <strong>Google Cloud 키 파일 경로</strong> 필드에 붙여넣거나, 이 필드를 비우고 <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수를 사용하세요.",
 		"googleCloudKeyFile": "Google Cloud 키 파일 경로",
 		"googleCloudProjectId": "Google Cloud 프로젝트 ID",
 		"googleCloudRegion": "Google Cloud 리전",
@@ -870,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "φÖò∞₧Ñ φöäδí£Ω╖╕δ₧¿∞¥Ç <serviceLink>{{serviceName}}</serviceLink>∞ùÉ∞ä£ ∞é¼∞Ü⌐ Ω░ÇδèÑφò£ ∞╡£∞ïá δ¬¿δì╕ δ¬⌐δí¥∞¥ä ∞₧ÉδÅÖ∞£╝δí£ Ω░Ç∞á╕∞ÿ╡δïêδïñ. ∞û┤δûñ δ¬¿δì╕∞¥ä ∞äáφâ¥φò┤∞ò╝ φòá∞ºÇ φÖò∞ïñφòÿ∞ºÇ ∞òèδïñδ⌐┤, Zoo Codeδèö <defaultModelLink>{{defaultModelId}}</defaultModelLink>δí£ Ω░Ç∞₧Ñ ∞₧ÿ ∞₧æδÅÖφò⌐δïêδïñ. φÿä∞₧¼ ∞é¼∞Ü⌐ Ω░ÇδèÑφò£ δ¼┤δúî ∞ÿ╡∞àÿ∞¥ä ∞░╛∞£╝δáñδ⌐┤ \"free\"δÑ╝ Ω▓Ç∞âëφò┤ δ│╝ ∞êÿδÅä ∞₧ê∞è╡δïêδïñ.",
+		"automaticFetch": "확장 프로그램은 <serviceLink>{{serviceName}}</serviceLink>에서 사용 가능한 최신 모델 목록을 자동으로 가져옵니다. 어떤 모델을 선택해야 할지 확실하지 않다면, Zoo Code는 <defaultModelLink>{{defaultModelId}}</defaultModelLink>로 가장 잘 작동합니다. 현재 사용 가능한 무료 옵션을 찾으려면 \"free\"를 검색해 볼 수도 있습니다.",
 		"label": "모델",
 		"searchPlaceholder": "검색",
 		"noMatchFound": "일치하는 항목 없음",

@@ -454,7 +454,7 @@
 			"step3": "3. Veya kimlik bilgileriyle bir hizmet hesabı oluşturun."
 		},
 		"googleCloudCredentials": "Google Cloud Kimlik Bilgileri",
-		"googleCloudCredentialsPathWarning": "Bu alan, bir yol de─ƒil, bir hizmet hesab─▒ anahtar dosyas─▒n─▒n JSON i├ºeri─ƒini bekler. Bir yolunuz varsa, a┼ƒa─ƒ─▒daki <strong>Google Cloud Anahtar Dosyas─▒ Yolu</strong> alan─▒na yap─▒┼ƒt─▒r─▒n veya bu alan─▒ temizleyin ve <code>GOOGLE_APPLICATION_CREDENTIALS</code> ortam de─ƒi┼ƒkenini kullan─▒n.",
+		"googleCloudCredentialsPathWarning": "Bu alan, bir yol değil, bir hizmet hesabı anahtar dosyasının JSON içeriğini bekler. Bir yolunuz varsa, aşağıdaki <strong>Google Cloud Anahtar Dosyası Yolu</strong> alanına yapıştırın veya bu alanı temizleyin ve <code>GOOGLE_APPLICATION_CREDENTIALS</code> ortam değişkenini kullanın.",
 		"googleCloudKeyFile": "Google Cloud Anahtar Dosyası Yolu",
 		"googleCloudProjectId": "Google Cloud Proje Kimliği",
 		"googleCloudRegion": "Google Cloud Bölgesi",
@@ -870,7 +870,7 @@
 		}
 	},
 	"modelPicker": {
-		"automaticFetch": "Uzant─▒ <serviceLink>{{serviceName}}</serviceLink> ├╝zerinde bulunan mevcut modellerin en g├╝ncel listesini otomatik olarak al─▒r. Hangi modeli se├ºece─ƒinizden emin de─ƒilseniz, Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi ┼ƒekilde ├ºal─▒┼ƒ─▒r. ┼₧u anda mevcut olan ├╝cretsiz se├ºenekleri bulmak i├ºin \"free\" aramas─▒ da yapabilirsiniz.",
+		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır. Şu anda mevcut olan ücretsiz seçenekleri bulmak için \"free\" araması da yapabilirsiniz.",
 		"label": "Model",
 		"searchPlaceholder": "Ara",
 		"noMatchFound": "Eşleşme bulunamadı",
