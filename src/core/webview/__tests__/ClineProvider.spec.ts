@@ -3788,14 +3788,17 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				expect(handleSpy).not.toHaveBeenCalled()
 			})
 
-			it("skips seeding when every zoo-gateway profile already has the current token", async () => {
+			it("skips seeding when every zoo-gateway profile already has the current token and base URL", async () => {
 				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
 				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
-					getProfile: vi.fn().mockResolvedValue({ zooSessionToken: "current-token" }),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "current-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
 				}
 
 				await (provider as any).ensureZooGatewayProfileSeeded()
@@ -3810,12 +3813,33 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
-					getProfile: vi.fn().mockResolvedValue({ zooSessionToken: "stale-token" }),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "stale-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
 				}
 
 				await (provider as any).ensureZooGatewayProfileSeeded()
 
 				expect(handleSpy).toHaveBeenCalledWith("fresh-token")
+			})
+
+			it("re-seeds when any zoo-gateway profile has a stale base URL", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "current-token",
+						zooGatewayBaseUrl: "https://staging.zoocode.dev/api/gateway/v1",
+					}),
+				}
+
+				await (provider as any).ensureZooGatewayProfileSeeded()
+
+				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
 		})
 	})
