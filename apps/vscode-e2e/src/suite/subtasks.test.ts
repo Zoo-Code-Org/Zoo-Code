@@ -9,25 +9,87 @@ import { SUBTASK_CHILD_FOLLOWUP_ANSWER, SUBTASK_PARENT_PROMPT } from "../fixture
 suite("Roo Code Subtasks", function () {
 	setDefaultSuiteTimeout(this)
 
-	test("Should keep parent paused after subtask cancellation", async () => {
+	// Race mitigation: skipDelegationRepair prevents removeClineFromStack from
+	// auto-resuming the parent when the child is cancelled (Race 2).
+	test("parent stays paused after subtask cancellation", async () => {
 		const api = globalThis.api
 		const asks: Record<string, ClineMessage[]> = {}
 		const messages: Record<string, ClineMessage[]> = {}
-		const waitForStage = async (label: string, condition: Parameters<typeof waitFor>[0]) => {
-			try {
-				await waitFor(condition)
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error)
-				throw new Error(`${label}: ${message}`)
-			}
-		}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
 			if (message.type === "ask") {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
+			if (message.type === "say" && message.partial === false) {
+				messages[taskId] = messages[taskId] || []
+				messages[taskId].push(message)
+			}
+		}
 
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		try {
+			const parentTaskId = await api.startNewTask({
+				configuration: {
+					mode: "ask",
+					alwaysAllowModeSwitch: true,
+					alwaysAllowSubtasks: true,
+					autoApprovalEnabled: true,
+					enableCheckpoints: false,
+				},
+				text: SUBTASK_PARENT_PROMPT,
+			})
+
+			let spawnedTaskId: string | undefined
+			await waitFor(() => {
+				const stack = api.getCurrentTaskStack()
+				const current = stack[stack.length - 1]
+				if (current && current !== parentTaskId) {
+					spawnedTaskId = current
+					return true
+				}
+				return false
+			})
+
+			await waitFor(
+				() => asks[spawnedTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "followup") ?? false,
+			)
+
+			await api.cancelCurrentTask()
+
+			assert.ok(
+				messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
+					undefined,
+				"Parent task should not have resumed after subtask cancellation",
+			)
+
+			await waitFor(() => api.getCurrentTaskStack().at(-1) === spawnedTaskId)
+			await waitFor(
+				() => asks[spawnedTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "resume_task") ?? false,
+			)
+
+			await api.clearCurrentTask()
+			// The parent task is still in the stack; drain it so it doesn't leak into the next test.
+			await api.clearCurrentTask()
+			await waitFor(() => api.getCurrentTaskStack().length === 0)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+		}
+	})
+
+	// Race mitigation: runDelegationTransition lock + cancelledDelegationChildIds guard
+	// ensures cancelTask() wins over a concurrent reopenParentFromDelegation() (Race 3).
+	test("cancelled child completes in-place and does not reopen parent", async () => {
+		const api = globalThis.api
+		const asks: Record<string, ClineMessage[]> = {}
+		const messages: Record<string, ClineMessage[]> = {}
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "ask") {
+				asks[taskId] = asks[taskId] || []
+				asks[taskId].push(message)
+			}
 			if (message.type === "say" && message.partial === false) {
 				messages[taskId] = messages[taskId] || []
 				messages[taskId].push(message)
@@ -64,35 +126,25 @@ suite("Roo Code Subtasks", function () {
 			})
 
 			let spawnedTaskId: string | undefined
-			await waitForStage("wait for spawned subtask", () => {
-				const currentTaskStack = api.getCurrentTaskStack()
-				const currentTaskId = currentTaskStack[currentTaskStack.length - 1]
-				if (currentTaskId && currentTaskId !== parentTaskId) {
-					spawnedTaskId = currentTaskId
+			await waitFor(() => {
+				const stack = api.getCurrentTaskStack()
+				const current = stack[stack.length - 1]
+				if (current && current !== parentTaskId) {
+					spawnedTaskId = current
 					return true
 				}
 				return false
 			})
-			await waitForStage(
-				"wait for delegated child followup ask",
+
+			await waitFor(
 				() => asks[spawnedTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "followup") ?? false,
 			)
-			const cancelledChildTaskId = spawnedTaskId!
 
+			const cancelledChildTaskId = spawnedTaskId!
 			await api.cancelCurrentTask()
 
-			assert.ok(
-				messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
-					undefined,
-				"Parent task should not have resumed after subtask cancellation",
-			)
-
-			await waitForStage(
-				"wait for cancelled child task to remain active",
-				() => api.getCurrentTaskStack().at(-1) === cancelledChildTaskId,
-			)
-			await waitForStage(
-				"wait for cancelled child resume ask",
+			await waitFor(() => api.getCurrentTaskStack().at(-1) === cancelledChildTaskId)
+			await waitFor(
 				() =>
 					asks[cancelledChildTaskId]?.some(({ type, ask }) => type === "ask" && ask === "resume_task") ??
 					false,
@@ -126,7 +178,6 @@ suite("Roo Code Subtasks", function () {
 				cancelledChildTaskId,
 				"Cancelled child task should remain the active completed task",
 			)
-
 			assert.ok(
 				messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
 					undefined,

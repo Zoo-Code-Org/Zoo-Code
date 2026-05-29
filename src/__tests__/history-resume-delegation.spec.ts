@@ -38,6 +38,7 @@ vi.mock("../core/task-persistence", () => ({
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
 import { readApiMessages, saveApiMessages, saveTaskMessages } from "../core/task-persistence"
+import { makeProviderStub } from "./helpers/provider-stub"
 
 describe("History resume delegation - parent metadata transitions", () => {
 	beforeEach(() => {
@@ -71,7 +72,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
 		})
 
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId,
 			emit: providerEmit,
@@ -79,7 +80,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			removeClineFromStack,
 			createTaskWithHistoryItem,
 			updateTaskHistory,
-		} as unknown as ClineProvider
+		} as any)
 
 		// Mock persistence reads to return empty arrays
 		vi.mocked(readTaskMessages).mockResolvedValue([])
@@ -121,7 +122,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 	})
 
 	it("reopenParentFromDelegation injects subtask_result into both UI and API histories", async () => {
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/storage" } },
 			getTaskWithId: vi.fn().mockResolvedValue({
 				historyItem: {
@@ -146,7 +147,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 			}),
 			updateTaskHistory: vi.fn().mockResolvedValue([]),
-		} as unknown as ClineProvider
+		} as any)
 
 		// Start with existing messages in history
 		const existingUiMessages = [{ type: "ask", ask: "tool", text: "Old tool", ts: 50 }]
@@ -204,7 +205,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 	})
 
 	it("reopenParentFromDelegation injects tool_result when new_task tool_use exists in API history", async () => {
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/storage" } },
 			getTaskWithId: vi.fn().mockResolvedValue({
 				historyItem: {
@@ -229,7 +230,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 			}),
 			updateTaskHistory: vi.fn().mockResolvedValue([]),
-		} as unknown as ClineProvider
+		} as any)
 
 		// Include an assistant message with new_task tool_use to exercise the tool_result path
 		const existingUiMessages = [{ type: "ask", ask: "tool", text: "new_task request", ts: 50 }]
@@ -290,7 +291,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 	})
 
 	it("reopenParentFromDelegation injects plain text when no new_task tool_use exists in API history", async () => {
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/storage" } },
 			getTaskWithId: vi.fn().mockResolvedValue({
 				historyItem: {
@@ -315,7 +316,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 			}),
 			updateTaskHistory: vi.fn().mockResolvedValue([]),
-		} as unknown as ClineProvider
+		} as any)
 
 		// No assistant tool_use in history
 		const existingUiMessages = [{ type: "ask", ask: "tool", text: "subtask request", ts: 50 }]
@@ -350,7 +351,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 		}
 
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({
 				historyItem: {
@@ -370,7 +371,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
 			createTaskWithHistoryItem: vi.fn().mockResolvedValue(parentInstance),
 			updateTaskHistory: vi.fn().mockResolvedValue([]),
-		} as unknown as ClineProvider
+		} as any)
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
@@ -390,7 +391,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const emitSpy = vi.fn()
 		const updateTaskHistory = vi.fn().mockResolvedValue([])
 
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({
 				historyItem: {
@@ -414,7 +415,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 			}),
 			updateTaskHistory,
-		} as unknown as ClineProvider
+		} as any)
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
@@ -456,7 +457,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			overwriteApiConversationHistory: vi.fn().mockRejectedValue(new Error("api overwrite failed")),
 		}
 
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockImplementation(async (id: string) => {
 				if (id === "parent-rpd06") {
@@ -492,7 +493,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
 			createTaskWithHistoryItem: vi.fn().mockResolvedValue(parentInstance),
 			updateTaskHistory: vi.fn().mockResolvedValue([]),
-		} as unknown as ClineProvider
+		} as any)
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
@@ -526,7 +527,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 	it("reopenParentFromDelegation does NOT emit TaskPaused or TaskUnpaused (new flow only)", async () => {
 		const emitSpy = vi.fn()
 
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({
 				historyItem: {
@@ -550,7 +551,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 			}),
 			updateTaskHistory: vi.fn().mockResolvedValue([]),
-		} as unknown as ClineProvider
+		} as any)
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
@@ -579,7 +580,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(parentInstance)
 
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockImplementation(async (id: string) => {
 				if (id === "parent-rpd02") {
@@ -614,7 +615,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			removeClineFromStack,
 			createTaskWithHistoryItem,
 			updateTaskHistory,
-		} as unknown as ClineProvider
+		} as any)
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
@@ -659,7 +660,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			return []
 		})
 
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockImplementation(async (id: string) => {
 				if (id === "parent-rpd04") {
@@ -695,7 +696,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
 			createTaskWithHistoryItem: vi.fn().mockResolvedValue(parentInstance),
 			updateTaskHistory,
-		} as unknown as ClineProvider
+		} as any)
 
 		vi.mocked(readTaskMessages).mockResolvedValue([])
 		vi.mocked(readApiMessages).mockResolvedValue([])
@@ -724,8 +725,49 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.TaskDelegationResumed, "parent-rpd04", "child-rpd04")
 	})
 
+	it("reopenParentFromDelegation keeps the child open when parent metadata persistence fails", async () => {
+		const persistError = new Error("parent status persist failed")
+		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
+		const createTaskWithHistoryItem = vi.fn()
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({
+				historyItem: {
+					id: "parent-rpd05",
+					status: "delegated",
+					awaitingChildId: "child-rpd05",
+					childIds: ["child-rpd05"],
+					ts: 800,
+					task: "Parent RPD-05",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				},
+			}),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => ({ taskId: "child-rpd05" })),
+			removeClineFromStack,
+			createTaskWithHistoryItem,
+			updateTaskHistory: vi.fn().mockRejectedValue(persistError),
+		} as any)
+
+		vi.mocked(readTaskMessages).mockResolvedValue([])
+		vi.mocked(readApiMessages).mockResolvedValue([])
+
+		await expect(
+			(ClineProvider.prototype as any).reopenParentFromDelegation.call(provider, {
+				parentTaskId: "parent-rpd05",
+				childTaskId: "child-rpd05",
+				completionResultSummary: "Child completion",
+			}),
+		).rejects.toThrow(persistError)
+
+		expect(removeClineFromStack).not.toHaveBeenCalled()
+		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
+	})
+
 	it("handles empty history gracefully when injecting synthetic messages", async () => {
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({
 				historyItem: {
@@ -749,7 +791,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
 			}),
 			updateTaskHistory: vi.fn().mockResolvedValue([]),
-		} as unknown as ClineProvider
+		} as any)
 
 		// Mock read failures or empty returns
 		vi.mocked(readTaskMessages).mockResolvedValue([])
@@ -793,7 +835,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const saveApiMessagesMock = vi.mocked(saveApiMessages)
 
 		const makeProvider = (historyItem: object) =>
-			({
+			makeProviderStub({
 				contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 				getTaskWithId: vi.fn().mockResolvedValue({ historyItem }),
 				emit: vi.fn(),
@@ -802,7 +844,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				removeClineFromStack: vi.fn(),
 				createTaskWithHistoryItem: vi.fn(),
 				updateTaskHistory,
-			}) as unknown as ClineProvider
+			} as any)
 
 		const providerActive = makeProvider({
 			id: "parent-guard",
@@ -827,7 +869,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const updateTaskHistory = vi.fn()
 		const saveTaskMessagesMock = vi.mocked(saveTaskMessages)
 		const saveApiMessagesMock = vi.mocked(saveApiMessages)
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId: vi.fn().mockResolvedValue({
 				historyItem: {
@@ -843,7 +885,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			createTaskWithHistoryItem: vi.fn(),
 			updateTaskHistory,
 			cancelledDelegationChildIds: new Set(["child-guard"]),
-		} as unknown as ClineProvider
+		} as any)
 
 		await expect(
 			(ClineProvider.prototype as any).reopenParentFromDelegation.call(provider, {
@@ -866,7 +908,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const saveApiMessagesMock = vi.mocked(saveApiMessages)
 
 		const makeProvider = (historyItem: object) =>
-			({
+			makeProviderStub({
 				contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 				getTaskWithId: vi.fn().mockResolvedValue({ historyItem }),
 				emit: vi.fn(),
@@ -875,7 +917,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				removeClineFromStack: vi.fn(),
 				createTaskWithHistoryItem: vi.fn(),
 				updateTaskHistory,
-			}) as unknown as ClineProvider
+			} as any)
 
 		const providerWrongChild = makeProvider({
 			id: "parent-guard",
@@ -893,5 +935,30 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(saveApiMessagesMock).not.toHaveBeenCalled()
 		expect(updateTaskHistory).not.toHaveBeenCalled()
 		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[reopenParentFromDelegation] Aborting"))
+	})
+
+	it("serializes delegation transitions and continues after a rejected predecessor", async () => {
+		const provider = makeProviderStub({} as any) as any
+		const calls: string[] = []
+		let rejectFirst!: (error: Error) => void
+
+		const first = provider.runDelegationTransition("parent-lock", async () => {
+			calls.push("first")
+			await new Promise<void>((_resolve, reject) => {
+				rejectFirst = reject
+			})
+		})
+		const second = provider.runDelegationTransition("parent-lock", async () => {
+			calls.push("second")
+			return "done"
+		})
+
+		await Promise.resolve()
+		expect(calls).toEqual(["first"])
+
+		rejectFirst(new Error("first transition failed"))
+		await expect(first).rejects.toThrow("first transition failed")
+		await expect(second).resolves.toBe("done")
+		expect(calls).toEqual(["first", "second"])
 	})
 })

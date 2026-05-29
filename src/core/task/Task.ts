@@ -3470,7 +3470,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// 	this.userMessageContentReady = true
 					// }
 
-					await pWaitFor(() => this.userMessageContentReady)
+					await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+
+					if (this.abort || this.abandoned) {
+						throw new Error(
+							`[RooCode#recursivelyMakeRooRequests] task ${this.taskId}.${this.instanceId} aborted`,
+						)
+					}
 
 					// If the model did not tool use, then we need to tell it to
 					// either use a tool or attempt_completion.

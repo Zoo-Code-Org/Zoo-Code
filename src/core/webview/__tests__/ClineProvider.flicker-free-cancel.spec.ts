@@ -463,4 +463,50 @@ describe("ClineProvider flicker-free cancel", () => {
 		)
 		expect((provider as any).cancelledDelegationChildIds.has("child-1")).toBe(true)
 	})
+
+	it("does not rehydrate a cancelled child when standalone persistence also fails", async () => {
+		const childHistory: HistoryItem = {
+			id: "child-1",
+			number: 2,
+			task: "child task",
+			ts: Date.now(),
+			tokensIn: 10,
+			tokensOut: 20,
+			totalCost: 0.001,
+			workspace: "/test/workspace",
+			parentTaskId: "parent-1",
+			rootTaskId: "root-1",
+		}
+
+		Object.assign(mockTask1, {
+			taskId: "child-1",
+			instanceId: "instance-child",
+			parentTaskId: "parent-1",
+			cancelCurrentRequest: vi.fn(),
+			abortTask: vi.fn(),
+			abandoned: false,
+			isStreaming: false,
+			didFinishAbortingStream: true,
+			isWaitingForFirstChunk: false,
+		})
+		;(provider as any).clineStack = [mockTask1]
+		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
+			if (id === "child-1") {
+				return Promise.resolve({ historyItem: childHistory })
+			}
+			if (id === "parent-1") {
+				return Promise.reject(new Error("parent lookup failed"))
+			}
+			throw new Error(`unexpected task lookup: ${id}`)
+		}) as any
+
+		vi.spyOn(provider, "updateTaskHistory").mockRejectedValue(new Error("standalone persist failed"))
+		const createTaskWithHistoryItemSpy = vi
+			.spyOn(provider, "createTaskWithHistoryItem")
+			.mockResolvedValue(undefined as any)
+
+		await expect(provider.cancelTask()).rejects.toThrow("standalone persist failed")
+		expect(createTaskWithHistoryItemSpy).not.toHaveBeenCalled()
+		expect((provider as any).cancelledDelegationChildIds.has("child-1")).toBe(true)
+	})
 })

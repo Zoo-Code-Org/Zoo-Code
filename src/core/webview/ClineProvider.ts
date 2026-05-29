@@ -120,6 +120,9 @@ function runDelegationTransition<T>(
 	fn: () => Promise<T>,
 ): Promise<T> {
 	const previous = locks.get(parentTaskId) ?? Promise.resolve()
+	// Fail-forward: run fn even if the previous transition rejected. A failed
+	// cancelTask must not permanently block a subsequent reopenParentFromDelegation.
+	// The cancelledDelegationChildIds guard inside each fn is the safety net.
 	const current = previous.then(fn, fn)
 	const tail = current.then(
 		() => {},
@@ -512,7 +515,7 @@ export class ClineProvider
 			// child and will update the parent to point at the new child.
 			if (parentTaskId && childTaskId && !options?.skipDelegationRepair) {
 				try {
-					await ClineProvider.prototype.runDelegationTransition.call(this, parentTaskId, async () => {
+					await this.runDelegationTransition(parentTaskId, async () => {
 						const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
 
 						if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === childTaskId) {
@@ -2998,7 +3001,7 @@ export class ClineProvider
 
 		if (task.parentTaskId) {
 			try {
-				await ClineProvider.prototype.runDelegationTransition.call(this, task.parentTaskId, async () => {
+				await this.runDelegationTransition(task.parentTaskId, async () => {
 					const { historyItem: parentHistory } = await this.getTaskWithId(task.parentTaskId!)
 
 					if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === task.taskId) {
@@ -3013,6 +3016,7 @@ export class ClineProvider
 						)
 						parentTask = undefined
 						rootTask = undefined
+						// Clear any stale fail-closed entry from a prior failed cancel attempt.
 						this.cancelledDelegationChildIds.delete(task.taskId)
 					}
 				})
@@ -3036,6 +3040,7 @@ export class ClineProvider
 							historyError instanceof Error ? historyError.message : String(historyError)
 						}`,
 					)
+					throw historyError
 				}
 				this.log(
 					`[cancelTask] Failed to detach delegated parent for ${task.taskId}: ${
@@ -3230,16 +3235,6 @@ export class ClineProvider
 				`[delegateParentAndOpenChild] Parent mismatch: expected ${parentTaskId}, current ${parent.taskId}`,
 			)
 		}
-		let parentModeBeforeDelegation: string | undefined
-		try {
-			parentModeBeforeDelegation = await parent.getTaskMode()
-		} catch (error) {
-			this.log(
-				`[delegateParentAndOpenChild] Failed to capture parent mode for ${parentTaskId} before delegation (non-fatal): ${
-					error instanceof Error ? error.message : String(error)
-				}`,
-			)
-		}
 		// 2) Flush pending tool results to API history BEFORE disposing the parent.
 		//    This is critical: when tools are called before new_task,
 		//    their tool_result blocks are in userMessageContent but not yet saved to API history.
@@ -3320,10 +3315,8 @@ export class ClineProvider
 		})
 
 		// 5) Persist parent delegation metadata BEFORE the child starts writing.
-		let parentHistoryBeforeDelegation: HistoryItem | undefined
 		try {
 			const { historyItem } = await this.getTaskWithId(parentTaskId)
-			parentHistoryBeforeDelegation = historyItem
 			const childIds = Array.from(new Set([...(historyItem.childIds ?? []), child.taskId]))
 			const updatedHistory: typeof historyItem = {
 				...historyItem,
@@ -3341,38 +3334,31 @@ export class ClineProvider
 			)
 			try {
 				await this.removeClineFromStack({ skipDelegationRepair: true })
-			} catch (cleanupErr) {
+			} catch (cleanupError) {
 				this.log(
-					`[delegateParentAndOpenChild] Failed to remove child ${child.taskId} after parent metadata persistence failure (non-fatal): ${
-						(cleanupErr as Error)?.message ?? String(cleanupErr)
+					`[delegateParentAndOpenChild] Failed to close paused child ${child.taskId} during rollback: ${
+						(cleanupError as Error)?.message ?? String(cleanupError)
 					}`,
 				)
 			}
 			try {
-				await this.deleteTaskFromState(child.taskId)
-			} catch (cleanupErr) {
+				await this.deleteTaskWithId(child.taskId, false)
+			} catch (cleanupError) {
 				this.log(
-					`[delegateParentAndOpenChild] Failed to remove child ${child.taskId} history after parent metadata persistence failure (non-fatal): ${
-						(cleanupErr as Error)?.message ?? String(cleanupErr)
+					`[delegateParentAndOpenChild] Failed to delete paused child ${child.taskId} during rollback: ${
+						(cleanupError as Error)?.message ?? String(cleanupError)
 					}`,
 				)
 			}
-			if (parentHistoryBeforeDelegation) {
-				try {
-					await this.createTaskWithHistoryItem(
-						{
-							...parentHistoryBeforeDelegation,
-							mode: parentModeBeforeDelegation ?? parentHistoryBeforeDelegation.mode,
-						},
-						{ startTask: false },
-					)
-				} catch (cleanupErr) {
-					this.log(
-						`[delegateParentAndOpenChild] Failed to rehydrate parent ${parentTaskId} after parent metadata persistence failure (non-fatal): ${
-							(cleanupErr as Error)?.message ?? String(cleanupErr)
-						}`,
-					)
-				}
+			try {
+				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+				await this.createTaskWithHistoryItem(parentHistory)
+			} catch (rollbackError) {
+				this.log(
+					`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${
+						(rollbackError as Error)?.message ?? String(rollbackError)
+					}`,
+				)
 			}
 			throw err
 		}
@@ -3399,7 +3385,7 @@ export class ClineProvider
 		completionResultSummary: string
 	}): Promise<boolean> {
 		const { parentTaskId, childTaskId, completionResultSummary } = params
-		return await (ClineProvider.prototype.runDelegationTransition.call(this, parentTaskId, async () => {
+		return this.runDelegationTransition(parentTaskId, async () => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
@@ -3411,7 +3397,7 @@ export class ClineProvider
 			// approving the subtask finish.  If the parent no longer awaits this child,
 			// routing output back would corrupt an unrelated task.
 			if (
-				(this.cancelledDelegationChildIds as Set<string> | undefined)?.has(childTaskId) ||
+				this.cancelledDelegationChildIds.has(childTaskId) ||
 				historyItem.status !== "delegated" ||
 				historyItem.awaitingChildId !== childTaskId
 			) {
@@ -3455,7 +3441,14 @@ export class ClineProvider
 				text: completionResultSummary,
 				ts,
 			}
-			parentClineMessages.push(subtaskUiMessage)
+			const lastParentClineMessage = parentClineMessages.at(-1)
+			if (
+				lastParentClineMessage?.type !== "say" ||
+				lastParentClineMessage.say !== "subtask_result" ||
+				lastParentClineMessage.text !== completionResultSummary
+			) {
+				parentClineMessages.push(subtaskUiMessage)
+			}
 			await saveTaskMessages({ messages: parentClineMessages, taskId: parentTaskId, globalStoragePath })
 
 			// Find the tool_use_id from the last assistant message's new_task tool_use
@@ -3518,21 +3511,45 @@ export class ClineProvider
 			} else {
 				// If there is no corresponding tool_use in the parent API history, we cannot emit a
 				// tool_result. Fall back to a plain user text note so the parent can still resume.
-				parentApiMessages.push({
-					role: "user",
-					content: [
-						{
-							type: "text" as const,
-							text: `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`,
-						},
-					],
-					ts,
-				})
+				const fallbackText = `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`
+				const lastParentApiMessage = parentApiMessages.at(-1)
+				const alreadyHasFallback =
+					lastParentApiMessage?.role === "user" &&
+					Array.isArray(lastParentApiMessage.content) &&
+					lastParentApiMessage.content.some(
+						(block: { type?: string; text?: string }) =>
+							block.type === "text" && block.text === fallbackText,
+					)
+				if (!alreadyHasFallback) {
+					parentApiMessages.push({
+						role: "user",
+						content: [
+							{
+								type: "text" as const,
+								text: fallbackText,
+							},
+						],
+						ts,
+					})
+				}
 			}
 
 			await saveApiMessages({ messages: parentApiMessages as any, taskId: parentTaskId, globalStoragePath })
 
-			// 3) Close child instance if still open (single-open-task invariant).
+			// 3) Persist parent metadata before closing the child. If persistence fails,
+			//    the delegated child remains active and can retry completion.
+			const childIds = Array.from(new Set([...(historyItem.childIds ?? []), childTaskId]))
+			const updatedHistory: typeof historyItem = {
+				...historyItem,
+				status: "active",
+				completedByChildId: childTaskId,
+				completionResultSummary,
+				awaitingChildId: undefined,
+				childIds,
+			}
+			await this.updateTaskHistory(updatedHistory)
+
+			// 4) Close child instance if still open (single-open-task invariant).
 			//    This MUST happen BEFORE updating the child's status to "completed" because
 			//    removeClineFromStack() → abortTask(true) → saveClineMessages() writes
 			//    the historyItem with initialStatus (typically "active"), which would
@@ -3542,9 +3559,9 @@ export class ClineProvider
 				await this.removeClineFromStack({ skipDelegationRepair: true })
 			}
 
-			// 4) Update child metadata to "completed" status.
+			// 5) Update child metadata to "completed" status.
 			//    This runs after the abort so it overwrites the stale "active" status
-			//    that saveClineMessages() may have written during step 3.
+			//    that saveClineMessages() may have written during step 4.
 			try {
 				const { historyItem: childHistory } = await this.getTaskWithId(childTaskId)
 				await this.updateTaskHistory({
@@ -3558,18 +3575,6 @@ export class ClineProvider
 					}`,
 				)
 			}
-
-			// 5) Update parent metadata and persist BEFORE emitting completion event
-			const childIds = Array.from(new Set([...(historyItem.childIds ?? []), childTaskId]))
-			const updatedHistory: typeof historyItem = {
-				...historyItem,
-				status: "active",
-				completedByChildId: childTaskId,
-				completionResultSummary,
-				awaitingChildId: undefined,
-				childIds,
-			}
-			await this.updateTaskHistory(updatedHistory)
 
 			// 6) Emit TaskDelegationCompleted (provider-level)
 			try {
@@ -3606,9 +3611,9 @@ export class ClineProvider
 				// non-fatal
 			}
 
-			;(this.cancelledDelegationChildIds as Set<string> | undefined)?.delete(childTaskId)
+			this.cancelledDelegationChildIds.delete(childTaskId)
 			return true
-		}) as Promise<boolean>)
+		})
 	}
 
 	/**

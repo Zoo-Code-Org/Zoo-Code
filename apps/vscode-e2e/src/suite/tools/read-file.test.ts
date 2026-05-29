@@ -67,9 +67,9 @@ suite("Roo Code read_file Tool", function () {
 
 	// Clean up temporary directory and files after tests
 	suiteTeardown(async () => {
-		// Cancel any running tasks before cleanup
+		// Clear any running tasks before cleanup
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
@@ -96,9 +96,9 @@ suite("Roo Code read_file Tool", function () {
 
 	// Clean up before each test
 	setup(async () => {
-		// Cancel any previous task
+		// Clear any previous task
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
@@ -109,9 +109,9 @@ suite("Roo Code read_file Tool", function () {
 
 	// Clean up after each test
 	teardown(async () => {
-		// Cancel the current task
+		// Clear the current task
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}

@@ -6,7 +6,7 @@ import { toolResultContains } from "./tool-result"
 const SUBTASK_PARENT_MARKER = "SUBTASK_PARENT_CANCELLATION_SMOKE"
 const SUBTASK_CHILD_MARKER = "SUBTASK_CHILD_CALCULATOR_SMOKE"
 
-export const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
+const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
 export const SUBTASK_PARENT_PROMPT = `${SUBTASK_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_CHILD_PROMPT}" Do not answer directly.`
 export const SUBTASK_CHILD_FOLLOWUP_ANSWER = "9"
 
@@ -18,8 +18,11 @@ const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
 const completionAfterAnswer = (followupId: string, completionId: string) => ({
 	match: {
 		predicate: (req: ChatCompletionRequest) =>
+			// Preferred: structured tool-result message carries the followup answer.
 			toolResultContains(req, followupId, [SUBTASK_CHILD_FOLLOWUP_ANSWER]) ||
+			// Fallback 1: answer present alongside the tool-call ID but not in a role:tool message.
 			requestContains(req, [followupId, SUBTASK_CHILD_FOLLOWUP_ANSWER]) ||
+			// Fallback 2: answer arrives as a bare user message after task resume (no tool-call ID context).
 			requestContains(req, [
 				SUBTASK_CHILD_MARKER,
 				`<user_message>\\n${SUBTASK_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`,
