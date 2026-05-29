@@ -100,8 +100,8 @@ describe("ZooGatewayHandler", () => {
 				baseURL: "https://staging.zoocode.dev/api/gateway/v1",
 				apiKey: mockOptions.zooSessionToken,
 				defaultHeaders: expect.objectContaining({
-					"HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
-					"X-Title": "Roo Code",
+					"HTTP-Referer": "https://github.com/Zoo-Code-Org/Zoo-Code",
+					"X-Title": "Zoo Code",
 					"X-Zoo-Editor": "vscode",
 					"X-Zoo-Extension-Version": Package.version,
 				}),
