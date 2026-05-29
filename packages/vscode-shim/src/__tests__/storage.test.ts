@@ -132,6 +132,17 @@ describe("FileSecretStorage", () => {
 		expect(value).toBe("persistent-value")
 	})
 
+	it("should reload secrets changed by an existing peer instance", async () => {
+		const storage1 = new FileSecretStorage(tempDir)
+		const storage2 = new FileSecretStorage(tempDir)
+
+		await storage1.store("token", "first-value")
+		expect(await storage2.get("token")).toBe("first-value")
+
+		await storage1.store("token", "second-value")
+		expect(await storage2.get("token")).toBe("second-value")
+	})
+
 	it("should fire onDidChange event when secret changes", async () => {
 		const storage = new FileSecretStorage(tempDir)
 		const events: string[] = []

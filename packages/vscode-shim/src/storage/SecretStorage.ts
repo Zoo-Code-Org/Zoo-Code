@@ -56,6 +56,8 @@ export class FileSecretStorage implements SecretStorage {
 			if (fs.existsSync(this.filePath)) {
 				const content = fs.readFileSync(this.filePath, "utf-8")
 				this.secrets = JSON.parse(content)
+			} else {
+				this.secrets = {}
 			}
 		} catch (error) {
 			console.warn(`Failed to load secrets from ${this.filePath}:`, error)
@@ -95,6 +97,7 @@ export class FileSecretStorage implements SecretStorage {
 	 * @returns The secret value or undefined if not found
 	 */
 	async get(key: string): Promise<string | undefined> {
+		this.loadFromFile()
 		return this.secrets[key]
 	}
 
