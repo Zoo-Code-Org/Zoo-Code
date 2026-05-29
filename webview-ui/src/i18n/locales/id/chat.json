@@ -366,9 +366,9 @@
 		},
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Provider Xiaomi MiMo: Xiaomi MiMo ditambahkan sebagai provider API kelas utama agar kamu bisa mengatur model MiMo langsung di Zoo Code.",
-			"highlight2": "Handoff upstream Zoo Code: Merge upstream sunset terbaru dan pembaruan platform terkait diambil agar Zoo Code tetap selaras dengan kerja handoff komunitas.",
-			"highlight3": "Perbaikan stabilitas di chat dan provider: Memperbaiki teks sign-in MCP, request Gemini dengan tool set penuh, penanganan temperature OpenAI, dan render Markdown untuk single tilde."
+			"highlight1": "Claude Opus 4.8 dan Opencode Go: Claude Opus 4.8 ditambahkan ke Anthropic, Bedrock, dan Vertex, ditambah Opencode Go sebagai provider baru kelas utama.",
+			"highlight2": "Pembatalan tugas yang andal: Membatalkan tugas kini benar-benar menghentikan proses yang berjalan, dengan percobaan ulang Ctrl+C otomatis untuk proses yang sulit dihentikan.",
+			"highlight3": "Perbaikan provider dan editor: Memperbaiki ID model kustom Gemini, pemotongan diff Grok, deteksi PowerShell di Windows, dan branding code action VS Code."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

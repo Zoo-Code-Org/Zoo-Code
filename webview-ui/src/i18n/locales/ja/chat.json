@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "Xiaomi MiMo プロバイダー: Xiaomi MiMo を正式な API プロバイダーとして追加し、MiMo モデルを Zoo Code で直接設定できるようにしました。",
-			"highlight2": "Zoo Code の upstream handoff: 最新の upstream sunset merge と関連するプラットフォーム更新を取り込み、Zoo Code をコミュニティ移管作業と揃えました。",
-			"highlight3": "チャットとプロバイダーの安定性修正: MCP サインイン文言、Gemini のフルツールリクエスト、OpenAI temperature 処理、Markdown の単一チルダ描画を修正しました。"
+			"highlight1": "Claude Opus 4.8 と Opencode Go: Anthropic・Bedrock・Vertex に Claude Opus 4.8 を追加し、Opencode Go を新たな正式プロバイダーとして追加しました。",
+			"highlight2": "タスクキャンセルの改善: タスクをキャンセルすると実行中のプロセスが正しく終了するようになりました。応答しないプロセスには Ctrl+C の自動リトライも行います。",
+			"highlight3": "プロバイダーとエディターの修正: Gemini のカスタムモデル ID、Grok の差分切り捨て、Windows での PowerShell 検出、VS Code コードアクションのブランド名を修正しました。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

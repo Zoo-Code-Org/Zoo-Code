@@ -30,35 +30,17 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.55.1
+## Điểm mới trong v3.56.0
 
-**Bản hotfix này** khôi phục việc chạy prompt trên các phiên bản VS Code mới đóng gói ripgrep dưới tên `@vscode/ripgrep-universal`.
-
-- Sửa lỗi request API bị treo vô thời hạn trên VS Code 1.122.0+ sau khi gói ripgrep được đổi tên.
-
-<details>
-  <summary>🌐 Các ngôn ngữ có sẵn</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Hỗ trợ **Claude Opus 4.8** trên các provider Anthropic, Bedrock và Vertex
+- **Opencode Go** được thêm làm provider API hạng nhất mới
+- **Hủy tác vụ đáng tin cậy** — hủy tác vụ giờ sẽ kết thúc đúng tiến trình đang chạy, với tính năng tự động thử lại Ctrl+C cho các tiến trình khó dừng
+- Sửa lỗi ID model tùy chỉnh của Gemini bị bỏ qua và rơi về mặc định
+- Sửa lỗi diff Grok bị cắt ngắn do thiếu marker
+- Sửa lỗi phát hiện PowerShell trên Windows khi không có shell profile
+- Sửa lỗi code action của VS Code vẫn hiển thị thương hiệu Roo Code; đã bản địa hóa sang tất cả ngôn ngữ được hỗ trợ
+- Sửa cảnh báo Vertex AI khi trường Google Cloud Credentials nhận đường dẫn file
+- Sáu bản cập nhật bảo mật phụ thuộc (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

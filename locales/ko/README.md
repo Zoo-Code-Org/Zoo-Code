@@ -30,35 +30,17 @@
 
 Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/VxfP4Vx3gX)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
 
-## v3.55.1의 새로운 기능
+## v3.56.0의 새로운 기능
 
-**이번 핫픽스 릴리스는** ripgrep를 `@vscode/ripgrep-universal`로 제공하는 최신 VS Code에서 프롬프트 실행을 복구합니다.
-
-- ripgrep 패키지 이름 변경 이후 VS Code 1.122.0+에서 API 요청이 무한 로딩에 빠지는 문제를 수정했어요.
-
-<details>
-  <summary>🌐 사용 가능한 언어</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Anthropic, Bedrock, Vertex provider에서 **Claude Opus 4.8** 지원
+- **Opencode Go**를 새로운 first-class API provider로 추가
+- **안정적인 task 취소** — task를 취소하면 실행 중인 프로세스가 제대로 종료돼요. 잘 안 꺼지는 프로세스에는 자동으로 Ctrl+C를 재시도해요
+- Gemini 커스텀 모델 ID가 무시되고 기본값으로 폴백되던 문제 수정
+- 마커 누락으로 인한 Grok diff 잘림 문제 수정
+- 쉘 프로파일이 없는 Windows에서 PowerShell 감지 문제 수정
+- VS Code code action에 여전히 Roo Code 브랜딩이 표시되던 문제 수정; 모든 지원 언어로 로컬라이즈
+- Google Cloud Credentials 필드에 파일 경로를 입력했을 때 Vertex AI 경고가 잘못 표시되던 문제 수정
+- 보안 의존성 업데이트 6건 (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

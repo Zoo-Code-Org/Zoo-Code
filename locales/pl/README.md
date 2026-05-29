@@ -30,35 +30,17 @@
 
 Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku migracji Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chcemy jak najlepiej pomagać użytkownikom w czasie przejścia i właśnie do tego służą nasze [Reddit](https://www.reddit.com/r/ZooCode) oraz [Discord](https://discord.gg/VxfP4Vx3gX). Jeśli masz problem albo pytanie, wpadaj i pytaj.
 
-## Nowości w v3.55.1
+## Nowości w v3.56.0
 
-**Ta poprawka hotfix** przywraca wykonywanie promptów w nowszych wersjach VS Code, które dostarczają ripgrep jako `@vscode/ripgrep-universal`.
-
-- Naprawia żądania API, które po zmianie nazwy pakietu ripgrep zawieszały się bez końca w VS Code 1.122.0+.
-
-<details>
-  <summary>🌐 Dostępne języki</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Wsparcie dla **Claude Opus 4.8** u dostawców Anthropic, Bedrock i Vertex
+- **Opencode Go** dodany jako nowy dostawca API pierwszej klasy
+- **Niezawodne anulowanie zadań** — anulowanie zadania teraz poprawnie kończy uruchomiony proces, z automatycznym ponowieniem Ctrl+C dla opornych procesów
+- Naprawiono niestandardowe ID modeli Gemini, które były ignorowane i wracały do domyślnego
+- Naprawiono obcinanie diffów Grok przez brakujące znaczniki
+- Naprawiono wykrywanie PowerShell na Windows bez skonfigurowanego profilu powłoki
+- Naprawiono akcje kodu VS Code wyświetlające nazwę Roo Code; zlokalizowane we wszystkich obsługiwanych językach
+- Naprawiono ostrzeżenie Vertex AI przy ścieżce pliku w polu poświadczeń Google Cloud
+- Sześć aktualizacji bezpieczeństwa zależności (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

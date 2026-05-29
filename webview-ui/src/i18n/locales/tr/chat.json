@@ -338,9 +338,9 @@
 		},
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Xiaomi MiMo sağlayıcısı: Xiaomi MiMo, MiMo modellerini doğrudan Zoo Code içinde yapılandırabilmen için birinci sınıf bir API sağlayıcısı olarak eklendi.",
-			"highlight2": "Zoo Code upstream handoff'u: Zoo Code'u topluluk handoff çalışmasıyla uyumlu tutmak için en son upstream sunset merge'i ve ilgili platform güncellemeleri alındı.",
-			"highlight3": "Sohbet ve sağlayıcılarda kararlılık düzeltmeleri: MCP oturum açma metni, Gemini tam araç seti istekleri, OpenAI temperature işleme ve Markdown single-tilde renderingi düzeltildi."
+			"highlight1": "Claude Opus 4.8 ve Opencode Go: Anthropic, Bedrock ve Vertex'e Claude Opus 4.8 eklendi; Opencode Go ise yeni bir birinci sınıf sağlayıcı olarak katıldı.",
+			"highlight2": "Güvenilir görev iptali: Bir görevi iptal etmek artık çalışan işlemi doğru şekilde sonlandırıyor; inatçı işlemler için otomatik Ctrl+C yeniden denemesi de yapılıyor.",
+			"highlight3": "Sağlayıcı ve editör düzeltmeleri: Gemini özel model ID'leri, Grok diff kesintisi, Windows'ta PowerShell algılama ve VS Code code action isimlendirmesi düzeltildi."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

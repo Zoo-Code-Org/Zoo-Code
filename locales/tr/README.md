@@ -30,35 +30,17 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
-## v3.55.1'daki Yenilikler
+## v3.56.0'daki Yenilikler
 
-**Bu hotfix sürümü** ripgrep'i `@vscode/ripgrep-universal` altında dağıtan yeni VS Code sürümlerinde prompt çalıştırmayı yeniden düzeltir.
-
-- ripgrep paketinin yeniden adlandırılmasından sonra VS Code 1.122.0+ üzerinde sonsuza kadar bekleyen API isteklerini düzeltir.
-
-<details>
-  <summary>🌐 Mevcut diller</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Anthropic, Bedrock ve Vertex sağlayıcılarında **Claude Opus 4.8** desteği
+- **Opencode Go** yeni birinci sınıf API sağlayıcısı olarak eklendi
+- **Güvenilir görev iptali** — bir görevi iptal etmek artık çalışan işlemi doğru şekilde sonlandırıyor; inatçı işlemler için otomatik Ctrl+C yeniden denemesi
+- Gemini özel model ID'lerinin yok sayılarak varsayılana geri dönmesi düzeltildi
+- Eksik işaretçilerden kaynaklanan Grok diff kesintileri düzeltildi
+- Yapılandırılmış shell profili olmayan Windows'ta PowerShell algılama düzeltildi
+- VS Code code action'larının hâlâ Roo Code markasını göstermesi düzeltildi; tüm desteklenen dillere yerelleştirildi
+- Google Cloud Credentials alanına dosya yolu girildiğinde Vertex AI uyarısı düzeltildi
+- Altı güvenlik bağımlılık güncellemesi (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 
