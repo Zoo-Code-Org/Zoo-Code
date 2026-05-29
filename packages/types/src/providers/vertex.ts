@@ -384,6 +384,7 @@ export const vertexModels = {
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')
 		tiers: [
@@ -406,6 +407,7 @@ export const vertexModels = {
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
 		supportsTemperature: false,
 		// 4.8 inherits the same Vertex pricing structure as 4.7 — no breaking changes.
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')

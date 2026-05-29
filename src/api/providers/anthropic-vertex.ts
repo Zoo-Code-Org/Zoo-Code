@@ -17,6 +17,7 @@ import { ApiStream } from "../transform/stream"
 import { addCacheBreakpoints } from "../transform/caching/vertex"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
+import { getAnthropicProviderReasoning } from "../transform/reasoning"
 import {
 	convertOpenAIToolsToAnthropic,
 	convertOpenAIToolChoiceToAnthropic,
@@ -95,7 +96,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		 * This ensures we stay under the 4-block limit while maintaining effective caching
 		 * for the most relevant context.
 		 */
-		const params: Anthropic.Messages.MessageCreateParamsStreaming = {
+		const params = {
 			model: id,
 			max_tokens: maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
 			temperature,
@@ -107,7 +108,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			messages: supportsPromptCache ? addCacheBreakpoints(sanitizedMessages) : sanitizedMessages,
 			stream: true,
 			...nativeToolParams,
-		}
+		} as Anthropic.Messages.MessageCreateParamsStreaming
 
 		// and prompt caching
 		const requestOptions = betas?.length ? { headers: { "anthropic-beta": betas.join(",") } } : undefined
@@ -240,6 +241,11 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			settings: this.options,
 			defaultTemperature: 0,
 		})
+		const thinking = getAnthropicProviderReasoning({
+			model: info,
+			reasoningBudget: params.reasoningBudget,
+			settings: this.options,
+		})
 
 		// Build betas array for request headers
 		const betas: string[] = []
@@ -258,6 +264,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			info,
 			betas: betas.length > 0 ? betas : undefined,
 			...params,
+			reasoning: thinking,
 		}
 	}
 
@@ -271,7 +278,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 				reasoning: thinking,
 			} = this.getModel()
 
-			const params: Anthropic.Messages.MessageCreateParamsNonStreaming = {
+			const params = {
 				model: id,
 				max_tokens: maxTokens,
 				temperature,
@@ -285,7 +292,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					},
 				],
 				stream: false,
-			}
+			} as Anthropic.Messages.MessageCreateParamsNonStreaming
 
 			const response = await this.client.messages.create(params)
 			const content = response.content[0]

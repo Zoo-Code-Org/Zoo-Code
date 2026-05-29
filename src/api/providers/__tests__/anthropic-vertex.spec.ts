@@ -1161,6 +1161,37 @@ describe("VertexHandler", () => {
 				undefined,
 			)
 		})
+
+		it("should use adaptive thinking for Claude Opus 4.8", async () => {
+			const opus48Handler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-4-8",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () => ({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } }
+				},
+			}))
+			;(opus48Handler["client"].messages as any).create = mockCreate
+
+			await opus48Handler
+				.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }])
+				.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					thinking: { type: "adaptive" },
+				}),
+				undefined,
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).not.toHaveProperty("budget_tokens")
+			expect(request.temperature).toBeUndefined()
+		})
 	})
 
 	describe("native tool calling", () => {
