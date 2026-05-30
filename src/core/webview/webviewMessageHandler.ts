@@ -946,31 +946,6 @@ export const webviewMessageHandler = async (
 				}
 			}
 
-			// For zoo-gateway, the token may be stored in a separate zoo-gateway profile
-			// (not the currently active profile). Look it up so the model list populates
-			// even when zoo-gateway isn't the active provider.
-			let zooGatewayToken = apiConfiguration.zooSessionToken
-			let zooGatewayBaseUrl = apiConfiguration.zooGatewayBaseUrl
-
-			if (!zooGatewayToken) {
-				try {
-					const allProfiles = await provider.providerSettingsManager.listConfig()
-					const zooGatewayProfiles = allProfiles.filter((p) => p.apiProvider === "zoo-gateway")
-					for (const profileMeta of zooGatewayProfiles) {
-						const fullProfile = await provider.providerSettingsManager.getProfile({
-							name: profileMeta.name,
-						})
-						if (fullProfile.zooSessionToken) {
-							zooGatewayToken = fullProfile.zooSessionToken
-							zooGatewayBaseUrl = fullProfile.zooGatewayBaseUrl ?? zooGatewayBaseUrl
-							break
-						}
-					}
-				} catch (error) {
-					console.debug("Failed to look up zoo-gateway profile for model fetch:", error)
-				}
-			}
-
 			// Base candidates (only those handled by this aggregate fetcher)
 			const candidates: { key: RouterName; options: GetModelsOptions }[] = [
 				{ key: "openrouter", options: { provider: "openrouter" } },
@@ -994,8 +969,7 @@ export const webviewMessageHandler = async (
 					key: "zoo-gateway",
 					options: {
 						provider: "zoo-gateway",
-						apiKey: zooGatewayToken,
-						baseUrl: zooGatewayBaseUrl,
+						baseUrl: apiConfiguration.zooGatewayBaseUrl,
 					},
 				},
 			]
