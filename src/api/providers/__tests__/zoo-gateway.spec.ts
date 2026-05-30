@@ -82,11 +82,13 @@ describe("ZooGatewayHandler", () => {
 	})
 
 	describe("constructor", () => {
-		it("requires authentication before constructing the client", () => {
-			expect(() => new ZooGatewayHandler({})).toThrow(
-				"Zoo Gateway requires authentication. Please sign in to Zoo Code first.",
+		it("allows construction without a session token (auth is enforced at request time)", () => {
+			expect(() => new ZooGatewayHandler({})).not.toThrow()
+			expect(OpenAI).toHaveBeenCalledWith(
+				expect.objectContaining({
+					apiKey: "not-provided",
+				}),
 			)
-			expect(OpenAI).not.toHaveBeenCalled()
 		})
 
 		it("initializes OpenAI with Zoo enrichment headers and session token", () => {
@@ -158,6 +160,17 @@ describe("ZooGatewayHandler", () => {
 					}
 				},
 			}))
+		})
+
+		it("requires authentication at request time when no session token is available", async () => {
+			const handler = new ZooGatewayHandler({})
+			const stream = handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }])
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow("Zoo Gateway requires authentication. Please sign in to Zoo Code first.")
 		})
 
 		it("streams text and usage chunks", async () => {
