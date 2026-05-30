@@ -5,6 +5,7 @@ import { IndexingState } from "../interfaces/manager"
 import { VectorStoreSearchResult } from "../interfaces/vector-store"
 import { CodeIndexStateManager } from "../state-manager"
 import { SembleCLI } from "./semble-cli"
+import { downloadSemble, isSembleSupportedPlatform } from "./semble-downloader"
 import { ISembleProvider, SembleConfig, SembleContentType, SembleSearchResult, SEMBLE_DEFAULTS } from "./types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
@@ -13,29 +14,31 @@ import { TelemetryEventName } from "@roo-code/types"
  * Orchestrates code search via the semble CLI.
  *
  * Semble indexes on-the-fly with each search call — there is no separate
- * "indexing" step. The provider simply validates that semble is installed,
- * then delegates search queries to `semble search`.
+ * "indexing" step. The provider automatically downloads the semble binary
+ * on first use, then delegates search queries to `semble search`.
  *
  * When `embedderProvider === "semble"`, the CodeIndexManager delegates
  * to this provider instead of the ServiceFactory → orchestrator pipeline.
  */
 export class SembleProvider implements ISembleProvider {
-	private readonly cli: SembleCLI
+	private cli: SembleCLI
 	private readonly workspacePath: string
 	private readonly config: SembleConfig
 	private readonly stateManager: CodeIndexStateManager
+	private readonly context: vscode.ExtensionContext
 
 	private _state: IndexingState = "Standby"
 	private _isInitialized = false
 
 	constructor(
 		workspacePath: string,
-		_context: vscode.ExtensionContext,
+		context: vscode.ExtensionContext,
 		stateManager: CodeIndexStateManager,
 		semblePath: string = SEMBLE_DEFAULTS.DEFAULT_PATH,
 		options?: { topK?: number; content?: SembleContentType },
 	) {
 		this.workspacePath = workspacePath
+		this.context = context
 		this.stateManager = stateManager
 
 		this.config = {
@@ -52,24 +55,49 @@ export class SembleProvider implements ISembleProvider {
 	}
 
 	/**
-	 * Initializes the provider: checks semble is installed.
+	 * Initializes the provider: downloads semble if needed, then validates it works.
 	 */
 	async initialize(): Promise<void> {
 		if (this._isInitialized) {
 			return
 		}
 
-		// Check if semble is installed
-		const checkResult = await this.cli.checkInstalled()
-
-		if (!checkResult.installed) {
-			const errorMsg = checkResult.error || "Semble is not installed"
+		// Check platform support
+		if (!isSembleSupportedPlatform()) {
 			this._state = "Error"
 			this.stateManager.setSystemState(
 				"Error",
-				`Semble not found. Install with 'pip install semble' or set the semble path in settings. Error: ${errorMsg}`,
+				`Semble is not supported on this platform (${process.platform}-${process.arch}).`,
 			)
-			console.error("[SembleProvider] Semble not found:", errorMsg)
+			console.error(`[SembleProvider] Unsupported platform: ${process.platform}-${process.arch}`)
+			return
+		}
+
+		// Auto-download semble if no custom path is configured
+		if (this.config.semblePath === SEMBLE_DEFAULTS.DEFAULT_PATH) {
+			try {
+				this.stateManager.setSystemState("Indexing", "Downloading semble binary...")
+				const storageDir = this.context.globalStorageUri.fsPath
+				const binaryPath = await downloadSemble(storageDir)
+				if (binaryPath) {
+					this.cli = new SembleCLI(binaryPath)
+				}
+			} catch (error: any) {
+				this._state = "Error"
+				this.stateManager.setSystemState("Error", `Failed to download semble: ${error?.message || error}`)
+				console.error("[SembleProvider] Download failed:", error?.message || error)
+				return
+			}
+		}
+
+		// Verify the binary works
+		const checkResult = await this.cli.checkInstalled()
+
+		if (!checkResult.installed) {
+			const errorMsg = checkResult.error || "Semble binary is not functional"
+			this._state = "Error"
+			this.stateManager.setSystemState("Error", `Semble check failed: ${errorMsg}`)
+			console.error("[SembleProvider] Semble check failed:", errorMsg)
 			return
 		}
 

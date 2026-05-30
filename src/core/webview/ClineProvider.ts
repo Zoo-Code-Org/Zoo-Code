@@ -2282,6 +2282,8 @@ export class ClineProvider
 				}
 			})(),
 			...zooCodeState,
+			platform: process.platform,
+			arch: process.arch,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
 		}
 	}

@@ -214,15 +214,7 @@
 		"workspaceToggleLabel": "Abilita l'indicizzazione per questo workspace",
 		"workspaceDisabledMessage": "L'indicizzazione è configurata ma non abilitata per questo workspace.",
 		"autoEnableDefaultLabel": "Abilita automaticamente l'indicizzazione per i nuovi workspace",
-		"sembleProvider": "Semble - Locale",
-		"semblePathLabel": "Percorso Semble",
-		"semblePathPlaceholder": "semble",
-		"semblePathDescription": "Percorso dell'eseguibile semble. Lascia \"semble\" se è nel tuo PATH, o fornisci il percorso completo (es. \"/usr/local/bin/semble\").",
-		"sembleInstallTitle": "Installa semble",
-		"sembleInstallDescription": "Semble deve essere installato tramite pip prima dell'uso:",
-		"sembleInstallCommand": "pip install semble",
-		"sembleInstallNote": "Richiede Python 3.10+. Assicurati che il binario semble installato sia nel tuo PATH, o specifica il percorso completo sopra.",
-		"sembleDescription": "Ricerca ibrida locale — nessuna chiave API richiesta."
+		"sembleProvider": "Semble - Locale"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Puoi configurare una scorciatoia globale per questa impostazione <SettingsLink>nelle preferenze del tuo IDE</SettingsLink>.",

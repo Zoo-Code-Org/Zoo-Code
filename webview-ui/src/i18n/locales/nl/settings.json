@@ -214,15 +214,7 @@
 		"workspaceToggleLabel": "Indexering inschakelen voor deze werkruimte",
 		"workspaceDisabledMessage": "Indexering is geconfigureerd maar niet ingeschakeld voor deze werkruimte.",
 		"autoEnableDefaultLabel": "Indexering automatisch inschakelen voor nieuwe werkruimtes",
-		"sembleProvider": "Semble - Lokaal",
-		"semblePathLabel": "Semble-pad",
-		"semblePathPlaceholder": "semble",
-		"semblePathDescription": "Pad naar het semble-uitvoerbestand. Laat het op \"semble\" als het in uw PATH staat, of geef het volledige pad op (bijv. \"/usr/local/bin/semble\").",
-		"sembleInstallTitle": "Semble installeren",
-		"sembleInstallDescription": "Semble moet via pip geïnstalleerd worden voor gebruik:",
-		"sembleInstallCommand": "pip install semble",
-		"sembleInstallNote": "Vereist Python 3.10+. Zorg ervoor dat het geïnstalleerde semble-binair in uw PATH staat, of geef hierboven het volledige pad op.",
-		"sembleDescription": "Lokaal hybride zoeken — geen API-sleutels vereist."
+		"sembleProvider": "Semble - Lokaal"
 	},
 	"autoApprove": {
 		"toggleShortcut": "U kunt een globale sneltoets voor deze instelling configureren <SettingsLink>in de voorkeuren van uw IDE</SettingsLink>.",

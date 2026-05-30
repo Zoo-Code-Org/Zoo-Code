@@ -30,11 +30,10 @@ export interface SembleSearchResult {
 }
 
 /**
- * Result from checking if semble is installed.
+ * Result from checking if semble is functional.
  */
 export interface SembleCheckResult {
 	installed: boolean
-	version?: string
 	error?: string
 }
 

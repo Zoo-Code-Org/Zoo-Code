@@ -195,7 +195,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 }) => {
 	const SECRET_PLACEHOLDER = "••••••••••••••••"
 	const { t } = useAppTranslation()
-	const { codebaseIndexConfig, codebaseIndexModels, cwd, apiConfiguration } = useExtensionState()
+	const { codebaseIndexConfig, codebaseIndexModels, cwd, apiConfiguration, platform, arch } = useExtensionState()
 	const [open, setOpen] = useState(false)
 	const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false)
 	const [isSetupSettingsOpen, setIsSetupSettingsOpen] = useState(false)
@@ -204,6 +204,10 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 
 	const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle")
 	const [saveError, setSaveError] = useState<string | null>(null)
+
+	// Check if semble is supported on the current platform
+	const SEMBLE_SUPPORTED_PLATFORMS = ["linux-x64", "linux-arm64", "darwin-arm64", "win32-x64"]
+	const isSembleSupported = platform && arch ? SEMBLE_SUPPORTED_PLATFORMS.includes(`${platform}-${arch}`) : false
 
 	// Form validation state
 	const [formErrors, setFormErrors] = useState<Record<string, string>>({})
@@ -771,9 +775,11 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 												<SelectItem value="openrouter">
 													{t("settings:codeIndex.openRouterProvider")}
 												</SelectItem>
-												<SelectItem value="semble">
-													{t("settings:codeIndex.sembleProvider")}
-												</SelectItem>
+												{isSembleSupported && (
+													<SelectItem value="semble">
+														{t("settings:codeIndex.sembleProvider")}
+													</SelectItem>
+												)}
 											</SelectContent>
 										</Select>
 									</div>
@@ -1440,44 +1446,6 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 														</p>
 													</div>
 												)}
-										</>
-									)}
-
-									{currentSettings.codebaseIndexEmbedderProvider === "semble" && (
-										<>
-											<div className="rounded border border-vscode-editorWidget-border bg-vscode-editorWidget-background p-3 space-y-1">
-												<p className="text-xs font-medium text-vscode-foreground mb-1">
-													{t("settings:codeIndex.sembleInstallTitle")}
-												</p>
-												<p className="text-xs text-vscode-descriptionForeground">
-													{t("settings:codeIndex.sembleInstallDescription")}
-												</p>
-												<code className="block text-xs font-mono bg-vscode-textCodeBlock-background text-vscode-foreground px-2 py-1 rounded select-all">
-													{t("settings:codeIndex.sembleInstallCommand")}
-												</code>
-												<p className="text-xs text-vscode-descriptionForeground">
-													{t("settings:codeIndex.sembleInstallNote")}
-												</p>
-											</div>
-											<div className="space-y-2">
-												<label className="text-sm font-medium">
-													{t("settings:codeIndex.semblePathLabel")}
-												</label>
-												<VSCodeTextField
-													value={currentSettings.codebaseIndexSemblePath || ""}
-													onInput={(e: any) =>
-														updateSetting("codebaseIndexSemblePath", e.target.value)
-													}
-													placeholder={t("settings:codeIndex.semblePathPlaceholder")}
-													className="w-full"
-												/>
-												<p className="text-xs text-vscode-descriptionForeground mt-1 mb-0">
-													{t("settings:codeIndex.semblePathDescription")}
-												</p>
-											</div>
-											<p className="text-xs text-vscode-descriptionForeground mt-1 mb-0">
-												{t("settings:codeIndex.sembleDescription")}
-											</p>
 										</>
 									)}
 

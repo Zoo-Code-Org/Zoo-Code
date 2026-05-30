@@ -214,15 +214,7 @@
 		"workspaceToggleLabel": "Aktifkan pengindeksan untuk ruang kerja ini",
 		"workspaceDisabledMessage": "Pengindeksan dikonfigurasi tetapi tidak diaktifkan untuk ruang kerja ini.",
 		"autoEnableDefaultLabel": "Aktifkan pengindeksan secara otomatis untuk ruang kerja baru",
-		"sembleProvider": "Semble - Lokal",
-		"semblePathLabel": "Path Semble",
-		"semblePathPlaceholder": "semble",
-		"semblePathDescription": "Path ke executable semble. Biarkan sebagai \"semble\" jika sudah ada di PATH Anda, atau berikan path lengkap (mis. \"/usr/local/bin/semble\").",
-		"sembleInstallTitle": "Instal semble",
-		"sembleInstallDescription": "Semble harus diinstal melalui pip sebelum digunakan:",
-		"sembleInstallCommand": "pip install semble",
-		"sembleInstallNote": "Membutuhkan Python 3.10+. Pastikan binary semble yang terinstal ada di PATH Anda, atau tentukan path lengkap di atas.",
-		"sembleDescription": "Pencarian hybrid lokal — tidak memerlukan kunci API."
+		"sembleProvider": "Semble - Lokal"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Anda dapat mengonfigurasi pintasan global untuk pengaturan ini <SettingsLink>di preferensi IDE Anda</SettingsLink>.",

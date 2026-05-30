@@ -214,15 +214,7 @@
 		"workspaceToggleLabel": "このワークスペースのインデックス作成を有効にする",
 		"workspaceDisabledMessage": "インデックス作成は設定済みですが、このワークスペースでは有効になっていません。",
 		"autoEnableDefaultLabel": "新しいワークスペースのインデックス作成を自動的に有効にする",
-		"sembleProvider": "Semble - ローカル",
-		"semblePathLabel": "Sembleパス",
-		"semblePathPlaceholder": "semble",
-		"semblePathDescription": "semble実行ファイルのパス。PATHにある場合は\"semble\"のままにするか、フルパスを指定してください（例：\"/usr/local/bin/semble\"）。",
-		"sembleInstallTitle": "sembleのインストール",
-		"sembleInstallDescription": "使用前にpipでSembleをインストールする必要があります：",
-		"sembleInstallCommand": "pip install semble",
-		"sembleInstallNote": "Python 3.10+が必要です。インストールしたsembleバイナリがPATHにあることを確認するか、上記でフルパスを指定してください。",
-		"sembleDescription": "ローカルハイブリッド検索 — APIキー不要。"
+		"sembleProvider": "Semble - ローカル"
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDEの環境設定</SettingsLink>で、この設定のグローバルショートカットを設定できます。",

@@ -63,52 +63,13 @@ describe("SembleCLI", () => {
 	})
 
 	describe("checkInstalled", () => {
-		it("should return installed: true with version when --help and pip show succeed", async () => {
-			// First call: semble --help; second call: pip show semble
-			mockSpawn
-				.mockReturnValueOnce(createMockProcess("usage: semble ...", "", 0))
-				.mockReturnValueOnce(createMockProcess("Name: semble\nVersion: 0.3.1\nSummary: ...", "", 0))
+		it("should return installed: true when --help succeeds", async () => {
+			mockSpawn.mockReturnValueOnce(createMockProcess("usage: semble ...", "", 0))
 
 			const result = await cli.checkInstalled()
 
-			expect(result).toEqual({ installed: true, version: "0.3.1" })
-			expect(mockSpawn).toHaveBeenNthCalledWith(1, "semble", ["--help"], expect.objectContaining({ shell: false }))
-			expect(mockSpawn).toHaveBeenNthCalledWith(2, "pip", ["show", "semble"], expect.any(Object))
-		})
-
-		it("should fall back to pip3 if pip is not available", async () => {
-			mockSpawn
-				.mockReturnValueOnce(createMockProcess("usage: semble ...", "", 0)) // --help
-				.mockReturnValueOnce(createErrorProcess("spawn ENOENT")) // pip fails
-				.mockReturnValueOnce(createMockProcess("Name: semble\nVersion: 0.3.2\n", "", 0)) // pip3 succeeds
-
-			const result = await cli.checkInstalled()
-
-			expect(result).toEqual({ installed: true, version: "0.3.2" })
-		})
-
-		it("should return installed: true with unknown version when pip cannot find semble", async () => {
-			mockSpawn
-				.mockReturnValueOnce(createMockProcess("usage: semble ...", "", 0)) // --help
-				.mockReturnValueOnce(createMockProcess("", "WARNING: Package(s) not found: semble", 1)) // pip not found
-				.mockReturnValueOnce(createMockProcess("", "WARNING: Package(s) not found: semble", 1)) // pip3 not found
-
-			const result = await cli.checkInstalled()
-
-			expect(result).toEqual({ installed: true, version: "unknown" })
-		})
-
-		it("should return installed: false when version is below 0.3.0", async () => {
-			mockSpawn
-				.mockReturnValueOnce(createMockProcess("usage: semble ...", "", 0)) // --help
-				.mockReturnValueOnce(createMockProcess("Name: semble\nVersion: 0.2.5\n", "", 0)) // pip show
-
-			const result = await cli.checkInstalled()
-
-			expect(result.installed).toBe(false)
-			expect(result.error).toContain("0.2.5")
-			expect(result.error).toContain(">= 0.3.0")
-			expect(result.error).toContain("pip install --upgrade semble")
+			expect(result).toEqual({ installed: true })
+			expect(mockSpawn).toHaveBeenCalledWith("semble", ["--help"], expect.objectContaining({ shell: false }))
 		})
 
 		it("should return installed: false when semble --help fails", async () => {
@@ -163,11 +124,7 @@ describe("SembleCLI", () => {
 
 			await cli.search("test", "/repo", { topK: 5 })
 
-			expect(mockSpawn).toHaveBeenCalledWith(
-				"semble",
-				["search", "test", "/repo", "-k", "5"],
-				expect.any(Object),
-			)
+			expect(mockSpawn).toHaveBeenCalledWith("semble", ["search", "test", "/repo", "-k", "5"], expect.any(Object))
 		})
 
 		it("should add --content flag for non-default content types", async () => {
@@ -229,9 +186,7 @@ describe("SembleCLI", () => {
 		it("should throw error when semble find-related fails", async () => {
 			mockSpawn.mockReturnValue(createMockProcess("", "Error: no chunk found", 1))
 
-			await expect(cli.findRelated("src/auth.ts", 42, "/repo")).rejects.toThrow(
-				"Semble find-related failed",
-			)
+			await expect(cli.findRelated("src/auth.ts", 42, "/repo")).rejects.toThrow("Semble find-related failed")
 		})
 	})
 

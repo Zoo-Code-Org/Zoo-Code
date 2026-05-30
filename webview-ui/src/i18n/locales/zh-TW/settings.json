@@ -224,15 +224,7 @@
 		"workspaceToggleLabel": "為此工作區啟用索引",
 		"workspaceDisabledMessage": "索引已設定，但尚未為此工作區啟用。",
 		"autoEnableDefaultLabel": "自動為新工作區啟用索引",
-		"sembleProvider": "Semble - 本機",
-		"semblePathLabel": "Semble 路徑",
-		"semblePathPlaceholder": "semble",
-		"semblePathDescription": "semble 可執行檔的路徑。如果在您的 PATH 中，保持為 \"semble\"，或提供完整路徑（例如 \"/usr/local/bin/semble\"）。",
-		"sembleInstallTitle": "安裝 semble",
-		"sembleInstallDescription": "使用前必須透過 pip 安裝 Semble：",
-		"sembleInstallCommand": "pip install semble",
-		"sembleInstallNote": "需要 Python 3.10+。確保已安裝的 semble 二進位檔在您的 PATH 中，或在上方指定完整路徑。",
-		"sembleDescription": "本機混合搜尋 - 無需 API 金鑰。"
+		"sembleProvider": "Semble - 本機"
 	},
 	"autoApprove": {
 		"description": "無需詢問許可即可執行下列動作。請僅在您完全信任且了解安全風險的情況下啟用此功能。",

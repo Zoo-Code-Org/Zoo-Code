@@ -5,8 +5,8 @@ import { SembleSearchResult, SembleCheckResult, SembleContentType, SEMBLE_DEFAUL
 /**
  * Wraps the `semble` CLI for programmatic access.
  *
- * Semble must be installed via pip: `pip install semble`
- * The semblePath should be a direct path to the executable (e.g. "semble" or "/usr/local/bin/semble").
+ * The semble binary is automatically downloaded on enablement via semble-downloader.ts.
+ * The semblePath should be a direct path to the executable.
  *
  * All methods spawn the semble process via child_process.spawn with array
  * arguments (no shell) to prevent shell injection.
@@ -29,45 +29,18 @@ export class SembleCLI {
 	}
 
 	/**
-	 * Checks whether semble is installed and meets the minimum version requirement (0.3.0).
-	 *
-	 * - Confirms the executable runs via `semble --help`.
-	 * - Queries `pip show semble` (falling back to `pip3`) to get the installed version
-	 *   and validates >= 0.3.0.
+	 * Checks whether the semble binary is functional by running `semble --help`.
 	 */
 	async checkInstalled(): Promise<SembleCheckResult> {
-		// 1. Confirm the executable is runnable
 		try {
 			await this._spawn(["--help"], { timeout: 10_000 })
+			return { installed: true }
 		} catch (error: any) {
 			return {
 				installed: false,
 				error: error?.stderr?.trim() || error?.message || "Failed to run semble",
 			}
 		}
-
-		// 2. Query pip for the installed semble version
-		const version = await this._getPipVersion()
-		if (!version) {
-			// pip couldn't find it — semble may be installed outside pip, allow it
-			return { installed: true, version: "unknown" }
-		}
-
-		// 3. Validate >= 0.3.0
-		const match = version.match(/^(\d+)\.(\d+)\.(\d+)/)
-		if (!match) {
-			return { installed: true, version: "unknown" }
-		}
-
-		const [major, minor] = [Number(match[1]), Number(match[2])]
-		if (major === 0 && minor < 3) {
-			return {
-				installed: false,
-				error: `Semble version ${version} is not supported. Please upgrade to semble >= 0.3.0 (run: pip install --upgrade semble).`,
-			}
-		}
-
-		return { installed: true, version }
 	}
 
 	/**
@@ -124,26 +97,6 @@ export class SembleCLI {
 	}
 
 	/**
-	 * Queries `pip show semble` (falling back to `pip3`) and returns the version string,
-	 * or `undefined` if semble is not found in pip or pip is unavailable.
-	 */
-	private async _getPipVersion(): Promise<string | undefined> {
-		for (const pipCmd of ["pip", "pip3"]) {
-			try {
-				const stdout = await this._spawnExternal(pipCmd, ["show", "semble"], { timeout: 10_000 })
-				// pip show outputs lines like "Version: 0.3.1"
-				const match = stdout.match(/^Version:\s*(.+)$/m)
-				if (match) {
-					return match[1].trim()
-				}
-			} catch {
-				// try next
-			}
-		}
-		return undefined
-	}
-
-	/**
 	 * Spawns the semble process and collects stdout/stderr.
 	 * Uses spawn without shell — args are passed as an array, no injection risk.
 	 */
@@ -176,39 +129,6 @@ export class SembleCLI {
 					resolve({ stdout, stderr })
 				} else {
 					reject({ message: `Process exited with code ${code}`, stderr, stdout })
-				}
-			})
-		})
-	}
-
-	/**
-	 * Spawns an arbitrary external command (not the semble executable) and returns stdout.
-	 */
-	private _spawnExternal(cmd: string, args: string[], options: { timeout: number }): Promise<string> {
-		return new Promise((resolve, reject) => {
-			const child = spawn(cmd, args, {
-				shell: false,
-				timeout: options.timeout,
-				stdio: ["ignore", "pipe", "pipe"],
-			} as any)
-
-			let stdout = ""
-			let stderr = ""
-
-			child.stdout?.on("data", (data: Buffer) => {
-				stdout += data.toString()
-			})
-			child.stderr?.on("data", (data: Buffer) => {
-				stderr += data.toString()
-			})
-			child.on("error", (err: Error) => {
-				reject({ message: err.message, stderr })
-			})
-			child.on("close", (code: number | null) => {
-				if (code === 0) {
-					resolve(stdout)
-				} else {
-					reject({ message: `Process exited with code ${code}`, stderr })
 				}
 			})
 		})

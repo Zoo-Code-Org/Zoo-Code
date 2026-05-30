@@ -214,15 +214,7 @@
 		"workspaceToggleLabel": "Включить индексацию для этого рабочего пространства",
 		"workspaceDisabledMessage": "Индексация настроена, но не включена для этого рабочего пространства.",
 		"autoEnableDefaultLabel": "Автоматически включать индексацию для новых рабочих пространств",
-		"sembleProvider": "Semble - Локальный",
-		"semblePathLabel": "Путь к Semble",
-		"semblePathPlaceholder": "semble",
-		"semblePathDescription": "Путь к исполняемому файлу semble. Оставьте \"semble\", если он в вашем PATH, или укажите полный путь (напр. \"/usr/local/bin/semble\").",
-		"sembleInstallTitle": "Установить semble",
-		"sembleInstallDescription": "Semble необходимо установить через pip перед использованием:",
-		"sembleInstallCommand": "pip install semble",
-		"sembleInstallNote": "Требуется Python 3.10+. Убедитесь, что установленный бинарник semble находится в вашем PATH, или укажите полный путь выше.",
-		"sembleDescription": "Локальный гибридный поиск — ключи API не требуются."
+		"sembleProvider": "Semble - Локальный"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Вы можете настроить глобальное сочетание клавиш для этого параметра <SettingsLink>в настройках вашей IDE</SettingsLink>.",

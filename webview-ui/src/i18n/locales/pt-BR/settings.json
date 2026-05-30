@@ -214,15 +214,7 @@
 		"workspaceToggleLabel": "Ativar indexação para este workspace",
 		"workspaceDisabledMessage": "A indexação está configurada, mas não ativada para este workspace.",
 		"autoEnableDefaultLabel": "Ativar indexação automaticamente para novos workspaces",
-		"sembleProvider": "Semble - Local",
-		"semblePathLabel": "Caminho do Semble",
-		"semblePathPlaceholder": "semble",
-		"semblePathDescription": "Caminho para o executável do semble. Deixe como \"semble\" se estiver no seu PATH, ou forneça o caminho completo (ex. \"/usr/local/bin/semble\").",
-		"sembleInstallTitle": "Instalar semble",
-		"sembleInstallDescription": "O Semble deve ser instalado via pip antes do uso:",
-		"sembleInstallCommand": "pip install semble",
-		"sembleInstallNote": "Requer Python 3.10+. Certifique-se de que o binário semble instalado está no seu PATH, ou especifique o caminho completo acima.",
-		"sembleDescription": "Busca híbrida local — nenhuma chave de API necessária."
+		"sembleProvider": "Semble - Local"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Você pode configurar um atalho global para esta configuração <SettingsLink>nas preferências do seu IDE</SettingsLink>.",
