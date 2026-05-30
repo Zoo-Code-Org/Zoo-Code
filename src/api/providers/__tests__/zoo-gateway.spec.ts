@@ -57,11 +57,21 @@ vitest.mock("../fetchers/modelCache", () => ({
 }))
 
 const mockGetCachedZooCodeToken = vitest.hoisted(() => vitest.fn<() => string | undefined>(() => undefined))
+const mockSessionCleared = vitest.hoisted(() => ({ value: false }))
 
 vitest.mock("../../../services/zoo-code-auth", () => ({
 	getZooCodeBaseUrl: vitest.fn(() => "https://www.zoocode.dev"),
-	getCachedZooCodeToken: mockGetCachedZooCodeToken,
-	clearZooCodeToken: vitest.fn(async () => undefined),
+	getCachedZooCodeToken: () => mockGetCachedZooCodeToken() ?? "",
+	resolveZooGatewaySessionToken: (profileToken?: string) => {
+		const cached = mockGetCachedZooCodeToken()
+		if (cached) return cached
+		if (mockSessionCleared.value) return undefined
+		return profileToken
+	},
+	clearZooCodeToken: vitest.fn(async () => {
+		mockSessionCleared.value = true
+		mockGetCachedZooCodeToken.mockReturnValue(undefined)
+	}),
 }))
 
 vitest.mock("../../transform/caching/vercel-ai-gateway", () => ({
@@ -93,6 +103,7 @@ describe("ZooGatewayHandler", () => {
 
 	beforeEach(() => {
 		vitest.clearAllMocks()
+		mockSessionCleared.value = false
 		mockGetCachedZooCodeToken.mockReturnValue(undefined)
 		mockCreate.mockClear()
 		showErrorMessage.mockReset()
@@ -195,6 +206,13 @@ describe("ZooGatewayHandler", () => {
 	})
 
 	describe("createMessage", () => {
+		it("requires authentication at request time when no session token is available", async () => {
+			const handler = new ZooGatewayHandler({})
+			await expect(drainCreateMessage(handler)).rejects.toThrow(
+				"Zoo Gateway requires authentication. Please sign in to Zoo Code first.",
+			)
+		})
+
 		beforeEach(() => {
 			mockCreate.mockImplementation(async () => ({
 				[Symbol.asyncIterator]: async function* () {

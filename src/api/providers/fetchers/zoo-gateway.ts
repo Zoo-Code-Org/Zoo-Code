@@ -3,7 +3,7 @@ import axios from "axios"
 import type { ModelInfo } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../../shared/api"
-import { getCachedZooCodeToken, getZooCodeBaseUrl } from "../../../services/zoo-code-auth"
+import { getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../../services/zoo-code-auth"
 
 import {
 	type VercelAiGatewayModel,
@@ -24,9 +24,7 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.zooGatewayBaseUrl ?? `${getZooCodeBaseUrl()}/api/gateway/v1`
 
-	// Build headers - Zoo Gateway requires authentication via the zoo_ext_ session token.
-	// Fall back to the secret-storage cache when the profile hasn't been seeded yet.
-	const sessionToken = options?.zooSessionToken || getCachedZooCodeToken()
+	const sessionToken = resolveZooGatewaySessionToken(options?.zooSessionToken)
 	const headers: Record<string, string> = {}
 	if (sessionToken) {
 		headers["Authorization"] = `Bearer ${sessionToken}`

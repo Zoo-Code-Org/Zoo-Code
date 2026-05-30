@@ -12,6 +12,7 @@ import {
 	getZooCodeBaseUrl,
 	handleAuthCallback,
 	initZooCodeAuth,
+	resolveZooGatewaySessionToken,
 	setZooCodeToken,
 	setZooCodeUserInfo,
 	verifyZooCodeToken,
@@ -429,6 +430,29 @@ describe("zoo-code-auth", () => {
 			const info = getCachedZooCodeUserInfo()
 			expect(info.email).toBe("jane@example.com")
 			expect(info.name).toBe("John Doe")
+		})
+	})
+
+	describe("resolveZooGatewaySessionToken", () => {
+		it("prefers the cached token over a profile token", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_cached")
+
+			expect(resolveZooGatewaySessionToken("zoo_ext_profile")).toBe("zoo_ext_cached")
+		})
+
+		it("ignores profile tokens after an explicit sign-out clear", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_cached")
+			await clearZooCodeToken()
+
+			expect(resolveZooGatewaySessionToken("zoo_ext_stale_profile")).toBeUndefined()
+		})
+
+		it("falls back to the profile token when the cache is empty and not cleared", async () => {
+			await initZooCodeAuth(mockContext)
+
+			expect(resolveZooGatewaySessionToken("zoo_ext_profile")).toBe("zoo_ext_profile")
 		})
 	})
 

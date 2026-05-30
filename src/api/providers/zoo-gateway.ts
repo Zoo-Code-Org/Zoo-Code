@@ -10,7 +10,7 @@ import {
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
-import { clearZooCodeToken, getCachedZooCodeToken, getZooCodeBaseUrl } from "../../services/zoo-code-auth"
+import { clearZooCodeToken, getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../services/zoo-code-auth"
 import { Package } from "../../shared/package"
 import { t } from "../../i18n"
 
@@ -101,9 +101,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 	constructor(options: ApiHandlerOptions) {
 		const baseURL = options.zooGatewayBaseUrl ?? `${getZooCodeBaseUrl()}/api/gateway/v1`
 
-		// Prefer the secret-storage cache so a 401 clear takes effect immediately; fall back
-		// to the profile-persisted token when the user is signed in but seeding hasn't run yet.
-		const sessionToken = getCachedZooCodeToken() || options.zooSessionToken
+		const sessionToken = resolveZooGatewaySessionToken(options.zooSessionToken)
 
 		// Merge Zoo-specific enrichment headers into openAiHeaders so they flow through
 		// the parent's single OpenAI client. We avoid reassigning `this.client` (which
@@ -128,8 +126,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 	}
 
 	private ensureAuthenticated(): void {
-		const sessionToken = getCachedZooCodeToken() || this.options.zooSessionToken
-		if (!sessionToken) {
+		if (!resolveZooGatewaySessionToken(this.options.zooSessionToken)) {
 			throw new Error(ZOO_GATEWAY_AUTH_ERROR)
 		}
 	}
@@ -217,12 +214,14 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				}
 			}
 		} catch (error) {
-			void surfaceGatewayApiError(error).catch((surfaceError) => {
+			try {
+				await surfaceGatewayApiError(error)
+			} catch (surfaceError) {
 				console.error(
 					"Failed to surface Zoo Gateway error:",
 					surfaceError instanceof Error ? surfaceError.message : surfaceError,
 				)
-			})
+			}
 			throw error
 		}
 	}
@@ -248,12 +247,14 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			const response = await this.client.chat.completions.create(requestOptions)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
-			void surfaceGatewayApiError(error).catch((surfaceError) => {
+			try {
+				await surfaceGatewayApiError(error)
+			} catch (surfaceError) {
 				console.error(
 					"Failed to surface Zoo Gateway error:",
 					surfaceError instanceof Error ? surfaceError.message : surfaceError,
 				)
-			})
+			}
 			if (error instanceof Error) {
 				throw new Error(`Zoo Gateway completion error: ${error.message}`)
 			}
