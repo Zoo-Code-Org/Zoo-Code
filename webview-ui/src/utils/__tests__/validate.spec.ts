@@ -211,6 +211,54 @@ describe("Model Validation Functions", () => {
 			expect(result).toBe("settings:validation.modelId")
 		})
 	})
+
+	describe("Zoo Gateway validation", () => {
+		it("returns a sign-in error when neither profile token nor Zoo auth is present", () => {
+			const config: ProviderSettings = {
+				apiProvider: "zoo-gateway",
+				zooGatewayModelId: "anthropic/claude-sonnet-4",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				mockRouterModels,
+				allowAllOrganization,
+				false,
+			)
+			expect(result).toBe("settings:validation.zooGatewaySignIn")
+		})
+
+		it("returns undefined when Zoo Code auth is active without a profile token", () => {
+			const config: ProviderSettings = {
+				apiProvider: "zoo-gateway",
+				zooGatewayModelId: "anthropic/claude-sonnet-4",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				mockRouterModels,
+				allowAllOrganization,
+				true,
+			)
+			expect(result).toBeUndefined()
+		})
+
+		it("returns undefined when a profile session token is set", () => {
+			const config: ProviderSettings = {
+				apiProvider: "zoo-gateway",
+				zooGatewayModelId: "anthropic/claude-sonnet-4",
+				zooSessionToken: "zoo_ext_test_token",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				mockRouterModels,
+				allowAllOrganization,
+				false,
+			)
+			expect(result).toBeUndefined()
+		})
+	})
 })
 
 describe("validateBedrockArn", () => {

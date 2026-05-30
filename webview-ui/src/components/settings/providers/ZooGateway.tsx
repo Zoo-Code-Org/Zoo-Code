@@ -9,6 +9,7 @@ import {
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { getZooCodeAuthUrl } from "@src/oauth/urls"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 
 import { ModelPicker } from "../ModelPicker"
 
@@ -92,11 +93,9 @@ export const ZooGateway = ({
 						<p className="text-xs text-vscode-descriptionForeground">
 							{t("settings:providers.zooGateway.signInDescription")}
 						</p>
-						<a
-							href={authUrl}
-							className="inline-flex w-fit items-center rounded-sm bg-vscode-button-background px-3 py-1 text-xs text-vscode-button-foreground no-underline hover:bg-vscode-button-hoverBackground">
+						<VSCodeButtonLink href={authUrl} appearance="primary">
 							{t("settings:providers.zooGateway.signInButton")}
-						</a>
+						</VSCodeButtonLink>
 					</div>
 				) : (
 					<div className="flex items-center gap-1">
