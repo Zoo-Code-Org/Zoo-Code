@@ -9,7 +9,7 @@ import {
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
-import { getZooCodeBaseUrl } from "../../services/zoo-code-auth"
+import { getCachedZooCodeToken, getZooCodeBaseUrl } from "../../services/zoo-code-auth"
 import { Package } from "../../shared/package"
 
 import { ApiStream } from "../transform/stream"
@@ -25,16 +25,15 @@ interface ZooGatewayUsage extends OpenAI.CompletionUsage {
 	cost?: number
 }
 
+const ZOO_GATEWAY_AUTH_ERROR = "Zoo Gateway requires authentication. Please sign in to Zoo Code first."
+
 export class ZooGatewayHandler extends RouterProvider implements SingleCompletionHandler {
 	constructor(options: ApiHandlerOptions) {
 		const baseURL = options.zooGatewayBaseUrl ?? `${getZooCodeBaseUrl()}/api/gateway/v1`
 
-		// Fail fast with a clear message instead of waiting for a 401.
-		// The token is set automatically by handleZooCodeCallback() after the user
-		// authenticates via the "Sign in with Zoo Code" flow in the extension.
-		if (!options.zooSessionToken) {
-			throw new Error("Zoo Gateway requires authentication. Please sign in to Zoo Code first.")
-		}
+		// Prefer the secret-storage cache so a 401 clear takes effect immediately; fall back
+		// to the profile-persisted token when the user is signed in but seeding hasn't run yet.
+		const sessionToken = getCachedZooCodeToken() || options.zooSessionToken
 
 		// Merge Zoo-specific enrichment headers into openAiHeaders so they flow through
 		// the parent's single OpenAI client. We avoid reassigning `this.client` (which
@@ -51,11 +50,18 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			},
 			name: "zoo-gateway",
 			baseURL,
-			apiKey: options.zooSessionToken,
+			apiKey: sessionToken || "not-provided",
 			modelId: options.zooGatewayModelId,
 			defaultModelId: zooGatewayDefaultModelId,
 			defaultModelInfo: zooGatewayDefaultModelInfo,
 		})
+	}
+
+	private ensureAuthenticated(): void {
+		const sessionToken = getCachedZooCodeToken() || this.options.zooSessionToken
+		if (!sessionToken) {
+			throw new Error(ZOO_GATEWAY_AUTH_ERROR)
+		}
 	}
 
 	override async *createMessage(
@@ -63,6 +69,8 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		this.ensureAuthenticated()
+
 		const { id: modelId, info } = await this.fetchModel()
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -140,6 +148,8 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
+		this.ensureAuthenticated()
+
 		const { id: modelId, info } = await this.fetchModel()
 
 		try {

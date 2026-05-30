@@ -42,7 +42,7 @@ export type VercelAiGatewayModel = z.infer<typeof vercelAiGatewayModelSchema>
  * VercelAiGatewayModelsResponse
  */
 
-const vercelAiGatewayModelsResponseSchema = z.object({
+export const vercelAiGatewayModelsResponseSchema = z.object({
 	object: z.string(),
 	data: z.array(vercelAiGatewayModelSchema),
 })
