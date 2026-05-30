@@ -52,6 +52,8 @@ export class CustomModesManager {
 	private writeQueue: Array<() => Promise<void>> = []
 	private cachedModes: ModeConfig[] | null = null
 	private cachedAt: number = 0
+	/** Prevents re-entrant onUpdate() when ModeFactory writes to .roomodes */
+	private isInternalUpdate = false
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -321,6 +323,11 @@ export class CustomModesManager {
 			const roomodesWatcher = vscode.workspace.createFileSystemWatcher(roomodesPath)
 
 			const handleRoomodesChange = async () => {
+				// Skip — this change was triggered by our own write (e.g. ModeFactory)
+				if (this.isInternalUpdate) {
+					return
+				}
+
 				try {
 					const settingsModes = await this.loadModesFromFile(settingsPath)
 					const roomodesModes = await this.loadModesFromFile(roomodesPath)
@@ -402,6 +409,7 @@ export class CustomModesManager {
 	}
 
 	public async updateCustomMode(slug: string, config: ModeConfig): Promise<void> {
+		this.isInternalUpdate = true
 		try {
 			// Validate the mode configuration before saving
 			const validationResult = modeConfigSchema.safeParse(config)
@@ -459,6 +467,8 @@ export class CustomModesManager {
 			logger.error("Failed to update custom mode", { slug, error: errorMessage })
 			vscode.window.showErrorMessage(t("common:customModes.errors.updateFailed", { error: errorMessage }))
 			throw error
+		} finally {
+			this.isInternalUpdate = false
 		}
 	}
 

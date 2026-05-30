@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
+import { render, screen, fireEvent, waitFor, act } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import type { SkillMetadata } from "@roo-code/types"
@@ -166,7 +166,7 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 	useExtensionState: () => mockExtensionState,
 }))
 
-const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string) => {
+const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string, skillsUpdateNotice?: string) => {
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: { retry: false },
@@ -179,6 +179,7 @@ const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string
 		skills,
 		cwd: cwd !== undefined ? cwd : "/workspace",
 		customModes: [],
+		skillsUpdateNotice,
 	}
 
 	return render(
@@ -193,6 +194,7 @@ const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string
 describe("SkillsSettings", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		vi.useRealTimers()
 	})
 
 	it("renders section header", () => {
@@ -206,6 +208,25 @@ describe("SkillsSettings", () => {
 		renderSkillsSettings()
 
 		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "requestSkills" })
+	})
+
+	it("shows a live skills update banner when the extension pushes one", () => {
+		renderSkillsSettings(mockSkills, undefined, 'Skill created: "workflow-terminal-file"')
+
+		expect(screen.getByRole("status")).toHaveTextContent('Skill created: "workflow-terminal-file"')
+	})
+
+	it("auto-dismisses the live skills update banner after a short delay", () => {
+		vi.useFakeTimers()
+		renderSkillsSettings(mockSkills, undefined, 'Skill created: "workflow-terminal-file"')
+
+		expect(screen.getByRole("status")).toHaveTextContent('Skill created: "workflow-terminal-file"')
+
+		act(() => {
+			vi.advanceTimersByTime(4000)
+		})
+
+		expect(screen.queryByRole("status")).not.toBeInTheDocument()
 	})
 
 	it("displays project skills section when in a workspace", () => {

@@ -12,6 +12,7 @@ import { ClineAskResponse } from "../../shared/WebviewMessage"
 import { isWriteToolAction, isReadOnlyToolAction } from "./tools"
 import { isMcpToolAlwaysAllowed } from "./mcp"
 import { getCommandDecision } from "./commands"
+import type { TrustService } from "../../services/self-improving/TrustService"
 
 // We have auto-approval actions for different categories.
 export type AutoApprovalState =
@@ -49,14 +50,27 @@ export async function checkAutoApproval({
 	ask,
 	text,
 	isProtected,
+	trustService,
 }: {
 	state?: Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOptions>
 	ask: ClineAsk
 	text?: string
 	isProtected?: boolean
+	trustService?: TrustService
 }): Promise<CheckAutoApprovalResult> {
 	if (isNonBlockingAsk(ask)) {
 		return { decision: "approve" }
+	}
+
+	// Check TrustService for auto-approval (experiment-gated full trust)
+	if (trustService) {
+		const toolName = mapAskToToolName(ask, text)
+		if (toolName) {
+			const params = extractToolParams(ask, text)
+			if (trustService.shouldAutoApprove(toolName, params)) {
+				return { decision: "approve" }
+			}
+		}
 	}
 
 	if (!state || !state.autoApprovalEnabled) {
@@ -180,6 +194,66 @@ export async function checkAutoApproval({
 	}
 
 	return { decision: "ask" }
+}
+
+/**
+ * Map a ClineAsk type to a tool name for TrustService checks.
+ */
+function mapAskToToolName(ask: ClineAsk, text?: string): string | undefined {
+	switch (ask) {
+		case "tool":
+			if (!text) return undefined
+			try {
+				const tool = JSON.parse(text) as ClineSayTool
+				return tool.tool
+			} catch {
+				return undefined
+			}
+		case "command":
+			return "execute_command"
+		case "command_output":
+			return "execute_command"
+		case "use_mcp_server":
+			return "use_mcp_tool"
+		case "mode_switch":
+			return "switch_mode"
+		case "followup":
+			return "ask_followup_question"
+		case "completion_result":
+			return "attempt_completion"
+		default:
+			return undefined
+	}
+}
+
+/**
+ * Extract tool parameters from a ClineAsk for TrustService checks.
+ */
+function extractToolParams(
+	ask: ClineAsk,
+	text?: string,
+): { command?: string; path?: string; mode?: string } | undefined {
+	if (!text) return undefined
+
+	switch (ask) {
+		case "tool":
+			try {
+				const tool = JSON.parse(text) as ClineSayTool
+				return {
+					command: tool.command,
+					path: tool.path,
+				}
+			} catch {
+				return undefined
+			}
+		case "command":
+		case "command_output":
+			return { command: text }
+		case "mode_switch":
+			return { mode: text }
+		default:
+			return undefined
+	}
 }
 
 export { AutoApprovalHandler } from "./AutoApprovalHandler"

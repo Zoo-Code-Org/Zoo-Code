@@ -6,9 +6,10 @@ interface ExperimentalFeatureProps {
 	onChange: (value: boolean) => void
 	// Additional property to identify the experiment
 	experimentKey?: string
+	checkboxTestId?: string
 }
 
-export const ExperimentalFeature = ({ enabled, onChange, experimentKey }: ExperimentalFeatureProps) => {
+export const ExperimentalFeature = ({ enabled, onChange, experimentKey, checkboxTestId }: ExperimentalFeatureProps) => {
 	const { t } = useAppTranslation()
 
 	// Generate translation keys based on experiment key
@@ -18,7 +19,10 @@ export const ExperimentalFeature = ({ enabled, onChange, experimentKey }: Experi
 	return (
 		<div>
 			<div className="flex items-center gap-2">
-				<VSCodeCheckbox checked={enabled} onChange={(e: any) => onChange(e.target.checked)}>
+				<VSCodeCheckbox
+					checked={enabled}
+					onChange={(e: any) => onChange(e.target.checked)}
+					data-testid={checkboxTestId}>
 					<span className="font-medium">{t(nameKey)}</span>
 				</VSCodeCheckbox>
 			</div>

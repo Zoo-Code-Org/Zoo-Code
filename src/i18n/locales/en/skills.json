@@ -3,6 +3,7 @@
 		"name_length": "Skill name must be 1-{{maxLength}} characters (got {{length}})",
 		"name_format": "Skill name must be lowercase letters/numbers/hyphens only (no leading/trailing hyphen, no consecutive hyphens)",
 		"description_length": "Skill description must be 1-1024 characters (got {{length}})",
+		"invalid_structure": "Invalid SKILL.md structure: {{reason}}",
 		"no_workspace": "Cannot create project skill: no workspace folder is open",
 		"already_exists": "Skill \"{{name}}\" already exists at {{path}}",
 		"not_found": "Skill \"{{name}}\" not found in {{source}}{{modeInfo}}",

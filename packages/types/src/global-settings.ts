@@ -78,6 +78,10 @@ export const DEFAULT_CHECKPOINT_TIMEOUT_SECONDS = 15
  * GlobalSettings
  */
 
+export const selfImprovingScopeSchema = z.enum(["workspace", "global"])
+
+export type SelfImprovingScope = z.infer<typeof selfImprovingScopeSchema>
+
 export const globalSettingsSchema = z.object({
 	currentApiConfigName: z.string().optional(),
 	listApiConfigMeta: z.array(providerSettingsEntrySchema).optional(),
@@ -92,6 +96,20 @@ export const globalSettingsSchema = z.object({
 	imageGenerationProvider: z.enum(["openrouter"]).optional(),
 	openRouterImageApiKey: z.string().optional(),
 	openRouterImageGenerationSelectedModel: z.string().optional(),
+	memoryBackend: z.enum(["builtin", "agentmemory"]).optional(),
+	agentMemoryUrl: z.string().optional(),
+	selfImprovingScope: selfImprovingScopeSchema.optional(),
+	selfImprovingAutoSkillsScope: selfImprovingScopeSchema.optional(),
+
+	// KAIZEN orchestrator configuration
+	kaizenFrequency: z.number().min(1).max(100).optional(),
+	kaizenMiniGoal: z.string().optional(),
+	kaizenLimit: z.number().min(1).max(1000).optional(),
+
+	// KAIZEN git auto-push configuration
+	kaizenAutoPush: z.boolean().optional(),
+	kaizenRemoteName: z.string().optional(),
+	kaizenCommitTemplate: z.string().optional(),
 
 	customCondensingPrompt: z.string().optional(),
 
@@ -182,6 +200,12 @@ export const globalSettingsSchema = z.object({
 
 	rateLimitSeconds: z.number().optional(),
 	experiments: experimentsSchema.optional(),
+
+	/**
+	 * List of mode slugs that should skip code quality verification in AttemptCompletionTool.
+	 * Default: ["research"]
+	 */
+	lenientModes: z.array(z.string()).optional(),
 
 	codebaseIndexModels: codebaseIndexModelsSchema.optional(),
 	codebaseIndexConfig: codebaseIndexConfigSchema.optional(),

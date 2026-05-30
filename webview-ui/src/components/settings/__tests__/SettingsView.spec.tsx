@@ -1,6 +1,7 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/settings/__tests__/SettingsView.spec.tsx
 
-import { render, screen, fireEvent, within } from "@/utils/test-utils"
+import { render, screen, fireEvent, within, waitFor } from "@/utils/test-utils"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { vscode } from "@/utils/vscode"
@@ -39,7 +40,11 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			<input
 				type="checkbox"
 				checked={checked}
-				onChange={(e) => onChange({ target: { checked: e.target.checked } })}
+				onClick={(e: any) => {
+					const newChecked = !checked
+					e.target.checked = newChecked
+					onChange({ target: { checked: newChecked } })
+				}}
 				aria-label={typeof children === "string" ? children : undefined}
 				data-testid={dataTestId}
 			/>
@@ -70,6 +75,12 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			role="textbox"
 		/>
 	),
+	VSCodeDropdown: ({ children, value, onChange }: any) => (
+		<select value={value} onChange={onChange} data-testid="vscode-dropdown">
+			{children}
+		</select>
+	),
+	VSCodeOption: ({ children, value }: any) => <option value={value}>{children}</option>,
 }))
 
 vi.mock("../../../components/common/Tab", () => ({
@@ -173,21 +184,17 @@ vi.mock("@/components/ui", () => ({
 	Input: ({ value, onChange, placeholder, "data-testid": dataTestId }: any) => (
 		<input type="text" value={value} onChange={onChange} placeholder={placeholder} data-testid={dataTestId} />
 	),
-	Select: ({ children, value, onValueChange }: any) => (
-		<div data-testid="select" data-value={value}>
-			<button onClick={() => onValueChange && onValueChange("test-change")}>{value}</button>
+	Select: ({ children, value, onValueChange, "data-testid": dataTestId }: any) => (
+		<select data-testid={dataTestId || "select"} value={value} onChange={(e) => onValueChange?.(e.target.value)}>
+			<option value="">select</option>
 			{children}
-		</div>
+		</select>
 	),
-	SelectContent: ({ children }: any) => <div data-testid="select-content">{children}</div>,
-	SelectGroup: ({ children }: any) => <div data-testid="select-group">{children}</div>,
-	SelectItem: ({ children, value }: any) => (
-		<div data-testid={`select-item-${value}`} data-value={value}>
-			{children}
-		</div>
-	),
-	SelectTrigger: ({ children }: any) => <div data-testid="select-trigger">{children}</div>,
-	SelectValue: ({ placeholder }: any) => <div data-testid="select-value">{placeholder}</div>,
+	SelectContent: ({ children }: any) => <>{children}</>,
+	SelectGroup: ({ children }: any) => <>{children}</>,
+	SelectItem: ({ children, value }: any) => <option value={value}>{children}</option>,
+	SelectTrigger: () => null,
+	SelectValue: () => null,
 	SearchableSelect: ({ value, onValueChange, options, placeholder }: any) => (
 		<select value={value} onChange={(e) => onValueChange(e.target.value)} data-testid="searchable-select">
 			{placeholder && <option value="">{placeholder}</option>}
@@ -287,7 +294,7 @@ const mockPostMessage = (state: any) => {
 	)
 }
 
-const renderSettingsView = () => {
+const renderSettingsView = (initialState?: Record<string, any>) => {
 	const onDone = vi.fn()
 	const queryClient = new QueryClient()
 
@@ -300,7 +307,7 @@ const renderSettingsView = () => {
 	)
 
 	// Hydrate initial state.
-	mockPostMessage({})
+	mockPostMessage(initialState ?? {})
 
 	// Helper function to activate a tab and ensure its content is visible
 	const activateTab = (tabId: string) => {
@@ -505,6 +512,94 @@ describe("SettingsView - Sound Settings", () => {
 				type: "updateSettings",
 				updatedSettings: expect.objectContaining({
 					soundVolume: 0.75,
+				}),
+			}),
+		)
+	})
+})
+
+describe("SettingsView - Experimental Settings", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("shows the auto-skills sub-option under self-improving and saves it", () => {
+		// Start with selfImproving enabled so sub-options are visible
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { selfImproving: true } })
+
+		// Clear initial render side-effects (e.g., requestRouterModels)
+		vi.clearAllMocks()
+
+		activateTab("experimental")
+
+		// Clear tab activation side-effects (e.g., refreshCustomTools)
+		vi.clearAllMocks()
+
+		const content = getSettingsContent()
+		// Verify the auto-skills sub-option appears
+		expect(within(content).queryByTestId("experimental-self-improving-auto-skills-checkbox")).toBeInTheDocument()
+
+		vi.clearAllMocks()
+
+		const selfImprovingScopeSelect = within(content).getByTestId("self-improving-scope-select")
+		fireEvent.change(selfImprovingScopeSelect, { target: { value: "workspace" } })
+
+		const autoSkillsScopeSelect = within(content).getByTestId("self-improving-auto-skills-scope-select")
+		fireEvent.change(autoSkillsScopeSelect, { target: { value: "global" } })
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+
+		const saveButton = screen.getByTestId("save-button")
+		fireEvent.click(saveButton)
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					selfImprovingScope: "workspace",
+					selfImprovingAutoSkillsScope: "global",
+					experiments: expect.objectContaining({
+						selfImproving: true,
+						selfImprovingAutoSkills: true,
+					}),
+				}),
+			}),
+		)
+	})
+
+	it("shows memory backend controls for self-improving and saves agentmemory settings", () => {
+		// Start with selfImproving enabled so sub-options are visible
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: { selfImproving: true } })
+
+		activateTab("experimental")
+
+		const content = getSettingsContent()
+		// Verify the memory backend controls appear
+		expect(within(content).queryByTestId("self-improving-scope-select")).toBeInTheDocument()
+
+		vi.clearAllMocks()
+
+		const selfImprovingScopeSelect = within(content).getByTestId("self-improving-scope-select")
+		fireEvent.change(selfImprovingScopeSelect, { target: { value: "global" } })
+
+		const backendSelect = within(content).getByTestId("self-improving-memory-backend-select")
+		fireEvent.change(backendSelect, { target: { value: "agentmemory" } })
+
+		const urlInput = within(content).getByTestId("self-improving-agent-memory-url-input")
+		fireEvent.change(urlInput, { target: { value: "http://agentmemory.internal:4001" } })
+		expect(urlInput).toHaveValue("http://agentmemory.internal:4001")
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+
+		const saveButton = screen.getByTestId("save-button")
+		fireEvent.click(saveButton)
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					selfImprovingScope: "global",
+					memoryBackend: "agentmemory",
+					agentMemoryUrl: "http://agentmemory.internal:4001",
 				}),
 			}),
 		)

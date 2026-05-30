@@ -198,6 +198,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize the provider *before* the Roo Code Cloud service.
 	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
 
+	// Initialize self-improving manager (experiment-gated, zero overhead when disabled)
+	provider.initializeSelfImproving().catch((error) => {
+		outputChannel.appendLine(
+			`[SelfImproving] Initialization error: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	})
+
 	// Initialize Roo Code Cloud service.
 	const postStateListener = () => ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
 

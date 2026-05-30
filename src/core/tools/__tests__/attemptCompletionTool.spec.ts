@@ -38,7 +38,7 @@ vi.mock("../../../shared/package", () => ({
 	},
 }))
 
-import { attemptCompletionTool, AttemptCompletionCallbacks } from "../AttemptCompletionTool"
+import { AttemptCompletionTool, attemptCompletionTool, AttemptCompletionCallbacks } from "../AttemptCompletionTool"
 import { Task } from "../../task/Task"
 import * as vscode from "vscode"
 
@@ -52,6 +52,7 @@ describe("attemptCompletionTool", () => {
 	let mockGetConfiguration: ReturnType<typeof vi.fn>
 
 	beforeEach(() => {
+		AttemptCompletionTool.reset()
 		mockCaptureTaskCompleted.mockReset()
 		mockPushToolResult = vi.fn()
 		mockAskApproval = vi.fn()
@@ -79,10 +80,12 @@ describe("attemptCompletionTool", () => {
 			emitFinalTokenUsageUpdate: vi.fn(),
 			emit: vi.fn(),
 			getTokenUsage: vi.fn().mockReturnValue({}),
+			getTaskMode: vi.fn().mockResolvedValue("code"),
 			toolUsage: {},
 			taskId: "task_1",
 			apiConfiguration: { apiProvider: "test" } as any,
 			api: { getModel: vi.fn().mockReturnValue({ id: "test-model", info: {} }) } as any,
+			providerRef: { deref: vi.fn().mockReturnValue(undefined) } as any,
 		}
 	})
 

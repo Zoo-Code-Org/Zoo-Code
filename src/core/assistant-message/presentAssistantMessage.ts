@@ -675,6 +675,41 @@ export async function presentAssistantMessage(cline: Task) {
 				}
 			}
 
+			// Inject prevention context before tool execution
+			if (!block.partial) {
+				const toolName = block.name as string
+				const params = block.nativeArgs ?? block.params ?? {}
+				const preventionMsg = cline.getToolPreventionContext(toolName, params)
+				if (preventionMsg) {
+					// Inject prevention message as a tool_result hint so the model sees it
+					cline.userMessageContent.push({
+						type: "text",
+						text: `[Prevention: ${preventionMsg}]`,
+					})
+				}
+
+				// Fire-and-forget code index enrichment — non-blocking, graceful fallback
+				const sim = cline.providerRef.deref()?.getSelfImprovingManager?.()
+				if (sim?.preventionEngine) {
+					const userText = cline.userMessageContent
+						.filter((c): c is Anthropic.TextBlockParam => c.type === "text")
+						.map((c) => c.text)
+						.join("\n")
+					if (userText) {
+						sim.preventionEngine.enrichContextWithCodeIndex(userText).then((enriched) => {
+							if (enriched !== userText) {
+								cline.userMessageContent.push({
+									type: "text",
+									text: `[Code Index Context]\n${enriched}`,
+								})
+							}
+						}).catch(() => {
+							// Graceful fallback — enrichment failure is non-critical
+						})
+					}
+				}
+			}
+
 			switch (block.name) {
 				case "write_to_file":
 					await checkpointSaveAndMark(cline)
@@ -813,6 +848,10 @@ export async function presentAssistantMessage(cline: Task) {
 					})
 					break
 				case "attempt_completion": {
+					// Reset recovery state — the model is trying to deliver a result,
+					// not failing. This prevents false positive recovery from large
+					// response failures during delivery attempts.
+					cline.resilienceService?.onDeliveryAttempt()
 					const completionCallbacks: AttemptCompletionCallbacks = {
 						askApproval,
 						handleError,

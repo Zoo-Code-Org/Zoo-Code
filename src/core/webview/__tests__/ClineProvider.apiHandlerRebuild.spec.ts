@@ -9,6 +9,8 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task, TaskOptions } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
 
+const mockWorkspacePath = vi.hoisted(() => ({ value: "/test/workspace-one" }))
+
 // Mock setup
 vi.mock("fs/promises", () => ({
 	mkdir: vi.fn().mockResolvedValue(undefined),
@@ -22,6 +24,10 @@ vi.mock("../../../utils/storage", () => ({
 	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
 	getGlobalStoragePath: vi.fn().mockResolvedValue("/test/storage/path"),
+}))
+
+vi.mock("../../../utils/path", () => ({
+	getWorkspacePath: vi.fn(() => mockWorkspacePath.value),
 }))
 
 vi.mock("p-wait-for", () => ({
@@ -143,6 +149,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
+		mockWorkspacePath.value = "/test/workspace-one"
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -578,5 +585,30 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(getModelId({ apiProvider: "anthropic" })).toBeUndefined()
 			expect(getModelId({})).toBeUndefined()
 		})
+	})
+
+	test("includes self-improving scope and memory backend settings in provider state", async () => {
+		await (provider as any).setValue("selfImprovingScope", "workspace")
+		await (provider as any).setValue("selfImprovingAutoSkillsScope", "global")
+		await (provider as any).setValue("memoryBackend", "agentmemory")
+		await (provider as any).setValue("agentMemoryUrl", "http://agentmemory.internal:4001")
+
+		const state = await provider.getState()
+
+		expect((state as any).selfImprovingScope).toBe("workspace")
+		expect((state as any).selfImprovingAutoSkillsScope).toBe("global")
+		expect((state as any).memoryBackend).toBe("agentmemory")
+		expect((state as any).agentMemoryUrl).toBe("http://agentmemory.internal:4001")
+	})
+
+	test("refreshWorkspace reconfigures self-improving when the workspace path changes", async () => {
+		const onSettingsChanged = vi.fn().mockResolvedValue(undefined)
+		;(provider as any).selfImprovingManager.onSettingsChanged = onSettingsChanged
+		await (provider as any).setValue("selfImprovingScope", "workspace")
+		mockWorkspacePath.value = "/test/workspace-two"
+
+		await provider.refreshWorkspace()
+
+		expect(onSettingsChanged).toHaveBeenCalledTimes(1)
 	})
 })

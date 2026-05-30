@@ -71,6 +71,11 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 			}
 
 			const searchResults: VectorStoreSearchResult[] = await manager.searchIndex(query, directoryPrefix)
+			await task.providerRef.deref()?.getSelfImprovingManager?.()?.recordCodeIndexEvent(task.taskId, {
+				available: true,
+				hits: searchResults.length,
+				topScore: searchResults[0]?.score,
+			})
 
 			if (!searchResults || searchResults.length === 0) {
 				pushToolResult(`No relevant code snippets found for the query: "${query}"`)

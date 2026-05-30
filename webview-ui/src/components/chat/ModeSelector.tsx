@@ -18,6 +18,27 @@ import { IconButton } from "./IconButton"
 
 const SEARCH_THRESHOLD = 6
 
+/**
+ * Checks whether ALL self-improving experiment flags are enabled.
+ * ONE-SHOT and KAIZEN orchestrator modes require every self-improving
+ * sub-feature to be active before they become available in the mode selector.
+ */
+const areAllSelfImprovingEnabled = (experiments: Record<string, boolean | undefined>): boolean => {
+	const requiredFlags = [
+		"selfImprovingPromptQuality",
+		"selfImprovingToolPreference",
+		"selfImprovingSkillMerge",
+		"selfImprovingPersistCounts",
+		"selfImprovingCodeIndex",
+		"selfImprovingReviewTeam",
+		"selfImprovingQuestionEvaluation",
+		"selfImprovingAutoSkills",
+		"selfImprovingAutoMode",
+		"selfImprovingFullTrust",
+	] as const
+	return requiredFlags.every((flag) => experiments[flag] === true)
+}
+
 interface ModeSelectorProps {
 	value: Mode
 	onChange: (value: Mode) => void
@@ -48,7 +69,7 @@ export const ModeSelector = ({
 	const scrollContainerRef = React.useRef<HTMLDivElement>(null)
 	const lastNotifiedInvalidModeRef = React.useRef<string | null>(null)
 	const portalContainer = useRooPortal("roo-portal")
-	const { hasOpenedModeSelector, setHasOpenedModeSelector } = useExtensionState()
+	const { hasOpenedModeSelector, setHasOpenedModeSelector, experiments } = useExtensionState()
 	const { t } = useAppTranslation()
 
 	const trackModeSelectorOpened = React.useCallback(() => {
@@ -63,14 +84,32 @@ export const ModeSelector = ({
 	}, [hasOpenedModeSelector, setHasOpenedModeSelector])
 
 	// Get all modes including custom modes and merge custom prompt descriptions.
+	// ONE-SHOT and KAIZEN orchestrator modes are gated behind ALL self-improving
+	// experiment flags being enabled + their own experiment flag.
 	const modes = React.useMemo(() => {
 		const allModes = getAllModes(customModes)
 
-		return allModes.map((mode) => ({
-			...mode,
-			description: customModePrompts?.[mode.slug]?.description ?? mode.description,
-		}))
-	}, [customModes, customModePrompts])
+		return allModes
+			.map((mode) => ({
+				...mode,
+				description: customModePrompts?.[mode.slug]?.description ?? mode.description,
+			}))
+			.filter((mode) => {
+				if (mode.slug === "one-shot-orchestrator") {
+					return (
+						experiments?.oneShotOrchestrator === true &&
+						areAllSelfImprovingEnabled(experiments ?? {})
+					)
+				}
+				if (mode.slug === "kaizen-orchestrator") {
+					return (
+						experiments?.kaizenOrchestrator === true &&
+						areAllSelfImprovingEnabled(experiments ?? {})
+					)
+				}
+				return true // always show other modes
+			})
+	}, [customModes, customModePrompts, experiments])
 
 	// Find the selected mode, falling back to default if current mode doesn't exist (e.g., after workspace switch)
 	const selectedMode = React.useMemo(() => {

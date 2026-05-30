@@ -49,6 +49,7 @@ import { ModeConfig } from "@roo-code/types"
 
 import { SYSTEM_PROMPT } from "../system"
 import { McpHub } from "../../../services/mcp/McpHub"
+import type { SelfImprovingManager } from "../../../services/self-improving"
 import { defaultModeSlug, modes, Mode } from "../../../shared/modes"
 import "../../../utils/path"
 import { addCustomInstructions } from "../sections/custom-instructions"
@@ -270,6 +271,37 @@ describe("SYSTEM_PROMPT", () => {
 		)
 
 		expect(prompt).toMatchFileSnapshot("./__snapshots__/system-prompt/with-undefined-mcp-hub.snap")
+	})
+
+	it("should include learned guidance before rules when available", async () => {
+		const selfImprovingManager = {
+			getPromptContextString: () => "\n## Learned Guidance\n- [prompt] Search relevant code before editing\n",
+			getPromptContext: () => undefined,
+		} as unknown as SelfImprovingManager
+
+		const prompt = await SYSTEM_PROMPT(
+			mockContext,
+			"/test/path",
+			false,
+			undefined, // mcpHub
+			undefined, // diffStrategy
+			defaultModeSlug, // mode
+			undefined, // customModePrompts
+			undefined, // customModes
+			undefined, // globalCustomInstructions
+			experiments,
+			undefined, // language
+			undefined, // rooIgnoreInstructions
+			undefined, // settings
+			undefined, // todoList
+			undefined, // modelId
+			undefined, // skillsManager
+			selfImprovingManager,
+		)
+
+		expect(prompt).toContain("## Learned Guidance")
+		expect(prompt).toContain("- [prompt] Search relevant code before editing")
+		expect(prompt.indexOf("## Learned Guidance")).toBeLessThan(prompt.indexOf("====\n\nRULES"))
 	})
 
 	it("should include vscode language in custom instructions", async () => {

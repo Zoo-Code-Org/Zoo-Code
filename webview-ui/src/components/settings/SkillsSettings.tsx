@@ -35,12 +35,13 @@ import { CreateSkillDialog } from "./CreateSkillDialog"
 
 export const SkillsSettings: React.FC = () => {
 	const { t } = useAppTranslation()
-	const { cwd, skills: rawSkills, customModes } = useExtensionState()
+	const { cwd, skills: rawSkills, customModes, skillsUpdateNotice } = useExtensionState()
 	const skills = useMemo(() => rawSkills ?? [], [rawSkills])
 
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 	const [skillToDelete, setSkillToDelete] = useState<SkillMetadata | null>(null)
 	const [createDialogOpen, setCreateDialogOpen] = useState(false)
+	const [visibleSkillsUpdateNotice, setVisibleSkillsUpdateNotice] = useState<string>()
 
 	// Mode selection modal state
 	const [modeDialogOpen, setModeDialogOpen] = useState(false)
@@ -64,6 +65,20 @@ export const SkillsSettings: React.FC = () => {
 	useEffect(() => {
 		handleRefresh()
 	}, [handleRefresh])
+
+	useEffect(() => {
+		if (!skillsUpdateNotice) {
+			setVisibleSkillsUpdateNotice(undefined)
+			return
+		}
+
+		setVisibleSkillsUpdateNotice(skillsUpdateNotice)
+		const timeoutId = window.setTimeout(() => {
+			setVisibleSkillsUpdateNotice(undefined)
+		}, 3500)
+
+		return () => window.clearTimeout(timeoutId)
+	}, [skillsUpdateNotice])
 
 	const handleDeleteClick = useCallback((skill: SkillMetadata) => {
 		setSkillToDelete(skill)
@@ -238,6 +253,15 @@ export const SkillsSettings: React.FC = () => {
 						<Plus />
 						{t("settings:skills.addSkill")}
 					</Button>
+
+					{visibleSkillsUpdateNotice && (
+						<div
+							role="status"
+							aria-live="polite"
+							className="self-start rounded-md border border-vscode-widget-border/70 bg-vscode-editorWidget-background/80 px-2.5 py-1 text-xs text-vscode-descriptionForeground shadow-sm">
+							{visibleSkillsUpdateNotice}
+						</div>
+					)}
 				</div>
 			</div>
 

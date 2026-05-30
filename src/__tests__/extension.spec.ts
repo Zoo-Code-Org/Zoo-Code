@@ -184,6 +184,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 		postStateToWebview: vi.fn(),
 		postStateToWebviewWithoutClineMessages: vi.fn(),
 		getState: vi.fn().mockResolvedValue({}),
+		initializeSelfImproving: vi.fn().mockResolvedValue(undefined),
 		initializeCloudProfileSyncWhenReady: vi.fn().mockResolvedValue(undefined),
 		providerSettingsManager: {},
 		contextProxy: { getGlobalState: vi.fn() },
@@ -259,6 +260,18 @@ describe("extension.ts", () => {
 		await activate(mockContext)
 
 		expect(dotenvx.config).toHaveBeenCalledTimes(1)
+	})
+
+	test("initializes self-improving through the provider during activation", async () => {
+		vi.resetModules()
+		vi.clearAllMocks()
+
+		const { ClineProvider } = await import("../core/webview/ClineProvider")
+		const { activate } = await import("../extension")
+		await activate(mockContext)
+
+		const provider = (ClineProvider as any).getVisibleInstance()
+		expect(provider.initializeSelfImproving).toHaveBeenCalledTimes(1)
 	})
 
 	describe("cloud auth state handling", () => {

@@ -5,6 +5,7 @@ import { execSync } from "child_process"
 import { defineConfig, type PluginOption, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
+import tsconfigPaths from "vite-tsconfig-paths"
 
 import { sourcemapPlugin } from "./src/vite-plugins/sourcemapPlugin"
 
@@ -90,6 +91,7 @@ export default defineConfig(({ mode }) => {
 			},
 		}),
 		tailwindcss(),
+		tsconfigPaths(),
 		persistPortPlugin(),
 		wasmPlugin(),
 		sourcemapPlugin(),

@@ -29,6 +29,7 @@ import {
 	ArrowLeft,
 	GitCommitVertical,
 	GraduationCap,
+	RefreshCw,
 } from "lucide-react"
 
 import {
@@ -58,6 +59,8 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 	StandardTooltip,
+	Input,
+	ToggleSwitch,
 } from "@src/components/ui"
 
 import { Tab, TabContent, TabHeader, TabList, TabTrigger } from "../common/Tab"
@@ -110,6 +113,7 @@ export const sectionNames = [
 	"prompts",
 	"ui",
 	"experimental",
+	"kaizen",
 	"language",
 	"about",
 ] as const
@@ -198,11 +202,21 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		imageGenerationProvider,
 		openRouterImageApiKey,
 		openRouterImageGenerationSelectedModel,
+		memoryBackend,
+		agentMemoryUrl,
+		selfImprovingScope,
+		selfImprovingAutoSkillsScope,
 		reasoningBlockCollapsed,
 		enterBehavior,
 		includeCurrentTime,
 		includeCurrentCost,
 		maxGitStatusFiles,
+		kaizenFrequency,
+		kaizenMiniGoal,
+		kaizenLimit,
+		kaizenAutoPush,
+		kaizenRemoteName,
+		kaizenCommitTemplate,
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
@@ -226,6 +240,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			setChangeDetected(false)
 		}
 	}, [settingsImportedAt, extensionState])
+
+	// Re-sync cachedState when extensionState changes externally (e.g., CLI, another webview,
+	// extension restart) but only if user hasn't made local edits. This prevents stale UI
+	// when settings are changed from outside the settings view.
+	useEffect(() => {
+		if (!isChangeDetected && extensionState) {
+			setCachedState(extensionState)
+		}
+	}, [extensionState, isChangeDetected])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
 		setCachedState((prevState) => {
@@ -290,6 +313,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		})
 	}, [])
 
+	const setLenientModes = useCallback((modes: string[]) => {
+		setCachedState((prevState) => {
+			setChangeDetected(true)
+			return { ...prevState, experiments: { ...prevState.experiments, lenientModes: modes } }
+		})
+	}, [])
+
 	const setTelemetrySetting = useCallback((setting: TelemetrySetting) => {
 		setCachedState((prevState) => {
 			if (prevState.telemetrySetting === setting) {
@@ -339,6 +369,50 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			}
 
 			return { ...prevState, openRouterImageGenerationSelectedModel: model }
+		})
+	}, [])
+
+	const setMemoryBackend = useCallback((backend: "builtin" | "agentmemory") => {
+		setCachedState((prevState) => {
+			if (prevState.memoryBackend === backend) {
+				return prevState
+			}
+
+			setChangeDetected(true)
+			return { ...prevState, memoryBackend: backend }
+		})
+	}, [])
+
+	const setAgentMemoryUrl = useCallback((url: string) => {
+		setCachedState((prevState) => {
+			if (prevState.agentMemoryUrl === url) {
+				return prevState
+			}
+
+			setChangeDetected(true)
+			return { ...prevState, agentMemoryUrl: url }
+		})
+	}, [])
+
+	const setSelfImprovingScope = useCallback((scope: "workspace" | "global") => {
+		setCachedState((prevState) => {
+			if (prevState.selfImprovingScope === scope) {
+				return prevState
+			}
+
+			setChangeDetected(true)
+			return { ...prevState, selfImprovingScope: scope }
+		})
+	}, [])
+
+	const setSelfImprovingAutoSkillsScope = useCallback((scope: "workspace" | "global") => {
+		setCachedState((prevState) => {
+			if (prevState.selfImprovingAutoSkillsScope === scope) {
+				return prevState
+			}
+
+			setChangeDetected(true)
+			return { ...prevState, selfImprovingAutoSkillsScope: scope }
 		})
 	}, [])
 
@@ -420,8 +494,18 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					imageGenerationProvider,
 					openRouterImageApiKey,
 					openRouterImageGenerationSelectedModel,
+					memoryBackend,
+					agentMemoryUrl: agentMemoryUrl || "http://localhost:3111",
+					selfImprovingScope: selfImprovingScope ?? "global",
+					selfImprovingAutoSkillsScope: selfImprovingAutoSkillsScope ?? "workspace",
 					experiments,
 					customSupportPrompts,
+					kaizenFrequency: kaizenFrequency ?? 5,
+					kaizenMiniGoal: kaizenMiniGoal ?? "",
+					kaizenLimit: kaizenLimit ?? 50,
+					kaizenAutoPush: kaizenAutoPush ?? true,
+					kaizenRemoteName: kaizenRemoteName ?? "origin",
+					kaizenCommitTemplate: kaizenCommitTemplate ?? "kaizen: {description}",
 				},
 			})
 
@@ -522,6 +606,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			{ id: "worktrees", icon: GitBranch },
 			{ id: "ui", icon: Glasses },
 			{ id: "experimental", icon: FlaskConical },
+			{ id: "kaizen", icon: RefreshCw },
 			{ id: "language", icon: Globe },
 			{ id: "about", icon: Info },
 		],
@@ -904,14 +989,138 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								apiConfiguration={apiConfiguration}
 								setApiConfigurationField={setApiConfigurationField}
 								imageGenerationProvider={imageGenerationProvider}
-								openRouterImageApiKey={openRouterImageApiKey as string | undefined}
-								openRouterImageGenerationSelectedModel={
-									openRouterImageGenerationSelectedModel as string | undefined
-								}
+								openRouterImageApiKey={openRouterImageApiKey}
+								openRouterImageGenerationSelectedModel={openRouterImageGenerationSelectedModel}
+								memoryBackend={memoryBackend}
+								agentMemoryUrl={agentMemoryUrl}
+								selfImprovingScope={selfImprovingScope}
+								selfImprovingAutoSkillsScope={selfImprovingAutoSkillsScope}
 								setImageGenerationProvider={setImageGenerationProvider}
 								setOpenRouterImageApiKey={setOpenRouterImageApiKey}
 								setImageGenerationSelectedModel={setImageGenerationSelectedModel}
+								setMemoryBackend={setMemoryBackend}
+								setAgentMemoryUrl={setAgentMemoryUrl}
+								setSelfImprovingScope={setSelfImprovingScope}
+								setSelfImprovingAutoSkillsScope={setSelfImprovingAutoSkillsScope}
+								setLenientModes={setLenientModes}
 							/>
+						)}
+
+						{/* KAIZEN Section */}
+						{renderTab === "kaizen" && (
+							<div>
+								<SectionHeader>{t("settings:sections.kaizen")}</SectionHeader>
+								<Section>
+									<div className="space-y-4">
+										<div className="flex items-center justify-between">
+											<div>
+												<div className="text-sm font-medium">KAIZEN Frequency</div>
+												<div className="text-xs text-vscode-descriptionForeground">
+													How often (in minutes) KAIZEN runs improvement cycles
+												</div>
+											</div>
+											<Input
+												type="number"
+												value={kaizenFrequency ?? 5}
+												onChange={(e) =>
+													setCachedStateField("kaizenFrequency", Number(e.target.value))
+												}
+												className="w-20"
+												min={1}
+												max={100}
+												data-testid="kaizen-frequency-input"
+											/>
+										</div>
+										<div className="flex items-center justify-between">
+											<div>
+												<div className="text-sm font-medium">KAIZEN Mini Goal</div>
+												<div className="text-xs text-vscode-descriptionForeground">
+													Optional mini-goal description for KAIZEN cycles
+												</div>
+											</div>
+											<Input
+												type="text"
+												value={kaizenMiniGoal ?? ""}
+												onChange={(e) =>
+													setCachedStateField("kaizenMiniGoal", e.target.value)
+												}
+												className="w-48"
+												placeholder=""
+												data-testid="kaizen-mini-goal-input"
+											/>
+										</div>
+										<div className="flex items-center justify-between">
+											<div>
+												<div className="text-sm font-medium">KAIZEN Limit</div>
+												<div className="text-xs text-vscode-descriptionForeground">
+													Maximum number of improvement iterations per cycle
+												</div>
+											</div>
+											<Input
+												type="number"
+												value={kaizenLimit ?? 50}
+												onChange={(e) =>
+													setCachedStateField("kaizenLimit", Number(e.target.value))
+												}
+												className="w-20"
+												min={1}
+												max={1000}
+												data-testid="kaizen-limit-input"
+											/>
+										</div>
+										<div className="flex items-center justify-between">
+											<div>
+												<div className="text-sm font-medium">Auto Push</div>
+												<div className="text-xs text-vscode-descriptionForeground">
+													Automatically push KAIZEN commits to remote
+												</div>
+											</div>
+											<ToggleSwitch
+												checked={kaizenAutoPush ?? true}
+												onChange={() =>
+													setCachedStateField("kaizenAutoPush", !(kaizenAutoPush ?? true))
+												}
+											/>
+										</div>
+										<div className="flex items-center justify-between">
+											<div>
+												<div className="text-sm font-medium">Remote Name</div>
+												<div className="text-xs text-vscode-descriptionForeground">
+													Git remote to push KAIZEN commits to
+												</div>
+											</div>
+											<Input
+												type="text"
+												value={kaizenRemoteName ?? "origin"}
+												onChange={(e) =>
+													setCachedStateField("kaizenRemoteName", e.target.value)
+												}
+												className="w-32"
+												placeholder="origin"
+												data-testid="kaizen-remote-name-input"
+											/>
+										</div>
+										<div className="flex items-center justify-between">
+											<div>
+												<div className="text-sm font-medium">Commit Template</div>
+												<div className="text-xs text-vscode-descriptionForeground">
+													Template for KAIZEN commit messages
+												</div>
+											</div>
+											<Input
+												type="text"
+												value={kaizenCommitTemplate ?? "kaizen: {description}"}
+												onChange={(e) =>
+													setCachedStateField("kaizenCommitTemplate", e.target.value)
+												}
+												className="w-48"
+												placeholder="kaizen: {description}"
+												data-testid="kaizen-commit-template-input"
+											/>
+										</div>
+									</div>
+								</Section>
+							</div>
 						)}
 
 						{/* Language Section */}

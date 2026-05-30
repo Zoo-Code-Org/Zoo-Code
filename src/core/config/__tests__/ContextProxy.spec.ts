@@ -255,6 +255,30 @@ describe("ContextProxy", () => {
 			const storedValue = proxy.getGlobalState("apiModelId")
 			expect(storedValue).toBe("gpt-4")
 		})
+
+		it("should persist self-improving memory backend settings in global settings", async () => {
+			const updateGlobalStateSpy = vi.spyOn(proxy, "updateGlobalState")
+
+			await proxy.setValue("memoryBackend", "agentmemory")
+			await proxy.setValue("agentMemoryUrl", "http://agentmemory.internal:4001")
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("memoryBackend", "agentmemory")
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("agentMemoryUrl", "http://agentmemory.internal:4001")
+			expect(proxy.getGlobalState("memoryBackend")).toBe("agentmemory")
+			expect(proxy.getGlobalState("agentMemoryUrl")).toBe("http://agentmemory.internal:4001")
+		})
+
+		it("should persist self-improving scope settings in global settings", async () => {
+			const updateGlobalStateSpy = vi.spyOn(proxy, "updateGlobalState")
+
+			await proxy.setValue("selfImprovingScope", "workspace")
+			await proxy.setValue("selfImprovingAutoSkillsScope", "global")
+
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("selfImprovingScope", "workspace")
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("selfImprovingAutoSkillsScope", "global")
+			expect(proxy.getGlobalState("selfImprovingScope")).toBe("workspace")
+			expect(proxy.getGlobalState("selfImprovingAutoSkillsScope")).toBe("global")
+		})
 	})
 
 	describe("setValues", () => {

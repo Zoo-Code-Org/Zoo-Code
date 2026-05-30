@@ -144,6 +144,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	showWorktreesInHomeScreen: boolean
 	setShowWorktreesInHomeScreen: (value: boolean) => void
 	skills?: SkillMetadata[]
+	skillsUpdateNotice?: string
 }
 
 export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
@@ -282,6 +283,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		global: {},
 	})
 	const [skills, setSkills] = useState<SkillMetadata[]>([])
+	const [skillsUpdateNotice, setSkillsUpdateNotice] = useState<string>()
 	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(true)
 	const [includeCurrentTime, setIncludeCurrentTime] = useState(true)
 	const [includeCurrentCost, setIncludeCurrentCost] = useState(true)
@@ -395,6 +397,13 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 					if (message.skills) {
 						setSkills(message.skills)
 					}
+					break
+				}
+				case "skillsUpdated": {
+					if (message.skills) {
+						setSkills(message.skills)
+					}
+					setSkillsUpdateNotice(message.text)
 					break
 				}
 				case "mcpServers": {
@@ -594,6 +603,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		includeCurrentCost,
 		setIncludeCurrentCost,
 		skills,
+		skillsUpdateNotice,
 		showWorktreesInHomeScreen: state.showWorktreesInHomeScreen ?? true,
 		setShowWorktreesInHomeScreen: (value) =>
 			setState((prevState) => ({ ...prevState, showWorktreesInHomeScreen: value })),

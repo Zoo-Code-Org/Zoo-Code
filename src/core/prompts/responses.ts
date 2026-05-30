@@ -60,10 +60,11 @@ Otherwise, if you have not completed the task and do not need additional informa
 			feedback,
 		}),
 
-	missingToolParameterError: (paramName: string) => {
+	missingToolParameterError: (paramName: string, toolName?: string) => {
 		const instructions = getToolInstructionsReminder()
+		const toolPrefix = toolName ? ` for '${toolName}'` : ""
 
-		return `Missing value for required parameter '${paramName}'. Please retry with complete response.\n\n${instructions}`
+		return `Missing value for required parameter '${paramName}'${toolPrefix}. Please retry with complete response.\n\n${instructions}`
 	},
 
 	invalidMcpToolArgumentError: (serverName: string, toolName: string) =>

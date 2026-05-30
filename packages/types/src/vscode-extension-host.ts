@@ -97,6 +97,7 @@ export interface ExtensionMessage {
 		| "branchWorktreeIncludeResult"
 		| "folderSelected"
 		| "skills"
+		| "skillsUpdated"
 		| "fileContent"
 	text?: string
 	/** For fileContent: { path, content, error? } */
@@ -289,6 +290,16 @@ export type ExtensionState = Pick<
 	| "includeDiagnosticMessages"
 	| "maxDiagnosticMessages"
 	| "imageGenerationProvider"
+	| "memoryBackend"
+	| "agentMemoryUrl"
+	| "selfImprovingScope"
+	| "selfImprovingAutoSkillsScope"
+	| "kaizenFrequency"
+	| "kaizenMiniGoal"
+	| "kaizenLimit"
+	| "kaizenAutoPush"
+	| "kaizenRemoteName"
+	| "kaizenCommitTemplate"
 	| "openRouterImageGenerationSelectedModel"
 	| "includeTaskHistoryInEnhance"
 	| "reasoningBlockCollapsed"
@@ -324,7 +335,7 @@ export type ExtensionState = Pick<
 	maxImageFileSize: number // Maximum size of image files to process in MB
 	maxTotalImageSize: number // Maximum total size for all images in a single read operation in MB
 
-	experiments: Experiments // Map of experiment IDs to their enabled state
+	experiments: Experiments // Map of experiment IDs to their enabled state (includes lenientModes)
 
 	mcpEnabled: boolean
 
@@ -359,7 +370,44 @@ export type ExtensionState = Pick<
 	profileThresholds: Record<string, number>
 	hasOpenedModeSelector: boolean
 	openRouterImageApiKey?: string
+	memoryBackend?: "builtin" | "agentmemory"
+	agentMemoryUrl?: string
+	selfImprovingScope?: "workspace" | "global"
+	selfImprovingAutoSkillsScope?: "workspace" | "global"
 	messageQueue?: QueuedMessage[]
+	selfImprovingStatus?: {
+		enabled: boolean
+		started: boolean
+		patternCount: number
+		eventCount: number
+		actionCount: number
+		memoryEntries: number
+		memoryBackend?: string
+		skillRecords: number
+		curatorStatus: {
+			lastRunAt: number
+			firstRunDone: boolean
+			config: {
+				intervalMs: number
+				minIdleMs: number
+				firstRunDeferred: boolean
+				staleAfterDays: number
+				archiveAfterDays: number
+				backupsEnabled: boolean
+				maxBackups: number
+			}
+		}
+		lastReviewAt?: number
+		lastCuratorRunAt?: number
+		autoMode?: Record<string, unknown>
+		reviewTeam?: Record<string, unknown>
+		questionEvaluator?: Record<string, unknown>
+		resilience?: Record<string, unknown>
+		toolErrorHealer?: Record<string, unknown>
+		preventionEngine?: Record<string, unknown>
+		verificationEngine?: Record<string, unknown>
+		requirementsVerification?: Record<string, unknown>
+	}
 	lastShownAnnouncementId?: string
 	apiModelId?: string
 	mcpServers?: McpServer[]

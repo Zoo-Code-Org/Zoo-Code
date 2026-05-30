@@ -10,6 +10,8 @@ import type { ToolUse } from "../../shared/tools"
 import { t } from "../../i18n"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { RequirementsVerifier } from "../../services/self-improving/RequirementsVerifier"
+import { VerificationEngine } from "../../services/self-improving/VerificationEngine"
 
 interface AttemptCompletionParams {
 	result: string
@@ -36,9 +38,47 @@ interface DelegationProvider {
 export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 	readonly name = "attempt_completion" as const
 
+	/**
+	 * Tracks the last result text per task to guard against duplicate completions.
+	 * Unlike a permanent boolean flag, this allows new attempt_completion calls
+	 * with different result content (e.g., after user feedback or a new task cycle).
+	 * Only exact duplicate result text is blocked.
+	 */
+	private static lastResults = new Map<string, string>()
+
+	/** Optional requirements verifier for checking user intent fulfillment */
+	private requirementsVerifier?: RequirementsVerifier
+	/** Optional verification engine for code quality checks */
+	private verificationEngine?: VerificationEngine
+
+	/**
+	 * Set the verifiers used to guard completion.
+	 */
+	setVerifiers(requirementsVerifier?: RequirementsVerifier, verificationEngine?: VerificationEngine): void {
+		this.requirementsVerifier = requirementsVerifier
+		this.verificationEngine = verificationEngine
+	}
+
+	/**
+	 * Resets the completion tracking state. Used in tests to prevent
+	 * cross-test contamination from the static Map.
+	 */
+	static reset(): void {
+		AttemptCompletionTool.lastResults.clear()
+	}
+
 	async execute(params: AttemptCompletionParams, task: Task, callbacks: AttemptCompletionCallbacks): Promise<void> {
 		const { result } = params
 		const { handleError, pushToolResult, askFinishSubTaskApproval } = callbacks
+
+		// Guard: block only duplicate result text, not ALL future completions
+		const lastResult = AttemptCompletionTool.lastResults.get(task.taskId)
+		if (lastResult !== undefined && lastResult === result) {
+			pushToolResult(
+				formatResponse.toolResult("Task already completed with the same result. No further action needed."),
+			)
+			return
+		}
 
 		// Prevent attempt_completion if any tool failed in the current turn
 		if (task.didToolFailInCurrentTurn) {
@@ -76,6 +116,42 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				return
 			}
 
+			// Accumulate requirements from ALL user messages before verification
+			if (this.requirementsVerifier) {
+				const userMessages = this.getAllUserMessages(task)
+				this.requirementsVerifier.processUserMessages(userMessages)
+			}
+
+			// Guard 5: Requirements verification — check user intent is fulfilled
+			if (this.requirementsVerifier) {
+				const reqResult = await this.requirementsVerifier.verify()
+				if (!reqResult.passed && this.requirementsVerifier.getConfig().mandatory) {
+					const errorMsg = `Requirements verification failed:\n${reqResult.summary}\n\nFailed requirements:\n${reqResult.failed.map((r) => `  ❌ ${r.text}`).join("\n")}\n\nPending requirements:\n${reqResult.pending.map((r) => `  ⏳ ${r.text}`).join("\n")}\n\nPlease address these requirements before completing the task.`
+					task.consecutiveMistakeCount++
+					task.recordToolError("attempt_completion")
+					pushToolResult(formatResponse.toolError(errorMsg))
+					return
+				}
+			}
+
+			// Guard 6: Code quality verification (VerificationEngine)
+			// Skip verification for lenient modes — research tasks and other user-configured modes
+			// don't need build/lint/types/tests. Default: ["research"]
+			const currentMode = await task.getTaskMode()
+			const experiments = task.experiments
+			const lenientModes = experiments?.lenientModes ?? ["research"]
+			const isLenientMode = lenientModes.includes(currentMode)
+			if (this.verificationEngine && !isLenientMode) {
+				const verResult = await this.verificationEngine.verify()
+				if (!verResult.passed && this.verificationEngine.getConfig().mandatory) {
+					const errorMsg = `Code quality verification failed:\n${verResult.summary}\n\nFailed gates:\n${verResult.gates.filter((g) => !g.passed).map((g) => `  ❌ ${g.name}: ${g.error || "failed"}`).join("\n")}\n\nPlease fix these issues before completing the task.`
+					task.consecutiveMistakeCount++
+					task.recordToolError("attempt_completion")
+					pushToolResult(formatResponse.toolError(errorMsg))
+					return
+				}
+			}
+
 			task.consecutiveMistakeCount = 0
 
 			await task.say("completion_result", result, undefined, false)
@@ -105,7 +181,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 								pushToolResult,
 							)
 							if (delegation === "delegated") {
-								this.emitTaskCompleted(task)
+								this.emitTaskCompleted(task, result)
 							}
 							if (delegation !== "continue") return
 						} else {
@@ -132,8 +208,16 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			const { response, text, images } = await task.ask("completion_result", "", false)
 
 			if (response === "yesButtonClicked") {
-				this.emitTaskCompleted(task)
+				this.emitTaskCompleted(task, result)
 				return
+			}
+
+			// User provided feedback - reset completion tracking so subsequent
+			// attempt_completion calls are not blocked by stale guard state.
+			AttemptCompletionTool.lastResults.delete(task.taskId)
+			const provider = task.providerRef.deref()
+			if (provider?.trustService) {
+				provider.trustService.taskCompleted = false
 			}
 
 			// User provided feedback - push tool result to continue the conversation
@@ -196,7 +280,39 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 		}
 	}
 
-	private emitTaskCompleted(task: Task): void {
+	/**
+	 * Extract all user messages from the task's conversation history.
+	 * Includes the initial task prompt and all user_feedback messages.
+	 */
+	private getAllUserMessages(task: Task): string[] {
+		const messages: string[] = []
+
+		// Get the initial task prompt from metadata
+		if (task.metadata?.task) {
+			messages.push(task.metadata.task)
+		}
+
+		// Get user feedback messages from clineMessages
+		const clineMessages = task.clineMessages || []
+		for (const msg of clineMessages) {
+			if (msg.type === "say" && msg.say === "user_feedback" && msg.text) {
+				messages.push(msg.text)
+			}
+		}
+
+		return messages
+	}
+
+	private emitTaskCompleted(task: Task, result: string): void {
+		// Store the result text to guard against duplicate completions
+		AttemptCompletionTool.lastResults.set(task.taskId, result)
+
+		// Notify TrustService that task has completed to block auto-approval of subsequent attempt_completion
+		const provider = task.providerRef.deref()
+		if (provider?.trustService) {
+			provider.trustService.taskCompleted = true
+		}
+
 		// Force final token usage update before emitting TaskCompleted.
 		// This ensures the latest stats are captured regardless of throttle timer.
 		task.emitFinalTokenUsageUpdate()

@@ -662,6 +662,9 @@ export const webviewMessageHandler = async (
 
 		case "updateSettings":
 			if (message.updatedSettings) {
+				let experimentsUpdated = false
+				let selfImprovingSettingsUpdated = false
+
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
 					let newValue = value
 
@@ -740,17 +743,35 @@ export const webviewMessageHandler = async (
 							continue
 						}
 
+						experimentsUpdated = true
 						newValue = {
 							...(getGlobalState("experiments") ?? experimentDefault),
 							...(value as Record<ExperimentId, boolean>),
 						}
+					} else if (
+						key === "memoryBackend" ||
+						key === "agentMemoryUrl" ||
+						key === "selfImprovingScope" ||
+						key === "selfImprovingAutoSkillsScope"
+					) {
+						selfImprovingSettingsUpdated = true
 					} else if (key === "customSupportPrompts") {
 						if (!value) {
 							continue
 						}
 					}
 
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					try {
+						await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					} catch (error) {
+						console.error(`[Settings] Failed to save ${key}:`, error)
+					}
+				}
+
+				if (experimentsUpdated || selfImprovingSettingsUpdated) {
+					await provider.selfImprovingManager.onSettingsChanged(
+						provider.contextProxy.getGlobalState("experiments"),
+					)
 				}
 
 				await provider.postStateToWebview()

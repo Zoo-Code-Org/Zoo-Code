@@ -5,6 +5,7 @@ import {
 	type ExperimentId,
 	type ExtensionState,
 	type ClineMessage,
+	type SkillMetadata,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 } from "@roo-code/types"
 
@@ -43,6 +44,17 @@ const ApiConfigTestComponent = () => {
 			<button data-testid="partial-update-button" onClick={() => setApiConfiguration({ modelTemperature: 0.7 })}>
 				Partial Update
 			</button>
+		</div>
+	)
+}
+
+const SkillsUpdateTestComponent = () => {
+	const { skills, skillsUpdateNotice } = useExtensionState()
+
+	return (
+		<div>
+			<div data-testid="skills-state">{JSON.stringify(skills ?? [])}</div>
+			<div data-testid="skills-update-notice">{skillsUpdateNotice ?? ""}</div>
 		</div>
 	)
 }
@@ -180,6 +192,38 @@ describe("ExtensionStateContext", () => {
 				modelTemperature: 0.7, // Should add this from partial update
 			}),
 		)
+	})
+
+	it("updates skills and notice when a live skillsUpdated message arrives", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<SkillsUpdateTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		const updatedSkills: SkillMetadata[] = [
+			{
+				name: "workflow-terminal-file",
+				description: "Generated workflow skill",
+				path: "/tmp/workflow-terminal-file/SKILL.md",
+				source: "global",
+			},
+		]
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "skillsUpdated",
+						text: 'Skill created: "workflow-terminal-file"',
+						skills: updatedSkills,
+					},
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("skills-state").textContent || "[]")).toEqual(updatedSkills)
+		expect(screen.getByTestId("skills-update-notice").textContent).toBe('Skill created: "workflow-terminal-file"')
 	})
 })
 

@@ -382,14 +382,16 @@ export class ContextProxy {
 		return this.secretCache[key]
 	}
 
-	storeSecret(key: SecretStateKey, value?: string) {
-		// Update cache.
-		this.secretCache[key] = value
+	async storeSecret(key: SecretStateKey, value?: string) {
+		// Write to storage first, then update cache only on success.
+		// This prevents cache/storage desync if the write fails.
+		if (value === undefined) {
+			await this.originalContext.secrets.delete(key)
+		} else {
+			await this.originalContext.secrets.store(key, value)
+		}
 
-		// Write directly to context.
-		return value === undefined
-			? this.originalContext.secrets.delete(key)
-			: this.originalContext.secrets.store(key, value)
+		this.secretCache[key] = value
 	}
 
 	/**

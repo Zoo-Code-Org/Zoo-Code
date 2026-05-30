@@ -95,9 +95,6 @@ function createSanitizedGit(baseDir: string): SimpleGit {
 		config: [],
 		// --template="" stops git copying hooks/templates into the shadow repo (axis 1).
 		// GIT_TEMPLATE_DIR is stripped from the env above to block the env-var path (axis 2).
-		// allowUnsafeTemplateDir opts out of simple-git ≥3.36's blockUnsafeOperationsPlugin
-		// so the --template arg is not rejected before reaching git.
-		unsafe: { allowUnsafeTemplateDir: true },
 	}
 
 	// Create git instance and set the sanitized environment

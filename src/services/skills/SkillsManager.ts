@@ -49,6 +49,23 @@ export class SkillsManager {
 		}
 	}
 
+	private async postSkillsUpdatedMessage(text: string): Promise<void> {
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return
+		}
+
+		await provider.postMessageToWebview({
+			type: "skillsUpdated",
+			text,
+			skills: this.getSkillsMetadata(),
+		})
+	}
+
+	private getSkillNameFromUri(uri: vscode.Uri): string {
+		return path.basename(path.dirname(uri.fsPath)) || "skill"
+	}
+
 	/**
 	 * Scan a skills directory for skill subdirectories.
 	 * Handles two symlink cases:
@@ -291,6 +308,30 @@ export class SkillsManager {
 	}
 
 	/**
+	 * Get the unique discovered skill names.
+	 */
+	getSkillNames(): string[] {
+		return Array.from(new Set(this.getAllSkills().map((skill) => skill.name))).sort()
+	}
+
+	/**
+	 * Infer skill provenance for autonomous mutation safety.
+	 * Project and global discovered skills default to user-authored unless
+	 * a higher-level caller tracks agent provenance separately.
+	 */
+	getSkillProvenance(name: string): "user" | "bundled" | "hub" | "unknown" {
+		return this.getAllSkills().some((skill) => skill.name === name) ? "user" : "unknown"
+	}
+
+	getSkillProvenanceForSource(name: string, source: "global" | "project"): "user" | "bundled" | "hub" | "unknown" {
+		return this.findSkillByNameAndSource(name, source) ? "user" : "unknown"
+	}
+
+	hasSkill(name: string, source: "global" | "project"): boolean {
+		return this.findSkillByNameAndSource(name, source) !== undefined
+	}
+
+	/**
 	 * Get a skill by name, source, and optionally mode
 	 */
 	getSkill(name: string, source: "global" | "project", mode?: string): SkillMetadata | undefined {
@@ -323,6 +364,36 @@ export class SkillsManager {
 		return { valid: true }
 	}
 
+	private validateSkillDocumentStructure(name: string, content: string, expectedDescription?: string): void {
+		const { data: frontmatter } = matter(content)
+		const frontmatterName = typeof frontmatter.name === "string" ? frontmatter.name.trim() : ""
+		const frontmatterDescription = typeof frontmatter.description === "string" ? frontmatter.description.trim() : ""
+
+		if (!frontmatterName || !frontmatterDescription) {
+			throw new Error(
+				t("skills:errors.invalid_structure", {
+					reason: "missing required frontmatter fields: name, description",
+				}),
+			)
+		}
+
+		if (frontmatterName !== name) {
+			throw new Error(t("skills:errors.invalid_structure", { reason: `frontmatter name must match \"${name}\"` }))
+		}
+
+		if (frontmatterDescription.length < 1 || frontmatterDescription.length > 1024) {
+			throw new Error(t("skills:errors.description_length", { length: frontmatterDescription.length }))
+		}
+
+		if (expectedDescription && frontmatterDescription !== expectedDescription.trim()) {
+			throw new Error(
+				t("skills:errors.invalid_structure", {
+					reason: "frontmatter description must match the provided description",
+				}),
+			)
+		}
+	}
+
 	/**
 	 * Convert skill name validation error code to a user-friendly error message.
 	 */
@@ -351,51 +422,12 @@ export class SkillsManager {
 		description: string,
 		modeSlugs?: string[],
 	): Promise<string> {
-		// Validate skill name
-		const validation = this.validateSkillName(name)
-		if (!validation.valid) {
-			throw new Error(validation.error)
-		}
-
-		// Validate description
-		const trimmedDescription = description.trim()
-		if (trimmedDescription.length < 1 || trimmedDescription.length > 1024) {
-			throw new Error(t("skills:errors.description_length", { length: trimmedDescription.length }))
-		}
-
-		// Determine base directory
-		let baseDir: string
-		if (source === "global") {
-			baseDir = getGlobalRooDirectory()
-		} else {
-			const provider = this.providerRef.deref()
-			if (!provider?.cwd) {
-				throw new Error(t("skills:errors.no_workspace"))
-			}
-			baseDir = path.join(provider.cwd, ".roo")
-		}
-
-		// Always use the generic skills directory (mode info stored in frontmatter now)
-		const skillsDir = path.join(baseDir, "skills")
-		const skillDir = path.join(skillsDir, name)
-		const skillMdPath = path.join(skillDir, "SKILL.md")
-
-		// Check if skill already exists
-		if (await fileExists(skillMdPath)) {
-			throw new Error(t("skills:errors.already_exists", { name, path: skillMdPath }))
-		}
-
-		// Create the skill directory
-		await fs.mkdir(skillDir, { recursive: true })
-
-		// Generate SKILL.md content with frontmatter
 		const titleName = name
 			.split("-")
 			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
 			.join(" ")
 
-		// Build frontmatter with optional modeSlugs
-		const frontmatterLines = [`name: ${name}`, `description: ${trimmedDescription}`]
+		const frontmatterLines = [`name: ${name}`, `description: ${description.trim()}`]
 		if (modeSlugs && modeSlugs.length > 0) {
 			frontmatterLines.push(`modeSlugs:`)
 			for (const slug of modeSlugs) {
@@ -414,13 +446,90 @@ ${frontmatterLines.join("\n")}
 Add your skill instructions here.
 `
 
-		// Write the SKILL.md file
-		await fs.writeFile(skillMdPath, skillContent, "utf-8")
+		return this.createSkillFromContent(name, source, description, skillContent, modeSlugs)
+	}
 
-		// Refresh skills list
+	/**
+	 * Create a new skill from fully prepared SKILL.md content.
+	 */
+	async createSkillFromContent(
+		name: string,
+		source: "global" | "project",
+		description: string,
+		content: string,
+		modeSlugs?: string[],
+	): Promise<string> {
+		// Validate skill name
+		const validation = this.validateSkillName(name)
+		if (!validation.valid) {
+			throw new Error(validation.error)
+		}
+
+		// Validate description
+		const trimmedDescription = description.trim()
+		if (trimmedDescription.length < 1 || trimmedDescription.length > 1024) {
+			throw new Error(t("skills:errors.description_length", { length: trimmedDescription.length }))
+		}
+
+		if (!content.trim()) {
+			throw new Error(t("skills:errors.description_length", { length: 0 }))
+		}
+		this.validateSkillDocumentStructure(name, content, trimmedDescription)
+
+		// Determine base directory
+		let baseDir: string
+		if (source === "global") {
+			baseDir = getGlobalRooDirectory()
+		} else {
+			const provider = this.providerRef.deref()
+			if (!provider?.cwd) {
+				throw new Error(t("skills:errors.no_workspace"))
+			}
+			baseDir = path.join(provider.cwd, ".roo")
+		}
+
+		const skillsDir = path.join(baseDir, "skills")
+		const skillDir = path.join(skillsDir, name)
+		const skillMdPath = path.join(skillDir, "SKILL.md")
+
+		if (await fileExists(skillMdPath)) {
+			throw new Error(t("skills:errors.already_exists", { name, path: skillMdPath }))
+		}
+
+		await fs.mkdir(skillDir, { recursive: true })
+		await fs.writeFile(skillMdPath, content, "utf-8")
 		await this.discoverSkills()
+		await this.postSkillsUpdatedMessage(`Skill created: "${name}"`)
 
 		return skillMdPath
+	}
+
+	/**
+	 * Update the full SKILL.md content for an existing skill.
+	 */
+	async updateSkillContent(
+		name: string,
+		source: "global" | "project",
+		content: string,
+		mode?: string,
+	): Promise<void> {
+		const skill = mode
+			? Array.from(this.skills.values()).find(
+					(candidate) =>
+						candidate.name === name &&
+						candidate.source === source &&
+						(candidate.mode === mode || candidate.modeSlugs?.includes(mode)),
+				)
+			: this.findSkillByNameAndSource(name, source)
+		if (!skill) {
+			const modeInfo = mode ? ` (mode: ${mode})` : ""
+			throw new Error(t("skills:errors.not_found", { name, source, modeInfo }))
+		}
+		this.validateSkillDocumentStructure(name, content)
+
+		await fs.writeFile(skill.path, content, "utf-8")
+		await this.discoverSkills()
+		await this.postSkillsUpdatedMessage(`Skill updated: "${name}"`)
 	}
 
 	/**
@@ -445,6 +554,7 @@ Add your skill instructions here.
 
 		// Refresh skills list
 		await this.discoverSkills()
+		await this.postSkillsUpdatedMessage(`Skill deleted: "${name}"`)
 	}
 
 	/**
@@ -516,6 +626,7 @@ Add your skill instructions here.
 
 		// Refresh skills list
 		await this.discoverSkills()
+		await this.postSkillsUpdatedMessage(`Skill updated: "${name}"`)
 	}
 
 	/**
@@ -559,6 +670,7 @@ Add your skill instructions here.
 
 		// Refresh skills list
 		await this.discoverSkills()
+		await this.postSkillsUpdatedMessage(`Skill updated: "${name}"`)
 	}
 
 	/**
@@ -694,17 +806,23 @@ Add your skill instructions here.
 
 		watcher.onDidChange(async (uri) => {
 			if (this.isDisposed) return
+			const skillName = this.getSkillNameFromUri(uri)
 			await this.discoverSkills()
+			await this.postSkillsUpdatedMessage(`Skill updated: "${skillName}"`)
 		})
 
 		watcher.onDidCreate(async (uri) => {
 			if (this.isDisposed) return
+			const skillName = this.getSkillNameFromUri(uri)
 			await this.discoverSkills()
+			await this.postSkillsUpdatedMessage(`Skill created: "${skillName}"`)
 		})
 
 		watcher.onDidDelete(async (uri) => {
 			if (this.isDisposed) return
+			const skillName = this.getSkillNameFromUri(uri)
 			await this.discoverSkills()
+			await this.postSkillsUpdatedMessage(`Skill deleted: "${skillName}"`)
 		})
 
 		this.disposables.push(watcher)
