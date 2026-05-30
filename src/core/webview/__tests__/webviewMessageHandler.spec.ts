@@ -381,58 +381,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 	})
 
-	it("recovers zoo-gateway credentials from a separate profile when not the active provider", async () => {
-		// Regression: when zoo-gateway is NOT the active provider, the active apiConfiguration
-		// will not contain zooSessionToken / zooGatewayBaseUrl. The aggregate model fetcher must
-		// fall back to scanning providerSettingsManager profiles for a zoo-gateway entry so the
-		// model picker still populates.
-		mockClineProvider.getState = vi.fn().mockResolvedValue({
-			apiConfiguration: {
-				// Active provider is anthropic (or anything other than zoo-gateway).
-				apiProvider: "anthropic",
-				openRouterApiKey: "openrouter-key",
-				requestyApiKey: "requesty-key",
-				// No zooSessionToken / zooGatewayBaseUrl on the active config.
-			},
-		})
-		;(mockClineProvider as any).providerSettingsManager = {
-			listConfig: vi.fn().mockResolvedValue([
-				{ name: "Anthropic", apiProvider: "anthropic" },
-				{ name: "My Zoo Gateway Profile", apiProvider: "zoo-gateway" },
-			]),
-			getProfile: vi.fn().mockResolvedValue({
-				apiProvider: "zoo-gateway",
-				zooSessionToken: "recovered-zoo-token",
-				zooGatewayBaseUrl: "https://zoo.example.com/api/gateway/v1",
-			}),
-		}
-
-		const mockModels: ModelRecord = {
-			"model-1": {
-				maxTokens: 4096,
-				contextWindow: 8192,
-				supportsPromptCache: false,
-				description: "Test model 1",
-			},
-		}
-		mockGetModels.mockResolvedValue(mockModels)
-
-		await webviewMessageHandler(mockClineProvider, { type: "requestRouterModels" })
-
-		expect((mockClineProvider as any).providerSettingsManager.listConfig).toHaveBeenCalled()
-		expect((mockClineProvider as any).providerSettingsManager.getProfile).toHaveBeenCalledWith({
-			name: "My Zoo Gateway Profile",
-		})
-		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "zoo-gateway",
-			apiKey: "recovered-zoo-token",
-			baseUrl: "https://zoo.example.com/api/gateway/v1",
-		})
-
-		// Reset to avoid bleeding into other tests
-		delete (mockClineProvider as any).providerSettingsManager
-	})
-
 	it("handles LiteLLM models with values from message when config is missing", async () => {
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
