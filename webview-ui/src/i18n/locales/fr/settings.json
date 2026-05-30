@@ -213,7 +213,16 @@
 		"stoppingButton": "Arrêt en cours...",
 		"workspaceToggleLabel": "Activer l'indexation pour cet espace de travail",
 		"workspaceDisabledMessage": "L'indexation est configurée mais non activée pour cet espace de travail.",
-		"autoEnableDefaultLabel": "Activer automatiquement l'indexation pour les nouveaux espaces de travail"
+		"autoEnableDefaultLabel": "Activer automatiquement l'indexation pour les nouveaux espaces de travail",
+		"sembleProvider": "Semble - Local",
+		"semblePathLabel": "Chemin de Semble",
+		"semblePathPlaceholder": "semble",
+		"semblePathDescription": "Chemin vers l'exécutable semble. Laissez \"semble\" s'il est dans votre PATH, ou fournissez le chemin complet (ex. \"/usr/local/bin/semble\").",
+		"sembleInstallTitle": "Installer semble",
+		"sembleInstallDescription": "Semble doit être installé via pip avant utilisation :",
+		"sembleInstallCommand": "pip install semble",
+		"sembleInstallNote": "Nécessite Python 3.10+. Assurez-vous que le binaire semble installé est dans votre PATH, ou spécifiez le chemin complet ci-dessus.",
+		"sembleDescription": "Recherche hybride locale — aucune clé API requise."
 	},
 	"autoApprove": {
 		"toggleShortcut": "Vous pouvez configurer un raccourci global pour ce paramètre <SettingsLink>dans les préférences de votre IDE</SettingsLink>.",

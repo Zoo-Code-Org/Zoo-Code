@@ -213,7 +213,16 @@
 		"stoppingButton": "중지 중...",
 		"workspaceToggleLabel": "이 워크스페이스에 대한 인덱싱 활성화",
 		"workspaceDisabledMessage": "인덱싱이 구성되었지만 이 워크스페이스에서는 활성화되지 않았습니다.",
-		"autoEnableDefaultLabel": "새 워크스페이스에 대한 인덱싱 자동 활성화"
+		"autoEnableDefaultLabel": "새 워크스페이스에 대한 인덱싱 자동 활성화",
+		"sembleProvider": "Semble - 로컬",
+		"semblePathLabel": "Semble 경로",
+		"semblePathPlaceholder": "semble",
+		"semblePathDescription": "semble 실행 파일의 경로. PATH에 있으면 \"semble\"로 두거나, 전체 경로를 제공하세요 (예: \"/usr/local/bin/semble\").",
+		"sembleInstallTitle": "semble 설치",
+		"sembleInstallDescription": "사용 전에 pip를 통해 Semble을 설치해야 합니다:",
+		"sembleInstallCommand": "pip install semble",
+		"sembleInstallNote": "Python 3.10+가 필요합니다. 설치된 semble 바이너리가 PATH에 있는지 확인하거나, 위에서 전체 경로를 지정하세요.",
+		"sembleDescription": "로컬 하이브리드 검색 — API 키 불필요."
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDE 환경 설정</SettingsLink>에서 이 설정에 대한 전역 바로 가기를 구성할 수 있습니다.",

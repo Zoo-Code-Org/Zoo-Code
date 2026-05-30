@@ -213,7 +213,16 @@
 		"stoppingButton": "Durduruluyor...",
 		"workspaceToggleLabel": "Bu çalışma alanı için indekslemeyi etkinleştir",
 		"workspaceDisabledMessage": "İndeksleme yapılandırıldı ancak bu çalışma alanı için etkinleştirilmedi.",
-		"autoEnableDefaultLabel": "Yeni çalışma alanları için indekslemeyi otomatik etkinleştir"
+		"autoEnableDefaultLabel": "Yeni çalışma alanları için indekslemeyi otomatik etkinleştir",
+		"sembleProvider": "Semble - Yerel",
+		"semblePathLabel": "Semble Yolu",
+		"semblePathPlaceholder": "semble",
+		"semblePathDescription": "semble yürütülebilir dosyasının yolu. PATH'inizde ise \"semble\" olarak bırakın veya tam yolu girin (örn. \"/usr/local/bin/semble\").",
+		"sembleInstallTitle": "semble'ı yükle",
+		"sembleInstallDescription": "Kullanmadan önce Semble pip ile yüklenmelidir:",
+		"sembleInstallCommand": "pip install semble",
+		"sembleInstallNote": "Python 3.10+ gerektirir. Yüklenen semble ikili dosyasının PATH'inizde olduğundan emin olun veya yukarıda tam yolu belirtin.",
+		"sembleDescription": "Yerel hibrit arama — API anahtarı gerektirmez."
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDE tercihlerinizde</SettingsLink> bu ayar için genel bir kısayol yapılandırabilirsiniz.",

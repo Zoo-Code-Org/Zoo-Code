@@ -193,7 +193,7 @@ export class SembleProvider implements ISembleProvider {
 				id: `semble-${index}`,
 				score: r.score,
 				payload: {
-					filePath: path.join(basePath, r.chunk.file_path),
+					filePath: path.join(basePath, r.chunk.file_path).replace(/\\/g, "/"),
 					codeChunk: r.chunk?.content ?? "",
 					startLine: r.chunk?.start_line ?? 0,
 					endLine: r.chunk?.end_line ?? 0,

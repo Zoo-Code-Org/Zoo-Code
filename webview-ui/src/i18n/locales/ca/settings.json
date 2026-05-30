@@ -213,7 +213,16 @@
 		"stoppingButton": "Aturant...",
 		"workspaceToggleLabel": "Activar la indexació per a aquest espai de treball",
 		"workspaceDisabledMessage": "La indexació està configurada però no habilitada per a aquest espai de treball.",
-		"autoEnableDefaultLabel": "Habilitar automàticament la indexació per a nous espais de treball"
+		"autoEnableDefaultLabel": "Habilitar automàticament la indexació per a nous espais de treball",
+		"sembleProvider": "Semble - Local",
+		"semblePathLabel": "Ruta de Semble",
+		"semblePathPlaceholder": "semble",
+		"semblePathDescription": "Ruta a l'executable de semble. Deixeu-ho com a \"semble\" si està al vostre PATH, o proporcioneu la ruta completa (p. ex. \"/usr/local/bin/semble\").",
+		"sembleInstallTitle": "Instal·lar semble",
+		"sembleInstallDescription": "Semble s'ha d'instal·lar via pip abans d'usar-lo:",
+		"sembleInstallCommand": "pip install semble",
+		"sembleInstallNote": "Requereix Python 3.10+. Assegureu-vos que el binari semble instal·lat estigui al vostre PATH, o especifiqueu la ruta completa a dalt.",
+		"sembleDescription": "Cerca híbrida local — no calen claus d'API."
 	},
 	"autoApprove": {
 		"toggleShortcut": "Pots configurar una drecera global per a aquesta configuració <SettingsLink>a les preferències del teu IDE</SettingsLink>.",

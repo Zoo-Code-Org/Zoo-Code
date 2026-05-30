@@ -213,7 +213,16 @@
 		"stoppingButton": "रोक रहा है...",
 		"workspaceToggleLabel": "इस वर्कस्पेस के लिए इंडेक्सिंग सक्षम करें",
 		"workspaceDisabledMessage": "इंडेक्सिंग कॉन्फ़िगर की गई है लेकिन इस वर्कस्पेस के लिए सक्षम नहीं है।",
-		"autoEnableDefaultLabel": "नए वर्कस्पेस के लिए स्वचालित रूप से इंडेक्सिंग सक्षम करें"
+		"autoEnableDefaultLabel": "नए वर्कस्पेस के लिए स्वचालित रूप से इंडेक्सिंग सक्षम करें",
+		"sembleProvider": "Semble - स्थानीय",
+		"semblePathLabel": "Semble पथ",
+		"semblePathPlaceholder": "semble",
+		"semblePathDescription": "semble निष्पादन योग्य का पथ। यदि यह आपके PATH में है तो \"semble\" रहने दें, या पूरा पथ प्रदान करें (जैसे \"/usr/local/bin/semble\")।",
+		"sembleInstallTitle": "semble इंस्टॉल करें",
+		"sembleInstallDescription": "उपयोग से पहले Semble को pip के माध्यम से इंस्टॉल किया जाना चाहिए:",
+		"sembleInstallCommand": "pip install semble",
+		"sembleInstallNote": "Python 3.10+ आवश्यक है। सुनिश्चित करें कि इंस्टॉल किया गया semble बाइनरी आपके PATH पर है, या ऊपर पूरा पथ निर्दिष्ट करें।",
+		"sembleDescription": "स्थानीय हाइब्रिड खोज — किसी API कुंजी की आवश्यकता नहीं।"
 	},
 	"autoApprove": {
 		"toggleShortcut": "आप <SettingsLink>अपनी आईडीई वरीयताओं में</SettingsLink> इस सेटिंग के लिए एक वैश्विक शॉर्टकट कॉन्फ़िगर कर सकते हैं।",

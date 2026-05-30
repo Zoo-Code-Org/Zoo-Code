@@ -213,7 +213,16 @@
 		"stoppingButton": "正在停止...",
 		"workspaceToggleLabel": "为此工作区启用索引",
 		"workspaceDisabledMessage": "索引已配置，但尚未为此工作区启用。",
-		"autoEnableDefaultLabel": "自动为新工作区启用索引"
+		"autoEnableDefaultLabel": "自动为新工作区启用索引",
+		"sembleProvider": "Semble - 本地",
+		"semblePathLabel": "Semble 路径",
+		"semblePathPlaceholder": "semble",
+		"semblePathDescription": "semble 可执行文件的路径。如果在您的 PATH 中，保持为 \"semble\"，或提供完整路径（例如 \"/usr/local/bin/semble\"）。",
+		"sembleInstallTitle": "安装 semble",
+		"sembleInstallDescription": "使用前必须通过 pip 安装 Semble：",
+		"sembleInstallCommand": "pip install semble",
+		"sembleInstallNote": "需要 Python 3.10+。确保已安装的 semble 二进制文件在您的 PATH 中，或在上方指定完整路径。",
+		"sembleDescription": "本地混合搜索 - 无需 API 密钥。"
 	},
 	"autoApprove": {
 		"toggleShortcut": "您可以<SettingsLink>在 IDE 首选项中</SettingsLink>为此设置配置全局快捷方式。",

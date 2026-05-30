@@ -205,7 +205,7 @@
 		"sembleInstallTitle": "Install semble",
 		"sembleInstallDescription": "Semble must be installed via pip before use:",
 		"sembleInstallCommand": "pip install semble",
-		"sembleInstallNote": "Requires Python 3.10+. After installing, semble will be available on your PATH.",
+		"sembleInstallNote": "Requires Python 3.10+. Ensure the installed semble binary is on your PATH, or specify the full path above.",
 		"sembleDescription": "Local hybrid search — no API keys required.",
 		"openaiCompatibleProvider": "OpenAI Compatible",
 		"openAiKeyLabel": "OpenAI API Key",
