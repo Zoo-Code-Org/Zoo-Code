@@ -302,6 +302,28 @@ describe("SembleProvider", () => {
 			})
 		})
 
+		it("should resolve relative directoryPrefix against workspace path", async () => {
+			mockCli.search.mockResolvedValue([])
+
+			await provider.searchIndex("test", "src/subdir")
+
+			expect(mockCli.search).toHaveBeenCalledWith("test", "/workspace/src/subdir", {
+				topK: SEMBLE_DEFAULTS.DEFAULT_TOP_K,
+				content: SEMBLE_DEFAULTS.DEFAULT_CONTENT,
+			})
+		})
+
+		it("should use absolute directoryPrefix as-is", async () => {
+			mockCli.search.mockResolvedValue([])
+
+			await provider.searchIndex("test", "/absolute/custom/path")
+
+			expect(mockCli.search).toHaveBeenCalledWith("test", "/absolute/custom/path", {
+				topK: SEMBLE_DEFAULTS.DEFAULT_TOP_K,
+				content: SEMBLE_DEFAULTS.DEFAULT_CONTENT,
+			})
+		})
+
 		it("should return empty array on search error and log telemetry", async () => {
 			mockCli.search.mockRejectedValue(new Error("Search failed"))
 
@@ -351,6 +373,220 @@ describe("SembleProvider", () => {
 			// After dispose, searchIndex should return empty array
 			const results = await provider.searchIndex("test")
 			expect(results).toEqual([])
+		})
+	})
+
+	describe("_convertResults edge cases", () => {
+		beforeEach(async () => {
+			mockCli.checkInstalled.mockResolvedValue({ installed: true })
+			await provider.initialize()
+		})
+
+		it("should handle results with null content using empty string fallback", async () => {
+			const mockResults = [
+				{
+					chunk: {
+						content: null,
+						file_path: "src/file.ts",
+						start_line: null,
+						end_line: null,
+						language: null,
+						location: "",
+					},
+					score: 0.6,
+				},
+			]
+
+			mockCli.search.mockResolvedValue(mockResults)
+
+			const results = await provider.searchIndex("test")
+
+			expect(results).toHaveLength(1)
+			expect(results[0].payload?.codeChunk).toBe("")
+			expect(results[0].payload?.startLine).toBe(0)
+			expect(results[0].payload?.endLine).toBe(0)
+		})
+
+		it("should handle results with undefined content fields", async () => {
+			const mockResults = [
+				{
+					chunk: {
+						content: undefined,
+						file_path: "src/file.ts",
+						start_line: undefined,
+						end_line: undefined,
+						language: undefined,
+						location: "",
+					},
+					score: 0.5,
+				},
+			]
+
+			mockCli.search.mockResolvedValue(mockResults)
+
+			const results = await provider.searchIndex("test")
+
+			expect(results).toHaveLength(1)
+			expect(results[0].payload?.codeChunk).toBe("")
+			expect(results[0].payload?.startLine).toBe(0)
+			expect(results[0].payload?.endLine).toBe(0)
+		})
+
+		it("should normalize backslashes in file paths", async () => {
+			const mockResults = [
+				{
+					chunk: {
+						content: "code",
+						file_path: "src\\nested\\file.ts",
+						start_line: 1,
+						end_line: 10,
+						language: "typescript",
+						location: "",
+					},
+					score: 0.8,
+				},
+			]
+
+			mockCli.search.mockResolvedValue(mockResults)
+
+			const results = await provider.searchIndex("test")
+
+			expect(results).toHaveLength(1)
+			expect(results[0].payload?.filePath).not.toContain("\\")
+			expect(results[0].payload?.filePath).toContain("/")
+		})
+
+		it("should join file paths against the searchPath when directoryPrefix is provided", async () => {
+			const mockResults = [
+				{
+					chunk: {
+						content: "code",
+						file_path: "file.ts",
+						start_line: 1,
+						end_line: 5,
+						language: "typescript",
+						location: "",
+					},
+					score: 0.9,
+				},
+			]
+
+			mockCli.search.mockResolvedValue(mockResults)
+
+			const results = await provider.searchIndex("test", "/custom/path")
+
+			expect(results[0].payload?.filePath).toBe("/custom/path/file.ts")
+		})
+
+		it("should assign sequential semble-N IDs to results", async () => {
+			const mockResults = [
+				{
+					chunk: {
+						content: "a",
+						file_path: "a.ts",
+						start_line: 1,
+						end_line: 2,
+						language: "ts",
+						location: "",
+					},
+					score: 0.9,
+				},
+				{
+					chunk: {
+						content: "b",
+						file_path: "b.ts",
+						start_line: 1,
+						end_line: 2,
+						language: "ts",
+						location: "",
+					},
+					score: 0.8,
+				},
+				{
+					chunk: {
+						content: "c",
+						file_path: "c.ts",
+						start_line: 1,
+						end_line: 2,
+						language: "ts",
+						location: "",
+					},
+					score: 0.7,
+				},
+			]
+
+			mockCli.search.mockResolvedValue(mockResults)
+
+			const results = await provider.searchIndex("test")
+
+			expect(results[0].id).toBe("semble-0")
+			expect(results[1].id).toBe("semble-1")
+			expect(results[2].id).toBe("semble-2")
+		})
+	})
+
+	describe("initialize error edge cases", () => {
+		it("should set Error state when download returns no path (undefined)", async () => {
+			;(downloadSemble as any).mockResolvedValue(undefined)
+
+			await provider.initialize()
+
+			expect(provider.state).toBe("Error")
+			expect(mockStateManager.setSystemState).toHaveBeenCalledWith(
+				"Error",
+				expect.stringContaining("Failed to download semble"),
+			)
+		})
+
+		it("should set Error state with default message when checkInstalled returns no error string", async () => {
+			mockCli.checkInstalled.mockResolvedValue({
+				installed: false,
+				error: undefined,
+			})
+
+			await provider.initialize()
+
+			expect(provider.state).toBe("Error")
+			expect(mockStateManager.setSystemState).toHaveBeenCalledWith(
+				"Error",
+				expect.stringContaining("Semble binary is not functional"),
+			)
+		})
+	})
+
+	describe("custom config options", () => {
+		it("should pass custom topK to CLI search", async () => {
+			const customProvider = new SembleProvider("/workspace", mockContext, mockStateManager, {
+				topK: 5,
+			})
+
+			mockCli.checkInstalled.mockResolvedValue({ installed: true })
+			await customProvider.initialize()
+			mockCli.search.mockResolvedValue([])
+
+			await customProvider.searchIndex("test")
+
+			expect(mockCli.search).toHaveBeenCalledWith("test", "/workspace", {
+				topK: 5,
+				content: "code",
+			})
+		})
+
+		it("should pass custom content type to CLI search", async () => {
+			const customProvider = new SembleProvider("/workspace", mockContext, mockStateManager, {
+				content: "all",
+			})
+
+			mockCli.checkInstalled.mockResolvedValue({ installed: true })
+			await customProvider.initialize()
+			mockCli.search.mockResolvedValue([])
+
+			await customProvider.searchIndex("test")
+
+			expect(mockCli.search).toHaveBeenCalledWith("test", "/workspace", {
+				topK: 10,
+				content: "all",
+			})
 		})
 	})
 })

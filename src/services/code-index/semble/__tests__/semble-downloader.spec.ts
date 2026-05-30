@@ -349,5 +349,91 @@ describe("semble-downloader", () => {
 				if (originalArch) Object.defineProperty(process, "arch", originalArch)
 			}
 		})
+
+		it("should use correct binary name for windows", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
+			;(fs.access as any).mockResolvedValue(undefined)
+
+			try {
+				const result = await getSembleBinaryPath("/storage")
+				expect(result).toBe(path.join("/storage", "semble", "semble.exe"))
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
+	})
+
+	describe("downloadSemble - zip extraction on Windows", () => {
+		it("should use PowerShell Expand-Archive on Windows", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
+
+			// fs.access rejects => file not present, triggering download
+			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+
+			// Simulate successful download
+			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
+				if (event === "finish") {
+					setImmediate(cb)
+				}
+			})
+
+			try {
+				const result = await downloadSemble("/storage")
+
+				expect(result).toBe(path.join("/storage", "semble", "semble.exe"))
+				// Should call PowerShell for zip extraction
+				expect(spawn).toHaveBeenCalledWith(
+					"powershell",
+					expect.arrayContaining(["-NoProfile", "-Command", expect.stringContaining("Expand-Archive")]),
+					expect.any(Object),
+				)
+				// Should NOT call chmod on windows
+				expect(fs.chmod).not.toHaveBeenCalled()
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
+	})
+
+	describe("downloadSemble - error handling edge cases", () => {
+		it("should not throw when archive cleanup fails after successful extraction", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
+
+			// fs.access rejects => file not present
+			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+
+			// Simulate successful download
+			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
+				if (event === "finish") {
+					setImmediate(cb)
+				}
+			})
+
+			// Archive cleanup fails but should not throw (only archive removal after extraction)
+			;(fs.unlink as any).mockRejectedValue(new Error("unlink cleanup failed"))
+
+			try {
+				const result = await downloadSemble("/storage")
+				// Should still succeed — archive cleanup failure is ignored
+				expect(result).toBe(path.join("/storage", "semble", "semble"))
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
 	})
 })

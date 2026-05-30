@@ -178,10 +178,66 @@ describe("SembleCLI", () => {
 			)
 		})
 
+		it("should not add --content flag for code (default)", async () => {
+			mockSpawn.mockReturnValue(createMockProcess(JSON.stringify({ query: "related", results: [] }), "", 0))
+
+			await cli.findRelated("src/auth.ts", 42, "/repo", { content: "code" })
+
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"semble",
+				["find-related", "src/auth.ts", "42", "/repo", "-k", "10"],
+				expect.any(Object),
+			)
+		})
+
+		it("should add --content flag for docs content type", async () => {
+			mockSpawn.mockReturnValue(createMockProcess(JSON.stringify({ query: "related", results: [] }), "", 0))
+
+			await cli.findRelated("src/auth.ts", 42, "/repo", { content: "docs" })
+
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"semble",
+				["find-related", "src/auth.ts", "42", "/repo", "-k", "10", "--content", "docs"],
+				expect.any(Object),
+			)
+		})
+
 		it("should throw error when semble find-related fails", async () => {
 			mockSpawn.mockReturnValue(createMockProcess("", "Error: no chunk found", 1))
 
 			await expect(cli.findRelated("src/auth.ts", 42, "/repo")).rejects.toThrow("Semble find-related failed")
+		})
+
+		it("should throw with message when find-related fails with empty stderr", async () => {
+			mockSpawn.mockReturnValue(createMockProcess("", "", 1))
+
+			await expect(cli.findRelated("src/auth.ts", 42, "/repo")).rejects.toThrow("Semble find-related failed")
+		})
+
+		it("should parse results from find-related", async () => {
+			const jsonResponse = {
+				query: "related",
+				results: [
+					{
+						chunk: {
+							content: "related code",
+							file_path: "src/related.ts",
+							start_line: 1,
+							end_line: 10,
+							language: "typescript",
+							location: "src/related.ts:1-10",
+						},
+						score: 0.85,
+					},
+				],
+			}
+			mockSpawn.mockReturnValue(createMockProcess(JSON.stringify(jsonResponse), "", 0))
+
+			const results = await cli.findRelated("src/auth.ts", 42, "/repo")
+
+			expect(results).toHaveLength(1)
+			expect(results[0].chunk.file_path).toBe("src/related.ts")
+			expect(results[0].score).toBe(0.85)
 		})
 	})
 
@@ -267,6 +323,57 @@ describe("SembleCLI", () => {
 			const results = await cli.search("test", "/repo")
 
 			expect(results).toEqual([])
+		})
+
+		it("should handle flat array format (older semble format)", async () => {
+			const flatArray = [
+				{
+					chunk: {
+						content: "old format result",
+						file_path: "src/old.ts",
+						start_line: 1,
+						end_line: 5,
+						language: "typescript",
+						location: "src/old.ts:1-5",
+					},
+					score: 0.7,
+				},
+			]
+			mockSpawn.mockReturnValue(createMockProcess(JSON.stringify(flatArray), "", 0))
+
+			const results = await cli.search("test", "/repo")
+
+			expect(results).toHaveLength(1)
+			expect(results[0].chunk.file_path).toBe("src/old.ts")
+			expect(results[0].score).toBe(0.7)
+		})
+
+		it("should return empty array for unexpected JSON structure", async () => {
+			mockSpawn.mockReturnValue(createMockProcess(JSON.stringify({ unexpected: "format" }), "", 0))
+
+			const results = await cli.search("test", "/repo")
+
+			expect(results).toEqual([])
+		})
+	})
+
+	describe("search error handling", () => {
+		it("should include stderr in error message when available", async () => {
+			mockSpawn.mockReturnValue(createMockProcess("", "Permission denied: /repo", 1))
+
+			await expect(cli.search("test", "/repo")).rejects.toThrow("Permission denied: /repo")
+		})
+
+		it("should fall back to process exit message when stderr is empty", async () => {
+			mockSpawn.mockReturnValue(createMockProcess("", "", 1))
+
+			await expect(cli.search("test", "/repo")).rejects.toThrow("Semble search failed")
+		})
+
+		it("should handle spawn error during search", async () => {
+			mockSpawn.mockReturnValue(createErrorProcess("EACCES: permission denied"))
+
+			await expect(cli.search("test", "/repo")).rejects.toThrow("EACCES: permission denied")
 		})
 	})
 })
