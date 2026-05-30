@@ -6,7 +6,6 @@ import { SembleSearchResult, SembleCheckResult, SembleContentType, SEMBLE_DEFAUL
  * Wraps the `semble` CLI for programmatic access.
  *
  * The semble binary is automatically downloaded on enablement via semble-downloader.ts.
- * The semblePath should be a direct path to the executable.
  *
  * All methods spawn the semble process via child_process.spawn with array
  * arguments (no shell) to prevent shell injection.
@@ -24,7 +23,7 @@ import { SembleSearchResult, SembleCheckResult, SembleContentType, SEMBLE_DEFAUL
 export class SembleCLI {
 	private readonly semblePath: string
 
-	constructor(semblePath: string = SEMBLE_DEFAULTS.DEFAULT_PATH) {
+	constructor(semblePath: string) {
 		this.semblePath = semblePath
 	}
 

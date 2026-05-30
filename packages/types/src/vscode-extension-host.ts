@@ -677,7 +677,6 @@ export interface WebviewMessage {
 		codebaseIndexSearchMaxResults?: number
 		codebaseIndexSearchMinScore?: number
 		codebaseIndexOpenRouterSpecificProvider?: string // OpenRouter provider routing
-		codebaseIndexSemblePath?: string // Path to the semble executable
 
 		// Secret settings
 		codeIndexOpenAiKey?: string

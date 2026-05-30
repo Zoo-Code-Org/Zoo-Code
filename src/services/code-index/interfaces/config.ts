@@ -45,5 +45,4 @@ export type PreviousConfigSnapshot = {
 	openRouterSpecificProvider?: string
 	qdrantUrl?: string
 	qdrantApiKey?: string
-	semblePath?: string
 }

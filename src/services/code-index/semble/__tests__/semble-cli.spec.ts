@@ -51,12 +51,7 @@ describe("SembleCLI", () => {
 	})
 
 	describe("constructor", () => {
-		it("should use default semble path", () => {
-			const defaultCli = new SembleCLI()
-			expect(defaultCli).toBeDefined()
-		})
-
-		it("should accept a custom path to the semble executable", () => {
+		it("should accept a path to the semble executable", () => {
 			const customCli = new SembleCLI("/usr/local/bin/semble")
 			expect(customCli).toBeDefined()
 		})

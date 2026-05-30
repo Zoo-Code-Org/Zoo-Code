@@ -41,8 +41,6 @@ export interface SembleCheckResult {
  * Configuration for the Semble provider.
  */
 export interface SembleConfig {
-	/** Path to the semble executable. Default: "semble" (uses PATH). */
-	semblePath: string
 	/** Maximum search results to return. Default: 10. */
 	topK: number
 	/** Content types to index. Default: "code". */
@@ -83,7 +81,6 @@ export interface ISembleProvider {
  * Default configuration values for Semble.
  */
 export const SEMBLE_DEFAULTS = {
-	DEFAULT_PATH: "semble",
 	DEFAULT_TOP_K: 10,
 	DEFAULT_CONTENT: "code" as SembleContentType,
 }

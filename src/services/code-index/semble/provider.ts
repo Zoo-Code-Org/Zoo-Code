@@ -21,7 +21,7 @@ import { TelemetryEventName } from "@roo-code/types"
  * to this provider instead of the ServiceFactory → orchestrator pipeline.
  */
 export class SembleProvider implements ISembleProvider {
-	private cli: SembleCLI
+	private cli!: SembleCLI
 	private readonly workspacePath: string
 	private readonly config: SembleConfig
 	private readonly stateManager: CodeIndexStateManager
@@ -34,7 +34,6 @@ export class SembleProvider implements ISembleProvider {
 		workspacePath: string,
 		context: vscode.ExtensionContext,
 		stateManager: CodeIndexStateManager,
-		semblePath: string = SEMBLE_DEFAULTS.DEFAULT_PATH,
 		options?: { topK?: number; content?: SembleContentType },
 	) {
 		this.workspacePath = workspacePath
@@ -42,12 +41,9 @@ export class SembleProvider implements ISembleProvider {
 		this.stateManager = stateManager
 
 		this.config = {
-			semblePath,
 			topK: options?.topK ?? SEMBLE_DEFAULTS.DEFAULT_TOP_K,
 			content: options?.content ?? SEMBLE_DEFAULTS.DEFAULT_CONTENT,
 		}
-
-		this.cli = new SembleCLI(semblePath)
 	}
 
 	get state(): IndexingState {
@@ -55,7 +51,7 @@ export class SembleProvider implements ISembleProvider {
 	}
 
 	/**
-	 * Initializes the provider: downloads semble if needed, then validates it works.
+	 * Initializes the provider: downloads semble, then validates it works.
 	 */
 	async initialize(): Promise<void> {
 		if (this._isInitialized) {
@@ -73,21 +69,20 @@ export class SembleProvider implements ISembleProvider {
 			return
 		}
 
-		// Auto-download semble if no custom path is configured
-		if (this.config.semblePath === SEMBLE_DEFAULTS.DEFAULT_PATH) {
-			try {
-				this.stateManager.setSystemState("Indexing", "Downloading semble binary...")
-				const storageDir = this.context.globalStorageUri.fsPath
-				const binaryPath = await downloadSemble(storageDir)
-				if (binaryPath) {
-					this.cli = new SembleCLI(binaryPath)
-				}
-			} catch (error: any) {
-				this._state = "Error"
-				this.stateManager.setSystemState("Error", `Failed to download semble: ${error?.message || error}`)
-				console.error("[SembleProvider] Download failed:", error?.message || error)
-				return
+		// Download semble binary
+		try {
+			this.stateManager.setSystemState("Indexing", "Downloading semble binary...")
+			const storageDir = this.context.globalStorageUri.fsPath
+			const binaryPath = await downloadSemble(storageDir)
+			if (!binaryPath) {
+				throw new Error("Download returned no path")
 			}
+			this.cli = new SembleCLI(binaryPath)
+		} catch (error: any) {
+			this._state = "Error"
+			this.stateManager.setSystemState("Error", `Failed to download semble: ${error?.message || error}`)
+			console.error("[SembleProvider] Download failed:", error?.message || error)
+			return
 		}
 
 		// Verify the binary works

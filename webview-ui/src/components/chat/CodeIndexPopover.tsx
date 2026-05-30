@@ -81,7 +81,6 @@ interface LocalCodeIndexSettings {
 	codebaseIndexVercelAiGatewayApiKey?: string
 	codebaseIndexOpenRouterApiKey?: string
 	codebaseIndexOpenRouterSpecificProvider?: string
-	codebaseIndexSemblePath?: string
 }
 
 // Validation schema for codebase index settings
@@ -181,7 +180,6 @@ const createValidationSchema = (provider: EmbedderProvider, t: any) => {
 			// Semble requires no API keys, Qdrant URL, or model selection
 			return z.object({
 				codebaseIndexEnabled: z.boolean(),
-				codebaseIndexSemblePath: z.string().optional(),
 			})
 
 		default:
@@ -237,7 +235,6 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 		codebaseIndexVercelAiGatewayApiKey: "",
 		codebaseIndexOpenRouterApiKey: "",
 		codebaseIndexOpenRouterSpecificProvider: "",
-		codebaseIndexSemblePath: "",
 	})
 
 	// Initial settings state - stores the settings when popover opens
@@ -278,7 +275,6 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 				codebaseIndexOpenRouterApiKey: "",
 				codebaseIndexOpenRouterSpecificProvider:
 					codebaseIndexConfig.codebaseIndexOpenRouterSpecificProvider || "",
-				codebaseIndexSemblePath: codebaseIndexConfig.codebaseIndexSemblePath || "",
 			}
 			setInitialSettings(settings)
 			setCurrentSettings(settings)

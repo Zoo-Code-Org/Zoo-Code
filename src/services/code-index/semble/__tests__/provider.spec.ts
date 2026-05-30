@@ -57,7 +57,7 @@ describe("SembleProvider", () => {
 			globalStorageUri: { fsPath: "/mock/storage" },
 		}
 
-		provider = new SembleProvider("/workspace", mockContext, mockStateManager, "semble")
+		provider = new SembleProvider("/workspace", mockContext, mockStateManager)
 		mockCli = sharedMockCli
 	})
 
@@ -68,13 +68,8 @@ describe("SembleProvider", () => {
 			expect(p.state).toBe("Standby")
 		})
 
-		it("should create provider with custom semble path", () => {
-			const p = new SembleProvider("/workspace", mockContext, mockStateManager, "/usr/local/bin/semble")
-			expect(p).toBeDefined()
-		})
-
 		it("should create provider with custom topK and content", () => {
-			const p = new SembleProvider("/workspace", mockContext, mockStateManager, "semble", {
+			const p = new SembleProvider("/workspace", mockContext, mockStateManager, {
 				topK: 5,
 				content: "all",
 			})
@@ -142,16 +137,6 @@ describe("SembleProvider", () => {
 			await provider.initialize()
 
 			expect(mockCli.checkInstalled).toHaveBeenCalledTimes(1)
-		})
-
-		it("should skip download when custom semble path is configured", async () => {
-			const customProvider = new SembleProvider("/workspace", mockContext, mockStateManager, "/custom/semble")
-			mockCli.checkInstalled.mockResolvedValue({ installed: true })
-
-			await customProvider.initialize()
-
-			expect(downloadSemble).not.toHaveBeenCalled()
-			expect(customProvider.state).toBe("Indexed")
 		})
 	})
 
