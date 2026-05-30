@@ -321,11 +321,15 @@ describe("ApiOptions", () => {
 				apiProvider: "aetherapi",
 				apiModelId: aetherapiDefaultModelId,
 				aetherapiApiKey: "",
+				aetherapiBaseUrl: "",
 			},
 			setApiConfigurationField: mockSetApiConfigurationField,
 		})
 
 		expect(screen.getByText("settings:providers.aetherapiApiKey")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.aetherapiDisclosure")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.aetherapiBaseUrl")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.aetherapiEndpointInfo")).toBeInTheDocument()
 		expect(screen.getByText("settings:providers.getAetherapiApiKey")).toBeInTheDocument()
 		expect(screen.getByTestId("model-picker-button")).toHaveTextContent(aetherapiDefaultModelId)
 
@@ -333,6 +337,11 @@ describe("ApiOptions", () => {
 		fireEvent.change(apiKeyInput, { target: { value: "aether-key" } })
 
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("aetherapiApiKey", "aether-key")
+
+		const baseUrlInput = screen.getByPlaceholderText("https://api.aetherapi.dev/v1")
+		fireEvent.change(baseUrlInput, { target: { value: "https://gateway.example.test/v1" } })
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("aetherapiBaseUrl", "https://gateway.example.test/v1")
 	})
 
 	it("resets model to AetherAPI default when switching providers", () => {

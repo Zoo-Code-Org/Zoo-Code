@@ -319,6 +319,9 @@
 		"apiKeyStorageNotice": "Les claus API s'emmagatzemen de forma segura a l'Emmagatzematge Secret de VSCode",
 		"aetherapiApiKey": "Clau API d'AetherAPI",
 		"getAetherapiApiKey": "Obtenir clau API d'AetherAPI",
+		"aetherapiBaseUrl": "AetherAPI Base URL",
+		"aetherapiDisclosure": "AetherAPI is a third-party intermediary. Requests are sent to AetherAPI's API endpoint before being processed by the selected model provider.",
+		"aetherapiEndpointInfo": "Default endpoint: https://api.aetherapi.dev/v1",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",

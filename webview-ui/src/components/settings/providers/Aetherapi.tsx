@@ -40,6 +40,19 @@ export const Aetherapi = ({ apiConfiguration, setApiConfigurationField }: Aether
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
+			<div className="text-sm text-vscode-descriptionForeground">
+				{t("settings:providers.aetherapiDisclosure")}
+			</div>
+			<VSCodeTextField
+				value={apiConfiguration?.aetherapiBaseUrl || ""}
+				onInput={handleInputChange("aetherapiBaseUrl")}
+				placeholder="https://api.aetherapi.dev/v1"
+				className="w-full">
+				<label className="block font-medium mb-1">{t("settings:providers.aetherapiBaseUrl")}</label>
+			</VSCodeTextField>
+			<div className="text-sm text-vscode-descriptionForeground -mt-2">
+				{t("settings:providers.aetherapiEndpointInfo")}
+			</div>
 			{!apiConfiguration?.aetherapiApiKey && (
 				<VSCodeButtonLink href="https://aetherapi.dev/" appearance="secondary">
 					{t("settings:providers.getAetherapiApiKey")}

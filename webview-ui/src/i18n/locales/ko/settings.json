@@ -319,6 +319,9 @@
 		"apiKeyStorageNotice": "API 키는 VSCode의 보안 저장소에 안전하게 저장됩니다",
 		"aetherapiApiKey": "AetherAPI API 키",
 		"getAetherapiApiKey": "AetherAPI API 키 받기",
+		"aetherapiBaseUrl": "AetherAPI Base URL",
+		"aetherapiDisclosure": "AetherAPI is a third-party intermediary. Requests are sent to AetherAPI's API endpoint before being processed by the selected model provider.",
+		"aetherapiEndpointInfo": "Default endpoint: https://api.aetherapi.dev/v1",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",

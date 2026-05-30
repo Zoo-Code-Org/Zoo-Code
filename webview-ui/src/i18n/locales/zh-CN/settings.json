@@ -319,6 +319,9 @@
 		"apiKeyStorageNotice": "API 密钥安全存储在 VSCode 的密钥存储中",
 		"aetherapiApiKey": "AetherAPI API 密钥",
 		"getAetherapiApiKey": "获取 AetherAPI API 密钥",
+		"aetherapiBaseUrl": "AetherAPI Base URL",
+		"aetherapiDisclosure": "AetherAPI is a third-party intermediary. Requests are sent to AetherAPI's API endpoint before being processed by the selected model provider.",
+		"aetherapiEndpointInfo": "Default endpoint: https://api.aetherapi.dev/v1",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
 			"loading": "Loading usage limits...",
