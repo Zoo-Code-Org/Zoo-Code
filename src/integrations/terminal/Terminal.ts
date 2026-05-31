@@ -2,7 +2,6 @@ import { existsSync } from "fs"
 import * as path from "path"
 
 import * as vscode from "vscode"
-import pWaitFor from "p-wait-for"
 
 import type { RooTerminalCallbacks, RooTerminalProcessResultPromise } from "./types"
 import { BaseTerminal } from "./BaseTerminal"
@@ -49,7 +48,9 @@ export class Terminal extends BaseTerminal {
 			this.terminal = vscode.window.createTerminal(options)
 		}
 
-		if (Terminal.getTerminalZdotdir()) {
+		// Only register ZDOTDIR cleanup when we actually set it (i.e. no profile
+		// override is active — see getEnv() for the same guard).
+		if (Terminal.getTerminalZdotdir() && !Terminal.getTerminalProfile()) {
 			ShellIntegrationManager.terminalTmpDirs.set(id, env.ZDOTDIR)
 		}
 	}
@@ -87,7 +88,7 @@ export class Terminal extends BaseTerminal {
 		process.once("completed", (output) => callbacks.onCompleted(output, process))
 		process.once("shell_execution_started", (pid) => callbacks.onShellExecutionStarted(pid, process))
 		process.once("shell_execution_complete", (details) => callbacks.onShellExecutionComplete(details, process))
-		process.once("no_shell_integration", (msg) => callbacks.onNoShellIntegration?.(msg, process))
+		process.once("no_shell_integration", (details) => callbacks.onNoShellIntegration?.(details, process))
 
 		const promise = new Promise<void>((resolve, reject) => {
 			// Set up event handlers
@@ -97,28 +98,60 @@ export class Terminal extends BaseTerminal {
 				reject(error)
 			})
 
-			// Wait for shell integration before executing the command
-			pWaitFor(() => this.terminal.shellIntegration !== undefined, {
-				timeout: Terminal.getShellIntegrationTimeout(),
-			})
-				.then(() => {
-					// Clean up temporary directory if shell integration is available, zsh did its job:
-					ShellIntegrationManager.zshCleanupTmpDir(this.id)
+			// Wait for shell integration before executing the command. Use the
+			// event-based API rather than polling so we react immediately when
+			// VS Code's injector fires instead of burning CPU on a tight loop.
+			const waitForShellIntegration = (): Promise<void> => {
+				if (this.terminal.shellIntegration !== undefined) {
+					return Promise.resolve()
+				}
 
-					// Run the command in the terminal
-					process.run(command)
+				return new Promise<void>((res, rej) => {
+					const timeoutId = setTimeout(() => {
+						disposable.dispose()
+						rej(new Error("timeout"))
+					}, Terminal.getShellIntegrationTimeout())
+
+					const disposable = vscode.window.onDidChangeTerminalShellIntegration(({ terminal }) => {
+						if (terminal === this.terminal) {
+							clearTimeout(timeoutId)
+							disposable.dispose()
+							res()
+						}
+					})
 				})
-				.catch(() => {
-					console.log(`[Terminal ${this.id}] Shell integration not available. Command execution aborted.`)
+			}
 
-					// Clean up temporary directory if shell integration is not available
-					ShellIntegrationManager.zshCleanupTmpDir(this.id)
-
-					process.emit(
-						"no_shell_integration",
-						`Shell integration initialization sequence '\\x1b]633;A' was not received within ${Terminal.getShellIntegrationTimeout() / 1000}s. Shell integration has been disabled for this terminal instance. Increase the timeout in the settings if necessary.`,
-					)
+			if (Terminal.isActiveShellCmdExe()) {
+				// cmd.exe cannot emit OSC 633;A — skip the timeout entirely and go
+				// straight to the execa fallback (VS Code issue #164646).
+				ShellIntegrationManager.zshCleanupTmpDir(this.id)
+				process.emit("no_shell_integration", {
+					message:
+						"cmd.exe does not support shell integration (VS Code issue #164646). Command will run via fallback.",
+					commandSubmitted: false,
 				})
+			} else {
+				waitForShellIntegration()
+					.then(() => {
+						// Clean up temporary directory if shell integration is available, zsh did its job:
+						ShellIntegrationManager.zshCleanupTmpDir(this.id)
+
+						// Run the command in the terminal
+						process.run(command)
+					})
+					.catch(() => {
+						console.log(`[Terminal ${this.id}] Shell integration not available. Command execution aborted.`)
+
+						// Clean up temporary directory if shell integration is not available
+						ShellIntegrationManager.zshCleanupTmpDir(this.id)
+
+						process.emit("no_shell_integration", {
+							message: `Shell integration initialization sequence '\\x1b]633;A' was not received within ${Terminal.getShellIntegrationTimeout() / 1000}s. Shell integration has been disabled for this terminal instance. Increase the timeout in the settings if necessary.`,
+							commandSubmitted: false,
+						})
+					})
+			}
 		})
 
 		return mergePromise(process, promise)
@@ -214,8 +247,11 @@ export class Terminal extends BaseTerminal {
 			env.PROMPT_EOL_MARK = ""
 		}
 
-		// Handle ZDOTDIR for zsh if enabled
-		if (Terminal.getTerminalZdotdir()) {
+		// Handle ZDOTDIR for zsh if enabled. Skip when a profile override is
+		// active: VS Code's own shell integration injector also sets ZDOTDIR for
+		// zsh, and the two would fight each other (VS Code's ambient env wins per
+		// issue #96295). Let VS Code handle injection for the selected profile.
+		if (Terminal.getTerminalZdotdir() && !Terminal.getTerminalProfile()) {
 			env.ZDOTDIR = ShellIntegrationManager.zshInitTmpDir(env)
 		}
 
@@ -310,6 +346,52 @@ export class Terminal extends BaseTerminal {
 		}
 	}
 
+	/**
+	 * Returns true when the resolved shell path is cmd.exe. cmd.exe cannot emit
+	 * the OSC 633;C sequence (VS Code issue #164646, closed as not planned), so
+	 * shell integration will never work for it — exclude it from the picker.
+	 */
+	public static isCmdExe(shellPath: string): boolean {
+		return /[/\\]cmd\.exe$/i.test(shellPath)
+	}
+
+	/**
+	 * Returns true when the active shell (profile override or VS Code default) is
+	 * cmd.exe. Used to skip the shell integration timeout entirely for cmd.exe.
+	 */
+	public static isActiveShellCmdExe(platform: NodeJS.Platform = process.platform): boolean {
+		if (platform !== "win32") {
+			return false
+		}
+
+		// Check explicit profile override first.
+		const profileShell = Terminal.getProfileShell(platform)
+
+		if (profileShell?.shellPath) {
+			return Terminal.isCmdExe(profileShell.shellPath)
+		}
+
+		// Fall back to VS Code's configured default profile for Windows.
+		const platformKey = Terminal.getPlatformProfileKey(platform)
+		const defaultProfileName = vscode.workspace
+			.getConfiguration("terminal.integrated")
+			.get<string>(`defaultProfile.${platformKey}`)
+
+		if (!defaultProfileName) {
+			return false
+		}
+
+		const profiles = Terminal.getConfiguredProfiles(platform)
+		const profile = profiles[defaultProfileName] as { path?: unknown } | null | undefined
+
+		if (!profile) {
+			return false
+		}
+
+		const resolved = Terminal.resolveProfilePath(profile.path, platform)
+		return resolved ? Terminal.isCmdExe(resolved) : false
+	}
+
 	public static getAvailableProfileNames(platform: NodeJS.Platform = process.platform): string[] {
 		const names = new Set<string>()
 
@@ -319,8 +401,9 @@ export class Terminal extends BaseTerminal {
 			}
 
 			const { path: profilePath } = entry as { path?: unknown }
+			const resolved = Terminal.resolveProfilePath(profilePath, platform)
 
-			if (Terminal.resolveProfilePath(profilePath, platform)) {
+			if (resolved && !Terminal.isCmdExe(resolved)) {
 				names.add(name)
 			}
 		}
