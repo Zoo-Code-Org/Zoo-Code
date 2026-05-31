@@ -26,7 +26,12 @@ export interface RooTerminalCallbacks {
 	onCompleted: (output: string | undefined, process: RooTerminalProcess) => void | Promise<void>
 	onShellExecutionStarted: (pid: number | undefined, process: RooTerminalProcess) => void
 	onShellExecutionComplete: (details: ExitCodeDetails, process: RooTerminalProcess) => void
-	onNoShellIntegration?: (message: string, process: RooTerminalProcess) => void
+	onNoShellIntegration?: (details: ShellIntegrationErrorDetails, process: RooTerminalProcess) => void
+}
+
+export interface ShellIntegrationErrorDetails {
+	message: string
+	commandSubmitted: boolean
 }
 
 export interface RooTerminalProcess extends EventEmitter<RooTerminalProcessEvents> {
@@ -50,7 +55,7 @@ export interface RooTerminalProcessEvents {
 	shell_execution_started: [pid: number | undefined]
 	shell_execution_complete: [exitDetails: ExitCodeDetails]
 	error: [error: Error]
-	no_shell_integration: [message: string]
+	no_shell_integration: [details: ShellIntegrationErrorDetails]
 }
 
 export interface ExitCodeDetails {

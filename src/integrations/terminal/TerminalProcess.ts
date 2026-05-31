@@ -62,10 +62,10 @@ export class TerminalProcess extends BaseTerminalProcess {
 				"[TerminalProcess] Shell integration not available. Command sent without knowledge of response.",
 			)
 
-			this.emit(
-				"no_shell_integration",
-				"Command was submitted; output is not available, as shell integration is inactive.",
-			)
+			this.emit("no_shell_integration", {
+				message: "Command was submitted; output is not available, as shell integration is inactive.",
+				commandSubmitted: true,
+			})
 
 			this.emit(
 				"completed",
@@ -83,10 +83,10 @@ export class TerminalProcess extends BaseTerminalProcess {
 				this.removeAllListeners("stream_available")
 
 				// Emit no_shell_integration event with descriptive message
-				this.emit(
-					"no_shell_integration",
-					`VSCE shell integration stream did not start within ${Terminal.getShellIntegrationTimeout() / 1000} seconds. Terminal problem?`,
-				)
+				this.emit("no_shell_integration", {
+					message: `VSCE shell integration stream did not start within ${Terminal.getShellIntegrationTimeout() / 1000} seconds. Terminal problem?`,
+					commandSubmitted: true,
+				})
 
 				// Reject with descriptive error
 				reject(
@@ -108,10 +108,16 @@ export class TerminalProcess extends BaseTerminalProcess {
 			this.once("shell_execution_complete", (details: ExitCodeDetails) => resolve(details))
 		})
 
-		// Execute command
-		const defaultWindowsShellProfile = vscode.workspace
-			.getConfiguration("terminal.integrated.defaultProfile")
-			.get("windows")
+		// Execute command.
+		// Determine whether the active shell is PowerShell so we can apply the
+		// PS-specific counter/sleep workarounds.  Prefer the Zoo Code profile
+		// override (if set) over the VS Code default profile.  Fix for the wrong
+		// config API: must be getConfiguration("terminal.integrated").get(
+		// "defaultProfile.windows"), not the reversed form that always returns null.
+		const profileOverride = Terminal.getTerminalProfile()
+		const defaultWindowsShellProfile =
+			profileOverride ??
+			vscode.workspace.getConfiguration("terminal.integrated").get<string>("defaultProfile.windows")
 
 		const isPowerShell =
 			process.platform === "win32" &&
@@ -221,26 +227,35 @@ export class TerminalProcess extends BaseTerminalProcess {
 			// Emit any remaining output before completing
 			this.emitRemainingBufferIfListening()
 		} else {
-			const errorMsg =
-				"VSCE output start escape sequence (]633;C or ]133;C) not received, but the stream has started. Upstream VSCE Bug?"
-
 			const inspectPreOutput = inspect(preOutput, { colors: false, breakLength: Infinity })
+
+			// Empty stream (preOutput === '') is a first-run race: VS Code fires
+			// onDidStartTerminalShellExecution before the shell is fully initialized on
+			// a freshly-created terminal. The command was never submitted, so this is
+			// retryable (commandSubmitted: false triggers the execa fallback).
+			//
+			// Non-empty preOutput means the stream had data but ]633;C never arrived —
+			// a genuine shell integration failure after submission (not retryable).
+			const commandSubmitted = preOutput !== ""
+
+			const errorMsg = commandSubmitted
+				? "VSCE output start escape sequence (]633;C or ]133;C) not received, but the stream has started. Upstream VSCE Bug?"
+				: "VSCE shell integration stream completed with no output on first command (shell startup race). Command was not submitted."
+
 			console.error(`[Terminal Process] ${errorMsg} preOutput: ${inspectPreOutput}`)
 
-			// Emit no_shell_integration event
-			this.emit("no_shell_integration", errorMsg)
+			this.emit("no_shell_integration", { message: errorMsg, commandSubmitted })
 
-			// Emit completed event with error message
 			this.emit(
 				"completed",
-				"<VSCE shell integration markers not found: terminal output and command execution status is unknown>\n" +
-					`<preOutput>${inspectPreOutput}</preOutput>\n` +
-					"AI MODEL: You MUST notify the user with the information above so they can open a bug report.",
+				commandSubmitted
+					? "<VSCE shell integration markers not found: terminal output and command execution status is unknown>\n" +
+							`<preOutput>${inspectPreOutput}</preOutput>\n` +
+							"AI MODEL: You MUST notify the user with the information above so they can open a bug report."
+					: "<shell integration stream was empty on first execution: command was not submitted>",
 			)
 
 			this.continue()
-
-			// Return early since we can't process output without shell integration markers
 			return
 		}
 
