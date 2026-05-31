@@ -33,12 +33,20 @@ export const TranslationProvider: React.FC<{ children: ReactNode }> = ({ childre
 	}, [i18n, extensionState.language])
 
 	// Memoize the translation function to prevent unnecessary re-renders
+	// Note: i18n.language must be included as a dependency so that the
+	// translate function is recreated when the language changes. Without
+	// this, React Compiler / React.memo consumers will cache stale
+	// translations because the i18n object reference never changes.
+	/* eslint-disable react-hooks/exhaustive-deps */
+	// i18n.language must be included: i18n is a singleton whose reference
+	// never changes, but language changes via changeLanguage()
 	const translate = useCallback(
 		(key: string, options?: Record<string, any>) => {
 			return i18n.t(key, options)
 		},
-		[i18n],
+		[i18n, i18n.language],
 	)
+	/* eslint-enable react-hooks/exhaustive-deps */
 
 	return (
 		<TranslationContext.Provider
