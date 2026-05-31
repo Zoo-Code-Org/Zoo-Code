@@ -10,6 +10,8 @@ vi.mock("fs/promises", () => ({
 	chmod: vi.fn().mockResolvedValue(undefined),
 	unlink: vi.fn().mockResolvedValue(undefined),
 	rm: vi.fn().mockResolvedValue(undefined),
+	readFile: vi.fn(),
+	writeFile: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock fs (createWriteStream)
@@ -144,6 +146,8 @@ describe("semble-downloader", () => {
 
 			// fs.access resolves => file exists
 			;(fs.access as any).mockResolvedValue(undefined)
+			// Version file matches current version
+			;(fs.readFile as any).mockResolvedValue("v0.3.1")
 
 			try {
 				const result = await downloadSemble("/storage")
@@ -168,6 +172,8 @@ describe("semble-downloader", () => {
 
 			// fs.access rejects => file not present
 			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// No version file exists
+			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate successful download: pipe is called, then "finish" fires
 			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
@@ -196,6 +202,12 @@ describe("semble-downloader", () => {
 					expect.any(Object),
 				)
 				expect(fs.chmod).toHaveBeenCalledWith(path.join("/storage", "semble", "semble"), 0o755)
+				// Version file should be written
+				expect(fs.writeFile).toHaveBeenCalledWith(
+					path.join("/storage", "semble", ".semble-version"),
+					"v0.3.1",
+					"utf-8",
+				)
 				// Archive should be cleaned up
 				expect(fs.unlink).toHaveBeenCalledWith(path.join("/storage", "semble-linux-x64-fast.tar.gz"))
 			} finally {
@@ -213,6 +225,8 @@ describe("semble-downloader", () => {
 
 			// fs.access resolves => file exists
 			;(fs.access as any).mockResolvedValue(undefined)
+			// Version file matches
+			;(fs.readFile as any).mockResolvedValue("v0.3.1")
 
 			try {
 				const result = await downloadSemble("/storage")
@@ -234,6 +248,8 @@ describe("semble-downloader", () => {
 
 			// fs.access rejects => file not present
 			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// No version file
+			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate HTTP error response
 			mockResponse.statusCode = 404
@@ -257,6 +273,8 @@ describe("semble-downloader", () => {
 
 			// fs.access rejects => file not present
 			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// No version file
+			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// First call returns a redirect, second call returns 200
 			let callCount = 0
@@ -378,6 +396,8 @@ describe("semble-downloader", () => {
 
 			// fs.access rejects => file not present, triggering download
 			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// No version file
+			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate successful download
 			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
@@ -415,6 +435,8 @@ describe("semble-downloader", () => {
 
 			// fs.access rejects => file not present
 			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// No version file
+			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate successful download
 			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
@@ -430,6 +452,154 @@ describe("semble-downloader", () => {
 				const result = await downloadSemble("/storage")
 				// Should still succeed — archive cleanup failure is ignored
 				expect(result).toBe(path.join("/storage", "semble", "semble"))
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
+	})
+
+	describe("downloadSemble - version tracking", () => {
+		it("should re-download when installed version differs from SEMBLE_VERSION", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
+
+			// Version file has an old version
+			;(fs.readFile as any).mockResolvedValue("v0.2.0")
+			// Binary doesn't matter — version mismatch forces re-download
+			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+
+			// Simulate successful download
+			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
+				if (event === "finish") {
+					setImmediate(cb)
+				}
+			})
+
+			try {
+				const result = await downloadSemble("/storage")
+
+				expect(result).toBe(path.join("/storage", "semble", "semble"))
+				// Should remove old installation
+				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "semble"), {
+					recursive: true,
+					force: true,
+				})
+				// Should download the new version
+				expect(https.get).toHaveBeenCalledWith(expect.stringContaining("v0.3.1"), expect.any(Function))
+				// Should write the new version file
+				expect(fs.writeFile).toHaveBeenCalledWith(
+					path.join("/storage", "semble", ".semble-version"),
+					"v0.3.1",
+					"utf-8",
+				)
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
+
+		it("should skip download when installed version matches SEMBLE_VERSION and binary exists", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
+
+			// Version matches
+			;(fs.readFile as any).mockResolvedValue("v0.3.1")
+			// Binary exists
+			;(fs.access as any).mockResolvedValue(undefined)
+
+			try {
+				const result = await downloadSemble("/storage")
+
+				expect(result).toBe(path.join("/storage", "semble", "semble"))
+				// Should NOT download
+				expect(https.get).not.toHaveBeenCalled()
+				// Should NOT remove the extract dir
+				expect(fs.rm).not.toHaveBeenCalled()
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
+
+		it("should re-download when version matches but binary is missing", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
+
+			// Version matches
+			;(fs.readFile as any).mockResolvedValue("v0.3.1")
+			// But binary is missing
+			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+
+			// Simulate successful download
+			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
+				if (event === "finish") {
+					setImmediate(cb)
+				}
+			})
+
+			try {
+				const result = await downloadSemble("/storage")
+
+				expect(result).toBe(path.join("/storage", "semble", "semble"))
+				// Should download since binary was missing
+				expect(https.get).toHaveBeenCalled()
+				// Should write version file again
+				expect(fs.writeFile).toHaveBeenCalledWith(
+					path.join("/storage", "semble", ".semble-version"),
+					"v0.3.1",
+					"utf-8",
+				)
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
+
+		it("should download when no version file exists (first install)", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
+
+			// No version file
+			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
+			// No binary
+			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+
+			// Simulate successful download
+			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
+				if (event === "finish") {
+					setImmediate(cb)
+				}
+			})
+
+			try {
+				const result = await downloadSemble("/storage")
+
+				expect(result).toBe(path.join("/storage", "semble", "semble"))
+				expect(https.get).toHaveBeenCalled()
+				// Should NOT try to rm the old dir (no previous version)
+				expect(fs.rm).not.toHaveBeenCalledWith(
+					path.join("/storage", "semble"),
+					expect.objectContaining({ recursive: true }),
+				)
+				// Should write version file
+				expect(fs.writeFile).toHaveBeenCalledWith(
+					path.join("/storage", "semble", ".semble-version"),
+					"v0.3.1",
+					"utf-8",
+				)
 			} finally {
 				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
 				if (originalArch) Object.defineProperty(process, "arch", originalArch)

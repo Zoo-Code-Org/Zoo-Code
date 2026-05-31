@@ -104,9 +104,8 @@ export class SembleCLI {
 			const child = spawn(this.semblePath, args, {
 				shell: false,
 				timeout: options.timeout,
-				maxBuffer: 10 * 1024 * 1024,
 				stdio: ["ignore", "pipe", "pipe"],
-			} as any)
+			})
 
 			let stdout = ""
 			let stderr = ""
