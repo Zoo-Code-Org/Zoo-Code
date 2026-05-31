@@ -256,6 +256,18 @@ describe("executeCommandTool", () => {
 			expect(mockAskApproval).not.toHaveBeenCalled()
 			// executeCommandInTerminal should not be called since rooignore blocked it
 		})
+
+		it("allows Execa retry when shell integration fails before command submission", () => {
+			const error = new executeCommandModule.ShellIntegrationError("startup failed", false)
+
+			expect(executeCommandModule.canRetryShellIntegrationError(error)).toBe(true)
+		})
+
+		it("prevents Execa retry when shell integration fails after command submission", () => {
+			const error = new executeCommandModule.ShellIntegrationError("stream missing", true)
+
+			expect(executeCommandModule.canRetryShellIntegrationError(error)).toBe(false)
+		})
 	})
 
 	describe("Command execution timeout configuration", () => {
