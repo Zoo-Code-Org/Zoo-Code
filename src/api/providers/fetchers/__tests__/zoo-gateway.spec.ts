@@ -104,6 +104,37 @@ describe("Zoo Gateway Fetchers", () => {
 			consoleErrorSpy.mockRestore()
 		})
 
+		it("accepts gateway catalog models without created or description (e.g. Bedrock)", async () => {
+			mockedAxios.get.mockResolvedValueOnce({
+				data: {
+					object: "list",
+					data: [
+						{
+							id: "anthropic/claude-sonnet-4",
+							object: "model",
+							owned_by: "anthropic",
+							name: "Claude Sonnet 4",
+							context_window: 200000,
+							max_tokens: 64000,
+							type: "language",
+							pricing: {
+								input: "3.00",
+								output: "15.00",
+							},
+						},
+					],
+				},
+			})
+
+			const models = await getZooGatewayModels({
+				zooGatewayBaseUrl: baseUrl,
+				zooSessionToken: token,
+			} as any)
+
+			expect(Object.keys(models)).toEqual(["anthropic/claude-sonnet-4"])
+			expect(models["anthropic/claude-sonnet-4"].description).toBe("Claude Sonnet 4")
+		})
+
 		it("returns {} on a structurally broken response instead of throwing", async () => {
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
 			mockedAxios.get.mockResolvedValueOnce({ data: { unexpected: true } })
