@@ -2,6 +2,8 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import * as https from "https"
 import { createWriteStream } from "fs"
+import { createHash } from "crypto"
+import { createReadStream } from "fs"
 import { spawn } from "child_process"
 
 /**
@@ -21,6 +23,40 @@ const SEMBLE_ARCHIVES: Record<string, { archive: string; binary: string }> = {
 const SEMBLE_VERSION = "v0.3.1"
 const DOWNLOAD_BASE_URL = `https://github.com/navedmerchant/sembleexec/releases/download/${SEMBLE_VERSION}`
 const VERSION_FILE = ".semble-version"
+
+/**
+ * SHA-256 checksums for each platform archive at SEMBLE_VERSION.
+ * These are verified after download to guard against tampered release assets.
+ * Update these when bumping SEMBLE_VERSION.
+ *
+ * To regenerate: `shasum -a 256 <archive-file>`
+ */
+const SEMBLE_SHA256: Record<string, string> = {
+	"linux-x64": "2bd4117dbd1ff7a26ed5ef44dad8d43162a4b9f431ec0bcc9dd2f9c6f5952e28",
+	"linux-arm64": "177d14f41d3272594844a2635d59d97ad20400868a874a59169fd26a868c32a5",
+	"darwin-arm64": "9130f447ff2c21803853a9aee58268f0e05134326384ac23d8b74ed22905e118",
+	"win32-x64": "c8ae86f3703675e356824e08cf79c8a20c41c602296d2a5bff15bf35d762a46b",
+}
+
+/**
+ * Verifies the SHA-256 checksum of a downloaded file against the expected value.
+ * Throws if the checksum does not match.
+ */
+export async function verifyChecksum(filePath: string, expected: string): Promise<void> {
+	const hash = createHash("sha256")
+	await new Promise<void>((resolve, reject) => {
+		const stream = createReadStream(filePath)
+		stream.on("data", (chunk) => hash.update(chunk))
+		stream.on("end", resolve)
+		stream.on("error", reject)
+	})
+	const actual = hash.digest("hex")
+	if (actual !== expected) {
+		throw new Error(
+			`Checksum mismatch for ${path.basename(filePath)}: expected ${expected.slice(0, 12)}…, got ${actual.slice(0, 12)}…`,
+		)
+	}
+}
 
 /**
  * Returns whether the current platform/arch has a prebuilt semble binary available.
@@ -127,6 +163,13 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 	try {
 		await downloadFile(url, archivePath)
 
+		// Verify archive integrity before extraction
+		const platformKey = `${process.platform}-${process.arch}`
+		const expectedChecksum = SEMBLE_SHA256[platformKey]
+		if (expectedChecksum) {
+			await verifyChecksum(archivePath, expectedChecksum)
+		}
+
 		// Extract the archive
 		await fs.mkdir(extractDir, { recursive: true })
 
@@ -216,6 +259,15 @@ function extractTarGz(archivePath: string, destDir: string): Promise<void> {
 }
 
 /**
+ * Escapes a string for use inside a PowerShell single-quoted literal.
+ * In PowerShell, the only special character in a single-quoted string is the
+ * apostrophe itself, which is escaped by doubling it.
+ */
+function escapePowerShellLiteral(value: string): string {
+	return value.replace(/'/g, "''")
+}
+
+/**
  * Extracts a .zip archive into the destination directory.
  * Uses PowerShell on Windows, unzip on other platforms.
  */
@@ -229,7 +281,7 @@ function extractZip(archivePath: string, destDir: string): Promise<void> {
 				[
 					"-NoProfile",
 					"-Command",
-					`Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force`,
+					`Expand-Archive -Path '${escapePowerShellLiteral(archivePath)}' -DestinationPath '${escapePowerShellLiteral(destDir)}' -Force`,
 				],
 				{ shell: false, stdio: ["ignore", "pipe", "pipe"] },
 			)

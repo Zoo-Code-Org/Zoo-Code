@@ -3,6 +3,22 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import { EventEmitter } from "events"
 
+// Mock crypto — verifyChecksum reads the archive file (mocked via createReadStream)
+// and computes a SHA-256. We make digest() dynamically return the expected checksum
+// for the current process.platform/arch so verification always passes in unit tests.
+const CHECKSUMS: Record<string, string> = {
+	"linux-x64": "2bd4117dbd1ff7a26ed5ef44dad8d43162a4b9f431ec0bcc9dd2f9c6f5952e28",
+	"linux-arm64": "177d14f41d3272594844a2635d59d97ad20400868a874a59169fd26a868c32a5",
+	"darwin-arm64": "9130f447ff2c21803853a9aee58268f0e05134326384ac23d8b74ed22905e118",
+	"win32-x64": "c8ae86f3703675e356824e08cf79c8a20c41c602296d2a5bff15bf35d762a46b",
+}
+vi.mock("crypto", () => ({
+	createHash: vi.fn(() => ({
+		update: vi.fn().mockReturnThis(),
+		digest: vi.fn(() => CHECKSUMS[`${process.platform}-${process.arch}`] ?? "no-match"),
+	})),
+}))
+
 // Mock fs/promises
 vi.mock("fs/promises", () => ({
 	mkdir: vi.fn().mockResolvedValue(undefined),
@@ -14,27 +30,37 @@ vi.mock("fs/promises", () => ({
 	writeFile: vi.fn().mockResolvedValue(undefined),
 }))
 
-// Mock fs (createWriteStream)
+// Mock fs (createWriteStream and createReadStream for checksum verification)
 const mockWriteStream = {
 	on: vi.fn(),
 	close: vi.fn(),
 }
 vi.mock("fs", () => ({
 	createWriteStream: vi.fn(() => mockWriteStream),
+	createReadStream: vi.fn(() => {
+		const { EventEmitter } = require("events")
+		const stream = new EventEmitter()
+		setImmediate(() => {
+			stream.emit("data", Buffer.from("fake-archive-content"))
+			stream.emit("end")
+		})
+		return stream
+	}),
 }))
 
-// Mock https
-const mockRequest = new EventEmitter() as any
-mockRequest.setTimeout = vi.fn()
-
-const mockResponse = new EventEmitter() as any
-mockResponse.statusCode = 200
-mockResponse.headers = {}
-mockResponse.pipe = vi.fn()
-mockResponse.destroy = vi.fn()
+// Mock https — fresh emitters per invocation to avoid listener leaks across tests
+let mockRequest: any
+let mockResponse: any
 
 vi.mock("https", () => ({
 	get: vi.fn((_url: string, callback: (res: any) => void) => {
+		mockRequest = Object.assign(new EventEmitter(), { setTimeout: vi.fn() })
+		mockResponse = Object.assign(new EventEmitter(), {
+			statusCode: 200,
+			headers: {},
+			pipe: vi.fn(),
+			destroy: vi.fn(),
+		})
 		setImmediate(() => callback(mockResponse))
 		return mockRequest
 	}),
@@ -64,11 +90,6 @@ import { spawn } from "child_process"
 describe("semble-downloader", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		// Reset response defaults
-		mockResponse.statusCode = 200
-		mockResponse.headers = {}
-		mockResponse.pipe = vi.fn()
-		mockResponse.destroy = vi.fn()
 		mockWriteStream.on = vi.fn()
 		mockWriteStream.close = vi.fn()
 	})
@@ -252,7 +273,17 @@ describe("semble-downloader", () => {
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate HTTP error response
-			mockResponse.statusCode = 404
+			;(https.get as any).mockImplementation((_url: string, callback: (res: any) => void) => {
+				const res = Object.assign(new EventEmitter(), {
+					statusCode: 404,
+					headers: {},
+					pipe: vi.fn(),
+					destroy: vi.fn(),
+				})
+				setImmediate(() => callback(res))
+				const req = Object.assign(new EventEmitter(), { setTimeout: vi.fn() })
+				return req
+			})
 
 			try {
 				await expect(downloadSemble("/storage")).rejects.toThrow("Failed to download semble")
