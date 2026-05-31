@@ -155,13 +155,14 @@ export class TerminalRegistry {
 		provider: RooTerminalProvider = "vscode",
 	): Promise<RooTerminal> {
 		const terminals = this.getAllTerminals()
+		const reuseKey = provider === "vscode" ? Terminal.getReuseKey() : provider
 		let terminal: RooTerminal | undefined
 
 		// First priority: Find a terminal already assigned to this task with
 		// matching directory.
 		if (taskId) {
 			terminal = terminals.find((t) => {
-				if (t.busy || t.taskId !== taskId || t.provider !== provider) {
+				if (t.busy || t.taskId !== taskId || t.provider !== provider || t.reuseKey !== reuseKey) {
 					return false
 				}
 
@@ -178,7 +179,7 @@ export class TerminalRegistry {
 		// Second priority: Find any available terminal with matching directory.
 		if (!terminal) {
 			terminal = terminals.find((t) => {
-				if (t.busy || t.provider !== provider) {
+				if (t.busy || t.provider !== provider || t.reuseKey !== reuseKey) {
 					return false
 				}
 

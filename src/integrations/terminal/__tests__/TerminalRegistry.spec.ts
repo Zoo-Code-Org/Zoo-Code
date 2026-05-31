@@ -14,11 +14,13 @@ describe("TerminalRegistry", () => {
 	let mockCreateTerminal: any
 
 	beforeEach(() => {
+		TerminalRegistry["terminals"] = []
+		Terminal.setTerminalProfile(undefined)
 		mockCreateTerminal = vi.spyOn(vscode.window, "createTerminal").mockImplementation(
 			(...args: any[]) =>
 				({
 					exitStatus: undefined,
-					name: "Roo Code",
+					name: "Zoo Code",
 					processId: Promise.resolve(123),
 					creationOptions: {},
 					state: {
@@ -36,13 +38,19 @@ describe("TerminalRegistry", () => {
 		)
 	})
 
+	afterEach(() => {
+		TerminalRegistry["terminals"] = []
+		Terminal.setTerminalProfile(undefined)
+		vi.restoreAllMocks()
+	})
+
 	describe("createTerminal", () => {
 		it("creates terminal with PAGER set appropriately for platform", () => {
 			TerminalRegistry.createTerminal("/test/path", "vscode")
 
 			expect(mockCreateTerminal).toHaveBeenCalledWith({
 				cwd: "/test/path",
-				name: "Roo Code",
+				name: "Zoo Code",
 				iconPath: expect.any(Object),
 				env: {
 					PAGER,
@@ -63,7 +71,7 @@ describe("TerminalRegistry", () => {
 
 				expect(mockCreateTerminal).toHaveBeenCalledWith({
 					cwd: "/test/path",
-					name: "Roo Code",
+					name: "Zoo Code",
 					iconPath: expect.any(Object),
 					env: {
 						PAGER,
@@ -86,7 +94,7 @@ describe("TerminalRegistry", () => {
 
 				expect(mockCreateTerminal).toHaveBeenCalledWith({
 					cwd: "/test/path",
-					name: "Roo Code",
+					name: "Zoo Code",
 					iconPath: expect.any(Object),
 					env: {
 						PAGER,
@@ -108,7 +116,7 @@ describe("TerminalRegistry", () => {
 
 				expect(mockCreateTerminal).toHaveBeenCalledWith({
 					cwd: "/test/path",
-					name: "Roo Code",
+					name: "Zoo Code",
 					iconPath: expect.any(Object),
 					env: {
 						PAGER,
@@ -121,6 +129,48 @@ describe("TerminalRegistry", () => {
 			} finally {
 				Terminal.setTerminalZshP10k(false)
 			}
+		})
+	})
+
+	describe("getOrCreateTerminal", () => {
+		it("reuses an idle VS Code terminal when the selected profile is unchanged", async () => {
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+
+			expect(second).toBe(first)
+			expect(mockCreateTerminal).toHaveBeenCalledTimes(1)
+		})
+
+		it("creates a new VS Code terminal after changing from default to an override", async () => {
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+
+			Terminal.setTerminalProfile("Git Bash")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+
+			expect(second).not.toBe(first)
+			expect(mockCreateTerminal).toHaveBeenCalledTimes(2)
+		})
+
+		it("creates a new VS Code terminal after changing from an override to default", async () => {
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			Terminal.setTerminalProfile("Git Bash")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+
+			Terminal.setTerminalProfile(undefined)
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+
+			expect(second).not.toBe(first)
+			expect(mockCreateTerminal).toHaveBeenCalledTimes(2)
+		})
+
+		it("continues to reuse Execa terminals when the VS Code profile changes", async () => {
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "execa")
+
+			Terminal.setTerminalProfile("Git Bash")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "execa")
+
+			expect(second).toBe(first)
 		})
 	})
 

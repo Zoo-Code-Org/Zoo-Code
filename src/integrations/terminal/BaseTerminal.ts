@@ -13,6 +13,7 @@ export abstract class BaseTerminal implements RooTerminal {
 	public readonly provider: RooTerminalProvider
 	public readonly id: number
 	public readonly initialCwd: string
+	public readonly reuseKey: string
 
 	public busy: boolean
 	public running: boolean
@@ -22,10 +23,11 @@ export abstract class BaseTerminal implements RooTerminal {
 	public process?: RooTerminalProcess
 	public completedProcesses: RooTerminalProcess[] = []
 
-	constructor(provider: RooTerminalProvider, id: number, cwd: string) {
+	constructor(provider: RooTerminalProvider, id: number, cwd: string, reuseKey: string = provider) {
 		this.provider = provider
 		this.id = id
 		this.initialCwd = cwd
+		this.reuseKey = reuseKey
 		this.busy = false
 		this.running = false
 		this.streamClosed = false

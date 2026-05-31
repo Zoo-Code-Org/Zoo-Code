@@ -16,7 +16,7 @@ export class Terminal extends BaseTerminal {
 	public cmdCounter: number = 0
 
 	constructor(id: number, terminal: vscode.Terminal | undefined, cwd: string) {
-		super("vscode", id, cwd)
+		super("vscode", id, cwd, Terminal.getReuseKey())
 
 		const env = Terminal.getEnv()
 		const iconPath = new vscode.ThemeIcon("rocket")
@@ -326,6 +326,10 @@ export class Terminal extends BaseTerminal {
 		}
 
 		return Array.from(names).sort()
+	}
+
+	public static getReuseKey(): string {
+		return `vscode:${Terminal.getTerminalProfile() ?? "default"}`
 	}
 
 	/**
