@@ -220,6 +220,16 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 			}
 
+			// Finalize any tool calls that weren't explicitly ended by finish_reason.
+			// Handles streams that terminate without a proper finish_reason (e.g., MiMo proxy
+			// emitting choices: [] when tokens are exhausted) and finish_reason: "length".
+			if (activeToolCallIds.size > 0) {
+				for (const id of activeToolCallIds) {
+					yield { type: "tool_call_end", id }
+				}
+				activeToolCallIds.clear()
+			}
+
 			for (const chunk of matcher.final()) {
 				yield chunk
 			}
@@ -460,6 +470,16 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					outputTokens: chunk.usage.completion_tokens || 0,
 				}
 			}
+
+			// Finalize any tool calls that weren't explicitly ended by finish_reason.
+			// This handles cases where the stream terminates without a proper finish_reason
+			// (e.g., some OpenAI-compatible proxies emit choices: [] when tokens are exhausted).
+			if (activeToolCallIds.size > 0) {
+				for (const id of activeToolCallIds) {
+					yield { type: "tool_call_end", id }
+				}
+				activeToolCallIds.clear()
+			}
 		}
 	}
 
@@ -493,9 +513,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 		}
 
-		// Emit tool_call_end events when finish_reason is "tool_calls"
-		// This ensures tool calls are finalized even if the stream doesn't properly close
-		if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
+		// Emit tool_call_end events when finish_reason is "tool_calls" or "length".
+		// "length" means the model hit max_tokens mid-tool-call — tool call arguments
+		// are incomplete but we must still finalize them so the error path can handle it.
+		if ((finishReason === "tool_calls" || finishReason === "length") && activeToolCallIds.size > 0) {
 			for (const id of activeToolCallIds) {
 				yield { type: "tool_call_end", id }
 			}

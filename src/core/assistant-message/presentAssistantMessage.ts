@@ -421,7 +421,9 @@ export async function presentAssistantMessage(cline: Task) {
 				if (isKnownTool && !block.nativeArgs && !customTool) {
 					const errorMessage =
 						`Invalid tool call for '${block.name}': missing nativeArgs. ` +
-						`This usually means the model streamed invalid or incomplete arguments and the call could not be finalized.`
+						`This usually means the model ran out of output tokens before completing the tool arguments. ` +
+						`Try: (1) simplifying the request, (2) breaking it into smaller steps, ` +
+						`or (3) increasing the model's max output tokens in settings.`
 
 					cline.consecutiveMistakeCount++
 					try {

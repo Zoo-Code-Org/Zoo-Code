@@ -874,6 +874,115 @@ describe("MimoHandler", () => {
 			expect(params.messages[0].content).toBe("You are a helpful assistant")
 			expect(params.messages[1].role).toBe("user")
 		})
+
+		it("should emit tool_call_end when stream ends without finish_reason (MiMo premature termination)", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Write a large file" }] },
+			]
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_1",
+											function: { name: "write_to_file", arguments: "" },
+										},
+									],
+								},
+							},
+						],
+					}
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{ index: 0, function: { arguments: '{"path":"test.txt","content":"' } },
+									],
+								},
+							},
+						],
+					}
+					// MiMo premature termination: choices: [] without finish_reason
+					yield {
+						choices: [],
+						usage: {
+							prompt_tokens: 527,
+							completion_tokens: 100,
+							total_tokens: 627,
+							completion_tokens_details: { reasoning_tokens: 45 },
+						},
+					}
+				},
+			}))
+
+			const chunks: any[] = []
+			const stream = handler.createMessage("System", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			// Post-loop cleanup in MimoHandler.createMessage should emit tool_call_end
+			const toolCallEndChunks = chunks.filter((c) => c.type === "tool_call_end")
+			expect(toolCallEndChunks).toHaveLength(1)
+			expect(toolCallEndChunks[0].id).toBe("call_1")
+		})
+
+		it("should emit tool_call_end when finish_reason is 'length' with active tool calls", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Write a large file" }] },
+			]
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_length",
+											function: { name: "write_to_file", arguments: "" },
+										},
+									],
+								},
+							},
+						],
+					}
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [{ index: 0, function: { arguments: '{"path":"test.txt"}' } }],
+								},
+							},
+						],
+					}
+					// Standard OpenAI token limit behavior
+					yield {
+						choices: [{ delta: {}, finish_reason: "length" }],
+						usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+					}
+				},
+			}))
+
+			const chunks: any[] = []
+			const stream = handler.createMessage("System", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			// processToolCalls should emit tool_call_end for finish_reason: "length"
+			const toolCallEndChunks = chunks.filter((c) => c.type === "tool_call_end")
+			expect(toolCallEndChunks).toHaveLength(1)
+			expect(toolCallEndChunks[0].id).toBe("call_length")
+		})
 	})
 
 	describe("completePrompt", () => {
