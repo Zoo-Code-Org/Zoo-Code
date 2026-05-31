@@ -22,6 +22,7 @@ export * from "./vertex.js"
 export * from "./vscode-llm.js"
 export * from "./xai.js"
 export * from "./vercel-ai-gateway.js"
+export * from "./opencode-go.js"
 export * from "./zai.js"
 export * from "./minimax.js"
 export * from "./mimo.js"
@@ -46,6 +47,7 @@ import { vertexDefaultModelId } from "./vertex.js"
 import { vscodeLlmDefaultModelId } from "./vscode-llm.js"
 import { xaiDefaultModelId } from "./xai.js"
 import { vercelAiGatewayDefaultModelId } from "./vercel-ai-gateway.js"
+import { opencodeGoDefaultModelId } from "./opencode-go.js"
 import { internationalZAiDefaultModelId, mainlandZAiDefaultModelId } from "./zai.js"
 import { minimaxDefaultModelId } from "./minimax.js"
 import { mimoDefaultModelId } from "./mimo.js"
@@ -115,6 +117,8 @@ export function getProviderDefaultModelId(
 			return unboundDefaultModelId
 		case "vercel-ai-gateway":
 			return vercelAiGatewayDefaultModelId
+		case "opencode-go":
+			return opencodeGoDefaultModelId
 		case "anthropic":
 		case "gemini-cli":
 		case "fake-ai":

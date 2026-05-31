@@ -30,39 +30,17 @@
 
 Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
-## v3.55.0 の新機能
+## v3.56.0 の新機能
 
-**Zoo Code 初の機能リリース** では、Marketplace への移行を土台に、新しいプロバイダー、Roo Code の upstream sunset merge、そしてチャット、プロバイダー設定、レンダリング周りのユーザー向け修正をまとめて取り込みました。
-
-- Xiaomi MiMo を正式な API プロバイダーとして追加。
-- Roo Code の upstream sunset merge と関連するプラットフォーム更新を取り込み。
-- MCP サインイン文言、Gemini のフルツールリクエスト、未対応モデルに対する OpenAI temperature 処理を修正。
-- Markdown の単一チルダ描画と diagnostics 用一時ファイル名を修正。
-- Z.AI、GLM、Vertex AI のプロバイダー既定値とリージョン対応を改善。
-
-<details>
-  <summary>🌐 利用可能な言語</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Anthropic・Bedrock・Vertex で **Claude Opus 4.8** をサポート
+- **Opencode Go** を新たな正式 API プロバイダーとして追加
+- **タスクキャンセルの改善** — タスクをキャンセルすると実行中のプロセスが正しく終了。応答しないプロセスには Ctrl+C の自動リトライも実施
+- Gemini のカスタムモデル ID が無視されてデフォルトにフォールバックする問題を修正
+- マーカー欠落による Grok diff の切り捨てを修正
+- シェルプロファイルが未設定の Windows での PowerShell 検出を修正
+- VS Code コードアクションが Roo Code のブランド名を表示していた問題を修正。全サポート言語にローカライズ済み
+- Google Cloud 認証情報フィールドにファイルパスを受け取った際の Vertex AI の誤警告を修正
+- 6 件のセキュリティ依存関係更新 (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

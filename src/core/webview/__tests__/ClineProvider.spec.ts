@@ -2479,6 +2479,7 @@ describe("ClineProvider - Router Models", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})
@@ -2525,6 +2526,7 @@ describe("ClineProvider - Router Models", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})
@@ -2620,6 +2622,7 @@ describe("ClineProvider - Router Models", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})

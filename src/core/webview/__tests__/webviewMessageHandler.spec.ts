@@ -371,6 +371,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})
@@ -457,6 +458,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})
@@ -512,6 +514,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})

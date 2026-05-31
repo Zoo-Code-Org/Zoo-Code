@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import { Vertex } from "../Vertex"
 import type { ProviderSettings } from "@roo-code/types"
 import { VERTEX_REGIONS } from "@roo-code/types"
+import enSettings from "@src/i18n/locales/en/settings.json"
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeTextField: ({ children, value, onInput, type }: any) => (
@@ -24,6 +25,27 @@ vi.mock("vscrui", () => ({
 
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({ t: (key: string) => key }),
+}))
+
+// The component uses <Trans> for the path-shape warning so it can interpolate
+// <strong>/<code> elements. Resolve the i18n key against the real English
+// resource so the test fails if the warning copy drops the "Google Cloud Key
+// File Path" field name or the "GOOGLE_APPLICATION_CREDENTIALS" env var
+// mention — those are the actual remediation hints users need.
+vi.mock("react-i18next", () => ({
+	Trans: ({ i18nKey }: { i18nKey: string }) => {
+		// Keys are "<namespace>:<dotted.path>"; the spec only renders the
+		// settings namespace so resolve against the imported English bundle.
+		const [, dotted] = i18nKey.split(":")
+		const resolved = dotted
+			.split(".")
+			.reduce<unknown>(
+				(acc, segment) =>
+					acc && typeof acc === "object" ? (acc as Record<string, unknown>)[segment] : undefined,
+				enSettings,
+			)
+		return <>{typeof resolved === "string" ? resolved : i18nKey}</>
+	},
 }))
 
 vi.mock("@src/components/ui", () => ({
@@ -123,5 +145,56 @@ describe("Vertex", () => {
 
 		expect(screen.queryByTestId("checkbox-url-context")).not.toBeInTheDocument()
 		expect(screen.queryByTestId("checkbox-grounding-search")).not.toBeInTheDocument()
+	})
+
+	describe("path-shape warning for Google Cloud Credentials field", () => {
+		it("does not render the warning when the credentials field is empty", () => {
+			render(
+				<Vertex
+					apiConfiguration={defaultApiConfiguration}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(screen.queryByTestId("vertex-credentials-path-warning")).not.toBeInTheDocument()
+		})
+
+		it("does not render the warning when the credentials field contains JSON content", () => {
+			render(
+				<Vertex
+					apiConfiguration={{
+						...defaultApiConfiguration,
+						vertexJsonCredentials: '{"type":"service_account","client_email":"x@y.z"}',
+					}}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			expect(screen.queryByTestId("vertex-credentials-path-warning")).not.toBeInTheDocument()
+		})
+
+		it.each([
+			["Windows backslash path", "C:\\Users\\dev\\sa.json"],
+			["Windows forward-slash path", "C:/Users/dev/sa.json"],
+			["POSIX absolute path", "/home/dev/sa.json"],
+			["POSIX home path", "~/sa.json"],
+			["POSIX relative ./", "./sa.json"],
+			["POSIX relative ../", "../sa.json"],
+		])("renders the warning when the credentials field looks like %s", (_label, value) => {
+			render(
+				<Vertex
+					apiConfiguration={{ ...defaultApiConfiguration, vertexJsonCredentials: value }}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>,
+			)
+
+			const warning = screen.getByTestId("vertex-credentials-path-warning")
+			expect(warning).toBeInTheDocument()
+			// The warning resolves through the real English bundle, so a
+			// regression that dropped either of these remediation strings
+			// from the translation would be caught here.
+			expect(warning).toHaveTextContent(/Google Cloud Key File Path/)
+			expect(warning).toHaveTextContent(/GOOGLE_APPLICATION_CREDENTIALS/)
+		})
 	})
 })

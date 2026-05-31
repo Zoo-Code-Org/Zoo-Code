@@ -315,6 +315,8 @@
 		"getOpenRouterApiKey": "OpenRouter API-sleutel ophalen",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API-sleutel",
 		"getVercelAiGatewayApiKey": "Vercel AI Gateway API-sleutel ophalen",
+		"opencodeGoApiKey": "Opencode Go API-sleutel",
+		"getOpencodeGoApiKey": "Opencode Go API-sleutel ophalen",
 		"apiKeyStorageNotice": "API-sleutels worden veilig opgeslagen in de geheime opslag van VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -453,6 +455,7 @@
 			"step3": "3. Of maak een serviceaccount met referenties."
 		},
 		"googleCloudCredentials": "Google Cloud-referenties",
+		"googleCloudCredentialsPathWarning": "Dit veld verwacht de JSON-inhoud van een serviceaccount-sleutelbestand, geen pad. Als je een pad hebt, plak het dan in het veld <strong>Google Cloud-sleutelbestandspad</strong> hieronder, of leeg dit veld en gebruik de omgevingsvariabele <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Google Cloud-sleutelbestandspad",
 		"googleCloudProjectId": "Google Cloud-project-ID",
 		"googleCloudRegion": "Google Cloud-regio",
@@ -961,6 +964,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Vereist {{primaryMod}}+Enter om berichten te versturen",
 			"description": "Wanneer ingeschakeld, moet je {{primaryMod}}+Enter indrukken om berichten te versturen in plaats van alleen Enter"
+		},
+		"chatFontSize": {
+			"label": "Lettergrootte van chat",
+			"description": "Stel de lettergrootte (in pixels) in voor de Zoo Code-chat. Laat op de standaardwaarde staan om overeen te komen met de lettergrootte van VS Code.",
+			"reset": "VS Code-standaard gebruiken"
 		}
 	},
 	"skills": {

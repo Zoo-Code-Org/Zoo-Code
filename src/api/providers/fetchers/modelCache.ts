@@ -18,6 +18,7 @@ import { fileExistsAtPath } from "../../../utils/fs"
 
 import { getOpenRouterModels } from "./openrouter"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
+import { getOpencodeGoModels } from "./opencode-go"
 import { getRequestyModels } from "./requesty"
 import { getUnboundModels } from "./unbound"
 import { getLiteLLMModels } from "./litellm"
@@ -85,6 +86,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 			break
 		case "vercel-ai-gateway":
 			models = await getVercelAiGatewayModels()
+			break
+		case "opencode-go":
+			models = await getOpencodeGoModels(options.apiKey)
 			break
 		case "poe":
 			models = await getPoeModels(options.apiKey, options.baseUrl)

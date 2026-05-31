@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: 接続に成功しました！Zoo Code を AI プロバイダーとして使用できます。",
 			"disconnected": "Zoo Code: 正常に切断されました。"
 		}
+	},
+	"codeActions": {
+		"explain": "Zoo Codeで説明",
+		"fix": "Zoo Codeで修正",
+		"improve": "Zoo Codeで改善",
+		"addToContext": "Zoo Codeに追加"
 	}
 }

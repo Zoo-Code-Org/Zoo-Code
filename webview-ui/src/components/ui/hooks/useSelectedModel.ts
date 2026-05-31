@@ -27,6 +27,7 @@ import {
 	qwenCodeModels,
 	litellmDefaultModelInfo,
 	lMStudioDefaultModelInfo,
+	opencodeGoDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
@@ -344,6 +345,17 @@ function getSelectedModel({
 				defaultModelId,
 			)
 			const info = routerModels["vercel-ai-gateway"]?.[id]
+			return { id, info }
+		}
+		case "opencode-go": {
+			const id = getValidatedModelId(
+				apiConfiguration.opencodeGoModelId,
+				routerModels["opencode-go"],
+				defaultModelId,
+			)
+			// Fall back to the provider's default ModelInfo so capability-driven UI
+			// keeps working when the /models list is empty or unavailable.
+			const info = routerModels["opencode-go"]?.[id] ?? opencodeGoDefaultModelInfo
 			return { id, info }
 		}
 		// case "anthropic":

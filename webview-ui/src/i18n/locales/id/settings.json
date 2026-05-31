@@ -315,6 +315,8 @@
 		"getOpenRouterApiKey": "Dapatkan OpenRouter API Key",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API Key",
 		"getVercelAiGatewayApiKey": "Dapatkan Vercel AI Gateway API Key",
+		"opencodeGoApiKey": "Opencode Go API Key",
+		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"apiKeyStorageNotice": "API key disimpan dengan aman di Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -453,6 +455,7 @@
 			"step3": "3. Atau buat service account dengan credentials."
 		},
 		"googleCloudCredentials": "Google Cloud Credentials",
+		"googleCloudCredentialsPathWarning": "Bidang ini mengharapkan konten JSON dari file kunci akun layanan, bukan path. Jika Anda memiliki path, tempelkan ke bidang <strong>Path File Key Google Cloud</strong> di bawah, atau kosongkan bidang ini dan gunakan variabel lingkungan <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Path File Key Google Cloud",
 		"googleCloudProjectId": "Google Cloud Project ID",
 		"googleCloudRegion": "Google Cloud Region",
@@ -961,6 +964,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Memerlukan {{primaryMod}}+Enter untuk mengirim pesan",
 			"description": "Ketika diaktifkan, kamu harus menekan {{primaryMod}}+Enter untuk mengirim pesan alih-alih hanya Enter"
+		},
+		"chatFontSize": {
+			"label": "Ukuran font obrolan",
+			"description": "Atur ukuran font (dalam piksel) untuk obrolan Zoo Code. Biarkan pada nilai default agar sesuai dengan ukuran font VS Code.",
+			"reset": "Gunakan default VS Code"
 		}
 	},
 	"skills": {

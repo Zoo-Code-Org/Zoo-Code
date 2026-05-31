@@ -267,5 +267,11 @@
 			"connected": "Zoo Code: 連線成功！你現在可以使用 Zoo Code 作為 AI 提供商。",
 			"disconnected": "Zoo Code: 已成功中斷連線。"
 		}
+	},
+	"codeActions": {
+		"explain": "使用 Zoo Code 解釋",
+		"fix": "使用 Zoo Code 修復",
+		"improve": "使用 Zoo Code 改進",
+		"addToContext": "新增至 Zoo Code"
 	}
 }

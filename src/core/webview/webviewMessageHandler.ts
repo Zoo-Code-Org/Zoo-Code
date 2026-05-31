@@ -929,6 +929,7 @@ export const webviewMessageHandler = async (
 						lmstudio: {},
 						poe: {},
 						deepseek: {},
+						"opencode-go": {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -1009,6 +1010,20 @@ export const webviewMessageHandler = async (
 				candidates.push({
 					key: "deepseek",
 					options: { provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+				})
+			}
+
+			// Opencode Go is conditional on apiKey (its /models endpoint requires auth)
+			const opencodeGoApiKey = message?.values?.opencodeGoApiKey ?? apiConfiguration.opencodeGoApiKey
+
+			if (opencodeGoApiKey) {
+				if (message?.values?.opencodeGoApiKey) {
+					await flushModels({ provider: "opencode-go", apiKey: opencodeGoApiKey }, true)
+				}
+
+				candidates.push({
+					key: "opencode-go",
+					options: { provider: "opencode-go", apiKey: opencodeGoApiKey },
 				})
 			}
 
@@ -1119,15 +1134,6 @@ export const webviewMessageHandler = async (
 				success: false,
 				error: getRouterRemovalMessage(),
 				values: { provider: "roo" },
-			})
-			break
-		}
-		case "requestRooCreditBalance": {
-			const requestId = message.requestId
-			provider.postMessageToWebview({
-				type: "rooCreditBalance",
-				requestId,
-				values: { error: "Roo credit balance is no longer available." },
 			})
 			break
 		}

@@ -6,7 +6,20 @@ import { BaseTerminalProcess } from "./BaseTerminalProcess"
 import { Terminal } from "./Terminal"
 
 export class TerminalProcess extends BaseTerminalProcess {
+	// #266: Some processes (interactive tools, programs that trap SIGINT and
+	// prompt for confirmation) need more than one Ctrl+C to actually exit. We
+	// send Ctrl+C up to this many times in TOTAL — the immediate send in abort()
+	// plus retries — checking between sends whether the process has exited, before
+	// giving up and letting dispose() proceed.
+	private static readonly CTRL_C_SEND_LIMIT = 3
+	// Delay between Ctrl+C re-sends. Kept short so cancel stays responsive; the
+	// retry window is bounded by (CTRL_C_SEND_LIMIT - 1) * ABORT_RETRY_DELAY_MS.
+	private static readonly ABORT_RETRY_DELAY_MS = 500
+
 	private terminalRef: WeakRef<Terminal>
+	// Guards against overlapping abort retry loops if abort() is called again
+	// while a previous loop is still re-sending Ctrl+C.
+	private aborting = false
 
 	constructor(terminal: Terminal) {
 		super()
@@ -256,9 +269,62 @@ export class TerminalProcess extends BaseTerminalProcess {
 	}
 
 	public override abort() {
-		if (this.isListening) {
-			// Send SIGINT using CTRL+C
-			this.terminal.terminal.sendText("\x03")
+		if (!this.isListening) {
+			return
+		}
+
+		// Send SIGINT using CTRL+C.
+		this.terminal.terminal.sendText("\x03")
+
+		// #266: A single Ctrl+C isn't always enough — some processes trap SIGINT
+		// and keep running. Kick off a bounded retry that re-sends Ctrl+C a few
+		// times, verifying between attempts whether the process actually exited
+		// (terminal.busy flips to false on completion). This is intentionally
+		// fire-and-forget so it never blocks the synchronous cancel path; the
+		// total retry window is bounded so dispose() is never delayed for long.
+		if (!this.aborting) {
+			this.aborting = true
+			void this.retryAbort()
+				.finally(() => {
+					this.aborting = false
+				})
+				.catch((err) => console.error("[TerminalProcess] retryAbort error:", err))
+		}
+	}
+
+	/**
+	 * Re-sends Ctrl+C after the immediate send in abort(), up to CTRL_C_SEND_LIMIT
+	 * total sends, waiting ABORT_RETRY_DELAY_MS between sends and stopping early once
+	 * the process exits (or once we stop listening). Bounded so it can never loop
+	 * indefinitely.
+	 */
+	private async retryAbort(): Promise<void> {
+		// abort() already sent Ctrl+C once, so `sent` starts at 1; re-send until we
+		// reach CTRL_C_SEND_LIMIT total.
+		for (let sent = 1; sent < TerminalProcess.CTRL_C_SEND_LIMIT; sent++) {
+			await new Promise((resolve) => setTimeout(resolve, TerminalProcess.ABORT_RETRY_DELAY_MS))
+
+			// Stop as soon as there's nothing left to interrupt. `isListening` (cleared
+			// by continue()) and `terminal.busy` (cleared by shellExecutionComplete() /
+			// the "completed" event) are set on different code paths and can diverge, so
+			// either one being false is a sufficient stop signal — we deliberately check
+			// both rather than collapsing them into one.
+			if (!this.isListening) {
+				return
+			}
+
+			const terminal = this.terminalRef.deref()
+
+			// Stop if the terminal is gone, idle, or has already moved on to a different
+			// command. If the original command exits and the terminal is reused before this
+			// tick fires, `terminal.busy` can be true for the NEW command while
+			// `terminal.process` points at a different TerminalProcess — re-sending Ctrl+C
+			// then would interrupt an unrelated command, so we bail out.
+			if (!terminal || !terminal.busy || terminal.process !== this) {
+				return
+			}
+
+			terminal.terminal.sendText("\x03")
 		}
 	}
 

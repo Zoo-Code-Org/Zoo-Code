@@ -315,6 +315,8 @@
 		"getOpenRouterApiKey": "获取 OpenRouter API 密钥",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API 密钥",
 		"getVercelAiGatewayApiKey": "获取 Vercel AI Gateway API 密钥",
+		"opencodeGoApiKey": "Opencode Go API 密钥",
+		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"apiKeyStorageNotice": "API 密钥安全存储在 VSCode 的密钥存储中",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -453,6 +455,7 @@
 			"step3": "3. 创建服务账号获取凭证"
 		},
 		"googleCloudCredentials": "Google Cloud 凭证",
+		"googleCloudCredentialsPathWarning": "此字段需要服务账号密钥文件的 JSON 内容，而不是路径。如果您有路径，请将其粘贴到下方的<strong>Google Cloud 密钥文件路径</strong>字段中，或清除此字段并使用 <code>GOOGLE_APPLICATION_CREDENTIALS</code> 环境变量。",
 		"googleCloudKeyFile": "Google Cloud 密钥文件路径",
 		"googleCloudProjectId": "Google Cloud 项目 ID",
 		"googleCloudRegion": "Google Cloud 区域",
@@ -961,6 +964,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "需要 {{primaryMod}}+Enter 发送消息",
 			"description": "启用后，必须按 {{primaryMod}}+Enter 发送消息，而不仅仅是 Enter"
+		},
+		"chatFontSize": {
+			"label": "聊天字体大小",
+			"description": "设置 Zoo Code 聊天的字体大小（以像素为单位）。保留默认值以匹配 VS Code 的字体大小。",
+			"reset": "使用 VS Code 默认值"
 		}
 	},
 	"skills": {

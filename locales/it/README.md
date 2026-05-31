@@ -30,39 +30,17 @@
 
 Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida alla migrazione Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Vogliamo aiutare gli utenti il più possibile durante la transizione, e per questo abbiamo il nostro [Reddit](https://www.reddit.com/r/ZooCode) e il nostro [Discord](https://discord.gg/VxfP4Vx3gX). Se hai problemi o domande, passa pure e chiedi.
 
-## Novità in v3.55.0
+## Novità in v3.56.0
 
-**La prima release di funzionalità di Zoo Code** si basa sull'handoff al Marketplace con un nuovo provider, il merge upstream del sunset di Roo Code e una serie di correzioni visibili all'utente in chat, nelle impostazioni dei provider e nel rendering.
-
-- Aggiunto Xiaomi MiMo come provider API di primo livello.
-- Integrato il merge upstream del sunset di Roo Code e i relativi aggiornamenti di piattaforma.
-- Corretti il testo del sign-in MCP, le richieste Gemini con il set completo di strumenti e la gestione della temperatura OpenAI per i modelli che non la supportano.
-- Corretti il rendering Markdown con tilde singola e la denominazione dei file temporanei di diagnostica.
-- Migliorati i valori predefiniti dei provider e la copertura regionale per Z.AI, GLM e Vertex AI.
-
-<details>
-  <summary>🌐 Lingue disponibili</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Supporto per **Claude Opus 4.8** sui provider Anthropic, Bedrock e Vertex
+- **Opencode Go** aggiunto come nuovo provider API di primo livello
+- **Cancellazione delle task affidabile** — annullare una task ora termina correttamente il processo in esecuzione, con retry automatico di Ctrl+C per i processi ostinati
+- Corretti gli ID modello personalizzati di Gemini che venivano ignorati e tornavano al valore predefinito
+- Corretti i diff di Grok troncati per marcatori mancanti
+- Corretta la rilevazione di PowerShell su Windows senza profilo di shell configurato
+- Corrette le code action di VS Code che mostravano ancora il nome Roo Code; localizzate in tutte le lingue supportate
+- Corretta la notifica di Vertex AI quando il campo delle credenziali Google Cloud riceve un percorso file
+- Sei aggiornamenti di sicurezza delle dipendenze (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

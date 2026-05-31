@@ -315,6 +315,8 @@
 		"getOpenRouterApiKey": "Uzyskaj klucz API OpenRouter",
 		"vercelAiGatewayApiKey": "Klucz API Vercel AI Gateway",
 		"getVercelAiGatewayApiKey": "Uzyskaj klucz API Vercel AI Gateway",
+		"opencodeGoApiKey": "Klucz API Opencode Go",
+		"getOpencodeGoApiKey": "Uzyskaj klucz API Opencode Go",
 		"apiKeyStorageNotice": "Klucze API są bezpiecznie przechowywane w Tajnym Magazynie VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -453,6 +455,7 @@
 			"step3": "3. Lub utworzyć konto usługi z poświadczeniami."
 		},
 		"googleCloudCredentials": "Poświadczenia Google Cloud",
+		"googleCloudCredentialsPathWarning": "To pole oczekuje zawartości JSON pliku klucza konta usługi, a nie ścieżki. Jeśli masz ścieżkę, wklej ją do pola <strong>Ścieżka pliku klucza Google Cloud</strong> poniżej lub wyczyść to pole i użyj zmiennej środowiskowej <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ścieżka pliku klucza Google Cloud",
 		"googleCloudProjectId": "ID projektu Google Cloud",
 		"googleCloudRegion": "Region Google Cloud",
@@ -961,6 +964,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Wymagaj {{primaryMod}}+Enter do wysyłania wiadomości",
 			"description": "Po włączeniu musisz nacisnąć {{primaryMod}}+Enter, aby wysłać wiadomości, zamiast tylko Enter"
+		},
+		"chatFontSize": {
+			"label": "Rozmiar czcionki czatu",
+			"description": "Ustaw rozmiar czcionki (w pikselach) dla czatu Zoo Code. Pozostaw wartość domyślną, aby dopasować ją do rozmiaru czcionki VS Code.",
+			"reset": "Użyj wartości domyślnej VS Code"
 		}
 	},
 	"skills": {
