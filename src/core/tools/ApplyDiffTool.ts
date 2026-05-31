@@ -173,15 +173,6 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					return
 				}
 
-					task.diffViewProvider.editType = "modify"
-					task.diffViewProvider.originalContent = originalContent
-					await task.diffViewProvider.saveDirectly(
-						relPath,
-						diffResult.content,
-						false,
-						diagnosticsEnabled,
-						writeDelayMs,
-					)
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
 				await task.diffViewProvider.saveDirectly(
@@ -190,6 +181,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					isWriteProtected,
 				)
 			} else {
 				// Original behavior with diff view
