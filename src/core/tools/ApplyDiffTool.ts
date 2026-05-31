@@ -182,6 +182,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					isWriteProtected,
 				)
 			} else {
 				// Original behavior with diff view

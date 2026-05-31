@@ -215,7 +215,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		// Save the changes
 		if (isPreventFocusDisruptionEnabled) {
-			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
+			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs, isWriteProtected)
 		} else {
 			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 		}
@@ -415,6 +415,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					isWriteProtected,
 				)
 			} else {
 				// Write to new path and delete old file

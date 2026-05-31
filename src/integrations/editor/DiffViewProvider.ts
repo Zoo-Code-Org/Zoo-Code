@@ -645,6 +645,7 @@ export class DiffViewProvider {
 		openFile: boolean = true,
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		isWriteProtected: boolean = false,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -652,16 +653,61 @@ export class DiffViewProvider {
 	}> {
 		const absolutePath = path.resolve(this.cwd, relPath)
 
+		// Protected files must always show diff view for manual review,
+		// even when background editing is enabled. This prevents accidental
+		// modification of sensitive configuration files.
+		if (isWriteProtected && !openFile) {
+			openFile = true
+		}
+
+		// When auto-approval is disabled, force showing the file so the user
+		// can review changes. Background editing only makes sense when writes
+		// are auto-approved (#8736).
+		if (!openFile) {
+			const task = this.taskRef.deref()
+			const provider = task?.providerRef.deref()
+			if (provider) {
+				const state = await provider.getState()
+				if (!state?.autoApprovalEnabled) {
+					openFile = true
+				}
+			}
+		}
+
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content using VSCode's file system API to ensure
-		// proper notification of language servers and file watchers
+		// Write the content directly to the file using Node's fs.
+		// Node's fs.writeFile does NOT notify VSCode's file watcher, which is
+		// intentional — it prevents open editor tabs from showing "unsaved changes"
+		// prompts when the user tries to close them after background editing.
+		await createDirectoriesForFile(absolutePath)
+		await fs.writeFile(absolutePath, content, "utf-8")
+
+		// Verify the content was written correctly to disk with exponential backoff retry
 		const fileUri = vscode.Uri.file(absolutePath)
-		const contentBuffer = Buffer.from(content, "utf-8")
-		await vscode.workspace.fs.writeFile(fileUri, contentBuffer)
+		const MAX_WRITE_RETRIES = 3
+		let writeVerified = false
+		for (let attempt = 0; attempt < MAX_WRITE_RETRIES; attempt++) {
+			const verifyContent = await fs.readFile(absolutePath, "utf-8")
+			if (verifyContent === content) {
+				writeVerified = true
+				break
+			}
+			if (attempt < MAX_WRITE_RETRIES - 1) {
+				// Exponential backoff: 100ms, 200ms
+				await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 100))
+				await fs.writeFile(absolutePath, content, "utf-8")
+			}
+		}
+		if (!writeVerified) {
+			throw new Error(`Failed to save content to ${relPath} after ${MAX_WRITE_RETRIES} attempts`)
+		}
 
 		// Open the document to ensure diagnostics are loaded
+		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open
+		// in memory and immediately save to mark it as "clean" in VSCode — this
+		// prevents the "unsaved changes" prompt when closing the tab.
 		if (openFile) {
 			// Show the document in the editor without stealing focus
 			await vscode.window.showTextDocument(fileUri, {
@@ -672,35 +718,15 @@ export class DiffViewProvider {
 			// Open the document in memory to trigger diagnostics without showing it
 			const doc = await vscode.workspace.openTextDocument(fileUri)
 
-			// Verify the document content matches what we wrote.
-			// This guards against a race condition where VSCode returns a stale
-			// cached version of the document before processing the file change.
-			const actualContent = doc.getText()
-			if (actualContent !== content) {
-				// Force-apply the correct content via WorkspaceEdit
-				const edit = new vscode.WorkspaceEdit()
-				const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(actualContent.length))
-				edit.replace(doc.uri, fullRange, content)
-				await vscode.workspace.applyEdit(edit)
+			// Save the document to ensure VSCode recognizes it as saved and
+			// triggers diagnostics. Without this, VSCode would show "unsaved
+			// changes" when the user tries to close the file.
+			if (doc.isDirty) {
+				await doc.save()
 			}
 
 			// Small delay to allow diagnostics to be triggered
 			await new Promise((resolve) => setTimeout(resolve, 100))
-		}
-
-		// Verify the content was written correctly to disk
-		const verifyContent = await vscode.workspace.fs.readFile(fileUri)
-		const verifyText = Buffer.from(verifyContent).toString("utf-8")
-		if (verifyText !== content) {
-			// Retry write if verification failed
-			await vscode.workspace.fs.writeFile(fileUri, contentBuffer)
-
-			// Final verification after retry
-			const retryContent = await vscode.workspace.fs.readFile(fileUri)
-			const retryText = Buffer.from(retryContent).toString("utf-8")
-			if (retryText !== content) {
-				throw new Error(`Failed to save content to ${relPath} after retry`)
-			}
 		}
 
 		let newProblemsMessage = ""

@@ -208,7 +208,7 @@ export class SearchReplaceTool extends BaseTool<"search_replace"> {
 			// Save the changes
 			if (isPreventFocusDisruptionEnabled) {
 				// Direct file write without diff view or opening the file
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs, isWriteProtected)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)

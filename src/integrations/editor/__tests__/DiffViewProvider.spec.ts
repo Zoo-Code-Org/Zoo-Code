@@ -8,10 +8,14 @@ vi.mock("delay", () => ({
 	default: vi.fn().mockResolvedValue(undefined),
 }))
 
-// Mock fs/promises
+// Mock fs/promises — readFile returns what writeFile last wrote
+let mockFileContent = "file content"
 vi.mock("fs/promises", () => ({
-	readFile: vi.fn().mockResolvedValue("file content"),
-	writeFile: vi.fn().mockResolvedValue(undefined),
+	readFile: vi.fn().mockImplementation(() => Promise.resolve(mockFileContent)),
+	writeFile: vi.fn().mockImplementation((_path: string, content: string) => {
+		mockFileContent = content
+		return Promise.resolve(undefined)
+	}),
 }))
 
 // Mock utils
@@ -125,6 +129,7 @@ describe("DiffViewProvider", () => {
 					getState: vi.fn().mockResolvedValue({
 						includeDiagnosticMessages: true,
 						maxDiagnosticMessages: 50,
+						autoApprovalEnabled: true,
 					}),
 				}),
 			},
@@ -361,14 +366,12 @@ describe("DiffViewProvider", () => {
 	})
 
 	describe("saveDirectly method", () => {
-		beforeEach(() => {
-			// Mock vscode functions
+		beforeEach(async () => {
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
-			// Reset workspace.fs mocks
-			vi.mocked(vscode.workspace.fs.writeFile).mockResolvedValue(undefined)
-			vi.mocked(vscode.workspace.fs.readFile).mockResolvedValue(Buffer.from("new content"))
-			// Default openTextDocument returns matching content (no race condition)
+			const fs = await import("fs/promises")
+			vi.mocked(fs.readFile).mockResolvedValue("new content" as any)
+			vi.mocked(fs.writeFile).mockResolvedValue(undefined)
 			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue({
 				isDirty: false,
 				save: vi.fn().mockResolvedValue(undefined),
@@ -378,19 +381,20 @@ describe("DiffViewProvider", () => {
 			} as any)
 		})
 
-		it("should use vscode.workspace.fs.writeFile instead of node fs.writeFile", async () => {
+		it("should use fs.writeFile instead of vscode.workspace.fs.writeFile", async () => {
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
-
-			// Verify file was written via vscode.workspace.fs.writeFile, not node fs.writeFile
-			expect(vscode.workspace.fs.writeFile).toHaveBeenCalledWith(
-				expect.objectContaining({ fsPath: `${mockCwd}/test.ts` }),
-				expect.any(Uint8Array),
-			)
-
-			// Verify node fs.writeFile was NOT called
+	
+			// Verify file was written via fs.writeFile, not vscode.workspace.fs.writeFile
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).not.toHaveBeenCalled()
-
+			expect(fs.writeFile).toHaveBeenCalledWith(
+				expect.stringContaining(`${mockCwd}/test.ts`),
+				"new content",
+				"utf-8",
+			)
+	
+			// Verify vscode.workspace.fs.writeFile was NOT called
+			expect(vscode.workspace.fs.writeFile).not.toHaveBeenCalled()
+	
 			// Verify result
 			expect(result.newProblemsMessage).toBe("")
 			expect(result.finalContent).toBe("new content")
@@ -402,10 +406,12 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
 
-			// Verify file was written via vscode API
-			expect(vscode.workspace.fs.writeFile).toHaveBeenCalledWith(
-				expect.objectContaining({ fsPath: `${mockCwd}/test.ts` }),
-				expect.any(Uint8Array),
+			// Verify file was written via fs.writeFile
+			const fs = await import("fs/promises")
+			expect(fs.writeFile).toHaveBeenCalledWith(
+				expect.stringContaining(`${mockCwd}/test.ts`),
+				"new content",
+				"utf-8",
 			)
 
 			// Verify file was opened without focus
@@ -427,10 +433,12 @@ describe("DiffViewProvider", () => {
 		it("should not open file when openFile is false", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 1000)
 
-			// Verify file was written via vscode API
-			expect(vscode.workspace.fs.writeFile).toHaveBeenCalledWith(
-				expect.objectContaining({ fsPath: `${mockCwd}/test.ts` }),
-				expect.any(Uint8Array),
+			// Verify file was written via fs.writeFile
+			const fs = await import("fs/promises")
+			expect(fs.writeFile).toHaveBeenCalledWith(
+				expect.stringContaining(`${mockCwd}/test.ts`),
+				"new content",
+				"utf-8",
 			)
 
 			// Verify showTextDocument was NOT called (background mode)
@@ -444,8 +452,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 1000)
 
-			// Verify file was written via vscode API
-			expect(vscode.workspace.fs.writeFile).toHaveBeenCalled()
+			// Verify file was written via fs.writeFile
+			const fs = await import("fs/promises")
+			expect(fs.writeFile).toHaveBeenCalled()
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
@@ -476,21 +485,22 @@ describe("DiffViewProvider", () => {
 			// First readFile returns wrong content (simulating write failure)
 			// Second readFile (after retry) returns correct content
 			let readCount = 0
-			vi.mocked(vscode.workspace.fs.readFile).mockImplementation(() => {
+			const fs = await import("fs/promises")
+			vi.mocked(fs.readFile).mockImplementation(() => {
 				readCount++
 				if (readCount === 1) {
-					return Promise.resolve(Buffer.from("wrong content"))
+					return Promise.resolve("wrong content" as any)
 				}
-				return Promise.resolve(Buffer.from("new content"))
+				return Promise.resolve("new content" as any)
 			})
 
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
 			// Verify write was called twice (initial + retry)
-			expect(vscode.workspace.fs.writeFile).toHaveBeenCalledTimes(2)
+			expect(fs.writeFile).toHaveBeenCalledTimes(2)
 
 			// Verify readFile was called twice (initial verification + retry verification)
-			expect(vscode.workspace.fs.readFile).toHaveBeenCalledTimes(2)
+			expect(fs.readFile).toHaveBeenCalledTimes(2)
 
 			// Verify result still succeeds
 			expect(result.finalContent).toBe("new content")
@@ -498,26 +508,23 @@ describe("DiffViewProvider", () => {
 
 		it("should throw error if content verification fails after retry", async () => {
 			// readFile always returns wrong content
-			vi.mocked(vscode.workspace.fs.readFile).mockResolvedValue(Buffer.from("corrupted"))
+			const fs = await import("fs/promises")
+			vi.mocked(fs.readFile).mockResolvedValue("corrupted" as any)
 
 			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)).rejects.toThrow(
-				"Failed to save content to test.ts after retry",
+				"Failed to save content to test.ts after 3 attempts",
 			)
 		})
 
-		it("should apply WorkspaceEdit when document has stale content in background mode", async () => {
-			// Simulate stale document content (race condition)
-			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue({
-				isDirty: false,
-				getText: vi.fn().mockReturnValue("stale old content"),
-				uri: { fsPath: `${mockCwd}/test.ts` },
-				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
-			} as any)
+		it("should skip user edit detection when openTextDocument fails", async () => {
+			// openTextDocument throws for user edit detection
+			vi.mocked(vscode.workspace.openTextDocument).mockRejectedValue(new Error("file not found"))
 
-			await diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
 
-			// Verify WorkspaceEdit was applied to fix the stale content
-			expect(vscode.workspace.applyEdit).toHaveBeenCalled()
+			// Verify no error is thrown and userEdits is undefined
+			expect(result.userEdits).toBeUndefined()
+			expect(result.finalContent).toBe("new content")
 		})
 
 		it("should detect user edits in background mode", async () => {
@@ -534,6 +541,7 @@ describe("DiffViewProvider", () => {
 			// Verify userEdits was detected and returned
 			expect(result.userEdits).toBeDefined()
 			expect(typeof result.userEdits).toBe("string")
+			expect(result.userEdits).toContain("user modified content")
 
 			// Verify internal state was updated
 			expect((diffViewProvider as any).userEdits).toBeDefined()

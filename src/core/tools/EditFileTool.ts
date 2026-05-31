@@ -443,6 +443,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 					isNewFile,
 					diagnosticsEnabled,
 					writeDelayMs,
+					isWriteProtected,
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
