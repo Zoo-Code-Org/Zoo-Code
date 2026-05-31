@@ -434,15 +434,18 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 				return
 			}
 
-			// Save the changes
 			if (isPreventFocusDisruptionEnabled) {
 				// Direct file write without diff view or opening the file
+				// Background editing: always pass openFile=false to prevent focus disruption;
+				// file is written via fs.writeFile and VSCode dirty state is resolved via
+				// openTextDocument + doc.save()
 				await task.diffViewProvider.saveDirectly(
 					relPath,
 					newContent,
-					isNewFile,
+					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					isWriteProtected,
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
