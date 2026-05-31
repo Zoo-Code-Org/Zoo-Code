@@ -1,7 +1,7 @@
 import { HTMLAttributes, useState, useCallback } from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { vscode } from "@/utils/vscode"
-import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeCheckbox, VSCodeLink, VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
 import { buildDocLink } from "@src/utils/docLinks"
 import { useEvent, useMount } from "react-use"
@@ -27,6 +27,7 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	terminalZshP10k?: boolean
 	terminalZdotdir?: boolean
 	terminalProfile?: string
+	onTerminalProfilePickerOpened?: () => void
 	setCachedStateField: SetCachedStateField<
 		| "terminalOutputPreviewSize"
 		| "terminalShellIntegrationTimeout"
@@ -41,8 +42,8 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	>
 }
 
-// Sentinel value for the "Default" option; the Select component cannot use an
-// empty-string item value, so we map it to/from `undefined` in the handler.
+// Sentinel value that maps to `undefined` (use VS Code's default shell).
+// The Select component cannot accept empty-string item values.
 const DEFAULT_PROFILE_VALUE = "__default__"
 
 export const TerminalSettings = ({
@@ -56,6 +57,7 @@ export const TerminalSettings = ({
 	terminalZshP10k,
 	terminalZdotdir,
 	terminalProfile,
+	onTerminalProfilePickerOpened,
 	setCachedStateField,
 	className,
 	...props
@@ -151,40 +153,107 @@ export const TerminalSettings = ({
 						</div>
 					</div>
 					<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
-						{/* The profile picker only affects inline execution, which is active when shell
-						    integration is disabled. Hide it otherwise so it isn't shown but ineffective
-						    (mirrors the inline-only settings guarded below). Defaults to shown, matching
-						    the checkbox's `?? true`. See PR #277 review. */}
-						{(terminalShellIntegrationDisabled ?? true) && (
+						{/* Profile override — only applies when VS Code integrated terminal is active
+						    (shell integration enabled). Hidden in Execa/inline mode since getProfileShell()
+						    is not wired there. */}
+						{terminalShellIntegrationDisabled === false && (
 							<SearchableSetting
 								settingId="terminal-profile"
 								section="terminal"
 								label={t("settings:terminal.profile.label")}>
 								<label className="block font-medium mb-1">{t("settings:terminal.profile.label")}</label>
-								<Select
-									value={terminalProfile || DEFAULT_PROFILE_VALUE}
-									onValueChange={(value) =>
-										setCachedStateField(
-											"terminalProfile",
-											value === DEFAULT_PROFILE_VALUE ? undefined : value,
-										)
-									}>
-									<SelectTrigger className="w-full" data-testid="terminal-profile-dropdown">
-										<SelectValue placeholder={t("settings:common.select")} />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value={DEFAULT_PROFILE_VALUE}>
-											{t("settings:terminal.profile.default")}
-										</SelectItem>
-										{profileNames.map((name) => (
-											<SelectItem key={name} value={name}>
-												{name}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
+
+								{/* Level 1: Default (recommended) */}
+								<div className="flex items-center gap-2 mb-2">
+									<input
+										type="radio"
+										id="terminal-profile-default"
+										name="terminal-profile-mode"
+										checked={!terminalProfile}
+										onChange={() => setCachedStateField("terminalProfile", undefined)}
+										data-testid="terminal-profile-default-radio"
+									/>
+									<label htmlFor="terminal-profile-default" className="cursor-pointer">
+										{t("settings:terminal.profile.default")}
+									</label>
+									<VSCodeButton
+										appearance="secondary"
+										onClick={() => {
+											onTerminalProfilePickerOpened?.()
+											vscode.postMessage({ type: "openTerminalProfilePicker" })
+										}}
+										data-testid="terminal-profile-configure-button">
+										{t("settings:terminal.profile.configureButton")}
+									</VSCodeButton>
+								</div>
+
+								{/* Level 2: Override */}
+								<div className="flex items-center gap-2 mb-2">
+									<input
+										type="radio"
+										id="terminal-profile-override"
+										name="terminal-profile-mode"
+										checked={!!terminalProfile}
+										disabled={profileNames.length === 0}
+										onChange={() => {
+											if (!terminalProfile && profileNames.length > 0) {
+												setCachedStateField("terminalProfile", profileNames[0])
+											}
+										}}
+										data-testid="terminal-profile-override-radio"
+									/>
+									<label
+										htmlFor="terminal-profile-override"
+										className={
+											profileNames.length === 0
+												? "cursor-not-allowed text-vscode-disabledForeground"
+												: "cursor-pointer"
+										}>
+										{t("settings:terminal.profile.overrideLabel")}
+									</label>
+									{profileNames.length === 0 && (
+										<span
+											className="text-vscode-descriptionForeground text-xs"
+											data-testid="terminal-profile-no-profiles-hint">
+											{t("settings:terminal.profile.noProfiles")}
+										</span>
+									)}
+								</div>
+
+								{!!terminalProfile && profileNames.length > 0 && (
+									<Select
+										value={terminalProfile || DEFAULT_PROFILE_VALUE}
+										data-testid="terminal-profile-dropdown"
+										onValueChange={(value) =>
+											setCachedStateField(
+												"terminalProfile",
+												value === DEFAULT_PROFILE_VALUE ? undefined : value,
+											)
+										}>
+										<SelectTrigger className="w-full ml-6">
+											<SelectValue placeholder={t("settings:common.select")} />
+										</SelectTrigger>
+										<SelectContent>
+											{profileNames.map((name) => (
+												<SelectItem key={name} value={name}>
+													{name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								)}
+
 								<div className="text-vscode-descriptionForeground text-sm mt-1">
-									{t("settings:terminal.profile.description")}
+									<Trans i18nKey="settings:terminal.profile.description">
+										<VSCodeLink
+											href={buildDocLink(
+												"features/shell-integration",
+												"settings_terminal_profile",
+											)}
+											style={{ display: "inline" }}>
+											{" "}
+										</VSCodeLink>
+									</Trans>
 								</div>
 							</SearchableSetting>
 						)}

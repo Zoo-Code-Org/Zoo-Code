@@ -1318,6 +1318,12 @@ export const webviewMessageHandler = async (
 
 			break
 		}
+		case "openTerminalProfilePicker": {
+			// Open VS Code's native terminal profile picker so the user can set the
+			// default shell without leaving VS Code's own settings UI.
+			await vscode.commands.executeCommand("workbench.action.terminal.selectDefaultShell")
+			break
+		}
 		case "openKeyboardShortcuts": {
 			// Open VSCode keyboard shortcuts settings and optionally filter to show the Roo Code commands
 			const searchQuery = message.text || ""
@@ -1524,18 +1530,30 @@ export const webviewMessageHandler = async (
 			// return only the sanitized profile names. The terminal profile dropdown
 			// only needs names, so this avoids routing it through the generic
 			// `getVSCodeSetting` handler (which reads any key the webview supplies).
+			// Only profiles with a resolvable `path` are returned — source-only
+			// profiles (e.g. { source: "PowerShell" }) cannot be mapped to a shell
+			// binary by an extension and would silently fall back to the default.
 			try {
 				const names = new Set<string>()
 
-				const platformKey =
-					process.platform === "win32" ? "windows" : process.platform === "darwin" ? "osx" : "linux"
+				const platformKey = Terminal.getPlatformProfileKey()
 				const profiles = vscode.workspace
 					.getConfiguration("terminal.integrated.profiles")
 					.get<Record<string, unknown>>(platformKey)
 
 				if (profiles && typeof profiles === "object") {
-					for (const name of Object.keys(profiles)) {
-						names.add(name)
+					for (const [name, entry] of Object.entries(profiles)) {
+						if (!entry || typeof entry !== "object") {
+							continue
+						}
+
+						const { path } = entry as { path?: unknown }
+
+						// Source-only profiles and paths that cannot be found on disk or
+						// PATH are excluded because the override would fail at launch.
+						if (Terminal.resolveProfilePath(path)) {
+							names.add(name)
+						}
 					}
 				}
 

@@ -743,9 +743,12 @@
 			"description": "Activez pour hériter des variables d'environnement du processus parent VS Code. <0>En savoir plus</0>"
 		},
 		"profile": {
-			"label": "Profil de terminal intégré",
-			"default": "Par défaut (shell par défaut de VS Code)",
-			"description": "Choisissez le profil de terminal VS Code utilisé par le terminal intégré. Sélectionnez un shell UTF-8 tel que Git Bash si le shell par défaut altère la sortie non ASCII (par exemple sous Windows avec une page de codes GBK). Laissez sur Par défaut pour conserver le comportement par défaut de VS Code."
+			"label": "Remplacement du terminal Zoo Code",
+			"default": "Utiliser le profil par défaut VS Code (recommandé)",
+			"description": "Par défaut, Zoo Code utilise le shell configuré dans VS Code. Sélectionnez Remplacer pour choisir un profil shell avec chemin exposé par VS Code. Les profils source uniquement (ex. : l'entrée PowerShell intégrée) ne peuvent pas être listés ici. <0>En savoir plus</0>",
+			"overrideLabel": "Remplacer le shell pour Zoo Code",
+			"configureButton": "Choisir le profil par défaut dans VS Code",
+			"noProfiles": "(aucun profil avec chemin trouvé dans terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {

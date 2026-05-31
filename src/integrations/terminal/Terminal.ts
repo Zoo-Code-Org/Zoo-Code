@@ -1,4 +1,5 @@
 import { existsSync } from "fs"
+import * as path from "path"
 
 import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
@@ -25,10 +26,10 @@ export class Terminal extends BaseTerminal {
 		} else {
 			const options: vscode.TerminalOptions = { cwd, name: "Roo Code", iconPath, env }
 
-			// When the user has chosen a specific terminal profile, resolve it to a
-			// shell path/args/env so the inline terminal uses that shell (e.g. Git Bash
-			// with a UTF-8 charset on Windows). When unset, we leave shellPath/shellArgs
-			// undefined so VS Code's default terminal behavior is preserved (#119).
+			// When the user has chosen a VS Code terminal profile, resolve it to a
+			// shell path/args/env so the integrated terminal uses that shell. When
+			// unset, shellPath/shellArgs are left undefined so VS Code's default
+			// terminal behavior is preserved.
 			const profileShell = Terminal.getProfileShell()
 
 			if (profileShell?.shellPath) {
@@ -225,7 +226,7 @@ export class Terminal extends BaseTerminal {
 	 * Returns the VS Code config section key (`windows`/`osx`/`linux`) used for
 	 * platform-specific terminal profiles.
 	 */
-	private static getPlatformProfileKey(platform: NodeJS.Platform = process.platform): "windows" | "osx" | "linux" {
+	public static getPlatformProfileKey(platform: NodeJS.Platform = process.platform): "windows" | "osx" | "linux" {
 		if (platform === "win32") {
 			return "windows"
 		}
@@ -238,13 +239,69 @@ export class Terminal extends BaseTerminal {
 	}
 
 	/**
-	 * Resolves the configured inline terminal profile (see `terminalProfile`
+	 * Resolves a profile path to an executable on disk. VS Code's built-in Unix
+	 * profiles commonly use bare command names such as `bash`, so check PATH in
+	 * addition to explicit filesystem paths.
+	 */
+	public static resolveProfilePath(
+		profilePath: unknown,
+		platform: NodeJS.Platform = process.platform,
+		env: NodeJS.ProcessEnv = process.env,
+	): string | undefined {
+		const candidates = Array.isArray(profilePath) ? profilePath : [profilePath]
+		const pathValue = env.PATH ?? env.Path ?? env.path
+		const pathEntries = pathValue?.split(platform === "win32" ? ";" : ":") ?? []
+
+		for (const value of candidates) {
+			if (typeof value !== "string") {
+				continue
+			}
+
+			const candidate = value.trim()
+
+			if (!candidate) {
+				continue
+			}
+
+			if (/[\\/]/.test(candidate)) {
+				if (existsSync(candidate)) {
+					return candidate
+				}
+
+				continue
+			}
+
+			const extensions =
+				platform === "win32" && path.extname(candidate) === ""
+					? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")
+					: [""]
+
+			for (const entry of pathEntries) {
+				const directory = entry.replace(/^"(.*)"$/, "$1")
+
+				for (const extension of extensions) {
+					const resolved = path.join(directory, `${candidate}${extension}`)
+
+					if (existsSync(resolved)) {
+						return resolved
+					}
+				}
+			}
+		}
+
+		return undefined
+	}
+
+	/**
+	 * Resolves the configured VS Code terminal profile (see `terminalProfile`
 	 * setting / {@link Terminal.getTerminalProfile}) into a shell path and args by
 	 * reading VS Code's `terminal.integrated.profiles.<platform>` configuration.
 	 *
 	 * This reuses VS Code's terminal profile concept so users can pick, for
-	 * example, a Git Bash profile (UTF-8) instead of the default cmd/PowerShell
-	 * (which may use a non-UTF-8 charset such as GBK) on Windows (#119).
+	 * example, a Git Bash profile instead of the default shell. Only profiles
+	 * with a resolvable `path` are supported; source-only profiles (e.g.
+	 * `{ source: "PowerShell" }`) cannot be mapped to a shell binary by an
+	 * extension and return undefined.
 	 *
 	 * @returns The resolved shell path/args, or undefined when no profile is
 	 *   configured or the profile cannot be resolved (default behavior).
@@ -279,12 +336,7 @@ export class Terminal extends BaseTerminal {
 			return undefined
 		}
 
-		// A `path` may be a single string or an array of candidate paths. VS Code
-		// picks the first candidate that exists on disk, so mirror that: prefer the
-		// first existing path, otherwise fall back to the first non-empty candidate.
-		const candidates = Array.isArray(profile.path) ? profile.path : [profile.path]
-		const nonEmpty = candidates.filter((p): p is string => typeof p === "string" && p.length > 0)
-		const pathValue = nonEmpty.find((p) => existsSync(p)) ?? nonEmpty[0]
+		const pathValue = Terminal.resolveProfilePath(profile.path, platform)
 
 		if (!pathValue) {
 			// Profiles defined only by `source` (e.g. "PowerShell") can't be mapped to

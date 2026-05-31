@@ -458,6 +458,7 @@ export interface WebviewMessage {
 		| "getVSCodeSetting"
 		| "vsCodeSetting"
 		| "requestTerminalProfiles"
+		| "openTerminalProfilePicker"
 		| "updateCondensingPrompt"
 		| "playSound"
 		| "playTts"

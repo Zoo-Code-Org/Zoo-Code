@@ -743,9 +743,12 @@
 			"description": "親VS Codeプロセスから環境変数を継承するには、これをオンにします。<0>詳細情報</0>"
 		},
 		"profile": {
-			"label": "インラインターミナルプロファイル",
-			"default": "デフォルト（VS Code のデフォルトシェル）",
-			"description": "インラインターミナルが使用する VS Code のターミナルプロファイルを選択します。デフォルトのシェルが ASCII 以外の出力を文字化けさせる場合（例: GBK コードページの Windows）、Git Bash などの UTF-8 シェルを選択してください。VS Code のデフォルト動作を維持するにはデフォルトのままにします。"
+			"label": "Zoo Code ターミナルの上書き",
+			"default": "VS Code のデフォルトプロファイルを使用する（推奨）",
+			"description": "デフォルトでは Zoo Code は VS Code に設定されたシェルを使用します。VS Code が公開するパスベースのシェルプロファイルを選択するには「上書き」を選択してください。ソースのみのプロファイル（例：組み込みの PowerShell エントリ）はここに表示できません。 <0>詳細を見る</0>",
+			"overrideLabel": "Zoo Code 用シェルを上書き",
+			"configureButton": "VS Code でデフォルトプロファイルを選択",
+			"noProfiles": "(terminal.integrated.profiles にパスベースのプロファイルが見つかりません)"
 		}
 	},
 	"advancedSettings": {

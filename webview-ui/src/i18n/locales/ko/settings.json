@@ -743,9 +743,12 @@
 			"description": "부모 VS Code 프로세���에서 환경 변수를 상속하려면 이 기능을 켜십시오. <0>자세히 알아보기</0>"
 		},
 		"profile": {
-			"label": "인라인 터미널 프로필",
-			"default": "기본값 (VS Code 기본 셸)",
-			"description": "인라인 터미널이 사용할 VS Code 터미널 프로필을 선택합니다. 기본 셸이 ASCII가 아닌 출력을 깨뜨리는 경우(예: GBK 코드 페이지의 Windows) Git Bash와 같은 UTF-8 셸을 선택하세요. VS Code 기본 동작을 유지하려면 기본값으로 두세요."
+			"label": "Zoo Code 터미널 재정의",
+			"default": "VS Code 기본 프로필 사용 (권장)",
+			"description": "기본적으로 Zoo Code는 VS Code에 구성된 쉘을 사용합니다. VS Code가 노출하는 경로 기반 쉘 프로필을 선택하려면 재정의를 선택하세요. 소스 전용 프로필(예: 내장 PowerShell 항목)은 여기에 나열할 수 없습니다. <0>자세히 알아보기</0>",
+			"overrideLabel": "Zoo Code용 쉘 재정의",
+			"configureButton": "VS Code에서 기본 프로필 선택",
+			"noProfiles": "(terminal.integrated.profiles에 경로 기반 프로필이 없습니다)"
 		}
 	},
 	"advancedSettings": {

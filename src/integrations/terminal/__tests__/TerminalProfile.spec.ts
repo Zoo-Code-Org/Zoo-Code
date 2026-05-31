@@ -17,7 +17,7 @@ vi.mock("fs", () => ({
 
 const mockedExistsSync = existsSync as unknown as ReturnType<typeof vi.fn>
 
-describe("Terminal inline terminal profile (#119)", () => {
+describe("Terminal VS Code terminal profile (#277)", () => {
 	// VS Code's getConfiguration/createTerminal are overloaded, so the precise
 	// spy MockInstance type isn't worth fighting in a test — `any` keeps it simple.
 	let getConfigurationSpy: any
@@ -52,9 +52,9 @@ describe("Terminal inline terminal profile (#119)", () => {
 
 	beforeEach(() => {
 		createTerminalSpy = vi.spyOn(vscode.window, "createTerminal").mockImplementation(() => mockTerminal())
-		// Default: no candidate path exists on disk unless a test says otherwise.
+		// Default: explicit profile paths exist unless a test says otherwise.
 		mockedExistsSync.mockReset()
-		mockedExistsSync.mockReturnValue(false)
+		mockedExistsSync.mockReturnValue(true)
 		// Reset to default (unset) before each test.
 		Terminal.setTerminalProfile(undefined)
 	})
@@ -147,7 +147,7 @@ describe("Terminal inline terminal profile (#119)", () => {
 			})
 		})
 
-		it("falls back to the first non-empty candidate when none of the paths exist", () => {
+		it("falls back to default when none of the path candidates exist", () => {
 			stubProfiles({
 				windows: {
 					"Git Bash": {
@@ -155,14 +155,11 @@ describe("Terminal inline terminal profile (#119)", () => {
 					},
 				},
 			})
-			// existsSync defaults to false for every candidate.
+			mockedExistsSync.mockReturnValue(false)
 
 			Terminal.setTerminalProfile("Git Bash")
 
-			expect(Terminal.getProfileShell("win32")).toEqual({
-				shellPath: "C:\\missing\\bash.exe",
-				shellArgs: undefined,
-			})
+			expect(Terminal.getProfileShell("win32")).toBeUndefined()
 		})
 
 		it("wraps a string args value into an array", () => {
@@ -210,6 +207,22 @@ describe("Terminal inline terminal profile (#119)", () => {
 		})
 	})
 
+	describe("resolveProfilePath", () => {
+		it("resolves a bare executable name through PATH", () => {
+			mockedExistsSync.mockImplementation((p: string) => p === "/usr/local/bin/fish")
+
+			expect(Terminal.resolveProfilePath("fish", "linux", { PATH: "/usr/bin:/usr/local/bin" })).toBe(
+				"/usr/local/bin/fish",
+			)
+		})
+
+		it("returns undefined when an executable cannot be found", () => {
+			mockedExistsSync.mockReturnValue(false)
+
+			expect(Terminal.resolveProfilePath("/missing/bash", "linux", { PATH: "/usr/bin" })).toBeUndefined()
+		})
+	})
+
 	describe("createTerminal integration", () => {
 		afterEach(() => {
 			TerminalRegistry["terminals"] = []
@@ -226,7 +239,7 @@ describe("Terminal inline terminal profile (#119)", () => {
 
 		it("passes the resolved shellPath/shellArgs when a profile is configured", () => {
 			stubProfiles({
-				[Terminal["getPlatformProfileKey"](process.platform)]: {
+				[Terminal.getPlatformProfileKey(process.platform)]: {
 					"Git Bash": { path: "/usr/bin/bash", args: ["-i"] },
 				},
 			})

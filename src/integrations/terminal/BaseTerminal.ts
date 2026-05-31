@@ -298,9 +298,9 @@ export abstract class BaseTerminal implements RooTerminal {
 	}
 
 	/**
-	 * Sets the name of the VS Code terminal profile to use for the inline
-	 * (shell-integration) terminal. An empty/undefined value falls back to
-	 * VS Code's default terminal behavior.
+	 * Sets the name of the VS Code terminal profile to use for the integrated
+	 * terminal. An empty/undefined value falls back to VS Code's default terminal
+	 * behavior.
 	 * @param profile The terminal profile name, or undefined for the default
 	 */
 	public static setTerminalProfile(profile: string | undefined): void {
@@ -309,7 +309,7 @@ export abstract class BaseTerminal implements RooTerminal {
 	}
 
 	/**
-	 * Gets the name of the VS Code terminal profile to use for the inline terminal.
+	 * Gets the name of the VS Code terminal profile to use for the integrated terminal.
 	 * @returns The terminal profile name, or undefined when the default should be used
 	 */
 	public static getTerminalProfile(): string | undefined {

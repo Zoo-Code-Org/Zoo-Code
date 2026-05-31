@@ -743,9 +743,12 @@
 			"description": "Ana VS Code işleminden ortam değişkenlerini devralmak için bunu açın. <0>Daha fazla bilgi edinin</0>"
 		},
 		"profile": {
-			"label": "Satır içi terminal profili",
-			"default": "Varsayılan (VS Code varsayılan kabuğu)",
-			"description": "Satır içi terminalin kullanacağı VS Code terminal profilini seçin. Varsayılan kabuk ASCII olmayan çıktıyı bozuyorsa (örneğin GBK kod sayfası olan Windows'ta) Git Bash gibi bir UTF-8 kabuğu seçin. VS Code varsayılan davranışını korumak için Varsayılan olarak bırakın."
+			"label": "Zoo Code terminal geçersiz kılma",
+			"default": "VS Code varsayılan profilini kullan (önerilir)",
+			"description": "Varsayılan olarak Zoo Code, VS Code'da yapılandırılmış kabuğu kullanır. VS Code'un sunduğu yol tabanlı bir kabuk profili seçmek için Geçersiz Kıl'ı seçin. Yalnızca kaynak profiller (örn. yerleşik PowerShell girişi) burada listelenemez. <0>Daha fazla bilgi</0>",
+			"overrideLabel": "Zoo Code için kabuk geçersiz kıl",
+			"configureButton": "VS Code'da varsayılan profili seç",
+			"noProfiles": "(terminal.integrated.profiles'da yol tabanlı profil bulunamadı)"
 		}
 	},
 	"advancedSettings": {

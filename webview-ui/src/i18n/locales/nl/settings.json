@@ -743,9 +743,12 @@
 			"description": "Schakel in om omgevingsvariabelen over te nemen van het bovenliggende VS Code-proces. <0>Meer informatie</0>"
 		},
 		"profile": {
-			"label": "Inline-terminalprofiel",
-			"default": "Standaard (standaardshell van VS Code)",
-			"description": "Kies welk VS Code-terminalprofiel de inline-terminal gebruikt. Selecteer een UTF-8-shell zoals Git Bash als de standaardshell niet-ASCII-uitvoer verminkt (bijvoorbeeld op Windows met een GBK-codepagina). Laat op Standaard staan om het standaardgedrag van VS Code te behouden."
+			"label": "Zoo Code terminal-overschrijving",
+			"default": "VS Code standaardprofiel gebruiken (aanbevolen)",
+			"description": "Standaard gebruikt Zoo Code de shell die in VS Code is geconfigureerd. Selecteer Overschrijven om een shell-profiel met pad te kiezen dat VS Code beschikbaar stelt. Uitsluitend op bron gebaseerde profielen (bijv. de ingebouwde PowerShell-vermelding) kunnen hier niet worden vermeld. <0>Meer informatie</0>",
+			"overrideLabel": "Shell voor Zoo Code overschrijven",
+			"configureButton": "Standaardprofiel kiezen in VS Code",
+			"noProfiles": "(geen profielen met pad gevonden in terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
