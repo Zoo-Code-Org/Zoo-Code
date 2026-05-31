@@ -1,4 +1,4 @@
-import { HTMLAttributes, useState, useCallback } from "react"
+import { HTMLAttributes, useState, useCallback, useEffect, useId } from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { vscode } from "@/utils/vscode"
 import { VSCodeCheckbox, VSCodeLink, VSCodeButton } from "@vscode/webview-ui-toolkit/react"
@@ -66,6 +66,11 @@ export const TerminalSettings = ({
 
 	const [inheritEnv, setInheritEnv] = useState<boolean>(true)
 	const [profileNames, setProfileNames] = useState<string[]>([])
+	const [isProfilesLoaded, setIsProfilesLoaded] = useState(false)
+	const profileModeId = useId()
+	const defaultProfileId = `${profileModeId}-default`
+	const overrideProfileId = `${profileModeId}-override`
+	const isProfileOverrideSelected = !!terminalProfile && (!isProfilesLoaded || profileNames.includes(terminalProfile))
 
 	useMount(() => {
 		vscode.postMessage({ type: "getVSCodeSetting", setting: "terminal.integrated.inheritEnv" })
@@ -85,6 +90,7 @@ export const TerminalSettings = ({
 				break
 			case "terminalProfiles":
 				setProfileNames(message.profiles ?? [])
+				setIsProfilesLoaded(true)
 				break
 			default:
 				break
@@ -92,6 +98,12 @@ export const TerminalSettings = ({
 	}, [])
 
 	useEvent("message", onMessage)
+
+	useEffect(() => {
+		if (isProfilesLoaded && terminalProfile && !profileNames.includes(terminalProfile)) {
+			setCachedStateField("terminalProfile", undefined)
+		}
+	}, [isProfilesLoaded, profileNames, setCachedStateField, terminalProfile])
 
 	return (
 		<div className={cn("flex flex-col", className)} {...props}>
@@ -167,13 +179,13 @@ export const TerminalSettings = ({
 								<div className="flex items-center gap-2 mb-2">
 									<input
 										type="radio"
-										id="terminal-profile-default"
-										name="terminal-profile-mode"
-										checked={!terminalProfile}
+										id={defaultProfileId}
+										name={profileModeId}
+										checked={!isProfileOverrideSelected}
 										onChange={() => setCachedStateField("terminalProfile", undefined)}
 										data-testid="terminal-profile-default-radio"
 									/>
-									<label htmlFor="terminal-profile-default" className="cursor-pointer">
+									<label htmlFor={defaultProfileId} className="cursor-pointer">
 										{t("settings:terminal.profile.default")}
 									</label>
 									<VSCodeButton
@@ -191,9 +203,9 @@ export const TerminalSettings = ({
 								<div className="flex items-center gap-2 mb-2">
 									<input
 										type="radio"
-										id="terminal-profile-override"
-										name="terminal-profile-mode"
-										checked={!!terminalProfile}
+										id={overrideProfileId}
+										name={profileModeId}
+										checked={isProfileOverrideSelected}
 										disabled={profileNames.length === 0}
 										onChange={() => {
 											if (!terminalProfile && profileNames.length > 0) {
@@ -203,7 +215,7 @@ export const TerminalSettings = ({
 										data-testid="terminal-profile-override-radio"
 									/>
 									<label
-										htmlFor="terminal-profile-override"
+										htmlFor={overrideProfileId}
 										className={
 											profileNames.length === 0
 												? "cursor-not-allowed text-vscode-disabledForeground"
@@ -220,7 +232,7 @@ export const TerminalSettings = ({
 									)}
 								</div>
 
-								{!!terminalProfile && profileNames.length > 0 && (
+								{isProfileOverrideSelected && profileNames.length > 0 && (
 									<Select
 										value={terminalProfile || DEFAULT_PROFILE_VALUE}
 										data-testid="terminal-profile-dropdown"

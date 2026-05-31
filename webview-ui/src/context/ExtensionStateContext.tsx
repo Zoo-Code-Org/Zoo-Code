@@ -85,7 +85,6 @@ export interface ExtensionStateContextType extends ExtensionState {
 	terminalZdotdir?: boolean
 	setTerminalZdotdir: (value: boolean) => void
 	terminalProfile?: string
-	setTerminalProfile: (value: string | undefined) => void
 	setTtsEnabled: (value: boolean) => void
 	setTtsSpeed: (value: number) => void
 	setEnableCheckpoints: (value: boolean) => void
@@ -552,7 +551,6 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		setTerminalShellIntegrationDisabled: (value) =>
 			setState((prevState) => ({ ...prevState, terminalShellIntegrationDisabled: value })),
 		setTerminalZdotdir: (value) => setState((prevState) => ({ ...prevState, terminalZdotdir: value })),
-		setTerminalProfile: (value) => setState((prevState) => ({ ...prevState, terminalProfile: value })),
 		setMcpEnabled: (value) => setState((prevState) => ({ ...prevState, mcpEnabled: value })),
 		setTaskSyncEnabled: (value) => setState((prevState) => ({ ...prevState, taskSyncEnabled: value }) as any),
 		setCurrentApiConfigName: (value) => setState((prevState) => ({ ...prevState, currentApiConfigName: value })),

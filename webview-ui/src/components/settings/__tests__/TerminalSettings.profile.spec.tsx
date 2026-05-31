@@ -117,6 +117,36 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 		expect(screen.getByTestId("terminal-profile-dropdown")).toBeInTheDocument()
 	})
 
+	it("falls back to the default radio and clears an unavailable saved profile after profiles load", () => {
+		const { setCachedStateField } = setup("Git Bash")
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "terminalProfiles", profiles: ["Command Prompt"] },
+				}),
+			)
+		})
+
+		expect(screen.getByTestId("terminal-profile-default-radio")).toBeChecked()
+		expect(screen.getByTestId("terminal-profile-override-radio")).not.toBeChecked()
+		expect(screen.queryByTestId("terminal-profile-dropdown")).not.toBeInTheDocument()
+		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", undefined)
+	})
+
+	it("uses instance-local radio groups", () => {
+		render(
+			<>
+				<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />
+				<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />
+			</>,
+		)
+
+		const defaultRadios = screen.getAllByTestId("terminal-profile-default-radio")
+		expect(defaultRadios[0]).toBeChecked()
+		expect(defaultRadios[1]).toBeChecked()
+		expect(defaultRadios[0]).not.toHaveAttribute("name", defaultRadios[1].getAttribute("name"))
+	})
+
 	it("populates the dropdown from received profile names and selecting one sets the profile", () => {
 		const { setCachedStateField } = setup("Git Bash")
 
@@ -128,8 +158,8 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 			)
 		})
 
-		fireEvent.click(screen.getByTestId("option-Git Bash"))
-		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+		fireEvent.click(screen.getByTestId("option-zsh"))
+		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", "zsh")
 	})
 
 	it("clicking default radio sets terminalProfile to undefined", () => {

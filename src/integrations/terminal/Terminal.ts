@@ -24,7 +24,7 @@ export class Terminal extends BaseTerminal {
 		if (terminal) {
 			this.terminal = terminal
 		} else {
-			const options: vscode.TerminalOptions = { cwd, name: "Roo Code", iconPath, env }
+			const options: vscode.TerminalOptions = { cwd, name: "Zoo Code", iconPath, env }
 
 			// When the user has chosen a VS Code terminal profile, resolve it to a
 			// shell path/args/env so the integrated terminal uses that shell. When
