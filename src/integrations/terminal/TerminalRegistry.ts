@@ -278,6 +278,22 @@ export class TerminalRegistry {
 	}
 
 	/**
+	 * Disposes all idle (non-busy) VS Code terminals so they are not reused
+	 * after a shell profile change. Busy terminals are left untouched.
+	 */
+	public static closeIdleTerminals(): void {
+		this.terminals = this.terminals.filter((t) => {
+			if (t.busy || !(t instanceof Terminal)) {
+				return true
+			}
+
+			t.terminal.dispose()
+			ShellIntegrationManager.zshCleanupTmpDir(t.id)
+			return false
+		})
+	}
+
+	/**
 	 * Releases all terminals associated with a task.
 	 *
 	 * @param taskId The task ID

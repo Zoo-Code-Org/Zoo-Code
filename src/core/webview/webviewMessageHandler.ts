@@ -50,6 +50,7 @@ import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
 import { Terminal } from "../../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { openFile } from "../../integrations/misc/open-file"
 import { openImage, saveImage } from "../../integrations/misc/image-handler"
 import { selectImages } from "../../integrations/misc/process-images"
@@ -728,6 +729,10 @@ export const webviewMessageHandler = async (
 						}
 					} else if (key === "terminalProfile") {
 						Terminal.setTerminalProfile(value as string | undefined)
+						// Discard idle terminals so the next command gets a fresh
+						// terminal using the new profile's shell instead of reusing
+						// a stale one from the previous profile.
+						TerminalRegistry.closeIdleTerminals()
 					} else if (key === "execaShellPath") {
 						Terminal.setExecaShellPath(value as string | undefined)
 					} else if (key === "mcpEnabled") {
