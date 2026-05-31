@@ -383,7 +383,7 @@ describe("DiffViewProvider", () => {
 
 		it("should use fs.writeFile instead of vscode.workspace.fs.writeFile", async () => {
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
-	
+
 			// Verify file was written via fs.writeFile, not vscode.workspace.fs.writeFile
 			const fs = await import("fs/promises")
 			expect(fs.writeFile).toHaveBeenCalledWith(
@@ -391,10 +391,10 @@ describe("DiffViewProvider", () => {
 				"new content",
 				"utf-8",
 			)
-	
+
 			// Verify vscode.workspace.fs.writeFile was NOT called
 			expect(vscode.workspace.fs.writeFile).not.toHaveBeenCalled()
-	
+
 			// Verify result
 			expect(result.newProblemsMessage).toBe("")
 			expect(result.finalContent).toBe("new content")
