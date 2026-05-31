@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Requer {{primaryMod}}+Enter para enviar mensagens",
 			"description": "Quando ativado, você deve pressionar {{primaryMod}}+Enter para enviar mensagens em vez de apenas Enter"
+		},
+		"chatFontSize": {
+			"label": "Tamanho da fonte do chat",
+			"description": "Defina o tamanho da fonte (em pixels) do chat do Zoo Code. Deixe no padrão para corresponder ao tamanho da fonte do VS Code.",
+			"reset": "Usar o padrão do VS Code"
 		}
 	},
 	"skills": {

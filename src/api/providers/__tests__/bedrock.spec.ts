@@ -1335,4 +1335,212 @@ describe("AwsBedrockHandler", () => {
 			expect(hasCachePoint).toBe(false)
 		})
 	})
+
+	describe("Claude 4.7+ adaptive thinking (Opus 4.7 / Opus 4.8)", () => {
+		beforeEach(() => {
+			mockConverseStreamCommand.mockReset()
+		})
+
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+		it("should send adaptive thinking with effort xhigh for Claude Opus 4.7 when reasoning is enabled", async () => {
+			const opus47Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-7",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+			})
+
+			const generator = opus47Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// Adaptive thinking — no budget_tokens, must use effort levels.
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "xhigh" })
+			// 4.7+ rejects sampling parameters: temperature must be omitted entirely.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should send adaptive thinking with effort xhigh for Claude Opus 4.8 when reasoning is enabled", async () => {
+			const opus48Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-8",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+			})
+
+			const generator = opus48Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// 4.8 inherits the 4.7 adaptive-thinking contract — no breaking API changes.
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "xhigh" })
+			// Sampling parameters are still rejected on 4.8 — temperature must be absent.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
+			const opus48Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-8",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: false,
+			})
+
+			const generator = opus48Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// Without reasoning enabled, no adaptive thinking payload is sent.
+			expect(commandArg.additionalModelRequestFields?.thinking).toBeUndefined()
+			// Temperature is still omitted for 4.8 because the API rejects sampling params.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("should still send temperature and budget_tokens thinking for older Claude Opus 4.6", async () => {
+			// Regression guard: the adaptive-thinking branch must NOT activate for 4.6 or earlier.
+			const opus46Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-6-v1",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+			})
+
+			const generator = opus46Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// 4.6 still uses the budget_tokens-based thinking format.
+			expect(commandArg.additionalModelRequestFields?.thinking?.type).toBe("enabled")
+			expect(commandArg.additionalModelRequestFields?.thinking?.budget_tokens).toBeGreaterThan(0)
+			// 4.6 still accepts temperature.
+			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
+		})
+
+		it("should detect adaptive-thinking models via cross-region inference prefix (us.anthropic.claude-opus-4-8)", async () => {
+			// Regression guard: the heuristic uses parseBaseModelId, so cross-region prefixes
+			// like `us.` / `eu.` / `global.` must still be detected as 4.8.
+			const opus48GlobalHandler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-8",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				awsUseCrossRegionInference: true,
+				enableReasoningEffort: true,
+			})
+
+			const generator = opus48GlobalHandler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// Model ID should carry the cross-region prefix.
+			expect(commandArg.modelId).toBe("us.anthropic.claude-opus-4-8")
+			// Adaptive thinking must still apply despite the prefix.
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("completePrompt should omit temperature for Claude Opus 4.8 (non-stream path)", async () => {
+			// Regression guard for the non-stream path: completePrompt must guard
+			// temperature the same way createMessage does, otherwise adaptive-thinking
+			// models (4.7/4.8) return a 400 from Bedrock.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const opus48Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-8",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await opus48Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as any
+
+			// 4.8 must NOT receive temperature in the non-stream inferenceConfig.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it("completePrompt should still send temperature for older Claude Opus 4.6 (non-stream path)", async () => {
+			// 4.6 and earlier still accept sampling parameters, so completePrompt must
+			// continue to send temperature for them.
+			const mockConverseCommand = vi.mocked(ConverseCommand)
+
+			const opus46Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-4-6-v1",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			await opus46Handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+			const commandArg = mockConverseCommand.mock.calls[0][0] as any
+
+			// 4.6 must still receive temperature.
+			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
+		})
+
+		describe("isAdaptiveThinkingModel detection", () => {
+			// Unit-cover the private guard directly (same pattern the suite uses for
+			// parseBaseModelId / getPrefixForRegion). This exercises all four model
+			// patterns — including the future-proof sonnet-4-7 / sonnet-4-8 branches
+			// that have no registry entry yet — plus negative cases and prefix stripping.
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+			const isAdaptiveThinkingModel = (handler as any).isAdaptiveThinkingModel.bind(handler)
+
+			it("returns true for all adaptive-thinking model patterns (opus/sonnet 4.7 and 4.8)", () => {
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-7")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-8")).toBe(true)
+				// Future-proof Sonnet patterns — guarded even before a registry entry exists.
+				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-7")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-8")).toBe(true)
+			})
+
+			it("returns true when the id carries a cross-region or global prefix", () => {
+				expect(isAdaptiveThinkingModel("us.anthropic.claude-opus-4-8")).toBe(true)
+				expect(isAdaptiveThinkingModel("eu.anthropic.claude-sonnet-4-7")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-4-8")).toBe(true)
+			})
+
+			it("returns false for older / non-adaptive models", () => {
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-6-v1")).toBe(false)
+				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-6")).toBe(false)
+				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
+				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
+			})
+		})
+	})
 })

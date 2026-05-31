@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "需要 {{primaryMod}}+Enter 发送消息",
 			"description": "启用后，必须按 {{primaryMod}}+Enter 发送消息，而不仅仅是 Enter"
+		},
+		"chatFontSize": {
+			"label": "聊天字体大小",
+			"description": "设置 Zoo Code 聊天的字体大小（以像素为单位）。保留默认值以匹配 VS Code 的字体大小。",
+			"reset": "使用 VS Code 默认值"
 		}
 	},
 	"skills": {

@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Yêu cầu {{primaryMod}}+Enter để gửi tin nhắn",
 			"description": "Khi được bật, bạn phải nhấn {{primaryMod}}+Enter để gửi tin nhắn thay vì chỉ nhấn Enter"
+		},
+		"chatFontSize": {
+			"label": "Cỡ chữ trò chuyện",
+			"description": "Đặt cỡ chữ (tính bằng pixel) cho cuộc trò chuyện Zoo Code. Để ở giá trị mặc định để khớp với cỡ chữ của VS Code.",
+			"reset": "Dùng mặc định của VS Code"
 		}
 	},
 	"skills": {

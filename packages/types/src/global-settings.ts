@@ -202,6 +202,11 @@ export const globalSettingsSchema = z.object({
 	historyPreviewCollapsed: z.boolean().optional(),
 	reasoningBlockCollapsed: z.boolean().optional(),
 	/**
+	 * Font size (in pixels) for the Zoo Code chat/webview UI.
+	 * When unset (or `null`), the webview inherits VS Code's `--vscode-font-size`.
+	 */
+	chatFontSize: z.number().int().min(8).max(32).nullish(),
+	/**
 	 * Controls the keyboard behavior for sending messages in the chat input.
 	 * - "send": Enter sends message, Shift+Enter creates newline (default)
 	 * - "newline": Enter creates newline, Shift+Enter/Ctrl+Enter sends message

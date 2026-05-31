@@ -310,9 +310,9 @@
 		},
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Xiaomi MiMo-provider: Xiaomi MiMo toegevoegd als eersteklas API-provider, zodat je MiMo-modellen direct in Zoo Code kunt configureren.",
-			"highlight2": "Upstream-handoff van Zoo Code: De nieuwste upstream sunset-merge en bijbehorende platformupdates zijn overgenomen om Zoo Code afgestemd te houden op het community-handoffwerk.",
-			"highlight3": "Stabiliteitsfixes voor chat en providers: De MCP-aanmeldtekst, Gemini-verzoeken met de volledige toolset, de OpenAI-temperatuurafhandeling en Markdown met één tilde zijn gecorrigeerd."
+			"highlight1": "Claude Opus 4.8 en Opencode Go: Claude Opus 4.8 toegevoegd voor Anthropic, Bedrock en Vertex, plus Opencode Go als nieuwe eersteklas provider.",
+			"highlight2": "Betrouwbare taakafsluiting: Een taak annuleren beëindigt nu correct het lopende proces, met automatische Ctrl+C-herpoging voor hardnekkige processen.",
+			"highlight3": "Provider- en editorfixes: Aangepaste Gemini-model-ID's, afgeknipte Grok-diffs, PowerShell-detectie op Windows en de VS Code-code-actienaam zijn gecorrigeerd."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

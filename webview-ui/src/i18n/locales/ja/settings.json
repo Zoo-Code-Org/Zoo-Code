@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "メッセージを送信するには{{primaryMod}}+Enterが必要",
 			"description": "有効にすると、Enterだけでなく{{primaryMod}}+Enterを押してメッセージを送信する必要があります"
+		},
+		"chatFontSize": {
+			"label": "チャットのフォントサイズ",
+			"description": "Zoo Code チャットのフォントサイズ（ピクセル単位）を設定します。VS Code のフォントサイズに合わせるには既定値のままにしてください。",
+			"reset": "VS Code の既定値を使用"
 		}
 	},
 	"skills": {

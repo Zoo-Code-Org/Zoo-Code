@@ -160,7 +160,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "may-2026-v3.55.0-mimo-handoff-stability" // v3.55.0 Xiaomi MiMo, upstream handoff updates, stability fixes
+	public readonly latestAnnouncementId = "may-2026-v3.56.0-opus48-opencodego-cancellation" // v3.56.0 Claude Opus 4.8, Opencode Go provider, task cancellation fixes
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -2071,6 +2071,7 @@ export class ClineProvider
 			maxTotalImageSize,
 			historyPreviewCollapsed,
 			reasoningBlockCollapsed,
+			chatFontSize,
 			enterBehavior,
 			cloudUserInfo,
 			cloudIsAuthenticated,
@@ -2229,6 +2230,7 @@ export class ClineProvider
 			settingsImportedAt: this.settingsImportedAt,
 			historyPreviewCollapsed: historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: reasoningBlockCollapsed ?? true,
+			chatFontSize,
 			enterBehavior: enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated: cloudIsAuthenticated ?? false,
@@ -2428,6 +2430,7 @@ export class ClineProvider
 			maxTotalImageSize: stateValues.maxTotalImageSize ?? 20,
 			historyPreviewCollapsed: stateValues.historyPreviewCollapsed ?? false,
 			reasoningBlockCollapsed: stateValues.reasoningBlockCollapsed ?? true,
+			chatFontSize: stateValues.chatFontSize,
 			enterBehavior: stateValues.enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated,

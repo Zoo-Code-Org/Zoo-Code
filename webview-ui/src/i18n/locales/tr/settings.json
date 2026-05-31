@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Mesaj göndermek için {{primaryMod}}+Enter gerekli",
 			"description": "Etkinleştirildiğinde, sadece Enter yerine mesaj göndermek için {{primaryMod}}+Enter'a basmalısınız"
+		},
+		"chatFontSize": {
+			"label": "Sohbet yazı tipi boyutu",
+			"description": "Zoo Code sohbeti için yazı tipi boyutunu (piksel cinsinden) ayarlayın. VS Code yazı tipi boyutuyla eşleşmesi için varsayılan değerde bırakın.",
+			"reset": "VS Code varsayılanını kullan"
 		}
 	},
 	"skills": {

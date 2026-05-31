@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "संदेश भेजने के लिए {{primaryMod}}+Enter की आवश्यकता है",
 			"description": "जब सक्षम हो, तो आपको केवल Enter के बजाय संदेश भेजने के लिए {{primaryMod}}+Enter दबाना होगा"
+		},
+		"chatFontSize": {
+			"label": "चैट फ़ॉन्ट आकार",
+			"description": "Zoo Code चैट के लिए फ़ॉन्ट आकार (पिक्सेल में) सेट करें। VS Code के फ़ॉन्ट आकार से मेल खाने के लिए डिफ़ॉल्ट पर छोड़ दें।",
+			"reset": "VS Code डिफ़ॉल्ट का उपयोग करें"
 		}
 	},
 	"skills": {

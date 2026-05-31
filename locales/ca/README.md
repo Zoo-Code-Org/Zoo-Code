@@ -30,39 +30,17 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.55.0
+## Novetats a la v3.56.0
 
-**La primera release de funcionalitats de Zoo Code** es basa en el traspàs al Marketplace amb un proveïdor nou, la fusió upstream del sunset de Roo Code i una ronda de correccions visibles per a l'usuari al xat, la configuració dels proveïdors i el renderitzat.
-
-- S'ha afegit Xiaomi MiMo com a proveïdor d'API de primer nivell.
-- S'ha incorporat la fusió upstream del sunset de Roo Code i les actualitzacions relacionades de la plataforma.
-- S'han corregit els textos de l'inici de sessió d'MCP, les sol·licituds completes d'eines de Gemini i la gestió de la temperatura d'OpenAI per a models que no l'admeten.
-- S'ha corregit el renderitzat del text amb una sola titlla a Markdown i el nom dels fitxers temporals de diagnòstic.
-- S'han millorat els valors per defecte dels proveïdors i la cobertura de regions per a Z.AI, GLM i Vertex AI.
-
-<details>
-  <summary>🌐 Idiomes disponibles</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Suport per a **Claude Opus 4.8** als proveïdors Anthropic, Bedrock i Vertex
+- **Opencode Go** afegit com a nou proveïdor d'API de primera classe
+- **Cancel·lació de tasques fiable** — cancel·lar una tasca ara finalitza el procés en execució, amb reintent automàtic de Ctrl+C per als processos que no responen
+- S'han corregit els ID de model personalitzats de Gemini que s'ignoraven i tornaven al valor predeterminat
+- S'han corregit els diffs de Grok truncats per marcadors faltants
+- S'ha corregit la detecció de PowerShell a Windows quan no hi ha cap perfil de shell configurat
+- S'han corregit les accions de codi del VS Code que encara mostraven la marca Roo Code; localitzades en tots els idiomes suportats
+- S'ha corregit l'avís de Vertex AI quan el camp de credencials de Google Cloud rep una ruta de fitxer
+- Sis actualitzacions de seguretat de dependències (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

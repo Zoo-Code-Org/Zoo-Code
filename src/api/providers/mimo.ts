@@ -141,6 +141,14 @@ export class MimoHandler extends OpenAiHandler {
 			}
 		}
 
+		// Finalize any tool calls that weren't explicitly ended by finish_reason.
+		// MiMo's proxy emits choices: [] without finish_reason when tokens are exhausted
+		// mid-tool-call, so we must clean up here to avoid orphaned partial tool calls.
+		for (const id of activeToolCallIds) {
+			yield { type: "tool_call_end", id }
+		}
+		activeToolCallIds.clear()
+
 		if (lastUsage) {
 			const inputTokens = lastUsage?.prompt_tokens || 0
 			const outputTokens = lastUsage?.completion_tokens || 0

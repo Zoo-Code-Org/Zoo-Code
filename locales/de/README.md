@@ -30,39 +30,17 @@
 
 Eine kurze Anleitung für den Wechsel von Roo Code zu Zoo Code findest du im [Roo→Zoo-Migrationsleitfaden](https://docs.zoocode.dev/roo-to-zoo-migration). Wir wollen Nutzer beim Umstieg so gut wie möglich unterstützen, und genau dafür sind unser [Reddit](https://www.reddit.com/r/ZooCode) und [Discord](https://discord.gg/VxfP4Vx3gX) da. Wenn du Probleme hast oder Fragen auftauchen, komm vorbei und frag nach.
 
-## Neu in v3.55.0
+## Neu in v3.56.0
 
-**Die erste Funktionsversion von Zoo Code** baut auf dem Marketplace-Handoff auf und bringt einen neuen Provider, den Upstream-Sunset-Merge aus Roo Code sowie eine Runde nutzerseitiger Korrekturen für Chat, Provider-Einstellungen und Rendering.
-
-- Xiaomi MiMo als vollwertigen API-Provider hinzugefügt.
-- Den Upstream-Sunset-Merge aus Roo Code und zugehörige Plattform-Updates übernommen.
-- Texte auf der MCP-Anmeldeseite, Gemini-Anfragen mit vollem Tool-Set und die OpenAI-Temperaturbehandlung für nicht unterstützte Modelle korrigiert.
-- Markdown-Darstellung einzelner Tilden und die Benennung temporärer Diagnosedateien korrigiert.
-- Standardwerte und Regionsabdeckung für Z.AI, GLM und Vertex AI verbessert.
-
-<details>
-  <summary>🌐 Verfügbare Sprachen</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Claude Opus 4.8**-Unterstützung für Anthropic, Bedrock und Vertex
+- **Opencode Go** als neuer vollwertiger API-Provider hinzugefügt
+- **Zuverlässiger Task-Abbruch** — das Abbrechen einer Aufgabe beendet jetzt den laufenden Prozess, mit automatischem Ctrl+C-Retry für hartnäckige Prozesse
+- Benutzerdefinierte Gemini-Modell-IDs werden nicht mehr ignoriert und auf den Standard zurückgesetzt
+- Abgeschnittene Grok-Diffs durch fehlende Markierungen behoben
+- PowerShell-Erkennung unter Windows ohne konfiguriertes Shell-Profil korrigiert
+- VS Code-Code-Actions zeigen nicht mehr Roo Code-Branding; in alle unterstützten Sprachen lokalisiert
+- Vertex AI-Warnung bei Dateipfad im Google Cloud Credentials-Feld behoben
+- Sechs Sicherheitsupdates für Abhängigkeiten (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

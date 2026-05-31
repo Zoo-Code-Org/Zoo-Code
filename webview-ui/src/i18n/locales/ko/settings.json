@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "메시지를 보내려면 {{primaryMod}}+Enter가 필요",
 			"description": "활성화하면 Enter만으로는 안 되고 {{primaryMod}}+Enter를 눌러야 메시지를 보낼 수 있습니다"
+		},
+		"chatFontSize": {
+			"label": "채팅 글꼴 크기",
+			"description": "Zoo Code 채팅의 글꼴 크기(픽셀)를 설정합니다. VS Code 글꼴 크기에 맞추려면 기본값으로 두세요.",
+			"reset": "VS Code 기본값 사용"
 		}
 	},
 	"skills": {

@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Exiger {{primaryMod}}+Entrée pour envoyer les messages",
 			"description": "Lorsqu'activé, tu dois appuyer sur {{primaryMod}}+Entrée pour envoyer des messages au lieu de simplement Entrée"
+		},
+		"chatFontSize": {
+			"label": "Taille de police du chat",
+			"description": "Définissez la taille de police (en pixels) du chat Zoo Code. Laissez la valeur par défaut pour correspondre à la taille de police de VS Code.",
+			"reset": "Utiliser la valeur par défaut de VS Code"
 		}
 	},
 	"skills": {

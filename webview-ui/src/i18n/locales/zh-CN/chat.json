@@ -338,9 +338,9 @@
 		},
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "Xiaomi MiMo 提供商：已将 Xiaomi MiMo 添加为一等 API 提供商，让你可以直接在 Zoo Code 中配置 MiMo 模型。",
-			"highlight2": "Zoo Code 上游交接：已合入最新的上游 sunset merge 及相关平台更新，让 Zoo Code 持续与社区交接工作保持一致。",
-			"highlight3": "聊天与提供商稳定性修复：已修复 MCP 登录文案、Gemini 全工具集请求、OpenAI temperature 处理，以及 Markdown 单波浪线渲染。"
+			"highlight1": "Claude Opus 4.8 与 Opencode Go：已为 Anthropic、Bedrock 和 Vertex 添加 Claude Opus 4.8，并新增 Opencode Go 作为一等提供商。",
+			"highlight2": "可靠的任务取消：取消任务现在会正确终止正在运行的进程，对于顽固进程还会自动重试 Ctrl+C。",
+			"highlight3": "提供商与编辑器修复：修复了 Gemini 自定义模型 ID、Grok diff 截断、Windows 上的 PowerShell 检测以及 VS Code 代码操作的品牌名称。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

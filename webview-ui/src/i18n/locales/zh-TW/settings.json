@@ -107,6 +107,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "需要 {{primaryMod}}+Enter 傳送訊息",
 			"description": "啟用後，必須按 {{primaryMod}}+Enter 傳送訊息，而不只是 Enter"
+		},
+		"chatFontSize": {
+			"label": "聊天字型大小",
+			"description": "設定 Zoo Code 聊天的字型大小（以像素為單位）。保留預設值以符合 VS Code 的字型大小。",
+			"reset": "使用 VS Code 預設值"
 		}
 	},
 	"prompts": {

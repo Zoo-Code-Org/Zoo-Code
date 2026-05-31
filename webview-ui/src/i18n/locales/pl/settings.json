@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Wymagaj {{primaryMod}}+Enter do wysyłania wiadomości",
 			"description": "Po włączeniu musisz nacisnąć {{primaryMod}}+Enter, aby wysłać wiadomości, zamiast tylko Enter"
+		},
+		"chatFontSize": {
+			"label": "Rozmiar czcionki czatu",
+			"description": "Ustaw rozmiar czcionki (w pikselach) dla czatu Zoo Code. Pozostaw wartość domyślną, aby dopasować ją do rozmiaru czcionki VS Code.",
+			"reset": "Użyj wartości domyślnej VS Code"
 		}
 	},
 	"skills": {

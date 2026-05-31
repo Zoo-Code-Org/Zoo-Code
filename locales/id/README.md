@@ -30,39 +30,17 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.55.0
+## Yang Baru di v3.56.0
 
-**Rilis fitur pertama Zoo Code** melanjutkan handoff Marketplace dengan provider baru, merge upstream sunset Roo Code, dan serangkaian perbaikan yang langsung terasa di chat, pengaturan provider, dan rendering.
-
-- Menambahkan Xiaomi MiMo sebagai provider API kelas utama.
-- Mengambil merge upstream sunset Roo Code beserta pembaruan platform terkait.
-- Memperbaiki teks sign-in MCP, request Gemini dengan tool set penuh, dan penanganan temperature OpenAI untuk model yang tidak mendukungnya.
-- Memperbaiki render Markdown untuk single tilde dan penamaan file sementara diagnostik.
-- Meningkatkan default provider dan cakupan region untuk Z.AI, GLM, dan Vertex AI.
-
-<details>
-  <summary>🌐 Bahasa yang tersedia</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Dukungan **Claude Opus 4.8** untuk provider Anthropic, Bedrock, dan Vertex
+- **Opencode Go** ditambahkan sebagai provider API baru kelas utama
+- **Pembatalan tugas yang andal** — membatalkan tugas kini benar-benar menghentikan proses yang berjalan, dengan percobaan ulang Ctrl+C otomatis untuk proses yang sulit dihentikan
+- Memperbaiki ID model kustom Gemini yang diabaikan dan kembali ke default
+- Memperbaiki diff Grok yang terpotong karena marker yang hilang
+- Memperbaiki deteksi PowerShell di Windows tanpa profil shell yang dikonfigurasi
+- Memperbaiki code action VS Code yang masih menampilkan branding Roo Code; dilokalisasi ke semua bahasa yang didukung
+- Memperbaiki peringatan Vertex AI saat field Google Cloud Credentials menerima path file
+- Enam pembaruan keamanan dependensi (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

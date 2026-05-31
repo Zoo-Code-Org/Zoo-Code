@@ -963,6 +963,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Requereix {{primaryMod}}+Intro per enviar missatges",
 			"description": "Quan estigui activat, has de prémer {{primaryMod}}+Intro per enviar missatges en lloc de només Intro"
+		},
+		"chatFontSize": {
+			"label": "Mida de lletra del xat",
+			"description": "Defineix la mida de la lletra (en píxels) del xat de Zoo Code. Deixa-ho al valor per defecte per coincidir amb la mida de lletra del VS Code.",
+			"reset": "Utilitza el valor per defecte del VS Code"
 		}
 	},
 	"skills": {
