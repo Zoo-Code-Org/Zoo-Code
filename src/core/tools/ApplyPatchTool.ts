@@ -213,10 +213,34 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			return
 		}
 
-		// Save the changes
 		if (isPreventFocusDisruptionEnabled) {
-			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs, isWriteProtected)
+			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
 		} else {
+			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+		}
+
+		// Track file edit operation
+		await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+		task.didEditFile = true
+
+		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
+		pushToolResult(message)
+		await task.diffViewProvider.reset()
+		task.processQueuedMessages()
+	}
+
+	private async handleDeleteFile(
+		if (isPreventFocusDisruptionEnabled) {
+			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
+			// Save changes to the same file
+			if (isPreventFocusDisruptionEnabled) {
+				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+			} else {
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+			}
+
+			await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+		}
 			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 		}
 
@@ -407,7 +431,6 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Save new content to the new path
 			if (isPreventFocusDisruptionEnabled) {
 				await task.diffViewProvider.saveDirectly(
 					change.movePath,
@@ -415,7 +438,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
-					isWriteProtected,
+				)
+			if (isPreventFocusDisruptionEnabled) {
+				await task.diffViewProvider.saveDirectly(
+					change.movePath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
 				)
 			} else {
 				// Write to new path and delete old file

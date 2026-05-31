@@ -133,7 +133,39 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs, isWriteProtected)
+			} else {
+				if (!task.diffViewProvider.isEditing) {
+					const partialMessage = JSON.stringify(sharedMessageProps)
+					await task.ask("tool", partialMessage, true).catch(() => {})
+					await task.diffViewProvider.open(relPath)
+				}
+	
+				await task.diffViewProvider.update(
+					everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
+					true,
+				)
+	
+				await delay(300)
+				task.diffViewProvider.scrollToFirstDiff()
+	
+				let unified = fileExists
+					? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
+					: convertNewFileToUnifiedDiff(newContent, relPath)
+				unified = sanitizeUnifiedDiff(unified)
+				const completeMessage = JSON.stringify({
+					...sharedMessageProps,
+					content: unified,
+					diffStats: computeDiffStats(unified) || undefined,
+				} satisfies ClineSayTool)
+	
+				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
+	
+				if (!didApprove) {
+					await task.diffViewProvider.revertChanges()
+					return
+				}
+	
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)

@@ -434,7 +434,6 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 				return
 			}
 
-			// Save the changes
 			if (isPreventFocusDisruptionEnabled) {
 				// Direct file write without diff view or opening the file
 				await task.diffViewProvider.saveDirectly(
@@ -443,7 +442,15 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 					isNewFile,
 					diagnosticsEnabled,
 					writeDelayMs,
-					isWriteProtected,
+				)
+			if (isPreventFocusDisruptionEnabled) {
+				// Direct file write without diff view or opening the file
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					isNewFile,
+					diagnosticsEnabled,
+					writeDelayMs,
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
