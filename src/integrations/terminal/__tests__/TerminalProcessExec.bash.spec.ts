@@ -37,6 +37,7 @@ vi.mock("vscode", () => {
 				eventHandlers.closeTerminal = handler
 				return { dispose: vi.fn() }
 			}),
+			onDidChangeTerminalShellIntegration: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 		},
 		ThemeIcon: class ThemeIcon {
 			constructor(id: string) {
@@ -92,7 +93,7 @@ function createRealCommandStream(command: string): { stream: AsyncIterable<strin
 				exitCode = 1
 			}
 		} else {
-			exitCode = error.status || 1 // Use status if available, default to 1
+			exitCode = error.status ?? 1 // Use status if available, default to 1
 		}
 	}
 

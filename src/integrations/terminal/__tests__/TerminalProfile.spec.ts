@@ -6,6 +6,7 @@ import * as vscode from "vscode"
 
 import { Terminal } from "../Terminal"
 import { TerminalRegistry } from "../TerminalRegistry"
+import { ShellIntegrationManager } from "../ShellIntegrationManager"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -126,6 +127,102 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 			mockedExistsSync.mockImplementation((profilePath: string) => profilePath !== "/missing/bash")
 
 			expect(Terminal.getAvailableProfileNames("linux")).toEqual(["bash", "zsh"])
+		})
+
+		it("excludes cmd.exe profiles on Windows (shell integration unsupported)", () => {
+			stubProfiles({
+				windows: {
+					"Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" },
+					PowerShell: { path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+				},
+			})
+
+			expect(Terminal.getAvailableProfileNames("win32")).toEqual(["PowerShell"])
+		})
+
+		describe("isCmdExe", () => {
+			it.each([
+				["C:\\Windows\\System32\\cmd.exe", true],
+				["C:\\WINDOWS\\SYSTEM32\\CMD.EXE", true],
+				["/mnt/c/Windows/System32/cmd.exe", true],
+				["/bin/bash", false],
+				["pwsh.exe", false],
+				["cmd", false],
+			])("isCmdExe(%s) === %s", (input, expected) => {
+				expect(Terminal.isCmdExe(input)).toBe(expected)
+			})
+		})
+
+		describe("isActiveShellCmdExe", () => {
+			it("returns false on non-Windows platforms", () => {
+				expect(Terminal.isActiveShellCmdExe("linux")).toBe(false)
+				expect(Terminal.isActiveShellCmdExe("darwin")).toBe(false)
+			})
+
+			it("returns true when profile override resolves to cmd.exe", () => {
+				stubProfiles({ windows: { "Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" } } })
+				Terminal.setTerminalProfile("Command Prompt")
+				expect(Terminal.isActiveShellCmdExe("win32")).toBe(true)
+			})
+
+			it("returns false when profile override resolves to a non-cmd shell", () => {
+				stubProfiles({ windows: { PowerShell: { path: "C:\\Program Files\\PowerShell\\pwsh.exe" } } })
+				Terminal.setTerminalProfile("PowerShell")
+				expect(Terminal.isActiveShellCmdExe("win32")).toBe(false)
+			})
+
+			it("returns true when no override and default profile is cmd.exe", () => {
+				Terminal.setTerminalProfile(undefined)
+				stubProfiles({ windows: { "Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" } } })
+				getConfigurationSpy = vi
+					.spyOn(vscode.workspace, "getConfiguration")
+					.mockImplementation((section?: string) => {
+						if (section === "terminal.integrated.profiles") {
+							return {
+								inspect: (_key: string) => ({
+									defaultValue: { "Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" } },
+									globalValue: undefined,
+								}),
+							} as any
+						}
+						if (section === "terminal.integrated") {
+							return {
+								get: (key: string) => (key === "defaultProfile.windows" ? "Command Prompt" : undefined),
+							} as any
+						}
+						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+					})
+				expect(Terminal.isActiveShellCmdExe("win32")).toBe(true)
+			})
+
+			it("returns false when no override and default profile is PowerShell", () => {
+				Terminal.setTerminalProfile(undefined)
+				getConfigurationSpy = vi
+					.spyOn(vscode.workspace, "getConfiguration")
+					.mockImplementation((section?: string) => {
+						if (section === "terminal.integrated.profiles") {
+							return {
+								inspect: (_key: string) => ({
+									defaultValue: { PowerShell: { path: "C:\\Program Files\\PowerShell\\pwsh.exe" } },
+									globalValue: undefined,
+								}),
+							} as any
+						}
+						if (section === "terminal.integrated") {
+							return {
+								get: (key: string) => (key === "defaultProfile.windows" ? "PowerShell" : undefined),
+							} as any
+						}
+						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+					})
+				expect(Terminal.isActiveShellCmdExe("win32")).toBe(false)
+			})
+
+			it("returns false when no override and no default profile configured", () => {
+				Terminal.setTerminalProfile(undefined)
+				stubProfiles({})
+				expect(Terminal.isActiveShellCmdExe("win32")).toBe(false)
+			})
 		})
 	})
 
@@ -326,6 +423,43 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 			const options = createTerminalSpy.mock.calls[0][0] as vscode.TerminalOptions
 			expect(options.shellPath).toBeUndefined()
 			expect(options.shellArgs).toBeUndefined()
+		})
+	})
+
+	describe("ZDOTDIR injection guard", () => {
+		let zshInitTmpDirSpy: any
+
+		beforeEach(() => {
+			zshInitTmpDirSpy = vi
+				.spyOn(ShellIntegrationManager, "zshInitTmpDir")
+				.mockReturnValue("/tmp/roo-zdotdir-test")
+			Terminal.setTerminalZdotdir(true)
+		})
+
+		afterEach(() => {
+			Terminal.setTerminalZdotdir(false)
+			Terminal.setTerminalProfile(undefined)
+			TerminalRegistry["terminals"] = []
+			vi.restoreAllMocks()
+		})
+
+		it("sets ZDOTDIR when zdotdir is enabled and no profile is configured", () => {
+			stubProfiles({})
+			const env = Terminal.getEnv()
+			expect(zshInitTmpDirSpy).toHaveBeenCalledTimes(1)
+			expect(env.ZDOTDIR).toBe("/tmp/roo-zdotdir-test")
+		})
+
+		it("skips ZDOTDIR when zdotdir is enabled but a profile is configured", () => {
+			stubProfiles({
+				[Terminal.getPlatformProfileKey(process.platform)]: {
+					zsh: { path: "/bin/zsh" },
+				},
+			})
+			Terminal.setTerminalProfile("zsh")
+			const env = Terminal.getEnv()
+			expect(zshInitTmpDirSpy).not.toHaveBeenCalled()
+			expect(env.ZDOTDIR).toBeUndefined()
 		})
 	})
 })

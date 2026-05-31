@@ -192,6 +192,7 @@ export const TerminalSettings = ({
 										appearance="secondary"
 										onClick={() => {
 											onTerminalProfilePickerOpened?.()
+											setCachedStateField("terminalProfile", undefined)
 											vscode.postMessage({ type: "openTerminalProfilePicker" })
 										}}
 										data-testid="terminal-profile-configure-button">
