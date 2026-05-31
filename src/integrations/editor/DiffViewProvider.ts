@@ -655,29 +655,52 @@ export class DiffViewProvider {
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content directly to the file
-		await createDirectoriesForFile(absolutePath)
-		await fs.writeFile(absolutePath, content, "utf-8")
+		// Write the content using VSCode's file system API to ensure
+		// proper notification of language servers and file watchers
+		const fileUri = vscode.Uri.file(absolutePath)
+		const contentBuffer = Buffer.from(content, "utf-8")
+		await vscode.workspace.fs.writeFile(fileUri, contentBuffer)
 
 		// Open the document to ensure diagnostics are loaded
-		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
 		if (openFile) {
-			// Show the document in the editor
-			await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
+			// Show the document in the editor without stealing focus
+			await vscode.window.showTextDocument(fileUri, {
 				preview: false,
 				preserveFocus: true,
 			})
 		} else {
-			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+			// Open the document in memory to trigger diagnostics without showing it
+			const doc = await vscode.workspace.openTextDocument(fileUri)
 
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
-			if (doc.isDirty) {
-				await doc.save()
+			// Verify the document content matches what we wrote.
+			// This guards against a race condition where VSCode returns a stale
+			// cached version of the document before processing the file change.
+			const actualContent = doc.getText()
+			if (actualContent !== content) {
+				// Force-apply the correct content via WorkspaceEdit
+				const edit = new vscode.WorkspaceEdit()
+				const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(actualContent.length))
+				edit.replace(doc.uri, fullRange, content)
+				await vscode.workspace.applyEdit(edit)
 			}
 
-			// Force a small delay to ensure diagnostics are triggered
+			// Small delay to allow diagnostics to be triggered
 			await new Promise((resolve) => setTimeout(resolve, 100))
+		}
+
+		// Verify the content was written correctly to disk
+		const verifyContent = await vscode.workspace.fs.readFile(fileUri)
+		const verifyText = Buffer.from(verifyContent).toString("utf-8")
+		if (verifyText !== content) {
+			// Retry write if verification failed
+			await vscode.workspace.fs.writeFile(fileUri, contentBuffer)
+
+			// Final verification after retry
+			const retryContent = await vscode.workspace.fs.readFile(fileUri)
+			const retryText = Buffer.from(retryContent).toString("utf-8")
+			if (retryText !== content) {
+				throw new Error(`Failed to save content to ${relPath} after retry`)
+			}
 		}
 
 		let newProblemsMessage = ""
@@ -712,15 +735,35 @@ export class DiffViewProvider {
 				newProblems.length > 0 ? `\n\nNew problems detected after saving the file:\n${newProblems}` : ""
 		}
 
+		// Read back the final content to detect any user modifications
+		// that may have occurred via external editors or file watchers
+		let detectedUserEdits: string | undefined
+		try {
+			const finalDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+			const finalDocContent = finalDoc.getText()
+			const normalizedExpected = content.replace(/\r\n|\n/g, "\n")
+			const normalizedActual = finalDocContent.replace(/\r\n|\n/g, "\n")
+
+			if (normalizedActual !== normalizedExpected) {
+				detectedUserEdits = formatResponse.createPrettyPatch(
+					relPath.toPosix(),
+					normalizedExpected,
+					normalizedActual,
+				)
+			}
+		} catch {
+			// If we can't read back the document, proceed without user edit detection
+		}
+
 		// Store the results for formatFileWriteResponse
 		this.newProblemsMessage = newProblemsMessage
-		this.userEdits = undefined
+		this.userEdits = detectedUserEdits
 		this.relPath = relPath
 		this.newContent = content
 
 		return {
 			newProblemsMessage,
-			userEdits: undefined,
+			userEdits: detectedUserEdits,
 			finalContent: content,
 		}
 	}
