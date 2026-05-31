@@ -103,6 +103,7 @@ vi.mock("vscode", () => {
 		workspace: {
 			workspaceFolders: [{ uri: { fsPath: "/mock/workspace" } }],
 			openTextDocument,
+			getConfiguration: vi.fn(() => ({ get: vi.fn() })),
 		},
 	}
 })
@@ -896,6 +897,49 @@ describe("webviewMessageHandler - terminalProfile", () => {
 		expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 
 		setTerminalProfileSpy.mockRestore()
+	})
+})
+
+describe("webviewMessageHandler - requestTerminalProfiles", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("posts sorted profile names for the active platform", async () => {
+		const mockGet = vi.fn().mockReturnValue({ "Git Bash": {}, PowerShell: {}, "Command Prompt": {} })
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: mockGet } as any)
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "terminalProfiles",
+			profiles: ["Command Prompt", "Git Bash", "PowerShell"],
+		})
+	})
+
+	it("posts an empty array when getConfiguration throws", async () => {
+		vi.mocked(vscode.workspace.getConfiguration).mockImplementation(() => {
+			throw new Error("config error")
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "terminalProfiles",
+			profiles: [],
+		})
+	})
+
+	it("posts an empty array when no profiles are configured", async () => {
+		const mockGet = vi.fn().mockReturnValue(undefined)
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: mockGet } as any)
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "terminalProfiles",
+			profiles: [],
+		})
 	})
 })
 

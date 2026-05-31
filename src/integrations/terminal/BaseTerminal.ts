@@ -304,7 +304,8 @@ export abstract class BaseTerminal implements RooTerminal {
 	 * @param profile The terminal profile name, or undefined for the default
 	 */
 	public static setTerminalProfile(profile: string | undefined): void {
-		BaseTerminal.terminalProfile = profile && profile.trim().length > 0 ? profile : undefined
+		const normalized = profile?.trim()
+		BaseTerminal.terminalProfile = normalized && normalized.length > 0 ? normalized : undefined
 	}
 
 	/**

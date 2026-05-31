@@ -1527,15 +1527,15 @@ export const webviewMessageHandler = async (
 			try {
 				const names = new Set<string>()
 
-				for (const platform of ["windows", "osx", "linux"] as const) {
-					const profiles = vscode.workspace
-						.getConfiguration("terminal.integrated.profiles")
-						.get<Record<string, unknown>>(platform)
+				const platformKey =
+					process.platform === "win32" ? "windows" : process.platform === "darwin" ? "osx" : "linux"
+				const profiles = vscode.workspace
+					.getConfiguration("terminal.integrated.profiles")
+					.get<Record<string, unknown>>(platformKey)
 
-					if (profiles && typeof profiles === "object") {
-						for (const name of Object.keys(profiles)) {
-							names.add(name)
-						}
+				if (profiles && typeof profiles === "object") {
+					for (const name of Object.keys(profiles)) {
+						names.add(name)
 					}
 				}
 
