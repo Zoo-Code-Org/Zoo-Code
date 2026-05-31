@@ -38,11 +38,17 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 		}) as any
 
 	// Helper to stub `terminal.integrated.profiles.<platform>` config reads.
-	const stubProfiles = (profilesByPlatform: Record<string, unknown>) => {
+	const stubProfiles = (
+		profilesByPlatform: Record<string, unknown>,
+		workspaceProfilesByPlatform: Record<string, unknown> = {},
+	) => {
 		getConfigurationSpy = vi.spyOn(vscode.workspace, "getConfiguration").mockImplementation((section?: string) => {
 			if (section === "terminal.integrated.profiles") {
 				return {
-					get: (platformKey: string) => profilesByPlatform[platformKey],
+					inspect: (platformKey: string) => ({
+						defaultValue: profilesByPlatform[platformKey],
+						workspaceValue: workspaceProfilesByPlatform[platformKey],
+					}),
 				} as any
 			}
 
@@ -81,6 +87,45 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 
 			Terminal.setTerminalProfile("   ")
 			expect(Terminal.getTerminalProfile()).toBeUndefined()
+		})
+	})
+
+	describe("getConfiguredProfiles / getAvailableProfileNames", () => {
+		it("merges default and global profiles while ignoring workspace profiles", () => {
+			getConfigurationSpy = vi
+				.spyOn(vscode.workspace, "getConfiguration")
+				.mockImplementation((section?: string) => {
+					if (section === "terminal.integrated.profiles") {
+						return {
+							inspect: () => ({
+								defaultValue: { bash: { path: "/bin/bash" } },
+								globalValue: { zsh: { path: "/bin/zsh" } },
+								workspaceValue: { malicious: { path: "/workspace/malicious-shell" } },
+							}),
+						} as any
+					}
+
+					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+				})
+
+			expect(Terminal.getConfiguredProfiles("linux")).toEqual({
+				bash: { path: "/bin/bash" },
+				zsh: { path: "/bin/zsh" },
+			})
+		})
+
+		it("returns sorted names for profiles with resolvable paths only", () => {
+			stubProfiles({
+				linux: {
+					zsh: { path: "/bin/zsh" },
+					PowerShell: { source: "PowerShell" },
+					bash: { path: "/bin/bash" },
+					missing: { path: "/missing/bash" },
+				},
+			})
+			mockedExistsSync.mockImplementation((profilePath: string) => profilePath !== "/missing/bash")
+
+			expect(Terminal.getAvailableProfileNames("linux")).toEqual(["bash", "zsh"])
 		})
 	})
 
@@ -177,6 +222,21 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 			})
 		})
 
+		it("drops non-string args array entries", () => {
+			stubProfiles({
+				linux: {
+					bash: { path: "/bin/bash", args: ["-l", 42, null] },
+				},
+			})
+
+			Terminal.setTerminalProfile("bash")
+
+			expect(Terminal.getProfileShell("linux")).toEqual({
+				shellPath: "/bin/bash",
+				shellArgs: ["-l"],
+			})
+		})
+
 		it("reads the osx profile section on darwin", () => {
 			stubProfiles({
 				osx: { zsh: { path: "/bin/zsh" } },
@@ -250,6 +310,22 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 			const options = createTerminalSpy.mock.calls[0][0] as vscode.TerminalOptions
 			expect(options.shellPath).toBe("/usr/bin/bash")
 			expect(options.shellArgs).toEqual(["-i"])
+		})
+
+		it("falls back to VS Code defaults when a configured profile disappears", () => {
+			stubProfiles({
+				[Terminal.getPlatformProfileKey(process.platform)]: {
+					"Git Bash": { path: "/missing/bash" },
+				},
+			})
+			mockedExistsSync.mockReturnValue(false)
+
+			Terminal.setTerminalProfile("Git Bash")
+			TerminalRegistry.createTerminal("/test/path", "vscode")
+
+			const options = createTerminalSpy.mock.calls[0][0] as vscode.TerminalOptions
+			expect(options.shellPath).toBeUndefined()
+			expect(options.shellArgs).toBeUndefined()
 		})
 	})
 })

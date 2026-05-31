@@ -906,27 +906,14 @@ describe("webviewMessageHandler - terminalProfile", () => {
 describe("webviewMessageHandler - requestTerminalProfiles", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		vi.spyOn(Terminal, "resolveProfilePath").mockImplementation((profilePath) => {
-			const candidates = Array.isArray(profilePath) ? profilePath : [profilePath]
-			const value = candidates.find(
-				(candidate) =>
-					typeof candidate === "string" && candidate.trim().length > 0 && !candidate.includes("missing"),
-			)
-			return typeof value === "string" ? value.trim() : undefined
-		})
 	})
 
 	afterEach(() => {
 		vi.restoreAllMocks()
 	})
 
-	it("posts sorted path-resolvable profile names for the active platform", async () => {
-		const mockGet = vi.fn().mockReturnValue({
-			"Git Bash": { path: "C:\\Git\\bin\\bash.exe" },
-			bash: { path: "/bin/bash" },
-			PowerShell: { source: "PowerShell" }, // source-only — must be excluded
-		})
-		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: mockGet } as any)
+	it("posts available profile names", async () => {
+		vi.spyOn(Terminal, "getAvailableProfileNames").mockReturnValue(["Git Bash", "bash"])
 
 		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
 
@@ -936,23 +923,8 @@ describe("webviewMessageHandler - requestTerminalProfiles", () => {
 		})
 	})
 
-	it("excludes source-only profiles that have no path field", async () => {
-		const mockGet = vi.fn().mockReturnValue({
-			PowerShell: { source: "PowerShell" },
-			"Windows PowerShell": { source: "PowerShell" },
-		})
-		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: mockGet } as any)
-
-		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
-
-		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
-			type: "terminalProfiles",
-			profiles: [],
-		})
-	})
-
-	it("posts an empty array when getConfiguration throws", async () => {
-		vi.mocked(vscode.workspace.getConfiguration).mockImplementation(() => {
+	it("posts an empty array when profile discovery throws", async () => {
+		vi.spyOn(Terminal, "getAvailableProfileNames").mockImplementation(() => {
 			throw new Error("config error")
 		})
 
@@ -961,65 +933,6 @@ describe("webviewMessageHandler - requestTerminalProfiles", () => {
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "terminalProfiles",
 			profiles: [],
-		})
-	})
-
-	it("posts an empty array when no profiles are configured", async () => {
-		const mockGet = vi.fn().mockReturnValue(undefined)
-		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: mockGet } as any)
-
-		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
-
-		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
-			type: "terminalProfiles",
-			profiles: [],
-		})
-	})
-
-	it("excludes profiles with empty or whitespace-only path strings", async () => {
-		const mockGet = vi.fn().mockReturnValue({
-			empty: { path: "" },
-			whitespace: { path: "   " },
-			valid: { path: "/bin/bash" },
-		})
-		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: mockGet } as any)
-
-		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
-
-		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
-			type: "terminalProfiles",
-			profiles: ["valid"],
-		})
-	})
-
-	it("excludes profiles with path arrays containing only empty or whitespace strings", async () => {
-		const mockGet = vi.fn().mockReturnValue({
-			emptyArray: { path: [] },
-			whitespaceArray: { path: ["", "   "] },
-			valid: { path: ["/bin/bash", "/usr/bin/bash"] },
-		})
-		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: mockGet } as any)
-
-		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
-
-		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
-			type: "terminalProfiles",
-			profiles: ["valid"],
-		})
-	})
-
-	it("excludes profiles whose executable cannot be resolved", async () => {
-		const mockGet = vi.fn().mockReturnValue({
-			missing: { path: "/missing/bash" },
-			valid: { path: "/bin/bash" },
-		})
-		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ get: mockGet } as any)
-
-		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
-
-		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
-			type: "terminalProfiles",
-			profiles: ["valid"],
 		})
 	})
 })

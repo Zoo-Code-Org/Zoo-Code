@@ -251,6 +251,7 @@ export class Terminal extends BaseTerminal {
 		const candidates = Array.isArray(profilePath) ? profilePath : [profilePath]
 		const pathValue = env.PATH ?? env.Path ?? env.path
 		const pathEntries = pathValue?.split(platform === "win32" ? ";" : ":") ?? []
+		const platformJoin = platform === "win32" ? path.win32.join : path.posix.join
 
 		for (const value of candidates) {
 			if (typeof value !== "string") {
@@ -280,7 +281,7 @@ export class Terminal extends BaseTerminal {
 				const directory = entry.replace(/^"(.*)"$/, "$1")
 
 				for (const extension of extensions) {
-					const resolved = path.join(directory, `${candidate}${extension}`)
+					const resolved = platformJoin(directory, `${candidate}${extension}`)
 
 					if (existsSync(resolved)) {
 						return resolved
@@ -290,6 +291,41 @@ export class Terminal extends BaseTerminal {
 		}
 
 		return undefined
+	}
+
+	/**
+	 * Reads profiles from trusted settings scopes only. Workspace settings are
+	 * intentionally excluded because opening a repository must not allow its
+	 * `.vscode/settings.json` to select an executable for Zoo Code to launch.
+	 */
+	public static getConfiguredProfiles(platform: NodeJS.Platform = process.platform): Record<string, unknown> {
+		const platformKey = Terminal.getPlatformProfileKey(platform)
+		const inspected = vscode.workspace
+			.getConfiguration("terminal.integrated.profiles")
+			.inspect<Record<string, unknown>>(platformKey)
+
+		return {
+			...(inspected?.defaultValue ?? {}),
+			...(inspected?.globalValue ?? {}),
+		}
+	}
+
+	public static getAvailableProfileNames(platform: NodeJS.Platform = process.platform): string[] {
+		const names = new Set<string>()
+
+		for (const [name, entry] of Object.entries(Terminal.getConfiguredProfiles(platform))) {
+			if (!entry || typeof entry !== "object") {
+				continue
+			}
+
+			const { path: profilePath } = entry as { path?: unknown }
+
+			if (Terminal.resolveProfilePath(profilePath, platform)) {
+				names.add(name)
+			}
+		}
+
+		return Array.from(names).sort()
 	}
 
 	/**
@@ -317,9 +353,7 @@ export class Terminal extends BaseTerminal {
 
 		const platformKey = Terminal.getPlatformProfileKey(platform)
 
-		const profiles = vscode.workspace
-			.getConfiguration("terminal.integrated.profiles")
-			.get<Record<string, unknown>>(platformKey)
+		const profiles = Terminal.getConfiguredProfiles(platform)
 
 		const profile = profiles?.[profileName] as
 			| {
@@ -348,7 +382,7 @@ export class Terminal extends BaseTerminal {
 		}
 
 		const shellArgs = Array.isArray(profile.args)
-			? profile.args
+			? profile.args.filter((arg): arg is string => typeof arg === "string")
 			: typeof profile.args === "string"
 				? [profile.args]
 				: undefined

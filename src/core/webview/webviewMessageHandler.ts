@@ -1534,32 +1534,9 @@ export const webviewMessageHandler = async (
 			// profiles (e.g. { source: "PowerShell" }) cannot be mapped to a shell
 			// binary by an extension and would silently fall back to the default.
 			try {
-				const names = new Set<string>()
-
-				const platformKey = Terminal.getPlatformProfileKey()
-				const profiles = vscode.workspace
-					.getConfiguration("terminal.integrated.profiles")
-					.get<Record<string, unknown>>(platformKey)
-
-				if (profiles && typeof profiles === "object") {
-					for (const [name, entry] of Object.entries(profiles)) {
-						if (!entry || typeof entry !== "object") {
-							continue
-						}
-
-						const { path } = entry as { path?: unknown }
-
-						// Source-only profiles and paths that cannot be found on disk or
-						// PATH are excluded because the override would fail at launch.
-						if (Terminal.resolveProfilePath(path)) {
-							names.add(name)
-						}
-					}
-				}
-
 				await provider.postMessageToWebview({
 					type: "terminalProfiles",
-					profiles: Array.from(names).sort(),
+					profiles: Terminal.getAvailableProfileNames(),
 				})
 			} catch (error) {
 				console.error("Failed to get terminal profiles:", error)
