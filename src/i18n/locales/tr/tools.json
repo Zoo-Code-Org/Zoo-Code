@@ -8,6 +8,8 @@
 	},
 	"toolRepetitionLimitReached": "Zoo bir döngüye takılmış gibi görünüyor, aynı eylemi ({{toolName}}) tekrar tekrar deniyor. Bu, mevcut stratejisinde bir sorun olduğunu gösterebilir. Görevi yeniden ifade etmeyi, daha spesifik talimatlar vermeyi veya onu farklı bir yaklaşıma yönlendirmeyi düşünün.",
 	"unknownToolError": "Zoo bilinmeyen bir araç kullanmaya çalıştı: \"{{toolName}}\". Yeniden deneniyor...",
+	"missingToolParameter": "Zoo, gerekli '{{paramName}}' parametresi için değer olmadan {{toolName}} kullanmaya çalıştı. Yeniden deneniyor...",
+	"missingToolParameterWithPath": "Zoo, '{{relPath}}' için gerekli '{{paramName}}' parametresi için değer olmadan {{toolName}} kullanmaya çalıştı. Yeniden deneniyor...",
 	"codebaseSearch": {
 		"approval": "Kod tabanında '{{query}}' aranıyor..."
 	},

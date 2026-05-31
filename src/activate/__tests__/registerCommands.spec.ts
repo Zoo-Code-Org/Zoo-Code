@@ -2,7 +2,7 @@ import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 
-import { getVisibleProviderOrLog, registerCommands, setPanel } from "../registerCommands"
+import { getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -13,8 +13,16 @@ vi.mock("vscode", () => ({
 		QuickFix: { value: "quickfix" },
 		RefactorRewrite: { value: "refactor.rewrite" },
 	},
+	Uri: {
+		joinPath: vi.fn((_base: unknown, ..._pathSegments: string[]) => ({ path: _pathSegments.join("/") })),
+	},
+	ViewColumn: {
+		Two: 2,
+	},
 	window: {
 		createTextEditorDecorationType: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+		createWebviewPanel: vi.fn(),
+		visibleTextEditors: [],
 	},
 	workspace: {
 		workspaceFolders: [
@@ -346,6 +354,56 @@ describe("registerCommands handlers", () => {
 		expect(mockOutputChannel.appendLine).toHaveBeenCalledTimes(1)
 		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 			`[toggleAutoApprove] postMessageToWebview failed: ${boom}`,
+		)
+	})
+})
+
+describe("openClineInNewTab", () => {
+	let mockOutputChannel: vscode.OutputChannel
+	let mockContext: vscode.ExtensionContext
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+
+		mockOutputChannel = {
+			appendLine: vi.fn(),
+			append: vi.fn(),
+			clear: vi.fn(),
+			hide: vi.fn(),
+			name: "mock",
+			replace: vi.fn(),
+			show: vi.fn(),
+			dispose: vi.fn(),
+		}
+
+		mockContext = {
+			subscriptions: [],
+			extensionUri: { path: "/mock/ext" },
+		} as unknown as vscode.ExtensionContext
+
+		const mockPanel = {
+			webview: { postMessage: vi.fn() },
+			onDidChangeViewState: vi.fn(),
+			onDidDispose: vi.fn(),
+		}
+		;(vscode.window.createWebviewPanel as Mock).mockReturnValue(mockPanel)
+
+		// Reset module-level panel state.
+		setPanel(undefined, "sidebar")
+		setPanel(undefined, "tab")
+	})
+
+	it("creates a webview panel with title 'Zoo Code'", async () => {
+		await openClineInNewTab({ context: mockContext, outputChannel: mockOutputChannel })
+
+		expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
+			"zoo-code.TabPanelProvider",
+			"Zoo Code",
+			expect.any(Number),
+			expect.objectContaining({
+				enableScripts: true,
+				retainContextWhenHidden: true,
+			}),
 		)
 	})
 })

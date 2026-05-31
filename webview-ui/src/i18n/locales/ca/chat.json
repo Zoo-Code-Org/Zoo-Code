@@ -185,7 +185,7 @@
 		"current": "Actual"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo vol obtenir instruccions detallades per ajudar amb la tasca actual."
+		"wantsToFetch": "Zoo vol obtenir instruccions detallades per ajudar amb la tasca actual."
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo vol llegir aquest fitxer",
@@ -195,8 +195,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo vol editar aquest fitxer fora de l'espai de treball",
 		"wantsToEditProtected": "Zoo vol editar un fitxer de configuració protegit",
 		"wantsToCreate": "Zoo vol crear un nou fitxer",
-		"wantsToSearchReplace": "Roo vol realitzar cerca i substitució en aquest fitxer",
-		"didSearchReplace": "Roo ha realitzat cerca i substitució en aquest fitxer",
+		"wantsToSearchReplace": "Zoo vol realitzar cerca i substitució en aquest fitxer",
+		"didSearchReplace": "Zoo ha realitzat cerca i substitució en aquest fitxer",
 		"wantsToInsert": "Zoo vol inserir contingut en aquest fitxer",
 		"wantsToInsertWithLineNumber": "Zoo vol inserir contingut a la línia {{lineNumber}} d'aquest fitxer",
 		"wantsToInsertAtEnd": "Zoo vol afegir contingut al final d'aquest fitxer",

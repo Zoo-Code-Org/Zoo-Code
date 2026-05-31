@@ -180,7 +180,7 @@
 		"current": "Huidig"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo wil gedetailleerde instructies ophalen om te helpen met de huidige taak"
+		"wantsToFetch": "Zoo wil gedetailleerde instructies ophalen om te helpen met de huidige taak"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo wil dit bestand lezen",
@@ -190,8 +190,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo wil dit bestand buiten de werkruimte bewerken",
 		"wantsToEditProtected": "Zoo wil een beveiligd configuratiebestand bewerken",
 		"wantsToCreate": "Zoo wil een nieuw bestand aanmaken",
-		"wantsToSearchReplace": "Roo wil zoeken en vervangen in dit bestand",
-		"didSearchReplace": "Roo heeft zoeken en vervangen uitgevoerd op dit bestand",
+		"wantsToSearchReplace": "Zoo wil zoeken en vervangen in dit bestand",
+		"didSearchReplace": "Zoo heeft zoeken en vervangen uitgevoerd op dit bestand",
 		"wantsToInsert": "Zoo wil inhoud invoegen in dit bestand",
 		"wantsToInsertWithLineNumber": "Zoo wil inhoud invoegen in dit bestand op regel {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo wil inhoud toevoegen aan het einde van dit bestand",
