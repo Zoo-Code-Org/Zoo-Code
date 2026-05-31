@@ -187,7 +187,7 @@
 		"current": "Bieżący"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo chce pobrać szczegółowe instrukcje, aby pomóc w bieżącym zadaniu"
+		"wantsToFetch": "Zoo chce pobrać szczegółowe instrukcje, aby pomóc w bieżącym zadaniu"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo chce przeczytać ten plik",
@@ -197,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo chce edytować ten plik poza obszarem roboczym",
 		"wantsToEditProtected": "Zoo chce edytować chroniony plik konfiguracyjny",
 		"wantsToCreate": "Zoo chce utworzyć nowy plik",
-		"wantsToSearchReplace": "Roo chce wykonać wyszukiwanie i zamianę w tym pliku",
-		"didSearchReplace": "Roo wykonał wyszukiwanie i zamianę w tym pliku",
+		"wantsToSearchReplace": "Zoo chce wykonać wyszukiwanie i zamianę w tym pliku",
+		"didSearchReplace": "Zoo wykonał wyszukiwanie i zamianę w tym pliku",
 		"wantsToInsert": "Zoo chce wstawić zawartość do tego pliku",
 		"wantsToInsertWithLineNumber": "Zoo chce wstawić zawartość do tego pliku w linii {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo chce dodać zawartość na końcu tego pliku",

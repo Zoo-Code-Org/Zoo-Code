@@ -8,6 +8,8 @@
 	},
 	"toolRepetitionLimitReached": "Zoo appears to be stuck in a loop, attempting the same action ({{toolName}}) repeatedly. This might indicate a problem with its current strategy. Consider rephrasing the task, providing more specific instructions, or guiding it towards a different approach.",
 	"unknownToolError": "Zoo tried to use an unknown tool: \"{{toolName}}\". Retrying...",
+	"missingToolParameter": "Zoo tried to use {{toolName}} without value for required parameter '{{paramName}}'. Retrying...",
+	"missingToolParameterWithPath": "Zoo tried to use {{toolName}} for '{{relPath}}' without value for required parameter '{{paramName}}'. Retrying...",
 	"codebaseSearch": {
 		"approval": "Searching for '{{query}}' in codebase..."
 	},

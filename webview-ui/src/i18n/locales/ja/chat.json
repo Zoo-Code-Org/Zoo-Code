@@ -130,7 +130,7 @@
 		"title": "モード",
 		"marketplace": "モードマーケットプレイス",
 		"settings": "モード設定",
-		"description": "Rooの動作をカスタマイズする専門的なペルソナ。",
+		"description": "Zooの動作をカスタマイズする専門的なペルソナ。",
 		"searchPlaceholder": "モードを検索...",
 		"noResults": "結果が見つかりません"
 	},
@@ -144,7 +144,7 @@
 	"diffError": {
 		"title": "編集に失敗しました"
 	},
-	"troubleMessage": "Rooに問題が発生しています...",
+	"troubleMessage": "Zooに問題が発生しています...",
 	"apiRequest": {
 		"title": "APIリクエスト",
 		"failed": "APIリクエスト失敗",
@@ -187,42 +187,42 @@
 		"current": "現在"
 	},
 	"instructions": {
-		"wantsToFetch": "Rooは現在のタスクを支援するための詳細な指示を取得したい"
+		"wantsToFetch": "Zooは現在のタスクを支援するための詳細な指示を取得したい"
 	},
 	"fileOperations": {
-		"wantsToRead": "Rooはこのファイルを読みたい",
-		"wantsToReadOutsideWorkspace": "Rooはワークスペース外のこのファイルを読みたい",
-		"didRead": "Rooはこのファイルを読みました",
-		"wantsToEdit": "Rooはこのファイルを編集したい",
-		"wantsToEditOutsideWorkspace": "Rooはワークスペース外のこのファイルを編集したい",
-		"wantsToEditProtected": "Rooは保護された設定ファイルを編集したい",
-		"wantsToCreate": "Rooは新しいファイルを作成したい",
-		"wantsToSearchReplace": "Rooはこのファイルで検索と置換を行う",
-		"didSearchReplace": "Rooはこのファイルで検索と置換を実行しました",
-		"wantsToInsert": "Rooはこのファイルにコンテンツを挿入したい",
-		"wantsToInsertWithLineNumber": "Rooはこのファイルの{{lineNumber}}行目にコンテンツを挿入したい",
-		"wantsToInsertAtEnd": "Rooはこのファイルの末尾にコンテンツを追加したい",
+		"wantsToRead": "Zooはこのファイルを読みたい",
+		"wantsToReadOutsideWorkspace": "Zooはワークスペース外のこのファイルを読みたい",
+		"didRead": "Zooはこのファイルを読みました",
+		"wantsToEdit": "Zooはこのファイルを編集したい",
+		"wantsToEditOutsideWorkspace": "Zooはワークスペース外のこのファイルを編集したい",
+		"wantsToEditProtected": "Zooは保護された設定ファイルを編集したい",
+		"wantsToCreate": "Zooは新しいファイルを作成したい",
+		"wantsToSearchReplace": "Zooはこのファイルで検索と置換を行う",
+		"didSearchReplace": "Zooはこのファイルで検索と置換を実行しました",
+		"wantsToInsert": "Zooはこのファイルにコンテンツを挿入したい",
+		"wantsToInsertWithLineNumber": "Zooはこのファイルの{{lineNumber}}行目にコンテンツを挿入したい",
+		"wantsToInsertAtEnd": "Zooはこのファイルの末尾にコンテンツを追加したい",
 		"wantsToReadAndXMore": "Zoo はこのファイルと他に {{count}} 個のファイルを読み込もうとしています",
-		"wantsToReadMultiple": "Rooは複数のファイルを読み取ろうとしています",
-		"wantsToApplyBatchChanges": "Rooは複数のファイルに変更を適用したい",
-		"wantsToGenerateImage": "Rooは画像を生成したい",
-		"wantsToGenerateImageOutsideWorkspace": "Rooはワークスペース外で画像を生成したい",
-		"wantsToGenerateImageProtected": "Rooは保護された場所で画像を生成したい",
-		"didGenerateImage": "Rooは画像を生成しました"
+		"wantsToReadMultiple": "Zooは複数のファイルを読み取ろうとしています",
+		"wantsToApplyBatchChanges": "Zooは複数のファイルに変更を適用したい",
+		"wantsToGenerateImage": "Zooは画像を生成したい",
+		"wantsToGenerateImageOutsideWorkspace": "Zooはワークスペース外で画像を生成したい",
+		"wantsToGenerateImageProtected": "Zooは保護された場所で画像を生成したい",
+		"didGenerateImage": "Zooは画像を生成しました"
 	},
 	"directoryOperations": {
-		"wantsToViewTopLevel": "Rooはこのディレクトリのトップレベルファイルを表示したい",
-		"didViewTopLevel": "Rooはこのディレクトリのトップレベルファイルを表示しました",
-		"wantsToViewRecursive": "Rooはこのディレクトリのすべてのファイルを再帰的に表示したい",
-		"didViewRecursive": "Rooはこのディレクトリのすべてのファイルを再帰的に表示しました",
-		"wantsToSearch": "Rooはこのディレクトリで <code>{{regex}}</code> を検索したい",
-		"didSearch": "Rooはこのディレクトリで <code>{{regex}}</code> を検索しました",
-		"wantsToSearchOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）で <code>{{regex}}</code> を検索したい",
-		"didSearchOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）で <code>{{regex}}</code> を検索しました",
-		"wantsToViewTopLevelOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）のトップレベルファイルを表示したい",
-		"didViewTopLevelOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）のトップレベルファイルを表示しました",
-		"wantsToViewRecursiveOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示したい",
-		"didViewRecursiveOutsideWorkspace": "Rooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示しました",
+		"wantsToViewTopLevel": "Zooはこのディレクトリのトップレベルファイルを表示したい",
+		"didViewTopLevel": "Zooはこのディレクトリのトップレベルファイルを表示しました",
+		"wantsToViewRecursive": "Zooはこのディレクトリのすべてのファイルを再帰的に表示したい",
+		"didViewRecursive": "Zooはこのディレクトリのすべてのファイルを再帰的に表示しました",
+		"wantsToSearch": "Zooはこのディレクトリで <code>{{regex}}</code> を検索したい",
+		"didSearch": "Zooはこのディレクトリで <code>{{regex}}</code> を検索しました",
+		"wantsToSearchOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）で <code>{{regex}}</code> を検索したい",
+		"didSearchOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）で <code>{{regex}}</code> を検索しました",
+		"wantsToViewTopLevelOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のトップレベルファイルを表示したい",
+		"didViewTopLevelOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のトップレベルファイルを表示しました",
+		"wantsToViewRecursiveOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示したい",
+		"didViewRecursiveOutsideWorkspace": "Zooはこのディレクトリ（ワークスペース外）のすべてのファイルを再帰的に表示しました",
 		"wantsToViewMultipleDirectories": "Zoo は複数のディレクトリを表示したい"
 	},
 	"commandOutput": "コマンド出力",
@@ -246,24 +246,24 @@
 	"response": "応答",
 	"arguments": "引数",
 	"text": {
-		"rooSaid": "Rooの発言"
+		"rooSaid": "Zooの発言"
 	},
 	"feedback": {
 		"youSaid": "あなたの発言"
 	},
 	"mcp": {
-		"wantsToUseTool": "RooはMCPサーバー{{serverName}}でツールを使用したい",
-		"wantsToAccessResource": "RooはMCPサーバー{{serverName}}のリソースにアクセスしたい"
+		"wantsToUseTool": "ZooはMCPサーバー{{serverName}}でツールを使用したい",
+		"wantsToAccessResource": "ZooはMCPサーバー{{serverName}}のリソースにアクセスしたい"
 	},
 	"modes": {
-		"wantsToSwitch": "Rooは<code>{{mode}}</code>モードに切り替えたい",
-		"wantsToSwitchWithReason": "Rooは次の理由で<code>{{mode}}</code>モードに切り替えたい: {{reason}}",
-		"didSwitch": "Rooは<code>{{mode}}</code>モードに切り替えました",
-		"didSwitchWithReason": "Rooは次の理由で<code>{{mode}}</code>モードに切り替えました: {{reason}}"
+		"wantsToSwitch": "Zooは<code>{{mode}}</code>モードに切り替えたい",
+		"wantsToSwitchWithReason": "Zooは次の理由で<code>{{mode}}</code>モードに切り替えたい: {{reason}}",
+		"didSwitch": "Zooは<code>{{mode}}</code>モードに切り替えました",
+		"didSwitchWithReason": "Zooは次の理由で<code>{{mode}}</code>モードに切り替えました: {{reason}}"
 	},
 	"subtasks": {
-		"wantsToCreate": "Rooは<code>{{mode}}</code>モードで新しいサブタスクを作成したい",
-		"wantsToFinish": "Rooはこのサブタスクを終了したい",
+		"wantsToCreate": "Zooは<code>{{mode}}</code>モードで新しいサブタスクを作成したい",
+		"wantsToFinish": "Zooはこのサブタスクを終了したい",
 		"newTaskContent": "サブタスク指示",
 		"completionContent": "サブタスク完了",
 		"resultContent": "サブタスク結果",
@@ -272,7 +272,7 @@
 		"goToSubtask": "タスクを表示"
 	},
 	"questions": {
-		"hasQuestion": "Rooは質問があります"
+		"hasQuestion": "Zooは質問があります"
 	},
 	"taskCompleted": "タスク完了",
 	"modelResponseIncomplete": "モデルの応答が不完全",
@@ -288,7 +288,7 @@
 		"copyToClipboard": "クリップボードにコピー",
 		"copied": "コピーしました！",
 		"diagnostics": "詳細なエラー情報を取得",
-		"proxyProvider": "プロキシベースのプロバイダーを使用しているようです。ログを確認し、Rooのリクエストを書き換えていないことを確認してください。"
+		"proxyProvider": "プロキシベースのプロバイダーを使用しているようです。ログを確認し、Zooのリクエストを書き換えていないことを確認してください。"
 	},
 	"powershell": {
 		"issues": "Windows PowerShellに問題があるようです。こちらを参照してください"
@@ -331,8 +331,8 @@
 		}
 	},
 	"skill": {
-		"wantsToLoad": "Rooはスキルを読み込もうとしています",
-		"didLoad": "Rooはスキルを読み込みました"
+		"wantsToLoad": "Zooはスキルを読み込もうとしています",
+		"didLoad": "Zooはスキルを読み込みました"
 	},
 	"followUpSuggest": {
 		"copyToInput": "入力欄にコピー（またはShift + クリック）",
@@ -375,18 +375,18 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "自動承認リクエスト制限に達しました",
-			"description": "Rooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
+			"description": "Zooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
 			"button": "リセットして続行"
 		},
 		"autoApprovedCostLimitReached": {
 			"title": "自動承認コスト制限に達しました",
-			"description": "Rooは自動承認されたコスト制限の${{count}}に達しました。コストをリセットしてタスクを続行しますか？",
+			"description": "Zooは自動承認されたコスト制限の${{count}}に達しました。コストをリセットしてタスクを続行しますか？",
 			"button": "リセットして続ける"
 		}
 	},
 	"codebaseSearch": {
-		"wantsToSearch": "Rooはコードベースで <code>{{query}}</code> を検索したい",
-		"wantsToSearchWithPath": "Rooは <code>{{path}}</code> 内のコードベースで <code>{{query}}</code> を検索したい",
+		"wantsToSearch": "Zooはコードベースで <code>{{query}}</code> を検索したい",
+		"wantsToSearchWithPath": "Zooは <code>{{path}}</code> 内のコードベースで <code>{{query}}</code> を検索したい",
 		"didSearch_one": "1件の結果が見つかりました",
 		"didSearch_other": "{{count}}件の結果が見つかりました",
 		"resultTooltip": "類似度スコア: {{score}} (クリックしてファイルを開く)"
@@ -468,8 +468,8 @@
 		"clickToEdit": "クリックしてメッセージを編集"
 	},
 	"slashCommand": {
-		"wantsToRun": "Rooはスラッシュコマンドを実行したい",
-		"didRun": "Rooはスラッシュコマンドを実行しました"
+		"wantsToRun": "Zooはスラッシュコマンドを実行したい",
+		"didRun": "Zooはスラッシュコマンドを実行しました"
 	},
 	"todo": {
 		"partial": "{{total}}件中{{completed}}件のTo-Doが完了",
@@ -488,7 +488,7 @@
 		"openMcpSettings": "MCP 設定を開く"
 	},
 	"readCommandOutput": {
-		"title": "Rooがコマンド出力を読み込みました"
+		"title": "Zooがコマンド出力を読み込みました"
 	},
 	"retiredProvider": {
 		"title": "プロバイダーのサポート終了",

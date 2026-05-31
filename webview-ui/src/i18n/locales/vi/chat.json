@@ -187,7 +187,7 @@
 		"current": "Hiện tại"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo muốn lấy hướng dẫn chi tiết để hỗ trợ nhiệm vụ hiện tại"
+		"wantsToFetch": "Zoo muốn lấy hướng dẫn chi tiết để hỗ trợ nhiệm vụ hiện tại"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo muốn đọc tệp này",
@@ -197,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo muốn chỉnh sửa tệp này bên ngoài không gian làm việc",
 		"wantsToEditProtected": "Zoo muốn chỉnh sửa tệp cấu hình được bảo vệ",
 		"wantsToCreate": "Zoo muốn tạo một tệp mới",
-		"wantsToSearchReplace": "Roo muốn thực hiện tìm kiếm và thay thế trong tệp này",
-		"didSearchReplace": "Roo đã thực hiện tìm kiếm và thay thế trong tệp này",
+		"wantsToSearchReplace": "Zoo muốn thực hiện tìm kiếm và thay thế trong tệp này",
+		"didSearchReplace": "Zoo đã thực hiện tìm kiếm và thay thế trong tệp này",
 		"wantsToInsert": "Zoo muốn chèn nội dung vào tệp này",
 		"wantsToInsertWithLineNumber": "Zoo muốn chèn nội dung vào dòng {{lineNumber}} của tệp này",
 		"wantsToInsertAtEnd": "Zoo muốn thêm nội dung vào cuối tệp này",
