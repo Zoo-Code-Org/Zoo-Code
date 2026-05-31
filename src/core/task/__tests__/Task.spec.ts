@@ -156,6 +156,25 @@ vi.mock("../../environment/getEnvironmentDetails", () => ({
 
 vi.mock("../../ignore/RooIgnoreController")
 
+// i18n is not initialized in this suite, so the real t() returns the raw translation key.
+// Interpolate just the missing-parameter keys so tests can assert on the resolved, user-facing
+// copy; every other key is delegated to the real t() to keep the rest of the suite unchanged.
+vi.mock("../../../i18n", async (importOriginal) => {
+	const actual = (await importOriginal()) as typeof import("../../../i18n")
+	return {
+		...actual,
+		t: (key: string, args?: Record<string, unknown>) => {
+			if (key === "tools:missingToolParameterWithPath") {
+				return `Zoo tried to use ${args?.toolName} for '${args?.relPath}' without value for required parameter '${args?.paramName}'. Retrying...`
+			}
+			if (key === "tools:missingToolParameter") {
+				return `Zoo tried to use ${args?.toolName} without value for required parameter '${args?.paramName}'. Retrying...`
+			}
+			return actual.t(key, args)
+		},
+	}
+})
+
 vi.mock("../../condense", async (importOriginal) => {
 	const actual = (await importOriginal()) as any
 	return {
@@ -393,6 +412,41 @@ describe("Cline", () => {
 			expect(() => {
 				new Task({ provider: mockProvider, apiConfiguration: mockApiConfig })
 			}).toThrow("Either historyItem or task/images must be provided")
+		})
+	})
+
+	describe("sayAndCreateMissingParamError", () => {
+		it("surfaces a localized error notice and returns the missing-parameter tool error for both relPath branches", async () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const saySpy = vi.spyOn(cline, "say").mockResolvedValue(undefined)
+
+			// relPath provided -> the "...WithPath" message branch.
+			const withPath = await cline.sayAndCreateMissingParamError("read_file", "path", "src/foo.ts")
+			// relPath omitted -> the plain message branch.
+			const withoutPath = await cline.sayAndCreateMissingParamError("execute_command", "command")
+
+			// Both branches emit an "error" say whose resolved text names the tool and the
+			// missing parameter (guards against a silent i18n regression where t() would
+			// otherwise return the raw key or an empty string and still type-check as a String).
+			expect(saySpy).toHaveBeenCalledTimes(2)
+			const [withPathChannel, withPathNotice] = saySpy.mock.calls[0]
+			const [withoutPathChannel, withoutPathNotice] = saySpy.mock.calls[1]
+			expect(withPathChannel).toBe("error")
+			expect(withoutPathChannel).toBe("error")
+			expect(withPathNotice).toEqual(expect.stringContaining("read_file"))
+			expect(withPathNotice).toEqual(expect.stringContaining("path"))
+			expect(withoutPathNotice).toEqual(expect.stringContaining("execute_command"))
+			expect(withoutPathNotice).toEqual(expect.stringContaining("command"))
+
+			// The returned tool error names the missing parameter.
+			expect(withPath).toContain("path")
+			expect(withoutPath).toContain("command")
 		})
 	})
 

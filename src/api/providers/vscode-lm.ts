@@ -395,7 +395,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		try {
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
-				justification: `Roo Code would like to use '${client.name}' from '${client.vendor}', Click 'Allow' to proceed.`,
+				justification: `Zoo Code would like to use '${client.name}' from '${client.vendor}', Click 'Allow' to proceed.`,
 				tools: convertToVsCodeLmTools(metadata?.tools ?? []),
 			}
 
