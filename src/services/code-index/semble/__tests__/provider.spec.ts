@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import * as path from "path"
 import { SembleProvider } from "../provider"
 import { SembleCLI } from "../semble-cli"
 import { SEMBLE_DEFAULTS } from "../types"
@@ -307,7 +308,8 @@ describe("SembleProvider", () => {
 
 			await provider.searchIndex("test", "src/subdir")
 
-			expect(mockCli.search).toHaveBeenCalledWith("test", "/workspace/src/subdir", {
+			const expectedPath = path.join("/workspace", "src/subdir")
+			expect(mockCli.search).toHaveBeenCalledWith("test", expectedPath, {
 				topK: SEMBLE_DEFAULTS.DEFAULT_TOP_K,
 				content: SEMBLE_DEFAULTS.DEFAULT_CONTENT,
 			})
