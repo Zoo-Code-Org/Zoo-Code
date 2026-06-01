@@ -668,9 +668,6 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		const { pushToolResult } = callbacks
 		const modelInfo = task.api.getModel().info
 
-		// Temporary indicator for testing legacy format detection
-		console.warn("[read_file] Legacy format detected - using backward compatibility path")
-
 		if (!fileEntries || fileEntries.length === 0) {
 			task.consecutiveMistakeCount++
 			task.recordToolError("read_file")
@@ -694,6 +691,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				await task.say("rooignore_error", relPath)
 				const errorMsg = formatResponse.rooIgnoreError(relPath)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)
+				// Mirror the native path: a blocked file marks the tool turn as failed.
+				task.didToolFailInCurrentTurn = true
 				continue
 			}
 
@@ -731,6 +730,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					const errorMsg = `Cannot read '${relPath}' because it is a directory.`
 					results.push(`File: ${relPath}\nError: ${errorMsg}`)
 					await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+					// Mirror the native path: a failed read marks the tool turn as failed.
+					task.didToolFailInCurrentTurn = true
 					continue
 				}
 
@@ -802,6 +803,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				results.push(`File: ${relPath}\nError: ${errorMsg}`)
 				await task.say("error", `Error reading file ${relPath}: ${errorMsg}`)
+				// Mirror the native path: a failed read marks the tool turn as failed.
+				task.didToolFailInCurrentTurn = true
 			}
 		}
 
