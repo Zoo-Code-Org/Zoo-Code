@@ -1013,19 +1013,22 @@ export const webviewMessageHandler = async (
 				})
 			}
 
-			// Opencode Go is conditional on apiKey (its /models endpoint requires auth)
+			// Opencode Go's /models endpoint is public — it returns the full model list with no
+			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
+			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
+			// model) whenever the key wasn't yet in apiConfiguration at fetch time. The key is still
+			// forwarded when present.
 			const opencodeGoApiKey = message?.values?.opencodeGoApiKey ?? apiConfiguration.opencodeGoApiKey
 
-			if (opencodeGoApiKey) {
-				if (message?.values?.opencodeGoApiKey) {
-					await flushModels({ provider: "opencode-go", apiKey: opencodeGoApiKey }, true)
-				}
-
-				candidates.push({
-					key: "opencode-go",
-					options: { provider: "opencode-go", apiKey: opencodeGoApiKey },
-				})
+			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
+			if (message?.values?.opencodeGoApiKey) {
+				await flushModels({ provider: "opencode-go", apiKey: opencodeGoApiKey }, true)
 			}
+
+			candidates.push({
+				key: "opencode-go",
+				options: { provider: "opencode-go", apiKey: opencodeGoApiKey },
+			})
 
 			// Apply single provider filter if specified
 			const modelFetchPromises = providerFilter

@@ -357,6 +357,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			apiKey: "litellm-key",
 			baseUrl: "http://localhost:4000",
 		})
+		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
+		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
 
 		// Verify response was sent
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -371,10 +373,39 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
-				"opencode-go": {},
+				"opencode-go": mockModels,
 			},
 			values: undefined,
 		})
+	})
+
+	it("fetches Opencode Go models without an API key (public /models endpoint, regression for empty picker)", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: {
+				openRouterApiKey: "openrouter-key",
+				// Deliberately no opencodeGoApiKey — the endpoint is public.
+			},
+		})
+
+		const mockModels: ModelRecord = {
+			"glm-5.1": {
+				maxTokens: 4096,
+				contextWindow: 8192,
+				supportsPromptCache: false,
+				description: "GLM 5.1",
+			},
+		}
+		mockGetModels.mockResolvedValue(mockModels)
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestRouterModels" })
+
+		// Must be fetched despite no configured key, forwarding apiKey: undefined.
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: undefined })
+
+		const routerModelsCall = (mockClineProvider.postMessageToWebview as any).mock.calls.find(
+			([msg]: [{ type: string }]) => msg.type === "routerModels",
+		)
+		expect(routerModelsCall?.[0].routerModels["opencode-go"]).toEqual(mockModels)
 	})
 
 	it("handles LiteLLM models with values from message when config is missing", async () => {
@@ -458,7 +489,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
-				"opencode-go": {},
+				"opencode-go": mockModels,
 			},
 			values: undefined,
 		})
@@ -481,6 +512,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockResolvedValueOnce(mockModels) // unbound
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
+			.mockResolvedValueOnce(mockModels) // opencode-go
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
@@ -514,7 +546,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
-				"opencode-go": {},
+				"opencode-go": mockModels,
 			},
 			values: undefined,
 		})
