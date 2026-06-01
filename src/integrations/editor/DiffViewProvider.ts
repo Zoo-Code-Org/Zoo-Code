@@ -660,20 +660,6 @@ export class DiffViewProvider {
 			openFile = true
 		}
 
-		// When auto-approval is disabled, force showing the file so the user
-		// can review changes. Background editing only makes sense when writes
-		// are auto-approved (#8736).
-		if (!openFile) {
-			const task = this.taskRef.deref()
-			const provider = task?.providerRef.deref()
-			if (provider) {
-				const state = await provider.getState()
-				if (!state?.autoApprovalEnabled) {
-					openFile = true
-				}
-			}
-		}
-
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
