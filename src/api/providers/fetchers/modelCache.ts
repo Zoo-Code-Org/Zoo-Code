@@ -38,6 +38,16 @@ const modelRecordSchema = z.record(z.string(), modelInfoSchema)
 // This prevents race conditions where multiple calls might overwrite each other's results
 const inFlightRefresh = new Map<RouterName, Promise<ModelRecord>>()
 
+// Providers whose model lists are scoped to the signed-in user (e.g. per-account
+// allowlists or org policies). For these we MUST NOT cache results on disk or
+// in memory: a sign-in/out cycle could otherwise serve a previous user's model
+// list to the next user, and stale data could mask backend allowlist updates.
+const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set(["zoo-gateway"])
+
+function isAuthScopedProvider(provider: RouterName): boolean {
+	return AUTH_SCOPED_PROVIDERS.has(provider)
+}
+
 async function writeModels(router: RouterName, data: ModelRecord) {
 	const filename = `${router}_models.json`
 	const cacheDir = await getCacheDirectoryPath(ContextProxy.instance.globalStorageUri.fsPath)
@@ -124,8 +134,7 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 export const getModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
 	const { provider } = options
 
-	// Always fetch fresh to prevent serving stale models from different auth contexts.
-	const shouldSkipCache = provider === "zoo-gateway"
+	const shouldSkipCache = isAuthScopedProvider(provider)
 
 	let models = shouldSkipCache ? undefined : getModelsFromCache(provider)
 
@@ -137,9 +146,8 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 		models = await fetchModelsFromProvider(options)
 		const modelCount = Object.keys(models).length
 
-		// Only cache non-empty results to prevent persisting failed API responses
-		// Empty results could indicate API failure rather than "no models exist"
-		// Zoo Gateway models are user-specific - skip caching entirely
+		// Only cache non-empty results so a failed API response doesn't get persisted
+		// as if the provider had no models. Auth-scoped providers skip caching entirely.
 		if (modelCount > 0 && !shouldSkipCache) {
 			memoryCache.set(provider, models)
 
@@ -175,10 +183,7 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 export const refreshModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
 	const { provider } = options
 
-	// Zoo Gateway models are user-specific (auth-scoped). Mirror the bypass in
-	// getModels() so we never persist one user's model list and serve it to a
-	// different authenticated user from cache.
-	const shouldSkipCache = provider === "zoo-gateway"
+	const shouldSkipCache = isAuthScopedProvider(provider)
 
 	// Check if there's already an in-flight refresh for this provider.
 	// This prevents race conditions where multiple concurrent refreshes might
