@@ -89,3 +89,61 @@ describe("filterNativeToolsForMode - disabledTools", () => {
 		expect(resultNames).not.toContain("edit")
 	})
 })
+
+describe("filterNativeToolsForMode - access_mcp_resource allowlist", () => {
+	const nativeTools: OpenAI.Chat.ChatCompletionTool[] = [makeTool("read_file"), makeTool("access_mcp_resource")]
+
+	// Minimal McpHub stub exposing only getServers(), which is all the resource
+	// availability check uses.
+	function makeMcpHub(servers: Array<{ name: string; resources?: unknown[] }>): any {
+		return {
+			getServers: () => servers,
+		}
+	}
+
+	it("keeps access_mcp_resource when an allowed server has resources", () => {
+		const mcpHub = makeMcpHub([{ name: "allowed-server", resources: [{ uri: "res://x" }] }])
+
+		const result = filterNativeToolsForMode(nativeTools, "code", undefined, undefined, undefined, {}, mcpHub, [
+			"allowed-server",
+		])
+
+		const resultNames = result.map((t) => (t as any).function.name)
+		expect(resultNames).toContain("access_mcp_resource")
+	})
+
+	it("removes access_mcp_resource when only a disallowed server has resources", () => {
+		// The server with resources is NOT in the allowlist, so the restricted
+		// mode must not retain access_mcp_resource.
+		const mcpHub = makeMcpHub([
+			{ name: "allowed-server", resources: [] },
+			{ name: "blocked-server", resources: [{ uri: "res://secret" }] },
+		])
+
+		const result = filterNativeToolsForMode(nativeTools, "code", undefined, undefined, undefined, {}, mcpHub, [
+			"allowed-server",
+		])
+
+		const resultNames = result.map((t) => (t as any).function.name)
+		expect(resultNames).not.toContain("access_mcp_resource")
+		expect(resultNames).toContain("read_file")
+	})
+
+	it("considers all servers when no allowlist is provided (unrestricted mode)", () => {
+		const mcpHub = makeMcpHub([{ name: "any-server", resources: [{ uri: "res://y" }] }])
+
+		const result = filterNativeToolsForMode(nativeTools, "code", undefined, undefined, undefined, {}, mcpHub)
+
+		const resultNames = result.map((t) => (t as any).function.name)
+		expect(resultNames).toContain("access_mcp_resource")
+	})
+
+	it("removes access_mcp_resource when the allowlist is empty", () => {
+		const mcpHub = makeMcpHub([{ name: "some-server", resources: [{ uri: "res://z" }] }])
+
+		const result = filterNativeToolsForMode(nativeTools, "code", undefined, undefined, undefined, {}, mcpHub, [])
+
+		const resultNames = result.map((t) => (t as any).function.name)
+		expect(resultNames).not.toContain("access_mcp_resource")
+	})
+})
