@@ -51,6 +51,8 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	protected options: ApiHandlerOptions
 	protected config: OpenAICompatibleConfig
 	protected provider: ReturnType<typeof createOpenAICompatible>
+	// Abort controller for cancelling ongoing requests (fixes #404)
+	private abortController?: AbortController
 
 	constructor(options: ApiHandlerOptions, config: OpenAICompatibleConfig) {
 		super()
@@ -155,42 +157,55 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const model = this.getModel()
-		const languageModel = this.getLanguageModel()
+		// Create AbortController for cancellation (fixes #404)
+		this.abortController = new AbortController()
 
-		// Convert messages to AI SDK format
-		const aiSdkMessages = convertToAiSdkMessages(messages)
+		try {
+			const model = this.getModel()
+			const languageModel = this.getLanguageModel()
 
-		// Convert tools to OpenAI format first, then to AI SDK format
-		const openAiTools = this.convertToolsForOpenAI(metadata?.tools)
-		const aiSdkTools = convertToolsForAiSdk(openAiTools) as ToolSet | undefined
+			// Convert messages to AI SDK format
+			const aiSdkMessages = convertToAiSdkMessages(messages)
 
-		// Build the request options
-		const requestOptions: Parameters<typeof streamText>[0] = {
-			model: languageModel,
-			system: systemPrompt,
-			messages: aiSdkMessages,
-			temperature: model.temperature ?? this.config.temperature ?? 0,
-			maxOutputTokens: this.getMaxOutputTokens(),
-			tools: aiSdkTools,
-			toolChoice: this.mapToolChoice(metadata?.tool_choice),
-		}
+			// Convert tools to OpenAI format first, then to AI SDK format
+			const openAiTools = this.convertToolsForOpenAI(metadata?.tools)
+			const aiSdkTools = convertToolsForAiSdk(openAiTools) as ToolSet | undefined
 
-		// Use streamText for streaming responses
-		const result = streamText(requestOptions)
-
-		// Process the full stream to get all events
-		for await (const part of result.fullStream) {
-			// Use the processAiSdkStreamPart utility to convert stream parts
-			for (const chunk of processAiSdkStreamPart(part)) {
-				yield chunk
+			// Build the request options
+			const requestOptions: Parameters<typeof streamText>[0] = {
+				model: languageModel,
+				system: systemPrompt,
+				messages: aiSdkMessages,
+				temperature: model.temperature ?? this.config.temperature ?? 0,
+				maxOutputTokens: this.getMaxOutputTokens(),
+				tools: aiSdkTools,
+				toolChoice: this.mapToolChoice(metadata?.tool_choice),
+				abortSignal: this.abortController.signal,
 			}
-		}
 
-		// Yield usage metrics at the end
-		const usage = await result.usage
-		if (usage) {
-			yield this.processUsageMetrics(usage)
+			// Use streamText for streaming responses
+			const result = streamText(requestOptions)
+
+			// Process the full stream to get all events
+			for await (const part of result.fullStream) {
+				// Check if request was aborted (fixes #404)
+				if (this.abortController?.signal.aborted) {
+					break
+				}
+
+				// Use the processAiSdkStreamPart utility to convert stream parts
+				for (const chunk of processAiSdkStreamPart(part)) {
+					yield chunk
+				}
+			}
+
+			// Yield usage metrics at the end
+			const usage = await result.usage
+			if (usage) {
+				yield this.processUsageMetrics(usage)
+			}
+		} finally {
+			this.abortController = undefined
 		}
 	}
 
@@ -198,15 +213,23 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	 * Complete a prompt using the AI SDK generateText.
 	 */
 	async completePrompt(prompt: string): Promise<string> {
-		const languageModel = this.getLanguageModel()
+		// Create AbortController for cancellation (fixes #404)
+		this.abortController = new AbortController()
 
-		const { text } = await generateText({
-			model: languageModel,
-			prompt,
-			maxOutputTokens: this.getMaxOutputTokens(),
-			temperature: this.config.temperature ?? 0,
-		})
+		try {
+			const languageModel = this.getLanguageModel()
 
-		return text
+			const { text } = await generateText({
+				model: languageModel,
+				prompt,
+				maxOutputTokens: this.getMaxOutputTokens(),
+				temperature: this.config.temperature ?? 0,
+				abortSignal: this.abortController.signal,
+			})
+
+			return text
+		} finally {
+			this.abortController = undefined
+		}
 	}
 }

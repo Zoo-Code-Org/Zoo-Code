@@ -354,7 +354,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 					stream: true,
 					stream_options: { include_usage: true },
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -543,6 +543,136 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			const endChunks = chunks.filter((chunk) => chunk.type === "tool_call_end")
 			expect(endChunks).toHaveLength(0)
+		})
+	})
+
+	describe("Abort/cancellation support (fixes #404)", () => {
+		it("should pass abort signal to chat.completions.create in createMessage", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "Hello" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}
+			})
+
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			// Verify signal was passed to the SDK
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "test-model" }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("should stop yielding chunks when abort is signaled mid-stream", async () => {
+			let resolveSecondChunk: () => void
+			const secondChunkPromise = new Promise<void>((resolve) => {
+				resolveSecondChunk = resolve
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				let callCount = 0
+				return {
+					[Symbol.asyncIterator]: () => ({
+						next: vi.fn().mockImplementation(async () => {
+							callCount++
+							if (callCount === 1) {
+								return {
+									done: false,
+									value: { choices: [{ delta: { content: "Before abort" } }] },
+								}
+							}
+							// Wait until the test signals abort
+							await secondChunkPromise
+							return {
+								done: false,
+								value: { choices: [{ delta: { content: "After abort" } }] },
+							}
+						}),
+					}),
+				}
+			})
+
+			const stream = handler.createMessage("system prompt", [])
+
+			// Collect chunks with abort after first
+			const chunks: any[] = []
+			const iterator = stream[Symbol.asyncIterator]()
+
+			// Get first chunk
+			const first = await iterator.next()
+			chunks.push(first.value)
+
+			// Access the private abortController to signal abort
+			// The abortController is created in createMessage, so it exists now
+			const controller = (handler as any).abortController as AbortController
+			expect(controller).toBeDefined()
+			controller.abort()
+			resolveSecondChunk!()
+
+			// The stream should stop after abort
+			const second = await iterator.next()
+			// After abort, the for-await loop breaks, so we get done: true
+			expect(second.done).toBe(true)
+		})
+
+		it("should pass abort signal to chat.completions.create in completePrompt", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+
+			await handler.completePrompt("test prompt")
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "test-model" }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("should clean up abortController after createMessage completes", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "done" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}
+			})
+
+			const stream = handler.createMessage("system prompt", [])
+			for await (const _chunk of stream) {
+				// consume stream
+			}
+
+			// abortController should be cleaned up
+			expect((handler as any).abortController).toBeUndefined()
+		})
+
+		it("should clean up abortController after completePrompt completes", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+
+			await handler.completePrompt("test prompt")
+
+			// abortController should be cleaned up
+			expect((handler as any).abortController).toBeUndefined()
 		})
 	})
 })
