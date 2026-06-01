@@ -7,6 +7,7 @@ import { Task } from "../../task/Task"
 import { formatResponse } from "../../prompts/responses"
 import { ToolUse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
+import { Terminal } from "../../../integrations/terminal/Terminal"
 
 // Mock dependencies
 vitest.mock("execa", () => ({
@@ -267,6 +268,15 @@ describe("executeCommandTool", () => {
 			const error = new executeCommandModule.ShellIntegrationError("stream missing", true)
 
 			expect(executeCommandModule.canRetryShellIntegrationError(error)).toBe(false)
+		})
+
+		it("selects the Execa fallback provider for cmd.exe shell integration", () => {
+			vitest.spyOn(Terminal, "isActiveShellCmdExe").mockReturnValue(true)
+
+			expect(executeCommandModule.getTerminalProviderForExecution(false)).toEqual({
+				terminalProvider: "execa",
+				isCmdExeFallback: true,
+			})
 		})
 	})
 

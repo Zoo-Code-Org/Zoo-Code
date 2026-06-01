@@ -117,6 +117,14 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 		expect(screen.getByTestId("terminal-profile-dropdown")).toBeInTheDocument()
 	})
 
+	it("keeps a saved profile selected while profile names are loading", () => {
+		const { setCachedStateField } = setup("Git Bash")
+
+		expect(screen.getByTestId("terminal-profile-override-radio")).toBeChecked()
+		expect(screen.queryByTestId("terminal-profile-dropdown")).not.toBeInTheDocument()
+		expect(setCachedStateField).not.toHaveBeenCalled()
+	})
+
 	it("falls back to the default radio and clears an unavailable saved profile after profiles load", () => {
 		const { setCachedStateField } = setup("Git Bash")
 		act(() => {
@@ -169,12 +177,13 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 	})
 
 	it("renders the native profile configure button and posts openTerminalProfilePicker when clicked", () => {
-		const { onTerminalProfilePickerOpened } = setup()
+		const { onTerminalProfilePickerOpened, setCachedStateField } = setup("Git Bash")
 		const btn = screen.getByTestId("terminal-profile-configure-button")
 		expect(btn).toBeInTheDocument()
 		fireEvent.click(btn)
 		expect(onTerminalProfilePickerOpened).toHaveBeenCalledTimes(1)
 		expect(postMessageMock).toHaveBeenCalledWith({ type: "openTerminalProfilePicker" })
+		expect(setCachedStateField).not.toHaveBeenCalledWith("terminalProfile", undefined)
 	})
 
 	it("shows picker section when VS Code integrated terminal is active (shell integration enabled)", () => {
@@ -190,6 +199,12 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 	it("hides picker section when terminalShellIntegrationDisabled is undefined (defaults to inline mode)", () => {
 		render(<TerminalSettings setCachedStateField={vi.fn()} />)
 		expect(screen.queryByTestId("terminal-profile-default-radio")).not.toBeInTheDocument()
+		expect(screen.queryByText("settings:terminal.inheritEnv.label")).not.toBeInTheDocument()
+	})
+
+	it("shows the command delay default as 0ms", () => {
+		render(<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />)
+		expect(screen.getByText("0ms")).toBeInTheDocument()
 	})
 
 	it("disables override radio and shows hint when no profiles are available", () => {

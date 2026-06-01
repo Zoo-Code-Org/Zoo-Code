@@ -15,7 +15,9 @@ import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import {
 	ExitCodeDetails,
 	RooTerminalCallbacks,
+	RooTerminalProvider,
 	RooTerminalProcess,
+	ShellIntegrationError,
 	ShellIntegrationErrorDetails,
 } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
@@ -26,17 +28,20 @@ import { t } from "../../i18n"
 import { getTaskDirectoryPath } from "../../utils/storage"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
-export class ShellIntegrationError extends Error {
-	constructor(
-		message: string,
-		public readonly commandSubmitted: boolean,
-	) {
-		super(message)
-	}
-}
+export { ShellIntegrationError } from "../../integrations/terminal/types"
 
 export function canRetryShellIntegrationError(error: unknown): error is ShellIntegrationError {
 	return error instanceof ShellIntegrationError && !error.commandSubmitted
+}
+
+export function getTerminalProviderForExecution(terminalShellIntegrationDisabled: boolean): {
+	terminalProvider: RooTerminalProvider
+	isCmdExeFallback: boolean
+} {
+	const isCmdExeFallback = !terminalShellIntegrationDisabled && Terminal.isActiveShellCmdExe()
+	const terminalProvider = terminalShellIntegrationDisabled || isCmdExeFallback ? "execa" : "vscode"
+
+	return { terminalProvider, isCmdExeFallback }
 }
 
 interface ExecuteCommandParams {
@@ -224,8 +229,7 @@ export async function executeCommandInTerminal(
 	let shellIntegrationError: ShellIntegrationError | undefined
 	let hasAskedForCommandOutput = false
 
-	const isCmdExeFallback = !terminalShellIntegrationDisabled && Terminal.isActiveShellCmdExe()
-	const terminalProvider = terminalShellIntegrationDisabled || isCmdExeFallback ? "execa" : "vscode"
+	const { terminalProvider, isCmdExeFallback } = getTerminalProviderForExecution(terminalShellIntegrationDisabled)
 	const provider = await task.providerRef.deref()
 
 	// cmd.exe can't use shell integration — tell the webview to expand the output
@@ -515,30 +519,14 @@ export async function executeCommandInTerminal(
 			return [false, formatPersistedOutput(persistedResult, exitDetails, currentWorkingDir)]
 		}
 
-		// Use inline format for small outputs (original behavior with exit status)
-		let exitStatus: string = ""
-
-		if (exitDetails !== undefined) {
-			if (exitDetails.signalName) {
-				exitStatus = `Process terminated by signal ${exitDetails.signalName}`
-
-				if (exitDetails.coreDumpPossible) {
-					exitStatus += " - core dump possible"
-				}
-			} else if (exitDetails.exitCode === undefined) {
-				result += "<VSCE exit code is undefined: terminal output and command execution status is unknown.>"
-				exitStatus = `Exit code: <undefined, notify user>`
-			} else {
-				if (exitDetails.exitCode !== 0) {
-					exitStatus += "Command execution was not successful, inspect the cause and adjust as needed.\n"
-				}
-
-				exitStatus += `Exit code: ${exitDetails.exitCode}`
-			}
-		} else {
+		// Use inline format for small outputs (original behavior with exit status).
+		if (exitDetails === undefined) {
 			result += "<VSCE exitDetails == undefined: terminal output and command execution status is unknown.>"
-			exitStatus = `Exit code: <undefined, notify user>`
+		} else if (!exitDetails.signalName && exitDetails.exitCode === undefined) {
+			result += "<VSCE exit code is undefined: terminal output and command execution status is unknown.>"
 		}
+
+		const exitStatus = formatExitStatus(exitDetails)
 
 		return [
 			false,

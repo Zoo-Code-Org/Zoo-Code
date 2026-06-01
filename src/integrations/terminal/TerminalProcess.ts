@@ -114,15 +114,11 @@ export class TerminalProcess extends BaseTerminalProcess {
 		// override (if set) over the VS Code default profile.  Fix for the wrong
 		// config API: must be getConfiguration("terminal.integrated").get(
 		// "defaultProfile.windows"), not the reversed form that always returns null.
-		const profileOverride = Terminal.getTerminalProfile()
-		const defaultWindowsShellProfile =
-			profileOverride ??
-			vscode.workspace.getConfiguration("terminal.integrated").get<string>("defaultProfile.windows")
-
-		const isPowerShell =
-			process.platform === "win32" &&
-			(defaultWindowsShellProfile === null ||
-				(defaultWindowsShellProfile as string)?.toLowerCase().includes("powershell"))
+		const shellKind = {
+			isPowerShell: Terminal.isActiveShellPowerShell(),
+			isFish: Terminal.isActiveShellFish(),
+		}
+		const isPowerShell = shellKind.isPowerShell
 
 		if (isPowerShell) {
 			let commandToExecute = command
@@ -137,9 +133,11 @@ export class TerminalProcess extends BaseTerminalProcess {
 				commandToExecute += ` ; start-sleep -milliseconds ${Terminal.getCommandDelay()}`
 			}
 
-			terminal.shellIntegration.executeCommand(commandToExecute)
+			terminal.shellIntegration.executeCommand(
+				this.prepareCommandForShellIntegration(commandToExecute, shellKind),
+			)
 		} else {
-			terminal.shellIntegration.executeCommand(command)
+			terminal.shellIntegration.executeCommand(this.prepareCommandForShellIntegration(command, shellKind))
 		}
 
 		this.isHot = true
@@ -265,6 +263,31 @@ export class TerminalProcess extends BaseTerminalProcess {
 		this.stopHotTimer()
 		this.emit("completed", this.stripCursorSequences(this.removeVSCodeShellIntegration(this.fullOutput)))
 		this.emit("continue")
+	}
+
+	/**
+	 * VS Code reports each complete top-level statement in multiline input as a
+	 * separate shell execution. Keep the submitted script in one execution so a
+	 * leading assignment cannot complete and detach the tracked process before
+	 * the remaining statements run.
+	 */
+	private prepareCommandForShellIntegration(
+		command: string,
+		shellKind: { isPowerShell: boolean; isFish: boolean },
+	): string {
+		if (!command.includes("\n")) {
+			return command
+		}
+
+		if (shellKind.isPowerShell) {
+			return `. {\n${command}\n}`
+		}
+
+		if (shellKind.isFish) {
+			return `begin\n${command}\nend`
+		}
+
+		return `{\n${command}\n}`
 	}
 
 	public override continue() {

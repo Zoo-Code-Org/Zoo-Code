@@ -71,6 +71,7 @@ export const TerminalSettings = ({
 	const defaultProfileId = `${profileModeId}-default`
 	const overrideProfileId = `${profileModeId}-override`
 	const isProfileOverrideSelected = !!terminalProfile && (!isProfilesLoaded || profileNames.includes(terminalProfile))
+	const isVSCodeTerminalEnabled = terminalShellIntegrationDisabled === false
 
 	useMount(() => {
 		vscode.postMessage({ type: "getVSCodeSetting", setting: "terminal.integrated.inheritEnv" })
@@ -168,7 +169,7 @@ export const TerminalSettings = ({
 						{/* Profile override — only applies when VS Code integrated terminal is active
 						    (shell integration enabled). Hidden in Execa/inline mode since getProfileShell()
 						    is not wired there. */}
-						{terminalShellIntegrationDisabled === false && (
+						{isVSCodeTerminalEnabled && (
 							<SearchableSetting
 								settingId="terminal-profile"
 								section="terminal"
@@ -192,7 +193,6 @@ export const TerminalSettings = ({
 										appearance="secondary"
 										onClick={() => {
 											onTerminalProfilePickerOpened?.()
-											setCachedStateField("terminalProfile", undefined)
 											vscode.postMessage({ type: "openTerminalProfilePicker" })
 										}}
 										data-testid="terminal-profile-configure-button">
@@ -298,7 +298,7 @@ export const TerminalSettings = ({
 							</div>
 						</SearchableSetting>
 
-						{!terminalShellIntegrationDisabled && (
+						{isVSCodeTerminalEnabled && (
 							<>
 								<SearchableSetting
 									settingId="terminal-inherit-env"
@@ -389,7 +389,7 @@ export const TerminalSettings = ({
 												)
 											}
 										/>
-										<span className="w-10">{terminalCommandDelay ?? 50}ms</span>
+										<span className="w-10">{terminalCommandDelay ?? 0}ms</span>
 									</div>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
 										<Trans i18nKey="settings:terminal.commandDelay.description">

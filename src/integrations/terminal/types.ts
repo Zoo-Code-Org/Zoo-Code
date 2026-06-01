@@ -34,6 +34,15 @@ export interface ShellIntegrationErrorDetails {
 	commandSubmitted: boolean
 }
 
+export class ShellIntegrationError extends Error {
+	constructor(
+		message: string,
+		public readonly commandSubmitted: boolean,
+	) {
+		super(message)
+	}
+}
+
 export interface RooTerminalProcess extends EventEmitter<RooTerminalProcessEvents> {
 	command: string
 	isHot: boolean

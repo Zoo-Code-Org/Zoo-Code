@@ -58,6 +58,35 @@ describe("TerminalProcess", () => {
 	})
 
 	describe("run", () => {
+		it("emits no_shell_integration with commandSubmitted=false when shell integration startup times out", async () => {
+			vi.useFakeTimers()
+			const previousTimeout = Terminal.getShellIntegrationTimeout()
+			Terminal.setShellIntegrationTimeout(10)
+
+			try {
+				mockTerminal.shellIntegration = undefined
+				let commandSubmitted: boolean | undefined
+				const runPromise = mockTerminalInfo.runCommand("test command", {
+					onLine: vi.fn(),
+					onCompleted: vi.fn(),
+					onShellExecutionStarted: vi.fn(),
+					onShellExecutionComplete: vi.fn(),
+					onNoShellIntegration: (details) => {
+						commandSubmitted = details.commandSubmitted
+					},
+				})
+
+				await vi.advanceTimersByTimeAsync(20)
+				await runPromise
+
+				expect(commandSubmitted).toBe(false)
+				expect(mockTerminal.sendText).not.toHaveBeenCalled()
+			} finally {
+				Terminal.setShellIntegrationTimeout(previousTimeout)
+				vi.useRealTimers()
+			}
+		})
+
 		it("handles shell integration commands correctly", async () => {
 			let lines: string[] = []
 
@@ -89,6 +118,55 @@ describe("TerminalProcess", () => {
 
 			expect(lines).toEqual(["Initial output", "More output", "Final output"])
 			expect(terminalProcess.isHot).toBe(false)
+		})
+
+		it("wraps multiline POSIX scripts so VS Code tracks them as one shell execution", async () => {
+			const command = 'PR_SHA=abc123\nfor f in one two; do\n  echo "$f @ $PR_SHA"\ndone'
+
+			mockStream = (async function* () {
+				yield "\x1b]633;C\x07"
+				yield "one @ abc123\ntwo @ abc123\n"
+				yield "\x1b]633;D\x07"
+				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+			})()
+
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue({
+				read: vi.fn().mockReturnValue(mockStream),
+			})
+
+			const runPromise = terminalProcess.run(command)
+			terminalProcess.emit("stream_available", mockStream)
+			await runPromise
+
+			expect(mockTerminal.shellIntegration.executeCommand).toHaveBeenCalledWith(`{\n${command}\n}`)
+		})
+
+		it.each([
+			["PowerShell", ". {\necho one\necho two\n}"],
+			["fish", "begin\necho one\necho two\nend"],
+		])("uses the %s multiline wrapper", async (profile, expectedCommand) => {
+			Terminal.setTerminalProfile(profile)
+
+			try {
+				mockStream = (async function* () {
+					yield "\x1b]633;C\x07"
+					yield "one\ntwo\n"
+					yield "\x1b]633;D\x07"
+					terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+				})()
+
+				mockTerminal.shellIntegration.executeCommand.mockReturnValue({
+					read: vi.fn().mockReturnValue(mockStream),
+				})
+
+				const runPromise = terminalProcess.run("echo one\necho two")
+				terminalProcess.emit("stream_available", mockStream)
+				await runPromise
+
+				expect(mockTerminal.shellIntegration.executeCommand).toHaveBeenCalledWith(expectedCommand)
+			} finally {
+				Terminal.setTerminalProfile(undefined)
+			}
 		})
 
 		it("handles terminals without shell integration", async () => {

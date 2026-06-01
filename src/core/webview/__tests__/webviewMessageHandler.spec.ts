@@ -172,6 +172,7 @@ vi.mock("../../mentions/resolveImageMentions", () => ({
 
 import { resolveImageMentions } from "../../mentions/resolveImageMentions"
 import { Terminal } from "../../../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
@@ -874,32 +875,78 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 describe("webviewMessageHandler - terminalProfile", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		Terminal.setTerminalProfile(undefined)
 	})
 
 	afterEach(() => {
+		Terminal.setTerminalProfile(undefined)
 		vi.restoreAllMocks()
 	})
 
-	it("bridges a saved terminalProfile from updateSettings into the process-wide terminal state", async () => {
-		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
+	it("normalizes and persists a saved terminalProfile, then closes stale idle terminals", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
-			updatedSettings: { terminalProfile: "Git Bash" },
+			updatedSettings: { terminalProfile: " Git Bash " },
 		})
 
-		expect(setTerminalProfileSpy).toHaveBeenCalledWith("Git Bash")
+		expect(Terminal.getTerminalProfile()).toBe("Git Bash")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
 	})
 
-	it("clears the terminal profile when updateSettings sends undefined", async () => {
-		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
+	it("does not close idle terminals when hydration sends the unchanged profile", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
-			updatedSettings: { terminalProfile: undefined },
+			updatedSettings: { terminalProfile: " Git Bash " },
 		})
 
-		expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+		expect(closeIdleTerminalsSpy).not.toHaveBeenCalled()
+	})
+
+	it("clears the persisted profile when SettingsView sends the empty-string sentinel", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: "" },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBeUndefined()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not close idle terminals when the empty-string sentinel leaves the profile unset", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: "" },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).not.toHaveBeenCalled()
+	})
+
+	it("treats non-string terminalProfile values as unset", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: 42 as any },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBeUndefined()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
 	})
 })
 

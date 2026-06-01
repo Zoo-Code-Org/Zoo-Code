@@ -44,7 +44,7 @@ export abstract class BaseTerminal implements RooTerminal {
 	/**
 	 * Sets the active stream for this terminal and notifies the process
 	 * @param stream The stream to set, or undefined to clean up
-	 * @throws Error if process is undefined when a stream is provided
+	 * If no process exists when a stream is provided, logs a warning and returns.
 	 */
 	public setActiveStream(stream: AsyncIterable<string> | undefined, pid?: number): void {
 		if (stream) {

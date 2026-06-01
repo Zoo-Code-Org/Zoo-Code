@@ -166,6 +166,17 @@ suite("Terminal Profile", function () {
 			assert.ok(content.includes("zoo-profile-override-ok"), `Output file should contain marker, got: ${content}`)
 
 			assert.ok(vscode.window.terminals.length >= 1, "At least one VS Code terminal should exist")
+			const profileTerminal = vscode.window.terminals.find((terminal) => {
+				const options = terminal.creationOptions as vscode.TerminalOptions
+				return (
+					options.name === "Zoo Code" &&
+					options.shellPath === "/bin/bash" &&
+					Array.isArray(options.shellArgs) &&
+					options.shellArgs.includes("--noprofile") &&
+					options.shellArgs.includes("--norc")
+				)
+			})
+			assert.ok(profileTerminal, "Expected a Zoo Code terminal created with the configured Bash profile")
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
 		}

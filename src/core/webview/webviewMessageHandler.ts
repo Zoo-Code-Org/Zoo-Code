@@ -728,11 +728,16 @@ export const webviewMessageHandler = async (
 							Terminal.setTerminalZdotdir(value as boolean)
 						}
 					} else if (key === "terminalProfile") {
-						Terminal.setTerminalProfile(value as string | undefined)
-						// Discard idle terminals so the next command gets a fresh
-						// terminal using the new profile's shell instead of reusing
-						// a stale one from the previous profile.
-						TerminalRegistry.closeIdleTerminals()
+						const previousProfile = Terminal.getTerminalProfile()
+						Terminal.setTerminalProfile(typeof value === "string" ? value : undefined)
+						newValue = Terminal.getTerminalProfile()
+
+						if (newValue !== previousProfile) {
+							// Discard idle terminals so the next command gets a fresh
+							// terminal using the new profile's shell instead of reusing
+							// a stale one from the previous profile.
+							TerminalRegistry.closeIdleTerminals()
+						}
 					} else if (key === "execaShellPath") {
 						Terminal.setExecaShellPath(value as string | undefined)
 					} else if (key === "mcpEnabled") {

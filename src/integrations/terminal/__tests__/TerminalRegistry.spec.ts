@@ -1,6 +1,8 @@
 // npx vitest run src/integrations/terminal/__tests__/TerminalRegistry.spec.ts
 
 import * as vscode from "vscode"
+import { ExecaTerminal } from "../ExecaTerminal"
+import { ShellIntegrationManager } from "../ShellIntegrationManager"
 import { Terminal } from "../Terminal"
 import { TerminalRegistry } from "../TerminalRegistry"
 
@@ -164,6 +166,18 @@ describe("TerminalRegistry", () => {
 			expect(mockCreateTerminal).toHaveBeenCalledTimes(2)
 		})
 
+		it("creates a new VS Code terminal after changing between named profiles", async () => {
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			Terminal.setTerminalProfile("Git Bash")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+
+			Terminal.setTerminalProfile("zsh")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+
+			expect(second).not.toBe(first)
+			expect(mockCreateTerminal).toHaveBeenCalledTimes(2)
+		})
+
 		it("continues to reuse Execa terminals when the VS Code profile changes", async () => {
 			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "execa")
 
@@ -171,6 +185,23 @@ describe("TerminalRegistry", () => {
 			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "execa")
 
 			expect(second).toBe(first)
+		})
+	})
+
+	describe("closeIdleTerminals", () => {
+		it("disposes only idle VS Code terminals and cleans up their temporary zsh directories", () => {
+			const idle = TerminalRegistry.createTerminal("/idle", "vscode") as Terminal
+			const busy = TerminalRegistry.createTerminal("/busy", "vscode") as Terminal
+			const execa = TerminalRegistry.createTerminal("/inline", "execa") as ExecaTerminal
+			busy.busy = true
+			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
+
+			TerminalRegistry.closeIdleTerminals()
+
+			expect(idle.terminal.dispose).toHaveBeenCalledTimes(1)
+			expect(cleanupSpy).toHaveBeenCalledWith(idle.id)
+			expect(busy.terminal.dispose).not.toHaveBeenCalled()
+			expect(TerminalRegistry["terminals"]).toEqual([busy, execa])
 		})
 	})
 

@@ -480,8 +480,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public setTerminalProfile(name: string | undefined): void {
+		const previousProfile = Terminal.getTerminalProfile()
 		Terminal.setTerminalProfile(name)
-		TerminalRegistry.closeIdleTerminals()
+
+		if (Terminal.getTerminalProfile() !== previousProfile) {
+			TerminalRegistry.closeIdleTerminals()
+		}
 	}
 
 	// Provider Profile Management

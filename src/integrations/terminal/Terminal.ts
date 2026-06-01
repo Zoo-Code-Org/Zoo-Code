@@ -38,10 +38,14 @@ export class Terminal extends BaseTerminal {
 					options.shellArgs = profileShell.shellArgs
 				}
 
-				// Merge the profile's own env on top of the base env so profile-specific
-				// variables (e.g. locale/PATH) are not lost. A `null` value unsets one.
+				console.info(
+					`[Terminal] Creating terminal with profile "${Terminal.getTerminalProfile()}" -> ${profileShell.shellPath}`,
+				)
+
+				// Preserve profile-specific variables (e.g. locale/PATH), but keep
+				// Zoo Code's shell-integration controls authoritative.
 				if (profileShell.env) {
-					options.env = { ...env, ...profileShell.env }
+					options.env = { ...profileShell.env, ...env }
 				}
 			}
 
@@ -123,6 +127,8 @@ export class Terminal extends BaseTerminal {
 			}
 
 			if (Terminal.isActiveShellCmdExe()) {
+				// Keep this defensive fallback for callers that invoke Terminal.runCommand()
+				// directly instead of routing through executeCommandInTerminal().
 				// cmd.exe cannot emit OSC 633;A — skip the timeout entirely and go
 				// straight to the execa fallback (VS Code issue #164646).
 				ShellIntegrationManager.zshCleanupTmpDir(this.id)
@@ -336,14 +342,38 @@ export class Terminal extends BaseTerminal {
 	 */
 	public static getConfiguredProfiles(platform: NodeJS.Platform = process.platform): Record<string, unknown> {
 		const platformKey = Terminal.getPlatformProfileKey(platform)
-		const inspected = vscode.workspace
-			.getConfiguration("terminal.integrated.profiles")
-			.inspect<Record<string, unknown>>(platformKey)
+		const configuration = vscode.workspace.getConfiguration("terminal.integrated.profiles")
+
+		// Some test doubles and older embedders expose get() without inspect().
+		// Falling back to no profiles preserves the trusted-scope guarantee.
+		if (typeof configuration.inspect !== "function") {
+			return {}
+		}
+
+		const inspected = configuration.inspect<Record<string, unknown>>(platformKey)
 
 		return {
 			...(inspected?.defaultValue ?? {}),
 			...(inspected?.globalValue ?? {}),
 		}
+	}
+
+	/**
+	 * Reads the configured default profile from trusted settings scopes only.
+	 */
+	public static getConfiguredDefaultProfileName(platform: NodeJS.Platform = process.platform): string | undefined {
+		const platformKey = Terminal.getPlatformProfileKey(platform)
+		const configuration = vscode.workspace.getConfiguration("terminal.integrated")
+
+		// Some test doubles and older embedders expose get() without inspect().
+		// Falling back to undefined preserves the trusted-scope guarantee.
+		if (typeof configuration.inspect !== "function") {
+			return undefined
+		}
+
+		const inspected = configuration.inspect<string>(`defaultProfile.${platformKey}`)
+
+		return inspected?.globalValue ?? inspected?.defaultValue
 	}
 
 	/**
@@ -353,6 +383,14 @@ export class Terminal extends BaseTerminal {
 	 */
 	public static isCmdExe(shellPath: string): boolean {
 		return /[/\\]cmd\.exe$/i.test(shellPath)
+	}
+
+	public static isPowerShell(shellPath: string): boolean {
+		return /[/\\](?:pwsh|powershell)(?:\.exe)?$/i.test(shellPath)
+	}
+
+	public static isFish(shellPath: string): boolean {
+		return /[/\\]fish(?:\.exe)?$/i.test(shellPath)
 	}
 
 	/**
@@ -372,10 +410,7 @@ export class Terminal extends BaseTerminal {
 		}
 
 		// Fall back to VS Code's configured default profile for Windows.
-		const platformKey = Terminal.getPlatformProfileKey(platform)
-		const defaultProfileName = vscode.workspace
-			.getConfiguration("terminal.integrated")
-			.get<string>(`defaultProfile.${platformKey}`)
+		const defaultProfileName = Terminal.getConfiguredDefaultProfileName(platform)
 
 		if (!defaultProfileName) {
 			return false
@@ -392,8 +427,67 @@ export class Terminal extends BaseTerminal {
 		return resolved ? Terminal.isCmdExe(resolved) : false
 	}
 
+	public static isActiveShellPowerShell(platform: NodeJS.Platform = process.platform): boolean {
+		if (platform !== "win32") {
+			return false
+		}
+
+		const profileOverride = Terminal.getTerminalProfile()
+
+		if (profileOverride) {
+			const profileShell = Terminal.getProfileShell(platform)
+			return profileShell?.shellPath ? Terminal.isPowerShell(profileShell.shellPath) : false
+		}
+
+		const defaultProfileName = Terminal.getConfiguredDefaultProfileName(platform)
+
+		if (!defaultProfileName) {
+			return false
+		}
+
+		const profiles = Terminal.getConfiguredProfiles(platform)
+		const profile = profiles[defaultProfileName] as { path?: unknown; source?: unknown } | null | undefined
+
+		if (!profile) {
+			return false
+		}
+
+		const resolved = Terminal.resolveProfilePath(profile.path, platform)
+
+		if (resolved) {
+			return Terminal.isPowerShell(resolved)
+		}
+
+		return typeof profile.source === "string" && profile.source.toLowerCase().includes("powershell")
+	}
+
+	public static isActiveShellFish(platform: NodeJS.Platform = process.platform): boolean {
+		const profileOverride = Terminal.getTerminalProfile()
+
+		if (profileOverride) {
+			const profileShell = Terminal.getProfileShell(platform)
+			return profileShell?.shellPath ? Terminal.isFish(profileShell.shellPath) : false
+		}
+
+		const defaultProfileName = Terminal.getConfiguredDefaultProfileName(platform)
+
+		if (!defaultProfileName) {
+			return false
+		}
+
+		const profiles = Terminal.getConfiguredProfiles(platform)
+		const profile = profiles[defaultProfileName] as { path?: unknown } | null | undefined
+
+		if (!profile) {
+			return false
+		}
+
+		const resolved = Terminal.resolveProfilePath(profile.path, platform)
+		return resolved ? Terminal.isFish(resolved) : false
+	}
+
 	public static getAvailableProfileNames(platform: NodeJS.Platform = process.platform): string[] {
-		const names = new Set<string>()
+		const names: string[] = []
 
 		for (const [name, entry] of Object.entries(Terminal.getConfiguredProfiles(platform))) {
 			if (!entry || typeof entry !== "object") {
@@ -404,13 +498,17 @@ export class Terminal extends BaseTerminal {
 			const resolved = Terminal.resolveProfilePath(profilePath, platform)
 
 			if (resolved && !Terminal.isCmdExe(resolved)) {
-				names.add(name)
+				names.push(name)
 			}
 		}
 
-		return Array.from(names).sort()
+		return names.sort()
 	}
 
+	/**
+	 * Returns a stable key that prevents terminals created with different VS Code
+	 * profile overrides from being reused interchangeably.
+	 */
 	public static getReuseKey(): string {
 		return `vscode:${Terminal.getTerminalProfile() ?? "default"}`
 	}
@@ -482,9 +580,19 @@ export class Terminal extends BaseTerminal {
 
 		if (profile.env && typeof profile.env === "object") {
 			const sanitized: Record<string, string | null> = {}
+			const blockedKeys = new Set([
+				"ZDOTDIR",
+				"PROMPT_COMMAND",
+				"LD_PRELOAD",
+				"LD_LIBRARY_PATH",
+				"DYLD_INSERT_LIBRARIES",
+				"DYLD_LIBRARY_PATH",
+				"BASH_ENV",
+				"ENV",
+			])
 
 			for (const [key, val] of Object.entries(profile.env)) {
-				if (typeof val === "string" || val === null) {
+				if (!blockedKeys.has(key.toUpperCase()) && (typeof val === "string" || val === null)) {
 					sanitized[key] = val
 				}
 			}
