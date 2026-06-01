@@ -1,8 +1,14 @@
 import React from "react"
 
 export const VSCodeCheckbox = ({ children, onChange, checked, "data-testid": dataTestId, ...props }: any) => (
-	<label data-testid={dataTestId}>
-		<input type="checkbox" checked={checked} onChange={(e: any) => onChange?.(e)} {...props} />
+	<label>
+		<input
+			type="checkbox"
+			data-testid={dataTestId}
+			checked={checked}
+			onChange={(e: any) => onChange?.(e)}
+			{...props}
+		/>
 		{children}
 	</label>
 )
@@ -52,3 +58,31 @@ export const VSCodeTextField = ({ value, onInput, "data-testid": dataTestId, chi
 		{children}
 	</div>
 )
+
+export const VSCodeButton = ({ children, onClick, "data-testid": dataTestId, ...props }: any) => (
+	<button data-testid={dataTestId} onClick={onClick} {...props}>
+		{children}
+	</button>
+)
+
+export const VSCodeBadge = ({ children, ...props }: any) => <span {...props}>{children}</span>
+
+export const VSCodeProgressRing = (props: any) => <div role="progressbar" {...props} />
+
+export const VSCodeDropdown = ({ children, value, onChange, "data-testid": dataTestId, ...props }: any) => (
+	<select data-testid={dataTestId} value={value} onChange={(e: any) => onChange?.(e)} {...props}>
+		{children}
+	</select>
+)
+
+export const VSCodeOption = ({ children, value, ...props }: any) => (
+	<option value={value} {...props}>
+		{children}
+	</option>
+)
+
+export const VSCodePanels = ({ children, ...props }: any) => <div {...props}>{children}</div>
+
+export const VSCodePanelTab = ({ children, ...props }: any) => <div {...props}>{children}</div>
+
+export const VSCodePanelView = ({ children, ...props }: any) => <div {...props}>{children}</div>
