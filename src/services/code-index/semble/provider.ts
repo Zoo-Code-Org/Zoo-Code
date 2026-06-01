@@ -166,7 +166,7 @@ export class SembleProvider implements ISembleProvider {
 
 			// Filter results to the requested directory prefix, if any.
 			if (directoryPrefix) {
-				const normalizedPrefix = path.resolve(this.workspacePath, directoryPrefix).replace(/\\/g, "/")
+				const normalizedPrefix = path.join(this.workspacePath, directoryPrefix).replace(/\\/g, "/")
 				converted = converted.filter((r) => {
 					const filePath = (r.payload?.filePath ?? "").replace(/\\/g, "/")
 					return filePath.startsWith(normalizedPrefix + "/") || filePath === normalizedPrefix
