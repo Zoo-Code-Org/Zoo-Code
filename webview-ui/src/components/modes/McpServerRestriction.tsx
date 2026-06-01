@@ -61,6 +61,18 @@ const McpServerRestriction: React.FC<McpServerRestrictionProps> = ({ customMode,
 	// Reseed-on-mode-switch is keyed on slug; track the last slug we saw.
 	const lastSlugRef = useRef(customMode.slug)
 
+	// Always hold the latest `customMode` and `onCommit` so the debounced flush
+	// merges `allowedMcpServers` into the freshest mode snapshot instead of the
+	// stale one captured when the timeout was scheduled. Without this, an edit to
+	// another field of the same mode within the 150 ms debounce window would be
+	// clobbered when this flush spreads an outdated `customMode`.
+	const latestCustomModeRef = useRef(customMode)
+	const latestOnCommitRef = useRef(onCommit)
+	useEffect(() => {
+		latestCustomModeRef.current = customMode
+		latestOnCommitRef.current = onCommit
+	})
+
 	// Reseed when the user switches to a different mode.
 	useEffect(() => {
 		if (lastSlugRef.current !== customMode.slug) {
@@ -98,10 +110,13 @@ const McpServerRestriction: React.FC<McpServerRestrictionProps> = ({ customMode,
 		}
 		const handle = setTimeout(() => {
 			lastFlushedRef.current = cachedAllowedMcpServers
-			onCommit(customMode.slug, {
-				...customMode,
+			// Merge into the freshest mode snapshot (via refs) so a concurrent edit to
+			// another field within the debounce window is not clobbered by a stale spread.
+			const latestCustomMode = latestCustomModeRef.current
+			latestOnCommitRef.current(latestCustomMode.slug, {
+				...latestCustomMode,
 				allowedMcpServers: cachedAllowedMcpServers,
-				source: customMode.source || "global",
+				source: latestCustomMode.source || "global",
 			})
 		}, 150)
 		return () => clearTimeout(handle)
