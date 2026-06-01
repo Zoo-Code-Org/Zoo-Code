@@ -138,8 +138,9 @@ describe("MCP Server Restriction UI", () => {
 			expect(screen.getByTestId("restrict-mcp-servers-toggle")).toBeInTheDocument()
 		})
 
-		const toggleLabel = screen.getByTestId("restrict-mcp-servers-toggle")
-		const checkbox = toggleLabel.querySelector("input[type='checkbox']") as HTMLInputElement
+		// The toolkit mock forwards `data-testid` to the inner
+		// <input type="checkbox">, so getByTestId resolves to the checkbox input directly.
+		const checkbox = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
 		fireEvent.click(checkbox)
 
 		await waitFor(() => {
@@ -165,8 +166,8 @@ describe("MCP Server Restriction UI", () => {
 			expect(screen.getByTestId("restrict-mcp-servers-toggle")).toBeInTheDocument()
 		})
 
-		const toggleLabel = screen.getByTestId("restrict-mcp-servers-toggle")
-		const checkbox = toggleLabel.querySelector("input[type='checkbox']") as HTMLInputElement
+		// data-testid is forwarded to the inner checkbox input by the toolkit mock.
+		const checkbox = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
 		fireEvent.click(checkbox)
 
 		await waitFor(() => {
@@ -222,17 +223,16 @@ describe("McpServerRestriction subcomponent — flicker regressions", () => {
 			const onCommit = vitest.fn()
 			render(<McpServerRestriction customMode={baseCustomMode} mcpServers={mcpServers} onCommit={onCommit} />)
 
-			const toggleLabel = screen.getByTestId("restrict-mcp-servers-toggle")
-			const checkbox = toggleLabel.querySelector("input[type='checkbox']") as HTMLInputElement
+			// The toolkit mock forwards `data-testid` to the inner checkbox input,
+			// so getByTestId resolves to the <input type="checkbox"> directly.
+			const checkbox = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
 			expect(checkbox.checked).toBe(false)
 			expect(screen.queryByTestId("mcp-server-list")).not.toBeInTheDocument()
 
 			fireEvent.click(checkbox)
 
 			// Synchronous post-click assertions — no advanceTimers, no host echo.
-			const checkboxAfter = screen
-				.getByTestId("restrict-mcp-servers-toggle")
-				.querySelector("input[type='checkbox']") as HTMLInputElement
+			const checkboxAfter = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
 			expect(checkboxAfter.checked).toBe(true)
 			expect(screen.getByTestId("mcp-server-list")).toBeInTheDocument()
 			// Debounced flush has not fired yet.
@@ -314,10 +314,10 @@ describe("McpServerRestriction subcomponent — flicker regressions", () => {
 			const initialCommits = onRender.mock.calls.length
 			expect(initialCommits).toBeGreaterThan(0)
 
-			// (a) Click — exactly 1 additional commit.
-			const serverCheckbox = screen
-				.getByTestId("mcp-server-checkbox-server-a")
-				.querySelector("input[type='checkbox']") as HTMLInputElement
+			// (a) Click — exactly 1 additional commit. The toolkit mock forwards
+			// `data-testid` to the inner checkbox input, so getByTestId resolves
+			// to the <input type="checkbox"> directly.
+			const serverCheckbox = screen.getByTestId("mcp-server-checkbox-server-a") as HTMLInputElement
 			fireEvent.click(serverCheckbox)
 			const afterClickCommits = onRender.mock.calls.length
 			expect(afterClickCommits - initialCommits).toBe(1)
@@ -367,10 +367,10 @@ describe("McpServerRestriction subcomponent — flicker regressions", () => {
 				<McpServerRestriction customMode={customMode} mcpServers={mcpServers} onCommit={onCommit} />,
 			)
 
-			// User edits the allowlist (schedules the debounced flush).
-			const serverCheckbox = screen
-				.getByTestId("mcp-server-checkbox-server-a")
-				.querySelector("input[type='checkbox']") as HTMLInputElement
+			// User edits the allowlist (schedules the debounced flush). The toolkit
+			// mock forwards `data-testid` to the inner checkbox input, so getByTestId
+			// resolves to the <input type="checkbox"> directly.
+			const serverCheckbox = screen.getByTestId("mcp-server-checkbox-server-a") as HTMLInputElement
 			fireEvent.click(serverCheckbox)
 			expect(onCommit).not.toHaveBeenCalled() // debounce hasn't fired yet
 
