@@ -114,7 +114,13 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		supportsImages,
 	})
 
-	// Filter native tools based on mode restrictions.
+	// Resolve mode config to get allowedMcpServers for MCP server filtering.
+	const modeConfig = getModeBySlug(mode ?? defaultModeSlug, customModes)
+	const allowedMcpServers = modeConfig?.allowedMcpServers
+
+	// Filter native tools based on mode restrictions. The allowlist is forwarded so the
+	// access_mcp_resource availability check only considers resources from allowed servers;
+	// otherwise a restricted mode could still read resources from disallowed servers.
 	const filteredNativeTools = filterNativeToolsForMode(
 		nativeTools,
 		mode,
@@ -123,11 +129,8 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		codeIndexManager,
 		filterSettings,
 		mcpHub,
+		allowedMcpServers,
 	)
-
-	// Resolve mode config to get allowedMcpServers for MCP server filtering.
-	const modeConfig = getModeBySlug(mode ?? defaultModeSlug, customModes)
-	const allowedMcpServers = modeConfig?.allowedMcpServers
 
 	// Filter MCP tools based on mode restrictions.
 	const mcpTools = getMcpServerTools(mcpHub, allowedMcpServers)

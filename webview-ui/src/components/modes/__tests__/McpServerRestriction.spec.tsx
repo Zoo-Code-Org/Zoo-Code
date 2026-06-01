@@ -138,8 +138,9 @@ describe("MCP Server Restriction UI", () => {
 			expect(screen.getByTestId("restrict-mcp-servers-toggle")).toBeInTheDocument()
 		})
 
-		const toggleLabel = screen.getByTestId("restrict-mcp-servers-toggle")
-		const checkbox = toggleLabel.querySelector("input[type='checkbox']") as HTMLInputElement
+		// The toolkit mock forwards `data-testid` to the inner
+		// <input type="checkbox">, so getByTestId resolves to the checkbox input directly.
+		const checkbox = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
 		fireEvent.click(checkbox)
 
 		await waitFor(() => {
@@ -165,8 +166,8 @@ describe("MCP Server Restriction UI", () => {
 			expect(screen.getByTestId("restrict-mcp-servers-toggle")).toBeInTheDocument()
 		})
 
-		const toggleLabel = screen.getByTestId("restrict-mcp-servers-toggle")
-		const checkbox = toggleLabel.querySelector("input[type='checkbox']") as HTMLInputElement
+		// data-testid is forwarded to the inner checkbox input by the toolkit mock.
+		const checkbox = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
 		fireEvent.click(checkbox)
 
 		await waitFor(() => {
@@ -222,17 +223,16 @@ describe("McpServerRestriction subcomponent — flicker regressions", () => {
 			const onCommit = vitest.fn()
 			render(<McpServerRestriction customMode={baseCustomMode} mcpServers={mcpServers} onCommit={onCommit} />)
 
-			const toggleLabel = screen.getByTestId("restrict-mcp-servers-toggle")
-			const checkbox = toggleLabel.querySelector("input[type='checkbox']") as HTMLInputElement
+			// The toolkit mock forwards `data-testid` to the inner checkbox input,
+			// so getByTestId resolves to the <input type="checkbox"> directly.
+			const checkbox = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
 			expect(checkbox.checked).toBe(false)
 			expect(screen.queryByTestId("mcp-server-list")).not.toBeInTheDocument()
 
 			fireEvent.click(checkbox)
 
 			// Synchronous post-click assertions — no advanceTimers, no host echo.
-			const checkboxAfter = screen
-				.getByTestId("restrict-mcp-servers-toggle")
-				.querySelector("input[type='checkbox']") as HTMLInputElement
+			const checkboxAfter = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
 			expect(checkboxAfter.checked).toBe(true)
 			expect(screen.getByTestId("mcp-server-list")).toBeInTheDocument()
 			// Debounced flush has not fired yet.
@@ -314,10 +314,10 @@ describe("McpServerRestriction subcomponent — flicker regressions", () => {
 			const initialCommits = onRender.mock.calls.length
 			expect(initialCommits).toBeGreaterThan(0)
 
-			// (a) Click — exactly 1 additional commit.
-			const serverCheckbox = screen
-				.getByTestId("mcp-server-checkbox-server-a")
-				.querySelector("input[type='checkbox']") as HTMLInputElement
+			// (a) Click — exactly 1 additional commit. The toolkit mock forwards
+			// `data-testid` to the inner checkbox input, so getByTestId resolves
+			// to the <input type="checkbox"> directly.
+			const serverCheckbox = screen.getByTestId("mcp-server-checkbox-server-a") as HTMLInputElement
 			fireEvent.click(serverCheckbox)
 			const afterClickCommits = onRender.mock.calls.length
 			expect(afterClickCommits - initialCommits).toBe(1)
@@ -336,6 +336,59 @@ describe("McpServerRestriction subcomponent — flicker regressions", () => {
 			// not 0. The child's render work is still bounded — Test 2 proves the
 			// server-list DOM node is preserved across the heartbeat.
 			expect(afterHeartbeatCommits - afterClickCommits).toBeLessThanOrEqual(1)
+		} finally {
+			vitest.useRealTimers()
+		}
+	})
+
+	/**
+	 * Test 4 — Concurrent-edit safety: the debounced flush must not clobber a
+	 * newer edit to another field of the same mode made within the 150 ms
+	 * window.
+	 *
+	 * Repro: the user toggles a per-server checkbox (schedules the debounced
+	 * flush), then within the debounce window another field of the same mode
+	 * (e.g. `name`) changes — the parent re-renders the component with an
+	 * updated `customMode`. Before the fix, the flush spread the STALE
+	 * `customMode` captured when the timeout was scheduled, sending the old
+	 * `name` back to the host and clobbering the newer value.
+	 *
+	 * After the fix, the flush merges `allowedMcpServers` into the freshest
+	 * `customMode` (via a ref), so the committed snapshot carries the updated
+	 * `name`.
+	 */
+	it("Test 4: debounced flush merges into the latest customMode, not the stale snapshot", () => {
+		vitest.useFakeTimers()
+		try {
+			const onCommit = vitest.fn()
+			const customMode = { ...baseCustomMode, name: "Old Name", allowedMcpServers: [] as string[] }
+
+			const { rerender } = render(
+				<McpServerRestriction customMode={customMode} mcpServers={mcpServers} onCommit={onCommit} />,
+			)
+
+			// User edits the allowlist (schedules the debounced flush). The toolkit
+			// mock forwards `data-testid` to the inner checkbox input, so getByTestId
+			// resolves to the <input type="checkbox"> directly.
+			const serverCheckbox = screen.getByTestId("mcp-server-checkbox-server-a") as HTMLInputElement
+			fireEvent.click(serverCheckbox)
+			expect(onCommit).not.toHaveBeenCalled() // debounce hasn't fired yet
+
+			// Within the debounce window, another field of the same mode changes.
+			const updatedCustomMode = { ...customMode, name: "New Name" }
+			rerender(
+				<McpServerRestriction customMode={updatedCustomMode} mcpServers={mcpServers} onCommit={onCommit} />,
+			)
+
+			// Let the 150 ms debounce fire.
+			vitest.advanceTimersByTime(200)
+
+			expect(onCommit).toHaveBeenCalledTimes(1)
+			const [, committedConfig] = onCommit.mock.calls[0]
+			// The newer field value must be preserved (not clobbered by the stale snapshot).
+			expect(committedConfig.name).toBe("New Name")
+			// And the user's allowlist edit must still be present.
+			expect(committedConfig.allowedMcpServers).toEqual(["server-a"])
 		} finally {
 			vitest.useRealTimers()
 		}
