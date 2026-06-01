@@ -24,6 +24,7 @@ export const MAX_PENDING_BATCHES = 20 // Maximum number of batches to accumulate
 
 /**OpenAI Embedder */
 export const MAX_BATCH_TOKENS = 100000
+export const MAX_BATCH_ITEMS = 32 // Maximum number of items per embedding API call (provider limit, fixes #335)
 export const MAX_ITEM_TOKENS = 8191
 export const BATCH_PROCESSING_CONCURRENCY = 10
 

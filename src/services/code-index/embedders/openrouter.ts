@@ -2,6 +2,7 @@ import { OpenAI } from "openai"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
 import {
 	MAX_BATCH_TOKENS,
+	MAX_BATCH_ITEMS,
 	MAX_ITEM_TOKENS,
 	MAX_BATCH_RETRIES as MAX_RETRIES,
 	INITIAL_RETRY_DELAY_MS as INITIAL_DELAY_MS,
@@ -148,7 +149,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 					continue
 				}
 
-				if (currentBatchTokens + itemTokens <= MAX_BATCH_TOKENS) {
+				if (currentBatchTokens + itemTokens <= MAX_BATCH_TOKENS && currentBatch.length < MAX_BATCH_ITEMS) {
 					currentBatch.push(text)
 					currentBatchTokens += itemTokens
 					processedIndices.push(i)
