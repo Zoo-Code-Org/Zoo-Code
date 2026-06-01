@@ -133,6 +133,11 @@ export class SembleProvider implements ISembleProvider {
 
 	/**
 	 * Searches the codebase using `semble search`.
+	 *
+	 * Always searches the full workspace root to avoid creating separate
+	 * Semble cache directories for each subdirectory. When directoryPrefix
+	 * is provided, results are filtered post-search to only include files
+	 * within that directory.
 	 */
 	async searchIndex(query: string, directoryPrefix?: string): Promise<VectorStoreSearchResult[]> {
 		if (!this._isInitialized) {
@@ -145,22 +150,32 @@ export class SembleProvider implements ISembleProvider {
 		}
 
 		try {
-			let searchPath = this.workspacePath
-			if (directoryPrefix) {
-				// Resolve relative paths against the workspace root
-				searchPath = path.isAbsolute(directoryPrefix)
-					? directoryPrefix
-					: path.join(this.workspacePath, directoryPrefix)
-			}
-			console.log(`[SembleProvider] Searching for "${query}" in ${searchPath}`)
-			const results = await this.cli.search(query, searchPath, {
+			// Always search the full workspace to maintain a single Semble cache.
+			// Semble creates a separate cache directory per path (SHA-256 of the
+			// resolved absolute path), so passing subdirectories would create
+			// redundant indexes and waste disk space.
+			console.log(`[SembleProvider] Searching for "${query}" in ${this.workspacePath}`)
+			const results = await this.cli.search(query, this.workspacePath, {
 				topK: this.config.topK,
 				content: this.config.content,
 			})
 
-			// Semble returns file paths relative to the search path.
-			// We join against searchPath (not workspacePath) to get correct absolute paths.
-			const converted = this._convertResults(results, searchPath)
+			// Semble returns file paths relative to the search path (workspace root).
+			// We join against workspacePath to produce correct absolute paths.
+			let converted = this._convertResults(results, this.workspacePath)
+
+			// Filter results to the requested directory prefix, if any.
+			if (directoryPrefix) {
+				const normalizedPrefix = path.resolve(this.workspacePath, directoryPrefix).replace(/\\/g, "/")
+				converted = converted.filter((r) => {
+					const filePath = (r.payload?.filePath ?? "").replace(/\\/g, "/")
+					return filePath.startsWith(normalizedPrefix + "/") || filePath === normalizedPrefix
+				})
+				console.log(
+					`[SembleProvider] Filtered to "${directoryPrefix}": ${converted.length} of ${results.length} results`,
+				)
+			}
+
 			console.log(
 				`[SembleProvider] Search returned ${converted.length} results (raw: ${results.length}). Sample path: ${converted[0]?.payload?.filePath ?? "none"}`,
 			)

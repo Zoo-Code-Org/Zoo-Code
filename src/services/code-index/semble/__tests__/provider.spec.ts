@@ -292,38 +292,108 @@ describe("SembleProvider", () => {
 			expect(results[0].payload?.filePath).toBe("/workspace/src/good.ts")
 		})
 
-		it("should use directoryPrefix when provided", async () => {
+		it("should always search workspace root regardless of directoryPrefix", async () => {
 			mockCli.search.mockResolvedValue([])
 
 			await provider.searchIndex("test", "/custom/path")
 
-			expect(mockCli.search).toHaveBeenCalledWith("test", "/custom/path", {
+			// Should always pass workspace root to semble, not the directoryPrefix
+			expect(mockCli.search).toHaveBeenCalledWith("test", "/workspace", {
 				topK: SEMBLE_DEFAULTS.DEFAULT_TOP_K,
 				content: SEMBLE_DEFAULTS.DEFAULT_CONTENT,
 			})
 		})
 
-		it("should resolve relative directoryPrefix against workspace path", async () => {
+		it("should always search workspace root with relative directoryPrefix", async () => {
 			mockCli.search.mockResolvedValue([])
 
 			await provider.searchIndex("test", "src/subdir")
 
-			const expectedPath = path.join("/workspace", "src/subdir")
-			expect(mockCli.search).toHaveBeenCalledWith("test", expectedPath, {
+			// Should always pass workspace root to semble
+			expect(mockCli.search).toHaveBeenCalledWith("test", "/workspace", {
 				topK: SEMBLE_DEFAULTS.DEFAULT_TOP_K,
 				content: SEMBLE_DEFAULTS.DEFAULT_CONTENT,
 			})
 		})
 
-		it("should use absolute directoryPrefix as-is", async () => {
-			mockCli.search.mockResolvedValue([])
+		it("should filter results by directoryPrefix when provided", async () => {
+			const mockResults = [
+				{
+					chunk: {
+						content: "code in src/auth",
+						file_path: "src/auth/login.ts",
+						start_line: 1,
+						end_line: 10,
+						language: "typescript",
+						location: "src/auth/login.ts:1-10",
+					},
+					score: 0.95,
+				},
+				{
+					chunk: {
+						content: "code in src/utils",
+						file_path: "src/utils/helper.ts",
+						start_line: 5,
+						end_line: 15,
+						language: "typescript",
+						location: "src/utils/helper.ts:5-15",
+					},
+					score: 0.8,
+				},
+				{
+					chunk: {
+						content: "code in root",
+						file_path: "README.md",
+						start_line: 1,
+						end_line: 5,
+						language: "markdown",
+						location: "README.md:1-5",
+					},
+					score: 0.6,
+				},
+			]
 
-			await provider.searchIndex("test", "/absolute/custom/path")
+			mockCli.search.mockResolvedValue(mockResults)
 
-			expect(mockCli.search).toHaveBeenCalledWith("test", "/absolute/custom/path", {
-				topK: SEMBLE_DEFAULTS.DEFAULT_TOP_K,
-				content: SEMBLE_DEFAULTS.DEFAULT_CONTENT,
-			})
+			const results = await provider.searchIndex("test", "src/auth")
+
+			// Only the src/auth result should pass the filter
+			expect(results).toHaveLength(1)
+			expect(results[0].payload?.filePath).toBe("/workspace/src/auth/login.ts")
+		})
+
+		it("should not filter results when no directoryPrefix is provided", async () => {
+			const mockResults = [
+				{
+					chunk: {
+						content: "code in src/auth",
+						file_path: "src/auth/login.ts",
+						start_line: 1,
+						end_line: 10,
+						language: "typescript",
+						location: "src/auth/login.ts:1-10",
+					},
+					score: 0.95,
+				},
+				{
+					chunk: {
+						content: "code in src/utils",
+						file_path: "src/utils/helper.ts",
+						start_line: 5,
+						end_line: 15,
+						language: "typescript",
+						location: "src/utils/helper.ts:5-15",
+					},
+					score: 0.8,
+				},
+			]
+
+			mockCli.search.mockResolvedValue(mockResults)
+
+			const results = await provider.searchIndex("test")
+
+			// All results should be returned
+			expect(results).toHaveLength(2)
 		})
 
 		it("should return empty array on search error and log telemetry", async () => {
@@ -458,12 +528,12 @@ describe("SembleProvider", () => {
 			expect(results[0].payload?.filePath).toContain("/")
 		})
 
-		it("should join file paths against the searchPath when directoryPrefix is provided", async () => {
+		it("should always join file paths against workspace root, even with directoryPrefix", async () => {
 			const mockResults = [
 				{
 					chunk: {
 						content: "code",
-						file_path: "file.ts",
+						file_path: "src/file.ts",
 						start_line: 1,
 						end_line: 5,
 						language: "typescript",
@@ -475,9 +545,10 @@ describe("SembleProvider", () => {
 
 			mockCli.search.mockResolvedValue(mockResults)
 
-			const results = await provider.searchIndex("test", "/custom/path")
+			// Even with a directoryPrefix, file paths are joined against workspace root
+			const results = await provider.searchIndex("test", "src")
 
-			expect(results[0].payload?.filePath).toBe("/custom/path/file.ts")
+			expect(results[0].payload?.filePath).toBe("/workspace/src/file.ts")
 		})
 
 		it("should assign sequential semble-N IDs to results", async () => {
