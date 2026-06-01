@@ -229,30 +229,21 @@ export class TerminalProcess extends BaseTerminalProcess {
 		} else {
 			const inspectPreOutput = inspect(preOutput, { colors: false, breakLength: Infinity })
 
-			// Empty stream (preOutput === '') is a first-run race: VS Code fires
-			// onDidStartTerminalShellExecution before the shell is fully initialized on
-			// a freshly-created terminal. The command was never submitted, so this is
-			// retryable (commandSubmitted: false triggers the execa fallback).
-			//
-			// Non-empty preOutput means the stream had data but ]633;C never arrived —
-			// a genuine shell integration failure after submission (not retryable).
-			const commandSubmitted = preOutput !== ""
-
-			const errorMsg = commandSubmitted
-				? "VSCE output start escape sequence (]633;C or ]133;C) not received, but the stream has started. Upstream VSCE Bug?"
-				: "VSCE shell integration stream completed with no output on first command (shell startup race). Command was not submitted."
+			// executeCommand() has already been called, so an empty stream cannot prove
+			// the command was never submitted. Treat the status as submitted/unknown to
+			// avoid replaying a potentially side-effecting command through Execa.
+			const errorMsg =
+				"VSCE output start escape sequence (]633;C or ]133;C) not received after command submission. Command execution status is unknown."
 
 			console.error(`[Terminal Process] ${errorMsg} preOutput: ${inspectPreOutput}`)
 
-			this.emit("no_shell_integration", { message: errorMsg, commandSubmitted })
+			this.emit("no_shell_integration", { message: errorMsg, commandSubmitted: true })
 
 			this.emit(
 				"completed",
-				commandSubmitted
-					? "<VSCE shell integration markers not found: terminal output and command execution status is unknown>\n" +
-							`<preOutput>${inspectPreOutput}</preOutput>\n` +
-							"AI MODEL: You MUST notify the user with the information above so they can open a bug report."
-					: "<shell integration stream was empty on first execution: command was not submitted>",
+				"<VSCE shell integration markers not found: terminal output and command execution status is unknown>\n" +
+					`<preOutput>${inspectPreOutput}</preOutput>\n` +
+					"AI MODEL: You MUST notify the user with the information above so they can open a bug report.",
 			)
 
 			this.continue()

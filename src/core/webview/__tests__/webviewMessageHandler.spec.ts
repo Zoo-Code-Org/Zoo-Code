@@ -876,6 +876,10 @@ describe("webviewMessageHandler - terminalProfile", () => {
 		vi.clearAllMocks()
 	})
 
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
 	it("bridges a saved terminalProfile from updateSettings into the process-wide terminal state", async () => {
 		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
 
@@ -885,8 +889,6 @@ describe("webviewMessageHandler - terminalProfile", () => {
 		})
 
 		expect(setTerminalProfileSpy).toHaveBeenCalledWith("Git Bash")
-
-		setTerminalProfileSpy.mockRestore()
 	})
 
 	it("clears the terminal profile when updateSettings sends undefined", async () => {
@@ -898,8 +900,6 @@ describe("webviewMessageHandler - terminalProfile", () => {
 		})
 
 		expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
-
-		setTerminalProfileSpy.mockRestore()
 	})
 })
 

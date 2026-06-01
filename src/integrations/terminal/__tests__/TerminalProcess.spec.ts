@@ -140,7 +140,7 @@ describe("TerminalProcess", () => {
 			consoleWarnSpy.mockRestore()
 		})
 
-		it("emits no_shell_integration with commandSubmitted=false when stream is empty (first-run startup race)", async () => {
+		it("emits no_shell_integration with commandSubmitted=true when stream is empty after submission", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 			let details: { message: string; commandSubmitted: boolean } | undefined
@@ -173,7 +173,7 @@ describe("TerminalProcess", () => {
 			await runPromise
 			await eventPromises
 
-			expect(details?.commandSubmitted).toBe(false)
+			expect(details?.commandSubmitted).toBe(true)
 			consoleErrorSpy.mockRestore()
 		})
 

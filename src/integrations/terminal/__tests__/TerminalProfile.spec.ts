@@ -120,6 +120,7 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 				linux: {
 					zsh: { path: "/bin/zsh" },
 					PowerShell: { source: "PowerShell" },
+					disabled: null,
 					bash: { path: "/bin/bash" },
 					missing: { path: "/missing/bash" },
 				},
