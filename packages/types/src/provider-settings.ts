@@ -585,10 +585,10 @@ export const getApiProtocol = (provider: ProviderName | undefined, modelId?: str
 		return "anthropic"
 	}
 
-	// Vercel AI Gateway, Zoo Gateway, and Roo use anthropic protocol for anthropic models.
+	// Vercel AI Gateway and Zoo Gateway use the anthropic protocol for anthropic models.
 	if (
 		provider &&
-		["vercel-ai-gateway", "zoo-gateway", "roo"].includes(provider) &&
+		["vercel-ai-gateway", "zoo-gateway"].includes(provider) &&
 		modelId &&
 		modelId.toLowerCase().startsWith("anthropic/")
 	) {
