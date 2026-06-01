@@ -30,39 +30,17 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.55.0 新增内容
+## v3.56.0 新增内容
 
-**Zoo Code 首个功能版本** 在 Marketplace 交接的基础上，带来了一个新提供商、Roo Code 的上游 sunset merge，以及一轮覆盖聊天、提供商设置和渲染的用户可见修复。
-
-- 新增 Xiaomi MiMo 一等 API 提供商支持。
-- 合入 Roo Code 的上游 sunset merge 及相关平台更新。
-- 修复 MCP 登录文案、Gemini 全工具集请求，以及 OpenAI 在不支持 temperature 的模型上的处理。
-- 修复 Markdown 单波浪线渲染和诊断临时文件命名。
-- 改进 Z.AI、GLM 和 Vertex AI 的提供商默认值与区域覆盖。
-
-<details>
-  <summary>🌐 可用语言</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- 为 Anthropic、Bedrock 和 Vertex 提供商添加 **Claude Opus 4.8** 支持
+- 新增 **Opencode Go** 作为一等 API 提供商
+- **可靠的任务取消** — 取消任务现在会正确终止正在运行的进程，对于顽固进程还会自动重试 Ctrl+C
+- 修复 Gemini 自定义模型 ID 被忽略并回退到默认值的问题
+- 修复因缺少标记导致的 Grok diff 截断问题
+- 修复 Windows 上未配置 shell 配置文件时 PowerShell 检测失败的问题
+- 修复 VS Code 代码操作仍显示 Roo Code 品牌名称的问题；已本地化为所有支持的语言
+- 修复 Google Cloud 凭据字段收到文件路径时 Vertex AI 的错误警告
+- 六项安全依赖更新（diff、i18next-http-backend、fast-xml-parser、simple-git、uuid、turbo）
 
 ---
 

@@ -104,7 +104,7 @@ describe("WebAuthService", () => {
 		vi.mocked(getRooCodeApiUrl).mockReturnValue("https://api.test.com")
 
 		// Setup utils mock
-		vi.mocked(getUserAgent).mockReturnValue("Roo-Code 1.0.0")
+		vi.mocked(getUserAgent).mockReturnValue("Zoo-Code 1.0.0")
 
 		// Setup crypto mock
 		vi.mocked(crypto.randomBytes).mockReturnValue(Buffer.from("test-random-bytes") as never)

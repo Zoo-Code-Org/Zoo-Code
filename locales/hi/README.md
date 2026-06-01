@@ -30,39 +30,17 @@
 
 Roo Code से Zoo Code में आने के लिए एक quick guide तुम्हें [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration) में मिल जाएगी। We plan to help users as much as possible during the transition, और उसी support के लिए हमारा [Reddit](https://www.reddit.com/r/ZooCode) और [Discord](https://discord.gg/VxfP4Vx3gX) है। अगर तुम्हें कोई problem हो या कोई question हो, आकर पूछो।
 
-## v3.55.0 में नया क्या है
+## v3.56.0 में नया क्या है
 
-**Zoo Code का पहला feature release** marketplace handoff पर आगे बढ़ता है और इसमें एक नया provider, Roo Code के upstream sunset merge, और chat, provider settings, और rendering में user-facing fixes की एक नई खेप शामिल है।
-
-- Xiaomi MiMo को first-class API provider के रूप में जोड़ा गया।
-- Roo Code के upstream sunset merge और उससे जुड़े platform updates को शामिल किया गया।
-- MCP sign-in copy, Gemini की full-tool requests, और unsupported models के लिए OpenAI temperature handling को ठीक किया गया।
-- Markdown में single-tilde rendering और diagnostics temp-file naming को ठीक किया गया।
-- Z.AI, GLM, और Vertex AI के लिए provider defaults और region coverage को बेहतर बनाया गया।
-
-<details>
-  <summary>🌐 उपलब्ध भाषाएँ</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- Anthropic, Bedrock और Vertex providers पर **Claude Opus 4.8** का समर्थन
+- **Opencode Go** को नए first-class API provider के रूप में जोड़ा गया
+- **भरोसेमंद task cancellation** — किसी task को cancel करने पर अब चल रहा process सही तरीके से बंद होता है, जिद्दी processes के लिए automatic Ctrl+C retry भी
+- Gemini के custom model IDs को अनदेखा करके default पर fallback होने की समस्या ठीक की गई
+- Missing diff markers के कारण truncated Grok diffs ठीक किए गए
+- Windows पर कोई shell profile न होने पर PowerShell detection ठीक की गई
+- VS Code code actions में अभी भी Roo Code branding दिखने की समस्या ठीक की गई; सभी supported languages में localized
+- Google Cloud Credentials field में file path मिलने पर Vertex AI की गलत warning ठीक की गई
+- छह security dependency updates (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

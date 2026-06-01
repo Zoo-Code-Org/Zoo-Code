@@ -53,18 +53,17 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.55.0
+## What's New in v3.56.0
 
-**Zoo Code's first feature release** builds on the marketplace handoff with a
-new provider, the upstream sunset merge, and a round of user-facing fixes
-across chat, provider settings, and rendering.
-
-- Add Xiaomi MiMo as a first-class API provider
-- Pull in the upstream Roo Code sunset merge and related platform updates
-- Fix MCP sign-in copy, Gemini full-tool requests, and OpenAI temperature
-  handling for unsupported models
-- Fix Markdown single-tilde rendering and diagnostics temp-file naming
-- Improve provider defaults and region coverage for Z.AI, GLM, and Vertex AI
+- **Claude Opus 4.8** support across Anthropic, Bedrock, and Vertex providers
+- **Opencode Go** added as a new first-class API provider
+- **Reliable task cancellation** — cancelling a task now terminates the running process, with automatic Ctrl+C retry for stubborn processes
+- Fix Gemini custom model IDs being ignored and falling back to the default
+- Fix truncated Grok diffs caused by missing diff markers
+- Fix PowerShell detection on Windows when no shell profile is configured
+- Fix VS Code code actions still showing Roo Code branding; localized into all supported languages
+- Fix Vertex AI warning when the Google Cloud Credentials field receives a file path
+- Six security dependency updates (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 <details>
   <summary>🌐 Available languages</summary>
@@ -88,7 +87,7 @@ across chat, provider settings, and rendering.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-  </details>
+    </details>
 
 ---
 

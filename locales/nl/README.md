@@ -30,39 +30,17 @@
 
 Je vindt een korte handleiding voor de overstap van Roo Code naar Zoo Code in de [Roo→Zoo-migratiegids](https://docs.zoocode.dev/roo-to-zoo-migration). We willen gebruikers zo goed mogelijk helpen tijdens de overgang, en precies daarvoor zijn onze [Reddit](https://www.reddit.com/r/ZooCode) en [Discord](https://discord.gg/VxfP4Vx3gX) er. Als je ergens tegenaan loopt of vragen hebt, kom langs en vraag het.
 
-## Nieuw in v3.55.0
+## Nieuw in v3.56.0
 
-**De eerste feature-release van Zoo Code** bouwt voort op de Marketplace-handoff met een nieuwe provider, de upstream sunset-merge uit Roo Code en een reeks gebruiksvriendelijke fixes in chat, providerinstellingen en rendering.
-
-- Xiaomi MiMo toegevoegd als eersteklas API-provider.
-- De upstream sunset-merge uit Roo Code en bijbehorende platformupdates overgenomen.
-- De MCP-aanmeldtekst, Gemini-verzoeken met de volledige toolset en de OpenAI-temperatuurafhandeling voor niet-ondersteunde modellen gecorrigeerd.
-- Markdown-weergave met één tilde en de naamgeving van tijdelijke diagnostiekbestanden gecorrigeerd.
-- Providerstandaarden en regiodekking voor Z.AI, GLM en Vertex AI verbeterd.
-
-<details>
-  <summary>🌐 Beschikbare talen</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Claude Opus 4.8**-ondersteuning voor Anthropic, Bedrock en Vertex
+- **Opencode Go** toegevoegd als nieuwe eersteklas API-provider
+- **Betrouwbare taakafsluiting** — een taak annuleren beëindigt nu correct het lopende proces, met automatische Ctrl+C-herpoging voor hardnekkige processen
+- Aangepaste Gemini-model-ID's die werden genegeerd en terugvielen op de standaard zijn gecorrigeerd
+- Afgeknipte Grok-diffs door ontbrekende markeerders zijn opgelost
+- PowerShell-detectie op Windows zonder geconfigureerd shell-profiel is gecorrigeerd
+- VS Code-code-acties die nog de Roo Code-naam toonden zijn gecorrigeerd; gelokaliseerd in alle ondersteunde talen
+- Vertex AI-waarschuwing bij een bestandspad in het Google Cloud Credentials-veld is opgelost
+- Zes beveiligingsupdates voor afhankelijkheden (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 

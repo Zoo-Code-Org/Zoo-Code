@@ -10,6 +10,7 @@ import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
 import { addSearchFilesResultFixtures } from "./fixtures/search-files"
+import { addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 
@@ -26,12 +27,21 @@ function isDeepSeekTargetedRun(testFile?: string, testGrep?: string) {
 	return testGrep?.toLowerCase().includes("deepseek") ?? false
 }
 
+function isBedrockTargetedRun(testFile?: string, testGrep?: string) {
+	if (testFile?.toLowerCase().includes("bedrock.test")) {
+		return true
+	}
+
+	return testGrep?.toLowerCase().includes("bedrock") ?? false
+}
+
 async function main() {
 	const isRecord = process.env.AIMOCK_RECORD === "true"
 	const testGrep = getCliFlagValue("--grep") || process.env.TEST_GREP
 	const testFile = getCliFlagValue("--file") || process.env.TEST_FILE
 	const isDeepSeekTest = isDeepSeekTargetedRun(testFile, testGrep)
 	const isGeminiTest = testFile?.toLowerCase().includes("gemini.test") ?? false
+	const isBedrockTest = isBedrockTargetedRun(testFile, testGrep)
 
 	if (isRecord && isDeepSeekTest && !process.env.DEEPSEEK_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
@@ -49,7 +59,9 @@ async function main() {
 	// Replay mode starts aimock when no real API key is present or USE_MOCK is forced.
 	const hasRealApiKey = isDeepSeekTest
 		? !!process.env.DEEPSEEK_API_KEY
-		: !!(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY)
+		: isBedrockTest
+			? true // Bedrock test starts its own binary-event-stream mock server when no real token
+			: !!(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY)
 	const useMock = isRecord || !hasRealApiKey || process.env.USE_MOCK === "true"
 
 	let mock: InstanceType<typeof LLMock> | undefined
@@ -99,6 +111,7 @@ async function main() {
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
+				addSubtaskFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 

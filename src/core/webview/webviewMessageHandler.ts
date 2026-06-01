@@ -1137,15 +1137,6 @@ export const webviewMessageHandler = async (
 			})
 			break
 		}
-		case "requestRooCreditBalance": {
-			const requestId = message.requestId
-			provider.postMessageToWebview({
-				type: "rooCreditBalance",
-				requestId,
-				values: { error: "Roo credit balance is no longer available." },
-			})
-			break
-		}
 		case "requestOpenAiModels":
 			if (message?.values?.baseUrl && message?.values?.apiKey) {
 				const openAiModels = await getOpenAiModels(
