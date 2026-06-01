@@ -137,7 +137,7 @@ const ApiOptions = ({
 	setErrorMessage,
 }: ApiOptionsProps) => {
 	const { t } = useAppTranslation()
-	const { organizationAllowList, openAiCodexIsAuthenticated, zooCodeIsAuthenticated } = useExtensionState()
+	const { organizationAllowList, openAiCodexIsAuthenticated } = useExtensionState()
 
 	const [customHeaders, setCustomHeaders] = useState<[string, string][]>(() => {
 		const headers = apiConfiguration?.openAiHeaders || {}
@@ -270,21 +270,21 @@ const ApiOptions = ({
 			return
 		}
 
+		// Zoo Gateway renders its own auth-state error inline (sign-in card in
+		// ZooGateway.tsx) so it can react to zooCodeIsAuthenticated changes
+		// without re-running this effect or threading auth state through validation.
+		if (apiConfiguration.apiProvider === "zoo-gateway") {
+			setErrorMessage(undefined)
+			return
+		}
+
 		const apiValidationResult = validateApiConfigurationExcludingModelErrors(
 			apiConfiguration,
 			routerModels,
 			organizationAllowList,
-			zooCodeIsAuthenticated,
 		)
 		setErrorMessage(apiValidationResult)
-	}, [
-		apiConfiguration,
-		routerModels,
-		organizationAllowList,
-		setErrorMessage,
-		isRetiredSelectedProvider,
-		zooCodeIsAuthenticated,
-	])
+	}, [apiConfiguration, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
 
 	const onProviderChange = useCallback(
 		(value: ProviderName) => {

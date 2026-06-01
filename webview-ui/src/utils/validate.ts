@@ -291,14 +291,21 @@ export function getModelValidationError(
  * Validates API configuration but excludes model-specific errors.
  * This is used for the general API error display to prevent duplication
  * when model errors are shown in the model selector.
+ *
+ * Zoo Gateway intentionally short-circuits here — its sign-in error is rendered
+ * inline by the `ZooGateway` provider component so the form-level error effect
+ * does not need to track Zoo Code auth state.
  */
 export function validateApiConfigurationExcludingModelErrors(
 	apiConfiguration: ProviderSettings,
 	_routerModels?: RouterModels, // Keeping this for compatibility with the old function.
 	organizationAllowList?: OrganizationAllowList,
-	zooCodeIsAuthenticated?: boolean,
 ): string | undefined {
-	const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration, zooCodeIsAuthenticated)
+	if (apiConfiguration.apiProvider === "zoo-gateway") {
+		return undefined
+	}
+
+	const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration)
 
 	if (keysAndIdsPresentErrorMessage) {
 		return keysAndIdsPresentErrorMessage

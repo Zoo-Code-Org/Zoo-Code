@@ -1,5 +1,5 @@
 import React from "react"
-import { render, waitFor } from "@/utils/test-utils"
+import { render, screen, waitFor } from "@/utils/test-utils"
 import type { ModelInfo, ProviderSettings, RouterModels } from "@roo-code/types"
 
 import { ZooGateway, pickZooGatewayDefaultModelId } from "../ZooGateway"
@@ -10,15 +10,17 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	}),
 }))
 
+const extensionStateMock = {
+	zooCodeIsAuthenticated: true,
+	zooCodeUserEmail: "user@example.com",
+	zooCodeUserName: "User",
+	zooCodeBaseUrl: "https://www.zoocode.dev",
+	uriScheme: "vscode",
+	deviceName: "Test Device",
+}
+
 vi.mock("@src/context/ExtensionStateContext", () => ({
-	useExtensionState: () => ({
-		zooCodeIsAuthenticated: true,
-		zooCodeUserEmail: "user@example.com",
-		zooCodeUserName: "User",
-		zooCodeBaseUrl: "https://www.zoocode.dev",
-		uriScheme: "vscode",
-		deviceName: "Test Device",
-	}),
+	useExtensionState: () => extensionStateMock,
 }))
 
 vi.mock("@src/oauth/urls", () => ({
@@ -164,5 +166,24 @@ describe("ZooGateway component", () => {
 		)
 
 		expect(setApiConfigurationField).not.toHaveBeenCalled()
+	})
+
+	it("renders the sign-in validation error inline when not authenticated", () => {
+		const original = extensionStateMock.zooCodeIsAuthenticated
+		extensionStateMock.zooCodeIsAuthenticated = false
+		try {
+			render(
+				<ZooGateway
+					apiConfiguration={{ apiProvider: "zoo-gateway" } as ProviderSettings}
+					setApiConfigurationField={vi.fn()}
+					routerModels={buildRouterModels(["anthropic/claude-sonnet-4"])}
+					organizationAllowList={baseProps.organizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByText("settings:validation.zooGatewaySignIn")).toBeInTheDocument()
+		} finally {
+			extensionStateMock.zooCodeIsAuthenticated = original
+		}
 	})
 })

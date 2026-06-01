@@ -12,6 +12,7 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 
 import { ModelPicker } from "../ModelPicker"
+import { ApiErrorMessage } from "../ApiErrorMessage"
 
 type ZooGatewayProps = {
 	apiConfiguration: ProviderSettings
@@ -22,31 +23,29 @@ type ZooGatewayProps = {
 	simplifySettings?: boolean
 }
 
-function isSonnet45ModelId(id: string) {
-	return /sonnet-4[.-]5|sonnet-4\.5/i.test(id)
+function isClaudeSonnetModelId(id: string) {
+	return /claude.*sonnet/i.test(id)
 }
 
-// Exported for unit tests.
+// Exported for unit tests. Picks the default Zoo Gateway model id, preferring
+// Claude Sonnet 4.5 → Sonnet 4 → first available Sonnet → first model overall.
 export function pickZooGatewayDefaultModelId(modelIds: string[]) {
 	if (modelIds.length === 0) {
 		return zooGatewayDefaultModelId
 	}
 
-	const sonnet45 = modelIds.filter(isSonnet45ModelId)
-	if (sonnet45.length > 0) {
-		return (
-			sonnet45.find((id) => id === "anthropic/claude-sonnet-4.5") ??
-			sonnet45.find((id) => id.includes("claude-sonnet-4.5")) ??
-			sonnet45[0]
-		)
+	const sonnets = modelIds.filter(isClaudeSonnetModelId)
+	if (sonnets.length === 0) {
+		return modelIds[0]
 	}
 
-	const sonnet4 = modelIds.filter((id) => /claude/i.test(id) && /sonnet/i.test(id) && /sonnet-4/i.test(id))
-	if (sonnet4.length > 0) {
-		return sonnet4[0]
-	}
-
-	return modelIds[0]
+	return (
+		sonnets.find((id) => id === "anthropic/claude-sonnet-4.5") ??
+		sonnets.find((id) => id.includes("claude-sonnet-4.5")) ??
+		sonnets.find((id) => /sonnet-4[.-]5/i.test(id)) ??
+		sonnets.find((id) => /sonnet-4(?![.-]?\d)/i.test(id)) ??
+		sonnets[0]
+	)
 }
 
 export const ZooGateway = ({
@@ -90,6 +89,7 @@ export const ZooGateway = ({
 				</div>
 				{!zooCodeIsAuthenticated ? (
 					<div className="flex flex-col gap-1">
+						<ApiErrorMessage errorMessage={t("settings:validation.zooGatewaySignIn")} />
 						<p className="text-xs text-vscode-descriptionForeground">
 							{t("settings:providers.zooGateway.signInDescription")}
 						</p>
