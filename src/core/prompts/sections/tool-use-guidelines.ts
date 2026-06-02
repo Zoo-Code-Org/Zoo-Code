@@ -7,3 +7,45 @@ export function getToolUseGuidelinesSection(): string {
 
 By carefully considering the user's response after tool executions, you can react accordingly and make informed decisions about how to proceed with the task. This iterative process helps ensure the overall success and accuracy of your work.`
 }
+
+/**
+ * Content Reference (CRT) guidelines.
+ *
+ * CRT allows the agent to cite existing content from session context
+ * instead of regenerating it, saving 80-96% tokens on long fragments.
+ */
+export const CONTENT_REFERENCE_GUIDELINES = `
+## Content Reference (Ref)
+
+You can use \`ref\` parameters to cite content already present in the session context, avoiding redundant generation:
+
+### When to use Ref
+- **Long fragments (>60 chars):** Use \`startAnchor\` + \`endAnchor\` (15-40 chars each)
+  The Selector Engine finds everything between them automatically.
+  Example: \`{ ref: { source: "chat", ref: "-1", startAnchor: "function foo(", endAnchor: "}" } }\`
+- **Short fragments (<=60 chars):** Use \`selector\` (exact substring)
+  Example: \`{ ref: { source: "file", ref: "src/config.ts", selector: "export const API_URL" } }\`
+- **Multi-source composition:** Use \`multi_ref\` with \`join_with\` separator
+  Example: \`{ multi_ref: [...], transform: { join_with: "\\\\n" } }\`
+- **MCP tools:** Use inline \`{{ref:source=chat,ref=-1,startAnchor=...}}\` markers inside strings
+
+### Supported Sources
+| Source | Ref format | Description |
+|--------|-----------|-------------|
+| \`chat\` | \`"-1"\` (last message), \`"-2"\` | Previous assistant messages |
+| \`file\` | \`"src/file.ts"\` (relative path) | Files on disk |
+| \`terminal\` | \`"cmd-xxx.txt"\` (artifact) | Command outputs |
+| \`tool\` | \`"read_file"\` (tool name) | Results of previous tool calls |
+
+### Transforms (optional pipeline)
+Order: \`replace → prepend → wrap_with → append\`
+- \`replace\`: { from: "old", to: "new" } — substring replacement
+- \`prepend\`: "text before" — add before content
+- \`wrap_with\`: "template {content}" — wrap with template
+- \`append\`: "text after" — add after content
+
+### Important
+- \`ref\` is OPTIONAL. If omitted, the tool works as usual.
+- If ref fails (content condensed, file changed), the content is regenerated automatically.
+- Do NOT use both \`command\` and \`ref\` in the same call — ref has priority.
+`

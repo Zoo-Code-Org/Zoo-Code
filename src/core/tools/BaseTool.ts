@@ -2,6 +2,8 @@ import type { ToolName } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import type { ToolUse, HandleError, PushToolResult, AskApproval, NativeToolArgs } from "../../shared/tools"
+import { resolveRef } from "./ref/index"
+import type { ResolveRefResult } from "./ref/index"
 
 /**
  * Callbacks passed to tool execution
@@ -99,6 +101,44 @@ export abstract class BaseTool<TName extends ToolName> {
 	}
 
 	/**
+	 * Inject resolved CRT content into the appropriate parameter for the tool.
+	 * Supports all 7 CRT-enabled tools.
+	 */
+	private injectRefContent(
+		params: ToolParams<TName>,
+		toolName: string,
+		refResults: ResolveRefResult,
+	): ToolParams<TName> {
+		const p = { ...params } as any
+		const content = refResults.joined ?? refResults.content
+
+		switch (toolName) {
+			case "execute_command":
+				p.command = content
+				break
+			case "write_to_file":
+				p.content = content
+				break
+			case "apply_diff":
+				p.diff = content
+				break
+			case "apply_patch":
+				p.patch = content
+				break
+			case "edit":
+			case "search_and_replace":
+			case "search_replace":
+			case "edit_file":
+				// For edit tools, ref replaces new_string
+				// (old_string is still used as the search target)
+				p.new_string = content
+				break
+		}
+
+		return p as ToolParams<TName>
+	}
+
+	/**
 	 * Main entry point for tool execution.
 	 *
 	 * Handles the complete flow:
@@ -131,6 +171,20 @@ export abstract class BaseTool<TName extends ToolName> {
 			if (block.nativeArgs !== undefined) {
 				// Native: typed args provided by NativeToolCallParser.
 				params = block.nativeArgs as ToolParams<TName>
+
+				// CRT: resolve ref if present, with graceful fallback
+				if (block.refMeta) {
+					try {
+						const refResults = await resolveRef(block.refMeta, task)
+						if (refResults?.content) {
+							params = this.injectRefContent(params, block.name, refResults)
+						}
+					} catch (error) {
+						// Graceful fallback: use original params.
+						// Error is logged but does NOT prevent execution.
+						console.error(`[CRT] Failed to resolve ref for ${block.name}:`, error)
+					}
+				}
 			} else {
 				// If legacy/XML markup was provided via params, surface a clear error.
 				const paramsText = (() => {

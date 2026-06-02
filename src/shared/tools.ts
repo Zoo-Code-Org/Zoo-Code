@@ -81,6 +81,9 @@ export const toolParamNames = [
 	// read_file legacy format parameter (backward compatibility)
 	"files",
 	"line_ranges",
+	"ref",
+	"multi_ref",
+	"transform",
 ] as const
 
 export type ToolParamName = (typeof toolParamNames)[number]
@@ -94,13 +97,62 @@ export type NativeToolArgs = {
 	read_file: import("@roo-code/types").ReadFileToolParams
 	read_command_output: { artifact_id: string; search?: string; offset?: number; limit?: number }
 	attempt_completion: { result: string }
-	execute_command: { command: string; cwd?: string; timeout?: number | null }
-	apply_diff: { path: string; diff: string }
-	edit: { file_path: string; old_string: string; new_string: string; replace_all?: boolean }
-	search_and_replace: { file_path: string; old_string: string; new_string: string; replace_all?: boolean }
-	search_replace: { file_path: string; old_string: string; new_string: string }
-	edit_file: { file_path: string; old_string: string; new_string: string; expected_replacements?: number }
-	apply_patch: { patch: string }
+	execute_command: {
+		command: string
+		cwd?: string
+		timeout?: number | null
+		ref?: ContentRef
+		multi_ref?: ContentRef[]
+		transform?: ContentRefParams["transform"]
+	}
+	apply_diff: {
+		path: string
+		diff: string
+		ref?: ContentRef
+		multi_ref?: ContentRef[]
+		transform?: ContentRefParams["transform"]
+	}
+	edit: {
+		file_path: string
+		old_string: string
+		new_string: string
+		replace_all?: boolean
+		ref?: ContentRef
+		multi_ref?: ContentRef[]
+		transform?: ContentRefParams["transform"]
+	}
+	search_and_replace: {
+		file_path: string
+		old_string: string
+		new_string: string
+		replace_all?: boolean
+		ref?: ContentRef
+		multi_ref?: ContentRef[]
+		transform?: ContentRefParams["transform"]
+	}
+	search_replace: {
+		file_path: string
+		old_string: string
+		new_string: string
+		ref?: ContentRef
+		multi_ref?: ContentRef[]
+		transform?: ContentRefParams["transform"]
+	}
+	edit_file: {
+		file_path: string
+		old_string: string
+		new_string: string
+		expected_replacements?: number
+		ref?: ContentRef
+		multi_ref?: ContentRef[]
+		transform?: ContentRefParams["transform"]
+	}
+	apply_patch: {
+		patch: string
+		ref?: ContentRef
+		multi_ref?: ContentRef[]
+		transform?: ContentRefParams["transform"]
+	}
 	list_files: { path: string; recursive?: boolean }
 	new_task: { mode: string; message: string; todos?: string }
 	ask_followup_question: {
@@ -115,7 +167,13 @@ export type NativeToolArgs = {
 	switch_mode: { mode_slug: string; reason: string }
 	update_todo_list: { todos: string }
 	use_mcp_tool: { server_name: string; tool_name: string; arguments?: Record<string, unknown> }
-	write_to_file: { path: string; content: string }
+	write_to_file: {
+		path: string
+		content: string
+		ref?: ContentRef
+		multi_ref?: ContentRef[]
+		transform?: ContentRefParams["transform"]
+	}
 	// Add more tools as they are migrated to native protocol
 }
 
@@ -144,6 +202,75 @@ export interface ToolUse<TName extends ToolName = ToolName> {
 	 * Used for telemetry tracking to monitor migration from old formats.
 	 */
 	usedLegacyFormat?: boolean
+	/**
+	 * Content Reference metadata extracted by parser.
+	 * When present, BaseTool.handle() resolves references before execute().
+	 */
+	refMeta?: ContentRefParams
+}
+
+// ========== Content Reference Types (CRT) ==========
+
+/** Source of content for CRT ref */
+export type ContentSource = "chat" | "file" | "terminal" | "tool"
+
+/**
+ * ContentRef specifies which fragment to cite from session context.
+ *
+ * Priority chain: startLine+endLine > startAnchor+endAnchor > startAnchor > selector
+ *
+ * For strict mode compliance: ALL properties are required in JSON Schema,
+ * but optional ones use `string | null` in TypeScript.
+ */
+export interface ContentRef {
+	source: ContentSource
+	/**
+	 * Source identifier:
+	 * - for "chat": message index ("-1" = last assistant message)
+	 * - for "file": relative file path
+	 * - for "terminal": artifact filename (cmd-xxx.txt)
+	 * - for "tool": tool name (e.g. "read_file")
+	 */
+	ref: string
+
+	// --- Anchor Pair (recommended for fragments >60 chars) ---
+	/** Start anchor: first 15-40 chars of the target fragment */
+	startAnchor?: string
+	/** End anchor: last 15-40 chars of the target fragment, searched AFTER startAnchor */
+	endAnchor?: string
+
+	// --- Full Selector (fallback for fragments <=60 chars) ---
+	/** Exact substring to find in source */
+	selector?: string
+
+	// --- File-specific: Line range ---
+	/** Starting line number (1-based, only for source="file") */
+	startLine?: number
+	/** End line number (1-based, only for source="file") */
+	endLine?: number
+
+	// --- Source hint ---
+	/** Hint for boundary expansion heuristics */
+	contextType?: "code" | "command" | "prose" | "markdown" | "diff"
+}
+
+/**
+ * Parameters for ref-based tool calling.
+ * These are embedded in tool JSON schemas as optional parameters.
+ */
+export interface ContentRefParams {
+	/** Single content reference */
+	ref?: ContentRef
+	/** Multiple content references (for composing from several sources) */
+	multi_ref?: ContentRef[]
+	/** Transform pipeline applied after content resolution */
+	transform?: {
+		append?: string | null
+		prepend?: string | null
+		replace?: { from: string; to: string } | null
+		wrap_with?: string | null // template with {content} placeholder
+		join_with?: string | null // separator for multi_ref fragments
+	}
 }
 
 /**

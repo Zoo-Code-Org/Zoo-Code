@@ -3,7 +3,8 @@ import type { ClineAskUseMcpServer, McpExecutionStatus } from "@roo-code/types"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { t } from "../../i18n"
-import type { ToolUse } from "../../shared/tools"
+import { resolveRef } from "./ref/index"
+import type { ContentRefParams, ContentSource, ToolUse } from "../../shared/tools"
 import { toolNamesMatch } from "../../utils/mcp-name"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -25,6 +26,82 @@ type ValidationResult =
 
 export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	readonly name = "use_mcp_tool" as const
+
+	/**
+	 * Scan string arguments for {{ref:...}} markers and resolve them inline.
+	 * This enables CRT for MCP tools whose schemas we don't control.
+	 */
+	private async injectRefsIntoArgs(args: Record<string, unknown>, task: Task): Promise<Record<string, unknown>> {
+		const resolved: Record<string, unknown> = {}
+
+		for (const [key, value] of Object.entries(args)) {
+			if (typeof value === "string") {
+				resolved[key] = await this.resolveInlineRefs(value, task)
+			} else if (value !== null && typeof value === "object") {
+				// Recursively process nested objects
+				resolved[key] = await this.injectRefsIntoArgs(value as Record<string, unknown>, task)
+			} else {
+				resolved[key] = value
+			}
+		}
+
+		return resolved
+	}
+
+	/**
+	 * Resolve all {{ref:...}} markers within a single string.
+	 * Pattern: {{ref:source=chat,ref=-1,startAnchor=...,endAnchor=...}}
+	 */
+	private readonly REF_PATTERN = /\{\{ref:(.*?)\}\}/
+
+	private async resolveInlineRefs(text: string, task: Task): Promise<string> {
+		if (!this.REF_PATTERN.test(text)) {
+			return text
+		}
+
+		let result = text
+		let match: RegExpExecArray | null
+
+		// Reset lastIndex
+		this.REF_PATTERN.lastIndex = 0
+
+		while ((match = this.REF_PATTERN.exec(result)) !== null) {
+			const fullMatch = match[0]
+			const paramsStr = match[1]
+
+			// Parse key=value pairs from the ref string
+			const params: Record<string, string> = {}
+			for (const part of paramsStr.split(",")) {
+				const eqIdx = part.indexOf("=")
+				if (eqIdx === -1) continue
+				const k = part.slice(0, eqIdx).trim()
+				const v = part.slice(eqIdx + 1).trim()
+				params[k] = v
+			}
+
+			try {
+				const content = await resolveRef(
+					{
+						ref: {
+							source: (params.source || "chat") as ContentSource,
+							ref: params.ref || "-1",
+							startAnchor: params.startAnchor,
+							endAnchor: params.endAnchor,
+							selector: params.selector,
+						},
+					},
+					task,
+				)
+
+				result = result.replace(fullMatch, content.content)
+			} catch (error) {
+				// Graceful fallback: keep the ref marker as-is so model sees failure
+				console.error(`[CRT] Failed to resolve inline ref: ${fullMatch}`, error)
+			}
+		}
+
+		return result
+	}
 
 	async execute(params: UseMcpToolParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { askApproval, handleError, pushToolResult } = callbacks
@@ -308,7 +385,10 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			toolName,
 		})
 
-		const toolResult = await task.providerRef.deref()?.getMcpHub()?.callTool(serverName, toolName, parsedArguments)
+		// Resolve inline {{ref:...}} markers in MCP arguments before sending
+		const resolvedArgs = parsedArguments ? await this.injectRefsIntoArgs(parsedArguments, task) : undefined
+
+		const toolResult = await task.providerRef.deref()?.getMcpHub()?.callTool(serverName, toolName, resolvedArgs)
 
 		let toolResultPretty = "(No response)"
 		let images: string[] = []

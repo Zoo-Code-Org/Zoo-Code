@@ -23,6 +23,7 @@ import {
 	addCustomInstructions,
 	markdownFormattingSection,
 	getSkillsSection,
+	CONTENT_REFERENCE_GUIDELINES,
 } from "./sections"
 
 // Helper function to get prompt component, filtering out empty objects
@@ -89,6 +90,8 @@ ${markdownFormattingSection()}
 ${getSharedToolUseSection()}${toolsCatalog}
 
 	${getToolUseGuidelinesSection()}
+
+${CONTENT_REFERENCE_GUIDELINES}
 
 ${getCapabilitiesSection(cwd, shouldIncludeMcp ? mcpHub : undefined)}
 

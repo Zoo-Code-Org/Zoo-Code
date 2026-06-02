@@ -4,6 +4,7 @@ import { type ToolName, toolNames, type FileEntry } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 
 import {
+	type ContentRefParams,
 	type ToolUse,
 	type McpToolUse,
 	type ToolParamName,
@@ -641,12 +642,23 @@ export class NativeToolCallParser {
 				break
 		}
 
+		// CRT: extract refMeta from partial args
+		let partialRefMeta: ContentRefParams | undefined
+		if (partialArgs && (partialArgs.ref || partialArgs.multi_ref || partialArgs.transform)) {
+			partialRefMeta = {
+				ref: partialArgs.ref,
+				multi_ref: partialArgs.multi_ref,
+				transform: partialArgs.transform,
+			} as ContentRefParams
+		}
+
 		const result: ToolUse = {
 			type: "tool_use" as const,
 			name,
 			params,
 			partial,
 			nativeArgs,
+			refMeta: partialRefMeta,
 		}
 
 		// Preserve original name for API history when an alias was used
@@ -1004,12 +1016,23 @@ export class NativeToolCallParser {
 				)
 			}
 
+			// CRT: extract refMeta from parsed args
+			let refMeta: ContentRefParams | undefined
+			if (args && (args.ref || args.multi_ref || args.transform)) {
+				refMeta = {
+					ref: args.ref,
+					multi_ref: args.multi_ref,
+					transform: args.transform,
+				} as ContentRefParams
+			}
+
 			const result: ToolUse<TName> = {
 				type: "tool_use" as const,
 				name: resolvedName,
 				params,
 				partial: false, // Native tool calls are always complete when yielded
 				nativeArgs,
+				refMeta,
 			}
 
 			// Preserve original name for API history when an alias was used
