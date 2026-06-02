@@ -111,6 +111,45 @@ describe("ThinkingBudget", () => {
 		expect(screen.queryByTestId("reasoning-effort")).not.toBeInTheDocument()
 	})
 
+	const binaryReasoningModel: ModelInfo = {
+		...mockModelInfo,
+		supportsReasoningBinary: true,
+		supportsReasoningBudget: false,
+		supportsReasoningEffort: false,
+	}
+
+	it("should hide the max-output-tokens slider in binary reasoning when reasoning is off", () => {
+		// With reasoning disabled, getModelMaxOutputTokens ignores the slider value, so an
+		// interactive control would be misleading — it must not render (PR #332 review).
+		render(
+			<ThinkingBudget
+				{...defaultProps}
+				apiConfiguration={{ enableReasoningEffort: false }}
+				modelInfo={binaryReasoningModel}
+			/>,
+		)
+
+		expect(screen.getByText("settings:providers.useReasoning")).toBeInTheDocument()
+		expect(screen.queryByTestId("slider")).not.toBeInTheDocument()
+	})
+
+	it("should show and wire the max-output-tokens slider in binary reasoning when reasoning is on", () => {
+		const setApiConfigurationField = vi.fn()
+		render(
+			<ThinkingBudget
+				{...defaultProps}
+				apiConfiguration={{ enableReasoningEffort: true }}
+				setApiConfigurationField={setApiConfigurationField}
+				modelInfo={binaryReasoningModel}
+			/>,
+		)
+
+		const slider = screen.getByTestId("slider")
+		expect(slider).toBeInTheDocument()
+		fireEvent.change(slider, { target: { value: "12288" } })
+		expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", 12288)
+	})
+
 	it("should render sliders when model supports thinking", () => {
 		render(<ThinkingBudget {...defaultProps} />)
 

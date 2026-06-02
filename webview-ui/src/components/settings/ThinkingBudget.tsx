@@ -164,6 +164,27 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 		return null
 	}
 
+	// Max output tokens control used by both binary reasoning and budget reasoning paths.
+	const maxOutputTokensControl = (
+		<div className="flex flex-col gap-1">
+			<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
+			<div className="flex items-center gap-1">
+				<Slider
+					min={8192}
+					max={Math.max(
+						modelInfo.maxTokens || 8192,
+						customMaxOutputTokens,
+						DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
+					)}
+					step={1024}
+					value={[customMaxOutputTokens]}
+					onValueChange={([value]) => setApiConfigurationField("modelMaxTokens", value)}
+				/>
+				<div className="w-12 text-sm text-center">{customMaxOutputTokens}</div>
+			</div>
+		</div>
+	)
+
 	// Models with supportsReasoningBinary (binary reasoning) show a simple on/off toggle
 	if (isReasoningSupported) {
 		return (
@@ -175,6 +196,10 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 					}>
 					{t("settings:providers.useReasoning")}
 				</Checkbox>
+				{/* Only show the max-output-tokens slider when reasoning is enabled: with it off,
+				    getModelMaxOutputTokens returns the model default regardless of the slider, so an
+				    interactive-but-ignored control would mislead. Matches the budget path's guard. */}
+				{enableReasoningEffort && maxOutputTokensControl}
 			</div>
 		)
 	}
