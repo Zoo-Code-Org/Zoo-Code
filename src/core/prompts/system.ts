@@ -98,7 +98,15 @@ ${getSharedToolUseSection()}${toolsCatalog}
 
 	${getToolUseGuidelinesSection()}
 
-${getCapabilitiesSection(cwd, shouldIncludeMcp ? mcpHub : undefined)}
+${
+	// `shouldIncludeMcp` already accounts for the mode's allowedMcpServers allowlist
+	// (see hasMcpServers above), so a mode that restricts MCP servers down to none will
+	// pass `undefined` here and omit the MCP capabilities line entirely. The capabilities
+	// section only emits a generic MCP availability statement (it does not enumerate
+	// individual servers), so forwarding the hub when at least one allowed server exists
+	// is consistent with the per-mode tool exposure.
+	getCapabilitiesSection(cwd, shouldIncludeMcp ? mcpHub : undefined)
+}
 
 ${modesSection}
 ${skillsSection ? `\n${skillsSection}` : ""}

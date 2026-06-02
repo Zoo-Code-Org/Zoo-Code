@@ -308,7 +308,10 @@ export function filterNativeToolsForMode(
 	// Conditionally exclude access_mcp_resource if MCP is not enabled or there are no resources.
 	// When the mode restricts MCP servers via allowedMcpServers, only resources from allowed
 	// servers count — otherwise a restricted mode could still read resources from disallowed servers.
-	if (!mcpHub || !hasAnyMcpResources(mcpHub, allowedMcpServers)) {
+	// Fall back to the mode config's own allowlist when the caller omits the parameter, so the
+	// restriction is enforced regardless of call site (defense in depth).
+	const effectiveAllowedMcpServers = allowedMcpServers ?? modeConfig.allowedMcpServers
+	if (!mcpHub || !hasAnyMcpResources(mcpHub, effectiveAllowedMcpServers)) {
 		allowedToolNames.delete("access_mcp_resource")
 	}
 
