@@ -252,13 +252,25 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				// where ref/multi_ref/transform are optional)
 				result.required = schema.required && schema.required.length > 0 ? schema.required : allKeys
 
-				// Recursively process nested objects
+				// Recursively process nested objects and convert nullable types
 				const newProps = { ...result.properties }
 				for (const key of allKeys) {
 					const prop = newProps[key]
-					if (prop.type === "object") {
+
+					// Handle nullable types - keep null union types for optional params
+					// (OpenAI supports ["object", "null"] for nullable object parameters)
+					if (prop && Array.isArray(prop.type) && prop.type.includes("null")) {
+						const nonNullTypes = prop.type.filter((t: string) => t !== "null")
+						if (nonNullTypes.length > 0) {
+							// Keep only non-null types (collapse single type to string)
+							prop.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
+						}
+						// If only null remains, keep the original array as-is
+					}
+
+					if (prop && prop.type === "object") {
 						newProps[key] = ensureAllRequired(prop)
-					} else if (prop.type === "array" && prop.items?.type === "object") {
+					} else if (prop && prop.type === "array" && prop.items?.type === "object") {
 						newProps[key] = {
 							...prop,
 							items: ensureAllRequired(prop.items),

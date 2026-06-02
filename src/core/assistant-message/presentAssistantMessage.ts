@@ -496,6 +496,7 @@ export async function presentAssistantMessage(cline: Task) {
 				partialMessage?: string,
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
+				treatMessageAsApproval?: boolean,
 			) => {
 				const { response, text, images } = await cline.ask(
 					type,
@@ -505,7 +506,7 @@ export async function presentAssistantMessage(cline: Task) {
 					isProtected || false,
 				)
 
-				if (response !== "yesButtonClicked") {
+				if (response !== "yesButtonClicked" && !(treatMessageAsApproval && response === "messageResponse")) {
 					// Handle both messageResponse and noButtonClicked with text.
 					if (text) {
 						await cline.say("user_feedback", text, images)
@@ -534,7 +535,7 @@ export async function presentAssistantMessage(cline: Task) {
 				// control to the parent task to continue running the rest of
 				// the sub-tasks.
 				const toolMessage = JSON.stringify({ tool: "finishTask" })
-				return await askApproval("tool", toolMessage)
+				return await askApproval("tool", toolMessage, undefined, false, true)
 			}
 
 			const handleError = async (action: string, error: Error) => {
