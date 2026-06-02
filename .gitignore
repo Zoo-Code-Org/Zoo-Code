@@ -57,5 +57,3 @@ plans/
 roo-cli-*.tar.gz*
 releases/
 src/core/tools/ref/transform.ts
-.gitignore
-releases/.png*
