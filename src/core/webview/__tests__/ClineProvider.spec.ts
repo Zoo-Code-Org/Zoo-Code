@@ -2465,6 +2465,8 @@ describe("ClineProvider - Router Models", () => {
 			apiKey: "litellm-key",
 			baseUrl: "http://localhost:4000",
 		})
+		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
+		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
 
 		// Verify response was sent
 		expect(mockPostMessage).toHaveBeenCalledWith({
@@ -2479,7 +2481,7 @@ describe("ClineProvider - Router Models", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
-				"opencode-go": {},
+				"opencode-go": mockModels,
 			},
 			values: undefined,
 		})
@@ -2510,6 +2512,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockResolvedValueOnce(mockModels) // unbound success
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway success
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
+			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
 
@@ -2526,7 +2529,7 @@ describe("ClineProvider - Router Models", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
-				"opencode-go": {},
+				"opencode-go": mockModels,
 			},
 			values: undefined,
 		})
@@ -2622,7 +2625,7 @@ describe("ClineProvider - Router Models", () => {
 				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
-				"opencode-go": {},
+				"opencode-go": mockModels,
 			},
 			values: undefined,
 		})
