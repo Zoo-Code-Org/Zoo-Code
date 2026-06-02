@@ -3531,11 +3531,13 @@ export class ClineProvider
 			// (setting status → "active", awaitingChildId → undefined) while the user was
 			// approving the subtask finish.  If the parent no longer awaits this child,
 			// routing output back would corrupt an unrelated task.
-			if (
-				this.cancelledDelegationChildIds.has(childTaskId) ||
-				historyItem.status !== "delegated" ||
-				historyItem.awaitingChildId !== childTaskId
-			) {
+			// NOTE: cancelledDelegationChildIds is NOT checked here because
+			// cancelTask() already sets parent status to "active" BEFORE adding
+			// the child to the blacklist. If the parent IS still "delegated" and
+			// awaiting this child, it's safe to reopen — the blacklist only exists
+			// to prevent stale fail-closed children from corrupting unrelated tasks,
+			// and the status+awaitingChildId check below already handles that.
+			if (historyItem.status !== "delegated" || historyItem.awaitingChildId !== childTaskId) {
 				this.log(
 					`[reopenParentFromDelegation] Aborting: parent ${parentTaskId} is no longer delegated to child ${childTaskId} ` +
 						`(status=${historyItem.status}, awaitingChildId=${historyItem.awaitingChildId})`,
