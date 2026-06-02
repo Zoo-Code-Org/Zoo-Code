@@ -47,6 +47,7 @@ describe("Model Validation Functions", () => {
 		poe: {},
 		deepseek: {},
 		"opencode-go": {},
+		"zoo-gateway": {},
 	}
 
 	const allowAllOrganization: OrganizationAllowList = {
