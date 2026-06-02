@@ -82,7 +82,7 @@ const search_replace = {
 					additionalProperties: false,
 				},
 			},
-			required: ["file_path", "old_string", "new_string", "ref", "multi_ref", "transform"],
+			required: ["file_path", "old_string", "new_string"],
 			additionalProperties: false,
 		},
 	},

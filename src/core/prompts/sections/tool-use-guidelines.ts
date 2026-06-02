@@ -9,17 +9,17 @@ By carefully considering the user's response after tool executions, you can reac
 }
 
 /**
- * Content Reference (CRT) guidelines.
- *
- * CRT allows the agent to cite existing content from session context
- * instead of regenerating it, saving 80-96% tokens on long fragments.
+ * Content Reference (CRT) guidelines - aggressive token efficiency.
+ * Ref is the DEFAULT mechanism, not an alternative.
  */
 export const CONTENT_REFERENCE_GUIDELINES = `
-## Content Reference (Ref)
+Before writing content for any tool that accepts it (execute_command, write_to_file,
+apply_diff, apply_patch, edit, search_and_replace, search_replace, edit_file),
+first check: does the exact content already exist somewhere in the session context
+— a previous assistant message, a file on disk, a terminal artifact, or a tool result?
 
-Before writing content for any tool that accepts it (execute_command, write_to_file, apply_diff, apply_patch, edit, search_and_replace, search_replace, edit_file), first check: does the exact content already exist somewhere in the session context — a previous assistant message, a file on disk, a terminal artifact, or a tool result?
-
-If yes → use \`ref\` instead of regenerating it. Ref saves 80-96% of tokens per fragment, making responses faster and tasks cheaper.
+If yes → use \`ref\` instead of regenerating it. Ref saves 80-96% of tokens per
+fragment, making responses faster and tasks cheaper.
 
 ### How to reference
 | Fragment size | Mechanism | Example ref |
@@ -27,7 +27,7 @@ If yes → use \`ref\` instead of regenerating it. Ref saves 80-96% of tokens pe
 | >60 chars | \`startAnchor\` + \`endAnchor\` (15-40 chars each) | \`{ source: "chat", ref: "-1", startAnchor: "function foo(", endAnchor: "}" }\` |
 | ≤60 chars | \`selector\` (exact substring) | \`{ source: "chat", ref: "-1", selector: "export const API" }\` |
 | Multiple sources | \`multi_ref\` + \`transform.join_with\` | \`{ multi_ref: [...], transform: { join_with: "\\\\n" } }\` |
-| MCP tools | Inline \`{{ref:...}}\` marker | \`{{ref:source=chat,ref=-1,startAnchor=function foo(}}\` |
+| MCP tools | Inline \`{{ref:...}}\` markers | \`{{ref:source=chat,ref=-1,startAnchor=function foo(}}\` |
 
 ### Supported sources
 | Source | Ref format | Purpose |
@@ -37,13 +37,11 @@ If yes → use \`ref\` instead of regenerating it. Ref saves 80-96% of tokens pe
 | \`terminal\` | \`"cmd-xxx.txt"\` (artifact filename) | Command output artifacts |
 | \`tool\` | \`"read_file"\` (tool name) | Results of previous tool calls |
 
-### Transforms (optional)
-Pipeline order: \`replace → prepend → wrap_with → append\`. For multi_ref: \`join_with\` separates fragments.
+### Transforms (optional pipeline)
+Order: \`replace → prepend → wrap_with → append\`. For multi_ref: \`join_with\` separates fragments.
 
 ### Why ref first
-- **Safe**: if content was condensed or changed, ref falls back to the original parameter automatically. You break nothing.
-- **Efficient**: 80-96% fewer tokens for content you would regenerate anyway.
-- **Expected**: when content exists in context, ref is the default mechanism — not an optional alternative.
-
-When using ref, simply omit the parameter it replaces (\`command\`, \`content\`, \`diff\`, \`patch\`, or \`new_string\`).
+- Ref is **safe**: if resolution fails, the system automatically falls back to the original parameter. You break nothing by using ref.
+- When using ref, omit the parameter it replaces (command, content, diff, patch, new_string). Do NOT pass both.
+- Start with \`ref\` — only regenerate when the content is truly new or unique.
 `

@@ -50,6 +50,13 @@ vi.mock("../selector", () => ({
 }))
 
 // ---------------------------------------------------------------------------
+// Mock condense module (getEffectiveApiHistory used by resolveChatSource)
+// ---------------------------------------------------------------------------
+vi.mock("../../../condense/index", () => ({
+	getEffectiveApiHistory: vi.fn((messages: any) => messages),
+}))
+
+// ---------------------------------------------------------------------------
 // Imports after mocks are set up
 // ---------------------------------------------------------------------------
 import * as fs from "fs/promises"
@@ -81,6 +88,7 @@ function createMockTask(overrides: Partial<any> = {}): any {
 		},
 		assistantMessageContent: [],
 		userMessageContent: [],
+		apiConversationHistory: [],
 		...overrides,
 	}
 }
@@ -133,9 +141,9 @@ describe("resolveChatSource", () => {
 	describe("successful resolution", () => {
 		it("resolves the last message with index '-1'", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [
-					{ type: "text", content: "First message", partial: false },
-					{ type: "text", content: "Last message", partial: false },
+				apiConversationHistory: [
+					{ role: "assistant", content: [{ type: "text", text: "First message" }] },
+					{ role: "assistant", content: [{ type: "text", text: "Last message" }] },
 				],
 			})
 
@@ -147,10 +155,10 @@ describe("resolveChatSource", () => {
 
 		it("resolves the second-to-last message with index '-2'", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [
-					{ type: "text", content: "First message", partial: false },
-					{ type: "text", content: "Second message", partial: false },
-					{ type: "text", content: "Third message", partial: false },
+				apiConversationHistory: [
+					{ role: "assistant", content: [{ type: "text", text: "First message" }] },
+					{ role: "assistant", content: [{ type: "text", text: "Second message" }] },
+					{ role: "assistant", content: [{ type: "text", text: "Third message" }] },
 				],
 			})
 
@@ -162,7 +170,7 @@ describe("resolveChatSource", () => {
 
 		it("resolves a TextContent message", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [{ type: "text", content: "Hello, world!", partial: false }],
+				apiConversationHistory: [{ role: "assistant", content: [{ type: "text", text: "Hello, world!" }] }],
 			})
 
 			const result = await resolveChatSource(makeChatRef("-1"), task)
@@ -172,14 +180,18 @@ describe("resolveChatSource", () => {
 
 		it("resolves a ToolUse message by stringifying nativeArgs", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [
+				apiConversationHistory: [
 					{
-						type: "tool_use",
-						name: "read_file",
-						id: "tool-1",
-						nativeArgs: { path: "/src/index.ts" },
-						partial: false,
-					} as any,
+						role: "assistant",
+						content: [
+							{
+								type: "tool_use",
+								name: "read_file",
+								id: "tool-1",
+								nativeArgs: { path: "/src/index.ts" },
+							} as any,
+						],
+					},
 				],
 			})
 
@@ -190,14 +202,18 @@ describe("resolveChatSource", () => {
 
 		it("resolves a ToolUse message by falling back to params when nativeArgs is absent", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [
+				apiConversationHistory: [
 					{
-						type: "tool_use",
-						name: "read_file",
-						id: "tool-2",
-						params: { path: "/src/app.ts" },
-						partial: false,
-					} as any,
+						role: "assistant",
+						content: [
+							{
+								type: "tool_use",
+								name: "read_file",
+								id: "tool-2",
+								params: { path: "/src/app.ts" },
+							} as any,
+						],
+					},
 				],
 			})
 
@@ -208,13 +224,17 @@ describe("resolveChatSource", () => {
 
 		it("resolves a ToolUse message with empty object when both nativeArgs and params are absent", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [
+				apiConversationHistory: [
 					{
-						type: "tool_use",
-						name: "read_file",
-						id: "tool-3",
-						partial: false,
-					} as any,
+						role: "assistant",
+						content: [
+							{
+								type: "tool_use",
+								name: "read_file",
+								id: "tool-3",
+							} as any,
+						],
+					},
 				],
 			})
 
@@ -225,13 +245,17 @@ describe("resolveChatSource", () => {
 
 		it("resolves a McpToolUse message by stringifying arguments", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [
+				apiConversationHistory: [
 					{
-						type: "mcp_tool_use",
-						name: "mcp_server_tool",
-						arguments: { key: "value" },
-						partial: false,
-					} as any,
+						role: "assistant",
+						content: [
+							{
+								type: "mcp_tool_use",
+								name: "mcp_server_tool",
+								arguments: { key: "value" },
+							} as any,
+						],
+					},
 				],
 			})
 
@@ -242,13 +266,17 @@ describe("resolveChatSource", () => {
 
 		it("resolves a McpToolUse message with empty object when arguments is absent", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [
+				apiConversationHistory: [
 					{
-						type: "mcp_tool_use",
-						name: "mcp_server_tool",
-						arguments: undefined,
-						partial: false,
-					} as any,
+						role: "assistant",
+						content: [
+							{
+								type: "mcp_tool_use",
+								name: "mcp_server_tool",
+								arguments: undefined,
+							} as any,
+						],
+					},
 				],
 			})
 
@@ -261,7 +289,7 @@ describe("resolveChatSource", () => {
 	describe("error cases", () => {
 		it("throws on invalid index: 0", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [{ type: "text", content: "msg", partial: false }],
+				apiConversationHistory: [{ role: "assistant", content: [{ type: "text", text: "msg" }] }],
 			})
 
 			await expect(resolveChatSource(makeChatRef("0"), task)).rejects.toThrow("Invalid chat ref index: 0")
@@ -269,7 +297,7 @@ describe("resolveChatSource", () => {
 
 		it("throws on invalid index: positive number", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [{ type: "text", content: "msg", partial: false }],
+				apiConversationHistory: [{ role: "assistant", content: [{ type: "text", text: "msg" }] }],
 			})
 
 			await expect(resolveChatSource(makeChatRef("1"), task)).rejects.toThrow("Invalid chat ref index: 1")
@@ -277,7 +305,7 @@ describe("resolveChatSource", () => {
 
 		it("throws on invalid index: NaN (non-numeric string)", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [{ type: "text", content: "msg", partial: false }],
+				apiConversationHistory: [{ role: "assistant", content: [{ type: "text", text: "msg" }] }],
 			})
 
 			await expect(resolveChatSource(makeChatRef("abc"), task)).rejects.toThrow("Invalid chat ref index: abc")
@@ -285,7 +313,7 @@ describe("resolveChatSource", () => {
 
 		it("throws when index is out of bounds (too negative)", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [{ type: "text", content: "only message", partial: false }],
+				apiConversationHistory: [{ role: "assistant", content: [{ type: "text", text: "only message" }] }],
 			})
 
 			await expect(resolveChatSource(makeChatRef("-5"), task)).rejects.toThrow(
@@ -295,7 +323,7 @@ describe("resolveChatSource", () => {
 
 		it("throws when message is empty (text with empty content)", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [{ type: "text", content: "", partial: false }],
+				apiConversationHistory: [{ role: "assistant", content: [{ type: "text", text: "" }] }],
 			})
 
 			await expect(resolveChatSource(makeChatRef("-1"), task)).rejects.toThrow(
@@ -305,7 +333,9 @@ describe("resolveChatSource", () => {
 
 		it("throws when message content is undefined", async () => {
 			const task = createMockTask({
-				assistantMessageContent: [{ type: "text", content: undefined, partial: false } as any],
+				apiConversationHistory: [
+					{ role: "assistant", content: [{ type: "text", text: undefined } as any] } as any,
+				],
 			})
 
 			await expect(resolveChatSource(makeChatRef("-1"), task)).rejects.toThrow(

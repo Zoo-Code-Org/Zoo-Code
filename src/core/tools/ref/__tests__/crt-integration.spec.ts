@@ -102,6 +102,27 @@ function createTaskMock(overrides: Record<string, any> = {}): any {
 		},
 		assistantMessageContent: [...ASSISTANT_MESSAGES],
 		userMessageContent: [...USER_MESSAGES],
+		apiConversationHistory: [
+			{
+				role: "assistant",
+				content: [{ type: "text", text: MESSAGE_GREET }],
+			},
+			{
+				role: "assistant",
+				content: [{ type: "text", text: MESSAGE_FAREWELL }],
+			},
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "tool_use" as const,
+						id: "tool1",
+						name: "read_file",
+						nativeArgs: { path: "test.ts" },
+					} as any,
+				],
+			},
+		],
 		...overrides,
 	}
 }

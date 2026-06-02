@@ -20,7 +20,6 @@ export default {
 	function: {
 		name: "write_to_file",
 		description: WRITE_TO_FILE_DESCRIPTION,
-		strict: true,
 		parameters: {
 			type: "object",
 			properties: {
@@ -73,7 +72,7 @@ export default {
 					additionalProperties: false,
 				},
 			},
-			required: ["path", "content", "ref", "multi_ref", "transform"],
+			required: ["path", "content"],
 			additionalProperties: false,
 		},
 	},

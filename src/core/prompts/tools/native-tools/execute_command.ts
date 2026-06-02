@@ -30,7 +30,6 @@ export default {
 	function: {
 		name: "execute_command",
 		description: EXECUTE_COMMAND_DESCRIPTION,
-		strict: true,
 		parameters: {
 			type: "object",
 			properties: {
@@ -87,7 +86,7 @@ export default {
 					additionalProperties: false,
 				},
 			},
-			required: ["command", "cwd", "timeout", "ref", "multi_ref", "transform"],
+			required: ["command", "cwd", "timeout"],
 			additionalProperties: false,
 		},
 	},

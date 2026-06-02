@@ -247,7 +247,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			if (result.properties) {
 				const allKeys = Object.keys(result.properties)
-				result.required = allKeys
+				// OpenAI strict mode requires ALL properties to be in required array
+				// Preserve original required array when present (e.g., for CRT tool schemas
+				// where ref/multi_ref/transform are optional)
+				result.required = schema.required && schema.required.length > 0 ? schema.required : allKeys
 
 				// Recursively process nested objects
 				const newProps = { ...result.properties }

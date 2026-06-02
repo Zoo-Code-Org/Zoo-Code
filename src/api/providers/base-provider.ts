@@ -76,17 +76,24 @@ export abstract class BaseProvider implements ApiHandler {
 		if (result.properties) {
 			const allKeys = Object.keys(result.properties)
 			// OpenAI strict mode requires ALL properties to be in required array
-			result.required = allKeys
+			// Preserve original required array when present (e.g., for CRT tool schemas
+			// where ref/multi_ref/transform are optional)
+			result.required = schema.required && schema.required.length > 0 ? schema.required : allKeys
 
 			// Recursively process nested objects and convert nullable types
 			const newProps = { ...result.properties }
 			for (const key of allKeys) {
 				const prop = newProps[key]
 
-				// Handle nullable types by removing null
+				// Handle nullable types - keep null union types for optional params
+				// (OpenAI supports ["object", "null"] for nullable object parameters)
 				if (prop && Array.isArray(prop.type) && prop.type.includes("null")) {
 					const nonNullTypes = prop.type.filter((t: string) => t !== "null")
-					prop.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
+					if (nonNullTypes.length > 0) {
+						// Keep only non-null types (collapse single type to string)
+						prop.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
+					}
+					// If only null remains, keep the original array as-is
 				}
 
 				// Recursively process nested objects

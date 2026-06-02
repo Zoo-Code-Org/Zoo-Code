@@ -68,7 +68,7 @@ export const apply_diff = {
 					additionalProperties: false,
 				},
 			},
-			required: ["path", "diff", "ref", "multi_ref", "transform"],
+			required: ["path", "diff"],
 			additionalProperties: false,
 		},
 	},

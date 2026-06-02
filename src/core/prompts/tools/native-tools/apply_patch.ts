@@ -92,7 +92,7 @@ const apply_patch = {
 					additionalProperties: false,
 				},
 			},
-			required: ["patch", "ref", "multi_ref", "transform"],
+			required: ["patch"],
 			additionalProperties: false,
 		},
 	},
