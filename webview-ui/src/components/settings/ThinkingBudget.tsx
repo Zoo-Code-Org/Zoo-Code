@@ -174,7 +174,7 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 			: undefined) ??
 		modelInfo?.maxTokens ??
 		DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS
-	const standaloneMaxOutputTokens = apiConfiguration.modelMaxTokens || defaultMaxOutputTokens
+	const standaloneMaxOutputTokens = apiConfiguration.modelMaxTokens ?? defaultMaxOutputTokens
 
 	if (!modelInfo) {
 		return null
