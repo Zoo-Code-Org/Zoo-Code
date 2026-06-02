@@ -701,18 +701,30 @@ export class DiffViewProvider {
 				preserveFocus: true,
 			})
 		} else {
-			// Open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(fileUri)
+			// If the file is already open with unsaved user changes, background
+			// editing cannot proceed safely — the dirty buffer would overwrite
+			// the AI-written content on doc.save() causing data loss. Show the
+			// file instead so the user can review and complete their edits first.
+			const existingDoc = vscode.workspace.textDocuments.find(
+				(d) => d.uri.scheme === "file" && d.uri.fsPath === absolutePath,
+			)
+			if (existingDoc?.isDirty) {
+				// User has unsaved changes — show file for manual conflict resolution
+				await vscode.window.showTextDocument(fileUri, {
+					preview: false,
+					preserveFocus: true,
+				})
+			} else {
+				// Open the document in memory to trigger diagnostics without showing it.
+				// openTextDocument returns the existing document if already open (but not
+				// dirty), or creates a new one. No explicit save is needed since the
+				// content was already written via fs.writeFile above and VSCode will
+				// resolve the dirty state naturally.
+				await vscode.workspace.openTextDocument(fileUri)
 
-			// Save the document to ensure VSCode recognizes it as saved and
-			// triggers diagnostics. Without this, VSCode would show "unsaved
-			// changes" when the user tries to close the file.
-			if (doc.isDirty) {
-				await doc.save()
+				// Small delay to allow diagnostics to be triggered
+				await new Promise((resolve) => setTimeout(resolve, 100))
 			}
-
-			// Small delay to allow diagnostics to be triggered
-			await new Promise((resolve) => setTimeout(resolve, 100))
 		}
 
 		let newProblemsMessage = ""
