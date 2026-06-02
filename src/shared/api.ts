@@ -132,6 +132,13 @@ export const getModelMaxOutputTokens = ({
 		return ANTHROPIC_DEFAULT_MAX_TOKENS
 	}
 
+	// Models that expose a configurable max-output slider (e.g. Z.ai GLM) honor the user's
+	// explicit override instead of the default 20% context-window clamp, capped at the model's
+	// own ceiling. This keeps the runtime budget consistent with the value sent to the provider.
+	if (model.supportsMaxTokens && settings?.modelMaxTokens != null && settings.modelMaxTokens > 0) {
+		return model.maxTokens ? Math.min(settings.modelMaxTokens, model.maxTokens) : settings.modelMaxTokens
+	}
+
 	// If model has explicit maxTokens, clamp it to 20% of the context window
 	// Exception: GPT-5 models should use their exact configured max output tokens
 	if (model.maxTokens) {

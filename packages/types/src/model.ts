@@ -81,6 +81,10 @@ export const modelInfoSchema = z.object({
 	promptCacheRetention: z.enum(["in_memory", "24h"]).optional(),
 	// Capability flag to indicate whether the model supports an output verbosity parameter
 	supportsVerbosity: z.boolean().optional(),
+	// Capability flag to indicate whether the model exposes a user-configurable max output
+	// tokens control in settings. When set, the settings UI surfaces a slider that persists
+	// `modelMaxTokens`; when the user leaves it unset, the default output clamp is used.
+	supportsMaxTokens: z.boolean().optional(),
 	supportsReasoningBudget: z.boolean().optional(),
 	// Capability flag to indicate whether the model supports simple on/off binary reasoning
 	supportsReasoningBinary: z.boolean().optional(),
