@@ -909,7 +909,7 @@
 		"modelNotAllowed": "模型 '{{model}}' 不允许用于提供商 '{{provider}}'，您的组织不允许",
 		"profileInvalid": "此配置文件包含您的组织不允许的提供商或模型",
 		"qwenCodeOauthPath": "您必须提供有效的 OAuth 凭证路径",
-		"zooGatewaySignIn": "您必须登录 Zoo Code 才能使用 Zoo Gateway。点击「登录」进行身份验证。"
+		"zooGatewaySignIn": "请登录 Zoo Code 以使用 Zoo Gateway。"
 	},
 	"placeholders": {
 		"apiKey": "请输入 API 密钥...",

@@ -909,7 +909,7 @@
 		"modelNotAllowed": "El model '{{model}}' no està permès per al proveïdor '{{provider}}' per la vostra organització",
 		"profileInvalid": "Aquest perfil conté un proveïdor o model que no està permès per la vostra organització",
 		"qwenCodeOauthPath": "Has de proporcionar una ruta vàlida de credencials OAuth",
-		"zooGatewaySignIn": "Has d'iniciar sessió a Zoo Code per utilitzar Zoo Gateway. Fes clic a 'Inicia sessió' per autenticar-te."
+		"zooGatewaySignIn": "Inicia sessió a Zoo Code per utilitzar Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Introduïu la clau API...",

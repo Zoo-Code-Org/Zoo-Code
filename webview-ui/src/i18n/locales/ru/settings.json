@@ -909,7 +909,7 @@
 		"modelNotAllowed": "Модель '{{model}}' не разрешена для провайдера '{{provider}}' вашей организацией",
 		"profileInvalid": "Этот профиль содержит провайдера или модель, которые не разрешены вашей организацией",
 		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth",
-		"zooGatewaySignIn": "Для использования Zoo Gateway необходимо войти в Zoo Code. Нажмите «Войти», чтобы пройти аутентификацию."
+		"zooGatewaySignIn": "Войдите в Zoo Code, чтобы использовать Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Введите API-ключ...",

@@ -909,7 +909,7 @@
 		"modelNotAllowed": "Il modello '{{model}}' non è consentito per il fornitore '{{provider}}' dalla tua organizzazione.",
 		"profileInvalid": "Questo profilo contiene un fornitore o un modello non consentito dalla tua organizzazione.",
 		"qwenCodeOauthPath": "Devi fornire un percorso valido per le credenziali OAuth",
-		"zooGatewaySignIn": "Devi accedere a Zoo Code per utilizzare Zoo Gateway. Clicca su 'Accedi' per autenticarti."
+		"zooGatewaySignIn": "Accedi a Zoo Code per utilizzare Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Inserisci chiave API...",

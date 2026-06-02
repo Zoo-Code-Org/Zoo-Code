@@ -909,7 +909,7 @@
 		"modelNotAllowed": "Mô hình '{{model}}' không được phép cho nhà cung cấp '{{provider}}' bởi tổ chức của bạn",
 		"profileInvalid": "Hồ sơ này chứa một nhà cung cấp hoặc mô hình không được phép bởi tổ chức của bạn",
 		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ",
-		"zooGatewaySignIn": "Bạn phải đăng nhập vào Zoo Code để sử dụng Zoo Gateway. Nhấp vào 'Đăng nhập' để xác thực."
+		"zooGatewaySignIn": "Đăng nhập vào Zoo Code để sử dụng Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Nhập khóa API...",

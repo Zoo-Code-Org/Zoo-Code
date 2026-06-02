@@ -283,6 +283,27 @@ describe("Model Validation Functions", () => {
 				)
 				expect(result).toBeUndefined()
 			})
+
+			it("surfaces PROVIDER_NOT_ALLOWED for zoo-gateway when organization disallows it", () => {
+				const orgWithoutZooGateway: OrganizationAllowList = {
+					allowAll: false,
+					providers: {
+						openrouter: { allowAll: true },
+					},
+				}
+
+				const config: ProviderSettings = {
+					apiProvider: "zoo-gateway",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				}
+
+				const result = validateApiConfigurationExcludingModelErrors(
+					config,
+					mockRouterModels,
+					orgWithoutZooGateway,
+				)
+				expect(result).toContain("settings:validation.providerNotAllowed")
+			})
 		})
 	})
 })

@@ -924,7 +924,7 @@
 		"modelNotAllowed": "模型 '{{model}}' 不允許用於供應商 '{{provider}}'，此設定已被組織禁止",
 		"profileInvalid": "此設定檔包含您的組織不允許的供應商或模型",
 		"qwenCodeOauthPath": "您必須提供有效的 OAuth 憑證路徑",
-		"zooGatewaySignIn": "您必須登入 Zoo Code 才能使用 Zoo Gateway。點擊「登入」進行身份驗證。"
+		"zooGatewaySignIn": "請登入 Zoo Code 以使用 Zoo Gateway。"
 	},
 	"placeholders": {
 		"apiKey": "請輸入 API 金鑰...",

@@ -977,7 +977,7 @@
 		"modelNotAllowed": "Model '{{model}}' is not allowed for provider '{{provider}}' by your organization",
 		"profileInvalid": "This profile contains a provider or model that is not allowed by your organization",
 		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path.",
-		"zooGatewaySignIn": "You must sign in to Zoo Code to use Zoo Gateway. Click 'Sign In' to authenticate."
+		"zooGatewaySignIn": "Sign in to Zoo Code to use Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Enter API Key...",

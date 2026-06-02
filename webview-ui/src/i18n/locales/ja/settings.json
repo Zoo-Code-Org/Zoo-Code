@@ -909,7 +909,7 @@
 		"modelNotAllowed": "モデル「{{model}}」はプロバイダー「{{provider}}」に対して組織によって許可されていません",
 		"profileInvalid": "このプロファイルには、組織によって許可されていないプロバイダーまたはモデルが含まれています",
 		"qwenCodeOauthPath": "有効なOAuth認証情報のパスを提供する必要があります",
-		"zooGatewaySignIn": "Zoo Gatewayを使用するにはZoo Codeにサインインする必要があります。認証するには「サインイン」をクリックしてください。"
+		"zooGatewaySignIn": "Zoo Gatewayを使用するにはZoo Codeにサインインしてください。"
 	},
 	"placeholders": {
 		"apiKey": "API キーを入力...",
