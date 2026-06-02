@@ -1,0 +1,36 @@
+{
+	"master_task": "Сбор, систематизация и выбор лучших вариантов для реализации голосового модуля RooCode",
+	"current_status": {
+		"architecture": "Гибридная (Node.js Orchestrator + Rust Audio Core)",
+		"processing_type": "In-Memory (Zero-Disk, только RAM)",
+		"stt_tts": "Внешние OpenAI-совместимые API (Groq/Whisper)",
+		"key_requirements": [
+			"Минимальный вес и ресурсоемкость (цель: < 500KB для ядра)",
+			"Супер-фильтрация (VAD + Noise Suppression)",
+			"Настраиваемый Wake Word (Hands-Free режим)",
+			"TTS Duplexing (Echo Guard: Mute mic при озвучке)"
+		]
+	},
+	"research_findings": {
+		"rust_libraries": {
+			"cpal": "Захват аудио (Cross-platform)",
+			"nnnoiseless": "Порт RNNoise на Rust. Вес модели 60KB. Использовать from_static_bytes.",
+			"speex_dsp": "Традиционные алгоритмы, вес < 200KB, но качество ниже."
+		},
+		"resource_comparison": "См. OTCHETY/RESOURCE_COMPARISON.md. RNNoise (60KB) vs WebRTC (32MB+). Выбор: RNNoise/nnnoiseless.",
+		"in_memory_strategy": "Использование Vec<u8> и pipe (stdout) вместо записи на диск. Адаптация логики из audio_level_monitor.c (RMS)."
+	},
+	"existing_reports": [
+		"OTCHETY/STT_ARCHITECTURE_V2.md",
+		"OTCHETY/STT_RESEARCH_REPORT.md",
+		"OTCHETY/RUST_AUDIO_CORE_SPEC.md",
+		"OTCHETY/RESOURCE_COMPARISON.md"
+	],
+	"instructions_for_subordinate": {
+		"mandatory_tools": ["Context7 (resolve-library-id, query-docs)", "Tavily (tavily-search)", "Defuddle"],
+		"mandatory_skill": "joko-orchestrator",
+		"report_dir": "./OTCHETY/",
+		"report_prefix": "report_<timestamp>_",
+		"task": "Проанализировать существующие отчеты в OTCHETY. Найти в интернете (через Tavily/Context7) самые свежие и легкие реализации VAD и Noise Suppression на Rust/С. Дополнить отчеты новыми находками, не удаляя старое. Систематизировать варианты по критериям: Вес, RAM, CPU, Качество."
+	}
+}
