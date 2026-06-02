@@ -81,6 +81,12 @@ vi.mock("vscode", () => {
 		},
 		TabInputText: vi.fn(),
 		version: "1.85.0",
+		// Uri + RelativePattern needed by McpHub.watchMcpSettingsFile()
+		Uri: {
+			file: (path: string) => ({ fsPath: path, path, scheme: "file" }),
+			parse: (path: string) => ({ fsPath: path, path, scheme: "file" }),
+		},
+		RelativePattern: vi.fn(() => ({})),
 	}
 })
 
