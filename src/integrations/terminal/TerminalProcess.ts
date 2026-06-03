@@ -1,5 +1,4 @@
 import * as vscode from "vscode"
-import { inspect } from "util"
 
 import type { ExitCodeDetails } from "./types"
 import { BaseTerminalProcess } from "./BaseTerminalProcess"
@@ -118,11 +117,9 @@ export class TerminalProcess extends BaseTerminalProcess {
 			isPowerShell: Terminal.isActiveShellPowerShell(),
 			isFish: Terminal.isActiveShellFish(),
 		}
-		const isPowerShell = shellKind.isPowerShell
+		let commandToExecute = command
 
-		if (isPowerShell) {
-			let commandToExecute = command
-
+		if (shellKind.isPowerShell) {
 			// Only add the PowerShell counter workaround if enabled
 			if (Terminal.getPowershellCounter()) {
 				commandToExecute += ` ; "(Roo/PS Workaround: ${this.terminal.cmdCounter++})" > $null`
@@ -132,12 +129,22 @@ export class TerminalProcess extends BaseTerminalProcess {
 			if (Terminal.getCommandDelay() > 0) {
 				commandToExecute += ` ; start-sleep -milliseconds ${Terminal.getCommandDelay()}`
 			}
+		}
 
-			terminal.shellIntegration.executeCommand(
+		try {
+			const execution = terminal.shellIntegration.executeCommand(
 				this.prepareCommandForShellIntegration(commandToExecute, shellKind),
 			)
-		} else {
-			terminal.shellIntegration.executeCommand(this.prepareCommandForShellIntegration(command, shellKind))
+
+			this.terminal.activeShellExecution = execution
+
+			// VS Code only captures data written after read() is first called, so read
+			// the execution stream immediately instead of waiting for the global start
+			// event to deliver the same execution later.
+			this.terminal.setActiveStream(execution.read())
+		} catch (error) {
+			this.terminal.activeShellExecution = undefined
+			throw error
 		}
 
 		this.isHot = true
@@ -164,9 +171,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 			return
 		}
 
-		let preOutput = ""
-		let commandOutputStarted = false
-
 		/*
 		 * Extract clean output from raw accumulated output. FYI:
 		 * ]633 is a custom sequence number used by VSCode shell integration:
@@ -179,22 +183,14 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 		// Process stream data
 		for await (let data of stream) {
-			// Check for command output start marker
-			if (!commandOutputStarted) {
-				preOutput += data
-				const match = this.matchAfterVsceStartMarkers(data)
+			const match = this.fullOutput === "" ? this.matchAfterVsceStartMarkers(data) : undefined
 
-				if (match !== undefined) {
-					commandOutputStarted = true
-					data = match
-					this.fullOutput = "" // Reset fullOutput when command actually starts
-					this.emit("line", "") // Trigger UI to proceed
-				} else {
-					continue
-				}
+			if (match !== undefined) {
+				data = match
+				this.emit("line", "") // Trigger UI to proceed
 			}
 
-			// Command output started, accumulate data without filtering.
+			// Accumulate data without filtering.
 			// notice to future programmers: do not add escape sequence
 			// filtering here: fullOutput cannot change in length (see getUnretrievedOutput),
 			// and chunks may not be complete so you cannot rely on detecting or removing escape sequences mid-stream.
@@ -218,35 +214,12 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 		// Wait for shell execution to complete.
 		await shellExecutionComplete
+		this.terminal.activeShellExecution = undefined
 
 		this.isHot = false
 
-		if (commandOutputStarted) {
-			// Emit any remaining output before completing
-			this.emitRemainingBufferIfListening()
-		} else {
-			const inspectPreOutput = inspect(preOutput, { colors: false, breakLength: Infinity })
-
-			// executeCommand() has already been called, so an empty stream cannot prove
-			// the command was never submitted. Treat the status as submitted/unknown to
-			// avoid replaying a potentially side-effecting command through Execa.
-			const errorMsg =
-				"VSCE output start escape sequence (]633;C or ]133;C) not received after command submission. Command execution status is unknown."
-
-			console.error(`[Terminal Process] ${errorMsg} preOutput: ${inspectPreOutput}`)
-
-			this.emit("no_shell_integration", { message: errorMsg, commandSubmitted: true })
-
-			this.emit(
-				"completed",
-				"<VSCE shell integration markers not found: terminal output and command execution status is unknown>\n" +
-					`<preOutput>${inspectPreOutput}</preOutput>\n` +
-					"AI MODEL: You MUST notify the user with the information above so they can open a bug report.",
-			)
-
-			this.continue()
-			return
-		}
+		// Emit any remaining output before completing.
+		this.emitRemainingBufferIfListening()
 
 		// fullOutput begins after C marker so we only need to trim off D marker
 		// (if D exists, see VSCode bug# 237208):

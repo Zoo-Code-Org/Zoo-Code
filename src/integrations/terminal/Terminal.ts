@@ -15,6 +15,8 @@ export class Terminal extends BaseTerminal {
 
 	public cmdCounter: number = 0
 
+	public activeShellExecution?: vscode.TerminalShellExecution
+
 	constructor(id: number, terminal: vscode.Terminal | undefined, cwd: string) {
 		super("vscode", id, cwd, Terminal.getReuseKey())
 

@@ -48,8 +48,6 @@ export class TerminalRegistry {
 		try {
 			const startDisposable = vscode.window.onDidStartTerminalShellExecution?.(
 				async (e: vscode.TerminalShellExecutionStartEvent) => {
-					// Get a handle to the stream as early as possible:
-					const stream = e.execution.read()
 					const terminal = this.getTerminalByVSCETerminal(e.terminal)
 
 					console.info("[onDidStartTerminalShellExecution]", {
@@ -57,7 +55,13 @@ export class TerminalRegistry {
 						terminalId: terminal?.id,
 					})
 
-					if (terminal) {
+					if (terminal instanceof Terminal) {
+						if (terminal.activeShellExecution === e.execution) {
+							return
+						}
+
+						// Get a handle to the stream as early as possible.
+						const stream = e.execution.read()
 						terminal.setActiveStream(stream)
 						terminal.busy = true // Mark terminal as busy when shell execution starts
 					} else {
@@ -92,6 +96,10 @@ export class TerminalRegistry {
 						)
 
 						return
+					}
+
+					if (terminal instanceof Terminal && terminal.activeShellExecution === e.execution) {
+						terminal.activeShellExecution = undefined
 					}
 
 					if (!terminal.running) {

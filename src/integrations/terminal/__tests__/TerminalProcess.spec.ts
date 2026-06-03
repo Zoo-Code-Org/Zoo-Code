@@ -50,6 +50,7 @@ describe("TerminalProcess", () => {
 
 		// Create a process for testing
 		terminalProcess = new TestTerminalProcess(mockTerminalInfo)
+		mockTerminalInfo.process = terminalProcess
 
 		TerminalRegistry["terminals"].push(mockTerminalInfo)
 
@@ -142,10 +143,11 @@ describe("TerminalProcess", () => {
 		})
 
 		it.each([
-			["PowerShell", ". {\necho one\necho two\n}"],
-			["fish", "begin\necho one\necho two\nend"],
-		])("uses the %s multiline wrapper", async (profile, expectedCommand) => {
-			Terminal.setTerminalProfile(profile)
+			["PowerShell", true, false, ". {\necho one\necho two\n}"],
+			["fish", false, true, "begin\necho one\necho two\nend"],
+		])("uses the %s multiline wrapper", async (_profile, isPowerShell, isFish, expectedCommand) => {
+			const psSpy = vi.spyOn(Terminal, "isActiveShellPowerShell").mockReturnValue(isPowerShell)
+			const fishSpy = vi.spyOn(Terminal, "isActiveShellFish").mockReturnValue(isFish)
 
 			try {
 				mockStream = (async function* () {
@@ -165,7 +167,8 @@ describe("TerminalProcess", () => {
 
 				expect(mockTerminal.shellIntegration.executeCommand).toHaveBeenCalledWith(expectedCommand)
 			} finally {
-				Terminal.setTerminalProfile(undefined)
+				psSpy.mockRestore()
+				fishSpy.mockRestore()
 			}
 		})
 
@@ -218,24 +221,20 @@ describe("TerminalProcess", () => {
 			consoleWarnSpy.mockRestore()
 		})
 
-		it("emits no_shell_integration with commandSubmitted=true when stream is empty after submission", async () => {
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-
-			let details: { message: string; commandSubmitted: boolean } | undefined
+		it("completes without warning when the execution stream is empty after submission", async () => {
+			const noShellIntegrationSpy = vi.fn()
+			let completedOutput: string | undefined
 
 			const eventPromises = Promise.all([
 				new Promise<void>((resolve) =>
-					terminalProcess.once("no_shell_integration", (d) => {
-						details = d
+					terminalProcess.once("completed", (output?: string) => {
+						completedOutput = output
 						resolve()
 					}),
 				),
-				new Promise<void>((resolve) => terminalProcess.once("completed", (_output?: string) => resolve())),
 				new Promise<void>((resolve) => terminalProcess.once("continue", resolve)),
 			])
 
-			// Empty stream: simulates VS Code firing onDidStartTerminalShellExecution
-			// before the shell has fully initialised on a freshly-created terminal.
 			async function* emptyStream(): AsyncGenerator<string> {
 				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
 				return
@@ -246,32 +245,31 @@ describe("TerminalProcess", () => {
 			mockExecution = { read: vi.fn().mockReturnValue(mockStream) }
 			mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
 
+			terminalProcess.once("no_shell_integration", noShellIntegrationSpy)
+
 			const runPromise = terminalProcess.run("test command")
-			terminalProcess.emit("stream_available", mockStream)
 			await runPromise
 			await eventPromises
 
-			expect(details?.commandSubmitted).toBe(true)
-			consoleErrorSpy.mockRestore()
+			expect(mockExecution.read).toHaveBeenCalledTimes(1)
+			expect(completedOutput).toBe("")
+			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 		})
 
-		it("emits no_shell_integration with commandSubmitted=true when stream has data but no ]633;C", async () => {
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-
-			let details: { message: string; commandSubmitted: boolean } | undefined
+		it("captures execution output even when VS Code does not include start markers", async () => {
+			const noShellIntegrationSpy = vi.fn()
+			let completedOutput: string | undefined
 
 			const eventPromises = Promise.all([
 				new Promise<void>((resolve) =>
-					terminalProcess.once("no_shell_integration", (d) => {
-						details = d
+					terminalProcess.once("completed", (output?: string) => {
+						completedOutput = output
 						resolve()
 					}),
 				),
-				new Promise<void>((resolve) => terminalProcess.once("completed", (_output?: string) => resolve())),
 				new Promise<void>((resolve) => terminalProcess.once("continue", resolve)),
 			])
 
-			// Stream has output but never emits ]633;C — genuine shell integration failure.
 			mockStream = (async function* () {
 				yield "some output without marker\n"
 				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
@@ -280,13 +278,15 @@ describe("TerminalProcess", () => {
 			mockExecution = { read: vi.fn().mockReturnValue(mockStream) }
 			mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
 
+			terminalProcess.once("no_shell_integration", noShellIntegrationSpy)
+
 			const runPromise = terminalProcess.run("test command")
-			terminalProcess.emit("stream_available", mockStream)
 			await runPromise
 			await eventPromises
 
-			expect(details?.commandSubmitted).toBe(true)
-			consoleErrorSpy.mockRestore()
+			expect(mockExecution.read).toHaveBeenCalledTimes(1)
+			expect(completedOutput).toBe("some output without marker\n")
+			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 		})
 
 		it("sets hot state for compiling commands", async () => {
