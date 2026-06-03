@@ -53,6 +53,7 @@ describe("OpencodeGoHandler", () => {
 				baseURL: "https://opencode.ai/zen/go/v1",
 				apiKey: "test-key",
 			}),
+			{ signal: undefined },
 		)
 	})
 
@@ -150,6 +151,7 @@ describe("OpencodeGoHandler", () => {
 					max_completion_tokens: 32768,
 					temperature: expect.any(Number),
 				}),
+				{ signal: undefined },
 			)
 		})
 	})
@@ -165,6 +167,7 @@ describe("OpencodeGoHandler", () => {
 					stream: false,
 					max_completion_tokens: 32768,
 				}),
+				{ signal: undefined },
 			)
 		})
 

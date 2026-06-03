@@ -354,8 +354,8 @@ describe("BaseOpenAiCompatibleProvider", () => {
 					stream: true,
 					stream_options: { include_usage: true },
 				}),
-				undefined,
-			)
+	{ signal: undefined },
+	)
 		})
 
 		it("should yield usage data from stream", async () => {

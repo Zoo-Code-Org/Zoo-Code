@@ -99,7 +99,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 
 			let results
 			try {
-				results = await this.client.chat.completions.create(params)
+				results = await this.client.chat.completions.create(params, { signal: metadata?.abortSignal })
 			} catch (error) {
 				throw handleOpenAIError(error, this.providerName)
 			}

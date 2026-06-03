@@ -81,6 +81,7 @@ describe("LmStudioHandler Native Tools", () => {
 						}),
 					]),
 				}),
+				{ signal: undefined },
 			)
 			// parallel_tool_calls should be true by default when not explicitly set
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -107,6 +108,7 @@ describe("LmStudioHandler Native Tools", () => {
 				expect.objectContaining({
 					tool_choice: "auto",
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -219,6 +221,7 @@ describe("LmStudioHandler Native Tools", () => {
 				expect.objectContaining({
 					parallel_tool_calls: true,
 				}),
+				{ signal: undefined },
 			)
 		})
 

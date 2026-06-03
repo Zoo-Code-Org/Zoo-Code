@@ -476,6 +476,7 @@ describe("VercelAiGatewayHandler", () => {
 				await messageGenerator.next()
 
 				expect(mockCreate).toHaveBeenCalledWith(
+		{ signal: undefined },
 					expect.objectContaining({
 						stream_options: { include_usage: true },
 					}),

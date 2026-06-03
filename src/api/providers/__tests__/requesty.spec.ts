@@ -55,6 +55,7 @@ describe("RequestyHandler", () => {
 		expect(handler).toBeInstanceOf(RequestyHandler)
 
 		expect(OpenAI).toHaveBeenCalledWith({
+							{ signal: undefined },
 			baseURL: "https://router.requesty.ai/v1",
 			apiKey: mockOptions.requestyApiKey,
 			defaultHeaders: {
@@ -70,6 +71,7 @@ describe("RequestyHandler", () => {
 		expect(handler).toBeInstanceOf(RequestyHandler)
 
 		expect(OpenAI).toHaveBeenCalledWith({
+							{ signal: undefined },
 			baseURL: "https://custom.requesty.ai/v1",
 			apiKey: mockOptions.requestyApiKey,
 			defaultHeaders: {

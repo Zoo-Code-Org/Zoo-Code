@@ -108,6 +108,6 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
-		return this.client.chat.completions.create(params)
+		return this.client.chat.completions.create(params, { signal: metadata?.abortSignal })
 	}
 }

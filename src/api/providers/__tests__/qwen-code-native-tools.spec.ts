@@ -101,6 +101,7 @@ describe("QwenCodeHandler Native Tools", () => {
 					]),
 					parallel_tool_calls: true,
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -124,6 +125,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect.objectContaining({
 					tool_choice: "auto",
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -235,6 +237,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect.objectContaining({
 					parallel_tool_calls: true,
 				}),
+				{ signal: undefined },
 			)
 		})
 

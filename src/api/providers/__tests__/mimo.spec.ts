@@ -371,6 +371,7 @@ describe("MimoHandler", () => {
 			}
 
 			expect(mockCreate).toHaveBeenCalledWith(
+		{ signal: undefined },
 				expect.objectContaining({
 					extra_body: { thinking: { type: "enabled" } },
 				}),

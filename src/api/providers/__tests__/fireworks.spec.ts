@@ -95,25 +95,46 @@ describe("FireworksHandler", () => {
 	})
 
 	it.each([
-		{ modelId: "accounts/fireworks/models/glm-5p1" as const, contextWindow: 202752, inputPrice: 1.4, outputPrice: 4.4, cacheReadsPrice: 0.26 },
-		{ modelId: "accounts/fireworks/models/kimi-k2p6" as const, contextWindow: 262144, inputPrice: 0.95, outputPrice: 4.0, cacheReadsPrice: 0.16 },
-		{ modelId: "accounts/fireworks/models/deepseek-v4-pro" as const, contextWindow: 1048576, inputPrice: 1.74, outputPrice: 3.48, cacheReadsPrice: 0.14 },
-	])("should expose newly added model $modelId", ({ modelId, contextWindow, inputPrice, outputPrice, cacheReadsPrice }) => {
-		expect(fireworksModels[modelId]).toBeDefined()
-		const info = fireworksModels[modelId]
-		expect(info.maxTokens).toBeGreaterThan(0)
-		expect(info.contextWindow).toBe(contextWindow)
-		expect(info.inputPrice).toBe(inputPrice)
-		expect(info.outputPrice).toBe(outputPrice)
-		expect(info.cacheReadsPrice).toBe(cacheReadsPrice)
-		expect(info.description).toBeTruthy()
+		{
+			modelId: "accounts/fireworks/models/glm-5p1" as const,
+			contextWindow: 202752,
+			inputPrice: 1.4,
+			outputPrice: 4.4,
+			cacheReadsPrice: 0.26,
+		},
+		{
+			modelId: "accounts/fireworks/models/kimi-k2p6" as const,
+			contextWindow: 262144,
+			inputPrice: 0.95,
+			outputPrice: 4.0,
+			cacheReadsPrice: 0.16,
+		},
+		{
+			modelId: "accounts/fireworks/models/deepseek-v4-pro" as const,
+			contextWindow: 1048576,
+			inputPrice: 1.74,
+			outputPrice: 3.48,
+			cacheReadsPrice: 0.14,
+		},
+	])(
+		"should expose newly added model $modelId",
+		({ modelId, contextWindow, inputPrice, outputPrice, cacheReadsPrice }) => {
+			expect(fireworksModels[modelId]).toBeDefined()
+			const info = fireworksModels[modelId]
+			expect(info.maxTokens).toBeGreaterThan(0)
+			expect(info.contextWindow).toBe(contextWindow)
+			expect(info.inputPrice).toBe(inputPrice)
+			expect(info.outputPrice).toBe(outputPrice)
+			expect(info.cacheReadsPrice).toBe(cacheReadsPrice)
+			expect(info.description).toBeTruthy()
 
-		const handlerWithModel = new FireworksHandler({
-			apiModelId: modelId,
-			fireworksApiKey: "test-fireworks-api-key",
-		})
-		expect(handlerWithModel.getModel().id).toBe(modelId)
-	})
+			const handlerWithModel = new FireworksHandler({
+				apiModelId: modelId,
+				fireworksApiKey: "test-fireworks-api-key",
+			})
+			expect(handlerWithModel.getModel().id).toBe(modelId)
+		},
+	)
 
 	it("should return Kimi K2 Instruct model with correct configuration", () => {
 		const testModelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"
@@ -465,7 +486,7 @@ describe("FireworksHandler", () => {
 				stream: true,
 				stream_options: { include_usage: true },
 			}),
-			undefined,
+			expect.any(Object),
 		)
 	})
 
@@ -491,7 +512,7 @@ describe("FireworksHandler", () => {
 			expect.objectContaining({
 				temperature: 0.5,
 			}),
-			undefined,
+			expect.any(Object),
 		)
 	})
 
@@ -518,7 +539,7 @@ describe("FireworksHandler", () => {
 			expect.objectContaining({
 				temperature: 1.0,
 			}),
-			undefined,
+			expect.any(Object),
 		)
 	})
 
@@ -546,7 +567,7 @@ describe("FireworksHandler", () => {
 			expect.objectContaining({
 				temperature: 0.7,
 			}),
-			undefined,
+			expect.any(Object),
 		)
 	})
 

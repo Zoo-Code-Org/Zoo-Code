@@ -174,6 +174,7 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 			maxOutputTokens: this.getMaxOutputTokens(),
 			tools: aiSdkTools,
 			toolChoice: this.mapToolChoice(metadata?.tool_choice),
+			signal: metadata?.abortSignal,
 		}
 
 		// Use streamText for streaming responses

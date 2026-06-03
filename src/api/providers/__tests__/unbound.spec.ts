@@ -81,6 +81,7 @@ describe("UnboundHandler", () => {
 		}
 
 		expect(mockCreate).toHaveBeenCalledWith(
+						{ signal: undefined },
 			expect.objectContaining({
 				unbound_metadata: {
 					originApp: "zoo-code",
