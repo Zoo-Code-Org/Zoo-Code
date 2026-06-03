@@ -8,6 +8,8 @@
 	},
 	"toolRepetitionLimitReached": "Zoo sembla estar atrapat en un bucle, intentant la mateixa acció ({{toolName}}) repetidament. Això podria indicar un problema amb la seva estratègia actual. Considera reformular la tasca, proporcionar instruccions més específiques o guiar-lo cap a un enfocament diferent.",
 	"unknownToolError": "Zoo ha intentat utilitzar una eina desconeguda: \"{{toolName}}\". Reintentant...",
+	"missingToolParameter": "Zoo ha intentat utilitzar {{toolName}} sense valor per al paràmetre obligatori '{{paramName}}'. Reintentant...",
+	"missingToolParameterWithPath": "Zoo ha intentat utilitzar {{toolName}} per a '{{relPath}}' sense valor per al paràmetre obligatori '{{paramName}}'. Reintentant...",
 	"codebaseSearch": {
 		"approval": "Cercant '{{query}}' a la base de codi..."
 	},
