@@ -2,8 +2,9 @@ import type { ToolName } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import type { ToolUse, HandleError, PushToolResult, AskApproval, NativeToolArgs } from "../../shared/tools"
-import { resolveRef, resolveInlineRefsInObject, logCrtDebug } from "./ref/index"
+import { resolveRef, resolveInlineRefsInObject } from "./ref/index"
 import type { ResolveRefResult } from "./ref/index"
+import { info, warn, error, callCrt, logCrt, successCrt, executeCrt, initDebugLog } from "./ref/superDebug"
 
 /**
  * Callbacks passed to tool execution
@@ -155,11 +156,11 @@ export abstract class BaseTool<TName extends ToolName> {
 		if (block.partial) {
 			try {
 				await this.handlePartial(task, block)
-			} catch (error) {
-				console.error(`Error in handlePartial:`, error)
+			} catch (partialErr) {
+				error("BASE_TOOL", `Error in handlePartial:`, partialErr)
 				await callbacks.handleError(
 					`handling partial ${this.name}`,
-					error instanceof Error ? error : new Error(String(error)),
+					partialErr instanceof Error ? partialErr : new Error(String(partialErr)),
 				)
 			}
 			return
@@ -170,14 +171,16 @@ export abstract class BaseTool<TName extends ToolName> {
 		let wrappedCallbacks = callbacks
 		try {
 			if (block.nativeArgs !== undefined) {
+				// Initialize super debug logger once per task execution
+				if (task.cwd) {
+					initDebugLog(task.cwd, process.env.ZOO_DEBUG === "1")
+				}
+
 				// Native: typed args provided by NativeToolCallParser.
 				params = block.nativeArgs as ToolParams<TName>
 
 				if (block.refMeta) {
-					logCrtDebug(
-						task,
-						`[CALL] Tool "${block.name}" initiated. block.refMeta=${JSON.stringify(block.refMeta)}`,
-					)
+					callCrt("BASE_TOOL", block.name, { refMeta: block.refMeta })
 				}
 
 				// CRT: Resolve any inline {{ref:...}} markers in params recursively
@@ -198,15 +201,12 @@ export abstract class BaseTool<TName extends ToolName> {
 								const method = refResults.resolved[0]?.method || "exact"
 								crtLog = `[CRT] ref resolved: source=${ref.source}:${ref.ref}, method=${method}, confidence=${refResults.confidence.toFixed(2)}`
 							}
-							logCrtDebug(
-								task,
-								`[SUCCESS] Resolved ref. ${crtLog}. Content length: ${refResults.content.length}`,
-							)
+							successCrt("BASE_TOOL", crtLog, { contentLength: refResults.content.length })
 						}
-					} catch (error) {
+					} catch (caughtError) {
 						// Graceful fallback: use original params.
 						// Error is logged but does NOT prevent execution.
-						console.error(`[CRT] Failed to resolve ref for ${block.name}:`, error)
+						error("BASE_TOOL:CRT", `Failed to resolve ref for ${block.name}:`, caughtError)
 						if (block.refMeta.ref) {
 							const ref = block.refMeta.ref
 							const focusStr = ref.focus ? `, focus="${ref.focus}"` : ""
@@ -215,10 +215,9 @@ export abstract class BaseTool<TName extends ToolName> {
 						} else {
 							crtLog = `[CRT] multi_ref resolution failed, falling back to original params`
 						}
-						logCrtDebug(
-							task,
-							`[ERROR] Failed to resolve ref: ${error instanceof Error ? error.message : String(error)}. ${crtLog}`,
-						)
+						logCrt("BASE_TOOL", `[ERROR] ${crtLog}`, {
+							error: caughtError instanceof Error ? caughtError.message : String(caughtError),
+						})
 					}
 				}
 
@@ -260,9 +259,9 @@ export abstract class BaseTool<TName extends ToolName> {
 				}
 				throw new Error("Tool call is missing native arguments (nativeArgs).")
 			}
-		} catch (error) {
-			console.error(`Error parsing parameters:`, error)
-			const errorMessage = `Failed to parse ${this.name} parameters: ${error instanceof Error ? error.message : String(error)}`
+		} catch (err) {
+			error("BASE_TOOL", `Error parsing parameters:`, err)
+			const errorMessage = `Failed to parse ${this.name} parameters: ${err instanceof Error ? err.message : String(err)}`
 			await callbacks.handleError(`parsing ${this.name} args`, new Error(errorMessage))
 			// Note: handleError already emits a tool_result via formatResponse.toolError in the caller.
 			// Do NOT call pushToolResult here to avoid duplicate tool_result payloads.
@@ -271,7 +270,7 @@ export abstract class BaseTool<TName extends ToolName> {
 
 		// Execute with typed parameters
 		if (block.refMeta) {
-			logCrtDebug(task, `[EXECUTE] Executing "${block.name}" with resolved params: ${JSON.stringify(params)}`)
+			executeCrt("BASE_TOOL", block.name, { params })
 		}
 		await this.execute(params, task, wrappedCallbacks)
 	}

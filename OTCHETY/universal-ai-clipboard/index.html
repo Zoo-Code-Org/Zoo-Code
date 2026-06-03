@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UNIVERSAL AI CLIPBOARD — Reuse, Don't Regenerate</title>
+<meta name="description" content="Universal AI Clipboard (UAC) — a new category in AI agent architecture. Inter-tool content reuse mechanism.">
+<meta name="keywords" content="AI clipboard, UAC, CRT, content reference mechanism, AI agent, token saving">
+<meta property="og:title" content="UNIVERSAL AI CLIPBOARD">
+<meta property="og:description" content="A new category in AI architecture. Reuse, Don't Regenerate.">
+<meta property="og:url" content="https://dsconoiz.github.io/UNIVERSAL-AI-CLIPBOARD/">
+<meta name="theme-color" content="#0d1117">
+
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --bg-card-hover: #1c2333;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --text-cta: #c9d1d9;
+    --accent1: #ff6b35;
+    --accent2: #f7c948;
+    --accent3: #00d4aa;
+    --accent-gradient: linear-gradient(135deg, #ff6b35, #f7c948);
+    --border: #30363d;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse 70% 40% at 10% 5%, rgba(255,107,53,0.04) 0%, transparent 100%),
+      radial-gradient(ellipse 50% 35% at 90% 20%, rgba(0,212,170,0.04) 0%, transparent 100%),
+      radial-gradient(ellipse 40% 30% at 50% 90%, rgba(247,201,72,0.04) 0%, transparent 100%);
+    background-attachment: fixed;
+    color: var(--text);
+    line-height: 1.7;
+    min-height: 100vh;
+  }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  #particles {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .particle {
+    position: absolute; width: 2px; height: 2px;
+    border-radius: 50%; opacity: 0;
+    animation: float linear infinite;
+  }
+  .particle:nth-child(odd) { background: var(--accent2); }
+  .particle:nth-child(3n) { background: var(--accent3); }
+  @keyframes float {
+    0% { transform: translateY(105vh) rotate(0deg); opacity: 0; }
+    5% { opacity: 0.12; }
+    95% { opacity: 0.12; }
+    100% { transform: translateY(-10vh) rotate(720deg); opacity: 0; }
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+  header { padding: 48px 0 24px; text-align: center; border-bottom: 1px solid var(--border); }
+  .logo {
+    font-size: 2.6rem; font-weight: 900;
+    background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; letter-spacing: -0.03em; line-height: 1.1;
+  }
+  .logo-sub { font-size: 1rem; color: var(--text-dim); margin-top: 8px; font-weight: 400; }
+  .logo-sub span { color: var(--accent3); font-weight: 600; }
+  .tagline { font-size: 1.2rem; color: var(--text-cta); margin: 16px 0 0; font-style: italic; font-weight: 300; }
+  .lang-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 20px 0; padding: 0 8px; }
+  .lang-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    padding: 6px 14px; border-radius: 20px; cursor: pointer; font-size: 0.82rem;
+    transition: all 0.25s; font-family: inherit;
+  }
+  .lang-btn:hover { border-color: var(--accent1); color: var(--accent1); background: rgba(255,107,53,0.08); }
+  .lang-btn.active {
+    border-color: var(--accent1); color: #fff; background: var(--accent-gradient);
+    box-shadow: 0 0 24px rgba(255,107,53,0.15);
+  }
+  section { margin: 52px 0; }
+  .section-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 20px; color: var(--text); }
+  .section-title .acc1 { color: var(--accent1); }
+  .section-title .acc2 { color: var(--accent2); }
+  .section-title .acc3 { color: var(--accent3); }
+  .hero-text { font-size: 1.05rem; color: var(--text-dim); margin-bottom: 16px; line-height: 1.8; }
+  .callout {
+    font-size: 1rem; color: var(--text-cta); margin: 24px 0 0; padding: 20px 24px;
+    background: linear-gradient(135deg, rgba(255,107,53,0.06), rgba(0,212,170,0.06));
+    border-left: 3px solid var(--accent1); border-radius: 0 var(--radius) var(--radius) 0; line-height: 1.8;
+  }
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; transition: all 0.3s; cursor: default;
+  }
+  .card:hover { background: var(--bg-card-hover); border-color: rgba(255,107,53,0.2); transform: translateY(-3px); box-shadow: 0 4px 24px rgba(255,107,53,0.05); }
+  .card .num { font-size: 0.72rem; font-weight: 700; color: var(--accent1); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+  .card p { font-size: 0.85rem; color: var(--text-dim); line-height: 1.6; }
+  .pillars-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .pillar-card {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 24px; position: relative; overflow: hidden; transition: all 0.3s;
+  }
+  .pillar-card:hover { transform: translateY(-3px); box-shadow: 0 4px 24px rgba(255,107,53,0.06); }
+  .pillar-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px; }
+  .pillar-card.p1::before { background: var(--accent1); }
+  .pillar-card.p2::before { background: var(--accent2); }
+  .pillar-card.p3::before { background: var(--accent3); }
+  .pillar-card.p4::before { background: linear-gradient(90deg, var(--accent1), var(--accent2)); }
+  .pillar-card.p5::before { background: linear-gradient(90deg, var(--accent2), var(--accent3)); }
+  .pillar-card.p6::before { background: linear-gradient(90deg, var(--accent3), var(--accent1)); }
+  .pillar-card h3 { font-size: 1rem; margin-bottom: 8px; }
+  .pillar-card .tag { display: inline-block; font-size: 0.62rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+  .tag-orange { background: rgba(255,107,53,0.12); color: var(--accent1); }
+  .tag-yellow { background: rgba(247,201,72,0.12); color: var(--accent2); }
+  .tag-green { background: rgba(0,212,170,0.12); color: var(--accent3); }
+  .pillar-card p { font-size: 0.85rem; color: var(--text-dim); line-height: 1.7; }
+  .cta-block {
+    background: linear-gradient(135deg, rgba(255,107,53,0.08), rgba(0,212,170,0.08));
+    border: 1px solid rgba(255,107,53,0.2); border-radius: var(--radius); padding: 44px; text-align: center;
+  }
+  .cta-block h2 { font-size: 1.5rem; margin-bottom: 16px; }
+  .cta-block p { color: var(--text-dim); margin-bottom: 24px; font-size: 1rem; max-width: 600px; margin-left: auto; margin-right: auto; }
+  .cta-btn {
+    display: inline-block; background: var(--accent-gradient); color: #000; font-weight: 700;
+    padding: 14px 36px; border-radius: 30px; text-decoration: none; font-size: 1.05rem;
+    transition: all 0.25s; border: none; cursor: pointer;
+  }
+  .cta-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(255,107,53,0.3); }
+  .cta-secondary {
+    display: inline-block; margin-left: 12px; padding: 14px 28px; border: 1px solid var(--border);
+    border-radius: 30px; color: var(--text-dim); text-decoration: none; font-size: 0.95rem;
+    transition: all 0.25s; font-weight: 500;
+  }
+  .cta-secondary:hover { border-color: var(--accent1); color: var(--text); background: rgba(255,107,53,0.06); }
+  footer { text-align: center; padding: 40px 0 60px; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.85rem; margin-top: 48px; }
+  footer a { color: var(--accent1); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  .stats-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px 32px; margin: 24px 0 32px; }
+  .stat-item { text-align: center; }
+  .stat-number { font-size: 2.2rem; font-weight: 900; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1.2; }
+  .stat-label { font-size: 0.78rem; color: var(--text-dim); margin-top: 2px; }
+  .comp-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.85rem; }
+  .comp-table th { text-align: left; padding: 10px 12px; background: rgba(255,107,53,0.06); border-bottom: 2px solid var(--border); font-weight: 700; color: var(--text); }
+  .comp-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+  .comp-table .hl td { background: rgba(255,107,53,0.05); }
+  .comp-table .hl .name { color: var(--accent1); font-weight: 700; }
+  .badge-axis { display: inline-block; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .axis-user { background: rgba(0,212,170,0.12); color: var(--accent3); }
+  .axis-agent { background: rgba(255,107,53,0.12); color: var(--accent1); }
+  @media (max-width: 640px) {
+    .logo { font-size: 1.8rem; }
+    .logo-sub { font-size: 0.85rem; }
+    .cards-grid, .pillars-grid { grid-template-columns: 1fr; }
+    .lang-bar { gap: 4px; }
+    .lang-btn { font-size: 0.72rem; padding: 4px 10px; }
+    section { margin: 32px 0; }
+    .cta-block { padding: 24px; }
+    .stats-row { gap: 12px 20px; }
+    .stat-number { font-size: 1.6rem; }
+    .cta-secondary { margin-left: 0; margin-top: 12px; display: block; }
+  }
+  .fade-in { opacity: 0; transform: translateY(20px); animation: fadeIn 0.6s ease forwards; }
+  @keyframes fadeIn { to { opacity: 1; transform: translateY(0); } }
+  .fade-in:nth-child(1) { animation-delay: 0.1s; }
+  .fade-in:nth-child(2) { animation-delay: 0.2s; }
+  .fade-in:nth-child(3) { animation-delay: 0.3s; }
+  .fade-in:nth-child(4) { animation-delay: 0.4s; }
+  .fade-in:nth-child(5) { animation-delay: 0.5s; }
+</style>
+</head>
+<body>
+
+<div id="particles"></div>
+
+<header>
+  <div class="container">
+    <div class="logo">UAC</div>
+    <div class="logo-sub"><span>UNIVERSAL</span> AI CLIPBOARD</div>
+    <div class="tagline" data-key="tagline">"Reuse, Don't Regenerate"</div>
+  </div>
+</header>
+
+<div class="container">
+  <div class="lang-bar" id="langBar">
+    <button class="lang-btn" data-lang="en">English</button>
+    <button class="lang-btn" data-lang="ru">Русский</button>
+    <button class="lang-btn" data-lang="zh">中文</button>
+    <button class="lang-btn" data-lang="es">Español</button>
+    <button class="lang-btn" data-lang="de">Deutsch</button>
+    <button class="lang-btn" data-lang="fr">Français</button>
+    <button class="lang-btn" data-lang="ja">日本語</button>
+    <button class="lang-btn" data-lang="hi">हिन्दी</button>
+  </div>
+</div>
+
+<section class="fade-in">
+  <div class="cta-block" style="margin-top:8px;">
+    <h2 data-key="ctaTitle">A New Category in AI Agent Architecture</h2>
+    <p data-key="ctaDesc">Universal AI Clipboard (UAC) — a mechanism that allows AI agents to reuse content instead of regenerating it. Up to 96% token savings. Released into the public domain.</p>
+    <a class="cta-btn" id="ctaBtnTop" href="MANIFEST.md" target="_blank">📖 Read the Full Manifesto</a>
+    <a class="cta-secondary" href="https://github.com/DScoNOIZ/UNIVERSAL-AI-CLIPBOARD" target="_blank">⭐ GitHub</a>
+  </div>
+</section>
+
+<main class="container">
+
+  <section id="about" class="fade-in">
+    <h2 class="section-title"><span class="acc1">⏺</span> <span data-key="aboutTitle">Discovery Manifesto</span></h2>
+    <p class="hero-text" data-key="about1"><strong>I announce the discovery</strong> of a fundamentally new category in AI agent architecture — the <strong>"Optional Inter-Tool Content Citation Mechanism"</strong>, named <strong>Universal AI Clipboard (UAC)</strong>.</p>
+    <p class="hero-text" data-key="about2">An AI agent can reference existing contextual content through dedicated parameters (<code>ref</code>, <code>multi_ref</code>, <code>transform</code>) instead of regenerating it. The model becomes an <strong>assembler</strong>, combining ready-made information fragments in a single tool call.</p>
+    <p class="hero-text" data-key="about3">I <strong>release this discovery into the free use of the global community</strong> under CC0 license — no patents, royalties, or restrictions.</p>
+    <div class="callout" data-key="about4">This is more than technology. It is a call to the global community. The idea is given to the world for free. The next step is in the hands of those ready to implement it.</div>
+  </section>
+
+  <section class="fade-in">
+    <div class="stats-row">
+      <div class="stat-item"><div class="stat-number">80-96%</div><div class="stat-label" data-key="stat1">Token savings per citation</div></div>
+      <div class="stat-item"><div class="stat-number">5</div><div class="stat-label" data-key="stat2">Core mechanisms</div></div>
+      <div class="stat-item"><div class="stat-number">0</div><div class="stat-label" data-key="stat3">Analogues worldwide</div></div>
+      <div class="stat-item"><div class="stat-number">CC0</div><div class="stat-label" data-key="stat4">Public domain</div></div>
+    </div>
+  </section>
+
+  <section id="problem" class="fade-in">
+    <h2 class="section-title"><span class="acc2">⏺</span> <span data-key="problemTitle">The Problem: Regeneration Crisis</span></h2>
+    <p class="hero-text" data-key="problem1">Modern AI agents waste <strong>up to 90% of output traffic</strong> regenerating content that already exists in the session context.</p>
+    <p class="hero-text" data-key="problem2">Millions of AI agents daily regenerate terabytes of existing content, consuming gigawatt-hours of energy. This costs billions of dollars and produces tens of thousands of tons of CO₂ annually.</p>
+  </section>
+
+  <section id="pillars" class="fade-in">
+    <h2 class="section-title"><span class="acc3">⏺</span> <span data-key="pillarsTitle">Five Core Mechanisms</span></h2>
+    <div class="pillars-grid">
+      <div class="pillar-card p1">
+        <div class="tag tag-orange" data-key="p1Tag">Mechanism 1</div>
+        <h3>🔗 <span data-key="p1Title">Syntactic Clipboard</span></h3>
+        <p data-key="p1Desc">The model specifies a single anchor — a function name, class name, or variable. The system automatically finds it and extracts the entire syntactic unit.</p>
+      </div>
+      <div class="pillar-card p2">
+        <div class="tag tag-yellow" data-key="p2Tag">Mechanism 2</div>
+        <h3>📇 <span data-key="p2Title">Anchor Pair Citation</span></h3>
+        <p data-key="p2Desc">The model specifies only the START and END of a fragment. The system finds everything in between using multi-stage matching, even tolerating minor typos.</p>
+      </div>
+      <div class="pillar-card p3">
+        <div class="tag tag-green" data-key="p3Tag">Mechanism 3</div>
+        <h3>🧠 <span data-key="p3Title">Message Index Map</span></h3>
+        <p data-key="p3Desc">A separate index maps exact character positions in chat history. The model writes a short reference like "167:14..18" — the system extracts with 100% precision.</p>
+      </div>
+      <div class="pillar-card p4">
+        <div class="tag tag-orange" data-key="p4Tag">Mechanism 4</div>
+        <h3>🔄 <span data-key="p4Title">Transform Pipeline</span></h3>
+        <p data-key="p4Desc">A copied fragment can be modified on the fly — replace, prepend, wrap, append, or merge multiple fragments. All in a single tool call.</p>
+      </div>
+      <div class="pillar-card p5">
+        <div class="tag tag-yellow" data-key="p5Tag">Mechanism 5</div>
+        <h3>🔁 <span data-key="p5Title">Cross-Protocol Citation</span></h3>
+        <p data-key="p5Desc">Reference markers can be embedded inside any tool's text parameters. The system substitutes real content before calling external servers.</p>
+      </div>
+      <div class="pillar-card p6">
+        <div class="tag tag-green" data-key="p6Tag">Future</div>
+        <h3>🏖️ <span data-key="p6Title">Isolated Sub-Sessions</span></h3>
+        <p data-key="p6Desc">For complex tasks, a helper agent runs in an isolated temporary session, performs dirty work, returns only the clean result, then is destroyed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="unique" class="fade-in">
+    <h2 class="section-title"><span class="acc1">⏺</span> <span data-key="uniqueTitle">Uniqueness Verification</span></h2>
+    <div style="overflow-x:auto;">
+      <table class="comp-table">
+        <thead><tr><th data-key="comp1">Mechanism</th><th data-key="comp2">Axis</th><th data-key="comp3">Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>Anthropic Citations API</td><td><span class="badge-axis axis-user">Agent → User</span></td><td data-key="compRow1">Show source of answer</td></tr>
+          <tr><td>OpenAI Citation Formatting</td><td><span class="badge-axis axis-user">Agent → User</span></td><td data-key="compRow2">Tags for source display</td></tr>
+          <tr><td>Google Gemini Grounding</td><td><span class="badge-axis axis-user">Agent → User</span></td><td data-key="compRow3">Web search confirmation</td></tr>
+          <tr><td>ContextCite (MIT CSAIL)</td><td><span class="badge-axis axis-user">Agent → User</span></td><td data-key="compRow4">Source identification</td></tr>
+          <tr class="hl"><td class="name">★ Universal AI Clipboard (UAC)</td><td><span class="badge-axis axis-agent">Agent → Agent</span></td><td data-key="compRow5" style="font-weight:600;">Content reuse between calls</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="hero-text" style="margin-top:16px;" data-key="uniqueConclusion"><strong>Conclusion:</strong> Universal AI Clipboard (UAC) <strong style="color:var(--accent3);">has no analogues</strong> in worldwide AI agent systems practice.</p>
+  </section>
+
+  <!-- NEW: Deep Research Results -->
+  <section id="research" class="fade-in">
+    <h2 class="section-title"><span class="acc2">⏺</span> <span data-key="researchTitle">Deep Research Verification (7 Rounds)</span></h2>
+    <p class="hero-text" data-key="research1">I conducted <strong>7 rounds of deep search</strong> (Tavily advanced depth, ~50 sources) across all known AI categories: arXiv, LangChain, Anthropic, OpenAI, Google, MCP, CAMEL-AI, UiPath, Microsoft, AWS, GitHub discussions — <strong style="color:var(--accent3);">zero analogues found</strong>.</p>
+    <div style="overflow-x:auto;">
+      <table class="comp-table">
+        <thead><tr><th data-key="resCat">Category</th><th data-key="resSources">Sources</th><th data-key="resMatch">Analogue found?</th></tr></thead>
+        <tbody>
+          <tr><td>Human clipboard tools</td><td>UiPath Clipboard AI, PowerToys Advanced Paste</td><td style="color:var(--accent2);" data-key="resR1">❌ For humans, not AI agents</td></tr>
+          <tr><td>Tool output caching</td><td>CAMEL-AI "Brainwash Your Agent"</td><td style="color:var(--accent2);" data-key="resR2">⚠️ Only 1 last output, no 5 mechanisms</td></tr>
+          <tr><td>Academic research</td><td>AgentReuse (arXiv), KVCOMM</td><td style="color:var(--accent2);" data-key="resR3">❌ Plan/KV reuse only, not content</td></tr>
+          <tr><td>LangChain artifacts</td><td>content_and_artifact, ToolMessage.artifact</td><td style="color:var(--accent2);" data-key="resR4">❌ Content/metadata split, not citation</td></tr>
+          <tr><td>MCP protocol</td><td>MCP Resources, MCP Tools</td><td style="color:var(--accent2);" data-key="resR5">❌ Tool connection standard, not citation</td></tr>
+          <tr><td>Citation APIs</td><td>Anthropic/OpenAI/Google/Azure</td><td style="color:var(--accent2);" data-key="resR6">❌ Agent→User axis only</td></tr>
+          <tr><td>Shared memory</td><td>Multi-agent memory systems</td><td style="color:var(--accent2);" data-key="resR7">❌ RAG memory, not precise citation</td></tr>
+          <tr class="hl"><td class="name">★ UAC (this discovery)</td><td>Universal AI Clipboard</td><td data-key="resR8" style="color:var(--accent3);font-weight:600;">✅ 5 unique mechanisms, new category</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout" data-key="researchCallout"><strong>Result:</strong> Universal AI Clipboard is not "just another tool". It is a <strong>new category of architecture</strong> for AI agents, distinguished by a fundamentally new citation axis (Agent→Agent) and 5 unique content reuse mechanisms, no analogue of which exists anywhere in the world.</div>
+  </section>
+
+  <section class="fade-in">
+    <h2 class="section-title"><span class="acc2">⏺</span> <span data-key="sourcesTitle">Resources</span></h2>
+    <div class="cards-grid">
+      <div class="card">
+        <div class="num" data-key="src1Label">📄 Document</div>
+        <h3 data-key="src1Title">Full Manifesto (English)</h3>
+        <p data-key="src1Desc">Complete description: problem, solution, 5 core mechanisms, economic impact, call to action.</p>
+        <p style="margin-top:8px;"><a id="srcLinkEn" href="MANIFEST.md" style="color:var(--accent1);" target="_blank">Read →</a></p>
+      </div>
+      <div class="card">
+        <div class="num" data-key="src2Label">📄 Документ</div>
+        <h3 data-key="src2Title">Полный манифест (русский)</h3>
+        <p data-key="src2Desc">Всеобъемлющее описание: проблема, решение, 5 механизмов, экономический эффект, призыв к действию.</p>
+        <p style="margin-top:8px;"><a id="srcLinkRu" href="MANIFEST-RU.md" style="color:var(--accent1);" target="_blank">Читать →</a></p>
+      </div>
+      <div class="card">
+        <div class="num" data-key="src3Label">⭐ Repository</div>
+        <h3>GitHub: UNIVERSAL-AI-CLIPBOARD</h3>
+        <p data-key="src3Desc">Source documents, translations, all research materials and proof of discovery date.</p>
+        <p style="margin-top:8px;"><a href="https://github.com/DScoNOIZ/UNIVERSAL-AI-CLIPBOARD" style="color:var(--accent1);" target="_blank">Open →</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="fade-in">
+    <div class="cta-block">
+      <h2 data-key="ctaBottomTitle">I Call Upon the Global Community</h2>
+      <p data-key="ctaBottomDesc">AI framework developers, agent creators, researchers, business, environmentalists — this technology belongs to everyone. Fork, implement, improve. Released into the public domain.</p>
+      <a class="cta-btn" id="ctaBtnBottom" href="MANIFEST.md" target="_blank">📖 Read the Manifesto</a>
+      <a class="cta-secondary" href="https://github.com/DScoNOIZ/UNIVERSAL-AI-CLIPBOARD" target="_blank">⭐ GitHub</a>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container">
+    <p><strong>UNIVERSAL AI CLIPBOARD (UAC)</strong> — <span data-key="footerTag">a discovery released into the public domain</span></p>
+    <p data-key="footerAuth">github.com/DScoNOIZ · June 3, 2026</p>
+    <p style="margin-top:6px;"><a href="https://github.com/DScoNOIZ/UNIVERSAL-AI-CLIPBOARD" target="_blank">GitHub</a> &nbsp;·&nbsp; <span data-key="footerLicense">CC0 1.0 Universal — Public Domain</span></p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  const c = document.getElementById('particles');
+  for (let i=0; i<35; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    p.style.left = Math.random() * 100 + '%';
+    p.style.width = p.style.height = (1 + Math.random() * 2) + 'px';
+    p.style.animationDuration = (18 + Math.random() * 28) + 's';
+    p.style.animationDelay = Math.random() * 18 + 's';
+    c.appendChild(p);
+  }
+})();
+
+const MANIFEST_FILES = {
+  en: 'MANIFEST.md', ru: 'MANIFEST-RU.md', zh: 'MANIFEST-ZH.md',
+  es: 'MANIFEST-ES.md', de: 'MANIFEST-DE.md', fr: 'MANIFEST-FR.md',
+  ja: 'MANIFEST-JA.md', hi: 'MANIFEST-HI.md'
+};
+
+const TR = {
+  en: {
+    tagline: '"Reuse, Don\'t Regenerate"',
+    ctaTitle: 'A New Category in AI Agent Architecture',
+    ctaDesc: 'Universal AI Clipboard (UAC) — a mechanism that allows AI agents to reuse content instead of regenerating it. Up to 96% token savings. Released into the public domain.',
+    aboutTitle: 'Discovery Manifesto',
+    about1: '<strong>I announce the discovery</strong> of a fundamentally new category in AI agent architecture — the <strong>"Optional Inter-Tool Content Citation Mechanism"</strong>, named <strong>Universal AI Clipboard (UAC)</strong>.',
+    about2: 'An AI agent can reference existing contextual content through dedicated parameters (<code>ref</code>, <code>multi_ref</code>, <code>transform</code>) instead of regenerating it. The model becomes an <strong>assembler</strong>, combining ready-made information fragments in a single tool call.',
+    about3: 'I <strong>release this discovery into the free use of the global community</strong> under CC0 license — no patents, royalties, or restrictions.',
+    about4: 'This is more than technology. It is a call to the global community. The idea is given to the world for free. The next step is in the hands of those ready to implement it.',
+    stat1: 'Token savings per citation', stat2: 'Core mechanisms', stat3: 'Analogues worldwide', stat4: 'Public domain',
+    problemTitle: 'The Problem: Regeneration Crisis',
+    problem1: 'Modern AI agents waste <strong>up to 90% of output traffic</strong> regenerating content that already exists in the session context.',
+    problem2: 'Millions of AI agents daily regenerate terabytes of existing content, consuming gigawatt-hours of energy. This costs billions of dollars and produces tens of thousands of tons of CO₂ annually.',
+    pillarsTitle: 'Five Core Mechanisms',
+    p1Tag: 'Mechanism 1', p1Title: 'Syntactic Clipboard', p1Desc: 'The model specifies a single anchor — a function name, class name, or variable. The system automatically finds it and extracts the entire syntactic unit.',
+    p2Tag: 'Mechanism 2', p2Title: 'Anchor Pair Citation', p2Desc: 'The model specifies only the START and END of a fragment. The system finds everything in between using multi-stage matching, even tolerating minor typos.',
+    p3Tag: 'Mechanism 3', p3Title: 'Message Index Map', p3Desc: 'A separate index maps exact character positions in chat history. The model writes a short reference like "167:14..18" — the system extracts with 100% precision.',
+    p4Tag: 'Mechanism 4', p4Title: 'Transform Pipeline', p4Desc: 'A copied fragment can be modified on the fly — replace, prepend, wrap, append, or merge multiple fragments. All in a single tool call.',
+    p5Tag: 'Mechanism 5', p5Title: 'Cross-Protocol Citation', p5Desc: 'Reference markers can be embedded inside any tool\'s text parameters. The system substitutes real content before calling external servers.',
+    p6Tag: 'Future', p6Title: 'Isolated Sub-Sessions', p6Desc: 'For complex tasks, a helper agent runs in an isolated temporary session, performs dirty work, returns only the clean result, then is destroyed.',
+    uniqueTitle: 'Uniqueness Verification',
+    comp1: 'Mechanism', comp2: 'Axis', comp3: 'Purpose',
+    compRow1: 'Show source of answer', compRow2: 'Tags for source display', compRow3: 'Web search confirmation', compRow4: 'Source identification', compRow5: 'Content reuse between calls',
+    uniqueConclusion: '<strong>Conclusion:</strong> Universal AI Clipboard (UAC) <strong style="color:var(--accent3);">has no analogues</strong> in worldwide AI agent systems practice.',
+    researchTitle: 'Deep Research Verification (7 Rounds)',
+    research1: 'I conducted <strong>7 rounds of deep search</strong> (Tavily advanced depth, ~50 sources) across all known AI categories: arXiv, LangChain, Anthropic, OpenAI, Google, MCP, CAMEL-AI, UiPath, Microsoft, AWS, GitHub discussions — <strong style="color:var(--accent3);">zero analogues found</strong>.',
+    resCat: 'Category', resSources: 'Sources', resMatch: 'Analogue found?',
+    resR1: '❌ For humans, not AI agents', resR2: '⚠️ Only 1 last output, no 5 mechanisms', resR3: '❌ Plan/KV reuse only, not content',
+    resR4: '❌ Content/metadata split, not citation', resR5: '❌ Tool connection standard, not citation', resR6: '❌ Agent→User axis only',
+    resR7: '❌ RAG memory, not precise citation', resR8: '✅ 5 unique mechanisms, new category',
+    researchCallout: '<strong>Result:</strong> Universal AI Clipboard is not "just another tool". It is a <strong>new category of architecture</strong> for AI agents, distinguished by a fundamentally new citation axis (Agent→Agent) and 5 unique content reuse mechanisms, no analogue of which exists anywhere in the world.',
+    sourcesTitle: 'Resources',
+    src1Label: '📄 Document', src1Title: 'Full Manifesto (English)', src1Desc: 'Complete description: problem, solution, 5 core mechanisms, economic impact, call to action.',
+    src2Label: '📄 Документ', src2Title: 'Полный манифест (русский)', src2Desc: 'Всеобъемлющее описание: проблема, решение, 5 механизмов, экономический эффект, призыв к действию.',
+    src3Label: '⭐ Repository', src3Desc: 'Source documents, translations, all research materials and proof of discovery date.',
+    ctaBottomTitle: 'I Call Upon the Global Community',
+    ctaBottomDesc: 'AI framework developers, agent creators, researchers, business, environmentalists — this technology belongs to everyone. Fork, implement, improve. Released into the public domain.',
+    footerTag: 'a discovery released into the public domain', footerAuth: 'github.com/DScoNOIZ · June 3, 2026', footerLicense: 'CC0 1.0 Universal — Public Domain'
+  },
+  ru: {
+    tagline: '«Переиспользуй, а не генерируй заново»',
+    ctaTitle: 'Открытие новой категории в архитектуре AI-агентов',
+    ctaDesc: 'Universal AI Clipboard (UAC) — механизм, позволяющий AI-агентам переиспользовать контент вместо повторной генерации. Экономия до 96% токенов. Общественное достояние.',
+    aboutTitle: 'Манифест открытия',
+    about1: '<strong>Я заявляю об открытии</strong> принципиально новой категории в архитектуре AI-агентов — <strong>«Механизм опционального внутри-агентного цитирования контента между инструментальными вызовами»</strong>.',
+    about2: 'AI-агент может ссылаться на существующий контент через параметры <code>ref</code>/<code>multi_ref</code>/<code>transform</code> вместо повторной генерации. Модель становится <strong>сборщиком</strong>, комбинируя готовые фрагменты за один вызов.',
+    about3: 'Я <strong>передаю это открытие в безвозмездное пользование мировому сообществу</strong> по лицензии CC0 — без патентов, отчислений или ограничений.',
+    about4: 'Это не просто технология. Это призыв к мировому сообществу. Идея отдана миру бесплатно. Следующий шаг за теми, кто готов её реализовать.',
+    stat1: 'Экономии токенов на цитату', stat2: 'Ключевых механизмов', stat3: 'Аналогов в мире', stat4: 'Общественное достояние',
+    problemTitle: 'Проблема: кризис повторной генерации',
+    problem1: 'Современные AI-агенты тратят <strong>до 90% выходного трафика</strong> на перепечатывание контента, уже существующего в контексте сессии.',
+    problem2: 'Миллионы AI-агентов ежедневно перегенерируют терабайты контента, потребляя гигаватт-часы энергии, что стоит миллиарды долларов и производит десятки тысяч тонн CO₂ в год.',
+    pillarsTitle: 'Пять ключевых механизмов',
+    p1Tag: 'Механизм 1', p1Title: 'Синтаксический буфер обмена', p1Desc: 'Модель указывает опорный элемент — имя функции или переменной. Система находит его и извлекает всю синтаксическую единицу целиком.',
+    p2Tag: 'Механизм 2', p2Title: 'Цитата по началу и концу', p2Desc: 'Модель указывает только НАЧАЛО и КОНЕЦ фрагмента. Система находит всё между ними через многоступенчатый поиск, прощая мелкие опечатки.',
+    p3Tag: 'Механизм 3', p3Title: 'Индексный указатель сообщений', p3Desc: 'Создаётся индекс точных символьных позиций в истории чата. Модель пишет «167:14..18» — система извлекает с точностью до символа.',
+    p4Tag: 'Механизм 4', p4Title: 'Конвейер преобразований', p4Desc: 'Фрагмент изменяется на лету: замена, добавление, обёртывание, склейка нескольких фрагментов. Всё за один вызов.',
+    p5Tag: 'Механизм 5', p5Title: 'Сквозное цитирование', p5Desc: 'Маркеры-ссылки встраиваются в текстовые параметры любых инструментов. Система подставляет контент перед вызовом внешних серверов.',
+    p6Tag: 'Перспектива', p6Title: 'Изолированные подсессии', p6Desc: 'Для сложных задач вспомогательный агент в изолированной сессии выполняет черновую работу, возвращает чистый результат и уничтожается.',
+    uniqueTitle: 'Проверка уникальности',
+    comp1: 'Механизм', comp2: 'Ось', comp3: 'Назначение',
+    compRow1: 'Показать источник ответа', compRow2: 'Отображение источников', compRow3: 'Подтверждение из поиска', compRow4: 'Определение источников', compRow5: 'Переиспользование между вызовами',
+    uniqueConclusion: '<strong>Вывод:</strong> Universal AI Clipboard (UAC) <strong style="color:var(--accent3);">не имеет аналогов</strong> в мировой практике AI-агентных систем.',
+    researchTitle: 'Глубокое исследование (7 раундов)',
+    research1: 'Проведено <strong>7 раундов глубокого поиска</strong> (Tavily advanced depth, ~50 источников) по всем известным категориям AI: arXiv, LangChain, Anthropic, OpenAI, Google, MCP, CAMEL-AI, UiPath, Microsoft, AWS, GitHub discussions — <strong style="color:var(--accent3);">ноль аналогов</strong>.',
+    resCat: 'Категория', resSources: 'Источники', resMatch: 'Найден аналог?',
+    resR1: '❌ Для людей, не для AI-агентов', resR2: '⚠️ Только 1 последний output, нет 5 механизмов', resR3: '❌ Только переиспользование планов/KV',
+    resR4: '❌ Разделение контент/метаданные, не цитирование', resR5: '❌ Стандарт подключения, не цитирование', resR6: '❌ Только ось Агент→Пользователь',
+    resR7: '❌ RAG-память, не точное цитирование', resR8: '✅ 5 уникальных механизмов, новая категория',
+    researchCallout: '<strong>Результат:</strong> Universal AI Clipboard — это не «просто ещё один инструмент». Это <strong>новая категория архитектуры</strong> для AI-агентов, отличающаяся принципиально новой осью цитирования (Агент→Агент) и 5 уникальными механизмами переиспользования контента, аналогов которым нет в мире.',
+    sourcesTitle: 'Ресурсы',
+    src1Label: '📄 Документ', src1Title: 'Full Manifesto (English)', src1Desc: 'Complete description: problem, solution, 5 core mechanisms, economic impact, call to action.',
+    src2Label: '📄 Документ', src2Title: 'Полный манифест (русский)', src2Desc: 'Всеобъемлющее описание: проблема, решение, 5 механизмов, экономический эффект, призыв к действию.',
+    src3Label: '⭐ Репозиторий', src3Desc: 'Исходные документы, переводы, исследовательские материалы и подтверждение даты открытия.',
+    ctaBottomTitle: 'Я призываю мировое сообщество',
+    ctaBottomDesc: 'Разработчики AI-фреймворков, создатели агентов, исследователи, бизнес, экологи — эта технология принадлежит всем. Форкайте, реализуйте, улучшайте.',
+    footerTag: 'открытие, переданное в общественное достояние', footerAuth: 'github.com/DScoNOIZ · 3 июня 2026', footerLicense: 'CC0 1.0 Universal — Public Domain'
+  },
+  zh: {
+    tagline: '「重用，而非重新生成」',
+    ctaTitle: 'AI代理架构中的新类别',
+    ctaDesc: 'Universal AI Clipboard (UAC) — 允许AI代理重用内容而非重新生成的机制。高达96%的令牌节省。已进入公共领域。',
+    aboutTitle: '发现宣言',
+    about1: '<strong>我宣布发现</strong>AI代理架构中一个全新类别——<strong>"工具调用间可选内容引用机制"</strong>，命名为<strong>Universal AI Clipboard (UAC)</strong>。',
+    about2: 'AI代理可通过专用参数（<code>ref</code>、<code>multi_ref</code>、<code>transform</code>）引用现有上下文内容，而非重新生成。',
+    about3: '我<strong>将此发现无偿提供给全球社区</strong>，基于CC0许可证——无专利、版税或限制。',
+    about4: '这不仅仅是技术。这是对全球社区的号召。',
+    stat1: '每次引用节省令牌', stat2: '核心机制', stat3: '全球无类似', stat4: '公共领域',
+    problemTitle: '问题：重新生成危机',
+    problem1: '现代AI代理浪费<strong>高达90%的输出流量</strong>重新生成会话上下文中已存在的内容。',
+    problem2: '数百万AI代理每天重新生成数TB现有内容，消耗吉瓦时能源。',
+    pillarsTitle: '五个核心机制',
+    p1Tag: '机制 1', p1Title: '语法剪贴板', p1Desc: '模型指定一个锚点——函数名、类名或变量名。系统自动提取整个语法单元。',
+    p2Tag: '机制 2', p2Title: '锚点对引用', p2Desc: '模型仅指定片段的开始和结束。系统通过多阶段匹配找到其间所有内容。',
+    p3Tag: '机制 3', p3Title: '消息索引图', p3Desc: '单独索引映射聊天历史中的精确字符位置。模型写短引用如"167:14..18"。',
+    p4Tag: '机制 4', p4Title: '转换管道', p4Desc: '复制的片段可即时修改——替换、前置、包裹、追加或合并多个片段。',
+    p5Tag: '机制 5', p5Title: '跨协议引用', p5Desc: '引用标记可嵌入任何工具参数中。系统在调用服务器前替换为真实内容。',
+    p6Tag: '未来', p6Title: '隔离子会话', p6Desc: '复杂任务：辅助代理在隔离临时会话中运行，返回干净结果后销毁。',
+    uniqueTitle: '独特性验证',
+    comp1: '机制', comp2: '轴', comp3: '目的',
+    compRow1: '显示答案来源', compRow2: '来源显示标签', compRow3: '网页搜索确认', compRow4: '来源识别', compRow5: '调用间内容重用',
+    uniqueConclusion: '<strong>结论：</strong> Universal AI Clipboard (UAC) <strong style="color:var(--accent3);">在全球AI代理系统实践中没有类似物</strong>。',
+    researchTitle: '深度研究验证（7轮）',
+    research1: '我进行了<strong>7轮深度搜索</strong>（Tavily高级深度，~50来源）跨越所有已知AI类别：arXiv、LangChain、Anthropic、OpenAI、Google、MCP、CAMEL-AI、UiPath、Microsoft、AWS、GitHub讨论——<strong style="color:var(--accent3);">零类似物</strong>。',
+    resCat: '类别', resSources: '来源', resMatch: '找到类似物？',
+    resR1: '❌ 为人类设计，非AI代理', resR2: '⚠️ 仅最后1个输出，无5机制', resR3: '❌ 仅计划/KV重用',
+    resR4: '❌ 内容/元数据分离，非引用', resR5: '❌ 工具连接标准，非引用', resR6: '❌ 仅代理→用户轴',
+    resR7: '❌ RAG记忆，非精确引用', resR8: '✅ 5独特机制，新类别',
+    researchCallout: '<strong>结果：</strong> Universal AI Clipboard不是"又一个工具"。它是AI代理的<strong>新架构类别</strong>，以全新的引用轴（代理→代理）和5种独特内容重用机制为特征，在全世界没有任何类似物。',
+    sourcesTitle: '资源',
+    src1Label: '📄 文档', src1Title: '完整宣言（英文）', src1Desc: '完整描述：问题、解决方案、5个核心机制、经济影响、行动号召。',
+    src2Label: '📄 文档', src2Title: '完整宣言（俄文）', src2Desc: '全面描述：问题、解决方案、5个机制、经济影响、行动号召。',
+    src3Label: '⭐ 仓库', src3Desc: '源文档、翻译、所有研究材料和发现日期证明。',
+    ctaBottomTitle: '我呼吁全球社区',
+    ctaBottomDesc: 'AI框架开发者、代理创建者、研究人员、企业、环保人士——这项技术属于每个人。',
+    footerTag: '已进入公共领域的发现', footerAuth: 'github.com/DScoNOIZ · 2026年6月3日', footerLicense: 'CC0 1.0 Universal — 公共领域'
+  },
+  es: {
+    tagline: '"Reutiliza, no regenere"',
+    ctaTitle: 'Una nueva categoría en la arquitectura de agentes de IA',
+    ctaDesc: 'Universal AI Clipboard (UAC) — un mecanismo que permite a los agentes de IA reutilizar contenido en lugar de regenerarlo. Hasta 96% de ahorro de tokens. Dominio público.',
+    aboutTitle: 'Manifiesto del descubrimiento',
+    about1: '<strong>Anuncio el descubrimiento</strong> de una categoría fundamentalmente nueva en la arquitectura de agentes de IA.',
+    about2: 'Un agente de IA puede referenciar contenido contextual existente mediante parámetros dedicados en lugar de regenerarlo.',
+    about3: '<strong>Libero este descubrimiento al uso gratuito de la comunidad global</strong> bajo licencia CC0.',
+    about4: 'Esto es más que tecnología. Es un llamado a la comunidad global.',
+    stat1: 'Ahorro de tokens por cita', stat2: 'Mecanismos clave', stat3: 'Sin análogos globales', stat4: 'Dominio público',
+    problemTitle: 'El problema: crisis de regeneración',
+    problem1: 'Los agentes de IA desperdician <strong>hasta el 90% del tráfico de salida</strong> regenerando contenido existente.',
+    problem2: 'Millones de agentes regeneran terabytes de contenido diariamente, consumiendo gigavatios-hora de energía.',
+    pillarsTitle: 'Cinco mecanismos clave',
+    p1Tag: 'Mecanismo 1', p1Title: 'Portapapeles sintáctico', p1Desc: 'El modelo especifica un ancla — nombre de función, clase o variable. El sistema extrae toda la unidad sintáctica.',
+    p2Tag: 'Mecanismo 2', p2Title: 'Citación por par de anclas', p2Desc: 'El modelo especifica solo INICIO y FIN. El sistema encuentra todo lo intermedio mediante búsqueda multietapa.',
+    p3Tag: 'Mecanismo 3', p3Title: 'Mapa de índice de mensajes', p3Desc: 'Índice separado con posiciones exactas de caracteres. El modelo escribe referencia corta "167:14..18".',
+    p4Tag: 'Mecanismo 4', p4Title: 'Tubería de transformación', p4Desc: 'Fragmento copiado modificable sobre la marcha — reemplazar, anteponer, envolver, añadir o fusionar.',
+    p5Tag: 'Mecanismo 5', p5Title: 'Citación entre protocolos', p5Desc: 'Marcadores de referencia incrustados en parámetros de cualquier herramienta.',
+    p6Tag: 'Futuro', p6Title: 'Subsesiones aisladas', p6Desc: 'Agente auxiliar en sesión temporal aislada para trabajos complejos.',
+    researchTitle: 'Verificación profunda (7 rondas)',
+    research1: 'Realicé <strong>7 rondas de búsqueda profunda</strong> (Tavily advanced depth, ~50 fuentes) en todas las categorías conocidas de IA: arXiv, LangChain, Anthropic, OpenAI, Google, MCP, CAMEL-AI, UiPath, Microsoft, AWS, GitHub discussions — <strong style="color:var(--accent3);">cero análogos encontrados</strong>.',
+    resCat: 'Categoría', resSources: 'Fuentes', resMatch: '¿Análogo encontrado?',
+    resR1: '❌ Para humanos, no agentes IA', resR2: '⚠️ Solo último output, sin 5 mecanismos', resR3: '❌ Solo reutilización de planes/KV',
+    resR4: '❌ Separación contenido/metadatos, no cita', resR5: '❌ Estándar conexión, no cita', resR6: '❌ Solo eje Agente→Usuario',
+    resR7: '❌ Memoria RAG, no cita precisa', resR8: '✅ 5 mecanismos únicos, nueva categoría',
+    researchCallout: '<strong>Resultado:</strong> Universal AI Clipboard no es "solo otra herramienta". Es una <strong>nueva categoría de arquitectura</strong> para agentes de IA, con un nuevo eje de citación (Agente→Agente) y 5 mecanismos únicos sin análogo en el mundo.',
+    uniqueTitle: 'Verificación de unicidad',
+    comp1: 'Mecanismo', comp2: 'Eje', comp3: 'Propósito',
+    compRow1: 'Mostrar fuente', compRow2: 'Mostrar fuentes', compRow3: 'Confirmación web', compRow4: 'Identificación', compRow5: 'Reutilización entre llamadas',
+    uniqueConclusion: '<strong>Conclusión:</strong> UAC <strong style="color:var(--accent3);">no tiene análogos</strong> en sistemas de agentes de IA.',
+    sourcesTitle: 'Recursos',
+    src1Label: '📄 Documento', src1Title: 'Manifiesto completo (inglés)', src1Desc: 'Descripción completa: problema, solución, 5 mecanismos, impacto económico.',
+    src2Label: '📄 Documento', src2Title: 'Manifiesto completo (ruso)', src2Desc: 'Descripción completa en ruso.',
+    src3Label: '⭐ Repositorio', src3Desc: 'Documentos fuente, traducciones y prueba de fecha de descubrimiento.',
+    ctaBottomTitle: 'Hago un llamado a la comunidad global',
+    ctaBottomDesc: 'Desarrolladores, creadores de agentes, investigadores, empresas — esta tecnología pertenece a todos.',
+    footerTag: 'un descubrimiento en dominio público', footerAuth: 'github.com/DScoNOIZ · 3 de junio de 2026', footerLicense: 'CC0 1.0 Universal — Dominio Público'
+  },
+  de: {
+    tagline: '„Wiederverwenden, nicht neu generieren"',
+    ctaTitle: 'Eine neue Kategorie in der KI-Agenten-Architektur',
+    ctaDesc: 'UAC — ein Mechanismus, der KI-Agenten ermöglicht, Inhalte wiederzuverwenden statt neu zu generieren. Bis zu 96% Token-Ersparnis. Gemeinfreiheit.',
+    aboutTitle: 'Entdeckungsmanifest',
+    about1: '<strong>Ich kündige die Entdeckung</strong> einer grundlegend neuen Kategorie in der KI-Agenten-Architektur an.',
+    about2: 'Ein KI-Agent kann bestehende kontextuelle Inhalte durch dedizierte Parameter referenzieren.',
+    about3: 'Ich <strong>gebe diese Entdeckung zur freien Nutzung durch die globale Gemeinschaft frei</strong> unter CC0-Lizenz.',
+    about4: 'Dies ist mehr als Technologie. Es ist ein Aufruf an die globale Gemeinschaft.',
+    stat1: 'Token-Ersparnis pro Zitat', stat2: 'Kernmechanismen', stat3: 'Weltweit ohne Analogie', stat4: 'Gemeinfreiheit',
+    problemTitle: 'Das Problem: Regenerationskrise',
+    problem1: 'KI-Agenten verschwenden <strong>bis zu 90% des Ausgabeverkehrs</strong> durch Neu Generierung vorhandener Inhalte.',
+    problem2: 'Millionen KI-Agenten regenerieren täglich Terabytes vorhandener Inhalte.',
+    pillarsTitle: 'Fünf Kernmechanismen',
+    p1Tag: 'Mechanismus 1', p1Title: 'Syntaktische Zwischenablage', p1Desc: 'Modell spezifiziert Ankerpunkt — Funktionsname. System extrahiert gesamte syntaktische Einheit.',
+    p2Tag: 'Mechanismus 2', p2Title: 'Ankerpaar-Zitierung', p2Desc: 'Modell spezifiziert nur START und ENDE. System findet alles dazwischen.',
+    p3Tag: 'Mechanismus 3', p3Title: 'Nachrichtenindexkarte', p3Desc: 'Separater Index mit exakten Zeichenpositionen. Modell schreibt Kurzreferenz "167:14..18".',
+    p4Tag: 'Mechanismus 4', p4Title: 'Transformationspipeline', p4Desc: 'Kopiertes Fragment spontan veränderbar — ersetzen, voranstellen, umhüllen, anhängen, zusammenführen.',
+    p5Tag: 'Mechanismus 5', p5Title: 'Protokollübergreifende Zitierung', p5Desc: 'Referenzmarkierungen in Textparametern jedes Werkzeugs. System ersetzt vor Aufruf.',
+    p6Tag: 'Zukunft', p6Title: 'Isolierte Untersitzungen', p6Desc: 'Hilfsagent in isolierter temporärer Sitzung für komplexe Aufgaben.',
+    researchTitle: 'Tiefenprüfung (7 Runden)',
+    research1: 'Ich führte <strong>7 Runden tiefer Suche</strong> (Tavily advanced depth, ~50 Quellen) in allen bekannten KI-Kategorien durch: arXiv, LangChain, Anthropic, OpenAI, Google, MCP, CAMEL-AI, UiPath, Microsoft, AWS, GitHub discussions — <strong style="color:var(--accent3);">null Analoga gefunden</strong>.',
+    resCat: 'Kategorie', resSources: 'Quellen', resMatch: 'Analogon gefunden?',
+    resR1: '❌ Für Menschen, nicht KI-Agenten', resR2: '⚠️ Nur letzte Ausgabe, keine 5 Mechanismen', resR3: '❌ Nur Plan/KV-Wiederverwendung',
+    resR4: '❌ Inhalt/Metadaten-Trennung, kein Zitat', resR5: '❌ Verbindungsstandard, kein Zitat', resR6: '❌ Nur Agent→Benutzer-Achse',
+    resR7: '❌ RAG-Speicher, kein präzises Zitat', resR8: '✅ 5 einzigartige Mechanismen, neue Kategorie',
+    researchCallout: '<strong>Ergebnis:</strong> Universal AI Clipboard ist nicht "nur ein weiteres Tool". Es ist eine <strong>neue Architektur-Kategorie</strong> für KI-Agenten mit einer neuen Zitierachse (Agent→Agent) und 5 einzigartigen Mechanismen ohne Analogie weltweit.',
+    uniqueTitle: 'Einzigartigkeitsprüfung',
+    comp1: 'Mechanismus', comp2: 'Achse', comp3: 'Zweck',
+    compRow1: 'Quelle anzeigen', compRow2: 'Quellen anzeigen', compRow3: 'Websuche Bestätigung', compRow4: 'Quellenidentifikation', compRow5: 'Wiederverwendung zwischen Aufrufen',
+    uniqueConclusion: '<strong>Schlussfolgerung:</strong> UAC <strong style="color:var(--accent3);">hat keine Analoga</strong> weltweit.',
+    sourcesTitle: 'Ressourcen',
+    src1Label: '📄 Dokument', src1Title: 'Vollständiges Manifest (Englisch)', src1Desc: 'Vollständige Beschreibung.',
+    src2Label: '📄 Dokument', src2Title: 'Vollständiges Manifest (Russisch)', src2Desc: 'Vollständige Beschreibung auf Russisch.',
+    src3Label: '⭐ Repository', src3Desc: 'Quelldokumente, Übersetzungen und Entdeckungsnachweis.',
+    ctaBottomTitle: 'Ich rufe die globale Gemeinschaft auf',
+    ctaBottomDesc: 'KI-Framework-Entwickler, Agent-Ersteller, Forscher, Unternehmen — diese Technologie gehört allen.',
+    footerTag: 'eine Entdeckung in der Gemeinfreiheit', footerAuth: 'github.com/DScoNOIZ · 3. Juni 2026', footerLicense: 'CC0 1.0 Universal — Gemeinfreiheit'
+  },
+  fr: {
+    tagline: '« Réutilisez, ne régénérez pas »',
+    ctaTitle: 'Une nouvelle catégorie dans l\'architecture des agents IA',
+    ctaDesc: 'UAC — un mécanisme permettant aux agents IA de réutiliser le contenu plutôt que de le régénérer. Jusqu\'à 96% d\'économie de tokens. Domaine public.',
+    aboutTitle: 'Manifeste de la découverte',
+    about1: '<strong>J\'annonce la découverte</strong> d\'une catégorie fondamentalement nouvelle dans l\'architecture des agents IA.',
+    about2: 'Un agent IA peut référencer du contenu contextuel existant via des paramètres dédiés.',
+    about3: 'Je <strong>libère cette découverte en libre usage pour toute la communauté mondiale</strong> sous licence CC0.',
+    about4: 'C\'est plus que de la technologie. C\'est un appel à la communauté mondiale.',
+    stat1: 'Économie de tokens par citation', stat2: 'Mécanismes clés', stat3: 'Sans analogue mondial', stat4: 'Domaine public',
+    problemTitle: 'Le problème : crise de régénération',
+    problem1: 'Les agents IA gaspillent <strong>jusqu\'à 90% du trafic de sortie</strong> en régénérant du contenu existant.',
+    problem2: 'Des millions d\'agents IA régénèrent quotidiennement des téraoctets de contenu.',
+    pillarsTitle: 'Cinq mécanismes clés',
+    p1Tag: 'Mécanisme 1', p1Title: 'Presse-papiers syntaxique', p1Desc: 'Le modèle spécifie un point d\'ancrage — nom de fonction. Le système extrait l\'unité syntaxique entière.',
+    p2Tag: 'Mécanisme 2', p2Title: 'Citation par paire d\'ancres', p2Desc: 'Le modèle spécifie seulement DÉBUT et FIN. Le système trouve tout l\'intervalle.',
+    p3Tag: 'Mécanisme 3', p3Title: 'Carte d\'index de messages', p3Desc: 'Index séparé avec positions exactes des caractères. Référence courte "167:14..18".',
+    p4Tag: 'Mécanisme 4', p4Title: 'Pipeline de transformation', p4Desc: 'Fragment copié modifiable à la volée — remplacer, préfixer, envelopper, ajouter, fusionner.',
+    p5Tag: 'Mécanisme 5', p5Title: 'Citation inter-protocole', p5Desc: 'Marqueurs de référence intégrés dans les paramètres de tout outil.',
+    p6Tag: 'Futur', p6Title: 'Sous-sessions isolées', p6Desc: 'Agent auxiliaire en session temporaire isolée pour tâches complexes.',
+    researchTitle: 'Vérification approfondie (7 rondes)',
+    research1: 'J\'ai mené <strong>7 rondes de recherche approfondie</strong> (Tavily advanced depth, ~50 sources) dans toutes les catégories IA connues : arXiv, LangChain, Anthropic, OpenAI, Google, MCP, CAMEL-AI, UiPath, Microsoft, AWS, GitHub discussions — <strong style="color:var(--accent3);">zéro analogue trouvé</strong>.',
+    resCat: 'Catégorie', resSources: 'Sources', resMatch: 'Analogue trouvé ?',
+    resR1: '❌ Pour humains, pas agents IA', resR2: '⚠️ Seulement dernière sortie, pas 5 mécanismes', resR3: '❌ Réutilisation plan/KV seulement',
+    resR4: '❌ Séparation contenu/métadonnées, pas citation', resR5: '❌ Standard connexion, pas citation', resR6: '❌ Axe Agent→Utilisateur seulement',
+    resR7: '❌ Mémoire RAG, pas citation précise', resR8: '✅ 5 mécanismes uniques, nouvelle catégorie',
+    researchCallout: '<strong>Résultat :</strong> Universal AI Clipboard n\'est pas "juste un autre outil". C\'est une <strong>nouvelle catégorie d\'architecture</strong> pour les agents IA, avec un nouvel axe de citation (Agent→Agent) et 5 mécanismes uniques sans analogue dans le monde.',
+    uniqueTitle: 'Vérification d\'unicité',
+    comp1: 'Mécanisme', comp2: 'Axe', comp3: 'But',
+    compRow1: 'Afficher la source', compRow2: 'Afficher les sources', compRow3: 'Confirmation web', compRow4: 'Identification', compRow5: 'Réutilisation entre appels',
+    uniqueConclusion: '<strong>Conclusion :</strong> UAC <strong style="color:var(--accent3);">n\'a pas d\'analogue</strong> dans les systèmes d\'agents IA.',
+    sourcesTitle: 'Ressources',
+    src1Label: '📄 Document', src1Title: 'Manifeste complet (anglais)', src1Desc: 'Description complète en anglais.',
+    src2Label: '📄 Document', src2Title: 'Manifeste complet (russe)', src2Desc: 'Description complète en russe.',
+    src3Label: '⭐ Dépôt', src3Desc: 'Documents sources, traductions et preuve de date de découverte.',
+    ctaBottomTitle: 'J\'appelle la communauté mondiale',
+    ctaBottomDesc: 'Développeurs, créateurs d\'agents, chercheurs, entreprises — cette technologie appartient à tous.',
+    footerTag: 'une découverte dans le domaine public', footerAuth: 'github.com/DScoNOIZ · 3 juin 2026', footerLicense: 'CC0 1.0 Universal — Domaine Public'
+  },
+  ja: {
+    tagline: '「再利用、再生成しない」',
+    ctaTitle: 'AIエージェントアーキテクチャの新カテゴリー',
+    ctaDesc: 'Universal AI Clipboard (UAC) — AIエージェントがコンテンツを再生成せず再利用できるようにする仕組み。最大96%のトークン節約。パブリックドメイン。',
+    aboutTitle: '発見宣言',
+    about1: '<strong>私は発見を宣言します</strong> — AIエージェントアーキテクチャにおける根本的に新しいカテゴリーを。',
+    about2: 'AIエージェントは専用パラメータを通じて既存のコンテキストコンテンツを参照できます。',
+    about3: '私は<strong>この発見をグローバルコミュニティ全体の自由な使用に提供します</strong>（CC0ライセンス）。',
+    about4: 'これはテクノロジー以上のものです。グローバルコミュニティへの呼びかけです。',
+    stat1: '引用あたりのトークン節約', stat2: '中核メカニズム', stat3: '世界的に類似なし', stat4: 'パブリックドメイン',
+    problemTitle: '問題：再生成危機',
+    problem1: '現代のAIエージェントは<strong>出力トラフィックの最大90%</strong>を既存コンテンツの再生成に浪費しています。',
+    problem2: '何百万ものAIエージェントが毎日テラバイトの既存コンテンツを再生成しています。',
+    pillarsTitle: '5つの中核メカニズム',
+    p1Tag: 'メカニズム 1', p1Title: '構文クリップボード', p1Desc: 'モデルがアンカー（関数名など）を指定。システムが構文単位全体を抽出。',
+    p2Tag: 'メカニズム 2', p2Title: 'アンカーペア引用', p2Desc: 'モデルが開始と終了のみを指定。システムがその間をすべて検出。',
+    p3Tag: 'メカニズム 3', p3Title: 'メッセージインデックスマップ', p3Desc: '別個のインデックスが文字位置をマッピング。短い参照「167:14..18」で抽出。',
+    p4Tag: 'メカニズム 4', p4Title: '変換パイプライン', p4Desc: 'コピーした断片をその場で修正—置換、先頭追加、ラップ、末尾追加、マージ。',
+    p5Tag: 'メカニズム 5', p5Title: 'プロトコル間引用', p5Desc: '参照マーカーを任意のツールパラメータに埋め込み。システムが呼び出し前に実コンテンツに置換。',
+    p6Tag: '将来', p6Title: '分離サブセッション', p6Desc: '複雑なタスク用に補助エージェントが分離一時セッションで実行。',
+    researchTitle: '詳細検証（7ラウンド）',
+    research1: '<strong>7ラウンドの詳細検索</strong>を実施（Tavily advanced depth、約50ソース）、すべての既知AIカテゴリーを網羅：arXiv、LangChain、Anthropic、OpenAI、Google、MCP、CAMEL-AI、UiPath、Microsoft、AWS、GitHub discussions — <strong style="color:var(--accent3);">類似ゼロ</strong>。',
+    resCat: 'カテゴリー', resSources: 'ソース', resMatch: '類似発見？',
+    resR1: '❌ 人間用、AIエージェント用ではない', resR2: '⚠️ 最後の出力のみ、5メカニズムなし', resR3: '❌ 計画/KV再利用のみ',
+    resR4: '❌ コンテンツ/メタデータ分割、引用ではない', resR5: '❌ 接続標準、引用ではない', resR6: '❌ エージェント→ユーザー軸のみ',
+    resR7: '❌ RAG記憶、正確な引用ではない', resR8: '✅ 5つの独自メカニズム、新カテゴリー',
+    researchCallout: '<strong>結果：</strong> Universal AI Clipboardは「単なるツール」ではありません。これはAIエージェントの<strong>新しいアーキテクチャカテゴリー</strong>であり、新しい引用軸（エージェント→エージェント）と5つの独自メカニズムを持ち、世界中に類似はありません。',
+    uniqueTitle: '独自性の検証',
+    comp1: 'メカニズム', comp2: '軸', comp3: '目的',
+    compRow1: '回答ソースを表示', compRow2: 'ソース表示タグ', compRow3: 'ウェブ検索確認', compRow4: 'ソース識別', compRow5: '呼び出し間のコンテンツ再利用',
+    uniqueConclusion: '<strong>結論：</strong> UACは<strong style="color:var(--accent3);">世界的に類似がありません</strong>。',
+    sourcesTitle: 'リソース',
+    src1Label: '📄 ドキュメント', src1Title: '完全宣言（英語）', src1Desc: '完全な説明：問題、解決策、5つのメカニズム、経済的影響。',
+    src2Label: '📄 ドキュメント', src2Title: '完全宣言（ロシア語）', src2Desc: 'ロシア語での完全な説明。',
+    src3Label: '⭐ リポジトリ', src3Desc: 'ソースドキュメント、翻訳、発見日の証明。',
+    ctaBottomTitle: 'グローバルコミュニティへの呼びかけ',
+    ctaBottomDesc: 'AIフレームワーク開発者、エージェント作成者、研究者、企業 — この技術はすべての人のものです。',
+    footerTag: 'パブリックドメインに公開された発見', footerAuth: 'github.com/DScoNOIZ · 2026年6月3日', footerLicense: 'CC0 1.0 Universal — パブリックドメイン'
+  },
+  hi: {
+    tagline: '"पुनः उपयोग करें, पुनः निर्माण न करें"',
+    ctaTitle: 'AI एजेंट आर्किटेक्चर में एक नई श्रेणी',
+    ctaDesc: 'Universal AI Clipboard (UAC) — एक तंत्र जो AI एजेंटों को सामग्री को पुनः उत्पन्न करने के बजाय पुनः उपयोग करने की अनुमति देता है। 96% तक टोकन बचत। सार्वजनिक डोमेन में जारी।',
+    aboutTitle: 'खोज घोषणापत्र',
+    about1: '<strong>मैं खोज की घोषणा करता हूँ</strong> AI एजेंट आर्किटेक्चर में एक मौलिक रूप से नई श्रेणी — <strong>"वैकल्पिक अंतर-उपकरण सामग्री उद्धरण तंत्र"</strong>, जिसे <strong>Universal AI Clipboard (UAC)</strong> नाम दिया गया है।',
+    about2: 'AI एजेंट समर्पित पैरामीटर (<code>ref</code>, <code>multi_ref</code>, <code>transform</code>) के माध्यम से मौजूदा प्रासंगिक सामग्री को संदर्भित कर सकता है। मॉडल एक <strong>असेंबलर</strong> बन जाता है जो एक ही कॉल में तैयार सूचना के टुकड़ों को जोड़ता है।',
+    about3: 'मैं <strong>इस खोज को वैश्विक समुदाय के मुफ्त उपयोग के लिए जारी करता हूँ</strong> CC0 लाइसेंस के तहत — बिना पेटेंट, रॉयल्टी या प्रतिबंध के।',
+    about4: 'यह सिर्फ तकनीक से अधिक है। यह वैश्विक समुदाय के लिए एक आह्वान है।',
+    stat1: 'प्रति उद्धरण टोकन बचत', stat2: 'मुख्य तंत्र', stat3: 'दुनिया में कोई एनालॉग नहीं', stat4: 'सार्वजनिक डोमेन',
+    problemTitle: 'समस्या: पुनर्निर्माण संकट',
+    problem1: 'आधुनिक AI एजेंट <strong>90% तक आउटपुट ट्रैफ़िक</strong> बर्बाद करते हैं मौजूदा सामग्री को पुनः उत्पन्न करने में।',
+    problem2: 'लाखों AI एजेंट प्रतिदिन टेराबाइट्स मौजूदा सामग्री को पुनः उत्पन्न करते हैं, गीगावाट-घंटे ऊर्जा की खपत करते हैं।',
+    pillarsTitle: 'पाँच मुख्य तंत्र',
+    p1Tag: 'तंत्र 1', p1Title: 'सिंटैक्टिक क्लिपबोर्ड', p1Desc: 'मॉडल एक एंकर निर्दिष्ट करता है — फ़ंक्शन नाम, क्लास नाम या वेरिएबल। सिस्टम स्वचालित रूप से संपूर्ण सिंटैक्टिक यूनिट ढूंढता और निकालता है।',
+    p2Tag: 'तंत्र 2', p2Title: 'एंकर जोड़ी उद्धरण', p2Desc: 'मॉडल केवल खंड के आरंभ और अंत को निर्दिष्ट करता है। सिस्टम मल्टी-स्टेज मिलान के माध्यम से बीच की सारी सामग्री ढूंढता है।',
+    p3Tag: 'तंत्र 3', p3Title: 'संदेश सूचकांक मानचित्र', p3Desc: 'एक अलग सूचकांक चैट इतिहास में सटीक वर्ण स्थानों को मैप करता है। मॉडल छोटा संदर्भ "167:14..18" लिखता है।',
+    p4Tag: 'तंत्र 4', p4Title: 'रूपांतरण पाइपलाइन', p4Desc: 'कॉपी किए गए खंड को मौके पर संशोधित किया जा सकता है — बदलें, जोड़ें, लपेटें, या कई खंडों को मर्ज करें।',
+    p5Tag: 'तंत्र 5', p5Title: 'क्रॉस-प्रोटोकॉल उद्धरण', p5Desc: 'संदर्भ मार्कर किसी भी उपकरण के टेक्स्ट पैरामीटर में एम्बेड किए जा सकते हैं।',
+    p6Tag: 'भविष्य', p6Title: 'पृथक उप-सत्र', p6Desc: 'जटिल कार्यों के लिए सहायक एजेंट पृथक अस्थायी सत्र में चलता है, केवल स्वच्छ परिणाम लौटाता है।',
+    researchTitle: 'गहन शोध सत्यापन (7 दौर)',
+    research1: 'मैंने <strong>7 दौर का गहन खोज</strong> किया (Tavily advanced depth, ~50 स्रोत) सभी ज्ञात AI श्रेणियों में: arXiv, LangChain, Anthropic, OpenAI, Google, MCP, CAMEL-AI, UiPath, Microsoft, AWS, GitHub discussions — <strong style="color:var(--accent3);">शून्य एनालॉग मिले</strong>।',
+    resCat: 'श्रेणी', resSources: 'स्रोत', resMatch: 'एनालॉग मिला?',
+    resR1: '❌ मनुष्यों के लिए, AI एजेंटों के लिए नहीं', resR2: '⚠️ केवल अंतिम आउटपुट, 5 तंत्र नहीं', resR3: '❌ केवल योजना/KV पुन: उपयोग',
+    resR4: '❌ सामग्री/मेटाडेटा विभाजन, उद्धरण नहीं', resR5: '❌ कनेक्शन मानक, उद्धरण नहीं', resR6: '❌ केवल एजेंट→उपयोगकर्ता अक्ष',
+    resR7: '❌ RAG मेमोरी, सटीक उद्धरण नहीं', resR8: '✅ 5 अद्वितीय तंत्र, नई श्रेणी',
+    researchCallout: '<strong>परिणाम:</strong> Universal AI Clipboard सिर्फ "एक और उपकरण" नहीं है। यह AI एजेंटों के लिए <strong>आर्किटेक्चर की एक नई श्रेणी</strong> है, जो मौलिक रूप से नए उद्धरण अक्ष (एजेंट→एजेंट) और 5 अद्वितीय सामग्री पुन: उपयोग तंत्रों द्वारा प्रतिष्ठित है, जिसका दुनिया में कहीं कोई एनालॉग नहीं है।',
+    uniqueTitle: 'विशिष्टता सत्यापन',
+    comp1: 'तंत्र', comp2: 'अक्ष', comp3: 'उद्देश्य',
+    compRow1: 'उत्तर का स्रोत दिखाएँ', compRow2: 'स्रोत प्रदर्शन टैग', compRow3: 'वेब खोज पुष्टि', compRow4: 'स्रोत पहचान', compRow5: 'कॉल के बीच सामग्री पुन: उपयोग',
+    uniqueConclusion: '<strong>निष्कर्ष:</strong> Universal AI Clipboard (UAC) <strong style="color:var(--accent3);">का विश्व भर में कोई एनालॉग नहीं है</strong>।',
+    sourcesTitle: 'संसाधन',
+    src1Label: '📄 दस्तावेज़', src1Title: 'पूर्ण घोषणापत्र (अंग्रेज़ी)', src1Desc: 'पूर्ण विवरण: समस्या, समाधान, 5 मुख्य तंत्र, आर्थिक प्रभाव।',
+    src2Label: '📄 दस्तावेज़', src2Title: 'पूर्ण घोषणापत्र (रूसी)', src2Desc: 'रूसी में पूर्ण विवरण।',
+    src3Label: '⭐ भंडार', src3Desc: 'स्रोत दस्तावेज़, अनुवाद, खोज तिथि का प्रमाण।',
+    ctaBottomTitle: 'मैं वैश्विक समुदाय से आह्वान करता हूँ',
+    ctaBottomDesc: 'AI फ्रेमवर्क डेवलपर्स, एजेंट निर्माता, शोधकर्ता, व्यवसाय — यह तकनीक सभी की है।',
+    footerTag: 'सार्वजनिक डोमेन में जारी एक खोज', footerAuth: 'github.com/DScoNOIZ · 3 जून 2026', footerLicense: 'CC0 1.0 Universal — सार्वजनिक डोमेन'
+  }
+};
+
+function setLang(lang) {
+  if (!TR[lang]) lang = 'en';
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === lang));
+  document.documentElement.lang = lang;
+  document.querySelectorAll('[data-key]').forEach(el => {
+    const key = el.dataset.key;
+    if (TR[lang][key] !== undefined) el.innerHTML = TR[lang][key];
+  });
+  const mf = MANIFEST_FILES[lang] || 'MANIFEST.md';
+  document.getElementById('ctaBtnTop').href = mf;
+  document.getElementById('ctaBtnBottom').href = mf;
+  document.getElementById('srcLinkEn').href = 'MANIFEST.md';
+  document.getElementById('srcLinkRu').href = 'MANIFEST-RU.md';
+}
+
+function detectLang() {
+  const nav = (navigator.language || '').split('-')[0];
+  const supported = Object.keys(TR);
+  if (supported.includes(nav)) return nav;
+  for (const s of supported) { if (nav.startsWith(s) || s.startsWith(nav)) return s; }
+  return 'en';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const detected = detectLang();
+  setLang(detected);
+  document.querySelectorAll('.lang-btn').forEach(btn => {
+    btn.addEventListener('click', () => setLang(btn.dataset.lang));
+  });
+});
+</script>
+
+</body>
+</html>
