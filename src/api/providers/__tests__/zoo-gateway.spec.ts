@@ -19,7 +19,7 @@ import OpenAI from "openai"
 
 import { zooGatewayDefaultModelId, ZOO_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
-import { ZooGatewayHandler } from "../zoo-gateway"
+import { ZooGatewayHandler, classifyGatewayApiError } from "../zoo-gateway"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { clearZooCodeToken } from "../../../services/zoo-code-auth"
@@ -407,6 +407,39 @@ describe("ZooGatewayHandler", () => {
 			}))
 
 			await expect(handler.completePrompt("Test")).resolves.toBe("")
+		})
+	})
+
+	describe("classifyGatewayApiError", () => {
+		it("returns sign_in on 401", () => {
+			expect(classifyGatewayApiError(makeApiError(401))).toEqual({ kind: "sign_in" })
+		})
+
+		it("returns add_credits (not budget) on 402", () => {
+			expect(classifyGatewayApiError(makeApiError(402))).toEqual({ kind: "add_credits", budgetExceeded: false })
+		})
+
+		it("returns add_credits with budgetExceeded on 429 budget codes", () => {
+			expect(classifyGatewayApiError(makeApiError(429, { code: "monthly_budget_exceeded" }))).toEqual({
+				kind: "add_credits",
+				budgetExceeded: true,
+			})
+			expect(classifyGatewayApiError(makeApiError(429, { code: "daily_budget_exceeded" }))).toEqual({
+				kind: "add_credits",
+				budgetExceeded: true,
+			})
+		})
+
+		it("returns none on 429 without a budget code", () => {
+			expect(classifyGatewayApiError(makeApiError(429, { code: "rate_limited" }))).toEqual({ kind: "none" })
+		})
+
+		it("returns contact_support on 403", () => {
+			expect(classifyGatewayApiError(makeApiError(403))).toEqual({ kind: "contact_support" })
+		})
+
+		it("returns none for errors without an HTTP status", () => {
+			expect(classifyGatewayApiError(new Error("network down"))).toEqual({ kind: "none" })
 		})
 	})
 

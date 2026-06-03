@@ -46,46 +46,75 @@ function buildZooCodeSignInUrl(): string {
 	return `${getZooCodeBaseUrl()}/dashboard/connect?device=${device}&editor=${editor}&version=${Package.version}&callback_uri=${callbackUri}`
 }
 
-// Caller must always rethrow — this only surfaces UX, never swallows.
-async function surfaceGatewayApiError(error: unknown): Promise<void> {
+type ZooGatewayApiErrorAction =
+	| { kind: "sign_in" }
+	| { kind: "add_credits"; budgetExceeded: boolean }
+	| { kind: "contact_support" }
+	| { kind: "none" }
+
+// Pure mapping from an API error to the UX action it warrants. No side effects,
+// so this is trivial to unit test independently of the VS Code notification flow.
+// Exported for unit tests.
+export function classifyGatewayApiError(error: unknown): ZooGatewayApiErrorAction {
 	const status = getApiErrorStatus(error)
-	if (status === undefined) return
+	if (status === undefined) return { kind: "none" }
 	const code = getApiErrorCode(error)
 
 	if (status === 401) {
-		// Wipe before sign-in so the callback rebinds against an empty slot.
-		await clearZooCodeToken()
-		const action = await vscode.window.showErrorMessage(
-			t("common:zooAuth.errors.session_expired"),
-			t("common:zooAuth.buttons.sign_in"),
-		)
-		if (action) {
-			void vscode.env.openExternal(vscode.Uri.parse(buildZooCodeSignInUrl()))
-		}
-		return
+		return { kind: "sign_in" }
 	}
 
 	const isBudgetExceeded = status === 429 && (code === "monthly_budget_exceeded" || code === "daily_budget_exceeded")
 	if (status === 402 || isBudgetExceeded) {
-		const message = isBudgetExceeded
-			? t("common:zooAuth.errors.budget_exceeded")
-			: t("common:zooAuth.errors.out_of_credits")
-		const action = await vscode.window.showErrorMessage(message, t("common:zooAuth.buttons.add_credits"))
-		if (action) {
-			void vscode.env.openExternal(vscode.Uri.parse(`${getZooCodeBaseUrl()}/dashboard/credits`))
-		}
-		return
+		return { kind: "add_credits", budgetExceeded: isBudgetExceeded }
 	}
 
 	if (status === 403) {
-		const action = await vscode.window.showErrorMessage(
-			t("common:zooAuth.errors.account_unavailable"),
-			t("common:zooAuth.buttons.contact_support"),
-		)
-		if (action) {
-			void vscode.env.openExternal(vscode.Uri.parse(`${getZooCodeBaseUrl()}/support`))
+		return { kind: "contact_support" }
+	}
+
+	return { kind: "none" }
+}
+
+// Caller must always rethrow — this only surfaces UX, never swallows.
+async function surfaceGatewayApiError(error: unknown): Promise<void> {
+	const action = classifyGatewayApiError(error)
+
+	switch (action.kind) {
+		case "sign_in": {
+			// Wipe before sign-in so the callback rebinds against an empty slot.
+			await clearZooCodeToken()
+			const clicked = await vscode.window.showErrorMessage(
+				t("common:zooAuth.errors.session_expired"),
+				t("common:zooAuth.buttons.sign_in"),
+			)
+			if (clicked) {
+				void vscode.env.openExternal(vscode.Uri.parse(buildZooCodeSignInUrl()))
+			}
+			return
 		}
-		return
+		case "add_credits": {
+			const message = action.budgetExceeded
+				? t("common:zooAuth.errors.budget_exceeded")
+				: t("common:zooAuth.errors.out_of_credits")
+			const clicked = await vscode.window.showErrorMessage(message, t("common:zooAuth.buttons.add_credits"))
+			if (clicked) {
+				void vscode.env.openExternal(vscode.Uri.parse(`${getZooCodeBaseUrl()}/dashboard/credits`))
+			}
+			return
+		}
+		case "contact_support": {
+			const clicked = await vscode.window.showErrorMessage(
+				t("common:zooAuth.errors.account_unavailable"),
+				t("common:zooAuth.buttons.contact_support"),
+			)
+			if (clicked) {
+				void vscode.env.openExternal(vscode.Uri.parse(`${getZooCodeBaseUrl()}/support`))
+			}
+			return
+		}
+		default:
+			return
 	}
 }
 
