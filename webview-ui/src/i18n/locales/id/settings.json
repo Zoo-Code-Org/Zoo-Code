@@ -748,6 +748,14 @@
 		"inheritEnv": {
 			"label": "Warisi variabel lingkungan",
 			"description": "Aktifkan untuk mewarisi variabel lingkungan dari proses induk VS Code. <0>Pelajari lebih lanjut</0>"
+		},
+		"profile": {
+			"label": "Penimpaan terminal Zoo Code",
+			"default": "Gunakan profil default VS Code (direkomendasikan)",
+			"description": "Secara default Zoo Code menggunakan shell yang dikonfigurasi VS Code. Pilih Timpa untuk memilih profil shell berbasis jalur yang diekspos oleh VS Code. Profil hanya sumber (mis., entri PowerShell bawaan) tidak dapat tercantum di sini. <0>Pelajari lebih lanjut</0>",
+			"overrideLabel": "Timpa shell untuk Zoo Code",
+			"configureButton": "Pilih profil default di VS Code",
+			"noProfiles": "(tidak ada profil berbasis jalur di terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {

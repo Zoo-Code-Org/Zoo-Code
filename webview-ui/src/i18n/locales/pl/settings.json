@@ -748,6 +748,14 @@
 		"inheritEnv": {
 			"label": "Dziedzicz zmienne środowiskowe",
 			"description": "Włącz, aby dziedziczyć zmienne środowiskowe z procesu nadrzędnego VS Code. <0>Dowiedz się więcej</0>"
+		},
+		"profile": {
+			"label": "Nadpisanie terminala Zoo Code",
+			"default": "Użyj domyślnego profilu VS Code (zalecane)",
+			"description": "Domyślnie Zoo Code używa powłoki skonfigurowanej w VS Code. Wybierz Nadpisanie, aby wybrać profil powłoki ze ścieżką udostępniony przez VS Code. Profile tylko ze źródłem (np. wbudowany wpis PowerShell) nie mogą być tutaj wyświetlone. <0>Dowiedz się więcej</0>",
+			"overrideLabel": "Nadpisz powłokę dla Zoo Code",
+			"configureButton": "Wybierz domyślny profil w VS Code",
+			"noProfiles": "(brak profili ze ścieżką w terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {

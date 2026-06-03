@@ -24,6 +24,7 @@ import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
+import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 
 // Mock setup must come before imports.
@@ -469,6 +470,20 @@ describe("ClineProvider", () => {
 		// @ts-ignore - accessing private property for testing
 		provider.view = mockWebviewView
 		expect(ClineProvider.getVisibleInstance()).toBe(provider)
+	})
+
+	test("resolveWebviewView hydrates the saved terminalProfile into the process-wide Terminal state", async () => {
+		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
+		// Seed the persisted setting so the real getState() returns it during hydration.
+		await (provider as any).contextProxy.setValue("terminalProfile", "Git Bash")
+
+		await provider.resolveWebviewView(mockWebviewView)
+		// The hydration runs in a getState().then(...) callback, so flush microtasks.
+		await new Promise((resolve) => setImmediate(resolve))
+
+		expect(setTerminalProfileSpy).toHaveBeenCalledWith("Git Bash")
+
+		setTerminalProfileSpy.mockRestore()
 	})
 
 	test("resolveWebviewView sets up webview correctly", async () => {

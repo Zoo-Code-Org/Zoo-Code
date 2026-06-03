@@ -38,11 +38,11 @@ export function createPowerShellStream(command: string): CommandStream {
 	} catch (error: any) {
 		// Command failed - get output and exit code from error
 		realOutput = error.stdout?.toString() || ""
-		console.error(`PowerShell command failed with status ${error.status || "unknown"}:`, error.message)
+		console.error(`PowerShell command failed with status ${error.status ?? "unknown"}:`, error.message)
 		if (error.stderr) {
 			console.error(`stderr: ${error.stderr.toString()}`)
 		}
-		exitCode = error.status || 1
+		exitCode = error.status ?? 1
 	}
 
 	// Create an async iterator for the stream

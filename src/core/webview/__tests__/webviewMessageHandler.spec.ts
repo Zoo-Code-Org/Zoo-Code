@@ -103,6 +103,10 @@ vi.mock("vscode", () => {
 		workspace: {
 			workspaceFolders: [{ uri: { fsPath: "/mock/workspace" } }],
 			openTextDocument,
+			getConfiguration: vi.fn(() => ({ get: vi.fn() })),
+		},
+		commands: {
+			executeCommand: vi.fn().mockResolvedValue(undefined),
 		},
 	}
 })
@@ -167,6 +171,8 @@ vi.mock("../../mentions/resolveImageMentions", () => ({
 }))
 
 import { resolveImageMentions } from "../../mentions/resolveImageMentions"
+import { Terminal } from "../../../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
@@ -863,6 +869,129 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 
 		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("webviewMessageHandler - terminalProfile", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		Terminal.setTerminalProfile(undefined)
+	})
+
+	afterEach(() => {
+		Terminal.setTerminalProfile(undefined)
+		vi.restoreAllMocks()
+	})
+
+	it("normalizes and persists a saved terminalProfile, then closes stale idle terminals", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: " Git Bash " },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBe("Git Bash")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not close idle terminals when hydration sends the unchanged profile", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: " Git Bash " },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+		expect(closeIdleTerminalsSpy).not.toHaveBeenCalled()
+	})
+
+	it("clears the persisted profile when SettingsView sends the empty-string sentinel", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: "" },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBeUndefined()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not close idle terminals when the empty-string sentinel leaves the profile unset", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: "" },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).not.toHaveBeenCalled()
+	})
+
+	it("treats non-string terminalProfile values as unset", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: 42 as any },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBeUndefined()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("webviewMessageHandler - requestTerminalProfiles", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	it("posts available profile names", async () => {
+		vi.spyOn(Terminal, "getAvailableProfileNames").mockReturnValue(["Git Bash", "bash"])
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "terminalProfiles",
+			profiles: ["Git Bash", "bash"],
+		})
+	})
+
+	it("posts an empty array when profile discovery throws", async () => {
+		vi.spyOn(Terminal, "getAvailableProfileNames").mockImplementation(() => {
+			throw new Error("config error")
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "terminalProfiles",
+			profiles: [],
+		})
+	})
+})
+
+describe("webviewMessageHandler - openTerminalProfilePicker", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("executes the VS Code selectDefaultShell command", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "openTerminalProfilePicker" })
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.terminal.selectDefaultShell")
 	})
 })
 

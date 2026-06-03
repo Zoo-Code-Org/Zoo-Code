@@ -816,6 +816,14 @@
 		"inheritEnv": {
 			"label": "Inherit environment variables",
 			"description": "Turn this on to inherit environment variables from the parent VS Code process. <0>Learn more</0>"
+		},
+		"profile": {
+			"label": "Zoo Code terminal override",
+			"default": "Use VS Code default profile (recommended)",
+			"overrideLabel": "Override shell for Zoo Code",
+			"configureButton": "Choose default profile in VS Code",
+			"noProfiles": "(no path-based profiles found in terminal.integrated.profiles)",
+			"description": "By default Zoo Code uses whatever shell VS Code is configured to use. Select Override to pick a path-based shell profile exposed by VS Code. Source-only profiles (e.g. the built-in PowerShell entry) cannot be listed here. <0>Learn more</0>"
 		}
 	},
 	"advancedSettings": {

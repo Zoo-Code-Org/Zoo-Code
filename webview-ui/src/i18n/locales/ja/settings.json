@@ -748,6 +748,14 @@
 		"inheritEnv": {
 			"label": "環境変数を継承",
 			"description": "親VS Codeプロセスから環境変数を継承するには、これをオンにします。<0>詳細情報</0>"
+		},
+		"profile": {
+			"label": "Zoo Code ターミナルの上書き",
+			"default": "VS Code のデフォルトプロファイルを使用する（推奨）",
+			"description": "デフォルトでは Zoo Code は VS Code に設定されたシェルを使用します。VS Code が公開するパスベースのシェルプロファイルを選択するには「上書き」を選択してください。ソースのみのプロファイル（例：組み込みの PowerShell エントリ）はここに表示できません。 <0>詳細を見る</0>",
+			"overrideLabel": "Zoo Code 用シェルを上書き",
+			"configureButton": "VS Code でデフォルトプロファイルを選択",
+			"noProfiles": "(terminal.integrated.profiles にパスベースのプロファイルが見つかりません)"
 		}
 	},
 	"advancedSettings": {

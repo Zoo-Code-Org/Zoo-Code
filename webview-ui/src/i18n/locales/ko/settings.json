@@ -748,6 +748,14 @@
 		"inheritEnv": {
 			"label": "환경 변수 상속",
 			"description": "부모 VS Code 프로세���에서 환경 변수를 상속하려면 이 기능을 켜십시오. <0>자세히 알아보기</0>"
+		},
+		"profile": {
+			"label": "Zoo Code 터미널 재정의",
+			"default": "VS Code 기본 프로필 사용 (권장)",
+			"description": "기본적으로 Zoo Code는 VS Code에 구성된 쉘을 사용합니다. VS Code가 노출하는 경로 기반 쉘 프로필을 선택하려면 재정의를 선택하세요. 소스 전용 프로필(예: 내장 PowerShell 항목)은 여기에 나열할 수 없습니다. <0>자세히 알아보기</0>",
+			"overrideLabel": "Zoo Code용 쉘 재정의",
+			"configureButton": "VS Code에서 기본 프로필 선택",
+			"noProfiles": "(terminal.integrated.profiles에 경로 기반 프로필이 없습니다)"
 		}
 	},
 	"advancedSettings": {

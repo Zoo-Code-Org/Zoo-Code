@@ -748,6 +748,14 @@
 		"inheritEnv": {
 			"label": "Heredar variables de entorno",
 			"description": "Activa para heredar variables de entorno del proceso padre de VS Code. <0>Más información</0>"
+		},
+		"profile": {
+			"label": "Anulación del terminal de Zoo Code",
+			"default": "Usar perfil predeterminado de VS Code (recomendado)",
+			"description": "De forma predeterminada, Zoo Code usa la shell que VS Code tiene configurada. Selecciona Anular para elegir un perfil de shell con ruta expuesto por VS Code. Los perfiles solo de fuente (p. ej., la entrada integrada de PowerShell) no se pueden listar aquí. <0>Más información</0>",
+			"overrideLabel": "Anular shell para Zoo Code",
+			"configureButton": "Elegir perfil predeterminado en VS Code",
+			"noProfiles": "(no se encontraron perfiles con ruta en terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {

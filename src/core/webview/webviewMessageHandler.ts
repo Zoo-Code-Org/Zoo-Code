@@ -50,6 +50,7 @@ import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
 import { Terminal } from "../../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { openFile } from "../../integrations/misc/open-file"
 import { openImage, saveImage } from "../../integrations/misc/image-handler"
 import { selectImages } from "../../integrations/misc/process-images"
@@ -726,6 +727,17 @@ export const webviewMessageHandler = async (
 						if (value !== undefined) {
 							Terminal.setTerminalZdotdir(value as boolean)
 						}
+					} else if (key === "terminalProfile") {
+						const previousProfile = Terminal.getTerminalProfile()
+						Terminal.setTerminalProfile(typeof value === "string" ? value : undefined)
+						newValue = Terminal.getTerminalProfile()
+
+						if (newValue !== previousProfile) {
+							// Discard idle terminals so the next command gets a fresh
+							// terminal using the new profile's shell instead of reusing
+							// a stale one from the previous profile.
+							TerminalRegistry.closeIdleTerminals()
+						}
 					} else if (key === "execaShellPath") {
 						Terminal.setExecaShellPath(value as string | undefined)
 					} else if (key === "mcpEnabled") {
@@ -1316,6 +1328,12 @@ export const webviewMessageHandler = async (
 
 			break
 		}
+		case "openTerminalProfilePicker": {
+			// Open VS Code's native terminal profile picker so the user can set the
+			// default shell without leaving VS Code's own settings UI.
+			await vscode.commands.executeCommand("workbench.action.terminal.selectDefaultShell")
+			break
+		}
 		case "openKeyboardShortcuts": {
 			// Open VSCode keyboard shortcuts settings and optionally filter to show the Roo Code commands
 			const searchQuery = message.text || ""
@@ -1516,6 +1534,27 @@ export const webviewMessageHandler = async (
 			}
 
 			break
+
+		case "requestTerminalProfiles": {
+			// Allowlisted request: read VS Code's terminal profiles server-side and
+			// return only the sanitized profile names. The terminal profile dropdown
+			// only needs names, so this avoids routing it through the generic
+			// `getVSCodeSetting` handler (which reads any key the webview supplies).
+			// Only profiles with a resolvable `path` are returned — source-only
+			// profiles (e.g. { source: "PowerShell" }) cannot be mapped to a shell
+			// binary by an extension and would silently fall back to the default.
+			try {
+				await provider.postMessageToWebview({
+					type: "terminalProfiles",
+					profiles: Terminal.getAvailableProfileNames(),
+				})
+			} catch (error) {
+				console.error("Failed to get terminal profiles:", error)
+				await provider.postMessageToWebview({ type: "terminalProfiles", profiles: [] })
+			}
+
+			break
+		}
 
 		case "mode":
 			await provider.handleModeSwitch(message.text as Mode)

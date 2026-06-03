@@ -781,6 +781,7 @@ export class ClineProvider
 				terminalZshP10k = false,
 				terminalPowershellCounter = false,
 				terminalZdotdir = false,
+				terminalProfile,
 				ttsEnabled,
 				ttsSpeed,
 			}) => {
@@ -792,6 +793,7 @@ export class ClineProvider
 				Terminal.setTerminalZshP10k(terminalZshP10k)
 				Terminal.setPowershellCounter(terminalPowershellCounter)
 				Terminal.setTerminalZdotdir(terminalZdotdir)
+				Terminal.setTerminalProfile(terminalProfile)
 				setTtsEnabled(ttsEnabled ?? false)
 				setTtsSpeed(ttsSpeed ?? 1)
 			},
@@ -2084,6 +2086,7 @@ export class ClineProvider
 			terminalZshOhMy,
 			terminalZshP10k,
 			terminalZdotdir,
+			terminalProfile,
 			mcpEnabled,
 			currentApiConfigName,
 			listApiConfigMeta,
@@ -2237,6 +2240,7 @@ export class ClineProvider
 			terminalZshOhMy: terminalZshOhMy ?? false,
 			terminalZshP10k: terminalZshP10k ?? false,
 			terminalZdotdir: terminalZdotdir ?? false,
+			terminalProfile,
 			mcpEnabled: mcpEnabled ?? true,
 			currentApiConfigName: currentApiConfigName ?? "default",
 			listApiConfigMeta: listApiConfigMeta ?? [],
@@ -2441,6 +2445,7 @@ export class ClineProvider
 			terminalZshOhMy: stateValues.terminalZshOhMy ?? false,
 			terminalZshP10k: stateValues.terminalZshP10k ?? false,
 			terminalZdotdir: stateValues.terminalZdotdir ?? false,
+			terminalProfile: stateValues.terminalProfile,
 			mode: stateValues.mode ?? defaultModeSlug,
 			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
