@@ -12,8 +12,26 @@
  */
 
 import type { ContentRef } from "../../../shared/tools"
+import { info, successCrt } from "./superDebug"
 
 // ─── Public Types ───────────────────────────────────────────────────────────
+
+/**
+ * Результат AST-расширения блока по ключевому слову focus.
+ * Содержит точные границы синтаксического блока (функции, класса, метода).
+ */
+export interface FocusBlock {
+	/** Полное содержимое найденного блока */
+	content: string
+	/** Номер строки начала блока (1-based) */
+	startLine: number
+	/** Номер строки конца блока (1-based) */
+	endLine: number
+	/** Смещение начала блока в исходном коде */
+	startOffset: number
+	/** Смещение конца блока в исходном коде */
+	endOffset: number
+}
 
 export interface SelectorResult {
 	sourceId: string
@@ -21,9 +39,11 @@ export interface SelectorResult {
 	startOffset: number
 	endOffset: number
 	line?: number
+	/** End line number (1-based), заполняется только при AST-расширении focus */
+	endLine?: number
 	/** Confidence level: 1.0 (exact) down to 0.5 (fuzzy/expanded) */
 	confidence: number
-	method: "exact" | "normalized" | "fuzzy" | "anchor"
+	method: "exact" | "normalized" | "fuzzy" | "anchor" | "focus"
 }
 
 export interface SelectorOptions {
@@ -43,6 +63,481 @@ export interface SelectorOptions {
 }
 
 // ─── Default Options ────────────────────────────────────────────────────────
+
+// ─── Focus (AST) Resolver ──────────────────────────────────────────────────
+
+/**
+ * AST-парсер focus: по имени функции/класса/метода находит полный
+ * синтаксический блок в исходном коде.
+ *
+ * Поддерживаемые языки и паттерны:
+ *
+ * **TypeScript/JavaScript:**
+ *   - `function name(...) { ... }`
+ *   - `function* name(...) { ... }` (генераторы)
+ *   - `async function name(...) { ... }`
+ *   - `const name = (...) => { ... }` / `const name = (...) => expr`
+ *   - `const name = function(...) { ... }`
+ *   - `class name { ... }`
+ *   - `methodName(...) { ... }` / `methodName(...): Type { ... }`
+ *
+ * **Python:**
+ *   - `def name(...):` до конца блока (по отступам)
+ *   - `class name:` до конца блока
+ *   - `async def name(...):`
+ *
+ * **Go:**
+ *   - `func name(...) { ... }`
+ *   - `func (r *Receiver) name(...) { ... }`
+ *
+ * **Rust:**
+ *   - `fn name(...) { ... }`
+ *   - `fn name(...) -> Type { ... }`
+ *
+ * **Java/C#/C/C++:**
+ *   - `public ReturnType name(...) { ... }`
+ *   - `private static ReturnType name(...) { ... }`
+ */
+export function resolveFocus(source: string, focusName: string): FocusBlock | null {
+	info("FOCUS_AST", `resolveFocus: focusName="${focusName}", sourceLength=${source.length}`)
+
+	if (!source || !focusName) return null
+
+	const lines = source.split("\n")
+	const result = findFocusBlock(source, lines, focusName)
+
+	if (result) {
+		successCrt("FOCUS_AST", `resolved focus "${focusName}"`, {
+			startLine: result.startLine,
+			endLine: result.endLine,
+			contentLength: result.content.length,
+		})
+		return result
+	}
+
+	info("FOCUS_AST", `focus "${focusName}" not found via AST, returning null`)
+	return null
+}
+
+/**
+ * Определяет отступ строки (количество пробелов/табов в начале).
+ */
+function getIndent(line: string): number {
+	let i = 0
+	while (i < line.length && (line[i] === " " || line[i] === "\t")) {
+		i++
+	}
+	return i
+}
+
+/**
+ * Экранирует спецсимволы для RegExp.
+ */
+function escapeRegex(str: string): string {
+	return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/**
+ * Находит парные фигурные скобки, начиная с `startIdx` (индекс открывающей `{`).
+ * Учитывает вложенность. Возвращает индекс закрывающей `}`.
+ */
+function findMatchingBrace(source: string, startIdx: number): number {
+	let depth = 1
+	let i = startIdx + 1
+	let inString = false
+	let stringChar = ""
+	let inTemplate = false
+
+	while (i < source.length && depth > 0) {
+		const ch = source[i]
+		const prev = i > 0 ? source[i - 1] : ""
+
+		// Пропускаем строки
+		if (!inTemplate) {
+			if ((ch === '"' || ch === "'" || ch === "`") && prev !== "\\") {
+				if (!inString) {
+					inString = true
+					stringChar = ch
+				} else if (ch === stringChar) {
+					inString = false
+				}
+			}
+		}
+
+		if (!inString) {
+			if (ch === "{") {
+				depth++
+			} else if (ch === "}") {
+				depth--
+			}
+		}
+
+		i++
+	}
+
+	return depth === 0 ? i - 1 : -1
+}
+
+/**
+ * Находит конец Python-блока по отступам.
+ * lineIdx — индекс строки, где начинается блок (def/class/async def).
+ * blockIndent — отступ строки def/class.
+ */
+function findPythonBlockEnd(lines: string[], lineIdx: number): number {
+	const blockIndent = getIndent(lines[lineIdx])
+	let i = lineIdx + 1
+
+	while (i < lines.length) {
+		const line = lines[i]
+		if (line.trim() === "") {
+			i++
+			continue
+		}
+		const indent = getIndent(line)
+		if (indent <= blockIndent && line.trim() !== "") {
+			break
+		}
+		i++
+	}
+
+	return i - 1 // последняя строка блока
+}
+
+/**
+ * Основная логика поиска блока focus в исходном коде.
+ */
+function findFocusBlock(source: string, lines: string[], focusName: string): FocusBlock | null {
+	const escaped = escapeRegex(focusName)
+
+	// ─── 1. TypeScript/JavaScript: function name(...) { ... } ──────────────
+	//    Паттерны:
+	//    - (async\s+)?function\s*\*?\s+name\s*\(
+	//    - const\s+name\s*=\s*(async\s+)?function\s*\(
+	//    - const\s+name\s*=\s*(\([^)]*\)|name)\s*(:\s*\w+)?\s*=>\s*(\{|)
+	//    - name\s*\([^)]*\)\s*(:\s*\w+)?\s*\{  (метод класса)
+	const tsFnPattern = new RegExp(`(?:async\\s+)?function\\s*\\*?\\s*${escaped}\\s*\\(`)
+
+	// ─── 2. TS/JS: const name = (...) => { ─────────────────────────────────
+	const arrowFnBlockPattern = new RegExp(
+		`const\\s+${escaped}\\s*=\\s*(?:async\\s+)?(?:\\([^)]*\\)|\\w+)\\s*(?::\\s*\\w+(?:<[^>]*>)?)?\\s*=>\\s*\\{`,
+	)
+
+	// ─── 3. TS/JS: const name = (...) => expr ──────────────────────────────
+	const arrowFnExprPattern = new RegExp(
+		`const\\s+${escaped}\\s*=\\s*(?:async\\s+)?(?:\\([^)]*\\)|\\w+)\\s*(?::\\s*\\w+(?:<[^>]*>)?)?\\s*=>\\s*(?!\\{)`,
+	)
+
+	// ─── 4. class name { ... } ─────────────────────────────────────────────
+	const classPattern = new RegExp(
+		`(?:export\\s+)?(?:abstract\\s+)?class\\s+${escaped}\\s*(?:<[^>]*>)?\\s*(?:extends\\s+\\w+(?:<[^>]*>)?\\s*)?(?:implements\\s+[^{]+)?\\s*\\{`,
+	)
+
+	// ─── 5. TS method: name(...) { ... } ───────────────────────────────────
+	const methodPattern = new RegExp(`${escaped}\\s*\\([^)]*\\)\\s*(?::\\s*[^{]+)?\\s*\\{`)
+
+	// ─── 6. Python: def name(...): ─────────────────────────────────────
+	const pyDefPattern = new RegExp(`(?:async\\s+)?def\\s+${escaped}\\s*\\(`)
+
+	// ─── 7. Python: class name: ───────────────────────────────────────
+	const pyClassPattern = new RegExp(`class\\s+${escaped}\\s*(?:\\([^)]*\\))?\\s*:`)
+
+	// ─── 8. Go: func name(...) { ──────────────────────────────────────
+	const goFnPattern = new RegExp(`func\\s+(?:\\([^)]*\\)\\s+)?${escaped}\\s*\\(`)
+
+	// ─── 9. Rust: fn name(...) { / fn name(...) -> Type { ──────────────
+	const rustFnPattern = new RegExp(`fn\\s+${escaped}\\s*\\([^)]*\\)\\s*(?:->\\s*[^{]+)?\\s*\\{`)
+
+	// ─── 10. Java/C#/C++: modifiers ReturnType name(...) { ────────────
+	const javaPattern = new RegExp(
+		`(?:public|private|protected|static|final|abstract|virtual|override|internal|sealed|readonly)\\s+(?:[\\w<>.\\[\\],\\s]+\\s+)?${escaped}\\s*\\(`,
+	)
+
+	// Собираем все совпадения с их приоритетами для выбора лучшего
+	const candidates: Array<{
+		lineIdx: number
+		startLine: number
+		endLine: number
+		startOffset: number
+		endOffset: number
+		priority: number // чем выше, тем точнее
+	}> = []
+
+	// ─── Поиск в каждой строке ────────────────────────────────────────────
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]
+
+		// --- a) TypeScript/JS: function name(...) { ---
+		if (tsFnPattern.test(line)) {
+			const braceIdx = findOpeningBraceAfterSignature(source, lines, i)
+			if (braceIdx !== -1) {
+				const endBrace = findMatchingBrace(source, braceIdx)
+				if (endBrace !== -1) {
+					const endLineIdx = source.slice(0, endBrace).split("\n").length - 1
+					const startOffset = getLineStartOffset(lines, i)
+					const endOffset = endBrace + 1
+					candidates.push({
+						lineIdx: i,
+						startLine: i + 1,
+						endLine: Math.min(endLineIdx + 1, lines.length),
+						startOffset,
+						endOffset,
+						priority: 10,
+					})
+				}
+			}
+			continue
+		}
+
+		// --- b) TS/JS: const name = (...) => { ---
+		if (arrowFnBlockPattern.test(line)) {
+			const braceIdx = findOpeningBraceAfterArrow(lines, i)
+			if (braceIdx !== -1) {
+				const endBrace = findMatchingBrace(source, braceIdx)
+				if (endBrace !== -1) {
+					const endLineIdx = source.slice(0, endBrace).split("\n").length - 1
+					const startOffset = getLineStartOffset(lines, i)
+					const endOffset = endBrace + 1
+					candidates.push({
+						lineIdx: i,
+						startLine: i + 1,
+						endLine: Math.min(endLineIdx + 1, lines.length),
+						startOffset,
+						endOffset,
+						priority: 10,
+					})
+				}
+			}
+			continue
+		}
+
+		// --- c) TS/JS: const name = (...) => expr (без скобок) ---
+		if (arrowFnExprPattern.test(line)) {
+			// Однострочное выражение — вся строка
+			const startOffset = getLineStartOffset(lines, i)
+			const endOffset = startOffset + line.length + 1 // + \n
+			candidates.push({
+				lineIdx: i,
+				startLine: i + 1,
+				endLine: i + 1,
+				startOffset,
+				endOffset: Math.min(endOffset, source.length),
+				priority: 8,
+			})
+			continue
+		}
+
+		// --- d) class name { ---
+		if (classPattern.test(line)) {
+			const braceIdx = source.indexOf("{", getLineStartOffset(lines, i))
+			if (braceIdx !== -1) {
+				const endBrace = findMatchingBrace(source, braceIdx)
+				if (endBrace !== -1) {
+					const endLineIdx = source.slice(0, endBrace).split("\n").length - 1
+					const startOffset = getLineStartOffset(lines, i)
+					const endOffset = endBrace + 1
+					candidates.push({
+						lineIdx: i,
+						startLine: i + 1,
+						endLine: Math.min(endLineIdx + 1, lines.length),
+						startOffset,
+						endOffset,
+						priority: 10,
+					})
+				}
+			}
+			continue
+		}
+
+		// --- e) TS method: name(...) { ---
+		if (methodPattern.test(line)) {
+			const braceIdx = findOpeningBraceAfterSignature(source, lines, i)
+			if (braceIdx !== -1) {
+				const endBrace = findMatchingBrace(source, braceIdx)
+				if (endBrace !== -1) {
+					const endLineIdx = source.slice(0, endBrace).split("\n").length - 1
+					const startOffset = getLineStartOffset(lines, i)
+					const endOffset = endBrace + 1
+					candidates.push({
+						lineIdx: i,
+						startLine: i + 1,
+						endLine: Math.min(endLineIdx + 1, lines.length),
+						startOffset,
+						endOffset,
+						priority: 10,
+					})
+				}
+			}
+			continue
+		}
+
+		// --- f) Python: def name(...): ---
+		if (pyDefPattern.test(line)) {
+			const endLineIdx = findPythonBlockEnd(lines, i)
+			const startOffset = getLineStartOffset(lines, i)
+			const endOffset = getLineEndOffset(lines, endLineIdx)
+			candidates.push({
+				lineIdx: i,
+				startLine: i + 1,
+				endLine: endLineIdx + 1,
+				startOffset,
+				endOffset,
+				priority: 10,
+			})
+			continue
+		}
+
+		// --- g) Python: class name: ---
+		if (pyClassPattern.test(line)) {
+			const endLineIdx = findPythonBlockEnd(lines, i)
+			const startOffset = getLineStartOffset(lines, i)
+			const endOffset = getLineEndOffset(lines, endLineIdx)
+			candidates.push({
+				lineIdx: i,
+				startLine: i + 1,
+				endLine: endLineIdx + 1,
+				startOffset,
+				endOffset,
+				priority: 10,
+			})
+			continue
+		}
+
+		// --- h) Go: func name(...) { ---
+		if (goFnPattern.test(line)) {
+			const braceIdx = findOpeningBraceAfterSignature(source, lines, i)
+			if (braceIdx !== -1) {
+				const endBrace = findMatchingBrace(source, braceIdx)
+				if (endBrace !== -1) {
+					const endLineIdx = source.slice(0, endBrace).split("\n").length - 1
+					const startOffset = getLineStartOffset(lines, i)
+					const endOffset = endBrace + 1
+					candidates.push({
+						lineIdx: i,
+						startLine: i + 1,
+						endLine: Math.min(endLineIdx + 1, lines.length),
+						startOffset,
+						endOffset,
+						priority: 10,
+					})
+				}
+			}
+			continue
+		}
+
+		// --- i) Rust: fn name(...) { / fn name(...) -> Type { ---
+		if (rustFnPattern.test(line)) {
+			const braceIdx = source.indexOf("{", getLineStartOffset(lines, i))
+			if (braceIdx !== -1) {
+				const endBrace = findMatchingBrace(source, braceIdx)
+				if (endBrace !== -1) {
+					const endLineIdx = source.slice(0, endBrace).split("\n").length - 1
+					const startOffset = getLineStartOffset(lines, i)
+					const endOffset = endBrace + 1
+					candidates.push({
+						lineIdx: i,
+						startLine: i + 1,
+						endLine: Math.min(endLineIdx + 1, lines.length),
+						startOffset,
+						endOffset,
+						priority: 10,
+					})
+				}
+			}
+			continue
+		}
+
+		// --- j) Java/C#: modifiers ReturnType name(...) { ---
+		if (javaPattern.test(line)) {
+			const braceIdx = findOpeningBraceAfterSignature(source, lines, i)
+			if (braceIdx !== -1) {
+				const endBrace = findMatchingBrace(source, braceIdx)
+				if (endBrace !== -1) {
+					const endLineIdx = source.slice(0, endBrace).split("\n").length - 1
+					const startOffset = getLineStartOffset(lines, i)
+					const endOffset = endBrace + 1
+					candidates.push({
+						lineIdx: i,
+						startLine: i + 1,
+						endLine: Math.min(endLineIdx + 1, lines.length),
+						startOffset,
+						endOffset,
+						priority: 10,
+					})
+				}
+			}
+			continue
+		}
+	}
+
+	// Выбираем кандидата с наивысшим приоритетом
+	// Если приоритеты равны — выбираем первое (самое раннее) совпадение
+	if (candidates.length === 0) {
+		return null
+	}
+
+	candidates.sort((a, b) => b.priority - a.priority || a.lineIdx - b.lineIdx)
+	const best = candidates[0]
+
+	return {
+		content: source.slice(best.startOffset, best.endOffset),
+		startLine: best.startLine,
+		endLine: best.endLine,
+		startOffset: best.startOffset,
+		endOffset: best.endOffset,
+	}
+}
+
+/**
+ * Ищет открывающую `{` после сигнатуры функции (если она на нескольких строках).
+ * Начинает поиск с указанной строки, затем идёт по следующим строкам.
+ */
+function findOpeningBraceAfterSignature(source: string, lines: string[], lineIdx: number): number {
+	let globalIdx = getLineStartOffset(lines, lineIdx)
+	for (let i = lineIdx; i < lines.length; i++) {
+		const bracePos = lines[i].indexOf("{")
+		if (bracePos !== -1) {
+			return globalIdx + bracePos
+		}
+		globalIdx += lines[i].length + 1 // +1 for \n
+	}
+	return -1
+}
+
+/**
+ * Ищет открывающую `{` после стрелочной функции (=>).
+ */
+function findOpeningBraceAfterArrow(lines: string[], lineIdx: number): number {
+	const line = lines[lineIdx]
+	const arrowIdx = line.indexOf("=>")
+	if (arrowIdx === -1) return -1
+	// Ищем `{` после `=>` на этой же строке
+	const afterArrow = line.slice(arrowIdx + 2)
+	const bracePos = afterArrow.indexOf("{")
+	if (bracePos !== -1) {
+		return getLineStartOffset(lines, lineIdx) + arrowIdx + 2 + bracePos
+	}
+	return -1
+}
+
+/**
+ * Возвращает глобальное смещение (offset) начала строки в исходном тексте.
+ */
+function getLineStartOffset(lines: string[], lineIdx: number): number {
+	let offset = 0
+	for (let i = 0; i < lineIdx; i++) {
+		offset += lines[i].length + 1 // +1 for \n
+	}
+	return offset
+}
+
+/**
+ * Возвращает глобальное смещение (offset) конца строки (включая \n).
+ */
+function getLineEndOffset(lines: string[], lineIdx: number): number {
+	let offset = getLineStartOffset(lines, lineIdx)
+	offset += lines[lineIdx].length + 1 // +1 for \n
+	return offset
+}
 
 const DEFAULT_OPTIONS: Required<SelectorOptions> = {
 	tolerance: 0.1,
@@ -334,6 +829,10 @@ export function resolveSelector(
 	}
 
 	const opts = resolveOptions(options)
+	info(
+		"SELECTOR",
+		`resolveSelector: sourceId="${sourceId}", quoteLength=${quote.length}, tolerance=${opts.tolerance}`,
+	)
 	let pos = -1
 	let method: SelectorResult["method"] = "exact"
 
@@ -387,7 +886,7 @@ export function resolveSelector(
 			confidence = 0.85
 	}
 
-	return {
+	const result: SelectorResult = {
 		sourceId,
 		content,
 		startOffset: pos,
@@ -396,6 +895,12 @@ export function resolveSelector(
 		confidence,
 		method,
 	}
+	successCrt("SELECTOR", `resolved selector for "${sourceId}" via ${method}`, {
+		confidence,
+		contentLength: content.length,
+		line,
+	})
+	return result
 }
 
 // ─── Public: resolveAnchorPair ──────────────────────────────────────────────
@@ -417,6 +922,10 @@ export function resolveAnchorPair(
 	options?: SelectorOptions,
 ): SelectorResult {
 	const opts = resolveOptions(options)
+	info(
+		"SELECTOR",
+		`resolveAnchorPair: sourceId="${sourceId}", startAnchorLen=${startAnchor.length}, hasEndAnchor=${!!endAnchor}`,
+	)
 
 	// Find startAnchor using full cascade
 	const startResult = resolveSelector(sourceId, source, startAnchor, opts)
@@ -449,7 +958,7 @@ export function resolveAnchorPair(
 
 	const content = source.slice(startResult.startOffset, endPos)
 
-	return {
+	const anchorResult: SelectorResult = {
 		sourceId,
 		content,
 		startOffset: startResult.startOffset,
@@ -458,6 +967,12 @@ export function resolveAnchorPair(
 		confidence: startResult.confidence,
 		method: "anchor",
 	}
+	successCrt("SELECTOR", `resolved anchor pair for "${sourceId}"`, {
+		confidence: anchorResult.confidence,
+		contentLength: content.length,
+		line: anchorResult.line,
+	})
+	return anchorResult
 }
 
 // ─── Public: resolveContentRef (main entry point) ───────────────────────────
@@ -486,9 +1001,20 @@ export function resolveContentRef(
 	ref: ContentRef,
 	options?: SelectorOptions,
 ): SelectorResult {
+	info(
+		"CONTENT_REF",
+		`resolveContentRef: sourceId="${sourceId}", sourceLength=${source.length}, startAnchor=${!!ref.startAnchor}, selector=${!!ref.selector}, focus=${!!ref.focus}, startLine=${ref.startLine}`,
+	)
+
 	// Priority 1: Line numbers (file source only)
 	if (ref.source === "file" && ref.startLine != null) {
-		return resolveLineRange(sourceId, source, ref.startLine, ref.endLine)
+		const result = resolveLineRange(sourceId, source, ref.startLine, ref.endLine)
+		successCrt("CONTENT_REF", `resolved line range for "${sourceId}"`, {
+			startLine: ref.startLine,
+			endLine: ref.endLine,
+			contentLength: result.content.length,
+		})
+		return result
 	}
 
 	// Priority 2: Anchor pair
@@ -501,8 +1027,31 @@ export function resolveContentRef(
 		return resolveSelector(sourceId, source, ref.selector, options)
 	}
 
-	// Priority 4: Focus keyword (falls back to selector matching)
+	// Priority 4: Focus keyword (AST auto-expansion с fallback на selector)
 	if (ref.focus) {
+		// Пробуем AST-расширение (точный структурный поиск)
+		const focusResult = resolveFocus(source, ref.focus)
+		if (focusResult) {
+			const result: SelectorResult = {
+				sourceId,
+				content: focusResult.content,
+				startOffset: focusResult.startOffset,
+				endOffset: focusResult.endOffset,
+				line: focusResult.startLine,
+				endLine: focusResult.endLine,
+				confidence: 1.0,
+				method: "focus",
+			}
+			successCrt("CONTENT_REF", `resolved focus "${ref.focus}" via AST expansion`, {
+				startLine: focusResult.startLine,
+				endLine: focusResult.endLine,
+				contentLength: result.content.length,
+			})
+			return result
+		}
+
+		// Fallback: если AST не смог определить границы — используем обычный selector search
+		info("CONTENT_REF", `focus "${ref.focus}" AST resolution failed, falling back to selector matching`)
 		return resolveSelector(sourceId, source, ref.focus, options)
 	}
 

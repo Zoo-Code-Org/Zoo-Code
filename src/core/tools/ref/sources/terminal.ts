@@ -12,6 +12,7 @@ import type { SelectorResult } from "../selector"
 import { resolveContentRef } from "../selector"
 import type { Task } from "../../../task/Task"
 import { getTaskDirectoryPath } from "../../../../utils/storage"
+import { info, successCrt, error } from "../superDebug"
 
 /**
  * Resolve a terminal source reference by reading a command output artifact.
@@ -30,8 +31,11 @@ export async function resolveTerminalSource(ref: ContentRef, task: Task): Promis
 	const provider = task.providerRef.deref()
 	const globalStoragePath = provider?.context?.globalStorageUri?.fsPath
 	if (!globalStoragePath) {
+		error("TERMINAL_SOURCE", "Global storage path not available")
 		throw new Error("Global storage path not available for terminal source resolution.")
 	}
+
+	info("TERMINAL_SOURCE", `resolveTerminalSource: ref="${ref.ref}", startAnchor="${ref.startAnchor ?? ""}"`)
 
 	const taskDirPath = await getTaskDirectoryPath(globalStoragePath, task.taskId)
 
@@ -74,5 +78,12 @@ export async function resolveTerminalSource(ref: ContentRef, task: Task): Promis
 	}
 
 	const sourceId = `terminal://${path.basename(artifactPath)}`
-	return resolveContentRef(sourceId, content, ref)
+	info("TERMINAL_SOURCE", `Artifact resolved: path="${path.basename(artifactPath)}", contentLength=${content.length}`)
+	const result = resolveContentRef(sourceId, content, ref)
+	successCrt("TERMINAL_SOURCE", `resolved terminal artifact "${path.basename(artifactPath)}"`, {
+		sourceId: result.sourceId,
+		confidence: result.confidence,
+		contentLength: result.content.length,
+	})
+	return result
 }

@@ -11,6 +11,7 @@ import type { ContentRef } from "../../../../shared/tools"
 import type { SelectorResult } from "../selector"
 import { resolveContentRef } from "../selector"
 import type { Task } from "../../../task/Task"
+import { info, successCrt, error } from "../superDebug"
 
 /**
  * Resolve a file source reference by reading the file and matching content.
@@ -29,10 +30,17 @@ export async function resolveFileSource(ref: ContentRef, task: Task): Promise<Se
 	const cwd = task.cwd || process.cwd()
 	const filePath = path.resolve(cwd, ref.ref)
 
+	info(
+		"FILE_SOURCE",
+		`resolveFileSource: filePath="${filePath}", startLine=${ref.startLine}, selector=${ref.selector ?? ""}`,
+	)
+
 	let content: string
 	try {
 		content = await fs.readFile(filePath, "utf-8")
+		info("FILE_SOURCE", `File read: filePath="${filePath}", fileSize=${content.length}`)
 	} catch (err) {
+		error("FILE_SOURCE", `File not found: ${filePath}`, { ref })
 		throw new Error(
 			`File not found or unreadable: ${ref.ref} (resolved: ${filePath}). ${err instanceof Error ? err.message : ""}`,
 		)
@@ -46,6 +54,10 @@ export async function resolveFileSource(ref: ContentRef, task: Task): Promise<Se
 
 		const extracted = lines.slice(start, end).join("\n")
 		const sourceId = `file://${filePath}:${ref.startLine}-${ref.endLine ?? ref.startLine}`
+		info(
+			"FILE_SOURCE",
+			`Line range extraction: startLine=${ref.startLine}, endLine=${ref.endLine}, extractedLength=${extracted.length}`,
+		)
 
 		return {
 			sourceId,
@@ -59,5 +71,11 @@ export async function resolveFileSource(ref: ContentRef, task: Task): Promise<Se
 
 	// Priority 2+: Anchor pair / selector
 	const sourceId = `file://${filePath}`
-	return resolveContentRef(sourceId, content, ref)
+	const result = resolveContentRef(sourceId, content, ref)
+	successCrt("FILE_SOURCE", `resolved file "${ref.ref}" via ${result.method}`, {
+		sourceId: result.sourceId,
+		confidence: result.confidence,
+		contentLength: result.content.length,
+	})
+	return result
 }

@@ -4,11 +4,12 @@
  * Covers:
  * - resolveSelector (4-stage cascade: exact → normalized → fuzzy → word-boundary)
  * - resolveAnchorPair (startAnchor + optional endAnchor)
- * - resolveContentRef (main entry: line-range / anchor / selector priority)
+ * - resolveContentRef (main entry: line-range / anchor / selector / focus priority)
+ * - resolveFocus (AST-based auto-expansion for focus keyword)
  * - Edge cases: empty input, whitespace, Unicode, emoji, non-ASCII
  */
 import { describe, it, expect } from "vitest"
-import { resolveSelector, resolveAnchorPair, resolveContentRef } from "../selector"
+import { resolveSelector, resolveAnchorPair, resolveContentRef, resolveFocus } from "../selector"
 import type { ContentRef } from "../../../../shared/tools"
 
 // ---------------------------------------------------------------------------
@@ -250,12 +251,22 @@ describe("resolveContentRef", () => {
 		})
 	})
 
-	describe("Priority 4 — Focus Fallback", () => {
-		it("resolves via focus keyword when no selector/anchor is specified", () => {
+	describe("Priority 4 — Focus (AST expansion)", () => {
+		it("resolves via focus keyword using AST expansion when function is found", () => {
 			const ref = makeRef({ source: "chat", ref: "-1", focus: "farewell" })
 			const result = resolveContentRef("chat:-1", SOURCE_CODE, ref)
+			expect(result.method).toBe("focus")
+			expect(result.confidence).toBe(1.0)
+			expect(result.content).toContain("function farewell")
+			expect(result.content).toContain("console.log")
+		})
+
+		it("falls back to selector matching when AST cannot resolve", () => {
+			// "Hello" — не функция/класс/метод → падает на selector
+			const ref = makeRef({ source: "chat", ref: "-1", focus: "Hello" })
+			const result = resolveContentRef("chat:-1", SOURCE_CODE, ref)
 			expect(result.method).toBe("exact")
-			expect(result.content).toBe("farewell")
+			expect(result.content).toBe("Hello")
 		})
 	})
 
@@ -311,5 +322,327 @@ describe("resolveSelector — Unicode & Edge Cases", () => {
 		// "World" is a word boundary itself, so let's try "elloW" which spans word boundary
 		const result = resolveSelector("conf", source, "elloW")
 		expect(result.confidence).toBeLessThanOrEqual(0.95)
+	})
+})
+
+// ---------------------------------------------------------------------------
+// resolveFocus (AST auto-expansion)
+// ---------------------------------------------------------------------------
+
+describe("resolveFocus", () => {
+	// --- TypeScript/JavaScript function ---
+	it("находит function declaration с телом", () => {
+		const source = `function greet(name: string): string {
+	const greeting = \`Hello, \${name}!\`
+	return greeting
+}
+
+function farewell(name: string): void {
+	console.log("bye")
+}`
+		const result = resolveFocus(source, "greet")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(4)
+		expect(result!.content).toContain("function greet")
+		expect(result!.content).toContain("return greeting")
+	})
+
+	it("находит async function", () => {
+		const source = `async function fetchData(url: string): Promise<unknown> {
+	const response = await fetch(url)
+	return response.json()
+}`
+		const result = resolveFocus(source, "fetchData")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(4)
+		expect(result!.content).toContain("async function fetchData")
+	})
+
+	it("находит generator function", () => {
+		const source = `function* generateSequence(): Generator<number> {
+	for (let i = 0; i < 10; i++) {
+		yield i
+	}
+}`
+		const result = resolveFocus(source, "generateSequence")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.content).toContain("function* generateSequence")
+	})
+
+	// --- Arrow functions ---
+	it("находит const arrow function с блоком", () => {
+		const source = `const add = (a: number, b: number): number => {
+	return a + b
+}
+
+const subtract = (a: number, b: number): number => a - b`
+		const result = resolveFocus(source, "add")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(3)
+		expect(result!.content).toContain("const add = ")
+		expect(result!.content).toContain("return a + b")
+	})
+
+	it("находит const arrow function expression (однострочную)", () => {
+		const source = `const double = (x: number): number => x * 2`
+		const result = resolveFocus(source, "double")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(1)
+		expect(result!.content).toContain("const double = ")
+		expect(result!.content).toContain("x * 2")
+	})
+
+	// --- Class ---
+	it("находит class declaration", () => {
+		const source = `class Calculator {
+	add(a: number, b: number): number {
+		return a + b
+	}
+
+	subtract(a: number, b: number): number {
+		return a - b
+	}
+}`
+		const result = resolveFocus(source, "Calculator")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(9)
+		expect(result!.content).toContain("class Calculator")
+		expect(result!.content).toContain("subtract")
+	})
+
+	it("находит export class", () => {
+		const source = `export class UserService {
+	private users: string[] = []
+
+	getAll(): string[] {
+		return this.users
+	}
+}`
+		const result = resolveFocus(source, "UserService")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.content).toContain("export class UserService")
+	})
+
+	// --- Method ---
+	it("находит метод внутри класса", () => {
+		const source = `class MyClass {
+	myMethod(param: string): number {
+		return param.length
+	}
+
+	otherMethod(): void {
+		console.log("other")
+	}
+}`
+		const result = resolveFocus(source, "myMethod")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(2)
+		expect(result!.endLine).toBe(4)
+		expect(result!.content).toContain("myMethod")
+		expect(result!.content).toContain("return param.length")
+	})
+
+	// --- Python ---
+	it("находит Python def", () => {
+		const source = `def calculate_sum(a: int, b: int) -> int:
+	   result = a + b
+	   return result
+
+def other():
+	   pass`
+		const result = resolveFocus(source, "calculate_sum")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(4)
+		expect(result!.content).toContain("def calculate_sum")
+		expect(result!.content).toContain("return result")
+	})
+
+	it("находит Python async def", () => {
+		const source = `async def fetch_data(url: str) -> dict:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            return await response.json()
+
+def unrelated():
+    pass`
+		const result = resolveFocus(source, "fetch_data")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.content).toContain("async def fetch_data")
+	})
+
+	it("находит Python class", () => {
+		const source = `class MyCalculator:
+	   def __init__(self):
+	       self.result = 0
+
+	   def add(self, x: int) -> None:
+	       self.result += x
+
+class Other:
+	   pass`
+		const result = resolveFocus(source, "MyCalculator")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(7)
+		expect(result!.content).toContain("class MyCalculator")
+		expect(result!.content).toContain("def add")
+	})
+
+	// --- Go ---
+	it("находит Go func", () => {
+		const source = `func Greet(name string) string {
+	return "Hello, " + name
+}
+
+func Bye(name string) {
+	fmt.Println("Bye")
+}`
+		const result = resolveFocus(source, "Greet")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(3)
+		expect(result!.content).toContain("func Greet")
+	})
+
+	it("находит Go метод с receiver", () => {
+		const source = `func (u *User) GetFullName() string {
+	return u.FirstName + " " + u.LastName
+}`
+		const result = resolveFocus(source, "GetFullName")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.content).toContain("func (u *User) GetFullName")
+	})
+
+	// --- Rust ---
+	it("находит Rust fn", () => {
+		const source = `fn calculate(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+fn other() {
+    println!("other");
+}`
+		const result = resolveFocus(source, "calculate")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(3)
+		expect(result!.content).toContain("fn calculate")
+	})
+
+	// --- Java/C# ---
+	it("находит Java метод с модификаторами", () => {
+		const source = `public class HelloWorld {
+    public String greet(String name) {
+        return "Hello, " + name;
+    }
+
+    private int calculate() {
+        return 42;
+    }
+}`
+		const result = resolveFocus(source, "greet")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(2)
+		expect(result!.content).toContain("public String greet(")
+	})
+
+	// --- Вложенные скобки ---
+	it("корректно обрабатывает вложенные скобки", () => {
+		const source = `function complex(data: Record<string, unknown>): string {
+	const nested = { a: { b: { c: 1 } } }
+	const arr = [1, [2, [3]]]
+	return JSON.stringify({ data, nested, arr })
+}`
+		const result = resolveFocus(source, "complex")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.endLine).toBe(5)
+		expect(result!.content).toContain("function complex")
+		expect(result!.content).toContain("JSON.stringify")
+	})
+
+	// --- Edge cases ---
+	it("возвращает null для несуществующей функции", () => {
+		const source = `function exist() { return true }`
+		const result = resolveFocus(source, "nonexistent")
+		expect(result).toBeNull()
+	})
+
+	it("возвращает null для пустого source", () => {
+		const result = resolveFocus("", "test")
+		expect(result).toBeNull()
+	})
+
+	it("возвращает null для пустого focusName", () => {
+		const result = resolveFocus("some code", "")
+		expect(result).toBeNull()
+	})
+
+	it("находит первую функцию при дубликатах (приоритет по позиции)", () => {
+		const source = `function process() { return 1 }
+function process() { return 2 }`
+		const result = resolveFocus(source, "process")
+		expect(result).not.toBeNull()
+		expect(result!.startLine).toBe(1)
+		expect(result!.content).toContain("return 1")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// resolveContentRef — Focus (AST) Priority
+// ---------------------------------------------------------------------------
+
+describe("resolveContentRef — Focus AST", () => {
+	it("использует AST-расширение для focus, когда оно находится", () => {
+		const source = `function calculateSum(a: number, b: number): number {
+	const result = a + b
+	return result
+}`
+		const ref: ContentRef = {
+			source: "chat",
+			ref: "-1",
+			focus: "calculateSum",
+			startAnchor: undefined,
+			endAnchor: undefined,
+			selector: undefined,
+			startLine: undefined,
+			endLine: undefined,
+			contextType: undefined,
+		}
+		const result = resolveContentRef("chat:-1", source, ref)
+		expect(result.method).toBe("focus")
+		expect(result.confidence).toBe(1.0)
+		expect(result.content).toContain("function calculateSum")
+		expect(result.content).toContain("return result")
+		expect(result.line).toBe(1)
+		expect(result.endLine).toBe(4)
+	})
+
+	it("падает на selector, если AST не смог определить границы", () => {
+		const source = `some text with calculateSum inside a comment`
+		const ref: ContentRef = {
+			source: "chat",
+			ref: "-1",
+			focus: "calculateSum",
+			startAnchor: undefined,
+			endAnchor: undefined,
+			selector: undefined,
+			startLine: undefined,
+			endLine: undefined,
+			contextType: undefined,
+		}
+		const result = resolveContentRef("chat:-1", source, ref)
+		expect(result.method).toBe("exact")
+		expect(result.content).toBe("calculateSum")
 	})
 })

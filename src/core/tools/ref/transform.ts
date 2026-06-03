@@ -5,9 +5,9 @@
  *
  * Pipeline order (strict):
  *   replace -> prepend -> wrap_with -> append
- *
- * This module is a pure function — no imports, no side effects.
  */
+
+import { info, successCrt } from "./superDebug"
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -52,6 +52,8 @@ export function applyTransform(content: string, transform?: TransformOptions | n
         return content
     }
 
+    info("TRANSFORM", `applyTransform: inputLength=${content.length}, hasReplace=${!!transform.replace}, hasPrepend=${!!transform.prepend}, hasWrap=${!!transform.wrap_with}, hasAppend=${!!transform.append}`)
+
     let result = content
 
     // Step 1: replace — substitute all occurrences of `from` with `to`
@@ -84,6 +86,7 @@ export function applyTransform(content: string, transform?: TransformOptions | n
         result = result + transform.append
     }
 
+    info("TRANSFORM", `applyTransform: ${content.length} -> ${result.length} chars`)
     return result
 }
 
@@ -111,6 +114,8 @@ export function applyMultiTransform(
         return { contents }
     }
 
+    info("TRANSFORM", `applyMultiTransform: ${contents.length} fragments, join_with="${transform.join_with ?? ""}"`)
+
     // Apply transform to each fragment independently
     const transformed = contents.map((c) => applyTransform(c, transform))
 
@@ -120,5 +125,9 @@ export function applyMultiTransform(
         joined = transformed.join(transform.join_with)
     }
 
+    successCrt("TRANSFORM", `applyMultiTransform: ${contents.length} fragment(s) transformed${joined !== undefined ? `, joinedLength=${joined.length}` : ""}`, {
+        inputLengths: contents.map(c => c.length),
+        outputLengths: transformed.map(c => c.length),
+    })
     return { contents: transformed, joined }
 }

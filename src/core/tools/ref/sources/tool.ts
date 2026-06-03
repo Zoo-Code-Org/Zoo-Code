@@ -9,6 +9,7 @@ import type { ContentRef } from "../../../../shared/tools"
 import type { SelectorResult } from "../selector"
 import { resolveContentRef } from "../selector"
 import type { Task } from "../../../task/Task"
+import { info, successCrt, error } from "../superDebug"
 
 /**
  * Resolve a tool source reference by finding the last tool_result for a given tool.
@@ -25,6 +26,8 @@ export async function resolveToolSource(ref: ContentRef, task: Task): Promise<Se
 	// Find the last tool_result for the specified tool
 	const toolName = ref.ref
 	const messages = task.userMessageContent
+
+	info("TOOL_SOURCE", `resolveToolSource: toolName="${toolName}", messagesCount=${messages.length}`)
 
 	// Traverse backwards to find latest result for this tool
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -44,12 +47,23 @@ export async function resolveToolSource(ref: ContentRef, task: Task): Promise<Se
 					// Found matching tool result
 					const content = extractTextContent(block)
 					const sourceId = `tool:${toolName}:${toolUseId}`
-					return resolveContentRef(sourceId, content, ref)
+					info(
+						"TOOL_SOURCE",
+						`Found tool result: toolName="${toolName}", toolUseId="${toolUseId}", contentLength=${content.length}`,
+					)
+					const result = resolveContentRef(sourceId, content, ref)
+					successCrt("TOOL_SOURCE", `resolved tool result for "${toolName}" (id=${toolUseId})`, {
+						sourceId: result.sourceId,
+						confidence: result.confidence,
+						contentLength: result.content.length,
+					})
+					return result
 				}
 			}
 		}
 	}
 
+	error("TOOL_SOURCE", `No tool result found for tool: "${toolName}"`, { ref })
 	throw new Error(`No tool result found for tool: ${toolName}`)
 }
 

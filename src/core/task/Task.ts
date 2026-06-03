@@ -77,6 +77,7 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
+import { info, warn, error, initDebugLog } from "../tools/ref/superDebug"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
@@ -1798,6 +1799,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// messages from previous session).
 			this.clineMessages = []
 			this.apiConversationHistory = []
+			initDebugLog(this.cwd, true)
+			info("TASK", "Task started", { taskId: this.taskId, mode: this._taskMode })
 
 			// The todo list is already set in the constructor if initialTodos were provided
 			// No need to add any messages - the todoList property is already set
@@ -2119,6 +2122,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.abort = true
 
 		// Reset consecutive error counters on abort (manual intervention)
+		warn("TASK", "Task aborted", { taskId: this.taskId, isAbandoned })
 		this.consecutiveNoToolUseCount = 0
 		this.consecutiveNoAssistantMessagesCount = 0
 
@@ -2144,6 +2148,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public dispose(): void {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+		info("TASK", "Task disposed", { taskId: this.taskId, instanceId: this.instanceId })
 
 		// Cancel any in-progress HTTP request
 		try {
@@ -2647,6 +2652,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				let reasoningMessage = ""
 				let pendingGroundingSources: GroundingSource[] = []
 				this.isStreaming = true
+				info("TASK:STREAM", "Stream started", { modelId: cachedModelId })
 
 				try {
 					const iterator = stream[Symbol.asyncIterator]()
@@ -3114,6 +3120,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						const cancelReason: ClineApiReqCancelReason = this.abort ? "user_cancelled" : "streaming_failed"
 
 						const rawErrorMessage = error.message ?? JSON.stringify(serializeError(error), null, 2)
+						error("TASK:STREAM", "Stream failed", {
+							error: rawErrorMessage,
+							retryAttempt: currentItem.retryAttempt,
+						})
 						const streamingFailedMessage = this.abort
 							? undefined
 							: `${t("common:interruption.streamTerminatedByProvider")}: ${rawErrorMessage}`
@@ -3150,6 +3160,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							}
 
 							// Push the same content back onto the stack to retry, incrementing the retry attempt counter
+							info("TASK", "Retrying with effective history", {
+								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+							})
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
@@ -4189,6 +4202,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						`Retry attempt ${retryAttempt + 1}/${MAX_CONTEXT_WINDOW_RETRIES}. ` +
 						`Attempting automatic truncation...`,
 				)
+				warn("TASK", "Context window exceeded", { retryAttempt, modelId: this.api.getModel().id })
 				await this.handleContextWindowExceededError()
 				// Retry the request after handling the context window error
 				yield* this.attemptApiRequest(retryAttempt + 1)

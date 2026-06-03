@@ -1,4 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
+import { info, warn, error } from "../../core/tools/ref/superDebug"
 
 import type { ModelInfo } from "@roo-code/types"
 
@@ -65,51 +66,64 @@ export abstract class BaseProvider implements ApiHandler {
 			return schema
 		}
 
-		const result = { ...schema }
+		try {
+			info("PROVIDER", "Converting tool schema", {
+				schemaKeys: schema.properties ? Object.keys(schema.properties) : [],
+			})
 
-		// OpenAI Responses API requires additionalProperties: false on all object schemas
-		// Only add if not already set to false (to avoid unnecessary mutations)
-		if (result.additionalProperties !== false) {
-			result.additionalProperties = false
-		}
+			const result = { ...schema }
 
-		if (result.properties) {
-			const allKeys = Object.keys(result.properties)
-			// OpenAI strict mode requires ALL properties to be in required array
-			// Preserve original required array when present (e.g., for CRT tool schemas
-			// where ref/multi_ref/transform are optional)
-			result.required = schema.required && schema.required.length > 0 ? schema.required : allKeys
-
-			// Recursively process nested objects and convert nullable types
-			const newProps = { ...result.properties }
-			for (const key of allKeys) {
-				const prop = newProps[key]
-
-				// Handle nullable types - keep null union types for optional params
-				// (OpenAI supports ["object", "null"] for nullable object parameters)
-				if (prop && Array.isArray(prop.type) && prop.type.includes("null")) {
-					const nonNullTypes = prop.type.filter((t: string) => t !== "null")
-					if (nonNullTypes.length > 0) {
-						// Keep only non-null types (collapse single type to string)
-						prop.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
-					}
-					// If only null remains, keep the original array as-is
-				}
-
-				// Recursively process nested objects
-				if (prop && prop.type === "object") {
-					newProps[key] = this.convertToolSchemaForOpenAI(prop)
-				} else if (prop && prop.type === "array" && prop.items?.type === "object") {
-					newProps[key] = {
-						...prop,
-						items: this.convertToolSchemaForOpenAI(prop.items),
-					}
-				}
+			// OpenAI Responses API requires additionalProperties: false on all object schemas
+			// Only add if not already set to false (to avoid unnecessary mutations)
+			if (result.additionalProperties !== false) {
+				result.additionalProperties = false
 			}
-			result.properties = newProps
-		}
 
-		return result
+			if (result.properties) {
+				const allKeys = Object.keys(result.properties)
+				// OpenAI strict mode requires ALL properties to be in required array
+				// Preserve original required array when present (e.g., for CRT tool schemas
+				// where ref/multi_ref/transform are optional)
+				result.required = schema.required && schema.required.length > 0 ? schema.required : allKeys
+
+				if (schema.required && schema.required.length > 0 && schema.required.length < allKeys.length) {
+					info("PROVIDER", "CRT params preserved", { keys: schema.required })
+				}
+
+				// Recursively process nested objects and convert nullable types
+				const newProps = { ...result.properties }
+				for (const key of allKeys) {
+					const prop = newProps[key]
+
+					// Handle nullable types - keep null union types for optional params
+					// (OpenAI supports ["object", "null"] for nullable object parameters)
+					if (prop && Array.isArray(prop.type) && prop.type.includes("null")) {
+						const nonNullTypes = prop.type.filter((t: string) => t !== "null")
+						if (nonNullTypes.length > 0) {
+							// Keep only non-null types (collapse single type to string)
+							prop.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
+						}
+						// If only null remains, keep the original array as-is
+					}
+
+					// Recursively process nested objects
+					if (prop && prop.type === "object") {
+						newProps[key] = this.convertToolSchemaForOpenAI(prop)
+					} else if (prop && prop.type === "array" && prop.items?.type === "object") {
+						newProps[key] = {
+							...prop,
+							items: this.convertToolSchemaForOpenAI(prop.items),
+						}
+					}
+				}
+				result.properties = newProps
+			}
+
+			return result
+		} catch (err) {
+			error("PROVIDER", "Schema conversion failed", { error: err instanceof Error ? err.message : String(err) })
+			throw err
+		}
 	}
 
 	/**

@@ -48,6 +48,19 @@ vi.mock("../transform", () => ({
 }))
 
 // ---------------------------------------------------------------------------
+// Mock superDebug — default logCrt returns silently (no-op)
+// ---------------------------------------------------------------------------
+vi.mock("../superDebug", () => ({
+	logCrt: vi.fn(),
+	info: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
+	callCrt: vi.fn(),
+	successCrt: vi.fn(),
+	executeCrt: vi.fn(),
+}))
+
+// ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
 import { resolveChatSource } from "../sources/chat"
@@ -55,6 +68,7 @@ import { resolveFileSource } from "../sources/file"
 import { resolveTerminalSource } from "../sources/terminal"
 import { resolveToolSource } from "../sources/tool"
 import { applyMultiTransform } from "../transform"
+import { logCrt } from "../superDebug"
 import { resolveRef, resolveInlineRefs, resolveInlineRefsInObject, logCrtDebug } from "../index"
 import type { ContentRefParams, ContentRef } from "../../../../shared/tools"
 import type { SelectorResult } from "../selector"
@@ -496,6 +510,14 @@ describe("resolveRef", () => {
 
 	describe("logCrtDebug", () => {
 		it("writes diagnostic logs to crt-debug.log in task.cwd", () => {
+			// logCrtDebug first calls logCrt() from superDebug. Since superDebug is mocked
+			// by vi.mock("../superDebug") above, its logCrt throws by default (mock
+			// fn returns undefined — logCrt called without await is not a function error).
+			// We force the fallback path by making logCrt throw.
+			vi.mocked(logCrt).mockImplementationOnce(() => {
+				throw new Error("[mock] superDebug logCrt unavailable")
+			})
+
 			const appendFileSpy = vi.mocked(fs.appendFileSync)
 			const task = createMockTask({ cwd: "/workspace/project" })
 
@@ -509,6 +531,132 @@ describe("resolveRef", () => {
 			expect(logPath).toBe(path.join("/workspace/project", "crt-debug.log"))
 			expect(logMessage).toContain("test debug message")
 			expect(logMessage).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] test debug message\n$/)
+		})
+	})
+
+	// ===========================================================================
+	// Graceful fallback — partial failure in multi_ref
+	// ===========================================================================
+
+	describe("graceful fallback — partial failure in multi_ref", () => {
+		it("succeeds when some refs fail but at least one resolves", async () => {
+			vi.mocked(resolveChatSource).mockRejectedValue(new Error("chat error"))
+			vi.mocked(resolveFileSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "file://a.ts", content: "file content" }),
+			)
+
+			const task = createMockTask()
+			const refMeta: ContentRefParams = {
+				multi_ref: [makeRef("chat", "-1"), makeRef("file", "a.ts")],
+			}
+
+			const result = await resolveRef(refMeta, task)
+
+			expect(result.content).toBe("file content")
+			expect(result.resolved).toHaveLength(1)
+		})
+
+		it("throws when all refs fail", async () => {
+			vi.mocked(resolveChatSource).mockRejectedValue(new Error("chat error"))
+			vi.mocked(resolveFileSource).mockRejectedValue(new Error("file error"))
+
+			const task = createMockTask()
+			const refMeta: ContentRefParams = {
+				multi_ref: [makeRef("chat", "-1"), makeRef("file", "a.ts")],
+			}
+
+			await expect(resolveRef(refMeta, task)).rejects.toThrow("All 2 ref(s) failed to resolve")
+		})
+
+		it("partial failure: returns results from successful refs and skips failed", async () => {
+			vi.mocked(resolveChatSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "chat:-1", content: "chat content" }),
+			)
+			vi.mocked(resolveFileSource).mockRejectedValue(new Error("file not found"))
+			vi.mocked(resolveToolSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "tool:read_file", content: "tool result" }),
+			)
+
+			const task = createMockTask()
+			const refMeta: ContentRefParams = {
+				multi_ref: [makeRef("chat", "-1"), makeRef("file", "missing.ts"), makeRef("tool", "read_file")],
+			}
+
+			const result = await resolveRef(refMeta, task)
+
+			expect(result.resolved).toHaveLength(2)
+			expect(result.content).toBe("chat content") // first fragment
+		})
+	})
+
+	// ===========================================================================
+	// Simultaneous ref + multi_ref
+	// ===========================================================================
+
+	describe("resolveRef \u2014 simultaneous ref + multi_ref", () => {
+		beforeEach(() => {
+			vi.clearAllMocks()
+			vi.mocked(applyMultiTransform).mockImplementation((contents: string[]) => ({ contents }))
+		})
+
+		it("resolves both ref and multi_ref together", async () => {
+			vi.mocked(resolveChatSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "chat:-1", content: "from single ref", confidence: 1.0 }),
+			)
+			vi.mocked(resolveFileSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "file://a.ts", content: "from multi_ref", confidence: 1.0 }),
+			)
+
+			const task = createMockTask()
+			const refMeta: ContentRefParams = {
+				ref: makeRef("chat", "-1"),
+				multi_ref: [makeRef("file", "a.ts")],
+			}
+
+			const result = await resolveRef(refMeta, task)
+
+			expect(result.resolved).toHaveLength(2)
+			expect(result.content).toBe("from single ref") // first fragment (ref)
+			expect(resolveChatSource).toHaveBeenCalledTimes(1)
+			expect(resolveFileSource).toHaveBeenCalledTimes(1)
+		})
+
+		it("applies join_with to combined ref + multi_ref results", async () => {
+			vi.mocked(resolveChatSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "chat:-1", content: "first", confidence: 1.0 }),
+			)
+			vi.mocked(resolveFileSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "file://a.ts", content: "second", confidence: 1.0 }),
+			)
+			vi.mocked(applyMultiTransform).mockReturnValue({
+				contents: ["first", "second"],
+				joined: "first ||| second",
+			})
+
+			const task = createMockTask()
+			const refMeta: ContentRefParams = {
+				ref: makeRef("chat", "-1"),
+				multi_ref: [makeRef("file", "a.ts")],
+				transform: { join_with: " ||| " },
+			}
+
+			const result = await resolveRef(refMeta, task)
+
+			expect(result.content).toBe("first ||| second")
+			expect(result.resolved).toHaveLength(2)
+		})
+
+		it("throws when both ref and all multi_ref fail", async () => {
+			vi.mocked(resolveChatSource).mockRejectedValue(new Error("chat error"))
+			vi.mocked(resolveFileSource).mockRejectedValue(new Error("file error"))
+
+			const task = createMockTask()
+			const refMeta: ContentRefParams = {
+				ref: makeRef("chat", "-1"),
+				multi_ref: [makeRef("file", "a.ts")],
+			}
+
+			await expect(resolveRef(refMeta, task)).rejects.toThrow("All 2 ref(s) failed to resolve")
 		})
 	})
 })

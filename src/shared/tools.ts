@@ -243,6 +243,11 @@ export interface ContentRef {
 	/** Exact substring to find in source */
 	selector?: string
 
+	// --- Focus (AST-based auto-expansion) ---
+	/** Focus keyword for AST auto-expansion: the system finds this word and expands
+	 *  to the entire containing syntactic block (function, class, object). */
+	focus?: string
+
 	// --- File-specific: Line range ---
 	/** Starting line number (1-based, only for source="file") */
 	startLine?: number

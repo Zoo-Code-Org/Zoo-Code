@@ -17,6 +17,7 @@ import { resolveFileSource } from "./sources/file"
 import { resolveTerminalSource } from "./sources/terminal"
 import { resolveToolSource } from "./sources/tool"
 import type { Task } from "../../task/Task"
+import { info, warn, error as logError, callCrt, logCrt, successCrt, executeCrt } from "./superDebug"
 
 // ─── Public Types ───────────────────────────────────────────────────────────
 
@@ -47,32 +48,78 @@ export interface ResolveRefResult {
 export async function resolveRef(refMeta: ContentRefParams, task: Task): Promise<ResolveRefResult> {
 	const refs: ContentRef[] = []
 
+	// Support simultaneous ref + multi_ref
+	if (refMeta.ref) {
+		refs.push(refMeta.ref)
+	}
 	if (refMeta.multi_ref && refMeta.multi_ref.length > 0) {
 		refs.push(...refMeta.multi_ref)
-	} else if (refMeta.ref) {
-		refs.push(refMeta.ref)
 	}
 
 	if (refs.length === 0) {
-		throw new Error("No ref or multi_ref specified in refMeta.")
+		const errMsg = "No ref or multi_ref specified in refMeta."
+		logError("RESOLVE_REF", errMsg, { refMeta })
+		throw new Error(errMsg)
 	}
 
-	// Resolve all refs
+	info("RESOLVE_REF", `resolveRef: ${refs.length} ref(s) to resolve`, {
+		hasRef: !!refMeta.ref,
+		hasMultiRef: !!refMeta.multi_ref,
+		hasTransform: !!refMeta.transform,
+	})
+
+	// Resolve all refs with graceful fallback per ref
 	const resolved: SelectorResult[] = []
+	const errors: Array<{ ref: ContentRef; error: string }> = []
 	for (const ref of refs) {
-		const result = await resolveSingleRef(ref, task)
-		resolved.push(result)
+		try {
+			const result = await resolveSingleRef(ref, task)
+			resolved.push(result)
+		} catch (err) {
+			const errMsg = `ref=${ref.source}:${ref.ref} — ${err instanceof Error ? err.message : String(err)}`
+			errors.push({ ref, error: errMsg })
+			logError("RESOLVE_REF", `Failed to resolve ${errMsg}`)
+		}
+	}
+
+	if (resolved.length === 0) {
+		const errMsg = `All ${refs.length} ref(s) failed to resolve. First error: ${errors[0]?.error || "unknown"}`
+		logError("RESOLVE_REF", errMsg, { errorCount: errors.length })
+		throw new Error(errMsg)
+	}
+
+	// Log partial failures
+	if (errors.length > 0) {
+		logCrt(
+			"RESOLVE_REF",
+			`${errors.length}/${refs.length} ref(s) failed, using ${resolved.length} resolved fragment(s)`,
+			{
+				errors: errors.map((e) => e.error),
+			},
+		)
 	}
 
 	// Apply transforms
 	const contents = resolved.map((r) => r.content)
 	const transformed = applyMultiTransform(contents, refMeta.transform)
 
+	const confidence = resolved.reduce((min, r) => Math.min(min, r.confidence), 1.0)
+
+	successCrt(
+		"RESOLVE_REF",
+		`resolved ${resolved.length}/${refs.length} ref(s), confidence=${confidence.toFixed(2)}`,
+		{
+			contentLength: (transformed.joined ?? transformed.contents[0] ?? "").length,
+			confidence,
+			methods: resolved.map((r) => r.method),
+		},
+	)
+
 	return {
 		content: transformed.joined ?? transformed.contents[0] ?? "",
 		joined: transformed.joined,
 		resolved,
-		confidence: resolved.reduce((min, r) => Math.min(min, r.confidence), 1.0),
+		confidence,
 	}
 }
 
@@ -117,6 +164,8 @@ export async function resolveInlineRefs(text: string, task: Task): Promise<strin
 		return text
 	}
 
+	info("INLINE_REFS", `resolveInlineRefs: ${markers.length} marker(s) found in text (length=${text.length})`)
+
 	let result = text
 	for (let i = markers.length - 1; i >= 0; i--) {
 		const { match, paramsStr, index } = markers[i]
@@ -143,8 +192,9 @@ export async function resolveInlineRefs(text: string, task: Task): Promise<strin
 			)
 
 			result = result.slice(0, index) + content.content + result.slice(index + match.length)
-		} catch (error) {
-			console.error(`[CRT] Failed to resolve inline ref: ${match}`, error)
+		} catch (err) {
+			logError("INLINE_REFS", `Failed to resolve inline ref: ${match}`, { error: String(err) })
+			console.error(`[CRT] Failed to resolve inline ref: ${match}`, err)
 		}
 	}
 	return result
@@ -163,6 +213,7 @@ export async function resolveInlineRefsInObject(obj: any, task: Task): Promise<a
 	}
 
 	if (Array.isArray(obj)) {
+		info("INLINE_REFS", `resolveInlineRefsInObject: scanning array of ${obj.length} items`)
 		const result = []
 		for (const item of obj) {
 			result.push(await resolveInlineRefsInObject(item, task))
@@ -171,8 +222,10 @@ export async function resolveInlineRefsInObject(obj: any, task: Task): Promise<a
 	}
 
 	if (typeof obj === "object") {
+		const keys = Object.keys(obj)
+		info("INLINE_REFS", `resolveInlineRefsInObject: scanning object with ${keys.length} keys`)
 		const result: any = {}
-		for (const key of Object.keys(obj)) {
+		for (const key of keys) {
 			result[key] = await resolveInlineRefsInObject(obj[key], task)
 		}
 		return result
@@ -182,18 +235,25 @@ export async function resolveInlineRefsInObject(obj: any, task: Task): Promise<a
 }
 
 /**
- * Zonal CRT Debug Logger
+ * Zonal CRT Debug Logger (legacy — delegates to superDebug.logCrt)
  * Appends diagnostic logs to a crt-debug.log file in the workspace root (task.cwd).
+ *
+ * @deprecated Use superDebug's logCrt() / info() / successCrt() directly instead.
  */
 export function logCrtDebug(task: Task, message: string): void {
 	try {
-		const logDir = task.cwd
-		if (!logDir) return
-		const logPath = path.join(logDir, "crt-debug.log")
-		const timestamp = new Date().toISOString()
-		const formattedMessage = `[${timestamp}] ${message}\n`
-		fs.appendFileSync(logPath, formattedMessage, "utf8")
-	} catch (error) {
-		console.error("[CRT Debug Logger] Failed to write log:", error)
+		logCrt("CRT_DEBUG", message, { taskId: task.taskId })
+	} catch (err) {
+		// Fallback to old behavior if superDebug is not available
+		try {
+			const logDir = task.cwd
+			if (!logDir) return
+			const logPath = path.join(logDir, "crt-debug.log")
+			const timestamp = new Date().toISOString()
+			const formattedMessage = `[${timestamp}] ${message}\n`
+			fs.appendFileSync(logPath, formattedMessage, "utf8")
+		} catch (fallbackErr) {
+			console.error("[CRT Debug Logger] Failed to write log:", fallbackErr)
+		}
 	}
 }

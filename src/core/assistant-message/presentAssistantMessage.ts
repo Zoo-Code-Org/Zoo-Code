@@ -40,6 +40,7 @@ import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
+import { info, warn, error } from "../tools/ref/superDebug"
 
 /**
  * Processes and presents assistant message content to the user interface.
@@ -71,6 +72,8 @@ export async function presentAssistantMessage(cline: Task) {
 	cline.presentAssistantMessageLocked = true
 	cline.presentAssistantMessageHasPendingUpdates = false
 
+	info("PRESENT", "Presenting assistant message", { blocks: cline.assistantMessageContent?.length })
+
 	if (cline.currentStreamingContentIndex >= cline.assistantMessageContent.length) {
 		// This may happen if the last content block was completed before
 		// streaming could finish. If streaming is finished, and we're out of
@@ -92,11 +95,7 @@ export async function presentAssistantMessage(cline: Task) {
 		// This provides 80-90% reduction in cloning overhead (5-100ms saved per block).
 		block = { ...cline.assistantMessageContent[cline.currentStreamingContentIndex] }
 	} catch (error) {
-		console.error(`ERROR cloning block:`, error)
-		console.error(
-			`Block content:`,
-			JSON.stringify(cline.assistantMessageContent[cline.currentStreamingContentIndex], null, 2),
-		)
+		error("PRESENT", "Failed to clone block", { error: error instanceof Error ? error.message : String(error) })
 		cline.presentAssistantMessageLocked = false
 		return
 	}
@@ -676,6 +675,8 @@ export async function presentAssistantMessage(cline: Task) {
 				}
 			}
 
+			info("PRESENT", "Tool call presented", { name: block.name, blockId: toolCallId })
+
 			switch (block.name) {
 				case "write_to_file":
 					await checkpointSaveAndMark(cline)
@@ -989,7 +990,8 @@ async function checkpointSaveAndMark(task: Task) {
 	try {
 		await task.checkpointSave(true)
 		task.currentStreamingDidCheckpoint = true
+		info("PRESENT", "Checkpoint saved", { task: task.taskId })
 	} catch (error) {
-		console.error(`[Task#presentAssistantMessage] Error saving checkpoint: ${error.message}`, error)
+		error("PRESENT", "Failed to present", { error: error instanceof Error ? error.message : String(error) })
 	}
 }

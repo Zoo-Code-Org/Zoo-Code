@@ -19,6 +19,9 @@ import { BaseTool, ToolCallbacks } from "./BaseTool"
 interface ApplyDiffParams {
 	path: string
 	diff: string
+	ref?: import("../../shared/tools").ContentRef
+	multi_ref?: import("../../shared/tools").ContentRef[]
+	transform?: import("../../shared/tools").ContentRefParams["transform"]
 }
 
 export class ApplyDiffTool extends BaseTool<"apply_diff"> {

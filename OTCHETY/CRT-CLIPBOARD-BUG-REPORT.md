@@ -499,5 +499,55 @@ Universal AI Clipboard (CRT v5.0) — это **недостроенный мех
 
 ---
 
-_Отчёт составлен на основе эмпирического тестирования в среде Roo Code / Zoo Code.  
+_Отчёт составлен на основе эмпирического тестирования в среде Roo Code / Zoo Code.
 Все тесты могут быть воспроизведены по протоколу из раздела 2._
+
+---
+
+## 11. Обновление: Super Debug Logger (3 июня 2026)
+
+### Что сделано
+
+Создан и подключён **Super Debug Logger** — централизованный механизм
+отладки, логирующий ВСЕ внутренние коммуникации компонентов Zoo-Code.
+
+### Инструментированные компоненты (12 файлов)
+
+| Компонент            | Файл                       | Контекст лога          |
+| -------------------- | -------------------------- | ---------------------- |
+| CRT Operations       | BaseTool.ts                | BASE_TOOL              |
+| Ref Resolver         | ref/index.ts               | CRT                    |
+| Selector Engine      | ref/selector.ts            | SELECTOR               |
+| Transform Engine     | ref/transform.ts           | TRANSFORM              |
+| Chat Source          | ref/sources/chat.ts        | CHAT                   |
+| File Source          | ref/sources/file.ts        | FILE                   |
+| Terminal Source      | ref/sources/terminal.ts    | TERMINAL               |
+| Tool Source          | ref/sources/tool.ts        | TOOL                   |
+| Tool Call Parser     | NativeToolCallParser.ts    | PARSER                 |
+| Task Lifecycle       | Task.ts                    | TASK, TASK:STREAM      |
+| Message Presentation | presentAssistantMessage.ts | PRESENT                |
+| Schema Conversion    | base-provider.ts           | PROVIDER               |
+| Все console.\*       | глобально (patch)          | CONSOLE:LOG/WARN/ERROR |
+
+### Лог-файлы
+
+- `{cwd}/crt-debug.log` — CRT-специфичные ([CALL], [SUCCESS|ERROR], [EXECUTE])
+- `{cwd}/debug-log/zoo-debug.log` — все системные логи
+
+### Управление
+
+```bash
+# Включить
+ZOO_DEBUG=1 code .
+
+# Выключить
+code .  # (без ZOO_DEBUG)
+```
+
+### Статус
+
+✅ Все 12 компонентов инструментированы (32+ точек логирования)
+✅ TypeScript-компиляция: 0 ошибок
+✅ Логика не изменена — только добавлено логирование
+✅ console.\* патч для тотальной видимости
+✅ Документация: SUPER-DEBUG-README.md

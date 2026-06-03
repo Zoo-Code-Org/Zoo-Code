@@ -189,17 +189,23 @@ export abstract class BaseTool<TName extends ToolName> {
 				// CRT: resolve ref if present, with graceful fallback
 				let crtLog = ""
 				if (block.refMeta) {
+					// Calculate total requested ref count
+					const singleRefCount = block.refMeta.ref ? 1 : 0
+					const multiRefCount = block.refMeta.multi_ref?.length ?? 0
+					const totalRequestedRefs = singleRefCount + multiRefCount
+
 					try {
 						const refResults = await resolveRef(block.refMeta, task)
 						if (refResults?.content) {
 							params = this.injectRefContent(params, block.name, refResults)
 							// Format successful resolution log
-							if (block.refMeta.multi_ref) {
-								crtLog = `[CRT] multi_ref: ${block.refMeta.multi_ref.length}/${block.refMeta.multi_ref.length} resolved, confidence=${refResults.confidence.toFixed(2)}`
-							} else if (block.refMeta.ref) {
+							const methods = refResults.resolved.map((r) => r.method).join(",")
+							if (totalRequestedRefs > 1) {
+								crtLog = `[CRT] multi_ref: ${refResults.resolved.length}/${totalRequestedRefs} resolved, methods=${methods}, confidence=${refResults.confidence.toFixed(2)}`
+							} else {
 								const ref = block.refMeta.ref
 								const method = refResults.resolved[0]?.method || "exact"
-								crtLog = `[CRT] ref resolved: source=${ref.source}:${ref.ref}, method=${method}, confidence=${refResults.confidence.toFixed(2)}`
+								crtLog = `[CRT] ref resolved: source=${ref?.source}:${ref?.ref}, method=${method}, confidence=${refResults.confidence.toFixed(2)}`
 							}
 							successCrt("BASE_TOOL", crtLog, { contentLength: refResults.content.length })
 						}
@@ -207,7 +213,9 @@ export abstract class BaseTool<TName extends ToolName> {
 						// Graceful fallback: use original params.
 						// Error is logged but does NOT prevent execution.
 						error("BASE_TOOL:CRT", `Failed to resolve ref for ${block.name}:`, caughtError)
-						if (block.refMeta.ref) {
+						if (totalRequestedRefs > 1) {
+							crtLog = `[CRT] multi_ref (${totalRequestedRefs} ref(s)) resolution failed, falling back to original params`
+						} else if (block.refMeta.ref) {
 							const ref = block.refMeta.ref
 							const focusStr = ref.focus ? `, focus="${ref.focus}"` : ""
 							const selectorStr = ref.selector ? `, selector="${ref.selector}"` : ""
