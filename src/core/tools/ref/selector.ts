@@ -212,6 +212,22 @@ function lcsFuzzyMatch(source: string, quote: string, tolerance: number): number
 	return -1
 }
 
+/**
+ * Find the longest common substring between `source` and `quote` after normalizing both,
+ * then map the match position back to the original source.
+ */
+function normalizedFuzzyMatch(source: string, quote: string, options: Required<SelectorOptions>): number {
+	const normSource = normalizeText(source, options)
+	const normQuote = normalizeText(quote, options)
+
+	const idx = lcsFuzzyMatch(normSource.text, normQuote.text, options.tolerance)
+	if (idx === -1) {
+		return -1
+	}
+
+	return normSource.map[idx]
+}
+
 // ─── Stage 4: Word-Boundary Expansion ───────────────────────────────────────
 
 /**
@@ -334,7 +350,7 @@ export function resolveSelector(
 
 	// Stage 3: LCS Fuzzy match
 	if (pos === -1) {
-		pos = lcsFuzzyMatch(source, quote, opts.tolerance)
+		pos = normalizedFuzzyMatch(source, quote, opts)
 		if (pos !== -1) {
 			method = "fuzzy"
 		}
@@ -485,6 +501,13 @@ export function resolveContentRef(
 		return resolveSelector(sourceId, source, ref.selector, options)
 	}
 
+	// Priority 4: Focus keyword (falls back to selector matching)
+	if (ref.focus) {
+		return resolveSelector(sourceId, source, ref.focus, options)
+	}
+
 	// No matching strategy specified
-	throw new Error(`ContentRef for "${sourceId}" must specify at least one of: startAnchor, selector, or startLine`)
+	throw new Error(
+		`ContentRef for "${sourceId}" must specify at least one of: startAnchor, selector, focus, or startLine`,
+	)
 }

@@ -250,6 +250,15 @@ describe("resolveContentRef", () => {
 		})
 	})
 
+	describe("Priority 4 — Focus Fallback", () => {
+		it("resolves via focus keyword when no selector/anchor is specified", () => {
+			const ref = makeRef({ source: "chat", ref: "-1", focus: "farewell" })
+			const result = resolveContentRef("chat:-1", SOURCE_CODE, ref)
+			expect(result.method).toBe("exact")
+			expect(result.content).toBe("farewell")
+		})
+	})
+
 	describe("Error Handling", () => {
 		it("throws when no matching strategy is specified", () => {
 			const ref = makeRef({ source: "chat", ref: "-1" })

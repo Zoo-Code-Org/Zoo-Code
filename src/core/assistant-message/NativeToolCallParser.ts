@@ -643,14 +643,7 @@ export class NativeToolCallParser {
 		}
 
 		// CRT: extract refMeta from partial args
-		let partialRefMeta: ContentRefParams | undefined
-		if (partialArgs && (partialArgs.ref || partialArgs.multi_ref || partialArgs.transform)) {
-			partialRefMeta = {
-				ref: partialArgs.ref,
-				multi_ref: partialArgs.multi_ref,
-				transform: partialArgs.transform,
-			} as ContentRefParams
-		}
+		const partialRefMeta = parseRefMeta(partialArgs)
 
 		const result: ToolUse = {
 			type: "tool_use" as const,
@@ -1017,14 +1010,7 @@ export class NativeToolCallParser {
 			}
 
 			// CRT: extract refMeta from parsed args
-			let refMeta: ContentRefParams | undefined
-			if (args && (args.ref || args.multi_ref || args.transform)) {
-				refMeta = {
-					ref: args.ref,
-					multi_ref: args.multi_ref,
-					transform: args.transform,
-				} as ContentRefParams
-			}
+			const refMeta = parseRefMeta(args)
 
 			const result: ToolUse<TName> = {
 				type: "tool_use" as const,
@@ -1097,4 +1083,42 @@ export class NativeToolCallParser {
 			return null
 		}
 	}
+}
+
+function parseRefMeta(args: any): ContentRefParams | undefined {
+	if (!args || (!args.ref && !args.multi_ref && !args.transform)) {
+		return undefined
+	}
+
+	let ref = args.ref
+	let multi_ref = args.multi_ref
+	let transform = args.transform
+
+	if (typeof ref === "string") {
+		try {
+			ref = JSON.parse(ref)
+		} catch (e) {
+			// Keep original string if parsing fails
+		}
+	}
+	if (typeof multi_ref === "string") {
+		try {
+			multi_ref = JSON.parse(multi_ref)
+		} catch (e) {
+			// Keep original if parsing fails
+		}
+	}
+	if (typeof transform === "string") {
+		try {
+			transform = JSON.parse(transform)
+		} catch (e) {
+			// Keep original if parsing fails
+		}
+	}
+
+	return {
+		ref,
+		multi_ref,
+		transform,
+	} as ContentRefParams
 }
