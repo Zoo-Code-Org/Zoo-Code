@@ -461,7 +461,6 @@ describe("ZAiHandler", () => {
 			const expectedMaxTokens = Math.min(modelInfo.maxTokens, Math.ceil(modelInfo.contextWindow * 0.2))
 
 			expect(mockCreate).toHaveBeenCalledWith(
-							{ signal: undefined },
 				expect.objectContaining({
 					model: modelId,
 					max_tokens: expectedMaxTokens,
@@ -470,7 +469,7 @@ describe("ZAiHandler", () => {
 					stream: true,
 					stream_options: { include_usage: true },
 				}),
-				expect.any(Object),
+				{ signal: undefined },
 			)
 		})
 	})
@@ -501,6 +500,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5.1",
 					max_tokens: 40_000,
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -541,6 +541,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5.1",
 					max_tokens: 100_000,
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -567,11 +568,11 @@ describe("ZAiHandler", () => {
 
 			// For GLM-4.7 with default reasoning (medium), thinking should be enabled
 			expect(mockCreate).toHaveBeenCalledWith(
-			{ signal: undefined },
 				expect.objectContaining({
 					model: "glm-4.7",
 					thinking: { type: "enabled" },
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -599,11 +600,11 @@ describe("ZAiHandler", () => {
 
 			// For GLM-4.7 with reasoning disabled, thinking should be disabled
 			expect(mockCreate).toHaveBeenCalledWith(
-			{ signal: undefined },
 				expect.objectContaining({
 					model: "glm-4.7",
 					thinking: { type: "disabled" },
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -631,11 +632,11 @@ describe("ZAiHandler", () => {
 
 			// For GLM-4.7 with reasoning set to medium, thinking should be enabled
 			expect(mockCreate).toHaveBeenCalledWith(
-			{ signal: undefined },
 				expect.objectContaining({
 					model: "glm-4.7",
 					thinking: { type: "enabled" },
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -685,11 +686,11 @@ describe("ZAiHandler", () => {
 			await messageGenerator.next()
 
 			expect(mockCreate).toHaveBeenCalledWith(
-			{ signal: undefined },
 				expect.objectContaining({
 					model: "glm-5-turbo",
 					thinking: { type: "enabled" },
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -716,11 +717,11 @@ describe("ZAiHandler", () => {
 			await messageGenerator.next()
 
 			expect(mockCreate).toHaveBeenCalledWith(
-			{ signal: undefined },
 				expect.objectContaining({
 					model: "glm-5-turbo",
 					thinking: { type: "disabled" },
 				}),
+				{ signal: undefined },
 			)
 		})
 	})

@@ -55,7 +55,6 @@ describe("RequestyHandler", () => {
 		expect(handler).toBeInstanceOf(RequestyHandler)
 
 		expect(OpenAI).toHaveBeenCalledWith({
-							{ signal: undefined },
 			baseURL: "https://router.requesty.ai/v1",
 			apiKey: mockOptions.requestyApiKey,
 			defaultHeaders: {
@@ -71,7 +70,6 @@ describe("RequestyHandler", () => {
 		expect(handler).toBeInstanceOf(RequestyHandler)
 
 		expect(OpenAI).toHaveBeenCalledWith({
-							{ signal: undefined },
 			baseURL: "https://custom.requesty.ai/v1",
 			apiKey: mockOptions.requestyApiKey,
 			defaultHeaders: {
@@ -192,6 +190,7 @@ describe("RequestyHandler", () => {
 					stream_options: { include_usage: true },
 					temperature: 0,
 				}),
+				{ signal: undefined },
 			)
 		})
 
@@ -251,19 +250,20 @@ describe("RequestyHandler", () => {
 				await iterator.next()
 
 				expect(mockCreate).toHaveBeenCalledWith(
-					expect.objectContaining({
-						tools: expect.arrayContaining([
-							expect.objectContaining({
-								type: "function",
-								function: expect.objectContaining({
-									name: "get_weather",
-									description: "Get the current weather",
+				expect.objectContaining({
+					tools: expect.arrayContaining([
+				expect.objectContaining({
+					type: "function",
+				function: expect.objectContaining({
+					name: "get_weather",
+					description: "Get the current weather",
+											}),
+										}),
+									]),
+					tool_choice: "auto",
 								}),
-							}),
-						]),
-						tool_choice: "auto",
-					}),
-				)
+				{ signal: undefined },
+							)
 			})
 
 			it("should handle tool_call_partial chunks in streaming response", async () => {

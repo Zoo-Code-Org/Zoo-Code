@@ -183,7 +183,10 @@ describe("OpenAICompatibleHandler abort signal", () => {
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
 				abortSignal: mockAbortSignal,
-			})
+				})
+
+			await stream.next()
+
 
 			// Verify the signal was captured before aborting
 			expect(capturedOptions).toBeDefined()
