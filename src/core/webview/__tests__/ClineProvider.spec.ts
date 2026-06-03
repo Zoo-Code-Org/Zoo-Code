@@ -3772,6 +3772,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 					expect.stringContaining("[handleZooCodeCallback] Failed to save zoo-gateway profile"),
 				)
+				// State must still be refreshed even when profile persistence fails.
+				expect(provider.postStateToWebview).toHaveBeenCalled()
 			})
 		})
 

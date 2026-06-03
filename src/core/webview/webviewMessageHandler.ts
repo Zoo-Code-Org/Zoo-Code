@@ -2457,7 +2457,14 @@ export const webviewMessageHandler = async (
 					const currentApiConfigName = provider.contextProxy.getValues().currentApiConfigName
 
 					for (const entry of allProfiles) {
-						if (entry.apiProvider === "zoo-gateway") {
+						if (entry.apiProvider !== "zoo-gateway") {
+							continue
+						}
+
+						// Isolate per-profile failures: a corrupted profile or a failed write
+						// for one entry must not abort cleanup of the remaining profiles,
+						// otherwise sign-out would leave later profiles with a stale token.
+						try {
 							const profile = await provider.providerSettingsManager.getProfile({ name: entry.name })
 							const { zooSessionToken: _removed, ...cleanedProfile } = profile
 
@@ -2477,12 +2484,18 @@ export const webviewMessageHandler = async (
 								await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
 								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
 							}
+						} catch (profileError) {
+							// Log but continue to the next profile so one failure doesn't
+							// leave other profiles holding a stale token.
+							provider.log(
+								`[zooCodeSignOut] Failed to clear profile token for "${entry.name}": ${profileError instanceof Error ? profileError.message : String(profileError)}`,
+							)
 						}
 					}
 				} catch (profileError) {
-					// Log but don't fail the sign-out if profile cleanup fails
+					// listConfig itself failed — nothing to iterate.
 					provider.log(
-						`[zooCodeSignOut] Failed to clear profile token: ${profileError instanceof Error ? profileError.message : String(profileError)}`,
+						`[zooCodeSignOut] Failed to list profiles for token cleanup: ${profileError instanceof Error ? profileError.message : String(profileError)}`,
 					)
 				}
 
