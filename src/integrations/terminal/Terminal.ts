@@ -2,6 +2,7 @@ import { existsSync } from "fs"
 import * as path from "path"
 
 import * as vscode from "vscode"
+import pWaitFor from "p-wait-for"
 
 import type { RooTerminalCallbacks, RooTerminalProcessResultPromise } from "./types"
 import { BaseTerminal } from "./BaseTerminal"
@@ -102,30 +103,6 @@ export class Terminal extends BaseTerminal {
 				reject(error)
 			})
 
-			// Wait for shell integration before executing the command. Use the
-			// event-based API rather than polling so we react immediately when
-			// VS Code's injector fires instead of burning CPU on a tight loop.
-			const waitForShellIntegration = (): Promise<void> => {
-				if (this.terminal.shellIntegration !== undefined) {
-					return Promise.resolve()
-				}
-
-				return new Promise<void>((res, rej) => {
-					const timeoutId = setTimeout(() => {
-						disposable.dispose()
-						rej(new Error("timeout"))
-					}, Terminal.getShellIntegrationTimeout())
-
-					const disposable = vscode.window.onDidChangeTerminalShellIntegration(({ terminal }) => {
-						if (terminal === this.terminal) {
-							clearTimeout(timeoutId)
-							disposable.dispose()
-							res()
-						}
-					})
-				})
-			}
-
 			if (Terminal.isActiveShellCmdExe()) {
 				// Keep this defensive fallback for callers that invoke Terminal.runCommand()
 				// directly instead of routing through executeCommandInTerminal().
@@ -138,7 +115,10 @@ export class Terminal extends BaseTerminal {
 					commandSubmitted: false,
 				})
 			} else {
-				waitForShellIntegration()
+				// Wait for shell integration before executing the command
+				pWaitFor(() => this.terminal.shellIntegration !== undefined, {
+					timeout: Terminal.getShellIntegrationTimeout(),
+				})
 					.then(() => {
 						// Clean up temporary directory if shell integration is available, zsh did its job:
 						ShellIntegrationManager.zshCleanupTmpDir(this.id)
