@@ -15,9 +15,6 @@ let _sessionCleared = false
 let _cachedUserName: string | undefined = undefined
 let _cachedUserEmail: string | undefined = undefined
 let _cachedUserImage: string | undefined = undefined
-let _cachedSubscriptionStatus: "active" | "inactive" | "unknown" = "unknown"
-let _lastSubscriptionCheck: number = 0
-const SUBSCRIPTION_CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise<void> {
 	if (!context.secrets) {
@@ -35,19 +32,13 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 	_cachedUserImage = await secretStorage.get(ZOO_CODE_USER_IMAGE_KEY)
 
 	// Validate persisted auth state on init before reporting the user as connected.
+	// Network errors / 5xx ("unreachable") leave the cached session in place so a
+	// transient backend blip doesn't force users to sign in again.
 	if (_cachedToken) {
 		const result = await verifyZooCodeToken()
 		if (result === "invalid") {
-			// Token is definitively rejected by the backend — clear everything.
 			await clearZooCodeUserInfo()
 			await clearZooCodeToken()
-		} else if (result === "unreachable") {
-			// Network is temporarily down; keep the cached session but mark subscription
-			// status as unknown so callers know it hasn't been confirmed.
-			_cachedSubscriptionStatus = "unknown"
-		} else {
-			// result === "valid"
-			void checkSubscriptionStatus().catch(() => {})
 		}
 	}
 
@@ -56,12 +47,6 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 		if (e.key === ZOO_CODE_TOKEN_KEY) {
 			secretStorage?.get(ZOO_CODE_TOKEN_KEY).then((token) => {
 				_cachedToken = token
-				// Reset subscription status when token changes
-				_cachedSubscriptionStatus = "unknown"
-				_lastSubscriptionCheck = 0
-				if (token) {
-					checkSubscriptionStatus().catch(() => {})
-				}
 			})
 		}
 		if (e.key === ZOO_CODE_USER_NAME_KEY) {
@@ -110,57 +95,6 @@ export function getCachedZooCodeUserInfo(): { name?: string; email?: string; ima
 	}
 }
 
-/**
- * Get the cached subscription status. This is a synchronous getter that returns
- * the last known subscription status. Call checkSubscriptionStatus() to refresh.
- */
-export function getCachedSubscriptionStatus(): "active" | "inactive" | "unknown" {
-	return _cachedSubscriptionStatus
-}
-
-/**
- * Check the subscription status from the backend API.
- * Updates the cached status and returns it.
- * Implements caching to avoid excessive API calls (5 minute cache).
- */
-export async function checkSubscriptionStatus(): Promise<"active" | "inactive" | "unknown"> {
-	const token = await getZooCodeToken()
-	if (!token) {
-		_cachedSubscriptionStatus = "inactive"
-		return "inactive"
-	}
-
-	// Return cached status if checked recently
-	const now = Date.now()
-	if (now - _lastSubscriptionCheck < SUBSCRIPTION_CHECK_INTERVAL_MS && _cachedSubscriptionStatus !== "unknown") {
-		return _cachedSubscriptionStatus
-	}
-
-	const baseUrl = getZooCodeBaseUrl()
-
-	try {
-		const response = await fetch(`${baseUrl}/api/subscription/status`, {
-			headers: { Authorization: `Bearer ${token}` },
-			signal: AbortSignal.timeout(10_000),
-		})
-
-		if (!response.ok) {
-			_cachedSubscriptionStatus = "unknown"
-			_lastSubscriptionCheck = now
-			return "unknown"
-		}
-
-		const data = (await response.json()) as { isSubscriber?: boolean }
-		_cachedSubscriptionStatus = data.isSubscriber ? "active" : "inactive"
-		_lastSubscriptionCheck = now
-		return _cachedSubscriptionStatus
-	} catch {
-		_cachedSubscriptionStatus = "unknown"
-		_lastSubscriptionCheck = now
-		return "unknown"
-	}
-}
-
 export async function getZooCodeToken(): Promise<string | undefined> {
 	if (!secretStorage) return undefined
 	return secretStorage.get(ZOO_CODE_TOKEN_KEY)
@@ -171,9 +105,6 @@ export async function setZooCodeToken(token: string): Promise<void> {
 	await secretStorage.store(ZOO_CODE_TOKEN_KEY, token)
 	_cachedToken = token
 	_sessionCleared = false
-	// Reset subscription status when token is set
-	_cachedSubscriptionStatus = "unknown"
-	_lastSubscriptionCheck = 0
 }
 
 export async function setZooCodeUserInfo(info: {
@@ -223,8 +154,6 @@ export async function clearZooCodeToken(): Promise<void> {
 	await secretStorage.delete(ZOO_CODE_TOKEN_KEY)
 	_cachedToken = undefined
 	_sessionCleared = true
-	_cachedSubscriptionStatus = "unknown"
-	_lastSubscriptionCheck = 0
 }
 
 export function getZooCodeBaseUrl(): string {
@@ -265,9 +194,6 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
 	}
 
 	await setZooCodeToken(token)
-
-	// Check subscription status after successful auth
-	await checkSubscriptionStatus().catch(() => {})
 
 	vscode.window.showInformationMessage(t("common:zooAuth.info.connected"))
 	return true

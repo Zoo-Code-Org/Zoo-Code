@@ -2,11 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
 
 import {
-	checkSubscriptionStatus,
 	clearZooCodeToken,
 	clearZooCodeUserInfo,
 	disconnectZooCode,
-	getCachedSubscriptionStatus,
 	getCachedZooCodeToken,
 	getCachedZooCodeUserInfo,
 	getZooCodeBaseUrl,
@@ -68,98 +66,6 @@ describe("zoo-code-auth", () => {
 		vi.restoreAllMocks()
 	})
 
-	describe("getCachedSubscriptionStatus", () => {
-		it("returns unknown initially", () => {
-			expect(getCachedSubscriptionStatus()).toBe("unknown")
-		})
-	})
-
-	describe("checkSubscriptionStatus", () => {
-		it("returns inactive when no token is present", async () => {
-			await initZooCodeAuth(mockContext)
-
-			const status = await checkSubscriptionStatus()
-
-			expect(status).toBe("inactive")
-			expect(mockFetch).not.toHaveBeenCalled()
-		})
-
-		it("returns active when the API reports an active subscriber", async () => {
-			await initZooCodeAuth(mockContext)
-			await setZooCodeToken("zoo_ext_test_token")
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ isSubscriber: true, planId: "pro", status: "active" }),
-			})
-
-			const status = await checkSubscriptionStatus()
-
-			expect(status).toBe("active")
-			expect(mockFetch).toHaveBeenCalledWith(
-				expect.stringContaining("/api/subscription/status"),
-				expect.objectContaining({
-					headers: { Authorization: "Bearer zoo_ext_test_token" },
-				}),
-			)
-		})
-
-		it("returns inactive when the API reports a free user", async () => {
-			await initZooCodeAuth(mockContext)
-			await setZooCodeToken("zoo_ext_test_token")
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ isSubscriber: false, planId: "free", status: "active" }),
-			})
-
-			await expect(checkSubscriptionStatus()).resolves.toBe("inactive")
-		})
-
-		it("returns unknown when the API request fails", async () => {
-			await initZooCodeAuth(mockContext)
-			await setZooCodeToken("zoo_ext_test_token")
-
-			mockFetch.mockResolvedValueOnce({
-				ok: false,
-				status: 500,
-				statusText: "Internal Server Error",
-			})
-
-			await expect(checkSubscriptionStatus()).resolves.toBe("unknown")
-		})
-
-		it("returns unknown when the API throws", async () => {
-			await initZooCodeAuth(mockContext)
-			await setZooCodeToken("zoo_ext_test_token")
-			mockFetch.mockRejectedValueOnce(new Error("Network error"))
-
-			await expect(checkSubscriptionStatus()).resolves.toBe("unknown")
-		})
-
-		it("reuses the cached status when it was checked recently", async () => {
-			await initZooCodeAuth(mockContext)
-			await setZooCodeToken("zoo_ext_test_token")
-
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ isSubscriber: true, planId: "pro", status: "active" }),
-			})
-
-			expect(await checkSubscriptionStatus()).toBe("active")
-			expect(await checkSubscriptionStatus()).toBe("active")
-			expect(mockFetch).toHaveBeenCalledTimes(1)
-		})
-
-		it("handles AbortSignal timeouts", async () => {
-			await initZooCodeAuth(mockContext)
-			await setZooCodeToken("zoo_ext_test_token")
-			mockFetch.mockRejectedValueOnce(new DOMException("Aborted", "AbortError"))
-
-			await expect(checkSubscriptionStatus()).resolves.toBe("unknown")
-		})
-	})
-
 	describe("getCachedZooCodeToken", () => {
 		it("returns an empty string when no token is set", async () => {
 			await clearZooCodeToken()
@@ -169,15 +75,10 @@ describe("zoo-code-auth", () => {
 
 		it("preloads the cached token during initialization", async () => {
 			await mockSecrets.store("zoo-code-session-token", "zoo_ext_cached_token")
-			mockFetch
-				.mockResolvedValueOnce({
-					ok: true,
-					json: async () => ({ valid: true }),
-				})
-				.mockResolvedValueOnce({
-					ok: true,
-					json: async () => ({ isSubscriber: true }),
-				})
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ valid: true }),
+			})
 
 			await initZooCodeAuth(mockContext)
 			await Promise.resolve()
@@ -237,10 +138,8 @@ describe("zoo-code-auth", () => {
 
 			await initZooCodeAuth(mockContext)
 
-			// Token and user info should be kept; subscription status should be unknown
 			expect(getCachedZooCodeToken()).toBe("zoo_ext_valid_token")
 			expect(getCachedZooCodeUserInfo().name).toBe("Jane Doe")
-			expect(getCachedSubscriptionStatus()).toBe("unknown")
 		})
 
 		it("preserves token and user info when verify returns 5xx (transient backend error)", async () => {
@@ -257,39 +156,16 @@ describe("zoo-code-auth", () => {
 
 			expect(getCachedZooCodeToken()).toBe("zoo_ext_valid_token")
 			expect(getCachedZooCodeUserInfo().name).toBe("Jane Doe")
-			expect(getCachedSubscriptionStatus()).toBe("unknown")
-		})
-	})
-
-	describe("setZooCodeToken", () => {
-		it("resets the cached subscription status when the token changes", async () => {
-			await initZooCodeAuth(mockContext)
-			await setZooCodeToken("zoo_ext_token1")
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ isSubscriber: true, planId: "pro", status: "active" }),
-			})
-			await checkSubscriptionStatus()
-
-			await setZooCodeToken("zoo_ext_token2")
-
-			expect(getCachedSubscriptionStatus()).toBe("unknown")
 		})
 	})
 
 	describe("clearZooCodeToken", () => {
-		it("resets the cached subscription status when the token is cleared", async () => {
+		it("clears the cached token", async () => {
 			await initZooCodeAuth(mockContext)
 			await setZooCodeToken("zoo_ext_test_token")
-			mockFetch.mockResolvedValueOnce({
-				ok: true,
-				json: async () => ({ isSubscriber: true, planId: "pro", status: "active" }),
-			})
-			await checkSubscriptionStatus()
 
 			await clearZooCodeToken()
 
-			expect(getCachedSubscriptionStatus()).toBe("unknown")
 			expect(getCachedZooCodeToken()).toBe("")
 		})
 	})
@@ -337,15 +213,10 @@ describe("zoo-code-auth", () => {
 
 		it("persists a token only after backend verification succeeds", async () => {
 			await initZooCodeAuth(mockContext)
-			mockFetch
-				.mockResolvedValueOnce({
-					ok: true,
-					json: async () => ({ valid: true }),
-				})
-				.mockResolvedValueOnce({
-					ok: true,
-					json: async () => ({ isSubscriber: true }),
-				})
+			mockFetch.mockResolvedValueOnce({
+				ok: true,
+				json: async () => ({ valid: true }),
+			})
 
 			const success = await handleAuthCallback("zoo_ext_real_token")
 
