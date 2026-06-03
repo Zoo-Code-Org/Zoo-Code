@@ -977,6 +977,13 @@ export const webviewMessageHandler = async (
 					},
 				},
 				{ key: "vercel-ai-gateway", options: { provider: "vercel-ai-gateway" } },
+				{
+					key: "zoo-gateway",
+					options: {
+						provider: "zoo-gateway",
+						baseUrl: apiConfiguration.zooGatewayBaseUrl,
+					},
+				},
 			]
 
 			// LiteLLM is conditional on baseUrl+apiKey
@@ -2477,6 +2484,60 @@ export const webviewMessageHandler = async (
 			try {
 				const { disconnectZooCode } = await import("../../services/zoo-code-auth")
 				await disconnectZooCode()
+
+				// Clear zooSessionToken from ALL provider profiles with apiProvider === "zoo-gateway".
+				// Profiles are user-renameable, so we cannot rely on a hardcoded name like "Zoo Gateway".
+				// We must scan all profiles and clear tokens from any that use the zoo-gateway provider.
+				try {
+					const allProfiles = await provider.providerSettingsManager.listConfig()
+					// Check if Zoo Gateway is the currently active profile by apiProvider identity
+					const currentSettings = provider.contextProxy.getProviderSettings()
+					const isZooGatewayActive = currentSettings.apiProvider === "zoo-gateway"
+					const currentApiConfigName = provider.contextProxy.getValues().currentApiConfigName
+
+					for (const entry of allProfiles) {
+						if (entry.apiProvider !== "zoo-gateway") {
+							continue
+						}
+
+						// Isolate per-profile failures: a corrupted profile or a failed write
+						// for one entry must not abort cleanup of the remaining profiles,
+						// otherwise sign-out would leave later profiles with a stale token.
+						try {
+							const profile = await provider.providerSettingsManager.getProfile({ name: entry.name })
+							const { zooSessionToken: _removed, ...cleanedProfile } = profile
+
+							// If this is the currently active profile, ALWAYS push to the in-memory
+							// handler — even when the persisted profile has already been cleared —
+							// because currentSettings (and therefore the live API handler) may still
+							// carry a stale token from before sign-out. Persisted-only profiles get
+							// rewritten only when they previously had a token to avoid no-op disk writes.
+							const isThisProfileActive = isZooGatewayActive && currentApiConfigName === entry.name
+
+							if (isThisProfileActive) {
+								await provider.upsertProviderProfile(entry.name, cleanedProfile, true)
+								provider.log(
+									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
+								)
+							} else if (profile.zooSessionToken) {
+								await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
+								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
+							}
+						} catch (profileError) {
+							// Log but continue to the next profile so one failure doesn't
+							// leave other profiles holding a stale token.
+							provider.log(
+								`[zooCodeSignOut] Failed to clear profile token for "${entry.name}": ${profileError instanceof Error ? profileError.message : String(profileError)}`,
+							)
+						}
+					}
+				} catch (profileError) {
+					// listConfig itself failed — nothing to iterate.
+					provider.log(
+						`[zooCodeSignOut] Failed to list profiles for token cleanup: ${profileError instanceof Error ? profileError.message : String(profileError)}`,
+					)
+				}
+
 				await provider.postStateToWebview()
 			} catch (error) {
 				provider.log(

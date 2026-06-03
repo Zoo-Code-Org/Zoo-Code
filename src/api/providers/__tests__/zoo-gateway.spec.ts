@@ -1,14 +1,28 @@
 // npx vitest run src/api/providers/__tests__/zoo-gateway.spec.ts
 
-vitest.mock("vscode", () => ({}))
+const { showErrorMessage, openExternal } = vitest.hoisted(() => ({
+	showErrorMessage: vitest.fn(async () => undefined as string | undefined),
+	openExternal: vitest.fn(async () => true),
+}))
+
+vitest.mock("vscode", () => ({
+	window: { showErrorMessage },
+	env: { openExternal, uriScheme: "vscode", appName: "VS Code" },
+	Uri: { parse: (value: string) => ({ toString: () => value }) },
+}))
+
+vitest.mock("../../../i18n", () => ({
+	t: (key: string) => key,
+}))
 
 import OpenAI from "openai"
 
 import { zooGatewayDefaultModelId, ZOO_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
-import { ZooGatewayHandler } from "../zoo-gateway"
+import { ZooGatewayHandler, classifyGatewayApiError } from "../zoo-gateway"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
+import { clearZooCodeToken } from "../../../services/zoo-code-auth"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({ default: vitest.fn(() => Promise.resolve()) }))
@@ -42,10 +56,22 @@ vitest.mock("../fetchers/modelCache", () => ({
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
 
+const mockGetCachedZooCodeToken = vitest.hoisted(() => vitest.fn<() => string | undefined>(() => undefined))
+const mockSessionCleared = vitest.hoisted(() => ({ value: false }))
+
 vitest.mock("../../../services/zoo-code-auth", () => ({
 	getZooCodeBaseUrl: vitest.fn(() => "https://www.zoocode.dev"),
-	getCachedZooCodeToken: vitest.fn(() => undefined),
-	clearZooCodeToken: vitest.fn(async () => undefined),
+	getCachedZooCodeToken: () => mockGetCachedZooCodeToken() ?? "",
+	resolveZooGatewaySessionToken: (profileToken?: string) => {
+		const cached = mockGetCachedZooCodeToken()
+		if (cached) return cached
+		if (mockSessionCleared.value) return undefined
+		return profileToken
+	},
+	clearZooCodeToken: vitest.fn(async () => {
+		mockSessionCleared.value = true
+		mockGetCachedZooCodeToken.mockReturnValue(undefined)
+	}),
 }))
 
 vitest.mock("../../transform/caching/vercel-ai-gateway", () => ({
@@ -77,9 +103,34 @@ describe("ZooGatewayHandler", () => {
 
 	beforeEach(() => {
 		vitest.clearAllMocks()
+		mockSessionCleared.value = false
+		mockGetCachedZooCodeToken.mockReturnValue(undefined)
 		mockCreate.mockClear()
+		showErrorMessage.mockReset()
+		showErrorMessage.mockResolvedValue(undefined)
+		openExternal.mockReset()
+		openExternal.mockResolvedValue(true)
 		mockOpenAIClient()
 	})
+
+	function makeApiError(status: number, options: { code?: string; message?: string } = {}) {
+		const err = new Error(options.message ?? `HTTP ${status}`) as Error & {
+			status: number
+			code?: string
+		}
+		err.status = status
+		if (options.code) err.code = options.code
+		return err
+	}
+
+	async function drainCreateMessage(handler: ZooGatewayHandler) {
+		const stream = handler.createMessage("system", [{ role: "user", content: "hi" }])
+		const out: unknown[] = []
+		for await (const chunk of stream) {
+			out.push(chunk)
+		}
+		return out
+	}
 
 	describe("constructor", () => {
 		it("allows construction without a session token (auth is enforced at request time)", () => {
@@ -87,6 +138,21 @@ describe("ZooGatewayHandler", () => {
 			expect(OpenAI).toHaveBeenCalledWith(
 				expect.objectContaining({
 					apiKey: "not-provided",
+				}),
+			)
+		})
+
+		it("prefers the secret-storage cache over a persisted profile token", () => {
+			mockGetCachedZooCodeToken.mockReturnValue("zoo_ext_cached_token")
+
+			new ZooGatewayHandler({
+				zooSessionToken: "zoo_ext_stale_profile_token",
+				zooGatewayModelId: mockOptions.zooGatewayModelId,
+			})
+
+			expect(OpenAI).toHaveBeenCalledWith(
+				expect.objectContaining({
+					apiKey: "zoo_ext_cached_token",
 				}),
 			)
 		})
@@ -140,6 +206,13 @@ describe("ZooGatewayHandler", () => {
 	})
 
 	describe("createMessage", () => {
+		it("requires authentication at request time when no session token is available", async () => {
+			const handler = new ZooGatewayHandler({})
+			await expect(drainCreateMessage(handler)).rejects.toThrow(
+				"Zoo Gateway requires authentication. Please sign in to Zoo Code first.",
+			)
+		})
+
 		beforeEach(() => {
 			mockCreate.mockImplementation(async () => ({
 				[Symbol.asyncIterator]: async function* () {
@@ -334,6 +407,147 @@ describe("ZooGatewayHandler", () => {
 			}))
 
 			await expect(handler.completePrompt("Test")).resolves.toBe("")
+		})
+	})
+
+	describe("classifyGatewayApiError", () => {
+		it("returns sign_in on 401", () => {
+			expect(classifyGatewayApiError(makeApiError(401))).toEqual({ kind: "sign_in" })
+		})
+
+		it("returns add_credits (not budget) on 402", () => {
+			expect(classifyGatewayApiError(makeApiError(402))).toEqual({ kind: "add_credits", budgetExceeded: false })
+		})
+
+		it("returns add_credits with budgetExceeded on 429 budget codes", () => {
+			expect(classifyGatewayApiError(makeApiError(429, { code: "monthly_budget_exceeded" }))).toEqual({
+				kind: "add_credits",
+				budgetExceeded: true,
+			})
+			expect(classifyGatewayApiError(makeApiError(429, { code: "daily_budget_exceeded" }))).toEqual({
+				kind: "add_credits",
+				budgetExceeded: true,
+			})
+		})
+
+		it("returns none on 429 without a budget code", () => {
+			expect(classifyGatewayApiError(makeApiError(429, { code: "rate_limited" }))).toEqual({ kind: "none" })
+		})
+
+		it("returns contact_support on 403", () => {
+			expect(classifyGatewayApiError(makeApiError(403))).toEqual({ kind: "contact_support" })
+		})
+
+		it("returns none for errors without an HTTP status", () => {
+			expect(classifyGatewayApiError(new Error("network down"))).toEqual({ kind: "none" })
+		})
+	})
+
+	describe("surfaceGatewayApiError", () => {
+		it("clears the cached token and offers re-sign-in on 401", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(() => {
+				throw makeApiError(401)
+			})
+			showErrorMessage.mockResolvedValueOnce("common:zooAuth.buttons.sign_in")
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow()
+			expect(clearZooCodeToken).toHaveBeenCalledTimes(1)
+			expect(showErrorMessage).toHaveBeenCalledWith(
+				"common:zooAuth.errors.session_expired",
+				"common:zooAuth.buttons.sign_in",
+			)
+			expect(openExternal).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not open a URL on 401 when the user dismisses the prompt", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(() => {
+				throw makeApiError(401)
+			})
+			showErrorMessage.mockResolvedValueOnce(undefined)
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow()
+			expect(clearZooCodeToken).toHaveBeenCalledTimes(1)
+			expect(openExternal).not.toHaveBeenCalled()
+		})
+
+		it("prompts to add credits on 402", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(() => {
+				throw makeApiError(402)
+			})
+			showErrorMessage.mockResolvedValueOnce("common:zooAuth.buttons.add_credits")
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow()
+			expect(clearZooCodeToken).not.toHaveBeenCalled()
+			expect(showErrorMessage).toHaveBeenCalledWith(
+				"common:zooAuth.errors.out_of_credits",
+				"common:zooAuth.buttons.add_credits",
+			)
+			expect(openExternal).toHaveBeenCalledTimes(1)
+		})
+
+		it("shows the budget message on 429 with a budget code", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(() => {
+				throw makeApiError(429, { code: "monthly_budget_exceeded" })
+			})
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow()
+			expect(showErrorMessage).toHaveBeenCalledWith(
+				"common:zooAuth.errors.budget_exceeded",
+				"common:zooAuth.buttons.add_credits",
+			)
+		})
+
+		it("does not surface a notification on 429 without a budget code", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(() => {
+				throw makeApiError(429, { code: "rate_limited" })
+			})
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow()
+			expect(showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it("offers contact support on 403", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(() => {
+				throw makeApiError(403)
+			})
+			showErrorMessage.mockResolvedValueOnce("common:zooAuth.buttons.contact_support")
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow()
+			expect(showErrorMessage).toHaveBeenCalledWith(
+				"common:zooAuth.errors.account_unavailable",
+				"common:zooAuth.buttons.contact_support",
+			)
+			expect(openExternal).toHaveBeenCalledTimes(1)
+		})
+
+		it("ignores errors without an HTTP status", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(() => {
+				throw new Error("network down")
+			})
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow("network down")
+			expect(showErrorMessage).not.toHaveBeenCalled()
+			expect(clearZooCodeToken).not.toHaveBeenCalled()
+		})
+
+		it("surfaces the gateway error then wraps the message in completePrompt", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(() => {
+				throw makeApiError(402, { message: "out of credits" })
+			})
+
+			await expect(handler.completePrompt("ping")).rejects.toThrow("Zoo Gateway completion error: out of credits")
+			expect(showErrorMessage).toHaveBeenCalledWith(
+				"common:zooAuth.errors.out_of_credits",
+				"common:zooAuth.buttons.add_credits",
+			)
 		})
 	})
 })

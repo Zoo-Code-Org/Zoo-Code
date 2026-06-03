@@ -8,6 +8,7 @@ vitest.mock("axios")
 vitest.mock("../../../../services/zoo-code-auth", () => ({
 	getCachedZooCodeToken: vitest.fn(() => ""),
 	getZooCodeBaseUrl: vitest.fn(() => "https://example.test"),
+	resolveZooGatewaySessionToken: vitest.fn((profileToken?: string) => profileToken || undefined),
 }))
 const mockedAxios = axios as any
 

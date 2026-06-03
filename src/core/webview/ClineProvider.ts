@@ -655,6 +655,10 @@ export class ClineProvider
 		return findLast(Array.from(this.activeInstances), (instance) => instance.view?.visible === true)
 	}
 
+	public static getAllInstances(): ClineProvider[] {
+		return Array.from(this.activeInstances)
+	}
+
 	public static async getInstance(): Promise<ClineProvider | undefined> {
 		let visibleProvider = ClineProvider.getVisibleInstance()
 
@@ -888,6 +892,64 @@ export class ClineProvider
 		if (!currentTask || currentTask.abandoned || currentTask.abort) {
 			await this.removeClineFromStack()
 		}
+
+		// Ensure zoo-gateway profile is seeded for users who signed in before this feature existed.
+		// Without this, users with a valid cached token but no zoo-gateway profile would need to
+		// re-authenticate to use Zoo Gateway. Fire-and-forget to avoid blocking webview init.
+		void this.ensureZooGatewayProfileSeeded().catch((err) => {
+			this.log(`[ensureZooGatewayProfileSeeded] Error: ${err instanceof Error ? err.message : String(err)}`)
+		})
+	}
+
+	/**
+	 * Seeds the zoo-gateway provider profile for users who have a cached auth token
+	 * but no profile (e.g., users who signed in before Zoo Gateway was added), or
+	 * who have an empty/imported profile without a token.
+	 * Called once per webview init; handleZooCodeCallback is idempotent so repeated calls are safe.
+	 */
+	private async ensureZooGatewayProfileSeeded(): Promise<void> {
+		const { getCachedZooCodeToken, getZooCodeBaseUrl } = await import("../../services/zoo-code-auth")
+		const token = getCachedZooCodeToken()
+		if (!token) return
+		const expectedGatewayBaseUrl = `${getZooCodeBaseUrl()}/api/gateway/v1`
+
+		// Check ALL zoo-gateway profiles — only skip seeding if every profile has the current token.
+		// Using .find() would miss stale tokens in duplicate/renamed profiles since handleZooCodeCallback
+		// uses .filter() and updates all of them — the early-return guard must match.
+		const allProfiles = await this.providerSettingsManager.listConfig()
+		const zooGatewayProfiles = allProfiles.filter((p) => p.apiProvider === "zoo-gateway")
+
+		if (zooGatewayProfiles.length === 0) {
+			this.log("[ensureZooGatewayProfileSeeded] No zoo-gateway profile found, creating one")
+		} else {
+			let allUpToDate = true
+
+			for (const entry of zooGatewayProfiles) {
+				try {
+					const fullProfile = await this.providerSettingsManager.getProfile({ name: entry.name })
+					if (
+						fullProfile.zooSessionToken !== token ||
+						fullProfile.zooGatewayBaseUrl !== expectedGatewayBaseUrl
+					) {
+						allUpToDate = false
+						this.log("[ensureZooGatewayProfileSeeded] Existing zoo-gateway profile is stale, updating")
+						break
+					}
+				} catch {
+					allUpToDate = false
+					this.log("[ensureZooGatewayProfileSeeded] Failed to read existing profile, will re-seed")
+					break
+				}
+			}
+
+			if (allUpToDate) {
+				// All profiles have the current token — nothing to do
+				return
+			}
+		}
+
+		// User has token but either no profile, some profiles without token, or stale tokens — seed all
+		await this.handleZooCodeCallback(token)
 	}
 
 	public async createTaskWithHistoryItem(
@@ -1678,12 +1740,80 @@ export class ClineProvider
 		await this.upsertProviderProfile(currentApiConfigName, newConfiguration)
 	}
 
-	// Zoo Code Auth (for observability telemetry)
+	// Zoo Code Auth
 
-	async handleZooCodeCallback(_token: string) {
+	async handleZooCodeCallback(token: string) {
 		// Auth mutation (token storage, subscription check, success toast) was already
 		// performed by handleAuthCallback() in handleUri.ts before this method was called.
-		// This method only needs to refresh the webview state to reflect the new auth status.
+		// Save the zoo-gateway provider profile with the session token so that
+		// ZooGatewayHandler can authenticate without any manual user input.
+		//
+		// activate: true ONLY if Zoo Gateway is already the active profile — this pushes
+		// the new token to the in-memory handler so the current task picks it up immediately.
+		// Otherwise activate: false — do NOT switch providers mid-conversation. The user
+		// must explicitly select Zoo Gateway in settings if they want to use it.
+		try {
+			const { apiConfiguration } = await this.getState()
+			const currentSettings = this.contextProxy.getProviderSettings()
+			const currentApiConfigName = this.contextProxy.getValues().currentApiConfigName
+
+			// Derive the gateway base URL from ZOO_CODE_BASE_URL so that non-prod environments
+			// (staging, local dev) route completions to the correct backend instead of always
+			// hard-coding production. An already-set value in the profile is NOT preserved here —
+			// it must always align with the auth server the user just authenticated against.
+			const { getZooCodeBaseUrl } = await import("../../services/zoo-code-auth")
+			const derivedGatewayBaseUrl = `${getZooCodeBaseUrl()}/api/gateway/v1`
+
+			// Check if Zoo Gateway is the currently active profile by apiProvider identity,
+			// not by profile name (profile names are user-renameable).
+			const isZooGatewayActive = currentSettings.apiProvider === "zoo-gateway"
+
+			// Always scan ALL profiles and update every zoo-gateway profile with the new token.
+			// This ensures renamed profiles, duplicate profiles, and inactive profiles all stay
+			// in sync. The model lookup in requestRouterModels uses .find() which returns the
+			// first zoo-gateway profile it finds — if that profile has a stale token, requests fail.
+			const allProfiles = await this.providerSettingsManager.listConfig()
+			const zooProfiles = allProfiles.filter((p) => p.apiProvider === "zoo-gateway")
+
+			if (zooProfiles.length === 0) {
+				// No existing zoo-gateway profile — create the canonical default.
+				const newConfiguration: ProviderSettings = {
+					apiProvider: "zoo-gateway",
+					zooSessionToken: token,
+					zooGatewayModelId: apiConfiguration.zooGatewayModelId,
+					zooGatewayBaseUrl: derivedGatewayBaseUrl,
+				}
+				// Activate only if zoo-gateway was the active provider (shouldn't happen if
+				// no profiles exist, but defensive).
+				await this.upsertProviderProfile("Zoo Gateway", newConfiguration, isZooGatewayActive)
+			} else {
+				// Update every existing zoo-gateway profile with the new token and the
+				// derived base URL so that environment-specific routing stays consistent.
+				for (const entry of zooProfiles) {
+					const isActiveProfile = isZooGatewayActive && entry.name === currentApiConfigName
+					const existing = await this.providerSettingsManager.getProfile({ name: entry.name })
+					const updated: ProviderSettings = {
+						...existing,
+						zooSessionToken: token,
+						zooGatewayBaseUrl: derivedGatewayBaseUrl,
+					}
+					if (isActiveProfile) {
+						// Use upsertProviderProfile with activate: true so the in-memory handler
+						// picks up the new token immediately for the current task.
+						await this.upsertProviderProfile(entry.name, updated, true)
+					} else {
+						// Non-active profiles just need the token saved to disk.
+						await this.providerSettingsManager.saveConfig(entry.name, updated)
+					}
+				}
+			}
+		} catch (error) {
+			this.log(
+				`[handleZooCodeCallback] Failed to save zoo-gateway profile: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 		await this.postStateToWebview()
 	}
 

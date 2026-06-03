@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: अमान्य प्रमाणीकरण token प्राप्त हुआ।",
 			"token_verification_failed": "Zoo Code: Token सत्यापन विफल रहा।",
 			"invalid_token": "Zoo Code: अमान्य token।",
-			"could_not_verify_token": "Zoo Code: Token सत्यापित नहीं किया जा सका।"
+			"could_not_verify_token": "Zoo Code: Token सत्यापित नहीं किया जा सका।",
+			"session_expired": "Zoo Code सत्र समाप्त हो गया है। Zoo Gateway का उपयोग जारी रखने के लिए कृपया फिर से साइन इन करें।",
+			"out_of_credits": "Zoo Gateway: अपर्याप्त क्रेडिट। जारी रखने के लिए क्रेडिट जोड़ें।",
+			"account_unavailable": "Zoo Gateway: आपका खाता वर्तमान में उपलब्ध नहीं है। कृपया सहायता से संपर्क करें।",
+			"budget_exceeded": "Zoo Gateway: उपयोग बजट पूरा हो गया है। बजट रीसेट होने की प्रतीक्षा करें या रिचार्ज करें।"
 		},
 		"info": {
 			"connected": "Zoo Code: सफलतापूर्वक कनेक्ट हो गया! अब तुम Zoo Code को अपने AI प्रदाता के रूप में उपयोग कर सकते हो।",
 			"disconnected": "Zoo Code: सफलतापूर्वक डिस्कनेक्ट हो गया।"
+		},
+		"buttons": {
+			"sign_in": "साइन इन करें",
+			"add_credits": "क्रेडिट जोड़ें",
+			"contact_support": "सहायता से संपर्क करें"
 		}
 	},
 	"codeActions": {

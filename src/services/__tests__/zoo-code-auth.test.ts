@@ -12,6 +12,7 @@ import {
 	getZooCodeBaseUrl,
 	handleAuthCallback,
 	initZooCodeAuth,
+	resolveZooGatewaySessionToken,
 	setZooCodeToken,
 	setZooCodeUserInfo,
 	verifyZooCodeToken,
@@ -241,6 +242,23 @@ describe("zoo-code-auth", () => {
 			expect(getCachedZooCodeUserInfo().name).toBe("Jane Doe")
 			expect(getCachedSubscriptionStatus()).toBe("unknown")
 		})
+
+		it("preserves token and user info when verify returns 5xx (transient backend error)", async () => {
+			await mockSecrets.store("zoo-code-session-token", "zoo_ext_valid_token")
+			await mockSecrets.store("zoo-code-user-name", "Jane Doe")
+			await mockSecrets.store("zoo-code-user-email", "jane@example.com")
+			mockFetch.mockResolvedValueOnce({
+				ok: false,
+				status: 503,
+				statusText: "Service Unavailable",
+			})
+
+			await initZooCodeAuth(mockContext)
+
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_valid_token")
+			expect(getCachedZooCodeUserInfo().name).toBe("Jane Doe")
+			expect(getCachedSubscriptionStatus()).toBe("unknown")
+		})
 	})
 
 	describe("setZooCodeToken", () => {
@@ -364,7 +382,7 @@ describe("zoo-code-auth", () => {
 			expect(getCachedZooCodeToken()).toBe("zoo_ext_invalid_token")
 		})
 
-		it("returns 'invalid' when the backend returns HTTP error", async () => {
+		it("returns 'invalid' when the backend returns 4xx", async () => {
 			await initZooCodeAuth(mockContext)
 			await setZooCodeToken("zoo_ext_invalid_token")
 			mockFetch.mockResolvedValueOnce({
@@ -374,6 +392,19 @@ describe("zoo-code-auth", () => {
 			})
 
 			expect(await verifyZooCodeToken()).toBe("invalid")
+		})
+
+		it("returns 'unreachable' when the backend returns 5xx (transient)", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_token")
+			mockFetch.mockResolvedValueOnce({
+				ok: false,
+				status: 503,
+				statusText: "Service Unavailable",
+			})
+
+			expect(await verifyZooCodeToken()).toBe("unreachable")
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_token")
 		})
 
 		it("returns 'unreachable' when a network error occurs", async () => {
@@ -429,6 +460,29 @@ describe("zoo-code-auth", () => {
 			const info = getCachedZooCodeUserInfo()
 			expect(info.email).toBe("jane@example.com")
 			expect(info.name).toBe("John Doe")
+		})
+	})
+
+	describe("resolveZooGatewaySessionToken", () => {
+		it("prefers the cached token over a profile token", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_cached")
+
+			expect(resolveZooGatewaySessionToken("zoo_ext_profile")).toBe("zoo_ext_cached")
+		})
+
+		it("ignores profile tokens after an explicit sign-out clear", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_cached")
+			await clearZooCodeToken()
+
+			expect(resolveZooGatewaySessionToken("zoo_ext_stale_profile")).toBeUndefined()
+		})
+
+		it("falls back to the profile token when the cache is empty and not cleared", async () => {
+			await initZooCodeAuth(mockContext)
+
+			expect(resolveZooGatewaySessionToken("zoo_ext_profile")).toBe("zoo_ext_profile")
 		})
 	})
 

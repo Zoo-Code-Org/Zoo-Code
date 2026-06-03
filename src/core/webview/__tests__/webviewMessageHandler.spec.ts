@@ -4,6 +4,9 @@ import type { Mock } from "vitest"
 
 // Mock dependencies - must come before imports
 vi.mock("../../../api/providers/fetchers/modelCache")
+vi.mock("../../../services/zoo-code-auth", () => ({
+	disconnectZooCode: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
 }))
@@ -371,11 +374,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				litellm: mockModels,
 				ollama: {},
 				lmstudio: {},
-				"vercel-ai-gateway": mockModels,
-				"zoo-gateway": {},
 				poe: {},
 				deepseek: {},
 				"opencode-go": {},
@@ -459,11 +462,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
-				"vercel-ai-gateway": mockModels,
-				"zoo-gateway": {},
 				poe: {},
 				deepseek: {},
 				"opencode-go": {},
@@ -488,6 +491,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockResolvedValueOnce(mockModels) // unbound
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway
+			.mockResolvedValueOnce(mockModels) // zoo-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -516,11 +520,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: {},
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
-				"vercel-ai-gateway": mockModels,
-				"zoo-gateway": {},
 				poe: {},
 				deepseek: {},
 				"opencode-go": {},
@@ -536,6 +540,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockRejectedValueOnce(new Error("Unbound error")) // unbound
 			.mockRejectedValueOnce(new Error("Vercel AI Gateway error")) // vercel-ai-gateway
+			.mockRejectedValueOnce(new Error("Zoo Gateway error")) // zoo-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -1222,5 +1227,83 @@ describe("webviewMessageHandler - downloadErrorDiagnostics", () => {
 
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("No active task to generate diagnostics for")
 		expect(generateErrorDiagnostics).not.toHaveBeenCalled()
+	})
+})
+
+describe("zooCodeSignOut", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("disconnects Zoo Code and clears tokens from all zoo-gateway profiles", async () => {
+		const { disconnectZooCode } = await import("../../../services/zoo-code-auth")
+		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue(undefined)
+
+		;(mockClineProvider as any).contextProxy = {
+			...mockClineProvider.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+		}
+		;(mockClineProvider as any).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([
+				{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
+				{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+			]),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					apiProvider: "zoo-gateway",
+					zooSessionToken: "token-active",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				})
+				.mockResolvedValueOnce({
+					apiProvider: "zoo-gateway",
+					zooSessionToken: "token-backup",
+				}),
+			saveConfig,
+		}
+		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		expect(disconnectZooCode).toHaveBeenCalled()
+		expect(upsertProviderProfile).toHaveBeenCalledWith(
+			"Zoo Gateway",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+			true,
+		)
+		expect(saveConfig).toHaveBeenCalledWith(
+			"Backup Zoo",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+		)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("still clears the in-memory handler when the active profile token is already empty on disk", async () => {
+		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		;(mockClineProvider as any).contextProxy = {
+			...mockClineProvider.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+		}
+		;(mockClineProvider as any).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+			getProfile: vi.fn().mockResolvedValue({
+				apiProvider: "zoo-gateway",
+				zooGatewayModelId: "anthropic/claude-sonnet-4",
+			}),
+			saveConfig: vi.fn(),
+		}
+		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		expect(upsertProviderProfile).toHaveBeenCalledWith(
+			"Zoo Gateway",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+			true,
+		)
 	})
 })

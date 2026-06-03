@@ -11,6 +11,7 @@ let secretStorage: vscode.SecretStorage | undefined
 
 // In-memory cache for synchronous access in ZooCodeHandler hot path
 let _cachedToken: string | undefined = undefined
+let _sessionCleared = false
 let _cachedUserName: string | undefined = undefined
 let _cachedUserEmail: string | undefined = undefined
 let _cachedUserImage: string | undefined = undefined
@@ -28,6 +29,7 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 
 	// Pre-load the token and user info into memory on init so ZooCodeHandler can access them synchronously
 	_cachedToken = await secretStorage.get(ZOO_CODE_TOKEN_KEY)
+	_sessionCleared = false
 	_cachedUserName = await secretStorage.get(ZOO_CODE_USER_NAME_KEY)
 	_cachedUserEmail = await secretStorage.get(ZOO_CODE_USER_EMAIL_KEY)
 	_cachedUserImage = await secretStorage.get(ZOO_CODE_USER_IMAGE_KEY)
@@ -83,6 +85,21 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 // Synchronous getter for use in ZooCodeHandler (called in hot path during API requests)
 export function getCachedZooCodeToken(): string {
 	return _cachedToken ?? ""
+}
+
+/**
+ * Resolves the Zoo Gateway session token for API calls.
+ * Secret-storage cache wins over profile-persisted tokens; after an explicit sign-out
+ * or 401 clear, profile tokens are ignored so stale credentials cannot be reused.
+ */
+export function resolveZooGatewaySessionToken(profileToken?: string): string | undefined {
+	if (_cachedToken) {
+		return _cachedToken
+	}
+	if (_sessionCleared) {
+		return undefined
+	}
+	return profileToken || undefined
 }
 
 export function getCachedZooCodeUserInfo(): { name?: string; email?: string; image?: string } {
@@ -153,6 +170,7 @@ export async function setZooCodeToken(token: string): Promise<void> {
 	if (!secretStorage) return
 	await secretStorage.store(ZOO_CODE_TOKEN_KEY, token)
 	_cachedToken = token
+	_sessionCleared = false
 	// Reset subscription status when token is set
 	_cachedSubscriptionStatus = "unknown"
 	_lastSubscriptionCheck = 0
@@ -204,6 +222,7 @@ export async function clearZooCodeToken(): Promise<void> {
 	if (!secretStorage) return
 	await secretStorage.delete(ZOO_CODE_TOKEN_KEY)
 	_cachedToken = undefined
+	_sessionCleared = true
 	_cachedSubscriptionStatus = "unknown"
 	_lastSubscriptionCheck = 0
 }
@@ -226,7 +245,13 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
 			signal: AbortSignal.timeout(10_000),
 		})
 		if (!response.ok) {
-			vscode.window.showErrorMessage(t("common:zooAuth.errors.token_verification_failed"))
+			// Treat 5xx as a transient backend issue (e.g. DB unreachable) so the
+			// user can retry sign-in instead of being told the token is bad.
+			if (response.status >= 500) {
+				vscode.window.showErrorMessage(t("common:zooAuth.errors.could_not_verify_token"))
+			} else {
+				vscode.window.showErrorMessage(t("common:zooAuth.errors.token_verification_failed"))
+			}
 			return false
 		}
 		const data = (await response.json()) as { valid?: boolean }
@@ -252,8 +277,12 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
  * Verify the stored token against the backend.
  * Returns:
  *   - "valid"       — backend confirmed the token is good
- *   - "invalid"     — backend explicitly rejected the token (HTTP error or valid: false)
- *   - "unreachable" — network error / timeout; token state is unknown
+ *   - "invalid"     — backend explicitly rejected the token (4xx or valid: false)
+ *   - "unreachable" — network error / timeout / 5xx backend error; token state is unknown
+ *
+ * 5xx responses are treated as transient: the website returns 503 when the
+ * database is unreachable, and clearing a real session on a backend hiccup
+ * forces users to sign in again every time the API blips.
  *
  * This function has no side-effects; callers are responsible for acting on the result.
  */
@@ -270,6 +299,9 @@ export async function verifyZooCodeToken(): Promise<"valid" | "invalid" | "unrea
 		})
 
 		if (!response.ok) {
+			if (response.status >= 500) {
+				return "unreachable"
+			}
 			return "invalid"
 		}
 
