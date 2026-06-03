@@ -560,6 +560,13 @@
 			"placeholder": "Défaut : claude",
 			"maxTokensLabel": "Jetons de sortie max",
 			"maxTokensDescription": "Nombre maximum de jetons de sortie pour les réponses de Claude Code. La valeur par défaut est 8000."
+		},
+		"zooGateway": {
+			"account": "Compte Zoo Code",
+			"signInButton": "Se connecter à Zoo Code",
+			"signInDescription": "Connectez-vous pour utiliser Zoo Gateway avec votre compte",
+			"authenticated": "Authentifié",
+			"authenticatedAs": "Authentifié en tant que {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -901,7 +908,8 @@
 		"providerNotAllowed": "Le fournisseur '{{provider}}' n'est pas autorisé par votre organisation",
 		"modelNotAllowed": "Le modèle '{{model}}' n'est pas autorisé pour le fournisseur '{{provider}}' par votre organisation",
 		"profileInvalid": "Ce profil contient un fournisseur ou un modèle qui n'est pas autorisé par votre organisation",
-		"qwenCodeOauthPath": "Tu dois fournir un chemin valide pour les identifiants OAuth"
+		"qwenCodeOauthPath": "Tu dois fournir un chemin valide pour les identifiants OAuth",
+		"zooGatewaySignIn": "Connectez-vous à Zoo Code pour utiliser Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Saisissez la clé API...",

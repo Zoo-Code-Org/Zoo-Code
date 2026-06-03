@@ -9,36 +9,13 @@ import {
 	type ProviderSettings,
 	isRetiredProvider,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
-	openRouterDefaultModelId,
-	poeDefaultModelId,
-	requestyDefaultModelId,
-	litellmDefaultModelId,
-	openAiNativeDefaultModelId,
-	openAiCodexDefaultModelId,
-	anthropicDefaultModelId,
-	qwenCodeDefaultModelId,
-	geminiDefaultModelId,
-	deepSeekDefaultModelId,
-	moonshotDefaultModelId,
-	mistralDefaultModelId,
-	xaiDefaultModelId,
-	basetenDefaultModelId,
-	bedrockDefaultModelId,
-	vertexDefaultModelId,
-	sambaNovaDefaultModelId,
-	internationalZAiDefaultModelId,
-	mainlandZAiDefaultModelId,
-	fireworksDefaultModelId,
-	vercelAiGatewayDefaultModelId,
-	opencodeGoDefaultModelId,
-	minimaxDefaultModelId,
-	mimoDefaultModelId,
-	unboundDefaultModelId,
 } from "@roo-code/types"
 
 import {
 	getProviderServiceConfig,
 	getDefaultModelIdForProvider,
+	getProviderDocsSlug,
+	getProviderModelConfig,
 	getStaticModelsForProvider,
 	shouldUseGenericModelPicker,
 	handleModelChangeSideEffects,
@@ -95,6 +72,7 @@ import {
 	Fireworks,
 	VercelAiGateway,
 	OpenCodeGo,
+	ZooGateway,
 	MiniMax,
 	Mimo,
 } from "./providers"
@@ -268,6 +246,14 @@ const ApiOptions = ({
 			return
 		}
 
+		// Zoo Gateway renders its own auth-state error inline (sign-in card in
+		// ZooGateway.tsx) so it can react to zooCodeIsAuthenticated changes
+		// without re-running this effect or threading auth state through validation.
+		if (apiConfiguration.apiProvider === "zoo-gateway") {
+			setErrorMessage(undefined)
+			return
+		}
+
 		const apiValidationResult = validateApiConfigurationExcludingModelErrors(
 			apiConfiguration,
 			routerModels,
@@ -326,52 +312,7 @@ const ApiOptions = ({
 				}
 			}
 
-			// Define a mapping object that associates each provider with its model configuration
-			const PROVIDER_MODEL_CONFIG: Partial<
-				Record<
-					ProviderName,
-					{
-						field: keyof ProviderSettings
-						default?: string
-					}
-				>
-			> = {
-				openrouter: { field: "openRouterModelId", default: openRouterDefaultModelId },
-				requesty: { field: "requestyModelId", default: requestyDefaultModelId },
-				unbound: { field: "unboundModelId", default: unboundDefaultModelId },
-				litellm: { field: "litellmModelId", default: litellmDefaultModelId },
-				anthropic: { field: "apiModelId", default: anthropicDefaultModelId },
-				"openai-codex": { field: "apiModelId", default: openAiCodexDefaultModelId },
-				"qwen-code": { field: "apiModelId", default: qwenCodeDefaultModelId },
-				"openai-native": { field: "apiModelId", default: openAiNativeDefaultModelId },
-				gemini: { field: "apiModelId", default: geminiDefaultModelId },
-				deepseek: { field: "apiModelId", default: deepSeekDefaultModelId },
-				moonshot: { field: "apiModelId", default: moonshotDefaultModelId },
-				minimax: { field: "apiModelId", default: minimaxDefaultModelId },
-				mimo: { field: "apiModelId", default: mimoDefaultModelId },
-				mistral: { field: "apiModelId", default: mistralDefaultModelId },
-				xai: { field: "apiModelId", default: xaiDefaultModelId },
-				baseten: { field: "apiModelId", default: basetenDefaultModelId },
-				bedrock: { field: "apiModelId", default: bedrockDefaultModelId },
-				vertex: { field: "apiModelId", default: vertexDefaultModelId },
-				sambanova: { field: "apiModelId", default: sambaNovaDefaultModelId },
-				zai: {
-					field: "apiModelId",
-					default:
-						apiConfiguration.zaiApiLine === "china_coding"
-							? mainlandZAiDefaultModelId
-							: internationalZAiDefaultModelId,
-				},
-				fireworks: { field: "apiModelId", default: fireworksDefaultModelId },
-				poe: { field: "apiModelId", default: poeDefaultModelId },
-				"vercel-ai-gateway": { field: "vercelAiGatewayModelId", default: vercelAiGatewayDefaultModelId },
-				"opencode-go": { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
-				openai: { field: "openAiModelId" },
-				ollama: { field: "ollamaModelId" },
-				lmstudio: { field: "lmStudioModelId" },
-			}
-
-			const config = PROVIDER_MODEL_CONFIG[value]
+			const config = getProviderModelConfig(value, apiConfiguration)
 			if (config) {
 				validateAndResetModel(
 					value,
@@ -390,22 +331,14 @@ const ApiOptions = ({
 
 	const docs = useMemo(() => {
 		const provider = PROVIDERS.find(({ value }) => value === selectedProvider)
-		const name = provider?.label
-
-		if (!name) {
+		if (!provider) {
 			return undefined
 		}
 
-		// Get the URL slug - use custom mapping if available, otherwise use the provider key.
-		const slugs: Record<string, string> = {
-			"openai-native": "openai",
-			openai: "openai-compatible",
-		}
-
-		const slug = slugs[selectedProvider] || selectedProvider
+		const slug = getProviderDocsSlug(provider.value)
 		return {
 			url: buildDocLink(`providers/${slug}`, "provider_docs"),
-			name,
+			name: provider.label,
 		}
 	}, [selectedProvider])
 
@@ -693,6 +626,17 @@ const ApiOptions = ({
 
 					{selectedProvider === "opencode-go" && (
 						<OpenCodeGo
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === "zoo-gateway" && (
+						<ZooGateway
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

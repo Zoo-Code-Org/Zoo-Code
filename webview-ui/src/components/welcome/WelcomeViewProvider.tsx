@@ -36,7 +36,8 @@ const getWelcomeApiConfiguration = (apiConfiguration?: ProviderSettings): Provid
 }
 
 const WelcomeViewProvider = () => {
-	const { apiConfiguration, currentApiConfigName, setApiConfiguration, uriScheme } = useExtensionState()
+	const { apiConfiguration, currentApiConfigName, setApiConfiguration, uriScheme, zooCodeIsAuthenticated } =
+		useExtensionState()
 	const { t } = useAppTranslation()
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 	const [showProviderSetup, setShowProviderSetup] = useState(false)
@@ -65,7 +66,7 @@ const WelcomeViewProvider = () => {
 			return
 		}
 
-		const error = validateApiConfiguration(effectiveApiConfiguration)
+		const error = validateApiConfiguration(effectiveApiConfiguration, undefined, undefined, zooCodeIsAuthenticated)
 
 		if (error) {
 			setErrorMessage(error)
@@ -78,7 +79,14 @@ const WelcomeViewProvider = () => {
 			text: currentApiConfigName,
 			apiConfiguration: effectiveApiConfiguration,
 		})
-	}, [showProviderSetup, apiConfiguration, setApiConfiguration, effectiveApiConfiguration, currentApiConfigName])
+	}, [
+		showProviderSetup,
+		apiConfiguration,
+		setApiConfiguration,
+		effectiveApiConfiguration,
+		currentApiConfigName,
+		zooCodeIsAuthenticated,
+	])
 
 	if (!showProviderSetup) {
 		return (

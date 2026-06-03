@@ -560,6 +560,13 @@
 			"placeholder": "Padrão: claude",
 			"maxTokensLabel": "Tokens de saída máximos",
 			"maxTokensDescription": "Número máximo de tokens de saída para respostas do Claude Code. O padrão é 8000."
+		},
+		"zooGateway": {
+			"account": "Conta Zoo Code",
+			"signInButton": "Entrar no Zoo Code",
+			"signInDescription": "Entre para usar o Zoo Gateway com sua conta",
+			"authenticated": "Autenticado",
+			"authenticatedAs": "Autenticado como {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -901,7 +908,8 @@
 		"providerNotAllowed": "O provedor '{{provider}}' não é permitido pela sua organização",
 		"modelNotAllowed": "O modelo '{{model}}' não é permitido para o provedor '{{provider}}' pela sua organização",
 		"profileInvalid": "Este perfil contém um provedor ou modelo que não é permitido pela sua organização",
-		"qwenCodeOauthPath": "Você deve fornecer um caminho válido de credenciais OAuth"
+		"qwenCodeOauthPath": "Você deve fornecer um caminho válido de credenciais OAuth",
+		"zooGatewaySignIn": "Faça login no Zoo Code para usar o Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Digite a chave API...",

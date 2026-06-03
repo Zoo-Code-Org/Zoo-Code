@@ -560,6 +560,13 @@
 			"placeholder": "Domyślnie: claude",
 			"maxTokensLabel": "Maksymalna liczba tokenów wyjściowych",
 			"maxTokensDescription": "Maksymalna liczba tokenów wyjściowych dla odpowiedzi Claude Code. Domyślnie 8000."
+		},
+		"zooGateway": {
+			"account": "Konto Zoo Code",
+			"signInButton": "Zaloguj się do Zoo Code",
+			"signInDescription": "Zaloguj się, aby korzystać z Zoo Gateway ze swoim kontem",
+			"authenticated": "Uwierzytelniono",
+			"authenticatedAs": "Uwierzytelniono jako {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -901,7 +908,8 @@
 		"providerNotAllowed": "Dostawca '{{provider}}' nie jest dozwolony przez Twoją organizację",
 		"modelNotAllowed": "Model '{{model}}' nie jest dozwolony dla dostawcy '{{provider}}' przez Twoją organizację",
 		"profileInvalid": "Ten profil zawiera dostawcę lub model, który nie jest dozwolony przez Twoją organizację",
-		"qwenCodeOauthPath": "Musisz podać prawidłową ścieżkę do poświadczeń OAuth"
+		"qwenCodeOauthPath": "Musisz podać prawidłową ścieżkę do poświadczeń OAuth",
+		"zooGatewaySignIn": "Zaloguj się do Zoo Code, aby korzystać z Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Wprowadź klucz API...",

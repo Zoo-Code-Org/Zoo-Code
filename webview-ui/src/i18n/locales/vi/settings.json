@@ -560,6 +560,13 @@
 			"placeholder": "Mặc định: claude",
 			"maxTokensLabel": "Số token đầu ra tối đa",
 			"maxTokensDescription": "Số lượng token đầu ra tối đa cho các phản hồi của Claude Code. Mặc định là 8000."
+		},
+		"zooGateway": {
+			"account": "Tài khoản Zoo Code",
+			"signInButton": "Đăng nhập vào Zoo Code",
+			"signInDescription": "Đăng nhập để sử dụng Zoo Gateway với tài khoản của bạn",
+			"authenticated": "Đã xác thực",
+			"authenticatedAs": "Đã xác thực với tên {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -901,7 +908,8 @@
 		"providerNotAllowed": "Nhà cung cấp '{{provider}}' không được phép bởi tổ chức của bạn",
 		"modelNotAllowed": "Mô hình '{{model}}' không được phép cho nhà cung cấp '{{provider}}' bởi tổ chức của bạn",
 		"profileInvalid": "Hồ sơ này chứa một nhà cung cấp hoặc mô hình không được phép bởi tổ chức của bạn",
-		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ"
+		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ",
+		"zooGatewaySignIn": "Đăng nhập vào Zoo Code để sử dụng Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Nhập khóa API...",

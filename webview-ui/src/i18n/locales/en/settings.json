@@ -553,6 +553,13 @@
 				"learnMore": "Learn more about provider routing"
 			}
 		},
+		"zooGateway": {
+			"account": "Zoo Code Account",
+			"signInButton": "Sign in to Zoo Code",
+			"signInDescription": "Sign in to use Zoo Gateway with your account",
+			"authenticated": "Authenticated",
+			"authenticatedAs": "Authenticated as {{name}}"
+		},
 		"customModel": {
 			"capabilities": "Configure the capabilities and pricing for your custom OpenAI-compatible model. Be careful when specifying the model capabilities, as they can affect how Zoo Code performs.",
 			"maxTokens": {
@@ -969,7 +976,8 @@
 		"providerNotAllowed": "Provider '{{provider}}' is not allowed by your organization",
 		"modelNotAllowed": "Model '{{model}}' is not allowed for provider '{{provider}}' by your organization",
 		"profileInvalid": "This profile contains a provider or model that is not allowed by your organization",
-		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path."
+		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path.",
+		"zooGatewaySignIn": "Sign in to Zoo Code to use Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Enter API Key...",

@@ -4,7 +4,7 @@ import { render, screen, fireEvent, within } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
-import { openAiCodexDefaultModelId } from "@roo-code/types"
+import { openAiCodexDefaultModelId, zooGatewayDefaultModelId } from "@roo-code/types"
 
 import * as ExtensionStateContext from "@src/context/ExtensionStateContext"
 const { ExtensionStateContextProvider } = ExtensionStateContext
@@ -298,6 +298,28 @@ describe("ApiOptions", () => {
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "openai-codex")
 		// Model is reset to the provider default since the previous value is invalid for this provider
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiModelId", openAiCodexDefaultModelId, false)
+	})
+
+	it("initializes zooGatewayModelId to its default when switching provider to zoo-gateway", () => {
+		// Regression: zoo-gateway was previously missing from PROVIDER_MODEL_CONFIG, so switching
+		// providers never seeded zooGatewayModelId. Configs were left without a model id, which
+		// blocked completion flows that require a dynamic-provider model id.
+		const mockSetApiConfigurationField = vi.fn()
+
+		renderApiOptions({
+			apiConfiguration: {
+				apiProvider: "anthropic",
+				// No prior zooGatewayModelId.
+			},
+			setApiConfigurationField: mockSetApiConfigurationField,
+		})
+
+		const providerSelectContainer = screen.getByTestId("provider-select")
+		const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
+		fireEvent.change(providerSelect, { target: { value: "zoo-gateway" } })
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "zoo-gateway")
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("zooGatewayModelId", zooGatewayDefaultModelId, false)
 	})
 
 	it("shows temperature and rate limit controls by default", () => {

@@ -560,6 +560,13 @@
 			"placeholder": "Per defecte: claude",
 			"maxTokensLabel": "Tokens màxims de sortida",
 			"maxTokensDescription": "Nombre màxim de tokens de sortida per a les respostes de Claude Code. El valor per defecte és 8000."
+		},
+		"zooGateway": {
+			"account": "Compte de Zoo Code",
+			"signInButton": "Iniciar sessió a Zoo Code",
+			"signInDescription": "Inicia sessió per utilitzar Zoo Gateway amb el teu compte",
+			"authenticated": "Autenticat",
+			"authenticatedAs": "Autenticat com a {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -901,7 +908,8 @@
 		"providerNotAllowed": "El proveïdor '{{provider}}' no està permès per la vostra organització",
 		"modelNotAllowed": "El model '{{model}}' no està permès per al proveïdor '{{provider}}' per la vostra organització",
 		"profileInvalid": "Aquest perfil conté un proveïdor o model que no està permès per la vostra organització",
-		"qwenCodeOauthPath": "Has de proporcionar una ruta vàlida de credencials OAuth"
+		"qwenCodeOauthPath": "Has de proporcionar una ruta vàlida de credencials OAuth",
+		"zooGatewaySignIn": "Inicia sessió a Zoo Code per utilitzar Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Introduïu la clau API...",

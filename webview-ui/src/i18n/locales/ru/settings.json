@@ -560,6 +560,13 @@
 			"placeholder": "По умолчанию: claude",
 			"maxTokensLabel": "Макс. выходных токенов",
 			"maxTokensDescription": "Максимальное количество выходных токенов для ответов Claude Code. По умолчанию 8000."
+		},
+		"zooGateway": {
+			"account": "Учетная запись Zoo Code",
+			"signInButton": "Войти в Zoo Code",
+			"signInDescription": "Войдите, чтобы использовать Zoo Gateway с вашей учетной записью",
+			"authenticated": "Аутентифицирован",
+			"authenticatedAs": "Аутентифицирован как {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -901,7 +908,8 @@
 		"providerNotAllowed": "Провайдер '{{provider}}' не разрешен вашей организацией",
 		"modelNotAllowed": "Модель '{{model}}' не разрешена для провайдера '{{provider}}' вашей организацией",
 		"profileInvalid": "Этот профиль содержит провайдера или модель, которые не разрешены вашей организацией",
-		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth"
+		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth",
+		"zooGatewaySignIn": "Войдите в Zoo Code, чтобы использовать Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Введите API-ключ...",

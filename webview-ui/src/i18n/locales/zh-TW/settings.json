@@ -575,6 +575,13 @@
 			"placeholder": "預設：claude",
 			"maxTokensLabel": "最大輸出 Token",
 			"maxTokensDescription": "Claude Code 回應的最大輸出 Token 數量。預設為 8000。"
+		},
+		"zooGateway": {
+			"account": "Zoo Code 帳戶",
+			"signInButton": "登入 Zoo Code",
+			"signInDescription": "登入以使用您的帳戶存取 Zoo Gateway",
+			"authenticated": "已認證",
+			"authenticatedAs": "已認證為 {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -916,7 +923,8 @@
 		"providerNotAllowed": "供應商 '{{provider}}' 不允許用於您的組織。",
 		"modelNotAllowed": "模型 '{{model}}' 不允許用於供應商 '{{provider}}'，此設定已被組織禁止",
 		"profileInvalid": "此設定檔包含您的組織不允許的供應商或模型",
-		"qwenCodeOauthPath": "您必須提供有效的 OAuth 憑證路徑"
+		"qwenCodeOauthPath": "您必須提供有效的 OAuth 憑證路徑",
+		"zooGatewaySignIn": "請登入 Zoo Code 以使用 Zoo Gateway。"
 	},
 	"placeholders": {
 		"apiKey": "請輸入 API 金鑰...",
