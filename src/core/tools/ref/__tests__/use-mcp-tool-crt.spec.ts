@@ -9,11 +9,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 // ---------------------------------------------------------------------------
-// Mock resolveRef before importing UseMcpToolTool
+// Mock resolveRef before importing UseMcpToolTool, keeping other exports actual
 // ---------------------------------------------------------------------------
-vi.mock("../index", () => ({
-	resolveRef: vi.fn(),
-}))
+vi.mock("../index", async (importActual) => {
+	const actual = await importActual<typeof import("../index")>()
+	return {
+		...actual,
+		resolveRef: vi.fn(),
+	}
+})
 
 // ---------------------------------------------------------------------------
 // Imports after mocks

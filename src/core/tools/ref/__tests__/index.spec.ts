@@ -7,6 +7,19 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import * as fs from "fs"
+import * as path from "path"
+
+// ---------------------------------------------------------------------------
+// Mock fs module
+// ---------------------------------------------------------------------------
+vi.mock("fs", async (importActual) => {
+	const actual = await importActual<any>()
+	return {
+		...actual,
+		appendFileSync: vi.fn(),
+	}
+})
 
 // ---------------------------------------------------------------------------
 // Mock all source resolvers
@@ -42,7 +55,7 @@ import { resolveFileSource } from "../sources/file"
 import { resolveTerminalSource } from "../sources/terminal"
 import { resolveToolSource } from "../sources/tool"
 import { applyMultiTransform } from "../transform"
-import { resolveRef } from "../index"
+import { resolveRef, resolveInlineRefs, resolveInlineRefsInObject, logCrtDebug } from "../index"
 import type { ContentRefParams, ContentRef } from "../../../../shared/tools"
 import type { SelectorResult } from "../selector"
 
@@ -423,6 +436,79 @@ describe("resolveRef", () => {
 			expect(result.joined).toBe("a | b")
 			expect(result.resolved).toHaveLength(2)
 			expect(result.confidence).toBe(0.9)
+		})
+	})
+
+	describe("resolveInlineRefs", () => {
+		it("returns text unchanged if no markers are present", async () => {
+			const task = createMockTask()
+			const result = await resolveInlineRefs("hello world", task)
+			expect(result).toBe("hello world")
+		})
+
+		it("resolves single inline ref marker", async () => {
+			vi.mocked(resolveChatSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "chat:-1", content: "resolved-content", confidence: 1.0 }),
+			)
+			const task = createMockTask()
+			const result = await resolveInlineRefs("text {{ref:source=chat,ref=-1}} end", task)
+			expect(result).toBe("text resolved-content end")
+		})
+
+		it("resolves multiple inline ref markers", async () => {
+			vi.mocked(resolveChatSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "chat:-1", content: "content-1", confidence: 1.0 }),
+			)
+			vi.mocked(resolveFileSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "file://a.ts", content: "content-2", confidence: 1.0 }),
+			)
+			const task = createMockTask()
+			const result = await resolveInlineRefs(
+				"start {{ref:source=chat,ref=-1}} mid {{ref:source=file,ref=a.ts}} end",
+				task,
+			)
+			expect(result).toBe("start content-1 mid content-2 end")
+		})
+	})
+
+	describe("resolveInlineRefsInObject", () => {
+		it("resolves markers inside nested objects and arrays", async () => {
+			vi.mocked(resolveChatSource).mockResolvedValue(
+				makeSelectorResult({ sourceId: "chat:-1", content: "resolved", confidence: 1.0 }),
+			)
+			const task = createMockTask()
+			const obj = {
+				stringProp: "normal",
+				refProp: "has {{ref:source=chat,ref=-1}} marker",
+				nested: {
+					arrayProp: ["item1", "item {{ref:source=chat,ref=-1}} 2"],
+				},
+			}
+
+			const result = await resolveInlineRefsInObject(obj, task)
+
+			expect(result.stringProp).toBe("normal")
+			expect(result.refProp).toBe("has resolved marker")
+			expect(result.nested.arrayProp[0]).toBe("item1")
+			expect(result.nested.arrayProp[1]).toBe("item resolved 2")
+		})
+	})
+
+	describe("logCrtDebug", () => {
+		it("writes diagnostic logs to crt-debug.log in task.cwd", () => {
+			const appendFileSpy = vi.mocked(fs.appendFileSync)
+			const task = createMockTask({ cwd: "/workspace/project" })
+
+			logCrtDebug(task, "test debug message")
+
+			expect(appendFileSpy).toHaveBeenCalled()
+			const [logPath, logMessage] = appendFileSpy.mock.calls[appendFileSpy.mock.calls.length - 1] as [
+				string,
+				string,
+			]
+			expect(logPath).toBe(path.join("/workspace/project", "crt-debug.log"))
+			expect(logMessage).toContain("test debug message")
+			expect(logMessage).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] test debug message\n$/)
 		})
 	})
 })

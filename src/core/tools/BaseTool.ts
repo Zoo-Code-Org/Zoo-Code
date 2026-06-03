@@ -2,7 +2,7 @@ import type { ToolName } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import type { ToolUse, HandleError, PushToolResult, AskApproval, NativeToolArgs } from "../../shared/tools"
-import { resolveRef } from "./ref/index"
+import { resolveRef, resolveInlineRefsInObject, logCrtDebug } from "./ref/index"
 import type { ResolveRefResult } from "./ref/index"
 
 /**
@@ -167,22 +167,81 @@ export abstract class BaseTool<TName extends ToolName> {
 
 		// Native-only: obtain typed parameters from `nativeArgs`.
 		let params: ToolParams<TName>
+		let wrappedCallbacks = callbacks
 		try {
 			if (block.nativeArgs !== undefined) {
 				// Native: typed args provided by NativeToolCallParser.
 				params = block.nativeArgs as ToolParams<TName>
 
+				if (block.refMeta) {
+					logCrtDebug(
+						task,
+						`[CALL] Tool "${block.name}" initiated. block.refMeta=${JSON.stringify(block.refMeta)}`,
+					)
+				}
+
+				// CRT: Resolve any inline {{ref:...}} markers in params recursively
+				params = await resolveInlineRefsInObject(params, task)
+
 				// CRT: resolve ref if present, with graceful fallback
+				let crtLog = ""
 				if (block.refMeta) {
 					try {
 						const refResults = await resolveRef(block.refMeta, task)
 						if (refResults?.content) {
 							params = this.injectRefContent(params, block.name, refResults)
+							// Format successful resolution log
+							if (block.refMeta.multi_ref) {
+								crtLog = `[CRT] multi_ref: ${block.refMeta.multi_ref.length}/${block.refMeta.multi_ref.length} resolved, confidence=${refResults.confidence.toFixed(2)}`
+							} else if (block.refMeta.ref) {
+								const ref = block.refMeta.ref
+								const method = refResults.resolved[0]?.method || "exact"
+								crtLog = `[CRT] ref resolved: source=${ref.source}:${ref.ref}, method=${method}, confidence=${refResults.confidence.toFixed(2)}`
+							}
+							logCrtDebug(
+								task,
+								`[SUCCESS] Resolved ref. ${crtLog}. Content length: ${refResults.content.length}`,
+							)
 						}
 					} catch (error) {
 						// Graceful fallback: use original params.
 						// Error is logged but does NOT prevent execution.
 						console.error(`[CRT] Failed to resolve ref for ${block.name}:`, error)
+						if (block.refMeta.ref) {
+							const ref = block.refMeta.ref
+							const focusStr = ref.focus ? `, focus="${ref.focus}"` : ""
+							const selectorStr = ref.selector ? `, selector="${ref.selector}"` : ""
+							crtLog = `[CRT] ref not found: source=${ref.source}:${ref.ref}${focusStr}${selectorStr} — resolution failed, falling back to original params`
+						} else {
+							crtLog = `[CRT] multi_ref resolution failed, falling back to original params`
+						}
+						logCrtDebug(
+							task,
+							`[ERROR] Failed to resolve ref: ${error instanceof Error ? error.message : String(error)}. ${crtLog}`,
+						)
+					}
+				}
+
+				if (crtLog) {
+					wrappedCallbacks = {
+						...callbacks,
+						pushToolResult: (content: string | Array<any>) => {
+							if (typeof content === "string") {
+								// Append CRT log to the string response
+								callbacks.pushToolResult(`${content}\n\n${crtLog}`)
+							} else if (Array.isArray(content)) {
+								// If it's an array of blocks, append as a text block
+								callbacks.pushToolResult([
+									...content,
+									{
+										type: "text" as const,
+										text: crtLog,
+									},
+								])
+							} else {
+								callbacks.pushToolResult(content)
+							}
+						},
 					}
 				}
 			} else {
@@ -211,6 +270,9 @@ export abstract class BaseTool<TName extends ToolName> {
 		}
 
 		// Execute with typed parameters
-		await this.execute(params, task, callbacks)
+		if (block.refMeta) {
+			logCrtDebug(task, `[EXECUTE] Executing "${block.name}" with resolved params: ${JSON.stringify(params)}`)
+		}
+		await this.execute(params, task, wrappedCallbacks)
 	}
 }

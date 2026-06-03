@@ -9,11 +9,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 // ---------------------------------------------------------------------------
-// Mock resolveRef before importing BaseTool
+// Mock resolveRef before importing BaseTool, keeping other exports actual
 // ---------------------------------------------------------------------------
-vi.mock("../index", () => ({
-	resolveRef: vi.fn(),
-}))
+vi.mock("../index", async (importActual) => {
+	const actual = await importActual<typeof import("../index")>()
+	return {
+		...actual,
+		resolveRef: vi.fn(),
+	}
+})
 
 // ---------------------------------------------------------------------------
 // Imports after mocks
@@ -246,6 +250,71 @@ describe("BaseTool.handle() CRT integration", () => {
 		// The params passed to execute should have the resolved command
 		const executedParams = tool.execute.mock.calls[0][0]
 		expect(executedParams.command).toBe("resolved command")
+	})
+
+	it("appends CRT log to pushToolResult on success", async () => {
+		const refMeta = {
+			ref: {
+				source: "chat" as const,
+				ref: "-1",
+				startAnchor: "start",
+				endAnchor: "end",
+			},
+		}
+		const block = createToolUseBlock("execute_command", { command: "original" }, refMeta)
+
+		const resolvedResult = createResolveRefResult({
+			content: "resolved command",
+			resolved: [
+				{
+					sourceId: "chat:-1",
+					content: "resolved command",
+					startOffset: 0,
+					endOffset: 16,
+					confidence: 1.0,
+					method: "anchor",
+				},
+			],
+			confidence: 1.0,
+		})
+		vi.mocked(resolveRef).mockResolvedValue(resolvedResult)
+
+		await tool.handle(task, block, callbacks)
+
+		// Get the wrapped callbacks passed to execute
+		const executedCallbacks = tool.execute.mock.calls[0][2]
+
+		// Call the wrapped pushToolResult
+		executedCallbacks.pushToolResult("original result")
+
+		expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+			"original result\n\n[CRT] ref resolved: source=chat:-1, method=anchor, confidence=1.00",
+		)
+	})
+
+	it("appends CRT log to pushToolResult on fallback", async () => {
+		const refMeta = {
+			ref: {
+				source: "chat" as const,
+				ref: "-1",
+				focus: "myFunction",
+			},
+		}
+		const block = createToolUseBlock("execute_command", { command: "original" }, refMeta)
+
+		vi.mocked(resolveRef).mockRejectedValue(new Error("AST parse failed"))
+
+		await tool.handle(task, block, callbacks)
+
+		// Get the wrapped callbacks passed to execute
+		const executedCallbacks = tool.execute.mock.calls[0][2]
+
+		// Call the wrapped pushToolResult
+		executedCallbacks.pushToolResult("original result")
+
+		expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+			'original result\n\n[CRT] ref not found: source=chat:-1, focus="myFunction" — resolution failed, falling back to original params',
+		)
 	})
 
 	it("falls back to original params when resolveRef throws", async () => {

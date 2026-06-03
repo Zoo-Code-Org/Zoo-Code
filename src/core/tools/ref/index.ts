@@ -6,6 +6,8 @@
  * then applies the transform pipeline to the resolved content.
  */
 
+import * as fs from "fs"
+import * as path from "path"
 import type { ContentRefParams, ContentRef } from "../../../shared/tools"
 import type { SelectorResult } from "./selector"
 import { resolveContentRef } from "./selector"
@@ -91,5 +93,107 @@ async function resolveSingleRef(ref: ContentRef, task: Task): Promise<SelectorRe
 			return resolveToolSource(ref, task)
 		default:
 			throw new Error(`Unknown content source: ${ref.source}`)
+	}
+}
+
+/**
+ * Resolve all {{ref:...}} markers within a single string.
+ * Pattern: {{ref:source=chat,ref=-1,startAnchor=...,endAnchor=...}}
+ */
+export async function resolveInlineRefs(text: string, task: Task): Promise<string> {
+	const REF_PATTERN = /\{\{ref:(.*?)\}\}/
+	if (!REF_PATTERN.test(text)) {
+		return text
+	}
+
+	const globalPattern = /\{\{ref:(.*?)\}\}/g
+	const markers: Array<{ match: string; paramsStr: string; index: number }> = []
+	let m: RegExpExecArray | null
+	while ((m = globalPattern.exec(text)) !== null) {
+		markers.push({ match: m[0], paramsStr: m[1], index: m.index })
+	}
+
+	if (markers.length === 0) {
+		return text
+	}
+
+	let result = text
+	for (let i = markers.length - 1; i >= 0; i--) {
+		const { match, paramsStr, index } = markers[i]
+
+		const params: Record<string, string> = {}
+		for (const part of paramsStr.split(",")) {
+			const eqIdx = part.indexOf("=")
+			if (eqIdx === -1) continue
+			params[part.slice(0, eqIdx).trim()] = part.slice(eqIdx + 1).trim()
+		}
+
+		try {
+			const content = await resolveRef(
+				{
+					ref: {
+						source: (params.source || "chat") as any,
+						ref: params.ref || "-1",
+						startAnchor: params.startAnchor || undefined,
+						endAnchor: params.endAnchor || undefined,
+						selector: params.selector || undefined,
+					},
+				},
+				task,
+			)
+
+			result = result.slice(0, index) + content.content + result.slice(index + match.length)
+		} catch (error) {
+			console.error(`[CRT] Failed to resolve inline ref: ${match}`, error)
+		}
+	}
+	return result
+}
+
+/**
+ * Recursively scan an object (or array/string) and resolve any {{ref:...}} markers.
+ */
+export async function resolveInlineRefsInObject(obj: any, task: Task): Promise<any> {
+	if (!obj) {
+		return obj
+	}
+
+	if (typeof obj === "string") {
+		return resolveInlineRefs(obj, task)
+	}
+
+	if (Array.isArray(obj)) {
+		const result = []
+		for (const item of obj) {
+			result.push(await resolveInlineRefsInObject(item, task))
+		}
+		return result
+	}
+
+	if (typeof obj === "object") {
+		const result: any = {}
+		for (const key of Object.keys(obj)) {
+			result[key] = await resolveInlineRefsInObject(obj[key], task)
+		}
+		return result
+	}
+
+	return obj
+}
+
+/**
+ * Zonal CRT Debug Logger
+ * Appends diagnostic logs to a crt-debug.log file in the workspace root (task.cwd).
+ */
+export function logCrtDebug(task: Task, message: string): void {
+	try {
+		const logDir = task.cwd
+		if (!logDir) return
+		const logPath = path.join(logDir, "crt-debug.log")
+		const timestamp = new Date().toISOString()
+		const formattedMessage = `[${timestamp}] ${message}\n`
+		fs.appendFileSync(logPath, formattedMessage, "utf8")
+	} catch (error) {
+		console.error("[CRT Debug Logger] Failed to write log:", error)
 	}
 }
