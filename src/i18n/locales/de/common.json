@@ -256,11 +256,20 @@
 			"invalid_token_received": "Zoo Code: Ungültiger Authentifizierungstoken empfangen.",
 			"token_verification_failed": "Zoo Code: Token-Überprüfung fehlgeschlagen.",
 			"invalid_token": "Zoo Code: Ungültiger Token.",
-			"could_not_verify_token": "Zoo Code: Token konnte nicht verifiziert werden."
+			"could_not_verify_token": "Zoo Code: Token konnte nicht verifiziert werden.",
+			"session_expired": "Zoo Code-Sitzung abgelaufen. Bitte melde dich erneut an, um Zoo Gateway weiter zu nutzen.",
+			"out_of_credits": "Zoo Gateway: Unzureichendes Guthaben. Füge Guthaben hinzu, um fortzufahren.",
+			"account_unavailable": "Zoo Gateway: Dein Konto ist derzeit nicht verfügbar. Bitte kontaktiere den Support.",
+			"budget_exceeded": "Zoo Gateway: Nutzungsbudget erreicht. Warte auf das Zurücksetzen oder lade auf."
 		},
 		"info": {
 			"connected": "Zoo Code: Erfolgreich verbunden! Du kannst Zoo Code jetzt als KI-Anbieter verwenden.",
 			"disconnected": "Zoo Code: Erfolgreich getrennt."
+		},
+		"buttons": {
+			"sign_in": "Anmelden",
+			"add_credits": "Guthaben hinzufügen",
+			"contact_support": "Support kontaktieren"
 		}
 	},
 	"codeActions": {

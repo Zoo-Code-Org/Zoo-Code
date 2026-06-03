@@ -50,6 +50,7 @@ import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { getRouterRemovalMessage, getRouterUnavailableSignInMessage } from "../config/routerRemoval"
 import { experimentDefault } from "../../shared/experiments"
 import { Terminal } from "../../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { openFile } from "../../integrations/misc/open-file"
 import { openImage, saveImage } from "../../integrations/misc/image-handler"
 import { selectImages } from "../../integrations/misc/process-images"
@@ -726,6 +727,17 @@ export const webviewMessageHandler = async (
 						if (value !== undefined) {
 							Terminal.setTerminalZdotdir(value as boolean)
 						}
+					} else if (key === "terminalProfile") {
+						const previousProfile = Terminal.getTerminalProfile()
+						Terminal.setTerminalProfile(typeof value === "string" ? value : undefined)
+						newValue = Terminal.getTerminalProfile()
+
+						if (newValue !== previousProfile) {
+							// Discard idle terminals so the next command gets a fresh
+							// terminal using the new profile's shell instead of reusing
+							// a stale one from the previous profile.
+							TerminalRegistry.closeIdleTerminals()
+						}
 					} else if (key === "execaShellPath") {
 						Terminal.setExecaShellPath(value as string | undefined)
 					} else if (key === "mcpEnabled") {
@@ -922,6 +934,7 @@ export const webviewMessageHandler = async (
 				: {
 						openrouter: {},
 						"vercel-ai-gateway": {},
+						"zoo-gateway": {},
 						litellm: {},
 						requesty: {},
 						unbound: {},
@@ -929,6 +942,7 @@ export const webviewMessageHandler = async (
 						lmstudio: {},
 						poe: {},
 						deepseek: {},
+						"opencode-go": {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -963,6 +977,13 @@ export const webviewMessageHandler = async (
 					},
 				},
 				{ key: "vercel-ai-gateway", options: { provider: "vercel-ai-gateway" } },
+				{
+					key: "zoo-gateway",
+					options: {
+						provider: "zoo-gateway",
+						baseUrl: apiConfiguration.zooGatewayBaseUrl,
+					},
+				},
 			]
 
 			// LiteLLM is conditional on baseUrl+apiKey
@@ -1009,6 +1030,20 @@ export const webviewMessageHandler = async (
 				candidates.push({
 					key: "deepseek",
 					options: { provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+				})
+			}
+
+			// Opencode Go is conditional on apiKey (its /models endpoint requires auth)
+			const opencodeGoApiKey = message?.values?.opencodeGoApiKey ?? apiConfiguration.opencodeGoApiKey
+
+			if (opencodeGoApiKey) {
+				if (message?.values?.opencodeGoApiKey) {
+					await flushModels({ provider: "opencode-go", apiKey: opencodeGoApiKey }, true)
+				}
+
+				candidates.push({
+					key: "opencode-go",
+					options: { provider: "opencode-go", apiKey: opencodeGoApiKey },
 				})
 			}
 
@@ -1119,15 +1154,6 @@ export const webviewMessageHandler = async (
 				success: false,
 				error: getRouterRemovalMessage(),
 				values: { provider: "roo" },
-			})
-			break
-		}
-		case "requestRooCreditBalance": {
-			const requestId = message.requestId
-			provider.postMessageToWebview({
-				type: "rooCreditBalance",
-				requestId,
-				values: { error: "Roo credit balance is no longer available." },
 			})
 			break
 		}
@@ -1307,6 +1333,12 @@ export const webviewMessageHandler = async (
 				openFile(customModesFilePath)
 			}
 
+			break
+		}
+		case "openTerminalProfilePicker": {
+			// Open VS Code's native terminal profile picker so the user can set the
+			// default shell without leaving VS Code's own settings UI.
+			await vscode.commands.executeCommand("workbench.action.terminal.selectDefaultShell")
 			break
 		}
 		case "openKeyboardShortcuts": {
@@ -1509,6 +1541,27 @@ export const webviewMessageHandler = async (
 			}
 
 			break
+
+		case "requestTerminalProfiles": {
+			// Allowlisted request: read VS Code's terminal profiles server-side and
+			// return only the sanitized profile names. The terminal profile dropdown
+			// only needs names, so this avoids routing it through the generic
+			// `getVSCodeSetting` handler (which reads any key the webview supplies).
+			// Only profiles with a resolvable `path` are returned — source-only
+			// profiles (e.g. { source: "PowerShell" }) cannot be mapped to a shell
+			// binary by an extension and would silently fall back to the default.
+			try {
+				await provider.postMessageToWebview({
+					type: "terminalProfiles",
+					profiles: Terminal.getAvailableProfileNames(),
+				})
+			} catch (error) {
+				console.error("Failed to get terminal profiles:", error)
+				await provider.postMessageToWebview({ type: "terminalProfiles", profiles: [] })
+			}
+
+			break
+		}
 
 		case "mode":
 			await provider.handleModeSwitch(message.text as Mode)
@@ -2431,6 +2484,60 @@ export const webviewMessageHandler = async (
 			try {
 				const { disconnectZooCode } = await import("../../services/zoo-code-auth")
 				await disconnectZooCode()
+
+				// Clear zooSessionToken from ALL provider profiles with apiProvider === "zoo-gateway".
+				// Profiles are user-renameable, so we cannot rely on a hardcoded name like "Zoo Gateway".
+				// We must scan all profiles and clear tokens from any that use the zoo-gateway provider.
+				try {
+					const allProfiles = await provider.providerSettingsManager.listConfig()
+					// Check if Zoo Gateway is the currently active profile by apiProvider identity
+					const currentSettings = provider.contextProxy.getProviderSettings()
+					const isZooGatewayActive = currentSettings.apiProvider === "zoo-gateway"
+					const currentApiConfigName = provider.contextProxy.getValues().currentApiConfigName
+
+					for (const entry of allProfiles) {
+						if (entry.apiProvider !== "zoo-gateway") {
+							continue
+						}
+
+						// Isolate per-profile failures: a corrupted profile or a failed write
+						// for one entry must not abort cleanup of the remaining profiles,
+						// otherwise sign-out would leave later profiles with a stale token.
+						try {
+							const profile = await provider.providerSettingsManager.getProfile({ name: entry.name })
+							const { zooSessionToken: _removed, ...cleanedProfile } = profile
+
+							// If this is the currently active profile, ALWAYS push to the in-memory
+							// handler — even when the persisted profile has already been cleared —
+							// because currentSettings (and therefore the live API handler) may still
+							// carry a stale token from before sign-out. Persisted-only profiles get
+							// rewritten only when they previously had a token to avoid no-op disk writes.
+							const isThisProfileActive = isZooGatewayActive && currentApiConfigName === entry.name
+
+							if (isThisProfileActive) {
+								await provider.upsertProviderProfile(entry.name, cleanedProfile, true)
+								provider.log(
+									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
+								)
+							} else if (profile.zooSessionToken) {
+								await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
+								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
+							}
+						} catch (profileError) {
+							// Log but continue to the next profile so one failure doesn't
+							// leave other profiles holding a stale token.
+							provider.log(
+								`[zooCodeSignOut] Failed to clear profile token for "${entry.name}": ${profileError instanceof Error ? profileError.message : String(profileError)}`,
+							)
+						}
+					}
+				} catch (profileError) {
+					// listConfig itself failed — nothing to iterate.
+					provider.log(
+						`[zooCodeSignOut] Failed to list profiles for token cleanup: ${profileError instanceof Error ? profileError.message : String(profileError)}`,
+					)
+				}
+
 				await provider.postStateToWebview()
 			} catch (error) {
 				provider.log(

@@ -311,9 +311,9 @@
 		},
 		"release": {
 			"heading": "Что нового:",
-			"highlight1": "Провайдер Xiaomi MiMo: Xiaomi MiMo добавлен как полноценный API-провайдер, чтобы ты мог настраивать модели MiMo прямо в Zoo Code.",
-			"highlight2": "Upstream-handoff Zoo Code: Мы подтянули последний upstream sunset merge и связанные обновления платформы, чтобы Zoo Code оставался синхронизирован с работой сообщества по handoff.",
-			"highlight3": "Исправления стабильности в чате и у провайдеров: Исправлены текст входа MCP, запросы Gemini с полным набором инструментов, обработка температуры OpenAI и рендеринг Markdown с одиночной тильдой."
+			"highlight1": "Claude Opus 4.8 и Opencode Go: Claude Opus 4.8 добавлен для Anthropic, Bedrock и Vertex, плюс Opencode Go как новый полноценный провайдер.",
+			"highlight2": "Надёжная отмена задач: Отмена задачи теперь корректно завершает запущенный процесс, с автоматическим повтором Ctrl+C для упорных процессов.",
+			"highlight3": "Исправления провайдеров и редактора: Исправлены пользовательские ID моделей Gemini, обрезка диффов Grok, определение PowerShell в Windows и название code action в VS Code."
 		},
 		"cloudAgents": {
 			"heading": "Новое в облаке:",

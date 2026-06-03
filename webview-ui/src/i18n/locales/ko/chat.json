@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "Xiaomi MiMo provider: Xiaomi MiMo를 first-class API provider로 추가해 MiMo 모델을 Zoo Code에서 직접 설정할 수 있게 했어요.",
-			"highlight2": "Zoo Code upstream handoff: 최신 upstream sunset merge와 관련 platform 업데이트를 반영해 Zoo Code가 커뮤니티 handoff 작업과 계속 맞춰지도록 했어요.",
-			"highlight3": "채팅과 provider 안정성 수정: MCP sign-in 문구, Gemini의 full-tool 요청, OpenAI temperature 처리, Markdown single-tilde 렌더링을 수정했어요."
+			"highlight1": "Claude Opus 4.8과 Opencode Go: Anthropic, Bedrock, Vertex에 Claude Opus 4.8을 추가했고, Opencode Go를 새로운 first-class provider로 추가했어요.",
+			"highlight2": "안정적인 task 취소: task를 취소하면 이제 실행 중인 프로세스가 제대로 종료돼요. 잘 안 꺼지는 프로세스에는 자동으로 Ctrl+C를 재시도해요.",
+			"highlight3": "Provider와 에디터 수정: Gemini 커스텀 모델 ID, Grok diff 잘림 현상, Windows PowerShell 감지, VS Code code action 브랜딩을 수정했어요."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

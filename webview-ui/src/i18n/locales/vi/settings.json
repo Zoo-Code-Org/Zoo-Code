@@ -314,6 +314,8 @@
 		"getOpenRouterApiKey": "Lấy khóa API OpenRouter",
 		"vercelAiGatewayApiKey": "Khóa API Vercel AI Gateway",
 		"getVercelAiGatewayApiKey": "Lấy khóa API Vercel AI Gateway",
+		"opencodeGoApiKey": "Khóa API Opencode Go",
+		"getOpencodeGoApiKey": "Lấy khóa API Opencode Go",
 		"apiKeyStorageNotice": "Khóa API được lưu trữ an toàn trong Bộ lưu trữ bí mật của VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -558,6 +560,13 @@
 			"placeholder": "Mặc định: claude",
 			"maxTokensLabel": "Số token đầu ra tối đa",
 			"maxTokensDescription": "Số lượng token đầu ra tối đa cho các phản hồi của Claude Code. Mặc định là 8000."
+		},
+		"zooGateway": {
+			"account": "Tài khoản Zoo Code",
+			"signInButton": "Đăng nhập vào Zoo Code",
+			"signInDescription": "Đăng nhập để sử dụng Zoo Gateway với tài khoản của bạn",
+			"authenticated": "Đã xác thực",
+			"authenticatedAs": "Đã xác thực với tên {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -739,6 +748,14 @@
 		"inheritEnv": {
 			"label": "Kế thừa biến môi trường",
 			"description": "Bật tính năng này để kế thừa các biến môi trường từ quy trình mẹ của VS Code. <0>Tìm hiểu thêm</0>"
+		},
+		"profile": {
+			"label": "Ghi đè terminal Zoo Code",
+			"default": "Dùng hồ sơ mặc định của VS Code (khuyến nghị)",
+			"description": "Theo mặc định Zoo Code sử dụng shell được cấu hình trong VS Code. Chọn Ghi đè để chọn hồ sơ shell dựa trên đường dẫn được VS Code cung cấp. Các hồ sơ chỉ nguồn (ví dụ: mục PowerShell tích hợp) không thể được liệt kê ở đây. <0>Tìm hiểu thêm</0>",
+			"overrideLabel": "Ghi đè shell cho Zoo Code",
+			"configureButton": "Chọn hồ sơ mặc định trong VS Code",
+			"noProfiles": "(không tìm thấy hồ sơ dựa trên đường dẫn trong terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -899,7 +916,8 @@
 		"providerNotAllowed": "Nhà cung cấp '{{provider}}' không được phép bởi tổ chức của bạn",
 		"modelNotAllowed": "Mô hình '{{model}}' không được phép cho nhà cung cấp '{{provider}}' bởi tổ chức của bạn",
 		"profileInvalid": "Hồ sơ này chứa một nhà cung cấp hoặc mô hình không được phép bởi tổ chức của bạn",
-		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ"
+		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ",
+		"zooGatewaySignIn": "Đăng nhập vào Zoo Code để sử dụng Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Nhập khóa API...",
@@ -961,6 +979,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Yêu cầu {{primaryMod}}+Enter để gửi tin nhắn",
 			"description": "Khi được bật, bạn phải nhấn {{primaryMod}}+Enter để gửi tin nhắn thay vì chỉ nhấn Enter"
+		},
+		"chatFontSize": {
+			"label": "Cỡ chữ trò chuyện",
+			"description": "Đặt cỡ chữ (tính bằng pixel) cho cuộc trò chuyện Zoo Code. Để ở giá trị mặc định để khớp với cỡ chữ của VS Code.",
+			"reset": "Dùng mặc định của VS Code"
 		}
 	},
 	"skills": {

@@ -24,7 +24,7 @@ runs:
     using: "composite"
     steps:
         - name: Install pnpm
-          uses: pnpm/action-setup@v4
+          uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
           with:
               version: ${{ inputs.pnpm-version }}
         - name: Get pnpm store directory
@@ -32,14 +32,14 @@ runs:
           run: |
               echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
         - name: Setup pnpm cache
-          uses: actions/cache@v4
+          uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
           with:
               path: ${{ env.STORE_PATH }}
               key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
               restore-keys: |
                   ${{ runner.os }}-pnpm-store-
         - name: Setup Node.js
-          uses: actions/setup-node@v4
+          uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
           with:
               node-version: ${{ inputs.node-version }}
         - name: Install dependencies

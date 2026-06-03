@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "Co nowego:",
-			"highlight1": "Dostawca Xiaomi MiMo: Dodano Xiaomi MiMo jako pełnoprawnego dostawcę API, żebyś mógł konfigurować modele MiMo bezpośrednio w Zoo Code.",
-			"highlight2": "Upstreamowy handoff Zoo Code: Włączono najnowszy upstreamowy sunset merge i powiązane aktualizacje platformy, aby Zoo Code pozostał zgodny z pracą społeczności nad handoffem.",
-			"highlight3": "Poprawki stabilności w czacie i u dostawców: Naprawiono teksty logowania MCP, żądania Gemini z pełnym zestawem narzędzi, obsługę temperatury OpenAI i renderowanie Markdown z pojedynczą tyldą."
+			"highlight1": "Claude Opus 4.8 i Opencode Go: Claude Opus 4.8 dodano dla Anthropic, Bedrock i Vertex, a Opencode Go dołączono jako nowego dostawcę pierwszej klasy.",
+			"highlight2": "Niezawodne anulowanie zadań: Anulowanie zadania teraz poprawnie kończy działający proces, z automatycznym ponowieniem Ctrl+C dla opornych procesów.",
+			"highlight3": "Poprawki dostawców i edytora: Naprawiono niestandardowe ID modeli Gemini, obcinanie diffów Grok, wykrywanie PowerShell w Windows i nazwy akcji kodu VS Code."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",

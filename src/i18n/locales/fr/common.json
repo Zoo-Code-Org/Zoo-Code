@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: Jeton d'authentification invalide reçu.",
 			"token_verification_failed": "Zoo Code: La vérification du jeton a échoué.",
 			"invalid_token": "Zoo Code: Jeton invalide.",
-			"could_not_verify_token": "Zoo Code: Impossible de vérifier le jeton."
+			"could_not_verify_token": "Zoo Code: Impossible de vérifier le jeton.",
+			"session_expired": "Session Zoo Code expirée. Reconnectez-vous pour continuer à utiliser Zoo Gateway.",
+			"out_of_credits": "Zoo Gateway : crédits insuffisants. Ajoutez des crédits pour continuer.",
+			"account_unavailable": "Zoo Gateway : votre compte n'est pas disponible actuellement. Contactez le support.",
+			"budget_exceeded": "Zoo Gateway : budget d'utilisation atteint. Attendez la réinitialisation ou rechargez."
 		},
 		"info": {
 			"connected": "Zoo Code: Connecté avec succès ! Vous pouvez maintenant utiliser Zoo Code comme fournisseur d'IA.",
 			"disconnected": "Zoo Code: Déconnecté avec succès."
+		},
+		"buttons": {
+			"sign_in": "Se connecter",
+			"add_credits": "Ajouter des crédits",
+			"contact_support": "Contacter le support"
 		}
 	},
 	"codeActions": {

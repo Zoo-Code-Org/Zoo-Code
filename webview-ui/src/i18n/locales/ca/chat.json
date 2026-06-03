@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "Novetats:",
-			"highlight1": "Proveïdor Xiaomi MiMo: S'ha afegit Xiaomi MiMo com a proveïdor d'API de primer nivell perquè puguis configurar els models MiMo directament a Zoo Code.",
-			"highlight2": "Traspàs upstream de Zoo Code: S'ha incorporat l'última fusió upstream del sunset i les actualitzacions relacionades de la plataforma per mantenir Zoo Code alineat amb el treball de traspàs de la comunitat.",
-			"highlight3": "Correccions d'estabilitat al xat i als proveïdors: S'han corregit els textos de l'inici de sessió d'MCP, les sol·licituds completes d'eines de Gemini, la gestió de la temperatura d'OpenAI i el renderitzat del text amb una sola titlla a Markdown."
+			"highlight1": "Claude Opus 4.8 i Opencode Go: S'ha afegit Claude Opus 4.8 a Anthropic, Bedrock i Vertex, més Opencode Go com a nou proveïdor de primera classe.",
+			"highlight2": "Cancel·lació de tasques fiable: Cancel·lar una tasca ara finalitza correctament el procés en execució, amb reintent automàtic de Ctrl+C per als processos que no responen.",
+			"highlight3": "Correccions de proveïdors i editor: S'han corregit els ID de model personalitzats de Gemini, el truncament de diffs de Grok, la detecció de PowerShell a Windows i la marca de les accions de codi del VS Code."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

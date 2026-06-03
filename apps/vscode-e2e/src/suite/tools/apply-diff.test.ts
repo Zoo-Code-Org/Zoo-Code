@@ -128,7 +128,7 @@ suite("Roo Code apply_diff Tool", function () {
 
 	suiteTeardown(async () => {
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
@@ -147,7 +147,7 @@ suite("Roo Code apply_diff Tool", function () {
 
 	setup(async () => {
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
@@ -164,7 +164,7 @@ suite("Roo Code apply_diff Tool", function () {
 
 	teardown(async () => {
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
