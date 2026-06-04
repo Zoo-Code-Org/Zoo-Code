@@ -114,9 +114,9 @@ export const globalSettingsSchema = z.object({
 	/**
 	 * Fuzzy matching threshold for the multi-search-replace diff strategy.
 	 * Range: 0.0 (accept anything) to 1.0 (exact match only).
-	 * @default 0.9
+	 * `@default` 0.9
 	 */
-	diffFuzzyThreshold: z.number().min(0).max(1).optional(),
+	diffFuzzyThreshold: z.number().min(0.5).max(1).optional(),
 	requestDelaySeconds: z.number().optional(),
 	alwaysAllowMcp: z.boolean().optional(),
 	alwaysAllowModeSwitch: z.boolean().optional(),
