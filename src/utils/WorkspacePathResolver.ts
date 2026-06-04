@@ -47,8 +47,8 @@ export async function resolveRealPath(target: string): Promise<string> {
 			return normalizeCase(joined)
 		} catch (err) {
 			if (!isErrnoException(err, "ENOENT")) {
-				// Non-ENOENT (e.g. EACCES, ELOOP): propagate so the caller's security check can
-				// fail closed instead of falling through to the lexical path.
+				// Non-ENOENT (e.g. EACCES, ELOOP, ENOTDIR): propagate so the caller's
+				// security check can fail closed instead of falling through to the lexical path.
 				throw err
 			}
 
