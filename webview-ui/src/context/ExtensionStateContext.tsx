@@ -84,6 +84,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setTerminalShellIntegrationDisabled: (value: boolean) => void
 	terminalZdotdir?: boolean
 	setTerminalZdotdir: (value: boolean) => void
+	terminalProfile?: string
 	setTtsEnabled: (value: boolean) => void
 	setTtsSpeed: (value: number) => void
 	setEnableCheckpoints: (value: boolean) => void
@@ -235,6 +236,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		terminalZshOhMy: false, // Default Oh My Zsh integration setting
 		terminalZshP10k: false, // Default Powerlevel10k integration setting
 		terminalZdotdir: false, // Default ZDOTDIR handling setting
+		terminalProfile: undefined, // Default VS Code terminal profile (use VS Code default)
 		historyPreviewCollapsed: false, // Initialize the new state (default to expanded)
 		reasoningBlockCollapsed: true, // Default to collapsed
 		enterBehavior: "send", // Default: Enter sends, Shift+Enter creates newline

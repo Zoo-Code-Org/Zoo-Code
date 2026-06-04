@@ -730,4 +730,760 @@ describe("ReadFileTool", () => {
 			expect(description).toBe("[read_file with missing path]")
 		})
 	})
+
+	describe("legacy format handling", () => {
+		it("should detect legacy format and use backward compatibility path", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedFsReadFile.mockResolvedValue(Buffer.from("legacy content"))
+
+			await readFileTool.execute({ files: [{ path: "legacy.ts" }] } as any, mockTask as any, callbacks)
+
+			// The legacy path emits "File: <path>" entries — proof the backward-compat branch ran.
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("File: legacy.ts"))
+		})
+
+		it("should return error when legacy files array is empty", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			await readFileTool.execute({ files: [] } as any, mockTask as any, callbacks)
+
+			expect(mockTask.consecutiveMistakeCount).toBe(1)
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("read_file")
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Error:"))
+		})
+
+		it("should handle multiple files in legacy format", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedFsReadFile.mockResolvedValueOnce(Buffer.from("file1 content"))
+			mockedFsReadFile.mockResolvedValueOnce(Buffer.from("file2 content"))
+
+			// Override readWithSlice to return content that reflects the actual file data
+			mockedReadWithSlice
+				.mockReturnValueOnce({
+					content: "1 | file1 content",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+				.mockReturnValueOnce({
+					content: "1 | file2 content",
+					returnedLines: 1,
+					totalLines: 1,
+					wasTruncated: false,
+					includedRanges: [[1, 1]],
+				})
+
+			await readFileTool.execute(
+				{ files: [{ path: "file1.ts" }, { path: "file2.ts" }] } as any,
+				mockTask as any,
+				callbacks,
+			)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file1 content"))
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file2 content"))
+		})
+
+		it("should block rooignore-protected files in legacy format", async () => {
+			const mockTask = createMockTask({ rooIgnoreAllowed: false })
+			const callbacks = createMockCallbacks()
+
+			await readFileTool.execute({ files: [{ path: "secret.env" }] } as any, mockTask as any, callbacks)
+
+			expect(mockTask.say).toHaveBeenCalledWith("rooignore_error", "secret.env")
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("blocked by the .rooignore"))
+			// Consistent with the native path: a blocked file fails the tool turn.
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it("should deny legacy file read when user clicks no", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "noButtonClicked", text: undefined, images: undefined })
+
+			await readFileTool.execute({ files: [{ path: "protected.ts" }] } as any, mockTask as any, callbacks)
+
+			expect(mockTask.didRejectTool).toBe(true)
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Denied by user"))
+		})
+
+		it("should handle directory path in legacy format", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedFsStat.mockResolvedValue({ isDirectory: () => true } as any)
+
+			await readFileTool.execute({ files: [{ path: "src/utils" }] } as any, mockTask as any, callbacks)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("it is a directory"))
+			// Consistent with the native path: a failed read fails the tool turn.
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it("should handle line ranges in legacy format", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			// fs.readFile with "utf8" encoding returns a string, not a Buffer
+			mockedFsReadFile.mockResolvedValue("line1\nline2\nline3\nline4\nline5" as any)
+
+			await readFileTool.execute(
+				{ files: [{ path: "test.ts", lineRanges: [{ start: 2, end: 4 }] }] } as any,
+				mockTask as any,
+				callbacks,
+			)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("2 | line2"))
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("4 | line4"))
+		})
+
+		it("should handle binary image files in legacy format with image support", async () => {
+			const mockTask = createMockTask({ supportsImages: true })
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedIsBinaryFile.mockResolvedValue(true)
+			mockedIsSupportedImageFormat.mockReturnValue(true)
+			mockedValidateImageForProcessing.mockResolvedValue({
+				isValid: true,
+				sizeInMB: 0.5,
+			})
+			mockedProcessImageFile.mockResolvedValue({
+				dataUrl: "data:image/png;base64,abc123",
+				buffer: Buffer.from("test"),
+				sizeInKB: 512,
+				sizeInMB: 0.5,
+				notice: "Image processed successfully",
+			})
+
+			await readFileTool.execute({ files: [{ path: "image.png" }] } as any, mockTask as any, callbacks)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("Image file - content processed"),
+			)
+		})
+
+		it("should handle binary image validation failure in legacy format", async () => {
+			const mockTask = createMockTask({ supportsImages: true })
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedIsBinaryFile.mockResolvedValue(true)
+			mockedIsSupportedImageFormat.mockReturnValue(true)
+			mockedValidateImageForProcessing.mockResolvedValue({
+				isValid: false,
+				reason: "size_limit",
+				notice: "Image too large",
+			})
+
+			await readFileTool.execute({ files: [{ path: "large.png" }] } as any, mockTask as any, callbacks)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Image too large"))
+		})
+
+		it("should handle unsupported binary files in legacy format", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedIsBinaryFile.mockResolvedValue(true)
+			mockedIsSupportedImageFormat.mockReturnValue(false)
+
+			await readFileTool.execute({ files: [{ path: "program.exe" }] } as any, mockTask as any, callbacks)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Cannot read binary file"))
+		})
+
+		it("should handle file read errors in legacy format", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedFsReadFile.mockRejectedValue(new Error("ENOENT"))
+
+			await readFileTool.execute({ files: [{ path: "missing.ts" }] } as any, mockTask as any, callbacks)
+
+			expect(mockTask.say).toHaveBeenCalledWith("error", expect.stringContaining("Error reading file"))
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("ENOENT"))
+			// Consistent with the native path: a failed read fails the tool turn.
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it("should handle user feedback on approval in legacy format", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({
+				response: "yesButtonClicked",
+				text: "Read carefully",
+				images: undefined,
+			})
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+
+			await readFileTool.execute({ files: [{ path: "test.ts" }] } as any, mockTask as any, callbacks)
+
+			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Read carefully", undefined)
+		})
+
+		it("should handle user feedback on denial in legacy format", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({
+				response: "noButtonClicked",
+				text: "Not allowed",
+				images: undefined,
+			})
+
+			await readFileTool.execute({ files: [{ path: "secret.ts" }] } as any, mockTask as any, callbacks)
+
+			expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Not allowed", undefined)
+		})
+
+		it("should handle truncation in legacy format when no line ranges", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "1 | content",
+				returnedLines: 100,
+				totalLines: 5000,
+				wasTruncated: true,
+				includedRanges: [[1, 100]],
+			})
+
+			await readFileTool.execute({ files: [{ path: "large.ts" }] } as any, mockTask as any, callbacks)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("File truncated"))
+		})
+
+		it("should track file context in legacy format", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+
+			await readFileTool.execute({ files: [{ path: "tracked.ts" }] } as any, mockTask as any, callbacks)
+
+			expect(mockTask.fileContextTracker.trackFileContext).toHaveBeenCalledWith("tracked.ts", "read_tool")
+		})
+	})
+
+	describe("handlePartial", () => {
+		it("should handle partial display for new format", async () => {
+			const mockTask = createMockTask()
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+
+			const block = {
+				nativeArgs: { path: "src/app.ts" },
+				partial: true,
+			}
+
+			await readFileTool.handlePartial(mockTask as any, block as any)
+
+			expect(mockTask.ask).toHaveBeenCalledWith("tool", expect.stringContaining("readFile"), true)
+		})
+
+		it("should handle partial display for legacy format", async () => {
+			const mockTask = createMockTask()
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+
+			const block = {
+				nativeArgs: { files: [{ path: "legacy.ts" }] },
+				partial: false,
+			}
+
+			await readFileTool.handlePartial(mockTask as any, block as any)
+
+			expect(mockTask.ask).toHaveBeenCalledWith("tool", expect.stringContaining("legacy.ts"), false)
+		})
+
+		it("should handle partial display with empty path", async () => {
+			const mockTask = createMockTask()
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+
+			const block = {
+				nativeArgs: { path: "" },
+				partial: true,
+			}
+
+			await readFileTool.handlePartial(mockTask as any, block as any)
+
+			expect(mockTask.ask).toHaveBeenCalled()
+		})
+
+		it("should handle partial display with no nativeArgs", async () => {
+			const mockTask = createMockTask()
+			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+
+			const block = {
+				nativeArgs: undefined,
+				partial: true,
+			}
+
+			await readFileTool.handlePartial(mockTask as any, block as any)
+
+			expect(mockTask.ask).toHaveBeenCalled()
+		})
+
+		it("should gracefully handle ask rejection in partial", async () => {
+			const mockTask = createMockTask()
+			mockTask.ask.mockRejectedValue(new Error("Cancelled"))
+
+			const block = {
+				nativeArgs: { path: "test.ts" },
+				partial: true,
+			}
+
+			// Should not throw
+			await readFileTool.handlePartial(mockTask as any, block as any)
+
+			expect(mockTask.ask).toHaveBeenCalled()
+		})
+	})
+
+	describe("processTextFile indentation mode edge cases", () => {
+		beforeEach(() => {
+			mockedIsBinaryFile.mockResolvedValue(false)
+		})
+
+		it("should use offset as fallback when anchor_line is not provided in indentation mode", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "5 | line 5 content",
+				returnedLines: 1,
+				totalLines: 10,
+				wasTruncated: false,
+				includedRanges: [[5, 5]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					offset: 5,
+				} as any,
+				mockTask as any,
+				callbacks,
+			)
+
+			expect(mockedReadWithIndentation).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({ anchorLine: 5 }),
+			)
+		})
+
+		it("should default anchorLine to 1 when neither anchor_line nor offset in indentation mode", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "1 | first line",
+				returnedLines: 1,
+				totalLines: 10,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+				} as any,
+				mockTask as any,
+				callbacks,
+			)
+
+			expect(mockedReadWithIndentation).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({ anchorLine: 1 }),
+			)
+		})
+
+		it("should show truncation notice in indentation mode", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "1 | truncated block",
+				returnedLines: 50,
+				totalLines: 200,
+				wasTruncated: true,
+				includedRanges: [[1, 50]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					indentation: { anchor_line: 1 },
+				},
+				mockTask as any,
+				callbacks,
+			)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("File content truncated"))
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("To read more"))
+		})
+
+		it("should include range information in indentation mode when not truncated", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "5 | function foo() { ... }",
+				returnedLines: 10,
+				totalLines: 100,
+				wasTruncated: false,
+				includedRanges: [[5, 14]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					indentation: { anchor_line: 5 },
+				},
+				mockTask as any,
+				callbacks,
+			)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Included ranges: 5-14"))
+		})
+
+		it("should pass all indentation options to readWithIndentation", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "result",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					indentation: {
+						anchor_line: 10,
+						max_levels: 2,
+						include_siblings: true,
+						include_header: false,
+						max_lines: 200,
+					},
+					limit: 500,
+				},
+				mockTask as any,
+				callbacks,
+			)
+
+			expect(mockedReadWithIndentation).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.objectContaining({
+					anchorLine: 10,
+					maxLevels: 2,
+					includeSiblings: true,
+					includeHeader: false,
+					limit: 500,
+					maxLines: 200,
+				}),
+			)
+		})
+	})
+
+	describe("slice mode edge cases", () => {
+		beforeEach(() => {
+			mockedIsBinaryFile.mockResolvedValue(false)
+		})
+
+		it("should convert 1-based offset to 0-based for readWithSlice", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("line1\nline2\nline3"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "4 | line4",
+				returnedLines: 1,
+				totalLines: 10,
+				wasTruncated: false,
+				includedRanges: [[4, 4]],
+			})
+
+			await readFileTool.execute(
+				{ path: "test.ts", mode: "slice", offset: 4, limit: 1 },
+				mockTask as any,
+				callbacks,
+			)
+
+			// offset=4 (1-based) should become 3 (0-based) passed to readWithSlice
+			expect(mockedReadWithSlice).toHaveBeenCalledWith(expect.any(String), 3, 1)
+		})
+
+		it("should use default offset of 1 when not specified", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "1 | content",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
+
+			// Default offset=1 -> 0-based = 0
+			expect(mockedReadWithSlice).toHaveBeenCalledWith(expect.any(String), 0, expect.any(Number))
+		})
+
+		it("should use default limit when not specified", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "1 | content",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
+
+			// Should use DEFAULT_LINE_LIMIT (which is typically 2000)
+			expect(mockedReadWithSlice).toHaveBeenCalledWith(expect.any(String), expect.any(Number), expect.any(Number))
+		})
+
+		it("should show correct line range in truncation notice", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("lots of content"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "5 | partial",
+				returnedLines: 100,
+				totalLines: 500,
+				wasTruncated: true,
+				includedRanges: [[5, 104]],
+			})
+
+			await readFileTool.execute({ path: "test.ts", offset: 5, limit: 100 }, mockTask as any, callbacks)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Showing lines 5-104"))
+		})
+	})
+
+	describe("getLineSnippet and getStartLine", () => {
+		beforeEach(() => {
+			mockedIsBinaryFile.mockResolvedValue(false)
+		})
+
+		it("should show indentation mode snippet in approval message", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "result",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					indentation: { anchor_line: 42 },
+				},
+				mockTask as any,
+				callbacks,
+			)
+
+			// The approval message should contain the indentation mode info
+			const askCall = mockTask.ask.mock.calls[0]
+			const message = JSON.parse(askCall[1])
+			expect(message.reason).toContain("indentation mode at line 42")
+		})
+
+		it("should show line range in approval when offset > 1", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "result",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute({ path: "test.ts", offset: 10, limit: 50 }, mockTask as any, callbacks)
+
+			const askCall = mockTask.ask.mock.calls[0]
+			const message = JSON.parse(askCall[1])
+			expect(message.reason).toContain("lines 10-59")
+			expect(message.startLine).toBe(10)
+		})
+
+		it("should show up to N lines in approval when offset is default", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "result",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
+
+			const askCall = mockTask.ask.mock.calls[0]
+			const message = JSON.parse(askCall[1])
+			expect(message.reason).toContain("up to")
+			expect(message.reason).toContain("lines")
+			expect(message.startLine).toBeUndefined()
+		})
+
+		it("should show indentation mode snippet with offset fallback", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithIndentation.mockReturnValue({
+				content: "result",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute(
+				{
+					path: "test.ts",
+					mode: "indentation",
+					offset: 7,
+				} as any,
+				mockTask as any,
+				callbacks,
+			)
+
+			const askCall = mockTask.ask.mock.calls[0]
+			const message = JSON.parse(askCall[1])
+			expect(message.reason).toContain("indentation mode at line 7")
+		})
+	})
+
+	describe("provider state handling", () => {
+		it("should use default image limits when state is null", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			// Make providerRef return null
+			mockTask.providerRef.deref.mockReturnValue(null)
+
+			mockedIsBinaryFile.mockResolvedValue(false)
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "1 | content",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
+
+			// Should still work - uses default limits
+			expect(callbacks.pushToolResult).toHaveBeenCalled()
+		})
+
+		it("should use default limits when state has no image config", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockTask.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({}),
+			})
+
+			mockedIsBinaryFile.mockResolvedValue(false)
+			mockedFsReadFile.mockResolvedValue(Buffer.from("content"))
+			mockedReadWithSlice.mockReturnValue({
+				content: "1 | content",
+				returnedLines: 1,
+				totalLines: 1,
+				wasTruncated: false,
+				includedRanges: [[1, 1]],
+			})
+
+			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
+
+			expect(callbacks.pushToolResult).toHaveBeenCalled()
+		})
+	})
+
+	describe("error handling edge cases", () => {
+		it("should handle unknown error types (non-Error)", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsStat.mockRejectedValue("string error")
+
+			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
+
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("Error"))
+		})
+
+		it("should set didToolFailInCurrentTurn on rooignore block", async () => {
+			const mockTask = createMockTask({ rooIgnoreAllowed: false })
+			const callbacks = createMockCallbacks()
+
+			await readFileTool.execute({ path: "blocked.ts" }, mockTask as any, callbacks)
+
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it("should set didToolFailInCurrentTurn on directory read", async () => {
+			const mockTask = createMockTask()
+			const callbacks = createMockCallbacks()
+
+			mockedFsStat.mockResolvedValue({ isDirectory: () => true } as any)
+
+			await readFileTool.execute({ path: "src/" }, mockTask as any, callbacks)
+
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+	})
 })

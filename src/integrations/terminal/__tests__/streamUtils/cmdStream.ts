@@ -25,7 +25,7 @@ export function createCmdCommandStream(command: string): CommandStream {
 	} catch (error: any) {
 		// Command failed - get output and exit code from error
 		realOutput = error.stdout?.toString() || ""
-		exitCode = error.status || 1
+		exitCode = error.status ?? 1
 	}
 
 	// Create an async iterator for the stream

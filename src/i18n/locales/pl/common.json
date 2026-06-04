@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: Otrzymano nieprawidłowy token uwierzytelniania.",
 			"token_verification_failed": "Zoo Code: Weryfikacja tokenu nie powiodła się.",
 			"invalid_token": "Zoo Code: Nieprawidłowy token.",
-			"could_not_verify_token": "Zoo Code: Nie udało się zweryfikować tokenu."
+			"could_not_verify_token": "Zoo Code: Nie udało się zweryfikować tokenu.",
+			"session_expired": "Sesja Zoo Code wygasła. Zaloguj się ponownie, aby kontynuować korzystanie z Zoo Gateway.",
+			"out_of_credits": "Zoo Gateway: niewystarczające środki. Doładuj, aby kontynuować.",
+			"account_unavailable": "Zoo Gateway: Twoje konto jest obecnie niedostępne. Skontaktuj się z pomocą techniczną.",
+			"budget_exceeded": "Zoo Gateway: osiągnięto budżet użycia. Poczekaj na reset lub doładuj."
 		},
 		"info": {
 			"connected": "Zoo Code: Połączono pomyślnie! Możesz teraz używać Zoo Code jako dostawcy AI.",
 			"disconnected": "Zoo Code: Rozłączono pomyślnie."
+		},
+		"buttons": {
+			"sign_in": "Zaloguj się",
+			"add_credits": "Doładuj",
+			"contact_support": "Kontakt z pomocą"
 		}
 	},
 	"codeActions": {

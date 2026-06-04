@@ -1,7 +1,7 @@
-import { HTMLAttributes, useState, useCallback } from "react"
+import { HTMLAttributes, useState, useCallback, useEffect, useId } from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { vscode } from "@/utils/vscode"
-import { VSCodeCheckbox, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeCheckbox, VSCodeLink, VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
 import { buildDocLink } from "@src/utils/docLinks"
 import { useEvent, useMount } from "react-use"
@@ -26,6 +26,8 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	terminalZshOhMy?: boolean
 	terminalZshP10k?: boolean
 	terminalZdotdir?: boolean
+	terminalProfile?: string
+	onTerminalProfilePickerOpened?: () => void
 	setCachedStateField: SetCachedStateField<
 		| "terminalOutputPreviewSize"
 		| "terminalShellIntegrationTimeout"
@@ -36,8 +38,13 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "terminalZshOhMy"
 		| "terminalZshP10k"
 		| "terminalZdotdir"
+		| "terminalProfile"
 	>
 }
+
+// Sentinel value that maps to `undefined` (use VS Code's default shell).
+// The Select component cannot accept empty-string item values.
+const DEFAULT_PROFILE_VALUE = "__default__"
 
 export const TerminalSettings = ({
 	terminalOutputPreviewSize,
@@ -49,6 +56,8 @@ export const TerminalSettings = ({
 	terminalZshOhMy,
 	terminalZshP10k,
 	terminalZdotdir,
+	terminalProfile,
+	onTerminalProfilePickerOpened,
 	setCachedStateField,
 	className,
 	...props
@@ -56,21 +65,33 @@ export const TerminalSettings = ({
 	const { t } = useAppTranslation()
 
 	const [inheritEnv, setInheritEnv] = useState<boolean>(true)
+	const [profileNames, setProfileNames] = useState<string[]>([])
+	const [isProfilesLoaded, setIsProfilesLoaded] = useState(false)
+	const profileModeId = useId()
+	const defaultProfileId = `${profileModeId}-default`
+	const overrideProfileId = `${profileModeId}-override`
+	const isProfileOverrideSelected = !!terminalProfile && (!isProfilesLoaded || profileNames.includes(terminalProfile))
+	const isVSCodeTerminalEnabled = terminalShellIntegrationDisabled === false
 
-	useMount(() => vscode.postMessage({ type: "getVSCodeSetting", setting: "terminal.integrated.inheritEnv" }))
+	useMount(() => {
+		vscode.postMessage({ type: "getVSCodeSetting", setting: "terminal.integrated.inheritEnv" })
+		// Request the terminal profile names through a dedicated, allowlisted message
+		// (the extension reads the profiles and returns only sanitized names).
+		vscode.postMessage({ type: "requestTerminalProfiles" })
+	})
 
 	const onMessage = useCallback((event: MessageEvent) => {
 		const message: ExtensionMessage = event.data
 
 		switch (message.type) {
 			case "vsCodeSetting":
-				switch (message.setting) {
-					case "terminal.integrated.inheritEnv":
-						setInheritEnv(message.value ?? true)
-						break
-					default:
-						break
+				if (message.setting === "terminal.integrated.inheritEnv") {
+					setInheritEnv(message.value ?? true)
 				}
+				break
+			case "terminalProfiles":
+				setProfileNames(message.profiles ?? [])
+				setIsProfilesLoaded(true)
 				break
 			default:
 				break
@@ -78,6 +99,12 @@ export const TerminalSettings = ({
 	}, [])
 
 	useEvent("message", onMessage)
+
+	useEffect(() => {
+		if (isProfilesLoaded && terminalProfile && !profileNames.includes(terminalProfile)) {
+			setCachedStateField("terminalProfile", undefined)
+		}
+	}, [isProfilesLoaded, profileNames, setCachedStateField, terminalProfile])
 
 	return (
 		<div className={cn("flex flex-col", className)} {...props}>
@@ -139,6 +166,111 @@ export const TerminalSettings = ({
 						</div>
 					</div>
 					<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
+						{/* Profile override — only applies when VS Code integrated terminal is active
+						    (shell integration enabled). Hidden in Execa/inline mode since getProfileShell()
+						    is not wired there. */}
+						{isVSCodeTerminalEnabled && (
+							<SearchableSetting
+								settingId="terminal-profile"
+								section="terminal"
+								label={t("settings:terminal.profile.label")}>
+								<label className="block font-medium mb-1">{t("settings:terminal.profile.label")}</label>
+
+								{/* Level 1: Default (recommended) */}
+								<div className="flex items-center gap-2 mb-2">
+									<input
+										type="radio"
+										id={defaultProfileId}
+										name={profileModeId}
+										checked={!isProfileOverrideSelected}
+										onChange={() => setCachedStateField("terminalProfile", undefined)}
+										data-testid="terminal-profile-default-radio"
+									/>
+									<label htmlFor={defaultProfileId} className="cursor-pointer">
+										{t("settings:terminal.profile.default")}
+									</label>
+									<VSCodeButton
+										appearance="secondary"
+										onClick={() => {
+											onTerminalProfilePickerOpened?.()
+											vscode.postMessage({ type: "openTerminalProfilePicker" })
+										}}
+										data-testid="terminal-profile-configure-button">
+										{t("settings:terminal.profile.configureButton")}
+									</VSCodeButton>
+								</div>
+
+								{/* Level 2: Override */}
+								<div className="flex items-center gap-2 mb-2">
+									<input
+										type="radio"
+										id={overrideProfileId}
+										name={profileModeId}
+										checked={isProfileOverrideSelected}
+										disabled={profileNames.length === 0}
+										onChange={() => {
+											if (!terminalProfile && profileNames.length > 0) {
+												setCachedStateField("terminalProfile", profileNames[0])
+											}
+										}}
+										data-testid="terminal-profile-override-radio"
+									/>
+									<label
+										htmlFor={overrideProfileId}
+										className={
+											profileNames.length === 0
+												? "cursor-not-allowed text-vscode-disabledForeground"
+												: "cursor-pointer"
+										}>
+										{t("settings:terminal.profile.overrideLabel")}
+									</label>
+									{profileNames.length === 0 && (
+										<span
+											className="text-vscode-descriptionForeground text-xs"
+											data-testid="terminal-profile-no-profiles-hint">
+											{t("settings:terminal.profile.noProfiles")}
+										</span>
+									)}
+								</div>
+
+								{isProfileOverrideSelected && profileNames.length > 0 && (
+									<Select
+										value={terminalProfile || DEFAULT_PROFILE_VALUE}
+										data-testid="terminal-profile-dropdown"
+										onValueChange={(value) =>
+											setCachedStateField(
+												"terminalProfile",
+												value === DEFAULT_PROFILE_VALUE ? undefined : value,
+											)
+										}>
+										<SelectTrigger className="w-full ml-6">
+											<SelectValue placeholder={t("settings:common.select")} />
+										</SelectTrigger>
+										<SelectContent>
+											{profileNames.map((name) => (
+												<SelectItem key={name} value={name}>
+													{name}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+								)}
+
+								<div className="text-vscode-descriptionForeground text-sm mt-1">
+									<Trans i18nKey="settings:terminal.profile.description">
+										<VSCodeLink
+											href={buildDocLink(
+												"features/shell-integration",
+												"settings_terminal_profile",
+											)}
+											style={{ display: "inline" }}>
+											{" "}
+										</VSCodeLink>
+									</Trans>
+								</div>
+							</SearchableSetting>
+						)}
+
 						<SearchableSetting
 							settingId="terminal-shell-integration-disabled"
 							section="terminal"
@@ -166,7 +298,7 @@ export const TerminalSettings = ({
 							</div>
 						</SearchableSetting>
 
-						{!terminalShellIntegrationDisabled && (
+						{isVSCodeTerminalEnabled && (
 							<>
 								<SearchableSetting
 									settingId="terminal-inherit-env"
@@ -257,7 +389,7 @@ export const TerminalSettings = ({
 												)
 											}
 										/>
-										<span className="w-10">{terminalCommandDelay ?? 50}ms</span>
+										<span className="w-10">{terminalCommandDelay ?? 0}ms</span>
 									</div>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
 										<Trans i18nKey="settings:terminal.commandDelay.description">
