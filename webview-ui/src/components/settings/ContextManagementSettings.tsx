@@ -413,8 +413,10 @@ export const ContextManagementSettings = ({
 				<SearchableSetting
 					settingId="context-diff-fuzzy-threshold"
 					section="contextManagement"
-					label="Diff Match Threshold">
-					<span className="block font-medium mb-1">Diff Match Threshold</span>
+					label={t("settings:contextManagement.diagnostics.diffFuzzyThreshold.label")}>
+					<span className="block font-medium mb-1">
+						{t("settings:contextManagement.diagnostics.diffFuzzyThreshold.label")}
+					</span>
 					<div className="flex items-center gap-2">
 						<Slider
 							min={0.5}
@@ -429,8 +431,7 @@ export const ContextManagementSettings = ({
 						</span>
 					</div>
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
-						Lower thresholds make file edits more resilient to formatting and whitespace variations. A
-						threshold of 100% requires an exact match.
+						{t("settings:contextManagement.diagnostics.diffFuzzyThreshold.description")}
 					</div>
 				</SearchableSetting>
 

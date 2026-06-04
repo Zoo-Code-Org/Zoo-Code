@@ -1,19 +1,18 @@
 import { z } from "zod"
 
-import { type Keys } from "./type-fu.js"
+import { codebaseIndexConfigSchema, codebaseIndexModelsSchema } from "./codebase-index.js"
+import { experimentsSchema } from "./experiment.js"
+import { historyItemSchema } from "./history.js"
+import { customModePromptsSchema, customSupportPromptsSchema, modeConfigSchema } from "./mode.js"
 import {
 	type ProviderSettings,
 	PROVIDER_SETTINGS_KEYS,
 	providerSettingsEntrySchema,
 	providerSettingsSchema,
 } from "./provider-settings.js"
-import { historyItemSchema } from "./history.js"
-import { codebaseIndexModelsSchema, codebaseIndexConfigSchema } from "./codebase-index.js"
-import { experimentsSchema } from "./experiment.js"
 import { telemetrySettingsSchema } from "./telemetry.js"
-import { modeConfigSchema } from "./mode.js"
-import { customModePromptsSchema, customSupportPromptsSchema } from "./mode.js"
 import { toolNamesSchema } from "./tool.js"
+import { type Keys } from "./type-fu.js"
 import { languagesSchema } from "./vscode.js"
 
 /**
@@ -113,7 +112,7 @@ export const globalSettingsSchema = z.object({
 	writeDelayMs: z.number().min(0).optional(),
 	/**
 	 * Fuzzy matching threshold for the multi-search-replace diff strategy.
-	 * Range: 0.0 (accept anything) to 1.0 (exact match only).
+	 * Range: 0.5 (accept anything) to 1.0 (exact match only).
 	 * `@default` 0.9
 	 */
 	diffFuzzyThreshold: z.number().min(0.5).max(1).optional(),
