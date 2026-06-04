@@ -8,10 +8,14 @@ vi.mock("delay", () => ({
 	default: vi.fn().mockResolvedValue(undefined),
 }))
 
-// Mock fs/promises
+// Mock fs/promises — readFile returns what writeFile last wrote
+let mockFileContent = "file content"
 vi.mock("fs/promises", () => ({
-	readFile: vi.fn().mockResolvedValue("file content"),
-	writeFile: vi.fn().mockResolvedValue(undefined),
+	readFile: vi.fn().mockImplementation(() => Promise.resolve(mockFileContent)),
+	writeFile: vi.fn().mockImplementation((_path: string, content: string) => {
+		mockFileContent = content
+		return Promise.resolve(undefined)
+	}),
 }))
 
 // Mock utils
@@ -33,10 +37,13 @@ vi.mock("vscode", () => ({
 		openTextDocument: vi.fn().mockResolvedValue({
 			isDirty: false,
 			save: vi.fn().mockResolvedValue(undefined),
+			getText: vi.fn().mockReturnValue(""),
 		}),
 		textDocuments: [],
 		fs: {
 			stat: vi.fn(),
+			writeFile: vi.fn().mockResolvedValue(undefined),
+			readFile: vi.fn().mockResolvedValue(Buffer.from("")),
 		},
 	},
 	window: {
@@ -122,6 +129,7 @@ describe("DiffViewProvider", () => {
 					getState: vi.fn().mockResolvedValue({
 						includeDiagnosticMessages: true,
 						maxDiagnosticMessages: 50,
+						autoApprovalEnabled: true,
 					}),
 				}),
 			},
@@ -358,10 +366,38 @@ describe("DiffViewProvider", () => {
 	})
 
 	describe("saveDirectly method", () => {
-		beforeEach(() => {
-			// Mock vscode functions
+		beforeEach(async () => {
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+			const fs = await import("fs/promises")
+			vi.mocked(fs.readFile).mockResolvedValue("new content" as any)
+			vi.mocked(fs.writeFile).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue({
+				isDirty: false,
+				save: vi.fn().mockResolvedValue(undefined),
+				getText: vi.fn().mockReturnValue("new content"),
+				uri: { fsPath: `${mockCwd}/test.ts` },
+				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+			} as any)
+		})
+
+		it("should use fs.writeFile instead of vscode.workspace.fs.writeFile", async () => {
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
+
+			// Verify file was written via fs.writeFile, not vscode.workspace.fs.writeFile
+			const fs = await import("fs/promises")
+			expect(fs.writeFile).toHaveBeenCalledWith(
+				expect.stringContaining(`${mockCwd}/test.ts`),
+				"new content",
+				"utf-8",
+			)
+
+			// Verify vscode.workspace.fs.writeFile was NOT called
+			expect(vscode.workspace.fs.writeFile).not.toHaveBeenCalled()
+
+			// Verify result
+			expect(result.newProblemsMessage).toBe("")
+			expect(result.finalContent).toBe("new content")
 		})
 
 		it("should write content directly to file without opening diff view", async () => {
@@ -370,9 +406,13 @@ describe("DiffViewProvider", () => {
 
 			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 2000)
 
-			// Verify file was written
+			// Verify file was written via fs.writeFile
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(fs.writeFile).toHaveBeenCalledWith(
+				expect.stringContaining(`${mockCwd}/test.ts`),
+				"new content",
+				"utf-8",
+			)
 
 			// Verify file was opened without focus
 			expect(vscode.window.showTextDocument).toHaveBeenCalledWith(
@@ -390,14 +430,18 @@ describe("DiffViewProvider", () => {
 			expect(result.finalContent).toBe("new content")
 		})
 
-		it("should not open file when openWithoutFocus is false", async () => {
+		it("should not open file when openFile is false", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 1000)
 
-			// Verify file was written
+			// Verify file was written via fs.writeFile
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(fs.writeFile).toHaveBeenCalledWith(
+				expect.stringContaining(`${mockCwd}/test.ts`),
+				"new content",
+				"utf-8",
+			)
 
-			// Verify file was NOT opened
+			// Verify showTextDocument was NOT called (background mode)
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
 		})
 
@@ -408,9 +452,9 @@ describe("DiffViewProvider", () => {
 
 			await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 1000)
 
-			// Verify file was written
+			// Verify file was written via fs.writeFile
 			const fs = await import("fs/promises")
-			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
+			expect(fs.writeFile).toHaveBeenCalled()
 
 			// Verify delay was NOT called
 			expect(mockDelay).not.toHaveBeenCalled()
@@ -433,9 +477,74 @@ describe("DiffViewProvider", () => {
 
 			// Verify internal state was updated
 			expect((diffViewProvider as any).newProblemsMessage).toBe("")
-			expect((diffViewProvider as any).userEdits).toBeUndefined()
 			expect((diffViewProvider as any).relPath).toBe("test.ts")
 			expect((diffViewProvider as any).newContent).toBe("new content")
+		})
+
+		it("should verify content matches after write and retry if mismatch", async () => {
+			// First readFile returns wrong content (simulating write failure)
+			// Second readFile (after retry) returns correct content
+			let readCount = 0
+			const fs = await import("fs/promises")
+			vi.mocked(fs.readFile).mockImplementation(() => {
+				readCount++
+				if (readCount === 1) {
+					return Promise.resolve("wrong content" as any)
+				}
+				return Promise.resolve("new content" as any)
+			})
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+			// Verify write was called twice (initial + retry)
+			expect(fs.writeFile).toHaveBeenCalledTimes(2)
+
+			// Verify readFile was called twice (initial verification + retry verification)
+			expect(fs.readFile).toHaveBeenCalledTimes(2)
+
+			// Verify result still succeeds
+			expect(result.finalContent).toBe("new content")
+		})
+
+		it("should throw error if content verification fails after retry", async () => {
+			// readFile always returns wrong content
+			const fs = await import("fs/promises")
+			vi.mocked(fs.readFile).mockResolvedValue("corrupted" as any)
+
+			await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)).rejects.toThrow(
+				"Failed to save content to test.ts after 3 attempts",
+			)
+		})
+
+		it("should skip user edit detection when openTextDocument fails", async () => {
+			// openTextDocument throws for user edit detection
+			vi.mocked(vscode.workspace.openTextDocument).mockRejectedValue(new Error("file not found"))
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+			// Verify no error is thrown and userEdits is undefined
+			expect(result.userEdits).toBeUndefined()
+			expect(result.finalContent).toBe("new content")
+		})
+
+		it("should detect user edits in background mode", async () => {
+			// Simulate user edits: final document content differs from what we wrote
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValue({
+				isDirty: false,
+				getText: vi.fn().mockReturnValue("user modified content"),
+				uri: { fsPath: `${mockCwd}/test.ts` },
+				positionAt: vi.fn().mockReturnValue({ line: 0, character: 0 }),
+			} as any)
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
+
+			// Verify userEdits was detected and returned
+			expect(result.userEdits).toBeDefined()
+			expect(typeof result.userEdits).toBe("string")
+			expect(result.userEdits).toContain("user modified content")
+
+			// Verify internal state was updated
+			expect((diffViewProvider as any).userEdits).toBeDefined()
 		})
 	})
 

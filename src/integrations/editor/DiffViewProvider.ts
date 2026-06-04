@@ -645,6 +645,7 @@ export class DiffViewProvider {
 		openFile: boolean = true,
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		isWriteProtected: boolean = false,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -652,31 +653,79 @@ export class DiffViewProvider {
 	}> {
 		const absolutePath = path.resolve(this.cwd, relPath)
 
+		// Protected files must always show diff view for manual review,
+		// even when background editing is enabled. This prevents accidental
+		// modification of sensitive configuration files.
+		if (isWriteProtected && !openFile) {
+			openFile = true
+		}
+
+		// When auto-approval is disabled, force showing the file so the user
+		// can review changes. Background editing only makes sense when writes
+		// are auto-approved (#8736).
+		if (!openFile) {
+			const task = this.taskRef.deref()
+			const provider = task?.providerRef.deref()
+			if (provider) {
+				const state = await provider.getState()
+				if (!state?.autoApprovalEnabled) {
+					openFile = true
+				}
+			}
+		}
+
 		// Get diagnostics before editing the file
 		this.preDiagnostics = vscode.languages.getDiagnostics()
 
-		// Write the content directly to the file
+		// Write the content directly to the file using Node's fs.
+		// Node's fs.writeFile does NOT notify VSCode's file watcher, which is
+		// intentional — it prevents open editor tabs from showing "unsaved changes"
+		// prompts when the user tries to close them after background editing.
 		await createDirectoriesForFile(absolutePath)
 		await fs.writeFile(absolutePath, content, "utf-8")
 
+		// Verify the content was written correctly to disk with exponential backoff retry
+		const fileUri = vscode.Uri.file(absolutePath)
+		const MAX_WRITE_RETRIES = 3
+		let writeVerified = false
+		for (let attempt = 0; attempt < MAX_WRITE_RETRIES; attempt++) {
+			const verifyContent = await fs.readFile(absolutePath, "utf-8")
+			if (verifyContent === content) {
+				writeVerified = true
+				break
+			}
+			if (attempt < MAX_WRITE_RETRIES - 1) {
+				// Exponential backoff: 100ms, 200ms
+				await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 100))
+				await fs.writeFile(absolutePath, content, "utf-8")
+			}
+		}
+		if (!writeVerified) {
+			throw new Error(`Failed to save content to ${relPath} after ${MAX_WRITE_RETRIES} attempts`)
+		}
+
 		// Open the document to ensure diagnostics are loaded
-		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open in memory
+		// When openFile is false (PREVENT_FOCUS_DISRUPTION enabled), we only open
+		// in memory and immediately save to mark it as "clean" in VSCode — this
+		// prevents the "unsaved changes" prompt when closing the tab.
 		if (openFile) {
-			// Show the document in the editor
-			await vscode.window.showTextDocument(vscode.Uri.file(absolutePath), {
+			// Show the document in the editor without stealing focus
+			await vscode.window.showTextDocument(fileUri, {
 				preview: false,
 				preserveFocus: true,
 			})
 		} else {
-			// Just open the document in memory to trigger diagnostics without showing it
-			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+			// Open the document in memory to trigger diagnostics without showing it
+			const doc = await vscode.workspace.openTextDocument(fileUri)
 
-			// Save the document to ensure VSCode recognizes it as saved and triggers diagnostics
+			// Save the document to ensure VSCode recognizes it as saved and
+			// triggers diagnostics. Without this, VSCode would show "unsaved
+			// changes" when the user tries to close the file.
 			if (doc.isDirty) {
 				await doc.save()
 			}
 
-			// Force a small delay to ensure diagnostics are triggered
+			// Small delay to allow diagnostics to be triggered
 			await new Promise((resolve) => setTimeout(resolve, 100))
 		}
 
@@ -712,15 +761,35 @@ export class DiffViewProvider {
 				newProblems.length > 0 ? `\n\nNew problems detected after saving the file:\n${newProblems}` : ""
 		}
 
+		// Read back the final content to detect any user modifications
+		// that may have occurred via external editors or file watchers
+		let detectedUserEdits: string | undefined
+		try {
+			const finalDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(absolutePath))
+			const finalDocContent = finalDoc.getText()
+			const normalizedExpected = content.replace(/\r\n|\n/g, "\n")
+			const normalizedActual = finalDocContent.replace(/\r\n|\n/g, "\n")
+
+			if (normalizedActual !== normalizedExpected) {
+				detectedUserEdits = formatResponse.createPrettyPatch(
+					relPath.toPosix(),
+					normalizedExpected,
+					normalizedActual,
+				)
+			}
+		} catch {
+			// If we can't read back the document, proceed without user edit detection
+		}
+
 		// Store the results for formatFileWriteResponse
 		this.newProblemsMessage = newProblemsMessage
-		this.userEdits = undefined
+		this.userEdits = detectedUserEdits
 		this.relPath = relPath
 		this.newContent = content
 
 		return {
 			newProblemsMessage,
-			userEdits: undefined,
+			userEdits: detectedUserEdits,
 			finalContent: content,
 		}
 	}

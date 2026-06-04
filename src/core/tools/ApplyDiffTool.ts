@@ -19,6 +19,9 @@ import { BaseTool, ToolCallbacks } from "./BaseTool"
 interface ApplyDiffParams {
 	path: string
 	diff: string
+	ref?: import("../../shared/tools").ContentRef
+	multi_ref?: import("../../shared/tools").ContentRef[]
+	transform?: import("../../shared/tools").ContentRefParams["transform"]
 }
 
 export class ApplyDiffTool extends BaseTool<"apply_diff"> {
@@ -173,7 +176,6 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					return
 				}
 
-				// Save directly without showing diff view or opening the file
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
 				await task.diffViewProvider.saveDirectly(
@@ -182,6 +184,7 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					isWriteProtected,
 				)
 			} else {
 				// Original behavior with diff view
