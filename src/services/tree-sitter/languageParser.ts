@@ -1,5 +1,23 @@
 import * as path from "path"
 import { Parser as ParserT, Language as LanguageT, Query as QueryT } from "web-tree-sitter"
+
+/**
+ * Pre-warm a tree-sitter language's WASM JIT by doing one throw-away
+ * query.captures() call. The first query.captures() call for large WASM
+ * grammars (e.g. Swift 3.1MB, ObjC 7.4MB) can take 20+ seconds due to
+ * V8's lazy WASM JIT compilation. Subsequent calls are ~1ms.
+ *
+ * @returns time taken for the warmup in ms, or 0 if skipped
+ */
+async function warmUpWasmJit(language: LanguageT, queryString: string): Promise<number> {
+	const shim = new ParserT()
+	shim.setLanguage(language)
+	const shimTree = shim.parse("class Foo {}")
+	const shimQuery = new QueryT(language, queryString)
+	const start = performance.now()
+	shimQuery.captures(shimTree.rootNode)
+	return performance.now() - start
+}
 import {
 	javascriptQuery,
 	typescriptQuery,
@@ -152,6 +170,12 @@ export async function loadRequiredLanguageParsers(filesToParse: string[], source
 			case "swift":
 				language = await loadLanguage("swift", sourceDirectory)
 				query = new Query(language, swiftQuery)
+				// Pre-warm WASM JIT — first query.captures() for 3.1MB Swift grammar
+				// takes ~22-24s due to V8 lazy compilation. Must await so the
+				// caller doesn't hit the stall later.
+				console.log(`[tree-sitter] Warming up Swift WASM JIT...`)
+				const warmupMs = await warmUpWasmJit(language, swiftQuery)
+				console.log(`[tree-sitter] Swift WASM JIT warmup: ${warmupMs.toFixed(0)}ms`)
 				break
 			case "kt":
 			case "kts":
