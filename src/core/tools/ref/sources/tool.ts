@@ -51,7 +51,7 @@ export async function resolveToolSource(ref: ContentRef, task: Task): Promise<Se
 						"TOOL_SOURCE",
 						`Found tool result: toolName="${toolName}", toolUseId="${toolUseId}", contentLength=${content.length}`,
 					)
-					const result = resolveContentRef(sourceId, content, ref)
+					const result = await resolveContentRef(sourceId, content, ref)
 					successCrt("TOOL_SOURCE", `resolved tool result for "${toolName}" (id=${toolUseId})`, {
 						sourceId: result.sourceId,
 						confidence: result.confidence,

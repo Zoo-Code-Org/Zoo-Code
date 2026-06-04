@@ -36,16 +36,15 @@ vi.mock("../../../../utils/storage", () => ({
 // Mock selector module (resolveContentRef used by all resolvers)
 // ---------------------------------------------------------------------------
 vi.mock("../selector", () => ({
-	resolveContentRef: vi.fn(
-		(sourceId: string, source: string, ref: any) =>
-			({
-				sourceId,
-				content: source,
-				startOffset: 0,
-				endOffset: source.length,
-				confidence: 1.0,
-				method: "exact" as const,
-			}) as const,
+	resolveContentRef: vi.fn((sourceId: string, source: string, ref: any, cwd?: string) =>
+		Promise.resolve({
+			sourceId,
+			content: source,
+			startOffset: 0,
+			endOffset: source.length,
+			confidence: 1.0,
+			method: "exact" as const,
+		}),
 	),
 }))
 
@@ -368,6 +367,8 @@ describe("resolveFileSource", () => {
 				"file:///workspace/test.txt",
 				fileContent,
 				expect.objectContaining({ source: "file", ref: "test.txt" }),
+				undefined,
+				"/workspace",
 			)
 			expect(result.content).toBe(fileContent)
 		})

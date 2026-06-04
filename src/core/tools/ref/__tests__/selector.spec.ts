@@ -205,80 +205,80 @@ describe("resolveAnchorPair", () => {
 
 describe("resolveContentRef", () => {
 	describe("Priority 1 — Line Range (file source only)", () => {
-		it("extracts a single line by startLine", () => {
+		it("extracts a single line by startLine", async () => {
 			const ref = makeRef({ source: "file", ref: "src/test.ts", startLine: 1 })
-			const result = resolveContentRef("test.ts", SOURCE_CODE, ref)
+			const result = await resolveContentRef("test.ts", SOURCE_CODE, ref)
 			expect(result.content).toContain("function greet")
 			expect(result.line).toBe(1)
 			expect(result.confidence).toBe(1.0)
 		})
 
-		it("extracts a line range", () => {
+		it("extracts a line range", async () => {
 			const ref = makeRef({ source: "file", ref: "src/test.ts", startLine: 1, endLine: 3 })
-			const result = resolveContentRef("test.ts", SOURCE_CODE, ref)
+			const result = await resolveContentRef("test.ts", SOURCE_CODE, ref)
 			const lines = result.content.split("\n")
 			expect(lines.length).toBe(3)
 			expect(lines[0]).toContain("function greet")
 		})
 
-		it("clamps endLine to source length", () => {
+		it("clamps endLine to source length", async () => {
 			const ref = makeRef({ source: "file", ref: "src/test.ts", startLine: 1, endLine: 999 })
-			const result = resolveContentRef("test.ts", SOURCE_CODE, ref)
+			const result = await resolveContentRef("test.ts", SOURCE_CODE, ref)
 			expect(result.content).toBe(SOURCE_CODE)
 		})
 
-		it("throws when startLine exceeds source line count", () => {
+		it("throws when startLine exceeds source line count", async () => {
 			const ref = makeRef({ source: "file", ref: "src/test.ts", startLine: 999 })
-			expect(() => resolveContentRef("test.ts", SOURCE_CODE, ref)).toThrow()
+			await expect(() => resolveContentRef("test.ts", SOURCE_CODE, ref)).rejects.toThrow()
 		})
 	})
 
 	describe("Priority 2 — Anchor Pair", () => {
-		it("resolves via startAnchor+endAnchor", () => {
+		it("resolves via startAnchor+endAnchor", async () => {
 			const ref = makeRef({ source: "chat", ref: "-1", startAnchor: "function greet", endAnchor: "return" })
-			const result = resolveContentRef("chat:-1", SOURCE_CODE, ref)
+			const result = await resolveContentRef("chat:-1", SOURCE_CODE, ref)
 			expect(result.method).toBe("anchor")
 			expect(result.content).toContain("function greet")
 		})
 	})
 
 	describe("Priority 3 — Selector", () => {
-		it("resolves via exact selector", () => {
+		it("resolves via exact selector", async () => {
 			const ref = makeRef({ source: "chat", ref: "-1", selector: "return greeting" })
-			const result = resolveContentRef("chat:-1", SOURCE_CODE, ref)
+			const result = await resolveContentRef("chat:-1", SOURCE_CODE, ref)
 			expect(result.method).toBe("exact")
 			expect(result.content).toBe("return greeting")
 		})
 	})
 
 	describe("Priority 4 — Focus (AST expansion)", () => {
-		it("resolves via focus keyword using AST expansion when function is found", () => {
+		it("resolves via focus keyword using AST expansion when function is found", async () => {
 			const ref = makeRef({ source: "chat", ref: "-1", focus: "farewell" })
-			const result = resolveContentRef("chat:-1", SOURCE_CODE, ref)
+			const result = await resolveContentRef("chat:-1", SOURCE_CODE, ref)
 			expect(result.method).toBe("focus")
 			expect(result.confidence).toBe(1.0)
 			expect(result.content).toContain("function farewell")
 			expect(result.content).toContain("console.log")
 		})
 
-		it("falls back to selector matching when AST cannot resolve", () => {
+		it("falls back to selector matching when AST cannot resolve", async () => {
 			// "Hello" — не функция/класс/метод → падает на selector
 			const ref = makeRef({ source: "chat", ref: "-1", focus: "Hello" })
-			const result = resolveContentRef("chat:-1", SOURCE_CODE, ref)
+			const result = await resolveContentRef("chat:-1", SOURCE_CODE, ref)
 			expect(result.method).toBe("exact")
 			expect(result.content).toBe("Hello")
 		})
 	})
 
 	describe("Error Handling", () => {
-		it("throws when no matching strategy is specified", () => {
+		it("throws when no matching strategy is specified", async () => {
 			const ref = makeRef({ source: "chat", ref: "-1" })
-			expect(() => resolveContentRef("chat:-1", SOURCE_CODE, ref)).toThrow("must specify at least one")
+			await expect(resolveContentRef("chat:-1", SOURCE_CODE, ref)).rejects.toThrow("must specify at least one")
 		})
 
-		it("throws when source is empty", () => {
+		it("throws when source is empty", async () => {
 			const ref = makeRef({ source: "chat", ref: "-1", selector: "anything" })
-			expect(() => resolveContentRef("empty", "", ref)).toThrow("Empty source")
+			await expect(resolveContentRef("empty", "", ref)).rejects.toThrow("Empty source")
 		})
 	})
 })
@@ -309,10 +309,10 @@ describe("resolveSelector — Unicode & Edge Cases", () => {
 		expect(result.method).toBe("normalized")
 	})
 
-	it("handles empty lines in line range extraction", () => {
+	it("handles empty lines in line range extraction", async () => {
 		const source = "line1\n\n\nline4"
 		const ref = makeRef({ source: "file", ref: "test.txt", startLine: 2, endLine: 4 })
-		const result = resolveContentRef("test", source, ref)
+		const result = await resolveContentRef("test", source, ref)
 		expect(result.content).toBe("\n\nline4")
 	})
 
@@ -603,7 +603,7 @@ function process() { return 2 }`
 // ---------------------------------------------------------------------------
 
 describe("resolveContentRef — Focus AST", () => {
-	it("использует AST-расширение для focus, когда оно находится", () => {
+	it("использует AST-расширение для focus, когда оно находится", async () => {
 		const source = `function calculateSum(a: number, b: number): number {
 	const result = a + b
 	return result
@@ -619,7 +619,7 @@ describe("resolveContentRef — Focus AST", () => {
 			endLine: undefined,
 			contextType: undefined,
 		}
-		const result = resolveContentRef("chat:-1", source, ref)
+		const result = await resolveContentRef("chat:-1", source, ref)
 		expect(result.method).toBe("focus")
 		expect(result.confidence).toBe(1.0)
 		expect(result.content).toContain("function calculateSum")
@@ -628,7 +628,7 @@ describe("resolveContentRef — Focus AST", () => {
 		expect(result.endLine).toBe(4)
 	})
 
-	it("падает на selector, если AST не смог определить границы", () => {
+	it("падает на selector, если AST не смог определить границы", async () => {
 		const source = `some text with calculateSum inside a comment`
 		const ref: ContentRef = {
 			source: "chat",
@@ -641,7 +641,7 @@ describe("resolveContentRef — Focus AST", () => {
 			endLine: undefined,
 			contextType: undefined,
 		}
-		const result = resolveContentRef("chat:-1", source, ref)
+		const result = await resolveContentRef("chat:-1", source, ref)
 		expect(result.method).toBe("exact")
 		expect(result.content).toBe("calculateSum")
 	})

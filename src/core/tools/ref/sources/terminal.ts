@@ -79,7 +79,7 @@ export async function resolveTerminalSource(ref: ContentRef, task: Task): Promis
 
 	const sourceId = `terminal://${path.basename(artifactPath)}`
 	info("TERMINAL_SOURCE", `Artifact resolved: path="${path.basename(artifactPath)}", contentLength=${content.length}`)
-	const result = resolveContentRef(sourceId, content, ref)
+	const result = await resolveContentRef(sourceId, content, ref)
 	successCrt("TERMINAL_SOURCE", `resolved terminal artifact "${path.basename(artifactPath)}"`, {
 		sourceId: result.sourceId,
 		confidence: result.confidence,

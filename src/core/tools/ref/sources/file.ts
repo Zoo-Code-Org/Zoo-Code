@@ -69,9 +69,9 @@ export async function resolveFileSource(ref: ContentRef, task: Task): Promise<Se
 		}
 	}
 
-	// Priority 2+: Anchor pair / selector
+	// Priority 2+: Anchor pair / selector / focus AST expansion
 	const sourceId = `file://${filePath}`
-	const result = resolveContentRef(sourceId, content, ref)
+	const result = await resolveContentRef(sourceId, content, ref, undefined, cwd)
 	successCrt("FILE_SOURCE", `resolved file "${ref.ref}" via ${result.method}`, {
 		sourceId: result.sourceId,
 		confidence: result.confidence,

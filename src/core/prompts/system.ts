@@ -91,7 +91,7 @@ ${getSharedToolUseSection()}${toolsCatalog}
 
 	${getToolUseGuidelinesSection()}
 
-${CONTENT_REFERENCE_GUIDELINES}
+	${CONTENT_REFERENCE_GUIDELINES}
 
 ${getCapabilitiesSection(cwd, shouldIncludeMcp ? mcpHub : undefined)}
 

@@ -11,6 +11,7 @@
  *   Stage 4: word-boundary expansion → expand result to complete words
  */
 
+import * as path from "path"
 import type { ContentRef } from "../../../shared/tools"
 import { info, successCrt } from "./superDebug"
 
@@ -33,6 +34,69 @@ export interface FocusBlock {
 	endOffset: number
 }
 
+/**
+ * AST-driven focus expansion: given a file path and focus keyword,
+ * find the entire syntactic block (function, class, method) containing that keyword.
+ *
+ * Uses vscode.executeDocumentSymbolProvider to get the symbol tree,
+ * then finds the deepest symbol node containing the focus position.
+ *
+ * Falls back to null if vscode API is not available (e.g., tests, headless mode).
+ *
+ * @param filePath - absolute path to the file
+ * @param focus - keyword to find (function name, class name, etc.)
+ * @returns the block content with line info, or null if not found
+ */
+export async function resolveAstBlock(filePath: string, focus: string): Promise<FocusBlock | null> {
+	try {
+		// Dynamic import — vscode API is only available inside the extension host.
+		const vs: any = await import("vscode")
+		const uri = vs.Uri.file(filePath)
+		const document = await vs.workspace.openTextDocument(uri)
+		const text = document.getText()
+
+		// Find focus position in document
+		const idx = text.indexOf(focus)
+		if (idx === -1) return null
+
+		const position = document.positionAt(idx)
+
+		// Use vscode.executeDocumentSymbolProvider to get the symbol tree
+		const symbols: any[] | undefined = await vs.commands.executeCommand("vscode.executeDocumentSymbolProvider", uri)
+
+		if (!symbols || symbols.length === 0) return null
+
+		// Find deepest symbol containing the focus position
+		function findDeepestContaining(syms: any[], pos: any): any | null {
+			for (const sym of syms) {
+				if (sym.range && sym.range.contains(pos)) {
+					// Check children first (deeper nesting)
+					if (sym.children && sym.children.length > 0) {
+						const child = findDeepestContaining(sym.children, pos)
+						if (child) return child
+					}
+					return sym
+				}
+			}
+			return null
+		}
+
+		const symbol = findDeepestContaining(symbols, position)
+		if (!symbol) return null
+
+		const startLine = symbol.range.start.line + 1 // 1-based
+		const endLine = symbol.range.end.line + 1
+		const content = document.getText(symbol.range)
+		const startOffset = document.offsetAt(symbol.range.start)
+		const endOffset = document.offsetAt(symbol.range.end)
+
+		return { content, startLine, endLine, startOffset, endOffset }
+	} catch {
+		// Fallback: vscode API might not be available (tests, headless)
+		return null
+	}
+}
+
 export interface SelectorResult {
 	sourceId: string
 	content: string
@@ -43,7 +107,7 @@ export interface SelectorResult {
 	endLine?: number
 	/** Confidence level: 1.0 (exact) down to 0.5 (fuzzy/expanded) */
 	confidence: number
-	method: "exact" | "normalized" | "fuzzy" | "anchor" | "focus"
+	method: "exact" | "normalized" | "fuzzy" | "anchor" | "focus" | "ast"
 }
 
 export interface SelectorOptions {
@@ -984,23 +1048,27 @@ export function resolveAnchorPair(
  * priority chain:
  *
  *   1. **Line numbers** — if `source === "file"` and `startLine` is set
- *   2. **Anchor pair** — if `startAnchor` is set
- *   3. **Selector** — if `selector` is set
- *   4. **Error** — if none of the above are specified
+ *   2. **AST focus expansion** — if `source === "file"`, `focus` is set, and vscode API is available
+ *   3. **Anchor pair** — if `startAnchor` is set
+ *   4. **Selector** — if `selector` is set
+ *   5. **Focus keyword** — regex-based AST fallback, then selector fallback
+ *   6. **Error** — if none of the above are specified
  *
  * @param sourceId - Human-readable identifier for the source (e.g. file path)
  * @param source   - The full source text to search within
  * @param ref      - ContentRef specifying what to find
  * @param options  - Optional matching configuration
+ * @param cwd      - Working directory for resolving file paths (only used when ref.source === "file")
  * @returns SelectorResult with the extracted content fragment
  * @throws If no match strategy is specified or matching fails
  */
-export function resolveContentRef(
+export async function resolveContentRef(
 	sourceId: string,
 	source: string,
 	ref: ContentRef,
 	options?: SelectorOptions,
-): SelectorResult {
+	cwd?: string,
+): Promise<SelectorResult> {
 	info(
 		"CONTENT_REF",
 		`resolveContentRef: sourceId="${sourceId}", sourceLength=${source.length}, startAnchor=${!!ref.startAnchor}, selector=${!!ref.selector}, focus=${!!ref.focus}, startLine=${ref.startLine}`,
@@ -1017,17 +1085,51 @@ export function resolveContentRef(
 		return result
 	}
 
-	// Priority 2: Anchor pair
+	// Priority 2: AST-driven focus expansion (vscode DocumentSymbolProvider)
+	// Only for file sources where we have a file path and focus keyword.
+	if (ref.source === "file" && ref.focus) {
+		// Resolve the absolute file path from ref.ref + cwd
+		const resolvedCwd = cwd || process.cwd()
+		const filePath = path.resolve(resolvedCwd, ref.ref)
+
+		const astResult = await resolveAstBlock(filePath, ref.focus)
+		if (astResult) {
+			const result: SelectorResult = {
+				sourceId: `file://${filePath}:${astResult.startLine}-${astResult.endLine}`,
+				content: astResult.content,
+				startOffset: astResult.startOffset,
+				endOffset: astResult.endOffset,
+				line: astResult.startLine,
+				endLine: astResult.endLine,
+				confidence: 1.0,
+				method: "ast",
+			}
+			successCrt("CONTENT_REF", `resolved focus "${ref.focus}" via vscode DocumentSymbolProvider`, {
+				startLine: astResult.startLine,
+				endLine: astResult.endLine,
+				contentLength: result.content.length,
+			})
+			return result
+		}
+
+		// AST fallback: vscode API not available — continue to regex-based focus / selector
+		info(
+			"CONTENT_REF",
+			`focus "${ref.focus}" vscode AST resolution unavailable (likely headless), falling back to regex AST`,
+		)
+	}
+
+	// Priority 3: Anchor pair
 	if (ref.startAnchor) {
 		return resolveAnchorPair(sourceId, source, ref.startAnchor, ref.endAnchor, options)
 	}
 
-	// Priority 3: Full selector
+	// Priority 4: Full selector
 	if (ref.selector) {
 		return resolveSelector(sourceId, source, ref.selector, options)
 	}
 
-	// Priority 4: Focus keyword (AST auto-expansion с fallback на selector)
+	// Priority 5: Focus keyword (regex-based AST auto-expansion с fallback на selector)
 	if (ref.focus) {
 		// Пробуем AST-расширение (точный структурный поиск)
 		const focusResult = resolveFocus(source, ref.focus)

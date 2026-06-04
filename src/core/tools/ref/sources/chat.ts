@@ -130,7 +130,7 @@ export async function resolveChatSource(ref: ContentRef, task: Task, history?: A
 		return result
 	}
 
-	const result = resolveContentRef(sourceId, sourceText, ref)
+	const result = await resolveContentRef(sourceId, sourceText, ref)
 	successCrt("CHAT_SOURCE", `resolved chat message at index ${ref.ref} (targetIndex=${targetIndex})`, {
 		sourceId: result.sourceId,
 		confidence: result.confidence,
