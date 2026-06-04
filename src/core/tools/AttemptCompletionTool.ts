@@ -93,10 +93,13 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 						const status = historyItem?.status
 
 						if (status === "completed") {
-							// Subtask already completed - skip delegation flow entirely
-							// Fall through to normal completion ask flow below (outside this if block)
-							// This shows the user the completion result and waits for acceptance
-							// without injecting another tool_result to the parent
+							// Subtask already completed - emit task completed and return
+							// without showing completion_result ask again.
+							// This prevents infinite loop when user revisits a completed subtask from history:
+							// the subtask shows completion_result → user accepts → attempt_completion runs again
+							// → delegation flow attempts parent reopen → parent already resumed → loops forever.
+							this.emitTaskCompleted(task)
+							return
 						} else if (status === "active") {
 							// Verify parent still awaits this child before asking the user.
 							// If parent detached (cancelled/resumed), skip delegation to avoid

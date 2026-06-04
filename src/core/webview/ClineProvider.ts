@@ -156,6 +156,19 @@ export class ClineProvider
 	private clineStack: Task[] = []
 	private delegationTransitionLocks?: Map<string, Promise<void>>
 	private cancelledDelegationChildIds = new Set<string>()
+	/**
+	 * Mutex to prevent concurrent delegation operations for the same parent.
+	 * When true, a delegation is in progress and new delegation requests should wait.
+	 * This prevents race conditions where two parallel delegation attempts for one parentId
+	 * would corrupt globalState (last-writer-wins on delegation metadata).
+	 */
+	private delegationInProgress = false
+	/**
+	 * Flag to indicate that a task creation is in progress.
+	 * Used to prevent race conditions during delegation where
+	 * concurrent task creation calls would interfere with each other.
+	 */
+	public isTaskCreationInProgress = false
 	private codeIndexStatusSubscription?: vscode.Disposable
 	private codeIndexManager?: CodeIndexManager
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
@@ -3432,58 +3445,141 @@ export class ClineProvider
 			)
 		}
 
-		// 4) Create child as sole active (parent reference preserved for lineage)
-		// Pass initialStatus: "active" to ensure the child task's historyItem is created
-		// with status from the start, avoiding race conditions where the task might
-		// call attempt_completion before status is persisted separately.
-		//
-		// Pass startTask: false to prevent the child from beginning its task loop
-		// (and writing to globalState via saveClineMessages → updateTaskHistory)
-		// before we persist the parent's delegation metadata in step 5.
-		// Without this, the child's fire-and-forget startTask() races with step 5,
-		// and the last writer to globalState overwrites the other's changes—
-		// causing the parent's delegation fields to be lost.
-		const child = await this.createTask(message, undefined, parent as any, {
-			initialTodos,
-			initialStatus: "active",
-			startTask: false,
-		})
-
-		// 5) Persist parent delegation metadata BEFORE the child starts writing.
+		// 4) Guard: prevent concurrent delegation for the same parent.
+		if (this.delegationInProgress) {
+			throw new Error(
+				`[delegateParentAndOpenChild] Delegation already in progress for parent ${parentTaskId}. Concurrent delegation is not supported.`,
+			)
+		}
+		this.delegationInProgress = true
+		let child: Task | undefined
 		try {
-			const { historyItem } = await this.getTaskWithId(parentTaskId)
-			const childIds = Array.from(new Set([...(historyItem.childIds ?? []), child.taskId]))
-			const updatedHistory: typeof historyItem = {
-				...historyItem,
+			// 5) Create child as sole active (parent reference preserved for lineage)
+			// NOTE: We do NOT pass initialStatus here. Instead, we persist the child's
+			// initial status SEPARATELY before persisting parent delegation. This avoids
+			// the race condition where child's saveClineMessages() (called in startTask)
+			// overwrites parent's delegation metadata in globalState.
+			// Pass startTask: false to prevent the child from beginning its task loop
+			// (and writing to globalState via saveClineMessages → updateTaskHistory)
+			// before we persist the parent's delegation metadata in step 6.
+			// Without this, the child's fire-and-forget startTask() races with step 6,
+			// and the last writer to globalState overwrites the other's changes—
+			// causing the parent's delegation fields to be lost.
+			child = await this.createTask(message, undefined, parent as any, {
+				initialTodos,
+				startTask: false,
+			})
+
+			// 6) Persist child initial status separately BEFORE parent delegation metadata.
+			// This ensures the child has a valid history item with "active" status before
+			// the parent's delegation fields are persisted. Without this, the child's
+			// saveClineMessages() in startTask() would race with parent delegation persistence.
+			await this.updateTaskHistory(
+				{
+					id: child.taskId,
+					ts: Date.now(),
+					task: message,
+					number: child.taskNumber,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					status: "active",
+					parentTaskId: parentTaskId,
+					rootTaskId: child.rootTaskId,
+					workspace: this.cwd,
+				} as any,
+				{ broadcast: false },
+			)
+
+			// 7) Persist parent delegation metadata BEFORE the child starts writing.
+			// Use try-catch fallback for getTaskWithId to handle case where parent
+			// is not in globalState (eviction race).
+			let parentHistory: HistoryItem
+			try {
+				const result = await this.getTaskWithId(parentTaskId)
+				parentHistory = result.historyItem
+			} catch (err) {
+				this.log(
+					`[delegateParentAndOpenChild] Parent ${parentTaskId} not in globalState, using in-memory fallback: ${(err as Error)?.message ?? String(err)}`,
+				)
+				parentHistory = {
+					id: parentTaskId,
+					ts: parent.taskNumber > 0 ? Date.now() : Date.now(),
+					task: parent.metadata?.task ?? message,
+					number: parent.taskNumber,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					workspace: this.cwd,
+				} as HistoryItem
+			}
+			const childIds = Array.from(new Set([...(parentHistory.childIds ?? []), child.taskId]))
+			const updatedHistory: typeof parentHistory = {
+				...parentHistory,
 				status: "delegated",
 				delegatedToId: child.taskId,
 				awaitingChildId: child.taskId,
 				childIds,
 			}
 			await this.updateTaskHistory(updatedHistory)
-		} catch (err) {
-			this.log(
-				`[delegateParentAndOpenChild] Failed to persist parent metadata for ${parentTaskId} -> ${child.taskId}: ${
-					(err as Error)?.message ?? String(err)
-				}`,
-			)
+
+			// 7b) Persist delegation metadata to per-task file as fallback
+			// for globalState eviction protection.
 			try {
-				await this.removeClineFromStack({ skipDelegationRepair: true })
-			} catch (cleanupError) {
+				const { saveDelegationMeta } = await import("../task-persistence/delegationMeta")
+				const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+				await saveDelegationMeta({
+					taskId: parentTaskId,
+					globalStoragePath,
+					meta: {
+						status: "delegated",
+						awaitingChildId: child.taskId,
+						delegatedToId: child.taskId,
+						childIds,
+						completedByChildId: undefined,
+						completionResultSummary: undefined,
+					},
+				})
+			} catch (deMetaErr) {
 				this.log(
-					`[delegateParentAndOpenChild] Failed to close paused child ${child.taskId} during rollback: ${
-						(cleanupError as Error)?.message ?? String(cleanupError)
-					}`,
+					`[delegateParentAndOpenChild] Failed to persist delegationMeta for ${parentTaskId} (non-fatal): ${(deMetaErr as Error)?.message ?? String(deMetaErr)}`,
 				)
 			}
+
+			// 8) Start the child task now that parent metadata is safely persisted.
+			child.start()
+
+			// 9) Emit TaskDelegated (provider-level)
 			try {
-				await this.deleteTaskWithId(child.taskId, false)
-			} catch (cleanupError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to delete paused child ${child.taskId} during rollback: ${
-						(cleanupError as Error)?.message ?? String(cleanupError)
-					}`,
-				)
+				this.emit(RooCodeEventName.TaskDelegated, parentTaskId, child.taskId)
+			} catch {
+				// non-fatal
+			}
+
+			return child
+		} catch (err) {
+			this.log(
+				`[delegateParentAndOpenChild] Failed for parent ${parentTaskId}: ${(err as Error)?.message ?? String(err)}`,
+			)
+			if (child) {
+				try {
+					await this.removeClineFromStack({ skipDelegationRepair: true })
+				} catch (cleanupError) {
+					this.log(
+						`[delegateParentAndOpenChild] Failed to close paused child ${child.taskId} during rollback: ${
+							(cleanupError as Error)?.message ?? String(cleanupError)
+						}`,
+					)
+				}
+				try {
+					await this.deleteTaskWithId(child.taskId, false)
+				} catch (cleanupError) {
+					this.log(
+						`[delegateParentAndOpenChild] Failed to delete paused child ${child.taskId} during rollback: ${
+							(cleanupError as Error)?.message ?? String(cleanupError)
+						}`,
+					)
+				}
 			}
 			try {
 				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
@@ -3495,20 +3591,10 @@ export class ClineProvider
 					}`,
 				)
 			}
-			throw err
+			throw err // Re-throw to notify caller that delegation failed
+		} finally {
+			this.delegationInProgress = false
 		}
-
-		// 6) Start the child task now that parent metadata is safely persisted.
-		child.start()
-
-		// 7) Emit TaskDelegated (provider-level)
-		try {
-			this.emit(RooCodeEventName.TaskDelegated, parentTaskId, child.taskId)
-		} catch {
-			// non-fatal
-		}
-
-		return child
 	}
 
 	/**
