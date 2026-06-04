@@ -318,6 +318,7 @@ export type ExtensionState = Pick<
 	| "requestDelaySeconds"
 	| "showWorktreesInHomeScreen"
 	| "disabledTools"
+	| "diffFuzzyThreshold"
 > & {
 	lockApiConfigAcrossModes?: boolean
 	version: string
@@ -332,6 +333,7 @@ export type ExtensionState = Pick<
 	taskHistory: HistoryItem[]
 
 	writeDelayMs: number
+	diffFuzzyThreshold?: number
 
 	enableCheckpoints: boolean
 	checkpointTimeout: number // Timeout for checkpoint initialization in seconds (default: 15)

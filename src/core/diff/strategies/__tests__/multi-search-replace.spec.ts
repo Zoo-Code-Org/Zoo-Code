@@ -1374,4 +1374,97 @@ function sum(a, b) {
 			}
 		})
 	})
+
+	describe("fuzzyThreshold and diagnostics", () => {
+		const originalContent =
+			"function calculateTotal(price: number, tax: number) {\n\tconst subtotal = price;\n\treturn subtotal + tax;\n}\n"
+
+		it("should use default 0.90 threshold when instantiated without arguments", () => {
+			const strategy = new MultiSearchReplaceDiffStrategy()
+			expect(strategy["fuzzyThreshold"]).toBe(0.9)
+		})
+
+		it("should succeed with near-miss match (e.g. minor whitespace diff) when threshold is 0.90", async () => {
+			const strategy = new MultiSearchReplaceDiffStrategy(0.9)
+			// Near-miss search block with slightly different formatting/whitespace (e.g., spaces instead of tab, missing semicolon)
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				"function calculateTotal(price: number, tax: number) {\n" +
+				"    const subtotal = price\n" +
+				"    return subtotal + tax;\n" +
+				"}\n" +
+				"=======\n" +
+				"function calculateTotal(price: number, tax: number) {\n" +
+				"    const subtotal = price;\n" +
+				"    return (subtotal + tax) * 1.1;\n" +
+				"}\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(originalContent, diff)
+			expect(result.success).toBe(true)
+			if (result.success) {
+				expect(result.content).toContain("(subtotal + tax) * 1.1")
+			}
+		})
+
+		it("should fail with near-miss match when threshold is set to 1.0", async () => {
+			const strategy = new MultiSearchReplaceDiffStrategy(1.0)
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				"function calculateTotal(price: number, tax: number) {\n" +
+				"    const subtotal = price\n" +
+				"    return subtotal + tax;\n" +
+				"}\n" +
+				"=======\n" +
+				"function calculateTotal(price: number, tax: number) {\n" +
+				"    const subtotal = price;\n" +
+				"    return (subtotal + tax) * 1.1;\n" +
+				"}\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(originalContent, diff)
+			expect(result.success).toBe(false)
+			if (!result.success && result.failParts) {
+				const failedPart = result.failParts[0]
+				if (failedPart && "error" in failedPart && failedPart.error) {
+					expect(failedPart.error).toContain("No sufficiently similar match found")
+				} else {
+					throw new Error("Expected failedPart to have an error property")
+				}
+			}
+		})
+
+		it("should output enhanced error diagnostics (Levenshtein distance, character counts) when a match fails", async () => {
+			const strategy = new MultiSearchReplaceDiffStrategy(0.95)
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				"function calculateGrandTotal(initialPrice: number, standardTax: number) {\n" +
+				"    const totalVal = initialPrice\n" +
+				"    return totalVal + standardTax;\n" +
+				"}\n" +
+				"=======\n" +
+				"function calculateTotal(price: number, tax: number) {\n" +
+				"    const subtotal = price;\n" +
+				"    return (subtotal + tax) * 1.1;\n" +
+				"}\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(originalContent, diff)
+			expect(result.success).toBe(false)
+			if (!result.success && result.failParts) {
+				const failedPart = result.failParts[0]
+				if (failedPart && "error" in failedPart && failedPart.error) {
+					const errorMsg = failedPart.error
+					expect(errorMsg).toContain("Debug Info:")
+					expect(errorMsg).toContain("Similarity Score:")
+					expect(errorMsg).toContain("Required Threshold: 95%")
+					expect(errorMsg).toContain("Levenshtein Distance:")
+					expect(errorMsg).toContain("Search Length:")
+					expect(errorMsg).toContain("Best Match Length:")
+				} else {
+					throw new Error("Expected failedPart to have an error property")
+				}
+			}
+		})
+	})
 })

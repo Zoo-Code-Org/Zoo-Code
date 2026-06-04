@@ -24,6 +24,15 @@ import { languagesSchema } from "./vscode.js"
 export const DEFAULT_WRITE_DELAY_MS = 1000
 
 /**
+ * Default fuzzy matching threshold for the multi-search-replace diff strategy.
+ * A value of 0.90 means the search content must be at least 90% similar to the
+ * file content for a match to succeed. Lowered from the previous strict 1.0 (exact
+ * match) to reduce "Edit Unsuccessful" errors caused by minor whitespace or
+ * formatting differences.
+ */
+export const DEFAULT_DIFF_FUZZY_THRESHOLD = 0.9
+
+/**
  * Terminal output preview size options for persisted command output.
  *
  * Controls how much command output is kept in memory as a "preview" before
@@ -102,6 +111,12 @@ export const globalSettingsSchema = z.object({
 	alwaysAllowWriteOutsideWorkspace: z.boolean().optional(),
 	alwaysAllowWriteProtected: z.boolean().optional(),
 	writeDelayMs: z.number().min(0).optional(),
+	/**
+	 * Fuzzy matching threshold for the multi-search-replace diff strategy.
+	 * Range: 0.0 (accept anything) to 1.0 (exact match only).
+	 * @default 0.9
+	 */
+	diffFuzzyThreshold: z.number().min(0).max(1).optional(),
 	requestDelaySeconds: z.number().optional(),
 	alwaysAllowMcp: z.boolean().optional(),
 	alwaysAllowModeSwitch: z.boolean().optional(),

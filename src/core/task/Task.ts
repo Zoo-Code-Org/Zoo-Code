@@ -160,6 +160,7 @@ export interface TaskOptions extends CreateTaskOptions {
 	/** Initial status for the task's history item (e.g., "active" for child tasks) */
 	initialStatus?: "active" | "delegated" | "completed"
 	rateLimitClock?: RateLimitClock
+	diffFuzzyThreshold?: number
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -432,6 +433,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		workspacePath,
 		initialStatus,
 		rateLimitClock,
+		diffFuzzyThreshold,
 	}: TaskOptions) {
 		super()
 
@@ -529,7 +531,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.setupProviderProfileChangeListener(provider)
 
 		// Set up diff strategy
-		this.diffStrategy = new MultiSearchReplaceDiffStrategy()
+		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
 
 		this.toolRepetitionDetector = new ToolRepetitionDetector(this.consecutiveMistakeLimit)
 

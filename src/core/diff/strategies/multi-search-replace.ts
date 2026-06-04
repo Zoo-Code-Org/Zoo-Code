@@ -1,6 +1,6 @@
 import { distance } from "fastest-levenshtein"
 
-import { ToolProgressStatus } from "@roo-code/types"
+import { ToolProgressStatus, DEFAULT_DIFF_FUZZY_THRESHOLD } from "@roo-code/types"
 
 import { addLineNumbers, everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
 import { ToolUse, DiffStrategy, DiffResult } from "../../../shared/tools"
@@ -81,10 +81,11 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 	}
 
 	constructor(fuzzyThreshold?: number, bufferLines?: number) {
-		// Use provided threshold or default to exact matching (1.0)
-		// Note: fuzzyThreshold is inverted in UI (0% = 1.0, 10% = 0.9)
-		// so we use it directly here
-		this.fuzzyThreshold = fuzzyThreshold ?? 1.0
+		// Use provided threshold or default to relaxed matching (0.9)
+		// A value of 0.9 means 90% similarity is required for a match.
+		// This was previously 1.0 (exact match) which caused frequent
+		// "Edit Unsuccessful" errors on minor whitespace differences.
+		this.fuzzyThreshold = fuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD
 		this.bufferLines = bufferLines ?? BUFFER_LINES
 	}
 
@@ -555,9 +556,13 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 
 					const lineRange = startLine ? ` at line: ${startLine}` : ""
 
+					const levenDist = bestMatchContent
+						? distance(normalizeString(searchChunk), normalizeString(bestMatchContent))
+						: -1
+
 					diffResults.push({
 						success: false,
-						error: `No sufficiently similar match found${lineRange} (${Math.floor(bestMatchScore * 100)}% similar, needs ${Math.floor(this.fuzzyThreshold * 100)}%)\n\nDebug Info:\n- Similarity Score: ${Math.floor(bestMatchScore * 100)}%\n- Required Threshold: ${Math.floor(this.fuzzyThreshold * 100)}%\n- Search Range: ${startLine ? `starting at line ${startLine}` : "start to end"}\n- Tried both standard and aggressive line number stripping\n- Tip: Use the read_file tool to get the latest content of the file before attempting to use the apply_diff tool again, as the file content may have changed\n\nSearch Content:\n${searchChunk}${bestMatchSection}${originalContentSection}`,
+						error: `No sufficiently similar match found${lineRange} (${Math.floor(bestMatchScore * 100)}% similar, needs ${Math.floor(this.fuzzyThreshold * 100)}%)\n\nDebug Info:\n- Similarity Score: ${Math.floor(bestMatchScore * 100)}%\n- Required Threshold: ${Math.floor(this.fuzzyThreshold * 100)}%\n- Search Range: ${startLine ? `starting at line ${startLine}` : "start to end"}\n- Levenshtein Distance: ${levenDist >= 0 ? `${levenDist} characters` : "N/A"}\n- Search Length: ${searchChunk.length} characters\n- Best Match Length: ${bestMatchContent ? bestMatchContent.length : 0} characters\n- Tried both standard and aggressive line number stripping\n- Tip: Use the read_file tool to get the latest content of the file before attempting to use the apply_diff tool again, as the file content may have changed\n\nSearch Content:\n${searchChunk}${bestMatchSection}${originalContentSection}`,
 					})
 					continue
 				}

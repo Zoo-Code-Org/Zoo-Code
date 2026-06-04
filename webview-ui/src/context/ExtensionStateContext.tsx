@@ -209,6 +209,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Default to 15 seconds
 		language: "en", // Default language code
 		writeDelayMs: 1000,
+		diffFuzzyThreshold: 0.9,
 		terminalShellIntegrationTimeout: 4000,
 		mcpEnabled: true,
 		taskSyncEnabled: false,
