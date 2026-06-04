@@ -38,12 +38,6 @@ export default defineConfig({
 			// Mock the vscode module for tests since it's not available outside
 			// VS Code extension context.
 			vscode: path.resolve(__dirname, "./src/__mocks__/vscode.ts"),
-			// Mock the VSCode webview-ui-toolkit to avoid dual React instance
-			// issues caused by FAST Foundation web component registration.
-			"@vscode/webview-ui-toolkit/react": path.resolve(
-				__dirname,
-				"./src/__mocks__/@vscode/webview-ui-toolkit/react.tsx",
-			),
 		},
 	},
 })

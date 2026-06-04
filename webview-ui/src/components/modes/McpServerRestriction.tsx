@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import type { ModeConfig, McpServer } from "@roo-code/types"
+import McpServerChecklist from "./McpServerChecklist"
 
 export interface McpServerRestrictionProps {
 	customMode: ModeConfig
@@ -155,32 +156,12 @@ const McpServerRestriction: React.FC<McpServerRestrictionProps> = ({ customMode,
 				Restrict to specific MCP servers
 			</VSCodeCheckbox>
 			{isRestricted && (
-				<div className="ml-6 mt-2 flex flex-col gap-1" data-testid="mcp-server-list">
-					{mcpServers && mcpServers.length > 0 ? (
-						mcpServers.map((server) => (
-							<VSCodeCheckbox
-								key={server.name}
-								checked={cachedAllowedMcpServers?.includes(server.name) ?? false}
-								data-testid={`mcp-server-checkbox-${server.name}`}
-								onChange={handleServerToggle(server.name)}>
-								{server.name}
-							</VSCodeCheckbox>
-						))
-					) : (
-						<div className="text-xs text-vscode-descriptionForeground">No MCP servers connected</div>
-					)}
-					{/* Warning for servers in cached list that aren't connected */}
-					{cachedAllowedMcpServers
-						?.filter((s) => !mcpServers?.some((ms) => ms.name === s))
-						.map((missingServer) => (
-							<div
-								key={missingServer}
-								className="text-xs text-vscode-errorForeground flex items-center gap-1">
-								<span className="codicon codicon-warning" />
-								{missingServer} (not connected)
-							</div>
-						))}
-				</div>
+				<McpServerChecklist
+					allowedMcpServers={cachedAllowedMcpServers ?? []}
+					mcpServers={mcpServers}
+					onServerToggle={handleServerToggle}
+					testIdPrefix="mcp-server"
+				/>
 			)}
 		</div>
 	)

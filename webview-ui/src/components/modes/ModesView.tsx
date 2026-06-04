@@ -50,6 +50,7 @@ import {
 } from "@src/components/ui"
 import { DeleteModeDialog } from "@src/components/modes/DeleteModeDialog"
 import McpServerRestriction from "@src/components/modes/McpServerRestriction"
+import McpServerChecklist from "@src/components/modes/McpServerChecklist"
 import { useEscapeKey } from "@src/hooks/useEscapeKey"
 
 // Get all available groups that should show in prompts view
@@ -1617,37 +1618,25 @@ const ModesView = () => {
 											Restrict to specific MCP servers
 										</VSCodeCheckbox>
 										{newModeAllowedMcpServers !== undefined && (
-											<div
-												className="ml-6 mt-2 flex flex-col gap-1"
-												data-testid="create-mcp-server-list">
-												{mcpServers && mcpServers.length > 0 ? (
-													mcpServers.map((server) => (
-														<VSCodeCheckbox
-															key={server.name}
-															checked={newModeAllowedMcpServers.includes(server.name)}
-															data-testid={`create-mcp-server-checkbox-${server.name}`}
-															onChange={(e: Event | React.FormEvent<HTMLElement>) => {
-																const target =
-																	(e as CustomEvent)?.detail?.target ||
-																	(e.target as HTMLInputElement)
-																const checked = target.checked
-																setNewModeAllowedMcpServers(
-																	checked
-																		? [...newModeAllowedMcpServers, server.name]
-																		: newModeAllowedMcpServers.filter(
-																				(s) => s !== server.name,
-																			),
-																)
-															}}>
-															{server.name}
-														</VSCodeCheckbox>
-													))
-												) : (
-													<div className="text-xs text-vscode-descriptionForeground">
-														No MCP servers connected
-													</div>
-												)}
-											</div>
+											<McpServerChecklist
+												allowedMcpServers={newModeAllowedMcpServers}
+												mcpServers={mcpServers}
+												testIdPrefix="create-mcp-server"
+												onServerToggle={(serverName) => (e) => {
+													const target =
+														(e as CustomEvent)?.detail?.target ||
+														(e.target as HTMLInputElement)
+													const checked = target.checked
+													setNewModeAllowedMcpServers((prev) => {
+														const current = prev ?? []
+														return checked
+															? current.includes(serverName)
+																? current
+																: [...current, serverName]
+															: current.filter((s) => s !== serverName)
+													})
+												}}
+											/>
 										)}
 									</div>
 								)}

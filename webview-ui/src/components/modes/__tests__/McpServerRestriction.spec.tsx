@@ -393,4 +393,66 @@ describe("McpServerRestriction subcomponent — flicker regressions", () => {
 			vitest.useRealTimers()
 		}
 	})
+
+	/**
+	 * Test 5 — Slug-change reseed (mode switch).
+	 *
+	 * The reseed effect (McpServerRestriction.tsx) re-initializes the cached
+	 * `allowedMcpServers` whenever `customMode.slug` changes. This prevents
+	 * mode A's allowlist from bleeding into mode B when the user switches the
+	 * selected mode. This is the most operationally critical reconciliation
+	 * path, so we assert there is NO bleed across the switch.
+	 */
+	it("Test 5: reseeds cached allowlist when slug changes — no bleed from previous mode", () => {
+		const onCommit = vitest.fn()
+
+		const modeA = { ...baseCustomMode, slug: "mode-a", allowedMcpServers: ["server-a"] }
+		const { rerender } = render(
+			<McpServerRestriction customMode={modeA} mcpServers={mcpServers} onCommit={onCommit} />,
+		)
+
+		// Mode A: server-a checked, server-b not.
+		const aServerA = screen.getByTestId("mcp-server-checkbox-server-a") as HTMLInputElement
+		const aServerB = screen.getByTestId("mcp-server-checkbox-server-b") as HTMLInputElement
+		expect(aServerA.checked).toBe(true)
+		expect(aServerB.checked).toBe(false)
+
+		// Switch to mode B with a different allowlist.
+		const modeB = { ...baseCustomMode, slug: "mode-b", allowedMcpServers: ["server-b"] }
+		rerender(<McpServerRestriction customMode={modeB} mcpServers={mcpServers} onCommit={onCommit} />)
+
+		// Cached state must reflect mode-b's allowlist with NO bleed from mode-a.
+		const bServerA = screen.getByTestId("mcp-server-checkbox-server-a") as HTMLInputElement
+		const bServerB = screen.getByTestId("mcp-server-checkbox-server-b") as HTMLInputElement
+		expect(bServerA.checked).toBe(false)
+		expect(bServerB.checked).toBe(true)
+	})
+
+	/**
+	 * Test 5b — Slug-change reseed to an unrestricted mode (undefined allowlist).
+	 *
+	 * Switching from a restricted mode to one whose `allowedMcpServers` is
+	 * undefined must reset the restrict toggle to off and unmount the server
+	 * list — again proving no bleed from the previous mode.
+	 */
+	it("Test 5b: reseeds to undefined allowlist on slug change — restrict toggle reflects undefined", () => {
+		const onCommit = vitest.fn()
+
+		const modeA = { ...baseCustomMode, slug: "mode-a", allowedMcpServers: ["server-a"] }
+		const { rerender } = render(
+			<McpServerRestriction customMode={modeA} mcpServers={mcpServers} onCommit={onCommit} />,
+		)
+
+		const toggleA = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
+		expect(toggleA.checked).toBe(true)
+		expect(screen.getByTestId("mcp-server-list")).toBeInTheDocument()
+
+		// Switch to an unrestricted mode (allowedMcpServers undefined).
+		const modeB = { ...baseCustomMode, slug: "mode-b", allowedMcpServers: undefined }
+		rerender(<McpServerRestriction customMode={modeB} mcpServers={mcpServers} onCommit={onCommit} />)
+
+		const toggleB = screen.getByTestId("restrict-mcp-servers-toggle") as HTMLInputElement
+		expect(toggleB.checked).toBe(false)
+		expect(screen.queryByTestId("mcp-server-list")).not.toBeInTheDocument()
+	})
 })
