@@ -33,7 +33,8 @@ function normalizeCase(p: string): string {
  * - The result is case-normalized on case-insensitive filesystems (macOS, Windows).
  *
  * Workspace folder paths should be resolved through this same function by callers, since a folder
- * may itself be reached via a symlink.
+ * may itself be reached via a symlink. Callers should always compare two `resolveRealPath()` results
+ * rather than mixing with raw `uri.fsPath` — `arePathsEqual()` does not case-fold on macOS.
  */
 export async function resolveRealPath(target: string): Promise<string> {
 	let current = path.resolve(target)
