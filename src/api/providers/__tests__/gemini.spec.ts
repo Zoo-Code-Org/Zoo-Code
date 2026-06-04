@@ -176,12 +176,12 @@ describe("GeminiHandler", () => {
 
 		it("should honor a custom gemini model id not present in geminiModels (#227)", () => {
 			const customHandler = new GeminiHandler({
-				apiModelId: "gemini-3.5-flash",
+				apiModelId: "gemini-9.9-nonexistent",
 				geminiApiKey: "test-key",
 			})
 			const modelInfo = customHandler.getModel()
 			// The configured id must be invoked, not silently swapped for the default.
-			expect(modelInfo.id).toBe("gemini-3.5-flash")
+			expect(modelInfo.id).toBe("gemini-9.9-nonexistent")
 			expect(modelInfo.id).not.toBe(geminiDefaultModelId)
 			// A baseline ModelInfo is provided so downstream params resolve.
 			expect(modelInfo.info).toBeDefined()
