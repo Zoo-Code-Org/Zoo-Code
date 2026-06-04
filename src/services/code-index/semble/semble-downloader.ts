@@ -166,9 +166,10 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 		// Verify archive integrity before extraction
 		const platformKey = `${process.platform}-${process.arch}`
 		const expectedChecksum = SEMBLE_SHA256[platformKey]
-		if (expectedChecksum) {
-			await verifyChecksum(archivePath, expectedChecksum)
+		if (!expectedChecksum) {
+			throw new Error(`No checksum configured for platform ${platformKey} at ${SEMBLE_VERSION}`)
 		}
+		await verifyChecksum(archivePath, expectedChecksum)
 
 		// Extract the archive
 		await fs.mkdir(extractDir, { recursive: true })
@@ -234,10 +235,18 @@ export async function getSembleBinaryPath(storageDir: string): Promise<string | 
 
 /**
  * Extracts a .tar.gz archive into the destination directory using the system `tar` command.
+ * Uses --no-same-owner to avoid issues with permission elevation,
+ * and strips absolute paths to prevent path traversal attacks.
  */
 function extractTarGz(archivePath: string, destDir: string): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const child = spawn("tar", ["-xzf", archivePath, "-C", destDir], {
+		const args = ["-xzf", archivePath, "-C", destDir, "--no-same-owner"]
+		// GNU tar supports --absolute-names / -P to refuse absolute paths.
+		// macOS (bsdtar) strips absolute paths by default and doesn't need this flag.
+		if (process.platform === "linux") {
+			args.push("--no-absolute-filenames")
+		}
+		const child = spawn("tar", args, {
 			shell: false,
 			stdio: ["ignore", "pipe", "pipe"],
 		})
@@ -309,8 +318,27 @@ function extractZip(archivePath: string, destDir: string): Promise<void> {
 }
 
 /**
+ * Trusted domains for following redirects during semble binary download.
+ * GitHub releases redirect to objects.githubusercontent.com for the actual download.
+ */
+const TRUSTED_DOWNLOAD_DOMAINS = ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"]
+
+/**
+ * Validates that a URL belongs to a trusted domain.
+ */
+function isTrustedDownloadUrl(url: string): boolean {
+	try {
+		const parsed = new URL(url)
+		return parsed.protocol === "https:" && TRUSTED_DOWNLOAD_DOMAINS.some((d) => parsed.hostname.endsWith(d))
+	} catch {
+		return false
+	}
+}
+
+/**
  * Downloads a file from the given URL to the destination path.
  * Follows redirects (GitHub releases use 302 redirects to CDN).
+ * Only follows redirects to trusted domains to prevent redirect-based attacks.
  */
 function downloadFile(url: string, destPath: string, maxRedirects = 5): Promise<void> {
 	return new Promise((resolve, reject) => {
@@ -328,7 +356,16 @@ function downloadFile(url: string, destPath: string, maxRedirects = 5): Promise<
 				response.headers.location
 			) {
 				response.destroy()
-				downloadFile(response.headers.location, destPath, maxRedirects - 1)
+				const redirectUrl = response.headers.location
+				if (!isTrustedDownloadUrl(redirectUrl)) {
+					reject(
+						new Error(
+							`Redirect to untrusted domain blocked: ${redirectUrl}. Only ${TRUSTED_DOWNLOAD_DOMAINS.join(", ")} are allowed.`,
+						),
+					)
+					return
+				}
+				downloadFile(redirectUrl, destPath, maxRedirects - 1)
 					.then(resolve)
 					.catch(reject)
 				return

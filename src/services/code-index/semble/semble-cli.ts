@@ -98,8 +98,11 @@ export class SembleCLI {
 	/**
 	 * Spawns the semble process and collects stdout/stderr.
 	 * Uses spawn without shell — args are passed as an array, no injection risk.
+	 * Caps stdout/stderr buffers at MAX_BUFFER_BYTES to prevent OOM in the extension host.
 	 */
 	private _spawn(args: string[], options: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
+		const MAX_BUFFER_BYTES = 10 * 1024 * 1024 // 10 MB
+
 		return new Promise((resolve, reject) => {
 			const child = spawn(this.semblePath, args, {
 				shell: false,
@@ -109,13 +112,21 @@ export class SembleCLI {
 
 			let stdout = ""
 			let stderr = ""
+			let stdoutBytes = 0
+			let stderrBytes = 0
 
 			child.stdout?.on("data", (data: Buffer) => {
-				stdout += data.toString()
+				stdoutBytes += data.length
+				if (stdoutBytes <= MAX_BUFFER_BYTES) {
+					stdout += data.toString()
+				}
 			})
 
 			child.stderr?.on("data", (data: Buffer) => {
-				stderr += data.toString()
+				stderrBytes += data.length
+				if (stderrBytes <= MAX_BUFFER_BYTES) {
+					stderr += data.toString()
+				}
 			})
 
 			child.on("error", (err: Error) => {

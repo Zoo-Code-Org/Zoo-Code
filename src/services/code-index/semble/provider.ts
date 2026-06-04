@@ -29,6 +29,7 @@ export class SembleProvider implements ISembleProvider {
 
 	private _state: IndexingState = "Standby"
 	private _isInitialized = false
+	private _initPromise: Promise<void> | undefined
 
 	constructor(
 		workspacePath: string,
@@ -52,12 +53,30 @@ export class SembleProvider implements ISembleProvider {
 
 	/**
 	 * Initializes the provider: downloads semble, then validates it works.
+	 * Uses an _initPromise to prevent concurrent initialization races.
 	 */
 	async initialize(): Promise<void> {
 		if (this._isInitialized) {
 			return
 		}
 
+		// If initialization is already in progress, wait for it
+		if (this._initPromise) {
+			return this._initPromise
+		}
+
+		this._initPromise = this._doInitialize()
+		try {
+			await this._initPromise
+		} finally {
+			this._initPromise = undefined
+		}
+	}
+
+	/**
+	 * Internal initialization logic, called only once via _initPromise guard.
+	 */
+	private async _doInitialize(): Promise<void> {
 		// Check platform support
 		if (!isSembleSupportedPlatform()) {
 			this._state = "Error"
@@ -154,7 +173,7 @@ export class SembleProvider implements ISembleProvider {
 			// Semble creates a separate cache directory per path (SHA-256 of the
 			// resolved absolute path), so passing subdirectories would create
 			// redundant indexes and waste disk space.
-			console.log(`[SembleProvider] Searching for "${query}" in ${this.workspacePath}`)
+			console.log(`[SembleProvider] Searching in ${this.workspacePath}`)
 			const results = await this.cli.search(query, this.workspacePath, {
 				topK: this.config.topK,
 				content: this.config.content,

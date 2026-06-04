@@ -92,6 +92,19 @@ describe("semble-downloader", () => {
 		vi.clearAllMocks()
 		mockWriteStream.on = vi.fn()
 		mockWriteStream.close = vi.fn()
+
+		// Restore the default https.get mock so tests that override it don't leak
+		;(https.get as any).mockImplementation((_url: string, callback: (res: any) => void) => {
+			mockRequest = Object.assign(new EventEmitter(), { setTimeout: vi.fn() })
+			mockResponse = Object.assign(new EventEmitter(), {
+				statusCode: 200,
+				headers: {},
+				pipe: vi.fn(),
+				destroy: vi.fn(),
+			})
+			setImmediate(() => callback(mockResponse))
+			return mockRequest
+		})
 	})
 
 	describe("isSembleSupportedPlatform", () => {
@@ -219,6 +232,8 @@ describe("semble-downloader", () => {
 						path.join("/storage", "semble-linux-x64-fast.tar.gz"),
 						"-C",
 						path.join("/storage", "semble"),
+						"--no-same-owner",
+						"--no-absolute-filenames",
 					],
 					expect.any(Object),
 				)
@@ -314,7 +329,9 @@ describe("semble-downloader", () => {
 				const res = new EventEmitter() as any
 				if (callCount === 1) {
 					res.statusCode = 302
-					res.headers = { location: "https://cdn.example.com/semble-macos-arm64-fast.tar.gz" }
+					res.headers = {
+						location: "https://objects.githubusercontent.com/semble-macos-arm64-fast.tar.gz",
+					}
 					res.destroy = vi.fn()
 				} else {
 					res.statusCode = 200
@@ -341,6 +358,39 @@ describe("semble-downloader", () => {
 
 				expect(result).toBe(path.join("/storage", "semble", "semble"))
 				expect(https.get).toHaveBeenCalledTimes(2)
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
+
+		it("should block redirects to untrusted domains", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "darwin", configurable: true })
+			Object.defineProperty(process, "arch", { value: "arm64", configurable: true })
+
+			// fs.access rejects => file not present
+			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// No version file
+			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
+
+			// Redirect to an untrusted domain
+			;(https.get as any).mockImplementation((_url: string, callback: (res: any) => void) => {
+				const res = new EventEmitter() as any
+				res.statusCode = 302
+				res.headers = { location: "https://evil.example.com/malicious-binary.tar.gz" }
+				res.destroy = vi.fn()
+				setImmediate(() => callback(res))
+
+				const req = new EventEmitter() as any
+				req.setTimeout = vi.fn()
+				return req
+			})
+
+			try {
+				await expect(downloadSemble("/storage")).rejects.toThrow("untrusted domain")
 			} finally {
 				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
 				if (originalArch) Object.defineProperty(process, "arch", originalArch)
