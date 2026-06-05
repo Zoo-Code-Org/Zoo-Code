@@ -414,7 +414,13 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 					break
 				}
 				case "routerModels": {
-					setExtensionRouterModels(message.routerModels)
+					const provider = message.values?.provider as string | undefined
+					const incoming = message.routerModels
+					if (provider && incoming) {
+						setExtensionRouterModels((current) => (current ? { ...current, ...incoming } : incoming))
+					} else {
+						setExtensionRouterModels(incoming)
+					}
 					break
 				}
 				case "marketplaceData": {

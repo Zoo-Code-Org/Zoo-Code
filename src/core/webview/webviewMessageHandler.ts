@@ -981,6 +981,7 @@ export const webviewMessageHandler = async (
 					key: "zoo-gateway",
 					options: {
 						provider: "zoo-gateway",
+						apiKey: apiConfiguration.zooSessionToken,
 						baseUrl: apiConfiguration.zooGatewayBaseUrl,
 					},
 				},

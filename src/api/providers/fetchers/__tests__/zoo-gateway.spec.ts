@@ -77,13 +77,11 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(models["anthropic/claude-sonnet-4"]).toBeDefined()
 		})
 
-		it("omits the Authorization header when no token is provided", async () => {
-			mockedAxios.get.mockResolvedValueOnce(mockResponse)
+		it("skips the request and returns {} when no token is available", async () => {
+			const models = await getZooGatewayModels({ zooGatewayBaseUrl: baseUrl } as any)
 
-			await getZooGatewayModels({ zooGatewayBaseUrl: baseUrl } as any)
-
-			const call = mockedAxios.get.mock.calls[0]
-			expect(call[1].headers.Authorization).toBeUndefined()
+			expect(mockedAxios.get).not.toHaveBeenCalled()
+			expect(models).toEqual({})
 		})
 
 		it("returns {} and never leaks the error object when the request fails", async () => {
