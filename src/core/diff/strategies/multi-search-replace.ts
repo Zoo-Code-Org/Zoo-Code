@@ -85,7 +85,9 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 		// A value of 0.9 means 90% similarity is required for a match.
 		// This was previously 1.0 (exact match) which caused frequent
 		// "Edit Unsuccessful" errors on minor whitespace differences.
-		this.fuzzyThreshold = fuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD
+		// Clamp the threshold to [0.5, 1.0] as a defence-in-depth guard.
+		const thresholdVal = fuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD
+		this.fuzzyThreshold = Math.max(0.5, Math.min(1.0, thresholdVal))
 		this.bufferLines = bufferLines ?? BUFFER_LINES
 	}
 
