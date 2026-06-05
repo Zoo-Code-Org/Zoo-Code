@@ -42,9 +42,16 @@ export function parseCommand(command: string): string[] {
 	// a single-quoted region, and a double quote inside 'a "b' must not begin a
 	// double-quoted region. Negated character classes match newlines, so
 	// multi-line quoted strings are captured whole.
+	//
+	// ANSI-C quoting ($'...') is matched first as a single unit. Unlike POSIX
+	// single quotes, ANSI-C strings interpret backslash escapes, so an escaped
+	// apostrophe (\') does not terminate the string. The alternative is therefore
+	// escape-aware, and listing it first ensures the leading $ is captured with
+	// the quoted body rather than the plain single-quote branch ending early at
+	// the escaped apostrophe and leaking an embedded newline.
 	const topLevelQuotes: string[] = []
 
-	const masked = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, (match) => {
+	const masked = command.replace(/\$'(?:[^'\\]|\\.)*'|'[^']*'|"(?:[^"\\]|\\.)*"/g, (match) => {
 		topLevelQuotes.push(match)
 		return `__TOPLEVEL_QUOTE_${topLevelQuotes.length - 1}__`
 	})

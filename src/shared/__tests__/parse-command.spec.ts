@@ -65,6 +65,17 @@ describe("parseCommand", () => {
 			expect(result.join(" ")).not.toContain("SQUOTE")
 			expect(result.join(" ")).not.toContain("__")
 		})
+
+		// An escaped apostrophe inside an ANSI-C string must not terminate the
+		// quoted region early; otherwise a following newline would leak out and
+		// split the single command into bogus sub-commands.
+		it("treats a $'...' argument with an escaped apostrophe and newline as one command", () => {
+			const input = "sh -c $'echo \\'1\\'\necho 2'"
+			const result = parseCommand(input)
+			expect(result).toEqual([input])
+			expect(result.join(" ")).not.toContain("SQUOTE")
+			expect(result.join(" ")).not.toContain("__")
+		})
 	})
 
 	describe("newlines inside double-quoted strings", () => {
