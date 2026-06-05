@@ -244,24 +244,39 @@ export class SembleProvider implements ISembleProvider {
 	 * Results with missing file paths or paths that escape the workspace are excluded.
 	 */
 	private _convertResults(results: SembleSearchResult[], basePath: string): VectorStoreSearchResult[] {
-		const normalizedBase = path.resolve(basePath).replace(/\\/g, "/")
+		// Resolve basePath to an absolute canonical form for the traversal check.
+		const resolvedBase = path.resolve(basePath).replace(/\\/g, "/")
 
-		return results
-			.filter((r) => r.chunk?.file_path) // Exclude results with no file path
-			.map((r, index) => ({
+		const converted: VectorStoreSearchResult[] = []
+
+		for (const [index, r] of results.entries()) {
+			if (!r.chunk?.file_path) {
+				continue
+			}
+
+			// Use path.join for the displayed path (preserves basePath format).
+			const filePath = path.join(basePath, r.chunk.file_path).replace(/\\/g, "/")
+
+			// Use path.resolve to normalize any ../ for the security check.
+			const resolvedFilePath = path.resolve(basePath, r.chunk.file_path).replace(/\\/g, "/")
+
+			// Guard against path traversal: reject file paths that resolve outside the workspace
+			if (!resolvedFilePath.startsWith(resolvedBase + "/") && resolvedFilePath !== resolvedBase) {
+				continue
+			}
+
+			converted.push({
 				id: `semble-${index}`,
 				score: r.score,
 				payload: {
-					filePath: path.resolve(basePath, r.chunk.file_path).replace(/\\/g, "/"),
+					filePath,
 					codeChunk: r.chunk?.content ?? "",
 					startLine: r.chunk?.start_line ?? 0,
 					endLine: r.chunk?.end_line ?? 0,
 				},
-			}))
-			.filter((r) => {
-				// Guard against path traversal: reject file paths that resolve outside the workspace
-				const filePath = r.payload.filePath
-				return filePath.startsWith(normalizedBase + "/") || filePath === normalizedBase
 			})
+		}
+
+		return converted
 	}
 }
