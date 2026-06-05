@@ -943,7 +943,8 @@ export class ClineProvider
 			}
 
 			if (allUpToDate) {
-				// All profiles have the current token — nothing to do
+				const { postZooGatewayCredentialsReady } = await import("../../services/zoo-gateway-credentials-sync")
+				postZooGatewayCredentialsReady((message) => this.postMessageToWebview(message))
 				return
 			}
 		}
@@ -1815,6 +1816,8 @@ export class ClineProvider
 			)
 		}
 		await this.postStateToWebview()
+		const { postZooGatewayCredentialsReady } = await import("../../services/zoo-gateway-credentials-sync")
+		postZooGatewayCredentialsReady((message) => this.postMessageToWebview(message))
 	}
 
 	// Requesty

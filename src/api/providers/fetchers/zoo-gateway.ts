@@ -25,9 +25,12 @@ export async function getZooGatewayModels(options?: ApiHandlerOptions): Promise<
 	const baseURL = options?.zooGatewayBaseUrl ?? `${getZooCodeBaseUrl()}/api/gateway/v1`
 
 	const sessionToken = resolveZooGatewaySessionToken(options?.zooSessionToken)
-	const headers: Record<string, string> = {}
-	if (sessionToken) {
-		headers["Authorization"] = `Bearer ${sessionToken}`
+	if (!sessionToken) {
+		return models
+	}
+
+	const headers: Record<string, string> = {
+		Authorization: `Bearer ${sessionToken}`,
 	}
 
 	try {

@@ -3707,12 +3707,14 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				} as any)
 				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
 				await provider.handleZooCodeCallback("zoo_ext_token")
 
+				expect(postMessageSpy).toHaveBeenCalledWith({ type: "zooGatewayCredentialsReady" })
 				expect(upsertSpy).toHaveBeenCalledWith(
 					"Zoo Gateway",
 					expect.objectContaining({
@@ -3809,6 +3811,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
 				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
@@ -3821,6 +3824,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				await (provider as any).ensureZooGatewayProfileSeeded()
 
 				expect(handleSpy).not.toHaveBeenCalled()
+				expect(postMessageSpy).toHaveBeenCalledWith({ type: "zooGatewayCredentialsReady" })
 			})
 
 			it("re-seeds when any zoo-gateway profile has a stale or missing token", async () => {

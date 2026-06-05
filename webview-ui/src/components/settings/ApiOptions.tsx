@@ -25,6 +25,7 @@ import { vscode } from "@src/utils/vscode"
 import { validateApiConfigurationExcludingModelErrors, getModelValidationError } from "@src/utils/validate"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
+import { useZooGatewayRouterModelsSync } from "@src/components/ui/hooks/useZooGatewayRouterModelsSync"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import { requestLmStudioModels } from "@src/components/ui/hooks/useLmStudioModels"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
@@ -171,6 +172,7 @@ const ApiOptions = ({
 		typeof apiConfiguration.apiProvider === "string" && isRetiredProvider(apiConfiguration.apiProvider)
 
 	const { data: routerModels, refetch: refetchRouterModels } = useRouterModels()
+	useZooGatewayRouterModelsSync()
 
 	const { data: openRouterModelProviders } = useOpenRouterModelProviders(
 		apiConfiguration?.openRouterModelId,

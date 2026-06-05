@@ -38,6 +38,7 @@ export interface ExtensionMessage {
 		| "commitSearchResults"
 		| "listApiConfig"
 		| "routerModels"
+		| "zooGatewayCredentialsReady"
 		| "openAiModels"
 		| "ollamaModels"
 		| "lmStudioModels"
