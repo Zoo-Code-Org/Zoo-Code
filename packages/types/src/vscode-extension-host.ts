@@ -318,7 +318,6 @@ export type ExtensionState = Pick<
 	| "requestDelaySeconds"
 	| "showWorktreesInHomeScreen"
 	| "disabledTools"
-	| "diffFuzzyThreshold"
 > & {
 	lockApiConfigAcrossModes?: boolean
 	version: string
