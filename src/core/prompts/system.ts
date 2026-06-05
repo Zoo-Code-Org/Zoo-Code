@@ -68,11 +68,13 @@ async function generatePrompt(
 	const hasMcpGroup = modeConfig.groups.some((groupEntry) => getGroupName(groupEntry) === "mcp")
 	const allowedMcpServers = modeConfig.allowedMcpServers
 
+	// Hoist the allowlist Set once (matches the sibling call sites, e.g. mcp_server.ts) instead
+	// of constructing a new Set on every `.filter` iteration.
+	const allowSet = allowedMcpServers ? new Set(allowedMcpServers) : undefined
+
 	let hasMcpServers = false
 	if (mcpHub) {
-		const servers = allowedMcpServers
-			? mcpHub.getServers().filter((s) => new Set(allowedMcpServers).has(s.name))
-			: mcpHub.getServers()
+		const servers = allowSet ? mcpHub.getServers().filter((s) => allowSet.has(s.name)) : mcpHub.getServers()
 		hasMcpServers = servers.length > 0
 	}
 	const shouldIncludeMcp = hasMcpGroup && hasMcpServers
@@ -99,13 +101,13 @@ ${getSharedToolUseSection()}${toolsCatalog}
 	${getToolUseGuidelinesSection()}
 
 ${
-	// `shouldIncludeMcp` already accounts for the mode's allowedMcpServers allowlist
-	// (see hasMcpServers above), so a mode that restricts MCP servers down to none will
-	// pass `undefined` here and omit the MCP capabilities line entirely. The capabilities
-	// section only emits a generic MCP availability statement (it does not enumerate
-	// individual servers), so forwarding the hub when at least one allowed server exists
-	// is consistent with the per-mode tool exposure.
-	getCapabilitiesSection(cwd, shouldIncludeMcp ? mcpHub : undefined)
+	// Forward the hub only when the mode actually exposes the MCP group, and pass the per-mode
+	// allowlist through so the capabilities section filters servers using the SAME convention as
+	// the tool-listing layer (a single source of truth for which servers are visible). This keeps
+	// the capability text consistent with the tools exposed in mixed cases (e.g. one allowed +
+	// one disallowed server), preventing the section from advertising MCP based on a disallowed
+	// server. `shouldIncludeMcp` is still used to short-circuit when no allowed server exists.
+	getCapabilitiesSection(cwd, hasMcpGroup ? mcpHub : undefined, allowedMcpServers)
 }
 
 ${modesSection}
