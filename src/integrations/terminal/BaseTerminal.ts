@@ -13,6 +13,7 @@ export abstract class BaseTerminal implements RooTerminal {
 	public readonly provider: RooTerminalProvider
 	public readonly id: number
 	public readonly initialCwd: string
+	public readonly reuseKey: string
 
 	public busy: boolean
 	public running: boolean
@@ -22,10 +23,11 @@ export abstract class BaseTerminal implements RooTerminal {
 	public process?: RooTerminalProcess
 	public completedProcesses: RooTerminalProcess[] = []
 
-	constructor(provider: RooTerminalProvider, id: number, cwd: string) {
+	constructor(provider: RooTerminalProvider, id: number, cwd: string, reuseKey: string = provider) {
 		this.provider = provider
 		this.id = id
 		this.initialCwd = cwd
+		this.reuseKey = reuseKey
 		this.busy = false
 		this.running = false
 		this.streamClosed = false
@@ -42,7 +44,7 @@ export abstract class BaseTerminal implements RooTerminal {
 	/**
 	 * Sets the active stream for this terminal and notifies the process
 	 * @param stream The stream to set, or undefined to clean up
-	 * @throws Error if process is undefined when a stream is provided
+	 * If no process exists when a stream is provided, logs a warning and returns.
 	 */
 	public setActiveStream(stream: AsyncIterable<string> | undefined, pid?: number): void {
 		if (stream) {
@@ -161,6 +163,7 @@ export abstract class BaseTerminal implements RooTerminal {
 	private static terminalZshOhMy: boolean = false
 	private static terminalZshP10k: boolean = false
 	private static terminalZdotdir: boolean = false
+	private static terminalProfile: string | undefined = undefined
 	private static execaShellPath: string | undefined = undefined
 
 	/**
@@ -294,6 +297,25 @@ export abstract class BaseTerminal implements RooTerminal {
 	 */
 	public static getTerminalZdotdir(): boolean {
 		return BaseTerminal.terminalZdotdir
+	}
+
+	/**
+	 * Sets the name of the VS Code terminal profile to use for the integrated
+	 * terminal. An empty/undefined value falls back to VS Code's default terminal
+	 * behavior.
+	 * @param profile The terminal profile name, or undefined for the default
+	 */
+	public static setTerminalProfile(profile: string | undefined): void {
+		const normalized = profile?.trim()
+		BaseTerminal.terminalProfile = normalized && normalized.length > 0 ? normalized : undefined
+	}
+
+	/**
+	 * Gets the name of the VS Code terminal profile to use for the integrated terminal.
+	 * @returns The terminal profile name, or undefined when the default should be used
+	 */
+	public static getTerminalProfile(): string | undefined {
+		return BaseTerminal.terminalProfile
 	}
 
 	public static setExecaShellPath(shellPath: string | undefined): void {

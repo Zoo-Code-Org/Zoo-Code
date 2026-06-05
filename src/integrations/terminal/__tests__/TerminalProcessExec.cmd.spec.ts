@@ -42,6 +42,7 @@ vi.mock("vscode", () => {
 				eventHandlers.closeTerminal = handler
 				return { dispose: vi.fn() }
 			}),
+			onDidChangeTerminalShellIntegration: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 		},
 		ThemeIcon: class ThemeIcon {
 			constructor(id: string) {

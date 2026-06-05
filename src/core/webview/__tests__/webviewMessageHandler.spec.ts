@@ -4,6 +4,9 @@ import type { Mock } from "vitest"
 
 // Mock dependencies - must come before imports
 vi.mock("../../../api/providers/fetchers/modelCache")
+vi.mock("../../../services/zoo-code-auth", () => ({
+	disconnectZooCode: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
 }))
@@ -103,6 +106,10 @@ vi.mock("vscode", () => {
 		workspace: {
 			workspaceFolders: [{ uri: { fsPath: "/mock/workspace" } }],
 			openTextDocument,
+			getConfiguration: vi.fn(() => ({ get: vi.fn() })),
+		},
+		commands: {
+			executeCommand: vi.fn().mockResolvedValue(undefined),
 		},
 	}
 })
@@ -167,6 +174,8 @@ vi.mock("../../mentions/resolveImageMentions", () => ({
 }))
 
 import { resolveImageMentions } from "../../mentions/resolveImageMentions"
+import { Terminal } from "../../../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
@@ -365,10 +374,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				litellm: mockModels,
 				ollama: {},
 				lmstudio: {},
-				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
 				"opencode-go": {},
@@ -452,10 +462,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
-				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
 				"opencode-go": {},
@@ -480,6 +491,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockResolvedValueOnce(mockModels) // unbound
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway
+			.mockResolvedValueOnce(mockModels) // zoo-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -508,10 +520,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				openrouter: mockModels,
 				requesty: {},
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
-				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
 				"opencode-go": {},
@@ -527,6 +540,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockRejectedValueOnce(new Error("Unbound error")) // unbound
 			.mockRejectedValueOnce(new Error("Vercel AI Gateway error")) // vercel-ai-gateway
+			.mockRejectedValueOnce(new Error("Zoo Gateway error")) // zoo-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -863,6 +877,129 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 	})
 })
 
+describe("webviewMessageHandler - terminalProfile", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		Terminal.setTerminalProfile(undefined)
+	})
+
+	afterEach(() => {
+		Terminal.setTerminalProfile(undefined)
+		vi.restoreAllMocks()
+	})
+
+	it("normalizes and persists a saved terminalProfile, then closes stale idle terminals", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: " Git Bash " },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBe("Git Bash")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not close idle terminals when hydration sends the unchanged profile", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: " Git Bash " },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+		expect(closeIdleTerminalsSpy).not.toHaveBeenCalled()
+	})
+
+	it("clears the persisted profile when SettingsView sends the empty-string sentinel", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: "" },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBeUndefined()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not close idle terminals when the empty-string sentinel leaves the profile unset", async () => {
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: "" },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).not.toHaveBeenCalled()
+	})
+
+	it("treats non-string terminalProfile values as unset", async () => {
+		Terminal.setTerminalProfile("Git Bash")
+		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { terminalProfile: 42 as any },
+		})
+
+		expect(Terminal.getTerminalProfile()).toBeUndefined()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("terminalProfile", undefined)
+		expect(closeIdleTerminalsSpy).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("webviewMessageHandler - requestTerminalProfiles", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	it("posts available profile names", async () => {
+		vi.spyOn(Terminal, "getAvailableProfileNames").mockReturnValue(["Git Bash", "bash"])
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "terminalProfiles",
+			profiles: ["Git Bash", "bash"],
+		})
+	})
+
+	it("posts an empty array when profile discovery throws", async () => {
+		vi.spyOn(Terminal, "getAvailableProfileNames").mockImplementation(() => {
+			throw new Error("config error")
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestTerminalProfiles" })
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "terminalProfiles",
+			profiles: [],
+		})
+	})
+})
+
+describe("webviewMessageHandler - openTerminalProfilePicker", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("executes the VS Code selectDefaultShell command", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "openTerminalProfilePicker" })
+		expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.terminal.selectDefaultShell")
+	})
+})
+
 describe("webviewMessageHandler - requestCommands", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -1090,5 +1227,83 @@ describe("webviewMessageHandler - downloadErrorDiagnostics", () => {
 
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("No active task to generate diagnostics for")
 		expect(generateErrorDiagnostics).not.toHaveBeenCalled()
+	})
+})
+
+describe("zooCodeSignOut", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("disconnects Zoo Code and clears tokens from all zoo-gateway profiles", async () => {
+		const { disconnectZooCode } = await import("../../../services/zoo-code-auth")
+		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue(undefined)
+
+		;(mockClineProvider as any).contextProxy = {
+			...mockClineProvider.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+		}
+		;(mockClineProvider as any).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([
+				{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
+				{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+			]),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					apiProvider: "zoo-gateway",
+					zooSessionToken: "token-active",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				})
+				.mockResolvedValueOnce({
+					apiProvider: "zoo-gateway",
+					zooSessionToken: "token-backup",
+				}),
+			saveConfig,
+		}
+		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		expect(disconnectZooCode).toHaveBeenCalled()
+		expect(upsertProviderProfile).toHaveBeenCalledWith(
+			"Zoo Gateway",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+			true,
+		)
+		expect(saveConfig).toHaveBeenCalledWith(
+			"Backup Zoo",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+		)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("still clears the in-memory handler when the active profile token is already empty on disk", async () => {
+		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		;(mockClineProvider as any).contextProxy = {
+			...mockClineProvider.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+		}
+		;(mockClineProvider as any).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+			getProfile: vi.fn().mockResolvedValue({
+				apiProvider: "zoo-gateway",
+				zooGatewayModelId: "anthropic/claude-sonnet-4",
+			}),
+			saveConfig: vi.fn(),
+		}
+		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		expect(upsertProviderProfile).toHaveBeenCalledWith(
+			"Zoo Gateway",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+			true,
+		)
 	})
 })

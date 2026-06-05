@@ -412,6 +412,37 @@ describe("SettingsView - Sound Settings", () => {
 		)
 	})
 
+	it("saves the selected chat font size and persists null on reset", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+
+		activateTab("ui")
+
+		const content = getSettingsContent()
+		const slider = within(content).getByTestId("chat-font-size-slider")
+
+		// Pick a size, then Save — the boundary should forward it to the host.
+		fireEvent.change(slider, { target: { value: "18" } })
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ chatFontSize: 18 }),
+			}),
+		)
+
+		// Reset clears the override; it is persisted as null (not undefined).
+		fireEvent.click(within(getSettingsContent()).getByTestId("chat-font-size-reset"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ chatFontSize: null }),
+			}),
+		)
+	})
+
 	it("shows tts slider when sound is enabled", () => {
 		// Render once and get the activateTab helper
 		const { activateTab, getSettingsContent } = renderSettingsView()

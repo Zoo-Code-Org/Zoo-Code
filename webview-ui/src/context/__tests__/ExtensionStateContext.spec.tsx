@@ -29,6 +29,22 @@ const TestComponent = () => {
 	)
 }
 
+const ChatFontSizeTestComponent = () => {
+	const { chatFontSize, setChatFontSize } = useExtensionState()
+
+	return (
+		<div>
+			<div data-testid="chat-font-size">{JSON.stringify(chatFontSize ?? null)}</div>
+			<button data-testid="set-font-size-button" onClick={() => setChatFontSize(20)}>
+				Set Font Size
+			</button>
+			<button data-testid="reset-font-size-button" onClick={() => setChatFontSize(undefined)}>
+				Reset Font Size
+			</button>
+		</div>
+	)
+}
+
 const ApiConfigTestComponent = () => {
 	const { apiConfiguration, setApiConfiguration } = useExtensionState()
 
@@ -90,6 +106,43 @@ describe("ExtensionStateContext", () => {
 		})
 
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(false)
+	})
+
+	it("does not set the chat font-size CSS variable when unset (init)", () => {
+		document.documentElement.style.removeProperty("--zoo-chat-font-size")
+
+		render(
+			<ExtensionStateContextProvider>
+				<ChatFontSizeTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("chat-font-size").textContent!)).toBe(null)
+		expect(document.documentElement.style.getPropertyValue("--zoo-chat-font-size")).toBe("")
+	})
+
+	it("applies the chat font-size CSS variable when set, and clears it on reset", () => {
+		document.documentElement.style.removeProperty("--zoo-chat-font-size")
+
+		render(
+			<ExtensionStateContextProvider>
+				<ChatFontSizeTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			screen.getByTestId("set-font-size-button").click()
+		})
+
+		expect(JSON.parse(screen.getByTestId("chat-font-size").textContent!)).toBe(20)
+		expect(document.documentElement.style.getPropertyValue("--zoo-chat-font-size")).toBe("20px")
+
+		act(() => {
+			screen.getByTestId("reset-font-size-button").click()
+		})
+
+		expect(JSON.parse(screen.getByTestId("chat-font-size").textContent!)).toBe(null)
+		expect(document.documentElement.style.getPropertyValue("--zoo-chat-font-size")).toBe("")
 	})
 
 	it("updates allowedCommands through setAllowedCommands", () => {

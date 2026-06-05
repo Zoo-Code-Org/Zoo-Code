@@ -102,7 +102,7 @@ const StyledMarkdown = styled.div`
 		"Helvetica Neue",
 		sans-serif;
 
-	font-size: var(--vscode-font-size, 13px);
+	font-size: var(--zoo-chat-font-size, var(--vscode-font-size, 13px));
 
 	p,
 	li,
