@@ -30,17 +30,19 @@
 
 Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku migracji Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chcemy jak najlepiej pomagać użytkownikom w czasie przejścia i właśnie do tego służą nasze [Reddit](https://www.reddit.com/r/ZooCode) oraz [Discord](https://discord.gg/VxfP4Vx3gX). Jeśli masz problem albo pytanie, wpadaj i pytaj.
 
-## Nowości w v3.56.0
+## Nowości w v3.58.0
 
-- Wsparcie dla **Claude Opus 4.8** u dostawców Anthropic, Bedrock i Vertex
-- **Opencode Go** dodany jako nowy dostawca API pierwszej klasy
-- **Niezawodne anulowanie zadań** — anulowanie zadania teraz poprawnie kończy uruchomiony proces, z automatycznym ponowieniem Ctrl+C dla opornych procesów
-- Naprawiono niestandardowe ID modeli Gemini, które były ignorowane i wracały do domyślnego
-- Naprawiono obcinanie diffów Grok przez brakujące znaczniki
-- Naprawiono wykrywanie PowerShell na Windows bez skonfigurowanego profilu powłoki
-- Naprawiono akcje kodu VS Code wyświetlające nazwę Roo Code; zlokalizowane we wszystkich obsługiwanych językach
-- Naprawiono ostrzeżenie Vertex AI przy ścieżce pliku w polu poświadczeń Google Cloud
-- Sześć aktualizacji bezpieczeństwa zależności (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — połącz przez zarządzany gateway z obsługą uwierzytelniania wielu profili
+- **Gemini 3.5 Flash** — szybki i wydajny model Google, teraz dostępny bezpośrednio w ustawieniach dostawcy
+- **Semble embedding** — indeksuj bazę kodu lokalnie bez zewnętrznego klucza API ani przesyłania plików
+- **Konfigurowalna wielkość czcionki czatu** i **nadpisanie powłoki zintegrowanego terminala VS Code**
+- **Powiadomienia w stylu GitHub** renderowane w webview
+- **Konfigurowalna maksymalna liczba tokenów wyjściowych** dla modeli GLM
+- **WorkspacePathResolver** — niezawodna obsługa ścieżek w workspace'ach z dowiązaniami symbolicznymi
+- Naprawiono crash React spowodowany przez niepoprawny tryb sugestii follow-up
+- Naprawiono brak parametru temperature OpenAI bez niestandardowej wartości
+- Obsługa błędów per-klucz podczas importowania ustawień
+- Aktualizacje bezpieczeństwa: mermaid v11.15.0, axios v1.16.0
 
 ---
 

@@ -366,9 +366,9 @@
 		},
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Claude Opus 4.8 dan Opencode Go: Claude Opus 4.8 ditambahkan ke Anthropic, Bedrock, dan Vertex, ditambah Opencode Go sebagai provider baru kelas utama.",
-			"highlight2": "Pembatalan tugas yang andal: Membatalkan tugas kini benar-benar menghentikan proses yang berjalan, dengan percobaan ulang Ctrl+C otomatis untuk proses yang sulit dihentikan.",
-			"highlight3": "Perbaikan provider dan editor: Memperbaiki ID model kustom Gemini, pemotongan diff Grok, deteksi PowerShell di Windows, dan branding code action VS Code."
+			"highlight1": "Hubungkan melalui Zoo Gateway — arahkan permintaanmu melalui gateway terkelola dengan dukungan autentikasi multi-profil.",
+			"highlight2": "Gunakan Gemini 3.5 Flash — model Google yang cepat dan andal, kini tersedia langsung dari pengaturan provider.",
+			"highlight3": "Indeks kodebasemu secara lokal dengan Semble — embedding on-the-fly tanpa API key eksternal atau unggahan, kodemu tetap di mesinmu."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

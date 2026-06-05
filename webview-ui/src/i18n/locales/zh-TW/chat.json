@@ -359,9 +359,9 @@
 		},
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "Claude Opus 4.8 與 Opencode Go：已為 Anthropic、Bedrock 和 Vertex 新增 Claude Opus 4.8，並新增 Opencode Go 作為一等供應商。",
-			"highlight2": "可靠的任務取消：取消任務現在會正確終止正在執行的程序，對於頑固程序還會自動重試 Ctrl+C。",
-			"highlight3": "供應商與編輯器修正：修正了 Gemini 自訂模型 ID、Grok diff 截斷、Windows 上的 PowerShell 偵測以及 VS Code 程式碼動作的品牌名稱。"
+			"highlight1": "透過 Zoo Gateway 連線 — 將請求路由至支援多設定檔驗證的託管閘道。",
+			"highlight2": "使用 Gemini 3.5 Flash — 一款快速且強大的 Google 模型，現可直接在供應商設定中使用。",
+			"highlight3": "使用 Semble 在本機對程式碼庫建立索引 — 無需外部 API 金鑰或上傳即可即時產生嵌入，程式碼始終保留在你的機器上。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

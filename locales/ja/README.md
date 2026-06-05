@@ -30,17 +30,19 @@
 
 Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
-## v3.56.0 の新機能
+## v3.58.0 の新機能
 
-- Anthropic・Bedrock・Vertex で **Claude Opus 4.8** をサポート
-- **Opencode Go** を新たな正式 API プロバイダーとして追加
-- **タスクキャンセルの改善** — タスクをキャンセルすると実行中のプロセスが正しく終了。応答しないプロセスには Ctrl+C の自動リトライも実施
-- Gemini のカスタムモデル ID が無視されてデフォルトにフォールバックする問題を修正
-- マーカー欠落による Grok diff の切り捨てを修正
-- シェルプロファイルが未設定の Windows での PowerShell 検出を修正
-- VS Code コードアクションが Roo Code のブランド名を表示していた問題を修正。全サポート言語にローカライズ済み
-- Google Cloud 認証情報フィールドにファイルパスを受け取った際の Vertex AI の誤警告を修正
-- 6 件のセキュリティ依存関係更新 (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — マルチプロファイル認証に対応したマネージドゲートウェイ経由で接続
+- **Gemini 3.5 Flash** — 高速で優れた Google モデルがプロバイダー設定から直接利用可能に
+- **Semble 埋め込み** — 外部 API キーやアップロード不要でコードベースをローカルにインデックス化
+- **チャットのフォントサイズ設定**と **VS Code 統合ターミナルのシェル上書き**
+- webview で **GitHub スタイルのアラート**をレンダリング
+- GLM モデル向けの**最大出力トークン設定**
+- **WorkspacePathResolver** — シンボリックリンクを含むワークスペースでの安定したパス処理
+- 不正な形式のフォローアップ提案モードによる React クラッシュを修正
+- カスタム値が未設定の場合に OpenAI の temperature が省略される問題を修正
+- 設定インポート時のキー別失敗を処理
+- セキュリティ更新: mermaid v11.15.0、axios v1.16.0
 
 ---
 

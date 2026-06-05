@@ -58,7 +58,8 @@ mode: code
     - Ask the user what three areas should be highlighted.
     - Update relevant announcement files and documentation, including `webview-ui/src/components/chat/Announcement.tsx`, `README.md`, and the `latestAnnouncementId` in `src/core/webview/ClineProvider.ts`.
     - Ask the user to confirm the English announcement before proceeding.
-    - Arrange translation updates for all supported locales affected by README, announcement, or package localization changes.
+    - Arrange translation updates for all supported locales affected by README, announcement, or package localization changes. Use the `/roo-translate` skill to propagate the updated `chat.json` announcement highlight keys and the "What's New" section to all supported locales.
+    - Note: only some locale READMEs contain a translated "What's New" section (currently pt-BR, ko, zh-CN, zh-TW). Check the others and add translated sections where they are missing.
 
 8. Create the release branch:
 
