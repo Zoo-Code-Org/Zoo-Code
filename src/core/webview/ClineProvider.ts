@@ -193,7 +193,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "may-2026-v3.56.0-opus48-opencodego-cancellation" // v3.56.0 Claude Opus 4.8, Opencode Go provider, task cancellation fixes
+	public readonly latestAnnouncementId = "jun-2026-v3.58.0-zoo-gateway-gemini35flash-semble" // v3.58.0 Zoo Gateway, Gemini 3.5 Flash, Semble embedding
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 

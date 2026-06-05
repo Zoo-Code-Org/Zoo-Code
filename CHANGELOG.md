@@ -1,5 +1,31 @@
 # Zoo Code Changelog
 
+## 3.58.0
+
+### Minor Changes
+
+- Add Zoo Gateway provider with auth callback and multi-profile token sync (PR #344 by @JamesRobert20, PR #345 by @JamesRobert20, PR #347 by @JamesRobert20)
+- Add Gemini 3.5 Flash support (PR #331 by @jeanbispo)
+- Add Semble as a local on-the-fly embedding provider for code indexing (PR #399 by @navedmerchant)
+- Remove extension-side LLM telemetry; server logs only through gateway (PR #346 by @JamesRobert20)
+- Add VS Code integrated terminal shell override (PR #277 by @proyectoauraorg)
+- Add configurable chat font size (#157 by @duvw, PR #276 by @proyectoauraorg)
+- Render GitHub-style alerts in the webview (#258 by @melck, PR #275 by @proyectoauraorg)
+- Add configurable max output tokens for GLM models (#161 by @app/roomote, PR #274 by @proyectoauraorg)
+- Introduce WorkspacePathResolver for async symlink-aware path canonicalization (#389 by @edelauna, PR #428 by @proyectoauraorg)
+- Better secure release workflows and GitHub Actions (PR #482 by @edelauna)
+- Fix React crash from malformed follow-up suggestion mode (PR #414 by @edelauna)
+- Fix OpenAI temperature omitted when no custom value is set (#242 by @brunocasado, PR #247 by @proyectoauraorg)
+- Handle per-key failures during settings import (PR #401 by @taltas)
+- Add comprehensive test coverage for ReadFileTool (PR #222 by @proyectoauraorg)
+- Unskip VS Code e2e replay for subtasks (PR #94 by @app/roomote)
+- Fix e2e cache: replace paths filter with content-hash cache skip (PR #268 by @app/roomote)
+- Remove deprecated requestRooCreditBalance handler (PR #385 by @JamesRobert20)
+- Update mermaid to v11.15.0 for a security fix (PR #235 by @app/renovate)
+- Update axios to v1.16.0 for a security fix (PR #400 by @app/renovate)
+- Pin dependencies (PR #353 by @app/renovate)
+- Remove unused tmp dependency and other unused packages (PR #341 by @app/renovate)
+
 ## 3.56.0
 
 ### Minor Changes
