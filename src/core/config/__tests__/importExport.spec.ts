@@ -731,9 +731,12 @@ describe("importExport", () => {
 					{ name: "valid-profile", id: "valid-id", apiProvider: "openai" as ProviderName },
 				])
 
+				const seenImportedAt: Array<number | undefined> = []
 				const mockProvider = {
-					settingsImportedAt: 0,
-					postStateToWebview: vi.fn().mockResolvedValue(undefined),
+					settingsImportedAt: undefined as number | undefined,
+					postStateToWebview: vi.fn().mockImplementation(async () => {
+						seenImportedAt.push(mockProvider.settingsImportedAt)
+					}),
 				}
 
 				const showWarningMessageSpy = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined)
@@ -754,7 +757,7 @@ describe("importExport", () => {
 
 				// Should show warning message with short summary (not full details)
 				expect(showWarningMessageSpy).toHaveBeenCalledWith(
-					expect.stringContaining("1 profile had issues during import."),
+					expect.stringContaining("1 item had issues during import."),
 				)
 				expect(showWarningMessageSpy).toHaveBeenCalledWith(
 					expect.stringContaining("See Developer Tools console for details."),
@@ -766,13 +769,65 @@ describe("importExport", () => {
 				)
 				expect(showInfoMessageSpy).not.toHaveBeenCalled()
 
-				// Provider state should still be updated
-				expect(mockProvider.settingsImportedAt).toBeGreaterThan(0)
+				// Provider state should be delivered once, then cleared.
+				expect(seenImportedAt).toHaveLength(1)
+				expect(seenImportedAt[0]).toBeGreaterThan(0)
+				expect(mockProvider.settingsImportedAt).toBeUndefined()
 				expect(mockProvider.postStateToWebview).toHaveBeenCalled()
 
 				showWarningMessageSpy.mockRestore()
 				showInfoMessageSpy.mockRestore()
 				consoleWarnSpy.mockRestore()
+			})
+
+			it("clears settingsImportedAt after posting the imported state so later launches do not replay it", async () => {
+				const filePath = "/mock/path/settings.json"
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: "openai" as ProviderName,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: { mode: "code" },
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				;(fs.access as Mock).mockResolvedValue(undefined)
+
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: "openai" as ProviderName },
+				])
+
+				const seenImportedAt: Array<number | undefined> = []
+				const mockProvider = {
+					settingsImportedAt: undefined as number | undefined,
+					postStateToWebview: vi.fn().mockImplementation(async () => {
+						seenImportedAt.push(mockProvider.settingsImportedAt)
+					}),
+				}
+
+				await importSettingsWithFeedback(
+					{
+						providerSettingsManager: mockProviderSettingsManager,
+						contextProxy: mockContextProxy,
+						customModesManager: mockCustomModesManager,
+						provider: mockProvider,
+					},
+					filePath,
+				)
+
+				expect(seenImportedAt).toHaveLength(1)
+				expect(seenImportedAt[0]).toBeGreaterThan(0)
+				expect(mockProvider.settingsImportedAt).toBeUndefined()
 			})
 
 			it("should handle multiple profiles with mixed valid and invalid providers", async () => {
@@ -1044,7 +1099,7 @@ describe("importExport", () => {
 
 				// Should show warning message with plural summary for multiple warnings
 				expect(showWarningMessageSpy).toHaveBeenCalledWith(
-					expect.stringContaining("2 profiles had issues during import."),
+					expect.stringContaining("2 items had issues during import."),
 				)
 				// Should log full details to console
 				expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -1053,6 +1108,219 @@ describe("importExport", () => {
 						expect.stringContaining("problematic-profile-1"),
 						expect.stringContaining("problematic-profile-2"),
 					]),
+				)
+
+				showWarningMessageSpy.mockRestore()
+				consoleWarnSpy.mockRestore()
+			})
+
+			it("should normalize imageGenerationProvider roo while preserving other global settings", async () => {
+				;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: "openai" as ProviderName,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: {
+						imageGenerationProvider: "roo",
+						openRouterImageGenerationSelectedModel: "openrouter/model-1",
+						customInstructions: "Keep this setting",
+					},
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: "openai" as ProviderName },
+				])
+
+				const result = await importSettings({
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+				})
+
+				expect(result.success).toBe(true)
+				expect((result as { warnings?: string[] }).warnings).toEqual(
+					expect.arrayContaining([
+						expect.stringContaining("globalSettings.imageGenerationProvider"),
+						expect.stringContaining('unsupported value "roo"'),
+					]),
+				)
+
+				const importedGlobalSettings = mockContextProxy.setValues.mock.calls[0][0]
+				expect(importedGlobalSettings).toHaveProperty("imageGenerationProvider", undefined)
+				expect(importedGlobalSettings.openRouterImageGenerationSelectedModel).toBe("openrouter/model-1")
+				expect(importedGlobalSettings.customInstructions).toBe("Keep this setting")
+			})
+
+			it("should partially import valid global settings when invalid top-level keys are present", async () => {
+				;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: "openai" as ProviderName,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: {
+						customInstructions: "Keep this setting",
+						autoApprovalEnabled: true,
+						requestDelaySeconds: "slow",
+						telemetrySetting: "maybe",
+					},
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: "openai" as ProviderName },
+				])
+
+				const result = await importSettings({
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+				})
+
+				expect(result.success).toBe(true)
+				expect((result as { warnings?: string[] }).warnings).toEqual(
+					expect.arrayContaining([
+						expect.stringContaining("globalSettings.requestDelaySeconds"),
+						expect.stringContaining("globalSettings.telemetrySetting"),
+					]),
+				)
+
+				const importedGlobalSettings = mockContextProxy.setValues.mock.calls[0][0]
+				expect(importedGlobalSettings).toEqual({
+					customInstructions: "Keep this setting",
+					autoApprovalEnabled: true,
+				})
+			})
+
+			it("should skip invalid customModes without aborting unrelated settings import", async () => {
+				;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: "openai" as ProviderName,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: {
+						customInstructions: "Keep this setting",
+						customModes: [
+							{
+								slug: "broken-mode",
+								name: "",
+								roleDefinition: "",
+								groups: ["invalid-group"],
+							},
+						],
+					},
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: "openai" as ProviderName },
+				])
+
+				const result = await importSettings({
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+				})
+
+				expect(result.success).toBe(true)
+				expect((result as { warnings?: string[] }).warnings).toEqual(
+					expect.arrayContaining([expect.stringContaining("globalSettings.customModes")]),
+				)
+				expect(mockCustomModesManager.updateCustomMode).not.toHaveBeenCalled()
+				expect(mockContextProxy.setValues).toHaveBeenCalledWith({
+					customInstructions: "Keep this setting",
+				})
+			})
+
+			it("should use generic warning wording when only global settings have issues", async () => {
+				const filePath = "/mock/path/settings.json"
+				const mockFileContent = JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "valid-profile",
+						apiConfigs: {
+							"valid-profile": {
+								apiProvider: "openai" as ProviderName,
+								apiKey: "test-key",
+								id: "valid-id",
+							},
+						},
+					},
+					globalSettings: {
+						requestDelaySeconds: "slow",
+					},
+				})
+
+				;(fs.readFile as Mock).mockResolvedValue(mockFileContent)
+				;(fs.access as Mock).mockResolvedValue(undefined)
+				mockProviderSettingsManager.export.mockResolvedValue({
+					currentApiConfigName: "default",
+					apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
+				})
+				mockProviderSettingsManager.listConfig.mockResolvedValue([
+					{ name: "valid-profile", id: "valid-id", apiProvider: "openai" as ProviderName },
+				])
+
+				const mockProvider = {
+					settingsImportedAt: 0,
+					postStateToWebview: vi.fn().mockResolvedValue(undefined),
+				}
+
+				const showWarningMessageSpy = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined)
+				const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+				await importSettingsWithFeedback(
+					{
+						providerSettingsManager: mockProviderSettingsManager,
+						contextProxy: mockContextProxy,
+						customModesManager: mockCustomModesManager,
+						provider: mockProvider,
+					},
+					filePath,
+				)
+
+				expect(showWarningMessageSpy).toHaveBeenCalledWith(
+					expect.stringContaining("1 item had issues during import."),
+				)
+				expect(showWarningMessageSpy).not.toHaveBeenCalledWith(expect.stringContaining("profile had issues"))
+				expect(consoleWarnSpy).toHaveBeenCalledWith(
+					"Settings import completed with warnings:",
+					expect.arrayContaining([expect.stringContaining("globalSettings.requestDelaySeconds")]),
 				)
 
 				showWarningMessageSpy.mockRestore()

@@ -112,18 +112,15 @@ describe("list-files symlink support", () => {
 		await listFiles(testDir, false, 100)
 
 		// Verify that spawn was called with --follow flag (the critical fix)
-		const [rgPath, args] = mockSpawn.mock.calls[0]
+		const [rgPath, args, options] = mockSpawn.mock.calls[0]
 		expect(rgPath).toBe("/mock/path/to/rg")
 		expect(args).toContain("--files")
 		expect(args).toContain("--hidden")
 		expect(args).toContain("--follow") // This is the critical assertion - the fix should add this flag
 
-		// Platform-agnostic path check - verify the last argument ends with the expected path
 		const lastArg = args[args.length - 1]
-		// On Windows, the path might be resolved to something like D:\test\dir
-		// On Unix, it would be /test/dir
-		// So we just check that it ends with the expected segments
-		expect(lastArg).toMatch(/[/\\]test[/\\]dir$/)
+		expect(lastArg).toBe(".")
+		expect(options).toMatchObject({ cwd: path.resolve(testDir) })
 	})
 
 	it("should include --follow flag for recursive listings too", async () => {
@@ -137,18 +134,30 @@ describe("list-files symlink support", () => {
 		await listFiles(testDir, true, 100)
 
 		// Verify that spawn was called with --follow flag (the critical fix)
-		const [rgPath, args] = mockSpawn.mock.calls[0]
+		const [rgPath, args, options] = mockSpawn.mock.calls[0]
 		expect(rgPath).toBe("/mock/path/to/rg")
 		expect(args).toContain("--files")
 		expect(args).toContain("--hidden")
 		expect(args).toContain("--follow") // This should be present in recursive mode too
 
-		// Platform-agnostic path check - verify the last argument ends with the expected path
 		const lastArg = args[args.length - 1]
-		// On Windows, the path might be resolved to something like D:\test\dir
-		// On Unix, it would be /test/dir
-		// So we just check that it ends with the expected segments
-		expect(lastArg).toMatch(/[/\\]test[/\\]dir$/)
+		expect(lastArg).toBe(".")
+		expect(options).toMatchObject({ cwd: path.resolve(testDir) })
+	})
+
+	it("should keep ignored ancestor directories like /tmp from excluding recursive file results", async () => {
+		const mockSpawn = vi.mocked(childProcess.spawn)
+		mockSpawn.mockReturnValue(createMockRipgrepProcess(["nested/deep/deep-nested-file.ts\n"]) as any)
+
+		const testDir = "/tmp/roo-test-workspace/list-files-tool-fixture"
+
+		const [files] = await listFiles(testDir, true, 100)
+
+		const [, args, options] = mockSpawn.mock.calls[0]
+		expect(args).toContain("!**/tmp/**")
+		expect(args[args.length - 1]).toBe(".")
+		expect(options).toMatchObject({ cwd: path.resolve(testDir) })
+		expect(files).toContain(path.resolve(testDir, "nested", "deep", "deep-nested-file.ts"))
 	})
 
 	it("should ensure first-level directories are included when limit is reached", async () => {

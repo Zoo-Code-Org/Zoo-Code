@@ -26,10 +26,11 @@ const vercelAiGatewayPricingSchema = z.object({
 const vercelAiGatewayModelSchema = z.object({
 	id: z.string(),
 	object: z.string(),
-	created: z.number(),
+	// Zoo Gateway / Bedrock catalog entries omit these; they are not used for routing.
+	created: z.number().optional(),
 	owned_by: z.string(),
 	name: z.string(),
-	description: z.string(),
+	description: z.string().optional(),
 	context_window: z.number(),
 	max_tokens: z.number(),
 	type: z.string(),
@@ -42,7 +43,7 @@ export type VercelAiGatewayModel = z.infer<typeof vercelAiGatewayModelSchema>
  * VercelAiGatewayModelsResponse
  */
 
-const vercelAiGatewayModelsResponseSchema = z.object({
+export const vercelAiGatewayModelsResponseSchema = z.object({
 	object: z.string(),
 	data: z.array(vercelAiGatewayModelSchema),
 })
@@ -110,7 +111,7 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 		outputPrice: parseApiPrice(model.pricing?.output),
 		cacheWritesPrice,
 		cacheReadsPrice,
-		description: model.description,
+		description: model.description ?? model.name,
 	}
 
 	return modelInfo

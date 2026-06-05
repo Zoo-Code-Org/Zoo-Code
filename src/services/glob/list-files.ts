@@ -203,27 +203,28 @@ async function listFilesWithRipgrep(
 	recursive: boolean,
 	limit: number,
 ): Promise<string[]> {
-	const rgArgs = buildRipgrepArgs(dirPath, recursive)
-
-	const relativePaths = await execRipgrep(rgPath, rgArgs, limit)
-
-	// Convert relative paths from ripgrep to absolute paths
-	// Resolve dirPath once here for the mapping operation
 	const absolutePath = path.resolve(dirPath)
+	const rgArgs = buildRipgrepArgs(".", recursive, dirPath)
+
+	const relativePaths = await execRipgrep(rgPath, rgArgs, limit, absolutePath)
+
+	// Convert relative paths from ripgrep to absolute paths.
+	// Ripgrep now runs from the target directory so glob exclusions apply within that root
+	// instead of accidentally matching ignored ancestor path segments like /tmp.
 	return relativePaths.map((relativePath) => path.resolve(absolutePath, relativePath))
 }
 
 /**
  * Build appropriate ripgrep arguments based on whether we're doing a recursive search
  */
-function buildRipgrepArgs(dirPath: string, recursive: boolean): string[] {
+function buildRipgrepArgs(searchPath: string, recursive: boolean, targetDirPath: string): string[] {
 	// Base arguments to list files
 	const args = ["--files", "--hidden", "--follow"]
 
 	if (recursive) {
-		return [...args, ...buildRecursiveArgs(dirPath), dirPath]
+		return [...args, ...buildRecursiveArgs(targetDirPath), searchPath]
 	} else {
-		return [...args, ...buildNonRecursiveArgs(), dirPath]
+		return [...args, ...buildNonRecursiveArgs(), searchPath]
 	}
 }
 
@@ -646,12 +647,9 @@ function formatAndCombineResults(files: string[], directories: string[], limit: 
 /**
  * Execute ripgrep command and return list of files
  */
-async function execRipgrep(rgPath: string, args: string[], limit: number): Promise<string[]> {
+async function execRipgrep(rgPath: string, args: string[], limit: number, cwd?: string): Promise<string[]> {
 	return new Promise((resolve, reject) => {
-		// Extract the directory path from args (it's the last argument)
-		const searchDir = args[args.length - 1]
-
-		const rgProcess = childProcess.spawn(rgPath, args)
+		const rgProcess = childProcess.spawn(rgPath, args, cwd ? { cwd } : undefined)
 		let output = ""
 		let results: string[] = []
 

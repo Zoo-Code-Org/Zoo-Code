@@ -18,6 +18,7 @@ export type RooReasoningParams = {
 }
 
 export type AnthropicReasoningParams = BetaThinkingConfigParam
+export type AnthropicProviderReasoningParams = AnthropicReasoningParams | { type: "adaptive" }
 
 export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"] }
 
@@ -37,7 +38,7 @@ export type GeminiReasoningParams = GenerateContentConfig["thinkingConfig"] & {
 export type GetModelReasoningOptions = {
 	model: ModelInfo
 	reasoningBudget: number | undefined
-	reasoningEffort: ReasoningEffortExtended | "disable" | undefined
+	reasoningEffort?: ReasoningEffortExtended | "disable" | undefined
 	settings: ProviderSettings
 }
 
@@ -111,6 +112,18 @@ export const getAnthropicReasoning = ({
 }: GetModelReasoningOptions): AnthropicReasoningParams | undefined =>
 	shouldUseReasoningBudget({ model, settings }) ? { type: "enabled", budget_tokens: reasoningBudget! } : undefined
 
+export const getAnthropicProviderReasoning = ({
+	model,
+	reasoningBudget,
+	settings,
+}: GetModelReasoningOptions): AnthropicProviderReasoningParams | undefined => {
+	if (model.supportsReasoningBinary && settings.enableReasoningEffort) {
+		return { type: "adaptive" }
+	}
+
+	return getAnthropicReasoning({ model, reasoningBudget, settings })
+}
+
 export const getOpenAiReasoning = ({
 	model,
 	reasoningEffort,
@@ -165,5 +178,5 @@ export const getGeminiReasoning = ({
 		return undefined
 	}
 
-	return { thinkingLevel: effortToUse, includeThoughts: true }
+	return { thinkingLevel: effortToUse as unknown as GeminiReasoningParams["thinkingLevel"], includeThoughts: true }
 }

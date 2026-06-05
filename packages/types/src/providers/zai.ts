@@ -11,7 +11,7 @@ import { ZaiApiLine } from "../provider-settings.js"
 // https://bigmodel.cn/pricing
 
 export type InternationalZAiModelId = keyof typeof internationalZAiModels
-export const internationalZAiDefaultModelId: InternationalZAiModelId = "glm-4.6"
+export const internationalZAiDefaultModelId: InternationalZAiModelId = "glm-4.7"
 export const internationalZAiModels = {
 	"glm-4.5": {
 		maxTokens: 16_384,
@@ -142,6 +142,7 @@ export const internationalZAiModels = {
 		contextWindow: 200_000,
 		supportsImages: false,
 		supportsPromptCache: true,
+		supportsMaxTokens: true,
 		supportsReasoningEffort: ["disable", "medium"],
 		reasoningEffort: "medium",
 		preserveReasoning: true,
@@ -157,6 +158,7 @@ export const internationalZAiModels = {
 		contextWindow: 202_752,
 		supportsImages: false,
 		supportsPromptCache: true,
+		supportsMaxTokens: true,
 		supportsReasoningEffort: ["disable", "medium"],
 		reasoningEffort: "medium",
 		preserveReasoning: true,
@@ -229,7 +231,7 @@ export const internationalZAiModels = {
 } as const satisfies Record<string, ModelInfo>
 
 export type MainlandZAiModelId = keyof typeof mainlandZAiModels
-export const mainlandZAiDefaultModelId: MainlandZAiModelId = "glm-4.6"
+export const mainlandZAiDefaultModelId: MainlandZAiModelId = "glm-4.7"
 export const mainlandZAiModels = {
 	"glm-4.5": {
 		maxTokens: 16_384,
@@ -348,6 +350,7 @@ export const mainlandZAiModels = {
 		contextWindow: 204_800,
 		supportsImages: false,
 		supportsPromptCache: true,
+		supportsMaxTokens: true,
 		supportsReasoningEffort: ["disable", "medium"],
 		reasoningEffort: "medium",
 		preserveReasoning: true,
@@ -363,6 +366,7 @@ export const mainlandZAiModels = {
 		contextWindow: 202_752,
 		supportsImages: false,
 		supportsPromptCache: true,
+		supportsMaxTokens: true,
 		supportsReasoningEffort: ["disable", "medium"],
 		reasoningEffort: "medium",
 		preserveReasoning: true,

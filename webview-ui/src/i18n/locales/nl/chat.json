@@ -305,14 +305,14 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"handoff": {
 			"heading": "Roo Code is terug! Nu als een door de community onderhouden plugin genaamd Zoo Code!!",
-			"description": "Als je het gemist hebt: het Roo Code-team heeft onlangs aangekondigd dat het de ontwikkeling van Roo Code afbouwt en het bestaande werk archiveert. Maar geen zorgen: de community is opgestaan om de erfenis van Roo Code voort te zetten met een nieuwe naam en een nieuw thuis. We zijn niet langer slechts één \"Roo\", maar een community — een \"Zoo\", zogezegd. Zoo Code is een door de community onderhouden plugin die verdergaat waar Zoo Code ophield, en we zetten ons ervoor in om de geest van Roo levend te houden terwijl we ook nieuwe functies en verbeteringen introduceren. We willen het hele Roo Code-team enorm bedanken voor hun geweldige werk en voor het maken van zo'n fantastisch hulpmiddel voor ontwikkelaars. We kijken ernaar uit om verder te bouwen op hun fundament en te zien waar de community Zoo Code in de toekomst naartoe brengt!",
+			"description": "Als je het gemist hebt: het Roo Code-team heeft onlangs aangekondigd dat het de ontwikkeling van Roo Code afbouwt en het bestaande werk archiveert. Maar geen zorgen: de community is opgestaan om de erfenis van Roo Code voort te zetten met een nieuwe naam en een nieuw thuis. We zijn niet langer slechts één \"Roo\", maar een community — een \"Zoo\", zogezegd. Zoo Code is een door de community onderhouden plugin die verdergaat waar Roo Code ophield, en we zetten ons ervoor in om de geest van Roo levend te houden terwijl we ook nieuwe functies en verbeteringen introduceren. We willen het hele Roo Code-team enorm bedanken voor hun geweldige werk en voor het maken van zo'n fantastisch hulpmiddel voor ontwikkelaars. We kijken ernaar uit om verder te bouwen op hun fundament en te zien waar de community Zoo Code in de toekomst naartoe brengt!",
 			"readMore": "Bekijk de nieuwe homepage van Zoo Code en lees de volledige aankondiging"
 		},
 		"release": {
-			"heading": "Wat is er nieuw:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: GPT-5.5-ondersteuning toegevoegd in de OpenAI Codex-provider, zodat je het nieuwste model direct vanuit Zoo Code kunt gebruiken.",
-			"claudeOpus47": "Claude Opus 4.7 op Vertex AI: Claude Opus 4.7 toegevoegd aan de Vertex AI-provider voor Anthropic's nieuwste vlaggenschip-reasoningmodel.",
-			"checkpointNav": "Navigatie naar vorige checkpoints: Bediening toegevoegd in de chat om terug te springen door eerdere checkpoints, met volledige i18n-ondersteuning."
+			"heading": "Wat is nieuw:",
+			"highlight1": "Claude Opus 4.8 en Opencode Go: Claude Opus 4.8 toegevoegd voor Anthropic, Bedrock en Vertex, plus Opencode Go als nieuwe eersteklas provider.",
+			"highlight2": "Betrouwbare taakafsluiting: Een taak annuleren beëindigt nu correct het lopende proces, met automatische Ctrl+C-herpoging voor hardnekkige processen.",
+			"highlight3": "Provider- en editorfixes: Aangepaste Gemini-model-ID's, afgeknipte Grok-diffs, PowerShell-detectie op Windows en de VS Code-code-actienaam zijn gecorrigeerd."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

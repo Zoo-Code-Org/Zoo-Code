@@ -89,7 +89,7 @@ export const globalSettingsSchema = z.object({
 	dismissedUpsells: z.array(z.string()).optional(),
 
 	// Image generation settings (experimental) - flattened for simplicity
-	imageGenerationProvider: z.enum(["openrouter", "roo"]).optional(),
+	imageGenerationProvider: z.enum(["openrouter"]).optional(),
 	openRouterImageApiKey: z.string().optional(),
 	openRouterImageGenerationSelectedModel: z.string().optional(),
 
@@ -176,6 +176,7 @@ export const globalSettingsSchema = z.object({
 	terminalZshOhMy: z.boolean().optional(),
 	terminalZshP10k: z.boolean().optional(),
 	terminalZdotdir: z.boolean().optional(),
+	terminalProfile: z.string().optional(),
 	execaShellPath: z.string().optional(),
 
 	diagnosticsEnabled: z.boolean().optional(),
@@ -201,6 +202,11 @@ export const globalSettingsSchema = z.object({
 	includeTaskHistoryInEnhance: z.boolean().optional(),
 	historyPreviewCollapsed: z.boolean().optional(),
 	reasoningBlockCollapsed: z.boolean().optional(),
+	/**
+	 * Font size (in pixels) for the Zoo Code chat/webview UI.
+	 * When unset (or `null`), the webview inherits VS Code's `--vscode-font-size`.
+	 */
+	chatFontSize: z.number().int().min(8).max(32).nullish(),
 	/**
 	 * Controls the keyboard behavior for sending messages in the chat input.
 	 * - "send": Enter sends message, Shift+Enter creates newline (default)
@@ -279,6 +285,7 @@ export const SECRET_STATE_KEYS = [
 	"zaiApiKey",
 	"fireworksApiKey",
 	"vercelAiGatewayApiKey",
+	"opencodeGoApiKey",
 	"basetenApiKey",
 ] as const
 
@@ -311,73 +318,3 @@ export const GLOBAL_STATE_KEYS = [...GLOBAL_SETTINGS_KEYS, ...PROVIDER_SETTINGS_
 
 export const isGlobalStateKey = (key: string): key is Keys<GlobalState> =>
 	GLOBAL_STATE_KEYS.includes(key as Keys<GlobalState>)
-
-/**
- * Evals
- */
-
-// Default settings when running evals (unless overridden).
-export const EVALS_SETTINGS: RooCodeSettings = {
-	apiProvider: "openrouter",
-
-	lastShownAnnouncementId: "jul-09-2025-3-23-0",
-
-	pinnedApiConfigs: {},
-
-	autoApprovalEnabled: true,
-	alwaysAllowReadOnly: true,
-	alwaysAllowReadOnlyOutsideWorkspace: false,
-	alwaysAllowWrite: true,
-	alwaysAllowWriteOutsideWorkspace: false,
-	alwaysAllowWriteProtected: false,
-	writeDelayMs: 1000,
-	requestDelaySeconds: 10,
-	alwaysAllowMcp: true,
-	alwaysAllowModeSwitch: true,
-	alwaysAllowSubtasks: true,
-	alwaysAllowExecute: true,
-	alwaysAllowFollowupQuestions: true,
-	followupAutoApproveTimeoutMs: 0,
-	allowedCommands: ["*"],
-	commandExecutionTimeout: 20,
-	commandTimeoutAllowlist: [],
-	preventCompletionWithOpenTodos: false,
-
-	ttsEnabled: false,
-	ttsSpeed: 1,
-	soundEnabled: false,
-	soundVolume: 0.5,
-
-	terminalShellIntegrationTimeout: 30000,
-	terminalCommandDelay: 0,
-	terminalPowershellCounter: false,
-	terminalZshOhMy: true,
-	terminalZshClearEolMark: true,
-	terminalZshP10k: false,
-	terminalZdotdir: true,
-	terminalShellIntegrationDisabled: true,
-
-	diagnosticsEnabled: true,
-
-	enableCheckpoints: false,
-
-	rateLimitSeconds: 0,
-	maxOpenTabsContext: 20,
-	maxWorkspaceFiles: 200,
-	maxGitStatusFiles: 20,
-	showRooIgnoredFiles: true,
-
-	includeDiagnosticMessages: true,
-	maxDiagnosticMessages: 50,
-
-	language: "en",
-	telemetrySetting: "enabled",
-
-	mcpEnabled: false,
-
-	mode: "code", // "architect",
-
-	customModes: [],
-}
-
-export const EVALS_TIMEOUT = 5 * 60 * 1_000

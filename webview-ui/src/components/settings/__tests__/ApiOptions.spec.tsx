@@ -1,10 +1,10 @@
 // npx vitest src/components/settings/__tests__/ApiOptions.spec.tsx
 
-import { render, screen, fireEvent } from "@/utils/test-utils"
+import { render, screen, fireEvent, within } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
-import { openAiCodexDefaultModelId } from "@roo-code/types"
+import { openAiCodexDefaultModelId, zooGatewayDefaultModelId } from "@roo-code/types"
 
 import * as ExtensionStateContext from "@src/context/ExtensionStateContext"
 const { ExtensionStateContextProvider } = ExtensionStateContext
@@ -176,7 +176,7 @@ vi.mock("../TodoListSettingsControl", () => ({
 
 // Mock ThinkingBudget component
 vi.mock("../ThinkingBudget", () => ({
-	ThinkingBudget: ({ modelInfo }: any) => {
+	ThinkingBudget: ({ modelInfo, apiConfiguration, setApiConfigurationField }: any) => {
 		// Only render if model supports reasoning budget (thinking models)
 		if (modelInfo?.supportsReasoningBudget || modelInfo?.requiredReasoningBudget) {
 			return (
@@ -186,6 +186,22 @@ vi.mock("../ThinkingBudget", () => ({
 				</div>
 			)
 		}
+
+		if (modelInfo?.supportsReasoningEffort) {
+			return (
+				<div data-testid="reasoning-effort">
+					<select
+						value={apiConfiguration?.reasoningEffort || ""}
+						onChange={(e) => setApiConfigurationField("reasoningEffort", e.target.value)}>
+						<option value="">Select...</option>
+						<option value="low">Low</option>
+						<option value="medium">Medium</option>
+						<option value="high">High</option>
+					</select>
+				</div>
+			)
+		}
+
 		return null
 	},
 }))
@@ -211,11 +227,6 @@ vi.mock("../providers/LiteLLM", () => ({
 			<button data-testid="litellm-refresh-models">Refresh Models</button>
 		</div>
 	),
-}))
-
-// Mock Roo provider for tests
-vi.mock("../providers/Roo", () => ({
-	Roo: () => <div data-testid="roo-provider">Roo Provider</div>,
 }))
 
 vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
@@ -287,6 +298,28 @@ describe("ApiOptions", () => {
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "openai-codex")
 		// Model is reset to the provider default since the previous value is invalid for this provider
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiModelId", openAiCodexDefaultModelId, false)
+	})
+
+	it("initializes zooGatewayModelId to its default when switching provider to zoo-gateway", () => {
+		// Regression: zoo-gateway was previously missing from PROVIDER_MODEL_CONFIG, so switching
+		// providers never seeded zooGatewayModelId. Configs were left without a model id, which
+		// blocked completion flows that require a dynamic-provider model id.
+		const mockSetApiConfigurationField = vi.fn()
+
+		renderApiOptions({
+			apiConfiguration: {
+				apiProvider: "anthropic",
+				// No prior zooGatewayModelId.
+			},
+			setApiConfigurationField: mockSetApiConfigurationField,
+		})
+
+		const providerSelectContainer = screen.getByTestId("provider-select")
+		const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
+		fireEvent.change(providerSelect, { target: { value: "zoo-gateway" } })
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "zoo-gateway")
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("zooGatewayModelId", zooGatewayDefaultModelId, false)
 	})
 
 	it("shows temperature and rate limit controls by default", () => {
@@ -459,7 +492,7 @@ describe("ApiOptions", () => {
 			// However, we've tested the state update call.
 		})
 
-		it.skip("updates reasoningEffort in openAiCustomModelInfo when select value changes", () => {
+		it("updates reasoningEffort in openAiCustomModelInfo when select value changes", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
 				apiProvider: "openai" as const,
@@ -484,10 +517,11 @@ describe("ApiOptions", () => {
 			const selectContainer = screen.getByTestId("reasoning-effort")
 			expect(selectContainer).toBeInTheDocument()
 
-			console.log(selectContainer.querySelector("select")?.value)
+			const reasoningSelect = within(selectContainer).getByRole("combobox")
+			expect(reasoningSelect).toHaveValue("low")
 
 			// Simulate changing the reasoning effort to 'high'
-			fireEvent.change(selectContainer.querySelector("select")!, { target: { value: "high" } })
+			fireEvent.change(reasoningSelect, { target: { value: "high" } })
 
 			// Check if setApiConfigurationField was called correctly for openAiCustomModelInfo
 			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
@@ -559,86 +593,6 @@ describe("ApiOptions", () => {
 			})
 
 			expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
-		})
-	})
-
-	describe("Roo provider tests", () => {
-		it("renders the retired provider message for legacy roo selections without cloud account UI", () => {
-			const useExtensionStateMock = vi.spyOn(ExtensionStateContext, "useExtensionState")
-			useExtensionStateMock.mockReturnValue({
-				cloudIsAuthenticated: false,
-				organizationAllowList: { providers: {} },
-			} as any)
-
-			renderApiOptions({
-				apiConfiguration: {
-					apiProvider: "roo",
-				},
-			})
-
-			expect(screen.getByTestId("retired-provider-message")).toHaveTextContent(
-				"settings:providers.retiredProviderMessage",
-			)
-			expect(screen.queryByText("Authenticated")).not.toBeInTheDocument()
-			expect(screen.queryByText("Not Authenticated")).not.toBeInTheDocument()
-		})
-
-		it("pins roo provider to the top when not on welcome screen", () => {
-			// Mock useExtensionState to ensure no filtering
-			const useExtensionStateMock = vi.spyOn(ExtensionStateContext, "useExtensionState")
-			useExtensionStateMock.mockReturnValue({
-				cloudIsAuthenticated: false,
-				organizationAllowList: { providers: {} },
-			} as any)
-
-			renderApiOptions({
-				apiConfiguration: {},
-				fromWelcomeView: false,
-			})
-
-			const providerSelectContainer = screen.getByTestId("provider-select")
-			const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
-			const options = Array.from(providerSelect.querySelectorAll("option"))
-
-			// Filter out the placeholder option (empty value)
-			const providerOptions = options.filter((opt) => opt.value !== "")
-
-			// Find the roo option
-			const rooOption = providerOptions.find((opt) => opt.value === "roo")
-
-			// If roo is available, verify it's pinned to the top
-			if (rooOption) {
-				expect(providerOptions[0].value).toBe("roo")
-			}
-
-			useExtensionStateMock.mockRestore()
-		})
-
-		it("filters out roo provider on welcome screen", () => {
-			// Mock useExtensionState to ensure no filtering
-			const useExtensionStateMock = vi.spyOn(ExtensionStateContext, "useExtensionState")
-			useExtensionStateMock.mockReturnValue({
-				cloudIsAuthenticated: false,
-				organizationAllowList: { providers: {} },
-			} as any)
-
-			renderApiOptions({
-				apiConfiguration: {},
-				fromWelcomeView: true,
-			})
-
-			const providerSelectContainer = screen.getByTestId("provider-select")
-			const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
-			const options = Array.from(providerSelect.querySelectorAll("option"))
-
-			// Filter out the placeholder option (empty value)
-			const providerOptions = options.filter((opt) => opt.value !== "")
-
-			// Check that roo is NOT in the list when on welcome screen
-			const rooOption = providerOptions.find((opt) => opt.value === "roo")
-			expect(rooOption).toBeUndefined()
-
-			useExtensionStateMock.mockRestore()
 		})
 	})
 

@@ -333,14 +333,14 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"handoff": {
 			"heading": "Roo Code geri döndü! Artık Zoo Code adlı, topluluk tarafından sürdürülen bir eklenti!!",
-			"description": "Takip etmiyorsan kaçırmış olabilirsin: Roo Code ekibi kısa süre önce Roo Code geliştirmesini aşamalı olarak sonlandırdığını ve yaptıkları çalışmaları arşivlediğini duyurdu. Ama endişelenme; topluluk, Roo Code mirasını yeni bir ad ve yeni bir yuva ile sürdürmek için öne çıktı! Artık sadece tek bir \"Roo\" değiliz; bir topluluğuz, istersen bir \"Zoo\" diyebilirsin. Zoo Code, Zoo Code'un bıraktığı yerden devam eden, topluluk tarafından sürdürülen bir eklenti ve Roo'nun ruhunu korurken yeni özellikler ve iyileştirmeler sunmaya kararlıyız. Geliştiriciler için böylesine harika bir araç yarattıkları ve yaptıkları inanılmaz iş için tüm Roo Code ekibine kocaman bir teşekkür göndermek istiyoruz. Onların temeli üzerine inşa etmeyi sürdürmekten ve topluluğun gelecekte Zoo Code'u nereye taşıyacağını görmekten heyecan duyuyoruz!",
+			"description": "Takip etmiyorsan kaçırmış olabilirsin: Roo Code ekibi kısa süre önce Roo Code geliştirmesini aşamalı olarak sonlandırdığını ve yaptıkları çalışmaları arşivlediğini duyurdu. Ama endişelenme; topluluk, Roo Code mirasını yeni bir ad ve yeni bir yuva ile sürdürmek için öne çıktı! Artık sadece tek bir \"Roo\" değiliz; bir topluluğuz, istersen bir \"Zoo\" diyebilirsin. Zoo Code, Roo Code'un bıraktığı yerden devam eden, topluluk tarafından sürdürülen bir eklenti ve Roo'nun ruhunu korurken yeni özellikler ve iyileştirmeler sunmaya kararlıyız. Geliştiriciler için böylesine harika bir araç yarattıkları ve yaptıkları inanılmaz iş için tüm Roo Code ekibine kocaman bir teşekkür göndermek istiyoruz. Onların temeli üzerine inşa etmeyi sürdürmekten ve topluluğun gelecekte Zoo Code'u nereye taşıyacağını görmekten heyecan duyuyoruz!",
 			"readMore": "Zoo Code'un yeni ana sayfasına göz at ve tam duyuruyu oku"
 		},
 		"release": {
 			"heading": "Yenilikler:",
-			"gpt55": "OpenAI Codex üzerinden GPT-5.5: En son modeli doğrudan Zoo Code'dan kullanabilmen için OpenAI Codex sağlayıcısına GPT-5.5 desteği eklendi.",
-			"claudeOpus47": "Vertex AI'da Claude Opus 4.7: Anthropic'in en yeni amiral gemisi akıl yürütme modeli olan Claude Opus 4.7 Vertex AI sağlayıcısına eklendi.",
-			"checkpointNav": "Önceki Checkpoint Navigasyonu: Sohbetten önceki checkpoint'lere geri atlayabilmen için kontroller eklendi ve tam i18n desteği sunuluyor."
+			"highlight1": "Claude Opus 4.8 ve Opencode Go: Anthropic, Bedrock ve Vertex'e Claude Opus 4.8 eklendi; Opencode Go ise yeni bir birinci sınıf sağlayıcı olarak katıldı.",
+			"highlight2": "Güvenilir görev iptali: Bir görevi iptal etmek artık çalışan işlemi doğru şekilde sonlandırıyor; inatçı işlemler için otomatik Ctrl+C yeniden denemesi de yapılıyor.",
+			"highlight3": "Sağlayıcı ve editör düzeltmeleri: Gemini özel model ID'leri, Grok diff kesintisi, Windows'ta PowerShell algılama ve VS Code code action isimlendirmesi düzeltildi."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

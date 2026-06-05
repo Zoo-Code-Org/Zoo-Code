@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "Co nowego:",
-			"gpt55": "GPT-5.5 przez OpenAI Codex: Dodano obsługę GPT-5.5 w dostawcy OpenAI Codex, żebyś mógł korzystać z najnowszego modelu bezpośrednio z Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 w Vertex AI: Dodano Claude Opus 4.7 do dostawcy Vertex AI - najnowszy flagowy model rozumowania od Anthropic.",
-			"checkpointNav": "Nawigacja po poprzednich checkpointach: Dodano kontrolki w czacie, żebyś mógł cofać się do wcześniejszych checkpointów, z pełną obsługą i18n."
+			"highlight1": "Claude Opus 4.8 i Opencode Go: Claude Opus 4.8 dodano dla Anthropic, Bedrock i Vertex, a Opencode Go dołączono jako nowego dostawcę pierwszej klasy.",
+			"highlight2": "Niezawodne anulowanie zadań: Anulowanie zadania teraz poprawnie kończy działający proces, z automatycznym ponowieniem Ctrl+C dla opornych procesów.",
+			"highlight3": "Poprawki dostawców i edytora: Naprawiono niestandardowe ID modeli Gemini, obcinanie diffów Grok, wykrywanie PowerShell w Windows i nazwy akcji kodu VS Code."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",

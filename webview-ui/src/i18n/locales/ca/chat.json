@@ -332,14 +332,14 @@
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"handoff": {
 			"heading": "Roo Code ha tornat! Ara com a connector mantingut per la comunitat anomenat Zoo Code!!",
-			"description": "Per si no ho havies seguit, l'equip de Roo Code ha anunciat fa poc que deixa de desenvolupar Roo Code i n'arxiva la feina feta. Però no pateixis: la comunitat ha fet un pas endavant per continuar el llegat de Roo Code amb un nom nou i una llar nova! Ja no som només un sol \"Roo\", som una comunitat, un \"Zoo\" si vols. Zoo Code és un connector mantingut per la comunitat que reprèn el camí on Zoo Code ho va deixar, i ens comprometem a mantenir viu l'esperit de Roo mentre també hi incorporem funcions i millores noves. Volem donar un enorme agraïment a tot l'equip de Roo Code per la feina increïble que han fet i per haver creat una eina tan extraordinària per als desenvolupadors. Ens fa molta il·lusió continuar construint sobre la seva base i veure fins on porta la comunitat Zoo Code en el futur!",
+			"description": "Per si no ho havies seguit, l'equip de Roo Code ha anunciat fa poc que deixa de desenvolupar Roo Code i n'arxiva la feina feta. Però no pateixis: la comunitat ha fet un pas endavant per continuar el llegat de Roo Code amb un nom nou i una llar nova! Ja no som només un sol \"Roo\", som una comunitat, un \"Zoo\" si vols. Zoo Code és un connector mantingut per la comunitat que reprèn el camí on Roo Code ho va deixar, i ens comprometem a mantenir viu l'esperit de Roo mentre també hi incorporem funcions i millores noves. Volem donar un enorme agraïment a tot l'equip de Roo Code per la feina increïble que han fet i per haver creat una eina tan extraordinària per als desenvolupadors. Ens fa molta il·lusió continuar construint sobre la seva base i veure fins on porta la comunitat Zoo Code en el futur!",
 			"readMore": "Mira la nova pàgina principal de Zoo Code i llegeix l'anunci complet"
 		},
 		"release": {
-			"heading": "Què hi ha de nou:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: S'ha afegit suport per a GPT-5.5 al proveïdor OpenAI Codex perquè puguis fer servir el model més recent directament des de Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 a Vertex AI: S'ha afegit Claude Opus 4.7 al proveïdor Vertex AI, el nou model de raonament emblemàtic d'Anthropic.",
-			"checkpointNav": "Navegació per Checkpoints Anteriors: S'han afegit controls al xat per tornar enrere pels checkpoints previs, amb suport complet d'i18n."
+			"heading": "Novetats:",
+			"highlight1": "Claude Opus 4.8 i Opencode Go: S'ha afegit Claude Opus 4.8 a Anthropic, Bedrock i Vertex, més Opencode Go com a nou proveïdor de primera classe.",
+			"highlight2": "Cancel·lació de tasques fiable: Cancel·lar una tasca ara finalitza correctament el procés en execució, amb reintent automàtic de Ctrl+C per als processos que no responen.",
+			"highlight3": "Correccions de proveïdors i editor: S'han corregit els ID de model personalitzats de Gemini, el truncament de diffs de Grok, la detecció de PowerShell a Windows i la marca de les accions de codi del VS Code."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

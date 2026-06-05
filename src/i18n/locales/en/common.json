@@ -112,7 +112,7 @@
 			"thinking_complete_recitation": "(Thinking complete, but output was blocked due to recitation check.)"
 		},
 		"roo": {
-			"authenticationRequired": "Zoo provider requires cloud authentication. Please sign in to Zoo Code Cloud.",
+			"authenticationRequired": "Roo provider requires cloud authentication. Please sign in to Roo Code Cloud.",
 			"routerRemoved": "Roo Code Router has been removed. Please select and configure a different provider."
 		},
 		"openAiCodex": {
@@ -246,6 +246,33 @@
 	},
 	"docsLink": {
 		"label": "Docs",
-		"url": "https://docs.roocode.com"
+		"url": "https://docs.zoocode.dev"
+	},
+	"zooAuth": {
+		"errors": {
+			"invalid_token_received": "Zoo Code: Invalid authentication token received.",
+			"token_verification_failed": "Zoo Code: Token verification failed.",
+			"invalid_token": "Zoo Code: Invalid token.",
+			"could_not_verify_token": "Zoo Code: Could not verify token.",
+			"session_expired": "Zoo Code session expired. Please sign in again to continue using Zoo Gateway.",
+			"out_of_credits": "Zoo Gateway: insufficient credits. Add credits to continue.",
+			"account_unavailable": "Zoo Gateway: your account is currently unavailable. Please contact support.",
+			"budget_exceeded": "Zoo Gateway: usage budget reached. Wait for the budget to reset or top up."
+		},
+		"info": {
+			"connected": "Zoo Code: Successfully connected! You can now use Zoo Code as your AI provider.",
+			"disconnected": "Zoo Code: Disconnected successfully."
+		},
+		"buttons": {
+			"sign_in": "Sign In",
+			"add_credits": "Add Credits",
+			"contact_support": "Contact Support"
+		}
+	},
+	"codeActions": {
+		"explain": "Explain with Zoo Code",
+		"fix": "Fix with Zoo Code",
+		"improve": "Improve with Zoo Code",
+		"addToContext": "Add to Zoo Code"
 	}
 }

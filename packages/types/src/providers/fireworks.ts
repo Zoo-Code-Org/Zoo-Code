@@ -5,6 +5,7 @@ export type FireworksModelId =
 	| "accounts/fireworks/models/kimi-k2-instruct-0905"
 	| "accounts/fireworks/models/kimi-k2-thinking"
 	| "accounts/fireworks/models/kimi-k2p5"
+	| "accounts/fireworks/models/kimi-k2p6"
 	| "accounts/fireworks/models/minimax-m2"
 	| "accounts/fireworks/models/minimax-m2p1"
 	| "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
@@ -13,10 +14,12 @@ export type FireworksModelId =
 	| "accounts/fireworks/models/deepseek-v3"
 	| "accounts/fireworks/models/deepseek-v3p1"
 	| "accounts/fireworks/models/deepseek-v3p2"
+	| "accounts/fireworks/models/deepseek-v4-pro"
 	| "accounts/fireworks/models/glm-4p5"
 	| "accounts/fireworks/models/glm-4p5-air"
 	| "accounts/fireworks/models/glm-4p6"
 	| "accounts/fireworks/models/glm-4p7"
+	| "accounts/fireworks/models/glm-5p1"
 	| "accounts/fireworks/models/gpt-oss-20b"
 	| "accounts/fireworks/models/gpt-oss-120b"
 	| "accounts/fireworks/models/llama-v3p3-70b-instruct"
@@ -239,5 +242,38 @@ export const fireworksModels = {
 		outputPrice: 0.6,
 		description:
 			"Llama 4 Scout is a smaller, faster variant of Llama 4 with multimodal capabilities, ideal for quick iterations and cost-effective deployments.",
+	},
+	"accounts/fireworks/models/kimi-k2p6": {
+		maxTokens: 16384,
+		contextWindow: 262144,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 0.95,
+		outputPrice: 4.0,
+		cacheReadsPrice: 0.16,
+		description:
+			"Kimi K2.6 is Moonshot AI's latest flagship agentic model, building on K2.5 with stronger long-horizon reasoning, multi-step tool use, and unified vision/text understanding.",
+	},
+	"accounts/fireworks/models/deepseek-v4-pro": {
+		maxTokens: 16384,
+		contextWindow: 1048576,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 1.74,
+		outputPrice: 3.48,
+		cacheReadsPrice: 0.14,
+		description:
+			"DeepSeek V4 Pro is the latest iteration of the DeepSeek model family, with improved reasoning, code generation, and instruction following over the V3 series.",
+	},
+	"accounts/fireworks/models/glm-5p1": {
+		maxTokens: 25344,
+		contextWindow: 202752,
+		supportsImages: false,
+		supportsPromptCache: true,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheReadsPrice: 0.26,
+		description:
+			"Z.ai GLM-5.1 is the latest coding-focused model in the GLM family, with exceptional performance on complex programming tasks and enhanced reasoning and code generation quality.",
 	},
 } as const satisfies Record<string, ModelInfo>

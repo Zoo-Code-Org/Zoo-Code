@@ -1,0 +1,60 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "LIST_FILES_NON_RECURSIVE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "list_files",
+						"arguments": "{\"path\":\"list-files-tool-fixture\",\"recursive\":false}",
+						"id": "call_list_files_non_recursive_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "LIST_FILES_RECURSIVE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "list_files",
+						"arguments": "{\"path\":\"list-files-tool-fixture\",\"recursive\":true}",
+						"id": "call_list_files_recursive_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "LIST_FILES_SYMLINK_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "list_files",
+						"arguments": "{\"path\":\"list-files-symlink-fixture\",\"recursive\":false}",
+						"id": "call_list_files_symlink_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "LIST_FILES_WORKSPACE_ROOT_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "list_files",
+						"arguments": "{\"path\":\".\",\"recursive\":false}",
+						"id": "call_list_files_workspace_root_001"
+					}
+				]
+			}
+		}
+	]
+}

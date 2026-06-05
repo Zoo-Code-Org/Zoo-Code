@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thank you for your report! Please search existing issues first:
-        https://github.com/RooCodeInc/Roo-Code/issues
+        https://github.com/Zoo-Code-Org/Zoo-Code/issues
 
   - type: textarea
     id: problem
@@ -66,7 +66,7 @@ body:
     id: version
     attributes:
       label: App Version
-      description: What version of Roo Code are you using? (e.g., v3.3.1)
+      description: What version of Zoo Code are you using? (e.g., v3.3.1)
     validations:
       required: true
 
@@ -107,9 +107,9 @@ body:
   - type: textarea
     id: roo-code-tasks
     attributes:
-      label: Roo Code Task Links (optional)
-      description: If you have any publicly shared Roo Code task links that demonstrate the issue, paste them here.
-      placeholder: Paste your Roo Code share links here, one per line
+      label: Zoo Code Task Links (optional)
+      description: If you have any publicly shared Zoo Code task links that demonstrate the issue, paste them here.
+      placeholder: Paste your Zoo Code share links here, one per line
 
   - type: textarea
     id: logs

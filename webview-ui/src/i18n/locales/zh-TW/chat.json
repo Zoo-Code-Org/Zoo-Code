@@ -359,9 +359,9 @@
 		},
 		"release": {
 			"heading": "新增功能：",
-			"gpt55": "透過 OpenAI Codex 支援 GPT-5.5：已在 OpenAI Codex 供應商中新增 GPT-5.5 支援，讓你可以直接在 Zoo Code 中使用最新模型。",
-			"claudeOpus47": "Vertex AI 上的 Claude Opus 4.7：已將 Anthropic 最新旗艦推理模型 Claude Opus 4.7 新增至 Vertex AI 供應商。",
-			"checkpointNav": "前一個存檔點導覽：在聊天中新增控制項，可回到此前的存檔點，並提供完整的 i18n 支援。"
+			"highlight1": "Claude Opus 4.8 與 Opencode Go：已為 Anthropic、Bedrock 和 Vertex 新增 Claude Opus 4.8，並新增 Opencode Go 作為一等供應商。",
+			"highlight2": "可靠的任務取消：取消任務現在會正確終止正在執行的程序，對於頑固程序還會自動重試 Ctrl+C。",
+			"highlight3": "供應商與編輯器修正：修正了 Gemini 自訂模型 ID、Grok diff 截斷、Windows 上的 PowerShell 偵測以及 VS Code 程式碼動作的品牌名稱。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

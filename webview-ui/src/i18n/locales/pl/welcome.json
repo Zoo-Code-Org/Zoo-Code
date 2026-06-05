@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "Witaj w Roo Code!",
-		"introduction": "Dzięki szerokiej gamie wbudowanych i rozszerzalnych Trybów, Roo Code pozwala planować, projektować architekturę, kodować, debugować i zwiększać produktywność jak nigdy dotąd.",
+		"greeting": "Witaj w Zoo Code!",
+		"introduction": "Dzięki szerokiej gamie wbudowanych i rozszerzalnych Trybów, Zoo Code pozwala planować, projektować architekturę, kodować, debugować i zwiększać produktywność jak nigdy dotąd.",
 		"getStarted": "Wybierz swojego dostawcę"
 	},
 	"providerSignup": {
 		"heading": "Wybierz swojego dostawcę",
-		"chooseProvider": "Roo potrzebuje dostawcy LLM, aby działać. Wybierz jeden, aby zacząć, możesz dodać więcej później.",
+		"chooseProvider": "Zoo Code potrzebuje dostawcy LLM, aby działać. Wybierz jeden, aby zacząć, możesz dodać więcej później.",
 		"goBack": "Wróć",
 		"finish": "Zakończ"
 	},

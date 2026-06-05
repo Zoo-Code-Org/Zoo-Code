@@ -1,6 +1,120 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"extends": ["config:recommended"],
+	"extends": ["config:best-practices"],
 	"forkProcessing": "enabled",
-	"ignoreDeps": ["@vscode/vsce"]
+	"timezone": "America/Los_Angeles",
+	"prConcurrentLimit": 5,
+	"prCreation": "not-pending",
+	"ignoreDeps": ["@vscode/vsce"],
+	"packageRules": [
+		{
+			"description": "Group GitHub Actions updates for one review pass.",
+			"matchManagers": ["github-actions"],
+			"groupName": "GitHub Actions"
+		},
+		{
+			"description": "Group AI SDK and provider patch/minor updates.",
+			"matchPackageNames": [
+				"ai",
+				"openai",
+				"ollama",
+				"tiktoken",
+				"@google/genai",
+				"@modelcontextprotocol/sdk",
+				"ai-sdk-provider-poe",
+				"sambanova-ai-provider",
+				"zhipu-ai-provider",
+				"/^@ai-sdk\\//",
+				"/^@anthropic-ai\\//",
+				"/^@aws-sdk\\//",
+				"/^@lmstudio\\//",
+				"/^@mistralai\\//",
+				"/^@openrouter\\//",
+				"/^@qdrant\\//"
+			],
+			"matchUpdateTypes": ["minor", "patch"],
+			"groupName": "AI SDKs and providers"
+		},
+		{
+			"description": "Group frontend and UI patch/minor updates.",
+			"matchPackageNames": [
+				"next",
+				"react",
+				"react-dom",
+				"framer-motion",
+				"styled-components",
+				"lucide-react",
+				"tailwindcss",
+				"tailwind-merge",
+				"tailwindcss-animate",
+				"/^@radix-ui\\//",
+				"/^@tailwindcss\\//"
+			],
+			"matchUpdateTypes": ["minor", "patch"],
+			"groupName": "Frontend and UI stack"
+		},
+		{
+			"description": "Group test and build tooling patch/minor updates.",
+			"matchPackageNames": [
+				"vitest",
+				"vite",
+				"jsdom",
+				"nock",
+				"typescript",
+				"turbo",
+				"tsx",
+				"esbuild",
+				"eslint",
+				"prettier",
+				"knip",
+				"lint-staged",
+				"/^@testing-library\\//",
+				"/^@vitejs\\//",
+				"/^@vitest\\//",
+				"/^eslint($|-)/"
+			],
+			"matchUpdateTypes": ["minor", "patch"],
+			"groupName": "Build, lint, and test tooling"
+		},
+		{
+			"description": "Automerge low-risk patch updates for DefinitelyTyped packages.",
+			"matchPackageNames": ["/^@types\\//"],
+			"matchUpdateTypes": ["patch"],
+			"automerge": true
+		}
+	],
+	"customManagers": [
+		{
+			"customType": "regex",
+			"description": "Update Node.js version in the setup-node composite action.",
+			"managerFilePatterns": ["/^\\.github\\/actions\\/setup-node-pnpm\\/action\\.yml$/"],
+			"matchStrings": [
+				"node-version:\\n(?:[ \\t]+.*\\n){0,4}[ \\t]+default:\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""
+			],
+			"depNameTemplate": "node",
+			"datasourceTemplate": "node-version",
+			"versioningTemplate": "node"
+		},
+		{
+			"customType": "regex",
+			"description": "Update Node.js version in the evals setup script.",
+			"managerFilePatterns": ["/^packages\\/evals\\/scripts\\/setup\\.sh$/"],
+			"matchStrings": [
+				"node@(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+				"node --version\\) != \\\"v(?<currentValue>\\d+\\.\\d+\\.\\d+)\\\""
+			],
+			"depNameTemplate": "node",
+			"datasourceTemplate": "node-version",
+			"versioningTemplate": "node"
+		},
+		{
+			"customType": "regex",
+			"description": "Update Node.js version in the evals runner Dockerfile.",
+			"managerFilePatterns": ["/^packages\\/evals\\/Dockerfile\\.runner$/"],
+			"matchStrings": ["ARG NODE_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+			"depNameTemplate": "node",
+			"datasourceTemplate": "node-version",
+			"versioningTemplate": "node"
+		}
+	]
 }

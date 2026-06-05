@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "Welkom bij Roo Code!",
-		"introduction": "Met een reeks ingebouwde en uitbreidbare Modi laat Roo Code je plannen, ontwerpen, coderen, debuggen en je productiviteit verhogen als nooit tevoren.",
+		"greeting": "Welkom bij Zoo Code!",
+		"introduction": "Met een reeks ingebouwde en uitbreidbare Modi laat Zoo Code je plannen, ontwerpen, coderen, debuggen en je productiviteit verhogen als nooit tevoren.",
 		"getStarted": "Kies je provider"
 	},
 	"providerSignup": {
 		"heading": "Kies je provider",
-		"chooseProvider": "Roo heeft een LLM-provider nodig om te werken. Kies er een om te beginnen, je kunt er later meer toevoegen.",
+		"chooseProvider": "Zoo Code heeft een LLM-provider nodig om te werken. Kies er een om te beginnen, je kunt er later meer toevoegen.",
 		"goBack": "Terug",
 		"finish": "Klaar"
 	},

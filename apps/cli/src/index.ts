@@ -69,7 +69,7 @@ const applyListOptions = (command: Command) =>
 	command
 		.option("-w, --workspace <path>", "Workspace directory path (defaults to current working directory)")
 		.option("-e, --extension <path>", "Path to the extension bundle directory")
-		.option("-k, --api-key <key>", "OpenRouter API key (falls back to OPENROUTER_API_KEY)")
+		.option("-k, --api-key <key>", "API key for the LLM provider")
 		.option("--format <format>", 'Output format: "json" (default) or "text"', "json")
 		.option("-d, --debug", "Enable debug output", false)
 
@@ -107,7 +107,7 @@ applyListOptions(listCommand.command("modes").description("List available modes"
 	},
 )
 
-applyListOptions(listCommand.command("models").description("List available OpenRouter models")).action(
+applyListOptions(listCommand.command("models").description("List available models")).action(
 	async (options: Parameters<typeof listModels>[0]) => {
 		await runListAction(() => listModels(options))
 	},

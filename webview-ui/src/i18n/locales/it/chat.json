@@ -332,14 +332,14 @@
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"handoff": {
 			"heading": "Roo Code è tornato! Ora come plugin mantenuto dalla community chiamato Zoo Code!!",
-			"description": "Se non l'hai seguito, il team di Roo Code ha annunciato di recente che interromperà lo sviluppo di Roo Code e archivierà il lavoro svolto. Ma niente paura: la community si è fatta avanti per continuare l'eredità di Roo Code con un nuovo nome e una nuova casa! Non siamo più solo un singolo \"Roo\", ma una community, uno \"Zoo\" se vuoi. Zoo Code è un plugin mantenuto dalla community che riprende da dove Zoo Code si era fermato, e ci impegniamo a mantenere vivo lo spirito di Roo introducendo anche nuove funzionalità e miglioramenti. Vogliamo ringraziare di cuore tutto il team di Roo Code per il lavoro incredibile e per aver creato uno strumento così straordinario per gli sviluppatori. Siamo entusiasti di continuare a costruire sulla loro base e di vedere dove la community porterà Zoo Code in futuro!",
+			"description": "Se non l'hai seguito, il team di Roo Code ha annunciato di recente che interromperà lo sviluppo di Roo Code e archivierà il lavoro svolto. Ma niente paura: la community si è fatta avanti per continuare l'eredità di Roo Code con un nuovo nome e una nuova casa! Non siamo più solo un singolo \"Roo\", ma una community, uno \"Zoo\" se vuoi. Zoo Code è un plugin mantenuto dalla community che riprende da dove Roo Code si era fermato, e ci impegniamo a mantenere vivo lo spirito di Roo introducendo anche nuove funzionalità e miglioramenti. Vogliamo ringraziare di cuore tutto il team di Roo Code per il lavoro incredibile e per aver creato uno strumento così straordinario per gli sviluppatori. Siamo entusiasti di continuare a costruire sulla loro base e di vedere dove la community porterà Zoo Code in futuro!",
 			"readMore": "Vai alla nuova home page di Zoo Code e leggi l'annuncio completo"
 		},
 		"release": {
 			"heading": "Novità:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: Aggiunto il supporto a GPT-5.5 nel provider OpenAI Codex così puoi usare il modello più recente direttamente da Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 su Vertex AI: Aggiunto Claude Opus 4.7 al provider Vertex AI, il nuovo modello di ragionamento di punta di Anthropic.",
-			"checkpointNav": "Navigazione Checkpoint Precedenti: Aggiunti controlli nella chat per tornare indietro ai checkpoint precedenti, con pieno supporto i18n."
+			"highlight1": "Claude Opus 4.8 e Opencode Go: Claude Opus 4.8 aggiunto su Anthropic, Bedrock e Vertex, più Opencode Go come nuovo provider di primo livello.",
+			"highlight2": "Cancellazione delle task affidabile: Annullare una task ora termina correttamente il processo in esecuzione, con un retry automatico di Ctrl+C per i processi ostinati.",
+			"highlight3": "Fix per provider ed editor: Corretti gli ID modello personalizzati di Gemini, il troncamento dei diff di Grok, il rilevamento di PowerShell su Windows e il nome delle code action di VS Code."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",

@@ -5,11 +5,11 @@ import { type RouterModels, type ExtensionMessage } from "@roo-code/types"
 import { vscode } from "@src/utils/vscode"
 
 type UseRouterModelsOptions = {
-	provider?: string // single provider filter (e.g. "roo")
+	provider?: string // single provider filter (e.g. "openrouter")
 	enabled?: boolean // gate fetching entirely
 }
 
-const getRouterModels = async (provider?: string) =>
+export const fetchRouterModels = async (provider?: string) =>
 	new Promise<RouterModels>((resolve, reject) => {
 		const cleanup = () => {
 			if (typeof window !== "undefined") {
@@ -57,7 +57,7 @@ export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {
 	const provider = opts.provider || undefined
 	return useQuery({
 		queryKey: ["routerModels", provider || "all"],
-		queryFn: () => getRouterModels(provider),
+		queryFn: () => fetchRouterModels(provider),
 		enabled: opts.enabled !== false,
 	})
 }

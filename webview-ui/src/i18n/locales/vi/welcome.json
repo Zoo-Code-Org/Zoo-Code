@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "Chào mừng đến với Roo Code!",
-		"introduction": "Với nhiều Chế độ tích hợp và có thể mở rộng, Roo Code cho phép bạn lập kế hoạch, thiết kế kiến trúc, viết mã, gỡ lỗi và tăng năng suất như chưa từng có trước đây.",
+		"greeting": "Chào mừng đến với Zoo Code!",
+		"introduction": "Với nhiều Chế độ tích hợp và có thể mở rộng, Zoo Code cho phép bạn lập kế hoạch, thiết kế kiến trúc, viết mã, gỡ lỗi và tăng năng suất như chưa từng có trước đây.",
 		"getStarted": "Chọn nhà cung cấp của bạn"
 	},
 	"providerSignup": {
 		"heading": "Chọn nhà cung cấp của bạn",
-		"chooseProvider": "Roo cần một nhà cung cấp LLM để hoạt động. Chọn một để bắt đầu, bạn có thể thêm nhiều hơn sau.",
+		"chooseProvider": "Zoo Code cần một nhà cung cấp LLM để hoạt động. Chọn một để bắt đầu, bạn có thể thêm nhiều hơn sau.",
 		"goBack": "Quay lại",
 		"finish": "Hoàn thành"
 	},

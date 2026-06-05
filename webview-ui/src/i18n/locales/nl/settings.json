@@ -56,7 +56,7 @@
 			"label": "Kwetsbaarheid ontdekt?",
 			"link": "Volg ons openbaarmakingsproces"
 		},
-		"community": "Wil je tips of gewoon even hangen met andere Zoo Code-gebruikers? Sluit je aan bij <redditLink>reddit.com/r/RooCode</redditLink> of <discordLink>discord.gg/roocode</discordLink>",
+		"community": "Wil je tips of gewoon even hangen met andere Zoo Code-gebruikers? Sluit je aan bij <redditLink>reddit.com/r/ZooCode</redditLink> of <discordLink>discord.gg/VxfP4Vx3gX</discordLink>",
 		"contactAndCommunity": "Contact & Gemeenschap",
 		"manageSettings": "Instellingen Beheren",
 		"debugMode": {
@@ -213,7 +213,8 @@
 		"stoppingButton": "Stoppen...",
 		"workspaceToggleLabel": "Indexering inschakelen voor deze werkruimte",
 		"workspaceDisabledMessage": "Indexering is geconfigureerd maar niet ingeschakeld voor deze werkruimte.",
-		"autoEnableDefaultLabel": "Indexering automatisch inschakelen voor nieuwe werkruimtes"
+		"autoEnableDefaultLabel": "Indexering automatisch inschakelen voor nieuwe werkruimtes",
+		"sembleProvider": "Semble - Lokaal"
 	},
 	"autoApprove": {
 		"toggleShortcut": "U kunt een globale sneltoets voor deze instelling configureren <SettingsLink>in de voorkeuren van uw IDE</SettingsLink>.",
@@ -314,6 +315,8 @@
 		"getOpenRouterApiKey": "OpenRouter API-sleutel ophalen",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API-sleutel",
 		"getVercelAiGatewayApiKey": "Vercel AI Gateway API-sleutel ophalen",
+		"opencodeGoApiKey": "Opencode Go API-sleutel",
+		"getOpencodeGoApiKey": "Opencode Go API-sleutel ophalen",
 		"apiKeyStorageNotice": "API-sleutels worden veilig opgeslagen in de geheime opslag van VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -394,6 +397,13 @@
 		"minimaxApiKey": "MiniMax API-sleutel",
 		"getMiniMaxApiKey": "MiniMax API-sleutel ophalen",
 		"minimaxBaseUrl": "MiniMax-ingangspunt",
+		"mimoApiKey": "MiMo API-sleutel",
+		"getMimoApiKey": "MiMo API-sleutel ophalen",
+		"mimoBaseUrl": "MiMo-toegangspunt",
+		"mimoBaseUrlSingapore": "Token Plan - Singapore (Standaard)",
+		"mimoBaseUrlChina": "Token Plan - China",
+		"mimoBaseUrlEurope": "Token Plan - Europa (AMS)",
+		"mimoBaseUrlPayg": "Pay-as-you-go",
 		"geminiApiKey": "Gemini API-sleutel",
 		"getSambaNovaApiKey": "SambaNova API-sleutel ophalen",
 		"sambaNovaApiKey": "SambaNova API-sleutel",
@@ -445,6 +455,7 @@
 			"step3": "3. Of maak een serviceaccount met referenties."
 		},
 		"googleCloudCredentials": "Google Cloud-referenties",
+		"googleCloudCredentialsPathWarning": "Dit veld verwacht de JSON-inhoud van een serviceaccount-sleutelbestand, geen pad. Als je een pad hebt, plak het dan in het veld <strong>Google Cloud-sleutelbestandspad</strong> hieronder, of leeg dit veld en gebruik de omgevingsvariabele <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Google Cloud-sleutelbestandspad",
 		"googleCloudProjectId": "Google Cloud-project-ID",
 		"googleCloudRegion": "Google Cloud-regio",
@@ -550,6 +561,13 @@
 			"placeholder": "Standaard: claude",
 			"maxTokensLabel": "Max Output Tokens",
 			"maxTokensDescription": "Maximaal aantal output-tokens voor Claude Code-reacties. Standaard is 8000."
+		},
+		"zooGateway": {
+			"account": "Zoo Code Account",
+			"signInButton": "Inloggen bij Zoo Code",
+			"signInDescription": "Log in om Zoo Gateway met je account te gebruiken",
+			"authenticated": "Geauthenticeerd",
+			"authenticatedAs": "Geauthenticeerd als {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -731,6 +749,14 @@
 		"inheritEnv": {
 			"label": "Omgevingsvariabelen overnemen",
 			"description": "Schakel in om omgevingsvariabelen over te nemen van het bovenliggende VS Code-proces. <0>Meer informatie</0>"
+		},
+		"profile": {
+			"label": "Zoo Code terminal-overschrijving",
+			"default": "VS Code standaardprofiel gebruiken (aanbevolen)",
+			"description": "Standaard gebruikt Zoo Code de shell die in VS Code is geconfigureerd. Selecteer Overschrijven om een shell-profiel met pad te kiezen dat VS Code beschikbaar stelt. Uitsluitend op bron gebaseerde profielen (bijv. de ingebouwde PowerShell-vermelding) kunnen hier niet worden vermeld. <0>Meer informatie</0>",
+			"overrideLabel": "Shell voor Zoo Code overschrijven",
+			"configureButton": "Standaardprofiel kiezen in VS Code",
+			"noProfiles": "(geen profielen met pad gevonden in terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -891,7 +917,8 @@
 		"providerNotAllowed": "Provider '{{provider}}' is niet toegestaan door je organisatie",
 		"modelNotAllowed": "Model '{{model}}' is niet toegestaan voor provider '{{provider}}' door je organisatie",
 		"profileInvalid": "Dit profiel bevat een provider of model dat niet is toegestaan door je organisatie",
-		"qwenCodeOauthPath": "Je moet een geldig OAuth-referentiepad opgeven"
+		"qwenCodeOauthPath": "Je moet een geldig OAuth-referentiepad opgeven",
+		"zooGatewaySignIn": "Log in bij Zoo Code om Zoo Gateway te gebruiken."
 	},
 	"placeholders": {
 		"apiKey": "Voer API-sleutel in...",
@@ -953,6 +980,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Vereist {{primaryMod}}+Enter om berichten te versturen",
 			"description": "Wanneer ingeschakeld, moet je {{primaryMod}}+Enter indrukken om berichten te versturen in plaats van alleen Enter"
+		},
+		"chatFontSize": {
+			"label": "Lettergrootte van chat",
+			"description": "Stel de lettergrootte (in pixels) in voor de Zoo Code-chat. Laat op de standaardwaarde staan om overeen te komen met de lettergrootte van VS Code.",
+			"reset": "VS Code-standaard gebruiken"
 		}
 	},
 	"skills": {

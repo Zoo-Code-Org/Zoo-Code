@@ -47,6 +47,13 @@ vi.mock("@src/components/settings/SettingsView", () => ({
 	},
 }))
 
+vi.mock("@src/components/welcome/WelcomeViewProvider", () => ({
+	__esModule: true,
+	default: function WelcomeView() {
+		return <div data-testid="welcome-view">Welcome View</div>
+	},
+}))
+
 vi.mock("@src/components/history/HistoryView", () => ({
 	__esModule: true,
 	default: function HistoryView({ onDone }: { onDone: () => void }) {
@@ -181,6 +188,15 @@ describe("App", () => {
 		window.dispatchEvent(messageEvent)
 	}
 
+	const createSetupIncompleteState = () => ({
+		didHydrateState: true,
+		showWelcome: true,
+		shouldShowAnnouncement: false,
+		experiments: {},
+		language: "en",
+		telemetrySetting: "enabled",
+	})
+
 	it("shows chat view by default", () => {
 		render(<AppWithProviders />)
 
@@ -188,6 +204,22 @@ describe("App", () => {
 		expect(chatView).toBeInTheDocument()
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 	}, 10000)
+
+	it("shows welcome view when setup is incomplete", () => {
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("settings-view")).not.toBeInTheDocument()
+	})
 
 	it("switches to settings view when receiving settingsButtonClicked action", async () => {
 		render(<AppWithProviders />)
@@ -201,6 +233,166 @@ describe("App", () => {
 
 		const chatView = screen.getByTestId("chat-view")
 		expect(chatView.getAttribute("data-hidden")).toBe("true")
+	})
+
+	it.each([
+		["settings", "settings-view"],
+		["marketplace", "marketplace-view"],
+	])("still switches to %s while welcome gating is active", async (action, testId) => {
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		act(() => {
+			triggerMessage(`${action}ButtonClicked`)
+		})
+
+		expect(await screen.findByTestId(testId)).toBeInTheDocument()
+		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
+	})
+
+	it("keeps history behind the welcome gate while setup is incomplete", () => {
+		mockUseExtensionState.mockReturnValue({
+			didHydrateState: true,
+			showWelcome: true,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+		})
+
+		render(<AppWithProviders />)
+
+		act(() => {
+			triggerMessage("historyButtonClicked")
+		})
+
+		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("history-view")).not.toBeInTheDocument()
+	})
+
+	it.each([
+		{ label: "chat", action: undefined },
+		{ label: "history", action: "historyButtonClicked" },
+	])("redirects to providers settings when an import fires from the $label tab", async ({ action }) => {
+		const state = {
+			...createSetupIncompleteState(),
+			settingsImportedAt: undefined as number | undefined,
+		}
+
+		mockUseExtensionState.mockImplementation(() => state)
+
+		const { rerender } = render(<AppWithProviders />)
+
+		if (action) {
+			act(() => {
+				triggerMessage(action)
+			})
+		}
+
+		if (action === "historyButtonClicked") {
+			expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		}
+
+		state.settingsImportedAt = Date.now()
+		rerender(<AppWithProviders />)
+
+		expect(await screen.findByTestId("settings-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
+	})
+
+	it.each([
+		{
+			label: "settings before returning to chat",
+			action: "settingsButtonClicked",
+			viewId: "settings-view",
+			nextAction: undefined,
+		},
+		{
+			label: "settings before switching to history",
+			action: "settingsButtonClicked",
+			viewId: "settings-view",
+			nextAction: "historyButtonClicked",
+		},
+		{
+			label: "marketplace before returning to chat",
+			action: "marketplaceButtonClicked",
+			viewId: "marketplace-view",
+			nextAction: undefined,
+		},
+		{
+			label: "marketplace before switching to history",
+			action: "marketplaceButtonClicked",
+			viewId: "marketplace-view",
+			nextAction: "historyButtonClicked",
+		},
+	])(
+		"consumes imported settings without a later redirect when already on $label",
+		async ({ action, viewId, nextAction }) => {
+			const state = {
+				...createSetupIncompleteState(),
+				settingsImportedAt: undefined as number | undefined,
+			}
+
+			mockUseExtensionState.mockImplementation(() => state)
+
+			const { rerender } = render(<AppWithProviders />)
+
+			act(() => {
+				triggerMessage(action)
+			})
+
+			expect(await screen.findByTestId(viewId)).toBeInTheDocument()
+			expect(screen.queryByTestId("welcome-view")).not.toBeInTheDocument()
+
+			state.settingsImportedAt = Date.now()
+			rerender(<AppWithProviders />)
+
+			const currentView = await screen.findByTestId(viewId)
+			expect(currentView).toBeInTheDocument()
+
+			if (nextAction) {
+				act(() => {
+					triggerMessage(nextAction)
+				})
+			} else {
+				act(() => {
+					currentView.click()
+				})
+			}
+
+			expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+			expect(screen.queryByTestId("settings-view")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("marketplace-view")).not.toBeInTheDocument()
+		},
+	)
+
+	it("does not bounce back to settings after the import redirect has already fired", async () => {
+		const importedAt = Date.now()
+
+		mockUseExtensionState.mockReturnValue({
+			...createSetupIncompleteState(),
+			settingsImportedAt: importedAt,
+		})
+
+		render(<AppWithProviders />)
+
+		const settingsView = await screen.findByTestId("settings-view")
+		expect(settingsView).toBeInTheDocument()
+
+		act(() => {
+			settingsView.click()
+		})
+
+		expect(screen.getByTestId("welcome-view")).toBeInTheDocument()
+		expect(screen.queryByTestId("settings-view")).not.toBeInTheDocument()
 	})
 
 	it("switches to history view when receiving historyButtonClicked action", async () => {

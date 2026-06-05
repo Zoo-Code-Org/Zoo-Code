@@ -45,6 +45,16 @@ export class CodeIndexServiceFactory {
 
 		const provider = config.embedderProvider as EmbedderProvider
 
+		if (provider === "semble") {
+			// Semble is a self-contained search binary that doesn't produce embedding
+			// vectors. The manager branches before reaching this factory (see
+			// _recreateServices). This guard prevents accidental misuse if the factory
+			// is ever called directly with a semble config.
+			throw new Error(
+				"Semble provider handles its own embedding. Do not call createEmbedder() for semble — use SembleProvider instead.",
+			)
+		}
+
 		if (provider === "openai") {
 			const apiKey = config.openAiOptions?.openAiNativeApiKey
 
@@ -141,6 +151,13 @@ export class CodeIndexServiceFactory {
 		const config = this.configManager.getConfig()
 
 		const provider = config.embedderProvider as EmbedderProvider
+
+		if (provider === "semble") {
+			throw new Error(
+				"Semble provider handles its own vector storage. Do not call createVectorStore() for semble — use SembleProvider instead.",
+			)
+		}
+
 		const defaultModel = getDefaultModelId(provider)
 		// Use the embedding model ID from config, not the chat model IDs
 		const modelId = config.modelId ?? defaultModel

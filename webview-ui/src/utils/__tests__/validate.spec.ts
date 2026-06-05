@@ -16,7 +16,12 @@ vi.mock("i18next", () => ({
 	},
 }))
 
-import { getModelValidationError, validateApiConfigurationExcludingModelErrors, validateBedrockArn } from "../validate"
+import {
+	getModelValidationError,
+	validateApiConfiguration,
+	validateApiConfigurationExcludingModelErrors,
+	validateBedrockArn,
+} from "../validate"
 
 describe("Model Validation Functions", () => {
 	const mockRouterModels: RouterModels = {
@@ -44,9 +49,10 @@ describe("Model Validation Functions", () => {
 		ollama: {},
 		lmstudio: {},
 		"vercel-ai-gateway": {},
-		roo: {},
 		poe: {},
 		deepseek: {},
+		"opencode-go": {},
+		"zoo-gateway": {},
 	}
 
 	const allowAllOrganization: OrganizationAllowList = {
@@ -173,6 +179,131 @@ describe("Model Validation Functions", () => {
 				restrictiveOrganization,
 			)
 			expect(result).toBeUndefined() // Should exclude model-specific org errors
+		})
+	})
+
+	describe("Opencode Go validation", () => {
+		it("returns an apiKey error when the Opencode Go API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: "opencode-go",
+				opencodeGoModelId: "glm-5.1",
+				// Missing opencodeGoApiKey
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined for a valid Opencode Go configuration", () => {
+			const config: ProviderSettings = {
+				apiProvider: "opencode-go",
+				opencodeGoApiKey: "valid-key",
+				opencodeGoModelId: "glm-5.1",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+
+		it("returns a modelId error when no Opencode Go model id is set", () => {
+			const config: ProviderSettings = {
+				apiProvider: "opencode-go",
+				opencodeGoApiKey: "valid-key",
+				// Missing opencodeGoModelId
+			}
+
+			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.modelId")
+		})
+	})
+
+	describe("Zoo Gateway validation", () => {
+		describe("validateApiConfiguration (welcome-view entry point)", () => {
+			it("returns a sign-in error when neither profile token nor Zoo auth is present", () => {
+				const config: ProviderSettings = {
+					apiProvider: "zoo-gateway",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				}
+
+				const result = validateApiConfiguration(config, mockRouterModels, allowAllOrganization, false)
+				expect(result).toBe("settings:validation.zooGatewaySignIn")
+			})
+
+			it("returns undefined when Zoo Code auth is active without a profile token", () => {
+				const config: ProviderSettings = {
+					apiProvider: "zoo-gateway",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				}
+
+				const result = validateApiConfiguration(config, mockRouterModels, allowAllOrganization, true)
+				expect(result).toBeUndefined()
+			})
+
+			it("returns undefined when a profile session token is set", () => {
+				const config: ProviderSettings = {
+					apiProvider: "zoo-gateway",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+					zooSessionToken: "zoo_ext_test_token",
+				}
+
+				const result = validateApiConfiguration(config, mockRouterModels, allowAllOrganization, false)
+				expect(result).toBeUndefined()
+			})
+		})
+
+		describe("validateApiConfigurationExcludingModelErrors (settings form)", () => {
+			// The settings form short-circuits zoo-gateway and renders the sign-in
+			// error inline in `ZooGateway.tsx`, so this entry point must never
+			// surface a zoo-gateway-specific error regardless of auth state.
+			it("returns undefined for zoo-gateway when unauthenticated and no token", () => {
+				const config: ProviderSettings = {
+					apiProvider: "zoo-gateway",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				}
+
+				const result = validateApiConfigurationExcludingModelErrors(
+					config,
+					mockRouterModels,
+					allowAllOrganization,
+				)
+				expect(result).toBeUndefined()
+			})
+
+			it("returns undefined for zoo-gateway when a profile token is set", () => {
+				const config: ProviderSettings = {
+					apiProvider: "zoo-gateway",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+					zooSessionToken: "zoo_ext_test_token",
+				}
+
+				const result = validateApiConfigurationExcludingModelErrors(
+					config,
+					mockRouterModels,
+					allowAllOrganization,
+				)
+				expect(result).toBeUndefined()
+			})
+
+			it("surfaces PROVIDER_NOT_ALLOWED for zoo-gateway when organization disallows it", () => {
+				const orgWithoutZooGateway: OrganizationAllowList = {
+					allowAll: false,
+					providers: {
+						openrouter: { allowAll: true },
+					},
+				}
+
+				const config: ProviderSettings = {
+					apiProvider: "zoo-gateway",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				}
+
+				const result = validateApiConfigurationExcludingModelErrors(
+					config,
+					mockRouterModels,
+					orgWithoutZooGateway,
+				)
+				expect(result).toContain("settings:validation.providerNotAllowed")
+			})
 		})
 	})
 })

@@ -11,9 +11,9 @@
 </sub>
 </div>
 
-# Roo Code'a Katkıda Bulunma
+# Zoo Code'a Katkıda Bulunma
 
-Roo Code topluluk tarafından yürütülen bir projedir ve her katkıyı derinden takdir ediyoruz. İşbirliğini kolaylaştırmak için [Önce Sorun Yaklaşımı](#önce-sorun-yaklaşımı) temelinde çalışıyoruz, bu da tüm [Çekme İsteklerinin (PR'ler)](#bir-çekme-isteği-gönderme) önce bir GitHub Sorununa bağlanması gerektiği anlamına gelir. Lütfen bu kılavuzu dikkatlice inceleyin.
+Zoo Code topluluk tarafından yürütülen bir projedir ve her katkıyı derinden takdir ediyoruz. İşbirliğini kolaylaştırmak için [Önce Sorun Yaklaşımı](#önce-sorun-yaklaşımı) temelinde çalışıyoruz, bu da tüm [Çekme İsteklerinin (PR'ler)](#pull-request-guidelines) önce bir GitHub Sorununa bağlanması gerektiği anlamına gelir. Lütfen bu kılavuzu dikkatlice inceleyin.
 
 ## İçindekiler
 
@@ -52,10 +52,10 @@ Yol haritamız projenin yönünü belirler. Katkılarınızı bu temel hedeflerl
 
 PR'lerinizde bu alanlarla uyumu belirtin.
 
-### 3. Roo Code Topluluğuna Katılın
+### 3. Zoo Code topluluğuna katıl
 
-- **Birincil:** [Discord](https://discord.gg/roocode) sunucumuza katılın ve **Hannes Rudolph (`hrudolph`)**'a DM gönderin.
-- **Alternatif:** Deneyimli katkıda bulunanlar doğrudan [GitHub Projeleri](https://github.com/orgs/RooCodeInc/projects/1) aracılığıyla etkileşimde bulunabilirler.
+- **Discord:** [Discord](https://discord.gg/VxfP4Vx3gX) sunucumuza katıl.
+- **Reddit:** [Reddit](https://www.reddit.com/r/ZooCode/) topluluğumuza katıl.
 
 ## Katkınızı Bulma ve Planlama
 
@@ -69,26 +69,26 @@ PR'lerinizde bu alanlarla uyumu belirtin.
 
 Tüm katkılar, basit şablonlarımızı kullanarak bir GitHub Sorunu ile başlar.
 
-- **Mevcut sorunları kontrol edin**: [GitHub Sorunları](https://github.com/RooCodeInc/Roo-Code/issues)nda arama yapın.
+- **Mevcut sorunları kontrol edin**: [GitHub Sorunları](https://github.com/Zoo-Code-Org/Zoo-Code/issues)nda arama yapın.
 - **Bir sorun oluşturun**:
     - **İyileştirmeler:** "İyileştirme İsteği" şablonu (kullanıcı yararına odaklanan sade bir dil).
     - **Hatalar:** "Hata Raporu" şablonu (minimum yeniden oluşturma + beklenen vs gerçek + sürüm).
-- **Üzerinde çalışmak ister misiniz?** Soruna "Talep ediyorum" yorumu yapın ve atanmak için [Discord](https://discord.gg/roocode) üzerinden **Hannes Rudolph (`hrudolph`)**'a DM gönderin. Atama, başlıkta teyit edilecektir.
+- **Üzerinde çalışmak ister misiniz?** Soruna "Talep ediyorum" yorumu yapın ve atanmak için [Discord](https://discord.gg/VxfP4Vx3gX) üzerinden çekirdek ekiple iletişime geçin. Atama, başlıkta teyit edilecektir.
 - **PR'ler soruna bağlanmalıdır.** Bağlantısız PR'ler kapatılabilir.
 
 ### Ne Üzerinde Çalışılacağına Karar Verme
 
-- "Sorun [Atanmamış]" sorunları için [GitHub Projesi](https://github.com/orgs/RooCodeInc/projects/1)'ni kontrol edin.
-- Belgeler için [Roo Code Belgeleri](https://github.com/RooCodeInc/Roo-Code-Docs)ni ziyaret edin.
+- Issue bulmak için [GitHub Issues sayfasına](https://github.com/Zoo-Code-Org/Zoo-Code/issues) bak.
+- Belgeler için [Zoo Code Belgeleri](https://github.com/Zoo-Code-Org/Zoo-Code-Docs)ni ziyaret edin.
 
 ### Hataları Bildirme
 
 - Önce mevcut raporları kontrol edin.
-- Aşağıdakilerle ["Hata Raporu" şablonunu](https://github.com/RooCodeInc/Roo-Code/issues/new/choose) kullanarak yeni bir hata oluşturun:
+- Aşağıdakilerle ["Hata Raporu" şablonunu](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) kullanarak yeni bir hata oluşturun:
     - Açık, numaralandırılmış yeniden oluşturma adımları
     - Beklenen vs gerçek sonuç
-    - Roo Code sürümü (gerekli); ilgiliyse API sağlayıcısı/modeli
-- **Güvenlik sorunları**: [Güvenlik tavsiyeleri](https://github.com/RooCodeInc/Roo-Code/security/advisories/new) aracılığıyla özel olarak bildirin.
+    - Zoo Code sürümü (gerekli); ilgiliyse API sağlayıcısı/modeli
+- **Güvenlik sorunları**: [Güvenlik tavsiyeleri](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new) aracılığıyla özel olarak bildirin.
 
 ## Geliştirme ve Gönderme Süreci
 
@@ -97,7 +97,7 @@ Tüm katkılar, basit şablonlarımızı kullanarak bir GitHub Sorunu ile başla
 1. **Çatallayın ve Klonlayın:**
 
 ```
-git clone https://github.com/KULLANICI_ADINIZ/Roo-Code.git
+git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
 2. **Bağımlılıkları Yükleyin:**
@@ -116,6 +116,8 @@ pnpm install
 - Kapsamlı testler sağlayın (`npm test`).
 - Göndermeden önce en son `main` dalına yeniden temel alın.
 
+<a id="pull-request-guidelines"></a>
+
 ### Bir Çekme İsteği Gönderme
 
 - Erken geri bildirim arıyorsanız **Taslak PR** olarak başlayın.
@@ -126,7 +128,7 @@ pnpm install
 
 ### Çekme İsteği Politikası
 
-- Atanmış bir GitHub Sorununa atıfta bulunmalıdır. Atanmak için: soruna "Talep ediyorum" yorumu yapın ve [Discord](https://discord.gg/roocode) üzerinden **Hannes Rudolph (`hrudolph`)**'a DM gönderin. Atama, başlıkta teyit edilecektir.
+- Atanmış bir GitHub Sorununa atıfta bulunmalıdır. Atanmak için: soruna "Talep ediyorum" yorumu yapın ve [Discord](https://discord.gg/VxfP4Vx3gX) üzerinden çekirdek ekiple iletişime geçin. Atama, başlıkta teyit edilecektir.
 - Bağlantısız PR'ler kapatılabilir.
 - PR'ler CI testlerini geçmeli, yol haritasıyla uyumlu olmalı ve net belgelere sahip olmalıdır.
 
@@ -138,4 +140,4 @@ pnpm install
 
 ## Yasal
 
-Katkıda bulunarak, katkılarınızın Roo Code'un lisanslamasıyla tutarlı olan Apache 2.0 Lisansı altında lisanslanacağını kabul etmiş olursunuz.
+Katkıda bulunarak, katkılarınızın Zoo Code'un lisanslamasıyla tutarlı olan Apache 2.0 Lisansı altında lisanslanacağını kabul etmiş olursunuz.

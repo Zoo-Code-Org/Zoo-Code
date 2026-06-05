@@ -132,21 +132,21 @@ export const getModelMaxOutputTokens = ({
 		return ANTHROPIC_DEFAULT_MAX_TOKENS
 	}
 
+	// Models that expose a configurable max-output slider (e.g. Z.ai GLM) honor the user's
+	// explicit override instead of the default 20% context-window clamp, capped at the model's
+	// own ceiling. This keeps the runtime budget consistent with the value sent to the provider.
+	if (model.supportsMaxTokens && settings?.modelMaxTokens != null && settings.modelMaxTokens > 0) {
+		return model.maxTokens ? Math.min(settings.modelMaxTokens, model.maxTokens) : settings.modelMaxTokens
+	}
+
 	// If model has explicit maxTokens, clamp it to 20% of the context window
 	// Exception: GPT-5 models should use their exact configured max output tokens
 	if (model.maxTokens) {
 		// Check if this is a GPT-5 model (case-insensitive)
 		const isGpt5Model = modelId.toLowerCase().includes("gpt-5")
 
-		// Z.ai models have hand-curated maxTokens values from Z.ai's own documentation
-		// (e.g. glm-5.1 supports 128k output on a 200k context window) — bypass the cap.
-		// Note: ZAiHandler.createStreamWithThinking bypasses this function entirely because
-		// ApiHandlerOptions omits apiProvider; this bypass serves callers that pass full
-		// ProviderSettings (Task.ts context management, model-params.ts).
-		const isZaiProvider = settings?.apiProvider === "zai"
-
 		// GPT-5 models bypass the 20% cap and use their full configured max tokens
-		if (isGpt5Model || isZaiProvider) {
+		if (isGpt5Model) {
 			return model.maxTokens
 		}
 
@@ -178,14 +178,15 @@ type CommonFetchParams = {
 const dynamicProviderExtras = {
 	openrouter: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
 	"vercel-ai-gateway": {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
+	"zoo-gateway": {} as { apiKey?: string; baseUrl?: string },
 	litellm: {} as { apiKey: string; baseUrl: string },
 	requesty: {} as { apiKey?: string; baseUrl?: string },
 	unbound: {} as { apiKey?: string },
 	ollama: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
 	lmstudio: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
-	roo: {} as { apiKey?: string; baseUrl?: string },
 	poe: {} as { apiKey?: string; baseUrl?: string },
 	deepseek: {} as { apiKey?: string; baseUrl?: string },
+	"opencode-go": {} as { apiKey?: string },
 } as const satisfies Record<RouterName, object>
 
 // Build the dynamic options union from the map, intersected with CommonFetchParams

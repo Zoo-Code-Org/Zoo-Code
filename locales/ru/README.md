@@ -1,59 +1,50 @@
 <p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=RooVeterinaryInc.roo-cline"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
-  <a href="https://x.com/roocode"><img src="https://img.shields.io/badge/roocode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-  <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
-  <a href="https://discord.gg/roocode"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
-  <a href="https://www.reddit.com/r/RooCode/"><img src="https://img.shields.io/badge/Join%20r%2FRooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/RooCode"></a>
-</p>
-<p align="center">
-  <em>Получить быструю помощь → <a href="https://discord.gg/roocode">Присоединяйтесь к Discord</a> • Предпочитаете асинхронный режим? → <a href="https://www.reddit.com/r/RooCode/">Присоединяйтесь к r/RooCode</a></em>
-</p>
+          <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
+          <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
+          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
+          <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
+          <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
+          <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
+        </p>
+        <p align="center">
+          <em>Нужна помощь быстро → <a href="https://discord.gg/VxfP4Vx3gX">Присоединяйся к Discord</a> • Предпочитаешь асинхронно? → <a href="https://www.reddit.com/r/ZooCode/">Присоединяйся к r/ZooCode</a></em>
+        </p>
 
-# Roo Code
+        # Zoo Code
 
-> Твоя команда разработчиков на ИИ — прямо в редакторе
+        > Твоя команда разработчиков на ИИ — прямо в редакторе
 
-## Что нового в v3.53.0
+        ## Мы — Zoo Code
 
-> ### Плагин Roo Code никуда не денется.
+> Возможно, ты видел [недавнее объявление](https://x.com/mattrubens/status/2046636598859559114) команды Roo 🦘🦘🦘. Коротко: команда постепенно сворачивает активную разработку Roo Code, сосредоточившись на [Roomote](https://roomote.dev/). Эта новость тяжело далась многим пользователям Roo; этот плагин очень много значит для этого сообщества.
 >
-> Возможно, ты видел [недавнее объявление](https://x.com/mattrubens/status/2046636598859559114) о том, что Roo Code достиг 3 миллионов установок, а оригинальная команда полностью переключается на Roomote. Мы понимаем, что эта новость была непростой для многих из вас. Этот плагин много значит для нас и для тебя, и мы тебя слышим.
+> Мы хотим поблагодарить всю команду Roo за работу, которую они вложили в этот плагин. Мы не будем перечислять здесь каждого по имени, но все можем согласиться, что это выдающиеся разработчики и, что не менее важно, невероятные люди. Спасибо команде Roo.
 >
-> Хорошая новость: **команда сообщества взяла на себя задачу продолжать развивать Roo Code**, и мы работаем с ними над официальной передачей, чтобы плагин, на который ты полагаешься, продолжал получать поддержку и улучшения.
+> Пользователи Roo очень разные. Кто-то использует его профессионально каждый день, кто-то — чтобы придумывать невероятно сложные workflow. Кто-то помогает улучшать сам Roo, а кто-то — модели, которые использует Roo (супер мета). Суть в том, что сообщество разнообразно, и хотя кенгуру 🦘🦘🦘 — благородное и достойное животное, нам показалось, что «Zoo» 🐘🦡🦒🦓🦛🦧🦭🦦 лучше отражает это разнообразие пользователей плагина.
+>
+> Поэтому мы хотим объявить, что **Zoo Code** продолжит развитие этого важного проекта. Основная команда состоит из разработчиков, которые раньше уже вносили вклад в Roo и которым действительно небезразличен этот плагин. Мы продолжим обновлять модели, исправлять ошибки и выпускать новые функции. Но больше всего мы хотим слушать вас — сообщество, которое сделало этот плагин таким особенным. Так что присоединяйся к нашему [Discord](https://discord.gg/VxfP4Vx3gX), нашему [Reddit](https://www.reddit.com/r/ZooCode), или [открывай PR или issue](https://github.com/Zoo-Code-Org/Zoo-Code); но прежде всего мы просим тебя оставаться вовлеченным, на связи и активным как часть сообщества.
+>
+> _-Zoo Code Team_
 
-**Что нового в этом релизе:**
+## Переход с Roo Code на Zoo Code
 
-- Добавлена поддержка GPT-5.5 через провайдер OpenAI Codex.
-- Добавлена поддержка Claude Opus 4.7 в Vertex AI.
-- В чат добавлены элементы управления навигацией по предыдущим контрольным точкам, чтобы ты мог легче переходить назад через ранее созданные контрольные точки.
+Короткое руководство по переходу с Roo Code на Zoo Code можно найти в [гайде по миграции Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Мы хотим как можно лучше помочь пользователям во время перехода, и именно для этого у нас есть [Reddit](https://www.reddit.com/r/ZooCode) и [Discord](https://discord.gg/VxfP4Vx3gX). Если у тебя возникнут проблемы или вопросы, заходи и спрашивай.
 
-<details>
-  <summary>🌐 Доступные языки</summary>
+## Что нового в v3.56.0
 
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
+- Поддержка **Claude Opus 4.8** у провайдеров Anthropic, Bedrock и Vertex
+- **Opencode Go** добавлен как новый полноценный API-провайдер
+- **Надёжная отмена задач** — отмена задачи теперь корректно завершает запущенный процесс, с автоматическим повтором Ctrl+C для упорных процессов
+- Исправлены пользовательские ID моделей Gemini, которые игнорировались и сбрасывались на стандартные
+- Исправлена обрезка диффов Grok из-за отсутствующих маркеров
+- Исправлено определение PowerShell в Windows без настроенного профиля оболочки
+- Исправлены code action в VS Code, которые всё ещё отображали название Roo Code; локализованы на все поддерживаемые языки
+- Исправлено предупреждение Vertex AI при получении пути к файлу в поле учётных данных Google Cloud
+- Шесть обновлений безопасности зависимостей (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
 
 ---
 
-## Что Roo Code может сделать для ВАС?
+## Что Zoo Code может сделать для ВАС?
 
 - Генерировать код из описаний на естественном языке
 - Адаптация с помощью режимов: Код, Архитектор, Вопрос, Отладка и Пользовательские режимы
@@ -65,7 +56,7 @@
 
 ## Режимы
 
-Roo Code адаптируется к вашему стилю работы, а не наоборот:
+Zoo Code адаптируется к вашему стилю работы, а не наоборот:
 
 - Режим Код: повседневное кодирование, правки и операции с файлами
 - Режим Архитектор: планирование систем, спецификаций и миграций
@@ -73,7 +64,7 @@ Roo Code адаптируется к вашему стилю работы, а н
 - Режим Отладка: отслеживание проблем, добавление логов, изоляция первопричин
 - Пользовательские режимы: создавайте специализированные режимы для вашей команды или рабочего процесса
 
-Подробнее: [Использование режимов](https://docs.roocode.com/basic-usage/using-modes) • [Пользовательские режимы](https://docs.roocode.com/advanced-usage/custom-modes)
+Подробнее: [Использование режимов](https://docs.zoocode.dev/basic-usage/using-modes) • [Пользовательские режимы](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
 ## Обучающие видео и видео о функциях
 
@@ -81,22 +72,22 @@ Roo Code адаптируется к вашему стилю работы, а н
 
 |                                                                                                                                                                               |                                                                                                                                                                          |                                                                                                                                                                               |
 | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-|   <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Установка Roo Code</b>    | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Настройка профилей</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Индексация кодовой базы</b> |
+|   <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Установка Zoo Code</b>    | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Настройка профилей</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Индексация кодовой базы</b> |
 | <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Пользовательские режимы</b> | <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Контрольные точки</b>  |  <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Управление Контекстом</b>  |
 
 </div>
 <p align="center">
-<a href="https://docs.roocode.com/tutorial-videos">Больше коротких обучающих видео и видео о функциях...</a>
+<a href="https://docs.zoocode.dev/tutorial-videos">Больше коротких обучающих видео и видео о функциях...</a>
 </p>
 
 ## Ресурсы
 
-- **[Документация](https://docs.roocode.com):** Официальное руководство по установке, настройке и освоению Roo Code.
+- **[Документация](https://docs.zoocode.dev):** Официальное руководство по установке, настройке и освоению Zoo Code.
 - **[Канал на YouTube](https://youtube.com/@roocodeyt?feature=shared):** Смотрите обучающие видео и функции в действии.
-- **[Сервер Discord](https://discord.gg/roocode):** Присоединяйтесь к сообществу для получения помощи и обсуждений в реальном времени.
-- **[Сообщество Reddit](https://www.reddit.com/r/RooCode):** Делитесь своим опытом и смотрите, что создают другие.
-- **[Проблемы на GitHub](https://github.com/RooCodeInc/Roo-Code/issues):** Сообщайте об ошибках и отслеживайте разработку.
-- **[Запросы на новые функции](https://github.com/RooCodeInc/Roo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** Есть идея? Поделитесь ею с разработчиками.
+- **[Сервер Discord](https://discord.gg/VxfP4Vx3gX):** Присоединяйтесь к сообществу для получения помощи и обсуждений в реальном времени.
+- **[Сообщество Reddit](https://www.reddit.com/r/ZooCode):** Делитесь своим опытом и смотрите, что создают другие.
+- **[Проблемы на GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Сообщайте об ошибках и отслеживайте разработку.
+- **[Запросы на новые функции](https://github.com/Zoo-Code-Org/Zoo-Code/discussions/categories/feature-requests?discussions_q=is%3Aopen+category%3A%22Feature+Requests%22+sort%3Atop):** Есть идея? Поделитесь ею с разработчиками.
 
 ---
 
@@ -105,7 +96,7 @@ Roo Code адаптируется к вашему стилю работы, а н
 1. **Клонируйте** репозиторий:
 
 ```sh
-git clone https://github.com/RooCodeInc/Roo-Code.git
+git clone https://github.com/Zoo-Code-Org/Zoo-Code.git
 ```
 
 2. **Установите зависимости**:
@@ -116,13 +107,13 @@ pnpm install
 
 3. **Запустите расширение**:
 
-Существует несколько способов запустить расширение Roo Code:
+Существует несколько способов запустить расширение Zoo Code:
 
 ### Режим разработки (F5)
 
 Для активной разработки используйте встроенную отладку VSCode:
 
-Нажмите `F5` (или перейдите в меню **Выполнить** → **Начать отладку**) в VSCode. Это откроет новое окно VSCode с запущенным расширением Roo Code.
+Нажмите `F5` (или перейдите в меню **Выполнить** → **Начать отладку**) в VSCode. Это откроет новое окно VSCode с запущенным расширением Zoo Code.
 
 - Изменения в веб-представлении появятся немедленно.
 - Изменения в ядре расширения также будут автоматически перезагружены "на лету".
@@ -156,10 +147,10 @@ pnpm install:vsix [-y] [--editor=<command>]
     ```sh
     pnpm vsix
     ```
-2.  Файл `.vsix` будет сгенерирован в каталоге `bin/` (например, `bin/roo-cline-<version>.vsix`).
+2.  Файл `.vsix` будет сгенерирован в каталоге `bin/` (например, `bin/zoo-code-<version>.vsix`).
 3.  Установите его вручную с помощью VSCode CLI:
     ```sh
-    code --install-extension bin/roo-cline-<version>.vsix
+    code --install-extension bin/zoo-code-<version>.vsix
     ```
 
 ---
@@ -170,7 +161,7 @@ pnpm install:vsix [-y] [--editor=<command>]
 
 ## Отказ от ответственности
 
-**Пожалуйста, обратите внимание**, что Roo Code, Inc. **не делает** никаких заявлений и не дает никаких гарантий в отношении любого кода, моделей или других инструментов, предоставляемых или доступных в связи с Roo Code, любых связанных сторонних инструментов или любых результирующих результатов. Вы принимаете на себя **все риски**, связанные с использованием любых таких инструментов или результатов; такие инструменты предоставляются на условиях **"КАК ЕСТЬ"** и **"ПО МЕРЕ ДОСТУПНОСТИ"**. Такие риски могут включать, без ограничений, нарушение прав интеллектуальной собственности, киберуязвимости или атаки, предвзятость, неточности, ошибки, дефекты, вирусы, простои, потерю или повреждение имущества и/или телесные повреждения. Вы несете полную ответственность за использование любых таких инструментов или результатов (включая, без ограничений, их законность, уместность и результаты).
+**Пожалуйста, обратите внимание**, что Zoo Code **не делает** никаких заявлений и не дает никаких гарантий в отношении любого кода, моделей или других инструментов, предоставляемых или доступных в связи с Zoo Code, любых связанных сторонних инструментов или любых результирующих результатов. Вы принимаете на себя **все риски**, связанные с использованием любых таких инструментов или результатов; такие инструменты предоставляются на условиях **"КАК ЕСТЬ"** и **"ПО МЕРЕ ДОСТУПНОСТИ"**. Такие риски могут включать, без ограничений, нарушение прав интеллектуальной собственности, киберуязвимости или атаки, предвзятость, неточности, ошибки, дефекты, вирусы, простои, потерю или повреждение имущества и/или телесные повреждения. Вы несете полную ответственность за использование любых таких инструментов или результатов (включая, без ограничений, их законность, уместность и результаты).
 
 ---
 
@@ -182,8 +173,8 @@ pnpm install:vsix [-y] [--editor=<command>]
 
 ## Лицензия
 
-[Apache 2.0 © 2025 Roo Code, Inc.](../../LICENSE)
+[Apache 2.0 © 2025 Zoo Code Org](../../LICENSE)
 
 ---
 
-**Наслаждайтесь Roo Code!** Независимо от того, будете ли вы держать его на коротком поводке или позволите ему действовать автономно, мы с нетерпением ждем, что вы создадите. Если у вас есть вопросы или идеи по поводу функций, заходите в наше [сообщество на Reddit](https://www.reddit.com/r/RooCode/) или [Discord](https://discord.gg/roocode). Приятного кодирования!
+**Наслаждайся Zoo Code!** Будешь ли ты держать его на коротком поводке или позволишь ему действовать автономно, нам не терпится увидеть, что ты построишь. Если у тебя есть вопросы или идеи для новых функций, открой [issue](https://github.com/Zoo-Code-Org/Zoo-Code/issues) или начни [discussion](https://github.com/Zoo-Code-Org/Zoo-Code/discussions). Приятного кодинга!

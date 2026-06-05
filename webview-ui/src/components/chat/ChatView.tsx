@@ -10,11 +10,10 @@ import { appendImages } from "@src/utils/imageUtils"
 import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
 import { batchConsecutive } from "@src/utils/batchConsecutive"
 
-import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType } from "@roo-code/types"
-import { isRetiredProvider } from "@roo-code/types"
+import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
+import { getSuggestionMode, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
-import { SuggestionItem } from "@roo-code/types"
 import { combineApiRequests } from "@roo/combineApiRequests"
 import { combineCommandSequences } from "@roo/combineCommandSequences"
 import { getApiMetrics } from "@roo/getApiMetrics"
@@ -81,11 +80,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		setMode,
 		alwaysAllowModeSwitch,
 		customModes,
-		telemetrySetting,
 		soundEnabled,
 		soundVolume,
 		messageQueue = [],
 		showWorktreesInHomeScreen,
+		telemetrySetting,
 	} = useExtensionState()
 
 	// Show a WarningRow when the user sends a message with a retired provider.
@@ -1336,13 +1335,17 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	const switchToMode = useCallback(
 		(modeSlug: string): void => {
+			if (!getAllModes(customModes).some((modeConfig) => modeConfig.slug === modeSlug)) {
+				return
+			}
+
 			// Update local state and notify extension to sync mode change.
 			setMode(modeSlug)
 
 			// Send the mode switch message.
 			vscode.postMessage({ type: "mode", text: modeSlug })
 		},
-		[setMode],
+		[customModes, setMode],
 	)
 
 	const handleSuggestionClickInRow = useCallback(
@@ -1358,12 +1361,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			}
 
 			// Check if we need to switch modes
-			if (suggestion.mode) {
+			const suggestionMode = getSuggestionMode(suggestion.mode)
+			if (suggestionMode) {
 				// Only switch modes if it's a manual click (event exists) or auto-approval is allowed
 				const isManualClick = !!event
 				if (isManualClick || alwaysAllowModeSwitch) {
 					// Switch mode without waiting
-					switchToMode(suggestion.mode)
+					switchToMode(suggestionMode)
 				}
 			}
 
@@ -1610,8 +1614,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					)}
 				</>
 			) : (
-				<div className="flex flex-col h-full justify-center p-6 min-h-0 overflow-y-auto gap-4 relative">
-					<div className="flex flex-col items-start gap-2 justify-center h-full min-[400px]:px-6">
+				<div className="flex flex-col h-full p-6 min-h-0 overflow-y-auto gap-4 relative">
+					<div className="flex flex-col items-start gap-2 my-auto min-[400px]:px-6">
 						<VersionIndicator
 							onClick={() => setShowAnnouncementModal(true)}
 							className="absolute top-2 right-3 z-10"

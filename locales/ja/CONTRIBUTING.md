@@ -11,9 +11,9 @@
 </sub>
 </div>
 
-# Roo Codeへの貢献
+# Zoo Codeへの貢献
 
-Roo Codeはコミュニティ主導のプロジェクトであり、すべての貢献を深く評価しています。共同作業を円滑にするため、私たちは[課題第一のアプローチ](#課題第一のアプローチ)で運営しています。つまり、すべての[プルリクエスト（PR）](#プルリクエストの提出)は、まずGitHubの課題にリンクされている必要があります。このガイドを注意深く確認してください。
+Zoo Codeはコミュニティ主導のプロジェクトであり、すべての貢献を深く評価しています。共同作業を円滑にするため、私たちは[課題第一のアプローチ](#課題第一のアプローチ)で運営しています。つまり、すべての[プルリクエスト（PR）](#プルリクエストの提出)は、まずGitHubの課題にリンクされている必要があります。このガイドを注意深く確認してください。
 
 ## 目次
 
@@ -52,10 +52,10 @@ Roo Codeはコミュニティ主導のプロジェクトであり、すべての
 
 PRでこれらの分野との連携について言及してください。
 
-### 3. Roo Codeコミュニティに参加する
+### 3. Zoo Code コミュニティに参加しよう
 
-- **プライマリ：** [Discord](https://discord.gg/roocode)に参加し、**Hannes Rudolph (`hrudolph`)**にDMしてください。
-- **代替：** 経験豊富な貢献者は、[GitHubプロジェクト](https://github.com/orgs/RooCodeInc/projects/1)を介して直接関与できます。
+- **Discord:** 私たちの [Discord](https://discord.gg/VxfP4Vx3gX) に参加してください。
+- **Reddit:** 私たちの [Reddit](https://www.reddit.com/r/ZooCode/) に参加してください。
 
 ## 貢献内容の検索と計画
 
@@ -69,26 +69,26 @@ PRでこれらの分野との連携について言及してください。
 
 すべての貢献は、私たちのスキニーテンプレートを使用してGitHubの課題から始まります。
 
-- **既存の課題を確認する**：[GitHubの課題](https://github.com/RooCodeInc/Roo-Code/issues)で検索します。
+- **既存の課題を確認する**：[GitHubの課題](https://github.com/Zoo-Code-Org/Zoo-Code/issues)で検索します。
 - **課題を作成する**：
     - **機能強化：** 「機能強化リクエスト」テンプレート（ユーザーの利益に焦点を当てた平易な言葉）。
     - **バグ：** 「バグレポート」テンプレート（最小限の再現+期待値と実際値+バージョン）。
-- **それに取り組みたいですか？** 課題に「Claiming」とコメントし、[Discord](https://discord.gg/roocode)で**Hannes Rudolph（`hrudolph`）**にDMして割り当てを受けてください。割り当てはスレッドで確認されます。
+- **それに取り組みたいですか？** 課題に「Claiming」とコメントし、[Discord](https://discord.gg/VxfP4Vx3gX)のコアチームに連絡して割り当てを受けてください。割り当てはスレッドで確認されます。
 - **PRは課題にリンクする必要があります。** リンクされていないPRはクローズされる場合があります。
 
 ### 何に取り組むかを決める
 
-- 「課題[未割り当て]」の課題については、[GitHubプロジェクト](https://github.com/orgs/RooCodeInc/projects/1)を確認してください。
-- ドキュメントについては、[Roo Codeドキュメント](https://github.com/RooCodeInc/Roo-Code-Docs)をご覧ください。
+- issue を探すには [GitHub Issues ページ](https://github.com/Zoo-Code-Org/Zoo-Code/issues) を確認してください。
+- ドキュメントについては、[Zoo Codeドキュメント](https://github.com/Zoo-Code-Org/Zoo-Code-Docs)をご覧ください。
 
 ### バグの報告
 
 - 最初に既存のレポートを確認してください。
-- 次の情報を含む[「バグレポート」テンプレート](https://github.com/RooCodeInc/Roo-Code/issues/new/choose)を使用して新しいバグを作成します。
+- 次の情報を含む[「バグレポート」テンプレート](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose)を使用して新しいバグを作成します。
     - 明確で番号付きの再現手順
     - 期待される結果と実際の結果
-    - Roo Codeのバージョン（必須）。関連する場合はAPIプロバイダー/モデル
-- **セキュリティの問題**：[セキュリティアドバイザリ](https://github.com/RooCodeInc/Roo-Code/security/advisories/new)を介して非公開で報告してください。
+    - Zoo Codeのバージョン（必須）。関連する場合はAPIプロバイダー/モデル
+- **セキュリティの問題**：[セキュリティアドバイザリ](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new)を介して非公開で報告してください。
 
 ## 開発と提出のプロセス
 
@@ -97,7 +97,7 @@ PRでこれらの分野との連携について言及してください。
 1. **フォークとクローン：**
 
 ```
-git clone https://github.com/あなたのユーザー名/Roo-Code.git
+git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
 2. **依存関係のインストール：**
@@ -126,7 +126,7 @@ pnpm install
 
 ### プルリクエストポリシー
 
-- 割り当てられたGitHubの課題を参照する必要があります。割り当てを受けるには、課題に「Claiming」とコメントし、[Discord](https://discord.gg/roocode)で**Hannes Rudolph（`hrudolph`）**にDMしてください。割り当てはスレッドで確認されます。
+- 割り当てられたGitHubの課題を参照する必要があります。割り当てを受けるには、課題に「Claiming」とコメントし、[Discord](https://discord.gg/VxfP4Vx3gX)のコアチームに連絡してください。割り当てはスレッドで確認されます。
 - リンクされていないPRはクローズされる場合があります。
 - PRはCIテストに合格し、ロードマップに沿っており、明確なドキュメントが必要です。
 
@@ -138,4 +138,4 @@ pnpm install
 
 ## 法務
 
-貢献することにより、あなたの貢献がRoo Codeのライセンスと一致するApache 2.0ライセンスの下でライセンスされることに同意したことになります。
+貢献することにより、あなたの貢献がZoo Codeのライセンスと一致するApache 2.0ライセンスの下でライセンスされることに同意したことになります。

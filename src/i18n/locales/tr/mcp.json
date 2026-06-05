@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "OAuth Geri Çağırma - Roo Code",
+			"title": "OAuth Geri Çağırma - Zoo Code",
 			"success": "Başarılı!",
 			"failed": "Başarısız",
 			"auth_failed": "Kimlik doğrulama başarısız oldu. Lütfen MCP sunucu günlüklerini kontrol edin.",

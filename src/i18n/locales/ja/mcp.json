@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "OAuth コールバック - Roo Code",
+			"title": "OAuth コールバック - Zoo Code",
 			"success": "成功！",
 			"failed": "失敗",
 			"auth_failed": "認証に失敗しました。MCP サーバーのログを確認してください。",

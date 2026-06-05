@@ -84,6 +84,7 @@ export interface ExtensionStateContextType extends ExtensionState {
 	setTerminalShellIntegrationDisabled: (value: boolean) => void
 	terminalZdotdir?: boolean
 	setTerminalZdotdir: (value: boolean) => void
+	terminalProfile?: string
 	setTtsEnabled: (value: boolean) => void
 	setTtsSpeed: (value: number) => void
 	setEnableCheckpoints: (value: boolean) => void
@@ -124,6 +125,8 @@ export interface ExtensionStateContextType extends ExtensionState {
 	togglePinnedApiConfig: (configName: string) => void
 	setHistoryPreviewCollapsed: (value: boolean) => void
 	setReasoningBlockCollapsed: (value: boolean) => void
+	chatFontSize?: number
+	setChatFontSize: (value: number | undefined) => void
 	enterBehavior?: "send" | "newline"
 	setEnterBehavior: (value: "send" | "newline") => void
 	autoCondenseContext: boolean
@@ -233,6 +236,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		terminalZshOhMy: false, // Default Oh My Zsh integration setting
 		terminalZshP10k: false, // Default Powerlevel10k integration setting
 		terminalZdotdir: false, // Default ZDOTDIR handling setting
+		terminalProfile: undefined, // Default VS Code terminal profile (use VS Code default)
 		historyPreviewCollapsed: false, // Initialize the new state (default to expanded)
 		reasoningBlockCollapsed: true, // Default to collapsed
 		enterBehavior: "send", // Default: Enter sends, Shift+Enter creates newline
@@ -410,7 +414,13 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 					break
 				}
 				case "routerModels": {
-					setExtensionRouterModels(message.routerModels)
+					const provider = message.values?.provider as string | undefined
+					const incoming = message.routerModels
+					if (provider && incoming) {
+						setExtensionRouterModels((current) => (current ? { ...current, ...incoming } : incoming))
+					} else {
+						setExtensionRouterModels(incoming)
+					}
 					break
 				}
 				case "marketplaceData": {
@@ -473,8 +483,22 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		vscode.postMessage({ type: "webviewDidLaunch" })
 	}, [])
 
+	// Apply the configurable chat font size as a CSS variable. When unset, the
+	// override is removed so the UI falls back to VS Code's `--vscode-font-size`.
+	useEffect(() => {
+		const root = document.documentElement
+		if (typeof state.chatFontSize === "number") {
+			root.style.setProperty("--zoo-chat-font-size", `${state.chatFontSize}px`)
+		} else {
+			root.style.removeProperty("--zoo-chat-font-size")
+		}
+	}, [state.chatFontSize])
+
 	const contextValue: ExtensionStateContextType = {
 		...state,
+		// `chatFontSize` is persisted as nullish (null on reset); normalize null to
+		// undefined so it matches the context type and means "use VS Code default".
+		chatFontSize: state.chatFontSize ?? undefined,
 		reasoningBlockCollapsed: state.reasoningBlockCollapsed ?? true,
 		didHydrateState,
 		showWelcome,
@@ -572,6 +596,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 			setState((prevState) => ({ ...prevState, historyPreviewCollapsed: value })),
 		setReasoningBlockCollapsed: (value) =>
 			setState((prevState) => ({ ...prevState, reasoningBlockCollapsed: value })),
+		setChatFontSize: (value) => setState((prevState) => ({ ...prevState, chatFontSize: value })),
 		enterBehavior: state.enterBehavior ?? "send",
 		setEnterBehavior: (value) => setState((prevState) => ({ ...prevState, enterBehavior: value })),
 		setHasOpenedModeSelector: (value) => setState((prevState) => ({ ...prevState, hasOpenedModeSelector: value })),

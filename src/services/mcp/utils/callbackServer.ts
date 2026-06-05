@@ -2,6 +2,9 @@ import * as http from "http"
 import { t } from "../../../i18n"
 import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
 
+const HTML_RESPONSE_CONTENT_TYPE = "text/html; charset=utf-8"
+const CHARSET_META_TAG = '<meta charset="utf-8">'
+
 export interface CallbackResult {
 	code?: string
 	error?: string
@@ -93,13 +96,14 @@ export function startCallbackServer(
 					// Verify state for CSRF protection
 					if (expectedState && state !== expectedState) {
 						res.writeHead(400, {
-							"Content-Type": "text/html",
+							"Content-Type": HTML_RESPONSE_CONTENT_TYPE,
 							"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
 						})
 						res.end(`
 						         <!DOCTYPE html>
 						         <html>
 						           <head>
+						             ${CHARSET_META_TAG}
 						             <title>${t("mcp:oauth.callback.title")}</title>
 						           </head>
 						           <body>
@@ -115,7 +119,7 @@ export function startCallbackServer(
 
 					// Send HTML response
 					res.writeHead(200, {
-						"Content-Type": "text/html",
+						"Content-Type": HTML_RESPONSE_CONTENT_TYPE,
 						"Content-Security-Policy":
 							"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
 					})
@@ -123,6 +127,7 @@ export function startCallbackServer(
 <!DOCTYPE html>
 <html>
   <head>
+    ${CHARSET_META_TAG}
     <title>${t("mcp:oauth.callback.title")}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>

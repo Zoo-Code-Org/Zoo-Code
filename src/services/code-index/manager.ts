@@ -8,6 +8,7 @@ import { CodeIndexServiceFactory } from "./service-factory"
 import { CodeIndexSearchService } from "./search-service"
 import { CodeIndexOrchestrator } from "./orchestrator"
 import { CacheManager } from "./cache-manager"
+import { SembleProvider } from "./semble"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import fs from "fs/promises"
 import ignore from "ignore"
@@ -27,6 +28,7 @@ export class CodeIndexManager {
 	private _orchestrator: CodeIndexOrchestrator | undefined
 	private _searchService: CodeIndexSearchService | undefined
 	private _cacheManager: CacheManager | undefined
+	private _sembleProvider: SembleProvider | undefined
 
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
@@ -125,6 +127,10 @@ export class CodeIndexManager {
 	}
 
 	private assertInitialized() {
+		if (this._sembleProvider) {
+			// When semble is active, we don't need orchestrator/searchService
+			return
+		}
 		if (!this._configManager || !this._orchestrator || !this._searchService || !this._cacheManager) {
 			throw new Error("CodeIndexManager not initialized. Call initialize() first.")
 		}
@@ -133,6 +139,9 @@ export class CodeIndexManager {
 	public get state(): IndexingState {
 		if (!this.isFeatureEnabled) {
 			return "Standby"
+		}
+		if (this._sembleProvider) {
+			return this._sembleProvider.state
 		}
 		this.assertInitialized()
 		return this._orchestrator!.state
@@ -173,6 +182,9 @@ export class CodeIndexManager {
 			if (this._orchestrator) {
 				this._orchestrator.stopWatcher()
 			}
+			if (this._sembleProvider) {
+				this._sembleProvider.stopIndexing()
+			}
 			return { requiresRestart }
 		}
 
@@ -196,19 +208,27 @@ export class CodeIndexManager {
 		}
 
 		// 6. Determine if Core Services Need Recreation
-		const needsServiceRecreation = !this._serviceFactory || requiresRestart
+		const needsServiceRecreation = (!this._serviceFactory && !this._sembleProvider) || requiresRestart
 
 		if (needsServiceRecreation) {
 			await this._recreateServices()
 		}
 
 		// 7. Handle Indexing Start/Restart
-		const shouldStartOrRestartIndexing =
-			requiresRestart ||
-			(needsServiceRecreation && (!this._orchestrator || this._orchestrator.state !== "Indexing"))
+		if (this._sembleProvider) {
+			// For semble, start indexing if needed
+			const shouldStartIndexing = requiresRestart || needsServiceRecreation
+			if (shouldStartIndexing) {
+				await this._sembleProvider.startIndexing()
+			}
+		} else {
+			const shouldStartOrRestartIndexing =
+				requiresRestart ||
+				(needsServiceRecreation && (!this._orchestrator || this._orchestrator.state !== "Indexing"))
 
-		if (shouldStartOrRestartIndexing) {
-			this._orchestrator?.startIndexing()
+			if (shouldStartOrRestartIndexing) {
+				this._orchestrator?.startIndexing()
+			}
 		}
 
 		return { requiresRestart }
@@ -223,6 +243,12 @@ export class CodeIndexManager {
 	 */
 	public async startIndexing(): Promise<void> {
 		if (!this.isFeatureEnabled || !this.isWorkspaceEnabled) {
+			return
+		}
+
+		// Delegate to semble provider if active
+		if (this._sembleProvider) {
+			await this._sembleProvider.startIndexing()
 			return
 		}
 
@@ -244,6 +270,10 @@ export class CodeIndexManager {
 	 * Stops any in-progress indexing operation and the file watcher.
 	 */
 	public stopIndexing(): void {
+		if (this._sembleProvider) {
+			this._sembleProvider.stopIndexing()
+			return
+		}
 		if (this._orchestrator) {
 			this._orchestrator.stopIndexing()
 		}
@@ -295,6 +325,7 @@ export class CodeIndexManager {
 			this._serviceFactory = undefined
 			this._orchestrator = undefined
 			this._searchService = undefined
+			this._sembleProvider = undefined
 
 			// Reset the flag after recovery is complete
 			this._isRecoveringFromError = false
@@ -306,6 +337,10 @@ export class CodeIndexManager {
 	 */
 	public dispose(): void {
 		this.stopIndexing()
+		if (this._sembleProvider) {
+			this._sembleProvider.dispose()
+			this._sembleProvider = undefined
+		}
 		this._stateManager.dispose()
 	}
 
@@ -315,6 +350,10 @@ export class CodeIndexManager {
 	 */
 	public async clearIndexData(): Promise<void> {
 		if (!this.isFeatureEnabled) {
+			return
+		}
+		if (this._sembleProvider) {
+			await this._sembleProvider.clearIndexData()
 			return
 		}
 		this.assertInitialized()
@@ -338,6 +377,9 @@ export class CodeIndexManager {
 		if (!this.isFeatureEnabled) {
 			return []
 		}
+		if (this._sembleProvider) {
+			return this._sembleProvider.searchIndex(query, directoryPrefix)
+		}
 		this.assertInitialized()
 		return this._searchService!.searchIndex(query, directoryPrefix)
 	}
@@ -351,11 +393,23 @@ export class CodeIndexManager {
 		if (this._orchestrator) {
 			this.stopWatcher()
 		}
+		// Dispose existing semble provider if switching away
+		if (this._sembleProvider) {
+			this._sembleProvider.dispose()
+			this._sembleProvider = undefined
+		}
 		// Clear existing services to ensure clean state
 		this._orchestrator = undefined
 		this._searchService = undefined
 
-		// (Re)Initialize service factory
+		// Branch: if provider is "semble", create SembleProvider instead of external services
+		if (this._configManager!.currentEmbedderProvider === "semble") {
+			this._sembleProvider = new SembleProvider(this.workspacePath, this.context, this._stateManager)
+			await this._sembleProvider.initialize()
+			return
+		}
+
+		// (Re)Initialize service factory for external providers
 		this._serviceFactory = new CodeIndexServiceFactory(
 			this._configManager!,
 			this.workspacePath,

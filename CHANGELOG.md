@@ -1,4 +1,110 @@
-# Roo Code Changelog
+# Zoo Code Changelog
+
+## 3.56.0
+
+### Minor Changes
+
+- Add Claude Opus 4.8 support across Anthropic, Bedrock, and Vertex providers (PR #386 by @vandre-sales)
+- Add Opencode Go as a first-class provider (#172 by @vijay-0001, PR #319 by @proyectoauraorg)
+- Add glm-5.1, kimi-k2.6, and deepseek-v4-pro models to the Fireworks provider (#198 by @DeCodeTheWeb, PR #231 by @proyectoauraorg)
+- Show Zoo Code identity in outbound provider activity logs (#203 by @yfdyh000, PR #219 by @app/roomote)
+- Fix API requests hanging indefinitely on VS Code 1.122.0+ (#381 by @greatgradz-svg, #382 by @abcxlab, PR #383 by @app/roomote)
+- Fix terminal task cancellation so the running process is terminated when a task is cancelled (#245 by @proyectoauraorg, PR #261 by @proyectoauraorg)
+- Fix terminal Ctrl+C retry so processes that need multiple SIGINT signals are properly stopped (#266 by @edelauna, PR #272 by @proyectoauraorg)
+- Fix Gemini provider to honor custom model IDs instead of falling back to the default (#227 by @notoccupy2023-design, PR #317 by @proyectoauraorg)
+- Fix truncated Grok diffs caused by missing diff markers (#186 by @jcalfee, PR #230 by @proyectoauraorg)
+- Fix PowerShell detection on Windows when no shell profile is configured (#82 by @rossdonald, PR #239 by @proyectoauraorg)
+- Fix Vertex AI warning when the Google Cloud Credentials field receives a file path instead of JSON (PR #294 by @0xMink)
+- Rename Zoo Code in VS Code code actions (#328 by @rrewll, PR #329 by @rrewll)
+- Localize VS Code code action commands (#334 by @edelauna, PR #339 by @rrewll)
+- Migrate webview build to Vite 8 (PR #214 by @maxdewald)
+- Add comprehensive unit tests for AskFollowupQuestionTool and ListFilesTool (#206 by @app/roomote, PR #212, #213 by @proyectoauraorg)
+- Update `diff` to v5.2.2 for a security fix (PR #173 by @app/renovate)
+- Update `i18next-http-backend` to v3.0.5 for a security fix (PR #174 by @app/renovate)
+- Update `fast-xml-parser` to v5.7.0 for a security fix (PR #179 by @app/renovate)
+- Update `simple-git` to v3.36.0 for a security fix (PR #182 by @app/renovate)
+- Update `uuid` and pin esbuild/rollup/vite for a security fix (PR #205 by @app/renovate)
+- Update `turbo` to v2.9.14 for a security fix (PR #236 by @app/renovate)
+
+## 3.55.1
+
+### Patch Changes
+
+- Fix API requests hanging indefinitely on VS Code 1.122.0+ when Zoo Code could not find the bundled ripgrep binary after the `@vscode/ripgrep-universal` rename (#381 by @greatgradz-svg, PR #248 by @0xMink).
+
+All notable changes to Zoo Code will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Zoo Code uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## 3.55.0
+
+### Minor Changes
+
+- Add Xiaomi MiMo as a first-class API provider (#80 by @capitanfeeder, PR #81 by @capitanfeeder)
+- Merge the Roo Code upstream sunset into Zoo Code and pull in related handoff updates (PR #123 by @edelauna)
+- Fix Gemini requests when users enable the full MCP tool set (PR #148 by @app/roomote)
+- Fix OpenAI requests by omitting temperature for models that do not support it (#215 by @marty-a11y, PR #233 by @proyectoauraorg)
+- Fix the MCP OAuth callback page garbled text after sign-in (#217 by @mabiuroot-art, PR #218 by @app/roomote)
+- Fix single-tilde Markdown so normal text no longer appears struck through (#154 by @slashedstar, PR #240 by @proyectoauraorg)
+- Add deterministic xAI provider end-to-end coverage (PR #149 by @app/roomote)
+- Update the default Z.AI model to GLM-4.7 (PR #90 by @bryce-hoehn)
+- Fix GLM models reserving too much output context by default (PR #160 by @app/roomote)
+- Fix the Vertex AI region dropdown so eu and us multi-region endpoints appear correctly (PR #170 by @app/roomote)
+- Fix the webview diagnostics temp file prefix (#193 by @proyectoauraorg, PR #226 by @proyectoauraorg)
+- Fix Shift+Enter sending chat messages when Ctrl/Cmd+Enter mode is enabled (PR #199 by @app/roomote)
+- Fix recursive `list_files` omitting nested files in temp workspaces (PR #91 by @app/roomote)
+- Fix the welcome screen (#162 by @navedmerchant, PR #163 by @navedmerchant)
+- Refactor core monolith helpers (PR #27 by @doctarock)
+- Unskip read-file tests (PR #53 by @edelauna)
+- Improve core coverage CI and merge queue readiness (PR #207 by @app/roomote)
+- Unskip the VS Code e2e replay for mutating tools (PR #92 by @app/roomote)
+- Unskip the VS Code e2e replay for `use_mcp_tool` (PR #93 by @app/roomote)
+- Reduce Renovate review noise (PR #144 by @app/roomote)
+- Let Renovate open grouped updates on the normal bot cadence (PR #167 by @app/roomote)
+- Add comprehensive unit tests for the MiMoHandler provider (PR #210 by @proyectoauraorg)
+- Add unit tests for the SwitchModeTool (PR #211 by @proyectoauraorg)
+- Update `yaml` to `2.8.3` for a security fix (PR #176 by @app/renovate)
+- Update `axios` to `1.15.2` for a security fix (PR #177 by @app/renovate)
+- Update `mammoth` to `1.11.0` for a security fix (PR #180 by @app/renovate)
+- Update `undici` to `6.24.0` for a security fix (PR #183 by @app/renovate)
+- Update `@ai-sdk/amazon-bedrock` to `4.0.107` (PR #55 by @app/renovate)
+- Update `@ai-sdk/baseten` to `1.0.50` (PR #56 by @app/renovate)
+
+## 3.54.1
+
+### Patch Changes
+
+- Fix Anthropic Opus 4.7 when reasoning is enabled (PR #111 by @app/roomote)
+- Fix the OpenAI Compatible onboarding form starting above the viewport (PR #113 by @app/roomote)
+- Fix settings and Marketplace access after importing Roo Router settings (PR #109 by @app/roomote)
+- Fix the setup announcement origin and load LM Studio models on first open (PR #97 by @app/roomote)
+- Fix Discord invite links that still pointed to the old Zoo Code server (PR #107 by @app/roomote)
+- Fix support links that opened the wrong GitHub repository (PR #77 by @app/roomote)
+- Refresh Zoo Code branding across docs and metadata (PR #85 by @taltas)
+- Clarify Zoo Code migration messaging in the README (PR #99 by @taltas)
+- Keep settings regression coverage in the webview-ui test suite (PR #95 by @app/roomote)
+- Clean up skipped extension package tests (PR #110 by @app/roomote)
+- Add DeepSeek V4 end-to-end coverage (PR #72 by @app/roomote)
+- Use repo collaborators as the default code owners (PR #96 by @app/roomote)
+- Use a single PR flow for extension releases (PR #142 by @app/roomote)
+- Update `isbinaryfile` to `5.0.7` (PR #88 by @f14XuanLv)
+- Update `@dotenvx/dotenvx` to `1.66.0` (PR #61 by @app/renovate)
+- Update `lint-staged` to `16.4.0` (PR #64 by @app/renovate)
+- Update Node.js to `20.20.2` (PR #65 by @app/renovate)
+
+## [3.54.0] - 2026-05-08
+
+### Added
+
+- Publish Zoo Code under the `ZooCodeOrganization.zoo-code` Marketplace identity, continuing from upstream Roo Code `3.53.0`.
+- Add stable publishing workflows for the VS Code Marketplace and Open VSX Registry.
+- Add a VS Code Marketplace pre-release workflow.
+
+---
+
+# Archived Roo Code Changelog
+
+The entries below are preserved from the upstream Roo Code project history before the Zoo Code marketplace handoff.
 
 ## 3.53.0
 

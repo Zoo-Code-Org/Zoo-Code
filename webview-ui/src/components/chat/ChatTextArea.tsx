@@ -31,6 +31,7 @@ import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./ChatView"
 import ContextMenu from "./ContextMenu"
 import { IndexingStatusBadge } from "./IndexingStatusBadge"
+import { ZooCodeAuthBadge } from "./ZooCodeAuthBadge"
 import { usePromptHistory } from "./hooks/usePromptHistory"
 
 interface ChatTextAreaProps {
@@ -489,8 +490,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				// Handle Enter key based on enterBehavior setting
 				if (event.key === "Enter" && !isComposing) {
 					if (enterBehavior === "newline") {
-						// New behavior: Enter = newline, Shift+Enter or Ctrl+Enter = send
-						if (event.shiftKey || event.ctrlKey || event.metaKey) {
+						// New behavior: Enter = newline, Ctrl/Cmd+Enter = send
+						if (event.ctrlKey || event.metaKey) {
 							event.preventDefault()
 							resetHistoryNavigation()
 							onSend()
@@ -1342,6 +1343,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							</StandardTooltip>
 						)}
 						{!isEditMode ? <IndexingStatusBadge /> : null}
+						{!isEditMode ? <ZooCodeAuthBadge /> : null}
 					</div>
 				</div>
 			</div>

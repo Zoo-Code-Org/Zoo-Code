@@ -11,9 +11,9 @@
 </sub>
 </div>
 
-# Đóng góp cho Roo Code
+# Đóng góp cho Zoo Code
 
-Roo Code là một dự án do cộng đồng điều khiển và chúng tôi vô cùng trân trọng mọi đóng góp. Để hợp lý hóa việc cộng tác, chúng tôi hoạt động trên cơ sở [Ưu tiên vấn đề](#cách-tiếp-cận-ưu-tiên-vấn-đề), có nghĩa là tất cả các [Yêu cầu kéo (PR)](#gửi-yêu-cầu-kéo) trước tiên phải được liên kết với một Vấn đề trên GitHub. Vui lòng xem kỹ hướng dẫn này.
+Zoo Code là một dự án do cộng đồng điều khiển và chúng tôi vô cùng trân trọng mọi đóng góp. Để hợp lý hóa việc cộng tác, chúng tôi hoạt động trên cơ sở [Ưu tiên vấn đề](#cách-tiếp-cận-ưu-tiên-vấn-đề), có nghĩa là tất cả các [Yêu cầu kéo (PR)](#gửi-yêu-cầu-kéo) trước tiên phải được liên kết với một Vấn đề trên GitHub. Vui lòng xem kỹ hướng dẫn này.
 
 ## Bảng mục lục
 
@@ -52,10 +52,10 @@ Lộ trình của chúng tôi hướng dẫn định hướng của dự án. H�
 
 Hãy đề cập đến sự phù hợp với các lĩnh vực này trong PR của bạn.
 
-### 3. Tham gia cộng đồng Roo Code
+### 3. Tham gia cộng đồng Zoo Code
 
-- **Chính:** Tham gia [Discord](https://discord.gg/roocode) của chúng tôi và nhắn tin trực tiếp cho **Hannes Rudolph (`hrudolph`)**.
-- **Thay thế:** Những người đóng góp có kinh nghiệm có thể tham gia trực tiếp qua [Dự án GitHub](https://github.com/orgs/RooCodeInc/projects/1).
+- **Discord:** Tham gia [Discord](https://discord.gg/VxfP4Vx3gX) của chúng tôi.
+- **Reddit:** Tham gia [Reddit](https://www.reddit.com/r/ZooCode/) của chúng tôi.
 
 ## Tìm kiếm và lập kế hoạch đóng góp của bạn
 
@@ -69,26 +69,26 @@ Hãy đề cập đến sự phù hợp với các lĩnh vực này trong PR c�
 
 Tất cả các đóng góp đều bắt đầu bằng một Vấn đề trên GitHub bằng cách sử dụng các mẫu gọn nhẹ của chúng tôi.
 
-- **Kiểm tra các vấn đề hiện có**: Tìm kiếm trong [Vấn đề trên GitHub](https://github.com/RooCodeInc/Roo-Code/issues).
+- **Kiểm tra các vấn đề hiện có**: Tìm kiếm trong [Vấn đề trên GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
 - **Tạo một vấn đề** bằng cách sử dụng:
     - **Cải tiến:** mẫu "Yêu cầu cải tiến" (ngôn ngữ đơn giản tập trung vào lợi ích của người dùng).
     - **Lỗi:** mẫu "Báo cáo lỗi" (tái tạo tối thiểu + mong đợi so với thực tế + phiên bản).
-- **Bạn muốn làm việc với nó?** Bình luận "Nhận" trên vấn đề và nhắn tin trực tiếp cho **Hannes Rudolph (`hrudolph`)** trên [Discord](https://discord.gg/roocode) để được giao. Việc giao nhiệm vụ sẽ được xác nhận trong chuỗi.
+- **Bạn muốn làm việc với nó?** Bình luận "Nhận" trên vấn đề và nhắn tin trực tiếp cho nhóm cốt lõi trên [Discord](https://discord.gg/VxfP4Vx3gX) để được giao. Việc giao nhiệm vụ sẽ được xác nhận trong chuỗi.
 - **PR phải liên kết đến vấn đề.** Các PR không được liên kết có thể bị đóng.
 
 ### Quyết định nên làm gì
 
-- Kiểm tra [Dự án GitHub](https://github.com/orgs/RooCodeInc/projects/1) để tìm các vấn đề "Vấn đề [Chưa được giao]".
-- Để biết tài liệu, hãy truy cập [Tài liệu Roo Code](https://github.com/RooCodeInc/Roo-Code-Docs).
+- Hãy xem [trang GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues) để tìm issues.
+- Để biết tài liệu, hãy truy cập [Tài liệu Zoo Code](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
 
 ### Báo cáo lỗi
 
 - Trước tiên hãy kiểm tra các báo cáo hiện có.
-- Tạo một lỗi mới bằng cách sử dụng [mẫu "Báo cáo lỗi"](https://github.com/RooCodeInc/Roo-Code/issues/new/choose) với:
+- Tạo một lỗi mới bằng cách sử dụng [mẫu "Báo cáo lỗi"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) với:
     - Các bước tái tạo rõ ràng, được đánh số
     - Kết quả mong đợi so với thực tế
-    - Phiên bản Roo Code (bắt buộc); nhà cung cấp/mô hình API nếu có liên quan
-- **Vấn đề bảo mật**: Báo cáo riêng tư qua [tư vấn bảo mật](https://github.com/RooCodeInc/Roo-Code/security/advisories/new).
+    - Phiên bản Zoo Code (bắt buộc); nhà cung cấp/mô hình API nếu có liên quan
+- **Vấn đề bảo mật**: Báo cáo riêng tư qua [tư vấn bảo mật](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
 
 ## Quy trình phát triển và gửi
 
@@ -97,7 +97,7 @@ Tất cả các đóng góp đều bắt đầu bằng một Vấn đề trên G
 1. **Rẽ nhánh & Sao chép:**
 
 ```
-git clone https://github.com/TÊN_NGƯỜI_DÙNG_CỦA_BẠN/Roo-Code.git
+git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
 2. **Cài đặt các phụ thuộc:**
@@ -126,7 +126,7 @@ pnpm install
 
 ### Chính sách yêu cầu kéo
 
-- Phải tham chiếu đến một Vấn đề GitHub đã được giao. Để được giao: bình luận "Nhận" trên vấn đề và nhắn tin trực tiếp cho **Hannes Rudolph (`hrudolph`)** trên [Discord](https://discord.gg/roocode). Việc giao nhiệm vụ sẽ được xác nhận trong chuỗi.
+- Phải tham chiếu đến một Vấn đề GitHub đã được giao. Để được giao: bình luận "Nhận" trên vấn đề và nhắn tin trực tiếp cho nhóm cốt lõi trên [Discord](https://discord.gg/VxfP4Vx3gX). Việc giao nhiệm vụ sẽ được xác nhận trong chuỗi.
 - Các PR không được liên kết có thể bị đóng.
 - Các PR phải vượt qua các bài kiểm tra CI, phù hợp với lộ trình và có tài liệu rõ ràng.
 
@@ -138,4 +138,4 @@ pnpm install
 
 ## Pháp lý
 
-Bằng cách đóng góp, bạn đồng ý rằng những đóng góp của bạn sẽ được cấp phép theo Giấy phép Apache 2.0, phù hợp với việc cấp phép của Roo Code.
+Bằng cách đóng góp, bạn đồng ý rằng những đóng góp của bạn sẽ được cấp phép theo Giấy phép Apache 2.0, phù hợp với việc cấp phép của Zoo Code.

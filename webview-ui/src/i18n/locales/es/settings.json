@@ -56,7 +56,7 @@
 			"label": "¿Descubriste una vulnerabilidad?",
 			"link": "Sigue nuestro proceso de divulgación"
 		},
-		"community": "¿Quieres consejos o simplemente pasar el rato con otros usuarios de Zoo Code? Únete a <redditLink>reddit.com/r/RooCode</redditLink> o <discordLink>discord.gg/roocode</discordLink>",
+		"community": "¿Quieres consejos o simplemente pasar el rato con otros usuarios de Zoo Code? Únete a <redditLink>reddit.com/r/ZooCode</redditLink> o <discordLink>discord.gg/VxfP4Vx3gX</discordLink>",
 		"contactAndCommunity": "Contacto y Comunidad",
 		"manageSettings": "Gestionar Configuración",
 		"debugMode": {
@@ -213,7 +213,8 @@
 		"stoppingButton": "Deteniendo...",
 		"workspaceToggleLabel": "Activar indexación para este espacio de trabajo",
 		"workspaceDisabledMessage": "La indexación está configurada pero no habilitada para este espacio de trabajo.",
-		"autoEnableDefaultLabel": "Habilitar automáticamente la indexación para nuevos espacios de trabajo"
+		"autoEnableDefaultLabel": "Habilitar automáticamente la indexación para nuevos espacios de trabajo",
+		"sembleProvider": "Semble - Local"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Puedes configurar un atajo global para esta configuración <SettingsLink>en las preferencias de tu IDE</SettingsLink>.",
@@ -314,6 +315,8 @@
 		"getOpenRouterApiKey": "Obtener clave API de OpenRouter",
 		"vercelAiGatewayApiKey": "Clave API de Vercel AI Gateway",
 		"getVercelAiGatewayApiKey": "Obtener clave API de Vercel AI Gateway",
+		"opencodeGoApiKey": "Clave API de Opencode Go",
+		"getOpencodeGoApiKey": "Obtener clave API de Opencode Go",
 		"apiKeyStorageNotice": "Las claves API se almacenan de forma segura en el Almacenamiento Secreto de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -394,6 +397,13 @@
 		"minimaxApiKey": "Clave API de MiniMax",
 		"getMiniMaxApiKey": "Obtener clave API de MiniMax",
 		"minimaxBaseUrl": "Punto de entrada de MiniMax",
+		"mimoApiKey": "Clave API de MiMo",
+		"getMimoApiKey": "Obtener clave API de MiMo",
+		"mimoBaseUrl": "Punto de entrada de MiMo",
+		"mimoBaseUrlSingapore": "Token Plan - Singapur (Predeterminado)",
+		"mimoBaseUrlChina": "Token Plan - China",
+		"mimoBaseUrlEurope": "Token Plan - Europa (AMS)",
+		"mimoBaseUrlPayg": "Pago por uso",
 		"geminiApiKey": "Clave API de Gemini",
 		"getSambaNovaApiKey": "Obtener clave API de SambaNova",
 		"sambaNovaApiKey": "Clave API de SambaNova",
@@ -445,6 +455,7 @@
 			"step3": "3. O crear una cuenta de servicio con credenciales."
 		},
 		"googleCloudCredentials": "Credenciales de Google Cloud",
+		"googleCloudCredentialsPathWarning": "Este campo espera el contenido JSON de un archivo de clave de cuenta de servicio, no una ruta. Si tienes una ruta, pégala en el campo <strong>Ruta del archivo de clave de Google Cloud</strong> a continuación, o borra este campo y utiliza la variable de entorno <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Ruta del archivo de clave de Google Cloud",
 		"googleCloudProjectId": "ID del proyecto de Google Cloud",
 		"googleCloudRegion": "Región de Google Cloud",
@@ -550,6 +561,13 @@
 			"placeholder": "Por defecto: claude",
 			"maxTokensLabel": "Tokens máximos de salida",
 			"maxTokensDescription": "Número máximo de tokens de salida para las respuestas de Claude Code. El valor predeterminado es 8000."
+		},
+		"zooGateway": {
+			"account": "Cuenta de Zoo Code",
+			"signInButton": "Iniciar sesión en Zoo Code",
+			"signInDescription": "Inicia sesión para usar Zoo Gateway con tu cuenta",
+			"authenticated": "Autenticado",
+			"authenticatedAs": "Autenticado como {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -731,6 +749,14 @@
 		"inheritEnv": {
 			"label": "Heredar variables de entorno",
 			"description": "Activa para heredar variables de entorno del proceso padre de VS Code. <0>Más información</0>"
+		},
+		"profile": {
+			"label": "Anulación del terminal de Zoo Code",
+			"default": "Usar perfil predeterminado de VS Code (recomendado)",
+			"description": "De forma predeterminada, Zoo Code usa la shell que VS Code tiene configurada. Selecciona Anular para elegir un perfil de shell con ruta expuesto por VS Code. Los perfiles solo de fuente (p. ej., la entrada integrada de PowerShell) no se pueden listar aquí. <0>Más información</0>",
+			"overrideLabel": "Anular shell para Zoo Code",
+			"configureButton": "Elegir perfil predeterminado en VS Code",
+			"noProfiles": "(no se encontraron perfiles con ruta en terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -891,7 +917,8 @@
 		"providerNotAllowed": "El proveedor '{{provider}}' no está permitido por su organización",
 		"modelNotAllowed": "El modelo '{{model}}' no está permitido para el proveedor '{{provider}}' por su organización",
 		"profileInvalid": "Este perfil contiene un proveedor o modelo que no está permitido por su organización",
-		"qwenCodeOauthPath": "Debes proporcionar una ruta válida de credenciales OAuth"
+		"qwenCodeOauthPath": "Debes proporcionar una ruta válida de credenciales OAuth",
+		"zooGatewaySignIn": "Inicia sesión en Zoo Code para usar Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Ingrese clave API...",
@@ -953,6 +980,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Requerir {{primaryMod}}+Enter para enviar mensajes",
 			"description": "Cuando está activado, debes presionar {{primaryMod}}+Enter para enviar mensajes en lugar de solo Enter"
+		},
+		"chatFontSize": {
+			"label": "Tamaño de fuente del chat",
+			"description": "Establece el tamaño de fuente (en píxeles) del chat de Zoo Code. Déjalo en el valor predeterminado para que coincida con el tamaño de fuente de VS Code.",
+			"reset": "Usar el valor predeterminado de VS Code"
 		}
 	},
 	"skills": {

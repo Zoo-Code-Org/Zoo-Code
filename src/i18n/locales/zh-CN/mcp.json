@@ -27,7 +27,7 @@
 	},
 	"oauth": {
 		"callback": {
-			"title": "OAuth 回调 - Roo Code",
+			"title": "OAuth 回调 - Zoo Code",
 			"success": "成功！",
 			"failed": "失败",
 			"auth_failed": "身份验证失败。请检查 MCP 服务器日志。",

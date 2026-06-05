@@ -1,12 +1,12 @@
 {
 	"landing": {
-		"greeting": "Benvingut a Roo Code!",
-		"introduction": "Amb una gamma de Modes integrats i ampliables, Roo Code et permet planificar, arquitectar, codificar, depurar i augmentar la teva productivitat com mai abans.",
+		"greeting": "Benvingut a Zoo Code!",
+		"introduction": "Amb una gamma de Modes integrats i ampliables, Zoo Code et permet planificar, arquitectar, codificar, depurar i augmentar la teva productivitat com mai abans.",
 		"getStarted": "Tria el teu proveïdor"
 	},
 	"providerSignup": {
 		"heading": "Tria el teu proveïdor",
-		"chooseProvider": "Roo necessita un proveïdor de LLM per funcionar. Tria-ne un per començar, pots afegir-ne més tard.",
+		"chooseProvider": "Zoo Code necessita un proveïdor de LLM per funcionar. Tria-ne un per començar, pots afegir-ne més tard.",
 		"goBack": "Enrere",
 		"finish": "Finalitza"
 	},

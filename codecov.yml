@@ -11,6 +11,17 @@ coverage:
         target: 80%       # new lines must be 80% covered
         threshold: 0%
 
+flag_management:
+  individual_flags:
+    - name: core-unit
+      paths:
+        - packages/core/src/
+      carryforward: true
+    - name: core-integration
+      paths:
+        - packages/core/src/
+      carryforward: true
+
 comment:
   layout: "diff, flags"
   behavior: default

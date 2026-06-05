@@ -1,0 +1,89 @@
+name: Release Validation
+
+on:
+    workflow_dispatch:
+    pull_request:
+        types: [opened, reopened, synchronize, ready_for_review]
+        paths:
+            - "CHANGELOG.md"
+            - "README.md"
+            - "locales/*/README.md"
+            - "src/package.json"
+            - "src/CHANGELOG.md"
+            - "src/package.nls*.json"
+            - "src/core/webview/ClineProvider.ts"
+            - "webview-ui/src/components/chat/Announcement.tsx"
+            - "releases/**"
+            - ".github/workflows/release-validation.yml"
+
+jobs:
+    validate-release:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
+
+            - name: Validate package identity
+              run: |
+                  package_name=$(node -p "require('./src/package.json').name")
+                  publisher=$(node -p "require('./src/package.json').publisher")
+
+                  test "$package_name" = "zoo-code"
+                  test "$publisher" = "ZooCodeOrganization"
+
+            - name: Validate release metadata
+              run: |
+                  package_version=$(node -p "require('./src/package.json').version")
+
+                  node -e 'const version = process.argv[1]; if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) { throw new Error("Invalid SemVer version: " + version) }' "$package_version"
+                  grep -q "## \\[$package_version\\]\\|## $package_version" CHANGELOG.md
+
+            - name: Build workspace packages
+              run: |
+                  pnpm --filter @roo-code/build build
+                  pnpm --filter @roo-code/vscode-webview build
+
+            - name: Bundle extension and verify README sync
+              env:
+                  POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+              run: |
+                  pnpm --filter ./src bundle --production
+                  cmp README.md src/README.md
+
+            - name: Package extension
+              env:
+                  POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
+              run: |
+                  package_version=$(node -p "require('./src/package.json').version")
+                  pnpm --filter ./src vsix
+
+                  vsix_path="bin/zoo-code-${package_version}.vsix"
+                  test -f "$vsix_path"
+
+                  unzip -l "$vsix_path" > /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/package.json" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/package.nls.json" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/dist/extension.js" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/webview-ui/audio/celebration.wav" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/webview-ui/build/assets/index.js" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/assets/codicons/codicon.ttf" /tmp/zoo-code-vsix-contents.txt
+                  grep -q "extension/assets/vscode-material-icons/icons/3d.svg" /tmp/zoo-code-vsix-contents.txt
+
+            - name: Validate packaged manifest identity
+              run: |
+                  package_version=$(node -p "require('./src/package.json').version")
+                  vsix_path="bin/zoo-code-${package_version}.vsix"
+
+                  artifact_name=$(unzip -p "$vsix_path" extension/package.json | jq -r '.name')
+                  artifact_publisher=$(unzip -p "$vsix_path" extension/package.json | jq -r '.publisher')
+
+                  test "$artifact_name" = "zoo-code"
+                  test "$artifact_publisher" = "ZooCodeOrganization"

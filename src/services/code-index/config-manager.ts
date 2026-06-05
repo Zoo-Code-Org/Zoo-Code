@@ -120,6 +120,8 @@ export class CodeIndexConfigManager {
 			this.embedderProvider = "bedrock"
 		} else if (codebaseIndexEmbedderProvider === "openrouter") {
 			this.embedderProvider = "openrouter"
+		} else if (codebaseIndexEmbedderProvider === "semble") {
+			this.embedderProvider = "semble"
 		} else {
 			this.embedderProvider = "openai"
 		}
@@ -231,6 +233,11 @@ export class CodeIndexConfigManager {
 	 * Checks if the service is properly configured based on the embedder type.
 	 */
 	public isConfigured(): boolean {
+		if (this.embedderProvider === "semble") {
+			// Semble requires no API keys or Qdrant — it's always configured
+			return true
+		}
+
 		if (this.embedderProvider === "openai") {
 			const openAiKey = this.openAiOptions?.openAiNativeApiKey
 			const qdrantUrl = this.qdrantUrl

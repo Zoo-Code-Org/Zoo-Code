@@ -55,7 +55,7 @@ describe("TelemetryClient", () => {
 			expect(posthog.init).toHaveBeenCalledWith(
 				API_KEY,
 				expect.objectContaining({
-					api_host: "https://ph.roocode.com",
+					api_host: "https://us.i.posthog.com",
 					persistence: "localStorage",
 					loaded: expect.any(Function),
 				}),
@@ -99,7 +99,13 @@ describe("TelemetryClient", () => {
 			telemetryClient.capture("test_event", { property: "value" })
 
 			// Assert
-			expect(posthog.capture).toHaveBeenCalledWith("test_event", { property: "value" })
+			expect(posthog.capture).toHaveBeenCalledWith(
+				"test_event",
+				expect.objectContaining({
+					property: "value",
+					releaseChannel: "stable",
+				}),
+			)
 		})
 
 		it("doesn't capture events when telemetry is disabled", () => {
