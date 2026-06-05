@@ -110,6 +110,8 @@ describe("useZooGatewayRouterModelsSync", () => {
 		await waitFor(() => expect(mockFetchRouterModels).toHaveBeenCalled())
 		const cached = queryClient.getQueryData<RouterModels>(["routerModels", "all"])
 		expect(cached?.["zoo-gateway"]).toBeUndefined()
+		// The whole cache must survive an empty result, not just the zoo-gateway key.
+		expect(cached?.openrouter).toEqual({ "openai/gpt-4": modelInfo })
 	})
 
 	it("swallows fetch errors", async () => {
