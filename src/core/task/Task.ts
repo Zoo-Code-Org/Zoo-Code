@@ -1221,8 +1221,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		if (approval.decision === "approve") {
 			this.approveAsk()
+			// The backend resolved the ask itself, so the webview never gets a
+			// user click to clear its approval buttons. Signal it to clear them
+			// through the same pathway a manual click uses. Not done for the
+			// timeout branch below, where the buttons stay interactive during
+			// the countdown.
+			provider?.postMessageToWebview({ type: "clearApprovalButtons" })
 		} else if (approval.decision === "deny") {
 			this.denyAsk()
+			provider?.postMessageToWebview({ type: "clearApprovalButtons" })
 		} else if (approval.decision === "timeout") {
 			// Store the auto-approval timeout so it can be cancelled if user interacts
 			this.autoApprovalTimeoutRef = setTimeout(() => {

@@ -705,6 +705,18 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		}
 	}, [inputValue, selectedImages])
 
+	// Resets the approval button UI to its hidden/disabled state. Shared by the
+	// manual click handlers and by the backend-driven clearApprovalButtons
+	// message so auto-approved/denied asks hide the buttons through the same
+	// pathway a manual click uses.
+	const clearApprovalButtons = useCallback(() => {
+		setSendingDisabled(true)
+		setClineAsk(undefined)
+		setEnableButtons(false)
+		setPrimaryButtonText(undefined)
+		setSecondaryButtonText(undefined)
+	}, [])
+
 	// This logic depends on the useEffect[messages] above to set clineAsk,
 	// after which buttons are shown and we then send an askResponse to the
 	// extension.
@@ -773,13 +785,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					break
 			}
 
-			setSendingDisabled(true)
-			setClineAsk(undefined)
-			setEnableButtons(false)
-			setPrimaryButtonText(undefined)
-			setSecondaryButtonText(undefined)
+			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, currentTaskItem?.parentTaskId],
+		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons],
 	)
 
 	const handleSecondaryButtonClick = useCallback(
@@ -824,11 +832,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					vscode.postMessage({ type: "terminalOperation", terminalOperation: "abort" })
 					break
 			}
-			setSendingDisabled(true)
-			setClineAsk(undefined)
-			setEnableButtons(false)
+			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, isStreaming, setDidClickCancel],
+		[clineAsk, startNewTask, isStreaming, setDidClickCancel, clearApprovalButtons],
 	)
 
 	const { info: model } = useSelectedModel(apiConfiguration)
@@ -882,6 +888,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							break
 					}
 					break
+				case "clearApprovalButtons":
+					// The backend already resolved the ask (auto-approve/deny), so
+					// only clear the button UI; do not send another askResponse.
+					clearApprovalButtons()
+					break
 				case "condenseTaskContextStarted":
 					// Handle both manual and automatic condensation start
 					// We don't check the task ID because:
@@ -933,6 +944,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			handleSetChatBoxMessage,
 			handlePrimaryButtonClick,
 			handleSecondaryButtonClick,
+			clearApprovalButtons,
 			setCheckpointWarning,
 			playSound,
 		],
