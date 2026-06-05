@@ -99,6 +99,7 @@ export class SembleCLI {
 	 * Spawns the semble process and collects stdout/stderr.
 	 * Uses spawn without shell — args are passed as an array, no injection risk.
 	 * Caps stdout/stderr buffers at MAX_BUFFER_BYTES to prevent OOM in the extension host.
+	 * Kills the process and rejects if the cap is exceeded.
 	 */
 	private _spawn(args: string[], options: { timeout: number }): Promise<{ stdout: string; stderr: string }> {
 		const MAX_BUFFER_BYTES = 10 * 1024 * 1024 // 10 MB
@@ -114,11 +115,19 @@ export class SembleCLI {
 			let stderr = ""
 			let stdoutBytes = 0
 			let stderrBytes = 0
+			let killed = false
 
 			child.stdout?.on("data", (data: Buffer) => {
 				stdoutBytes += data.length
 				if (stdoutBytes <= MAX_BUFFER_BYTES) {
 					stdout += data.toString()
+				} else if (!killed) {
+					killed = true
+					child.kill()
+					reject({
+						message: `stdout exceeded ${MAX_BUFFER_BYTES} bytes — process killed to protect extension host`,
+						stderr,
+					})
 				}
 			})
 
@@ -126,14 +135,26 @@ export class SembleCLI {
 				stderrBytes += data.length
 				if (stderrBytes <= MAX_BUFFER_BYTES) {
 					stderr += data.toString()
+				} else if (!killed) {
+					killed = true
+					child.kill()
+					reject({
+						message: `stderr exceeded ${MAX_BUFFER_BYTES} bytes — process killed to protect extension host`,
+						stderr,
+					})
 				}
 			})
 
 			child.on("error", (err: Error) => {
-				reject({ message: err.message, stderr })
+				if (!killed) {
+					reject({ message: err.message, stderr })
+				}
 			})
 
 			child.on("close", (code: number | null) => {
+				if (killed) {
+					return // already rejected
+				}
 				if (code === 0) {
 					resolve({ stdout, stderr })
 				} else {

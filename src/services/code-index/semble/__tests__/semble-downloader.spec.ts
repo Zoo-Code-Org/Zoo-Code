@@ -28,6 +28,7 @@ vi.mock("fs/promises", () => ({
 	rm: vi.fn().mockResolvedValue(undefined),
 	readFile: vi.fn(),
 	writeFile: vi.fn().mockResolvedValue(undefined),
+	rename: vi.fn().mockResolvedValue(undefined),
 }))
 
 // Mock fs (createWriteStream and createReadStream for checksum verification)
@@ -204,8 +205,9 @@ describe("semble-downloader", () => {
 			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
 			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
 
-			// fs.access rejects => file not present
-			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// fs.access resolves — only called for staged binary verification
+			// (version is undefined so the binaryPath check is skipped)
+			;(fs.access as any).mockResolvedValue(undefined)
 			// No version file exists
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
@@ -224,20 +226,26 @@ describe("semble-downloader", () => {
 					expect.stringContaining("semble-linux-x64-fast.tar.gz"),
 					expect.any(Function),
 				)
-				// Should call tar for extraction
+				// Should call tar for extraction into staging directory
 				expect(spawn).toHaveBeenCalledWith(
 					"tar",
 					[
 						"-xzf",
 						path.join("/storage", "semble-linux-x64-fast.tar.gz"),
 						"-C",
-						path.join("/storage", "semble"),
+						path.join("/storage", "semble.new"),
 						"--no-same-owner",
 						"--no-absolute-filenames",
+						"--no-overwrite-dir",
 					],
 					expect.any(Object),
 				)
-				expect(fs.chmod).toHaveBeenCalledWith(path.join("/storage", "semble", "semble"), 0o755)
+				expect(fs.chmod).toHaveBeenCalledWith(path.join("/storage", "semble.new", "semble"), 0o755)
+				// Should rename staging to final
+				expect(fs.rename).toHaveBeenCalledWith(
+					path.join("/storage", "semble.new"),
+					path.join("/storage", "semble"),
+				)
 				// Version file should be written
 				expect(fs.writeFile).toHaveBeenCalledWith(
 					path.join("/storage", "semble", ".semble-version"),
@@ -303,7 +311,11 @@ describe("semble-downloader", () => {
 			try {
 				await expect(downloadSemble("/storage")).rejects.toThrow("Failed to download semble")
 				expect(fs.unlink).toHaveBeenCalledWith(path.join("/storage", "semble-linux-arm64-fast.tar.gz"))
-				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "semble"), { recursive: true, force: true })
+				// Should clean up staging directory, not the original
+				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "semble.new"), {
+					recursive: true,
+					force: true,
+				})
 			} finally {
 				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
 				if (originalArch) Object.defineProperty(process, "arch", originalArch)
@@ -317,8 +329,8 @@ describe("semble-downloader", () => {
 			Object.defineProperty(process, "platform", { value: "darwin", configurable: true })
 			Object.defineProperty(process, "arch", { value: "arm64", configurable: true })
 
-			// fs.access rejects => file not present
-			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// fs.access resolves — only called for staged binary verification
+			;(fs.access as any).mockResolvedValue(undefined)
 			// No version file
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
@@ -381,6 +393,39 @@ describe("semble-downloader", () => {
 				const res = new EventEmitter() as any
 				res.statusCode = 302
 				res.headers = { location: "https://evil.example.com/malicious-binary.tar.gz" }
+				res.destroy = vi.fn()
+				setImmediate(() => callback(res))
+
+				const req = new EventEmitter() as any
+				req.setTimeout = vi.fn()
+				return req
+			})
+
+			try {
+				await expect(downloadSemble("/storage")).rejects.toThrow("untrusted domain")
+			} finally {
+				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+				if (originalArch) Object.defineProperty(process, "arch", originalArch)
+			}
+		})
+
+		it("should block redirects to domains that suffix-match trusted domains (e.g. evilgithub.com)", async () => {
+			const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+			const originalArch = Object.getOwnPropertyDescriptor(process, "arch")
+
+			Object.defineProperty(process, "platform", { value: "darwin", configurable: true })
+			Object.defineProperty(process, "arch", { value: "arm64", configurable: true })
+
+			// fs.access rejects => file not present
+			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// No version file
+			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
+
+			// Redirect to a domain that suffix-matches "github.com" without a dot boundary
+			;(https.get as any).mockImplementation((_url: string, callback: (res: any) => void) => {
+				const res = new EventEmitter() as any
+				res.statusCode = 302
+				res.headers = { location: "https://evilgithub.com/malicious-binary.tar.gz" }
 				res.destroy = vi.fn()
 				setImmediate(() => callback(res))
 
@@ -475,8 +520,9 @@ describe("semble-downloader", () => {
 			Object.defineProperty(process, "platform", { value: "win32", configurable: true })
 			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
 
-			// fs.access rejects => file not present, triggering download
-			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// fs.access resolves — only called for staged binary verification
+			// (version is undefined so the binaryPath check is skipped)
+			;(fs.access as any).mockResolvedValue(undefined)
 			// No version file
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
@@ -514,8 +560,9 @@ describe("semble-downloader", () => {
 			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
 			Object.defineProperty(process, "arch", { value: "x64", configurable: true })
 
-			// fs.access rejects => file not present
-			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// fs.access resolves — only called for staged binary verification
+			// (version is undefined so the binaryPath check is skipped)
+			;(fs.access as any).mockResolvedValue(undefined)
 			// No version file
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
@@ -550,8 +597,9 @@ describe("semble-downloader", () => {
 
 			// Version file has an old version
 			;(fs.readFile as any).mockResolvedValue("v0.2.0")
-			// Binary doesn't matter — version mismatch forces re-download
-			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// fs.access resolves — only called for staged binary verification
+			// (version mismatch means binaryPath check is skipped)
+			;(fs.access as any).mockResolvedValue(undefined)
 
 			// Simulate successful download
 			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
@@ -564,11 +612,16 @@ describe("semble-downloader", () => {
 				const result = await downloadSemble("/storage")
 
 				expect(result).toBe(path.join("/storage", "semble", "semble"))
-				// Should remove old installation
+				// Should remove old installation during atomic swap
 				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "semble"), {
 					recursive: true,
 					force: true,
 				})
+				// Should rename staging dir to final
+				expect(fs.rename).toHaveBeenCalledWith(
+					path.join("/storage", "semble.new"),
+					path.join("/storage", "semble"),
+				)
 				// Should download the new version
 				expect(https.get).toHaveBeenCalledWith(expect.stringContaining("v0.3.1"), expect.any(Function))
 				// Should write the new version file
@@ -619,7 +672,15 @@ describe("semble-downloader", () => {
 			// Version matches
 			;(fs.readFile as any).mockResolvedValue("v0.3.1")
 			// But binary is missing
-			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			let accessCallCount = 0
+			;(fs.access as any).mockImplementation(() => {
+				accessCallCount++
+				// First call: binary path check (miss), subsequent: staged binary verify (pass)
+				if (accessCallCount === 1) {
+					return Promise.reject(new Error("ENOENT"))
+				}
+				return Promise.resolve(undefined)
+			})
 
 			// Simulate successful download
 			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
@@ -634,6 +695,11 @@ describe("semble-downloader", () => {
 				expect(result).toBe(path.join("/storage", "semble", "semble"))
 				// Should download since binary was missing
 				expect(https.get).toHaveBeenCalled()
+				// Should rename staging to final
+				expect(fs.rename).toHaveBeenCalledWith(
+					path.join("/storage", "semble.new"),
+					path.join("/storage", "semble"),
+				)
 				// Should write version file again
 				expect(fs.writeFile).toHaveBeenCalledWith(
 					path.join("/storage", "semble", ".semble-version"),
@@ -655,8 +721,8 @@ describe("semble-downloader", () => {
 
 			// No version file
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
-			// No binary
-			;(fs.access as any).mockRejectedValue(new Error("ENOENT"))
+			// fs.access resolves — only called for staged binary verification
+			;(fs.access as any).mockResolvedValue(undefined)
 
 			// Simulate successful download
 			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
@@ -670,10 +736,10 @@ describe("semble-downloader", () => {
 
 				expect(result).toBe(path.join("/storage", "semble", "semble"))
 				expect(https.get).toHaveBeenCalled()
-				// Should NOT try to rm the old dir (no previous version)
-				expect(fs.rm).not.toHaveBeenCalledWith(
+				// Should rename staging to final
+				expect(fs.rename).toHaveBeenCalledWith(
+					path.join("/storage", "semble.new"),
 					path.join("/storage", "semble"),
-					expect.objectContaining({ recursive: true }),
 				)
 				// Should write version file
 				expect(fs.writeFile).toHaveBeenCalledWith(

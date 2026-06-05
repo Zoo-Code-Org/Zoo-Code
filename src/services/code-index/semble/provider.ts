@@ -241,20 +241,27 @@ export class SembleProvider implements ISembleProvider {
 	 * Note: semble returns file paths relative to the path it was invoked with.
 	 * We join against `basePath` (the actual path passed to semble) to produce
 	 * correct absolute paths for the rest of the pipeline.
-	 * Results with missing file paths are excluded.
+	 * Results with missing file paths or paths that escape the workspace are excluded.
 	 */
 	private _convertResults(results: SembleSearchResult[], basePath: string): VectorStoreSearchResult[] {
+		const normalizedBase = path.resolve(basePath).replace(/\\/g, "/")
+
 		return results
 			.filter((r) => r.chunk?.file_path) // Exclude results with no file path
 			.map((r, index) => ({
 				id: `semble-${index}`,
 				score: r.score,
 				payload: {
-					filePath: path.join(basePath, r.chunk.file_path).replace(/\\/g, "/"),
+					filePath: path.resolve(basePath, r.chunk.file_path).replace(/\\/g, "/"),
 					codeChunk: r.chunk?.content ?? "",
 					startLine: r.chunk?.start_line ?? 0,
 					endLine: r.chunk?.end_line ?? 0,
 				},
 			}))
+			.filter((r) => {
+				// Guard against path traversal: reject file paths that resolve outside the workspace
+				const filePath = r.payload.filePath
+				return filePath.startsWith(normalizedBase + "/") || filePath === normalizedBase
+			})
 	}
 }

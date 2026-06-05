@@ -146,21 +146,27 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 		}
 	}
 
-	// Version mismatch — remove old installation before downloading new one
+	// Version mismatch — use staging directory to avoid leaving user without binary
 	if (installedVersion && installedVersion !== SEMBLE_VERSION) {
 		console.log(`[SembleDownloader] Version changed from ${installedVersion} to ${SEMBLE_VERSION}, updating...`)
-		try {
-			await fs.rm(extractDir, { recursive: true, force: true })
-		} catch {
-			// ignore cleanup errors
-		}
 	}
 
 	const url = `${DOWNLOAD_BASE_URL}/${info.archive}`
 	const archivePath = path.join(storageDir, info.archive)
+	// Stage the new installation in a temporary directory. The old binary stays
+	// intact until the new one is fully verified, preventing broken state on failure.
+	const stagingDir = extractDir + ".new"
+	const stagedBinaryPath = path.join(stagingDir, info.binary)
 	console.log(`[SembleDownloader] Downloading semble ${SEMBLE_VERSION} from ${url}`)
 
 	try {
+		// Clean any leftover staging directory from a previous failed attempt
+		try {
+			await fs.rm(stagingDir, { recursive: true, force: true })
+		} catch {
+			// ignore
+		}
+
 		await downloadFile(url, archivePath)
 
 		// Verify archive integrity before extraction
@@ -171,19 +177,30 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 		}
 		await verifyChecksum(archivePath, expectedChecksum)
 
-		// Extract the archive
-		await fs.mkdir(extractDir, { recursive: true })
+		// Extract to staging directory
+		await fs.mkdir(stagingDir, { recursive: true })
 
 		if (info.archive.endsWith(".tar.gz")) {
-			await extractTarGz(archivePath, extractDir)
+			await extractTarGz(archivePath, stagingDir)
 		} else if (info.archive.endsWith(".zip")) {
-			await extractZip(archivePath, extractDir)
+			await extractZip(archivePath, stagingDir)
 		}
 
 		// Make binary executable on unix platforms
 		if (process.platform !== "win32") {
-			await fs.chmod(binaryPath, 0o755)
+			await fs.chmod(stagedBinaryPath, 0o755)
 		}
+
+		// Verify the staged binary exists before swapping
+		await fs.access(stagedBinaryPath)
+
+		// Atomic swap: remove old installation, rename staging → final
+		try {
+			await fs.rm(extractDir, { recursive: true, force: true })
+		} catch {
+			// ignore — may not exist on first install
+		}
+		await fs.rename(stagingDir, extractDir)
 
 		// Record the installed version
 		await writeInstalledVersion(storageDir, SEMBLE_VERSION)
@@ -198,14 +215,14 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 		console.log(`[SembleDownloader] Successfully installed semble ${SEMBLE_VERSION} to ${binaryPath}`)
 		return binaryPath
 	} catch (error: any) {
-		// Clean up partial download/extraction
+		// Clean up partial download/staging — leave old installation intact
 		try {
 			await fs.unlink(archivePath)
 		} catch {
 			// ignore cleanup errors
 		}
 		try {
-			await fs.rm(extractDir, { recursive: true, force: true })
+			await fs.rm(stagingDir, { recursive: true, force: true })
 		} catch {
 			// ignore cleanup errors
 		}
@@ -236,15 +253,16 @@ export async function getSembleBinaryPath(storageDir: string): Promise<string | 
 /**
  * Extracts a .tar.gz archive into the destination directory using the system `tar` command.
  * Uses --no-same-owner to avoid issues with permission elevation,
- * and strips absolute paths to prevent path traversal attacks.
+ * strips absolute paths and blocks directory overwrites to prevent path traversal attacks.
  */
 function extractTarGz(archivePath: string, destDir: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const args = ["-xzf", archivePath, "-C", destDir, "--no-same-owner"]
-		// GNU tar supports --absolute-names / -P to refuse absolute paths.
-		// macOS (bsdtar) strips absolute paths by default and doesn't need this flag.
+		// GNU tar: --no-absolute-filenames blocks leading-slash entries,
+		// --no-overwrite-dir adds defense-in-depth against ../relative traversal.
+		// macOS bsdtar strips absolute paths by default.
 		if (process.platform === "linux") {
-			args.push("--no-absolute-filenames")
+			args.push("--no-absolute-filenames", "--no-overwrite-dir")
 		}
 		const child = spawn("tar", args, {
 			shell: false,
@@ -325,11 +343,14 @@ const TRUSTED_DOWNLOAD_DOMAINS = ["github.com", "objects.githubusercontent.com",
 
 /**
  * Validates that a URL belongs to a trusted domain.
+ * Uses domain-boundary aware matching to prevent suffix-based bypasses
+ * (e.g. "evilgithub.com" does NOT match "github.com").
  */
 function isTrustedDownloadUrl(url: string): boolean {
 	try {
 		const parsed = new URL(url)
-		return parsed.protocol === "https:" && TRUSTED_DOWNLOAD_DOMAINS.some((d) => parsed.hostname.endsWith(d))
+		const h = parsed.hostname
+		return parsed.protocol === "https:" && TRUSTED_DOWNLOAD_DOMAINS.some((d) => h === d || h.endsWith("." + d))
 	} catch {
 		return false
 	}
