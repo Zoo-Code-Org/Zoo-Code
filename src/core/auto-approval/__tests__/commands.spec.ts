@@ -99,3 +99,51 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		expect(getCommandDecision('echo "${var@P}"', allowedCommands)).toBe("ask_user")
 	})
 })
+
+describe("getCommandDecision — multi-line script wrapped in a quoted argument", () => {
+	// A wrapper command (e.g. sh -c '...') carrying a multi-line script as a
+	// single quoted argument must be treated as one command. The embedded
+	// newlines belong to the quoted string and must not be mistaken for a
+	// multi-statement sequence that would defeat allowlist auto-approval.
+	const wrappedSingleQuoted = [
+		`sh -c 'kubectl exec pod -- python3 -c "`,
+		`import urllib.request`,
+		`url = \\"http://127.0.0.1:49527/\\"`,
+		`try:`,
+		`    with urllib.request.urlopen(url, timeout=10) as r:`,
+		`        print(r.status)`,
+		`except Exception as e:`,
+		`    print(\\"fetch failed:\\", e)`,
+		`"'`,
+	].join("\n")
+
+	it("auto-approves a multi-line single-quoted script when the wrapper prefix is allowed", () => {
+		expect(getCommandDecision(wrappedSingleQuoted, ["sh"])).toBe("auto_approve")
+	})
+
+	it("auto-approves a multi-line double-quoted script when the wrapper prefix is allowed", () => {
+		const wrappedDoubleQuoted = 'sh -c "echo line1\necho line2"'
+		expect(getCommandDecision(wrappedDoubleQuoted, ["sh"])).toBe("auto_approve")
+	})
+
+	it("asks user when the wrapper prefix is not in the allowlist", () => {
+		expect(getCommandDecision(wrappedSingleQuoted, ["git"])).toBe("ask_user")
+	})
+
+	it("still splits genuine multi-statement scripts and asks when a statement is not allowed", () => {
+		// Real unquoted newlines separate independent statements; each must be on
+		// the allowlist for auto-approval to engage.
+		const multiStatement = "echo hello\nrm -rf /tmp/x"
+		expect(getCommandDecision(multiStatement, ["echo"])).toBe("ask_user")
+	})
+
+	it("auto-approves a genuine multi-statement script when every statement is allowed", () => {
+		const multiStatement = "echo hello\nls -la"
+		expect(getCommandDecision(multiStatement, ["echo", "ls"])).toBe("auto_approve")
+	})
+
+	it("auto-approves an ANSI-C quoted ($'...') multi-line argument when the wrapper prefix is allowed", () => {
+		const ansiC = "sh -c $'echo 1\necho 2'"
+		expect(getCommandDecision(ansiC, ["sh"])).toBe("auto_approve")
+	})
+})

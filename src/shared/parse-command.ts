@@ -4,33 +4,66 @@ export type ShellToken = string | { op: string } | { command: string }
 
 /**
  * Split a command string into individual sub-commands by
- * chaining operators (&&, ||, ;, |, or &) and newlines.
+ * chaining operators (&&, ||, ;, |, or &) and unquoted newlines.
  *
  * Uses shell-quote to properly handle:
- * - Quoted strings (preserves quotes)
+ * - Quoted strings (preserves quotes, including multi-line quoted strings)
  * - Subshell commands ($(cmd), `cmd`, <(cmd), >(cmd))
  * - PowerShell redirections (2>&1)
  * - Chain operators (&&, ||, ;, |, &)
- * - Newlines as command separators
+ * - Newlines as command separators (only when outside quoted strings)
+ *
+ * Key invariant: newlines that appear inside a quoted string (single or double)
+ * are part of that string argument and must NOT be treated as command separators.
+ * Only unquoted newlines split commands. For example:
+ *
+ *   sh -c 'python3 -c "
+ *   import sys
+ *   print(sys.version)
+ *   "'
+ *
+ * ...is a single command, not multiple commands split at each newline.
  */
 export function parseCommand(command: string): string[] {
 	if (!command?.trim()) {
 		return []
 	}
 
-	// Split by newlines first (handle different line ending formats)
-	// This regex splits on \r\n (Windows), \n (Unix), or \r (old Mac)
-	const lines = command.split(/\r\n|\r|\n/)
+	// Mask quoted strings (both single and double) before splitting on newlines.
+	// This ensures that newlines embedded inside a quoted argument are not
+	// mistaken for command separators. Both quote styles are handled here because
+	// either can span multiple lines (e.g. a heredoc-style script passed as a
+	// single argument to sh -c '...' or a double-quoted multi-line string).
+	//
+	// A single left-to-right scan with an alternation is used (rather than two
+	// separate passes) so that whichever quote opens first wins. This prevents a
+	// quote of one style that appears inside a string of the other style from
+	// starting a spurious match -- e.g. the apostrophe in "don't" must not begin
+	// a single-quoted region, and a double quote inside 'a "b' must not begin a
+	// double-quoted region. Negated character classes match newlines, so
+	// multi-line quoted strings are captured whole.
+	const topLevelQuotes: string[] = []
+
+	const masked = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, (match) => {
+		topLevelQuotes.push(match)
+		return `__TOPLEVEL_QUOTE_${topLevelQuotes.length - 1}__`
+	})
+
+	// Split on unquoted newlines (all line-ending formats).
+	const lines = masked.split(/\r\n|\r|\n/)
 	const allCommands: string[] = []
 
 	for (const line of lines) {
-		// Skip empty lines
 		if (!line.trim()) {
 			continue
 		}
 
-		// Process each line through the existing parsing logic
-		const lineCommands = parseCommandLine(line)
+		// Restore top-level quote placeholders before per-line parsing so that
+		// parseCommandLine sees the original quoted content and can apply its own
+		// masking for operator splitting.
+		const restoredLine = line.replace(/__TOPLEVEL_QUOTE_(\d+)__/g, (_, i) => topLevelQuotes[parseInt(i)])
+
+		const lineCommands = parseCommandLine(restoredLine)
 		allCommands.push(...lineCommands)
 	}
 
@@ -47,6 +80,7 @@ function parseCommandLine(command: string): string[] {
 	const redirections: string[] = []
 	const subshells: string[] = []
 	const quotes: string[] = []
+	const singleQuotes: string[] = []
 	const arrayIndexing: string[] = []
 	const arithmeticExpressions: string[] = []
 	const variables: string[] = []
@@ -84,6 +118,17 @@ function parseCommandLine(command: string): string[] {
 		return `__SUBSH_${subshells.length - 1}__`
 	})
 
+	// Handle ANSI-C quoting: $'...'. This must run before variable masking so the
+	// leading $ is captured as part of the quoted unit rather than being treated
+	// as a variable expansion (which would corrupt a following placeholder).
+	// ANSI-C strings interpret backslash escapes, so the pattern is escape-aware.
+	// The whole token (including the $ and quotes) is preserved in the single-
+	// quote bucket so it is restored verbatim.
+	processedCommand = processedCommand.replace(/\$'(?:[^'\\]|\\.)*'/g, (match) => {
+		singleQuotes.push(match)
+		return `__SQUOTE_${singleQuotes.length - 1}__`
+	})
+
 	// Handle simple variable references: $varname pattern
 	// This prevents shell-quote from splitting $count into separate tokens
 	processedCommand = processedCommand.replace(/\$[a-zA-Z_][a-zA-Z0-9_]*/g, (match) => {
@@ -108,8 +153,22 @@ function parseCommandLine(command: string): string[] {
 			return `__SUBSH_${subshells.length - 1}__`
 		})
 
-	// Then handle quoted strings
-	processedCommand = processedCommand.replace(/"[^"]*"/g, (match) => {
+	// Mask quoted strings (single and double) so their contents -- including
+	// operators like &&, |, ; and any embedded newlines -- are not treated as
+	// command separators. A single left-to-right scan with an alternation is used
+	// so that whichever quote opens first wins, preventing a quote of one style
+	// inside a string of the other style from starting a spurious match.
+	//
+	// Single quotes are matched literally (POSIX single quotes are fully opaque,
+	// no escaping inside them). Double quotes use an escape-aware pattern so that
+	// an escaped quote (\") does not prematurely terminate the match. Negated
+	// character classes match newlines, so multi-line quoted strings are captured
+	// as a single token.
+	processedCommand = processedCommand.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, (match) => {
+		if (match.startsWith("'")) {
+			singleQuotes.push(match)
+			return `__SQUOTE_${singleQuotes.length - 1}__`
+		}
 		quotes.push(match)
 		return `__QUOTE_${quotes.length - 1}__`
 	})
@@ -132,6 +191,7 @@ function parseCommandLine(command: string): string[] {
 			restorePlaceholders(
 				cmd,
 				quotes,
+				singleQuotes,
 				redirections,
 				arrayIndexing,
 				arithmeticExpressions,
@@ -177,11 +237,12 @@ function parseCommandLine(command: string): string[] {
 		commands.push(currentCommand.join(" "))
 	}
 
-	// Restore quotes and redirections
+	// Restore all placeholders
 	return commands.map((cmd) =>
 		restorePlaceholders(
 			cmd,
 			quotes,
+			singleQuotes,
 			redirections,
 			arrayIndexing,
 			arithmeticExpressions,
@@ -198,6 +259,7 @@ function parseCommandLine(command: string): string[] {
 function restorePlaceholders(
 	command: string,
 	quotes: string[],
+	singleQuotes: string[],
 	redirections: string[],
 	arrayIndexing: string[],
 	arithmeticExpressions: string[],
@@ -206,8 +268,10 @@ function restorePlaceholders(
 	subshells: string[],
 ): string {
 	let result = command
-	// Restore quotes
+	// Restore double-quoted strings
 	result = result.replace(/__QUOTE_(\d+)__/g, (_, i) => quotes[parseInt(i)])
+	// Restore single-quoted strings
+	result = result.replace(/__SQUOTE_(\d+)__/g, (_, i) => singleQuotes[parseInt(i)])
 	// Restore redirections
 	result = result.replace(/__REDIR_(\d+)__/g, (_, i) => redirections[parseInt(i)])
 	// Restore array indexing expressions
