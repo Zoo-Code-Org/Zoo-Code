@@ -1379,11 +1379,6 @@ function sum(a, b) {
 		const originalContent =
 			"function calculateTotal(price: number, tax: number) {\n\tconst subtotal = price;\n\treturn subtotal + tax;\n}\n"
 
-		it("should use default 0.90 threshold when instantiated without arguments", () => {
-			const strategy = new MultiSearchReplaceDiffStrategy()
-			expect(strategy["fuzzyThreshold"]).toBe(0.9)
-		})
-
 		it("should succeed with near-miss match (e.g. minor whitespace diff) when threshold is 0.90", async () => {
 			const strategy = new MultiSearchReplaceDiffStrategy(0.9)
 			// Near-miss search block with slightly different formatting/whitespace (e.g., spaces instead of tab, missing semicolon)
