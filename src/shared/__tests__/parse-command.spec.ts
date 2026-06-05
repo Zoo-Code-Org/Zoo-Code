@@ -1,5 +1,22 @@
 import { parseCommand } from "../parse-command"
 
+// Toggle that lets a single test force shell-quote's parse() to throw so the
+// parser's fallback branch can be exercised deterministically.
+let forceShellQuoteFailure = false
+
+vi.mock("shell-quote", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("shell-quote")>()
+	return {
+		...actual,
+		parse: (...args: Parameters<typeof actual.parse>) => {
+			if (forceShellQuoteFailure) {
+				throw new Error("forced parse failure")
+			}
+			return actual.parse(...args)
+		},
+	}
+})
+
 describe("parseCommand", () => {
 	describe("basic chaining", () => {
 		it("returns empty array for empty input", () => {
@@ -132,6 +149,24 @@ describe("parseCommand", () => {
 		it("extracts subshell content as separate commands", () => {
 			const result = parseCommand("echo $(whoami)")
 			expect(result).toContain("whoami")
+		})
+	})
+
+	describe("shell-quote parse-failure fallback", () => {
+		afterEach(() => {
+			forceShellQuoteFailure = false
+		})
+
+		// When shell-quote throws, the parser falls back to a crude operator
+		// split and must still restore every masked placeholder -- including the
+		// ANSI-C single-quote bucket -- so callers never see internal markers.
+		it("restores ANSI-C quoted placeholders in the fallback path", () => {
+			forceShellQuoteFailure = true
+
+			const result = parseCommand("sh -c $'echo hi' && echo done")
+			expect(result).toEqual(["sh -c $'echo hi'", "echo done"])
+			expect(result.join(" ")).not.toContain("SQUOTE")
+			expect(result.join(" ")).not.toContain("__")
 		})
 	})
 })
