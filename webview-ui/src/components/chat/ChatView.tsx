@@ -10,11 +10,10 @@ import { appendImages } from "@src/utils/imageUtils"
 import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
 import { batchConsecutive } from "@src/utils/batchConsecutive"
 
-import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType } from "@roo-code/types"
-import { isRetiredProvider } from "@roo-code/types"
+import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
+import { getSuggestionMode, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
-import { SuggestionItem } from "@roo-code/types"
 import { combineApiRequests } from "@roo/combineApiRequests"
 import { combineCommandSequences } from "@roo/combineCommandSequences"
 import { getApiMetrics } from "@roo/getApiMetrics"
@@ -1336,13 +1335,17 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	const switchToMode = useCallback(
 		(modeSlug: string): void => {
+			if (!getAllModes(customModes).some((modeConfig) => modeConfig.slug === modeSlug)) {
+				return
+			}
+
 			// Update local state and notify extension to sync mode change.
 			setMode(modeSlug)
 
 			// Send the mode switch message.
 			vscode.postMessage({ type: "mode", text: modeSlug })
 		},
-		[setMode],
+		[customModes, setMode],
 	)
 
 	const handleSuggestionClickInRow = useCallback(
@@ -1358,12 +1361,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			}
 
 			// Check if we need to switch modes
-			if (suggestion.mode) {
+			const suggestionMode = getSuggestionMode(suggestion.mode)
+			if (suggestionMode) {
 				// Only switch modes if it's a manual click (event exists) or auto-approval is allowed
 				const isManualClick = !!event
 				if (isManualClick || alwaysAllowModeSwitch) {
 					// Switch mode without waiting
-					switchToMode(suggestion.mode)
+					switchToMode(suggestionMode)
 				}
 			}
 

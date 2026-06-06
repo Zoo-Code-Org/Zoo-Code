@@ -213,7 +213,8 @@
 		"stoppingButton": "Parando...",
 		"workspaceToggleLabel": "Ativar indexação para este workspace",
 		"workspaceDisabledMessage": "A indexação está configurada, mas não ativada para este workspace.",
-		"autoEnableDefaultLabel": "Ativar indexação automaticamente para novos workspaces"
+		"autoEnableDefaultLabel": "Ativar indexação automaticamente para novos workspaces",
+		"sembleProvider": "Semble - Local"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Você pode configurar um atalho global para esta configuração <SettingsLink>nas preferências do seu IDE</SettingsLink>.",
@@ -560,6 +561,13 @@
 			"placeholder": "Padrão: claude",
 			"maxTokensLabel": "Tokens de saída máximos",
 			"maxTokensDescription": "Número máximo de tokens de saída para respostas do Claude Code. O padrão é 8000."
+		},
+		"zooGateway": {
+			"account": "Conta Zoo Code",
+			"signInButton": "Entrar no Zoo Code",
+			"signInDescription": "Entre para usar o Zoo Gateway com sua conta",
+			"authenticated": "Autenticado",
+			"authenticatedAs": "Autenticado como {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +749,14 @@
 		"inheritEnv": {
 			"label": "Herdar variáveis de ambiente",
 			"description": "Ative isso para herdar variáveis de ambiente do processo pai do VS Code. <0>Saiba mais</0>"
+		},
+		"profile": {
+			"label": "Substituição de terminal do Zoo Code",
+			"default": "Usar perfil padrão do VS Code (recomendado)",
+			"description": "Por padrão, o Zoo Code usa o shell configurado no VS Code. Selecione Substituir para escolher um perfil de shell com caminho exposto pelo VS Code. Perfis somente de fonte (ex.: a entrada integrada do PowerShell) não podem ser listados aqui. <0>Saiba mais</0>",
+			"overrideLabel": "Substituir shell para o Zoo Code",
+			"configureButton": "Escolher perfil padrão no VS Code",
+			"noProfiles": "(nenhum perfil com caminho encontrado em terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "O provedor '{{provider}}' não é permitido pela sua organização",
 		"modelNotAllowed": "O modelo '{{model}}' não é permitido para o provedor '{{provider}}' pela sua organização",
 		"profileInvalid": "Este perfil contém um provedor ou modelo que não é permitido pela sua organização",
-		"qwenCodeOauthPath": "Você deve fornecer um caminho válido de credenciais OAuth"
+		"qwenCodeOauthPath": "Você deve fornecer um caminho válido de credenciais OAuth",
+		"zooGatewaySignIn": "Faça login no Zoo Code para usar o Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Digite a chave API...",

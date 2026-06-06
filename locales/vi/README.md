@@ -30,17 +30,19 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.56.0
+## Điểm mới trong v3.58.0
 
-- Hỗ trợ **Claude Opus 4.8** trên các provider Anthropic, Bedrock và Vertex
-- **Opencode Go** được thêm làm provider API hạng nhất mới
-- **Hủy tác vụ đáng tin cậy** — hủy tác vụ giờ sẽ kết thúc đúng tiến trình đang chạy, với tính năng tự động thử lại Ctrl+C cho các tiến trình khó dừng
-- Sửa lỗi ID model tùy chỉnh của Gemini bị bỏ qua và rơi về mặc định
-- Sửa lỗi diff Grok bị cắt ngắn do thiếu marker
-- Sửa lỗi phát hiện PowerShell trên Windows khi không có shell profile
-- Sửa lỗi code action của VS Code vẫn hiển thị thương hiệu Roo Code; đã bản địa hóa sang tất cả ngôn ngữ được hỗ trợ
-- Sửa cảnh báo Vertex AI khi trường Google Cloud Credentials nhận đường dẫn file
-- Sáu bản cập nhật bảo mật phụ thuộc (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — kết nối qua một gateway được quản lý với hỗ trợ xác thực đa hồ sơ
+- **Gemini 3.5 Flash** — một mô hình Google nhanh và mạnh mẽ, giờ có thể truy cập trực tiếp từ cài đặt provider
+- **Semble embedding** — lập chỉ mục codebase cục bộ mà không cần API key bên ngoài hay tải lên
+- **Cỡ chữ chat có thể cấu hình** và **ghi đè shell terminal tích hợp VS Code**
+- **Cảnh báo kiểu GitHub** được hiển thị trong webview
+- **Số token đầu ra tối đa có thể cấu hình** cho các mô hình GLM
+- **WorkspacePathResolver** — xử lý đường dẫn đáng tin cậy trong workspace có symlink
+- Sửa lỗi crash React từ chế độ gợi ý tiếp theo bị lỗi định dạng
+- Sửa lỗi temperature OpenAI bị bỏ qua khi không có giá trị tùy chỉnh
+- Xử lý lỗi từng khóa khi nhập cài đặt
+- Cập nhật bảo mật: mermaid v11.15.0, axios v1.16.0
 
 ---
 

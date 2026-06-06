@@ -12,7 +12,14 @@ import { Task } from "../task/Task"
 import { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
-import { ExitCodeDetails, RooTerminalCallbacks, RooTerminalProcess } from "../../integrations/terminal/types"
+import {
+	ExitCodeDetails,
+	RooTerminalCallbacks,
+	RooTerminalProvider,
+	RooTerminalProcess,
+	ShellIntegrationError,
+	ShellIntegrationErrorDetails,
+} from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { Terminal } from "../../integrations/terminal/Terminal"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
@@ -21,7 +28,21 @@ import { t } from "../../i18n"
 import { getTaskDirectoryPath } from "../../utils/storage"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
-class ShellIntegrationError extends Error {}
+export { ShellIntegrationError } from "../../integrations/terminal/types"
+
+export function canRetryShellIntegrationError(error: unknown): error is ShellIntegrationError {
+	return error instanceof ShellIntegrationError && !error.commandSubmitted
+}
+
+export function getTerminalProviderForExecution(terminalShellIntegrationDisabled: boolean): {
+	terminalProvider: RooTerminalProvider
+	isCmdExeFallback: boolean
+} {
+	const isCmdExeFallback = !terminalShellIntegrationDisabled && Terminal.isActiveShellCmdExe()
+	const terminalProvider = terminalShellIntegrationDisabled || isCmdExeFallback ? "execa" : "vscode"
+
+	return { terminalProvider, isCmdExeFallback }
+}
 
 interface ExecuteCommandParams {
 	command: string
@@ -116,14 +137,14 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 				pushToolResult(result)
 			} catch (error: unknown) {
-				const status: CommandExecutionStatus = { executionId, status: "fallback" }
-				provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
-				await task.say("shell_integration_warning")
-
 				// Invalidate pending ask from first execution to prevent race condition
 				task.supersedePendingAsk()
 
-				if (error instanceof ShellIntegrationError) {
+				if (canRetryShellIntegrationError(error)) {
+					// Silent retry via execa — shell startup race, command was not submitted.
+					const status: CommandExecutionStatus = { executionId, status: "fallback" }
+					provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+
 					const [rejected, result] = await executeCommandInTerminal(task, {
 						...options,
 						terminalShellIntegrationDisabled: true,
@@ -135,7 +156,16 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 					pushToolResult(result)
 				} else {
-					pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
+					// Command was submitted but shell integration lost track of it — show warning.
+					await task.say("shell_integration_warning")
+
+					if (error instanceof ShellIntegrationError) {
+						pushToolResult(
+							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
+						)
+					} else {
+						pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
+					}
 				}
 			}
 
@@ -196,11 +226,18 @@ export async function executeCommandInTerminal(
 	let result: string = ""
 	let persistedResult: PersistedCommandOutput | undefined
 	let exitDetails: ExitCodeDetails | undefined
-	let shellIntegrationError: string | undefined
+	let shellIntegrationError: ShellIntegrationError | undefined
 	let hasAskedForCommandOutput = false
 
-	const terminalProvider = terminalShellIntegrationDisabled ? "execa" : "vscode"
+	const { terminalProvider, isCmdExeFallback } = getTerminalProviderForExecution(terminalShellIntegrationDisabled)
 	const provider = await task.providerRef.deref()
+
+	// cmd.exe can't use shell integration — tell the webview to expand the output
+	// panel immediately (same effect as the retry-fallback path).
+	if (isCmdExeFallback) {
+		const status: CommandExecutionStatus = { executionId, status: "fallback" }
+		provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+	}
 
 	// Get global storage path for persisted output artifacts
 	const globalStoragePath = provider?.context?.globalStorageUri?.fsPath
@@ -360,9 +397,9 @@ export async function executeCommandInTerminal(
 	}
 
 	if (terminalProvider === "vscode") {
-		callbacks.onNoShellIntegration = async (error: string) => {
+		callbacks.onNoShellIntegration = async (details: ShellIntegrationErrorDetails) => {
 			TelemetryService.instance.captureShellIntegrationError(task.taskId)
-			shellIntegrationError = error
+			shellIntegrationError = new ShellIntegrationError(details.message, details.commandSubmitted)
 		}
 	}
 
@@ -442,7 +479,7 @@ export async function executeCommandInTerminal(
 	}
 
 	if (shellIntegrationError) {
-		throw new ShellIntegrationError(shellIntegrationError)
+		throw shellIntegrationError
 	}
 
 	// Wait for a short delay to ensure all messages are sent to the webview.
@@ -482,30 +519,14 @@ export async function executeCommandInTerminal(
 			return [false, formatPersistedOutput(persistedResult, exitDetails, currentWorkingDir)]
 		}
 
-		// Use inline format for small outputs (original behavior with exit status)
-		let exitStatus: string = ""
-
-		if (exitDetails !== undefined) {
-			if (exitDetails.signalName) {
-				exitStatus = `Process terminated by signal ${exitDetails.signalName}`
-
-				if (exitDetails.coreDumpPossible) {
-					exitStatus += " - core dump possible"
-				}
-			} else if (exitDetails.exitCode === undefined) {
-				result += "<VSCE exit code is undefined: terminal output and command execution status is unknown.>"
-				exitStatus = `Exit code: <undefined, notify user>`
-			} else {
-				if (exitDetails.exitCode !== 0) {
-					exitStatus += "Command execution was not successful, inspect the cause and adjust as needed.\n"
-				}
-
-				exitStatus += `Exit code: ${exitDetails.exitCode}`
-			}
-		} else {
+		// Use inline format for small outputs (original behavior with exit status).
+		if (exitDetails === undefined) {
 			result += "<VSCE exitDetails == undefined: terminal output and command execution status is unknown.>"
-			exitStatus = `Exit code: <undefined, notify user>`
+		} else if (!exitDetails.signalName && exitDetails.exitCode === undefined) {
+			result += "<VSCE exit code is undefined: terminal output and command execution status is unknown.>"
 		}
+
+		const exitStatus = formatExitStatus(exitDetails)
 
 		return [
 			false,

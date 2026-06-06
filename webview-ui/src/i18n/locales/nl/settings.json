@@ -213,7 +213,8 @@
 		"stoppingButton": "Stoppen...",
 		"workspaceToggleLabel": "Indexering inschakelen voor deze werkruimte",
 		"workspaceDisabledMessage": "Indexering is geconfigureerd maar niet ingeschakeld voor deze werkruimte.",
-		"autoEnableDefaultLabel": "Indexering automatisch inschakelen voor nieuwe werkruimtes"
+		"autoEnableDefaultLabel": "Indexering automatisch inschakelen voor nieuwe werkruimtes",
+		"sembleProvider": "Semble - Lokaal"
 	},
 	"autoApprove": {
 		"toggleShortcut": "U kunt een globale sneltoets voor deze instelling configureren <SettingsLink>in de voorkeuren van uw IDE</SettingsLink>.",
@@ -560,6 +561,13 @@
 			"placeholder": "Standaard: claude",
 			"maxTokensLabel": "Max Output Tokens",
 			"maxTokensDescription": "Maximaal aantal output-tokens voor Claude Code-reacties. Standaard is 8000."
+		},
+		"zooGateway": {
+			"account": "Zoo Code Account",
+			"signInButton": "Inloggen bij Zoo Code",
+			"signInDescription": "Log in om Zoo Gateway met je account te gebruiken",
+			"authenticated": "Geauthenticeerd",
+			"authenticatedAs": "Geauthenticeerd als {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +749,14 @@
 		"inheritEnv": {
 			"label": "Omgevingsvariabelen overnemen",
 			"description": "Schakel in om omgevingsvariabelen over te nemen van het bovenliggende VS Code-proces. <0>Meer informatie</0>"
+		},
+		"profile": {
+			"label": "Zoo Code terminal-overschrijving",
+			"default": "VS Code standaardprofiel gebruiken (aanbevolen)",
+			"description": "Standaard gebruikt Zoo Code de shell die in VS Code is geconfigureerd. Selecteer Overschrijven om een shell-profiel met pad te kiezen dat VS Code beschikbaar stelt. Uitsluitend op bron gebaseerde profielen (bijv. de ingebouwde PowerShell-vermelding) kunnen hier niet worden vermeld. <0>Meer informatie</0>",
+			"overrideLabel": "Shell voor Zoo Code overschrijven",
+			"configureButton": "Standaardprofiel kiezen in VS Code",
+			"noProfiles": "(geen profielen met pad gevonden in terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "Provider '{{provider}}' is niet toegestaan door je organisatie",
 		"modelNotAllowed": "Model '{{model}}' is niet toegestaan voor provider '{{provider}}' door je organisatie",
 		"profileInvalid": "Dit profiel bevat een provider of model dat niet is toegestaan door je organisatie",
-		"qwenCodeOauthPath": "Je moet een geldig OAuth-referentiepad opgeven"
+		"qwenCodeOauthPath": "Je moet een geldig OAuth-referentiepad opgeven",
+		"zooGatewaySignIn": "Log in bij Zoo Code om Zoo Gateway te gebruiken."
 	},
 	"placeholders": {
 		"apiKey": "Voer API-sleutel in...",

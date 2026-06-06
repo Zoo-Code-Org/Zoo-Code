@@ -6,6 +6,33 @@ import type { ProviderSettings } from "@roo-code/types"
 
 import { ProviderSettingsManager, ProviderProfiles, SyncCloudProfilesResult } from "../ProviderSettingsManager"
 
+// `export()` builds an API handler per profile to read model capabilities. Mock
+// buildApiHandler with the real @roo-code/types model definitions so the token-field
+// filtering is driven by real capability flags, and so this suite stays isolated from
+// sibling specs that also mock "../../../api" (avoids a cross-file mock leak under
+// Vitest's singleFork pool).
+vi.mock("../../../api", async () => {
+	const types = await vi.importActual<typeof import("@roo-code/types")>("@roo-code/types")
+	const zaiModels = { ...types.internationalZAiModels, ...types.mainlandZAiModels } as Record<string, unknown>
+	const anthropicModels = types.anthropicModels as Record<string, unknown>
+	const modelInfoFor = (config: { apiProvider?: string; apiModelId?: string }) => {
+		const id = config?.apiModelId ?? ""
+		switch (config?.apiProvider) {
+			case "zai":
+				return zaiModels[id] ?? {}
+			case "anthropic":
+				return anthropicModels[id] ?? {}
+			default:
+				return {}
+		}
+	}
+	return {
+		buildApiHandler: (config: any) => ({
+			getModel: () => ({ id: config?.apiModelId ?? "", info: modelInfoFor(config) }),
+		}),
+	}
+})
+
 // Mock VSCode ExtensionContext
 const mockSecrets = {
 	get: vi.fn(),
@@ -873,6 +900,52 @@ describe("ProviderSettingsManager", () => {
 			expect(exported.apiConfigs.retired.openAiBaseUrl).toBe("https://legacy.example/v1")
 			expect(exported.apiConfigs.retired.modelMaxTokens).toBe(4096)
 			expect(exported.apiConfigs.retired.modelMaxThinkingTokens).toBe(2048)
+		})
+
+		it("should preserve modelMaxTokens for models that support a configurable max output (e.g. GLM)", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "glm",
+				apiConfigs: {
+					glm: {
+						id: "glm-id",
+						apiProvider: "zai",
+						apiModelId: "glm-5.1",
+						modelMaxTokens: 8192,
+						modelMaxThinkingTokens: 2048,
+					},
+				},
+			}
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const exported = await providerSettingsManager.export()
+
+			// GLM exposes a configurable max output (supportsMaxTokens) but no reasoning budget,
+			// so modelMaxTokens must survive the export while modelMaxThinkingTokens is dropped.
+			expect(exported.apiConfigs.glm.modelMaxTokens).toBe(8192)
+			expect(exported.apiConfigs.glm.modelMaxThinkingTokens).toBeUndefined()
+		})
+
+		it("should strip both token fields for models that support neither reasoning budgets nor a configurable max", async () => {
+			const existingConfig: ProviderProfiles = {
+				currentApiConfigName: "anthropic",
+				apiConfigs: {
+					anthropic: {
+						id: "anthropic-id",
+						apiProvider: "anthropic",
+						apiModelId: "claude-3-5-haiku-20241022",
+						modelMaxTokens: 8192,
+						modelMaxThinkingTokens: 2048,
+					},
+				},
+			}
+
+			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
+
+			const exported = await providerSettingsManager.export()
+
+			expect(exported.apiConfigs.anthropic.modelMaxTokens).toBeUndefined()
+			expect(exported.apiConfigs.anthropic.modelMaxThinkingTokens).toBeUndefined()
 		})
 	})
 

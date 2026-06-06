@@ -268,11 +268,20 @@
 			"invalid_token_received": "Zoo Code: Nhận được token xác thực không hợp lệ.",
 			"token_verification_failed": "Zoo Code: Xác minh token thất bại.",
 			"invalid_token": "Zoo Code: Token không hợp lệ.",
-			"could_not_verify_token": "Zoo Code: Không thể xác minh token."
+			"could_not_verify_token": "Zoo Code: Không thể xác minh token.",
+			"session_expired": "Phiên Zoo Code đã hết hạn. Vui lòng đăng nhập lại để tiếp tục sử dụng Zoo Gateway.",
+			"out_of_credits": "Zoo Gateway: không đủ tín dụng. Thêm tín dụng để tiếp tục.",
+			"account_unavailable": "Zoo Gateway: tài khoản của bạn hiện không khả dụng. Vui lòng liên hệ hỗ trợ.",
+			"budget_exceeded": "Zoo Gateway: đã đạt ngân sách sử dụng. Chờ đặt lại ngân sách hoặc nạp thêm."
 		},
 		"info": {
 			"connected": "Zoo Code: Kết nối thành công! Bạn có thể sử dụng Zoo Code làm nhà cung cấp AI.",
 			"disconnected": "Zoo Code: Đã ngắt kết nối thành công."
+		},
+		"buttons": {
+			"sign_in": "Đăng nhập",
+			"add_credits": "Thêm tín dụng",
+			"contact_support": "Liên hệ hỗ trợ"
 		}
 	},
 	"codeActions": {

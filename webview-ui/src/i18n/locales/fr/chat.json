@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "Claude Opus 4.8 et Opencode Go : Claude Opus 4.8 a été ajouté sur Anthropic, Bedrock et Vertex, plus Opencode Go comme nouveau fournisseur de premier plan.",
-			"highlight2": "Annulation de tâches fiable : Annuler une tâche termine désormais correctement le processus en cours, avec une relance automatique de Ctrl+C pour les processus récalcitrants.",
-			"highlight3": "Correctifs fournisseurs et éditeur : Correction des ID de modèles personnalisés Gemini, du truncage des diffs Grok, de la détection de PowerShell sous Windows et du nom des actions de code VS Code."
+			"highlight1": "Connecte-toi via Zoo Gateway — achemine tes requêtes à travers un gateway géré avec support d'authentification multi-profil.",
+			"highlight2": "Utilise Gemini 3.5 Flash — un modèle Google rapide et performant, désormais disponible directement dans les paramètres du fournisseur.",
+			"highlight3": "Indexe ton code localement avec Semble — embeddings à la volée sans clé API externe ni téléversement, ton code reste sur ta machine."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",

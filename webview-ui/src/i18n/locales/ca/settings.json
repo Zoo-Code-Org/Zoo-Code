@@ -213,7 +213,8 @@
 		"stoppingButton": "Aturant...",
 		"workspaceToggleLabel": "Activar la indexació per a aquest espai de treball",
 		"workspaceDisabledMessage": "La indexació està configurada però no habilitada per a aquest espai de treball.",
-		"autoEnableDefaultLabel": "Habilitar automàticament la indexació per a nous espais de treball"
+		"autoEnableDefaultLabel": "Habilitar automàticament la indexació per a nous espais de treball",
+		"sembleProvider": "Semble - Local"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Pots configurar una drecera global per a aquesta configuració <SettingsLink>a les preferències del teu IDE</SettingsLink>.",
@@ -560,6 +561,13 @@
 			"placeholder": "Per defecte: claude",
 			"maxTokensLabel": "Tokens màxims de sortida",
 			"maxTokensDescription": "Nombre màxim de tokens de sortida per a les respostes de Claude Code. El valor per defecte és 8000."
+		},
+		"zooGateway": {
+			"account": "Compte de Zoo Code",
+			"signInButton": "Iniciar sessió a Zoo Code",
+			"signInDescription": "Inicia sessió per utilitzar Zoo Gateway amb el teu compte",
+			"authenticated": "Autenticat",
+			"authenticatedAs": "Autenticat com a {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +749,14 @@
 		"inheritEnv": {
 			"label": "Hereta variables d'entorn",
 			"description": "Activa per heretar variables d'entorn del procés pare de VS Code. <0>Aprèn-ne més</0>"
+		},
+		"profile": {
+			"label": "Substitució del terminal de Zoo Code",
+			"default": "Utilitza el perfil predeterminat de VS Code (recomanat)",
+			"description": "Per defecte, Zoo Code utilitza la shell que VS Code té configurada. Seleccioneu Substituir per triar un perfil de shell amb ruta explícita exposat per VS Code. Els perfils de només font (p. ex., l'entrada integrada de PowerShell) no es poden llistar aquí. <0>Més informació</0>",
+			"overrideLabel": "Substituir la shell per a Zoo Code",
+			"configureButton": "Trieu el perfil predeterminat a VS Code",
+			"noProfiles": "(no s'han trobat perfils amb ruta a terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "El proveïdor '{{provider}}' no està permès per la vostra organització",
 		"modelNotAllowed": "El model '{{model}}' no està permès per al proveïdor '{{provider}}' per la vostra organització",
 		"profileInvalid": "Aquest perfil conté un proveïdor o model que no està permès per la vostra organització",
-		"qwenCodeOauthPath": "Has de proporcionar una ruta vàlida de credencials OAuth"
+		"qwenCodeOauthPath": "Has de proporcionar una ruta vàlida de credencials OAuth",
+		"zooGatewaySignIn": "Inicia sessió a Zoo Code per utilitzar Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Introduïu la clau API...",

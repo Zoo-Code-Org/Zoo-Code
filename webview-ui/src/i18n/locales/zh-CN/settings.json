@@ -213,7 +213,8 @@
 		"stoppingButton": "正在停止...",
 		"workspaceToggleLabel": "为此工作区启用索引",
 		"workspaceDisabledMessage": "索引已配置，但尚未为此工作区启用。",
-		"autoEnableDefaultLabel": "自动为新工作区启用索引"
+		"autoEnableDefaultLabel": "自动为新工作区启用索引",
+		"sembleProvider": "Semble - 本地"
 	},
 	"autoApprove": {
 		"toggleShortcut": "您可以<SettingsLink>在 IDE 首选项中</SettingsLink>为此设置配置全局快捷方式。",
@@ -560,6 +561,13 @@
 			"placeholder": "默认：claude",
 			"maxTokensLabel": "最大输出 Token",
 			"maxTokensDescription": "Claude Code 响应的最大输出 Token 数量。默认为 8000。"
+		},
+		"zooGateway": {
+			"account": "Zoo Code 账户",
+			"signInButton": "登录 Zoo Code",
+			"signInDescription": "登录以使用您的账户访问 Zoo Gateway",
+			"authenticated": "已认证",
+			"authenticatedAs": "已认证为 {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +749,14 @@
 		"inheritEnv": {
 			"label": "继承环境变量",
 			"description": "启用此选项以从父 VS Code 进程继承环境变量。<0>了解更多</0>"
+		},
+		"profile": {
+			"label": "Zoo Code 终端覆盖",
+			"default": "使用 VS Code 默认配置文件（推荐）",
+			"description": "默认情况下，Zoo Code 使用 VS Code 配置的 Shell。选择覆盖可从 VS Code 公开的路径型 Shell 配置文件中选取。仅含来源的配置文件（如内置的 PowerShell 条目）无法在此列出。 <0>了解更多</0>",
+			"overrideLabel": "为 Zoo Code 覆盖 Shell",
+			"configureButton": "在 VS Code 中选择默认配置文件",
+			"noProfiles": "(在 terminal.integrated.profiles 中未找到路径型配置文件)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "提供商 '{{provider}}' 不允许用于您的组织",
 		"modelNotAllowed": "模型 '{{model}}' 不允许用于提供商 '{{provider}}'，您的组织不允许",
 		"profileInvalid": "此配置文件包含您的组织不允许的提供商或模型",
-		"qwenCodeOauthPath": "您必须提供有效的 OAuth 凭证路径"
+		"qwenCodeOauthPath": "您必须提供有效的 OAuth 凭证路径",
+		"zooGatewaySignIn": "请登录 Zoo Code 以使用 Zoo Gateway。"
 	},
 	"placeholders": {
 		"apiKey": "请输入 API 密钥...",

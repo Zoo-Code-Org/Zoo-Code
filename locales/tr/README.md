@@ -30,17 +30,19 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
-## v3.56.0'daki Yenilikler
+## v3.58.0'daki Yenilikler
 
-- Anthropic, Bedrock ve Vertex sağlayıcılarında **Claude Opus 4.8** desteği
-- **Opencode Go** yeni birinci sınıf API sağlayıcısı olarak eklendi
-- **Güvenilir görev iptali** — bir görevi iptal etmek artık çalışan işlemi doğru şekilde sonlandırıyor; inatçı işlemler için otomatik Ctrl+C yeniden denemesi
-- Gemini özel model ID'lerinin yok sayılarak varsayılana geri dönmesi düzeltildi
-- Eksik işaretçilerden kaynaklanan Grok diff kesintileri düzeltildi
-- Yapılandırılmış shell profili olmayan Windows'ta PowerShell algılama düzeltildi
-- VS Code code action'larının hâlâ Roo Code markasını göstermesi düzeltildi; tüm desteklenen dillere yerelleştirildi
-- Google Cloud Credentials alanına dosya yolu girildiğinde Vertex AI uyarısı düzeltildi
-- Altı güvenlik bağımlılık güncellemesi (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — çok profilli kimlik doğrulama desteğiyle yönetilen bir gateway üzerinden bağlan
+- **Gemini 3.5 Flash** — hızlı ve güçlü bir Google modeli, artık doğrudan sağlayıcı ayarlarından kullanılabilir
+- **Semble embedding** — harici API anahtarı veya yükleme gerektirmeden kod tabanını yerel olarak indeksle
+- **Yapılandırılabilir sohbet yazı tipi boyutu** ve **VS Code tümleşik terminal shell geçersiz kılma**
+- Webview'de **GitHub stili uyarılar** görüntüleniyor
+- GLM modelleri için **yapılandırılabilir maksimum çıktı token sayısı**
+- **WorkspacePathResolver** — sembolik bağlantı içeren çalışma alanlarında güvenilir yol işleme
+- Hatalı biçimlendirilmiş takip öneri modundan kaynaklanan React çökmesi düzeltildi
+- Özel değer ayarlanmadığında OpenAI temperature'ının atlanması düzeltildi
+- Ayar içe aktarma sırasında anahtar başına başarısızlıkların işlenmesi
+- Güvenlik güncellemeleri: mermaid v11.15.0, axios v1.16.0
 
 ---
 

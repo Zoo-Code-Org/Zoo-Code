@@ -243,6 +243,23 @@ describe("FollowUpSuggest", () => {
 		expect(container.firstChild).toBeNull()
 	})
 
+	it("should render malformed object mode values without crashing", () => {
+		const suggestions = [{ answer: "Use code mode", mode: { mode_slug: "code" } }] as any
+
+		renderWithTestProviders(
+			<FollowUpSuggest
+				suggestions={suggestions}
+				onSuggestionClick={mockOnSuggestionClick}
+				ts={123}
+				onCancelAutoApproval={mockOnCancelAutoApproval}
+			/>,
+			defaultTestState,
+		)
+
+		expect(screen.getByText("Use code mode")).toBeInTheDocument()
+		expect(screen.getByText("code")).toBeInTheDocument()
+	})
+
 	it("should stop countdown when user manually responds (isAnswered becomes true)", () => {
 		const { rerender } = renderWithTestProviders(
 			<FollowUpSuggest

@@ -213,7 +213,8 @@
 		"stoppingButton": "Остановка...",
 		"workspaceToggleLabel": "Включить индексацию для этого рабочего пространства",
 		"workspaceDisabledMessage": "Индексация настроена, но не включена для этого рабочего пространства.",
-		"autoEnableDefaultLabel": "Автоматически включать индексацию для новых рабочих пространств"
+		"autoEnableDefaultLabel": "Автоматически включать индексацию для новых рабочих пространств",
+		"sembleProvider": "Semble - Локальный"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Вы можете настроить глобальное сочетание клавиш для этого параметра <SettingsLink>в настройках вашей IDE</SettingsLink>.",
@@ -560,6 +561,13 @@
 			"placeholder": "По умолчанию: claude",
 			"maxTokensLabel": "Макс. выходных токенов",
 			"maxTokensDescription": "Максимальное количество выходных токенов для ответов Claude Code. По умолчанию 8000."
+		},
+		"zooGateway": {
+			"account": "Учетная запись Zoo Code",
+			"signInButton": "Войти в Zoo Code",
+			"signInDescription": "Войдите, чтобы использовать Zoo Gateway с вашей учетной записью",
+			"authenticated": "Аутентифицирован",
+			"authenticatedAs": "Аутентифицирован как {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +749,14 @@
 		"inheritEnv": {
 			"label": "Наследовать переменные среды",
 			"description": "Включите для наследования переменных среды от родительского процесса VS Code. <0>Подробнее</0>"
+		},
+		"profile": {
+			"label": "Переопределение терминала Zoo Code",
+			"default": "Использовать профиль VS Code по умолчанию (рекомендуется)",
+			"description": "По умолчанию Zoo Code использует оболочку, настроенную в VS Code. Выберите Переопределить, чтобы указать профиль оболочки с путём, предоставленный VS Code. Профили только с источником (например, встроенная запись PowerShell) не могут быть перечислены здесь. <0>Подробнее</0>",
+			"overrideLabel": "Переопределить оболочку для Zoo Code",
+			"configureButton": "Выбрать профиль по умолчанию в VS Code",
+			"noProfiles": "(профили с путём в terminal.integrated.profiles не найдены)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "Провайдер '{{provider}}' не разрешен вашей организацией",
 		"modelNotAllowed": "Модель '{{model}}' не разрешена для провайдера '{{provider}}' вашей организацией",
 		"profileInvalid": "Этот профиль содержит провайдера или модель, которые не разрешены вашей организацией",
-		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth"
+		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth",
+		"zooGatewaySignIn": "Войдите в Zoo Code, чтобы использовать Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Введите API-ключ...",

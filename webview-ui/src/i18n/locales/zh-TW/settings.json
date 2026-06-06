@@ -228,7 +228,8 @@
 		"stoppingButton": "正在停止...",
 		"workspaceToggleLabel": "為此工作區啟用索引",
 		"workspaceDisabledMessage": "索引已設定，但尚未為此工作區啟用。",
-		"autoEnableDefaultLabel": "自動為新工作區啟用索引"
+		"autoEnableDefaultLabel": "自動為新工作區啟用索引",
+		"sembleProvider": "Semble - 本機"
 	},
 	"autoApprove": {
 		"description": "無需詢問許可即可執行下列動作。請僅在您完全信任且了解安全風險的情況下啟用此功能。",
@@ -575,6 +576,13 @@
 			"placeholder": "預設：claude",
 			"maxTokensLabel": "最大輸出 Token",
 			"maxTokensDescription": "Claude Code 回應的最大輸出 Token 數量。預設為 8000。"
+		},
+		"zooGateway": {
+			"account": "Zoo Code 帳戶",
+			"signInButton": "登入 Zoo Code",
+			"signInDescription": "登入以使用您的帳戶存取 Zoo Gateway",
+			"authenticated": "已認證",
+			"authenticatedAs": "已認證為 {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -756,6 +764,14 @@
 		"inheritEnv": {
 			"label": "繼承環境變數",
 			"description": "啟用此選項以從父 VS Code 程序繼承環境變數。<0>了解更多</0>"
+		},
+		"profile": {
+			"label": "Zoo Code 終端機覆寫",
+			"default": "使用 VS Code 預設設定檔（建議）",
+			"description": "預設情況下，Zoo Code 使用 VS Code 設定的 Shell。選擇覆寫可從 VS Code 公開的路徑型 Shell 設定檔中選取。僅含來源的設定檔（如內建的 PowerShell 項目）無法在此列出。 <0>了解更多</0>",
+			"overrideLabel": "為 Zoo Code 覆寫 Shell",
+			"configureButton": "在 VS Code 中選擇預設設定檔",
+			"noProfiles": "(在 terminal.integrated.profiles 中未找到路徑型設定檔)"
 		}
 	},
 	"advancedSettings": {
@@ -916,7 +932,8 @@
 		"providerNotAllowed": "供應商 '{{provider}}' 不允許用於您的組織。",
 		"modelNotAllowed": "模型 '{{model}}' 不允許用於供應商 '{{provider}}'，此設定已被組織禁止",
 		"profileInvalid": "此設定檔包含您的組織不允許的供應商或模型",
-		"qwenCodeOauthPath": "您必須提供有效的 OAuth 憑證路徑"
+		"qwenCodeOauthPath": "您必須提供有效的 OAuth 憑證路徑",
+		"zooGatewaySignIn": "請登入 Zoo Code 以使用 Zoo Gateway。"
 	},
 	"placeholders": {
 		"apiKey": "請輸入 API 金鑰...",

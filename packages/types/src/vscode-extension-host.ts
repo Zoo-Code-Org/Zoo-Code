@@ -38,6 +38,7 @@ export interface ExtensionMessage {
 		| "commitSearchResults"
 		| "listApiConfig"
 		| "routerModels"
+		| "zooGatewayCredentialsReady"
 		| "openAiModels"
 		| "ollamaModels"
 		| "lmStudioModels"
@@ -63,6 +64,7 @@ export interface ExtensionMessage {
 		| "commandExecutionStatus"
 		| "mcpExecutionStatus"
 		| "vsCodeSetting"
+		| "terminalProfiles"
 		| "authenticatedUser"
 		| "condenseTaskContextStarted"
 		| "condenseTaskContextResponse"
@@ -152,6 +154,8 @@ export interface ExtensionMessage {
 	error?: string
 	setting?: string
 	value?: any // eslint-disable-line @typescript-eslint/no-explicit-any
+	/** Sanitized VS Code terminal profile names for the `terminalProfiles` message. */
+	profiles?: string[]
 	hasContent?: boolean
 	items?: MarketplaceItem[]
 	userInfo?: CloudUserInfo
@@ -275,6 +279,7 @@ export type ExtensionState = Pick<
 	| "terminalZshOhMy"
 	| "terminalZshP10k"
 	| "terminalZdotdir"
+	| "terminalProfile"
 	| "execaShellPath"
 	| "diagnosticsEnabled"
 	| "language"
@@ -376,6 +381,12 @@ export type ExtensionState = Pick<
 	debug?: boolean
 
 	/**
+	 * Platform info for conditional feature support (e.g. semble binary availability).
+	 */
+	platform?: string
+	arch?: string
+
+	/**
 	 * Monotonically increasing sequence number for clineMessages state pushes.
 	 * When present, the frontend should only apply clineMessages from a state push
 	 * if its seq is greater than the last applied seq. This prevents stale state
@@ -453,6 +464,8 @@ export interface WebviewMessage {
 		| "updateVSCodeSetting"
 		| "getVSCodeSetting"
 		| "vsCodeSetting"
+		| "requestTerminalProfiles"
+		| "openTerminalProfilePicker"
 		| "updateCondensingPrompt"
 		| "playSound"
 		| "playTts"
@@ -660,6 +673,7 @@ export interface WebviewMessage {
 			| "vercel-ai-gateway"
 			| "bedrock"
 			| "openrouter"
+			| "semble"
 		codebaseIndexEmbedderBaseUrl?: string
 		codebaseIndexEmbedderModelId: string
 		codebaseIndexEmbedderModelDimension?: number // Generic dimension for all providers

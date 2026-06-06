@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: Ongeldig authenticatietoken ontvangen.",
 			"token_verification_failed": "Zoo Code: Tokenverificatie mislukt.",
 			"invalid_token": "Zoo Code: Ongeldig token.",
-			"could_not_verify_token": "Zoo Code: Token kon niet worden geverifieerd."
+			"could_not_verify_token": "Zoo Code: Token kon niet worden geverifieerd.",
+			"session_expired": "Zoo Code-sessie verlopen. Meld je opnieuw aan om Zoo Gateway te blijven gebruiken.",
+			"out_of_credits": "Zoo Gateway: onvoldoende tegoed. Voeg tegoed toe om door te gaan.",
+			"account_unavailable": "Zoo Gateway: je account is momenteel niet beschikbaar. Neem contact op met support.",
+			"budget_exceeded": "Zoo Gateway: gebruiksbudget bereikt. Wacht op de reset of laad bij."
 		},
 		"info": {
 			"connected": "Zoo Code: Succesvol verbonden! Je kunt Zoo Code nu gebruiken als AI-provider.",
 			"disconnected": "Zoo Code: Succesvol losgekoppeld."
+		},
+		"buttons": {
+			"sign_in": "Aanmelden",
+			"add_credits": "Tegoed toevoegen",
+			"contact_support": "Contact opnemen"
 		}
 	},
 	"codeActions": {

@@ -213,7 +213,8 @@
 		"stoppingButton": "중지 중...",
 		"workspaceToggleLabel": "이 워크스페이스에 대한 인덱싱 활성화",
 		"workspaceDisabledMessage": "인덱싱이 구성되었지만 이 워크스페이스에서는 활성화되지 않았습니다.",
-		"autoEnableDefaultLabel": "새 워크스페이스에 대한 인덱싱 자동 활성화"
+		"autoEnableDefaultLabel": "새 워크스페이스에 대한 인덱싱 자동 활성화",
+		"sembleProvider": "Semble - 로컬"
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDE 환경 설정</SettingsLink>에서 이 설정에 대한 전역 바로 가기를 구성할 수 있습니다.",
@@ -560,6 +561,13 @@
 			"placeholder": "기본값: claude",
 			"maxTokensLabel": "최대 출력 토큰",
 			"maxTokensDescription": "Claude Code 응답의 최대 출력 토큰 수. 기본값은 8000입니다."
+		},
+		"zooGateway": {
+			"account": "Zoo Code 계정",
+			"signInButton": "Zoo Code에 로그인",
+			"signInDescription": "계정으로 Zoo Gateway를 사용하려면 로그인하세요",
+			"authenticated": "인증됨",
+			"authenticatedAs": "{{name}}(으)로 인증됨"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +749,14 @@
 		"inheritEnv": {
 			"label": "환경 변수 상속",
 			"description": "부모 VS Code 프로세���에서 환경 변수를 상속하려면 이 기능을 켜십시오. <0>자세히 알아보기</0>"
+		},
+		"profile": {
+			"label": "Zoo Code 터미널 재정의",
+			"default": "VS Code 기본 프로필 사용 (권장)",
+			"description": "기본적으로 Zoo Code는 VS Code에 구성된 쉘을 사용합니다. VS Code가 노출하는 경로 기반 쉘 프로필을 선택하려면 재정의를 선택하세요. 소스 전용 프로필(예: 내장 PowerShell 항목)은 여기에 나열할 수 없습니다. <0>자세히 알아보기</0>",
+			"overrideLabel": "Zoo Code용 쉘 재정의",
+			"configureButton": "VS Code에서 기본 프로필 선택",
+			"noProfiles": "(terminal.integrated.profiles에 경로 기반 프로필이 없습니다)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "제공자 '{{provider}}'는 조직에서 허용되지 않습니다",
 		"modelNotAllowed": "모델 '{{model}}'은 제공자 '{{provider}}'에 대해 조직에서 허용되지 않습니다",
 		"profileInvalid": "이 프로필에는 조직에서 허용되지 않는 제공자 또는 모델이 포함되어 있습니다",
-		"qwenCodeOauthPath": "유효한 OAuth 자격 증명 경로를 제공해야 합니다"
+		"qwenCodeOauthPath": "유효한 OAuth 자격 증명 경로를 제공해야 합니다",
+		"zooGatewaySignIn": "Zoo Gateway를 사용하려면 Zoo Code에 로그인하세요."
 	},
 	"placeholders": {
 		"apiKey": "API 키 입력...",

@@ -240,6 +240,41 @@ describe("getModelMaxOutputTokens", () => {
 		})
 	})
 
+	test("should honor the user's modelMaxTokens override for supportsMaxTokens models (e.g. Z.ai GLM)", () => {
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: false,
+			supportsMaxTokens: true,
+			maxTokens: 98_304, // model ceiling, well above the 20% clamp (40k)
+		}
+
+		const settings: ProviderSettings = {
+			apiProvider: "zai",
+			modelMaxTokens: 64_000, // user override, above 20% of the context window (40k)
+		}
+
+		const result = getModelMaxOutputTokens({ modelId: "glm-4.6", model, settings, format: "openai" })
+		// Honored instead of clamped to 20% of the context window.
+		expect(result).toBe(64_000)
+	})
+
+	test("should cap the supportsMaxTokens override at the model's own maxTokens ceiling", () => {
+		const model: ModelInfo = {
+			contextWindow: 200_000,
+			supportsPromptCache: false,
+			supportsMaxTokens: true,
+			maxTokens: 32_000,
+		}
+
+		const settings: ProviderSettings = {
+			apiProvider: "zai",
+			modelMaxTokens: 999_999, // beyond the model ceiling
+		}
+
+		const result = getModelMaxOutputTokens({ modelId: "glm-4.6", model, settings, format: "openai" })
+		expect(result).toBe(32_000)
+	})
+
 	test("should still apply 20% cap to non-GPT-5 models", () => {
 		const model: ModelInfo = {
 			contextWindow: 200_000,

@@ -41,12 +41,12 @@
 	"devDependencies": {
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
-		"@types/node": "^24.1.0",
+		"@types/node": "24.2.1",
 		"@types/react": "^19.1.6",
-		"ink-testing-library": "^4.0.0",
-		"rimraf": "^6.0.1",
-		"tsup": "^8.4.0",
-		"@vitest/coverage-v8": "^3.2.3",
-		"vitest": "^3.2.3"
+		"ink-testing-library": "4.0.0",
+		"rimraf": "6.0.1",
+		"tsup": "8.5.0",
+		"@vitest/coverage-v8": "3.2.6",
+		"vitest": "3.2.6"
 	}
 }

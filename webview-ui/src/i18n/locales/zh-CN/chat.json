@@ -338,9 +338,9 @@
 		},
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "Claude Opus 4.8 与 Opencode Go：已为 Anthropic、Bedrock 和 Vertex 添加 Claude Opus 4.8，并新增 Opencode Go 作为一等提供商。",
-			"highlight2": "可靠的任务取消：取消任务现在会正确终止正在运行的进程，对于顽固进程还会自动重试 Ctrl+C。",
-			"highlight3": "提供商与编辑器修复：修复了 Gemini 自定义模型 ID、Grok diff 截断、Windows 上的 PowerShell 检测以及 VS Code 代码操作的品牌名称。"
+			"highlight1": "通过 Zoo Gateway 连接 — 将请求路由至支持多配置身份验证的托管网关。",
+			"highlight2": "使用 Gemini 3.5 Flash — 一款快速强大的 Google 模型，现可直接在提供商设置中使用。",
+			"highlight3": "使用 Semble 在本地对代码库建立索引 — 无需外部 API 密钥或上传即可即时生成嵌入，代码始终保留在你的机器上。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

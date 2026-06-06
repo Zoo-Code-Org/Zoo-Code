@@ -203,6 +203,7 @@
 		"openRouterApiKeyPlaceholder": "Enter your OpenRouter API key",
 		"openRouterProviderRoutingLabel": "OpenRouter Provider Routing",
 		"openRouterProviderRoutingDescription": "OpenRouter routes requests to the best available providers for your embedding model. By default, requests are load balanced across the top providers to maximize uptime. However, you can choose a specific provider to use for this model.",
+		"sembleProvider": "Semble - Local",
 		"openaiCompatibleProvider": "OpenAI Compatible",
 		"openAiKeyLabel": "OpenAI API Key",
 		"openAiKeyPlaceholder": "Enter your OpenAI API key",
@@ -553,6 +554,13 @@
 				"learnMore": "Learn more about provider routing"
 			}
 		},
+		"zooGateway": {
+			"account": "Zoo Code Account",
+			"signInButton": "Sign in to Zoo Code",
+			"signInDescription": "Sign in to use Zoo Gateway with your account",
+			"authenticated": "Authenticated",
+			"authenticatedAs": "Authenticated as {{name}}"
+		},
 		"customModel": {
 			"capabilities": "Configure the capabilities and pricing for your custom OpenAI-compatible model. Be careful when specifying the model capabilities, as they can affect how Zoo Code performs.",
 			"maxTokens": {
@@ -809,6 +817,14 @@
 		"inheritEnv": {
 			"label": "Inherit environment variables",
 			"description": "Turn this on to inherit environment variables from the parent VS Code process. <0>Learn more</0>"
+		},
+		"profile": {
+			"label": "Zoo Code terminal override",
+			"default": "Use VS Code default profile (recommended)",
+			"overrideLabel": "Override shell for Zoo Code",
+			"configureButton": "Choose default profile in VS Code",
+			"noProfiles": "(no path-based profiles found in terminal.integrated.profiles)",
+			"description": "By default Zoo Code uses whatever shell VS Code is configured to use. Select Override to pick a path-based shell profile exposed by VS Code. Source-only profiles (e.g. the built-in PowerShell entry) cannot be listed here. <0>Learn more</0>"
 		}
 	},
 	"advancedSettings": {
@@ -969,7 +985,8 @@
 		"providerNotAllowed": "Provider '{{provider}}' is not allowed by your organization",
 		"modelNotAllowed": "Model '{{model}}' is not allowed for provider '{{provider}}' by your organization",
 		"profileInvalid": "This profile contains a provider or model that is not allowed by your organization",
-		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path."
+		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path.",
+		"zooGatewaySignIn": "Sign in to Zoo Code to use Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Enter API Key...",

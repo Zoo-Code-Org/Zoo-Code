@@ -155,13 +155,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
 				// Some OpenAI-Compatible models (e.g. claude-opus-4-7, claude-opus-4-8) reject
-				// `temperature` as deprecated/unsupported. Honor the model's `supportsTemperature`
-				// flag and omit it when explicitly set to false (undefined still sends temperature,
-				// preserving behavior).
-				...(modelInfo.supportsTemperature !== false && {
-					temperature:
-						this.options.modelTemperature ?? (deepseekReasoner ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
-				}),
+				// `temperature` as deprecated/unsupported, so honor the model's `supportsTemperature`
+				// flag and omit it when that flag is false. Beyond that, only send `temperature` when
+				// the user set a custom value or the model needs a specific default (deepseek-reasoner);
+				// otherwise omit it so the server's own default applies instead of forcing 0.
+				...(modelInfo.supportsTemperature !== false &&
+					(this.options.modelTemperature != null || deepseekReasoner) && {
+						temperature: this.options.modelTemperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE,
+					}),
 				messages: convertedMessages,
 				stream: true as const,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),

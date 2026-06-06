@@ -213,7 +213,8 @@
 		"stoppingButton": "रोक रहा है...",
 		"workspaceToggleLabel": "इस वर्कस्पेस के लिए इंडेक्सिंग सक्षम करें",
 		"workspaceDisabledMessage": "इंडेक्सिंग कॉन्फ़िगर की गई है लेकिन इस वर्कस्पेस के लिए सक्षम नहीं है।",
-		"autoEnableDefaultLabel": "नए वर्कस्पेस के लिए स्वचालित रूप से इंडेक्सिंग सक्षम करें"
+		"autoEnableDefaultLabel": "नए वर्कस्पेस के लिए स्वचालित रूप से इंडेक्सिंग सक्षम करें",
+		"sembleProvider": "Semble - स्थानीय"
 	},
 	"autoApprove": {
 		"toggleShortcut": "आप <SettingsLink>अपनी आईडीई वरीयताओं में</SettingsLink> इस सेटिंग के लिए एक वैश्विक शॉर्टकट कॉन्फ़िगर कर सकते हैं।",
@@ -560,6 +561,13 @@
 			"placeholder": "डिफ़ॉल्ट: claude",
 			"maxTokensLabel": "अधिकतम आउटपुट टोकन",
 			"maxTokensDescription": "Claude Code प्रतिक्रियाओं के लिए आउटपुट टोकन की अधिकतम संख्या। डिफ़ॉल्ट 8000 है।"
+		},
+		"zooGateway": {
+			"account": "Zoo Code खाता",
+			"signInButton": "Zoo Code में साइन इन करें",
+			"signInDescription": "अपने खाते के साथ Zoo Gateway का उपयोग करने के लिए साइन इन करें",
+			"authenticated": "प्रमाणित",
+			"authenticatedAs": "{{name}} के रूप में प्रमाणित"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +749,14 @@
 		"inheritEnv": {
 			"label": "पर्यावरण चर विरासत में लें",
 			"description": "पैरेंट VS Code प्रोसेस से पर्यावरण चर विरासत में लेने के लिए इसे चालू करें। <0>अधिक जानें</0>"
+		},
+		"profile": {
+			"label": "Zoo Code टर्मिनल ओवरराइड",
+			"default": "VS Code डिफ़ॉल्ट प्रोफ़ाइल उपयोग करें (अनुशंसित)",
+			"description": "डिफ़ॉल्ट रूप से Zoo Code VS Code में कॉन्फ़िगर की गई शेल का उपयोग करता है। VS Code द्वारा प्रदर्शित पथ-आधारित शेल प्रोफ़ाइल चुनने के लिए ओवरराइड चुनें। केवल-स्रोत प्रोफ़ाइल (जैसे, अंतर्निर्मित PowerShell प्रविष्टि) यहाँ सूचीबद्ध नहीं किए जा सकते। <0>अधिक जानें</0>",
+			"overrideLabel": "Zoo Code के लिए शेल ओवरराइड करें",
+			"configureButton": "VS Code में डिफ़ॉल्ट प्रोफ़ाइल चुनें",
+			"noProfiles": "(terminal.integrated.profiles में कोई पथ-आधारित प्रोफ़ाइल नहीं मिली)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "प्रदाता '{{provider}}' आपके संगठन द्वारा अनुमत नहीं है",
 		"modelNotAllowed": "मॉडल '{{model}}' प्रदाता '{{provider}}' के लिए आपके संगठन द्वारा अनुमत नहीं है",
 		"profileInvalid": "इस प्रोफ़ाइल में एक प्रदाता या मॉडल शामिल है जो आपके संगठन द्वारा अनुमत नहीं है",
-		"qwenCodeOauthPath": "आपको एक वैध OAuth क्रेडेंशियल पथ प्रदान करना होगा"
+		"qwenCodeOauthPath": "आपको एक वैध OAuth क्रेडेंशियल पथ प्रदान करना होगा",
+		"zooGatewaySignIn": "Zoo Gateway का उपयोग करने के लिए Zoo Code में साइन इन करें।"
 	},
 	"placeholders": {
 		"apiKey": "API कुंजी दर्ज करें...",

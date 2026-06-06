@@ -213,7 +213,8 @@
 		"stoppingButton": "Interruzione...",
 		"workspaceToggleLabel": "Abilita l'indicizzazione per questo workspace",
 		"workspaceDisabledMessage": "L'indicizzazione è configurata ma non abilitata per questo workspace.",
-		"autoEnableDefaultLabel": "Abilita automaticamente l'indicizzazione per i nuovi workspace"
+		"autoEnableDefaultLabel": "Abilita automaticamente l'indicizzazione per i nuovi workspace",
+		"sembleProvider": "Semble - Locale"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Puoi configurare una scorciatoia globale per questa impostazione <SettingsLink>nelle preferenze del tuo IDE</SettingsLink>.",
@@ -560,6 +561,13 @@
 			"placeholder": "Predefinito: claude",
 			"maxTokensLabel": "Token di output massimi",
 			"maxTokensDescription": "Numero massimo di token di output per le risposte di Claude Code. Il valore predefinito è 8000."
+		},
+		"zooGateway": {
+			"account": "Account Zoo Code",
+			"signInButton": "Accedi a Zoo Code",
+			"signInDescription": "Accedi per utilizzare Zoo Gateway con il tuo account",
+			"authenticated": "Autenticato",
+			"authenticatedAs": "Autenticato come {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +749,14 @@
 		"inheritEnv": {
 			"label": "Eredita variabili d'ambiente",
 			"description": "Attiva per ereditare le variabili d'ambiente dal processo padre di VS Code. <0>Scopri di più</0>"
+		},
+		"profile": {
+			"label": "Override terminale Zoo Code",
+			"default": "Usa il profilo predefinito di VS Code (consigliato)",
+			"description": "Per impostazione predefinita Zoo Code usa la shell configurata in VS Code. Seleziona Override per scegliere un profilo shell con percorso esposto da VS Code. I profili solo sorgente (es. la voce PowerShell integrata) non possono essere elencati qui. <0>Ulteriori informazioni</0>",
+			"overrideLabel": "Sostituisci shell per Zoo Code",
+			"configureButton": "Scegli il profilo predefinito in VS Code",
+			"noProfiles": "(nessun profilo con percorso trovato in terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "Il fornitore '{{provider}}' non è consentito dalla tua organizzazione",
 		"modelNotAllowed": "Il modello '{{model}}' non è consentito per il fornitore '{{provider}}' dalla tua organizzazione.",
 		"profileInvalid": "Questo profilo contiene un fornitore o un modello non consentito dalla tua organizzazione.",
-		"qwenCodeOauthPath": "Devi fornire un percorso valido per le credenziali OAuth"
+		"qwenCodeOauthPath": "Devi fornire un percorso valido per le credenziali OAuth",
+		"zooGatewaySignIn": "Accedi a Zoo Code per utilizzare Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Inserisci chiave API...",

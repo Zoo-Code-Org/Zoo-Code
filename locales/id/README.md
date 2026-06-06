@@ -30,17 +30,19 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.56.0
+## Yang Baru di v3.58.0
 
-- Dukungan **Claude Opus 4.8** untuk provider Anthropic, Bedrock, dan Vertex
-- **Opencode Go** ditambahkan sebagai provider API baru kelas utama
-- **Pembatalan tugas yang andal** — membatalkan tugas kini benar-benar menghentikan proses yang berjalan, dengan percobaan ulang Ctrl+C otomatis untuk proses yang sulit dihentikan
-- Memperbaiki ID model kustom Gemini yang diabaikan dan kembali ke default
-- Memperbaiki diff Grok yang terpotong karena marker yang hilang
-- Memperbaiki deteksi PowerShell di Windows tanpa profil shell yang dikonfigurasi
-- Memperbaiki code action VS Code yang masih menampilkan branding Roo Code; dilokalisasi ke semua bahasa yang didukung
-- Memperbaiki peringatan Vertex AI saat field Google Cloud Credentials menerima path file
-- Enam pembaruan keamanan dependensi (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — hubungkan melalui gateway terkelola dengan dukungan autentikasi multi-profil
+- **Gemini 3.5 Flash** — model Google yang cepat dan andal, kini tersedia langsung dari pengaturan provider
+- **Semble embedding** — indeks kodebase secara lokal tanpa API key eksternal atau unggahan
+- **Ukuran font chat yang dapat dikonfigurasi** dan **penggantian shell terminal terintegrasi VS Code**
+- **Peringatan bergaya GitHub** dirender di webview
+- **Token output maksimum yang dapat dikonfigurasi** untuk model GLM
+- **WorkspacePathResolver** — penanganan path yang andal di workspace dengan symlink
+- Memperbaiki crash React dari mode saran tindak lanjut yang salah format
+- Memperbaiki temperature OpenAI yang dihilangkan saat tidak ada nilai kustom
+- Penanganan kegagalan per-kunci saat impor pengaturan
+- Pembaruan keamanan: mermaid v11.15.0, axios v1.16.0
 
 ---
 

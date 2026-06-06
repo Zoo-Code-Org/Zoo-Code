@@ -30,17 +30,19 @@
 
 Je vindt een korte handleiding voor de overstap van Roo Code naar Zoo Code in de [Roo→Zoo-migratiegids](https://docs.zoocode.dev/roo-to-zoo-migration). We willen gebruikers zo goed mogelijk helpen tijdens de overgang, en precies daarvoor zijn onze [Reddit](https://www.reddit.com/r/ZooCode) en [Discord](https://discord.gg/VxfP4Vx3gX) er. Als je ergens tegenaan loopt of vragen hebt, kom langs en vraag het.
 
-## Nieuw in v3.56.0
+## Nieuw in v3.58.0
 
-- **Claude Opus 4.8**-ondersteuning voor Anthropic, Bedrock en Vertex
-- **Opencode Go** toegevoegd als nieuwe eersteklas API-provider
-- **Betrouwbare taakafsluiting** — een taak annuleren beëindigt nu correct het lopende proces, met automatische Ctrl+C-herpoging voor hardnekkige processen
-- Aangepaste Gemini-model-ID's die werden genegeerd en terugvielen op de standaard zijn gecorrigeerd
-- Afgeknipte Grok-diffs door ontbrekende markeerders zijn opgelost
-- PowerShell-detectie op Windows zonder geconfigureerd shell-profiel is gecorrigeerd
-- VS Code-code-acties die nog de Roo Code-naam toonden zijn gecorrigeerd; gelokaliseerd in alle ondersteunde talen
-- Vertex AI-waarschuwing bij een bestandspad in het Google Cloud Credentials-veld is opgelost
-- Zes beveiligingsupdates voor afhankelijkheden (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — verbinding via een beheerde gateway met ondersteuning voor multi-profiel authenticatie
+- **Gemini 3.5 Flash** — een snel en krachtig Google-model, nu direct beschikbaar via de provider-instellingen
+- **Semble-inbedding** — indexeer je codebase lokaal zonder externe API-sleutel of upload
+- **Configureerbare chatlettergrootte** en **VS Code geïntegreerde terminal shell-overschrijving**
+- **GitHub-stijl waarschuwingen** worden gerenderd in de webview
+- **Configureerbaar maximum aantal uitvoertokens** voor GLM-modellen
+- **WorkspacePathResolver** — betrouwbare padverwerking in workspaces met symlinks
+- React-crash door een onjuist geformatteerde follow-up suggestiemodus opgelost
+- Ontbrekende OpenAI-temperature bij geen aangepaste waarde gecorrigeerd
+- Verwerking van fouten per sleutel bij het importeren van instellingen
+- Beveiligingsupdates: mermaid v11.15.0, axios v1.16.0
 
 ---
 
