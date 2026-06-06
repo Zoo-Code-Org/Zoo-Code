@@ -250,8 +250,8 @@ importers:
         specifier: 24.2.1
         version: 24.2.1
       '@types/vscode':
-        specifier: 1.103.0
-        version: 1.103.0
+        specifier: 1.100.0
+        version: 1.100.0
       '@vitest/coverage-v8':
         specifier: 3.2.4
         version: 3.2.4(vitest@3.2.4)
@@ -3730,9 +3730,6 @@ packages:
 
   '@types/vscode@1.100.0':
     resolution: {integrity: sha512-4uNyvzHoraXEeCamR3+fzcBlh7Afs4Ifjs4epINyUX/jvdk0uzLnwiDY35UKDKnkCHP5Nu3dljl2H8lR6s+rQw==}
-
-  '@types/vscode@1.103.0':
-    resolution: {integrity: sha512-o4hanZAQdNfsKecexq9L3eHICd0AAvdbLk6hA60UzGXbGH/q8b/9xv2RgR7vV3ZcHuyKVq7b37IGd/+gM4Tu+Q==}
 
   '@types/yargs-parser@21.0.3':
     resolution: {integrity: sha512-I4q9QU9MQv4oEOz4tAHJtNz1cwuLxn2F3xcc2iV5WdqLPpUnj30aUuxt1mAxYTG+oe8CZMV/+6rU4S4gRDzqtQ==}
@@ -12539,8 +12536,6 @@ snapshots:
   '@types/vscode-webview@1.57.5': {}
 
   '@types/vscode@1.100.0': {}
-
-  '@types/vscode@1.103.0': {}
 
   '@types/yargs-parser@21.0.3': {}
 
