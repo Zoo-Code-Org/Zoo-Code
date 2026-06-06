@@ -1419,13 +1419,12 @@ function sum(a, b) {
 
 			const result = await strategy.applyDiff(originalContent, diff)
 			expect(result.success).toBe(false)
-			if (!result.success && result.failParts) {
-				const failedPart = result.failParts[0]
-				if (failedPart && "error" in failedPart && failedPart.error) {
-					expect(failedPart.error).toContain("No sufficiently similar match found")
-				} else {
-					throw new Error("Expected failedPart to have an error property")
-				}
+			if (!result.success) {
+				expect(result.failParts).toBeDefined()
+				expect(result.failParts!.length).toBeGreaterThan(0)
+				const failedPart = result.failParts![0]
+				expect(failedPart).toHaveProperty("error")
+				expect((failedPart as { error: string }).error).toContain("No sufficiently similar match found")
 			}
 		})
 
@@ -1446,19 +1445,18 @@ function sum(a, b) {
 
 			const result = await strategy.applyDiff(originalContent, diff)
 			expect(result.success).toBe(false)
-			if (!result.success && result.failParts) {
-				const failedPart = result.failParts[0]
-				if (failedPart && "error" in failedPart && failedPart.error) {
-					const errorMsg = failedPart.error
-					expect(errorMsg).toContain("Debug Info:")
-					expect(errorMsg).toContain("Similarity Score:")
-					expect(errorMsg).toContain("Required Threshold: 95%")
-					expect(errorMsg).toContain("Levenshtein Distance:")
-					expect(errorMsg).toContain("Search Length:")
-					expect(errorMsg).toContain("Best Match Length:")
-				} else {
-					throw new Error("Expected failedPart to have an error property")
-				}
+			if (!result.success) {
+				expect(result.failParts).toBeDefined()
+				expect(result.failParts!.length).toBeGreaterThan(0)
+				const failedPart = result.failParts![0]
+				expect(failedPart).toHaveProperty("error")
+				const errorMsg = (failedPart as { error: string }).error
+				expect(errorMsg).toContain("Debug Info:")
+				expect(errorMsg).toContain("Similarity Score:")
+				expect(errorMsg).toContain("Required Threshold: 95%")
+				expect(errorMsg).toContain("Levenshtein Distance:")
+				expect(errorMsg).toContain("Search Length:")
+				expect(errorMsg).toContain("Best Match Length:")
 			}
 		})
 	})
