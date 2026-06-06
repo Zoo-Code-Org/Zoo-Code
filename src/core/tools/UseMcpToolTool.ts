@@ -1,4 +1,4 @@
-import type { ClineAskUseMcpServer, McpExecutionStatus } from "@roo-code/types"
+import type { ClineAskUseMcpServer, McpExecutionStatus, McpResourceLink } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -281,6 +281,10 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 						}
 					}
 					return ""
+				}
+				if (item.type === "resource_link") {
+					const link = item as McpResourceLink
+					return `[${link.name}](${link.uri})${link.description ? ` — ${link.description}` : ""}`
 				}
 				return ""
 			})
