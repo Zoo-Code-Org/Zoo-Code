@@ -341,7 +341,7 @@ describe("mergeExtensionState", () => {
 			taskSyncEnabled: false,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 			maxReadFileLine: -1,
-			diffFuzzyThreshold: 0.9,
+			diffFuzzyThreshold: DEFAULT_DIFF_FUZZY_THRESHOLD,
 		}
 
 		const makeMessage = (ts: number, text: string): ClineMessage =>

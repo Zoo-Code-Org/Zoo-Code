@@ -24,12 +24,13 @@ export const DEFAULT_WRITE_DELAY_MS = 1000
 
 /**
  * Default fuzzy matching threshold for the multi-search-replace diff strategy.
- * A value of 0.90 means the search content must be at least 90% similar to the
- * file content for a match to succeed. Lowered from the previous strict 1.0 (exact
- * match) to reduce "Edit Unsuccessful" errors caused by minor whitespace or
- * formatting differences.
+ * A value of 1.0 (exact match) is used by default for safety, especially when
+ * auto-approval for writes is enabled. This prevents unintended changes from
+ * being applied due to minor mismatches. Users can lower this threshold manually
+ * in settings to reduce "Edit Unsuccessful" errors caused by minor whitespace
+ * or formatting differences, accepting a higher risk of unintended edits.
  */
-export const DEFAULT_DIFF_FUZZY_THRESHOLD = 0.9
+export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 
 /**
  * Terminal output preview size options for persisted command output.
