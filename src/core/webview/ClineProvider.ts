@@ -469,6 +469,8 @@ export class ClineProvider
 	// Removes and destroys the top Cline instance (the current finished task),
 	// activating the previous one (resuming the parent task).
 	async removeClineFromStack(options?: { skipDelegationRepair?: boolean }) {
+		const callerStack = new Error().stack
+
 		if (this.clineStack.length === 0) {
 			return
 		}
@@ -525,7 +527,8 @@ export class ClineProvider
 								awaitingChildId: undefined,
 							})
 							this.log(
-								`[ClineProvider#removeClineFromStack] Repaired parent ${parentTaskId} metadata: delegated → active (child ${childTaskId} removed)`,
+								`[ClineProvider#removeClineFromStack] Repaired parent ${parentTaskId} metadata: delegated → active (child ${childTaskId} removed). ` +
+									`Caller stack: ${callerStack?.split("\n").slice(1, 5).join(" | ")}`,
 							)
 						}
 					})

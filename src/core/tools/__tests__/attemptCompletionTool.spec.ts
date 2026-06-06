@@ -493,6 +493,7 @@ describe("attemptCompletionTool", () => {
 					partial: false,
 				}
 				const mockProvider = {
+					log: vi.fn(),
 					getTaskWithId: vi.fn().mockImplementation((id: string) => {
 						if (id === "child-1") {
 							return Promise.resolve({ historyItem: { id, status: "active" } })
@@ -543,6 +544,7 @@ describe("attemptCompletionTool", () => {
 					partial: false,
 				}
 				const mockProvider = {
+					log: vi.fn(),
 					getTaskWithId: vi.fn().mockImplementation((id: string) => {
 						if (id === "child-1") {
 							return Promise.resolve({ historyItem: { id, status: "active" } })
@@ -594,6 +596,7 @@ describe("attemptCompletionTool", () => {
 					partial: false,
 				}
 				const mockProvider = {
+					log: vi.fn(),
 					getTaskWithId: vi.fn().mockImplementation((id: string) => {
 						if (id === "child-1") {
 							return Promise.resolve({ historyItem: { id, status: "active" } })
@@ -627,6 +630,7 @@ describe("attemptCompletionTool", () => {
 
 				expect(mockAskFinishSubTaskApproval).not.toHaveBeenCalled()
 				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+				expect(mockProvider.log).toHaveBeenCalledWith(expect.stringContaining("Skipping delegation"))
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
 				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith("child-1")
 			})

@@ -4,10 +4,143 @@ import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
 import { setDefaultSuiteTimeout } from "./test-utils"
 import { waitFor, waitUntilCompleted } from "./utils"
-import { SUBTASK_CHILD_FOLLOWUP_ANSWER, SUBTASK_PARENT_PROMPT } from "../fixtures/subtasks"
+import { SUBTASK_CHILD_FOLLOWUP_ANSWER, SUBTASK_FAST_PARENT_PROMPT, SUBTASK_PARENT_PROMPT } from "../fixtures/subtasks"
 
 suite("Roo Code Subtasks", function () {
 	setDefaultSuiteTimeout(this)
+
+	test("child completing on its first response returns to parent", async () => {
+		const api = globalThis.api
+		const says: Record<string, ClineMessage[]> = {}
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		try {
+			const parentTaskId = await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "ask",
+							alwaysAllowModeSwitch: true,
+							alwaysAllowSubtasks: true,
+							autoApprovalEnabled: true,
+							enableCheckpoints: false,
+						},
+						text: SUBTASK_FAST_PARENT_PROMPT,
+					}),
+			})
+
+			assert.ok(
+				Object.entries(says).some(
+					([taskId, messages]) =>
+						taskId !== parentTaskId &&
+						messages.some(
+							({ say, text }) => say === "completion_result" && text?.trim() === "Fast child completed",
+						),
+				),
+				"Immediately-completing child should emit its expected result",
+			)
+			assert.strictEqual(
+				says[parentTaskId]
+					?.filter(({ say }) => say === "completion_result")
+					.map(({ text }) => text?.trim())
+					.find((text): text is string => !!text),
+				"Fast parent resumed",
+				"Parent should resume after the child completes on its first response",
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+		}
+	})
+
+	// Smoke: child completing normally must resume the parent task.
+	test("child task returns to parent after normal completion", async () => {
+		const api = globalThis.api
+		const asks: Record<string, ClineMessage[]> = {}
+		const says: Record<string, ClineMessage[]> = {}
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "ask") {
+				asks[taskId] = asks[taskId] || []
+				asks[taskId].push(message)
+			}
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		try {
+			const parentTaskId = await api.startNewTask({
+				configuration: {
+					mode: "ask",
+					alwaysAllowModeSwitch: true,
+					alwaysAllowSubtasks: true,
+					autoApprovalEnabled: true,
+					enableCheckpoints: false,
+				},
+				text: SUBTASK_PARENT_PROMPT,
+			})
+
+			// Wait for child to spawn.
+			let childTaskId: string | undefined
+			await waitFor(() => {
+				const stack = api.getCurrentTaskStack()
+				const current = stack[stack.length - 1]
+				if (current && current !== parentTaskId) {
+					childTaskId = current
+					return true
+				}
+				return false
+			})
+
+			// Wait for the child's followup question, then answer so it can complete.
+			// Register the completion listener before sending the answer to avoid a race.
+			await waitFor(() => asks[childTaskId!]?.some(({ ask }) => ask === "followup") ?? false)
+			await waitUntilCompleted({
+				api,
+				start: async () => {
+					await api.sendMessage(SUBTASK_CHILD_FOLLOWUP_ANSWER)
+					return parentTaskId
+				},
+			})
+
+			const parentCompletionText = says[parentTaskId]
+				?.filter(({ say }) => say === "completion_result")
+				.map(({ text }) => text?.trim())
+				.find((t): t is string => !!t)
+
+			assert.strictEqual(
+				parentCompletionText,
+				"Parent task resumed",
+				"Parent should complete with the expected result after child returns",
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			// Drain the stack so partially-completed tasks don't leak into the next test.
+			// On the happy path the parent is already gone; on failure both tasks may still be active.
+			if (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			if (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+		}
+	})
 
 	// Race mitigation: skipDelegationRepair prevents removeClineFromStack from
 	// auto-resuming the parent when the child is cancelled (Race 2).

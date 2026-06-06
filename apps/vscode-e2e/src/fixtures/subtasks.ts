@@ -5,10 +5,14 @@ import { toolResultContains } from "./tool-result"
 
 const SUBTASK_PARENT_MARKER = "SUBTASK_PARENT_CANCELLATION_SMOKE"
 const SUBTASK_CHILD_MARKER = "SUBTASK_CHILD_CALCULATOR_SMOKE"
+const SUBTASK_FAST_PARENT_MARKER = "SUBTASK_PARENT_IMMEDIATE_COMPLETION"
+const SUBTASK_FAST_CHILD_MARKER = "SUBTASK_CHILD_IMMEDIATE_COMPLETION"
 
 const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
 export const SUBTASK_PARENT_PROMPT = `${SUBTASK_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_CHILD_PROMPT}" Do not answer directly.`
 export const SUBTASK_CHILD_FOLLOWUP_ANSWER = "9"
+const SUBTASK_FAST_CHILD_PROMPT = `${SUBTASK_FAST_CHILD_MARKER}: Complete immediately with the exact result "Fast child completed".`
+export const SUBTASK_FAST_PARENT_PROMPT = `${SUBTASK_FAST_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_FAST_CHILD_PROMPT}" Do not answer directly.`
 
 const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
 	const rawRequest = JSON.stringify(req)
@@ -40,6 +44,54 @@ const completionAfterAnswer = (followupId: string, completionId: string) => ({
 })
 
 export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(SUBTASK_FAST_PARENT_MARKER),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: SUBTASK_FAST_CHILD_PROMPT,
+					}),
+					id: "call_subtasks_fast_parent_new_task_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(SUBTASK_FAST_CHILD_MARKER),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: "Fast child completed" }),
+					id: "call_subtasks_fast_child_completion_002",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			toolCallId: "call_subtasks_fast_parent_new_task_001",
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: "Fast parent resumed" }),
+					id: "call_subtasks_fast_parent_completion_003",
+				},
+			],
+		},
+	})
+
 	mock.addFixture({
 		match: {
 			userMessage: new RegExp(SUBTASK_PARENT_MARKER),
