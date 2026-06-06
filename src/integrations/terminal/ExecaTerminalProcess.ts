@@ -3,6 +3,7 @@ import psTree from "ps-tree"
 import process from "process"
 
 import type { RooTerminal } from "./types"
+import { getShell } from "../../utils/shell"
 import { BaseTerminal } from "./BaseTerminal"
 import { BaseTerminalProcess } from "./BaseTerminalProcess"
 
@@ -40,7 +41,7 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 			this.isHot = true
 
 			this.subprocess = execa({
-				shell: BaseTerminal.getExecaShellPath() || true,
+					shell: BaseTerminal.getExecaShellPath() || getShell(),
 				cwd: this.terminal.getCurrentWorkingDirectory(),
 				all: true,
 				// Ignore stdin to ensure non-interactive mode and prevent hanging

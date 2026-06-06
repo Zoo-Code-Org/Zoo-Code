@@ -1,6 +1,7 @@
 // npx vitest run integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts
 
 const mockPid = 12345
+const mockGetShell = vitest.fn(() => "/bin/bash")
 
 vitest.mock("execa", () => {
 	const mockKill = vitest.fn()
@@ -19,6 +20,10 @@ vitest.mock("execa", () => {
 
 vitest.mock("ps-tree", () => ({
 	default: vitest.fn((_: number, cb: any) => cb(null, [])),
+}))
+
+vitest.mock("../../../utils/shell", () => ({
+	getShell: () => mockGetShell(),
 }))
 
 import { execa } from "execa"
@@ -63,7 +68,7 @@ describe("ExecaTerminalProcess", () => {
 			const execaMock = vitest.mocked(execa)
 			expect(execaMock).toHaveBeenCalledWith(
 				expect.objectContaining({
-					shell: true,
+					shell: "/bin/bash",
 					cwd: "/test/cwd",
 					all: true,
 					env: expect.objectContaining({
@@ -105,13 +110,14 @@ describe("ExecaTerminalProcess", () => {
 			)
 		})
 
-		it("should fall back to shell=true when execaShellPath is undefined", async () => {
+		it("should fall back to getShell() when execaShellPath is undefined", async () => {
 			BaseTerminal.setExecaShellPath(undefined)
+			mockGetShell.mockReturnValue("/usr/bin/zsh")
 			await terminalProcess.run("echo test")
 			const execaMock = vitest.mocked(execa)
 			expect(execaMock).toHaveBeenCalledWith(
 				expect.objectContaining({
-					shell: true,
+					shell: "/usr/bin/zsh",
 				}),
 			)
 		})
