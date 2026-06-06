@@ -45,12 +45,12 @@ describe("History resume delegation - parent metadata transitions", () => {
 		vi.clearAllMocks()
 	})
 
-	it("reopenParentFromDelegation persists parent metadata (delegated → active) before reopen", async () => {
+	it("reopenParentFromDelegation accepts an active parent awaiting the returning child", async () => {
 		const providerEmit = vi.fn()
 		const getTaskWithId = vi.fn().mockResolvedValue({
 			historyItem: {
 				id: "parent-1",
-				status: "delegated",
+				status: "active",
 				delegatedToId: "child-1",
 				awaitingChildId: "child-1",
 				childIds: ["child-1"],

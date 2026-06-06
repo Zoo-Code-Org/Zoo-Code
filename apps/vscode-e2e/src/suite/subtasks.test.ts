@@ -4,7 +4,15 @@ import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
 import { setDefaultSuiteTimeout } from "./test-utils"
 import { waitFor, waitUntilCompleted } from "./utils"
-import { SUBTASK_CHILD_FOLLOWUP_ANSWER, SUBTASK_FAST_PARENT_PROMPT, SUBTASK_PARENT_PROMPT } from "../fixtures/subtasks"
+import {
+	SUBTASK_CHILD_FOLLOWUP_ANSWER,
+	SUBTASK_FAST_PARENT_PROMPT,
+	SUBTASK_PARENT_PROMPT,
+	SUBTASK_XPROFILE_DIFFERENT_CHILD_RESULT,
+	SUBTASK_XPROFILE_PARENT_PROMPT,
+	SUBTASK_XPROFILE_PARENT_RESULT,
+	SUBTASK_XPROFILE_SAME_CHILD_RESULT,
+} from "../fixtures/subtasks"
 
 suite("Roo Code Subtasks", function () {
 	setDefaultSuiteTimeout(this)
@@ -320,6 +328,114 @@ suite("Roo Code Subtasks", function () {
 			await api.clearCurrentTask()
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
+		}
+	})
+
+	test("same-profile child returns before a different-profile child", async () => {
+		const api = globalThis.api
+		const says: Record<string, ClineMessage[]> = {}
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		const aimockUrl = process.env.AIMOCK_URL
+		const parentProfile = {
+			apiProvider: "openrouter" as const,
+			openRouterApiKey: "mock-key",
+			openRouterModelId: "openai/gpt-4.1",
+			rateLimitSeconds: 0,
+			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
+		}
+		const childProfile = {
+			...parentProfile,
+			openRouterModelId: "openai/gpt-4.1-mini",
+		}
+		const parentProfileId = await api.upsertProfile("subtask-parent-profile", parentProfile, true)
+		const childProfileId = await api.upsertProfile("subtask-child-profile", childProfile, false)
+		await api.setConfiguration({
+			modeApiConfigs: {
+				code: parentProfileId!,
+				ask: childProfileId!,
+			},
+		})
+
+		try {
+			let parentTaskId: string
+			try {
+				parentTaskId = await waitUntilCompleted({
+					api,
+					start: () =>
+						api.startNewTask({
+							configuration: {
+								mode: "code",
+								alwaysAllowModeSwitch: true,
+								alwaysAllowSubtasks: true,
+								autoApprovalEnabled: true,
+								enableCheckpoints: false,
+							},
+							text: SUBTASK_XPROFILE_PARENT_PROMPT,
+						}),
+				})
+			} catch (error) {
+				const messageSummary = Object.fromEntries(
+					Object.entries(says).map(([taskId, messages]) => [
+						taskId,
+						messages.map(({ say, text }) => ({ say, text: text?.slice(0, 200) })),
+					]),
+				)
+				throw new Error(
+					`Sequential cross-profile subtasks did not complete. Stack: ${JSON.stringify(api.getCurrentTaskStack())}; ` +
+						`messages: ${JSON.stringify(messageSummary)}`,
+					{ cause: error },
+				)
+			}
+
+			const sameProfileChildId = Object.entries(says).find(
+				([taskId, messages]) =>
+					taskId !== parentTaskId &&
+					messages.some(
+						({ say, text }) =>
+							say === "completion_result" && text?.trim() === SUBTASK_XPROFILE_SAME_CHILD_RESULT,
+					),
+			)?.[0]
+			const differentProfileChildId = Object.entries(says).find(
+				([taskId, messages]) =>
+					taskId !== parentTaskId &&
+					messages.some(
+						({ say, text }) =>
+							say === "completion_result" && text?.trim() === SUBTASK_XPROFILE_DIFFERENT_CHILD_RESULT,
+					),
+			)?.[0]
+
+			assert.ok(sameProfileChildId, "Same-profile child should return to the parent")
+			assert.ok(differentProfileChildId, "Different-profile child should return to the parent")
+			assert.notStrictEqual(
+				sameProfileChildId,
+				differentProfileChildId,
+				"Parent should delegate to two distinct child tasks",
+			)
+			assert.strictEqual(
+				says[parentTaskId]
+					?.filter(({ say }) => say === "completion_result")
+					.map(({ text }) => text?.trim())
+					.find((text): text is string => !!text),
+				SUBTASK_XPROFILE_PARENT_RESULT,
+				"Parent should resume after both sequential children complete",
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			await api.setConfiguration({ modeApiConfigs: {} })
+			await api.deleteProfile("subtask-child-profile").catch(() => {})
+			await api.deleteProfile("subtask-parent-profile").catch(() => {})
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
 		}
 	})
 })
