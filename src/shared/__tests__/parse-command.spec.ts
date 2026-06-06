@@ -1,4 +1,4 @@
-import { parseCommand } from "../parse-command"
+import { findUnterminatedQuote, parseCommand } from "../parse-command"
 
 // Toggle that lets a single test force shell-quote's parse() to throw so the
 // parser's fallback branch can be exercised deterministically.
@@ -167,6 +167,100 @@ describe("parseCommand", () => {
 			expect(result).toEqual(["sh -c $'echo hi'", "echo done"])
 			expect(result.join(" ")).not.toContain("SQUOTE")
 			expect(result.join(" ")).not.toContain("__")
+		})
+	})
+
+	describe("malformed input with unterminated quotes", () => {
+		// A command with an unterminated quote is a shell syntax error. It must
+		// be returned as a single opaque token so that an embedded newline cannot
+		// surface a line as an independent, separately auto-approvable command.
+		it("returns an unclosed single-quoted command as one opaque token", () => {
+			const input = "sh -c 'echo test"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("does not split an unclosed single quote on an embedded newline", () => {
+			const input = "sh -c 'echo a\nrm -rf /"
+			// Without the guard, this would yield ["sh -c echo a", "rm -rf /"],
+			// exposing `rm -rf /` as a standalone command.
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("returns an unclosed double-quoted command as one opaque token", () => {
+			const input = 'sh -c "echo a\necho b'
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("returns an unclosed ANSI-C quoted command as one opaque token", () => {
+			const input = "sh -c $'echo a\necho b"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("treats odd-quote improper quoting as a single opaque token", () => {
+			const input = "sh -c 'cmd ''\\\n"
+			expect(parseCommand(input)).toEqual([input])
+		})
+	})
+
+	describe("findUnterminatedQuote", () => {
+		it("returns null for balanced and quote-free input", () => {
+			expect(findUnterminatedQuote("git status")).toBeNull()
+			expect(findUnterminatedQuote("echo 'hello'")).toBeNull()
+			expect(findUnterminatedQuote('echo "hello"')).toBeNull()
+			expect(findUnterminatedQuote("sh -c 'echo a\necho b'")).toBeNull()
+			expect(findUnterminatedQuote("sh -c $'echo a\necho b'")).toBeNull()
+		})
+
+		it("detects an unterminated single quote and reports its opening index", () => {
+			expect(findUnterminatedQuote("echo 'hello")).toEqual({ quoteType: "posix-single", openIndex: 5 })
+		})
+
+		it("detects an unterminated double quote and reports its opening index", () => {
+			expect(findUnterminatedQuote('echo "hello')).toEqual({ quoteType: "double", openIndex: 5 })
+		})
+
+		it("reports ansi-c style and the $ position for an unterminated ANSI-C quote", () => {
+			expect(findUnterminatedQuote("echo $'hello")).toEqual({ quoteType: "ansi-c", openIndex: 5 })
+		})
+
+		it("treats a backslash-escaped quote outside a string as literal", () => {
+			// `echo \'` is a literal quote, not an unterminated region.
+			expect(findUnterminatedQuote("echo \\'")).toBeNull()
+			expect(findUnterminatedQuote('echo \\"')).toBeNull()
+		})
+
+		it("ignores a quote that appears inside a comment", () => {
+			expect(findUnterminatedQuote("echo hi # it's fine")).toBeNull()
+		})
+
+		it("treats # attached to a word as an ordinary character", () => {
+			expect(findUnterminatedQuote("echo foo#'bar'")).toBeNull()
+			expect(findUnterminatedQuote("echo foo#'bar")).toEqual({ quoteType: "posix-single", openIndex: 9 })
+		})
+
+		it("does not let an apostrophe inside double quotes open a region", () => {
+			expect(findUnterminatedQuote(`echo "don't"`)).toBeNull()
+		})
+
+		it("does not let a double quote inside single quotes open a region", () => {
+			expect(findUnterminatedQuote(`echo 'a " b'`)).toBeNull()
+		})
+
+		it("honors backslash escapes inside double quotes", () => {
+			// The escaped quote does not close the region; the final quote does.
+			expect(findUnterminatedQuote('echo "a \\" b"')).toBeNull()
+			expect(findUnterminatedQuote('echo "a \\"')?.quoteType).toBe("double")
+		})
+
+		it("honors backslash escapes inside ANSI-C quotes", () => {
+			expect(findUnterminatedQuote("echo $'it\\'s ok'")).toBeNull()
+			expect(findUnterminatedQuote("echo $'it\\'s ok")?.quoteType).toBe("ansi-c")
+		})
+
+		it("treats POSIX single quotes as opaque to backslashes", () => {
+			// Inside a POSIX single quote a backslash is literal, so the quote
+			// closes at the next apostrophe regardless of any preceding backslash.
+			expect(findUnterminatedQuote("echo 'a\\'")).toBeNull()
 		})
 	})
 })

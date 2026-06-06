@@ -3,6 +3,139 @@ import { parse } from "shell-quote"
 export type ShellToken = string | { op: string } | { command: string }
 
 /**
+ * The style of quoting that opened a region. Distinguishing `posix-single` from
+ * `ansi-c` matters because they share the `'` delimiter but follow different
+ * escaping rules.
+ */
+export type QuoteType = "posix-single" | "ansi-c" | "double"
+
+/**
+ * Describes the opening of a quoted region that is never closed.
+ *
+ * - `quoteType`: the style of the unterminated quote.
+ * - `openIndex`: the index in the original command string of the character that
+ *   opened the region. For ANSI-C quoting this points at the leading `$` so a
+ *   caller can render the `$'` opener. This position lets a future caller emit a
+ *   located error (e.g. "unterminated quote near ...") instead of a generic
+ *   message.
+ */
+export interface UnterminatedQuote {
+	quoteType: QuoteType
+	openIndex: number
+}
+
+/**
+ * Scan a command string left-to-right with a small state machine and report the
+ * first quoted region that is never closed, or `null` when every quoted region
+ * is properly terminated.
+ *
+ * A regex cannot reliably answer "is this command well-quoted?" because quoting
+ * is context-sensitive: a backslash escapes the next character outside single
+ * quotes, `#` may begin a comment that should be ignored, and an apostrophe
+ * inside double quotes (or vice versa) is literal text rather than a delimiter.
+ * This walk mirrors how a POSIX shell tokenizes quoting so that legitimate
+ * multi-line quoted arguments are accepted while genuinely unterminated quotes
+ * (a shell syntax error) are detected.
+ *
+ * Rules implemented:
+ * - Outside any quote, a backslash escapes the following character, so `\'` and
+ *   `\"` are literal and do not open a region.
+ * - Outside any quote, `#` begins a comment when it is at the start of the input
+ *   or preceded by whitespace; the remainder of that line is ignored. A `#` that
+ *   is attached to a word (e.g. `foo#bar`) is an ordinary character.
+ * - Single quotes are opaque: no escapes apply, and the region ends only at the
+ *   next `'`.
+ * - Double quotes honor backslash escapes, so `\"` does not close the region.
+ * - ANSI-C quoting ($'...') behaves like a single-quoted region for delimiter
+ *   purposes but honors backslash escapes, so `\'` does not close it.
+ */
+export function findUnterminatedQuote(command: string): UnterminatedQuote | null {
+	let inSingle = false
+	let inDouble = false
+	// Tracks whether the current single-quoted region was opened as ANSI-C
+	// ($'...'), which -- unlike a POSIX single quote -- honors backslash escapes.
+	let singleIsAnsiC = false
+	// Index of the character that opened the currently active quoted region.
+	let openIndex = -1
+
+	for (let i = 0; i < command.length; i++) {
+		const char = command[i]
+
+		if (inSingle) {
+			if (singleIsAnsiC && char === "\\") {
+				// Skip the escaped character inside an ANSI-C string.
+				i++
+				continue
+			}
+			if (char === "'") {
+				inSingle = false
+				singleIsAnsiC = false
+			}
+			continue
+		}
+
+		if (inDouble) {
+			if (char === "\\") {
+				// Skip the escaped character inside a double-quoted string.
+				i++
+				continue
+			}
+			if (char === '"') {
+				inDouble = false
+			}
+			continue
+		}
+
+		// Outside any quoted region.
+		if (char === "\\") {
+			// A backslash escapes the next character, so a following quote is
+			// literal and must not open a region.
+			i++
+			continue
+		}
+
+		if (char === "#" && (i === 0 || /\s/.test(command[i - 1]))) {
+			// Start of a comment: skip to the end of the current line.
+			while (i < command.length && command[i] !== "\n" && command[i] !== "\r") {
+				i++
+			}
+			continue
+		}
+
+		if (char === "$" && command[i + 1] === "'") {
+			// ANSI-C quoting opens an escape-aware single-quoted region. The
+			// opener position points at the leading $ so callers can show $'.
+			inSingle = true
+			singleIsAnsiC = true
+			openIndex = i
+			i++
+			continue
+		}
+
+		if (char === "'") {
+			inSingle = true
+			singleIsAnsiC = false
+			openIndex = i
+			continue
+		}
+
+		if (char === '"') {
+			inDouble = true
+			openIndex = i
+			continue
+		}
+	}
+
+	if (inSingle) {
+		return { quoteType: singleIsAnsiC ? "ansi-c" : "posix-single", openIndex }
+	}
+	if (inDouble) {
+		return { quoteType: "double", openIndex }
+	}
+	return null
+}
+
+/**
  * Split a command string into individual sub-commands by
  * chaining operators (&&, ||, ;, |, or &) and unquoted newlines.
  *
@@ -27,6 +160,19 @@ export type ShellToken = string | { op: string } | { command: string }
 export function parseCommand(command: string): string[] {
 	if (!command?.trim()) {
 		return []
+	}
+
+	// Reject syntactically malformed input with an unterminated quote. Splitting
+	// such a command on newlines is unsafe: a line intended to live inside the
+	// unclosed quoted region would surface as an independent sub-command and
+	// could be auto-approved in isolation (e.g. `sh -c 'echo a\nrm -rf /` would
+	// otherwise yield a standalone `rm -rf /`). Returning the whole raw input as
+	// a single opaque token forces every auto-approval check to match the entire
+	// string, which is effectively never on an allowlist, so the user is
+	// prompted. LLM-generated commands with nested quotes hit this case often
+	// enough to warrant explicit handling rather than best-effort splitting.
+	if (findUnterminatedQuote(command) !== null) {
+		return [command]
 	}
 
 	// Mask quoted strings (both single and double) before splitting on newlines.
