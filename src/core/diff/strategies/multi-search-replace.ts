@@ -550,20 +550,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 										.join("\n"),
 									Math.max(1, startLine - this.bufferLines),
 								)}`
-							: matchIndex !== -1
-								? `\n\nOriginal Content (around best match):\n${addLineNumbers(
-										resultLines
-											.slice(
-												Math.max(0, matchIndex - this.bufferLines),
-												Math.min(
-													resultLines.length,
-													matchIndex + searchLines.length + this.bufferLines,
-												),
-											)
-											.join("\n"),
-										Math.max(1, matchIndex + 1 - this.bufferLines),
-									)}`
-								: ""
+							: `\n\nOriginal Content:\n${addLineNumbers(resultLines.join("\n"))}`
 
 					const bestMatchSection = bestMatchContent
 						? `\n\nBest Match Found:\n${addLineNumbers(bestMatchContent, matchIndex + 1)}`
