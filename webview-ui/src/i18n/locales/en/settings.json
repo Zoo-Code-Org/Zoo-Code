@@ -759,7 +759,9 @@
 			"delayAfterWrite": {
 				"label": "Delay after writes to allow diagnostics to detect potential problems",
 				"description": "Time to wait after file writes before proceeding, allowing diagnostic tools to process changes and detect issues."
-			},
+			}
+		},
+		"fileEdits": {
 			"diffFuzzyThreshold": {
 				"label": "Diff match threshold",
 				"description": "Lower thresholds make file edits more resilient to formatting and whitespace variations. A threshold of 100% requires an exact match."
