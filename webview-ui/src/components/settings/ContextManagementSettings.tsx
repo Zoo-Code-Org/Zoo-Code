@@ -413,9 +413,9 @@ export const ContextManagementSettings = ({
 				<SearchableSetting
 					settingId="context-diff-fuzzy-threshold"
 					section="contextManagement"
-					label={t("settings:contextManagement.diagnostics.diffFuzzyThreshold.label")}>
+					label={t("settings:contextManagement.fileEdits.diffFuzzyThreshold.label")}>
 					<span className="block font-medium mb-1">
-						{t("settings:contextManagement.diagnostics.diffFuzzyThreshold.label")}
+						{t("settings:contextManagement.fileEdits.diffFuzzyThreshold.label")}
 					</span>
 					<div className="flex items-center gap-2">
 						<Slider
@@ -431,7 +431,7 @@ export const ContextManagementSettings = ({
 						</span>
 					</div>
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
-						{t("settings:contextManagement.diagnostics.diffFuzzyThreshold.description")}
+						{t("settings:contextManagement.fileEdits.diffFuzzyThreshold.description")}
 					</div>
 				</SearchableSetting>
 
