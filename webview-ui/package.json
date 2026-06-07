@@ -8,6 +8,10 @@
 		"pretest": "turbo run bundle --cwd ..",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
+		"test:visual": "playwright test -c playwright-ct.config.ts",
+		"test:visual:update": "playwright test -c playwright-ct.config.ts --update-snapshots",
+		"test:visual:docker": "node playwright/run-docker.mjs",
+		"test:visual:docker:update": "node playwright/run-docker.mjs --update",
 		"format": "prettier --write src",
 		"dev": "vite",
 		"build": "tsc -b && vite build",
@@ -83,6 +87,8 @@
 		"zod": "^3.25.61"
 	},
 	"devDependencies": {
+		"@playwright/experimental-ct-react": "1.60.0",
+		"@playwright/test": "1.60.0",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@testing-library/jest-dom": "6.9.1",

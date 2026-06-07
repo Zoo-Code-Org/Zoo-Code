@@ -1,0 +1,12 @@
+services:
+    visual:
+        image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948
+        ipc: host
+        user: "${UID:-1000}:${GID:-1000}"
+        working_dir: /work
+        environment:
+            COREPACK_HOME: /tmp/corepack
+            HOME: /tmp/playwright
+        volumes:
+            - ..:/work
+        command: sh -lc "corepack pnpm --filter @roo-code/vscode-webview test:visual"
