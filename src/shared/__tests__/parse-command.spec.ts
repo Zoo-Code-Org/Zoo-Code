@@ -124,6 +124,39 @@ describe("parseCommand", () => {
 		})
 	})
 
+	describe("comment lines containing quote characters", () => {
+		// A quote character inside a # comment is not shell quoting, so it must
+		// not be paired with a quote on a later line. The newline that ends the
+		// comment line stays a command separator and the following command is
+		// parsed independently.
+		it("does not let a quote inside a # comment hide the newline before the next command", () => {
+			// The unmatched single quote in the comment must not absorb the
+			// newline; line 2 must surface as its own sub-command.
+			const input = "echo hello # it's a comment\necho world"
+			const result = parseCommand(input)
+			expect(result).toHaveLength(2)
+			expect(result[result.length - 1]).toBe("echo world")
+		})
+
+		it("does not let a double-quote inside a # comment hide the newline before the next command", () => {
+			// The unmatched double quote in the comment must not absorb the newline.
+			const input = `echo hello # say "hi\necho world`
+			const result = parseCommand(input)
+			expect(result).toHaveLength(2)
+			expect(result[result.length - 1]).toBe("echo world")
+		})
+
+		// A comment quote that could otherwise pair with a quote several lines
+		// down must not swallow the intervening newlines. Every command stays
+		// separate so each is evaluated on its own, and the comment tail itself
+		// is discarded (it is not part of any executable command).
+		it("keeps every command separate when an earlier comment contains a quote", () => {
+			const input = "echo first # what's here\necho middle\necho 'done'"
+			const result = parseCommand(input)
+			expect(result).toEqual(["echo first", "echo middle", "echo 'done'"])
+		})
+	})
+
 	describe("real-world wrapped multi-line script (regression)", () => {
 		it("treats a wrapper command with an embedded multi-line script as a single command", () => {
 			const input = [
@@ -180,9 +213,9 @@ describe("parseCommand", () => {
 		})
 
 		it("does not split an unclosed single quote on an embedded newline", () => {
-			const input = "sh -c 'echo a\nrm -rf /"
-			// Without the guard, this would yield ["sh -c echo a", "rm -rf /"],
-			// exposing `rm -rf /` as a standalone command.
+			const input = "sh -c 'echo a\necho b"
+			// Without the guard, the second line would surface as a standalone
+			// `echo b` even though it was meant to live inside the unclosed quote.
 			expect(parseCommand(input)).toEqual([input])
 		})
 

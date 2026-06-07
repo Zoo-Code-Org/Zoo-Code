@@ -136,6 +136,113 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
 }
 
 /**
+ * Walk `command` left-to-right with the same state-machine rules used by
+ * `findUnterminatedQuote` and replace every top-level quoted region with a
+ * placeholder token. Returns the masked string and the array of original
+ * quoted substrings so callers can restore them later.
+ *
+ * "Top-level" means outside any other quoted region and outside a `#` comment.
+ * A `#` that follows whitespace (or is at position 0) starts a comment that
+ * runs to the end of the current line; any quote characters inside that comment
+ * are ignored and must not be masked, because they are not shell quoting.
+ *
+ * Supported quote styles:
+ * - ANSI-C quoting  $'...'  -- escape-aware, matched before plain single quotes
+ * - POSIX single    '...'   -- fully opaque, no escapes
+ * - Double          "..."   -- escape-aware (\X skips one char)
+ */
+function maskTopLevelQuotes(command: string): { masked: string; quotes: string[] } {
+	const quotes: string[] = []
+	let result = ""
+	let i = 0
+
+	while (i < command.length) {
+		const char = command[i]
+
+		// Outside any quoted region: handle backslash, comments, and quote openers.
+		if (char === "\\") {
+			// Backslash escapes the next character -- copy both and skip.
+			result += command.slice(i, i + 2)
+			i += 2
+			continue
+		}
+
+		if (char === "#" && (i === 0 || /\s/.test(command[i - 1]))) {
+			// Start of a comment: copy everything up to (but not including) the
+			// next newline verbatim. Quotes inside comments are not shell quoting.
+			const commentStart = i
+			while (i < command.length && command[i] !== "\n" && command[i] !== "\r") {
+				i++
+			}
+			result += command.slice(commentStart, i)
+			continue
+		}
+
+		if (char === "$" && command[i + 1] === "'") {
+			// ANSI-C quoting: $'...', escape-aware. Scan for the closing '.
+			const start = i
+			i += 2 // skip $'
+			while (i < command.length) {
+				if (command[i] === "\\") {
+					i += 2 // skip escaped char
+				} else if (command[i] === "'") {
+					i++ // consume closing '
+					break
+				} else {
+					i++
+				}
+			}
+			const match = command.slice(start, i)
+			quotes.push(match)
+			result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+			continue
+		}
+
+		if (char === "'") {
+			// POSIX single quote: fully opaque, ends at the next literal '.
+			const start = i
+			i++ // skip opening '
+			while (i < command.length && command[i] !== "'") {
+				i++
+			}
+			if (i < command.length) {
+				i++ // consume closing '
+			}
+			const match = command.slice(start, i)
+			quotes.push(match)
+			result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+			continue
+		}
+
+		if (char === '"') {
+			// Double quote: escape-aware, ends at the next unescaped ".
+			const start = i
+			i++ // skip opening "
+			while (i < command.length) {
+				if (command[i] === "\\") {
+					i += 2 // skip escaped char
+				} else if (command[i] === '"') {
+					i++ // consume closing "
+					break
+				} else {
+					i++
+				}
+			}
+			const match = command.slice(start, i)
+			quotes.push(match)
+			result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+			continue
+		}
+
+		// Ordinary character -- copy as-is.
+		result += char
+		i++
+	}
+
+	return { masked: result, quotes }
+}
+
+/**
  * Split a command string into individual sub-commands by
  * chaining operators (&&, ||, ;, |, or &) and unquoted newlines.
  *
@@ -165,8 +272,8 @@ export function parseCommand(command: string): string[] {
 	// Reject syntactically malformed input with an unterminated quote. Splitting
 	// such a command on newlines is unsafe: a line intended to live inside the
 	// unclosed quoted region would surface as an independent sub-command and
-	// could be auto-approved in isolation (e.g. `sh -c 'echo a\nrm -rf /` would
-	// otherwise yield a standalone `rm -rf /`). Returning the whole raw input as
+	// could be auto-approved in isolation (e.g. `sh -c 'echo a\necho b` would
+	// otherwise yield a standalone `echo b`). Returning the whole raw input as
 	// a single opaque token forces every auto-approval check to match the entire
 	// string, which is effectively never on an allowlist, so the user is
 	// prompted. LLM-generated commands with nested quotes hit this case often
@@ -175,32 +282,13 @@ export function parseCommand(command: string): string[] {
 		return [command]
 	}
 
-	// Mask quoted strings (both single and double) before splitting on newlines.
-	// This ensures that newlines embedded inside a quoted argument are not
-	// mistaken for command separators. Both quote styles are handled here because
-	// either can span multiple lines (e.g. a heredoc-style script passed as a
-	// single argument to sh -c '...' or a double-quoted multi-line string).
-	//
-	// A single left-to-right scan with an alternation is used (rather than two
-	// separate passes) so that whichever quote opens first wins. This prevents a
-	// quote of one style that appears inside a string of the other style from
-	// starting a spurious match -- e.g. the apostrophe in "don't" must not begin
-	// a single-quoted region, and a double quote inside 'a "b' must not begin a
-	// double-quoted region. Negated character classes match newlines, so
-	// multi-line quoted strings are captured whole.
-	//
-	// ANSI-C quoting ($'...') is matched first as a single unit. Unlike POSIX
-	// single quotes, ANSI-C strings interpret backslash escapes, so an escaped
-	// apostrophe (\') does not terminate the string. The alternative is therefore
-	// escape-aware, and listing it first ensures the leading $ is captured with
-	// the quoted body rather than the plain single-quote branch ending early at
-	// the escaped apostrophe and leaking an embedded newline.
-	const topLevelQuotes: string[] = []
-
-	const masked = command.replace(/\$'(?:[^'\\]|\\.)*'|'[^']*'|"(?:[^"\\]|\\.)*"/g, (match) => {
-		topLevelQuotes.push(match)
-		return `__TOPLEVEL_QUOTE_${topLevelQuotes.length - 1}__`
-	})
+	// Mask quoted strings before splitting on newlines so that newlines embedded
+	// inside a quoted argument are not mistaken for command separators. The
+	// masker uses the same state-machine rules as findUnterminatedQuote, which
+	// means it correctly ignores quote characters that appear inside # comments
+	// and therefore cannot confuse a comment-embedded quote with a real closing
+	// delimiter on a subsequent line.
+	const { masked, quotes: topLevelQuotes } = maskTopLevelQuotes(command)
 
 	// Split on unquoted newlines (all line-ending formats).
 	const lines = masked.split(/\r\n|\r|\n/)
