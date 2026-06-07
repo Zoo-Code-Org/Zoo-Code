@@ -62,9 +62,12 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 		// Then extract patterns from each command using the existing pattern extraction logic
 		const allPatterns = new Set<string>()
 
-		// Add all individual commands first
+		// Add all individual commands first. Multi-line patterns (e.g. heredocs,
+		// unterminated quotes) are opaque tokens and must not be added verbatim --
+		// their body lines would surface as approvable patterns. Only add
+		// single-line commands; multi-line tokens are covered by pattern extraction.
 		allCommands.forEach((cmd) => {
-			if (cmd.trim()) {
+			if (cmd.trim() && !cmd.includes("\n")) {
 				allPatterns.add(cmd.trim())
 			}
 		})

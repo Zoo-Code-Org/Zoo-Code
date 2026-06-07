@@ -452,5 +452,20 @@ describe("parseCommand", () => {
 			// closes at the next apostrophe regardless of any preceding backslash.
 			expect(findUnterminatedQuote("echo 'a\\'")).toBeNull()
 		})
+
+		it("reports locale style and the $ position for an unterminated locale quote", () => {
+			expect(findUnterminatedQuote('echo $"hello')).toEqual({ quoteType: "locale", openIndex: 5 })
+		})
+
+		it("returns null for a balanced locale-quoted string", () => {
+			expect(findUnterminatedQuote('echo $"hello world"')).toBeNull()
+		})
+
+		it("returns null for a balanced <<- heredoc with an indented terminator", () => {
+			// stripTabs must be true for <<- so the indented terminator line is
+			// recognized; without the fix every terminator line was unconditionally
+			// stripped of tabs, making <<- and << behave identically.
+			expect(findUnterminatedQuote("sh <<-EOF\n\techo hello\n\tEOF")).toBeNull()
+		})
 	})
 })

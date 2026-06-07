@@ -660,9 +660,9 @@ Output:
 			expect(selector.textContent).toContain("sh")
 
 			const fragments = Array.from(selector.querySelectorAll("span")).map((s) => s.textContent ?? "")
-			expect(fragments).not.toContain("EOF")
-			expect(fragments).not.toContain("echo")
-			expect(fragments).not.toContain("hello")
+				expect(fragments.some((f) => f.includes("EOF"))).toBe(false)
+				expect(fragments.some((f) => f.includes("echo"))).toBe(false)
+				expect(fragments.some((f) => f.includes("hello"))).toBe(false)
 		})
 	})
 })

@@ -68,6 +68,9 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
  // Tracks whether the current single-quoted region was opened as ANSI-C
  // ($'...'), which -- unlike a POSIX single quote -- honors backslash escapes.
  let singleIsAnsiC = false
+ // Tracks whether the current double-quoted region was opened as a locale
+ // quote ($"..."), so an unterminated region reports quoteType "locale".
+ let doubleIsLocale = false
  // Index of the character that opened the currently active quoted region.
  let openIndex = -1
 
@@ -95,6 +98,7 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
  		}
  		if (char === '"') {
  			inDouble = false
+ 			doubleIsLocale = false
  		}
  		continue
  	}
@@ -128,7 +132,8 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
  	if (char === "<" && command[i + 1] === "<") {
  		const heredocOpenIndex = i
  		i += 2 // skip <<
- 		if (command[i] === "-") i++ // optional - for <<-
+ 		const stripTabs = command[i] === "-"
+ 		if (stripTabs) i++ // optional - for <<-
  		// Skip horizontal whitespace between << and the delimiter word.
  		while (i < command.length && (command[i] === " " || command[i] === "\t")) {
  			i++
@@ -147,8 +152,9 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
  				while (i < command.length && command[i] !== "\n" && command[i] !== "\r") {
  					i++
  				}
- 				// Strip leading tabs for <<- heredocs (terminator may be indented).
- 				const line = command.slice(lineStart, i).replace(/^\t*/, "")
+ 				// Strip leading tabs only for <<- heredocs (terminator may be indented).
+ 				const rawLine = command.slice(lineStart, i)
+ 				const line = stripTabs ? rawLine.replace(/^\t*/, "") : rawLine
  				if (i < command.length) i++ // consume newline
  				if (line === delimiter) {
  					found = true
@@ -174,10 +180,10 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
 
  	if (char === "$" && command[i + 1] === '"') {
  		// Locale quoting: $"..." behaves like double quotes but the $ prefix
- 		// is part of the token. Set inDouble and advance i by 1 (past $); the
- 		// for-loop increment then moves past the opening " so the inDouble branch
- 		// handles content from the character after ". Mirrors the ANSI-C pattern.
+ 		// is part of the token. Set inDouble and doubleIsLocale so an unterminated
+ 		// region reports quoteType "locale" rather than "double".
  		inDouble = true
+ 		doubleIsLocale = true
  		openIndex = i
  		i++ // skip $; loop increment skips the opening "
  		continue
@@ -201,7 +207,7 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
  	return { quoteType: singleIsAnsiC ? "ansi-c" : "posix-single", openIndex }
  }
  if (inDouble) {
- 	return { quoteType: "double", openIndex }
+ 	return { quoteType: doubleIsLocale ? "locale" : "double", openIndex }
  }
  return null
 }
