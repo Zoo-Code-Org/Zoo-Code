@@ -1,7 +1,7 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/CommandExecution.spec.tsx
 
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import { CommandExecution } from "../CommandExecution"
 import { ExtensionStateContext } from "../../../context/ExtensionStateContext"
@@ -11,6 +11,7 @@ vi.mock("react-use", () => ({
 	useEvent: vi.fn(),
 }))
 
+import { useEvent } from "react-use"
 import { vscode } from "../../../utils/vscode"
 
 vi.mock("../../../utils/vscode", () => ({
@@ -21,6 +22,11 @@ vi.mock("../../../utils/vscode", () => ({
 
 vi.mock("../../common/CodeBlock", () => ({
 	default: ({ source }: { source: string }) => <div data-testid="code-block">{source}</div>,
+}))
+
+vi.mock("@src/components/ui", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@src/components/ui")>()),
+	StandardTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 // Mock TerminalOutput
@@ -603,6 +609,77 @@ Output:
 			const terminalOutput = screen.getByTestId("terminal-output")
 			expect(terminalOutput).toBeInTheDocument()
 			expect(terminalOutput).toHaveTextContent("0 total")
+		})
+	})
+
+	describe("running status indicator", () => {
+		// Since useEvent is mocked as a no-op vi.fn(), the component's onMessage
+		// handler is recorded in mock.calls[last][1]. We invoke it directly to
+		// simulate an incoming extension message. event.data must be an
+		// ExtensionMessage with type "commandExecutionStatus" and text holding
+		// the JSON-serialised CommandExecutionStatus payload.
+		const sendStatusMessage = (executionId: string, payload: Record<string, unknown>) => {
+			const mockedUseEvent = useEvent as unknown as ReturnType<typeof vi.fn>
+			const lastCall = mockedUseEvent.mock.calls[mockedUseEvent.mock.calls.length - 1]
+			const handler = lastCall?.[1] as ((e: MessageEvent) => void) | undefined
+			const data = { type: "commandExecutionStatus", text: JSON.stringify({ executionId, ...payload }) }
+			handler?.(new MessageEvent("message", { data }))
+		}
+
+		it("should show the pulsing dot when status is started", async () => {
+			render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId="exec-status-1" text="npm start" />
+				</ExtensionStateWrapper>,
+			)
+
+			// Dot absent before any status message
+			expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument()
+
+			await act(async () => {
+				// "started" schema requires executionId, status, command (pid optional)
+				sendStatusMessage("exec-status-1", { status: "started", command: "npm start", pid: 1234 })
+			})
+
+			// Pulsing dot must appear after the started status arrives
+			expect(document.querySelector(".animate-pulse")).toBeInTheDocument()
+		})
+
+		it("should not show the pulsing dot for a different executionId", async () => {
+			render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId="exec-status-2" text="npm start" />
+				</ExtensionStateWrapper>,
+			)
+
+			await act(async () => {
+				sendStatusMessage("other-id", { status: "started", command: "npm start", pid: 9999 })
+			})
+
+			// Dot should remain absent -- wrong execution ID
+			expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument()
+		})
+
+		it("should remove the pulsing dot when status transitions to exited", async () => {
+			render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId="exec-status-3" text="npm start" />
+				</ExtensionStateWrapper>,
+			)
+
+			await act(async () => {
+				sendStatusMessage("exec-status-3", { status: "started", command: "npm start", pid: 1234 })
+			})
+
+			// Dot present while running
+			expect(document.querySelector(".animate-pulse")).toBeInTheDocument()
+
+			await act(async () => {
+				sendStatusMessage("exec-status-3", { status: "exited", exitCode: 0 })
+			})
+
+			// Pulsing dot removed after process exits
+			expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument()
 		})
 	})
 })
