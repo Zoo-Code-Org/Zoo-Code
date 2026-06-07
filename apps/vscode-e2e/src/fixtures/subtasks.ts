@@ -57,6 +57,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			userMessage: new RegExp(SUBTASK_FAST_PARENT_MARKER),
+			sequenceIndex: 0,
 		},
 		response: {
 			toolCalls: [
@@ -160,6 +161,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			userMessage: new RegExp(SUBTASK_XPROFILE_PARENT_MARKER),
+			sequenceIndex: 0,
 		},
 		response: {
 			toolCalls: [
