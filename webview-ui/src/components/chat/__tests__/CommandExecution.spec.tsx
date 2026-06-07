@@ -641,4 +641,28 @@ Output:
 			expect(fragments).not.toContain("print")
 		})
 	})
+
+	describe("heredoc command in pattern selector", () => {
+		// An unterminated heredoc is returned as one opaque token by parseCommand.
+		// The pattern selector must show only the leading command word (sh) and
+		// must not surface EOF, body-line words, or other heredoc internals.
+		it("shows only the leading command for an unterminated heredoc", () => {
+			const heredocCommand = "sh << EOF\necho hello"
+
+			render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId="test-heredoc" text={heredocCommand} />
+				</ExtensionStateWrapper>,
+			)
+
+			const selector = screen.getByTestId("command-pattern-selector")
+
+			expect(selector.textContent).toContain("sh")
+
+			const fragments = Array.from(selector.querySelectorAll("span")).map((s) => s.textContent ?? "")
+			expect(fragments).not.toContain("EOF")
+			expect(fragments).not.toContain("echo")
+			expect(fragments).not.toContain("hello")
+		})
+	})
 })

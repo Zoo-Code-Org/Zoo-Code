@@ -235,6 +235,123 @@ describe("parseCommand", () => {
 		})
 	})
 
+	describe("heredoc quoting", () => {
+		// The entire heredoc -- opener line, body, and terminator -- must be
+		// treated as a single opaque token so body lines are never split into
+		// independent sub-commands for auto-approval evaluation.
+
+		it("treats an unquoted-delimiter heredoc as one command", () => {
+			const input = "sh -c bash << EOF\necho hello\nEOF"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("treats a single-quoted-delimiter heredoc as one command", () => {
+			const input = "sh -c bash << 'EOF'\necho hello\nEOF"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("treats a double-quoted-delimiter heredoc as one command", () => {
+			const input = 'sh -c bash << "EOF"\necho hello\nEOF'
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("treats a backslash-escaped-delimiter heredoc as one command", () => {
+			const input = "sh -c bash << \\EOF\necho hello\nEOF"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("treats a <<- heredoc (strip leading tabs) as one command", () => {
+			// <<- allows the terminator to be indented with tabs.
+			const input = "sh -c bash <<-EOF\n\techo hello\n\tEOF"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("does not split body lines of a multi-line heredoc", () => {
+			const input = [
+				"sh -c bash << 'EOF'",
+				"echo line1",
+				"echo line2",
+				"echo line3",
+				"EOF",
+			].join("\n")
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("splits a command that follows the heredoc terminator", () => {
+			const input = "sh -c bash << EOF\necho hello\nEOF\necho done"
+			const result = parseCommand(input)
+			expect(result).toHaveLength(2)
+			expect(result[0]).toBe("sh -c bash << EOF\necho hello\nEOF")
+			expect(result[1]).toBe("echo done")
+		})
+
+		it("treats a heredoc with a missing terminator as one opaque token", () => {
+			// An unterminated heredoc is a syntax error; the whole input must be
+			// returned as a single token so no body line can be auto-approved alone.
+			const input = "sh -c bash << EOF\necho hello"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("treats the real-world sh heredoc pattern as one command", () => {
+			const input = [
+				"sh -c bash << 'EOF'",
+				"echo line1 > /tmp/test.txt",
+				"echo line2 \\",
+				"  --flag value \\",
+				"  --other value",
+				"EOF",
+			].join("\n")
+			expect(parseCommand(input)).toEqual([input])
+		})
+		it("does not treat a # comment inside a heredoc body as a command separator", () => {
+			// A '#' inside a heredoc body is literal text, not a shell comment.
+			// The body must not be split and the comment line must be preserved.
+			const input = "sh -c bash << 'EOF'\n# this is a comment\necho hello\nEOF"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("does not mistake << inside a # comment as a heredoc opener", () => {
+			// A heredoc opener that appears inside a # comment must be ignored;
+			// the following lines must still be treated as separate commands.
+			const input = "echo hi # << EOF\necho world"
+			const result = parseCommand(input)
+			expect(result).toHaveLength(2)
+			expect(result[result.length - 1]).toBe("echo world")
+		})
+	})
+
+	describe("locale quoting ($\"...\")", () => {
+		// Locale quoting $"..." behaves like double quotes for delimiter purposes
+		// but the $ prefix is part of the token and must be preserved verbatim.
+
+		it("treats a locale-quoted argument as one command", () => {
+			const input = `echo $"hello world"`
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("does not split on operators inside a locale-quoted string", () => {
+			const input = `echo $"hello && world"`
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("does not split on a newline inside a locale-quoted string", () => {
+			const input = `echo $"hello\nworld"`
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("preserves the $ prefix in the output without leaking placeholders", () => {
+			const input = `echo $"greeting" && echo done`
+			const result = parseCommand(input)
+			expect(result[0]).toContain('$"greeting"')
+			expect(result.join(" ")).not.toContain("__")
+		})
+
+		it("returns an unterminated locale-quoted string as one opaque token", () => {
+			const input = `echo $"hello`
+			expect(parseCommand(input)).toEqual([input])
+		})
+	})
+
 	describe("findUnterminatedQuote", () => {
 		it("returns null for balanced and quote-free input", () => {
 			expect(findUnterminatedQuote("git status")).toBeNull()
