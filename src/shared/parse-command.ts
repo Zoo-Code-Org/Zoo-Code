@@ -115,6 +115,14 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
  		continue
  	}
 
+ 	// Herestring (<<<): single-line stdin redirect -- no body or terminator.
+ 	// Consume all three '<' and continue so the second '<' does not re-trigger
+ 	// the heredoc branch on the next iteration.
+ 	if (char === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
+ 		i += 3
+ 		continue
+ 	}
+
  	// Heredoc opener: <<[-]? followed by an optional-quoted word. The body
  	// through the terminator line is treated as a single quoted region.
  	if (char === "<" && command[i + 1] === "<") {
@@ -281,6 +289,15 @@ function maskTopLevelQuotes(command: string): { masked: string; quotes: string[]
 				i++
 			}
 			result += command.slice(commentStart, i)
+			continue
+		}
+
+		// Herestring (<<<): feed a single word as stdin. Not a heredoc -- has no
+		// body region or terminator. Emit all three '<' verbatim and advance past
+		// them so the second '<' does not re-trigger the heredoc branch below.
+		if (char === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
+			result += "<<<"
+			i += 3
 			continue
 		}
 

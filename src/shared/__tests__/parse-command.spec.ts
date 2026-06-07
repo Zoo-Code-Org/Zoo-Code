@@ -320,6 +320,46 @@ describe("parseCommand", () => {
 		})
 	})
 
+	describe("herestring (<<<)", () => {
+		// A herestring (<<<) feeds a single word as stdin -- it has no body region
+		// or terminator. The word to the right is a normal shell word (possibly
+		// quoted) and must NOT be treated as a heredoc body.
+
+		it("treats a simple herestring as one command", () => {
+			const input = `sh <<< "echo hello"`
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("does not scan for a heredoc terminator after <<<", () => {
+			// Without the <<< guard the parser would treat <<< as << followed by
+			// delimiter "<", then scan for a line exactly equal to "<" -- consuming
+			// the rest of input and returning it as an unterminated heredoc.
+			const input = "sh <<< 'echo hello'\necho done"
+			const result = parseCommand(input)
+			expect(result).toHaveLength(2)
+			expect(result[0]).toBe("sh <<< 'echo hello'")
+			expect(result[1]).toBe("echo done")
+		})
+
+		it("treats a herestring with a single-quoted multiline word as one command", () => {
+			// The quoted word after <<< may contain embedded newlines via quoting;
+			// those newlines are handled by the single-quote masker, not the heredoc
+			// scanner. The whole construct is one command.
+			const input = "sh <<< 'echo line1\necho line2'"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("treats a herestring with an ANSI-C quoted multiline word as one command", () => {
+			const input = "sh <<< $'echo line1\\necho line2'"
+			expect(parseCommand(input)).toEqual([input])
+		})
+
+		it("does not report an unterminated quote for a balanced herestring", () => {
+			expect(findUnterminatedQuote(`sh <<< "echo hello"`)).toBeNull()
+			expect(findUnterminatedQuote("sh <<< 'echo hello'")).toBeNull()
+		})
+	})
+
 	describe("locale quoting ($\"...\")", () => {
 		// Locale quoting $"..." behaves like double quotes for delimiter purposes
 		// but the $ prefix is part of the token and must be preserved verbatim.
