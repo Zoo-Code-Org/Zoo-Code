@@ -151,6 +151,11 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 				<div className="flex flex-row items-center gap-2">
 					{icon}
 					{title}
+					{status?.status === "started" && (
+						<StandardTooltip content={t("chat:commandExecution.running")}>
+							<div className="rounded-full size-2 bg-yellow-500 animate-pulse" />
+						</StandardTooltip>
+					)}
 					{status?.status === "exited" && (
 						<div className="flex flex-row items-center gap-2 font-mono text-xs">
 							<StandardTooltip
