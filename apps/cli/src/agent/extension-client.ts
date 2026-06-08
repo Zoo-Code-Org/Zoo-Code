@@ -540,18 +540,6 @@ export class ExtensionClient {
 // =============================================================================
 
 /**
- * Create a new ExtensionClient instance.
- *
- * This is a convenience function that creates a client with default settings.
- *
- * @param sendMessage - Function to send messages to the extension
- * @returns A new ExtensionClient instance
- */
-export function createClient(sendMessage: (message: WebviewMessage) => void): ExtensionClient {
-	return new ExtensionClient({ sendMessage })
-}
-
-/**
  * Create a mock client for testing.
  *
  * The mock client captures all sent messages for verification.

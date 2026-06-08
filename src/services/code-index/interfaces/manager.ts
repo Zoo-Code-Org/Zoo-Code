@@ -4,7 +4,7 @@ import * as vscode from "vscode"
 /**
  * Interface for the code index manager
  */
-export interface ICodeIndexManager {
+interface ICodeIndexManager {
 	/**
 	 * Event emitted when progress is updated
 	 */

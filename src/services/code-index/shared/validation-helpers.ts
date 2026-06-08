@@ -56,7 +56,7 @@ export interface HttpError extends Error {
 /**
  * Common error types that can occur during embedder validation
  */
-export interface ValidationError {
+interface ValidationError {
 	status?: number
 	message?: string
 	name?: string
