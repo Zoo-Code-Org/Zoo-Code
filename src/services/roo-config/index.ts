@@ -439,6 +439,3 @@ export async function loadConfiguration(
 		merged: merged || "",
 	}
 }
-
-// Export with backward compatibility alias
-export const loadRooConfiguration: typeof loadConfiguration = loadConfiguration

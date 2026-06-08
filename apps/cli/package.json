@@ -26,7 +26,6 @@
 		"@roo-code/core": "workspace:^",
 		"@roo-code/types": "workspace:^",
 		"@roo-code/vscode-shim": "workspace:^",
-		"@trpc/client": "^11.18.0",
 		"@vscode/ripgrep": "^1.15.9",
 		"commander": "^12.1.0",
 		"execa": "^9.5.2",
@@ -34,7 +33,6 @@
 		"ink": "^6.6.0",
 		"p-wait-for": "^5.0.2",
 		"react": "^19.1.0",
-		"superjson": "^2.2.6",
 		"zustand": "^5.0.14"
 	},
 	"devDependencies": {

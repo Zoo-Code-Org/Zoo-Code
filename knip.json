@@ -48,6 +48,7 @@
 			]
 		},
 		"apps/cli": {
+			"ignore": ["eslint.config.mjs", "scripts/**"],
 			"project": ["src/**/*.ts", "src/**/*.tsx"],
 			"ignoreDependencies": ["@vscode/ripgrep", "cross-spawn"]
 		},

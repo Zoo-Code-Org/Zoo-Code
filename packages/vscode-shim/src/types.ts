@@ -79,52 +79,12 @@ export interface TextLine {
 }
 
 /**
- * Represents a text document
- */
-export interface TextDocument {
-	uri: IUri
-	fileName: string
-	languageId: string
-	version: number
-	isDirty: boolean
-	isClosed: boolean
-	lineCount: number
-	getText(range?: IRange): string
-	lineAt(line: number): TextLine
-	offsetAt(position: IPosition): number
-	positionAt(offset: number): IPosition
-	save(): Thenable<boolean>
-	validateRange(range: IRange): IRange
-	validatePosition(position: IPosition): IPosition
-}
-
-/**
  * Configuration target for settings
  */
 export enum ConfigurationTarget {
 	Global = 1,
 	Workspace = 2,
 	WorkspaceFolder = 3,
-}
-
-/**
- * Workspace folder representation
- */
-export interface WorkspaceFolder {
-	uri: IUri
-	name: string
-	index: number
-}
-
-/**
- * Workspace configuration interface
- */
-export interface WorkspaceConfiguration {
-	get<T>(section: string): T | undefined
-	get<T>(section: string, defaultValue: T): T
-	has(section: string): boolean
-	inspect<T>(section: string): ConfigurationInspect<T> | undefined
-	update(section: string, value: unknown, configurationTarget?: ConfigurationTarget): Thenable<void>
 }
 
 /**
@@ -221,14 +181,6 @@ export enum ExtensionMode {
  * Event emitter event type
  */
 export type Event<T> = (listener: (e: T) => void, thisArgs?: unknown, disposables?: Disposable[]) => Disposable
-
-/**
- * Cancellation token for async operations
- */
-export interface CancellationToken {
-	isCancellationRequested: boolean
-	onCancellationRequested: Event<unknown>
-}
 
 /**
  * File system file type enum

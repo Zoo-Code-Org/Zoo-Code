@@ -261,17 +261,3 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 }
-
-export async function getLmStudioModels(baseUrl = "http://localhost:1234") {
-	try {
-		if (!URL.canParse(baseUrl)) {
-			return []
-		}
-
-		const response = await axios.get(`${baseUrl}/v1/models`)
-		const modelsArray = response.data?.data?.map((model: any) => model.id) || []
-		return [...new Set<string>(modelsArray)]
-	} catch {
-		return []
-	}
-}
