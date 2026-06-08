@@ -258,11 +258,10 @@ export async function getSembleBinaryPath(storageDir: string): Promise<string | 
 function extractTarGz(archivePath: string, destDir: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const args = ["-xzf", archivePath, "-C", destDir, "--no-same-owner"]
-		// GNU tar: --no-absolute-filenames blocks leading-slash entries,
-		// --no-overwrite-dir adds defense-in-depth against ../relative traversal.
+		// GNU tar: --no-overwrite-dir adds defense-in-depth against ../relative traversal.
 		// macOS bsdtar strips absolute paths by default.
 		if (process.platform === "linux") {
-			args.push("--no-absolute-filenames", "--no-overwrite-dir")
+			args.push("--no-overwrite-dir")
 		}
 		const child = spawn("tar", args, {
 			shell: false,

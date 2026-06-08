@@ -30,14 +30,19 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.56.0 新增内容
+## v3.58.0 新增内容
 
-- 为 Anthropic、Bedrock 和 Vertex 提供商添加 **Claude Opus 4.8** 支持
-- 新增 **Opencode Go** 作为一等 API 提供商
-- **可靠的任务取消** — 取消任务现在会正确终止正在运行的进程，对于顽固进程还会自动重试 Ctrl+C
-- 修复 Gemini 自定义模型 ID 被忽略并回退到默认值的问题
-- 修复因缺少标记导致的 Grok diff 截断问题
-- 修复 Windows 上未配置 shell 配置文件时 PowerShell 检测失败的问题
+- **Zoo Gateway** — 通过支持多配置身份验证的托管网关连接
+- **Gemini 3.5 Flash** — 快速强大的 Google 模型，现可直接在提供商设置中使用
+- **Semble 嵌入** — 无需外部 API 密钥或上传，在本地对代码库进行索引
+- **可配置的聊天字体大小**与 **VS Code 集成终端 Shell 覆盖**
+- 在 webview 中渲染 **GitHub 风格的提醒块**
+- GLM 模型的**最大输出 token 可配置**
+- **WorkspacePathResolver** — 在含符号链接的工作区中可靠地处理路径
+- 修复因格式错误的跟进建议模式导致的 React 崩溃
+- 修复未设置自定义值时 OpenAI temperature 被省略的问题
+- 处理设置导入时的逐键失败
+- 安全更新：mermaid v11.15.0、axios v1.16.0
 - 修复 VS Code 代码操作仍显示 Roo Code 品牌名称的问题；已本地化为所有支持的语言
 - 修复 Google Cloud 凭据字段收到文件路径时 Vertex AI 的错误警告
 - 六项安全依赖更新（diff、i18next-http-backend、fast-xml-parser、simple-git、uuid、turbo）

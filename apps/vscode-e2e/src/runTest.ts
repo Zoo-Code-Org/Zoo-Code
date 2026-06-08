@@ -161,7 +161,7 @@ async function main() {
 			extensionTestsPath,
 			launchArgs: [testWorkspace],
 			extensionTestsEnv,
-			version: process.env.VSCODE_VERSION || "1.101.2",
+			version: process.env.VSCODE_VERSION || "1.100.0",
 		})
 	} catch (error) {
 		console.error("Failed to run tests", error)

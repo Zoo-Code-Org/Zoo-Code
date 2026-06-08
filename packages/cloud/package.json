@@ -21,10 +21,10 @@
 	"devDependencies": {
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
-		"@types/node": "^24.1.0",
-		"@types/vscode": "^1.102.0",
-		"globals": "^16.3.0",
-		"@vitest/coverage-v8": "^3.2.4",
-		"vitest": "^3.2.4"
+		"@types/node": "24.2.1",
+		"@types/vscode": "1.100.0",
+		"globals": "16.3.0",
+		"@vitest/coverage-v8": "3.2.6",
+		"vitest": "3.2.6"
 	}
 }

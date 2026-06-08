@@ -193,7 +193,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "may-2026-v3.56.0-opus48-opencodego-cancellation" // v3.56.0 Claude Opus 4.8, Opencode Go provider, task cancellation fixes
+	public readonly latestAnnouncementId = "jun-2026-v3.58.0-zoo-gateway-gemini35flash-semble" // v3.58.0 Zoo Gateway, Gemini 3.5 Flash, Semble embedding
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -469,6 +469,8 @@ export class ClineProvider
 	// Removes and destroys the top Cline instance (the current finished task),
 	// activating the previous one (resuming the parent task).
 	async removeClineFromStack(options?: { skipDelegationRepair?: boolean }) {
+		const callerStack = new Error().stack
+
 		if (this.clineStack.length === 0) {
 			return
 		}
@@ -524,9 +526,11 @@ export class ClineProvider
 								status: "active",
 								awaitingChildId: undefined,
 							})
-							this.log(
-								`[ClineProvider#removeClineFromStack] Repaired parent ${parentTaskId} metadata: delegated → active (child ${childTaskId} removed)`,
-							)
+							const repairMsg =
+								`[ClineProvider#removeClineFromStack] Repaired parent ${parentTaskId} metadata: delegated → active (child ${childTaskId} removed). ` +
+								`Caller stack: ${callerStack?.split("\n").slice(1, 5).join(" | ")}`
+							this.log(repairMsg)
+							console.warn(repairMsg)
 						}
 					})
 				} catch (err) {
@@ -3538,7 +3542,7 @@ export class ClineProvider
 			// routing output back would corrupt an unrelated task.
 			if (
 				this.cancelledDelegationChildIds.has(childTaskId) ||
-				historyItem.status !== "delegated" ||
+				(historyItem.status !== "delegated" && historyItem.status !== "active") ||
 				historyItem.awaitingChildId !== childTaskId
 			) {
 				this.log(

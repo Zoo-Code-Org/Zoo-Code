@@ -30,17 +30,19 @@
 
 Roo Code से Zoo Code में आने के लिए एक quick guide तुम्हें [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration) में मिल जाएगी। We plan to help users as much as possible during the transition, और उसी support के लिए हमारा [Reddit](https://www.reddit.com/r/ZooCode) और [Discord](https://discord.gg/VxfP4Vx3gX) है। अगर तुम्हें कोई problem हो या कोई question हो, आकर पूछो।
 
-## v3.56.0 में नया क्या है
+## v3.58.0 में नया क्या है
 
-- Anthropic, Bedrock और Vertex providers पर **Claude Opus 4.8** का समर्थन
-- **Opencode Go** को नए first-class API provider के रूप में जोड़ा गया
-- **भरोसेमंद task cancellation** — किसी task को cancel करने पर अब चल रहा process सही तरीके से बंद होता है, जिद्दी processes के लिए automatic Ctrl+C retry भी
-- Gemini के custom model IDs को अनदेखा करके default पर fallback होने की समस्या ठीक की गई
-- Missing diff markers के कारण truncated Grok diffs ठीक किए गए
-- Windows पर कोई shell profile न होने पर PowerShell detection ठीक की गई
-- VS Code code actions में अभी भी Roo Code branding दिखने की समस्या ठीक की गई; सभी supported languages में localized
-- Google Cloud Credentials field में file path मिलने पर Vertex AI की गलत warning ठीक की गई
-- छह security dependency updates (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — multi-profile auth support के साथ एक managed gateway के ज़रिए कनेक्ट करें
+- **Gemini 3.5 Flash** — एक तेज़ और सक्षम Google model, अब provider settings से सीधे उपलब्ध
+- **Semble embedding** — बिना external API key या upload के codebase को locally index करें
+- **Configurable chat font size** और **VS Code integrated terminal shell override**
+- Webview में **GitHub-style alerts** render होंगे
+- GLM models के लिए **configurable maximum output tokens**
+- **WorkspacePathResolver** — symlinks वाले workspaces में reliable path handling
+- Malformed follow-up suggestion mode से होने वाली React crash ठीक की गई
+- Custom value न होने पर OpenAI temperature के omit होने की समस्या ठीक की गई
+- Settings import के दौरान per-key failures को handle किया गया
+- Security updates: mermaid v11.15.0, axios v1.16.0
 
 ---
 

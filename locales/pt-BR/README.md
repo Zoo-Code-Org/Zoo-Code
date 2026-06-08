@@ -30,17 +30,19 @@
 
 Você encontra um guia rápido para migrar do Roo Code para o Zoo Code no [guia de migração Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Queremos ajudar os usuários durante essa transição da melhor forma possível, e é exatamente para isso que temos nosso [Reddit](https://www.reddit.com/r/ZooCode) e nosso [Discord](https://discord.gg/VxfP4Vx3gX). Se você tiver algum problema ou dúvida, apareça por lá e pergunte.
 
-## Novidades na v3.56.0
+## Novidades na v3.58.0
 
-- Suporte ao **Claude Opus 4.8** nos provedores Anthropic, Bedrock e Vertex
-- **Opencode Go** adicionado como novo provedor de API de primeira classe
-- **Cancelamento de tarefas confiável** — cancelar uma tarefa agora encerra corretamente o processo em execução, com retry automático de Ctrl+C para processos resistentes
-- Corrigidos IDs de modelo personalizado do Gemini que eram ignorados e voltavam ao padrão
-- Corrigido o truncamento de diffs do Grok por marcadores ausentes
-- Corrigida a detecção do PowerShell no Windows sem perfil de shell configurado
-- Corrigidas as code actions do VS Code que ainda exibiam o nome Roo Code; localizadas em todos os idiomas suportados
-- Corrigido o aviso do Vertex AI quando o campo de credenciais do Google Cloud recebe um caminho de arquivo
-- Seis atualizações de segurança de dependências (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — conecte-se por um gateway gerenciado com suporte a autenticação multi-perfil
+- **Gemini 3.5 Flash** — um modelo Google rápido e capaz, agora disponível nas configurações do provedor
+- **Semble embedding** — indexe sua base de código localmente sem chave de API externa nem upload
+- **Tamanho de fonte configurável no chat** e **substituição do shell do terminal integrado do VS Code**
+- **Alertas no estilo GitHub** renderizados no webview
+- **Tokens de saída máximos configuráveis** para modelos GLM
+- **WorkspacePathResolver** — tratamento confiável de caminhos em workspaces com symlinks
+- Corrigida falha do React causada por modo de sugestão de acompanhamento malformado
+- Corrigida omissão da temperatura do OpenAI quando nenhum valor personalizado está definido
+- Tratamento de falhas por chave durante a importação de configurações
+- Atualizações de segurança: mermaid v11.15.0, axios v1.16.0
 
 ---
 

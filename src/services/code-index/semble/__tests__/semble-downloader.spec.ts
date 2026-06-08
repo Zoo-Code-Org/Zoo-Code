@@ -235,7 +235,6 @@ describe("semble-downloader", () => {
 						"-C",
 						path.join("/storage", "semble.new"),
 						"--no-same-owner",
-						"--no-absolute-filenames",
 						"--no-overwrite-dir",
 					],
 					expect.any(Object),

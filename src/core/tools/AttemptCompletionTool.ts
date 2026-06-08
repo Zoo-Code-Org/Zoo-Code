@@ -25,6 +25,7 @@ export interface AttemptCompletionCallbacks extends ToolCallbacks {
  * Interface for provider methods needed by AttemptCompletionTool for delegation handling.
  */
 interface DelegationProvider {
+	log(message: string): void
 	getTaskWithId(id: string): Promise<{ historyItem: HistoryItem }>
 	reopenParentFromDelegation(params: {
 		parentTaskId: string
@@ -101,7 +102,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 							const { historyItem: parentHistory } = await provider.getTaskWithId(task.parentTaskId)
 
 							if (
-								parentHistory?.status === "delegated" &&
+								(parentHistory?.status === "delegated" || parentHistory?.status === "active") &&
 								parentHistory?.awaitingChildId === task.taskId
 							) {
 								const delegation = await this.delegateToParent(
@@ -118,12 +119,18 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 							} else {
 								// Parent already detached, such as when the user cancelled this child.
 								// Fall through to the normal completion ask flow.
+								const msg =
+									`[AttemptCompletionTool] Skipping delegation for child ${task.taskId}: ` +
+									`parent ${task.parentTaskId} is not awaiting this child. ` +
+									`Diagnostic: { childStatus: "${status}", parentStatus: "${parentHistory?.status}", awaitingChildId: "${parentHistory?.awaitingChildId}" }`
+								provider.log(msg)
+								console.warn(msg)
 							}
 						} else {
 							// Unexpected status (undefined or "delegated") - log error and skip delegation
 							// undefined indicates a bug in status persistence during child creation
 							// "delegated" would mean this child has its own grandchild pending (shouldn't reach attempt_completion)
-							console.error(
+							provider.log(
 								`[AttemptCompletionTool] Unexpected child task status "${status}" for task ${task.taskId}. ` +
 									`Expected "active" or "completed". Skipping delegation to prevent data corruption.`,
 							)
@@ -131,7 +138,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 						}
 					} catch (err) {
 						// If we can't get the history, log error and skip delegation
-						console.error(
+						provider.log(
 							`[AttemptCompletionTool] Failed to get history for task ${historyLookupTaskId}: ${(err as Error)?.message ?? String(err)}. ` +
 								`Skipping delegation.`,
 						)

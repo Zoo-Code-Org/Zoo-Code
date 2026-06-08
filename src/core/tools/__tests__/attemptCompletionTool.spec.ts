@@ -484,7 +484,7 @@ describe("attemptCompletionTool", () => {
 		})
 
 		describe("completion lifecycle", () => {
-			it("delegates an active subtask completion only when the parent is awaiting that child", async () => {
+			it("delegates an active subtask completion when the active parent awaits that child", async () => {
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",
 					name: "attempt_completion",
@@ -493,13 +493,14 @@ describe("attemptCompletionTool", () => {
 					partial: false,
 				}
 				const mockProvider = {
+					log: vi.fn(),
 					getTaskWithId: vi.fn().mockImplementation((id: string) => {
 						if (id === "child-1") {
 							return Promise.resolve({ historyItem: { id, status: "active" } })
 						}
 						if (id === "parent-1") {
 							return Promise.resolve({
-								historyItem: { id, status: "delegated", awaitingChildId: "child-1" },
+								historyItem: { id, status: "active", awaitingChildId: "child-1" },
 							})
 						}
 						throw new Error(`unexpected task id ${id}`)
@@ -543,6 +544,7 @@ describe("attemptCompletionTool", () => {
 					partial: false,
 				}
 				const mockProvider = {
+					log: vi.fn(),
 					getTaskWithId: vi.fn().mockImplementation((id: string) => {
 						if (id === "child-1") {
 							return Promise.resolve({ historyItem: { id, status: "active" } })
@@ -594,6 +596,7 @@ describe("attemptCompletionTool", () => {
 					partial: false,
 				}
 				const mockProvider = {
+					log: vi.fn(),
 					getTaskWithId: vi.fn().mockImplementation((id: string) => {
 						if (id === "child-1") {
 							return Promise.resolve({ historyItem: { id, status: "active" } })
@@ -627,6 +630,55 @@ describe("attemptCompletionTool", () => {
 
 				expect(mockAskFinishSubTaskApproval).not.toHaveBeenCalled()
 				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+				expect(mockProvider.log).toHaveBeenCalledWith(expect.stringContaining("Skipping delegation"))
+				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
+				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith("child-1")
+			})
+
+			it("does not resume the parent when the parent is active but awaiting a different child", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "9" },
+					nativeArgs: { result: "9" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) => {
+						if (id === "child-1") {
+							return Promise.resolve({ historyItem: { id, status: "active" } })
+						}
+						if (id === "parent-1") {
+							return Promise.resolve({
+								historyItem: { id, status: "active", awaitingChildId: "different-child" },
+							})
+						}
+						throw new Error(`unexpected task id ${id}`)
+					}),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(undefined),
+				}
+
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+				})
+				mockAskFinishSubTaskApproval.mockResolvedValue(true)
+
+				const callbacks: AttemptCompletionCallbacks = {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				}
+
+				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
+
+				expect(mockAskFinishSubTaskApproval).not.toHaveBeenCalled()
+				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+				expect(mockProvider.log).toHaveBeenCalledWith(expect.stringContaining("Skipping delegation"))
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
 				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith("child-1")
 			})

@@ -30,17 +30,19 @@
 
 Eine kurze Anleitung für den Wechsel von Roo Code zu Zoo Code findest du im [Roo→Zoo-Migrationsleitfaden](https://docs.zoocode.dev/roo-to-zoo-migration). Wir wollen Nutzer beim Umstieg so gut wie möglich unterstützen, und genau dafür sind unser [Reddit](https://www.reddit.com/r/ZooCode) und [Discord](https://discord.gg/VxfP4Vx3gX) da. Wenn du Probleme hast oder Fragen auftauchen, komm vorbei und frag nach.
 
-## Neu in v3.56.0
+## Neu in v3.58.0
 
-- **Claude Opus 4.8**-Unterstützung für Anthropic, Bedrock und Vertex
-- **Opencode Go** als neuer vollwertiger API-Provider hinzugefügt
-- **Zuverlässiger Task-Abbruch** — das Abbrechen einer Aufgabe beendet jetzt den laufenden Prozess, mit automatischem Ctrl+C-Retry für hartnäckige Prozesse
-- Benutzerdefinierte Gemini-Modell-IDs werden nicht mehr ignoriert und auf den Standard zurückgesetzt
-- Abgeschnittene Grok-Diffs durch fehlende Markierungen behoben
-- PowerShell-Erkennung unter Windows ohne konfiguriertes Shell-Profil korrigiert
-- VS Code-Code-Actions zeigen nicht mehr Roo Code-Branding; in alle unterstützten Sprachen lokalisiert
-- Vertex AI-Warnung bei Dateipfad im Google Cloud Credentials-Feld behoben
-- Sechs Sicherheitsupdates für Abhängigkeiten (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — verbinde dich über ein verwaltetes Gateway mit Multi-Profil-Authentifizierung
+- **Gemini 3.5 Flash** — ein schnelles, leistungsstarkes Google-Modell, jetzt direkt in den Provider-Einstellungen verfügbar
+- **Semble-Einbettungen** — indexiere deine Codebasis lokal ohne externen API-Schlüssel oder Upload
+- **Konfigurierbarer Chat-Schriftgrad** und **VS Code integriertes Terminal Shell-Override**
+- **GitHub-ähnliche Hinweise** werden im Webview gerendert
+- **Konfigurierbare maximale Ausgabe-Tokens** für GLM-Modelle
+- **WorkspacePathResolver** — zuverlässige Pfadverarbeitung in Workspaces mit Symlinks
+- React-Absturz durch fehlerhafte Follow-up-Vorschlagsmodi behoben
+- Fehlendes OpenAI-Temperature-Parameter bei fehlendem benutzerdefinierten Wert korrigiert
+- Behandlung von Fehlern pro Schlüssel beim Importieren von Einstellungen
+- Sicherheitsupdates: mermaid v11.15.0, axios v1.16.0
 
 ---
 

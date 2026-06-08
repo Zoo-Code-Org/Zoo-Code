@@ -30,17 +30,19 @@
 
 Puedes encontrar una guía rápida para pasar de Roo Code a Zoo Code en la [guía de migración Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Queremos ayudar a los usuarios durante la transición, y para eso tenemos nuestro [Reddit](https://www.reddit.com/r/ZooCode) y [Discord](https://discord.gg/VxfP4Vx3gX). Si tienes problemas o alguna pregunta, entra y pregúntanos.
 
-## Novedades de la v3.56.0
+## Novedades de la v3.58.0
 
-- Soporte para **Claude Opus 4.8** en los proveedores Anthropic, Bedrock y Vertex
-- **Opencode Go** añadido como nuevo proveedor de API de primera clase
-- **Cancelación de tareas fiable** — cancelar una tarea ahora termina el proceso en ejecución, con reintento automático de Ctrl+C para procesos que no responden
-- Se corrigieron los IDs de modelo personalizados de Gemini que se ignoraban y volvían al valor predeterminado
-- Se corrigieron los diffs de Grok truncados por marcadores faltantes
-- Se corrigió la detección de PowerShell en Windows cuando no hay perfil de shell configurado
-- Se corrigieron las acciones de código de VS Code que aún mostraban la marca Roo Code; localizadas en todos los idiomas soportados
-- Se corrigió la advertencia de Vertex AI cuando el campo de credenciales de Google Cloud recibe una ruta de archivo
-- Seis actualizaciones de seguridad de dependencias (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
+- **Zoo Gateway** — conéctate a través de un gateway gestionado con soporte de autenticación multi-perfil
+- **Gemini 3.5 Flash** — un modelo de Google rápido y capaz, ahora disponible desde la configuración del proveedor
+- **Semble embedding** — indexa tu código localmente sin clave de API externa ni subida de archivos
+- **Tamaño de fuente del chat configurable** y **sustitución del shell del terminal integrado de VS Code**
+- **Alertas en estilo GitHub** renderizadas en el webview
+- **Tokens de salida máximos configurables** para modelos GLM
+- **WorkspacePathResolver** — gestión fiable de rutas en espacios de trabajo con symlinks
+- Corregida la caída de React causada por un modo de sugerencia de seguimiento malformado
+- Corregida la omisión de la temperatura de OpenAI cuando no hay valor personalizado definido
+- Gestión de fallos por clave durante la importación de configuración
+- Actualizaciones de seguridad: mermaid v11.15.0, axios v1.16.0
 
 ---
 
