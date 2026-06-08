@@ -1136,6 +1136,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		let askTs: number
 
+		// Resolve auto-approval before adding the message so the state snapshot
+		// sent to the webview already carries isAnswered:true when the ask will
+		// be immediately resolved. This eliminates the race between the state
+		// update (which shows approval buttons) and the former separate
+		// clearApprovalButtons message (which could arrive before buttons were
+		// rendered, leaving them stuck on-screen).
+		const provider = this.providerRef.deref()
+		const state = provider ? await provider.getState() : undefined
+		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
+		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
+
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
 
@@ -1190,6 +1201,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.partial = false
 					lastMessage.progressStatus = progressStatus
 					lastMessage.isProtected = isProtected
+					if (isAutoAnswered) {
+						lastMessage.isAnswered = true
+					}
 					await this.saveClineMessages()
 					this.updateClineMessage(lastMessage)
 				} else {
@@ -1199,7 +1213,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponseImages = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
-					await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, isProtected })
+					await this.addToClineMessages({
+						ts: askTs,
+						type: "ask",
+						ask: type,
+						text,
+						isProtected,
+						isAnswered: isAutoAnswered || undefined,
+					})
 				}
 			}
 		} else {
@@ -1209,27 +1230,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponseImages = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
-			await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, isProtected })
+			await this.addToClineMessages({
+				ts: askTs,
+				type: "ask",
+				ask: type,
+				text,
+				isProtected,
+				isAnswered: isAutoAnswered || undefined,
+			})
 		}
 
 		let timeouts: NodeJS.Timeout[] = []
 
-		// Automatically approve if the ask according to the user's settings.
-		const provider = this.providerRef.deref()
-		const state = provider ? await provider.getState() : undefined
-		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
-
 		if (approval.decision === "approve") {
 			this.approveAsk()
-			// The backend resolved the ask itself, so the webview never gets a
-			// user click to clear its approval buttons. Signal it to clear them
-			// through the same pathway a manual click uses. Not done for the
-			// timeout branch below, where the buttons stay interactive during
-			// the countdown.
-			provider?.postMessageToWebview({ type: "clearApprovalButtons" })
 		} else if (approval.decision === "deny") {
 			this.denyAsk()
-			provider?.postMessageToWebview({ type: "clearApprovalButtons" })
 		} else if (approval.decision === "timeout") {
 			// Store the auto-approval timeout so it can be cancelled if user interacts
 			this.autoApprovalTimeoutRef = setTimeout(() => {

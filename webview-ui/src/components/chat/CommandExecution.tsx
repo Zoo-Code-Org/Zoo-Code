@@ -20,6 +20,12 @@ import CodeBlock from "@src/components/common/CodeBlock"
 import { CommandPatternSelector } from "./CommandPatternSelector"
 import { TerminalOutput } from "./TerminalOutput"
 
+// Module-level cache of the most recent status for each executionId. Populated
+// by every onMessage handler so that a CommandExecution component that mounts
+// after the "started" event was already delivered can recover the status from
+// the cache rather than staying stuck at null.
+const statusCache = new Map<string, CommandExecutionStatus>()
+
 interface CommandPattern {
 	pattern: string
 	description?: string
@@ -47,7 +53,9 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 	// to expanding the command execution output.
 	const [isExpanded, setIsExpanded] = useState(terminalShellIntegrationDisabled)
 	const [streamingOutput, setStreamingOutput] = useState("")
-	const [status, setStatus] = useState<CommandExecutionStatus | null>(null)
+	// Initialize from the module-level cache so that components mounting after
+	// the "started" event was delivered still show the running indicator.
+	const [status, setStatus] = useState<CommandExecutionStatus | null>(() => statusCache.get(executionId) ?? null)
 
 	// The command's output can either come from the text associated with the
 	// task message (this is the case for completed commands) or from the
@@ -122,6 +130,11 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 					if (data.executionId !== executionId) {
 						return
 					}
+
+					// Keep the cache up to date for any component that mounts
+					// after this event (e.g. when auto-approval causes a fast
+					// mount after the "started" message was already sent).
+					statusCache.set(executionId, data)
 
 					switch (data.status) {
 						case "started":

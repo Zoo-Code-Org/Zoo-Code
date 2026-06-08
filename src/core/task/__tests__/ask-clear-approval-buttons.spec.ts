@@ -1,8 +1,9 @@
 import { Task } from "../Task"
 
-// When the backend auto-resolves an interactive ask, the webview never receives
-// a user click to clear its approval buttons. Task.ask() must signal the webview
-// to clear them via clearApprovalButtons so the auto path matches the manual one.
+// When the backend auto-resolves an interactive ask, isAnswered:true is stamped
+// on the ClineMessage before it is added so the webview state snapshot already
+// carries the resolved flag. This eliminates the race between showing approval
+// buttons and the former separate clearApprovalButtons message.
 
 type ProviderStub = {
 	getState: () => Promise<any>
@@ -34,8 +35,8 @@ async function attachQueue(task: Task) {
 	;(task as any).messageQueueService = new MessageQueueService()
 }
 
-describe("Task.ask clearApprovalButtons signal", () => {
-	it("posts clearApprovalButtons when a command ask is auto-approved", async () => {
+describe("Task.ask auto-approval stamping", () => {
+	it("stamps isAnswered:true on the message when a command ask is auto-approved", async () => {
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider: ProviderStub = {
 			postMessageToWebview,
@@ -53,10 +54,14 @@ describe("Task.ask clearApprovalButtons signal", () => {
 		const result = await task.ask("command", "echo hi", false)
 
 		expect(result.response).toBe("yesButtonClicked")
-		expect(postMessageToWebview).toHaveBeenCalledWith({ type: "clearApprovalButtons" })
+		// The message must carry isAnswered:true so the webview never shows buttons.
+		const addCall = (task as any).addToClineMessages.mock.calls[0][0]
+		expect(addCall.isAnswered).toBe(true)
+		// clearApprovalButtons is no longer sent as a separate message.
+		expect(postMessageToWebview).not.toHaveBeenCalledWith({ type: "clearApprovalButtons" })
 	})
 
-	it("posts clearApprovalButtons when a command ask is auto-denied", async () => {
+	it("stamps isAnswered:true on the message when a command ask is auto-denied", async () => {
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider: ProviderStub = {
 			postMessageToWebview,
@@ -74,10 +79,12 @@ describe("Task.ask clearApprovalButtons signal", () => {
 		const result = await task.ask("command", "echo hi", false)
 
 		expect(result.response).toBe("noButtonClicked")
-		expect(postMessageToWebview).toHaveBeenCalledWith({ type: "clearApprovalButtons" })
+		const addCall = (task as any).addToClineMessages.mock.calls[0][0]
+		expect(addCall.isAnswered).toBe(true)
+		expect(postMessageToWebview).not.toHaveBeenCalledWith({ type: "clearApprovalButtons" })
 	})
 
-	it("does not post clearApprovalButtons when the ask requires a manual decision", async () => {
+	it("does not stamp isAnswered when the ask requires a manual decision", async () => {
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider: ProviderStub = {
 			postMessageToWebview,
@@ -101,10 +108,12 @@ describe("Task.ask clearApprovalButtons signal", () => {
 
 		await askPromise
 
+		const addCall = (task as any).addToClineMessages.mock.calls[0][0]
+		expect(addCall.isAnswered).toBeFalsy()
 		expect(postMessageToWebview).not.toHaveBeenCalledWith({ type: "clearApprovalButtons" })
 	})
 
-	it("does not post clearApprovalButtons for the followup timeout branch", async () => {
+	it("does not stamp isAnswered for the followup timeout branch", async () => {
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider: ProviderStub = {
 			postMessageToWebview,
@@ -128,6 +137,8 @@ describe("Task.ask clearApprovalButtons signal", () => {
 
 		await askPromise
 
+		const addCall = (task as any).addToClineMessages.mock.calls[0][0]
+		expect(addCall.isAnswered).toBeFalsy()
 		expect(postMessageToWebview).not.toHaveBeenCalledWith({ type: "clearApprovalButtons" })
 	})
 })

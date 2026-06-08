@@ -258,6 +258,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		if (lastMessage) {
 			switch (lastMessage.type) {
 				case "ask":
+					// Skip button setup when the ask was already resolved by the backend
+					// before the state snapshot reached the webview. isAnswered:true is
+					// stamped on the message atomically with addToClineMessages, so the
+					// webview never needs to show -- and then clear -- approval buttons.
+					if (lastMessage.isAnswered) {
+						break
+					}
 					// Reset user response flag when a new ask arrives to allow auto-approval
 					userRespondedRef.current = false
 					const isPartial = lastMessage.partial === true
@@ -888,11 +895,6 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							break
 					}
 					break
-				case "clearApprovalButtons":
-					// The backend already resolved the ask (auto-approve/deny), so
-					// only clear the button UI; do not send another askResponse.
-					clearApprovalButtons()
-					break
 				case "condenseTaskContextStarted":
 					// Handle both manual and automatic condensation start
 					// We don't check the task ID because:
@@ -944,7 +946,6 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			handleSetChatBoxMessage,
 			handlePrimaryButtonClick,
 			handleSecondaryButtonClick,
-			clearApprovalButtons,
 			setCheckpointWarning,
 			playSound,
 		],

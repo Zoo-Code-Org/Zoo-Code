@@ -16,6 +16,7 @@ interface ClineMessage {
 	ts: number
 	text?: string
 	partial?: boolean
+	isAnswered?: boolean
 }
 
 vi.mock("@src/utils/vscode", () => ({
@@ -109,10 +110,6 @@ const hydrateState = (clineMessages: ClineMessage[]) => {
 	)
 }
 
-const dispatchExtensionMessage = (data: unknown) => {
-	window.dispatchEvent(new MessageEvent("message", { data }))
-}
-
 const defaultProps: ChatViewProps = {
 	isHidden: false,
 	showAnnouncement: false,
@@ -135,40 +132,45 @@ const commandAsk = (): ClineMessage[] => [
 	{ type: "ask", ask: "command", ts: 2, text: "echo hi", partial: false },
 ]
 
-describe("ChatView clearApprovalButtons handling", () => {
+const autoApprovedCommandAsk = (): ClineMessage[] => [
+	{ type: "say", say: "task", ts: 1, text: "Initial task" },
+	{ type: "ask", ask: "command", ts: 2, text: "echo hi", partial: false, isAnswered: true },
+]
+
+describe("ChatView approval button behavior", () => {
 	beforeEach(() => vi.clearAllMocks())
 
-	it("hides the Run/Deny buttons without sending an askResponse", async () => {
+	it("shows Run/Deny buttons for a command ask that requires manual approval", async () => {
 		const { queryByText } = renderChatView()
 
 		await act(async () => {
 			hydrateState(commandAsk())
 		})
 
-		// The command ask paints the approval buttons.
 		await waitFor(() => {
 			expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
 			expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
 		})
+	})
 
-		const postMessageCallsBefore = (vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.length
+	it("never shows Run/Deny buttons when the command ask is already answered (auto-approved)", async () => {
+		const { queryByText } = renderChatView()
 
 		await act(async () => {
-			dispatchExtensionMessage({ type: "clearApprovalButtons" })
+			hydrateState(autoApprovedCommandAsk())
 		})
 
-		// Buttons are cleared via the shared pathway.
+		// isAnswered:true on the message means the ask was resolved before the
+		// webview rendered it -- buttons must never appear.
 		await waitFor(() => {
 			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
 			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
 		})
 
-		// The backend already responded, so the webview must not send another response.
+		// No askResponse should have been sent, since the backend already responded.
 		const askResponseCalls = (vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.filter(
 			([msg]) => msg?.type === "askResponse",
 		)
 		expect(askResponseCalls).toHaveLength(0)
-		// And no new postMessage was triggered by the clear itself.
-		expect((vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.length).toBe(postMessageCallsBefore)
 	})
 })

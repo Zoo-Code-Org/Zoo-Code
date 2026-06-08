@@ -681,5 +681,40 @@ Output:
 			// Pulsing dot removed after process exits
 			expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument()
 		})
+
+		it("should show the pulsing dot on mount when the started event was already sent (cache recovery)", async () => {
+			// Simulate the race: a prior component received "started" and populated
+			// the module-level cache, then unmounted. The new component that mounts
+			// (e.g. after an auto-approved command causes a React reconciliation)
+			// must recover the status from the cache so the dot appears immediately
+			// without waiting for another "started" message.
+			const executionId = "exec-cache-recovery"
+
+			const { unmount } = render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId={executionId} text="npm start" />
+				</ExtensionStateWrapper>,
+			)
+
+			// Deliver "started" to the mounted component -- this populates the cache.
+			await act(async () => {
+				sendStatusMessage(executionId, { status: "started", command: "npm start", pid: 5678 })
+			})
+
+			expect(document.querySelector(".animate-pulse")).toBeInTheDocument()
+
+			// Unmount to simulate the component being destroyed.
+			unmount()
+
+			// A fresh instance with the same executionId must inherit the cached
+			// status and show the dot immediately, without any new message.
+			render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId={executionId} text="npm start" />
+				</ExtensionStateWrapper>,
+			)
+
+			expect(document.querySelector(".animate-pulse")).toBeInTheDocument()
+		})
 	})
 })
