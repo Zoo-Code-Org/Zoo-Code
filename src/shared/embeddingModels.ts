@@ -35,6 +35,10 @@ export const EMBEDDING_MODEL_PROFILES: EmbeddingModelProfiles = {
 	},
 	gemini: {
 		"gemini-embedding-001": { dimension: 3072, scoreThreshold: 0.4 },
+
+		// Gemini Embedding 2 for Gemini API / AI Studio / Vertex-style usage
+		"gemini-embedding-2": { dimension: 3072, scoreThreshold: 0.4 },
+
 		// Deprecated: text-embedding-004 is migrated to gemini-embedding-001 in GeminiEmbedder
 		// Kept here for backward-compatible dimension lookup in createVectorStore()
 		"text-embedding-004": { dimension: 3072, scoreThreshold: 0.4 },
@@ -47,14 +51,19 @@ export const EMBEDDING_MODEL_PROFILES: EmbeddingModelProfiles = {
 		"openai/text-embedding-3-small": { dimension: 1536, scoreThreshold: 0.4 },
 		"openai/text-embedding-3-large": { dimension: 3072, scoreThreshold: 0.4 },
 		"openai/text-embedding-ada-002": { dimension: 1536, scoreThreshold: 0.4 },
+
 		// Cohere models
 		"cohere/embed-v4.0": { dimension: 1024, scoreThreshold: 0.4 },
+
 		// Google models
 		"google/gemini-embedding-001": { dimension: 3072, scoreThreshold: 0.4 },
+		"google/gemini-embedding-2": { dimension: 3072, scoreThreshold: 0.4 },
 		"google/text-embedding-005": { dimension: 768, scoreThreshold: 0.4 },
 		"google/text-multilingual-embedding-002": { dimension: 768, scoreThreshold: 0.4 },
+
 		// Amazon models
 		"amazon/titan-embed-text-v2": { dimension: 1024, scoreThreshold: 0.4 },
+
 		// Mistral models
 		"mistral/codestral-embed": { dimension: 1536, scoreThreshold: 0.4 },
 		"mistral/mistral-embed": { dimension: 1024, scoreThreshold: 0.4 },
@@ -64,10 +73,13 @@ export const EMBEDDING_MODEL_PROFILES: EmbeddingModelProfiles = {
 		"amazon.titan-embed-text-v1": { dimension: 1536, scoreThreshold: 0.4 },
 		"amazon.titan-embed-text-v2:0": { dimension: 1024, scoreThreshold: 0.4 },
 		"amazon.titan-embed-image-v1": { dimension: 1024, scoreThreshold: 0.4 },
+
 		// Amazon Nova Embed models
 		"amazon.nova-2-multimodal-embeddings-v1:0": { dimension: 1024, scoreThreshold: 0.4 },
+
 		// Cohere Embed v4 (supports only text for now; multimodal image support planned)
 		"cohere.embed-v4:0": { dimension: 1536, scoreThreshold: 0.4 },
+
 		// Cohere Embed v3 models available through Bedrock
 		"cohere.embed-english-v3": { dimension: 1024, scoreThreshold: 0.4 },
 		"cohere.embed-multilingual-v3": { dimension: 1024, scoreThreshold: 0.4 },
@@ -77,11 +89,15 @@ export const EMBEDDING_MODEL_PROFILES: EmbeddingModelProfiles = {
 		"openai/text-embedding-3-small": { dimension: 1536, scoreThreshold: 0.4 },
 		"openai/text-embedding-3-large": { dimension: 3072, scoreThreshold: 0.4 },
 		"openai/text-embedding-ada-002": { dimension: 1536, scoreThreshold: 0.4 },
+
 		// Google models via OpenRouter
 		"google/gemini-embedding-001": { dimension: 3072, scoreThreshold: 0.4 },
+		"google/gemini-embedding-2": { dimension: 3072, scoreThreshold: 0.4 },
+
 		// Mistral models via OpenRouter
 		"mistralai/mistral-embed-2312": { dimension: 1024, scoreThreshold: 0.4 },
 		"mistralai/codestral-embed-2505": { dimension: 1536, scoreThreshold: 0.4 },
+
 		// Qwen models via OpenRouter
 		"qwen/qwen3-embedding-0.6b": { dimension: 1024, scoreThreshold: 0.4 },
 		"qwen/qwen3-embedding-4b": { dimension: 2560, scoreThreshold: 0.4 },
@@ -175,18 +191,19 @@ export function getDefaultModelId(provider: EmbedderProvider): string {
 		}
 
 		case "gemini":
-			return "gemini-embedding-001"
+			return "gemini-embedding-2"
 
 		case "mistral":
 			return "codestral-embed-2505"
 
 		case "vercel-ai-gateway":
-			return "openai/text-embedding-3-large"
+			return "google/gemini-embedding-2"
 
 		case "bedrock":
 			return "amazon.titan-embed-text-v2:0"
+
 		case "openrouter":
-			return "openai/text-embedding-3-large"
+			return "google/gemini-embedding-2"
 
 		case "semble":
 			return "potion-code-16M"
