@@ -681,6 +681,12 @@
 				"description": "Tiempo de espera después de escrituras de archivos antes de continuar, permitiendo que las herramientas de diagnóstico procesen cambios y detecten problemas."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Umbral de coincidencia de diff",
+				"description": "Los umbrales más bajos hacen que las ediciones de archivos sean más resistentes a variaciones de formato y espacios en blanco. Un umbral del 100% requiere una coincidencia exacta."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Umbral de condensación de contexto",
 			"selectProfile": "Configurar umbral para perfil",

@@ -671,6 +671,12 @@
 				"description": "在继续之前写入文件后等待的时间，允许诊断工具处理更改并检测问题。"
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "差异匹配阈值",
+				"description": "较低的阈值使文件编辑对格式和空白变化更具弹性。100%的阈值要求完全匹配。"
+			}
+		},
 		"condensingThreshold": {
 			"label": "压缩触发阈值",
 			"selectProfile": "配置配置文件阈值",

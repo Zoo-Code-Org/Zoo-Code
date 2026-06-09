@@ -649,6 +649,12 @@
 				"description": "Waktu tunggu setelah penulisan file sebelum melanjutkan, memungkinkan alat diagnostik untuk memproses perubahan dan mendeteksi masalah."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Ambang batas pencocokan diff",
+				"description": "Ambang batas yang lebih rendah membuat pengeditan file lebih tahan terhadap variasi format dan spasi. Ambang batas 100% memerlukan kecocokan yang tepat."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Ambang Batas Pemicu Kondensasi",
 			"selectProfile": "Konfigurasi ambang batas untuk profil",

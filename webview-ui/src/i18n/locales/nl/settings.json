@@ -681,6 +681,12 @@
 				"description": "Wachttijd na het schrijven van bestanden voordat u doorgaat, zodat diagnostische hulpmiddelen wijzigingen kunnen verwerken en problemen kunnen detecteren."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Diff-match-drempelwaarde",
+				"description": "Lagere drempelwaarden maken bestandbewerkingen beter bestand tegen opmaak- en witruimtevariaties. Een drempelwaarde van 100% vereist een exacte overeenkomst."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Compressie trigger drempelwaarde",
 			"selectProfile": "Drempelwaarde voor profiel configureren",

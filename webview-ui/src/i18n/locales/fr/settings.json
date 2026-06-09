@@ -681,6 +681,12 @@
 				"description": "Temps d'attente après les écritures de fichiers avant de continuer, permettant aux outils de diagnostic de traiter les modifications et de détecter les problèmes."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Seuil de correspondance du diff",
+				"description": "Des seuils plus bas rendent les modifications de fichiers plus résistantes aux variations de formatage et d'espaces blancs. Un seuil de 100% nécessite une correspondance exacte."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Seuil de condensation du contexte",
 			"selectProfile": "Configurer le seuil pour le profil",

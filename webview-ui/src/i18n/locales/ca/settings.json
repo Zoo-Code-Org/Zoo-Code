@@ -671,6 +671,12 @@
 				"description": "Temps d'espera després d'escriptures de fitxers abans de continuar, permetent que les eines de diagnòstic processin els canvis i detectin problemes."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Llindar de coincidència de diff",
+				"description": "Els llindars més baixos fan que les edicions de fitxer siguin més resistents a variacions de format i espais en blanc. Un llindar del 100% requereix una coincidència exacta."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Llindar d'activació de condensació",
 			"selectProfile": "Configura el llindar per al perfil",

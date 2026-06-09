@@ -671,6 +671,12 @@
 				"description": "Tempo di attesa dopo la scrittura dei file prima di procedere, consentendo agli strumenti di diagnostica di elaborare le modifiche e rilevare i problemi."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Soglia di corrispondenza diff",
+				"description": "Soglie più basse rendono le modifiche ai file più resilienti a variazioni di formattazione e spazi bianchi. Una soglia del 100% richiede una corrispondenza esatta."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Soglia di attivazione condensazione",
 			"selectProfile": "Configura soglia per profilo",
