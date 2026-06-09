@@ -279,7 +279,7 @@ describe("OpenAiNativeHandler", () => {
 			expect(modelInfo.info.contextWindow).toBe(1_050_000)
 			expect(modelInfo.info.supportsVerbosity).toBe(true)
 			expect(modelInfo.info.supportsReasoningEffort).toEqual(["none", "low", "medium", "high", "xhigh"])
-			expect(modelInfo.info.reasoningEffort).toBe("none")
+			expect(modelInfo.info.reasoningEffort).toBe("medium")
 		})
 
 		it("should return GPT-5.4 model info when selected", () => {
