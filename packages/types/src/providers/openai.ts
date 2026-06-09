@@ -32,7 +32,7 @@ export const openAiNativeModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh"],
-		reasoningEffort: "none",
+		reasoningEffort: "medium",
 		inputPrice: 5.0,
 		outputPrice: 30.0,
 		cacheReadsPrice: 0.5,
