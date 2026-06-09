@@ -268,7 +268,7 @@ describe("OpenAiNativeHandler", () => {
 		})
 
 		it("should return GPT-5.5 model info when selected", () => {
-			const gpt54Handler = new OpenAiNativeHandler({
+			const gpt55Handler = new OpenAiNativeHandler({
 				...mockOptions,
 				apiModelId: "gpt-5.5",
 			})
