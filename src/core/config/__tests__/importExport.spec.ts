@@ -930,7 +930,7 @@ describe("importExport", () => {
 				})
 
 				expect(result.success).toBe(true)
-				expect((result as { warnings?: string[] }).warnings?.[0]).toContain("Roo Code Router was removed")
+				expect((result as { warnings?: string[] }).warnings?.[0]).toContain("Zoo Code Router was removed")
 
 				const importedProfiles = mockProviderSettingsManager.import.mock.calls[0][0]
 				expect(importedProfiles.currentApiConfigName).toBe("router-profile")

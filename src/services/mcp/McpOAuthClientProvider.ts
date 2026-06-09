@@ -150,7 +150,7 @@ export class McpOAuthClientProvider implements OAuthClientProvider {
 			state,
 			authServerMeta,
 			resourceIndicator,
-			serverName || "Roo Code",
+			serverName || "Zoo Code",
 		)
 	}
 

@@ -112,8 +112,8 @@
 			"thinking_complete_recitation": "(Réflexion terminée, mais la sortie a été bloquée en raison de la vérification de récitation.)"
 		},
 		"roo": {
-			"authenticationRequired": "Le fournisseur Roo nécessite une authentification cloud. Veuillez vous connecter à Roo Code Cloud.",
-			"routerRemoved": "Roo Code Router a été supprimé. Sélectionne et configure un autre fournisseur."
+			"authenticationRequired": "Le fournisseur Roo nécessite une authentification cloud. Veuillez vous connecter à Zoo Code Cloud.",
+			"routerRemoved": "Zoo Code Router a été supprimé. Sélectionne et configure un autre fournisseur."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "La clé API contient des caractères invalides.",
@@ -164,7 +164,7 @@
 		"mode_exported": "Mode '{{mode}}' exporté avec succès",
 		"mode_imported": "Mode importé avec succès",
 		"roo": {
-			"signInUnavailable": "La connexion à Roo Code Cloud n'est pas disponible pour le moment. Configure un autre fournisseur pour continuer."
+			"signInUnavailable": "La connexion à Zoo Code Cloud n'est pas disponible pour le moment. Configure un autre fournisseur pour continuer."
 		}
 	},
 	"answers": {

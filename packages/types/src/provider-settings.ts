@@ -81,7 +81,7 @@ export const isInternalProvider = (key: string): key is InternalProvider =>
 /**
  * CustomProvider
  *
- * Custom providers are completely configurable within Roo Code settings.
+ * Custom providers are completely configurable within Zoo Code settings.
  */
 
 export const customProviders = ["openai"] as const

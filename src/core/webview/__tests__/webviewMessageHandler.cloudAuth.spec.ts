@@ -58,7 +58,7 @@ describe("webviewMessageHandler cloud auth fallbacks", () => {
 
 		expect(CloudService.instance.login).not.toHaveBeenCalled()
 		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-			"Roo Code Cloud sign-in is currently unavailable. Configure another provider to continue.",
+			"Zoo Code Cloud sign-in is currently unavailable. Configure another provider to continue.",
 		)
 	})
 
@@ -72,7 +72,7 @@ describe("webviewMessageHandler cloud auth fallbacks", () => {
 
 		expect(CloudService.instance.handleAuthCallback).not.toHaveBeenCalled()
 		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-			"Roo Code Cloud sign-in is currently unavailable. Configure another provider to continue.",
+			"Zoo Code Cloud sign-in is currently unavailable. Configure another provider to continue.",
 		)
 	})
 })

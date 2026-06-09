@@ -112,8 +112,8 @@
 			"thinking_complete_recitation": "(Nadenken voltooid, maar uitvoer is geblokkeerd vanwege recitatiecontrole.)"
 		},
 		"roo": {
-			"authenticationRequired": "Roo provider vereist cloud authenticatie. Log in bij Roo Code Cloud.",
-			"routerRemoved": "Roo Code Router is verwijderd. Selecteer en configureer een andere provider."
+			"authenticationRequired": "Zoo provider vereist cloud authenticatie. Log in bij Zoo Code Cloud.",
+			"routerRemoved": "Zoo Code Router is verwijderd. Selecteer en configureer een andere provider."
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API-sleutel bevat ongeldige karakters.",
@@ -164,7 +164,7 @@
 		"mode_exported": "Modus '{{mode}}' succesvol geëxporteerd",
 		"mode_imported": "Modus succesvol geïmporteerd",
 		"roo": {
-			"signInUnavailable": "Inloggen bij Roo Code Cloud is momenteel niet beschikbaar. Configureer een andere provider om door te gaan."
+			"signInUnavailable": "Inloggen bij Zoo Code Cloud is momenteel niet beschikbaar. Configureer een andere provider om door te gaan."
 		}
 	},
 	"answers": {

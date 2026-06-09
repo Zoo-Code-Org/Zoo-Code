@@ -224,7 +224,7 @@ export const globalSettingsSchema = z.object({
 
 	/**
 	 * Path to worktree to auto-open after switching workspaces.
-	 * Used by the worktree feature to open the Roo Code sidebar in a new window.
+	 * Used by the worktree feature to open the Zoo Code sidebar in a new window.
 	 */
 	worktreeAutoOpenPath: z.string().optional(),
 	/**

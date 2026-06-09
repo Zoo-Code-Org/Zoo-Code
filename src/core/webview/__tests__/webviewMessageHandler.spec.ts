@@ -592,7 +592,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
-			error: "Roo Code Router has been removed. Please select and configure a different provider.",
+			error: "Zoo Code Router has been removed. Please select and configure a different provider.",
 			values: { provider: "roo" },
 		})
 	})

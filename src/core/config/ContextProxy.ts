@@ -92,7 +92,7 @@ export class ContextProxy {
 		// Migration: Check for old nested image generation settings and migrate them
 		await this.migrateImageGenerationSettings()
 
-		// Migration: Downgrade legacy Roo Code Router state before generic sanitization.
+		// Migration: Downgrade legacy Zoo Code Router state before generic sanitization.
 		await this.migrateLegacyRooApiProvider()
 
 		// Migration: Sanitize invalid/removed API providers
@@ -228,7 +228,7 @@ export class ContextProxy {
 	}
 
 	/**
-	 * Migrates legacy Roo Code Router selections into a setup-needed state.
+	 * Migrates legacy Zoo Code Router selections into a setup-needed state.
 	 */
 	private async migrateLegacyRooApiProvider() {
 		try {
@@ -240,7 +240,7 @@ export class ContextProxy {
 				return
 			}
 
-			logger.info("[ContextProxy] Migrating legacy Roo Code Router state to setup-needed fallback")
+			logger.info("[ContextProxy] Migrating legacy Zoo Code Router state to setup-needed fallback")
 			this.stateCache = migratedState as GlobalState
 			await Promise.all([
 				this.originalContext.globalState.update("apiProvider", undefined),
@@ -249,7 +249,7 @@ export class ContextProxy {
 			])
 		} catch (error) {
 			logger.error(
-				`Error during Roo Code Router migration: ${error instanceof Error ? error.message : String(error)}`,
+				`Error during Zoo Code Router migration: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		}
 	}

@@ -1,6 +1,6 @@
 {
 	"name": "@roo-code/cloud",
-	"description": "Roo Code Cloud services.",
+	"description": "Zoo Code Cloud services.",
 	"version": "0.0.1",
 	"type": "module",
 	"exports": "./src/index.ts",

@@ -188,7 +188,7 @@ describe("McpOAuthClientProvider", () => {
 
 			const metadata = provider.clientMetadata
 
-			expect(metadata.client_name).toBe("Roo Code")
+			expect(metadata.client_name).toBe("Zoo Code")
 			expect(metadata.redirect_uris).toEqual(["http://localhost:0/callback"])
 			expect(metadata.grant_types).toContain("authorization_code")
 			expect(metadata.response_types).toContain("code")
@@ -786,7 +786,7 @@ describe("McpOAuthClientProvider", () => {
 					Promise.resolve({
 						client_id: "new-client-id",
 						redirect_uris: ["http://localhost:12345/callback"],
-						client_name: "Roo Code",
+						client_name: "Zoo Code",
 						grant_types: ["authorization_code", "refresh_token"],
 						response_types: ["code"],
 						token_endpoint_auth_method: "none",
@@ -832,7 +832,7 @@ describe("McpOAuthClientProvider", () => {
 					Promise.resolve({
 						client_id: "consistency-client-id",
 						redirect_uris: ["http://localhost:12345/callback"],
-						client_name: "Roo Code",
+						client_name: "Zoo Code",
 						grant_types: ["authorization_code", "refresh_token"],
 						response_types: ["code"],
 						token_endpoint_auth_method: "none",

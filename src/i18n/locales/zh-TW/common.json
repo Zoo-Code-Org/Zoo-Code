@@ -111,8 +111,8 @@
 			"thinking_complete_recitation": "（思考完成，但由於引用檢查輸出被阻止。）"
 		},
 		"roo": {
-			"authenticationRequired": "Roo 提供者需要雲端認證。請登入 Roo Code Cloud。",
-			"routerRemoved": "Roo Code Router 已被移除。請選擇並設定其他提供者。"
+			"authenticationRequired": "Roo 提供者需要雲端認證。請登入 Zoo Code Cloud。",
+			"routerRemoved": "Zoo Code Router 已被移除。請選擇並設定其他提供者。"
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API 金鑰包含無效字元。",
@@ -164,7 +164,7 @@
 		"mode_exported": "模式 '{{mode}}' 已成功匯出",
 		"mode_imported": "模式已成功匯入",
 		"roo": {
-			"signInUnavailable": "Roo Code Cloud 登入目前無法使用。請設定其他提供者以繼續。"
+			"signInUnavailable": "Zoo Code Cloud 登入目前無法使用。請設定其他提供者以繼續。"
 		}
 	},
 	"answers": {
