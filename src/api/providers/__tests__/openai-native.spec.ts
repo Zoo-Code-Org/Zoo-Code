@@ -487,7 +487,7 @@ describe("OpenAiNativeHandler", () => {
 			expect(parsedBody.max_output_tokens).toBe(128000)
 			expect(parsedBody.temperature).toBeUndefined()
 			expect(parsedBody.include).toEqual(["reasoning.encrypted_content"])
-			expect(parsedBody.reasoning?.effort).toBe("none")
+			expect(parsedBody.reasoning?.effort).toBe("medium")
 			expect(parsedBody.text?.verbosity).toBe("medium")
 
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
