@@ -273,7 +273,7 @@ describe("OpenAiNativeHandler", () => {
 				apiModelId: "gpt-5.5",
 			})
 
-			const modelInfo = gpt54Handler.getModel()
+			const modelInfo = gpt55Handler.getModel()
 			expect(modelInfo.id).toBe("gpt-5.5")
 			expect(modelInfo.info.maxTokens).toBe(128000)
 			expect(modelInfo.info.contextWindow).toBe(1_050_000)
