@@ -46,6 +46,31 @@ export interface ParseResult {
 export interface UnterminatedQuote {
 	quoteType: QuoteType
 	openIndex: number
+	/** Human-readable description suitable for surfacing to an agent as a tool error. */
+	message: string
+}
+
+/**
+ * Build the human-readable error message for an unterminated quote.
+ * Includes a short excerpt of the command around the opening delimiter
+ * so the agent has enough context to locate and fix the problem.
+ */
+function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, command: string): string {
+	const labels: Record<QuoteType, string> = {
+		"posix-single": "single quote (')",
+		"ansi-c": "ANSI-C quote ($')",
+		"double": 'double quote (")',
+		"locale": 'locale quote ($")',
+		"heredoc": "heredoc (<<)",
+	}
+	const snippetStart = Math.max(0, openIndex - 10)
+	const snippetEnd = Math.min(command.length, openIndex + 20)
+	const prefix = snippetStart > 0 ? "..." : ""
+	const suffix = snippetEnd < command.length ? "..." : ""
+	const excerpt = prefix + command.slice(snippetStart, snippetEnd).replace(/\r?\n/g, "\\n") + suffix
+	return (
+		`Malformed command: unterminated ${labels[quoteType]} at position ${openIndex} -- near: \`${excerpt}\`. `
+	)
 }
 
 /**
@@ -237,7 +262,7 @@ function scanTopLevelQuotes(command: string): ScanResult {
 					if (i < command.length) i++ // consume newline of a body line
 				}
 				if (!found) {
-					return { spans, unterminatedQuote: { quoteType: "heredoc", openIndex: start } }
+					return { spans, unterminatedQuote: { quoteType: "heredoc", openIndex: start, message: unterminatedQuoteMessage("heredoc", start, command) } }
 				}
 			}
 			spans.push({ start, end: i, quoteType: "heredoc" })
@@ -261,8 +286,8 @@ function scanTopLevelQuotes(command: string): ScanResult {
 				}
 			}
 			if (!closed) {
-				return { spans, unterminatedQuote: { quoteType: "ansi-c", openIndex: start } }
-			}
+					return { spans, unterminatedQuote: { quoteType: "ansi-c", openIndex: start, message: unterminatedQuoteMessage("ansi-c", start, command) } }
+				}
 			spans.push({ start, end: i, quoteType: "ansi-c" })
 			continue
 		}
@@ -284,8 +309,8 @@ function scanTopLevelQuotes(command: string): ScanResult {
 				}
 			}
 			if (!closed) {
-				return { spans, unterminatedQuote: { quoteType: "locale", openIndex: start } }
-			}
+					return { spans, unterminatedQuote: { quoteType: "locale", openIndex: start, message: unterminatedQuoteMessage("locale", start, command) } }
+				}
 			spans.push({ start, end: i, quoteType: "locale" })
 			continue
 		}
@@ -298,9 +323,9 @@ function scanTopLevelQuotes(command: string): ScanResult {
 				i++
 			}
 			if (i >= command.length) {
-				// No closing quote found.
-				return { spans, unterminatedQuote: { quoteType: "posix-single", openIndex: start } }
-			}
+					// No closing quote found.
+					return { spans, unterminatedQuote: { quoteType: "posix-single", openIndex: start, message: unterminatedQuoteMessage("posix-single", start, command) } }
+				}
 			i++ // consume closing '
 			spans.push({ start, end: i, quoteType: "posix-single" })
 			continue
@@ -323,8 +348,8 @@ function scanTopLevelQuotes(command: string): ScanResult {
 				}
 			}
 			if (!closed) {
-				return { spans, unterminatedQuote: { quoteType: "double", openIndex: start } }
-			}
+					return { spans, unterminatedQuote: { quoteType: "double", openIndex: start, message: unterminatedQuoteMessage("double", start, command) } }
+				}
 			spans.push({ start, end: i, quoteType: "double" })
 			continue
 		}

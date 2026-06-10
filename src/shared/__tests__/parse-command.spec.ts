@@ -415,15 +415,21 @@ describe("parseCommand", () => {
 		})
 
 		it("detects an unterminated single quote and reports its opening index", () => {
-			expect(findUnterminatedQuote("echo 'hello")).toEqual({ quoteType: "posix-single", openIndex: 5 })
+			expect(findUnterminatedQuote("echo 'hello")).toEqual(
+				expect.objectContaining({ quoteType: "posix-single", openIndex: 5 }),
+			)
 		})
 
 		it("detects an unterminated double quote and reports its opening index", () => {
-			expect(findUnterminatedQuote('echo "hello')).toEqual({ quoteType: "double", openIndex: 5 })
+			expect(findUnterminatedQuote('echo "hello')).toEqual(
+				expect.objectContaining({ quoteType: "double", openIndex: 5 }),
+			)
 		})
 
 		it("reports ansi-c style and the $ position for an unterminated ANSI-C quote", () => {
-			expect(findUnterminatedQuote("echo $'hello")).toEqual({ quoteType: "ansi-c", openIndex: 5 })
+			expect(findUnterminatedQuote("echo $'hello")).toEqual(
+				expect.objectContaining({ quoteType: "ansi-c", openIndex: 5 }),
+			)
 		})
 
 		it("treats a backslash-escaped quote outside a string as literal", () => {
@@ -446,7 +452,9 @@ describe("parseCommand", () => {
 
 		it("treats # attached to a word as an ordinary character", () => {
 			expect(findUnterminatedQuote("echo foo#'bar'")).toBeNull()
-			expect(findUnterminatedQuote("echo foo#'bar")).toEqual({ quoteType: "posix-single", openIndex: 9 })
+			expect(findUnterminatedQuote("echo foo#'bar")).toEqual(
+				expect.objectContaining({ quoteType: "posix-single", openIndex: 9 }),
+			)
 		})
 
 		it("does not let an apostrophe inside double quotes open a region", () => {
@@ -475,7 +483,9 @@ describe("parseCommand", () => {
 		})
 
 		it("reports locale style and the $ position for an unterminated locale quote", () => {
-			expect(findUnterminatedQuote('echo $"hello')).toEqual({ quoteType: "locale", openIndex: 5 })
+			expect(findUnterminatedQuote('echo $"hello')).toEqual(
+				expect.objectContaining({ quoteType: "locale", openIndex: 5 }),
+			)
 		})
 
 		it("returns null for a balanced locale-quoted string", () => {
