@@ -148,7 +148,7 @@ Pull Requests moeten beoordeelbaar, getest en onderhoudbaar zijn. Zorg er voor h
 - Je bereid bent om te reageren op reviewfeedback en redelijke vervolgwijzigingen aan te brengen.
 - De PR niet vereist dat onderhouders de implementatie wezenlijk herschrijven, herontwerpen of eigenaarschap overnemen voordat deze kan worden samengevoegd.
 
-Onderhouders kunnen PR's sluiten die onvolledig, te breed, inactief, niet in lijn met de projectrichting zijn, of die een onevenredige review- of onderhoudslast creëren. Het sluiten van een PR is geen oordeel over de bijdrager; het betekent dat de wijziging momenteel niet samenvoegbaar is in zijn huidige vorm.
+Onderhouders kunnen PR's sluiten die onvolledig, te breed, inactief, niet in lijn met de projectrichting zijn, of die een onevenredige review- of onderhoudslast creëren. Het sluiten van een PR is geen oordeel over de bijdrager; het is een beslissing van de onderhouders dat de wijziging niet kan worden geaccepteerd in zijn huidige vorm.
 
 ### Door AI ondersteunde bijdragen
 
@@ -158,11 +158,11 @@ Als je AI-tools gebruikt om een PR te helpen maken, moet je:
 
 - Elke significante wijziging beoordelen en begrijpen.
 - De implementatie en afwegingen in eigen woorden kunnen uitleggen.
-- De wijziging zelf testen waar praktisch.
+- De wijziging zelf testen. Als testen niet praktisch is in jouw omgeving, leg dan in de PR-beschrijving uit waarom en beschrijf hoe reviewers de wijziging kunnen verifiëren.
 - Verifiëren dat de gegenereerde code correct, noodzakelijk en compatibel is met de projectlicentie.
-- Significante AI-hulp in de PR-beschrijving vermelden wanneer dit materieel heeft bijgedragen aan de code, tests of het ontwerp.
+- Overweeg AI-hulp te vermelden in de PR-beschrijving wanneer dit de code, tests of het ontwerp wezenlijk heeft beïnvloed — dit helpt reviewers beter feedback te geven.
 
-Dien geen AI-gegenereerde wijzigingen in die je niet begrijpt, niet hebt getest of die je niet kunt onderhouden tijdens de review. Onderhouders kunnen PR's sluiten die overwegend AI-ondersteund lijken maar geen menselijke verificatie, duidelijke motivatie of review-opvolging hebben.
+Dien geen AI-gegenereerde wijzigingen in die je niet begrijpt of die je niet kunt onderhouden tijdens de review. Onderhouders kunnen PR's sluiten die overwegend AI-ondersteund lijken maar geen menselijke verificatie, duidelijke motivatie of review-opvolging hebben.
 
 ## Juridisch
 

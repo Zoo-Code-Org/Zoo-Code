@@ -20,8 +20,8 @@ Zoo Code is a community-driven project, and we deeply value every contribution. 
 - [Before You Contribute](#before-you-contribute)
 - [Finding & Planning Your Contribution](#finding--planning-your-contribution)
 - [Development & Submission Process](#development--submission-process)
-- [Pull Request Expectations](#pull-request-expectations)
-- [AI-Assisted Contributions](#ai-assisted-contributions)
+    - [Pull Request Expectations](#pull-request-expectations)
+    - [AI-Assisted Contributions](#ai-assisted-contributions)
 - [Legal](#legal)
 
 ## Before You Contribute
@@ -148,7 +148,7 @@ Pull requests should be reviewable, tested, and maintainable. Before opening a P
 - You are willing to respond to review feedback and make reasonable follow-up changes.
 - The PR does not require maintainers to substantially rewrite, redesign, or take ownership of the implementation before it can be merged.
 
-Maintainers may close PRs that are incomplete, too broad, inactive, not aligned with the project direction, or that create disproportionate review or maintenance burden. Closing a PR is not a judgment on the contributor; it means the change is not currently mergeable in its present form.
+Maintainers may close PRs that are incomplete, too broad, inactive, not aligned with the project direction, or that create disproportionate review or maintenance burden. Closing a PR is not a judgment on the contributor; it is a maintainer decision that the change cannot be accepted in its present form.
 
 ### AI-Assisted Contributions
 
@@ -158,11 +158,11 @@ If you use AI tools to help create a PR, you must:
 
 - Review and understand every meaningful change.
 - Be able to explain the implementation and tradeoffs in your own words.
-- Test the change yourself where practical.
+- Test the change yourself. If testing is impractical for your environment, explain why in the PR description and describe how reviewers can verify the change instead.
 - Verify that generated code is correct, necessary, and compatible with the project license.
-- Disclose meaningful AI assistance in the PR description when it materially contributed to the code, tests, or design.
+- Consider disclosing AI assistance in the PR description when it materially shaped the code, tests, or design — this helps reviewers give better feedback.
 
-Please do not submit AI-generated changes that you do not understand, have not tested, or cannot maintain through review. Maintainers may close PRs that appear to be substantially AI-assisted but lack human verification, clear rationale, or review follow-through.
+Please do not submit AI-generated changes that you do not understand or cannot maintain through review. Maintainers may close PRs that appear substantially AI-assisted but lack human verification, clear rationale, or review follow-through.
 
 ## Legal
 

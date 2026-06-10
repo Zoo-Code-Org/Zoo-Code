@@ -148,7 +148,7 @@ pnpm install
 - Jesteś gotowy do odpowiadania na opinie z przeglądu i wprowadzania rozsądnych zmian następczych.
 - PR nie wymaga od opiekunów zasadniczego przepisania, przeprojektowania ani przejęcia własności implementacji przed scaleniem.
 
-Opiekunowie mogą zamykać PR, które są niekompletne, zbyt szerokie, nieaktywne, niezgodne z kierunkiem projektu lub tworzące nieproporcjonalne obciążenie przeglądem lub konserwacją. Zamknięcie PR nie jest oceną współtwórcy; oznacza, że zmiana nie jest obecnie możliwa do scalenia w jej obecnej postaci.
+Opiekunowie mogą zamykać PR, które są niekompletne, zbyt szerokie, nieaktywne, niezgodne z kierunkiem projektu lub tworzące nieproporcjonalne obciążenie przeglądem lub konserwacją. Zamknięcie PR nie jest oceną współtwórcy; jest to decyzja opiekunów, że zmiana nie może zostać zaakceptowana w jej obecnej postaci.
 
 ### Wkłady wspomagane przez AI
 
@@ -158,11 +158,11 @@ Jeśli używasz narzędzi AI do pomocy przy tworzeniu PR, musisz:
 
 - Przejrzeć i zrozumieć każdą istotną zmianę.
 - Być w stanie wyjaśnić implementację i kompromisy własnymi słowami.
-- Samodzielnie przetestować zmianę tam, gdzie jest to praktyczne.
+- Samodzielnie przetestować zmianę. Jeśli testy nie są praktyczne w Twoim środowisku, wyjaśnij dlaczego w opisie PR i opisz, jak recenzenci mogą zweryfikować zmianę.
 - Zweryfikować, że wygenerowany kod jest poprawny, konieczny i zgodny z licencją projektu.
-- Ujawnić znaczącą pomoc AI w opisie PR, gdy w istotny sposób przyczyniła się do kodu, testów lub projektu.
+- Rozważ ujawnienie pomocy AI w opisie PR, gdy istotnie wpłynęła na kod, testy lub projekt — pomaga to recenzentom udzielać lepszych opinii.
 
-Prosimy o nieprzesyłanie zmian wygenerowanych przez AI, których nie rozumiesz, nie przetestowałeś lub których nie możesz utrzymać podczas przeglądu. Opiekunowie mogą zamykać PR, które wydają się w istotnym stopniu wspomagane przez AI, ale brakuje im weryfikacji człowieka, jasnego uzasadnienia lub kontynuacji przeglądu.
+Prosimy o nieprzesyłanie zmian wygenerowanych przez AI, których nie rozumiesz lub których nie możesz utrzymać podczas przeglądu. Opiekunowie mogą zamykać PR, które wydają się w istotnym stopniu wspomagane przez AI, ale brakuje im weryfikacji człowieka, jasnego uzasadnienia lub kontynuacji przeglądu.
 
 ## Kwestie prawne
 

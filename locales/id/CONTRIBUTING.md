@@ -148,7 +148,7 @@ Pull Request harus dapat ditinjau, diuji, dan dapat dipelihara. Sebelum membuka 
 - Anda bersedia merespons umpan balik ulasan dan melakukan perubahan tindak lanjut yang wajar.
 - PR tidak mengharuskan pengelola untuk menulis ulang, mendesain ulang, atau mengambil alih kepemilikan implementasi secara substansial sebelum dapat digabungkan.
 
-Pengelola dapat menutup PR yang tidak lengkap, terlalu luas, tidak aktif, tidak selaras dengan arah proyek, atau yang menciptakan beban ulasan atau pemeliharaan yang tidak proporsional. Menutup PR bukan merupakan penilaian terhadap kontributor; artinya perubahan tersebut tidak dapat digabungkan dalam bentuknya saat ini.
+Pengelola dapat menutup PR yang tidak lengkap, terlalu luas, tidak aktif, tidak selaras dengan arah proyek, atau yang menciptakan beban ulasan atau pemeliharaan yang tidak proporsional. Menutup PR bukan merupakan penilaian terhadap kontributor; itu adalah keputusan pengelola bahwa perubahan tersebut tidak dapat diterima dalam bentuknya saat ini.
 
 ### Kontribusi Berbantuan AI
 
@@ -158,11 +158,11 @@ Jika Anda menggunakan alat AI untuk membantu membuat PR, Anda harus:
 
 - Meninjau dan memahami setiap perubahan yang berarti.
 - Mampu menjelaskan implementasi dan pertukaran dengan kata-kata Anda sendiri.
-- Menguji perubahan sendiri jika memungkinkan.
+- Menguji perubahan sendiri. Jika pengujian tidak praktis di lingkungan Anda, jelaskan alasannya dalam deskripsi PR dan uraikan bagaimana peninjau dapat memverifikasi perubahan tersebut.
 - Memverifikasi bahwa kode yang dihasilkan benar, diperlukan, dan kompatibel dengan lisensi proyek.
-- Mengungkapkan bantuan AI yang signifikan dalam deskripsi PR ketika berkontribusi secara material pada kode, pengujian, atau desain.
+- Pertimbangkan untuk mengungkapkan bantuan AI dalam deskripsi PR ketika hal itu secara material membentuk kode, pengujian, atau desain — ini membantu peninjau memberikan umpan balik yang lebih baik.
 
-Jangan mengirimkan perubahan yang dihasilkan AI yang tidak Anda pahami, belum Anda uji, atau tidak dapat Anda pertahankan melalui ulasan. Pengelola dapat menutup PR yang tampaknya sebagian besar dibantu AI tetapi tidak memiliki verifikasi manusia, alasan yang jelas, atau tindak lanjut ulasan.
+Jangan mengirimkan perubahan yang dihasilkan AI yang tidak Anda pahami atau tidak dapat Anda pertahankan melalui ulasan. Pengelola dapat menutup PR yang tampaknya sebagian besar dibantu AI tetapi tidak memiliki verifikasi manusia, alasan yang jelas, atau tindak lanjut ulasan.
 
 ## Hukum
 

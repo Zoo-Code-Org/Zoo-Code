@@ -148,7 +148,7 @@ Les sol·licituds d'extracció han de ser revisables, provades i mantenibles. Ab
 - Esteu disposats a respondre als comentaris de la revisió i fer canvis raonables de seguiment.
 - La PR no requereix que els mantenidors reescriguin, redissenyin o assumeixin la propietat substancial de la implementació abans de poder fusionar-la.
 
-Els mantenidors poden tancar les PR que estiguin incompletes, siguin massa àmplies, inactives, no estiguin alineades amb la direcció del projecte o que creïn una càrrega desproporcionada de revisió o manteniment. Tancar una PR no és un judici sobre el col·laborador; significa que el canvi no és fusionable en la seva forma actual.
+Els mantenidors poden tancar les PR que estiguin incompletes, siguin massa àmplies, inactives, no estiguin alineades amb la direcció del projecte o que creïn una càrrega desproporcionada de revisió o manteniment. Tancar una PR no és un judici sobre el col·laborador; és una decisió dels mantenidors que el canvi no pot ser acceptat en la seva forma actual.
 
 ### Contribucions amb assistència d'IA
 
@@ -158,11 +158,11 @@ Si utiliseu eines d'IA per ajudar a crear una PR, heu de:
 
 - Revisar i comprendre cada canvi significatiu.
 - Ser capaços d'explicar la implementació i els compromisos amb les vostres pròpies paraules.
-- Provar el canvi vosaltres mateixos on sigui pràctic.
+- Provar el canvi vosaltres mateixos. Si les proves no són pràctiques en el vostre entorn, expliqueu per què a la descripció de la PR i descriviu com els revisors poden verificar el canvi.
 - Verificar que el codi generat és correcte, necessari i compatible amb la llicència del projecte.
-- Revelar l'assistència significativa de la IA a la descripció de la PR quan hagi contribuït materialment al codi, les proves o el disseny.
+- Considereu revelar l'assistència d'IA a la descripció de la PR quan hagi influït materialment en el codi, les proves o el disseny — això ajuda els revisors a donar millors comentaris.
 
-Si us plau, no envieu canvis generats per IA que no enteneu, no heu provat o no podeu mantenir durant la revisió. Els mantenidors poden tancar les PR que semblin substancialment assistides per IA però que manquin de verificació humana, raonament clar o seguiment de la revisió.
+Si us plau, no envieu canvis generats per IA que no enteneu o que no podeu mantenir durant la revisió. Els mantenidors poden tancar les PR que semblin substancialment assistides per IA però que manquin de verificació humana, raonament clar o seguiment de la revisió.
 
 ## Legal
 

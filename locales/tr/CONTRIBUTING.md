@@ -150,7 +150,7 @@ Pull Request'ler incelenebilir, test edilmiş ve sürdürülebilir olmalıdır. 
 - İnceleme geri bildirimine yanıt vermeye ve makul takip değişiklikleri yapmaya isteklisiniz.
 - PR, birleştirilmeden önce sürdürücülerin uygulamayı önemli ölçüde yeniden yazmasını, yeniden tasarlamasını veya sahiplenmesini gerektirmiyor.
 
-Sürdürücüler, eksik, çok geniş kapsamlı, hareketsiz, proje yönüyle uyumsuz olan veya orantısız inceleme ya da bakım yükü oluşturan PR'leri kapatabilir. Bir PR'yi kapatmak, katkıda bulunan hakkında bir yargı değildir; bu, değişikliğin mevcut biçimiyle birleştirilemeyeceği anlamına gelir.
+Sürdürücüler, eksik, çok geniş kapsamlı, hareketsiz, proje yönüyle uyumsuz olan veya orantısız inceleme ya da bakım yükü oluşturan PR'leri kapatabilir. Bir PR'yi kapatmak, katkıda bulunan hakkında bir yargı değildir; değişikliğin mevcut biçimiyle kabul edilemeyeceğine dair bir sürdürücü kararıdır.
 
 ### YZ Destekli Katkılar
 
@@ -160,11 +160,11 @@ Bir PR oluşturmak için YZ araçları kullanıyorsanız şunları yapmanız ger
 
 - Her önemli değişikliği gözden geçirin ve anlayın.
 - Uygulamayı ve değiş tokuşları kendi sözlerinizle açıklayabilin.
-- Mümkün olduğunda değişikliği kendiniz test edin.
+- Değişikliği kendiniz test edin. Ortamınızda test yapmak pratik değilse, PR açıklamasında nedenini açıklayın ve gözlemcilerin değişikliği nasıl doğrulayabileceğini tarif edin.
 - Oluşturulan kodun doğru, gerekli ve proje lisansıyla uyumlu olduğunu doğrulayın.
-- Koda, testlere veya tasarıma önemli ölçüde katkıda bulunduğunda PR açıklamasında önemli YZ yardımını açıklayın.
+- YZ kodu, testleri veya tasarımı önemli ölçüde şekillendirdiyse PR açıklamasında YZ yardımını açıklamayı düşünün — bu, gözlemcilerin daha iyi geri bildirim vermesine yardımcı olur.
 
-Anlamadığınız, test etmediğiniz veya inceleme sürecinde sürdüremeyeceğiniz YZ tarafından oluşturulan değişiklikler göndermeyin. Sürdürücüler, büyük ölçüde YZ destekli görünen ancak insan doğrulaması, net gerekçe veya inceleme takibi olmayan PR'leri kapatabilir.
+Anlamadığınız veya inceleme sürecinde sürdüremeyeceğiniz YZ tarafından oluşturulan değişiklikler göndermeyin. Sürdürücüler, büyük ölçüde YZ destekli görünen ancak insan doğrulaması, net gerekçe veya inceleme takibi olmayan PR'leri kapatabilir.
 
 ## Yasal
 

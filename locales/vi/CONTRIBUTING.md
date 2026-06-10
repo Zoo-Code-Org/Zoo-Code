@@ -148,7 +148,7 @@ Các Yêu cầu kéo phải có thể xem xét được, đã được kiểm tr
 - Bạn sẵn sàng phản hồi phản hồi xem xét và thực hiện các thay đổi tiếp theo hợp lý.
 - PR không yêu cầu những người bảo trì viết lại, thiết kế lại hoặc tiếp quản đáng kể việc triển khai trước khi có thể hợp nhất.
 
-Những người bảo trì có thể đóng các PR không đầy đủ, quá rộng, không hoạt động, không phù hợp với hướng dự án hoặc tạo ra gánh nặng xem xét hoặc bảo trì không tương xứng. Đóng PR không phải là phán xét về người đóng góp; nó có nghĩa là thay đổi hiện không thể hợp nhất ở dạng hiện tại.
+Những người bảo trì có thể đóng các PR không đầy đủ, quá rộng, không hoạt động, không phù hợp với hướng dự án hoặc tạo ra gánh nặng xem xét hoặc bảo trì không tương xứng. Đóng PR không phải là phán xét về người đóng góp; đó là quyết định của người bảo trì rằng thay đổi không thể được chấp nhận ở dạng hiện tại.
 
 ### Đóng góp có sự hỗ trợ của AI
 
@@ -158,11 +158,11 @@ Nếu bạn sử dụng các công cụ AI để giúp tạo PR, bạn phải:
 
 - Xem xét và hiểu mọi thay đổi có ý nghĩa.
 - Có thể giải thích việc triển khai và sự đánh đổi bằng lời của chính bạn.
-- Tự kiểm tra thay đổi khi có thể thực hiện được.
+- Tự kiểm tra thay đổi. Nếu kiểm tra không thực tế trong môi trường của bạn, hãy giải thích lý do trong mô tả PR và mô tả cách người xem xét có thể xác minh thay đổi.
 - Xác minh rằng mã được tạo là chính xác, cần thiết và tương thích với giấy phép dự án.
-- Tiết lộ sự hỗ trợ AI đáng kể trong mô tả PR khi nó đóng góp đáng kể vào mã, kiểm tra hoặc thiết kế.
+- Cân nhắc tiết lộ sự hỗ trợ AI trong mô tả PR khi nó đã định hình đáng kể mã, kiểm tra hoặc thiết kế — điều này giúp người xem xét đưa ra phản hồi tốt hơn.
 
-Vui lòng không gửi các thay đổi do AI tạo ra mà bạn không hiểu, chưa kiểm tra hoặc không thể duy trì trong quá trình xem xét. Những người bảo trì có thể đóng các PR có vẻ được hỗ trợ đáng kể bởi AI nhưng thiếu xác minh của con người, lý do rõ ràng hoặc theo dõi xem xét.
+Vui lòng không gửi các thay đổi do AI tạo ra mà bạn không hiểu hoặc không thể duy trì trong quá trình xem xét. Những người bảo trì có thể đóng các PR có vẻ được hỗ trợ đáng kể bởi AI nhưng thiếu xác minh của con người, lý do rõ ràng hoặc theo dõi xem xét.
 
 ## Pháp lý
 

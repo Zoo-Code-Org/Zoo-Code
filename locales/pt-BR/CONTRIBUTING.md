@@ -148,7 +148,7 @@ As Pull Requests devem ser revisáveis, testadas e manuteníveis. Antes de abrir
 - Você está disposto a responder ao feedback da revisão e fazer alterações de acompanhamento razoáveis.
 - A PR não requer que os mantenedores reescrevam, redesenhem ou assumam substancialmente a propriedade da implementação antes de poder ser mesclada.
 
-Os mantenedores podem fechar PRs que estejam incompletas, muito amplas, inativas, não alinhadas com a direção do projeto ou que criem uma carga desproporcionada de revisão ou manutenção. Fechar uma PR não é um julgamento sobre o contribuidor; significa que a mudança não é mesclável em sua forma atual.
+Os mantenedores podem fechar PRs que estejam incompletas, muito amplas, inativas, não alinhadas com a direção do projeto ou que criem uma carga desproporcionada de revisão ou manutenção. Fechar uma PR não é um julgamento sobre o contribuidor; é uma decisão dos mantenedores de que a mudança não pode ser aceita em sua forma atual.
 
 ### Contribuições assistidas por IA
 
@@ -158,11 +158,11 @@ Se você usar ferramentas de IA para ajudar a criar uma PR, você deve:
 
 - Revisar e entender cada mudança significativa.
 - Ser capaz de explicar a implementação e as compensações em suas próprias palavras.
-- Testar a mudança você mesmo onde for prático.
+- Testar a mudança você mesmo. Se os testes não forem práticos no seu ambiente, explique o motivo na descrição da PR e descreva como os revisores podem verificar a mudança.
 - Verificar se o código gerado é correto, necessário e compatível com a licença do projeto.
-- Divulgar a assistência significativa de IA na descrição da PR quando ela tiver contribuído materialmente para o código, testes ou design.
+- Considere divulgar a assistência de IA na descrição da PR quando ela tiver influenciado materialmente o código, testes ou design — isso ajuda os revisores a fornecer um feedback melhor.
 
-Por favor, não envie mudanças geradas por IA que você não entenda, não tenha testado ou que não possa manter durante a revisão. Os mantenedores podem fechar PRs que pareçam substancialmente assistidas por IA mas que careçam de verificação humana, justificativa clara ou acompanhamento da revisão.
+Por favor, não envie mudanças geradas por IA que você não entenda ou que não possa manter durante a revisão. Os mantenedores podem fechar PRs que pareçam substancialmente assistidas por IA mas que careçam de verificação humana, justificativa clara ou acompanhamento da revisão.
 
 ## Legal
 
