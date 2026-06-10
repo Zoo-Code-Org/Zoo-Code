@@ -221,6 +221,7 @@
 		"running": "चल रहा है",
 		"pid": "पीआईडी: {{pid}}",
 		"exitStatus": "{{exitCode}} स्थिति के साथ बाहर निकल गया",
+		"malformedCommand": "गलत कमांड: shell सिंटैक्स त्रुटि",
 		"manageCommands": "स्वतः-अनुमोदित कमांड",
 		"addToAllowed": "अनुमत सूची में जोड़ें",
 		"removeFromAllowed": "अनुमत सूची से हटाएँ",

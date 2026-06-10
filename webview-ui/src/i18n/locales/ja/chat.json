@@ -221,6 +221,7 @@
 		"running": "実行中",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "ステータス {{exitCode}} で終了しました",
+		"malformedCommand": "不正なコマンド: シェル構文エラー",
 		"manageCommands": "自動承認されたコマンド",
 		"addToAllowed": "許可リストに追加",
 		"removeFromAllowed": "許可リストから削除",

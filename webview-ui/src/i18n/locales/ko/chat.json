@@ -221,6 +221,7 @@
 		"running": "실행 중",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "상태 {{exitCode}}(으)로 종료됨",
+		"malformedCommand": "잘못된 명령: shell 구문 오류",
 		"manageCommands": "자동 승인된 명령",
 		"addToAllowed": "허용 목록에 추가",
 		"removeFromAllowed": "허용 목록에서 제거",

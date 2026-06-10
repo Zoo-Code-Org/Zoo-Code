@@ -221,6 +221,7 @@
 		"running": "En execució",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "S'ha sortit amb l'estat {{exitCode}}",
+		"malformedCommand": "Ordre mal formada: error de sintaxi del shell",
 		"manageCommands": "Comandes aprovades automàticament",
 		"addToAllowed": "Afegeix a la llista permesa",
 		"removeFromAllowed": "Elimina de la llista permesa",
