@@ -304,6 +304,101 @@ describe("AnthropicHandler", () => {
 			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
 			expect(requestBody?.max_tokens).toBe(32768)
 		})
+
+		it("should not require the 1M context beta header for Claude Opus 4.8", async () => {
+			const opus48Handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-8",
+				anthropicBeta1MContext: true,
+			})
+
+			const stream = opus48Handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.temperature).toBeUndefined()
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+			expect(requestOptions?.headers?.["anthropic-beta"]).not.toContain("context-1m-2025-08-07")
+		})
+
+		it("should use adaptive thinking for Claude Opus 4.8 when reasoning is enabled", async () => {
+			const opus48Handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-8",
+				enableReasoningEffort: true,
+			})
+
+			const stream = opus48Handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.max_tokens).toBe(16384)
+		})
+
+		it("should omit thinking for Claude Opus 4.8 when reasoning is disabled", async () => {
+			const opus48Handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-8",
+				enableReasoningEffort: false,
+			})
+
+			const stream = opus48Handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestBody?.thinking).toBeUndefined()
+			expect(requestBody?.max_tokens).toBe(8192)
+		})
+
+		it("should preserve custom maxTokens for Claude Opus 4.8 when reasoning is enabled", async () => {
+			const opus48Handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-8",
+				enableReasoningEffort: true,
+				modelMaxTokens: 32768,
+			})
+
+			const stream = opus48Handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.max_tokens).toBe(32768)
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -428,6 +523,23 @@ describe("AnthropicHandler", () => {
 			expect(model.info.supportsReasoningBinary).toBe(true)
 			expect(model.info.supportsReasoningBudget).toBe(true)
 			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.reasoningBudget).toBeUndefined()
+		})
+
+		it("should handle Claude Opus 4.8 model correctly", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-8",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-opus-4-8")
+			expect(model.info.maxTokens).toBe(128000)
+			expect(model.info.contextWindow).toBe(1000000)
+			expect(model.maxTokens).toBe(8192)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
 			expect(model.reasoningBudget).toBeUndefined()
 		})
 

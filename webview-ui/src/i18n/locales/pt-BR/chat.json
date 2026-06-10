@@ -337,9 +337,9 @@
 		},
 		"release": {
 			"heading": "Novidades:",
-			"highlight1": "Provedor Xiaomi MiMo: O Xiaomi MiMo foi adicionado como provedor de API de primeira classe para você configurar modelos MiMo diretamente no Zoo Code.",
-			"highlight2": "Handoff upstream do Zoo Code: Incorporamos o merge upstream mais recente do sunset e as atualizações relacionadas de plataforma para manter o Zoo Code alinhado ao trabalho de handoff da comunidade.",
-			"highlight3": "Correções de estabilidade em chat e provedores: Corrigimos os textos de sign-in do MCP, as requisições do Gemini com o conjunto completo de tools, o tratamento de temperatura da OpenAI e a renderização de til única em Markdown."
+			"highlight1": "Conecte-se pelo Zoo Gateway — roteie suas requisições por um gateway gerenciado com suporte a autenticação multi-perfil.",
+			"highlight2": "Use o Gemini 3.5 Flash — um modelo Google rápido e capaz, agora disponível diretamente nas configurações do provedor.",
+			"highlight3": "Indexe sua base de código localmente com o Semble — embeddings on-the-fly sem chave de API externa nem upload, mantendo seu código na sua máquina."
 		},
 		"cloudAgents": {
 			"heading": "Novidades na Nuvem:",

@@ -53,18 +53,19 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.55.0
+## What's New in v3.58.0
 
-**Zoo Code's first feature release** builds on the marketplace handoff with a
-new provider, the upstream sunset merge, and a round of user-facing fixes
-across chat, provider settings, and rendering.
-
-- Add Xiaomi MiMo as a first-class API provider
-- Pull in the upstream Roo Code sunset merge and related platform updates
-- Fix MCP sign-in copy, Gemini full-tool requests, and OpenAI temperature
-  handling for unsupported models
-- Fix Markdown single-tilde rendering and diagnostics temp-file naming
-- Improve provider defaults and region coverage for Z.AI, GLM, and Vertex AI
+- **Zoo Gateway** — connect through a managed gateway with multi-profile auth support
+- **Gemini 3.5 Flash** — a fast, capable Google model now available from your provider settings
+- **Semble embedding** — index your codebase locally with on-the-fly embeddings, no external API key required
+- **Configurable chat font size** and **VS Code integrated terminal shell override**
+- **GitHub-style alerts** rendered in the webview
+- **Configurable max output tokens** for GLM models
+- **WorkspacePathResolver** — reliable path handling across symlinked workspaces
+- Fix React crash from malformed follow-up suggestion mode
+- Fix OpenAI temperature being omitted when no custom value is set
+- Handle per-key failures during settings import
+- Security updates: mermaid v11.15.0, axios v1.16.0
 
 <details>
   <summary>🌐 Available languages</summary>

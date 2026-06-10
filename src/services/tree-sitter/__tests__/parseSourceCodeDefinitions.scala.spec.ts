@@ -62,21 +62,21 @@ describe("parseSourceCodeDefinitionsForFile with Scala", () => {
 	})
 
 	it("should parse method declarations", () => {
-		expect(parseResult).toMatch(/\d+--\d+ \|   def testMatch\(value: Any\): Int = value match/)
-		expect(parseResult).toMatch(/\d+--\d+ \|   def processItems\(items: List\[Int\]\): List\[Int\]/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {3}def testMatch\(value: Any\): Int = value match/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {3}def processItems\(items: List\[Int\]\): List\[Int\]/)
 	})
 
 	it("should parse value declarations", () => {
-		expect(parseResult).toMatch(/\d+--\d+ \|   lazy val heavyComputation: Int = \{/)
-		expect(parseResult).toMatch(/\d+--\d+ \|   val immutableValue: Int = 42/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {3}lazy val heavyComputation: Int = \{/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {3}val immutableValue: Int = 42/)
 	})
 
 	it("should parse variable declarations", () => {
-		expect(parseResult).toMatch(/\d+--\d+ \|   var mutableValue: String = "changeable"/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {3}var mutableValue: String = "changeable"/)
 	})
 
 	it("should parse type definitions", () => {
-		expect(parseResult).toMatch(/\d+--\d+ \|   type StringMap\[T\] = Map\[String, T\]/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {3}type StringMap\[T\] = Map\[String, T\]/)
 	})
 
 	/*

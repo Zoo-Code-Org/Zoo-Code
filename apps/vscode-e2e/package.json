@@ -16,13 +16,13 @@
 		"@roo-code/config-typescript": "workspace:^",
 		"@roo-code/types": "workspace:^",
 		"@copilotkit/aimock": "1.15.1",
-		"@types/mocha": "^10.0.10",
-		"@types/node": "^20.19.25",
-		"@types/vscode": "^1.95.0",
-		"@vscode/test-cli": "^0.0.11",
-		"@vscode/test-electron": "^2.4.0",
-		"glob": "^11.1.0",
-		"mocha": "^11.1.0",
-		"rimraf": "^6.0.1"
+		"@types/mocha": "10.0.10",
+		"@types/node": "20.19.41",
+		"@types/vscode": "1.100.0",
+		"@vscode/test-cli": "0.0.11",
+		"@vscode/test-electron": "2.5.2",
+		"glob": "11.1.0",
+		"mocha": "11.2.2",
+		"rimraf": "6.0.1"
 	}
 }

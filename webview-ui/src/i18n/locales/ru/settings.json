@@ -213,7 +213,8 @@
 		"stoppingButton": "Остановка...",
 		"workspaceToggleLabel": "Включить индексацию для этого рабочего пространства",
 		"workspaceDisabledMessage": "Индексация настроена, но не включена для этого рабочего пространства.",
-		"autoEnableDefaultLabel": "Автоматически включать индексацию для новых рабочих пространств"
+		"autoEnableDefaultLabel": "Автоматически включать индексацию для новых рабочих пространств",
+		"sembleProvider": "Semble - Локальный"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Вы можете настроить глобальное сочетание клавиш для этого параметра <SettingsLink>в настройках вашей IDE</SettingsLink>.",
@@ -314,6 +315,8 @@
 		"getOpenRouterApiKey": "Получить OpenRouter API-ключ",
 		"vercelAiGatewayApiKey": "Ключ API Vercel AI Gateway",
 		"getVercelAiGatewayApiKey": "Получить ключ API Vercel AI Gateway",
+		"opencodeGoApiKey": "Ключ API Opencode Go",
+		"getOpencodeGoApiKey": "Получить ключ API Opencode Go",
 		"apiKeyStorageNotice": "API-ключи хранятся безопасно в Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -452,6 +455,7 @@
 			"step3": "3. Или создайте сервисный аккаунт с ключом."
 		},
 		"googleCloudCredentials": "Учётные данные Google Cloud",
+		"googleCloudCredentialsPathWarning": "Это поле ожидает JSON-содержимое файла ключа сервисного аккаунта, а не путь. Если у вас есть путь, вставьте его в поле <strong>Путь к ключу Google Cloud</strong> ниже, либо очистите это поле и используйте переменную окружения <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Путь к ключу Google Cloud",
 		"googleCloudProjectId": "ID проекта Google Cloud",
 		"googleCloudRegion": "Регион Google Cloud",
@@ -557,6 +561,13 @@
 			"placeholder": "По умолчанию: claude",
 			"maxTokensLabel": "Макс. выходных токенов",
 			"maxTokensDescription": "Максимальное количество выходных токенов для ответов Claude Code. По умолчанию 8000."
+		},
+		"zooGateway": {
+			"account": "Учетная запись Zoo Code",
+			"signInButton": "Войти в Zoo Code",
+			"signInDescription": "Войдите, чтобы использовать Zoo Gateway с вашей учетной записью",
+			"authenticated": "Аутентифицирован",
+			"authenticatedAs": "Аутентифицирован как {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -738,6 +749,14 @@
 		"inheritEnv": {
 			"label": "Наследовать переменные среды",
 			"description": "Включите для наследования переменных среды от родительского процесса VS Code. <0>Подробнее</0>"
+		},
+		"profile": {
+			"label": "Переопределение терминала Zoo Code",
+			"default": "Использовать профиль VS Code по умолчанию (рекомендуется)",
+			"description": "По умолчанию Zoo Code использует оболочку, настроенную в VS Code. Выберите Переопределить, чтобы указать профиль оболочки с путём, предоставленный VS Code. Профили только с источником (например, встроенная запись PowerShell) не могут быть перечислены здесь. <0>Подробнее</0>",
+			"overrideLabel": "Переопределить оболочку для Zoo Code",
+			"configureButton": "Выбрать профиль по умолчанию в VS Code",
+			"noProfiles": "(профили с путём в terminal.integrated.profiles не найдены)"
 		}
 	},
 	"advancedSettings": {
@@ -898,7 +917,8 @@
 		"providerNotAllowed": "Провайдер '{{provider}}' не разрешен вашей организацией",
 		"modelNotAllowed": "Модель '{{model}}' не разрешена для провайдера '{{provider}}' вашей организацией",
 		"profileInvalid": "Этот профиль содержит провайдера или модель, которые не разрешены вашей организацией",
-		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth"
+		"qwenCodeOauthPath": "Вы должны указать допустимый путь к учетным данным OAuth",
+		"zooGatewaySignIn": "Войдите в Zoo Code, чтобы использовать Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Введите API-ключ...",
@@ -960,6 +980,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Требовать {{primaryMod}}+Enter для отправки сообщений",
 			"description": "Если включено, необходимо нажать {{primaryMod}}+Enter для отправки сообщений вместо простого Enter"
+		},
+		"chatFontSize": {
+			"label": "Размер шрифта чата",
+			"description": "Задайте размер шрифта (в пикселях) для чата Zoo Code. Оставьте значение по умолчанию, чтобы соответствовать размеру шрифта VS Code.",
+			"reset": "Использовать значение по умолчанию VS Code"
 		}
 	},
 	"skills": {

@@ -503,6 +503,46 @@ describe("ZAiHandler", () => {
 			)
 		})
 
+		it("should advertise supportsMaxTokens for configurable GLM models", () => {
+			expect(internationalZAiModels["glm-5.1"].supportsMaxTokens).toBe(true)
+			expect(internationalZAiModels["glm-5-turbo"].supportsMaxTokens).toBe(true)
+			expect(mainlandZAiModels["glm-5.1"].supportsMaxTokens).toBe(true)
+			expect(mainlandZAiModels["glm-5-turbo"].supportsMaxTokens).toBe(true)
+			// Models without a configurable output budget should not advertise the flag.
+			expect((internationalZAiModels["glm-4.7"] as { supportsMaxTokens?: boolean }).supportsMaxTokens).toBe(
+				undefined,
+			)
+		})
+
+		it("should honor an explicit modelMaxTokens override instead of the 20% clamp", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.1",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				modelMaxTokens: 100_000,
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.1",
+					max_tokens: 100_000,
+				}),
+			)
+		})
+
 		it("should enable thinking by default for GLM-4.7 (default reasoningEffort is medium)", async () => {
 			const handlerWithModel = new ZAiHandler({
 				apiModelId: "glm-4.7",

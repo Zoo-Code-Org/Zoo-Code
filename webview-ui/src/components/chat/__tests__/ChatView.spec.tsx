@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
+import type { SuggestionItem } from "@roo-code/types"
 
 import ChatView, { ChatViewProps } from "../ChatView"
 
@@ -46,7 +47,33 @@ vi.mock("use-sound", () => ({
 
 // Mock components that use ESM dependencies
 vi.mock("../ChatRow", () => ({
-	default: function MockChatRow({ message }: { message: ClineMessage }) {
+	default: function MockChatRow({
+		message,
+		onSuggestionClick,
+	}: {
+		message: ClineMessage
+		onSuggestionClick?: (suggestion: SuggestionItem, event?: React.MouseEvent) => void
+	}) {
+		if (message.type === "ask" && message.ask === "followup" && message.text) {
+			try {
+				const followUp = JSON.parse(message.text) as { suggest?: SuggestionItem[] }
+				return (
+					<div data-testid="chat-row">
+						{followUp.suggest?.map((suggestion) => (
+							<button
+								key={suggestion.answer}
+								type="button"
+								onClick={(event) => onSuggestionClick?.(suggestion, event)}>
+								{suggestion.answer}
+							</button>
+						))}
+					</div>
+				)
+			} catch {
+				// Fall through to the generic row renderer.
+			}
+		}
+
 		return <div data-testid="chat-row">{JSON.stringify(message)}</div>
 	},
 }))
@@ -1047,6 +1074,97 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "terminalOperation",
 			}),
 		)
+	})
+})
+
+describe("ChatView - Follow-up Suggestions", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(vscode.postMessage).mockClear()
+	})
+
+	it("switches to a known mode from a malformed object mode suggestion", async () => {
+		const { getByRole } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 1000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({
+						question: "Switch mode?",
+						suggest: [{ answer: "Use code mode", mode: { mode_slug: "code" } }],
+					}),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Use code mode" }))
+		vi.mocked(vscode.postMessage).mockClear()
+
+		fireEvent.click(suggestion)
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "mode", text: "code" })
+		})
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "askResponse",
+			askResponse: "messageResponse",
+			text: "Use code mode",
+			images: [],
+		})
+	})
+
+	it("does not switch modes for an unknown malformed object mode suggestion", async () => {
+		const { getByRole } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 1000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({
+						question: "Switch mode?",
+						suggest: [{ answer: "Use invalid mode", mode: { mode_slug: "not-a-mode" } }],
+					}),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Use invalid mode" }))
+		vi.mocked(vscode.postMessage).mockClear()
+
+		fireEvent.click(suggestion)
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "askResponse",
+				askResponse: "messageResponse",
+				text: "Use invalid mode",
+				images: [],
+			})
+		})
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
 	})
 })
 

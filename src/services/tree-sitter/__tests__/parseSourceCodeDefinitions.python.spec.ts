@@ -46,7 +46,7 @@ describe("parseSourceCodeDefinitionsForFile with Python", () => {
 	it("should parse class and method definitions", () => {
 		expect(parseResult).toMatch(/\d+--\d+ \| class MultiLineDecoratedClass:/)
 		expect(parseResult).toMatch(/\d+--\d+ \| class MethodContainer:/)
-		expect(parseResult).toMatch(/\d+--\d+ \|     def multi_line_method\(/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {5}def multi_line_method\(/)
 		debugLog("Class and method definitions found:", parseResult)
 	})
 

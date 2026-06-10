@@ -81,6 +81,11 @@
 			"matchPackageNames": ["/^@types\\//"],
 			"matchUpdateTypes": ["patch"],
 			"automerge": true
+		},
+		{
+			"description": "Update extension-host VS Code types only with an intentional minimum-version review.",
+			"matchPackageNames": ["@types/vscode"],
+			"enabled": false
 		}
 	],
 	"customManagers": [

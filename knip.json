@@ -1,26 +1,83 @@
 {
-	"$schema": "https://unpkg.com/knip@latest/schema.json",
-	"ignore": [
-		"**/__tests__/**",
-		"apps/vscode-e2e/**",
-		"src/extension/api.ts",
-		"src/activate/**",
-		"src/workers/countTokens.ts",
-		"src/extension.ts",
-		"scripts/**",
-		"apps/cli/scripts/**"
-	],
+	"$schema": "https://unpkg.com/knip@5/schema.json",
+	"ignore": ["**/__tests__/**", "apps/vscode-e2e/**", "scripts/**", "apps/cli/scripts/**"],
+	"ignoreDependencies": ["lint-staged", "only-allow", "ovsx"],
+	"ignoreExportsUsedInFile": true,
 	"workspaces": {
 		"src": {
-			"entry": ["extension.ts"],
-			"project": ["**/*.ts"]
+			"entry": ["extension.ts", "extension/api.ts", "workers/countTokens.ts"],
+			"project": ["**/*.ts", "!**/__tests__/**"],
+			"ignoreDependencies": [
+				"@ai-sdk/amazon-bedrock",
+				"@ai-sdk/baseten",
+				"@ai-sdk/deepseek",
+				"@ai-sdk/fireworks",
+				"@ai-sdk/google",
+				"@ai-sdk/google-vertex",
+				"@ai-sdk/mistral",
+				"@ai-sdk/xai",
+				"@roo-code/config-typescript",
+				"@types/mocha",
+				"@types/node-cache",
+				"@types/vscode",
+				"@vscode/codicons",
+				"esbuild-wasm",
+				"sambanova-ai-provider",
+				"tree-sitter-wasms",
+				"vscode-material-icons",
+				"zhipu-ai-provider"
+			]
 		},
 		"webview-ui": {
 			"entry": ["src/index.tsx"],
-			"project": ["src/**/*.{ts,tsx}", "../src/shared/*.ts"]
+			"project": ["src/**/*.{ts,tsx}", "../src/shared/*.ts"],
+			"ignoreDependencies": [
+				"@roo-code/config-typescript",
+				"@types/katex",
+				"@types/stacktrace-js",
+				"babel-plugin-react-compiler",
+				"katex",
+				"react-compiler-runtime",
+				"rehype-highlight",
+				"source-map",
+				"tailwindcss",
+				"tailwindcss-animate",
+				"vscode"
+			]
 		},
-		"packages/{build,cloud,ipc,telemetry,types}": {
+		"apps/cli": {
+			"project": ["src/**/*.ts", "src/**/*.tsx"],
+			"ignoreDependencies": ["@vscode/ripgrep", "cross-spawn"]
+		},
+		"packages/config-typescript": {
+			"ignoreUnresolved": ["vitest/globals"]
+		},
+		"packages/core": {
+			"project": ["src/**/*.ts"],
+			"ignoreDependencies": ["esbuild"]
+		},
+		"packages/vscode-shim": {
+			"project": ["src/**/*.ts"]
+		},
+		"packages/cloud": {
+			"project": ["src/**/*.ts"],
+			"ignoreDependencies": ["@types/vscode", "ioredis", "p-wait-for"]
+		},
+		"packages/telemetry": {
+			"project": ["src/**/*.ts"],
+			"ignoreDependencies": ["@types/vscode"]
+		},
+		"packages/{build,ipc,types}": {
 			"project": ["src/**/*.ts"]
 		}
+	},
+	"rules": {
+		"classMembers": "off",
+		"duplicates": "warn",
+		"enumMembers": "warn",
+		"exports": "warn",
+		"nsExports": "warn",
+		"types": "warn",
+		"nsTypes": "warn"
 	}
 }

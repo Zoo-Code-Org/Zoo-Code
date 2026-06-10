@@ -30,39 +30,19 @@
 
 Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku migracji Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chcemy jak najlepiej pomagać użytkownikom w czasie przejścia i właśnie do tego służą nasze [Reddit](https://www.reddit.com/r/ZooCode) oraz [Discord](https://discord.gg/VxfP4Vx3gX). Jeśli masz problem albo pytanie, wpadaj i pytaj.
 
-## Nowości w v3.55.0
+## Nowości w v3.58.0
 
-**Pierwsze wydanie funkcjonalne Zoo Code** rozwija handoff do Marketplace i zawiera nowego dostawcę, upstreamowy sunset merge z Roo Code oraz serię poprawek widocznych dla użytkownika w czacie, ustawieniach dostawców i renderowaniu.
-
-- Dodano Xiaomi MiMo jako pełnoprawnego dostawcę API.
-- Włączono upstreamowy sunset merge z Roo Code oraz powiązane aktualizacje platformy.
-- Naprawiono teksty logowania MCP, żądania Gemini z pełnym zestawem narzędzi oraz obsługę temperatury OpenAI dla modeli, które jej nie wspierają.
-- Naprawiono renderowanie Markdown z pojedynczą tyldą oraz nazewnictwo tymczasowych plików diagnostycznych.
-- Ulepszono domyślne ustawienia dostawców i pokrycie regionów dla Z.AI, GLM i Vertex AI.
-
-<details>
-  <summary>🌐 Dostępne języki</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — połącz przez zarządzany gateway z obsługą uwierzytelniania wielu profili
+- **Gemini 3.5 Flash** — szybki i wydajny model Google, teraz dostępny bezpośrednio w ustawieniach dostawcy
+- **Semble embedding** — indeksuj bazę kodu lokalnie bez zewnętrznego klucza API ani przesyłania plików
+- **Konfigurowalna wielkość czcionki czatu** i **nadpisanie powłoki zintegrowanego terminala VS Code**
+- **Powiadomienia w stylu GitHub** renderowane w webview
+- **Konfigurowalna maksymalna liczba tokenów wyjściowych** dla modeli GLM
+- **WorkspacePathResolver** — niezawodna obsługa ścieżek w workspace'ach z dowiązaniami symbolicznymi
+- Naprawiono crash React spowodowany przez niepoprawny tryb sugestii follow-up
+- Naprawiono brak parametru temperature OpenAI bez niestandardowej wartości
+- Obsługa błędów per-klucz podczas importowania ustawień
+- Aktualizacje bezpieczeństwa: mermaid v11.15.0, axios v1.16.0
 
 ---
 

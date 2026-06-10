@@ -30,39 +30,19 @@
 
 Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/VxfP4Vx3gX)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
 
-## v3.55.0의 새로운 기능
+## v3.58.0의 새로운 기능
 
-**Zoo Code의 첫 기능 릴리스**는 Marketplace handoff를 바탕으로 새 provider, Roo Code의 upstream sunset merge, 그리고 채팅, provider 설정, rendering 전반의 사용자 체감 수정 사항을 담고 있어요.
-
-- Xiaomi MiMo를 first-class API provider로 추가했어요.
-- Roo Code의 upstream sunset merge와 관련 platform 업데이트를 반영했어요.
-- MCP sign-in 문구, Gemini의 full-tool 요청, 지원하지 않는 모델에 대한 OpenAI temperature 처리 문제를 수정했어요.
-- Markdown single-tilde 렌더링과 diagnostics temp-file 이름을 수정했어요.
-- Z.AI, GLM, Vertex AI의 provider 기본값과 region 지원 범위를 개선했어요.
-
-<details>
-  <summary>🌐 사용 가능한 언어</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — 멀티 프로필 인증을 지원하는 관리형 게이트웨이를 통해 연결하세요
+- **Gemini 3.5 Flash** — 빠르고 강력한 Google 모델이 이제 provider 설정에서 바로 사용 가능해요
+- **Semble 임베딩** — 외부 API 키나 업로드 없이 코드베이스를 로컬에서 인덱싱하세요
+- **채팅 폰트 크기 설정** 및 **VS Code 통합 터미널 셸 재정의** 기능 추가
+- 웹뷰에서 **GitHub 스타일 알림** 렌더링
+- GLM 모델을 위한 **최대 출력 토큰 설정** 기능
+- **WorkspacePathResolver** — 심볼릭 링크가 있는 워크스페이스에서 안정적인 경로 처리
+- 잘못된 후속 제안 모드로 인한 React 충돌 수정
+- 커스텀 값이 없을 때 OpenAI temperature가 생략되던 문제 수정
+- 설정 가져오기 중 키별 실패 처리
+- 보안 업데이트: mermaid v11.15.0, axios v1.16.0
 
 ---
 

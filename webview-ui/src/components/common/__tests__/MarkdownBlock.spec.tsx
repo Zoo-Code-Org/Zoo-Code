@@ -112,6 +112,80 @@ describe("MarkdownBlock", () => {
 		expect(screen.getByText("Step three")).toBeInTheDocument()
 	})
 
+	it.each([
+		["NOTE", "note", "codicon-info"],
+		["TIP", "tip", "codicon-lightbulb"],
+		["IMPORTANT", "important", "codicon-report"],
+		["WARNING", "warning", "codicon-warning"],
+		["CAUTION", "caution", "codicon-flame"],
+	])("renders a [!%s] GitHub-style alert (#258)", async (marker, type, iconClass) => {
+		const markdown = `> [!${marker}]\n> Body content here.`
+		const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+		await screen.findByText(/Body content here/, { exact: false })
+
+		const alert = container.querySelector(`blockquote[data-alert-type="${type}"]`)
+		expect(alert).not.toBeNull()
+		expect(alert?.classList.contains("markdown-alert")).toBe(true)
+		expect(alert?.classList.contains(`markdown-alert-${type}`)).toBe(true)
+
+		// Distinct icon for the alert type.
+		expect(alert?.querySelector(`.${iconClass}`)).not.toBeNull()
+
+		// The raw "[!TYPE]" marker must not leak into the rendered text.
+		expect(alert?.textContent).not.toContain(`[!${marker}]`)
+		expect(alert?.textContent).toContain("Body content here.")
+	}, 10000)
+
+	it("recognizes alert markers case-insensitively", async () => {
+		const markdown = `> [!note]\n> lowercase marker`
+		const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+		await screen.findByText(/lowercase marker/, { exact: false })
+
+		expect(container.querySelector('blockquote[data-alert-type="note"]')).not.toBeNull()
+	}, 10000)
+
+	it("renders alert content with inline markdown (bold, code, links)", async () => {
+		const markdown = `> [!WARNING]\n> Be **careful** with \`rm -rf\` and see [docs](https://example.com).`
+		const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+		await screen.findByText(/careful/, { exact: false })
+
+		const alert = container.querySelector('blockquote[data-alert-type="warning"]')
+		expect(alert).not.toBeNull()
+		expect(alert?.querySelector("strong")?.textContent).toBe("careful")
+		expect(alert?.querySelector("code")?.textContent).toBe("rm -rf")
+		expect(alert?.querySelector("a")).toHaveAttribute("href", "https://example.com")
+	}, 10000)
+
+	it("keeps a normal blockquote rendering unchanged", async () => {
+		const markdown = `> Just an ordinary quote.\n> Second line.`
+		const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+		await screen.findByText(/ordinary quote/, { exact: false })
+
+		const blockquote = container.querySelector("blockquote")
+		expect(blockquote).not.toBeNull()
+		expect(blockquote?.hasAttribute("data-alert-type")).toBe(false)
+		expect(blockquote?.classList.contains("markdown-alert")).toBe(false)
+		// No injected alert title/icon for normal blockquotes.
+		expect(blockquote?.querySelector(".markdown-alert-title")).toBeNull()
+		expect(blockquote?.querySelector(".codicon")).toBeNull()
+	}, 10000)
+
+	it("treats an unsupported marker as a normal blockquote", async () => {
+		const markdown = `> [!INFO]\n> Not a supported alert type.`
+		const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+		await screen.findByText(/Not a supported alert type/, { exact: false })
+
+		const blockquote = container.querySelector("blockquote")
+		expect(blockquote?.hasAttribute("data-alert-type")).toBe(false)
+		// The raw marker text remains visible since it was not recognized.
+		expect(blockquote?.textContent).toContain("[!INFO]")
+	}, 10000)
+
 	it("should render nested lists with proper hierarchy", async () => {
 		const markdown = `Complex list:
 1. First level ordered

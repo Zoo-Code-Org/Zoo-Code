@@ -79,6 +79,16 @@ export async function run() {
 		throw new Error(`No test files found matching criteria: ${process.env.TEST_FILE || "all tests"}`)
 	}
 
+	// Run provider suites last so their teardown (which may leave per-mode profile
+	// pins pointing at non-default providers) doesn't affect tool suites that start
+	// tasks in specific modes and expect the default openrouter config.
+	testFiles.sort((a, b) => {
+		const aIsProvider = a.includes("/providers/")
+		const bIsProvider = b.includes("/providers/")
+		if (aIsProvider === bIsProvider) return a.localeCompare(b)
+		return aIsProvider ? 1 : -1
+	})
+
 	testFiles.forEach((testFile) => mocha.addFile(path.resolve(cwd, testFile)))
 
 	return new Promise<void>((resolve, reject) =>

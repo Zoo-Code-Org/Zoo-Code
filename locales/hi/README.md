@@ -30,39 +30,19 @@
 
 Roo Code से Zoo Code में आने के लिए एक quick guide तुम्हें [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration) में मिल जाएगी। We plan to help users as much as possible during the transition, और उसी support के लिए हमारा [Reddit](https://www.reddit.com/r/ZooCode) और [Discord](https://discord.gg/VxfP4Vx3gX) है। अगर तुम्हें कोई problem हो या कोई question हो, आकर पूछो।
 
-## v3.55.0 में नया क्या है
+## v3.58.0 में नया क्या है
 
-**Zoo Code का पहला feature release** marketplace handoff पर आगे बढ़ता है और इसमें एक नया provider, Roo Code के upstream sunset merge, और chat, provider settings, और rendering में user-facing fixes की एक नई खेप शामिल है।
-
-- Xiaomi MiMo को first-class API provider के रूप में जोड़ा गया।
-- Roo Code के upstream sunset merge और उससे जुड़े platform updates को शामिल किया गया।
-- MCP sign-in copy, Gemini की full-tool requests, और unsupported models के लिए OpenAI temperature handling को ठीक किया गया।
-- Markdown में single-tilde rendering और diagnostics temp-file naming को ठीक किया गया।
-- Z.AI, GLM, और Vertex AI के लिए provider defaults और region coverage को बेहतर बनाया गया।
-
-<details>
-  <summary>🌐 उपलब्ध भाषाएँ</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — multi-profile auth support के साथ एक managed gateway के ज़रिए कनेक्ट करें
+- **Gemini 3.5 Flash** — एक तेज़ और सक्षम Google model, अब provider settings से सीधे उपलब्ध
+- **Semble embedding** — बिना external API key या upload के codebase को locally index करें
+- **Configurable chat font size** और **VS Code integrated terminal shell override**
+- Webview में **GitHub-style alerts** render होंगे
+- GLM models के लिए **configurable maximum output tokens**
+- **WorkspacePathResolver** — symlinks वाले workspaces में reliable path handling
+- Malformed follow-up suggestion mode से होने वाली React crash ठीक की गई
+- Custom value न होने पर OpenAI temperature के omit होने की समस्या ठीक की गई
+- Settings import के दौरान per-key failures को handle किया गया
+- Security updates: mermaid v11.15.0, axios v1.16.0
 
 ---
 

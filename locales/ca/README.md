@@ -30,39 +30,19 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.55.0
+## Novetats a la v3.58.0
 
-**La primera release de funcionalitats de Zoo Code** es basa en el traspàs al Marketplace amb un proveïdor nou, la fusió upstream del sunset de Roo Code i una ronda de correccions visibles per a l'usuari al xat, la configuració dels proveïdors i el renderitzat.
-
-- S'ha afegit Xiaomi MiMo com a proveïdor d'API de primer nivell.
-- S'ha incorporat la fusió upstream del sunset de Roo Code i les actualitzacions relacionades de la plataforma.
-- S'han corregit els textos de l'inici de sessió d'MCP, les sol·licituds completes d'eines de Gemini i la gestió de la temperatura d'OpenAI per a models que no l'admeten.
-- S'ha corregit el renderitzat del text amb una sola titlla a Markdown i el nom dels fitxers temporals de diagnòstic.
-- S'han millorat els valors per defecte dels proveïdors i la cobertura de regions per a Z.AI, GLM i Vertex AI.
-
-<details>
-  <summary>🌐 Idiomes disponibles</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — connecta't a través d'un gateway gestionat amb suport d'autenticació multi-perfil
+- **Gemini 3.5 Flash** — un model de Google ràpid i capaç, ara disponible des de la configuració del proveïdor
+- **Semble embedding** — indexa el teu codi localment sense cap clau d'API externa ni pujada de fitxers
+- **Mida de font del xat configurable** i **substitució del shell del terminal integrat del VS Code**
+- **Alertes en estil GitHub** renderitzades al webview
+- **Tokens de sortida màxims configurables** per als models GLM
+- **WorkspacePathResolver** — gestió fiable de rutes en espais de treball amb symlinks
+- Corregida la fallada de React causada per un mode de suggeriment de seguiment malformat
+- Corregida l'omissió de la temperatura d'OpenAI quan no hi ha cap valor personalitzat
+- Gestió de fallades per clau durant la importació de configuració
+- Actualitzacions de seguretat: mermaid v11.15.0, axios v1.16.0
 
 ---
 

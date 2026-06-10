@@ -30,39 +30,19 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.55.0 新功能
+## v3.58.0 新功能
 
-**Zoo Code 首個功能版本** 以 Marketplace 交接為基礎，帶來了一個新的供應商、Roo Code 的上游 sunset merge，以及一輪涵蓋聊天、供應商設定與渲染的使用者可見修正。
-
-- 新增 Xiaomi MiMo 一級 API 供應商支援。
-- 合入 Roo Code 的上游 sunset merge 與相關平台更新。
-- 修正 MCP 登入文案、Gemini 全工具組請求，以及 OpenAI 在不支援 temperature 的模型上的處理。
-- 修正 Markdown 單波浪號渲染與診斷暫存檔命名。
-- 改善 Z.AI、GLM 與 Vertex AI 的供應商預設值與區域覆蓋。
-
-<details>
-  <summary>🌐 支援語言</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — 透過支援多設定檔驗證的託管閘道連線
+- **Gemini 3.5 Flash** — 快速且強大的 Google 模型，現可直接在供應商設定中使用
+- **Semble 嵌入** — 無需外部 API 金鑰或上傳，在本機對程式碼庫建立索引
+- **可設定的聊天字型大小**與 **VS Code 整合終端機 Shell 覆寫**
+- 在 webview 中渲染 **GitHub 風格的提醒區塊**
+- GLM 模型的**最大輸出 token 可設定**
+- **WorkspacePathResolver** — 在含符號連結的工作區中可靠地處理路徑
+- 修正因格式錯誤的後續建議模式導致的 React 崩潰
+- 修正未設定自訂值時 OpenAI temperature 被省略的問題
+- 處理設定匯入時的逐鍵失敗
+- 安全性更新：mermaid v11.15.0、axios v1.16.0
 
 ---
 

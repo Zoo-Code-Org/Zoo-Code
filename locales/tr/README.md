@@ -30,39 +30,19 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
-## v3.55.0'daki Yenilikler
+## v3.58.0'daki Yenilikler
 
-**Zoo Code'un ilk özellik sürümü** Marketplace handoff'unu yeni bir sağlayıcı, Roo Code'dan gelen upstream sunset merge'i ve sohbet, sağlayıcı ayarları ile render tarafındaki kullanıcıya görünen düzeltmelerle ileri taşıyor.
-
-- Xiaomi MiMo, birinci sınıf bir API sağlayıcısı olarak eklendi.
-- Roo Code upstream sunset merge'i ve ilgili platform güncellemeleri içeri alındı.
-- MCP oturum açma metni, Gemini'nin tam araç seti istekleri ve desteklenmeyen modeller için OpenAI temperature işleme düzeltildi.
-- Markdown single-tilde renderingi ve diagnostics temp-file adlandırması düzeltildi.
-- Z.AI, GLM ve Vertex AI için sağlayıcı varsayılanları ile bölge kapsamı iyileştirildi.
-
-<details>
-  <summary>🌐 Mevcut diller</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — çok profilli kimlik doğrulama desteğiyle yönetilen bir gateway üzerinden bağlan
+- **Gemini 3.5 Flash** — hızlı ve güçlü bir Google modeli, artık doğrudan sağlayıcı ayarlarından kullanılabilir
+- **Semble embedding** — harici API anahtarı veya yükleme gerektirmeden kod tabanını yerel olarak indeksle
+- **Yapılandırılabilir sohbet yazı tipi boyutu** ve **VS Code tümleşik terminal shell geçersiz kılma**
+- Webview'de **GitHub stili uyarılar** görüntüleniyor
+- GLM modelleri için **yapılandırılabilir maksimum çıktı token sayısı**
+- **WorkspacePathResolver** — sembolik bağlantı içeren çalışma alanlarında güvenilir yol işleme
+- Hatalı biçimlendirilmiş takip öneri modundan kaynaklanan React çökmesi düzeltildi
+- Özel değer ayarlanmadığında OpenAI temperature'ının atlanması düzeltildi
+- Ayar içe aktarma sırasında anahtar başına başarısızlıkların işlenmesi
+- Güvenlik güncellemeleri: mermaid v11.15.0, axios v1.16.0
 
 ---
 

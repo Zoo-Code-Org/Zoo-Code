@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { RooCodeEventName } from "@roo-code/types"
+import { makeProviderStub } from "./helpers/provider-stub"
 
 // Mock safe-stable-stringify to avoid runtime error
 vi.mock("safe-stable-stringify", () => ({
@@ -148,7 +149,7 @@ describe("Nested delegation resume (A → B → C)", () => {
 			return Object.values(historyIndex)
 		})
 
-		const provider = {
+		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			getTaskWithId,
 			emit: emitSpy,
@@ -160,7 +161,7 @@ describe("Nested delegation resume (A → B → C)", () => {
 			reopenParentFromDelegation: vi.fn(async (params: any) => {
 				return await (ClineProvider.prototype as any).reopenParentFromDelegation.call(provider, params)
 			}),
-		} as unknown as ClineProvider
+		} as unknown as ClineProvider)
 
 		// Empty histories for simplicity
 		vi.mocked(readTaskMessages).mockResolvedValue([])

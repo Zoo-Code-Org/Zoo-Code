@@ -17,6 +17,50 @@ import { CheckpointDiff, CheckpointResult, CheckpointEventMap } from "./types"
 import { getExcludePatterns } from "./excludes"
 
 /**
+ * Environment variables stripped before passing the env to simple-git.
+ *
+ * Two categories:
+ *  - Location-override vars (GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY,
+ *    GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_CEILING_DIRECTORIES): redirect git operations to
+ *    unintended repositories or limit where git searches.
+ *  - Code-execution vectors blocked by simple-git ≥3.36's blockUnsafeOperationsPlugin when
+ *    passed via .env(): GIT_EDITOR, GIT_SSH_COMMAND, GIT_PAGER, PREFIX, etc.
+ *
+ * Stripping GIT_CONFIG_COUNT also neutralises the entire GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n
+ * family — git ignores those per-key entries when the count key is absent.
+ */
+export const BLOCKED_ENV_KEYS = new Set([
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_INDEX_FILE",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+	"GIT_CEILING_DIRECTORIES",
+	"GIT_TEMPLATE_DIR",
+	"GIT_EDITOR",
+	"GIT_SEQUENCE_EDITOR",
+	"GIT_ASKPASS",
+	"GIT_SSH",
+	"GIT_SSH_COMMAND",
+	"GIT_PAGER",
+	"GIT_PROXY_COMMAND",
+	"GIT_EXEC_PATH",
+	"GIT_EXTERNAL_DIFF",
+	"GIT_CONFIG",
+	"GIT_CONFIG_GLOBAL",
+	"GIT_CONFIG_SYSTEM",
+	"GIT_CONFIG_COUNT",
+	"PREFIX",
+	"EDITOR",
+	"PAGER",
+	"SSH_ASKPASS",
+])
+
+// Lowercase set for case-insensitive lookup — the plugin uses toLowerCase() internally,
+// so a var like Git_Editor would bypass an exact-match check on Linux.
+const BLOCKED_ENV_KEYS_LOWER = new Set([...BLOCKED_ENV_KEYS].map((k) => k.toLowerCase()))
+
+/**
  * Creates a SimpleGit instance with sanitized environment variables to prevent
  * interference from inherited git environment variables like GIT_DIR and GIT_WORK_TREE.
  * This ensures checkpoint operations always target the intended shadow repository.
@@ -25,43 +69,35 @@ import { getExcludePatterns } from "./excludes"
  * @returns A SimpleGit instance with sanitized environment
  */
 function createSanitizedGit(baseDir: string): SimpleGit {
-	// Create a clean environment by explicitly unsetting git-related environment variables
-	// that could interfere with checkpoint operations
 	const sanitizedEnv: Record<string, string> = {}
-	const removedVars: string[] = []
+	const removedKeys: string[] = []
 
-	// Copy all environment variables except git-specific ones
 	for (const [key, value] of Object.entries(process.env)) {
-		// Skip git environment variables that would override repository location
-		if (
-			key === "GIT_DIR" ||
-			key === "GIT_WORK_TREE" ||
-			key === "GIT_INDEX_FILE" ||
-			key === "GIT_OBJECT_DIRECTORY" ||
-			key === "GIT_ALTERNATE_OBJECT_DIRECTORIES" ||
-			key === "GIT_CEILING_DIRECTORIES" ||
-			key === "GIT_TEMPLATE_DIR"
-		) {
-			removedVars.push(`${key}=${value}`)
+		if (BLOCKED_ENV_KEYS_LOWER.has(key.toLowerCase())) {
+			removedKeys.push(key)
 			continue
 		}
 
-		// Only include defined values
 		if (value !== undefined) {
 			sanitizedEnv[key] = value
 		}
 	}
 
 	// Log which git env vars were removed (helps with debugging Dev Container issues)
-	if (removedVars.length > 0) {
+	if (removedKeys.length > 0) {
 		console.log(
-			`[createSanitizedGit] Removed git environment variables for checkpoint isolation: ${removedVars.join(", ")}`,
+			`[createSanitizedGit] Removed git environment variables for checkpoint isolation: ${removedKeys.join(", ")}`,
 		)
 	}
 
 	const options: Partial<SimpleGitOptions> = {
 		baseDir,
 		config: [],
+		// --template="" stops git copying hooks/templates into the shadow repo (axis 1).
+		// GIT_TEMPLATE_DIR is stripped from the env above to block the env-var path (axis 2).
+		// allowUnsafeTemplateDir opts out of simple-git ≥3.36's blockUnsafeOperationsPlugin
+		// so the --template arg is not rejected before reaching git.
+		unsafe: { allowUnsafeTemplateDir: true },
 	}
 
 	// Create git instance and set the sanitized environment

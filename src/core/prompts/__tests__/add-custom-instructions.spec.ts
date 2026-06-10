@@ -33,10 +33,6 @@ vi.mock("os", () => ({
 	userInfo: () => ({ username: "test", uid: 1000, gid: 1000, shell: "/bin/bash", homedir: "/home/user" }),
 }))
 
-vi.mock("default-shell", () => ({
-	default: "/bin/zsh",
-}))
-
 vi.mock("os-name", () => ({
 	default: () => "Linux",
 }))

@@ -30,39 +30,19 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.55.0
+## Điểm mới trong v3.58.0
 
-**Bản phát hành tính năng đầu tiên của Zoo Code** tiếp tục phần handoff lên Marketplace với một provider mới, merge upstream sunset của Roo Code và một loạt bản sửa lỗi mà người dùng cảm nhận được ở chat, cài đặt provider và phần render.
-
-- Thêm Xiaomi MiMo như một provider API hạng nhất.
-- Tích hợp merge upstream sunset của Roo Code cùng các cập nhật nền tảng liên quan.
-- Sửa nội dung sign-in của MCP, các request Gemini với đầy đủ tool và cách xử lý temperature của OpenAI cho những model không hỗ trợ.
-- Sửa render Markdown với single tilde và cách đặt tên file tạm cho diagnostics.
-- Cải thiện giá trị mặc định của provider và độ phủ region cho Z.AI, GLM và Vertex AI.
-
-<details>
-  <summary>🌐 Các ngôn ngữ có sẵn</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — kết nối qua một gateway được quản lý với hỗ trợ xác thực đa hồ sơ
+- **Gemini 3.5 Flash** — một mô hình Google nhanh và mạnh mẽ, giờ có thể truy cập trực tiếp từ cài đặt provider
+- **Semble embedding** — lập chỉ mục codebase cục bộ mà không cần API key bên ngoài hay tải lên
+- **Cỡ chữ chat có thể cấu hình** và **ghi đè shell terminal tích hợp VS Code**
+- **Cảnh báo kiểu GitHub** được hiển thị trong webview
+- **Số token đầu ra tối đa có thể cấu hình** cho các mô hình GLM
+- **WorkspacePathResolver** — xử lý đường dẫn đáng tin cậy trong workspace có symlink
+- Sửa lỗi crash React từ chế độ gợi ý tiếp theo bị lỗi định dạng
+- Sửa lỗi temperature OpenAI bị bỏ qua khi không có giá trị tùy chỉnh
+- Xử lý lỗi từng khóa khi nhập cài đặt
+- Cập nhật bảo mật: mermaid v11.15.0, axios v1.16.0
 
 ---
 

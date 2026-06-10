@@ -1,0 +1,18 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "bedrock-identity-smoke"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_bedrock_identity_001"
+					}
+				]
+			}
+		}
+	]
+}
