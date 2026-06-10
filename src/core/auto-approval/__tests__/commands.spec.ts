@@ -146,4 +146,16 @@ describe("getCommandDecision — multi-line script wrapped in a quoted argument"
 		const ansiC = "sh -c $'echo 1\necho 2'"
 		expect(getCommandDecision(ansiC, ["sh"])).toBe("auto_approve")
 	})
+
+	it("returns malformed_command for a command with an unterminated quote regardless of allowlist", () => {
+		// An unterminated quote is a shell syntax error. Even if the leading word
+		// is on the allowlist (or the allowlist is the wildcard), or the exact
+		// full command string is listed, the command must not be auto-approved --
+		// the shell would report a syntax error and any prefix that ran before
+		// the error could have unintended side effects.
+		const malformed = "sh -c 'echo a\necho b"
+		expect(getCommandDecision(malformed, ["sh"])).toBe("malformed_command")
+		expect(getCommandDecision(malformed, ["*"])).toBe("malformed_command")
+		expect(getCommandDecision(malformed, [malformed])).toBe("malformed_command")
+	})
 })

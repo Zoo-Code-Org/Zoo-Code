@@ -57,7 +57,7 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 	// Extract command patterns from the actual command that was executed
 	const commandPatterns = useMemo<CommandPattern[]>(() => {
 		// First get all individual commands (including subshell commands) using parseCommand
-		const allCommands = parseCommand(command)
+		const { commands: allCommands } = parseCommand(command)
 
 		// Then extract patterns from each command using the existing pattern extraction logic
 		const allPatterns = new Set<string>()

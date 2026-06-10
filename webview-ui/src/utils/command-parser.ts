@@ -18,7 +18,7 @@ export function extractPatternsFromCommand(command: string): string[] {
 	// Split into sub-commands using the heredoc- and quote-aware parser so that
 	// constructs like heredocs or unterminated quotes are not broken up by
 	// shell-quote's operator splitting.
-	const subCommands = parseCommand(command)
+	const { commands: subCommands } = parseCommand(command)
 
 	for (const subCmd of subCommands) {
 		extractPatternsFromSingleCommand(subCmd, patterns)

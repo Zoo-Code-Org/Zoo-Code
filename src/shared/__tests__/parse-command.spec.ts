@@ -20,55 +20,55 @@ vi.mock("shell-quote", async (importOriginal) => {
 describe("parseCommand", () => {
 	describe("basic chaining", () => {
 		it("returns empty array for empty input", () => {
-			expect(parseCommand("")).toEqual([])
-			expect(parseCommand("   ")).toEqual([])
+			expect(parseCommand("").commands).toEqual([])
+			expect(parseCommand("   ").commands).toEqual([])
 		})
 
 		it("returns a single command unchanged", () => {
-			expect(parseCommand("git status")).toEqual(["git status"])
+			expect(parseCommand("git status").commands).toEqual(["git status"])
 		})
 
 		it("splits on &&", () => {
-			expect(parseCommand("git add . && git commit")).toEqual(["git add .", "git commit"])
+			expect(parseCommand("git add . && git commit").commands).toEqual(["git add .", "git commit"])
 		})
 
 		it("splits on ||, ;, and |", () => {
-			expect(parseCommand("a || b")).toEqual(["a", "b"])
-			expect(parseCommand("a ; b")).toEqual(["a", "b"])
-			expect(parseCommand("a | b")).toEqual(["a", "b"])
+			expect(parseCommand("a || b").commands).toEqual(["a", "b"])
+			expect(parseCommand("a ; b").commands).toEqual(["a", "b"])
+			expect(parseCommand("a | b").commands).toEqual(["a", "b"])
 		})
 	})
 
 	describe("genuine multi-statement scripts (unquoted newlines)", () => {
 		it("splits unquoted newlines into separate sub-commands", () => {
 			const input = "echo a\necho b\necho c"
-			expect(parseCommand(input)).toEqual(["echo a", "echo b", "echo c"])
+			expect(parseCommand(input).commands).toEqual(["echo a", "echo b", "echo c"])
 		})
 
 		it("handles Windows and old-Mac line endings", () => {
-			expect(parseCommand("echo a\r\necho b")).toEqual(["echo a", "echo b"])
-			expect(parseCommand("echo a\recho b")).toEqual(["echo a", "echo b"])
+			expect(parseCommand("echo a\r\necho b").commands).toEqual(["echo a", "echo b"])
+			expect(parseCommand("echo a\recho b").commands).toEqual(["echo a", "echo b"])
 		})
 
 		it("ignores blank lines", () => {
-			expect(parseCommand("echo a\n\n\necho b")).toEqual(["echo a", "echo b"])
+			expect(parseCommand("echo a\n\n\necho b").commands).toEqual(["echo a", "echo b"])
 		})
 	})
 
 	describe("newlines inside single-quoted strings", () => {
 		it("treats a multi-line single-quoted argument as one command", () => {
 			const input = "sh -c 'echo a\necho b'"
-			expect(parseCommand(input)).toEqual(["sh -c 'echo a\necho b'"])
+			expect(parseCommand(input).commands).toEqual(["sh -c 'echo a\necho b'"])
 		})
 
 		it("does not split operators that appear inside single quotes", () => {
 			const input = "sh -c 'echo a && echo b | grep x'"
-			expect(parseCommand(input)).toEqual(["sh -c 'echo a && echo b | grep x'"])
+			expect(parseCommand(input).commands).toEqual(["sh -c 'echo a && echo b | grep x'"])
 		})
 
 		it("preserves the embedded newline in the restored command", () => {
 			const input = "sh -c 'echo 1\necho 2'"
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toEqual(["sh -c 'echo 1\necho 2'"])
 			expect(result[0]).toContain("\n")
 		})
@@ -77,7 +77,7 @@ describe("parseCommand", () => {
 	describe("ANSI-C quoting ($'...')", () => {
 		it("does not leak a placeholder for a $'...' multi-line argument", () => {
 			const input = "sh -c $'echo 1\necho 2'"
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			// The placeholder used internally must never appear in the output.
 			expect(result.join(" ")).not.toContain("SQUOTE")
 			expect(result.join(" ")).not.toContain("__")
@@ -88,7 +88,7 @@ describe("parseCommand", () => {
 		// split the single command into bogus sub-commands.
 		it("treats a $'...' argument with an escaped apostrophe and newline as one command", () => {
 			const input = "sh -c $'echo \\'1\\'\necho 2'"
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toEqual([input])
 			expect(result.join(" ")).not.toContain("SQUOTE")
 			expect(result.join(" ")).not.toContain("__")
@@ -98,29 +98,29 @@ describe("parseCommand", () => {
 	describe("newlines inside double-quoted strings", () => {
 		it("treats a multi-line double-quoted argument as one command", () => {
 			const input = 'sh -c "echo a\necho b"'
-			expect(parseCommand(input)).toEqual(['sh -c "echo a\necho b"'])
+			expect(parseCommand(input).commands).toEqual(['sh -c "echo a\necho b"'])
 		})
 
 		it("does not split operators that appear inside double quotes", () => {
 			const input = 'sh -c "echo a && echo b | grep x"'
-			expect(parseCommand(input)).toEqual(['sh -c "echo a && echo b | grep x"'])
+			expect(parseCommand(input).commands).toEqual(['sh -c "echo a && echo b | grep x"'])
 		})
 
 		it("handles escaped quotes inside a double-quoted string", () => {
 			const input = 'sh -c "echo \\"hello world\\""'
-			expect(parseCommand(input)).toEqual(['sh -c "echo \\"hello world\\""'])
+			expect(parseCommand(input).commands).toEqual(['sh -c "echo \\"hello world\\""'])
 		})
 	})
 
 	describe("mixed quote styles", () => {
 		it("does not let an apostrophe inside double quotes start a single-quoted region", () => {
 			const input = `echo "don't" && echo ok`
-			expect(parseCommand(input)).toEqual([`echo "don't"`, "echo ok"])
+			expect(parseCommand(input).commands).toEqual([`echo "don't"`, "echo ok"])
 		})
 
 		it("does not let a double quote inside single quotes start a double-quoted region", () => {
 			const input = `echo 'a " b' && echo ok`
-			expect(parseCommand(input)).toEqual([`echo 'a " b'`, "echo ok"])
+			expect(parseCommand(input).commands).toEqual([`echo 'a " b'`, "echo ok"])
 		})
 	})
 
@@ -133,7 +133,7 @@ describe("parseCommand", () => {
 			// The unmatched single quote in the comment must not absorb the
 			// newline; line 2 must surface as its own sub-command.
 			const input = "echo hello # it's a comment\necho world"
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toHaveLength(2)
 			expect(result[result.length - 1]).toBe("echo world")
 		})
@@ -141,7 +141,7 @@ describe("parseCommand", () => {
 		it("does not let a double-quote inside a # comment hide the newline before the next command", () => {
 			// The unmatched double quote in the comment must not absorb the newline.
 			const input = `echo hello # say "hi\necho world`
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toHaveLength(2)
 			expect(result[result.length - 1]).toBe("echo world")
 		})
@@ -152,7 +152,7 @@ describe("parseCommand", () => {
 		// is discarded (it is not part of any executable command).
 		it("keeps every command separate when an earlier comment contains a quote", () => {
 			const input = "echo first # what's here\necho middle\necho 'done'"
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toEqual(["echo first", "echo middle", "echo 'done'"])
 		})
 	})
@@ -172,7 +172,7 @@ describe("parseCommand", () => {
 				`"'`,
 			].join("\n")
 
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toHaveLength(1)
 			expect(result[0]).toBe(input)
 		})
@@ -180,7 +180,7 @@ describe("parseCommand", () => {
 
 	describe("subshells still split", () => {
 		it("extracts subshell content as separate commands", () => {
-			const result = parseCommand("echo $(whoami)")
+			const { commands: result } = parseCommand("echo $(whoami)")
 			expect(result).toContain("whoami")
 		})
 	})
@@ -196,7 +196,7 @@ describe("parseCommand", () => {
 		it("restores ANSI-C quoted placeholders in the fallback path", () => {
 			forceShellQuoteFailure = true
 
-			const result = parseCommand("sh -c $'echo hi' && echo done")
+			const { commands: result } = parseCommand("sh -c $'echo hi' && echo done")
 			expect(result).toEqual(["sh -c $'echo hi'", "echo done"])
 			expect(result.join(" ")).not.toContain("SQUOTE")
 			expect(result.join(" ")).not.toContain("__")
@@ -204,34 +204,45 @@ describe("parseCommand", () => {
 	})
 
 	describe("malformed input with unterminated quotes", () => {
-		// A command with an unterminated quote is a shell syntax error. It must
-		// be returned as a single opaque token so that an embedded newline cannot
-		// surface a line as an independent, separately auto-approvable command.
-		it("returns an unclosed single-quoted command as one opaque token", () => {
+		// A command with an unterminated quote is a shell syntax error. The
+		// parseError field is non-null and commands contains the raw input as a
+		// single opaque token so no embedded line can be auto-approved alone.
+		it("returns an unclosed single-quoted command as one opaque token with a parseError", () => {
 			const input = "sh -c 'echo test"
-			expect(parseCommand(input)).toEqual([input])
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError).not.toBeNull()
+			expect(parseError?.quoteType).toBe("posix-single")
 		})
 
 		it("does not split an unclosed single quote on an embedded newline", () => {
 			const input = "sh -c 'echo a\necho b"
 			// Without the guard, the second line would surface as a standalone
 			// `echo b` even though it was meant to live inside the unclosed quote.
-			expect(parseCommand(input)).toEqual([input])
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError).not.toBeNull()
 		})
 
-		it("returns an unclosed double-quoted command as one opaque token", () => {
+		it("returns an unclosed double-quoted command as one opaque token with a parseError", () => {
 			const input = 'sh -c "echo a\necho b'
-			expect(parseCommand(input)).toEqual([input])
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError?.quoteType).toBe("double")
 		})
 
-		it("returns an unclosed ANSI-C quoted command as one opaque token", () => {
+		it("returns an unclosed ANSI-C quoted command as one opaque token with a parseError", () => {
 			const input = "sh -c $'echo a\necho b"
-			expect(parseCommand(input)).toEqual([input])
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError?.quoteType).toBe("ansi-c")
 		})
 
-		it("treats odd-quote improper quoting as a single opaque token", () => {
+		it("treats odd-quote improper quoting as a single opaque token with a parseError", () => {
 			const input = "sh -c 'cmd ''\\\n"
-			expect(parseCommand(input)).toEqual([input])
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError).not.toBeNull()
 		})
 	})
 
@@ -242,28 +253,28 @@ describe("parseCommand", () => {
 
 		it("treats an unquoted-delimiter heredoc as one command", () => {
 			const input = "sh -c bash << EOF\necho hello\nEOF"
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("treats a single-quoted-delimiter heredoc as one command", () => {
 			const input = "sh -c bash << 'EOF'\necho hello\nEOF"
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("treats a double-quoted-delimiter heredoc as one command", () => {
 			const input = 'sh -c bash << "EOF"\necho hello\nEOF'
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("treats a backslash-escaped-delimiter heredoc as one command", () => {
 			const input = "sh -c bash << \\EOF\necho hello\nEOF"
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("treats a <<- heredoc (strip leading tabs) as one command", () => {
 			// <<- allows the terminator to be indented with tabs.
 			const input = "sh -c bash <<-EOF\n\techo hello\n\tEOF"
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("does not split body lines of a multi-line heredoc", () => {
@@ -274,12 +285,12 @@ describe("parseCommand", () => {
 				"echo line3",
 				"EOF",
 			].join("\n")
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("splits a command that follows the heredoc terminator", () => {
 			const input = "sh -c bash << EOF\necho hello\nEOF\necho done"
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toHaveLength(2)
 			expect(result[0]).toBe("sh -c bash << EOF\necho hello\nEOF")
 			expect(result[1]).toBe("echo done")
@@ -289,7 +300,7 @@ describe("parseCommand", () => {
 			// An unterminated heredoc is a syntax error; the whole input must be
 			// returned as a single token so no body line can be auto-approved alone.
 			const input = "sh -c bash << EOF\necho hello"
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("treats the real-world sh heredoc pattern as one command", () => {
@@ -301,20 +312,20 @@ describe("parseCommand", () => {
 				"  --other value",
 				"EOF",
 			].join("\n")
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 		it("does not treat a # comment inside a heredoc body as a command separator", () => {
 			// A '#' inside a heredoc body is literal text, not a shell comment.
 			// The body must not be split and the comment line must be preserved.
 			const input = "sh -c bash << 'EOF'\n# this is a comment\necho hello\nEOF"
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("does not mistake << inside a # comment as a heredoc opener", () => {
 			// A heredoc opener that appears inside a # comment must be ignored;
 			// the following lines must still be treated as separate commands.
 			const input = "echo hi # << EOF\necho world"
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toHaveLength(2)
 			expect(result[result.length - 1]).toBe("echo world")
 		})
@@ -327,7 +338,7 @@ describe("parseCommand", () => {
 
 		it("treats a simple herestring as one command", () => {
 			const input = `sh <<< "echo hello"`
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("does not scan for a heredoc terminator after <<<", () => {
@@ -335,7 +346,7 @@ describe("parseCommand", () => {
 			// delimiter "<", then scan for a line exactly equal to "<" -- consuming
 			// the rest of input and returning it as an unterminated heredoc.
 			const input = "sh <<< 'echo hello'\necho done"
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result).toHaveLength(2)
 			expect(result[0]).toBe("sh <<< 'echo hello'")
 			expect(result[1]).toBe("echo done")
@@ -346,12 +357,12 @@ describe("parseCommand", () => {
 			// those newlines are handled by the single-quote masker, not the heredoc
 			// scanner. The whole construct is one command.
 			const input = "sh <<< 'echo line1\necho line2'"
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("treats a herestring with an ANSI-C quoted multiline word as one command", () => {
 			const input = "sh <<< $'echo line1\\necho line2'"
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("does not report an unterminated quote for a balanced herestring", () => {
@@ -366,29 +377,31 @@ describe("parseCommand", () => {
 
 		it("treats a locale-quoted argument as one command", () => {
 			const input = `echo $"hello world"`
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("does not split on operators inside a locale-quoted string", () => {
 			const input = `echo $"hello && world"`
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("does not split on a newline inside a locale-quoted string", () => {
 			const input = `echo $"hello\nworld"`
-			expect(parseCommand(input)).toEqual([input])
+			expect(parseCommand(input).commands).toEqual([input])
 		})
 
 		it("preserves the $ prefix in the output without leaking placeholders", () => {
 			const input = `echo $"greeting" && echo done`
-			const result = parseCommand(input)
+			const { commands: result } = parseCommand(input)
 			expect(result[0]).toContain('$"greeting"')
 			expect(result.join(" ")).not.toContain("__")
 		})
 
-		it("returns an unterminated locale-quoted string as one opaque token", () => {
+		it("returns an unterminated locale-quoted string as one opaque token with a parseError", () => {
 			const input = `echo $"hello`
-			expect(parseCommand(input)).toEqual([input])
+			const { commands, parseError } = parseCommand(input)
+			expect(commands).toEqual([input])
+			expect(parseError?.quoteType).toBe("locale")
 		})
 	})
 
@@ -421,6 +434,14 @@ describe("parseCommand", () => {
 
 		it("ignores a quote that appears inside a comment", () => {
 			expect(findUnterminatedQuote("echo hi # it's fine")).toBeNull()
+		})
+
+		it("ignores an apostrophe inside a # comment that follows a closed quoted argument", () => {
+			// A well-formed quoted argument followed by a comment whose content
+			// contains a quote character. The comment apostrophe must not open a
+			// new region.
+			expect(findUnterminatedQuote("echo 'hello' # it's a comment")).toBeNull()
+			expect(findUnterminatedQuote('echo "hello" # it\'s a comment')).toBeNull()
 		})
 
 		it("treats # attached to a word as an ordinary character", () => {

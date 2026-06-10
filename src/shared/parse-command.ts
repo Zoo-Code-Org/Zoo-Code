@@ -15,6 +15,24 @@ export type ShellToken = string | { op: string } | { command: string }
 export type QuoteType = "posix-single" | "ansi-c" | "double" | "locale" | "heredoc"
 
 /**
+ * The result of parsing a command string.
+ *
+ * `commands` is the list of individual sub-commands produced by splitting on
+ * unquoted newlines and chain operators. When `parseError` is non-null the
+ * command string is syntactically malformed (e.g. an unterminated quote) and
+ * `commands` contains the raw input as a single opaque token so callers can
+ * surface the error without splitting unsafe fragments.
+ *
+ * Callers that only need the sub-command list can destructure `{ commands }`.
+ * Callers that need to distinguish a parse error from a normal single-command
+ * result should also inspect `parseError`.
+ */
+export interface ParseResult {
+	commands: string[]
+	parseError: UnterminatedQuote | null
+}
+
+/**
  * Describes the opening of a quoted region that is never closed.
  *
  * - `quoteType`: the style of the unterminated quote. `"heredoc"` means a
@@ -63,153 +81,31 @@ export interface UnterminatedQuote {
  *   heredoc is unterminated.
  */
 export function findUnterminatedQuote(command: string): UnterminatedQuote | null {
- let inSingle = false
- let inDouble = false
- // Tracks whether the current single-quoted region was opened as ANSI-C
- // ($'...'), which -- unlike a POSIX single quote -- honors backslash escapes.
- let singleIsAnsiC = false
- // Tracks whether the current double-quoted region was opened as a locale
- // quote ($"..."), so an unterminated region reports quoteType "locale".
- let doubleIsLocale = false
- // Index of the character that opened the currently active quoted region.
- let openIndex = -1
+	return scanTopLevelQuotes(command).unterminatedQuote
+}
 
- for (let i = 0; i < command.length; i++) {
- 	const char = command[i]
+/**
+ * Describes a contiguous quoted region found at the top level of a command
+ * string (outside any other quoted region and outside `#` comments).
+ */
+interface QuoteSpan {
+	/** Index of the first character of the opening delimiter (e.g. `$` for `$'...'`). */
+	start: number
+	/** Index one past the last character of the closing delimiter. */
+	end: number
+	/** The style of quoting. */
+	quoteType: QuoteType
+}
 
- 	if (inSingle) {
- 		if (singleIsAnsiC && char === "\\") {
- 			// Skip the escaped character inside an ANSI-C string.
- 			i++
- 			continue
- 		}
- 		if (char === "'") {
- 			inSingle = false
- 			singleIsAnsiC = false
- 		}
- 		continue
- 	}
-
- 	if (inDouble) {
- 		if (char === "\\") {
- 			// Skip the escaped character inside a double-quoted string.
- 			i++
- 			continue
- 		}
- 		if (char === '"') {
- 			inDouble = false
- 			doubleIsLocale = false
- 		}
- 		continue
- 	}
-
- 	// Outside any quoted region.
- 	if (char === "\\") {
- 		// A backslash escapes the next character, so a following quote is
- 		// literal and must not open a region.
- 		i++
- 		continue
- 	}
-
- 	if (char === "#" && (i === 0 || /\s/.test(command[i - 1]))) {
- 		// Start of a comment: skip to the end of the current line.
- 		while (i < command.length && command[i] !== "\n" && command[i] !== "\r") {
- 			i++
- 		}
- 		continue
- 	}
-
- 	// Herestring (<<<): single-line stdin redirect -- no body or terminator.
- 	// Consume all three '<' and continue so the second '<' does not re-trigger
- 	// the heredoc branch on the next iteration.
- 	if (char === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
- 		i += 3
- 		continue
- 	}
-
- 	// Heredoc opener: <<[-]? followed by an optional-quoted word. The body
- 	// through the terminator line is treated as a single quoted region.
- 	if (char === "<" && command[i + 1] === "<") {
- 		const heredocOpenIndex = i
- 		i += 2 // skip <<
- 		const stripTabs = command[i] === "-"
- 		if (stripTabs) i++ // optional - for <<-
- 		// Skip horizontal whitespace between << and the delimiter word.
- 		while (i < command.length && (command[i] === " " || command[i] === "\t")) {
- 			i++
- 		}
- 		// Parse the delimiter word; quoting style determines expansion behavior
- 		// inside the body but the terminator match is always the bare word.
- 		const { delimiter, endIndex } = parseHeredocDelimiter(command, i)
- 		i = endIndex
- 		// Advance past the remainder of the opener line.
- 		while (i < command.length && command[i] !== "\n") i++
- 		if (i < command.length) i++ // consume newline
- 		if (delimiter.length > 0) {
- 			let found = false
- 			while (i < command.length) {
- 				const lineStart = i
- 				while (i < command.length && command[i] !== "\n" && command[i] !== "\r") {
- 					i++
- 				}
- 				// Strip leading tabs only for <<- heredocs (terminator may be indented).
- 				const rawLine = command.slice(lineStart, i)
- 				const line = stripTabs ? rawLine.replace(/^\t*/, "") : rawLine
- 				if (i < command.length) i++ // consume newline
- 				if (line === delimiter) {
- 					found = true
- 					break
- 				}
- 			}
- 			if (!found) {
- 				return { quoteType: "heredoc", openIndex: heredocOpenIndex }
- 			}
- 		}
- 		continue
- 	}
-
- 	if (char === "$" && command[i + 1] === "'") {
- 		// ANSI-C quoting opens an escape-aware single-quoted region. The
- 		// opener position points at the leading $ so callers can show $'.
- 		inSingle = true
- 		singleIsAnsiC = true
- 		openIndex = i
- 		i++
- 		continue
- 	}
-
- 	if (char === "$" && command[i + 1] === '"') {
- 		// Locale quoting: $"..." behaves like double quotes but the $ prefix
- 		// is part of the token. Set inDouble and doubleIsLocale so an unterminated
- 		// region reports quoteType "locale" rather than "double".
- 		inDouble = true
- 		doubleIsLocale = true
- 		openIndex = i
- 		i++ // skip $; loop increment skips the opening "
- 		continue
- 	}
-
- 	if (char === "'") {
- 		inSingle = true
- 		singleIsAnsiC = false
- 		openIndex = i
- 		continue
- 	}
-
- 	if (char === '"') {
- 		inDouble = true
- 		openIndex = i
- 		continue
- 	}
- }
-
- if (inSingle) {
- 	return { quoteType: singleIsAnsiC ? "ansi-c" : "posix-single", openIndex }
- }
- if (inDouble) {
- 	return { quoteType: doubleIsLocale ? "locale" : "double", openIndex }
- }
- return null
+/**
+ * Result returned by the single shared state-machine walk.
+ *
+ * `spans` contains every well-formed top-level quoted region found.
+ * `unterminatedQuote` is non-null when the walk ended inside an open region.
+ */
+interface ScanResult {
+	spans: QuoteSpan[]
+	unterminatedQuote: UnterminatedQuote | null
 }
 
 /**
@@ -224,56 +120,63 @@ export function findUnterminatedQuote(command: string): UnterminatedQuote | null
  * of the first character after the delimiter token.
  */
 function parseHeredocDelimiter(command: string, start: number): { delimiter: string; endIndex: number } {
- let i = start
- let delimiter = ""
+	let i = start
+	let delimiter = ""
 
- if (command[i] === "'") {
- 	i++ // skip opening '
- 	while (i < command.length && command[i] !== "'" && command[i] !== "\n") {
- 		delimiter += command[i++]
- 	}
- 	if (command[i] === "'") i++ // consume closing '
- } else if (command[i] === '"') {
- 	i++ // skip opening "
- 	while (i < command.length && command[i] !== '"' && command[i] !== "\n") {
- 		delimiter += command[i++]
- 	}
- 	if (command[i] === '"') i++ // consume closing "
- } else if (command[i] === "\\") {
- 	i++ // skip backslash
- 	while (i < command.length && command[i] !== "\n" && command[i] !== " " && command[i] !== "\t") {
- 		delimiter += command[i++]
- 	}
- } else {
- 	while (i < command.length && command[i] !== "\n" && command[i] !== " " && command[i] !== "\t") {
- 		delimiter += command[i++]
- 	}
- }
+	if (command[i] === "'") {
+		i++ // skip opening '
+		while (i < command.length && command[i] !== "'" && command[i] !== "\n") {
+			delimiter += command[i++]
+		}
+		if (command[i] === "'") i++ // consume closing '
+	} else if (command[i] === '"') {
+		i++ // skip opening "
+		while (i < command.length && command[i] !== '"' && command[i] !== "\n") {
+			delimiter += command[i++]
+		}
+		if (command[i] === '"') i++ // consume closing "
+	} else if (command[i] === "\\") {
+		i++ // skip backslash
+		while (i < command.length && command[i] !== "\n" && command[i] !== " " && command[i] !== "\t") {
+			delimiter += command[i++]
+		}
+	} else {
+		while (i < command.length && command[i] !== "\n" && command[i] !== " " && command[i] !== "\t") {
+			delimiter += command[i++]
+		}
+	}
 
- return { delimiter, endIndex: i }
+	return { delimiter, endIndex: i }
 }
 
 /**
- * Walk `command` left-to-right with the same state-machine rules used by
- * `findUnterminatedQuote` and replace every top-level quoted region with a
- * placeholder token. Returns the masked string and the array of original
- * quoted substrings so callers can restore them later.
+ * Single shared state-machine walk used by both `findUnterminatedQuote` and
+ * `maskTopLevelQuotes`. Walks `command` left-to-right, identifies every
+ * top-level quoted region (outside any other quote and outside `#` comments),
+ * and returns the list of spans together with an unterminated-quote descriptor
+ * if the walk ends inside an open region.
  *
- * "Top-level" means outside any other quoted region and outside a `#` comment.
- * A `#` that follows whitespace (or is at position 0) starts a comment that
- * runs to the end of the current line; any quote characters inside that comment
- * are ignored and must not be masked, because they are not shell quoting.
+ * Rules (match POSIX shell tokenization):
+ * - Outside any quote, `\X` escapes the next character so a quote after `\`
+ *   is literal and does not open a region.
+ * - `#` that follows whitespace (or is at position 0) starts a comment to end
+ *   of line; quotes inside a comment are ignored.
+ * - `<<<` is a herestring (single-line redirect), not a heredoc -- skip it.
+ * - `<<` opens a heredoc whose body runs through the terminator line.
+ * - `$'...'` is ANSI-C quoting (escape-aware single quote).
+ * - `$"..."` is locale quoting (escape-aware double quote with `$` prefix).
+ * - `'...'` is POSIX single quoting (fully opaque, no escapes).
+ * - `"..."` is double quoting (escape-aware).
  *
- * Supported quote styles:
- * - ANSI-C quoting  $'...'         -- escape-aware, matched before plain single quotes
- * - Locale quoting  $"..."         -- escape-aware, matched before plain double quotes
- * - POSIX single    '...'          -- fully opaque, no escapes
- * - Double          "..."          -- escape-aware (\X skips one char)
- * - Heredoc         <<WORD...WORD  -- body through terminator treated as one token
+ * Supported quote styles reported in spans/unterminatedQuote:
+ * - `ansi-c`       $'...'
+ * - `locale`       $"..."
+ * - `posix-single` '...'
+ * - `double`       "..."
+ * - `heredoc`      <<WORD...WORD
  */
-function maskTopLevelQuotes(command: string): { masked: string; quotes: string[] } {
-	const quotes: string[] = []
-	let result = ""
+function scanTopLevelQuotes(command: string): ScanResult {
+	const spans: QuoteSpan[] = []
 	let i = 0
 
 	while (i < command.length) {
@@ -281,36 +184,26 @@ function maskTopLevelQuotes(command: string): { masked: string; quotes: string[]
 
 		// Outside any quoted region: handle backslash, comments, and quote openers.
 		if (char === "\\") {
-			// Backslash escapes the next character -- copy both and skip.
-			result += command.slice(i, i + 2)
+			// Backslash escapes the next character; a quote after it is literal.
 			i += 2
 			continue
 		}
 
 		if (char === "#" && (i === 0 || /\s/.test(command[i - 1]))) {
-			// Start of a comment: copy everything up to (but not including) the
-			// next newline verbatim. Quotes inside comments are not shell quoting.
-			const commentStart = i
+			// Comment: skip to end of line. Quotes inside are not shell quoting.
 			while (i < command.length && command[i] !== "\n" && command[i] !== "\r") {
 				i++
 			}
-			result += command.slice(commentStart, i)
 			continue
 		}
 
-		// Herestring (<<<): feed a single word as stdin. Not a heredoc -- has no
-		// body region or terminator. Emit all three '<' verbatim and advance past
-		// them so the second '<' does not re-trigger the heredoc branch below.
+		// Herestring (<<<): single-line stdin redirect -- no body or terminator.
 		if (char === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
-			result += "<<<"
 			i += 3
 			continue
 		}
 
 		// Heredoc opener: <<[-]? followed by an optional-quoted delimiter word.
-		// The entire span from the opener through the terminator line is masked as
-		// one token so that embedded newlines in the body are invisible to the
-		// line splitter.
 		if (char === "<" && command[i + 1] === "<") {
 			const start = i
 			i += 2 // skip <<
@@ -325,112 +218,163 @@ function maskTopLevelQuotes(command: string): { masked: string; quotes: string[]
 			// Advance past the remainder of the opener line.
 			while (i < command.length && command[i] !== "\n") i++
 			if (i < command.length) i++ // consume newline
-			// Scan body lines for the exact terminator. The match ends at the end of
-			// the terminator line (including the terminator word but NOT its trailing
-			// newline), so the newline remains in `masked` as a line separator for any
-			// commands that follow the heredoc.
 			if (delimiter.length > 0) {
+				let found = false
 				while (i < command.length) {
 					const lineStart = i
 					while (i < command.length && command[i] !== "\n" && command[i] !== "\r") {
 						i++
 					}
+					// Strip leading tabs only for <<- heredocs.
 					const rawLine = command.slice(lineStart, i)
 					const line = stripTabs ? rawLine.replace(/^\t*/, "") : rawLine
-					// `i` now points at the newline (or end-of-string) after the line.
-					// Do NOT advance past it here -- consume it only for non-terminator
-					// lines so the terminator's newline stays available as a separator.
-					if (line === delimiter) break
+					// Do NOT advance past the terminator's newline -- leave it as a
+					// separator for any command that follows the heredoc.
+					if (line === delimiter) {
+						found = true
+						break
+					}
 					if (i < command.length) i++ // consume newline of a body line
 				}
+				if (!found) {
+					return { spans, unterminatedQuote: { quoteType: "heredoc", openIndex: start } }
+				}
 			}
-			const match = command.slice(start, i)
-			quotes.push(match)
-			result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+			spans.push({ start, end: i, quoteType: "heredoc" })
 			continue
 		}
 
+		// ANSI-C quoting: $'...', escape-aware.
 		if (char === "$" && command[i + 1] === "'") {
-			// ANSI-C quoting: $'...', escape-aware. Scan for the closing '.
 			const start = i
 			i += 2 // skip $'
+			let closed = false
 			while (i < command.length) {
 				if (command[i] === "\\") {
 					i += 2 // skip escaped char
 				} else if (command[i] === "'") {
 					i++ // consume closing '
+					closed = true
 					break
 				} else {
 					i++
 				}
 			}
-			const match = command.slice(start, i)
-			quotes.push(match)
-			result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+			if (!closed) {
+				return { spans, unterminatedQuote: { quoteType: "ansi-c", openIndex: start } }
+			}
+			spans.push({ start, end: i, quoteType: "ansi-c" })
 			continue
 		}
 
+		// Locale quoting: $"...", escape-aware like double quotes.
 		if (char === "$" && command[i + 1] === '"') {
-			// Locale quoting: $"...", escape-aware like double quotes but the $
-			// prefix is part of the token. Scan for the closing unescaped ".
 			const start = i
 			i += 2 // skip $"
+			let closed = false
 			while (i < command.length) {
 				if (command[i] === "\\") {
 					i += 2 // skip escaped char
 				} else if (command[i] === '"') {
 					i++ // consume closing "
+					closed = true
 					break
 				} else {
 					i++
 				}
 			}
-			const match = command.slice(start, i)
-			quotes.push(match)
-			result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+			if (!closed) {
+				return { spans, unterminatedQuote: { quoteType: "locale", openIndex: start } }
+			}
+			spans.push({ start, end: i, quoteType: "locale" })
 			continue
 		}
 
+		// POSIX single quote: fully opaque, ends at the next literal '.
 		if (char === "'") {
-			// POSIX single quote: fully opaque, ends at the next literal '.
 			const start = i
 			i++ // skip opening '
 			while (i < command.length && command[i] !== "'") {
 				i++
 			}
-			if (i < command.length) {
-				i++ // consume closing '
+			if (i >= command.length) {
+				// No closing quote found.
+				return { spans, unterminatedQuote: { quoteType: "posix-single", openIndex: start } }
 			}
-			const match = command.slice(start, i)
-			quotes.push(match)
-			result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+			i++ // consume closing '
+			spans.push({ start, end: i, quoteType: "posix-single" })
 			continue
 		}
 
+		// Double quote: escape-aware, ends at the next unescaped ".
 		if (char === '"') {
-			// Double quote: escape-aware, ends at the next unescaped ".
 			const start = i
 			i++ // skip opening "
+			let closed = false
 			while (i < command.length) {
 				if (command[i] === "\\") {
 					i += 2 // skip escaped char
 				} else if (command[i] === '"') {
 					i++ // consume closing "
+					closed = true
 					break
 				} else {
 					i++
 				}
 			}
-			const match = command.slice(start, i)
-			quotes.push(match)
-			result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+			if (!closed) {
+				return { spans, unterminatedQuote: { quoteType: "double", openIndex: start } }
+			}
+			spans.push({ start, end: i, quoteType: "double" })
 			continue
 		}
 
-		// Ordinary character -- copy as-is.
-		result += char
+		// Ordinary character -- advance.
 		i++
 	}
+
+	return { spans, unterminatedQuote: null }
+}
+
+/**
+ * Walk `command` and replace every top-level quoted region with a placeholder
+ * token. Returns the masked string and the array of original quoted substrings
+ * so callers can restore them later.
+ *
+ * Delegates all state-machine logic to `scanTopLevelQuotes`, ensuring
+ * consistent quoting rules with `findUnterminatedQuote`. An unterminated quote
+ * is treated as a span that runs to the end of the string so the masked output
+ * is always well-formed and the subsequent split never exposes a fragment of
+ * a malformed command.
+ */
+function maskTopLevelQuotes(command: string): { masked: string; quotes: string[] } {
+	const { spans, unterminatedQuote } = scanTopLevelQuotes(command)
+
+	// If the command has an unterminated quote, treat the unclosed region as a
+	// span running to the end of the string. This is safe because parseCommand
+	// already guards against unterminated quotes and returns the raw command as
+	// a single token before calling maskTopLevelQuotes -- but the fallback
+	// ensures maskTopLevelQuotes is robust even when called directly.
+	const effectiveSpans: QuoteSpan[] =
+		unterminatedQuote !== null
+			? [...spans, { start: unterminatedQuote.openIndex, end: command.length, quoteType: unterminatedQuote.quoteType }]
+			: spans
+
+	const quotes: string[] = []
+	let result = ""
+	let pos = 0
+
+	for (const span of effectiveSpans) {
+		// Copy the unquoted text between the previous span end and this span start.
+		result += command.slice(pos, span.start)
+		// Replace the quoted span with a placeholder.
+		quotes.push(command.slice(span.start, span.end))
+		result += `__TOPLEVEL_QUOTE_${quotes.length - 1}__`
+		pos = span.end
+	}
+
+	// Copy any remaining text after the last span (or the whole string if no spans).
+	result += command.slice(pos)
 
 	return { masked: result, quotes }
 }
@@ -456,31 +400,35 @@ function maskTopLevelQuotes(command: string): { masked: string; quotes: string[]
  *   "'
  *
  * ...is a single command, not multiple commands split at each newline.
+ *
+ * Returns a `ParseResult` containing the list of sub-commands and an optional
+ * `parseError` that is non-null when the input contains a shell syntax error
+ * (currently: an unterminated quote or heredoc). When `parseError` is set the
+ * `commands` array contains the raw input as a single opaque token; callers
+ * should surface the error rather than proceeding with auto-approval.
  */
-export function parseCommand(command: string): string[] {
+export function parseCommand(command: string): ParseResult {
 	if (!command?.trim()) {
-		return []
+		return { commands: [], parseError: null }
 	}
 
-	// Reject syntactically malformed input with an unterminated quote. Splitting
-	// such a command on newlines is unsafe: a line intended to live inside the
-	// unclosed quoted region would surface as an independent sub-command and
-	// could be auto-approved in isolation (e.g. `sh -c 'echo a\necho b` would
-	// otherwise yield a standalone `echo b`). Returning the whole raw input as
-	// a single opaque token forces every auto-approval check to match the entire
-	// string, which is effectively never on an allowlist, so the user is
-	// prompted. LLM-generated commands with nested quotes hit this case often
-	// enough to warrant explicit handling rather than best-effort splitting.
-	if (findUnterminatedQuote(command) !== null) {
-		return [command]
+	// Run the shared state-machine scan once. It gives us both the list of
+	// top-level quoted spans (used by maskTopLevelQuotes) and the parse-error
+	// descriptor (used here to detect malformed input) in a single pass.
+	const { unterminatedQuote } = scanTopLevelQuotes(command)
+
+	// Reject syntactically malformed input -- an unterminated quote is a shell
+	// syntax error. Return the raw input as a single opaque token so callers
+	// can surface the error to the agent rather than splitting unsafe fragments
+	// that might be auto-approved in isolation.
+	if (unterminatedQuote !== null) {
+		return { commands: [command], parseError: unterminatedQuote }
 	}
 
 	// Mask quoted strings before splitting on newlines so that newlines embedded
 	// inside a quoted argument are not mistaken for command separators. The
-	// masker uses the same state-machine rules as findUnterminatedQuote, which
-	// means it correctly ignores quote characters that appear inside # comments
-	// and therefore cannot confuse a comment-embedded quote with a real closing
-	// delimiter on a subsequent line.
+	// masker delegates to scanTopLevelQuotes internally, ensuring identical
+	// quoting rules with the check above.
 	const { masked, quotes: topLevelQuotes } = maskTopLevelQuotes(command)
 
 	// Split on unquoted newlines (all line-ending formats).
@@ -510,7 +458,7 @@ export function parseCommand(command: string): string[] {
 		allCommands.push(...lineCommands)
 	}
 
-	return allCommands
+	return { commands: allCommands, parseError: null }
 }
 
 /**
@@ -524,7 +472,6 @@ function parseCommandLine(command: string): string[] {
 	const subshells: string[] = []
 	const quotes: string[] = []
 	const singleQuotes: string[] = []
-	const arrayIndexing: string[] = []
 	const arithmeticExpressions: string[] = []
 	const variables: string[] = []
 	const parameterExpansions: string[] = []
@@ -646,7 +593,6 @@ function parseCommandLine(command: string): string[] {
 				quotes,
 				singleQuotes,
 				redirections,
-				arrayIndexing,
 				arithmeticExpressions,
 				parameterExpansions,
 				variables,
@@ -697,7 +643,6 @@ function parseCommandLine(command: string): string[] {
 			quotes,
 			singleQuotes,
 			redirections,
-			arrayIndexing,
 			arithmeticExpressions,
 			parameterExpansions,
 			variables,
@@ -707,14 +652,13 @@ function parseCommandLine(command: string): string[] {
 }
 
 /**
- * Helper function to restore placeholders in a command string.
- */
+	* Helper function to restore placeholders in a command string.
+	*/
 function restorePlaceholders(
 	command: string,
 	quotes: string[],
 	singleQuotes: string[],
 	redirections: string[],
-	arrayIndexing: string[],
 	arithmeticExpressions: string[],
 	parameterExpansions: string[],
 	variables: string[],
@@ -727,8 +671,6 @@ function restorePlaceholders(
 	result = result.replace(/__SQUOTE_(\d+)__/g, (_, i) => singleQuotes[parseInt(i)])
 	// Restore redirections
 	result = result.replace(/__REDIR_(\d+)__/g, (_, i) => redirections[parseInt(i)])
-	// Restore array indexing expressions
-	result = result.replace(/__ARRAY_(\d+)__/g, (_, i) => arrayIndexing[parseInt(i)])
 	// Restore arithmetic expressions
 	result = result.replace(/__ARITH_(\d+)__/g, (_, i) => arithmeticExpressions[parseInt(i)])
 	// Restore parameter expansions
