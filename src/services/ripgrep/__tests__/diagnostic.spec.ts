@@ -1,10 +1,13 @@
 // npx vitest run src/services/ripgrep/__tests__/diagnostic.spec.ts
 
 import * as path from "path"
+import { EventEmitter } from "events"
 
 import { vi, describe, it, expect, beforeEach } from "vitest"
+import * as vscode from "vscode"
+import * as childProcess from "child_process"
 
-import { getRipgrepDiagnostic } from "../diagnostic"
+import { getRipgrepDiagnostic, registerRipgrepDiagnosticCommand, trySpawnRipgrep } from "../diagnostic"
 
 const ripgrepMock = vi.hoisted(() => ({
 	value: undefined as { rgPath?: string; loadError?: string } | undefined,
@@ -14,12 +17,77 @@ const fsMock = vi.hoisted(() => ({
 	existing: new Set<string>(),
 }))
 
+const getBinPathMock = vi.hoisted(() => ({ value: undefined as string | undefined }))
+
+type SpawnResult = Awaited<ReturnType<typeof trySpawnRipgrep>>
+const spawnMock = vi.hoisted(() => ({
+	result: { stdout: "ripgrep 14.1.0", exitCode: 0 } as SpawnResult,
+}))
+
+function makeFakeProc(result: SpawnResult) {
+	const proc = new EventEmitter() as EventEmitter & {
+		stdout: EventEmitter
+		stderr: EventEmitter
+		kill: () => void
+	}
+	proc.stdout = new EventEmitter()
+	proc.stderr = new EventEmitter()
+	proc.kill = vi.fn()
+	setImmediate(() => {
+		if (result.spawnError) {
+			proc.emit("error", new Error(result.spawnError))
+		} else if (result.timedOut) {
+			proc.emit("close", null, "SIGTERM")
+		} else {
+			if (result.stdout) proc.stdout.emit("data", Buffer.from(result.stdout))
+			if (result.stderr) proc.stderr.emit("data", Buffer.from(result.stderr))
+			proc.emit("close", result.exitCode ?? 0, null)
+		}
+	})
+	return proc
+}
+
 vi.mock("../internal/loadRipgrep", () => ({
 	loadRipgrep: () => ripgrepMock.value,
 }))
 
 vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: (p: string) => Promise.resolve(fsMock.existing.has(p)),
+}))
+
+vi.mock("../index", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../index")>()
+	return {
+		...actual,
+		getBinPath: () => Promise.resolve(getBinPathMock.value),
+	}
+})
+
+vi.mock("child_process", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("child_process")>()
+	return { ...actual, spawn: vi.fn() }
+})
+
+const mockChannel = {
+	clear: vi.fn(),
+	appendLine: vi.fn(),
+	show: vi.fn(),
+	dispose: vi.fn(),
+}
+
+const mockCommand = { dispose: vi.fn() }
+
+vi.mock("vscode", () => ({
+	version: "1.99.0",
+	env: { appRoot: "/mock/appRoot", clipboard: { writeText: vi.fn() } },
+	window: {
+		createOutputChannel: vi.fn(() => mockChannel),
+		showInformationMessage: vi.fn(),
+	},
+	commands: { registerCommand: vi.fn(() => mockCommand) },
+	Disposable: {
+		from: vi.fn((...items: { dispose(): void }[]) => ({ dispose: () => items.forEach((d) => d.dispose()) })),
+	},
 }))
 
 const APP_ROOT = "/app"
@@ -40,6 +108,9 @@ describe("getRipgrepDiagnostic", () => {
 	beforeEach(() => {
 		ripgrepMock.value = undefined
 		fsMock.existing = new Set<string>()
+		getBinPathMock.value = undefined
+		spawnMock.result = { stdout: "ripgrep 14.1.0", exitCode: 0 }
+		vi.mocked(childProcess.spawn).mockImplementation(() => makeFakeProc(spawnMock.result) as any)
 	})
 
 	it("includes rgPath and fileExistsAtPath: true when loadRipgrep returns an existing path", async () => {
@@ -149,8 +220,146 @@ describe("getRipgrepDiagnostic", () => {
 		const report = await getRipgrepDiagnostic("")
 
 		expect(report).toContain("vscode.env.appRoot: (empty)")
-		expect(report).toContain("Cannot run diagnostic")
-		// path probe should NOT have run
+		expect(report).toContain("Cannot probe paths: vscode.env.appRoot is empty.")
+		// step 1 should still run
+		expect(report).toContain('--- step 1: require("@vscode/ripgrep") via loadRipgrep ---')
+		// path probe and spawn test should NOT have run
 		expect(report).not.toContain("--- step 2: path probe under appRoot ---")
+		expect(report).not.toContain("--- step 3: spawn rg --version on selected path ---")
+	})
+
+	it("reports getBinPath() undefined when no candidate exists", async () => {
+		getBinPathMock.value = undefined
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).toContain("--- step 3: spawn rg --version on selected path ---")
+		expect(report).toContain("getBinPath() returned undefined")
+	})
+
+	it("reports spawn success with exit code and stdout", async () => {
+		getBinPathMock.value = expectedCandidates[4]
+		fsMock.existing = new Set([expectedCandidates[4]])
+		spawnMock.result = { stdout: "ripgrep 14.1.0", exitCode: 0 }
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).toContain(`getBinPath() selected: ${expectedCandidates[4]}`)
+		expect(report).toContain(`selectedPath JSON: ${JSON.stringify(expectedCandidates[4])}`)
+		expect(report).toContain("exit code: 0")
+		expect(report).toContain("stdout: ripgrep 14.1.0")
+	})
+
+	it("reports spawn ENOENT — the file-exists-but-spawn-fails failure mode", async () => {
+		getBinPathMock.value = expectedCandidates[4]
+		fsMock.existing = new Set([expectedCandidates[4]])
+		spawnMock.result = { spawnError: "spawn ENOENT" }
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).toContain("spawn error: spawn ENOENT")
+		expect(report).not.toContain("exit code:")
+	})
+
+	it("passes the selected path, ['--version'], and timeout option to spawn", async () => {
+		getBinPathMock.value = expectedCandidates[4]
+		fsMock.existing = new Set([expectedCandidates[4]])
+
+		await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(vi.mocked(childProcess.spawn)).toHaveBeenCalledWith(expectedCandidates[4], ["--version"], {
+			timeout: 5_000,
+		})
+	})
+
+	it("reports timed out when the process is killed with SIGTERM", async () => {
+		getBinPathMock.value = expectedCandidates[4]
+		fsMock.existing = new Set([expectedCandidates[4]])
+		spawnMock.result = { timedOut: true }
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).toContain("timed out after 5000ms")
+		expect(report).not.toContain("exit code:")
+	})
+
+	it("reports stderr when the process exits with a non-zero code", async () => {
+		getBinPathMock.value = expectedCandidates[4]
+		fsMock.existing = new Set([expectedCandidates[4]])
+		spawnMock.result = { exitCode: 1, stderr: "error: unrecognised flag" }
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).toContain("exit code: 1")
+		expect(report).toContain("stderr: error: unrecognised flag")
+	})
+
+	it("omits the stderr line when stderr is empty", async () => {
+		getBinPathMock.value = expectedCandidates[4]
+		fsMock.existing = new Set([expectedCandidates[4]])
+		spawnMock.result = { stdout: "ripgrep 14.1.0", exitCode: 0, stderr: "" }
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).not.toContain("stderr:")
+	})
+
+	it("includes JSON-escaped path for the rgPath from loadRipgrep", async () => {
+		ripgrepMock.value = { rgPath: "/path/with spaces/rg" }
+		fsMock.existing = new Set(["/path/with spaces/rg"])
+
+		const report = await getRipgrepDiagnostic(APP_ROOT)
+
+		expect(report).toContain(`rgPath JSON: ${JSON.stringify("/path/with spaces/rg")}`)
+	})
+})
+
+describe("registerRipgrepDiagnosticCommand", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		ripgrepMock.value = undefined
+		fsMock.existing = new Set()
+	})
+
+	it("creates an output channel and registers the command", () => {
+		registerRipgrepDiagnosticCommand()
+
+		expect(vscode.window.createOutputChannel).toHaveBeenCalledWith("Zoo Code Ripgrep Diagnostic")
+		expect(vscode.commands.registerCommand).toHaveBeenCalledWith(
+			expect.stringContaining("showRipgrepDiagnostic"),
+			expect.any(Function),
+		)
+	})
+
+	it("returns a Disposable that disposes both the command and channel", () => {
+		const disposable = registerRipgrepDiagnosticCommand()
+		disposable.dispose()
+
+		expect(vscode.Disposable.from).toHaveBeenCalledWith(mockCommand, mockChannel)
+	})
+
+	it("clears, appends, and shows the channel when the command runs", async () => {
+		registerRipgrepDiagnosticCommand()
+
+		const [[, handler]] = vi.mocked(vscode.commands.registerCommand).mock.calls
+		await handler()
+
+		expect(mockChannel.clear).toHaveBeenCalled()
+		expect(mockChannel.appendLine).toHaveBeenCalledWith(expect.stringContaining("Zoo Code Ripgrep Diagnostic"))
+		expect(mockChannel.show).toHaveBeenCalledWith(true)
+	})
+
+	it("writes the report to the clipboard and shows a toast when the command runs", async () => {
+		registerRipgrepDiagnosticCommand()
+
+		const [[, handler]] = vi.mocked(vscode.commands.registerCommand).mock.calls
+		await handler()
+
+		expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith(
+			expect.stringContaining("Zoo Code Ripgrep Diagnostic"),
+		)
+		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+			"Zoo Code: ripgrep diagnostic copied to clipboard.",
+		)
 	})
 })

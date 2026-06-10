@@ -21,6 +21,7 @@
 				"@types/node-cache",
 				"@types/vscode",
 				"@vscode/codicons",
+				"@vscode/ripgrep",
 				"esbuild-wasm",
 				"sambanova-ai-provider",
 				"tree-sitter-wasms",

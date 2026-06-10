@@ -1,28 +1,48 @@
-import * as path from "path"
+import * as childProcess from "child_process"
 import * as vscode from "vscode"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { getCommand } from "../../utils/commands"
 import { loadRipgrep } from "./internal/loadRipgrep"
+import { getBinPath, ripgrepCandidatePaths } from "./index"
 
-const binName = process.platform.startsWith("win") ? "rg.exe" : "rg"
-const universalBin = `bin/${process.platform}-${process.arch}/${binName}`
+const SPAWN_TIMEOUT_MS = 5_000
 
-function probeCandidates(vscodeAppRoot: string): readonly string[] {
-	return [
-		path.join(vscodeAppRoot, "node_modules", "@vscode", "ripgrep", "bin", binName),
-		path.join(vscodeAppRoot, "node_modules", "vscode-ripgrep", "bin", binName),
-		path.join(vscodeAppRoot, "node_modules.asar.unpacked", "vscode-ripgrep", "bin", binName),
-		path.join(vscodeAppRoot, "node_modules.asar.unpacked", "@vscode", "ripgrep", "bin", binName),
-		path.join(vscodeAppRoot, "node_modules", "@vscode", "ripgrep-universal", ...universalBin.split("/")),
-		path.join(
-			vscodeAppRoot,
-			"node_modules.asar.unpacked",
-			"@vscode",
-			"ripgrep-universal",
-			...universalBin.split("/"),
-		),
-	]
+/**
+ * Attempts `rg --version` with a 5 s timeout.
+ * Returns { stdout, stderr, exitCode } on normal exit, { timedOut } on timeout,
+ * or { spawnError } when spawn itself fails (e.g. ENOENT).
+ */
+export function trySpawnRipgrep(rgPath: string): Promise<{
+	stdout?: string
+	stderr?: string
+	exitCode?: number
+	timedOut?: true
+	spawnError?: string
+}> {
+	return new Promise((resolve) => {
+		let proc: childProcess.ChildProcess
+		try {
+			proc = childProcess.spawn(rgPath, ["--version"], { timeout: SPAWN_TIMEOUT_MS })
+		} catch (err) {
+			resolve({ spawnError: err instanceof Error ? err.message : String(err) })
+			return
+		}
+
+		let stdout = ""
+		let stderr = ""
+		proc.stdout?.on("data", (d: Buffer) => (stdout += d.toString()))
+		proc.stderr?.on("data", (d: Buffer) => (stderr += d.toString()))
+
+		proc.on("error", (err) => resolve({ spawnError: err.message }))
+		proc.on("close", (code, signal) => {
+			if (signal === "SIGTERM" && code === null) {
+				resolve({ timedOut: true })
+			} else {
+				resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? -1 })
+			}
+		})
+	})
 }
 
 /**
@@ -34,29 +54,21 @@ function probeCandidates(vscodeAppRoot: string): readonly string[] {
  * extHost interceptor on builds that have completed the
  * `@vscode/ripgrep` → `@vscode/ripgrep-universal` migration).
  * Step 2 probes every known `vscode.env.appRoot`-relative path and
- * reports which ones exist on disk.
+ * reports which ones exist on disk. Step 2 is skipped when appRoot is empty.
+ * Step 3 runs `rg --version` on the path getBinPath() would select, directly
+ * testing whether spawn succeeds (the failure mode Naved reported).
  */
 export async function getRipgrepDiagnostic(vscodeAppRoot: string): Promise<string> {
-	if (!vscodeAppRoot || vscodeAppRoot.trim() === "") {
-		return [
-			`Zoo Code Ripgrep Diagnostic (${new Date().toISOString()})`,
-			`vscode.version: ${vscode.version}`,
-			`vscode.env.appRoot: (empty)`,
-			``,
-			`Cannot run diagnostic: vscode.env.appRoot is empty. This usually means`,
-			`the extension activated outside a VS Code-style host (e.g., a remote`,
-			`extension host that doesn't expose appRoot). The require-interceptor`,
-			`path may still work; the path-probe step requires a valid appRoot.`,
-		].join("\n")
-	}
+	const appRootEmpty = !vscodeAppRoot || vscodeAppRoot.trim() === ""
 	const lines: string[] = [
 		`Zoo Code Ripgrep Diagnostic (${new Date().toISOString()})`,
 		`vscode.version: ${vscode.version}`,
-		`vscode.env.appRoot: ${vscodeAppRoot}`,
-		`process.platform/arch: ${process.platform}/${process.arch}`,
+		`vscode.env.appRoot: ${appRootEmpty ? "(empty)" : vscodeAppRoot}`,
+		...(appRootEmpty ? [] : [`process.platform/arch: ${process.platform}/${process.arch}`]),
 		``,
 		`--- step 1: require("@vscode/ripgrep") via loadRipgrep ---`,
 	]
+
 	const m = loadRipgrep()
 	if (!m) {
 		lines.push(`loadRipgrep() returned undefined (require threw)`)
@@ -66,6 +78,7 @@ export async function getRipgrepDiagnostic(vscodeAppRoot: string): Promise<strin
 		const keys = Object.keys(m).join(",") || "(none)"
 		lines.push(`loadRipgrep() returned object. keys: ${keys}`)
 		lines.push(`rgPath: ${m.rgPath ?? "(undefined)"}`)
+		lines.push(`rgPath JSON: ${JSON.stringify(m.rgPath)}`)
 		if (m.rgPath) {
 			// Path-separator lookahead instead of `\b` — `\b` matches at the `r`/`.` boundary
 			// inside `node_modules.asar.unpacked` too, producing a double `.unpacked.unpacked`.
@@ -74,11 +87,39 @@ export async function getRipgrepDiagnostic(vscodeAppRoot: string): Promise<strin
 			lines.push(`fileExistsAtPath: ${await fileExistsAtPath(fixed)}`)
 		}
 	}
-	lines.push(``)
-	lines.push(`--- step 2: path probe under appRoot ---`)
-	for (const candidate of probeCandidates(vscodeAppRoot)) {
-		lines.push(`  ${(await fileExistsAtPath(candidate)) ? "✓" : "✗"} ${candidate}`)
+
+	if (appRootEmpty) {
+		lines.push(``)
+		lines.push(`Cannot probe paths: vscode.env.appRoot is empty.`)
+	} else {
+		lines.push(``)
+		lines.push(`--- step 2: path probe under appRoot ---`)
+		for (const candidate of ripgrepCandidatePaths(vscodeAppRoot)) {
+			const exists = await fileExistsAtPath(candidate)
+			lines.push(`  ${exists ? "✓" : "✗"} ${candidate}`)
+		}
+
+		lines.push(``)
+		lines.push(`--- step 3: spawn rg --version on selected path ---`)
+		const selectedPath = await getBinPath(vscodeAppRoot)
+		if (!selectedPath) {
+			lines.push(`getBinPath() returned undefined — no candidate path exists`)
+		} else {
+			lines.push(`getBinPath() selected: ${selectedPath}`)
+			lines.push(`selectedPath JSON: ${JSON.stringify(selectedPath)}`)
+			const result = await trySpawnRipgrep(selectedPath)
+			if (result.spawnError) {
+				lines.push(`spawn error: ${result.spawnError}`)
+			} else if (result.timedOut) {
+				lines.push(`timed out after ${SPAWN_TIMEOUT_MS}ms`)
+			} else {
+				lines.push(`exit code: ${result.exitCode}`)
+				lines.push(`stdout: ${result.stdout || "(empty)"}`)
+				if (result.stderr) lines.push(`stderr: ${result.stderr}`)
+			}
+		}
 	}
+
 	return lines.join("\n")
 }
 
@@ -89,7 +130,6 @@ export async function getRipgrepDiagnostic(vscodeAppRoot: string): Promise<strin
  * is created once at registration and disposed alongside the command via
  * the composite Disposable returned here.
  */
-/* c8 ignore start -- thin vscode wrapper; covered by manual invocation. */
 export function registerRipgrepDiagnosticCommand(): vscode.Disposable {
 	const channel = vscode.window.createOutputChannel("Zoo Code Ripgrep Diagnostic")
 	const command = vscode.commands.registerCommand(getCommand("showRipgrepDiagnostic"), async () => {
@@ -102,4 +142,3 @@ export function registerRipgrepDiagnosticCommand(): vscode.Disposable {
 	})
 	return vscode.Disposable.from(command, channel)
 }
-/* c8 ignore stop */
