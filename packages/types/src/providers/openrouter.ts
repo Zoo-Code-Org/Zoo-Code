@@ -43,6 +43,7 @@ export const OPEN_ROUTER_PROMPT_CACHING_MODELS = new Set([
 	"anthropic/claude-opus-4.1",
 	"anthropic/claude-opus-4.5",
 	"anthropic/claude-opus-4.6",
+	"anthropic/claude-fable-5",
 	"anthropic/claude-haiku-4.5",
 	"google/gemini-2.5-flash-preview",
 	"google/gemini-2.5-flash-preview:thinking",

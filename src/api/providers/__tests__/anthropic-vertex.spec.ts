@@ -945,6 +945,23 @@ describe("VertexHandler", () => {
 			expect(model.betas).toContain("context-1m-2025-08-07")
 		})
 
+		it("should return Claude Fable 5 model info", () => {
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-fable-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-fable-5")
+			expect(model.info.maxTokens).toBe(8192)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+		})
+
 		it("should not enable 1M context when flag is disabled", () => {
 			const handler = new AnthropicVertexHandler({
 				apiModelId: VERTEX_1M_CONTEXT_MODEL_IDS[0],
@@ -1180,6 +1197,35 @@ describe("VertexHandler", () => {
 			await opus48Handler
 				.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }])
 				.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					thinking: { type: "adaptive" },
+				}),
+				undefined,
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).not.toHaveProperty("budget_tokens")
+			expect(request.temperature).toBeUndefined()
+		})
+
+		it("should use adaptive thinking for Claude Fable 5", async () => {
+			const fableHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-fable-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () => ({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } }
+				},
+			}))
+			;(fableHandler["client"].messages as any).create = mockCreate
+
+			await fableHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({

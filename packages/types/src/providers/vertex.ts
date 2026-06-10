@@ -434,6 +434,21 @@ export const vertexModels = {
 			},
 		],
 	},
+	"claude-fable-5": {
+		maxTokens: 8192,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 10.0,
+		outputPrice: 50.0,
+		cacheWritesPrice: 12.5,
+		cacheReadsPrice: 1.0,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Fable 5 is Anthropic's most capable widely released model for the most demanding reasoning and long-horizon agentic work.",
+	},
 	"claude-opus-4-5@20251101": {
 		maxTokens: 8192,
 		contextWindow: 200_000,

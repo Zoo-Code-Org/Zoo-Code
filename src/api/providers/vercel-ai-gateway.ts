@@ -52,10 +52,12 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			addCacheBreakpoints(systemPrompt, openAiMessages)
 		}
 
+		const supportsTemperature = info.supportsTemperature !== false && this.supportsTemperature(modelId)
+
 		const body: OpenAI.Chat.ChatCompletionCreateParams = {
 			model: modelId,
 			messages: openAiMessages,
-			temperature: this.supportsTemperature(modelId)
+			temperature: supportsTemperature
 				? (this.options.modelTemperature ?? VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE)
 				: undefined,
 			max_completion_tokens: info.maxTokens,
@@ -114,7 +116,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 				stream: false,
 			}
 
-			if (this.supportsTemperature(modelId)) {
+			if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
 				requestOptions.temperature = this.options.modelTemperature ?? VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE
 			}
 

@@ -301,10 +301,11 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * Detect models that require the adaptive-thinking API contract.
 	 *
 	 * Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
-	 * in Opus 4.8 / Sonnet 4.8, Anthropic removed sampling parameters
+	 * in Opus 4.8 / Sonnet 4.8 and Claude Fable 5, Anthropic removed sampling parameters
 	 * (temperature/top_p/top_k) and replaced budget_tokens-based thinking with
 	 * `thinking.type: "adaptive"` plus `output_config.effort`. The migration guide
-	 * from 4.7 → 4.8 confirms there are no further breaking API changes, so a single
+	 * from 4.7 → 4.8 confirms there are no further breaking API changes, and Fable 5
+	 * keeps the same adaptive-thinking contract, so a single
 	 * guard matches both generations. Shared by createMessage and completePrompt so
 	 * both request paths omit temperature for these models (sending it causes a 400).
 	 *
@@ -316,6 +317,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		return (
 			baseModelId.includes("opus-4-7") ||
 			baseModelId.includes("opus-4-8") ||
+			baseModelId.includes("fable-5") ||
 			baseModelId.includes("sonnet-4-7") ||
 			baseModelId.includes("sonnet-4-8")
 		)
@@ -434,12 +436,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		if ((isThinkingExplicitlyEnabled || isThinkingEnabledBySettings) && modelConfig.info.supportsReasoningBudget) {
 			thinkingEnabled = true
 			if (isAdaptiveThinkingModel) {
-				// Claude 4.7+ (incl. 4.8) uses adaptive thinking with effort levels —
+				// Claude 4.7+ (incl. 4.8 and Fable 5) uses adaptive thinking with effort levels —
 				// budget_tokens causes a 400 error.
 				// display: "summarized" surfaces thinking content in Zoo Code UI.
 				// effort "xhigh" remains the recommended level for agentic coding tasks
-				// across both 4.7 and 4.8 (4.8 changed the API default to "high" but
-				// the model continues to honour "xhigh" for deeper reasoning).
+				// across 4.7, 4.8, and Fable 5 (4.8 changed the API default to "high"
+				// but the models continue to honour "xhigh" for deeper reasoning).
 				additionalModelRequestFields = {
 					thinking: { type: "adaptive", display: "summarized" },
 					output_config: { effort: "xhigh" },

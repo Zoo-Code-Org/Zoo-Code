@@ -9,7 +9,7 @@ import { calculateApiCostOpenAI } from "../../shared/cost"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
-import { AnthropicReasoningParams } from "../transform/reasoning"
+import { AnthropicProviderReasoningParams, getAnthropicProviderReasoning } from "../transform/reasoning"
 
 import { DEFAULT_HEADERS } from "./constants"
 import { getModels } from "./fetchers/modelCache"
@@ -36,7 +36,7 @@ type RequestyChatCompletionParamsStreaming = OpenAI.Chat.Completions.ChatComplet
 			mode?: string
 		}
 	}
-	thinking?: AnthropicReasoningParams
+	thinking?: AnthropicProviderReasoningParams
 }
 
 type RequestyChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParams & {
@@ -46,7 +46,7 @@ type RequestyChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParams & {
 			mode?: string
 		}
 	}
-	thinking?: AnthropicReasoningParams
+	thinking?: AnthropicProviderReasoningParams
 }
 
 export class RequestyHandler extends BaseProvider implements SingleCompletionHandler {
@@ -91,8 +91,13 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			settings: this.options,
 			defaultTemperature: 0,
 		})
+		const reasoning = getAnthropicProviderReasoning({
+			model: info,
+			reasoningBudget: params.reasoningBudget,
+			settings: this.options,
+		})
 
-		return { id, info, ...params }
+		return { id, info, ...params, reasoning }
 	}
 
 	protected processUsageMetrics(usage: any, modelInfo?: ModelInfo): ApiStreamUsageChunk {
