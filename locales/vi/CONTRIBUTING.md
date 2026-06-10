@@ -20,6 +20,8 @@ Zoo Code là một dự án do cộng đồng điều khiển và chúng tôi v�
 - [Trước khi bạn đóng góp](#trước-khi-bạn-đóng-góp)
 - [Tìm kiếm và lập kế hoạch đóng góp của bạn](#tìm-kiếm-và-lập-kế-hoạch-đóng-góp-của-bạn)
 - [Quy trình phát triển và gửi](#quy-trình-phát-triển-và-gửi)
+- [Kỳ vọng về Yêu cầu kéo](#kỳ-vọng-về-yêu-cầu-kéo)
+- [Đóng góp có sự hỗ trợ của AI](#đóng-góp-có-sự-hỗ-trợ-của-ai)
 - [Pháp lý](#pháp-lý)
 
 ## Trước khi bạn đóng góp
@@ -135,6 +137,32 @@ pnpm install
 - **Phân loại hàng ngày:** kiểm tra nhanh bởi những người bảo trì.
 - **Xem xét sâu hàng tuần:** đánh giá toàn diện.
 - **Lặp lại nhanh chóng** dựa trên phản hồi.
+
+### Kỳ vọng về Yêu cầu kéo
+
+Các Yêu cầu kéo phải có thể xem xét được, đã được kiểm tra và có thể bảo trì. Trước khi mở PR, hãy đảm bảo rằng:
+
+- Thay đổi được giới hạn trong một vấn đề, lỗi hoặc cải tiến cụ thể.
+- Bạn có thể giải thích thay đổi làm gì và tại sao nó đúng.
+- Bạn đã kiểm tra thay đổi cục bộ khi có thể thực hiện được.
+- Bạn sẵn sàng phản hồi phản hồi xem xét và thực hiện các thay đổi tiếp theo hợp lý.
+- PR không yêu cầu những người bảo trì viết lại, thiết kế lại hoặc tiếp quản đáng kể việc triển khai trước khi có thể hợp nhất.
+
+Những người bảo trì có thể đóng các PR không đầy đủ, quá rộng, không hoạt động, không phù hợp với hướng dự án hoặc tạo ra gánh nặng xem xét hoặc bảo trì không tương xứng. Đóng PR không phải là phán xét về người đóng góp; nó có nghĩa là thay đổi hiện không thể hợp nhất ở dạng hiện tại.
+
+### Đóng góp có sự hỗ trợ của AI
+
+Việc sử dụng các công cụ AI được phép, nhưng người đóng góp vẫn hoàn toàn chịu trách nhiệm về các bài nộp của họ.
+
+Nếu bạn sử dụng các công cụ AI để giúp tạo PR, bạn phải:
+
+- Xem xét và hiểu mọi thay đổi có ý nghĩa.
+- Có thể giải thích việc triển khai và sự đánh đổi bằng lời của chính bạn.
+- Tự kiểm tra thay đổi khi có thể thực hiện được.
+- Xác minh rằng mã được tạo là chính xác, cần thiết và tương thích với giấy phép dự án.
+- Tiết lộ sự hỗ trợ AI đáng kể trong mô tả PR khi nó đóng góp đáng kể vào mã, kiểm tra hoặc thiết kế.
+
+Vui lòng không gửi các thay đổi do AI tạo ra mà bạn không hiểu, chưa kiểm tra hoặc không thể duy trì trong quá trình xem xét. Những người bảo trì có thể đóng các PR có vẻ được hỗ trợ đáng kể bởi AI nhưng thiếu xác minh của con người, lý do rõ ràng hoặc theo dõi xem xét.
 
 ## Pháp lý
 

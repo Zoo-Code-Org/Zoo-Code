@@ -20,6 +20,8 @@ Zoo Code adalah proyek yang digerakkan oleh komunitas, dan kami sangat mengharga
 - [Sebelum Anda Berkontribusi](#sebelum-anda-berkontribusi)
 - [Menemukan & Merencanakan Kontribusi Anda](#menemukan--merencanakan-kontribusi-anda)
 - [Proses Pengembangan & Pengajuan](#proses-pengembangan--pengajuan)
+- [Ekspektasi Pull Request](#ekspektasi-pull-request)
+- [Kontribusi Berbantuan AI](#kontribusi-berbantuan-ai)
 - [Hukum](#hukum)
 
 ## Sebelum Anda Berkontribusi
@@ -135,6 +137,32 @@ pnpm install
 - **Triase Harian:** Pemeriksaan cepat oleh pengelola.
 - **Tinjauan Mendalam Mingguan:** Penilaian komprehensif.
 - **Iterasi dengan cepat** berdasarkan umpan balik.
+
+### Ekspektasi Pull Request
+
+Pull Request harus dapat ditinjau, diuji, dan dapat dipelihara. Sebelum membuka PR, pastikan bahwa:
+
+- Perubahan dibatasi pada masalah, bug, atau peningkatan tertentu.
+- Anda dapat menjelaskan apa yang dilakukan perubahan dan mengapa hal itu benar.
+- Anda telah menguji perubahan secara lokal jika memungkinkan.
+- Anda bersedia merespons umpan balik ulasan dan melakukan perubahan tindak lanjut yang wajar.
+- PR tidak mengharuskan pengelola untuk menulis ulang, mendesain ulang, atau mengambil alih kepemilikan implementasi secara substansial sebelum dapat digabungkan.
+
+Pengelola dapat menutup PR yang tidak lengkap, terlalu luas, tidak aktif, tidak selaras dengan arah proyek, atau yang menciptakan beban ulasan atau pemeliharaan yang tidak proporsional. Menutup PR bukan merupakan penilaian terhadap kontributor; artinya perubahan tersebut tidak dapat digabungkan dalam bentuknya saat ini.
+
+### Kontribusi Berbantuan AI
+
+Penggunaan alat AI diperbolehkan, tetapi kontributor tetap sepenuhnya bertanggung jawab atas kiriman mereka.
+
+Jika Anda menggunakan alat AI untuk membantu membuat PR, Anda harus:
+
+- Meninjau dan memahami setiap perubahan yang berarti.
+- Mampu menjelaskan implementasi dan pertukaran dengan kata-kata Anda sendiri.
+- Menguji perubahan sendiri jika memungkinkan.
+- Memverifikasi bahwa kode yang dihasilkan benar, diperlukan, dan kompatibel dengan lisensi proyek.
+- Mengungkapkan bantuan AI yang signifikan dalam deskripsi PR ketika berkontribusi secara material pada kode, pengujian, atau desain.
+
+Jangan mengirimkan perubahan yang dihasilkan AI yang tidak Anda pahami, belum Anda uji, atau tidak dapat Anda pertahankan melalui ulasan. Pengelola dapat menutup PR yang tampaknya sebagian besar dibantu AI tetapi tidak memiliki verifikasi manusia, alasan yang jelas, atau tindak lanjut ulasan.
 
 ## Hukum
 

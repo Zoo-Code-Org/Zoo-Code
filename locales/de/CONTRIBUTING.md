@@ -20,6 +20,8 @@ Zoo Code ist ein von der Community getragenes Projekt, und wir schätzen jeden B
 - [Bevor du beiträgst](#bevor-du-beiträgst)
 - [Deinen Beitrag finden und planen](#deinen-beitrag-finden-und-planen)
 - [Entwicklungs- und Einreichungsprozess](#entwicklungs-und-einreichungsprozess)
+- [Anforderungen an Pull Requests](#anforderungen-an-pull-requests)
+- [KI-gestützte Beiträge](#ki-gestützte-beiträge)
 - [Rechtliches](#rechtliches)
 
 ## Bevor du beiträgst
@@ -135,6 +137,32 @@ pnpm install
 - **Tägliche Triage:** Schnelle Überprüfungen durch die Betreuer.
 - **Wöchentliche ausführliche Überprüfung:** Umfassende Bewertung.
 - **Iteriere umgehend** basierend auf dem Feedback.
+
+### Anforderungen an Pull Requests
+
+Pull Requests müssen überprüfbar, getestet und wartbar sein. Stelle vor dem Öffnen eines PRs sicher, dass:
+
+- Die Änderung auf ein bestimmtes Issue, einen Bug oder eine Verbesserung beschränkt ist.
+- Du erklären kannst, was die Änderung bewirkt und warum sie korrekt ist.
+- Du die Änderung lokal getestet hast, soweit praktisch möglich.
+- Du bereit bist, auf Review-Feedback zu antworten und angemessene Folgeanpassungen vorzunehmen.
+- Der PR nicht erfordert, dass Betreuer die Implementierung vor dem Mergen wesentlich umschreiben, neu gestalten oder übernehmen.
+
+Betreuer können PRs schließen, die unvollständig, zu umfangreich, inaktiv, nicht mit der Projektrichtung abgestimmt sind oder einen unverhältnismäßigen Review- oder Wartungsaufwand verursachen. Das Schließen eines PRs ist kein Urteil über den Beitragenden; es bedeutet, dass die Änderung in ihrer aktuellen Form nicht mergebar ist.
+
+### KI-gestützte Beiträge
+
+Die Verwendung von KI-Tools ist erlaubt, aber Beitragende tragen die volle Verantwortung für ihre Einreichungen.
+
+Wenn du KI-Tools zur Erstellung eines PRs verwendest, musst du:
+
+- Jede wesentliche Änderung überprüfen und verstehen.
+- Die Implementierung und die Kompromisse in eigenen Worten erklären können.
+- Die Änderung selbst testen, soweit praktisch möglich.
+- Sicherstellen, dass der generierte Code korrekt, notwendig und mit der Projektlizenz kompatibel ist.
+- Wesentliche KI-Unterstützung in der PR-Beschreibung offenlegen, wenn sie maßgeblich zum Code, den Tests oder dem Design beigetragen hat.
+
+Bitte reiche keine KI-generierten Änderungen ein, die du nicht verstehst, nicht getestet hast oder die du nicht durch den Review-Prozess pflegen kannst. Betreuer können PRs schließen, die überwiegend KI-gestützt erscheinen, aber keine menschliche Überprüfung, klare Begründung oder Review-Nachverfolgung aufweisen.
 
 ## Rechtliches
 
