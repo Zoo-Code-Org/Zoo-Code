@@ -167,6 +167,13 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 							</StandardTooltip>
 						</div>
 					)}
+					{status?.status === "error" && (
+						<div className="flex flex-row items-center gap-2 font-mono text-xs text-vscode-errorForeground">
+							<StandardTooltip content={status.message ?? t("chat:commandExecution.malformedCommand")}>
+								<div className="rounded-full size-2 bg-red-600" />
+							</StandardTooltip>
+						</div>
+					)}
 				</div>
 				<div className=" flex flex-row items-center justify-between gap-2 px-1">
 					<div className="flex flex-row items-center gap-1">

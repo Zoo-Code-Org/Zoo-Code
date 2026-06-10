@@ -93,6 +93,10 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// command, rather than receiving a generic denial from the approval dialog.
 			const { parseError } = parseCommand(canonicalCommand)
 			if (parseError !== null) {
+				const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
+				const provider = await task.providerRef.deref()
+				const errorStatus: CommandExecutionStatus = { executionId, status: "error", message: parseError.message }
+				provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(errorStatus) })
 				task.didToolFailInCurrentTurn = true
 				pushToolResult(formatResponse.toolError(parseError.message))
 				return
