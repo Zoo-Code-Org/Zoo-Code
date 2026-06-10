@@ -177,9 +177,18 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// Order-safe guard (issue #561): the parent prompt embeds the same-child marker
+	// verbatim, so the parent's resume turn also contains SUBTASK_XPROFILE_SAME_CHILD_MARKER.
+	// A bare substring match here (registered before the parent-resume predicate below)
+	// could capture the parent resume and deliver a new_task-shaped body under
+	// attempt_completion. Requiring the same-child marker while excluding the parent
+	// marker fires only for the genuine child turn and lets the parent resume fall
+	// through to the predicate fixture below.
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_XPROFILE_SAME_CHILD_MARKER),
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SUBTASK_XPROFILE_SAME_CHILD_MARKER]) &&
+				!requestContains(req, [SUBTASK_XPROFILE_PARENT_MARKER]),
 		},
 		response: {
 			toolCalls: [
