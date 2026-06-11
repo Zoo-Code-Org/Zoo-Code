@@ -12,6 +12,7 @@ import { Task } from "../task/Task"
 import { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
+import { parseCommand } from "../../shared/parse-command"
 import {
 	ExitCodeDetails,
 	RooTerminalCallbacks,
@@ -85,6 +86,21 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			}
 
 			task.consecutiveMistakeCount = 0
+
+			// Detect shell syntax errors (unterminated quotes, unclosed heredocs) before
+			// presenting the command for approval. Surfacing this as a tool error gives
+			// the agent a precise, actionable message so it can retry with a corrected
+			// command, rather than receiving a generic denial from the approval dialog.
+			const { parseError } = parseCommand(canonicalCommand)
+			if (parseError !== null) {
+				const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
+				const provider = await task.providerRef.deref()
+				const errorStatus: CommandExecutionStatus = { executionId, status: "error", message: parseError.message }
+				provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(errorStatus) })
+				task.didToolFailInCurrentTurn = true
+				pushToolResult(formatResponse.toolError(parseError.message))
+				return
+			}
 
 			const didApprove = await askApproval("command", canonicalCommand)
 

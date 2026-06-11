@@ -1,9 +1,13 @@
 import * as path from "path"
 import * as childProcess from "child_process"
 import { listFiles } from "../list-files"
+import { directoryExists } from "../../../services/roo-config"
 
 vi.mock("child_process")
 vi.mock("fs")
+vi.mock("../../../services/roo-config", () => ({
+	directoryExists: vi.fn().mockResolvedValue(true),
+}))
 vi.mock("vscode", () => ({
 	env: {
 		appRoot: "/mock/vscode/app/root",
@@ -48,6 +52,7 @@ vi.mock("fs", () => ({
 		access: vi.fn().mockRejectedValue(new Error("Not found")),
 		readFile: vi.fn().mockResolvedValue(""),
 		readdir: vi.fn().mockResolvedValue([]),
+		stat: vi.fn().mockResolvedValue({ isDirectory: () => true }),
 	},
 }))
 
@@ -93,6 +98,10 @@ function resetFsPromiseMocks() {
 	vi.mocked(fs.promises.readFile).mockResolvedValue("")
 	vi.mocked(fs.promises.readdir).mockReset()
 	vi.mocked(fs.promises.readdir).mockResolvedValue([])
+	vi.mocked(fs.promises.stat).mockReset()
+	vi.mocked(fs.promises.stat).mockResolvedValue({ isDirectory: () => true } as any)
+	vi.mocked(directoryExists).mockReset()
+	vi.mocked(directoryExists).mockResolvedValue(true)
 }
 
 describe("list-files symlink support", () => {
@@ -401,5 +410,33 @@ describe("buildRecursiveArgs edge cases", () => {
 		// Should NOT have the special flags for hidden directories
 		expect(args).not.toContain("--no-ignore-vcs")
 		expect(args).not.toContain("--no-ignore")
+	})
+})
+
+describe("listFiles nonexistent directory", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		resetFsPromiseMocks()
+	})
+
+	it("should throw a clear error instead of a misleading ENOENT naming the executable", async () => {
+		vi.mocked(directoryExists).mockResolvedValue(false)
+
+		await expect(listFiles("/nonexistent/path", true, 100)).rejects.toThrow(
+			"Cannot list files: directory does not exist:",
+		)
+
+		// spawn should never be called when the directory doesn't exist
+		expect(vi.mocked(childProcess.spawn)).not.toHaveBeenCalled()
+	})
+
+	it("should report the missing directory even when ripgrep binary is also unavailable", async () => {
+		vi.mocked(directoryExists).mockResolvedValue(false)
+		const { getBinPath } = await import("../../ripgrep")
+		vi.mocked(getBinPath).mockRejectedValue(new Error("Could not find ripgrep binary"))
+
+		await expect(listFiles("/nonexistent/path", true, 100)).rejects.toThrow(
+			"Cannot list files: directory does not exist:",
+		)
 	})
 })

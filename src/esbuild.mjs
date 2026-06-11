@@ -126,7 +126,7 @@ async function main() {
 		// global-agent must be external because it dynamically patches Node.js http/https modules
 		// which breaks when bundled. It needs access to the actual Node.js module instances.
 		// undici must be bundled because our VSIX is packaged with `--no-dependencies`.
-		external: ["vscode", "esbuild", "global-agent"],
+		external: ["vscode", "esbuild", "global-agent", "@vscode/ripgrep"],
 	}
 
 	/**

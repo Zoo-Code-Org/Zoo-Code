@@ -13,6 +13,7 @@ import { handleNewTask } from "./handleTask"
 import { CodeIndexManager } from "../services/code-index/manager"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
+import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
 import { t } from "../i18n"
 
 /**
@@ -68,9 +69,27 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 		const command = getCommand(id as CommandId)
 		context.subscriptions.push(vscode.commands.registerCommand(command, callback))
 	}
+
+	context.subscriptions.push(registerRipgrepDiagnosticCommand())
 }
 
-const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOptions): Record<CommandId, any> => ({
+// `showRipgrepDiagnostic` is registered separately by
+// `registerRipgrepDiagnosticCommand` (above), which owns the OutputChannel
+// lifecycle alongside the command registration, so it's intentionally
+// excluded from this map.
+//
+// Callback shape mirrors VS Code's own `commands.registerCommand` signature
+// (`(...args: any[]) => any`), with the return narrowed to `unknown` so
+// callers must inspect before using. `any[]` for args is unavoidable: the
+// callbacks here are heterogeneous (`importSettings` takes an optional
+// `filePath?: string`, others take none) and VS Code dispatches positional
+// args dynamically.
+type CommandCallback = (...args: any[]) => unknown
+const getCommandsMap = ({
+	context,
+	outputChannel,
+	provider,
+}: RegisterCommandOptions): Record<Exclude<CommandId, "showRipgrepDiagnostic">, CommandCallback> => ({
 	activationCompleted: () => {},
 	plusButtonClicked: async () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)

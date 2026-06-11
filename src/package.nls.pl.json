@@ -14,6 +14,7 @@
 	"command.terminal.fixCommand.title": "Napraw tę Komendę",
 	"command.terminal.explainCommand.title": "Wyjaśnij tę Komendę",
 	"command.acceptInput.title": "Akceptuj Wprowadzanie/Sugestię",
+	"command.showRipgrepDiagnostic.title": "Pokaż diagnostykę Ripgrep",
 	"command.toggleAutoApprove.title": "Przełącz Auto-Zatwierdzanie",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",

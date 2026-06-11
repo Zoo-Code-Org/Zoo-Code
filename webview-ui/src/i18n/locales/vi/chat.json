@@ -221,6 +221,7 @@
 		"abort": "Hủy bỏ",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Đã thoát với trạng thái {{exitCode}}",
+		"malformedCommand": "Lệnh không hợp lệ: lỗi cú pháp shell",
 		"manageCommands": "Quản lý quyền lệnh",
 		"commandManagementDescription": "Quản lý quyền lệnh: Nhấp vào ✓ để cho phép tự động thực thi, ✗ để từ chối thực thi. Các mẫu có thể được bật/tắt hoặc xóa khỏi danh sách. <settingsLink>Xem tất cả cài đặt</settingsLink>",
 		"addToAllowed": "Thêm vào danh sách cho phép",

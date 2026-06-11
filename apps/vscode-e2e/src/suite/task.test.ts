@@ -21,7 +21,7 @@ suite("Roo Code Task", function () {
 
 		const taskId = await api.startNewTask({
 			configuration: { mode: "ask", alwaysAllowModeSwitch: true, autoApprovalEnabled: true },
-			text: "Hello world, what is your name? Respond with 'My name is ...'",
+			text: "TASK_HELLO_WORLD_SMOKE: what is your name?",
 		})
 
 		await waitUntilCompleted({ api, taskId })
