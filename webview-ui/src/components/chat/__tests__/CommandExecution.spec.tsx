@@ -1,7 +1,7 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/CommandExecution.spec.tsx
 
 import React from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import { CommandExecution } from "../CommandExecution"
 import { ExtensionStateContext } from "../../../context/ExtensionStateContext"
@@ -11,6 +11,7 @@ vi.mock("react-use", () => ({
 	useEvent: vi.fn(),
 }))
 
+import { useEvent } from "react-use"
 import { vscode } from "../../../utils/vscode"
 
 vi.mock("../../../utils/vscode", () => ({
