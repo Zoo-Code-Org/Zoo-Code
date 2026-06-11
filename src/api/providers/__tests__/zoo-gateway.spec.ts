@@ -19,7 +19,7 @@ import OpenAI from "openai"
 
 import { zooGatewayDefaultModelId, ZOO_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
-import { ZooGatewayHandler, classifyGatewayApiError } from "../zoo-gateway"
+import { ZooGatewayHandler, classifyGatewayApiError, toGatewayStreamError } from "../zoo-gateway"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { clearZooCodeToken } from "../../../services/zoo-code-auth"
@@ -363,6 +363,48 @@ describe("ZooGatewayHandler", () => {
 				},
 			])
 		})
+
+		it("throws the upstream reason when the gateway sends an in-stream error chunk", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						error: {
+							message: "Too many requests, please wait before trying again",
+							status: 429,
+							code: "rate_limited",
+						},
+					}
+				},
+			}))
+
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow(
+				"Too many requests, please wait before trying again",
+			)
+		})
+
+		it("surfaces the add-credits prompt when an in-stream error carries a budget code", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						error: {
+							message: "Monthly budget exceeded",
+							status: 429,
+							code: "monthly_budget_exceeded",
+						},
+					}
+				},
+			}))
+
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(drainCreateMessage(handler)).rejects.toThrow()
+			expect(showErrorMessage).toHaveBeenCalledWith(
+				"common:zooAuth.errors.budget_exceeded",
+				"common:zooAuth.buttons.add_credits",
+			)
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -440,6 +482,32 @@ describe("ZooGatewayHandler", () => {
 
 		it("returns none for errors without an HTTP status", () => {
 			expect(classifyGatewayApiError(new Error("network down"))).toEqual({ kind: "none" })
+		})
+	})
+
+	describe("toGatewayStreamError", () => {
+		it("preserves the message, status, and code from the chunk", () => {
+			const error = toGatewayStreamError({
+				message: "rate limited",
+				status: 429,
+				code: "rate_limited",
+			}) as Error & {
+				status?: number
+				code?: string
+			}
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.message).toBe("rate limited")
+			expect(error.status).toBe(429)
+			expect(error.code).toBe("rate_limited")
+		})
+
+		it("falls back to a default message and leaves status/code undefined", () => {
+			const error = toGatewayStreamError({}) as Error & { status?: number; code?: string }
+
+			expect(error.message).toBe("Zoo Gateway stream error")
+			expect(error.status).toBeUndefined()
+			expect(error.code).toBeUndefined()
 		})
 	})
 

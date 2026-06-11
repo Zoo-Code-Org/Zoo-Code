@@ -69,6 +69,17 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		const completion = await this.client.chat.completions.create(body)
 
 		for await (const chunk of completion) {
+			// Vercel AI Gateway reports mid-stream failures as an in-band error chunk
+			// rather than throwing, so surface it instead of returning an empty response.
+			if ("error" in chunk && chunk.error) {
+				const raw = chunk.error as { message?: unknown }
+				const message =
+					typeof raw.message === "string" && raw.message.length > 0
+						? raw.message
+						: "Vercel AI Gateway stream error"
+				throw new Error(message)
+			}
+
 			const delta = chunk.choices[0]?.delta
 			if (delta?.content) {
 				yield {

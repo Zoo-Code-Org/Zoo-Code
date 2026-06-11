@@ -190,6 +190,28 @@ describe("VercelAiGatewayHandler", () => {
 			})
 		})
 
+		it("throws the upstream reason when an in-stream error chunk is received", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						error: {
+							message: "Too many requests, please wait before trying again",
+							code: 429,
+						},
+					}
+				},
+			}))
+
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			const stream = handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }])
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow("Too many requests, please wait before trying again")
+		})
+
 		it("uses correct temperature from options", async () => {
 			const customTemp = 0.5
 			const handler = new VercelAiGatewayHandler({
