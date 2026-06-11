@@ -134,13 +134,19 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 						return
 					}
 
-					// Keep the cache up to date for any component that mounts
-					// after this event (e.g. when auto-approval causes a fast
-					// mount after the "started" message was already sent).
-					statusCache.set(executionId, data)
-
 					switch (data.status) {
 						case "started":
+							// Cache the started status so a component that mounts
+							// after this event (e.g. after auto-approval causes a
+							// fast remount) can recover the running indicator.
+							statusCache.set(executionId, data)
+							setStatus(data)
+							break
+						case "exited":
+						case "error":
+							// Terminal states don't need to be recovered on remount
+							// -- clear the cache entry so a fresh component starts clean.
+							statusCache.delete(executionId)
 							setStatus(data)
 							break
 						case "output":
