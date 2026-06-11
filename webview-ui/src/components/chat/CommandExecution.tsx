@@ -145,16 +145,19 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 						case "exited":
 						case "error":
 						case "timeout":
-						case "fallback":
-							// All terminal/non-recoverable states clear the cache so a
-							// fresh component mounting after any of these events does not
-							// inherit a stale "started" entry and incorrectly show the
-							// pulse dot.
+							// Terminal states clear the cache so a fresh component
+							// mounting after execution ends does not inherit a stale
+							// "started" entry and incorrectly show the pulse dot.
+							// Map.delete on a missing key is a no-op, so duplicate
+							// deletes (e.g. error followed by exited) are safe.
 							statusCache.delete(executionId)
 							setStatus(data)
-							if (data.status === "fallback") {
-								setIsExpanded(true)
-							}
+							break
+						case "fallback":
+							// Not a terminal state -- signals a mid-execution retry
+							// via execa after a shell integration failure. A new
+							// "started" event will follow, so leave the cache intact.
+							setIsExpanded(true)
 							break
 						case "output":
 							setStreamingOutput(data.output)
