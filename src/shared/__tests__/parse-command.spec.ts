@@ -405,6 +405,17 @@ describe("parseCommand", () => {
 		})
 	})
 
+	describe("placeholder collision guard", () => {
+		// If the raw command literally contains the internal placeholder tokens
+		// (e.g. __QUOTE_0__) the pre-escape/post-unescape round-trip must preserve
+		// them verbatim instead of corrupting them during the masking phase.
+		it("round-trips a command that contains every internal placeholder token", () => {
+			const input =
+				"echo __QUOTE_0__ __SQUOTE_0__ __REDIR_0__ __ARITH_0__ __PARAM_0__ __VAR_0__ __SUBSH_0__ __TOPLEVEL_QUOTE_0__"
+			expect(parseCommand(input).commands).toEqual([input])
+		})
+	})
+
 	describe("findUnterminatedQuote", () => {
 		it("returns null for balanced and quote-free input", () => {
 			expect(findUnterminatedQuote("git status")).toBeNull()

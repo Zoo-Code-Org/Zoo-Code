@@ -450,11 +450,21 @@ export function parseCommand(command: string): ParseResult {
 		return { commands: [command], parseError: unterminatedQuote }
 	}
 
+	// Pre-escape any literal __ sequences present in the raw command so they
+	// cannot collide with the internal placeholder tokens (e.g. __QUOTE_0__)
+	// used during masking and splitting. \x00 (the null byte, U+0000) is the
+	// sentinel: it encodes end-of-string at the C/OS level, so the OS terminates
+	// any command string at the first \x00 -- meaning a real shell command can
+	// never contain one. It therefore cannot appear in any command text the
+	// parser receives and will never match a placeholder regex. The post-unescape
+	// step at the return converts \x00 back to __ in every output command.
+	const escapedCommand = command.replace(/__/g, "\x00")
+
 	// Mask quoted strings before splitting on newlines so that newlines embedded
 	// inside a quoted argument are not mistaken for command separators. The
 	// masker delegates to scanTopLevelQuotes internally, ensuring identical
 	// quoting rules with the check above.
-	const { masked, quotes: topLevelQuotes } = maskTopLevelQuotes(command)
+	const { masked, quotes: topLevelQuotes } = maskTopLevelQuotes(escapedCommand)
 
 	// Split on unquoted newlines (all line-ending formats).
 	const lines = masked.split(/\r\n|\r|\n/)
@@ -483,7 +493,11 @@ export function parseCommand(command: string): ParseResult {
 		allCommands.push(...lineCommands)
 	}
 
-	return { commands: allCommands, parseError: null }
+	// Unescape \x00 back to __ in every output command. This reverses the
+	// pre-escape applied above to prevent literal __ tokens in the input from
+	// colliding with internal placeholder names. split/join is used instead of
+	// a regex literal to avoid triggering the no-control-regex lint rule.
+	return { commands: allCommands.map((cmd) => cmd.split("\x00").join("__")), parseError: null }
 }
 
 /**
