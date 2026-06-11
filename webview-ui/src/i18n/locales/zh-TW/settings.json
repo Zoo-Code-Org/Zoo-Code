@@ -766,10 +766,9 @@
 			"description": "啟用此選項以從父 VS Code 程序繼承環境變數。<0>了解更多</0>"
 		},
 		"profile": {
-			"label": "Zoo Code 終端機覆寫",
-			"default": "使用 VS Code 預設設定檔（建議）",
-			"description": "預設情況下，Zoo Code 使用 VS Code 設定的 Shell。選擇覆寫可從 VS Code 公開的路徑型 Shell 設定檔中選取。僅含來源的設定檔（如內建的 PowerShell 項目）無法在此列出。 <0>了解更多</0>",
-			"overrideLabel": "為 Zoo Code 覆寫 Shell",
+			"label": "Zoo Code 終端機設定檔",
+			"followVscode": "跟隨 VS Code 設定檔 （推薦）",
+			"description": "預設情況下，Zoo Code 使用 VS Code 設定的 Shell。從清單中選擇 VS Code 公開的路徑型 Shell 設定檔。僅含來源的設定檔（如內建的 PowerShell 項目）無法在此列出。 <0>了解更多</0>",
 			"configureButton": "在 VS Code 中選擇預設設定檔",
 			"noProfiles": "(在 terminal.integrated.profiles 中未找到路徑型設定檔)"
 		}
