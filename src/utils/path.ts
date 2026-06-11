@@ -2,6 +2,8 @@ import * as path from "path"
 import os from "os"
 import * as vscode from "vscode"
 
+import { Package } from "../shared/package"
+
 /*
 The Node.js 'path' module resolves and normalizes paths differently depending on the platform:
 - On Windows, it uses backslashes (\) as the default path separator.
@@ -138,11 +140,8 @@ const DEFAULT_ROOT_RESOLUTION: WorkspaceRootResolution = "activeEditor"
  */
 function getRootResolutionStrategy(): WorkspaceRootResolution {
 	try {
-		// Read directly from the `zoo-code` section to avoid importing
-		// `Package` here (path.ts is a low-level utility and we want to keep
-		// it free of circular dependencies on shared/* and package.json).
 		const value = vscode.workspace
-			.getConfiguration("zoo-code")
+			.getConfiguration(Package.name)
 			.get<string>("workspace.rootResolution", DEFAULT_ROOT_RESOLUTION)
 		return value === "firstFolder" ? "firstFolder" : DEFAULT_ROOT_RESOLUTION
 	} catch {

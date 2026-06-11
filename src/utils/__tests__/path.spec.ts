@@ -54,19 +54,25 @@ function withWorkspaceMock(opts: {
 	folders?: Array<{ uri: { fsPath: string }; name: string; index: number }> | undefined
 	getWorkspaceFolder?: (...args: unknown[]) => { uri: { fsPath: string } } | null | undefined
 	activeEditor?: { document: { uri: { fsPath: string } } } | null
+	getConfiguration?: (section?: string) => { get: (key: string, defaultValue?: unknown) => unknown }
 }): () => void {
 	const previousFolders = mockWorkspace.workspaceFolders
 	const previousGetWorkspaceFolder = mockWorkspace.getWorkspaceFolder
 	const previousActiveEditor = mockWindow.activeTextEditor
+	// Capture getConfiguration too: tests that mutate it must not leak a broken
+	// mock into sibling tests if the outer beforeEach is ever changed or moved.
+	const previousGetConfiguration = mockWorkspace.getConfiguration
 
 	if ("folders" in opts) mockWorkspace.workspaceFolders = opts.folders
 	if (opts.getWorkspaceFolder) mockWorkspace.getWorkspaceFolder = opts.getWorkspaceFolder
 	if ("activeEditor" in opts) mockWindow.activeTextEditor = opts.activeEditor ?? null
+	if (opts.getConfiguration) mockWorkspace.getConfiguration = opts.getConfiguration
 
 	return () => {
 		mockWorkspace.workspaceFolders = previousFolders
 		mockWorkspace.getWorkspaceFolder = previousGetWorkspaceFolder
 		mockWindow.activeTextEditor = previousActiveEditor
+		mockWorkspace.getConfiguration = previousGetConfiguration
 	}
 }
 
@@ -106,8 +112,6 @@ describe("Path Utilities", () => {
 			const workspacePath = "/Users/test/project"
 			expect(getWorkspacePath(workspacePath)).toBe("/Users/test/project")
 		})
-
-		it("should return undefined when outside a workspace", () => {})
 
 		describe("rootResolution = 'activeEditor' (default)", () => {
 			it("prefers the workspace folder containing the active editor", () => {
@@ -203,13 +207,15 @@ describe("Path Utilities", () => {
 		})
 
 		it("falls back to default behavior when reading the setting throws", () => {
-			mockWorkspace.getConfiguration = () => {
-				throw new Error("not available in this context")
-			}
+			// Route the throwing config mock through withWorkspaceMock so it is
+			// restored by the cleanup callback and cannot leak into sibling tests.
 			const restore = withWorkspaceMock({
 				folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
 				activeEditor: { document: { uri: { fsPath: "/test/workspaceFolder/file.ts" } } },
 				getWorkspaceFolder: () => ({ uri: { fsPath: "/test/workspaceFolder" } }),
+				getConfiguration: () => {
+					throw new Error("not available in this context")
+				},
 			})
 			try {
 				// Should not throw and should resolve via active-editor logic.
@@ -236,6 +242,22 @@ describe("Path Utilities", () => {
 			})
 			try {
 				expect(getWorkspacePathForContext("/some/other/workspace/file.ts")).toBe("/some/other/workspace")
+			} finally {
+				restore()
+			}
+		})
+
+		it("(activeEditor) falls back to getWorkspacePath when the context path has no workspace folder", () => {
+			setRootResolution("activeEditor")
+			// contextPath is provided but getWorkspaceFolder returns null, exercising
+			// the console.debug fallback branch in getWorkspacePathForContext.
+			const restore = withWorkspaceMock({
+				folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+				activeEditor: null,
+				getWorkspaceFolder: () => null,
+			})
+			try {
+				expect(getWorkspacePathForContext("/unknown/path/file.ts")).toBe("/test/workspace")
 			} finally {
 				restore()
 			}

@@ -426,6 +426,7 @@
 						"%settings.workspace.rootResolution.firstFolder.description%"
 					],
 					"default": "activeEditor",
+					"scope": "machine",
 					"description": "%settings.workspace.rootResolution.description%",
 					"markdownDescription": "%settings.workspace.rootResolution.description%"
 				}
