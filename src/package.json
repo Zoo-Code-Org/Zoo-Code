@@ -161,6 +161,11 @@
 				"category": "%configuration.title%"
 			},
 			{
+				"command": "zoo-code.showRipgrepDiagnostic",
+				"title": "%command.showRipgrepDiagnostic.title%",
+				"category": "%configuration.title%"
+			},
+			{
 				"command": "zoo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"

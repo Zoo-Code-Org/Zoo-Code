@@ -221,6 +221,7 @@
 		"abort": "Przerwij",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Zakończono ze statusem {{exitCode}}",
+		"malformedCommand": "Nieprawidlowe polecenie: blad skladni shell",
 		"manageCommands": "Polecenia zatwierdzone automatycznie",
 		"addToAllowed": "Dodaj do listy dozwolonych",
 		"removeFromAllowed": "Usuń z listy dozwolonych",

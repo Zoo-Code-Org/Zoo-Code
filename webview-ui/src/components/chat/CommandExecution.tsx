@@ -57,14 +57,17 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 	// Extract command patterns from the actual command that was executed
 	const commandPatterns = useMemo<CommandPattern[]>(() => {
 		// First get all individual commands (including subshell commands) using parseCommand
-		const allCommands = parseCommand(command)
+		const { commands: allCommands } = parseCommand(command)
 
 		// Then extract patterns from each command using the existing pattern extraction logic
 		const allPatterns = new Set<string>()
 
-		// Add all individual commands first
+		// Add all individual commands first. Multi-line patterns (e.g. heredocs,
+		// unterminated quotes) are opaque tokens and must not be added verbatim --
+		// their body lines would surface as approvable patterns. Only add
+		// single-line commands; multi-line tokens are covered by pattern extraction.
 		allCommands.forEach((cmd) => {
-			if (cmd.trim()) {
+			if (cmd.trim() && !cmd.includes("\n")) {
 				allPatterns.add(cmd.trim())
 			}
 		})
@@ -161,6 +164,13 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 										status.exitCode === 0 ? "bg-green-600" : "bg-red-600",
 									)}
 								/>
+							</StandardTooltip>
+						</div>
+					)}
+					{status?.status === "error" && (
+						<div className="flex flex-row items-center gap-2 font-mono text-xs text-vscode-errorForeground">
+							<StandardTooltip content={status.message ?? t("chat:commandExecution.malformedCommand")}>
+								<div className="rounded-full size-2 bg-red-600" />
 							</StandardTooltip>
 						</div>
 					)}

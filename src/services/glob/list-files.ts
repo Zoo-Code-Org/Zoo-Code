@@ -6,6 +6,7 @@ import * as vscode from "vscode"
 import ignore from "ignore"
 import { arePathsEqual } from "../../utils/path"
 import { getBinPath } from "../../services/ripgrep"
+import { directoryExists } from "../../services/roo-config"
 import { DIRS_TO_IGNORE } from "./constants"
 
 /**
@@ -34,6 +35,10 @@ export async function listFiles(dirPath: string, recursive: boolean, limit: numb
 	// Early return for limit of 0 - no need to scan anything
 	if (limit === 0) {
 		return [[], false]
+	}
+
+	if (!(await directoryExists(path.resolve(dirPath)))) {
+		throw new Error(`Cannot list files: directory does not exist: ${path.resolve(dirPath)}`)
 	}
 
 	// Handle special directories

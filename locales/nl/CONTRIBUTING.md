@@ -20,6 +20,8 @@ Zoo Code is een door de gemeenschap gedreven project en we waarderen elke bijdra
 - [Voordat je bijdraagt](#voordat-je-bijdraagt)
 - [Je bijdrage vinden en plannen](#je-bijdrage-vinden-en-plannen)
 - [Ontwikkelings- en indieningsproces](#ontwikkelings-en-indieningsproces)
+- [Verwachtingen voor Pull Requests](#verwachtingen-voor-pull-requests)
+- [Door AI ondersteunde bijdragen](#door-ai-ondersteunde-bijdragen)
 - [Juridisch](#juridisch)
 
 ## Voordat je bijdraagt
@@ -135,6 +137,32 @@ pnpm install
 - **Dagelijkse triage:** Snelle controles door onderhouders.
 - **Wekelijkse diepgaande beoordeling:** Uitgebreide beoordeling.
 - **Itereer snel** op basis van feedback.
+
+### Verwachtingen voor Pull Requests
+
+Pull Requests moeten beoordeelbaar, getest en onderhoudbaar zijn. Zorg er voor het openen van een PR voor dat:
+
+- De wijziging beperkt is tot een specifiek issue, bug of verbetering.
+- Je kunt uitleggen wat de wijziging doet en waarom het correct is.
+- Je de wijziging lokaal hebt getest waar praktisch.
+- Je bereid bent om te reageren op reviewfeedback en redelijke vervolgwijzigingen aan te brengen.
+- De PR niet vereist dat onderhouders de implementatie wezenlijk herschrijven, herontwerpen of eigenaarschap overnemen voordat deze kan worden samengevoegd.
+
+Onderhouders kunnen PR's sluiten die onvolledig, te breed, inactief, niet in lijn met de projectrichting zijn, of die een onevenredige review- of onderhoudslast creëren. Het sluiten van een PR is geen oordeel over de bijdrager; het is een beslissing van de onderhouders dat de wijziging niet kan worden geaccepteerd in zijn huidige vorm.
+
+### Door AI ondersteunde bijdragen
+
+Het gebruik van AI-tools is toegestaan, maar bijdragers blijven volledig verantwoordelijk voor hun inzendingen.
+
+Als je AI-tools gebruikt om een PR te helpen maken, moet je:
+
+- Elke significante wijziging beoordelen en begrijpen.
+- De implementatie en afwegingen in eigen woorden kunnen uitleggen.
+- De wijziging zelf testen. Als testen niet praktisch is in jouw omgeving, leg dan in de PR-beschrijving uit waarom en beschrijf hoe reviewers de wijziging kunnen verifiëren.
+- Verifiëren dat de gegenereerde code correct, noodzakelijk en compatibel is met de projectlicentie.
+- Overweeg AI-hulp te vermelden in de PR-beschrijving wanneer dit de code, tests of het ontwerp wezenlijk heeft beïnvloed — dit helpt reviewers beter feedback te geven.
+
+Dien geen AI-gegenereerde wijzigingen in die je niet begrijpt of die je niet kunt onderhouden tijdens de review. Onderhouders kunnen PR's sluiten die overwegend AI-ondersteund lijken maar geen menselijke verificatie, duidelijke motivatie of review-opvolging hebben.
 
 ## Juridisch
 

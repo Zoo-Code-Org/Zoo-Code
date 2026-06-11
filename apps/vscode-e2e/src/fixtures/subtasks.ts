@@ -177,9 +177,13 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// Issue #561: parent prompt embeds SAME_CHILD_MARKER verbatim, so parent-resume turns
+	// also match a bare substring check. Exclude the parent marker to let them fall through.
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_XPROFILE_SAME_CHILD_MARKER),
+			predicate: (req) =>
+				requestContains(req, [SUBTASK_XPROFILE_SAME_CHILD_MARKER]) &&
+				!requestContains(req, [SUBTASK_XPROFILE_PARENT_MARKER]),
 		},
 		response: {
 			toolCalls: [
@@ -212,6 +216,8 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// Safe as bare regex: DIFFERENT_CHILD_MARKER is NOT embedded in SUBTASK_XPROFILE_PARENT_PROMPT,
+	// so parent-resume turns never contain it. If that ever changes, add an exclusion predicate.
 	mock.addFixture({
 		match: {
 			userMessage: new RegExp(SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER),

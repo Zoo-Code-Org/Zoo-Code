@@ -221,6 +221,7 @@
 		"running": "En cours d'exécution",
 		"pid": "PID : {{pid}}",
 		"exitStatus": "Terminé avec le statut {{exitCode}}",
+		"malformedCommand": "Commande mal formée : erreur de syntaxe shell",
 		"manageCommands": "Commandes approuvées automatiquement",
 		"addToAllowed": "Ajouter à la liste autorisée",
 		"removeFromAllowed": "Retirer de la liste autorisée",

@@ -20,6 +20,8 @@ Zoo Code topluluk tarafından yürütülen bir projedir ve her katkıyı derinde
 - [Katkıda Bulunmadan Önce](#katkıda-bulunmadan-önce)
 - [Katkınızı Bulma ve Planlama](#katkınızı-bulma-ve-planlama)
 - [Geliştirme ve Gönderme Süreci](#geliştirme-ve-gönderme-süreci)
+- [Pull Request Beklentileri](#pull-request-beklentileri)
+- [YZ Destekli Katkılar](#yz-destekli-katkılar)
 - [Yasal](#yasal)
 
 ## Katkıda Bulunmadan Önce
@@ -137,6 +139,32 @@ pnpm install
 - **Günlük Triyaj:** Sürdürücüler tarafından hızlı kontroller.
 - **Haftalık Derinlemesine İnceleme:** Kapsamlı değerlendirme.
 - Geri bildirime göre **hızlı bir şekilde yineleyin**.
+
+### Pull Request Beklentileri
+
+Pull Request'ler incelenebilir, test edilmiş ve sürdürülebilir olmalıdır. Bir PR açmadan önce şunları sağlayın:
+
+- Değişiklik belirli bir sorun, hata veya iyileştirmeyle sınırlıdır.
+- Değişikliğin ne yaptığını ve neden doğru olduğunu açıklayabilirsiniz.
+- Değişikliği mümkün olduğunda yerel olarak test ettiniz.
+- İnceleme geri bildirimine yanıt vermeye ve makul takip değişiklikleri yapmaya isteklisiniz.
+- PR, birleştirilmeden önce sürdürücülerin uygulamayı önemli ölçüde yeniden yazmasını, yeniden tasarlamasını veya sahiplenmesini gerektirmiyor.
+
+Sürdürücüler, eksik, çok geniş kapsamlı, hareketsiz, proje yönüyle uyumsuz olan veya orantısız inceleme ya da bakım yükü oluşturan PR'leri kapatabilir. Bir PR'yi kapatmak, katkıda bulunan hakkında bir yargı değildir; değişikliğin mevcut biçimiyle kabul edilemeyeceğine dair bir sürdürücü kararıdır.
+
+### YZ Destekli Katkılar
+
+YZ araçlarının kullanımına izin verilmektedir, ancak katkıda bulunanlar gönderimlerinden tamamen sorumlu kalmaya devam eder.
+
+Bir PR oluşturmak için YZ araçları kullanıyorsanız şunları yapmanız gerekir:
+
+- Her önemli değişikliği gözden geçirin ve anlayın.
+- Uygulamayı ve değiş tokuşları kendi sözlerinizle açıklayabilin.
+- Değişikliği kendiniz test edin. Ortamınızda test yapmak pratik değilse, PR açıklamasında nedenini açıklayın ve gözlemcilerin değişikliği nasıl doğrulayabileceğini tarif edin.
+- Oluşturulan kodun doğru, gerekli ve proje lisansıyla uyumlu olduğunu doğrulayın.
+- YZ kodu, testleri veya tasarımı önemli ölçüde şekillendirdiyse PR açıklamasında YZ yardımını açıklamayı düşünün — bu, gözlemcilerin daha iyi geri bildirim vermesine yardımcı olur.
+
+Anlamadığınız veya inceleme sürecinde sürdüremeyeceğiniz YZ tarafından oluşturulan değişiklikler göndermeyin. Sürdürücüler, büyük ölçüde YZ destekli görünen ancak insan doğrulaması, net gerekçe veya inceleme takibi olmayan PR'leri kapatabilir.
 
 ## Yasal
 

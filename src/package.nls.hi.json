@@ -14,6 +14,7 @@
 	"command.terminal.fixCommand.title": "यह कमांड ठीक करें",
 	"command.terminal.explainCommand.title": "यह कमांड समझाएं",
 	"command.acceptInput.title": "इनपुट/सुझाव स्वीकारें",
+	"command.showRipgrepDiagnostic.title": "Ripgrep डायग्नोस्टिक दिखाएं",
 	"command.toggleAutoApprove.title": "ऑटो-अनुमोदन टॉगल करें",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",

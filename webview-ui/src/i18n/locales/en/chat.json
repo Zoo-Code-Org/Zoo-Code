@@ -264,6 +264,7 @@
 		"running": "Running",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Exited with status {{exitCode}}",
+		"malformedCommand": "Malformed command: shell syntax error",
 		"manageCommands": "Auto-approved commands",
 		"addToAllowed": "Add to allowed list",
 		"removeFromAllowed": "Remove from allowed list",

@@ -751,10 +751,9 @@
 			"description": "启用此选项以从父 VS Code 进程继承环境变量。<0>了解更多</0>"
 		},
 		"profile": {
-			"label": "Zoo Code 终端覆盖",
-			"default": "使用 VS Code 默认配置文件（推荐）",
-			"description": "默认情况下，Zoo Code 使用 VS Code 配置的 Shell。选择覆盖可从 VS Code 公开的路径型 Shell 配置文件中选取。仅含来源的配置文件（如内置的 PowerShell 条目）无法在此列出。 <0>了解更多</0>",
-			"overrideLabel": "为 Zoo Code 覆盖 Shell",
+			"label": "Zoo Code 使用的 Shell",
+			"followVscode": "跟随 VS Code 配置文件（推荐）",
+			"description": "Zoo Code 默认使用 VS Code 配置的 Shell。选择一个终端配置文件来覆盖此行为。此处仅列出 terminal.integrated.profiles 中的路径型配置文件。<0>了解更多</0>",
 			"configureButton": "在 VS Code 中选择默认配置文件",
 			"noProfiles": "(在 terminal.integrated.profiles 中未找到路径型配置文件)"
 		}

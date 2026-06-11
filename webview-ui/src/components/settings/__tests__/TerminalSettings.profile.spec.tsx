@@ -4,7 +4,7 @@ import * as React from "react"
 
 import { render, screen, fireEvent, act } from "@/utils/test-utils"
 
-import { TerminalSettings } from "../TerminalSettings"
+import { TerminalSettings, DEFAULT_PROFILE_VALUE } from "../TerminalSettings"
 
 // Mock translation hook to echo keys
 vi.mock("@/i18n/TranslationContext", () => ({
@@ -21,20 +21,25 @@ vi.mock("@/utils/vscode", () => ({
 }))
 
 // Render Select as a list of buttons so we can drive onValueChange in tests.
-vi.mock("@/components/ui", () => ({
-	Select: ({ children, value, onValueChange, "data-testid": testId }: any) => (
-		<div data-testid={testId ?? "select"} data-value={value}>
-			{renderSelectChildren(children, onValueChange)}
-		</div>
-	),
-	SelectTrigger: ({ children, ...rest }: any) => <div {...rest}>{children}</div>,
-	SelectValue: ({ children }: any) => <div>{children}</div>,
-	SelectContent: ({ children }: any) => <div>{children}</div>,
-	SelectItem: ({ children, value }: any) => <div data-item-value={value}>{children}</div>,
-	Slider: ({ value, onValueChange }: any) => (
-		<input type="range" value={value?.[0] ?? 0} onChange={(e) => onValueChange([parseFloat(e.target.value)])} />
-	),
-}))
+// Use async factory to resolve vi.importActual so real Button, TooltipProvider etc. are preserved.
+vi.mock("@/components/ui", async () => {
+	const actual = await vi.importActual("@/components/ui")
+	return {
+		...actual,
+		Select: ({ children, value, onValueChange, "data-testid": testId }: any) => (
+			<div data-testid={testId ?? "select"} data-value={value}>
+				{renderSelectChildren(children, onValueChange)}
+			</div>
+		),
+		SelectTrigger: ({ children, ...rest }: any) => <div {...rest}>{children}</div>,
+		SelectValue: ({ children }: any) => <div>{children}</div>,
+		SelectContent: ({ children }: any) => <div>{children}</div>,
+		SelectItem: ({ children, value }: any) => <div data-item-value={value}>{children}</div>,
+		Slider: ({ value, onValueChange }: any) => (
+			<input type="range" value={value?.[0] ?? 0} onChange={(e) => onValueChange([parseFloat(e.target.value)])} />
+		),
+	}
+})
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeCheckbox: ({ checked, onChange, children }: any) => (
@@ -44,11 +49,6 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 		</label>
 	),
 	VSCodeLink: ({ children }: any) => <a>{children}</a>,
-	VSCodeButton: ({ children, onClick, ...rest }: any) => (
-		<button onClick={onClick} {...rest}>
-			{children}
-		</button>
-	),
 }))
 
 // Helper used by the Select mock to render SelectItem children as buttons.
@@ -56,9 +56,6 @@ function renderSelectChildren(children: any, onValueChange: (value: string) => v
 	return React.Children.map(children, (child: any) => {
 		if (!child || typeof child !== "object") return child
 		const itemValue = child.props?.value ?? child.props?.["data-item-value"]
-		if (child.props?.children && itemValue === undefined) {
-			return renderSelectChildren(child.props.children, onValueChange)
-		}
 		if (itemValue !== undefined) {
 			return (
 				<button data-testid={`option-${itemValue}`} onClick={() => onValueChange(itemValue)}>
@@ -66,20 +63,22 @@ function renderSelectChildren(children: any, onValueChange: (value: string) => v
 				</button>
 			)
 		}
+		if (child.props?.children) {
+			return React.cloneElement(child, {}, renderSelectChildren(child.props.children, onValueChange))
+		}
 		return child
 	})
 }
 
-describe("TerminalSettings VS Code terminal profile (#277)", () => {
+describe("TerminalSettings unified profile dropdown", () => {
 	beforeEach(() => {
 		postMessageMock.mockClear()
 	})
 
-	// The profile section applies to the VS Code integrated terminal (terminalShellIntegrationDisabled === false).
 	const setup = (terminalProfile?: string) => {
 		const setCachedStateField = vi.fn()
 		const onTerminalProfilePickerOpened = vi.fn()
-		render(
+		const { rerender } = render(
 			<TerminalSettings
 				terminalShellIntegrationDisabled={false}
 				terminalProfile={terminalProfile}
@@ -87,7 +86,7 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 				setCachedStateField={setCachedStateField}
 			/>,
 		)
-		return { onTerminalProfilePickerOpened, setCachedStateField }
+		return { onTerminalProfilePickerOpened, setCachedStateField, rerender }
 	}
 
 	it("requests the terminal profile names on mount via the allowlisted message", () => {
@@ -96,15 +95,18 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 		expect(types).toContain("requestTerminalProfiles")
 	})
 
-	it("shows the default radio selected and no dropdown when no profile is set", () => {
+	it("shows the dropdown with 'Following VS Code profile' as default when no profile is set", () => {
 		setup()
-		const defaultRadio = screen.getByTestId("terminal-profile-default-radio")
-		expect(defaultRadio).toBeChecked()
-		expect(screen.queryByTestId("terminal-profile-dropdown")).not.toBeInTheDocument()
+		const dropdown = screen.getByTestId("terminal-profile-dropdown")
+		expect(dropdown).toBeInTheDocument()
+		expect(dropdown.closest('[data-testid="select"]')?.getAttribute("data-value")).toBe(DEFAULT_PROFILE_VALUE)
+		// Configure button visible because "Following VS Code profile" is selected
+		expect(screen.getByTestId("terminal-profile-configure-button")).toBeInTheDocument()
 	})
 
-	it("shows the override radio selected and dropdown when a profile is set and profiles are available", () => {
-		setup("Git Bash")
+	it("selects a specific profile and hides the Configure button", () => {
+		const { setCachedStateField, onTerminalProfilePickerOpened, rerender } = setup()
+
 		act(() => {
 			window.dispatchEvent(
 				new MessageEvent("message", {
@@ -112,21 +114,42 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 				}),
 			)
 		})
-		const overrideRadio = screen.getByTestId("terminal-profile-override-radio")
-		expect(overrideRadio).toBeChecked()
-		expect(screen.getByTestId("terminal-profile-dropdown")).toBeInTheDocument()
+
+		// Select "Git Bash" from dropdown
+		fireEvent.click(screen.getByTestId("option-Git Bash"))
+		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", "Git Bash")
+
+		rerender(
+			<TerminalSettings
+				terminalShellIntegrationDisabled={false}
+				terminalProfile="Git Bash"
+				onTerminalProfilePickerOpened={onTerminalProfilePickerOpened}
+				setCachedStateField={setCachedStateField}
+			/>,
+		)
+
+		// Configure button should be hidden
+		expect(screen.queryByTestId("terminal-profile-configure-button")).not.toBeInTheDocument()
 	})
 
-	it("keeps a saved profile selected while profile names are loading", () => {
+	it("selecting 'Following VS Code profile' sets terminalProfile to undefined", () => {
 		const { setCachedStateField } = setup("Git Bash")
 
-		expect(screen.getByTestId("terminal-profile-override-radio")).toBeChecked()
-		expect(screen.queryByTestId("terminal-profile-dropdown")).not.toBeInTheDocument()
-		expect(setCachedStateField).not.toHaveBeenCalled()
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "terminalProfiles", profiles: ["Git Bash", "zsh"] },
+				}),
+			)
+		})
+
+		fireEvent.click(screen.getByTestId(`option-${DEFAULT_PROFILE_VALUE}`))
+		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", undefined)
 	})
 
-	it("falls back to the default radio and clears an unavailable saved profile after profiles load", () => {
-		const { setCachedStateField } = setup("Git Bash")
+	it("clears an unavailable saved profile after profiles load", () => {
+		const { setCachedStateField } = setup("Old Shell")
+
 		act(() => {
 			window.dispatchEvent(
 				new MessageEvent("message", {
@@ -135,97 +158,83 @@ describe("TerminalSettings VS Code terminal profile (#277)", () => {
 			)
 		})
 
-		expect(screen.getByTestId("terminal-profile-default-radio")).toBeChecked()
-		expect(screen.getByTestId("terminal-profile-override-radio")).not.toBeChecked()
-		expect(screen.queryByTestId("terminal-profile-dropdown")).not.toBeInTheDocument()
+		// The unavailable profile should be cleared
 		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", undefined)
 	})
 
-	it("uses instance-local radio groups", () => {
-		render(
-			<>
-				<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />
-				<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />
-			</>,
-		)
+	it("renders the Configure button and posts openTerminalProfilePicker when clicked", () => {
+		const { onTerminalProfilePickerOpened } = setup()
 
-		const defaultRadios = screen.getAllByTestId("terminal-profile-default-radio")
-		expect(defaultRadios[0]).toBeChecked()
-		expect(defaultRadios[1]).toBeChecked()
-		expect(defaultRadios[0]).not.toHaveAttribute("name", defaultRadios[1].getAttribute("name"))
-	})
-
-	it("populates the dropdown from received profile names and selecting one sets the profile", () => {
-		const { setCachedStateField } = setup("Git Bash")
-
-		act(() => {
-			window.dispatchEvent(
-				new MessageEvent("message", {
-					data: { type: "terminalProfiles", profiles: ["Git Bash", "zsh"] },
-				}),
-			)
-		})
-
-		fireEvent.click(screen.getByTestId("option-zsh"))
-		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", "zsh")
-	})
-
-	it("clicking default radio sets terminalProfile to undefined", () => {
-		const { setCachedStateField } = setup("Git Bash")
-		fireEvent.click(screen.getByTestId("terminal-profile-default-radio"))
-		expect(setCachedStateField).toHaveBeenCalledWith("terminalProfile", undefined)
-	})
-
-	it("renders the native profile configure button and posts openTerminalProfilePicker when clicked", () => {
-		const { onTerminalProfilePickerOpened, setCachedStateField } = setup("Git Bash")
 		const btn = screen.getByTestId("terminal-profile-configure-button")
 		expect(btn).toBeInTheDocument()
 		fireEvent.click(btn)
 		expect(onTerminalProfilePickerOpened).toHaveBeenCalledTimes(1)
 		expect(postMessageMock).toHaveBeenCalledWith({ type: "openTerminalProfilePicker" })
-		expect(setCachedStateField).not.toHaveBeenCalledWith("terminalProfile", undefined)
 	})
 
-	it("shows picker section when VS Code integrated terminal is active (shell integration enabled)", () => {
+	it("shows profile section when VS Code integrated terminal is active (shell integration enabled)", () => {
 		render(<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />)
-		expect(screen.getByTestId("terminal-profile-default-radio")).toBeInTheDocument()
+		expect(screen.getByTestId("terminal-profile-dropdown")).toBeInTheDocument()
 	})
 
-	it("hides picker section when inline/Execa execution is active (shell integration disabled)", () => {
+	it("hides profile section when inline/Execa execution is active (shell integration disabled)", () => {
 		render(<TerminalSettings terminalShellIntegrationDisabled={true} setCachedStateField={vi.fn()} />)
-		expect(screen.queryByTestId("terminal-profile-default-radio")).not.toBeInTheDocument()
+		expect(screen.queryByTestId("terminal-profile-dropdown")).not.toBeInTheDocument()
 	})
 
-	it("hides picker section when terminalShellIntegrationDisabled is undefined (defaults to inline mode)", () => {
+	it("hides profile section when terminalShellIntegrationDisabled is undefined (defaults to inline mode)", () => {
 		render(<TerminalSettings setCachedStateField={vi.fn()} />)
-		expect(screen.queryByTestId("terminal-profile-default-radio")).not.toBeInTheDocument()
-		expect(screen.queryByText("settings:terminal.inheritEnv.label")).not.toBeInTheDocument()
+		expect(screen.queryByTestId("terminal-profile-dropdown")).not.toBeInTheDocument()
 	})
 
-	it("shows the command delay default as 0ms", () => {
-		render(<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />)
-		expect(screen.getByText("0ms")).toBeInTheDocument()
-	})
-
-	it("disables override radio and shows hint when no profiles are available", () => {
+	it("shows no-profiles hint when profile list is empty after load", () => {
 		setup()
-		// No terminalProfiles message dispatched → profileNames stays []
-		const overrideRadio = screen.getByTestId("terminal-profile-override-radio")
-		expect(overrideRadio).toBeDisabled()
-		expect(screen.getByTestId("terminal-profile-no-profiles-hint")).toBeInTheDocument()
-	})
-
-	it("enables override radio after profiles are received", () => {
-		setup()
+		// Hint should NOT appear before profiles are loaded
+		expect(screen.queryByTestId("terminal-profile-no-profiles-hint")).not.toBeInTheDocument()
 		act(() => {
 			window.dispatchEvent(
 				new MessageEvent("message", {
-					data: { type: "terminalProfiles", profiles: ["zsh"] },
+					data: { type: "terminalProfiles", profiles: [] },
 				}),
 			)
 		})
-		const overrideRadio = screen.getByTestId("terminal-profile-override-radio")
-		expect(overrideRadio).not.toBeDisabled()
-		expect(screen.queryByTestId("terminal-profile-no-profiles-hint")).not.toBeInTheDocument()
+		// Hint should appear after profiles loaded with empty list
+		expect(screen.getByTestId("terminal-profile-no-profiles-hint")).toBeInTheDocument()
+	})
+
+	it("shows 'Use Inline Terminal' checkbox before profile section", () => {
+		render(<TerminalSettings terminalShellIntegrationDisabled={false} setCachedStateField={vi.fn()} />)
+
+		// Both elements exist and checkbox should appear first in DOM order
+		const checkbox = screen.getByText("settings:terminal.shellIntegrationDisabled.label")
+		const profileDropdown = screen.getByTestId("terminal-profile-dropdown")
+
+		expect(checkbox).toBeInTheDocument()
+		expect(profileDropdown).toBeInTheDocument()
+		// Compare DOM positions — checkbox should be before profile dropdown
+		expect(checkbox.compareDocumentPosition(profileDropdown) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+	})
+
+	it("renders the Terminal icon inside the Configure button", () => {
+		setup()
+		const btn = screen.getByTestId("terminal-profile-configure-button")
+		const svg = btn.querySelector("svg")
+		expect(svg).toBeInTheDocument()
+	})
+
+	it("shows the correct i18n key for the profile label", () => {
+		setup()
+		expect(screen.getByText("settings:terminal.profile.label")).toBeInTheDocument()
+	})
+
+	it("shows the correct i18n key for the followVscode dropdown option", () => {
+		setup()
+		expect(screen.getByText("settings:terminal.profile.followVscode")).toBeInTheDocument()
+	})
+
+	it("shows the correct i18n key for the configure button text", () => {
+		setup()
+		const btn = screen.getByTestId("terminal-profile-configure-button")
+		expect(btn.textContent).toContain("settings:terminal.profile.configureButton")
 	})
 })

@@ -216,6 +216,7 @@
 		"abort": "Afbreken",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Afgesloten met status {{exitCode}}",
+		"malformedCommand": "Ongeldig commando: shell syntaxisfout",
 		"manageCommands": "Automatisch goedgekeurde commando's",
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
