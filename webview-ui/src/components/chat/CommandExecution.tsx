@@ -144,16 +144,20 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 							break
 						case "exited":
 						case "error":
-							// Terminal states don't need to be recovered on remount
-							// -- clear the cache entry so a fresh component starts clean.
+						case "timeout":
+						case "fallback":
+							// All terminal/non-recoverable states clear the cache so a
+							// fresh component mounting after any of these events does not
+							// inherit a stale "started" entry and incorrectly show the
+							// pulse dot.
 							statusCache.delete(executionId)
 							setStatus(data)
+							if (data.status === "fallback") {
+								setIsExpanded(true)
+							}
 							break
 						case "output":
 							setStreamingOutput(data.output)
-							break
-						case "fallback":
-							setIsExpanded(true)
 							break
 						default:
 							setStatus(data)
