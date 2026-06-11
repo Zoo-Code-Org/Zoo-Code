@@ -1,0 +1,99 @@
+{
+	"src/runTest.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		}
+	},
+	"src/suite/markdown-lists.test.ts": {
+		"sonarjs/slow-regex": {
+			"count": 3
+		}
+	},
+	"src/suite/providers/deepseek-v4.test.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 2
+		}
+	},
+	"src/suite/providers/gemini.test.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		}
+	},
+	"src/suite/providers/openrouter.test.ts": {
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		}
+	},
+	"src/suite/providers/xai.test.ts": {
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/void-use": {
+			"count": 1
+		}
+	},
+	"src/suite/providers/zai.test.ts": {
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		}
+	},
+	"src/suite/subtasks.test.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 2
+		}
+	},
+	"src/suite/tools/apply-diff.test.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 3
+		}
+	},
+	"src/suite/tools/execute-command.test.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 2
+		}
+	},
+	"src/suite/tools/list-files.test.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 3
+		}
+	},
+	"src/suite/tools/read-file.test.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 8
+		}
+	},
+	"src/suite/tools/search-files.test.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/no-identical-functions": {
+			"count": 7
+		},
+		"sonarjs/todo-tag": {
+			"count": 2
+		}
+	},
+	"src/suite/tools/write-to-file.test.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 1
+		}
+	}
+}

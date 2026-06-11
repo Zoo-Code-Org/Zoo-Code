@@ -1,0 +1,46 @@
+{
+	"src/RefreshTimer.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"src/TelemetryClient.ts": {
+		"sonarjs/prefer-single-boolean-return": {
+			"count": 1
+		}
+	},
+	"src/WebAuthService.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/no-redundant-jump": {
+			"count": 1
+		}
+	},
+	"src/__tests__/RefreshTimer.test.ts": {
+		"sonarjs/assertions-in-tests": {
+			"count": 4
+		}
+	},
+	"src/__tests__/StaticSettingsService.test.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 1
+		}
+	},
+	"src/__tests__/StaticTokenAuthService.spec.ts": {
+		"sonarjs/no-hardcoded-secrets": {
+			"count": 3
+		}
+	},
+	"src/retry-queue/RetryQueue.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	}
+}

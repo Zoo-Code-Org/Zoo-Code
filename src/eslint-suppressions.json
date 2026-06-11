@@ -1,0 +1,2791 @@
+{
+	"__tests__/history-resume-delegation.spec.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 1
+		}
+	},
+	"__tests__/nested-delegation-resume.spec.ts": {
+		"sonarjs/publicly-writable-directories": {
+			"count": 2
+		},
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"__tests__/removeClineFromStack-delegation.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"__tests__/single-open-invariant.spec.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"activate/registerCommands.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/index.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/anthropic-vertex.spec.ts": {
+		"sonarjs/no-unused-collection": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 5
+		}
+	},
+	"api/providers/__tests__/anthropic.spec.ts": {
+		"sonarjs/no-unused-collection": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 17
+		}
+	},
+	"api/providers/__tests__/base-openai-compatible-provider-timeout.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 5
+		}
+	},
+	"api/providers/__tests__/base-openai-compatible-provider.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/bedrock-error-handling.spec.ts": {
+		"sonarjs/generator-without-yield": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"api/providers/__tests__/bedrock-invokedModelId.spec.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		}
+	},
+	"api/providers/__tests__/bedrock-reasoning.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-collection": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/bedrock-vpc-endpoint.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 5
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/bedrock.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 3
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"api/providers/__tests__/deepseek.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 1
+		},
+		"sonarjs/no-skipped-tests": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 8
+		}
+	},
+	"api/providers/__tests__/fireworks.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 2
+		}
+	},
+	"api/providers/__tests__/gemini.spec.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		}
+	},
+	"api/providers/__tests__/lite-llm.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-unused-collection": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 8
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/lm-studio-timeout.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 3
+		}
+	},
+	"api/providers/__tests__/lmstudio.spec.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/mimo.spec.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 8
+		}
+	},
+	"api/providers/__tests__/minimax.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 6
+		}
+	},
+	"api/providers/__tests__/mistral.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/native-ollama.spec.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 7
+		}
+	},
+	"api/providers/__tests__/openai-codex-native-tool-calls.spec.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"api/providers/__tests__/openai-native-tools.spec.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		}
+	},
+	"api/providers/__tests__/openai-native.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 3
+		},
+		"sonarjs/no-dead-store": {
+			"count": 3
+		},
+		"sonarjs/no-unused-collection": {
+			"count": 8
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 11
+		}
+	},
+	"api/providers/__tests__/openai-timeout.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 5
+		}
+	},
+	"api/providers/__tests__/openai.spec.ts": {
+		"sonarjs/no-unused-collection": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 14
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/opencode-go.spec.ts": {
+		"sonarjs/void-use": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/poe.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		}
+	},
+	"api/providers/__tests__/sambanova.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 2
+		}
+	},
+	"api/providers/__tests__/unbound.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/vertex-credentials.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 9
+		}
+	},
+	"api/providers/__tests__/vscode-lm.spec.ts": {
+		"sonarjs/no-redundant-jump": {
+			"count": 10
+		},
+		"sonarjs/no-unused-collection": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/xai.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/__tests__/zai.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 9
+		}
+	},
+	"api/providers/__tests__/zoo-gateway.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"api/providers/anthropic-vertex.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/anthropic.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"api/providers/base-openai-compatible-provider.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/base-provider.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/bedrock.ts": {
+		"complexity": {
+			"count": 4
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 4
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 4
+		}
+	},
+	"api/providers/deepseek.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/fetchers/__tests__/litellm.spec.ts": {
+		"sonarjs/assertions-in-tests": {
+			"count": 1
+		},
+		"sonarjs/no-clear-text-protocols": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"api/providers/fetchers/__tests__/lmstudio.test.ts": {
+		"sonarjs/no-clear-text-protocols": {
+			"count": 1
+		}
+	},
+	"api/providers/fetchers/__tests__/ollama.test.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"api/providers/fetchers/deepseek.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/fetchers/litellm.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"api/providers/fetchers/lmstudio.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/fetchers/modelEndpointCache.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/fetchers/openrouter.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/gemini.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-dead-store": {
+			"count": 5
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		},
+		"sonarjs/prefer-single-boolean-return": {
+			"count": 1
+		}
+	},
+	"api/providers/lite-llm.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/lm-studio.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 3
+		}
+	},
+	"api/providers/mimo.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/minimax.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/mistral.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/moonshot.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/native-ollama.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		}
+	},
+	"api/providers/openai-codex.ts": {
+		"complexity": {
+			"count": 6
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 5
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-duplicated-branches": {
+			"count": 2
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 5
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/openai-native.ts": {
+		"complexity": {
+			"count": 7
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 5
+		},
+		"sonarjs/no-dead-store": {
+			"count": 3
+		},
+		"sonarjs/no-duplicated-branches": {
+			"count": 3
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 4
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/openai.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-identical-expressions": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 2
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"api/providers/opencode-go.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/openrouter.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"api/providers/poe.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/qwen-code.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/providers/requesty.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/unbound.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/utils/error-handler.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/utils/image-generation.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/vercel-ai-gateway.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"api/providers/vscode-lm.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		}
+	},
+	"api/providers/zai.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"api/providers/zoo-gateway.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/void-use": {
+			"count": 3
+		}
+	},
+	"api/transform/__tests__/model-params.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"api/transform/__tests__/reasoning.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"api/transform/__tests__/responses-api-input.spec.ts": {
+		"sonarjs/publicly-writable-directories": {
+			"count": 3
+		}
+	},
+	"api/transform/__tests__/responses-api-stream.spec.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 2
+		}
+	},
+	"api/transform/ai-sdk.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/transform/bedrock-converse-format.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/transform/cache-strategy/__tests__/cache-strategy.spec.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 6
+		}
+	},
+	"api/transform/cache-strategy/base-strategy.ts": {
+		"sonarjs/duplicates-in-character-class": {
+			"count": 3
+		}
+	},
+	"api/transform/cache-strategy/multi-point-strategy.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/transform/gemini-format.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		}
+	},
+	"api/transform/minimax-format.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/transform/mistral-format.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/transform/model-params.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 2
+		},
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"api/transform/openai-format.ts": {
+		"complexity": {
+			"count": 3
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 3
+		},
+		"sonarjs/no-unused-collection": {
+			"count": 1
+		}
+	},
+	"api/transform/r1-format.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/transform/reasoning.ts": {
+		"sonarjs/no-nested-conditional": {
+			"count": 2
+		}
+	},
+	"api/transform/responses-api-input.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/transform/responses-api-stream.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/no-redundant-jump": {
+			"count": 1
+		}
+	},
+	"api/transform/vscode-lm-format.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"api/transform/zai-format.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/assistant-message/NativeToolCallParser.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		}
+	},
+	"core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/assistant-message/presentAssistantMessage.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-identical-functions": {
+			"count": 2
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/auto-approval/commands.ts": {
+		"sonarjs/slow-regex": {
+			"count": 4
+		}
+	},
+	"core/auto-approval/index.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 2
+		}
+	},
+	"core/checkpoints/__tests__/checkpoint.test.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 3
+		}
+	},
+	"core/checkpoints/index.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 3
+		}
+	},
+	"core/condense/__tests__/foldedFileContext.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/condense/foldedFileContext.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"core/condense/index.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 3
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/prefer-single-boolean-return": {
+			"count": 1
+		}
+	},
+	"core/config/ContextProxy.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"core/config/CustomModesManager.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 4
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 9
+		},
+		"sonarjs/no-misleading-character-class": {
+			"count": 1
+		},
+		"sonarjs/no-unused-collection": {
+			"count": 1
+		}
+	},
+	"core/config/ProviderSettingsManager.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-dead-store": {
+			"count": 4
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 6
+		},
+		"sonarjs/pseudo-random": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"core/config/__tests__/CustomModesManager.exportImportSlugChange.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/config/__tests__/CustomModesManager.yamlEdgeCases.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/config/__tests__/ProviderSettingsManager.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/config/importExport.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"core/config/routerRemoval.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		},
+		"sonarjs/use-type-alias": {
+			"count": 1
+		}
+	},
+	"core/context-management/__tests__/context-management.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 3
+		},
+		"sonarjs/no-identical-functions": {
+			"count": 4
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		}
+	},
+	"core/context-management/__tests__/truncation.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"core/context-management/index.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"core/diff/strategies/multi-search-replace.ts": {
+		"complexity": {
+			"count": 3
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 3
+		},
+		"sonarjs/no-dead-store": {
+			"count": 3
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		},
+		"sonarjs/regex-complexity": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 4
+		}
+	},
+	"core/environment/getEnvironmentDetails.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"core/ignore/RooIgnoreController.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"core/mentions/__tests__/index.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/mentions/__tests__/processUserContentMentions.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		}
+	},
+	"core/mentions/index.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-all-duplicated-branches": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 2
+		}
+	},
+	"core/mentions/processUserContentMentions.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/mentions/resolveImageMentions.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/message-manager/index.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"core/prompts/__tests__/add-custom-instructions.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 3
+		}
+	},
+	"core/prompts/__tests__/system-prompt.spec.ts": {
+		"sonarjs/todo-tag": {
+			"count": 2
+		},
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"core/prompts/responses.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/prompts/sections/__tests__/custom-instructions-path-detection.spec.ts": {
+		"sonarjs/no-identical-expressions": {
+			"count": 2
+		}
+	},
+	"core/prompts/sections/__tests__/custom-instructions.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"core/prompts/sections/custom-instructions.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 7
+		},
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"core/prompts/sections/system-info.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"core/prompts/system.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		}
+	},
+	"core/prompts/tools/filter-tools-for-mode.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/prompts/tools/native-tools/__tests__/mcp_server.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"core/prompts/tools/native-tools/mcp_server.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/protect/__tests__/RooProtectedController.spec.ts": {
+		"sonarjs/publicly-writable-directories": {
+			"count": 1
+		}
+	},
+	"core/task-persistence/TaskHistoryStore.ts": {
+		"sonarjs/no-nested-functions": {
+			"count": 1
+		}
+	},
+	"core/task-persistence/__tests__/TaskHistoryStore.crossInstance.spec.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/task-persistence/__tests__/TaskHistoryStore.spec.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"core/task-persistence/apiMessages.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/task-persistence/taskMetadata.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"core/task/Task.ts": {
+		"complexity": {
+			"count": 8
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 8
+		},
+		"sonarjs/no-dead-store": {
+			"count": 4
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 4
+		},
+		"sonarjs/todo-tag": {
+			"count": 4
+		},
+		"sonarjs/unused-import": {
+			"count": 4
+		},
+		"sonarjs/void-use": {
+			"count": 2
+		}
+	},
+	"core/task/__tests__/Task.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 1
+		},
+		"sonarjs/generator-without-yield": {
+			"count": 2
+		},
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"core/task/__tests__/Task.sticky-profile-race.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/task/__tests__/duplicate-tool-use-ids.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"core/task/__tests__/grounding-sources.test.ts": {
+		"sonarjs/duplicates-in-character-class": {
+			"count": 3
+		},
+		"sonarjs/slow-regex": {
+			"count": 6
+		}
+	},
+	"core/task/__tests__/task-tool-history.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"core/task/apiConversationHistory.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"core/tools/ApplyDiffTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 2
+		}
+	},
+	"core/tools/ApplyPatchTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"core/tools/AttemptCompletionTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/tools/CodebaseSearchTool.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/tools/EditFileTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/tools/EditTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"core/tools/ExecuteCommandTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 2
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"core/tools/GenerateImageTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"core/tools/NewTaskTool.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/tools/ReadCommandOutputTool.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-redundant-assignments": {
+			"count": 1
+		}
+	},
+	"core/tools/ReadFileTool.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 5
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"core/tools/RunSlashCommandTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/tools/SearchReplaceTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"core/tools/SwitchModeTool.ts": {
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"core/tools/UpdateTodoListTool.ts": {
+		"sonarjs/hashing": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"core/tools/UseMcpToolTool.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"core/tools/WriteToFileTool.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/tools/__tests__/ReadCommandOutputTool.test.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/tools/__tests__/attemptCompletionTool.spec.ts": {
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"core/tools/__tests__/newTaskTool.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		}
+	},
+	"core/tools/__tests__/readFileTool.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 2
+		},
+		"sonarjs/unused-import": {
+			"count": 4
+		}
+	},
+	"core/tools/__tests__/updateTodoListTool.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 3
+		}
+	},
+	"core/tools/__tests__/useMcpToolTool.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		}
+	},
+	"core/tools/__tests__/validateToolUse.spec.ts": {
+		"sonarjs/no-empty-collection": {
+			"count": 1
+		}
+	},
+	"core/tools/apply-patch/apply.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/tools/apply-patch/parser.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-redundant-assignments": {
+			"count": 1
+		}
+	},
+	"core/tools/apply-patch/seek-sequence.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/tools/helpers/toolResultFormatting.ts": {
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"core/tools/validateToolUse.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"core/webview/ClineProvider.ts": {
+		"complexity": {
+			"count": 5
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 9
+		},
+		"sonarjs/no-dead-store": {
+			"count": 5
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 5
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 8
+		},
+		"sonarjs/todo-tag": {
+			"count": 3
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		},
+		"sonarjs/void-use": {
+			"count": 1
+		}
+	},
+	"core/webview/__tests__/ClineProvider.flicker-free-cancel.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"core/webview/__tests__/ClineProvider.spec.ts": {
+		"sonarjs/no-clear-text-protocols": {
+			"count": 2
+		}
+	},
+	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"core/webview/__tests__/ClineProvider.taskHistory.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/webview/__tests__/webviewMessageHandler.delete.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/webview/__tests__/webviewMessageHandler.edit.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/webview/__tests__/webviewMessageHandler.routerModels.spec.ts": {
+		"sonarjs/no-clear-text-protocols": {
+			"count": 2
+		}
+	},
+	"core/webview/__tests__/webviewMessageHandler.spec.ts": {
+		"sonarjs/no-clear-text-protocols": {
+			"count": 3
+		},
+		"sonarjs/publicly-writable-directories": {
+			"count": 1
+		}
+	},
+	"core/webview/checkpointRestoreHandler.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"core/webview/getNonce.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"core/webview/messageEnhancer.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"core/webview/webviewMessageHandler.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 3
+		},
+		"sonarjs/max-switch-cases": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"core/webview/worktree/handlers.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"eslint.config.mjs": {
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"extension.ts": {
+		"sonarjs/no-unused-collection": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		},
+		"sonarjs/void-use": {
+			"count": 1
+		}
+	},
+	"extension/__tests__/api-send-message.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"extension/api.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 5
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"integrations/diagnostics/index.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"integrations/editor/DiffViewProvider.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"integrations/editor/__tests__/DiffViewProvider.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"integrations/misc/__tests__/indentation-reader.spec.ts": {
+		"sonarjs/no-commented-code": {
+			"count": 2
+		},
+		"sonarjs/slow-regex": {
+			"count": 2
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"integrations/misc/__tests__/performance/processCarriageReturns.benchmark.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"integrations/misc/export-markdown.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"integrations/misc/extract-text.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"integrations/misc/image-handler.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"integrations/misc/indentation-reader.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"integrations/misc/line-counter.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 3
+		}
+	},
+	"integrations/misc/open-file.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"integrations/openai-codex/oauth.ts": {
+		"sonarjs/no-nested-conditional": {
+			"count": 4
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"integrations/openai-codex/rate-limits.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/BaseTerminal.ts": {
+		"sonarjs/public-static-readonly": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/ExecaTerminalProcess.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/ShellIntegrationManager.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		},
+		"sonarjs/public-static-readonly": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/Terminal.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/TerminalProcess.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/concise-regex": {
+			"count": 1
+		},
+		"sonarjs/no-control-regex": {
+			"count": 12
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		},
+		"sonarjs/void-use": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/TerminalRegistry.ts": {
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/ExecaTerminal.spec.ts": {
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts": {
+		"sonarjs/no-nested-functions": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/OutputInterceptor.test.ts": {
+		"sonarjs/publicly-writable-directories": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/TerminalProcess.test.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/TerminalProcessExec.bash.spec.ts": {
+		"sonarjs/no-all-duplicated-branches": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/os-command": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 2
+		}
+	},
+	"integrations/terminal/__tests__/TerminalProcessExec.cmd.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/TerminalProcessExec.pwsh.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/TerminalProcessInterpretExitCode.spec.ts": {
+		"sonarjs/no-os-command-from-path": {
+			"count": 3
+		}
+	},
+	"integrations/terminal/__tests__/TerminalProfile.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 9
+		},
+		"sonarjs/publicly-writable-directories": {
+			"count": 10
+		}
+	},
+	"integrations/terminal/__tests__/setupTerminalTests.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-os-command-from-path": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/streamUtils/bashStream.ts": {
+		"sonarjs/os-command": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/streamUtils/cmdStream.ts": {
+		"sonarjs/os-command": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/streamUtils/mockStream.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"integrations/terminal/__tests__/streamUtils/pwshStream.ts": {
+		"sonarjs/os-command": {
+			"count": 1
+		}
+	},
+	"integrations/theme/getTheme.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		}
+	},
+	"integrations/workspace/WorkspaceTracker.ts": {
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"services/__tests__/zoo-code-auth.test.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"services/checkpoints/ShadowCheckpointService.ts": {
+		"sonarjs/no-nested-template-literals": {
+			"count": 2
+		}
+	},
+	"services/checkpoints/__tests__/ShadowCheckpointService.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"services/checkpoints/excludes.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"services/code-index/__tests__/config-manager.spec.ts": {
+		"sonarjs/no-clear-text-protocols": {
+			"count": 78
+		},
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"services/code-index/config-manager.ts": {
+		"complexity": {
+			"count": 4
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 3
+		}
+	},
+	"services/code-index/embedders/__tests__/openai-compatible.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"services/code-index/embedders/__tests__/openai.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"services/code-index/embedders/__tests__/openrouter.spec.ts": {
+		"sonarjs/constructor-for-side-effects": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"services/code-index/embedders/bedrock.ts": {
+		"sonarjs/no-duplicated-branches": {
+			"count": 2
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"services/code-index/embedders/ollama.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/code-index/embedders/openai-compatible.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"services/code-index/embedders/openrouter.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"services/code-index/manager.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"services/code-index/orchestrator.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-dead-store": {
+			"count": 3
+		},
+		"sonarjs/no-unused-collection": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		}
+	},
+	"services/code-index/processors/__tests__/parser.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"services/code-index/processors/file-watcher.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-dead-store": {
+			"count": 1
+		}
+	},
+	"services/code-index/processors/parser.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/updated-loop-counter": {
+			"count": 1
+		}
+	},
+	"services/code-index/processors/scanner.ts": {
+		"complexity": {
+			"count": 3
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"services/code-index/semble/__tests__/provider.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 2
+		}
+	},
+	"services/code-index/semble/semble-downloader.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/file-permissions": {
+			"count": 2
+		},
+		"sonarjs/no-os-command-from-path": {
+			"count": 3
+		}
+	},
+	"services/code-index/service-factory.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"services/code-index/shared/validation-helpers.ts": {
+		"sonarjs/regex-complexity": {
+			"count": 1
+		},
+		"sonarjs/single-character-alternation": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 2
+		}
+	},
+	"services/code-index/state-manager.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"services/code-index/vector-store/__tests__/qdrant-client.spec.ts": {
+		"sonarjs/no-clear-text-protocols": {
+			"count": 4
+		},
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-hardcoded-ip": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"services/code-index/vector-store/qdrant-client.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-redundant-assignments": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/command/__tests__/symlink-commands.spec.ts": {
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"services/command/commands.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		}
+	},
+	"services/glob/__tests__/gitignore-integration.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 4
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 4
+		}
+	},
+	"services/glob/__tests__/gitignore-test.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"services/glob/__tests__/list-files-limit.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-identical-functions": {
+			"count": 2
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"services/glob/__tests__/list-files.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 5
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 5
+		},
+		"sonarjs/publicly-writable-directories": {
+			"count": 1
+		}
+	},
+	"services/glob/list-files.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"services/marketplace/MarketplaceManager.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 4
+		}
+	},
+	"services/marketplace/SimpleInstaller.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-dead-store": {
+			"count": 3
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 3
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"services/mcp/McpHub.ts": {
+		"complexity": {
+			"count": 3
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 6
+		},
+		"sonarjs/no-dead-store": {
+			"count": 3
+		},
+		"sonarjs/no-duplicated-branches": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 4
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 5
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 3
+		},
+		"sonarjs/void-use": {
+			"count": 7
+		}
+	},
+	"services/mcp/McpOAuthClientProvider.ts": {
+		"sonarjs/void-use": {
+			"count": 1
+		}
+	},
+	"services/mcp/__tests__/McpHub.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/unused-import": {
+			"count": 1
+		}
+	},
+	"services/mcp/utils/callbackServer.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-functions": {
+			"count": 1
+		}
+	},
+	"services/ripgrep/index.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 3
+		}
+	},
+	"services/roo-config/index.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"services/search/file-search.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"services/skills/SkillsManager.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"services/skills/__tests__/SkillsManager.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 2
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"services/tree-sitter/__tests__/helpers.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectC.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectCSS.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectCSharp.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectCpp.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectElisp.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectElixir.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectEmbeddedTemplate.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectHtml.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectJava.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectJavaScript.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectOCaml.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 3
+		}
+	},
+	"services/tree-sitter/__tests__/inspectPhp.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectPython.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectRuby.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectRust.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectScala.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectSolidity.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectSwift.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectTsx.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/inspectTypeScript.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/markdownParser.spec.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 4
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.c-sharp.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 18
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.c.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 42
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.cpp.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 20
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.css.spec.ts": {
+		"sonarjs/concise-regex": {
+			"count": 2
+		},
+		"sonarjs/slow-regex": {
+			"count": 15
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.elisp.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 7
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.elixir.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 16
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.embedded_template.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 10
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.go.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.java.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 20
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.javascript.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 17
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.lua.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 10
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.ocaml.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 8
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.python.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 15
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.rust.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 17
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.scala.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 16
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.swift.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 21
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.systemrdl.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 20
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.tlaplus.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 12
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.toml.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 31
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.tsx.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 30
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.typescript.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 16
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.vue.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 3
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/__tests__/parseSourceCodeDefinitions.zig.spec.ts": {
+		"sonarjs/slow-regex": {
+			"count": 9
+		}
+	},
+	"services/tree-sitter/index.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/languageParser.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"services/tree-sitter/markdownParser.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 2
+		}
+	},
+	"shared/ProfileValidator.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"shared/api.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"shared/context-mentions.ts": {
+		"sonarjs/duplicates-in-character-class": {
+			"count": 1
+		},
+		"sonarjs/regex-complexity": {
+			"count": 1
+		}
+	},
+	"shared/embeddingModels.ts": {
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"shared/modes.ts": {
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		},
+		"sonarjs/redundant-type-aliases": {
+			"count": 1
+		}
+	},
+	"shared/parse-command.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/concise-regex": {
+			"count": 1
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"shared/support-prompt.ts": {
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"shared/utils/requesty.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"utils/__tests__/WorkspacePathResolver.spec.ts": {
+		"sonarjs/file-permissions": {
+			"count": 1
+		}
+	},
+	"utils/__tests__/autoImportSettings.spec.ts": {
+		"sonarjs/no-dead-store": {
+			"count": 1
+		}
+	},
+	"utils/__tests__/git.spec.ts": {
+		"sonarjs/no-nested-functions": {
+			"count": 1
+		}
+	},
+	"utils/autoImportSettings.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"utils/git.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 5
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"utils/json-schema.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"utils/logging/__tests__/CompactTransport.spec.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 1
+		}
+	},
+	"utils/migrateSettings.ts": {
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"utils/outputChannelLogger.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		}
+	},
+	"utils/safeWriteJson.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/pseudo-random": {
+			"count": 2
+		}
+	},
+	"utils/storage.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 3
+		}
+	},
+	"utils/tag-matcher.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"utils/tiktoken.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"utils/tool-id.ts": {
+		"sonarjs/hashing": {
+			"count": 1
+		}
+	},
+	"utils/tts.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 2
+		}
+	}
+}

@@ -1,0 +1,22 @@
+{
+	"src/__tests__/looksLikeFilePath.spec.ts": {
+		"sonarjs/publicly-writable-directories": {
+			"count": 1
+		}
+	},
+	"src/providers/deepseek.ts": {
+		"sonarjs/todo-tag": {
+			"count": 3
+		}
+	},
+	"src/providers/index.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"src/task.ts": {
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	}
+}

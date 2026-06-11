@@ -1,8 +1,8 @@
 import js from "@eslint/js"
 import eslintConfigPrettier from "eslint-config-prettier"
+import sonarjs from "eslint-plugin-sonarjs"
 import turboPlugin from "eslint-plugin-turbo"
 import tseslint from "typescript-eslint"
-import onlyWarn from "eslint-plugin-only-warn"
 
 /**
  * A shared ESLint configuration for the repository.
@@ -13,17 +13,13 @@ export const config = [
 	js.configs.recommended,
 	eslintConfigPrettier,
 	...tseslint.configs.recommended,
+	sonarjs.configs.recommended,
 	{
 		plugins: {
 			turbo: turboPlugin,
 		},
 		rules: {
 			"turbo/no-undeclared-env-vars": "off",
-		},
-	},
-	{
-		plugins: {
-			onlyWarn,
 		},
 	},
 	{
@@ -39,6 +35,7 @@ export const config = [
 					caughtErrorsIgnorePattern: "^_",
 				},
 			],
+			complexity: ["error", 18],
 		},
 	},
 ]

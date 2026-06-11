@@ -1,0 +1,21 @@
+{
+	"src/esbuild.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/file-permissions": {
+			"count": 1
+		},
+		"sonarjs/os-command": {
+			"count": 1
+		}
+	},
+	"src/git.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/no-os-command-from-path": {
+			"count": 1
+		}
+	}
+}

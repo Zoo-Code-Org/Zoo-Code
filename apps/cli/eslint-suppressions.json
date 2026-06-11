@@ -1,0 +1,291 @@
+{
+	"src/__tests__/index.test.ts": {
+		"sonarjs/no-os-command-from-path": {
+			"count": 3
+		}
+	},
+	"src/agent/__tests__/events.test.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"src/agent/__tests__/extension-client.test.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"src/agent/__tests__/extension-host.test.ts": {
+		"sonarjs/publicly-writable-directories": {
+			"count": 3
+		}
+	},
+	"src/agent/ask-dispatcher.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"src/agent/json-event-emitter.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 3
+		},
+		"sonarjs/void-use": {
+			"count": 1
+		}
+	},
+	"src/agent/message-processor.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		}
+	},
+	"src/commands/auth/__tests__/auth-commands.test.ts": {
+		"sonarjs/publicly-writable-directories": {
+			"count": 3
+		}
+	},
+	"src/commands/cli/run.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 2
+		}
+	},
+	"src/commands/cli/stdin-stream.ts": {
+		"complexity": {
+			"count": 4
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 4
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 5
+		}
+	},
+	"src/index.ts": {
+		"sonarjs/no-identical-functions": {
+			"count": 1
+		}
+	},
+	"src/lib/storage/ephemeral.ts": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"src/lib/utils/__tests__/extension.test.ts": {
+		"sonarjs/prefer-single-boolean-return": {
+			"count": 2
+		}
+	},
+	"src/lib/utils/path.ts": {
+		"sonarjs/slow-regex": {
+			"count": 1
+		}
+	},
+	"src/lib/utils/provider.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-duplicated-branches": {
+			"count": 1
+		}
+	},
+	"src/ui/App.tsx": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-conditional": {
+			"count": 6
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 2
+		}
+	},
+	"src/ui/__tests__/store.test.ts": {
+		"sonarjs/no-all-duplicated-branches": {
+			"count": 1
+		}
+	},
+	"src/ui/components/ChatHistoryItem.tsx": {
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"src/ui/components/Icon.tsx": {
+		"sonarjs/todo-tag": {
+			"count": 3
+		}
+	},
+	"src/ui/components/LoadingText.tsx": {
+		"sonarjs/pseudo-random": {
+			"count": 1
+		}
+	},
+	"src/ui/components/MultilineTextInput.tsx": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		}
+	},
+	"src/ui/components/TodoChangeDisplay.tsx": {
+		"sonarjs/no-redundant-assignments": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 6
+		}
+	},
+	"src/ui/components/TodoDisplay.tsx": {
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 6
+		}
+	},
+	"src/ui/components/autocomplete/PickerSelect.tsx": {
+		"sonarjs/no-redundant-jump": {
+			"count": 1
+		}
+	},
+	"src/ui/components/autocomplete/triggers/FileTrigger.tsx": {
+		"sonarjs/no-nested-conditional": {
+			"count": 1
+		}
+	},
+	"src/ui/components/autocomplete/triggers/HistoryTrigger.tsx": {
+		"sonarjs/no-nested-conditional": {
+			"count": 2
+		}
+	},
+	"src/ui/components/autocomplete/triggers/SlashCommandTrigger.tsx": {
+		"sonarjs/no-nested-conditional": {
+			"count": 2
+		}
+	},
+	"src/ui/components/autocomplete/useAutocompletePicker.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-ignored-exceptions": {
+			"count": 2
+		},
+		"sonarjs/no-nested-functions": {
+			"count": 1
+		}
+	},
+	"src/ui/components/tools/FileWriteTool.tsx": {
+		"sonarjs/no-nested-conditional": {
+			"count": 2
+		}
+	},
+	"src/ui/components/tools/GenericTool.tsx": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"src/ui/components/tools/utils.ts": {
+		"sonarjs/todo-tag": {
+			"count": 2
+		}
+	},
+	"src/ui/hooks/useExtensionHost.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-nested-functions": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"src/ui/hooks/useFocusManagement.ts": {
+		"sonarjs/no-nested-conditional": {
+			"count": 2
+		}
+	},
+	"src/ui/hooks/useGlobalInput.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-unused-vars": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 5
+		}
+	},
+	"src/ui/hooks/useMessageHandlers.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	},
+	"src/ui/hooks/usePickerHandlers.ts": {
+		"complexity": {
+			"count": 1
+		}
+	},
+	"src/ui/hooks/useTaskSubmit.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"src/ui/store.ts": {
+		"sonarjs/todo-tag": {
+			"count": 2
+		}
+	},
+	"src/ui/stores/uiStateStore.ts": {
+		"sonarjs/todo-tag": {
+			"count": 2
+		}
+	},
+	"src/ui/types.ts": {
+		"sonarjs/todo-tag": {
+			"count": 2
+		}
+	},
+	"src/ui/utils/tools.ts": {
+		"complexity": {
+			"count": 2
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 2
+		},
+		"sonarjs/no-nested-template-literals": {
+			"count": 6
+		},
+		"sonarjs/slow-regex": {
+			"count": 1
+		},
+		"sonarjs/todo-tag": {
+			"count": 1
+		}
+	}
+}

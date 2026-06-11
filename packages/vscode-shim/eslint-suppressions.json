@@ -1,0 +1,12 @@
+{
+	"src/__tests__/TextEdit.test.ts": {
+		"sonarjs/no-element-overwrite": {
+			"count": 1
+		}
+	},
+	"src/__tests__/machine-id.test.ts": {
+		"sonarjs/file-permissions": {
+			"count": 2
+		}
+	}
+}

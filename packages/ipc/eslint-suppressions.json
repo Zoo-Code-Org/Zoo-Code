@@ -1,0 +1,7 @@
+{
+	"src/ipc-server.ts": {
+		"sonarjs/no-small-switch": {
+			"count": 1
+		}
+	}
+}

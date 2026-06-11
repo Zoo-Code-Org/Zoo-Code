@@ -1,0 +1,10 @@
+{
+	"src/PostHogTelemetryClient.ts": {
+		"sonarjs/no-ignored-exceptions": {
+			"count": 1
+		},
+		"sonarjs/prefer-single-boolean-return": {
+			"count": 1
+		}
+	}
+}

@@ -1,0 +1,54 @@
+{
+	"src/message-utils/consolidateApiRequests.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"src/message-utils/consolidateCommands.ts": {
+		"complexity": {
+			"count": 1
+		},
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/updated-loop-counter": {
+			"count": 1
+		}
+	},
+	"src/message-utils/consolidateTokenUsage.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"src/message-utils/safeJsonParse.ts": {
+		"sonarjs/no-nested-template-literals": {
+			"count": 1
+		}
+	},
+	"src/task-history/__tests__/task-history.spec.ts": {
+		"sonarjs/publicly-writable-directories": {
+			"count": 2
+		}
+	},
+	"src/task-history/index.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		}
+	},
+	"src/worktree/worktree-include.ts": {
+		"sonarjs/no-os-command-from-path": {
+			"count": 2
+		}
+	},
+	"src/worktree/worktree-service.ts": {
+		"sonarjs/cognitive-complexity": {
+			"count": 1
+		},
+		"sonarjs/no-identical-functions": {
+			"count": 1
+		}
+	}
+}
