@@ -45,5 +45,8 @@
 	"settings.debug.description": "API conversation history और UI messages को temporary files में prettified JSON के रूप में देखने के लिए अतिरिक्त बटन दिखाने के लिए debug mode सक्षम करें।",
 	"settings.debugProxy.enabled.description": "**Debug Proxy सक्षम करो** — सभी आउटबाउंड network requests को MITM debugging के लिए proxy के ज़रिए route करो। सिर्फ तब active रहेगा जब तुम debug mode (F5) में चला रहे हो।",
 	"settings.debugProxy.serverUrl.description": "Proxy URL (जैसे `http://127.0.0.1:8888`)। सिर्फ तब इस्तेमाल होती है जब **Debug Proxy** enabled हो।",
-	"settings.debugProxy.tlsInsecure.description": "Proxy से आने वाले self-signed certificates accept करो। **MITM inspection के लिए ज़रूरी।** ⚠️ Insecure — सिर्फ local debugging के लिए इस्तेमाल करो।"
+	"settings.debugProxy.tlsInsecure.description": "Proxy से आने वाले self-signed certificates accept करो। **MITM inspection के लिए ज़रूरी।** ⚠️ Insecure — सिर्फ local debugging के लिए इस्तेमाल करो।",
+	"settings.workspace.rootResolution.description": "Multi-root workspace में Zoo workspace root को कैसे resolve करता है। Root का इस्तेमाल `.roomodes`, `.roo/mcp.json`, `.roo/rules/` और दूसरी project-scoped configuration ढूंढने के लिए होता है। इस setting को बदलने का असर सिर्फ आगे की lookups पर पड़ता है; चल रहे tasks अपना original root बनाए रखते हैं।",
+	"settings.workspace.rootResolution.activeEditor.description": "उस workspace folder का इस्तेमाल करो जिसमें active editor है; पहले workspace folder पर fall back करो। (Default — legacy behavior बनाए रखता है।)",
+	"settings.workspace.rootResolution.firstFolder.description": "हमेशा पहले workspace folder (workspaceFolders[0]) का इस्तेमाल करो। Deterministic — इस बात से स्वतंत्र कि अभी कौन सी file focused है।"
 }

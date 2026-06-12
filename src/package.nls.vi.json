@@ -45,5 +45,8 @@
 	"settings.debug.description": "Bật chế độ gỡ lỗi để hiển thị các nút bổ sung để xem lịch sử hội thoại API và thông điệp giao diện người dùng dưới dạng JSON được định dạng trong các tệp tạm thời.",
 	"settings.debugProxy.enabled.description": "**Bật Debug Proxy** — Chuyển hướng tất cả yêu cầu mạng đi ra qua một proxy để debug MITM. Chỉ hoạt động khi bạn chạy ở chế độ gỡ lỗi (F5).",
 	"settings.debugProxy.serverUrl.description": "Proxy URL (vd: `http://127.0.0.1:8888`). Chỉ được dùng khi **Debug Proxy** được bật.",
-	"settings.debugProxy.tlsInsecure.description": "Chấp nhận chứng chỉ self-signed từ proxy. **Bắt buộc cho việc kiểm tra MITM.** ⚠️ Không an toàn — chỉ dùng cho debug cục bộ."
+	"settings.debugProxy.tlsInsecure.description": "Chấp nhận chứng chỉ self-signed từ proxy. **Bắt buộc cho việc kiểm tra MITM.** ⚠️ Không an toàn — chỉ dùng cho debug cục bộ.",
+	"settings.workspace.rootResolution.description": "Cách Zoo xác định gốc workspace trong một workspace nhiều gốc. Gốc được dùng để tìm `.roomodes`, `.roo/mcp.json`, `.roo/rules/` và các cấu hình khác ở phạm vi dự án. Thay đổi cài đặt này chỉ ảnh hưởng đến các lần tra cứu về sau; các tác vụ đang chạy vẫn giữ gốc ban đầu của chúng.",
+	"settings.workspace.rootResolution.activeEditor.description": "Dùng thư mục workspace chứa trình soạn thảo đang hoạt động; quay lại thư mục workspace đầu tiên. (Mặc định — giữ nguyên hành vi cũ.)",
+	"settings.workspace.rootResolution.firstFolder.description": "Luôn dùng thư mục workspace đầu tiên (workspaceFolders[0]). Mang tính xác định — không phụ thuộc vào tệp nào đang được focus."
 }

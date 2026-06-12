@@ -45,5 +45,8 @@
 	"settings.debug.description": "Aktiviere den Debug-Modus, um zusätzliche Schaltflächen zum Anzeigen des API-Konversationsverlaufs und der UI-Nachrichten als formatiertes JSON in temporären Dateien anzuzeigen.",
 	"settings.debugProxy.enabled.description": "**Debug-Proxy aktivieren** — Leite alle ausgehenden Netzwerkanfragen über einen Proxy für MITM-Debugging. Nur aktiv, wenn du im Debug-Modus (F5) läufst.",
 	"settings.debugProxy.serverUrl.description": "Proxy-URL (z. B. `http://127.0.0.1:8888`). Wird nur verwendet, wenn der **Debug-Proxy** aktiviert ist.",
-	"settings.debugProxy.tlsInsecure.description": "Akzeptiere selbstsignierte Zertifikate vom Proxy. **Erforderlich für MITM-Inspektion.** ⚠️ Unsicher – verwende das nur für lokales Debugging."
+	"settings.debugProxy.tlsInsecure.description": "Akzeptiere selbstsignierte Zertifikate vom Proxy. **Erforderlich für MITM-Inspektion.** ⚠️ Unsicher – verwende das nur für lokales Debugging.",
+	"settings.workspace.rootResolution.description": "Wie Zoo das Workspace-Stammverzeichnis in einem Multi-Root-Workspace auflöst. Das Stammverzeichnis wird verwendet, um `.roomodes`, `.roo/mcp.json`, `.roo/rules/` und andere projektbezogene Konfiguration zu finden. Eine Änderung dieser Einstellung wirkt sich nur auf zukünftige Suchen aus; laufende Aufgaben behalten ihr ursprüngliches Stammverzeichnis.",
+	"settings.workspace.rootResolution.activeEditor.description": "Verwende den Workspace-Ordner, der den aktiven Editor enthält; greife auf den ersten Workspace-Ordner zurück. (Standard – behält das bisherige Verhalten bei.)",
+	"settings.workspace.rootResolution.firstFolder.description": "Verwende immer den ersten Workspace-Ordner (workspaceFolders[0]). Deterministisch – unabhängig davon, welche Datei gerade fokussiert ist."
 }

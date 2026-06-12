@@ -45,5 +45,8 @@
 	"settings.debug.description": "Schakel debug-modus in om extra knoppen te tonen voor het bekijken van API-conversatiegeschiedenis en UI-berichten als opgemaakte JSON in tijdelijke bestanden.",
 	"settings.debugProxy.enabled.description": "**Debug Proxy inschakelen** — Leid alle uitgaande netwerkverzoeken via een proxy voor MITM-debugging. Alleen actief wanneer je in debugmodus (F5) draait.",
 	"settings.debugProxy.serverUrl.description": "Proxy-URL (bijv. `http://127.0.0.1:8888`). Wordt alleen gebruikt wanneer **Debug Proxy** is ingeschakeld.",
-	"settings.debugProxy.tlsInsecure.description": "Accepteer zelfondertekende certificaten van de proxy. **Vereist voor MITM-inspectie.** ⚠️ Onveilig — gebruik dit alleen voor lokale debugging."
+	"settings.debugProxy.tlsInsecure.description": "Accepteer zelfondertekende certificaten van de proxy. **Vereist voor MITM-inspectie.** ⚠️ Onveilig — gebruik dit alleen voor lokale debugging.",
+	"settings.workspace.rootResolution.description": "Hoe Zoo de workspace-root bepaalt in een multi-root workspace. De root wordt gebruikt om `.roomodes`, `.roo/mcp.json`, `.roo/rules/` en andere project-scoped configuratie te vinden. Deze instelling wijzigen heeft alleen invloed op toekomstige zoekopdrachten; lopende taken behouden hun oorspronkelijke root.",
+	"settings.workspace.rootResolution.activeEditor.description": "Gebruik de workspace-map die de actieve editor bevat; val terug op de eerste workspace-map. (Standaard — behoudt het oude gedrag.)",
+	"settings.workspace.rootResolution.firstFolder.description": "Gebruik altijd de eerste workspace-map (workspaceFolders[0]). Deterministisch — onafhankelijk van welk bestand op dit moment de focus heeft."
 }

@@ -45,5 +45,8 @@
 	"settings.debug.description": "Activa el mode de depuració per mostrar botons addicionals per veure l'historial de conversa de l'API i els missatges de la interfície d'usuari com a JSON embellert en fitxers temporals.",
 	"settings.debugProxy.enabled.description": "**Habilita el Debug Proxy** — Redirigeix totes les sol·licituds de xarxa sortints a través d'un proxy per a debugging MITM. Només està actiu quan s'executa en mode debug (F5).",
 	"settings.debugProxy.serverUrl.description": "URL del proxy (p. ex., `http://127.0.0.1:8888`). Només s'utilitza quan el **Debug Proxy** està habilitat.",
-	"settings.debugProxy.tlsInsecure.description": "Accepta certificats auto-signats del proxy. **Requerit per a la inspecció MITM.** ⚠️ Insegur — utilitza-ho només per a debugging local."
+	"settings.debugProxy.tlsInsecure.description": "Accepta certificats auto-signats del proxy. **Requerit per a la inspecció MITM.** ⚠️ Insegur — utilitza-ho només per a debugging local.",
+	"settings.workspace.rootResolution.description": "Com resol Zoo l'arrel de l'espai de treball en un espai de treball multi-arrel. L'arrel s'utilitza per localitzar `.roomodes`, `.roo/mcp.json`, `.roo/rules/` i altra configuració d'àmbit de projecte. Canviar aquest paràmetre només afecta les cerques futures; les tasques en execució conserven la seva arrel original.",
+	"settings.workspace.rootResolution.activeEditor.description": "Utilitza la carpeta de l'espai de treball que conté l'editor actiu; recorre a la primera carpeta de l'espai de treball. (Per defecte — conserva el comportament heretat.)",
+	"settings.workspace.rootResolution.firstFolder.description": "Utilitza sempre la primera carpeta de l'espai de treball (workspaceFolders[0]). Determinista — independent del fitxer que tingui el focus en aquest moment."
 }

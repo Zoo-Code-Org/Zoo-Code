@@ -258,6 +258,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		if (lastMessage) {
 			switch (lastMessage.type) {
 				case "ask":
+					// Skip button setup when the ask was already resolved by the backend
+					// before the state snapshot reached the webview. isAnswered:true is
+					// stamped on the message atomically with addToClineMessages, so the
+					// webview never needs to show -- and then clear -- approval buttons.
+					if (lastMessage.isAnswered) {
+						break
+					}
 					// Reset user response flag when a new ask arrives to allow auto-approval
 					userRespondedRef.current = false
 					const isPartial = lastMessage.partial === true
@@ -705,6 +712,18 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		}
 	}, [inputValue, selectedImages])
 
+	// Resets the approval button UI to its hidden/disabled state. Shared by the
+	// manual click handlers and by the backend-driven clearApprovalButtons
+	// message so auto-approved/denied asks hide the buttons through the same
+	// pathway a manual click uses.
+	const clearApprovalButtons = useCallback(() => {
+		setSendingDisabled(true)
+		setClineAsk(undefined)
+		setEnableButtons(false)
+		setPrimaryButtonText(undefined)
+		setSecondaryButtonText(undefined)
+	}, [])
+
 	// This logic depends on the useEffect[messages] above to set clineAsk,
 	// after which buttons are shown and we then send an askResponse to the
 	// extension.
@@ -773,13 +792,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					break
 			}
 
-			setSendingDisabled(true)
-			setClineAsk(undefined)
-			setEnableButtons(false)
-			setPrimaryButtonText(undefined)
-			setSecondaryButtonText(undefined)
+			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, currentTaskItem?.parentTaskId],
+		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons],
 	)
 
 	const handleSecondaryButtonClick = useCallback(
@@ -824,11 +839,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					vscode.postMessage({ type: "terminalOperation", terminalOperation: "abort" })
 					break
 			}
-			setSendingDisabled(true)
-			setClineAsk(undefined)
-			setEnableButtons(false)
+			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, isStreaming, setDidClickCancel],
+		[clineAsk, startNewTask, isStreaming, setDidClickCancel, clearApprovalButtons],
 	)
 
 	const { info: model } = useSelectedModel(apiConfiguration)

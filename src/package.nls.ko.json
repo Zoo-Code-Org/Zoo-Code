@@ -45,5 +45,8 @@
 	"settings.debug.description": "디버그 모드를 활성화하여 API 대화 기록과 UI 메시지를 임시 파일에 포맷된 JSON으로 보기 위한 추가 버튼을 표시합니다.",
 	"settings.debugProxy.enabled.description": "**Debug Proxy 활성화** — 모든 아웃바운드 네트워크 요청을 MITM 디버깅을 위해 프록시를 통해 라우팅합니다. 디버그 모드(F5)로 실행 중일 때만 활성화됩니다.",
 	"settings.debugProxy.serverUrl.description": "프록시 URL(예: `http://127.0.0.1:8888`). **Debug Proxy** 가 활성화된 경우에만 사용됩니다.",
-	"settings.debugProxy.tlsInsecure.description": "프록시의 self-signed 인증서를 허용합니다. **MITM 검사에 필요합니다.** ⚠️ 안전하지 않으므로 로컬 디버깅에만 사용하세요."
+	"settings.debugProxy.tlsInsecure.description": "프록시의 self-signed 인증서를 허용합니다. **MITM 검사에 필요합니다.** ⚠️ 안전하지 않으므로 로컬 디버깅에만 사용하세요.",
+	"settings.workspace.rootResolution.description": "멀티 루트 워크스페이스에서 Zoo가 워크스페이스 루트를 어떻게 결정하는지 설정합니다. 루트는 `.roomodes`, `.roo/mcp.json`, `.roo/rules/` 및 기타 프로젝트 범위 구성을 찾는 데 사용됩니다. 이 설정을 변경해도 이후의 조회에만 영향을 주며, 실행 중인 작업은 원래 루트를 유지합니다.",
+	"settings.workspace.rootResolution.activeEditor.description": "활성 편집기가 있는 워크스페이스 폴더를 사용하고, 첫 번째 워크스페이스 폴더로 폴백합니다. (기본값 — 기존 동작을 유지합니다.)",
+	"settings.workspace.rootResolution.firstFolder.description": "항상 첫 번째 워크스페이스 폴더(workspaceFolders[0])를 사용합니다. 결정적이며, 현재 포커스된 파일과 무관합니다."
 }

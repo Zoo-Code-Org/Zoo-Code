@@ -45,5 +45,8 @@
 	"settings.debug.description": "API konuşma geçmişini ve kullanıcı arayüzü mesajlarını geçici dosyalarda biçimlendirilmiş JSON olarak görüntülemek için ek düğmeler göstermek üzere hata ayıklama modunu etkinleştir.",
 	"settings.debugProxy.enabled.description": "**Debug Proxy'yi etkinleştir** — Tüm giden ağ isteklerini MITM hata ayıklaması için bir proxy üzerinden yönlendir. Yalnızca debug modunda (F5) çalıştırırken aktiftir.",
 	"settings.debugProxy.serverUrl.description": "Proxy URL'si (ör. `http://127.0.0.1:8888`). Yalnızca **Debug Proxy** etkin olduğunda kullanılır.",
-	"settings.debugProxy.tlsInsecure.description": "Proxy'den gelen self-signed sertifikaları kabul et. **MITM incelemesi için gerekli.** ⚠️ Güvensiz — yalnızca lokal debugging için kullan."
+	"settings.debugProxy.tlsInsecure.description": "Proxy'den gelen self-signed sertifikaları kabul et. **MITM incelemesi için gerekli.** ⚠️ Güvensiz — yalnızca lokal debugging için kullan.",
+	"settings.workspace.rootResolution.description": "Zoo'nun çok köklü bir çalışma alanında çalışma alanı kökünü nasıl belirlediği. Kök; `.roomodes`, `.roo/mcp.json`, `.roo/rules/` ve diğer proje kapsamındaki yapılandırmayı bulmak için kullanılır. Bu ayarı değiştirmek yalnızca sonraki aramaları etkiler; çalışan görevler özgün köklerini korur.",
+	"settings.workspace.rootResolution.activeEditor.description": "Aktif düzenleyiciyi içeren çalışma alanı klasörünü kullan; ilk çalışma alanı klasörüne geri dön. (Varsayılan — eski davranışı korur.)",
+	"settings.workspace.rootResolution.firstFolder.description": "Her zaman ilk çalışma alanı klasörünü (workspaceFolders[0]) kullan. Deterministik — o anda hangi dosyanın odakta olduğundan bağımsız."
 }

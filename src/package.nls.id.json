@@ -45,5 +45,8 @@
 	"settings.debug.description": "Aktifkan mode debug untuk menampilkan tombol tambahan untuk melihat riwayat percakapan API dan pesan UI sebagai JSON yang diformat dalam file sementara.",
 	"settings.debugProxy.enabled.description": "**Aktifkan Debug Proxy** — Arahkan semua permintaan jaringan keluar lewat proxy untuk debugging MITM. Hanya aktif saat kamu berjalan dalam mode debug (F5).",
 	"settings.debugProxy.serverUrl.description": "URL proxy (mis. `http://127.0.0.1:8888`). Hanya digunakan ketika **Debug Proxy** diaktifkan.",
-	"settings.debugProxy.tlsInsecure.description": "Terima sertifikat self-signed dari proxy. **Diperlukan untuk inspeksi MITM.** ⚠️ Tidak aman — gunakan hanya untuk debugging lokal."
+	"settings.debugProxy.tlsInsecure.description": "Terima sertifikat self-signed dari proxy. **Diperlukan untuk inspeksi MITM.** ⚠️ Tidak aman — gunakan hanya untuk debugging lokal.",
+	"settings.workspace.rootResolution.description": "Bagaimana Zoo menentukan root workspace di workspace multi-root. Root digunakan untuk menemukan `.roomodes`, `.roo/mcp.json`, `.roo/rules/`, dan konfigurasi lain yang bersifat project-scoped. Mengubah pengaturan ini hanya memengaruhi pencarian berikutnya; task yang sedang berjalan tetap memakai root aslinya.",
+	"settings.workspace.rootResolution.activeEditor.description": "Gunakan folder workspace yang berisi editor aktif; kembali ke folder workspace pertama. (Default — mempertahankan perilaku lama.)",
+	"settings.workspace.rootResolution.firstFolder.description": "Selalu gunakan folder workspace pertama (workspaceFolders[0]). Deterministik — tidak bergantung pada file mana yang sedang difokuskan."
 }

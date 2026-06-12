@@ -45,5 +45,8 @@
 	"settings.debug.description": "启用调试模式以显示额外按钮，用于在临时文件中以格式化 JSON 查看 API 对话历史和 UI 消息。",
 	"settings.debugProxy.enabled.description": "**启用 Debug Proxy** — 通过代理转发所有出站网络请求，用于 MITM 调试。只在调试模式 (F5) 运行时生效。",
 	"settings.debugProxy.serverUrl.description": "代理 URL（例如 `http://127.0.0.1:8888`）。仅在启用 **Debug Proxy** 时使用。",
-	"settings.debugProxy.tlsInsecure.description": "接受来自代理的 self-signed 证书。**MITM 检查所必需。** ⚠️ 不安全——只在本地调试时使用。"
+	"settings.debugProxy.tlsInsecure.description": "接受来自代理的 self-signed 证书。**MITM 检查所必需。** ⚠️ 不安全——只在本地调试时使用。",
+	"settings.workspace.rootResolution.description": "Zoo 在多根工作区中如何解析工作区根目录。根目录用于定位 `.roomodes`、`.roo/mcp.json`、`.roo/rules/` 以及其他项目范围的配置。更改此设置仅影响后续查找；正在运行的任务会保留其原始根目录。",
+	"settings.workspace.rootResolution.activeEditor.description": "使用包含活动编辑器的工作区文件夹；回退到第一个工作区文件夹。（默认——保留旧行为。）",
+	"settings.workspace.rootResolution.firstFolder.description": "始终使用第一个工作区文件夹（workspaceFolders[0]）。具有确定性——与当前聚焦的文件无关。"
 }

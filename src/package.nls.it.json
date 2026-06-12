@@ -45,5 +45,8 @@
 	"settings.debug.description": "Abilita la modalità debug per mostrare pulsanti aggiuntivi per visualizzare la cronologia delle conversazioni API e i messaggi dell'interfaccia utente come JSON formattato in file temporanei.",
 	"settings.debugProxy.enabled.description": "**Abilita Debug Proxy** — Instrada tutte le richieste di rete in uscita tramite un proxy per il debugging MITM. Attivo solo quando esegui in modalità debug (F5).",
 	"settings.debugProxy.serverUrl.description": "URL del proxy (ad es. `http://127.0.0.1:8888`). Usato solo quando **Debug Proxy** è abilitato.",
-	"settings.debugProxy.tlsInsecure.description": "Accetta certificati autofirmati dal proxy. **Necessario per l'ispezione MITM.** ⚠️ Non sicuro — usalo solo per il debugging locale."
+	"settings.debugProxy.tlsInsecure.description": "Accetta certificati autofirmati dal proxy. **Necessario per l'ispezione MITM.** ⚠️ Non sicuro — usalo solo per il debugging locale.",
+	"settings.workspace.rootResolution.description": "Come Zoo determina la radice del workspace in un workspace multi-radice. La radice viene usata per individuare `.roomodes`, `.roo/mcp.json`, `.roo/rules/` e altra configurazione a livello di progetto. Modificare questa impostazione influisce solo sulle ricerche future; i task in esecuzione mantengono la loro radice originale.",
+	"settings.workspace.rootResolution.activeEditor.description": "Usa la cartella del workspace che contiene l'editor attivo; ripiega sulla prima cartella del workspace. (Predefinito — mantiene il comportamento legacy.)",
+	"settings.workspace.rootResolution.firstFolder.description": "Usa sempre la prima cartella del workspace (workspaceFolders[0]). Deterministico — indipendente dal file attualmente attivo."
 }

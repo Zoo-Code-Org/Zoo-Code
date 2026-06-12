@@ -45,5 +45,8 @@
 	"settings.debug.description": "デバッグモードを有効にして、API会話履歴とUIメッセージをフォーマットされたJSONとして一時ファイルで表示するための追加ボタンを表示します。",
 	"settings.debugProxy.enabled.description": "**Debug Proxy を有効化** — すべての送信ネットワーク要求を MITM デバッグのためにプロキシ経由でルーティングします。デバッグモード (F5) で実行しているときだけ有効です。",
 	"settings.debugProxy.serverUrl.description": "プロキシ URL（例: `http://127.0.0.1:8888`）。**Debug Proxy** が有効なときにだけ使用されます。",
-	"settings.debugProxy.tlsInsecure.description": "プロキシからの自己署名証明書を許可します。**MITM インスペクションに必須です。** ⚠️ 危険な設定なので、ローカルでのデバッグにだけ使用してください。"
+	"settings.debugProxy.tlsInsecure.description": "プロキシからの自己署名証明書を許可します。**MITM インスペクションに必須です。** ⚠️ 危険な設定なので、ローカルでのデバッグにだけ使用してください。",
+	"settings.workspace.rootResolution.description": "マルチルートワークスペースで Zoo がワークスペースルートをどのように解決するか。ルートは `.roomodes`、`.roo/mcp.json`、`.roo/rules/` などのプロジェクト単位の設定を見つけるために使われます。この設定の変更は今後の検索にのみ影響し、実行中のタスクは元のルートを保持します。",
+	"settings.workspace.rootResolution.activeEditor.description": "アクティブなエディタを含むワークスペースフォルダを使用し、最初のワークスペースフォルダにフォールバックします。（デフォルト — 従来の動作を維持します。）",
+	"settings.workspace.rootResolution.firstFolder.description": "常に最初のワークスペースフォルダ（workspaceFolders[0]）を使用します。決定的で、現在フォーカスされているファイルに依存しません。"
 }

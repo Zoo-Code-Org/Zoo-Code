@@ -2,6 +2,8 @@ import * as path from "path"
 import os from "os"
 import * as vscode from "vscode"
 
+import { Package } from "../shared/package"
+
 /*
 The Node.js 'path' module resolves and normalizes paths differently depending on the platform:
 - On Windows, it uses backslashes (\) as the default path separator.
@@ -111,17 +113,67 @@ export const toRelativePath = (filePath: string, cwd: string) => {
 	return filePath.endsWith("/") ? relativePath + "/" : relativePath
 }
 
+/**
+ * Strategy used to resolve the workspace root in a multi-root workspace.
+ *
+ * - `activeEditor` (default, legacy): Prefer the workspace folder containing
+ *   the active editor; fall back to the first workspace folder when no editor
+ *   is open or the active file lives outside any workspace folder.
+ * - `firstFolder`: Always use the first workspace folder
+ *   (`vscode.workspace.workspaceFolders[0]`). Deterministic — independent of
+ *   which file is currently focused.
+ *
+ * Surfaced to users via the `zoo-code.workspace.rootResolution` setting.
+ */
+export type WorkspaceRootResolution = "activeEditor" | "firstFolder"
+
+const DEFAULT_ROOT_RESOLUTION: WorkspaceRootResolution = "activeEditor"
+
+/**
+ * Read the `zoo-code.workspace.rootResolution` setting safely.
+ *
+ * Wrapped in try/catch because:
+ *   1. `vscode.workspace.getConfiguration` is unavailable in some test/CLI
+ *      execution contexts.
+ *   2. The path utilities are imported very early during extension activation,
+ *      so we must never throw from a config read.
+ */
+function getRootResolutionStrategy(): WorkspaceRootResolution {
+	try {
+		const value = vscode.workspace
+			.getConfiguration(Package.name)
+			.get<string>("workspace.rootResolution", DEFAULT_ROOT_RESOLUTION)
+		return value === "firstFolder" ? "firstFolder" : DEFAULT_ROOT_RESOLUTION
+	} catch {
+		return DEFAULT_ROOT_RESOLUTION
+	}
+}
+
 export const getWorkspacePath = (defaultCwdPath = "") => {
-	const cwdPath = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) || defaultCwdPath
+	const firstFolderPath =
+		vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath).at(0) || defaultCwdPath
+
+	// Deterministic mode: always use the first workspace folder.
+	if (getRootResolutionStrategy() === "firstFolder") {
+		return firstFolderPath
+	}
+
+	// Default behavior: prefer the workspace folder containing the active editor.
 	const currentFileUri = vscode.window.activeTextEditor?.document.uri
 	if (currentFileUri) {
 		const workspaceFolder = vscode.workspace.getWorkspaceFolder(currentFileUri)
-		return workspaceFolder?.uri.fsPath || cwdPath
+		return workspaceFolder?.uri.fsPath || firstFolderPath
 	}
-	return cwdPath
+	return firstFolderPath
 }
 
 export const getWorkspacePathForContext = (contextPath?: string): string => {
+	// In `firstFolder` mode the root is pinned to workspaceFolders[0],
+	// regardless of whichever file the caller is reasoning about.
+	if (getRootResolutionStrategy() === "firstFolder") {
+		return getWorkspacePath()
+	}
+
 	// If context path provided, find its workspace
 	if (contextPath) {
 		const workspaceFolder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(contextPath))

@@ -45,5 +45,8 @@
 	"settings.debug.description": "Activa el modo de depuración para mostrar botones adicionales para ver el historial de conversación de API y los mensajes de la interfaz de usuario como JSON embellecido en archivos temporales.",
 	"settings.debugProxy.enabled.description": "**Activar Debug Proxy** — Redirige todas las solicitudes de red salientes a través de un proxy para depuración MITM. Solo está activo cuando se ejecuta en modo depuración (F5).",
 	"settings.debugProxy.serverUrl.description": "URL del proxy (p. ej., `http://127.0.0.1:8888`). Solo se usa cuando **Debug Proxy** está activado.",
-	"settings.debugProxy.tlsInsecure.description": "Aceptar certificados autofirmados del proxy. **Necesario para la inspección MITM.** ⚠️ Inseguro: úsalo solo para depuración local."
+	"settings.debugProxy.tlsInsecure.description": "Aceptar certificados autofirmados del proxy. **Necesario para la inspección MITM.** ⚠️ Inseguro: úsalo solo para depuración local.",
+	"settings.workspace.rootResolution.description": "Cómo resuelve Zoo la raíz del espacio de trabajo en un espacio de trabajo multi-raíz. La raíz se usa para localizar `.roomodes`, `.roo/mcp.json`, `.roo/rules/` y otra configuración del ámbito del proyecto. Cambiar este ajuste solo afecta a las búsquedas futuras; las tareas en ejecución conservan su raíz original.",
+	"settings.workspace.rootResolution.activeEditor.description": "Usa la carpeta del espacio de trabajo que contiene el editor activo; recurre a la primera carpeta del espacio de trabajo. (Predeterminado: conserva el comportamiento heredado.)",
+	"settings.workspace.rootResolution.firstFolder.description": "Usa siempre la primera carpeta del espacio de trabajo (workspaceFolders[0]). Determinista: independiente del archivo que tenga el foco en ese momento."
 }

@@ -3,6 +3,20 @@
 // Mock fs/promises
 vi.mock("fs/promises")
 
+// Mock os.homedir to make global directory path predictable across environments
+vi.mock("os", async () => ({
+	...(await vi.importActual("os")),
+	homedir: vi.fn().mockReturnValue("/mock/home"),
+}))
+
+// Mock roo-config to avoid environment-dependent global directory paths in tests
+vi.mock("../../../../services/roo-config", () => ({
+	getRooDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => [`${cwd}/.roo`]),
+	getAllRooDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => Promise.resolve([`${cwd}/.roo`])),
+	getAgentsDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => Promise.resolve([cwd])),
+	getGlobalRooDirectory: vi.fn().mockReturnValue("/mock/home/.roo"),
+}))
+
 // Mock path.resolve and path.join to be predictable in tests
 vi.mock("path", async () => ({
 	...(await vi.importActual("path")),
@@ -64,6 +78,7 @@ const statMock = vi.fn()
 const readdirMock = vi.fn()
 const readlinkMock = vi.fn()
 const lstatMock = vi.fn()
+const realpathMock = vi.fn().mockImplementation((p: string) => Promise.resolve(p))
 
 // Replace fs functions with our mocks
 fs.readFile = readFileMock as any
@@ -71,6 +86,7 @@ fs.stat = statMock as any
 fs.readdir = readdirMock as any
 fs.readlink = readlinkMock as any
 fs.lstat = lstatMock as any
+fs.realpath = realpathMock as any
 
 // Mock process.cwd
 const originalCwd = process.cwd
@@ -1571,6 +1587,167 @@ describe("Rules directory reading", () => {
 		expect(result).toContain("zzz-last.txt")
 		expect(result).toContain("aaa-first.txt")
 		expect(result).toContain("mmm-middle.txt")
+	})
+
+	it.skipIf(process.platform === "win32")(
+		"should resolve relative symlinks using realpath of parent directory",
+		async () => {
+			// This tests the scenario where:
+			// /project/.roo/rules -> /external/rules (symlinked directory)
+			// /external/rules/1-project.txt -> ../1-project.txt (relative symlink)
+			// The relative symlink should resolve to /external/1-project.txt, NOT /project/.roo/1-project.txt
+
+			// Simulate .roo/rules directory exists
+			statMock.mockResolvedValueOnce({
+				isDirectory: vi.fn().mockReturnValue(true),
+			} as any)
+
+			// Simulate listing files - one relative symlink inside the symlinked directory
+			readdirMock.mockResolvedValueOnce([
+				{
+					name: "1-project.txt",
+					isFile: () => false,
+					isSymbolicLink: () => true,
+					parentPath: "/project/.roo/rules",
+				},
+			] as any)
+
+			// readlink returns a relative target
+			readlinkMock.mockResolvedValueOnce("../1-project.txt")
+
+			// realpath resolves the symlinked parent directory to its real location
+			realpathMock.mockImplementation((dirPath: string) => {
+				const normalizedPath = dirPath.toString().replace(/\\/g, "/")
+				if (normalizedPath === "/project/.roo/rules") {
+					return Promise.resolve("/external/rules")
+				}
+				return Promise.resolve(dirPath)
+			})
+
+			// stat mock for the resolved target
+			statMock.mockImplementation((filePath: string) => {
+				const normalizedPath = filePath.toString().replace(/\\/g, "/")
+				if (
+					normalizedPath === "/external/rules/../1-project.txt" ||
+					normalizedPath === "/external/1-project.txt"
+				) {
+					return Promise.resolve({
+						isFile: vi.fn().mockReturnValue(true),
+						isDirectory: vi.fn().mockReturnValue(false),
+					} as any)
+				}
+				return Promise.resolve({
+					isFile: vi.fn().mockReturnValue(false),
+					isDirectory: vi.fn().mockReturnValue(false),
+				} as any)
+			})
+
+			readFileMock.mockImplementation((filePath: string) => {
+				const normalizedPath = filePath.toString().replace(/\\/g, "/")
+				if (
+					normalizedPath === "/external/rules/../1-project.txt" ||
+					normalizedPath === "/external/1-project.txt"
+				) {
+					return Promise.resolve("content from external file")
+				}
+				return Promise.reject({ code: "ENOENT" })
+			})
+
+			const result = await loadRuleFiles("/project")
+
+			// Verify realpath was called on the symlink's parent directory
+			expect(realpathMock).toHaveBeenCalledWith("/project/.roo/rules")
+
+			// Verify the content was read from the correctly resolved path
+			// (resolved relative to /external/rules, not /project/.roo/rules)
+			expect(result).toContain("content from external file")
+
+			// Verify readlink was called
+			expect(readlinkMock).toHaveBeenCalledWith("/project/.roo/rules/1-project.txt")
+
+			const statCalls = statMock.mock.calls.map((call: any[]) => call[0].toString().replace(/\\/g, "/"))
+			expect(statCalls).toEqual([
+				"/project/.roo/rules",
+				"/external/1-project.txt",
+				"/external/1-project.txt",
+			])
+		},
+	)
+
+	it.skipIf(process.platform === "win32")("should fall back to symlink path when realpath fails", async () => {
+		// Simulate .roo/rules directory exists
+		statMock.mockResolvedValueOnce({
+			isDirectory: vi.fn().mockReturnValue(true),
+		} as any)
+
+		// Simulate listing files - one relative symlink inside the directory
+		readdirMock.mockResolvedValueOnce([
+			{
+				name: "1-project.txt",
+				isFile: () => false,
+				isSymbolicLink: () => true,
+				parentPath: "/project/.roo/rules",
+			},
+		] as any)
+
+		// readlink returns a relative target
+		readlinkMock.mockResolvedValueOnce("../1-project.txt")
+
+		// realpath fails for the parent directory
+		realpathMock.mockImplementation((dirPath: string) => {
+			const normalizedPath = dirPath.toString().replace(/\\/g, "/")
+			if (normalizedPath === "/project/.roo/rules") {
+				return Promise.reject({ code: "ENOENT" })
+			}
+			return Promise.resolve(dirPath)
+		})
+
+		// stat mock for the resolved target (using fallback path)
+		statMock.mockImplementation((filePath: string) => {
+			const normalizedPath = filePath.toString().replace(/\\/g, "/")
+			if (
+				normalizedPath === "/project/.roo/rules/../1-project.txt" ||
+				normalizedPath === "/project/.roo/1-project.txt"
+			) {
+				return Promise.resolve({
+					isFile: vi.fn().mockReturnValue(true),
+					isDirectory: vi.fn().mockReturnValue(false),
+				} as any)
+			}
+			return Promise.resolve({
+				isFile: vi.fn().mockReturnValue(false),
+				isDirectory: vi.fn().mockReturnValue(false),
+			} as any)
+		})
+
+		readFileMock.mockImplementation((filePath: string) => {
+			const normalizedPath = filePath.toString().replace(/\\/g, "/")
+			if (
+				normalizedPath === "/project/.roo/rules/../1-project.txt" ||
+				normalizedPath === "/project/.roo/1-project.txt"
+			) {
+				return Promise.resolve("content from fallback path")
+			}
+			return Promise.reject({ code: "ENOENT" })
+		})
+
+		const result = await loadRuleFiles("/project")
+
+		// Verify realpath was called on the symlink's parent directory
+		expect(realpathMock).toHaveBeenCalledWith("/project/.roo/rules")
+
+		// Verify the content was read from the fallback path
+		expect(result).toContain("content from fallback path")
+
+		// Verify readlink was called
+		expect(readlinkMock).toHaveBeenCalledWith("/project/.roo/rules/1-project.txt")
+
+		const statCalls = statMock.mock.calls.map((call: any[]) => call[0].toString().replace(/\\/g, "/"))
+		expect(statCalls).toEqual([
+			"/project/.roo/rules",
+			"/project/.roo/1-project.txt",
+			"/project/.roo/1-project.txt",
+		])
 	})
 
 	it("should handle empty file list gracefully", async () => {

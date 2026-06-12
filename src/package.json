@@ -419,6 +419,21 @@
 					"default": false,
 					"description": "%settings.debugProxy.tlsInsecure.description%",
 					"markdownDescription": "%settings.debugProxy.tlsInsecure.description%"
+				},
+				"zoo-code.workspace.rootResolution": {
+					"type": "string",
+					"enum": [
+						"activeEditor",
+						"firstFolder"
+					],
+					"enumDescriptions": [
+						"%settings.workspace.rootResolution.activeEditor.description%",
+						"%settings.workspace.rootResolution.firstFolder.description%"
+					],
+					"default": "activeEditor",
+					"scope": "machine",
+					"description": "%settings.workspace.rootResolution.description%",
+					"markdownDescription": "%settings.workspace.rootResolution.description%"
 				}
 			}
 		}
