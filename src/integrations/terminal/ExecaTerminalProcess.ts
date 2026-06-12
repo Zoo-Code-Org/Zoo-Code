@@ -1,5 +1,6 @@
+import { spawnSync } from "child_process"
+
 import { execa, ExecaError } from "execa"
-import psTree from "ps-tree"
 import process from "process"
 
 import type { RooTerminal } from "./types"
@@ -11,7 +12,6 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 	private aborted = false
 	private pid?: number
 	private subprocess?: ReturnType<typeof execa>
-	private pidUpdatePromise?: Promise<void>
 
 	constructor(terminal: RooTerminal) {
 		super()
@@ -43,8 +43,16 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 				shell: BaseTerminal.getExecaShellPath() || true,
 				cwd: this.terminal.getCurrentWorkingDirectory(),
 				all: true,
-				// Ignore stdin to ensure non-interactive mode and prevent hanging
 				stdin: "ignore",
+				// On POSIX, detached: true puts the child in its own process group so
+				// abort() can send SIGKILL to the entire group via process.kill(-pid).
+				// On Windows, detached: true causes a console-window flash that
+				// windowsHide cannot reliably suppress (the OS allocates the window
+				// before the hide flag is fully processed).
+				// We omit detached on Windows; Windows abort() uses `taskkill /F /T` instead,
+				// which walks the PPID tree via Windows APIs and does not
+				// require the child to be in a detached state.
+				detached: process.platform !== "win32",
 				env: {
 					...process.env,
 					// Ensure UTF-8 encoding for Ruby, CocoaPods, etc.
@@ -52,27 +60,8 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 					LC_ALL: "en_US.UTF-8",
 				},
 			})`${command}`
-
+	
 			this.pid = this.subprocess.pid
-
-			// When using shell: true, the PID is for the shell, not the actual command
-			// Find the actual command PID after a small delay
-			if (this.pid) {
-				this.pidUpdatePromise = new Promise<void>((resolve) => {
-					setTimeout(() => {
-						psTree(this.pid!, (err, children) => {
-							if (!err && children.length > 0) {
-								// Update PID to the first child (the actual command)
-								const actualPid = parseInt(children[0].PID)
-								if (!isNaN(actualPid)) {
-									this.pid = actualPid
-								}
-							}
-							resolve()
-						})
-					}, 100)
-				})
-			}
 
 			const rawStream = this.subprocess.iterable({ from: "all", preserveNewlines: true })
 
@@ -102,37 +91,25 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 				this.startHotTimer(line)
 			}
 
-			if (this.aborted) {
-				let timeoutId: NodeJS.Timeout | undefined
-
-				const kill = new Promise<void>((resolve) => {
-					console.log(`[ExecaTerminalProcess#run] SIGKILL -> ${this.pid}`)
-
-					timeoutId = setTimeout(() => {
-						try {
-							this.subprocess?.kill("SIGKILL")
-						} catch (e) {}
-
-						resolve()
-					}, 5_000)
-				})
-
-				try {
-					await Promise.race([this.subprocess, kill])
-				} catch (error) {
-					console.log(
-						`[ExecaTerminalProcess#run] subprocess termination error: ${error instanceof Error ? error.message : String(error)}`,
-					)
+				if (this.aborted) {
+					try {
+						await this.subprocess
+					} catch (error) {
+						// Expected: process was killed by abort(); swallow the error.
+					}
+	
+					// 128 + 9 (SIGKILL) mirrors the conventional shell exit code so the
+					// UI indicator correctly shows a non-zero (red) exit.
+					this.emit("shell_execution_complete", { exitCode: 137, signalName: "SIGKILL" })
+				} else {
+					this.emit("shell_execution_complete", { exitCode: 0 })
 				}
-
-				if (timeoutId) {
-					clearTimeout(timeoutId)
-				}
-			}
-
-			this.emit("shell_execution_complete", { exitCode: 0 })
 		} catch (error) {
-			if (error instanceof ExecaError) {
+			// If abort() fired and the stream threw before the loop checked this.aborted,
+			// treat it as a SIGKILL exit rather than a generic error.
+			if (this.aborted) {
+				this.emit("shell_execution_complete", { exitCode: 137, signalName: "SIGKILL" })
+			} else if (error instanceof ExecaError) {
 				console.error(`[ExecaTerminalProcess#run] shell execution error: ${error.message}`)
 				this.emit("shell_execution_complete", { exitCode: error.exitCode ?? 0, signalName: error.signal })
 			} else {
@@ -162,60 +139,49 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 	public override abort() {
 		this.aborted = true
 
-		// Function to perform the kill operations
-		const performKill = () => {
-			// Try to kill using the subprocess object
-			if (this.subprocess) {
-				try {
-					this.subprocess.kill("SIGKILL")
-				} catch (e) {
-					console.warn(
-						`[ExecaTerminalProcess#abort] Failed to kill subprocess: ${e instanceof Error ? e.message : String(e)}`,
-					)
-				}
-			}
-
-			// Kill the stored PID (which should be the actual command after our update)
-			if (this.pid) {
-				try {
-					process.kill(this.pid, "SIGKILL")
-				} catch (e) {
-					console.warn(
-						`[ExecaTerminalProcess#abort] Failed to kill process ${this.pid}: ${e instanceof Error ? e.message : String(e)}`,
-					)
-				}
-			}
+		if (!this.pid) {
+			return
 		}
 
-		// If PID update is in progress, wait for it before killing
-		if (this.pidUpdatePromise) {
-			this.pidUpdatePromise.then(performKill).catch(() => performKill())
+		if (process.platform === "win32") {
+			// On Windows, taskkill /F /T kills the entire process tree (shell + all
+			// child commands), since negative-PID group kill is a POSIX-only concept.
+			try {
+				spawnSync("taskkill", ["/F", "/T", "/PID", String(this.pid)])
+			} catch (e) {
+				console.warn(
+					`[ExecaTerminalProcess#abort] taskkill failed for PID ${this.pid}: ${e instanceof Error ? e.message : String(e)}`,
+				)
+
+				// Fall back to killing the subprocess directly.
+				try {
+					this.subprocess?.kill("SIGKILL")
+				} catch (e2) {
+					console.warn(
+						`[ExecaTerminalProcess#abort] Fallback kill also failed: ${e2 instanceof Error ? e2.message : String(e2)}`,
+					)
+				}
+			}
 		} else {
-			performKill()
-		}
+			// POSIX: kill the entire process group (shell + all child commands) with
+			// SIGKILL. Using a negative PID sends the signal to every process in
+			// the group, so child commands are not orphaned. Requires 'detached'.
+			try {
+				process.kill(-this.pid, "SIGKILL")
+			} catch (e) {
+				console.warn(
+					`[ExecaTerminalProcess#abort] Failed to kill process group -${this.pid}: ${e instanceof Error ? e.message : String(e)}`,
+				)
 
-		// Continue with the rest of the abort logic
-		if (this.pid) {
-			// Also check for any child processes
-			psTree(this.pid, async (err, children) => {
-				if (!err) {
-					const pids = children.map((p) => parseInt(p.PID))
-
-					for (const pid of pids) {
-						try {
-							process.kill(pid, "SIGKILL")
-						} catch (e) {
-							console.warn(
-								`[ExecaTerminalProcess#abort] Failed to send SIGKILL to child PID ${pid}: ${e instanceof Error ? e.message : String(e)}`,
-							)
-						}
-					}
-				} else {
-					console.error(
-						`[ExecaTerminalProcess#abort] Failed to get process tree for PID ${this.pid}: ${err.message}`,
+				// Fall back to killing the subprocess directly if process group kill fails.
+				try {
+					this.subprocess?.kill("SIGKILL")
+				} catch (e2) {
+					console.warn(
+						`[ExecaTerminalProcess#abort] Fallback kill also failed: ${e2 instanceof Error ? e2.message : String(e2)}`,
 					)
 				}
-			})
+			}
 		}
 	}
 

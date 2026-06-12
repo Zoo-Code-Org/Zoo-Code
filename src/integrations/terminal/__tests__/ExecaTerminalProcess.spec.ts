@@ -1,25 +1,28 @@
 // npx vitest run integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts
 
 const mockPid = 12345
+// Declared via vi.hoisted so they are available inside the hoisted vi.mock factory.
+const { mockKill, mockSpawnSync, mockIterableFactory } = vitest.hoisted(() => ({
+	mockKill: vitest.fn(),
+	mockSpawnSync: vitest.fn().mockReturnValue({ status: 0 }),
+	// Default iterable yields one line; tests can replace this to simulate errors.
+	mockIterableFactory: { current: async function* () { yield "test output\n" } as () => AsyncGenerator<string> },
+}))
+
+vitest.mock("child_process", () => ({
+	spawnSync: mockSpawnSync,
+}))
 
 vitest.mock("execa", () => {
-	const mockKill = vitest.fn()
 	const execa = vitest.fn((options: any) => {
 		return (_template: TemplateStringsArray, ...args: any[]) => ({
 			pid: mockPid,
-			iterable: (_opts: any) =>
-				(async function* () {
-					yield "test output\n"
-				})(),
+			iterable: (_opts: any) => mockIterableFactory.current(),
 			kill: mockKill,
 		})
 	})
 	return { execa, ExecaError: class extends Error {} }
 })
-
-vitest.mock("ps-tree", () => ({
-	default: vitest.fn((_: number, cb: any) => cb(null, [])),
-}))
 
 import { execa } from "execa"
 import { ExecaTerminalProcess } from "../ExecaTerminalProcess"
@@ -66,6 +69,7 @@ describe("ExecaTerminalProcess", () => {
 					shell: true,
 					cwd: "/test/cwd",
 					all: true,
+					detached: true,
 					env: expect.objectContaining({
 						LANG: "en_US.UTF-8",
 						LC_ALL: "en_US.UTF-8",
@@ -141,6 +145,112 @@ describe("ExecaTerminalProcess", () => {
 			await terminalProcess.run("echo test")
 			expect(mockTerminal.setActiveStream).toHaveBeenCalledWith(expect.any(Object), mockPid)
 			expect(mockTerminal.setActiveStream).toHaveBeenLastCalledWith(undefined)
+		})
+	})
+
+	describe("abort", () => {
+		it("kills the process group using a negative PID so child processes are not orphaned", async () => {
+			const killSpy = vitest.spyOn(process, "kill").mockImplementation(() => true)
+
+			// Start run() but abort before it resolves
+			const runPromise = terminalProcess.run("sleep 30")
+			// Yield so run() can set this.pid from the mock subprocess
+			await Promise.resolve()
+			terminalProcess.abort()
+			await runPromise
+
+			expect(killSpy).toHaveBeenCalledWith(-mockPid, "SIGKILL")
+			killSpy.mockRestore()
+		})
+
+		it("emits exitCode 137 (SIGKILL) on abort", async () => {
+			const killSpy = vitest.spyOn(process, "kill").mockImplementation(() => true)
+			const completeSpy = vitest.fn()
+			terminalProcess.on("shell_execution_complete", completeSpy)
+
+			const runPromise = terminalProcess.run("sleep 30")
+			await Promise.resolve()
+			terminalProcess.abort()
+			await runPromise
+
+			expect(completeSpy).toHaveBeenCalledWith({ exitCode: 137, signalName: "SIGKILL" })
+			killSpy.mockRestore()
+		})
+
+		it("falls back to subprocess.kill when process group kill throws", async () => {
+			const killSpy = vitest.spyOn(process, "kill").mockImplementation(() => {
+				throw new Error("ESRCH")
+			})
+
+			const runPromise = terminalProcess.run("sleep 30")
+			await Promise.resolve()
+			terminalProcess.abort()
+			await runPromise
+
+			// process.kill threw, so the fallback subprocess.kill must have been called
+			expect(mockKill).toHaveBeenCalledWith("SIGKILL")
+			killSpy.mockRestore()
+		})
+
+		it("does nothing when pid is not yet set", () => {
+			const killSpy = vitest.spyOn(process, "kill").mockImplementation(() => true)
+			// abort() before run() is called -- pid is undefined
+			terminalProcess.abort()
+			expect(killSpy).not.toHaveBeenCalled()
+			killSpy.mockRestore()
+		})
+
+		it("emits exitCode 137 when the stream throws before the aborted flag is checked (race condition)", async () => {
+			// Simulate the race: SIGKILL arrives and the iterable throws an ExecaError
+			// before the for-await loop reads this.aborted and breaks cleanly.
+			const { ExecaError } = await import("execa")
+			const throwingError = Object.assign(new ExecaError(), { exitCode: null, signal: "SIGKILL", message: "killed" })
+			mockIterableFactory.current = async function* () {
+				throw throwingError
+			}
+
+			const killSpy = vitest.spyOn(process, "kill").mockImplementation(() => true)
+			const completeSpy = vitest.fn()
+			terminalProcess.on("shell_execution_complete", completeSpy)
+
+			// abort() before run() resolves so this.aborted is true when the catch fires
+			const runPromise = terminalProcess.run("sleep 30")
+			await Promise.resolve()
+			terminalProcess.abort()
+			await runPromise
+
+			expect(completeSpy).toHaveBeenCalledWith({ exitCode: 137, signalName: "SIGKILL" })
+
+			// Restore default iterable for subsequent tests
+			mockIterableFactory.current = async function* () { yield "test output\n" }
+			killSpy.mockRestore()
+		})
+	})
+
+	describe("abort (Windows)", () => {
+		const isWindows = process.platform === "win32"
+		const describeWindows = isWindows ? describe : describe.skip
+
+		describeWindows("on win32", () => {
+			it("kills the process tree via taskkill /F /T so child processes are not orphaned", async () => {
+				const runPromise = terminalProcess.run("sleep 30")
+				await Promise.resolve()
+				terminalProcess.abort()
+				await runPromise
+
+				expect(mockSpawnSync).toHaveBeenCalledWith("taskkill", ["/F", "/T", "/PID", String(mockPid)])
+			})
+
+			it("falls back to subprocess.kill when taskkill throws", async () => {
+				mockSpawnSync.mockImplementationOnce(() => { throw new Error("not found") })
+
+				const runPromise = terminalProcess.run("sleep 30")
+				await Promise.resolve()
+				terminalProcess.abort()
+				await runPromise
+
+				expect(mockKill).toHaveBeenCalledWith("SIGKILL")
+			})
 		})
 	})
 
