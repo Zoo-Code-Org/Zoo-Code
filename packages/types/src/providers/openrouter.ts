@@ -75,6 +75,7 @@ export const OPEN_ROUTER_REASONING_BUDGET_MODELS = new Set([
 	"anthropic/claude-opus-4.1",
 	"anthropic/claude-opus-4.5",
 	"anthropic/claude-opus-4.6",
+	"anthropic/claude-fable-5",
 	"anthropic/claude-sonnet-4",
 	"anthropic/claude-sonnet-4.5",
 	"anthropic/claude-sonnet-4.6",

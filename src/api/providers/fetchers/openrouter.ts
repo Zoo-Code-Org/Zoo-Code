@@ -266,6 +266,7 @@ export const parseOpenRouterModel = ({
 	// Set claude-fable-5 model to use the correct Anthropic configuration
 	if (id === "anthropic/claude-fable-5") {
 		modelInfo.maxTokens = anthropicModels["claude-fable-5"].maxTokens
+		modelInfo.supportsReasoningBinary = true
 		modelInfo.supportsTemperature = false
 	}
 

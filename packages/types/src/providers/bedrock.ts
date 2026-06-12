@@ -606,6 +606,7 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // - Claude Opus 4.5
 // - Claude Opus 4.6
 // - Claude Opus 4.7
+// - Claude Fable 5 (cross-region inference only — can only be used through an inference profile)
 export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -615,6 +616,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-opus-4-6-v1",
 	"anthropic.claude-opus-4-7",
 	"anthropic.claude-opus-4-8",
+	"anthropic.claude-fable-5",
 ] as const
 
 // Amazon Bedrock Service Tier types

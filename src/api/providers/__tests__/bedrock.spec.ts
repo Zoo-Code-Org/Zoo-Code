@@ -709,6 +709,19 @@ describe("AwsBedrockHandler", () => {
 			expect(model.info.supportsTemperature).toBe(false)
 			expect(model.maxTokens).toBe(8192)
 		})
+
+		it("should apply global inference prefix for Claude Fable 5 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("global.anthropic.claude-fable-5")
+		})
 	})
 
 	describe("1M context beta feature", () => {

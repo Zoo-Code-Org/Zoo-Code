@@ -314,6 +314,8 @@ describe("OpenRouter API", () => {
 			expect(result.maxTokens).toBe(128000)
 			expect(result.contextWindow).toBe(1000000)
 			expect(result.supportsTemperature).toBe(false)
+			expect(result.supportsReasoningBudget).toBe(true)
+			expect(result.supportsReasoningBinary).toBe(true)
 		})
 
 		it("sets horizon-alpha model to 32k max tokens", () => {
