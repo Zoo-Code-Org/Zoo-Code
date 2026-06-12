@@ -1485,7 +1485,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		],
 	)
 
-	const computeMessageKey = useCallback((_index: number, messageOrGroup: ClineMessage) => messageOrGroup.ts, [])
+	const computeMessageKey = useCallback(
+		(index: number, messageOrGroup: ClineMessage) => `${messageOrGroup.ts}-${index}`,
+		[],
+	)
 
 	// Function to handle mode switching
 	const switchToNextMode = useCallback(() => {

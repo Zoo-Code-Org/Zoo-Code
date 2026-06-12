@@ -536,7 +536,7 @@ describe("ChatView - Virtualization Configuration", () => {
 
 		expect(mockVirtuosoState.lastConfig?.defaultItemHeight).toBe(180)
 		expect(mockVirtuosoState.lastConfig?.increaseViewportBy).toEqual({ top: 600, bottom: 800 })
-		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs })).toBe(rowTs)
+		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs })).toBe(`${rowTs}-1`)
 	})
 })
 
