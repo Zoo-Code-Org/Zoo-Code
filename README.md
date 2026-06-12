@@ -67,6 +67,14 @@ for this exact support, so if you are having problems or if you have question, j
 - Handle per-key failures during settings import
 - Security updates: mermaid v11.15.0, axios v1.16.0
 
+## TrustedRouter
+
+TrustedRouter exposes an OpenRouter-compatible API. To use it in Zoo Code,
+choose the OpenRouter-compatible/custom provider path, paste your
+TrustedRouter API key, and set the API base URL to
+`https://api.trustedrouter.com/v1`. Useful model aliases include
+`trustedrouter/auto`, `trustedrouter/zdr`, and `trustedrouter/e2e`.
+
 <details>
   <summary>🌐 Available languages</summary>
 
