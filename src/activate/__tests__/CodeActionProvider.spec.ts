@@ -3,7 +3,19 @@ import * as vscode from "vscode"
 
 import { EditorUtils } from "../../integrations/editor/EditorUtils"
 
-import { CodeActionProvider, TITLES } from "../CodeActionProvider"
+import { CodeActionProvider } from "../CodeActionProvider"
+
+vi.mock("../../i18n", () => ({
+	t: vi.fn((key: string) => {
+		const translations: Record<string, string> = {
+			"common:codeActions.explain": "Explain with Zoo Code",
+			"common:codeActions.fix": "Fix with Zoo Code",
+			"common:codeActions.improve": "Improve with Zoo Code",
+			"common:codeActions.addToContext": "Add to Zoo Code",
+		}
+		return translations[key] || key
+	}),
+}))
 
 vi.mock("vscode", () => ({
 	CodeAction: vi.fn().mockImplementation((title, kind) => ({
@@ -74,9 +86,9 @@ describe("CodeActionProvider", () => {
 			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
 
 			expect(actions).toHaveLength(3)
-			expect((actions as any)[0].title).toBe(TITLES.ADD_TO_CONTEXT)
-			expect((actions as any)[1].title).toBe(TITLES.EXPLAIN)
-			expect((actions as any)[2].title).toBe(TITLES.IMPROVE)
+			expect((actions as any)[0].title).toBe("Add to Zoo Code")
+			expect((actions as any)[1].title).toBe("Explain with Zoo Code")
+			expect((actions as any)[2].title).toBe("Improve with Zoo Code")
 		})
 
 		it("should provide fix action instead of fix logic when diagnostics exist", () => {
@@ -87,8 +99,8 @@ describe("CodeActionProvider", () => {
 			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
 
 			expect(actions).toHaveLength(2)
-			expect((actions as any).some((a: any) => a.title === `${TITLES.FIX}`)).toBe(true)
-			expect((actions as any).some((a: any) => a.title === `${TITLES.ADD_TO_CONTEXT}`)).toBe(true)
+			expect((actions as any).some((a: any) => a.title === "Fix with Zoo Code")).toBe(true)
+			expect((actions as any).some((a: any) => a.title === "Add to Zoo Code")).toBe(true)
 		})
 
 		it("should return empty array when no effective range", () => {

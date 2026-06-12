@@ -1,5 +1,6 @@
 import { parseCommand } from "../../shared/parse-command"
 
+
 /**
  * Detect dangerous parameter substitutions that could lead to command execution.
  * These patterns are never auto-approved and always require explicit user approval.
@@ -204,7 +205,7 @@ export function isAutoDeniedSingleCommand(
 /**
  * Command approval decision types
  */
-export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user"
+export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malformed_command"
 
 /**
  * Unified command validation that implements the longest prefix match rule.
@@ -224,6 +225,7 @@ export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user"
  * - `"auto_approve"`: All sub-commands are explicitly allowed and no dangerous patterns detected
  * - `"auto_deny"`: At least one sub-command is explicitly denied
  * - `"ask_user"`: Mixed or no matches found, requires user decision, or contains dangerous patterns
+ * - `"malformed_command"`: Command contains an unterminated quote -- a shell syntax error that must not be auto-approved
  *
  * **Examples:**
  * ```typescript
@@ -262,8 +264,19 @@ export function getCommandDecision(
 		return "auto_approve"
 	}
 
-	// Parse into sub-commands (split by &&, ||, ;, |)
-	const subCommands = parseCommand(command)
+	// Parse into sub-commands (split by &&, ||, ;, |). parseCommand also
+	// detects shell syntax errors (unterminated quotes, unclosed heredocs) and
+	// returns a non-null parseError in that case.
+	const { commands: subCommands, parseError } = parseCommand(command)
+
+	// Reject commands with a shell syntax error. An unterminated quote means
+	// the shell would report a parse error; in a compound command it may
+	// partially execute the well-formed prefix before aborting. Returning a
+	// distinct decision lets callers surface a useful message to the agent
+	// rather than silently presenting the command for user approval.
+	if (parseError !== null) {
+		return "malformed_command"
+	}
 
 	// Check each sub-command and collect decisions
 	const decisions: CommandDecision[] = subCommands.map((cmd) => {

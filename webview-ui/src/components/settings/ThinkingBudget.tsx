@@ -46,6 +46,7 @@ import {
 	DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
 	DEFAULT_HYBRID_REASONING_MODEL_THINKING_TOKENS,
 	GEMINI_25_PRO_MIN_THINKING_TOKENS,
+	getModelMaxOutputTokens,
 } from "@roo/api"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -75,6 +76,10 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 	const isReasoningBudgetSupported = !!modelInfo && modelInfo.supportsReasoningBudget
 	const isReasoningBudgetRequired = !!modelInfo && modelInfo.requiredReasoningBudget
 	const isReasoningEffortSupported = !!modelInfo && modelInfo.supportsReasoningEffort
+	// Models that advertise a user-configurable max output budget (e.g. Z.ai GLM) but do not
+	// use the reasoning-budget slider. The reasoning-budget branch already renders its own
+	// max-tokens control, so only surface this standalone slider when that branch is inactive.
+	const isMaxTokensConfigurable = !!modelInfo && modelInfo.supportsMaxTokens && !isReasoningBudgetSupported
 
 	// Build available reasoning efforts list from capability
 	const supports = modelInfo?.supportsReasoningEffort
@@ -160,22 +165,63 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 		}
 	}, [isReasoningBudgetSupported, customMaxThinkingTokens, modelMaxThinkingTokens, setApiConfigurationField])
 
+	// Default max output budget for models that expose a standalone max-tokens slider.
+	// When the user hasn't set an explicit `modelMaxTokens`, fall back to the same value
+	// the runtime would use (the default output clamp) so behavior is unchanged.
+	const defaultMaxOutputTokens =
+		(isMaxTokensConfigurable && selectedModelId && modelInfo
+			? getModelMaxOutputTokens({ modelId: selectedModelId, model: modelInfo, settings: apiConfiguration })
+			: undefined) ??
+		modelInfo?.maxTokens ??
+		DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS
+	const standaloneMaxOutputTokens = apiConfiguration.modelMaxTokens ?? defaultMaxOutputTokens
+
 	if (!modelInfo) {
 		return null
 	}
 
-	// Models with supportsReasoningBinary (binary reasoning) show a simple on/off toggle
+	// Shared markup for the "Max Output Tokens" slider, reused by the standalone control
+	// (supportsMaxTokens models) and the reasoning-budget branch below.
+	const renderMaxTokensSlider = (min: number, max: number, value: number, testId?: string) => (
+		<div className="flex flex-col gap-1" {...(testId ? { "data-testid": testId } : {})}>
+			<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
+			<div className="flex items-center gap-1">
+				<Slider
+					min={min}
+					max={max}
+					step={1024}
+					value={[value]}
+					onValueChange={([newValue]) => setApiConfigurationField("modelMaxTokens", newValue)}
+				/>
+				<div className="w-12 text-sm text-center">{value}</div>
+			</div>
+		</div>
+	)
+
+	// Standalone max output tokens slider for models that advertise `supportsMaxTokens`
+	// (e.g. Z.ai GLM) but do not surface the reasoning-budget control.
+	const maxOutputTokensControl =
+		isMaxTokensConfigurable && modelInfo.maxTokens
+			? renderMaxTokensSlider(1024, modelInfo.maxTokens, standaloneMaxOutputTokens, "max-output-tokens")
+			: null
+
+	// Models with supportsReasoningBinary (binary reasoning) show a simple on/off toggle.
+	// A binary-reasoning model can still advertise `supportsMaxTokens`, so surface the
+	// standalone max-output slider alongside the toggle when it applies.
 	if (isReasoningSupported) {
 		return (
-			<div className="flex flex-col gap-1">
-				<Checkbox
-					checked={enableReasoningEffort}
-					onChange={(checked: boolean) =>
-						setApiConfigurationField("enableReasoningEffort", checked === true)
-					}>
-					{t("settings:providers.useReasoning")}
-				</Checkbox>
-			</div>
+			<>
+				{maxOutputTokensControl}
+				<div className="flex flex-col gap-1">
+					<Checkbox
+						checked={enableReasoningEffort}
+						onChange={(checked: boolean) =>
+							setApiConfigurationField("enableReasoningEffort", checked === true)
+						}>
+						{t("settings:providers.useReasoning")}
+					</Checkbox>
+				</div>
+			</>
 		)
 	}
 
@@ -194,23 +240,15 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 			)}
 			{(isReasoningBudgetRequired || enableReasoningEffort) && (
 				<>
-					<div className="flex flex-col gap-1">
-						<div className="font-medium">{t("settings:thinkingBudget.maxTokens")}</div>
-						<div className="flex items-center gap-1">
-							<Slider
-								min={8192}
-								max={Math.max(
-									modelInfo.maxTokens || 8192,
-									customMaxOutputTokens,
-									DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
-								)}
-								step={1024}
-								value={[customMaxOutputTokens]}
-								onValueChange={([value]) => setApiConfigurationField("modelMaxTokens", value)}
-							/>
-							<div className="w-12 text-sm text-center">{customMaxOutputTokens}</div>
-						</div>
-					</div>
+					{renderMaxTokensSlider(
+						8192,
+						Math.max(
+							modelInfo.maxTokens || 8192,
+							customMaxOutputTokens,
+							DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
+						),
+						customMaxOutputTokens,
+					)}
 					<div className="flex flex-col gap-1">
 						<div className="font-medium">{t("settings:thinkingBudget.maxThinkingTokens")}</div>
 						<div className="flex items-center gap-1" data-testid="reasoning-budget">
@@ -228,44 +266,49 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 			)}
 		</>
 	) : isReasoningEffortSupported ? (
-		<div className="flex flex-col gap-1" data-testid="reasoning-effort">
-			<div className="flex justify-between items-center">
-				<label className="block font-medium mb-1">{t("settings:providers.reasoningEffort.label")}</label>
-			</div>
-			<Select
-				value={currentReasoningEffort}
-				onValueChange={(value: ReasoningEffortOption) => {
-					// "disable" turns off reasoning entirely; "none" is a valid reasoning level
-					if (value === "disable") {
-						setApiConfigurationField("enableReasoningEffort", false)
-						setApiConfigurationField("reasoningEffort", "disable")
-					} else {
-						// "none", "minimal", "low", "medium", "high" all enable reasoning
-						setApiConfigurationField("enableReasoningEffort", true)
-						setApiConfigurationField("reasoningEffort", value as ReasoningEffortWithMinimal)
-					}
-				}}>
-				<SelectTrigger className="w-full">
-					<SelectValue
-						placeholder={
-							currentReasoningEffort
-								? currentReasoningEffort === "none" || currentReasoningEffort === "disable"
-									? t("settings:providers.reasoningEffort.none")
-									: t(`settings:providers.reasoningEffort.${currentReasoningEffort}`)
-								: t("settings:common.select")
+		<>
+			{maxOutputTokensControl}
+			<div className="flex flex-col gap-1" data-testid="reasoning-effort">
+				<div className="flex justify-between items-center">
+					<label className="block font-medium mb-1">{t("settings:providers.reasoningEffort.label")}</label>
+				</div>
+				<Select
+					value={currentReasoningEffort}
+					onValueChange={(value: ReasoningEffortOption) => {
+						// "disable" turns off reasoning entirely; "none" is a valid reasoning level
+						if (value === "disable") {
+							setApiConfigurationField("enableReasoningEffort", false)
+							setApiConfigurationField("reasoningEffort", "disable")
+						} else {
+							// "none", "minimal", "low", "medium", "high" all enable reasoning
+							setApiConfigurationField("enableReasoningEffort", true)
+							setApiConfigurationField("reasoningEffort", value as ReasoningEffortWithMinimal)
 						}
-					/>
-				</SelectTrigger>
-				<SelectContent>
-					{availableOptions.map((value) => (
-						<SelectItem key={value} value={value}>
-							{value === "none" || value === "disable"
-								? t("settings:providers.reasoningEffort.none")
-								: t(`settings:providers.reasoningEffort.${value}`)}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
-		</div>
-	) : null
+					}}>
+					<SelectTrigger className="w-full">
+						<SelectValue
+							placeholder={
+								currentReasoningEffort
+									? currentReasoningEffort === "none" || currentReasoningEffort === "disable"
+										? t("settings:providers.reasoningEffort.none")
+										: t(`settings:providers.reasoningEffort.${currentReasoningEffort}`)
+									: t("settings:common.select")
+							}
+						/>
+					</SelectTrigger>
+					<SelectContent>
+						{availableOptions.map((value) => (
+							<SelectItem key={value} value={value}>
+								{value === "none" || value === "disable"
+									? t("settings:providers.reasoningEffort.none")
+									: t(`settings:providers.reasoningEffort.${value}`)}
+							</SelectItem>
+						))}
+					</SelectContent>
+				</Select>
+			</div>
+		</>
+	) : (
+		maxOutputTokensControl
+	)
 }

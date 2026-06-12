@@ -1,12 +1,13 @@
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import type { ToolUse } from "../../shared/tools"
+import { getSuggestionMode } from "@roo-code/types"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
 interface Suggestion {
 	text: string
-	mode?: string
+	mode?: unknown
 }
 
 interface AskFollowupQuestionParams {
@@ -42,13 +43,14 @@ export class AskFollowupQuestionTool extends BaseTool<"ask_followup_question"> {
 			// Transform follow_up suggestions to the format expected by task.ask
 			const follow_up_json = {
 				question,
-				suggest: follow_up.map((s) => ({ answer: s.text, mode: s.mode })),
+				suggest: follow_up.map((s) => ({ answer: s.text, mode: getSuggestionMode(s.mode) })),
 			}
 
 			task.consecutiveMistakeCount = 0
 			const { text, images } = await task.ask("followup", JSON.stringify(follow_up_json), false)
-			await task.say("user_feedback", text ?? "", images)
-			pushToolResult(formatResponse.toolResult(`<user_message>\n${text}\n</user_message>`, images))
+			const safeText = text ?? ""
+			await task.say("user_feedback", safeText, images)
+			pushToolResult(formatResponse.toolResult(`<user_message>\n${safeText}\n</user_message>`, images))
 		} catch (error) {
 			await handleError("asking question", error as Error)
 		}

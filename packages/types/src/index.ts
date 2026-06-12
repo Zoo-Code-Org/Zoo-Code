@@ -33,3 +33,5 @@ export * from "./vscode.js"
 export * from "./worktree.js"
 
 export * from "./providers/index.js"
+
+export * from "./utils/looksLikeFilePath.js"

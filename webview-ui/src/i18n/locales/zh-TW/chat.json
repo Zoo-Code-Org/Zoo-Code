@@ -267,6 +267,7 @@
 		"running": "執行中",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "已結束，狀態碼 {{exitCode}}",
+		"malformedCommand": "命令格式錯誤：shell 語法錯誤",
 		"manageCommands": "自動核准的命令",
 		"addToAllowed": "新增至允許清單",
 		"removeFromAllowed": "從允許清單中移除",
@@ -359,9 +360,9 @@
 		},
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "Xiaomi MiMo 供應商：已將 Xiaomi MiMo 新增為一級 API 供應商，讓你可以直接在 Zoo Code 中設定 MiMo 模型。",
-			"highlight2": "Zoo Code 上游交接：已合入最新的上游 sunset merge 與相關平台更新，讓 Zoo Code 持續與社群交接工作保持一致。",
-			"highlight3": "聊天與供應商穩定性修正：已修正 MCP 登入文案、Gemini 全工具組請求、OpenAI temperature 處理，以及 Markdown 單波浪號渲染。"
+			"highlight1": "透過 Zoo Gateway 連線 — 將請求路由至支援多設定檔驗證的託管閘道。",
+			"highlight2": "使用 Gemini 3.5 Flash — 一款快速且強大的 Google 模型，現可直接在供應商設定中使用。",
+			"highlight3": "使用 Semble 在本機對程式碼庫建立索引 — 無需外部 API 金鑰或上傳即可即時產生嵌入，程式碼始終保留在你的機器上。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

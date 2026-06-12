@@ -6,7 +6,9 @@ import {
 	moonshotDefaultModelId,
 	geminiDefaultModelId,
 	mistralDefaultModelId,
+	openRouterDefaultModelId,
 	openAiNativeDefaultModelId,
+	openAiCodexDefaultModelId,
 	qwenCodeDefaultModelId,
 	vertexDefaultModelId,
 	xaiDefaultModelId,
@@ -17,6 +19,13 @@ import {
 	minimaxDefaultModelId,
 	basetenDefaultModelId,
 	mimoDefaultModelId,
+	poeDefaultModelId,
+	requestyDefaultModelId,
+	unboundDefaultModelId,
+	litellmDefaultModelId,
+	vercelAiGatewayDefaultModelId,
+	opencodeGoDefaultModelId,
+	zooGatewayDefaultModelId,
 } from "@roo-code/types"
 
 import { MODELS_BY_PROVIDER } from "../constants"
@@ -83,6 +92,68 @@ export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfigur
 	}
 
 	return PROVIDER_DEFAULT_MODEL_IDS[provider] ?? ""
+}
+
+export type ProviderModelConfig = {
+	field: keyof ProviderSettings
+	default?: string
+}
+
+// Minimal per-provider config used by ApiOptions for model-id field wiring.
+// Kept in this file to keep ApiOptions.tsx from growing a second registry.
+const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> = {
+	openrouter: { field: "openRouterModelId", default: openRouterDefaultModelId },
+	requesty: { field: "requestyModelId", default: requestyDefaultModelId },
+	unbound: { field: "unboundModelId", default: unboundDefaultModelId },
+	litellm: { field: "litellmModelId", default: litellmDefaultModelId },
+	anthropic: { field: "apiModelId", default: anthropicDefaultModelId },
+	"openai-codex": { field: "apiModelId", default: openAiCodexDefaultModelId },
+	"qwen-code": { field: "apiModelId", default: qwenCodeDefaultModelId },
+	"openai-native": { field: "apiModelId", default: openAiNativeDefaultModelId },
+	gemini: { field: "apiModelId", default: geminiDefaultModelId },
+	deepseek: { field: "apiModelId", default: deepSeekDefaultModelId },
+	moonshot: { field: "apiModelId", default: moonshotDefaultModelId },
+	minimax: { field: "apiModelId", default: minimaxDefaultModelId },
+	mimo: { field: "apiModelId", default: mimoDefaultModelId },
+	mistral: { field: "apiModelId", default: mistralDefaultModelId },
+	xai: { field: "apiModelId", default: xaiDefaultModelId },
+	baseten: { field: "apiModelId", default: basetenDefaultModelId },
+	bedrock: { field: "apiModelId", default: bedrockDefaultModelId },
+	vertex: { field: "apiModelId", default: vertexDefaultModelId },
+	sambanova: { field: "apiModelId", default: sambaNovaDefaultModelId },
+	zai: { field: "apiModelId" },
+	fireworks: { field: "apiModelId", default: fireworksDefaultModelId },
+	poe: { field: "apiModelId", default: poeDefaultModelId },
+	"vercel-ai-gateway": { field: "vercelAiGatewayModelId", default: vercelAiGatewayDefaultModelId },
+	"opencode-go": { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
+	"zoo-gateway": { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
+	openai: { field: "openAiModelId" },
+	ollama: { field: "ollamaModelId" },
+	lmstudio: { field: "lmStudioModelId" },
+}
+
+export function getProviderModelConfig(provider: string, apiConfiguration?: ProviderSettings) {
+	const config = PROVIDER_MODEL_CONFIG[provider as ProviderName]
+	if (!config) return undefined
+
+	if (provider === "zai") {
+		return {
+			...config,
+			default: getDefaultModelIdForProvider(provider as ProviderName, apiConfiguration),
+		}
+	}
+
+	return config
+}
+
+// Custom mapping for doc URL slugs. Default is provider key.
+const PROVIDER_DOCS_SLUGS: Partial<Record<ProviderName, string>> = {
+	"openai-native": "openai",
+	openai: "openai-compatible",
+}
+
+export function getProviderDocsSlug(provider: string) {
+	return PROVIDER_DOCS_SLUGS[provider as ProviderName] ?? provider
 }
 
 export const getStaticModelsForProvider = (

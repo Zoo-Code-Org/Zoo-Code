@@ -30,39 +30,19 @@
 
 Je vindt een korte handleiding voor de overstap van Roo Code naar Zoo Code in de [Roo→Zoo-migratiegids](https://docs.zoocode.dev/roo-to-zoo-migration). We willen gebruikers zo goed mogelijk helpen tijdens de overgang, en precies daarvoor zijn onze [Reddit](https://www.reddit.com/r/ZooCode) en [Discord](https://discord.gg/VxfP4Vx3gX) er. Als je ergens tegenaan loopt of vragen hebt, kom langs en vraag het.
 
-## Nieuw in v3.55.0
+## Nieuw in v3.58.0
 
-**De eerste feature-release van Zoo Code** bouwt voort op de Marketplace-handoff met een nieuwe provider, de upstream sunset-merge uit Roo Code en een reeks gebruiksvriendelijke fixes in chat, providerinstellingen en rendering.
-
-- Xiaomi MiMo toegevoegd als eersteklas API-provider.
-- De upstream sunset-merge uit Roo Code en bijbehorende platformupdates overgenomen.
-- De MCP-aanmeldtekst, Gemini-verzoeken met de volledige toolset en de OpenAI-temperatuurafhandeling voor niet-ondersteunde modellen gecorrigeerd.
-- Markdown-weergave met één tilde en de naamgeving van tijdelijke diagnostiekbestanden gecorrigeerd.
-- Providerstandaarden en regiodekking voor Z.AI, GLM en Vertex AI verbeterd.
-
-<details>
-  <summary>🌐 Beschikbare talen</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — verbinding via een beheerde gateway met ondersteuning voor multi-profiel authenticatie
+- **Gemini 3.5 Flash** — een snel en krachtig Google-model, nu direct beschikbaar via de provider-instellingen
+- **Semble-inbedding** — indexeer je codebase lokaal zonder externe API-sleutel of upload
+- **Configureerbare chatlettergrootte** en **VS Code geïntegreerde terminal shell-overschrijving**
+- **GitHub-stijl waarschuwingen** worden gerenderd in de webview
+- **Configureerbaar maximum aantal uitvoertokens** voor GLM-modellen
+- **WorkspacePathResolver** — betrouwbare padverwerking in workspaces met symlinks
+- React-crash door een onjuist geformatteerde follow-up suggestiemodus opgelost
+- Ontbrekende OpenAI-temperature bij geen aangepaste waarde gecorrigeerd
+- Verwerking van fouten per sleutel bij het importeren van instellingen
+- Beveiligingsupdates: mermaid v11.15.0, axios v1.16.0
 
 ---
 

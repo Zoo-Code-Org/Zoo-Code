@@ -30,39 +30,19 @@
 
 Eine kurze Anleitung für den Wechsel von Roo Code zu Zoo Code findest du im [Roo→Zoo-Migrationsleitfaden](https://docs.zoocode.dev/roo-to-zoo-migration). Wir wollen Nutzer beim Umstieg so gut wie möglich unterstützen, und genau dafür sind unser [Reddit](https://www.reddit.com/r/ZooCode) und [Discord](https://discord.gg/VxfP4Vx3gX) da. Wenn du Probleme hast oder Fragen auftauchen, komm vorbei und frag nach.
 
-## Neu in v3.55.0
+## Neu in v3.58.0
 
-**Die erste Funktionsversion von Zoo Code** baut auf dem Marketplace-Handoff auf und bringt einen neuen Provider, den Upstream-Sunset-Merge aus Roo Code sowie eine Runde nutzerseitiger Korrekturen für Chat, Provider-Einstellungen und Rendering.
-
-- Xiaomi MiMo als vollwertigen API-Provider hinzugefügt.
-- Den Upstream-Sunset-Merge aus Roo Code und zugehörige Plattform-Updates übernommen.
-- Texte auf der MCP-Anmeldeseite, Gemini-Anfragen mit vollem Tool-Set und die OpenAI-Temperaturbehandlung für nicht unterstützte Modelle korrigiert.
-- Markdown-Darstellung einzelner Tilden und die Benennung temporärer Diagnosedateien korrigiert.
-- Standardwerte und Regionsabdeckung für Z.AI, GLM und Vertex AI verbessert.
-
-<details>
-  <summary>🌐 Verfügbare Sprachen</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-  </details>
+- **Zoo Gateway** — verbinde dich über ein verwaltetes Gateway mit Multi-Profil-Authentifizierung
+- **Gemini 3.5 Flash** — ein schnelles, leistungsstarkes Google-Modell, jetzt direkt in den Provider-Einstellungen verfügbar
+- **Semble-Einbettungen** — indexiere deine Codebasis lokal ohne externen API-Schlüssel oder Upload
+- **Konfigurierbarer Chat-Schriftgrad** und **VS Code integriertes Terminal Shell-Override**
+- **GitHub-ähnliche Hinweise** werden im Webview gerendert
+- **Konfigurierbare maximale Ausgabe-Tokens** für GLM-Modelle
+- **WorkspacePathResolver** — zuverlässige Pfadverarbeitung in Workspaces mit Symlinks
+- React-Absturz durch fehlerhafte Follow-up-Vorschlagsmodi behoben
+- Fehlendes OpenAI-Temperature-Parameter bei fehlendem benutzerdefinierten Wert korrigiert
+- Behandlung von Fehlern pro Schlüssel beim Importieren von Einstellungen
+- Sicherheitsupdates: mermaid v11.15.0, axios v1.16.0
 
 ---
 

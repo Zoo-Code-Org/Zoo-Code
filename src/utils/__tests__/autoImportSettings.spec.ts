@@ -220,6 +220,54 @@ describe("autoImportSettings", () => {
 		expect(mockContextProxy.setValues).toHaveBeenCalled()
 	})
 
+	it("should log import warnings while still succeeding", async () => {
+		const settingsPath = "/absolute/path/to/config.json"
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+			get: vi.fn().mockReturnValue(settingsPath),
+		} as any)
+
+		vi.mocked(fileExistsAtPath).mockResolvedValue(true)
+
+		const mockSettings = {
+			providerProfiles: {
+				currentApiConfigName: "test-config",
+				apiConfigs: {
+					"test-config": {
+						apiProvider: "anthropic",
+						anthropicApiKey: "test-key",
+					},
+				},
+			},
+			globalSettings: {
+				imageGenerationProvider: "roo",
+				customInstructions: "Test instructions",
+			},
+		}
+
+		vi.mocked(fsPromises.readFile).mockResolvedValue(JSON.stringify(mockSettings) as any)
+
+		await autoImportSettings(mockOutputChannel, {
+			providerSettingsManager: mockProviderSettingsManager,
+			contextProxy: mockContextProxy,
+			customModesManager: mockCustomModesManager,
+		})
+
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			"[AutoImport] Successfully imported settings from /absolute/path/to/config.json",
+		)
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith("[AutoImport] Import completed with 1 warning.")
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining(
+				'[AutoImport] Warning: Setting "globalSettings.imageGenerationProvider" used unsupported value "roo"',
+			),
+		)
+		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("info.auto_import_success")
+		expect(mockContextProxy.setValues).toHaveBeenCalledWith({
+			imageGenerationProvider: undefined,
+			customInstructions: "Test instructions",
+		})
+	})
+
 	it("should handle invalid JSON gracefully", async () => {
 		const settingsPath = "~/config.json"
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({

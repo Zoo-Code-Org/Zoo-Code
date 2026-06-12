@@ -221,6 +221,7 @@
 		"running": "Ejecutando",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Salió con el estado {{exitCode}}",
+		"malformedCommand": "Comando mal formado: error de sintaxis del shell",
 		"manageCommands": "Comandos aprobados automáticamente",
 		"addToAllowed": "Agregar a la lista de permitidos",
 		"removeFromAllowed": "Eliminar de la lista de permitidos",
@@ -337,9 +338,9 @@
 		},
 		"release": {
 			"heading": "Novedades:",
-			"highlight1": "Proveedor Xiaomi MiMo: Se añadió Xiaomi MiMo como proveedor de API de primera clase para que puedas configurar modelos MiMo directamente en Zoo Code.",
-			"highlight2": "Traspaso upstream de Zoo Code: Se incorporaron el merge upstream del sunset y las actualizaciones relacionadas de la plataforma para mantener Zoo Code alineado con el trabajo de traspaso de la comunidad.",
-			"highlight3": "Correcciones de estabilidad en chat y proveedores: Se corrigieron los textos del inicio de sesión de MCP, las solicitudes de Gemini con todo el conjunto de herramientas, el manejo de la temperatura de OpenAI y el renderizado de Markdown con una sola tilde."
+			"highlight1": "Conéctate a través de Zoo Gateway — enruta tus solicitudes a través de un gateway gestionado con soporte de autenticación multi-perfil.",
+			"highlight2": "Usa Gemini 3.5 Flash — un modelo de Google rápido y capaz, ahora disponible directamente desde la configuración del proveedor.",
+			"highlight3": "Indexa tu código localmente con Semble — embeddings en tiempo real sin necesidad de clave de API externa ni subida de archivos, manteniendo tu código en tu máquina."
 		},
 		"cloudAgents": {
 			"heading": "Novedades en la Nube:",

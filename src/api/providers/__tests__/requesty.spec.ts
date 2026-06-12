@@ -58,9 +58,9 @@ describe("RequestyHandler", () => {
 			baseURL: "https://router.requesty.ai/v1",
 			apiKey: mockOptions.requestyApiKey,
 			defaultHeaders: {
-				"HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
-				"X-Title": "Roo Code",
-				"User-Agent": `RooCode/${Package.version}`,
+				"HTTP-Referer": "https://github.com/Zoo-Code-Org/Zoo-Code",
+				"X-Title": "Zoo Code",
+				"User-Agent": `ZooCode/${Package.version}`,
 			},
 		})
 	})
@@ -73,9 +73,9 @@ describe("RequestyHandler", () => {
 			baseURL: "https://custom.requesty.ai/v1",
 			apiKey: mockOptions.requestyApiKey,
 			defaultHeaders: {
-				"HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
-				"X-Title": "Roo Code",
-				"User-Agent": `RooCode/${Package.version}`,
+				"HTTP-Referer": "https://github.com/Zoo-Code-Org/Zoo-Code",
+				"X-Title": "Zoo Code",
+				"User-Agent": `ZooCode/${Package.version}`,
 			},
 		})
 	})

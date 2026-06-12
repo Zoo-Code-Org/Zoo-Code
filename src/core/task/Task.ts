@@ -3013,27 +3013,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cacheReadTokens: tokens.cacheRead,
 									cost: tokens.total ?? costResult.totalCost,
 								})
-
-								// Zoo Code observability telemetry
-								import("../../services/zoo-telemetry")
-									.then(async ({ sendLlmTelemetry }) => {
-										const mode = await this.getTaskMode().catch(() => "unknown")
-										return sendLlmTelemetry({
-											taskId: this.taskId,
-											provider: this.apiConfiguration?.apiProvider ?? "unknown",
-											model: this.apiConfiguration
-												? (getModelId(this.apiConfiguration) ?? "unknown")
-												: "unknown",
-											mode,
-											inputTokens: costResult.totalInputTokens,
-											outputTokens: costResult.totalOutputTokens,
-											cacheReadTokens: tokens.cacheRead ?? 0,
-											cacheWriteTokens: tokens.cacheWrite ?? 0,
-											totalCost: tokens.total ?? costResult.totalCost,
-											status,
-										}).catch(() => {})
-									})
-									.catch(() => {})
 							}
 						}
 
@@ -3470,7 +3449,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// 	this.userMessageContentReady = true
 					// }
 
-					await pWaitFor(() => this.userMessageContentReady)
+					await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+
+					if (this.abort || this.abandoned) {
+						throw new Error(
+							`[RooCode#recursivelyMakeRooRequests] task ${this.taskId}.${this.instanceId} aborted`,
+						)
+					}
 
 					// If the model did not tool use, then we need to tell it to
 					// either use a tool or attempt_completion.

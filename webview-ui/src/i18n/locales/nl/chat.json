@@ -216,6 +216,7 @@
 		"abort": "Afbreken",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Afgesloten met status {{exitCode}}",
+		"malformedCommand": "Ongeldig commando: shell syntaxisfout",
 		"manageCommands": "Automatisch goedgekeurde commando's",
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
@@ -310,9 +311,9 @@
 		},
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Xiaomi MiMo-provider: Xiaomi MiMo toegevoegd als eersteklas API-provider, zodat je MiMo-modellen direct in Zoo Code kunt configureren.",
-			"highlight2": "Upstream-handoff van Zoo Code: De nieuwste upstream sunset-merge en bijbehorende platformupdates zijn overgenomen om Zoo Code afgestemd te houden op het community-handoffwerk.",
-			"highlight3": "Stabiliteitsfixes voor chat en providers: De MCP-aanmeldtekst, Gemini-verzoeken met de volledige toolset, de OpenAI-temperatuurafhandeling en Markdown met één tilde zijn gecorrigeerd."
+			"highlight1": "Verbinding via Zoo Gateway — stuur je verzoeken via een beheerde gateway met ondersteuning voor multi-profiel authenticatie.",
+			"highlight2": "Gebruik Gemini 3.5 Flash — een snel en krachtig Google-model, nu direct beschikbaar via de provider-instellingen.",
+			"highlight3": "Indexeer je codebase lokaal met Semble — on-the-fly embeddings zonder externe API-sleutel of upload, je code blijft op je eigen machine."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

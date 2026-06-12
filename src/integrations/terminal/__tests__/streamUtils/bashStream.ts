@@ -40,7 +40,7 @@ export function createBashCommandStream(command: string): CommandStream {
 				exitCode = 1
 			}
 		} else {
-			exitCode = error.status || 1 // Use status if available, default to 1
+			exitCode = error.status ?? 1 // Use status if available, default to 1
 		}
 	}
 

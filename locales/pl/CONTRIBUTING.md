@@ -20,6 +20,8 @@ Zoo Code to projekt społecznościowy i głęboko cenimy każdy wkład. Aby uspr
 - [Zanim zaczniesz wnosić wkład](#zanim-zaczniesz-wnosić-wkład)
 - [Znajdowanie i planowanie swojego wkładu](#znajdowanie-i-planowanie-swojego-wkładu)
 - [Proces rozwoju i przesyłania](#proces-rozwoju-i-przesyłania)
+- [Oczekiwania dotyczące żądań ściągnięcia](#oczekiwania-dotyczące-żądań-ściągnięcia)
+- [Wkłady wspomagane przez AI](#wkłady-wspomagane-przez-ai)
 - [Kwestie prawne](#kwestie-prawne)
 
 ## Zanim zaczniesz wnosić wkład
@@ -135,6 +137,32 @@ pnpm install
 - **Codzienna selekcja:** Szybkie sprawdzanie przez opiekunów.
 - **Cotygodniowy dogłębny przegląd:** Kompleksowa ocena.
 - **Szybko iteruj** w oparciu o opinie.
+
+### Oczekiwania dotyczące żądań ściągnięcia
+
+Żądania ściągnięcia powinny być możliwe do przejrzenia, przetestowane i łatwe w utrzymaniu. Przed otwarciem PR upewnij się, że:
+
+- Zmiana jest ograniczona do konkretnego zgłoszenia, błędu lub ulepszenia.
+- Możesz wyjaśnić, co robi zmiana i dlaczego jest poprawna.
+- Przetestowałeś zmianę lokalnie tam, gdzie jest to praktyczne.
+- Jesteś gotowy do odpowiadania na opinie z przeglądu i wprowadzania rozsądnych zmian następczych.
+- PR nie wymaga od opiekunów zasadniczego przepisania, przeprojektowania ani przejęcia własności implementacji przed scaleniem.
+
+Opiekunowie mogą zamykać PR, które są niekompletne, zbyt szerokie, nieaktywne, niezgodne z kierunkiem projektu lub tworzące nieproporcjonalne obciążenie przeglądem lub konserwacją. Zamknięcie PR nie jest oceną współtwórcy; jest to decyzja opiekunów, że zmiana nie może zostać zaakceptowana w jej obecnej postaci.
+
+### Wkłady wspomagane przez AI
+
+Korzystanie z narzędzi AI jest dozwolone, ale współtwórcy pozostają w pełni odpowiedzialni za swoje zgłoszenia.
+
+Jeśli używasz narzędzi AI do pomocy przy tworzeniu PR, musisz:
+
+- Przejrzeć i zrozumieć każdą istotną zmianę.
+- Być w stanie wyjaśnić implementację i kompromisy własnymi słowami.
+- Samodzielnie przetestować zmianę. Jeśli testy nie są praktyczne w Twoim środowisku, wyjaśnij dlaczego w opisie PR i opisz, jak recenzenci mogą zweryfikować zmianę.
+- Zweryfikować, że wygenerowany kod jest poprawny, konieczny i zgodny z licencją projektu.
+- Rozważ ujawnienie pomocy AI w opisie PR, gdy istotnie wpłynęła na kod, testy lub projekt — pomaga to recenzentom udzielać lepszych opinii.
+
+Prosimy o nieprzesyłanie zmian wygenerowanych przez AI, których nie rozumiesz lub których nie możesz utrzymać podczas przeglądu. Opiekunowie mogą zamykać PR, które wydają się w istotnym stopniu wspomagane przez AI, ale brakuje im weryfikacji człowieka, jasnego uzasadnienia lub kontynuacji przeglądu.
 
 ## Kwestie prawne
 

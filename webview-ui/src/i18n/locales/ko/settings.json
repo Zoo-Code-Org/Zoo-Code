@@ -213,7 +213,8 @@
 		"stoppingButton": "중지 중...",
 		"workspaceToggleLabel": "이 워크스페이스에 대한 인덱싱 활성화",
 		"workspaceDisabledMessage": "인덱싱이 구성되었지만 이 워크스페이스에서는 활성화되지 않았습니다.",
-		"autoEnableDefaultLabel": "새 워크스페이스에 대한 인덱싱 자동 활성화"
+		"autoEnableDefaultLabel": "새 워크스페이스에 대한 인덱싱 자동 활성화",
+		"sembleProvider": "Semble - 로컬"
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDE 환경 설정</SettingsLink>에서 이 설정에 대한 전역 바로 가기를 구성할 수 있습니다.",
@@ -314,6 +315,8 @@
 		"getOpenRouterApiKey": "OpenRouter API 키 받기",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API 키",
 		"getVercelAiGatewayApiKey": "Vercel AI Gateway API 키 받기",
+		"opencodeGoApiKey": "Opencode Go API 키",
+		"getOpencodeGoApiKey": "Opencode Go API 키 받기",
 		"apiKeyStorageNotice": "API 키는 VSCode의 보안 저장소에 안전하게 저장됩니다",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -452,6 +455,7 @@
 			"step3": "3. 또는 자격 증명이 있는 서비스 계정을 만드세요."
 		},
 		"googleCloudCredentials": "Google Cloud 자격 증명",
+		"googleCloudCredentialsPathWarning": "이 필드는 경로가 아닌 서비스 계정 키 파일의 JSON 내용을 기대합니다. 경로가 있다면 아래의 <strong>Google Cloud 키 파일 경로</strong> 필드에 붙여넣거나, 이 필드를 비우고 <code>GOOGLE_APPLICATION_CREDENTIALS</code> 환경 변수를 사용하세요.",
 		"googleCloudKeyFile": "Google Cloud 키 파일 경로",
 		"googleCloudProjectId": "Google Cloud 프로젝트 ID",
 		"googleCloudRegion": "Google Cloud 리전",
@@ -557,6 +561,13 @@
 			"placeholder": "기본값: claude",
 			"maxTokensLabel": "최대 출력 토큰",
 			"maxTokensDescription": "Claude Code 응답의 최대 출력 토큰 수. 기본값은 8000입니다."
+		},
+		"zooGateway": {
+			"account": "Zoo Code 계정",
+			"signInButton": "Zoo Code에 로그인",
+			"signInDescription": "계정으로 Zoo Gateway를 사용하려면 로그인하세요",
+			"authenticated": "인증됨",
+			"authenticatedAs": "{{name}}(으)로 인증됨"
 		}
 	},
 	"checkpoints": {
@@ -738,6 +749,13 @@
 		"inheritEnv": {
 			"label": "환경 변수 상속",
 			"description": "부모 VS Code 프로세���에서 환경 변수를 상속하려면 이 기능을 켜십시오. <0>자세히 알아보기</0>"
+		},
+		"profile": {
+			"label": "Zoo Code 터미널 프로필",
+			"followVscode": "VS Code 프로필 따르기 (권장)",
+			"description": "기본적으로 Zoo Code는 VS Code에 구성된 쉘을 사용합니다. VS Code가 노출하는 경로 기반 쉘 프로필을 선택하려면 목록에서 셸 프로필을 선택하세요. 소스 전용 프로필(예: 내장 PowerShell 항목)은 여기에 나열할 수 없습니다. <0>자세히 알아보기</0>",
+			"configureButton": "VS Code에서 기본 프로필 선택",
+			"noProfiles": "(terminal.integrated.profiles에 경로 기반 프로필이 없습니다)"
 		}
 	},
 	"advancedSettings": {
@@ -898,7 +916,8 @@
 		"providerNotAllowed": "제공자 '{{provider}}'는 조직에서 허용되지 않습니다",
 		"modelNotAllowed": "모델 '{{model}}'은 제공자 '{{provider}}'에 대해 조직에서 허용되지 않습니다",
 		"profileInvalid": "이 프로필에는 조직에서 허용되지 않는 제공자 또는 모델이 포함되어 있습니다",
-		"qwenCodeOauthPath": "유효한 OAuth 자격 증명 경로를 제공해야 합니다"
+		"qwenCodeOauthPath": "유효한 OAuth 자격 증명 경로를 제공해야 합니다",
+		"zooGatewaySignIn": "Zoo Gateway를 사용하려면 Zoo Code에 로그인하세요."
 	},
 	"placeholders": {
 		"apiKey": "API 키 입력...",
@@ -960,6 +979,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "메시지를 보내려면 {{primaryMod}}+Enter가 필요",
 			"description": "활성화하면 Enter만으로는 안 되고 {{primaryMod}}+Enter를 눌러야 메시지를 보낼 수 있습니다"
+		},
+		"chatFontSize": {
+			"label": "채팅 글꼴 크기",
+			"description": "Zoo Code 채팅의 글꼴 크기(픽셀)를 설정합니다. VS Code 글꼴 크기에 맞추려면 기본값으로 두세요.",
+			"reset": "VS Code 기본값 사용"
 		}
 	},
 	"skills": {

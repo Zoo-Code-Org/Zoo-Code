@@ -605,4 +605,64 @@ Output:
 			expect(terminalOutput).toHaveTextContent("0 total")
 		})
 	})
+
+	describe("multi-line script wrapped in a quoted argument", () => {
+		// A wrapper command carrying a multi-line script inside a single quoted
+		// argument must be treated as one command. The pattern breakdown must not
+		// surface stray fragments from the embedded script lines, which would both
+		// clutter the UI and defeat allowlist auto-approval.
+		const wrappedCommand = [
+			`sh -c 'kubectl exec pod -- python3 -c "`,
+			`import urllib.request`,
+			`url = \\"http://127.0.0.1:49527/\\"`,
+			`print(url)`,
+			`"'`,
+		].join("\n")
+
+		it("does not surface stray script-line fragments in the pattern selector", () => {
+			render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId="test-multiline" text={wrappedCommand} />
+				</ExtensionStateWrapper>,
+			)
+
+			const selector = screen.getByTestId("command-pattern-selector")
+
+			// The wrapper command should be present as a single pattern.
+			expect(selector.textContent).toContain("sh")
+
+			// Each script line is rendered as its own <span> only if it was split
+			// into a separate command. Assert no span exactly equals a script-line
+			// fragment that would indicate erroneous splitting.
+			const fragments = Array.from(selector.querySelectorAll("span")).map((s) => s.textContent ?? "")
+			expect(fragments).not.toContain("import")
+			expect(fragments).not.toContain("import urllib.request")
+			expect(fragments).not.toContain("url")
+			expect(fragments).not.toContain("print")
+		})
+	})
+
+	describe("heredoc command in pattern selector", () => {
+		// An unterminated heredoc is returned as one opaque token by parseCommand.
+		// The pattern selector must show only the leading command word (sh) and
+		// must not surface EOF, body-line words, or other heredoc internals.
+		it("shows only the leading command for an unterminated heredoc", () => {
+			const heredocCommand = "sh << EOF\necho hello"
+
+			render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId="test-heredoc" text={heredocCommand} />
+				</ExtensionStateWrapper>,
+			)
+
+			const selector = screen.getByTestId("command-pattern-selector")
+
+			expect(selector.textContent).toContain("sh")
+
+			const fragments = Array.from(selector.querySelectorAll("span")).map((s) => s.textContent ?? "")
+				expect(fragments.some((f) => f.includes("EOF"))).toBe(false)
+				expect(fragments.some((f) => f.includes("echo"))).toBe(false)
+				expect(fragments.some((f) => f.includes("hello"))).toBe(false)
+		})
+	})
 })

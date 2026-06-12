@@ -7,8 +7,6 @@ import {
 	type GroundingMetadata,
 	FunctionCallingConfigMode,
 } from "@google/genai"
-import type { JWTInput } from "google-auth-library"
-
 import {
 	type ModelInfo,
 	type GeminiModelId,
@@ -16,7 +14,6 @@ import {
 	geminiModels,
 	ApiProviderError,
 } from "@roo-code/types"
-import { safeJsonParse } from "@roo-code/core"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import type { ApiHandlerOptions } from "../../shared/api"
@@ -28,6 +25,7 @@ import { getModelParams } from "../transform/model-params"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { BaseProvider } from "./base-provider"
+import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
@@ -190,13 +188,15 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		const location = this.options.vertexRegion ?? "not-provided"
 		const apiKey = this.options.geminiApiKey ?? "not-provided"
 
-		this.client = this.options.vertexJsonCredentials
+		const parsedVertexCredentials = parseVertexJsonCredentials(this.options.vertexJsonCredentials)
+
+		this.client = parsedVertexCredentials
 			? new GoogleGenAI({
 					vertexai: true,
 					project,
 					location,
 					googleAuthOptions: {
-						credentials: safeJsonParse<JWTInput>(this.options.vertexJsonCredentials, undefined),
+						credentials: parsedVertexCredentials,
 					},
 				})
 			: this.options.vertexKeyFile
@@ -490,8 +490,35 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 	override getModel() {
 		const modelId = this.options.apiModelId
-		let id = modelId && modelId in geminiModels ? (modelId as GeminiModelId) : geminiDefaultModelId
-		let info: ModelInfo = geminiModels[id]
+		let id: string
+		let info: ModelInfo
+
+		if (modelId && Object.hasOwn(geminiModels, modelId)) {
+			id = modelId
+			info = geminiModels[modelId as GeminiModelId]
+		} else if (modelId && modelId.toLowerCase().startsWith("gemini-")) {
+			// Honor a custom/unlisted Gemini model id (e.g. a newly released model
+			// not yet in `geminiModels`) instead of silently falling back to the
+			// default. This mirrors the settings UI's "use custom model" option and
+			// the `useSelectedModel` hook, which both keep the configured id. Ids
+			// that don't look like Gemini models still fall back below.
+			id = modelId
+			// Use the default model's structural info as a baseline, but drop the
+			// pricing fields we can't verify for an unknown model so cost reporting
+			// shows "unknown" (calculateCost returns undefined) instead of charging
+			// the default model's rates against a different model.
+			info = {
+				...geminiModels[geminiDefaultModelId],
+				inputPrice: undefined,
+				outputPrice: undefined,
+				cacheReadsPrice: undefined,
+				cacheWritesPrice: undefined,
+				tiers: undefined,
+			}
+		} else {
+			id = geminiDefaultModelId
+			info = geminiModels[geminiDefaultModelId]
+		}
 
 		const params = getModelParams({
 			format: "gemini",

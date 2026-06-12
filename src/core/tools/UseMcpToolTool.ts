@@ -1,4 +1,4 @@
-import type { ClineAskUseMcpServer, McpExecutionStatus } from "@roo-code/types"
+import type { ClineAskUseMcpServer, McpExecutionStatus, McpResourceLink } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -7,6 +7,7 @@ import type { ToolUse } from "../../shared/tools"
 import { toolNamesMatch } from "../../utils/mcp-name"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { ensureMcpServerAllowed } from "./mcpServerRestriction"
 
 interface UseMcpToolParams {
 	server_name: string
@@ -41,6 +42,20 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			// Validate that the tool exists on the server
 			const toolValidation = await this.validateToolExists(task, serverName, toolName, pushToolResult)
 			if (!toolValidation.isValid) {
+				return
+			}
+
+			// Execution-time defense: reject invocation of a server not permitted by the mode's
+			// allowedMcpServers allowlist, even if the model referenced it from history. This runs
+			// before approval/execution so a disallowed server can never be reached.
+			const serverAllowed = await ensureMcpServerAllowed(
+				task,
+				"use_mcp_tool",
+				serverName,
+				pushToolResult,
+				formatResponse.toolError,
+			)
+			if (!serverAllowed) {
 				return
 			}
 
@@ -111,7 +126,14 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			return { isValid: false }
 		}
 
-		// Native-only: arguments are already a structured object.
+		// Some LLMs emit arguments as JSON-encoded strings rather than objects.
+		// Parse them early so the type check below sees the unwrapped object.
+		if (typeof params.arguments === "string") {
+			try {
+				params.arguments = JSON.parse(params.arguments)
+			} catch {}
+		}
+
 		let parsedArguments: Record<string, unknown> | undefined
 		if (params.arguments !== undefined) {
 			if (typeof params.arguments !== "object" || params.arguments === null || Array.isArray(params.arguments)) {
@@ -281,6 +303,10 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 						}
 					}
 					return ""
+				}
+				if (item.type === "resource_link") {
+					const link = item as McpResourceLink
+					return `[${link.name}](${link.uri})${link.description ? ` — ${link.description}` : ""}`
 				}
 				return ""
 			})

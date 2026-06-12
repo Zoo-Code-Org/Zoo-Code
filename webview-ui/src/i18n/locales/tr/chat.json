@@ -221,6 +221,7 @@
 		"abort": "İptal Et",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "{{exitCode}} durumuyla çıkıldı",
+		"malformedCommand": "Hatalı komut: shell sozdizimi hatasi",
 		"manageCommands": "Komut İzinlerini Yönet",
 		"commandManagementDescription": "Komut izinlerini yönetin: Otomatik yürütmeye izin vermek için ✓'e, yürütmeyi reddetmek için ✗'e tıklayın. Desenler açılıp kapatılabilir veya listelerden kaldırılabilir. <settingsLink>Tüm ayarları görüntüle</settingsLink>",
 		"addToAllowed": "İzin verilenler listesine ekle",
@@ -338,9 +339,9 @@
 		},
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Xiaomi MiMo sağlayıcısı: Xiaomi MiMo, MiMo modellerini doğrudan Zoo Code içinde yapılandırabilmen için birinci sınıf bir API sağlayıcısı olarak eklendi.",
-			"highlight2": "Zoo Code upstream handoff'u: Zoo Code'u topluluk handoff çalışmasıyla uyumlu tutmak için en son upstream sunset merge'i ve ilgili platform güncellemeleri alındı.",
-			"highlight3": "Sohbet ve sağlayıcılarda kararlılık düzeltmeleri: MCP oturum açma metni, Gemini tam araç seti istekleri, OpenAI temperature işleme ve Markdown single-tilde renderingi düzeltildi."
+			"highlight1": "Zoo Gateway üzerinden bağlan — isteklerini çok profilli kimlik doğrulama desteğiyle yönetilen bir gateway üzerinden yönlendir.",
+			"highlight2": "Gemini 3.5 Flash kullan — hızlı ve güçlü bir Google modeli, artık doğrudan sağlayıcı ayarlarından kullanılabilir.",
+			"highlight3": "Semble ile kod tabanını yerel olarak indeksle — harici API anahtarı veya yükleme gerektirmeden anında embedding oluştur, kodun makinende kalır."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

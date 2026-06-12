@@ -213,7 +213,8 @@
 		"stoppingButton": "Menghentikan...",
 		"workspaceToggleLabel": "Aktifkan pengindeksan untuk ruang kerja ini",
 		"workspaceDisabledMessage": "Pengindeksan dikonfigurasi tetapi tidak diaktifkan untuk ruang kerja ini.",
-		"autoEnableDefaultLabel": "Aktifkan pengindeksan secara otomatis untuk ruang kerja baru"
+		"autoEnableDefaultLabel": "Aktifkan pengindeksan secara otomatis untuk ruang kerja baru",
+		"sembleProvider": "Semble - Lokal"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Anda dapat mengonfigurasi pintasan global untuk pengaturan ini <SettingsLink>di preferensi IDE Anda</SettingsLink>.",
@@ -314,6 +315,8 @@
 		"getOpenRouterApiKey": "Dapatkan OpenRouter API Key",
 		"vercelAiGatewayApiKey": "Vercel AI Gateway API Key",
 		"getVercelAiGatewayApiKey": "Dapatkan Vercel AI Gateway API Key",
+		"opencodeGoApiKey": "Opencode Go API Key",
+		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"apiKeyStorageNotice": "API key disimpan dengan aman di Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -452,6 +455,7 @@
 			"step3": "3. Atau buat service account dengan credentials."
 		},
 		"googleCloudCredentials": "Google Cloud Credentials",
+		"googleCloudCredentialsPathWarning": "Bidang ini mengharapkan konten JSON dari file kunci akun layanan, bukan path. Jika Anda memiliki path, tempelkan ke bidang <strong>Path File Key Google Cloud</strong> di bawah, atau kosongkan bidang ini dan gunakan variabel lingkungan <code>GOOGLE_APPLICATION_CREDENTIALS</code>.",
 		"googleCloudKeyFile": "Path File Key Google Cloud",
 		"googleCloudProjectId": "Google Cloud Project ID",
 		"googleCloudRegion": "Google Cloud Region",
@@ -557,6 +561,13 @@
 			"placeholder": "Default: claude",
 			"maxTokensLabel": "Token Output Maks",
 			"maxTokensDescription": "Jumlah maksimum token output untuk respons Claude Code. Default adalah 8000."
+		},
+		"zooGateway": {
+			"account": "Akun Zoo Code",
+			"signInButton": "Masuk ke Zoo Code",
+			"signInDescription": "Masuk untuk menggunakan Zoo Gateway dengan akun Anda",
+			"authenticated": "Terautentikasi",
+			"authenticatedAs": "Terautentikasi sebagai {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -738,6 +749,13 @@
 		"inheritEnv": {
 			"label": "Warisi variabel lingkungan",
 			"description": "Aktifkan untuk mewarisi variabel lingkungan dari proses induk VS Code. <0>Pelajari lebih lanjut</0>"
+		},
+		"profile": {
+			"label": "Profil terminal Zoo Code",
+			"followVscode": "Mengikuti profil VS Code (disarankan)",
+			"description": "Secara default Zoo Code menggunakan shell yang dikonfigurasi VS Code. Pilih profil shell dari daftar untuk memilih profil shell berbasis jalur yang diekspos oleh VS Code. Profil hanya sumber (mis., entri PowerShell bawaan) tidak dapat tercantum di sini. <0>Pelajari lebih lanjut</0>",
+			"configureButton": "Pilih profil default di VS Code",
+			"noProfiles": "(tidak ada profil berbasis jalur di terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -898,7 +916,8 @@
 		"providerNotAllowed": "Provider '{{provider}}' tidak diizinkan oleh organisasi kamu",
 		"modelNotAllowed": "Model '{{model}}' tidak diizinkan untuk provider '{{provider}}' oleh organisasi kamu",
 		"profileInvalid": "Profil ini berisi provider atau model yang tidak diizinkan oleh organisasi kamu",
-		"qwenCodeOauthPath": "Kamu harus memberikan jalur kredensial OAuth yang valid"
+		"qwenCodeOauthPath": "Kamu harus memberikan jalur kredensial OAuth yang valid",
+		"zooGatewaySignIn": "Masuk ke Zoo Code untuk menggunakan Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Masukkan API Key...",
@@ -960,6 +979,11 @@
 		"requireCtrlEnterToSend": {
 			"label": "Memerlukan {{primaryMod}}+Enter untuk mengirim pesan",
 			"description": "Ketika diaktifkan, kamu harus menekan {{primaryMod}}+Enter untuk mengirim pesan alih-alih hanya Enter"
+		},
+		"chatFontSize": {
+			"label": "Ukuran font obrolan",
+			"description": "Atur ukuran font (dalam piksel) untuk obrolan Zoo Code. Biarkan pada nilai default agar sesuai dengan ukuran font VS Code.",
+			"reset": "Gunakan default VS Code"
 		}
 	},
 	"skills": {

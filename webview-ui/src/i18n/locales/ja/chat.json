@@ -221,6 +221,7 @@
 		"running": "実行中",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "ステータス {{exitCode}} で終了しました",
+		"malformedCommand": "不正なコマンド: シェル構文エラー",
 		"manageCommands": "自動承認されたコマンド",
 		"addToAllowed": "許可リストに追加",
 		"removeFromAllowed": "許可リストから削除",
@@ -337,9 +338,9 @@
 		},
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "Xiaomi MiMo プロバイダー: Xiaomi MiMo を正式な API プロバイダーとして追加し、MiMo モデルを Zoo Code で直接設定できるようにしました。",
-			"highlight2": "Zoo Code の upstream handoff: 最新の upstream sunset merge と関連するプラットフォーム更新を取り込み、Zoo Code をコミュニティ移管作業と揃えました。",
-			"highlight3": "チャットとプロバイダーの安定性修正: MCP サインイン文言、Gemini のフルツールリクエスト、OpenAI temperature 処理、Markdown の単一チルダ描画を修正しました。"
+			"highlight1": "Zoo Gateway で接続 — マルチプロファイル認証に対応したマネージドゲートウェイを通じてリクエストをルーティングできます。",
+			"highlight2": "Gemini 3.5 Flash を使用 — 高速で優れた Google モデルが、プロバイダー設定から直接利用できるようになりました。",
+			"highlight3": "Semble でコードベースをローカルにインデックス化 — 外部 API キーやアップロード不要でオンザフライの埋め込みを生成し、コードはあなたのマシンに保持されます。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",
