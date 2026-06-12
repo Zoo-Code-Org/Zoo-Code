@@ -33,7 +33,7 @@
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "24.2.1",
 		"@vscode/vsce": "3.3.2",
-		"esbuild": "0.28.0",
+		"esbuild": "0.28.1",
 		"eslint": "9.28.0",
 		"husky": "9.1.7",
 		"knip": "5.60.2",
@@ -58,7 +58,7 @@
 		],
 		"overrides": {
 			"tar-fs": ">=3.1.1",
-			"esbuild": "0.28.0",
+			"esbuild": "0.28.1",
 			"rollup": "4.60.4",
 			"vite": "8.0.14",
 			"undici": ">=5.29.0",
