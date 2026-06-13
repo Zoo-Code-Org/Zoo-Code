@@ -3,14 +3,14 @@ import { renderHook } from "@testing-library/react"
 import { useEscapeKey } from "./useEscapeKey"
 
 describe("useEscapeKey", () => {
-	let mockOnEscape: ReturnType<typeof vi.fn>
+	let mockOnEscape: ReturnType<typeof vi.fn<() => void>>
 
 	beforeEach(() => {
-		mockOnEscape = vi.fn()
+		mockOnEscape = vi.fn<() => void>()
 	})
 
 	afterEach(() => {
-		vi.clearAllMocks()
+		vi.restoreAllMocks()
 	})
 
 	it("should call onEscape when Escape key is pressed and isOpen is true", () => {
@@ -121,27 +121,25 @@ describe("useEscapeKey", () => {
 			initialProps: { isOpen: false },
 		})
 
-		// Initial render
-		expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
-
 		// Rapid state changes
 		rerender({ isOpen: true })
 		rerender({ isOpen: false })
 		rerender({ isOpen: true })
 
-		// Each rerender causes the effect to re-run because handleKeyDown changes
-		expect(addEventListenerSpy).toHaveBeenCalledTimes(4)
-		// Each re-run also removes the previous listener
-		expect(removeEventListenerSpy).toHaveBeenCalledTimes(3)
-
 		// Unmount while isOpen is true
 		unmount()
 
-		// Should properly clean up the final listener
-		expect(removeEventListenerSpy).toHaveBeenCalledTimes(4)
+		// Filter to keydown only — other event types are React/jsdom internals
+		const addedHandlers = addEventListenerSpy.mock.calls
+			.filter(([event]) => event === "keydown")
+			.map(([, handler]) => handler)
+		const removedHandlers = removeEventListenerSpy.mock.calls
+			.filter(([event]) => event === "keydown")
+			.map(([, handler]) => handler)
 
-		// Verify that all listeners were properly cleaned up
-		expect(addEventListenerSpy).toHaveBeenCalledTimes(removeEventListenerSpy.mock.calls.length)
+		// Every handler added must be removed after unmount — no leaks
+		expect(addedHandlers.length).toBeGreaterThan(0)
+		expect(addedHandlers).toEqual(removedHandlers)
 	})
 
 	it("should update callback when dependencies change", () => {

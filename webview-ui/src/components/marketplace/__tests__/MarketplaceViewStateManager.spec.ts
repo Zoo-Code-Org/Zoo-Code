@@ -1,4 +1,8 @@
-import { MarketplaceViewStateManager, ViewStateTransition } from "../MarketplaceViewStateManager"
+import {
+	MarketplaceViewStateManager,
+	ViewStateTransition,
+	type StateChangeHandler,
+} from "../MarketplaceViewStateManager"
 import { MarketplaceItem } from "@roo-code/types"
 
 // Mock vscode module
@@ -10,7 +14,7 @@ vi.mock("@/utils/vscode", () => ({
 
 describe("MarketplaceViewStateManager", () => {
 	let stateManager: MarketplaceViewStateManager
-	let mockStateChangeHandler: ReturnType<typeof vi.fn>
+	let mockStateChangeHandler: ReturnType<typeof vi.fn<StateChangeHandler>>
 
 	const mockMarketplaceItems: MarketplaceItem[] = [
 		{
@@ -43,7 +47,7 @@ describe("MarketplaceViewStateManager", () => {
 
 	beforeEach(() => {
 		stateManager = new MarketplaceViewStateManager()
-		mockStateChangeHandler = vi.fn()
+		mockStateChangeHandler = vi.fn<StateChangeHandler>()
 		stateManager.onStateChange(mockStateChangeHandler)
 	})
 

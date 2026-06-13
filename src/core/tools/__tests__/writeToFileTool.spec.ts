@@ -7,7 +7,7 @@ import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
 import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
-import { ToolUse, ToolResponse } from "../../../shared/tools"
+import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { writeToFileTool } from "../WriteToFileTool"
 
 vi.mock("path", async () => {
@@ -103,9 +103,9 @@ describe("writeToFileTool", () => {
 	const mockedPathResolve = path.resolve as MockedFunction<typeof path.resolve>
 
 	const mockCline: any = {}
-	let mockAskApproval: ReturnType<typeof vi.fn>
-	let mockHandleError: ReturnType<typeof vi.fn>
-	let mockPushToolResult: ReturnType<typeof vi.fn>
+	let mockAskApproval: ReturnType<typeof vi.fn<AskApproval>>
+	let mockHandleError: ReturnType<typeof vi.fn<HandleError>>
+	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
 	let toolResult: ToolResponse | undefined
 
 	beforeEach(() => {

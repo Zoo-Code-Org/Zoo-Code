@@ -97,7 +97,9 @@ describe("WebAuthService", () => {
 			reset: vi.fn(),
 		}
 		const MockedRefreshTimer = vi.mocked(RefreshTimer)
-		MockedRefreshTimer.mockImplementation(() => mockTimer as unknown as RefreshTimer)
+		MockedRefreshTimer.mockImplementation(function () {
+			return mockTimer as unknown as RefreshTimer
+		})
 
 		// Setup config mocks - use production URL by default to maintain existing test behavior
 		vi.mocked(getClerkBaseUrl).mockReturnValue("https://clerk.roocode.com")

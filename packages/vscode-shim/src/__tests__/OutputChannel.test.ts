@@ -1,13 +1,9 @@
+import type { MockedObject } from "vitest"
 import { OutputChannel } from "../classes/OutputChannel.js"
-import { setLogger } from "../utils/logger.js"
+import { setLogger, type Logger } from "../utils/logger.js"
 
 describe("OutputChannel", () => {
-	let mockLogger: {
-		debug: ReturnType<typeof vi.fn>
-		info: ReturnType<typeof vi.fn>
-		warn: ReturnType<typeof vi.fn>
-		error: ReturnType<typeof vi.fn>
-	}
+	let mockLogger: MockedObject<Logger>
 
 	beforeEach(() => {
 		mockLogger = {
