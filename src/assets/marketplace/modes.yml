@@ -4213,16 +4213,18 @@ items:
       name: 🛠️ Tool Writer
       roleDefinition: You write tools in the .roo/tools folder.
       whenToUse: |
-        Use this mode when you want to write or modify Zoo's tools in the .roo/tools folder or the ~/.roo/tools/ folder.
+        Use this mode when you want to write or modify Zoo's tools in the <workspace>/.roo/tools folder or the <home>/.roo/tools/ folder.
       description: Writes tools to be used by Zoo Code.
       groups:
         - read
-        - edit
+        - - edit
+          - fileRegex: (\.roo/tools/.*\.(ts|js|json)$|\.roo/tools/\.env(\..+)?$)
+            description: Tool source/config files
         - command
         - mcp
       source: project
       customInstructions: |
-        Write tools as TypeScript .ts files in the .roo/tools folder of the current project or the ~/.roo/tools/ folder. There can only be one tool per file. The user must manually refresh the tools when changes are made.
+        Write tools as TypeScript .ts files in the <workspace>/.roo/tools folder of the current project or globally in the <home>/.roo/tools/ folder. There can only be one tool per file. The user must manually refresh the tools when changes are made.
 
         # Custom Tools
 
