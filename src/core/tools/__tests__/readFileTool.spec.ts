@@ -34,7 +34,9 @@ vi.mock("path", async () => {
 	return {
 		default: originalPath,
 		...originalPath,
-		resolve: vi.fn().mockImplementation((...args) => args.join("/")),
+		resolve: vi.fn().mockImplementation((...args) => {
+			return args.join("/")
+		}),
 	}
 })
 
@@ -66,10 +68,12 @@ vi.mock("../helpers/imageHelpers", () => ({
 	isSupportedImageFormat: vi.fn(),
 	validateImageForProcessing: vi.fn(),
 	processImageFile: vi.fn(),
-	ImageMemoryTracker: vi.fn().mockImplementation(() => ({
-		getTotalMemoryUsed: vi.fn().mockReturnValue(0),
-		addMemoryUsage: vi.fn(),
-	})),
+	ImageMemoryTracker: vi.fn().mockImplementation(function () {
+		return {
+			getTotalMemoryUsed: vi.fn().mockReturnValue(0),
+			addMemoryUsage: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("../../prompts/responses", () => ({

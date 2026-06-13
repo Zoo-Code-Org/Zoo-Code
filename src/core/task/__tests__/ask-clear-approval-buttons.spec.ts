@@ -18,7 +18,6 @@ function buildTask(provider: ProviderStub | undefined) {
 	;(task as any).askResponseText = undefined
 	;(task as any).askResponseImages = undefined
 	;(task as any).lastMessageTs = undefined
-
 	;(task as any).addToClineMessages = vi.fn(async () => {})
 	;(task as any).saveClineMessages = vi.fn(async () => {})
 	;(task as any).updateClineMessage = vi.fn(async () => {})

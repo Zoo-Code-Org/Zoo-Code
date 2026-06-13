@@ -38,11 +38,13 @@ vi.mock("vscode", () => ({
 	},
 	Range: vi.fn(),
 	Position: vi.fn(),
-	WorkspaceEdit: vi.fn(() => ({
-		replace: vi.fn(),
-		insert: vi.fn(),
-		delete: vi.fn(),
-	})),
+	WorkspaceEdit: vi.fn(function () {
+		return {
+			replace: vi.fn(),
+			insert: vi.fn(),
+			delete: vi.fn(),
+		}
+	}),
 	ViewColumn: {
 		One: 1,
 		Two: 2,

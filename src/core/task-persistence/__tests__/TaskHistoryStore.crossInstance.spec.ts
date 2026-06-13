@@ -10,7 +10,9 @@ import { TaskHistoryStore } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 
 vi.mock("../../../utils/storage", () => ({
-	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
+	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => {
+		return defaultPath
+	}),
 }))
 
 // Mock safeWriteJson to use plain fs writes in tests (avoids proper-lockfile issues)

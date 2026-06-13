@@ -16,6 +16,7 @@ export default defineConfig({
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "lcov"],
+			include: ["src/**/*.ts", "src/**/*.tsx"],
 			exclude: ["**/*.test.ts", "**/*.test.tsx", "**/*.spec.ts", "**/*.spec.tsx", "**/vitest.config.ts"],
 		},
 	},

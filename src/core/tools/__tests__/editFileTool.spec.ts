@@ -24,7 +24,9 @@ vi.mock("path", async () => {
 			return args.join(separator)
 		}),
 		isAbsolute: vi.fn().mockReturnValue(false),
-		relative: vi.fn().mockImplementation((from, to) => to),
+		relative: vi.fn().mockImplementation((from, to) => {
+			return to
+		}),
 	}
 })
 

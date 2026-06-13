@@ -13,19 +13,21 @@ const mockCreate = vi.fn()
 
 vi.mock("openai", () => {
 	return {
-		default: vi.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate,
+		default: vi.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate,
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 
 // Mock model fetching
 vi.mock("../fetchers/modelCache", () => ({
-	getModels: vi.fn().mockImplementation(() => {
+	getModels: vi.fn().mockImplementation(function () {
 		return Promise.resolve({
 			[litellmDefaultModelId]: litellmDefaultModelInfo,
 			"gpt-5": { ...litellmDefaultModelInfo, maxTokens: 8192 },

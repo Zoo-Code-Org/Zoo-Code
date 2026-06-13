@@ -7,7 +7,7 @@ import type { ToolUse } from "../../../shared/tools"
 import { ToolRepetitionDetector } from "../ToolRepetitionDetector"
 
 vitest.mock("../../../i18n", () => ({
-	t: vitest.fn((key, options) => {
+	t: vitest.fn(function (key, options) {
 		// For toolRepetitionLimitReached key, return a message with the tool name.
 		if (key === "tools:toolRepetitionLimitReached" && options?.toolName) {
 			return `Roo appears to be stuck in a loop, attempting the same action (${options.toolName}) repeatedly. This might indicate a problem with its current strategy.`

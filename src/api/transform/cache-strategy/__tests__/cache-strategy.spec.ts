@@ -326,9 +326,7 @@ describe("Cache Strategy", () => {
 			} as unknown as BedrockRuntimeClient
 
 			// Mock the convertToBedrockConverseMessages method to capture the config
-			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation(function (
-				...args: any[]
-			) {
+			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation((...args: any[]) => {
 				const messages = args[0]
 				const systemMessage = args[1]
 				const usePromptCache = args[2]
@@ -470,9 +468,7 @@ describe("Cache Strategy", () => {
 			} as unknown as BedrockRuntimeClient
 
 			// Mock the convertToBedrockConverseMessages method again for the new handler
-			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation(function (
-				...args: any[]
-			) {
+			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation((...args: any[]) => {
 				const messages = args[0]
 				const systemMessage = args[1]
 				const usePromptCache = args[2]

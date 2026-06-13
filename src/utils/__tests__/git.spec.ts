@@ -71,7 +71,9 @@ vitest.mock("util", () => ({
 
 // Mock extract-text
 vitest.mock("../../integrations/misc/extract-text", () => ({
-	truncateOutput: vitest.fn((text) => text),
+	truncateOutput: vitest.fn(function (text) {
+		return text
+	}),
 }))
 
 import { exec } from "child_process"

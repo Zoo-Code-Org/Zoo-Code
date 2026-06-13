@@ -13,38 +13,40 @@ const mockCreate = vi.fn()
 const mockComplete = vi.fn()
 vi.mock("@mistralai/mistralai", () => {
 	return {
-		Mistral: vi.fn().mockImplementation(() => ({
-			chat: {
-				stream: mockCreate.mockImplementation(async (_options) => {
-					const stream = {
-						[Symbol.asyncIterator]: async function* () {
-							yield {
-								data: {
-									choices: [
-										{
-											delta: { content: "Test response" },
-											index: 0,
-										},
-									],
-								},
-							}
-						},
-					}
-					return stream
-				}),
-				complete: mockComplete.mockImplementation(async (_options) => {
-					return {
-						choices: [
-							{
-								message: {
-									content: "Test response",
-								},
+		Mistral: vi.fn().mockImplementation(function () {
+			return {
+				chat: {
+					stream: mockCreate.mockImplementation(async (_options) => {
+						const stream = {
+							[Symbol.asyncIterator]: async function* () {
+								yield {
+									data: {
+										choices: [
+											{
+												delta: { content: "Test response" },
+												index: 0,
+											},
+										],
+									},
+								}
 							},
-						],
-					}
-				}),
-			},
-		})),
+						}
+						return stream
+					}),
+					complete: mockComplete.mockImplementation(async (_options) => {
+						return {
+							choices: [
+								{
+									message: {
+										content: "Test response",
+									},
+								},
+							],
+						}
+					}),
+				},
+			}
+		}),
 	}
 })
 

@@ -70,7 +70,7 @@ describe("outputChannelLogger", () => {
 
 	describe("createDualLogger", () => {
 		it("should log to both output channel and console", () => {
-			const consoleSpy = vitest.spyOn(console, "log").mockImplementation(() => {})
+			const consoleSpy = vitest.spyOn(console, "log").mockImplementation(function () {})
 			const outputChannelLogger = createOutputChannelLogger(mockOutputChannel)
 			const dualLogger = createDualLogger(outputChannelLogger)
 

@@ -111,7 +111,9 @@ describe("stopCallbackServer", () => {
 	})
 
 	it("should call the cancel function before closing", async () => {
-		const mockServer = { close: vi.fn((callback) => callback()) }
+		const mockServer = {
+			close: vi.fn((callback) => callback()),
+		}
 		const cancel = vi.fn()
 
 		await stopCallbackServer(mockServer as any, cancel)

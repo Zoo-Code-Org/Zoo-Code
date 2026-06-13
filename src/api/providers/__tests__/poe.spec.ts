@@ -7,22 +7,28 @@ vitest.mock("ai-sdk-provider-poe", () => ({
 }))
 
 vitest.mock("ai-sdk-provider-poe/code", () => ({
-	mapToolChoice: vitest.fn((value: unknown) => value),
-	extractUsageMetrics: vitest.fn((usage: any) => ({
-		inputTokens: usage?.inputTokens || 0,
-		outputTokens: usage?.outputTokens || 0,
-		cacheReadTokens: usage?.cacheReadTokens,
-		cacheWriteTokens: usage?.cacheWriteTokens,
-		reasoningTokens: usage?.reasoningTokens,
-	})),
-	getPoeDefaultModelInfo: vitest.fn(() => ({
-		maxTokens: 8192,
-		contextWindow: 200_000,
-		supportsImages: true,
-		supportsPromptCache: true,
-		inputPrice: 3,
-		outputPrice: 15,
-	})),
+	mapToolChoice: vitest.fn(function (value: unknown) {
+		return value
+	}),
+	extractUsageMetrics: vitest.fn(function (usage: any) {
+		return {
+			inputTokens: usage?.inputTokens || 0,
+			outputTokens: usage?.outputTokens || 0,
+			cacheReadTokens: usage?.cacheReadTokens,
+			cacheWriteTokens: usage?.cacheWriteTokens,
+			reasoningTokens: usage?.reasoningTokens,
+		}
+	}),
+	getPoeDefaultModelInfo: vitest.fn(function () {
+		return {
+			maxTokens: 8192,
+			contextWindow: 200_000,
+			supportsImages: true,
+			supportsPromptCache: true,
+			inputPrice: 3,
+			outputPrice: 15,
+		}
+	}),
 }))
 
 vitest.mock("ai", async (importOriginal) => {

@@ -42,30 +42,36 @@ const mockSend = vitest.fn().mockImplementation(async () => {
 // Mock AWS SDK modules
 vitest.mock("@aws-sdk/client-bedrock-runtime", () => {
 	return {
-		BedrockRuntimeClient: vitest.fn().mockImplementation(() => ({
-			send: mockSend,
-			config: { region: "us-east-1" },
-			middlewareStack: {
-				clone: () => ({ resolve: () => {} }),
-				use: () => {},
-			},
-		})),
-		ConverseStreamCommand: vitest.fn((params) => ({
-			...params,
-			input: params,
-			middlewareStack: {
-				clone: () => ({ resolve: () => {} }),
-				use: () => {},
-			},
-		})),
-		ConverseCommand: vitest.fn((params) => ({
-			...params,
-			input: params,
-			middlewareStack: {
-				clone: () => ({ resolve: () => {} }),
-				use: () => {},
-			},
-		})),
+		BedrockRuntimeClient: vitest.fn().mockImplementation(function () {
+			return {
+				send: mockSend,
+				config: { region: "us-east-1" },
+				middlewareStack: {
+					clone: () => ({ resolve: () => {} }),
+					use: () => {},
+				},
+			}
+		}),
+		ConverseStreamCommand: vitest.fn(function (params) {
+			return {
+				...params,
+				input: params,
+				middlewareStack: {
+					clone: () => ({ resolve: () => {} }),
+					use: () => {},
+				},
+			}
+		}),
+		ConverseCommand: vitest.fn(function (params) {
+			return {
+				...params,
+				input: params,
+				middlewareStack: {
+					clone: () => ({ resolve: () => {} }),
+					use: () => {},
+				},
+			}
+		}),
 	}
 })
 

@@ -6,7 +6,7 @@ describe("aggregateTaskCostsRecursive", () => {
 	let consoleWarnSpy: ReturnType<typeof vi.spyOn>
 
 	beforeEach(() => {
-		consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
 	})
 
 	it("should calculate cost for task with no children", async () => {

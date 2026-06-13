@@ -84,7 +84,7 @@ describe("Vercel AI Gateway Fetchers", () => {
 		})
 
 		it("handles API errors gracefully", async () => {
-			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
 			mockedAxios.get.mockRejectedValueOnce(new Error("Network error"))
 
 			const models = await getVercelAiGatewayModels()
@@ -97,7 +97,7 @@ describe("Vercel AI Gateway Fetchers", () => {
 		})
 
 		it("handles invalid response schema gracefully", async () => {
-			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
 			mockedAxios.get.mockResolvedValueOnce({
 				data: {
 					invalid: "response",
@@ -113,7 +113,7 @@ describe("Vercel AI Gateway Fetchers", () => {
 		})
 
 		it("continues processing with partially valid schema", async () => {
-			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
 			const invalidResponse = {
 				data: {
 					invalid_root: "response",

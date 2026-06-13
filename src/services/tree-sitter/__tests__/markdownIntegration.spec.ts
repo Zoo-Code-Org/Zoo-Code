@@ -1,12 +1,18 @@
 // Mocks must come first, before imports
 
 vi.mock("fs/promises", () => ({
-	readFile: vi.fn().mockImplementation(() => Promise.resolve("")),
-	stat: vi.fn().mockImplementation(() => Promise.resolve({ isDirectory: () => false })),
+	readFile: vi.fn().mockImplementation(function () {
+		return Promise.resolve("")
+	}),
+	stat: vi.fn().mockImplementation(function () {
+		return Promise.resolve({ isDirectory: () => false })
+	}),
 }))
 
 vi.mock("../../../utils/fs", () => ({
-	fileExistsAtPath: vi.fn().mockImplementation(() => Promise.resolve(true)),
+	fileExistsAtPath: vi.fn().mockImplementation(function () {
+		return Promise.resolve(true)
+	}),
 }))
 
 // Then imports
@@ -27,7 +33,9 @@ describe("Markdown Integration Tests", () => {
 			"# Main Header\n\nThis is some content under the main header.\nIt spans multiple lines to meet the minimum section length.\n\n## Section 1\n\nThis is content for section 1.\nIt also spans multiple lines.\n\n### Subsection 1.1\n\nThis is a subsection with enough lines\nto meet the minimum section length requirement.\n\n## Section 2\n\nFinal section content.\nWith multiple lines.\n"
 
 		// Mock fs.readFile to return our markdown content
-		;(fs.readFile as Mock).mockImplementation(() => Promise.resolve(markdownContent))
+		;(fs.readFile as Mock).mockImplementation(function () {
+			return Promise.resolve(markdownContent)
+		})
 
 		// Call the function with a markdown file path
 		const result = await parseSourceCodeDefinitionsForFile("test.md")
@@ -49,7 +57,9 @@ describe("Markdown Integration Tests", () => {
 		const markdownContent = "This is just some text.\nNo headers here.\nJust plain text."
 
 		// Mock fs.readFile to return our markdown content
-		;(fs.readFile as Mock).mockImplementation(() => Promise.resolve(markdownContent))
+		;(fs.readFile as Mock).mockImplementation(function () {
+			return Promise.resolve(markdownContent)
+		})
 
 		// Call the function with a markdown file path
 		const result = await parseSourceCodeDefinitionsForFile("no-headers.md")

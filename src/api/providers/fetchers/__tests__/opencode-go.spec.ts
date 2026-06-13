@@ -79,7 +79,7 @@ describe("Opencode Go Fetchers", () => {
 					],
 				},
 			})
-			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+			const warnSpy = vitest.spyOn(console, "warn").mockImplementation(function () {})
 
 			const models = await getOpencodeGoModels("k")
 

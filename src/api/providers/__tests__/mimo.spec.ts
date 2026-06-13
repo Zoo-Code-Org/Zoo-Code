@@ -2,31 +2,33 @@ const mockCreate = vi.fn()
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
-		default: vi.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate.mockImplementation(async (options) => {
-						return {
-							[Symbol.asyncIterator]: async function* () {
-								yield {
-									choices: [{ delta: { content: "Test response" }, index: 0 }],
-									usage: null,
-								}
-								yield {
-									choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
-									usage: {
-										prompt_tokens: 10,
-										completion_tokens: 5,
-										total_tokens: 15,
-										prompt_tokens_details: { cached_tokens: 2 },
-									},
-								}
-							},
-						}
-					}),
+		default: vi.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate.mockImplementation(async (options) => {
+							return {
+								[Symbol.asyncIterator]: async function* () {
+									yield {
+										choices: [{ delta: { content: "Test response" }, index: 0 }],
+										usage: null,
+									}
+									yield {
+										choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+										usage: {
+											prompt_tokens: 10,
+											completion_tokens: 5,
+											total_tokens: 15,
+											prompt_tokens_details: { cached_tokens: 2 },
+										},
+									}
+								},
+							}
+						}),
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 

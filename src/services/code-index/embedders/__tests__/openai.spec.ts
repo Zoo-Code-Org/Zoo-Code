@@ -34,8 +34,8 @@ vitest.mock("../../../../i18n", () => ({
 
 // Mock console methods
 const consoleMocks = {
-	error: vitest.spyOn(console, "error").mockImplementation(() => {}),
-	warn: vitest.spyOn(console, "warn").mockImplementation(() => {}),
+	error: vitest.spyOn(console, "error").mockImplementation(function () {}),
+	warn: vitest.spyOn(console, "warn").mockImplementation(function () {}),
 }
 
 describe("OpenAiEmbedder", () => {
