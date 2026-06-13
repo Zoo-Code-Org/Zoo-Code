@@ -104,6 +104,6 @@
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
 		"vite": "8.0.14",
-		"vitest": "3.2.6"
+		"vitest": "4.1.0"
 	}
 }

@@ -19,6 +19,6 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "20.19.41",
-		"vitest": "3.2.6"
+		"vitest": "4.1.0"
 	}
 }
