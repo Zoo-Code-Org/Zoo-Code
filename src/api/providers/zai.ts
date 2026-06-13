@@ -17,9 +17,13 @@ import { convertToZAiFormat } from "../transform/zai-format"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 
-// Custom interface for Z.ai params to support thinking mode
-type ZAiChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParamsStreaming & {
+// Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
+// Z.ai accepts the standard `reasoning_effort` ladder (none/minimal/low/medium/high/xhigh/max)
+// alongside the GLM-specific `thinking` toggle. Omit the OpenAI-typed `reasoning_effort` so we
+// can widen it to include provider-specific values such as "max".
+type ZAiChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsStreaming, "reasoning_effort"> & {
 	thinking?: { type: "enabled" | "disabled" }
+	reasoning_effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 }
 
 export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
@@ -79,6 +83,11 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 	) {
 		const { id: model, info } = this.getModel()
 
+		// Resolve the reasoning-effort tier (e.g. "high" | "max" for GLM-5.2) from the user
+		// setting, falling back to the model's default. Omitted when reasoning is disabled.
+		const effort = useReasoning ? (this.options.reasoningEffort ?? info.reasoningEffort) : undefined
+		const reasoningEffort = effort && effort !== "disable" ? effort : undefined
+
 		const max_tokens =
 			this.options.modelMaxTokens ||
 			(getModelMaxOutputTokens({
@@ -103,11 +112,14 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			stream_options: { include_usage: true },
 			// Thinking is ON by default for these models, so explicitly disable it when needed.
 			thinking: useReasoning ? { type: "enabled" } : { type: "disabled" },
+			reasoning_effort: reasoningEffort,
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
-		return this.client.chat.completions.create(params)
+		return this.client.chat.completions.create(
+			params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+		)
 	}
 }

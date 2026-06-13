@@ -153,6 +153,22 @@ export const internationalZAiModels = {
 		description:
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. It delivers top-tier reasoning, coding, and agentic performance.",
 	},
+	"glm-5.2": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "high", "max"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.26,
+		description:
+			"GLM-5.2 is Zhipu's flagship model with a 1M context window, 128k max output, and dual thinking-effort modes (High/Max). It delivers top-tier long-context reasoning, coding, and agentic performance for extended engineering sessions.",
+	},
 	"glm-5-turbo": {
 		maxTokens: 131_072,
 		contextWindow: 202_752,
@@ -360,6 +376,22 @@ export const mainlandZAiModels = {
 		cacheReadsPrice: 0.13,
 		description:
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. It delivers top-tier reasoning, coding, and agentic performance.",
+	},
+	"glm-5.2": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "high", "max"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 0.68,
+		outputPrice: 2.28,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.13,
+		description:
+			"GLM-5.2 is Zhipu's flagship model with a 1M context window, 128k max output, and dual thinking-effort modes (High/Max). It delivers top-tier long-context reasoning, coding, and agentic performance for extended engineering sessions.",
 	},
 	"glm-5-turbo": {
 		maxTokens: 131_072,
