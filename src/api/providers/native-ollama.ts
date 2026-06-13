@@ -60,7 +60,10 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 										}
 										return "(see following user message for image)"
 									}
-									return part.text
+									if (part.type === "text") {
+										return part.text
+									}
+									return ""
 								})
 								.join("\n") ?? ""
 					}

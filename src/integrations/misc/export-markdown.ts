@@ -13,7 +13,11 @@ interface ThoughtSignatureBlock {
 	type: "thoughtSignature"
 }
 
-export type ExtendedContentBlock = Anthropic.Messages.ContentBlockParam | ReasoningBlock | ThoughtSignatureBlock
+export type ExtendedContentBlock =
+	| Anthropic.Messages.ContentBlockParam
+	| Anthropic.Messages.ToolReferenceBlockParam
+	| ReasoningBlock
+	| ThoughtSignatureBlock
 
 export function getTaskFileName(dateTs: number): string {
 	const date = new Date(dateTs)
@@ -69,6 +73,12 @@ export function formatContentBlockToMarkdown(block: ExtendedContentBlock): strin
 			return block.text
 		case "image":
 			return `[Image]`
+		case "document":
+			return `[Document]`
+		case "search_result":
+			return `[Search Result]`
+		case "tool_reference":
+			return `[Tool Reference]`
 		case "tool_use": {
 			let input: string
 			if (typeof block.input === "object" && block.input !== null) {

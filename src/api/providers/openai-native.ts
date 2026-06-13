@@ -483,8 +483,10 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 							content.push({ type: "input_text", text: block.text })
 						} else if (block.type === "image") {
 							const image = block as Anthropic.Messages.ImageBlockParam
-							const imageUrl = `data:${image.source.media_type};base64,${image.source.data}`
-							content.push({ type: "input_image", image_url: imageUrl })
+							if (image.source.type === "base64") {
+								const imageUrl = `data:${image.source.media_type};base64,${image.source.data}`
+								content.push({ type: "input_image", image_url: imageUrl })
+							}
 						} else if (block.type === "tool_result") {
 							// Map Anthropic tool_result to Responses API function_call_output item
 							const result =
