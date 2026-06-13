@@ -544,6 +544,7 @@
 			"minimal": "Minimal (schnellste)",
 			"high": "Hoch",
 			"xhigh": "Sehr hoch",
+			"max": "Maximum",
 			"medium": "Mittel",
 			"low": "Niedrig"
 		},

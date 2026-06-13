@@ -544,6 +544,7 @@
 			"minimal": "Tối thiểu (nhanh nhất)",
 			"high": "Cao",
 			"xhigh": "Rất cao",
+			"max": "Tối đa",
 			"medium": "Trung bình",
 			"low": "Thấp"
 		},
