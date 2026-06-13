@@ -540,7 +540,6 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/clone-deep": "4.0.4",
-		"@types/debug": "4.1.12",
 		"@types/diff": "5.2.3",
 		"@types/lodash.debounce": "4.0.9",
 		"@types/mocha": "10.0.10",

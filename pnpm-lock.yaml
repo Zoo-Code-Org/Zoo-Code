@@ -352,9 +352,6 @@ importers:
       '@types/node-ipc':
         specifier: 9.2.3
         version: 9.2.3
-      vitest:
-        specifier: 4.1.0
-        version: 4.1.0(@opentelemetry/api@1.9.0)(@types/node@20.19.41)(@vitest/ui@4.1.0)(jsdom@26.1.0)(vite@8.0.14(@types/node@20.19.41)(esbuild@0.28.1)(jiti@2.4.2)(tsx@4.19.4)(yaml@2.9.0))
 
   packages/telemetry:
     dependencies:
@@ -682,9 +679,6 @@ importers:
       '@types/clone-deep':
         specifier: 4.0.4
         version: 4.0.4
-      '@types/debug':
-        specifier: 4.1.12
-        version: 4.1.12
       '@types/diff':
         specifier: 5.2.3
         version: 5.2.3
