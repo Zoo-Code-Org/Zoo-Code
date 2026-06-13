@@ -6,6 +6,7 @@ export type FireworksModelId =
 	| "accounts/fireworks/models/kimi-k2-thinking"
 	| "accounts/fireworks/models/kimi-k2p5"
 	| "accounts/fireworks/models/kimi-k2p6"
+	| "accounts/fireworks/models/kimi-k2p7-code"
 	| "accounts/fireworks/models/minimax-m2"
 	| "accounts/fireworks/models/minimax-m2p1"
 	| "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507"
@@ -264,6 +265,20 @@ export const fireworksModels = {
 		cacheReadsPrice: 0.14,
 		description:
 			"DeepSeek V4 Pro is the latest iteration of the DeepSeek model family, with improved reasoning, code generation, and instruction following over the V3 series.",
+	},
+	"accounts/fireworks/models/kimi-k2p7-code": {
+		maxTokens: 16384,
+		contextWindow: 262144,
+		supportsImages: true,
+		supportsPromptCache: true,
+		preserveReasoning: true,
+		supportsTemperature: true,
+		defaultTemperature: 1.0,
+		inputPrice: 0.95,
+		outputPrice: 4.0,
+		cacheReadsPrice: 0.19,
+		description:
+			"Kimi K2.7 Code is Moonshot AI's latest coding-focused model, building on K2.6 with enhanced code generation, reasoning, and unified vision/text understanding for software development workflows.",
 	},
 	"accounts/fireworks/models/glm-5p1": {
 		maxTokens: 25344,
