@@ -1624,7 +1624,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 					store: false,
 				}),
 				expect.objectContaining({
-					signal: expect.any(Object),
+					signal: expect.any(AbortSignal),
 				}),
 			)
 		})
