@@ -691,7 +691,9 @@ describe("summarizeConversation", () => {
 		// Setup mock API handler
 		mockApiHandler = {
 			createMessage: vi.fn().mockReturnValue(mockStream),
-			countTokens: vi.fn().mockImplementation(() => Promise.resolve(100)),
+			countTokens: vi.fn().mockImplementation(() => {
+				return Promise.resolve(100)
+			}),
 			getModel: vi.fn().mockReturnValue({
 				id: "test-model",
 				info: {
@@ -1012,7 +1014,9 @@ describe("summarizeConversation", () => {
 		mockApiHandler.createMessage = vi.fn().mockReturnValue(streamWithSmallTokens) as any
 
 		// Mock countTokens to return a small value
-		mockApiHandler.countTokens = vi.fn().mockImplementation(() => Promise.resolve(30)) as any
+		mockApiHandler.countTokens = vi.fn().mockImplementation(() => {
+			return Promise.resolve(30)
+		}) as any
 
 		const result = await summarizeConversation({
 			messages,
@@ -1161,7 +1165,9 @@ describe("summarizeConversation with custom settings", () => {
 					yield { type: "usage" as const, totalCost: 0.05, outputTokens: 100 }
 				})()
 			}),
-			countTokens: vi.fn().mockImplementation(() => Promise.resolve(50)),
+			countTokens: vi.fn().mockImplementation(() => {
+				return Promise.resolve(50)
+			}),
 			getModel: vi.fn().mockReturnValue({
 				id: "main-model",
 				info: {

@@ -12,10 +12,14 @@ import { OpencodeGoHandler } from "../opencode-go"
 import { ApiHandlerOptions } from "../../../shared/api"
 
 vitest.mock("openai")
-vitest.mock("delay", () => ({ default: vitest.fn(() => Promise.resolve()) }))
+vitest.mock("delay", () => ({
+	default: vitest.fn(function () {
+		return Promise.resolve()
+	}),
+}))
 vitest.mock("../fetchers/modelCache", () => ({
-	getModels: vitest.fn().mockImplementation(() =>
-		Promise.resolve({
+	getModels: vitest.fn().mockImplementation(function () {
+		return Promise.resolve({
 			"glm-5.1": {
 				maxTokens: 32768,
 				contextWindow: 200000,
@@ -23,16 +27,18 @@ vitest.mock("../fetchers/modelCache", () => ({
 				supportsPromptCache: false,
 				description: "GLM 5.1",
 			},
-		}),
-	),
+		})
+	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
 
 const mockCreate = vitest.fn()
 
-;(OpenAI as any).mockImplementation(() => ({
-	chat: { completions: { create: mockCreate } },
-}))
+;(OpenAI as any).mockImplementation(function () {
+	return {
+		chat: { completions: { create: mockCreate } },
+	}
+})
 
 describe("OpencodeGoHandler", () => {
 	const mockOptions: ApiHandlerOptions = {

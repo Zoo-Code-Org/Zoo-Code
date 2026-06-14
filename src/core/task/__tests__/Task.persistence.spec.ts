@@ -79,17 +79,19 @@ vi.mock("../../task-persistence", () => ({
 	readApiMessages: mockReadApiMessages,
 	readTaskMessages: mockReadTaskMessages,
 	taskMetadata: mockTaskMetadata,
-	TaskHistoryStore: vi.fn().mockImplementation(() => ({
-		initialize: vi.fn().mockResolvedValue(undefined),
-		dispose: vi.fn(),
-		get: vi.fn(),
-		getAll: vi.fn().mockReturnValue([]),
-		upsert: vi.fn().mockResolvedValue([]),
-		delete: vi.fn().mockResolvedValue(undefined),
-		deleteMany: vi.fn().mockResolvedValue(undefined),
-		reconcile: vi.fn().mockResolvedValue(undefined),
-		initialized: Promise.resolve(),
-	})),
+	TaskHistoryStore: vi.fn().mockImplementation(function () {
+		return {
+			initialize: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn(),
+			get: vi.fn(),
+			getAll: vi.fn().mockReturnValue([]),
+			upsert: vi.fn().mockResolvedValue([]),
+			delete: vi.fn().mockResolvedValue(undefined),
+			deleteMany: vi.fn().mockResolvedValue(undefined),
+			reconcile: vi.fn().mockResolvedValue(undefined),
+			initialized: Promise.resolve(),
+		}
+	}),
 }))
 
 vi.mock("vscode", () => {
@@ -140,7 +142,9 @@ vi.mock("vscode", () => {
 			uriScheme: "vscode",
 			language: "en",
 		},
-		EventEmitter: vi.fn().mockImplementation(() => mockEventEmitter),
+		EventEmitter: vi.fn().mockImplementation(function () {
+			return mockEventEmitter
+		}),
 		Disposable: {
 			from: vi.fn(),
 		},

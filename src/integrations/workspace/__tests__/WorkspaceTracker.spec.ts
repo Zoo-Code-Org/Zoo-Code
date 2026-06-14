@@ -16,7 +16,7 @@ let registeredTabChangeCallback: (() => Promise<void>) | null = null
 // Mock workspace path
 vitest.mock("../../../utils/path", () => ({
 	getWorkspacePath: vitest.fn().mockReturnValue("/test/workspace"),
-	toRelativePath: vitest.fn((path, cwd) => {
+	toRelativePath: vitest.fn(function (path, cwd) {
 		// Handle both Windows and POSIX paths by using path.relative
 		const relativePath = require("path").relative(cwd, path)
 		// Convert to forward slashes for consistency
@@ -37,13 +37,15 @@ const mockWatcher = {
 vitest.mock("vscode", () => ({
 	window: {
 		tabGroups: {
-			onDidChangeTabs: vitest.fn((callback) => {
+			onDidChangeTabs: vitest.fn(function (callback) {
 				registeredTabChangeCallback = callback
 				return { dispose: mockDispose }
 			}),
 			all: [],
 		},
-		onDidChangeActiveTextEditor: vitest.fn(() => ({ dispose: vitest.fn() })),
+		onDidChangeActiveTextEditor: vitest.fn(function () {
+			return { dispose: vitest.fn() }
+		}),
 	},
 	workspace: {
 		workspaceFolders: [
@@ -53,7 +55,9 @@ vitest.mock("vscode", () => ({
 				index: 0,
 			},
 		],
-		createFileSystemWatcher: vitest.fn(() => mockWatcher),
+		createFileSystemWatcher: vitest.fn(function () {
+			return mockWatcher
+		}),
 		fs: {
 			stat: vitest.fn().mockResolvedValue({ type: 1 }), // FileType.File = 1
 		},
@@ -266,7 +270,7 @@ describe("WorkspaceTracker", () => {
 		})
 
 		// Setup listFiles to use our controlled promise
-		;(listFiles as Mock).mockImplementation(() => {
+		;(listFiles as Mock).mockImplementation(function () {
 			// Change workspace path before listFiles resolves
 			;(getWorkspacePath as Mock).mockReturnValue("/test/changed-workspace")
 			return listFilesPromise

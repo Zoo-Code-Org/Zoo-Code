@@ -12,9 +12,11 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => {
 	const mockSend = vi.fn().mockResolvedValue({
 		stream: [],
 	})
-	const mockBedrockRuntimeClient = vi.fn().mockImplementation(() => ({
-		send: mockSend,
-	}))
+	const mockBedrockRuntimeClient = vi.fn().mockImplementation(function () {
+		return {
+			send: mockSend,
+		}
+	})
 
 	return {
 		BedrockRuntimeClient: mockBedrockRuntimeClient,

@@ -12,15 +12,17 @@ const mockCreate = vi.fn()
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
-		default: vi.fn().mockImplementation(() => ({
-			apiKey: "test-key",
-			baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-			chat: {
-				completions: {
-					create: mockCreate,
+		default: vi.fn().mockImplementation(function () {
+			return {
+				apiKey: "test-key",
+				baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+				chat: {
+					completions: {
+						create: mockCreate,
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 

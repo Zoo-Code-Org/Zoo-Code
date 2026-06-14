@@ -120,7 +120,7 @@ async function testPowerShellCommand(
 		}
 
 		// Configure the mock terminal to return our stream
-		mockTerminal.shellIntegration.executeCommand.mockImplementation(() => {
+		mockTerminal.shellIntegration.executeCommand.mockImplementation(function () {
 			return {
 				read: vi.fn().mockReturnValue(stream),
 			}

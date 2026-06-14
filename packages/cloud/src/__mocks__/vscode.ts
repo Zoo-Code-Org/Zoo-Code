@@ -1,11 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export const window = {
+export const window: { showInformationMessage: (...args: any[]) => any; showErrorMessage: (...args: any[]) => any } = {
 	showInformationMessage: vi.fn(),
 	showErrorMessage: vi.fn(),
 }
 
-export const env = {
+export const env: { openExternal: (...args: any[]) => any } = {
 	openExternal: vi.fn(),
 }
 
@@ -13,7 +13,7 @@ export const Uri = {
 	parse: vi.fn((uri: string) => ({ toString: () => uri })),
 }
 
-export const commands = {
+export const commands: { executeCommand: (...args: any[]) => any } = {
 	executeCommand: vi.fn().mockResolvedValue(undefined),
 }
 

@@ -6,13 +6,15 @@ import { UnboundHandler } from "../unbound"
 vi.mock("openai", () => {
 	const createMock = vi.fn()
 	return {
-		default: vi.fn(() => ({
-			chat: {
-				completions: {
-					create: createMock,
+		default: vi.fn(function () {
+			return {
+				chat: {
+					completions: {
+						create: createMock,
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 

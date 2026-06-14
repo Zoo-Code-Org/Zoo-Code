@@ -60,16 +60,20 @@ vitest.mock("vscode", () => {
 
 	return {
 		LanguageModelChatMessage: {
-			Assistant: vitest.fn((content) => ({
-				role: LanguageModelChatMessageRole.Assistant,
-				name: "assistant",
-				content: Array.isArray(content) ? content : [new MockLanguageModelTextPart(content)],
-			})),
-			User: vitest.fn((content) => ({
-				role: LanguageModelChatMessageRole.User,
-				name: "user",
-				content: Array.isArray(content) ? content : [new MockLanguageModelTextPart(content)],
-			})),
+			Assistant: vitest.fn(function (content) {
+				return {
+					role: LanguageModelChatMessageRole.Assistant,
+					name: "assistant",
+					content: Array.isArray(content) ? content : [new MockLanguageModelTextPart(content)],
+				}
+			}),
+			User: vitest.fn(function (content) {
+				return {
+					role: LanguageModelChatMessageRole.User,
+					name: "user",
+					content: Array.isArray(content) ? content : [new MockLanguageModelTextPart(content)],
+				}
+			}),
 		},
 		LanguageModelChatMessageRole,
 		LanguageModelTextPart: MockLanguageModelTextPart,

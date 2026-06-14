@@ -4,7 +4,7 @@ import { diagnosticsToProblemsString } from "../index"
 
 // Mock path module
 vitest.mock("path", () => ({
-	relative: vitest.fn((cwd, fullPath) => {
+	relative: vitest.fn(function (cwd, fullPath) {
 		let relativePath = ""
 		// Handle the specific case already present
 		if (cwd === "/project/root" && fullPath === "/project/root/src/utils/file.ts") {
@@ -31,21 +31,27 @@ vitest.mock("path", () => ({
 // Mock vscode module
 vitest.mock("vscode", () => ({
 	Uri: {
-		file: vitest.fn((path) => ({
-			fsPath: path,
-			toString: vitest.fn(() => path),
-		})),
+		file: vitest.fn(function (path) {
+			return {
+				fsPath: path,
+				toString: vitest.fn(() => path),
+			}
+		}),
 	},
-	Diagnostic: vitest.fn().mockImplementation((range, message, severity) => ({
-		range,
-		message,
-		severity,
-		source: "test",
-	})),
-	Range: vitest.fn().mockImplementation((startLine, startChar, endLine, endChar) => ({
-		start: { line: startLine, character: startChar },
-		end: { line: endLine, character: endChar },
-	})),
+	Diagnostic: vitest.fn().mockImplementation(function (range, message, severity) {
+		return {
+			range,
+			message,
+			severity,
+			source: "test",
+		}
+	}),
+	Range: vitest.fn().mockImplementation(function (startLine, startChar, endLine, endChar) {
+		return {
+			start: { line: startLine, character: startChar },
+			end: { line: endLine, character: endChar },
+		}
+	}),
 	DiagnosticSeverity: {
 		Error: 0,
 		Warning: 1,
@@ -91,9 +97,11 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content
 		const mockDocument = {
-			lineAt: vitest.fn((line) => ({
-				text: `Line ${line + 1} content`,
-			})),
+			lineAt: vitest.fn(function (line) {
+				return {
+					text: `Line ${line + 1} content`,
+				}
+			}),
 		}
 		vscode.workspace.openTextDocument = vitest.fn().mockResolvedValue(mockDocument)
 
@@ -187,7 +195,7 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content with specific line texts for each test case
 		const mockDocument = {
-			lineAt: vitest.fn((line: number) => {
+			lineAt: vitest.fn(function (line: number) {
 				const lineTexts: Record<number, string> = {
 					0: "Line 0 content for warning",
 					2: "Line 2 content for info",
@@ -253,12 +261,14 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content with specific line texts for each test case
 		const mockDocument1 = {
-			lineAt: vitest.fn((_line) => ({
-				text: "Line 1 content for error",
-			})),
+			lineAt: vitest.fn(function (_line) {
+				return {
+					text: "Line 1 content for error",
+				}
+			}),
 		}
 		const mockDocument2 = {
-			lineAt: vitest.fn((line) => {
+			lineAt: vitest.fn(function (line) {
 				const lineTexts = ["Line 1 content", "Line 2 content for warning", "Line 3 content for info"]
 				return { text: lineTexts[line] }
 			}),
@@ -321,9 +331,11 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content (though it shouldn't be accessed in this case)
 		const mockDocument = {
-			lineAt: vitest.fn((line) => ({
-				text: `Line ${line + 1} content`,
-			})),
+			lineAt: vitest.fn(function (line) {
+				return {
+					text: `Line ${line + 1} content`,
+				}
+			}),
 		}
 		vscode.workspace.openTextDocument = vitest.fn().mockResolvedValue(mockDocument)
 
@@ -361,9 +373,11 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content matching test assertion
 		const mockDocument = {
-			lineAt: vitest.fn((line) => ({
-				text: `Line ${line + 1} content for error`,
-			})),
+			lineAt: vitest.fn(function (line) {
+				return {
+					text: `Line ${line + 1} content for error`,
+				}
+			}),
 		}
 		vscode.workspace.openTextDocument = vitest.fn().mockResolvedValue(mockDocument)
 
@@ -401,9 +415,11 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content
 		const mockDocument = {
-			lineAt: vitest.fn((line) => ({
-				text: `Line ${line + 1} content`,
-			})),
+			lineAt: vitest.fn(function (line) {
+				return {
+					text: `Line ${line + 1} content`,
+				}
+			}),
 		}
 		vscode.workspace.openTextDocument = vitest.fn().mockResolvedValue(mockDocument)
 
@@ -444,9 +460,11 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content
 		const mockDocument = {
-			lineAt: vitest.fn((line) => ({
-				text: `Line ${line + 1} content`,
-			})),
+			lineAt: vitest.fn(function (line) {
+				return {
+					text: `Line ${line + 1} content`,
+				}
+			}),
 		}
 		vscode.workspace.openTextDocument = vitest.fn().mockResolvedValue(mockDocument)
 
@@ -500,9 +518,11 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content
 		const mockDocument = {
-			lineAt: vitest.fn((line) => ({
-				text: `Line ${line + 1} content`,
-			})),
+			lineAt: vitest.fn(function (line) {
+				return {
+					text: `Line ${line + 1} content`,
+				}
+			}),
 		}
 		vscode.workspace.openTextDocument = vitest.fn().mockResolvedValue(mockDocument)
 
@@ -549,9 +569,11 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content
 		const mockDocument = {
-			lineAt: vitest.fn((line) => ({
-				text: `Line ${line + 1} content`,
-			})),
+			lineAt: vitest.fn(function (line) {
+				return {
+					text: `Line ${line + 1} content`,
+				}
+			}),
 		}
 		vscode.workspace.openTextDocument = vitest.fn().mockResolvedValue(mockDocument)
 
@@ -591,9 +613,11 @@ describe("diagnosticsToProblemsString", () => {
 
 		// Mock document content
 		const mockDocument = {
-			lineAt: vitest.fn((line) => ({
-				text: `Line ${line + 1} content`,
-			})),
+			lineAt: vitest.fn(function (line) {
+				return {
+					text: `Line ${line + 1} content`,
+				}
+			}),
 		}
 		vscode.workspace.openTextDocument = vitest.fn().mockResolvedValue(mockDocument)
 

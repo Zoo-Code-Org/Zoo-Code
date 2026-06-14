@@ -130,7 +130,9 @@ describe("getEnvironmentDetails", () => {
 		;(listFiles as Mock).mockResolvedValue([["file1.ts", "file2.ts"], false])
 		;(formatResponse.formatFilesList as Mock).mockReturnValue("file1.ts\nfile2.ts")
 		;(arePathsEqual as Mock).mockReturnValue(false)
-		;(Terminal.compressTerminalOutput as Mock).mockImplementation((output: string) => output)
+		;(Terminal.compressTerminalOutput as Mock).mockImplementation((output: string) => {
+			return output
+		})
 		;(TerminalRegistry.getTerminals as Mock).mockReturnValue([])
 		;(TerminalRegistry.getBackgroundTerminals as Mock).mockReturnValue([])
 		;(TerminalRegistry.isProcessHot as Mock).mockReturnValue(false)
@@ -258,9 +260,9 @@ describe("getEnvironmentDetails", () => {
 			getCurrentWorkingDirectory: vi.fn().mockReturnValue("/test/path/build"),
 		} as MockTerminal
 
-		;(TerminalRegistry.getTerminals as Mock).mockImplementation((active: boolean) =>
-			active ? [] : [mockInactiveTerminal],
-		)
+		;(TerminalRegistry.getTerminals as Mock).mockImplementation((active: boolean) => {
+			return active ? [] : [mockInactiveTerminal]
+		})
 
 		const result = await getEnvironmentDetails(mockCline as Task)
 
@@ -294,9 +296,9 @@ describe("getEnvironmentDetails", () => {
 			getCurrentWorkingDirectory: vi.fn().mockReturnValue("/another/path"),
 		} as MockTerminal
 
-		;(TerminalRegistry.getTerminals as Mock).mockImplementation((active: boolean) =>
-			active ? [mockActiveTerminal] : [mockInactiveTerminal],
-		)
+		;(TerminalRegistry.getTerminals as Mock).mockImplementation((active: boolean) => {
+			return active ? [mockActiveTerminal] : [mockInactiveTerminal]
+		})
 		;(TerminalRegistry.getUnretrievedOutput as Mock).mockReturnValue("Server started")
 
 		const result = await getEnvironmentDetails(mockCline as Task)

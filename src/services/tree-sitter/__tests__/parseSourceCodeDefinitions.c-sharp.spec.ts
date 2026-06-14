@@ -15,7 +15,9 @@ vi.mock("../languageParser", () => ({
 
 // Mock fileExistsAtPath to return true for our test paths
 vi.mock("../../../utils/fs", () => ({
-	fileExistsAtPath: vi.fn().mockImplementation(() => Promise.resolve(true)),
+	fileExistsAtPath: vi.fn().mockImplementation(function () {
+		return Promise.resolve(true)
+	}),
 }))
 
 import { csharpQuery } from "../queries"

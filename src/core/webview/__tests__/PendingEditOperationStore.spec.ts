@@ -11,12 +11,12 @@ describe("PendingEditOperationStore", () => {
 		apiConversationHistoryIndex: 2,
 	}
 
-	let log: ReturnType<typeof vi.fn>
+	let log: ReturnType<typeof vi.fn<(message: string) => void>>
 	let store: PendingEditOperationStore
 
 	beforeEach(() => {
 		vi.useFakeTimers()
-		log = vi.fn()
+		log = vi.fn<(message: string) => void>()
 		store = new PendingEditOperationStore(1_000, log)
 	})
 

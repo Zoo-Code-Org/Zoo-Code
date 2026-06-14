@@ -11,7 +11,7 @@ vi.mock("@roo-code/telemetry")
 
 describe("MessageEnhancer", () => {
 	let mockProviderSettingsManager: ProviderSettingsManager
-	let mockSingleCompletionHandler: ReturnType<typeof vi.fn>
+	let mockSingleCompletionHandler: ReturnType<typeof vi.fn<(config: any, prompt: string) => Promise<string>>>
 
 	const mockApiConfiguration: ProviderSettings = {
 		apiProvider: "openai",
@@ -39,7 +39,9 @@ describe("MessageEnhancer", () => {
 		} as any
 
 		// Mock single completion handler
-		mockSingleCompletionHandler = vi.fn().mockResolvedValue("Enhanced prompt text")
+		mockSingleCompletionHandler = vi
+			.fn<(config: any, prompt: string) => Promise<string>>()
+			.mockResolvedValue("Enhanced prompt text")
 		vi.mocked(singleCompletionHandlerModule).singleCompletionHandler = mockSingleCompletionHandler
 
 		// Mock TelemetryService
@@ -324,7 +326,7 @@ describe("MessageEnhancer", () => {
 		})
 
 		it("should handle malformed messages gracefully", () => {
-			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// Create messages that will cause errors when accessed
 			const malformedMessages = [
@@ -345,7 +347,7 @@ describe("MessageEnhancer", () => {
 		})
 
 		it("should handle messages with circular references", () => {
-			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// Create a message with circular reference
 			const circularMessage: any = { type: "ask", text: "Test" }

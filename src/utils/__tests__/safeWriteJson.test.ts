@@ -1,4 +1,3 @@
-import * as actualFsPromises from "fs/promises"
 import * as fsSyncActual from "fs"
 import { Writable } from "stream"
 import * as path from "path"
@@ -6,14 +5,20 @@ import * as os from "os"
 
 import { safeWriteJson } from "../safeWriteJson"
 
-const originalFsPromisesRename = actualFsPromises.rename
-const originalFsPromisesUnlink = actualFsPromises.unlink
-const originalFsPromisesWriteFile = actualFsPromises.writeFile
-const _originalFsPromisesAccess = actualFsPromises.access
-const originalFsPromisesMkdir = actualFsPromises.mkdir
+// Capture actual implementations before the vi.mock factory runs,
+// so they are never wrapped by vi.fn() — avoids infinite recursion when
+// test mockImplementation callbacks delegate to the real implementation.
+const fsPromisesActuals = vi.hoisted(() => ({
+	rename: undefined as (typeof import("fs/promises"))["rename"] | undefined,
+	unlink: undefined as (typeof import("fs/promises"))["unlink"] | undefined,
+	writeFile: undefined as (typeof import("fs/promises"))["writeFile"] | undefined,
+}))
 
 vi.mock("fs/promises", async () => {
 	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+	fsPromisesActuals.rename = actual.rename
+	fsPromisesActuals.unlink = actual.unlink
+	fsPromisesActuals.writeFile = actual.writeFile
 	// Start with all actual implementations.
 	const mockedFs = { ...actual }
 	// Selectively wrap functions with vi.fn() if they are spied on
@@ -114,7 +119,7 @@ describe("safeWriteJson", () => {
 		const newData = { message: "Updated content" }
 
 		// Write initial data (overwriting the pre-created file from beforeEach)
-		await originalFsPromisesWriteFile(currentTestFilePath, JSON.stringify(initialData))
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
 		await safeWriteJson(currentTestFilePath, newData)
 
@@ -158,12 +163,10 @@ describe("safeWriteJson", () => {
 		const newData = { message: "New content, should not be written" }
 
 		// Overwrite the pre-created file with specific initial data
-		await originalFsPromisesWriteFile(currentTestFilePath, JSON.stringify(initialData))
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		const renameSpy = vi.spyOn(fs, "rename")
-
-		// Mock rename to fail on the first call (filePath -> tempBackupFilePath)
-		renameSpy.mockImplementationOnce(async () => {
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
 			throw new Error("Rename to backup failed")
 		})
 
@@ -179,29 +182,26 @@ describe("safeWriteJson", () => {
 		const newData = { message: "New content" }
 
 		// Overwrite the pre-created file with specific initial data
-		await originalFsPromisesWriteFile(currentTestFilePath, JSON.stringify(initialData))
-
-		const renameSpy = vi.spyOn(fs, "rename")
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
 		// Track rename calls
 		let renameCallCount = 0
 
-		// Mock rename to succeed on first call (filePath -> tempBackupFilePath)
-		// and fail on second call (tempNewFilePath -> filePath)
-		renameSpy.mockImplementation(async (oldPath, newPath) => {
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
 			if (renameCallCount === 1) {
 				// First call: filePath -> tempBackupFilePath (should succeed)
-				return originalFsPromisesRename(oldPath, newPath)
+				return fsPromisesActuals.rename!(oldPath, newPath)
 			} else if (renameCallCount === 2) {
 				// Second call: tempNewFilePath -> filePath (should fail)
 				throw new Error("Rename from temp to final failed")
 			} else if (renameCallCount === 3) {
 				// Third call: tempBackupFilePath -> filePath (rollback, should succeed)
-				return originalFsPromisesRename(oldPath, newPath)
+				return fsPromisesActuals.rename!(oldPath, newPath)
 			}
 			// Default: use original implementation
-			return originalFsPromisesRename(oldPath, newPath)
+			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename from temp to final failed")
@@ -255,9 +255,8 @@ describe("safeWriteJson", () => {
 	})
 
 	test("should handle directory creation permission errors", async () => {
-		// Mock mkdir to simulate a permission error
-		const mkdirSpy = vi.spyOn(fs, "mkdir")
-		mkdirSpy.mockImplementationOnce(async () => {
+		// fs.mkdir is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.mkdir).mockImplementationOnce(async () => {
 			const error = new Error("EACCES: permission denied") as any
 			error.code = "EACCES"
 			throw error
@@ -298,12 +297,10 @@ describe("safeWriteJson", () => {
 		const newData = { message: "Successfully written new content" }
 
 		// Overwrite the pre-created file with specific initial data
-		await originalFsPromisesWriteFile(currentTestFilePath, JSON.stringify(initialData))
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		const unlinkSpy = vi.spyOn(fs, "unlink")
-
-		// Mock unlink to fail when trying to delete the backup file
-		unlinkSpy.mockImplementationOnce(async () => {
+		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.unlink).mockImplementationOnce(async () => {
 			throw new Error("Failed to delete backup file")
 		})
 
@@ -321,15 +318,14 @@ describe("safeWriteJson", () => {
 		const initialData = { message: "Initial" }
 		const newData = { message: "New" }
 
-		await originalFsPromisesWriteFile(currentTestFilePath, JSON.stringify(initialData))
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// Mock unlink to fail when deleting backup files
-		const unlinkSpy = vi.spyOn(fs, "unlink")
-		unlinkSpy.mockImplementation(async (filePath: any) => {
+		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.unlink).mockImplementation(async (filePath: any) => {
 			if (filePath.toString().includes(".bak_")) {
 				throw new Error("Backup deletion failed")
 			}
-			return originalFsPromisesUnlink(filePath)
+			return fsPromisesActuals.unlink!(filePath)
 		})
 
 		await safeWriteJson(currentTestFilePath, newData)
@@ -338,7 +334,7 @@ describe("safeWriteJson", () => {
 		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Successfully wrote"), expect.any(Error))
 
 		consoleErrorSpy.mockRestore()
-		unlinkSpy.mockRestore()
+		vi.mocked(fs.unlink).mockRestore()
 	})
 
 	// The expected error message might need to change if the mock behaves differently.
@@ -347,24 +343,18 @@ describe("safeWriteJson", () => {
 		const initialData = { message: "Initial content" }
 		const newData = { message: "New content" }
 
-		await originalFsPromisesWriteFile(currentTestFilePath, JSON.stringify(initialData))
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		const renameSpy = vi.spyOn(fs, "rename")
-		// Mock rename to fail on the second call (tempNewFilePath -> filePath)
-		// This test assumes that the first rename (filePath -> tempBackupFilePath) succeeds,
-		// which is the expected behavior when the file exists.
-		// The existing complex mock in `test("should handle failure when renaming tempNewFilePath to filePath (filePath exists, backup succeeded)"`
-		// might be more relevant or adaptable here.
-
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		let renameCallCount = 0
-		renameSpy.mockImplementation(async (oldPath, newPath) => {
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
 			if (renameCallCount === 2) {
 				// Second call: tempNewFilePath -> filePath (should fail)
 				throw new Error("Rename failed")
 			}
 			// For all other calls, use the original implementation
-			return originalFsPromisesRename(oldPath, newPath)
+			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename failed")
@@ -428,7 +418,8 @@ describe("safeWriteJson", () => {
 
 	test("should handle fs.access error that is not ENOENT", async () => {
 		const data = { message: "access error test" }
-		const accessSpy = vi.spyOn(fs, "access").mockImplementationOnce(async () => {
+		// fs.access is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.access).mockImplementationOnce(async () => {
 			const error = new Error("EACCES: permission denied") as any
 			error.code = "EACCES"
 			throw error
@@ -440,7 +431,7 @@ describe("safeWriteJson", () => {
 		await expect(safeWriteJson(testPath, data)).rejects.toThrow("EACCES: permission denied")
 
 		// Verify access was called
-		expect(accessSpy).toHaveBeenCalled()
+		expect(vi.mocked(fs.access)).toHaveBeenCalled()
 	})
 
 	// Test for rollback failure scenario
@@ -448,13 +439,13 @@ describe("safeWriteJson", () => {
 		const initialData = { message: "Initial, should be lost if rollback fails" }
 		const newData = { message: "New content" }
 
-		await originalFsPromisesWriteFile(currentTestFilePath, JSON.stringify(initialData))
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		const renameSpy = vi.spyOn(fs, "rename")
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
 
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		let renameCallCount = 0
-		renameSpy.mockImplementation(async (oldPath, newPath) => {
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
 			renameCallCount++
 			if (renameCallCount === 2) {
 				// Second call: tempNewFilePath -> filePath (fail)
@@ -463,7 +454,7 @@ describe("safeWriteJson", () => {
 				// Third call: tempBackupFilePath -> filePath (rollback, also fail)
 				throw new Error("Rollback rename failed")
 			}
-			return originalFsPromisesRename(oldPath, newPath)
+			return fsPromisesActuals.rename!(oldPath, newPath)
 		})
 
 		// Should throw the original error, not the rollback error

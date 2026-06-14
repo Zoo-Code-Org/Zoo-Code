@@ -6,9 +6,15 @@ import { getZooGatewayModels, parseZooGatewayModel } from "../zoo-gateway"
 
 vitest.mock("axios")
 vitest.mock("../../../../services/zoo-code-auth", () => ({
-	getCachedZooCodeToken: vitest.fn(() => ""),
-	getZooCodeBaseUrl: vitest.fn(() => "https://example.test"),
-	resolveZooGatewaySessionToken: vitest.fn((profileToken?: string) => profileToken || undefined),
+	getCachedZooCodeToken: vitest.fn(function () {
+		return ""
+	}),
+	getZooCodeBaseUrl: vitest.fn(function () {
+		return "https://example.test"
+	}),
+	resolveZooGatewaySessionToken: vitest.fn(function (profileToken?: string) {
+		return profileToken || undefined
+	}),
 }))
 const mockedAxios = axios as any
 
@@ -85,7 +91,7 @@ describe("Zoo Gateway Fetchers", () => {
 		})
 
 		it("returns {} and never leaks the error object when the request fails", async () => {
-			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
 			const failure: any = new Error("Network error")
 			// Simulate axios attaching the request config (which contains the bearer token).
 			failure.config = { headers: { Authorization: "Bearer should-never-be-logged" } }
@@ -138,7 +144,7 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(models["anthropic/claude-sonnet-4"].description).toBe("Claude Sonnet 4")
 		})
 		it("returns {} on a structurally broken response instead of throwing", async () => {
-			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
 			mockedAxios.get.mockResolvedValueOnce({ data: { unexpected: true } })
 
 			const models = await getZooGatewayModels({

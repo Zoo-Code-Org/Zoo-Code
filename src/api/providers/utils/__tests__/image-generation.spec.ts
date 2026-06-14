@@ -14,9 +14,11 @@ vi.mock("../../../i18n", () => ({
 
 // Mock fetch globally
 global.fetch = vi.fn()
-global.FormData = vi.fn(() => ({
-	append: vi.fn(),
-})) as any
+global.FormData = vi.fn(function () {
+	return {
+		append: vi.fn(),
+	}
+}) as any
 global.Blob = vi.fn() as any
 global.atob = vi.fn((str: string) => {
 	return Buffer.from(str, "base64").toString("binary")

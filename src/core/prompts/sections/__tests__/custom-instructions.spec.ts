@@ -11,9 +11,15 @@ vi.mock("os", async () => ({
 
 // Mock roo-config to avoid environment-dependent global directory paths in tests
 vi.mock("../../../../services/roo-config", () => ({
-	getRooDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => [`${cwd}/.roo`]),
-	getAllRooDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => Promise.resolve([`${cwd}/.roo`])),
-	getAgentsDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => Promise.resolve([cwd])),
+	getRooDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => {
+		return [`${cwd}/.roo`]
+	}),
+	getAllRooDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => {
+		return Promise.resolve([`${cwd}/.roo`])
+	}),
+	getAgentsDirectoriesForCwd: vi.fn().mockImplementation((cwd: string) => {
+		return Promise.resolve([cwd])
+	}),
 	getGlobalRooDirectory: vi.fn().mockReturnValue("/mock/home/.roo"),
 }))
 
@@ -78,7 +84,9 @@ const statMock = vi.fn()
 const readdirMock = vi.fn()
 const readlinkMock = vi.fn()
 const lstatMock = vi.fn()
-const realpathMock = vi.fn().mockImplementation((p: string) => Promise.resolve(p))
+const realpathMock = vi.fn().mockImplementation((p: string) => {
+	return Promise.resolve(p)
+})
 
 // Replace fs functions with our mocks
 fs.readFile = readFileMock as any
@@ -1666,11 +1674,7 @@ describe("Rules directory reading", () => {
 			expect(readlinkMock).toHaveBeenCalledWith("/project/.roo/rules/1-project.txt")
 
 			const statCalls = statMock.mock.calls.map((call: any[]) => call[0].toString().replace(/\\/g, "/"))
-			expect(statCalls).toEqual([
-				"/project/.roo/rules",
-				"/external/1-project.txt",
-				"/external/1-project.txt",
-			])
+			expect(statCalls).toEqual(["/project/.roo/rules", "/external/1-project.txt", "/external/1-project.txt"])
 		},
 	)
 
@@ -1743,11 +1747,7 @@ describe("Rules directory reading", () => {
 		expect(readlinkMock).toHaveBeenCalledWith("/project/.roo/rules/1-project.txt")
 
 		const statCalls = statMock.mock.calls.map((call: any[]) => call[0].toString().replace(/\\/g, "/"))
-		expect(statCalls).toEqual([
-			"/project/.roo/rules",
-			"/project/.roo/1-project.txt",
-			"/project/.roo/1-project.txt",
-		])
+		expect(statCalls).toEqual(["/project/.roo/rules", "/project/.roo/1-project.txt", "/project/.roo/1-project.txt"])
 	})
 
 	it("should handle empty file list gracefully", async () => {

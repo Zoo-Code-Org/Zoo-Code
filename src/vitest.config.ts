@@ -15,16 +15,11 @@ export default defineConfig({
 		testTimeout: 20_000,
 		hookTimeout: 20_000,
 		onConsoleLog,
-		poolOptions: isWindowsCI
-			? {
-					forks: {
-						singleFork: true,
-					},
-				}
-			: undefined,
+		maxWorkers: isWindowsCI ? 1 : undefined,
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "lcov"],
+			include: ["src/**/*.ts", "src/**/*.tsx"],
 			exclude: [
 				"**/*.test.ts",
 				"**/*.test.tsx",

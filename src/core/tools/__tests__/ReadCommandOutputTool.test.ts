@@ -21,9 +21,9 @@ vi.mock("fs/promises", () => ({
 
 // Mock getTaskDirectoryPath
 vi.mock("../../../utils/storage", () => ({
-	getTaskDirectoryPath: vi.fn((globalStoragePath: string, taskId: string) => {
-		return path.join(globalStoragePath, "tasks", taskId)
-	}),
+	getTaskDirectoryPath: vi.fn((globalStoragePath: string, taskId: string) =>
+		path.join(globalStoragePath, "tasks", taskId),
+	),
 }))
 
 describe("ReadCommandOutputTool", () => {
