@@ -701,6 +701,36 @@ describe("ZAiHandler", () => {
 			expect(callArgs.reasoning_effort).toBeUndefined()
 		})
 
+		it("should fall back to the model default effort when a persisted value is unsupported", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.2",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				reasoningEffort: "medium",
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.2",
+					thinking: { type: "enabled" },
+					reasoning_effort: "high",
+				}),
+			)
+		})
+
 		it("should disable thinking for GLM-4.7 when reasoningEffort is set to disable", async () => {
 			const handlerWithModel = new ZAiHandler({
 				apiModelId: "glm-4.7",

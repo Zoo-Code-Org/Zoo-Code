@@ -162,6 +162,7 @@ export const internationalZAiModels = {
 		supportsReasoningEffort: ["disable", "high", "max"],
 		reasoningEffort: "high",
 		preserveReasoning: true,
+		// TODO: Pricing is from GLM-5.1, should update later.
 		inputPrice: 1.4,
 		outputPrice: 4.4,
 		cacheWritesPrice: 0,
@@ -386,6 +387,7 @@ export const mainlandZAiModels = {
 		supportsReasoningEffort: ["disable", "high", "max"],
 		reasoningEffort: "high",
 		preserveReasoning: true,
+		// TODO: Pricing is from GLM-5.1, should update later.
 		inputPrice: 0.68,
 		outputPrice: 2.28,
 		cacheWritesPrice: 0,
