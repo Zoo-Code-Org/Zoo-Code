@@ -19,7 +19,7 @@
 		"@types/mocha": "10.0.10",
 		"@types/node": "20.19.43",
 		"@types/vscode": "1.100.0",
-		"@vscode/test-cli": "0.0.11",
+		"@vscode/test-cli": "0.0.12",
 		"@vscode/test-electron": "2.5.2",
 		"glob": "11.1.0",
 		"mocha": "11.2.2",
