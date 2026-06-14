@@ -424,8 +424,9 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 		try {
 			// Use the official SDK with per-request headers
+			const signal = metadata?.abortSignal ?? this.abortController.signal
 			const stream = (await (this.client as any).responses.create(requestBody, {
-				signal: this.abortController.signal,
+				signal,
 				headers: requestHeaders,
 			})) as AsyncIterable<any>
 
@@ -576,7 +577,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					"User-Agent": userAgent,
 				},
 				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal,
+				signal: metadata?.abortSignal ?? this.abortController.signal,
 			})
 
 			if (!response.ok) {
@@ -1482,7 +1483,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		return this.lastResponseId
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, metadata?: ApiHandlerCreateMessageMetadata): Promise<string> {
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
 
@@ -1544,9 +1545,9 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				requestBody.prompt_cache_retention = promptCacheRetention
 			}
 
-			// Make the non-streaming request
+			// Make the non-streaming request with conditional signal pass-through
 			const response = await (this.client as any).responses.create(requestBody, {
-				signal: this.abortController.signal,
+				signal: metadata?.abortSignal ?? this.abortController.signal,
 			})
 
 			// Extract text from the response

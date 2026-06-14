@@ -234,14 +234,14 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				chatOptions.num_ctx = this.options.ollamaNumCtx
 			}
 
-			// Create the actual API request promise
-			const stream = await client.chat({
+			const controller = new AbortController()
+			const stream = (await client.chat({
 				model: modelId,
 				messages: ollamaMessages,
 				stream: true,
 				options: chatOptions,
 				tools: this.convertToolsToOllama(metadata?.tools),
-			})
+			})) as any
 
 			let totalInputTokens = 0
 			let totalOutputTokens = 0

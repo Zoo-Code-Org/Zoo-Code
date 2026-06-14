@@ -188,7 +188,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		// Make the request with retry on auth failure
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
-				yield* this.executeRequest(requestBody, model, accessToken, metadata?.taskId)
+				yield* this.executeRequest(requestBody, model, accessToken, metadata?.taskId, metadata)
 				return
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error)
@@ -345,6 +345,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		model: OpenAiCodexModel,
 		accessToken: string,
 		taskId?: string,
+		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
@@ -374,7 +375,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 					})
 
 				const stream = (await (client as any).responses.create(requestBody, {
-					signal: this.abortController.signal,
+					signal: metadata?.abortSignal ?? this.abortController.signal,
 					// If the SDK supports per-request overrides, ensure headers are present.
 					headers: codexHeaders,
 				})) as AsyncIterable<any>
@@ -399,7 +400,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}
 			} catch (_sdkErr) {
 				// Fallback to manual SSE via fetch (Codex backend).
-				yield* this.makeCodexRequest(requestBody, model, accessToken, taskId)
+				yield* this.makeCodexRequest(requestBody, model, accessToken, taskId, metadata)
 			}
 		} finally {
 			this.abortController = undefined
@@ -492,6 +493,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		model: OpenAiCodexModel,
 		accessToken: string,
 		taskId?: string,
+		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		// Per the implementation guide: route to Codex backend with Bearer token
 		const url = `${CODEX_API_BASE_URL}/responses`
@@ -518,7 +520,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				method: "POST",
 				headers,
 				body: JSON.stringify(requestBody),
-				signal: this.abortController?.signal,
+				signal: metadata?.abortSignal ?? this.abortController?.signal,
 			})
 
 			if (!response.ok) {
@@ -1151,7 +1153,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		return this.lastResponseId
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, metadata?: ApiHandlerCreateMessageMetadata): Promise<string> {
 		this.abortController = new AbortController()
 
 		try {
@@ -1213,7 +1215,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				method: "POST",
 				headers,
 				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal,
+				signal: metadata?.abortSignal ?? this.abortController.signal,
 			})
 
 			if (!response.ok) {

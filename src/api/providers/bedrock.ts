@@ -544,7 +544,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 
 			const command = new ConverseStreamCommand(payload)
 			const response = await this.client.send(command, {
-				abortSignal: controller.signal,
+				abortSignal: metadata?.abortSignal ?? controller.signal,
 			})
 
 			if (!response.stream) {
@@ -793,7 +793,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, metadata?: ApiHandlerCreateMessageMetadata): Promise<string> {
+		const controller = new AbortController()
 		try {
 			const modelConfig = this.getModel()
 
@@ -835,7 +836,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 
 			const command = new ConverseCommand(payload)
-			const response = await this.client.send(command)
+			const response = await this.client.send(command, {
+				abortSignal: metadata?.abortSignal ?? controller.signal,
+			})
 
 			if (
 				response?.output?.message?.content &&
