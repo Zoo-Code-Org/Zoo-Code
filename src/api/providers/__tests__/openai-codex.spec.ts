@@ -42,3 +42,52 @@ describe("OpenAiCodexHandler.getModel", () => {
 		expect(model.info).toBeDefined()
 	})
 })
+
+describe("OpenAiCodexHandler.completePrompt", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("should use metadata.abortSignal when provided in completePrompt", async () => {
+		const mockFetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({
+				output: [{ type: "message", content: [{ type: "output_text", text: "Codex response" }] }],
+			}),
+		})
+		global.fetch = mockFetch as any
+
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.3-codex" })
+		const controller = new AbortController()
+
+		await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+		expect(mockFetch).toHaveBeenCalledWith(
+			expect.stringContaining("/responses"),
+			expect.objectContaining({
+				signal: controller.signal,
+			}),
+		)
+	})
+
+	it("should use default abortController signal when metadata.abortSignal not provided", async () => {
+		const mockFetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({
+				output: [{ type: "message", content: [{ type: "output_text", text: "Codex response" }] }],
+			}),
+		})
+		global.fetch = mockFetch as any
+
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.3-codex" })
+
+		await handler.completePrompt("Test prompt")
+
+		expect(mockFetch).toHaveBeenCalledWith(
+			expect.stringContaining("/responses"),
+			expect.objectContaining({
+				signal: expect.any(AbortSignal),
+			}),
+		)
+	})
+})

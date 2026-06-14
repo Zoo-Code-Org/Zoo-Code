@@ -245,6 +245,49 @@ describe("OpenAiNativeHandler", () => {
 
 			expect(result).toBe("")
 		})
+
+		it("should use metadata.abortSignal when provided in completePrompt", async () => {
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "This is the completion response" }],
+					},
+				],
+			})
+
+			const controller = new AbortController()
+			const result = await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			expect(result).toBe("This is the completion response")
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expect.any(Object),
+				expect.objectContaining({
+					signal: controller.signal,
+				}),
+			)
+		})
+
+		it("should use default abortController signal when metadata.abortSignal not provided", async () => {
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "This is the completion response" }],
+					},
+				],
+			})
+
+			const result = await handler.completePrompt("Test prompt")
+
+			expect(result).toBe("This is the completion response")
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expect.any(Object),
+				expect.objectContaining({
+					signal: handler["abortController"].signal,
+				}),
+			)
+		})
 	})
 
 	describe("getModel", () => {

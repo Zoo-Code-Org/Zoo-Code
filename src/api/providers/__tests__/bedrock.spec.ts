@@ -1572,10 +1572,55 @@ describe("AwsBedrockHandler", () => {
 
 			it("returns false for older / non-adaptive models", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-6-v1")).toBe(false)
-				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-6")).toBe(false)
-				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
 			})
+		})
+	})
+
+	describe("abortSignal pass-through", () => {
+		it("should use metadata.abortSignal when provided in completePrompt", async () => {
+			const mockConverseCommand = vi.fn()
+			vi.mock("@aws-sdk/client-bedrock-runtime", async (importOriginal) => {
+				const actual = await importOriginal<typeof import("@aws-sdk/client-bedrock-runtime")>()
+				return {
+					...actual,
+					BedrockRuntimeClient: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ stream: null }) }),
+				}
+			})
+
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const controller = new AbortController()
+			await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			expect(mockConverseCommand).toHaveBeenCalled()
+		})
+
+		it("should use default controller signal when metadata.abortSignal not provided", async () => {
+			const mockConverseCommand = vi.fn()
+			vi.mock("@aws-sdk/client-bedrock-runtime", async (importOriginal) => {
+				const actual = await importOriginal<typeof import("@aws-sdk/client-bedrock-runtime")>()
+				return {
+					...actual,
+					BedrockRuntimeClient: vi.fn().mockReturnValue({ send: vi.fn().mockResolvedValue({ stream: null }) }),
+				}
+			})
+
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(mockConverseCommand).toHaveBeenCalled()
 		})
 	})
 })

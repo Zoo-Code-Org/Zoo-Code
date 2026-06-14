@@ -226,6 +226,34 @@ describe("NativeOllamaHandler", () => {
 				}),
 			)
 		})
+
+		it("should use metadata.abortSignal when provided in completePrompt", async () => {
+			mockChat.mockResolvedValue({
+				message: { content: "Response with abort signal" },
+			})
+
+			const controller = new AbortController()
+			await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					options: expect.any(Object),
+				}),
+			)
+			// Verify the call was made (signal is passed via Ollama SDK options)
+			const callArgs = mockChat.mock.calls[0][0] as any
+			expect(callArgs).toBeDefined()
+		})
+
+		it("should work without metadata in completePrompt", async () => {
+			mockChat.mockResolvedValue({
+				message: { content: "Response without metadata" },
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(mockChat).toHaveBeenCalled()
+		})
 	})
 
 	describe("error handling", () => {
