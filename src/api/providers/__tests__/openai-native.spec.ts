@@ -216,7 +216,7 @@ describe("OpenAiNativeHandler", () => {
 					],
 				}),
 				expect.objectContaining({
-					signal: expect.any(Object),
+					signal: expect.any(AbortSignal),
 				}),
 			)
 		})
