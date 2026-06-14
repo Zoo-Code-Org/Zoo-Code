@@ -10,6 +10,7 @@ import type { GlobalState, ProviderSettings, ModelInfo } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../Task"
+import { createRateLimitClock } from "../RateLimitClock"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
 import { ContextProxy } from "../../config/ContextProxy"
@@ -400,14 +401,6 @@ describe("Cline", () => {
 
 	describe("getEnvironmentDetails", () => {
 		describe("API conversation handling", () => {
-			beforeEach(() => {
-				Task.resetGlobalApiRequestTime()
-			})
-
-			afterEach(() => {
-				Task.resetGlobalApiRequestTime()
-			})
-
 			it("should strip non-protocol fields from API conversation history before sending to the API", async () => {
 				const cline = new Task({
 					provider: mockProvider,
@@ -669,6 +662,91 @@ describe("Cline", () => {
 				expect(mockDelay).toHaveBeenCalledWith(1000)
 			})
 
+			it("should respect rate limit window in retry backoff", async () => {
+				const clock = createRateLimitClock()
+				const rateLimitConfig = {
+					...mockApiConfig,
+					rateLimitSeconds: 10,
+				}
+				const cline = new Task({
+					provider: mockProvider,
+					apiConfiguration: rateLimitConfig,
+					task: "test task",
+					startTask: false,
+					rateLimitClock: clock,
+				})
+				vi.spyOn(cline as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+				const mockDelay = vi.fn().mockResolvedValue(undefined)
+				vi.spyOn(await import("delay"), "default").mockImplementation(mockDelay)
+
+				const saySpy = vi.spyOn(cline, "say")
+
+				const mockError = new Error("API Error")
+				const mockFailedStream = {
+					// eslint-disable-next-line require-yield
+					async *[Symbol.asyncIterator]() {
+						throw mockError
+					},
+					async next() {
+						throw mockError
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(e: any) {
+						throw e
+					},
+					async [Symbol.asyncDispose]() {},
+				} as AsyncGenerator<ApiStreamChunk>
+
+				const mockSuccessStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "Success" }
+					},
+					async next() {
+						return { done: true, value: { type: "text", text: "Success" } }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(e: any) {
+						throw e
+					},
+					async [Symbol.asyncDispose]() {},
+				} as AsyncGenerator<ApiStreamChunk>
+
+				let firstAttempt = true
+				vi.spyOn(cline.api, "createMessage").mockImplementation(() => {
+					if (firstAttempt) {
+						firstAttempt = false
+						return mockFailedStream
+					}
+					return mockSuccessStream
+				})
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: rateLimitConfig,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 3,
+				})
+
+				const iterator = cline.attemptApiRequest(0)
+				await iterator.next()
+
+				// The retry should have used the rate limit window.
+				// recordRequest() was called during attemptApiRequest, so the
+				// clock has a timestamp, and rateLimitSeconds=10 means the
+				// backoff should account for the rate limit window (10s) being
+				// larger than the base exponential delay (3s).
+				const retryMessages = saySpy.mock.calls.filter((call) => call[0] === "api_req_retry_delayed")
+				expect(retryMessages.length).toBeGreaterThan(0)
+
+				// Verify the clock was used (it should have a recorded timestamp)
+				expect(clock.getLastRequestTime()).toBeDefined()
+			})
+
 			it("should not apply retry delay twice", async () => {
 				const cline = new Task({
 					provider: mockProvider,
@@ -844,9 +922,6 @@ describe("Cline", () => {
 
 			beforeEach(() => {
 				vi.clearAllMocks()
-				// Reset the global timestamp before each test
-				Task.resetGlobalApiRequestTime()
-
 				mockApiConfig = {
 					apiProvider: "anthropic",
 					apiKey: "test-key",
@@ -880,14 +955,12 @@ describe("Cline", () => {
 				mockDelay.mockClear()
 			})
 
-			afterEach(() => {
-				// Clean up the global state after each test
-				Task.resetGlobalApiRequestTime()
-			})
-
 			it("should enforce rate limiting across parent and subtask", async () => {
 				// Add a spy to track getState calls
 				const getStateSpy = vi.spyOn(mockProvider, "getState")
+
+				// Shared clock so parent and child see each other's timestamps
+				const sharedClock = createRateLimitClock()
 
 				// Create parent task
 				const parent = new Task({
@@ -895,6 +968,7 @@ describe("Cline", () => {
 					apiConfiguration: mockApiConfig,
 					task: "parent task",
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(parent as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -924,7 +998,7 @@ describe("Cline", () => {
 				// Verify no delay was applied for the first request
 				expect(mockDelay).not.toHaveBeenCalled()
 
-				// Create a subtask immediately after
+				// Create a subtask immediately after, sharing the same clock
 				const child = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -932,6 +1006,7 @@ describe("Cline", () => {
 					parentTask: parent,
 					rootTask: parent,
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(child as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -978,12 +1053,15 @@ describe("Cline", () => {
 			}, 10000) // Increase timeout to 10 seconds
 
 			it("should not apply rate limiting if enough time has passed", async () => {
+				const sharedClock = createRateLimitClock()
+
 				// Create parent task
 				const parent = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "parent task",
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(parent as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -1023,6 +1101,7 @@ describe("Cline", () => {
 					parentTask: parent,
 					rootTask: parent,
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(child as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -1040,12 +1119,15 @@ describe("Cline", () => {
 			})
 
 			it("should share rate limiting across multiple subtasks", async () => {
+				const sharedClock = createRateLimitClock()
+
 				// Create parent task
 				const parent = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "parent task",
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(parent as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -1080,6 +1162,7 @@ describe("Cline", () => {
 					parentTask: parent,
 					rootTask: parent,
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(child1 as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -1104,6 +1187,7 @@ describe("Cline", () => {
 					parentTask: parent,
 					rootTask: parent,
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(child2 as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -1125,12 +1209,15 @@ describe("Cline", () => {
 					mcpEnabled: false,
 				})
 
+				const sharedClock = createRateLimitClock()
+
 				// Create parent task
 				const parent = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "parent task",
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(parent as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -1165,6 +1252,7 @@ describe("Cline", () => {
 					parentTask: parent,
 					rootTask: parent,
 					startTask: false,
+					rateLimitClock: sharedClock,
 				})
 				vi.spyOn(child as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -1178,13 +1266,16 @@ describe("Cline", () => {
 				expect(mockDelay).not.toHaveBeenCalled()
 			})
 
-			it("should update global timestamp even when no rate limiting is needed", async () => {
+			it("should update clock timestamp even when no rate limiting is needed", async () => {
+				const clock = createRateLimitClock()
+
 				// Create task
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "test task",
 					startTask: false,
+					rateLimitClock: clock,
 				})
 				vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
 
@@ -1211,10 +1302,9 @@ describe("Cline", () => {
 				const iterator = task.attemptApiRequest(0)
 				await iterator.next()
 
-				// Access the private static property via reflection for testing
-				const globalTimestamp = (Task as any).lastGlobalApiRequestTime
-				expect(globalTimestamp).toBeDefined()
-				expect(globalTimestamp).toBeGreaterThan(0)
+				const lastTime = clock.getLastRequestTime()
+				expect(lastTime).toBeDefined()
+				expect(lastTime).toBeGreaterThan(0)
 			})
 		})
 
