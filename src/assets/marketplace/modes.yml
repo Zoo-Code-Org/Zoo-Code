@@ -4405,7 +4405,7 @@ items:
         //@ts-ignore spawnSync really does exist
         import { spawnSync } from "child_process"
 
-        export default defineCustomTool({
+        export const test = defineCustomTool({
             name: "test",
             description: "Executes npm test",
             parameters: z.object({
@@ -4414,6 +4414,18 @@ items:
                 //@ts-ignore cwd really does exist
                 const basePath = context.task.cwd;
                 return exec('npm', ['test'], basePath, context);
+            }
+        })
+
+        export const build = defineCustomTool({
+            name: "build",
+            description: "Executes npm run build",
+            parameters: z.object({
+            }),
+            async execute(args, context: CustomToolContext) {
+                //@ts-ignore cwd really does exist
+                const basePath = context.task.cwd;
+                return exec('npm', ['run', 'build'], basePath, context);
             }
         })
 
