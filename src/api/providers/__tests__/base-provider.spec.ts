@@ -31,6 +31,22 @@ class TestProvider extends BaseProvider {
 	public testConvertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
 		return this.convertToolsForOpenAI(tools)
 	}
+
+	// Expose protected abort methods for testing
+	public testCreateAbortSignal() {
+		return this.createAbortSignal()
+	}
+	public testAbortAndCleanup() {
+		this.abortAndCleanup()
+	}
+	public testGetController() {
+		return (this as any)._abortController as AbortController | undefined
+	}
+
+	// Expose protected countTokens for testing
+	public testCountTokens(content: Anthropic.Messages.ContentBlockParam[]): Promise<number> {
+		return this.countTokens(content)
+	}
 }
 
 describe("BaseProvider", () => {
@@ -278,6 +294,52 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolsForOpenAI(tools)
 
 			expect(result?.[0]).toEqual(tools[0])
+		})
+	})
+
+	describe("countTokens", () => {
+		it("should return 0 for empty content", async () => {
+			const result = await provider.testCountTokens([])
+			expect(result).toBe(0)
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("should create an AbortController and return its signal", () => {
+			const signal = provider.testCreateAbortSignal()
+			expect(signal).toBeInstanceOf(AbortSignal)
+			expect(signal.aborted).toBe(false)
+			expect(provider.testGetController()).toBeDefined()
+		})
+
+		it("should abort and clean up the controller", () => {
+			const signal = provider.testCreateAbortSignal()
+			provider.testAbortAndCleanup()
+			expect(signal.aborted).toBe(true)
+			expect(provider.testGetController()).toBeUndefined()
+		})
+
+		it("should be safe to call abortAndCleanup without a controller", () => {
+			expect(() => provider.testAbortAndCleanup()).not.toThrow()
+		})
+
+		it("public abort() should abort the current signal", () => {
+			const signal = provider.testCreateAbortSignal()
+			provider.abort()
+			expect(signal.aborted).toBe(true)
+		})
+
+		it("public abort() should be safe when no controller exists", () => {
+			expect(() => provider.abort()).not.toThrow()
+		})
+
+		it("should abort previous signal when creating a new one", () => {
+			const signal1 = provider.testCreateAbortSignal()
+			expect(signal1.aborted).toBe(false)
+
+			const signal2 = provider.testCreateAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
 		})
 	})
 })

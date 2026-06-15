@@ -305,6 +305,7 @@ describe("MiniMaxHandler", () => {
 					messages: expect.any(Array),
 					stream: true,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -324,6 +325,7 @@ describe("MiniMaxHandler", () => {
 				expect.objectContaining({
 					temperature: 1,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -478,6 +480,126 @@ describe("MiniMaxHandler", () => {
 		it("should correctly configure MiniMax-M2 model properties with updated context window", () => {
 			const model = minimaxModels["MiniMax-M2"]
 			expect(model.contextWindow).toBe(204_800)
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		beforeEach(() => {
+			handler = new MiniMaxHandler({ minimaxApiKey: "test-minimax-api-key" })
+		})
+
+		it("abort() should not throw when no controller exists", () => {
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			mockCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true }
+					},
+				}),
+			})
+
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+			const gen = handler.createMessage("system", [])
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			mockCreate.mockResolvedValueOnce({
+				content: [{ type: "text", text: "test" }],
+			})
+
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+			await handler.completePrompt("test")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should trigger abortAndCleanup on early close of createMessage generator", async () => {
+			mockCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: () => ({
+					next: vitest
+						.fn()
+						.mockResolvedValueOnce({
+							done: false,
+							value: { type: "text", text: "chunk" },
+						})
+						.mockResolvedValueOnce({
+							done: false,
+							value: { type: "text", text: "chunk2" },
+						})
+						.mockResolvedValueOnce({ done: true }),
+				}),
+			})
+
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+			const gen = handler.createMessage("system", [])
+			await gen.next() // Get first chunk
+			await gen.return(undefined) // Early close triggers finally
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
+		})
+	})
+
+	describe("Cost calculation", () => {
+		beforeEach(() => {
+			handler = new MiniMaxHandler({ minimaxApiKey: "test-minimax-api-key" })
+		})
+
+		it("should yield final cost when stream has token usage", async () => {
+			mockCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: () => ({
+					next: vitest
+						.fn()
+						.mockResolvedValueOnce({
+							done: false,
+							value: {
+								type: "message_start",
+								message: {
+									usage: {
+										input_tokens: 100,
+										output_tokens: 0,
+										cache_creation_input_tokens: 50,
+										cache_read_input_tokens: 10,
+									},
+								},
+							},
+						})
+						.mockResolvedValueOnce({
+							done: false,
+							value: {
+								type: "message_delta",
+								usage: { output_tokens: 200 },
+							},
+						})
+						.mockResolvedValueOnce({ done: true }),
+				}),
+			})
+
+			const stream = handler.createMessage("system", [])
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const usageChunks = chunks.filter((c) => c.type === "usage")
+			// Should have usage chunks: one from message_start, possibly from message_delta, and final cost
+			expect(usageChunks.length).toBeGreaterThanOrEqual(2)
+			const finalUsage = usageChunks[usageChunks.length - 1]
+			expect(finalUsage).toHaveProperty("totalCost")
+			expect(finalUsage.inputTokens).toBe(0)
+			expect(finalUsage.outputTokens).toBe(0)
 		})
 	})
 })

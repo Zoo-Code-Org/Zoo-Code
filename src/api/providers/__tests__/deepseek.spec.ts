@@ -455,6 +455,17 @@ describe("DeepSeekHandler", () => {
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
 		})
+
+		it("should handle API errors in createMessage", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("DeepSeek API error"))
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// should throw
+				}
+			}).rejects.toThrow()
+		})
 	})
 
 	describe("processUsageMetrics", () => {
@@ -563,7 +574,7 @@ describe("DeepSeekHandler", () => {
 				expect.objectContaining({
 					thinking: { type: "enabled" },
 				}),
-				{}, // Empty path options for non-Azure URLs
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.reasoning_effort).toBeUndefined()
@@ -586,7 +597,7 @@ describe("DeepSeekHandler", () => {
 					reasoning_effort: "high",
 					max_completion_tokens: 200_000,
 				}),
-				{},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -623,7 +634,7 @@ describe("DeepSeekHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "max",
 				}),
-				{},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -708,6 +719,69 @@ describe("DeepSeekHandler", () => {
 			const toolCallChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
 			expect(toolCallChunks.length).toBeGreaterThan(0)
 			expect(toolCallChunks[0].name).toBe("get_weather")
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+			mockCreate.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const gen = handler.createMessage("", messages)
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+
+			mockCreate.mockResolvedValue({
+				choices: [{ message: { content: "response" } }],
+			})
+
+			await handler.completePrompt("Test prompt")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("abort() should not throw during createMessage streaming", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+			mockCreate.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const gen = handler.createMessage("", messages)
+			await gen.next()
+			expect(() => handler.abort()).not.toThrow()
+			for await (const _ of gen) {
+				// drain
+			}
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
 		})
 	})
 })

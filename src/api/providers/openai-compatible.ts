@@ -155,42 +155,50 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const model = this.getModel()
-		const languageModel = this.getLanguageModel()
+		const signal = this.createAbortSignal()
+		try {
+			const model = this.getModel()
+			const languageModel = this.getLanguageModel()
 
-		// Convert messages to AI SDK format
-		const aiSdkMessages = convertToAiSdkMessages(messages)
+			// Convert messages to AI SDK format
+			const aiSdkMessages = convertToAiSdkMessages(messages)
 
-		// Convert tools to OpenAI format first, then to AI SDK format
-		const openAiTools = this.convertToolsForOpenAI(metadata?.tools)
-		const aiSdkTools = convertToolsForAiSdk(openAiTools) as ToolSet | undefined
+			// Convert tools to OpenAI format first, then to AI SDK format
+			const openAiTools = this.convertToolsForOpenAI(metadata?.tools)
+			const aiSdkTools = convertToolsForAiSdk(openAiTools) as ToolSet | undefined
 
-		// Build the request options
-		const requestOptions: Parameters<typeof streamText>[0] = {
-			model: languageModel,
-			system: systemPrompt,
-			messages: aiSdkMessages,
-			temperature: model.temperature ?? this.config.temperature ?? 0,
-			maxOutputTokens: this.getMaxOutputTokens(),
-			tools: aiSdkTools,
-			toolChoice: this.mapToolChoice(metadata?.tool_choice),
-		}
-
-		// Use streamText for streaming responses
-		const result = streamText(requestOptions)
-
-		// Process the full stream to get all events
-		for await (const part of result.fullStream) {
-			// Use the processAiSdkStreamPart utility to convert stream parts
-			for (const chunk of processAiSdkStreamPart(part)) {
-				yield chunk
+			// Build the request options
+			const requestOptions: Parameters<typeof streamText>[0] = {
+				model: languageModel,
+				system: systemPrompt,
+				messages: aiSdkMessages,
+				temperature: model.temperature ?? this.config.temperature ?? 0,
+				maxOutputTokens: this.getMaxOutputTokens(),
+				tools: aiSdkTools,
+				toolChoice: this.mapToolChoice(metadata?.tool_choice),
+				abortSignal: signal,
 			}
-		}
 
-		// Yield usage metrics at the end
-		const usage = await result.usage
-		if (usage) {
-			yield this.processUsageMetrics(usage)
+			// Use streamText for streaming responses
+			const result = streamText(requestOptions)
+
+			// Process the full stream to get all events
+			for await (const part of result.fullStream) {
+				// Use the processAiSdkStreamPart utility to convert stream parts
+				for (const chunk of processAiSdkStreamPart(part)) {
+					yield chunk
+				}
+			}
+
+			// Guard: skip usage if aborted
+			if (!signal.aborted) {
+				const usage = await result.usage
+				if (usage) {
+					yield this.processUsageMetrics(usage)
+				}
+			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -198,15 +206,21 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	 * Complete a prompt using the AI SDK generateText.
 	 */
 	async completePrompt(prompt: string): Promise<string> {
-		const languageModel = this.getLanguageModel()
+		const signal = this.createAbortSignal()
+		try {
+			const languageModel = this.getLanguageModel()
 
-		const { text } = await generateText({
-			model: languageModel,
-			prompt,
-			maxOutputTokens: this.getMaxOutputTokens(),
-			temperature: this.config.temperature ?? 0,
-		})
+			const { text } = await generateText({
+				model: languageModel,
+				prompt,
+				maxOutputTokens: this.getMaxOutputTokens(),
+				temperature: this.config.temperature ?? 0,
+				abortSignal: signal,
+			})
 
-		return text
+			return text
+		} finally {
+			this.abortAndCleanup()
+		}
 	}
 }

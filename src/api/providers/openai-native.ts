@@ -57,8 +57,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	private lastResponseOutput: any[] | undefined
 	// Last top-level response id from Responses API (for troubleshooting)
 	private lastResponseId: string | undefined
-	// Abort controller for cancelling ongoing requests
-	private abortController?: AbortController
 
 	// Event types handled by the shared event processor to avoid duplication
 	private readonly coreHandledEventTypes = new Set<string>([
@@ -411,8 +409,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		systemPrompt?: string,
 		messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
+		const signal = this.createAbortSignal()
 
 		// Build per-request headers using taskId when available, falling back to sessionId
 		const taskId = metadata?.taskId
@@ -426,7 +423,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		try {
 			// Use the official SDK with per-request headers
 			const stream = (await (this.client as any).responses.create(requestBody, {
-				signal: this.abortController.signal,
+				signal,
 				headers: requestHeaders,
 			})) as AsyncIterable<any>
 
@@ -438,7 +435,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			for await (const event of stream) {
 				// Check if request was aborted
-				if (this.abortController.signal.aborted) {
+				if (signal.aborted) {
 					break
 				}
 
@@ -447,10 +444,14 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				}
 			}
 		} catch (sdkErr: any) {
-			// For errors, fallback to manual SSE via fetch
-			yield* this.makeResponsesApiRequest(requestBody, model, metadata, systemPrompt, messages)
+			// Preserve user cancellation; do not spawn fallback request on abort.
+			if (signal.aborted || sdkErr?.name === "AbortError") {
+				throw sdkErr
+			}
+			// For non-abort errors, fallback to manual SSE via fetch using same signal.
+			yield* this.makeResponsesApiRequest(requestBody, model, metadata, systemPrompt, messages, signal)
 		} finally {
-			this.abortController = undefined
+			this.abortAndCleanup()
 		}
 	}
 
@@ -554,13 +555,13 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		metadata?: ApiHandlerCreateMessageMetadata,
 		systemPrompt?: string,
 		messages?: Anthropic.Messages.MessageParam[],
+		signal?: AbortSignal,
 	): ApiStream {
 		const apiKey = this.options.openAiNativeApiKey ?? "not-provided"
 		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
 		const url = `${baseUrl}/v1/responses`
 
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
+		signal = signal || this.createAbortSignal()
 
 		// Build per-request headers using taskId when available, falling back to sessionId
 		const taskId = metadata?.taskId
@@ -577,7 +578,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 					"User-Agent": userAgent,
 				},
 				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal,
+				signal,
 			})
 
 			if (!response.ok) {
@@ -641,7 +642,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 
 			// Handle streaming response
-			yield* this.handleStreamResponse(response.body, model)
+			yield* this.handleStreamResponse(response.body, model, signal)
 		} catch (error) {
 			const model = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
@@ -659,7 +660,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// Handle non-Error objects
 			throw new Error(`Unexpected error connecting to Responses API`)
 		} finally {
-			this.abortController = undefined
+			this.abortAndCleanup()
 		}
 	}
 
@@ -670,7 +671,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 * and yields structured data chunks (`ApiStream`). It handles a wide variety of event types,
 	 * including text deltas, reasoning, usage data, and various status/tool events.
 	 */
-	private async *handleStreamResponse(body: ReadableStream<Uint8Array>, model: OpenAiNativeModel): ApiStream {
+	private async *handleStreamResponse(
+		body: ReadableStream<Uint8Array>,
+		model: OpenAiNativeModel,
+		signal: AbortSignal,
+	): ApiStream {
 		const reader = body.getReader()
 		const decoder = new TextDecoder()
 		let buffer = ""
@@ -681,7 +686,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		try {
 			while (true) {
 				// Check if request was aborted
-				if (this.abortController?.signal.aborted) {
+				if (signal.aborted) {
 					break
 				}
 
@@ -1484,8 +1489,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
+		const signal = this.createAbortSignal()
 
 		try {
 			const model = this.getModel()
@@ -1547,7 +1551,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			// Make the non-streaming request
 			const response = await (this.client as any).responses.create(requestBody, {
-				signal: this.abortController.signal,
+				signal,
 			})
 
 			// Extract text from the response
@@ -1580,7 +1584,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			}
 			throw error
 		} finally {
-			this.abortController = undefined
+			this.abortAndCleanup()
 		}
 	}
 }

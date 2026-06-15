@@ -223,6 +223,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				}) as const,
 		)
 
+		const signal = this.createAbortSignal()
 		try {
 			// Build options object conditionally
 			const chatOptions: OllamaChatOptions = {
@@ -243,6 +244,16 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				tools: this.convertToolsToOllama(metadata?.tools),
 			})
 
+			// Link provider signal to Ollama stream for proper HTTP cancellation.
+			// The Ollama SDK doesn't accept signal in ChatRequest, but the returned
+			// AbortableAsyncIterator wraps an internal AbortController whose abort()
+			// cancels the underlying fetch.
+			const onAbort = () => stream.abort()
+			signal.addEventListener("abort", onAbort, { once: true })
+			if (signal.aborted) {
+				stream.abort()
+			}
+
 			let totalInputTokens = 0
 			let totalOutputTokens = 0
 			// Track tool calls across chunks (Ollama may send complete tool_calls in final chunk)
@@ -252,6 +263,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 			try {
 				for await (const chunk of stream) {
+					if (signal.aborted) break
 					if (typeof chunk.message.content === "string" && chunk.message.content.length > 0) {
 						// Process content through matcher for reasoning detection
 						for (const matcherChunk of matcher.update(chunk.message.content)) {
@@ -310,6 +322,8 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			} catch (streamError: any) {
 				console.error("Error processing Ollama stream:", streamError)
 				throw new Error(`Ollama stream processing error: ${streamError.message || "Unknown error"}`)
+			} finally {
+				signal.removeEventListener("abort", onAbort)
 			}
 		} catch (error: any) {
 			// Enhance error reporting
@@ -328,6 +342,8 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 			console.error(`Ollama API error (${statusCode || "unknown"}): ${errorMessage}`)
 			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -345,6 +361,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
+		const signal = this.createAbortSignal()
 		try {
 			const client = this.ensureClient()
 			const { id: modelId } = await this.fetchModel()
@@ -360,19 +377,42 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				chatOptions.num_ctx = this.options.ollamaNumCtx
 			}
 
-			const response = await client.chat({
+			// Use streaming so we can get an AbortableAsyncIterator for signal-based cancellation.
+			// The Ollama SDK (v0.5.17) ChatRequest doesn't support a signal option, but the
+			// AbortableAsyncIterator returned from streamed chat() has an abort() method.
+			const stream = await client.chat({
 				model: modelId,
 				messages: [{ role: "user", content: prompt }],
-				stream: false,
+				stream: true,
 				options: chatOptions,
 			})
 
-			return response.message?.content || ""
+			const onAbort = () => stream.abort()
+			signal.addEventListener("abort", onAbort, { once: true })
+			if (signal.aborted) {
+				stream.abort()
+			}
+
+			let result = ""
+			try {
+				for await (const chunk of stream) {
+					if (signal.aborted) break
+					if (typeof chunk.message.content === "string" && chunk.message.content.length > 0) {
+						result += chunk.message.content
+					}
+				}
+			} finally {
+				signal.removeEventListener("abort", onAbort)
+			}
+
+			return result
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new Error(`Ollama completion error: ${error.message}`)
 			}
 			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

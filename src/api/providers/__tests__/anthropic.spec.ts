@@ -428,20 +428,77 @@ describe("AnthropicHandler", () => {
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 		})
+
+		it("should pass signal for models outside the prompt-caching list", async () => {
+			// Mock getModel to return an ID not in the createMessage outer switch,
+			// so it hits the default (non-caching) path which passes { signal }.
+			const modelInfo = handler.getModel()
+			vitest.spyOn(handler, "getModel").mockReturnValue({
+				...modelInfo,
+				id: "non-cached-model",
+			} as any)
+
+			const stream = handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			// Verify messages.create was called with { signal } (no prompt-caching headers)
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions).toEqual(expect.objectContaining({ signal: expect.any(AbortSignal) }))
+			expect(requestOptions?.headers).toBeUndefined()
+		})
+
+		it("should pass signal when inner prompt-caching switch hits default", async () => {
+			// Mock getModel to return the coverage-inner-default model, which
+			// is in the outer prompt-caching switch but NOT in the inner
+			// prompt-caching beta switch, so the inner default returns { signal }.
+			const modelInfo = handler.getModel()
+			vitest.spyOn(handler, "getModel").mockReturnValue({
+				...modelInfo,
+				id: "coverage-inner-default",
+			} as any)
+
+			const stream = handler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			// Verify messages.create was called with { signal } and no
+			// prompt-caching beta header (the inner switch default path).
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestOptions).toEqual(expect.objectContaining({ signal: expect.any(AbortSignal) }))
+			expect(requestOptions?.headers).toBeUndefined()
+		})
 	})
 
 	describe("completePrompt", () => {
 		it("should complete prompt successfully", async () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: mockOptions.apiModelId,
-				messages: [{ role: "user", content: "Test prompt" }],
-				max_tokens: 8192,
-				temperature: 0,
-				thinking: undefined,
-				stream: false,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "Test prompt" }],
+					max_tokens: 8192,
+					temperature: 0,
+					thinking: undefined,
+					stream: false,
+				},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 
 		it("should handle API errors", async () => {
@@ -1055,6 +1112,78 @@ describe("AnthropicHandler", () => {
 				name: undefined,
 				arguments: '"London"}',
 			})
+		})
+	})
+
+	describe("content_block_start and content_block_delta coverage", () => {
+		it("should handle thinking content_block_start", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 1 } } }
+					yield {
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "let me think" },
+					}
+					yield { type: "message_stop" }
+				},
+			}))
+
+			const stream = handler.createMessage("sys", [{ role: "user", content: "hi" }])
+			const chunks: any[] = []
+			for await (const c of stream) {
+				chunks.push(c)
+			}
+			const reasoning = chunks.filter((c) => c.type === "reasoning")
+			expect(reasoning.some((c) => c.text === "let me think")).toBe(true)
+		})
+
+		it("should insert newline for second text content_block_start", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 1 } } }
+					yield {
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "text", text: "first" },
+					}
+					yield {
+						type: "content_block_start",
+						index: 1,
+						content_block: { type: "text", text: "" },
+					}
+					yield { type: "message_stop" }
+				},
+			}))
+
+			const stream = handler.createMessage("sys", [{ role: "user", content: "hi" }])
+			const chunks: any[] = []
+			for await (const c of stream) {
+				chunks.push(c)
+			}
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks.some((c) => c.text === "\n")).toBe(true)
+		})
+
+		it("should handle thinking_delta", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 1 } } }
+					yield {
+						type: "content_block_delta",
+						delta: { type: "thinking_delta", thinking: "hmm" },
+					}
+					yield { type: "message_stop" }
+				},
+			}))
+
+			const stream = handler.createMessage("sys", [{ role: "user", content: "hi" }])
+			const chunks: any[] = []
+			for await (const c of stream) {
+				chunks.push(c)
+			}
+			const reasoning = chunks.filter((c) => c.type === "reasoning")
+			expect(reasoning.some((c) => c.text === "hmm")).toBe(true)
 		})
 	})
 })

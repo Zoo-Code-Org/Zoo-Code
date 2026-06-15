@@ -89,76 +89,92 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const model = this.getModel()
-
-		// Convert directly from Anthropic format to Responses API input format
-		const input = convertToResponsesApiInput(messages)
-		const responseTools = this.mapResponseTools(metadata?.tools)
-
-		// Build request options
-		const requestBody: Record<string, any> = {
-			model: model.id,
-			instructions: systemPrompt,
-			input: input,
-			stream: true,
-			store: false, // Don't store responses server-side for privacy
-			include: ["reasoning.encrypted_content"],
-		}
-
-		if (model.maxTokens) {
-			requestBody.max_output_tokens = model.maxTokens
-		}
-
-		if (model.temperature !== undefined) {
-			requestBody.temperature = model.temperature
-		}
-
-		if (responseTools) {
-			requestBody.tools = responseTools
-			// Cast tool_choice since metadata uses Chat Completions types but Responses API has its own type
-			requestBody.tool_choice = (metadata?.tool_choice ?? "auto") as any
-			requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
-		}
-
-		// Pass reasoning effort for models that support it (e.g., mini models)
-		if (model.reasoning) {
-			requestBody.reasoning = model.reasoning
-		}
-
-		let stream: AsyncIterable<any>
+		const signal = this.createAbortSignal()
 		try {
-			stream = (await this.client.responses.create({
-				...requestBody,
-				stream: true,
-			} as any)) as unknown as AsyncIterable<any>
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
-			TelemetryService.instance.captureException(apiError)
-			throw handleOpenAIError(error, this.providerName)
-		}
+			const model = this.getModel()
 
-		const normalizeUsage = createUsageNormalizer()
-		yield* processResponsesApiStream(stream, normalizeUsage)
+			// Convert directly from Anthropic format to Responses API input format
+			const input = convertToResponsesApiInput(messages)
+			const responseTools = this.mapResponseTools(metadata?.tools)
+
+			// Build request options
+			const requestBody: Record<string, any> = {
+				model: model.id,
+				instructions: systemPrompt,
+				input: input,
+				stream: true,
+				store: false, // Don't store responses server-side for privacy
+				include: ["reasoning.encrypted_content"],
+			}
+
+			if (model.maxTokens) {
+				requestBody.max_output_tokens = model.maxTokens
+			}
+
+			if (model.temperature !== undefined) {
+				requestBody.temperature = model.temperature
+			}
+
+			if (responseTools) {
+				requestBody.tools = responseTools
+				// Cast tool_choice since metadata uses Chat Completions types but Responses API has its own type
+				requestBody.tool_choice = (metadata?.tool_choice ?? "auto") as any
+				requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
+			}
+
+			// Pass reasoning effort for models that support it (e.g., mini models)
+			if (model.reasoning) {
+				requestBody.reasoning = model.reasoning
+			}
+
+			let stream: AsyncIterable<any>
+			try {
+				stream = (await this.client.responses.create(
+					{
+						...requestBody,
+						stream: true,
+					} as any,
+					{ signal },
+				)) as unknown as AsyncIterable<any>
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
+				TelemetryService.instance.captureException(apiError)
+				throw handleOpenAIError(error, this.providerName)
+			}
+
+			const normalizeUsage = createUsageNormalizer()
+			yield* processResponsesApiStream(stream, normalizeUsage)
+		} finally {
+			this.abortAndCleanup()
+		}
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		const model = this.getModel()
-
+		const signal = this.createAbortSignal()
 		try {
-			const response = await this.client.responses.create({
-				model: model.id,
-				input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-				store: false,
-			})
+			const model = this.getModel()
 
-			// output_text is a convenience field on the Responses API response
-			return response.output_text || ""
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "completePrompt")
-			TelemetryService.instance.captureException(apiError)
-			throw handleOpenAIError(error, this.providerName)
+			try {
+				const response = await this.client.responses.create(
+					{
+						model: model.id,
+						input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
+						store: false,
+					},
+					{ signal },
+				)
+
+				// output_text is a convenience field on the Responses API response
+				return response.output_text || ""
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "completePrompt")
+				TelemetryService.instance.captureException(apiError)
+				throw handleOpenAIError(error, this.providerName)
+			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

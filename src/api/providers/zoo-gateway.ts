@@ -179,136 +179,147 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		this.ensureAuthenticated()
-
-		const { id: modelId, info } = await this.fetchModel()
-
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOpenAiMessages(messages),
-		]
-
-		// Apply prompt caching for models that support it
-		// Zoo Gateway serves the same models as Vercel AI Gateway, so caching support is identical
-		if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
-			addCacheBreakpoints(systemPrompt, openAiMessages)
-		}
-
-		// Build request headers with enrichment metadata
-		const requestHeaders: Record<string, string> = {}
-		if (metadata?.taskId) {
-			requestHeaders["X-Zoo-Task-ID"] = metadata.taskId
-		}
-		if (metadata?.mode) {
-			requestHeaders["X-Zoo-Mode"] = metadata.mode
-		}
-
-		const body: OpenAI.Chat.ChatCompletionCreateParams = {
-			model: modelId,
-			messages: openAiMessages,
-			temperature: this.supportsTemperature(modelId)
-				? (this.options.modelTemperature ?? ZOO_GATEWAY_DEFAULT_TEMPERATURE)
-				: undefined,
-			max_completion_tokens: info.maxTokens,
-			stream: true,
-			stream_options: { include_usage: true },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
-		}
-
+		const signal = this.createAbortSignal()
 		try {
-			const completion = await this.client.chat.completions.create(body, {
-				headers: requestHeaders,
-			})
+			this.ensureAuthenticated()
 
-			for await (const chunk of completion) {
-				// Once the gateway starts streaming the HTTP status is already 200, so it
-				// reports upstream failures (e.g. provider rate limits) as an in-band error
-				// chunk. Surface it so the user sees the real reason instead of an empty reply.
-				if ("error" in chunk && chunk.error) {
-					throw toGatewayStreamError(chunk.error)
-				}
+			const { id: modelId, info } = await this.fetchModel()
 
-				const delta = chunk.choices[0]?.delta
-				if (delta?.content) {
-					yield {
-						type: "text",
-						text: delta.content,
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages),
+			]
+
+			// Apply prompt caching for models that support it
+			// Zoo Gateway serves the same models as Vercel AI Gateway, so caching support is identical
+			if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
+				addCacheBreakpoints(systemPrompt, openAiMessages)
+			}
+
+			// Build request headers with enrichment metadata
+			const requestHeaders: Record<string, string> = {}
+			if (metadata?.taskId) {
+				requestHeaders["X-Zoo-Task-ID"] = metadata.taskId
+			}
+			if (metadata?.mode) {
+				requestHeaders["X-Zoo-Mode"] = metadata.mode
+			}
+
+			const body: OpenAI.Chat.ChatCompletionCreateParams = {
+				model: modelId,
+				messages: openAiMessages,
+				temperature: this.supportsTemperature(modelId)
+					? (this.options.modelTemperature ?? ZOO_GATEWAY_DEFAULT_TEMPERATURE)
+					: undefined,
+				max_completion_tokens: info.maxTokens,
+				stream: true,
+				stream_options: { include_usage: true },
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			}
+
+			try {
+				const completion = await this.client.chat.completions.create(body, {
+					headers: requestHeaders,
+					signal,
+				})
+
+				for await (const chunk of completion) {
+					// Once the gateway starts streaming the HTTP status is already 200, so it
+					// reports upstream failures (e.g. provider rate limits) as an in-band error
+					// chunk. Surface it so the user sees the real reason instead of an empty reply.
+					if ("error" in chunk && chunk.error) {
+						throw toGatewayStreamError(chunk.error)
 					}
-				}
 
-				// Emit raw tool call chunks - NativeToolCallParser handles state management
-				if (delta?.tool_calls) {
-					for (const toolCall of delta.tool_calls) {
+					const delta = chunk.choices[0]?.delta
+					if (delta?.content) {
 						yield {
-							type: "tool_call_partial",
-							index: toolCall.index,
-							id: toolCall.id,
-							name: toolCall.function?.name,
-							arguments: toolCall.function?.arguments,
+							type: "text",
+							text: delta.content,
+						}
+					}
+
+					// Emit raw tool call chunks - NativeToolCallParser handles state management
+					if (delta?.tool_calls) {
+						for (const toolCall of delta.tool_calls) {
+							yield {
+								type: "tool_call_partial",
+								index: toolCall.index,
+								id: toolCall.id,
+								name: toolCall.function?.name,
+								arguments: toolCall.function?.arguments,
+							}
+						}
+					}
+
+					if (chunk.usage) {
+						const usage = chunk.usage as ZooGatewayUsage
+						yield {
+							type: "usage",
+							inputTokens: usage.prompt_tokens || 0,
+							outputTokens: usage.completion_tokens || 0,
+							cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+							cacheReadTokens: usage.prompt_tokens_details?.cached_tokens || undefined,
+							totalCost: usage.cost ?? 0,
 						}
 					}
 				}
-
-				if (chunk.usage) {
-					const usage = chunk.usage as ZooGatewayUsage
-					yield {
-						type: "usage",
-						inputTokens: usage.prompt_tokens || 0,
-						outputTokens: usage.completion_tokens || 0,
-						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-						cacheReadTokens: usage.prompt_tokens_details?.cached_tokens || undefined,
-						totalCost: usage.cost ?? 0,
-					}
+			} catch (error) {
+				try {
+					await surfaceGatewayApiError(error)
+				} catch (surfaceError) {
+					console.error(
+						"Failed to surface Zoo Gateway error:",
+						surfaceError instanceof Error ? surfaceError.message : surfaceError,
+					)
 				}
+				throw error
 			}
-		} catch (error) {
-			try {
-				await surfaceGatewayApiError(error)
-			} catch (surfaceError) {
-				console.error(
-					"Failed to surface Zoo Gateway error:",
-					surfaceError instanceof Error ? surfaceError.message : surfaceError,
-				)
-			}
-			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		this.ensureAuthenticated()
-
-		const { id: modelId, info } = await this.fetchModel()
-
+		const signal = this.createAbortSignal()
 		try {
-			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
-				model: modelId,
-				messages: [{ role: "user", content: prompt }],
-				stream: false,
-			}
+			this.ensureAuthenticated()
 
-			if (this.supportsTemperature(modelId)) {
-				requestOptions.temperature = this.options.modelTemperature ?? ZOO_GATEWAY_DEFAULT_TEMPERATURE
-			}
+			const { id: modelId, info } = await this.fetchModel()
 
-			requestOptions.max_completion_tokens = info.maxTokens
-
-			const response = await this.client.chat.completions.create(requestOptions)
-			return response.choices[0]?.message.content || ""
-		} catch (error) {
 			try {
-				await surfaceGatewayApiError(error)
-			} catch (surfaceError) {
-				console.error(
-					"Failed to surface Zoo Gateway error:",
-					surfaceError instanceof Error ? surfaceError.message : surfaceError,
-				)
+				const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
+					model: modelId,
+					messages: [{ role: "user", content: prompt }],
+					stream: false,
+				}
+
+				if (this.supportsTemperature(modelId)) {
+					requestOptions.temperature = this.options.modelTemperature ?? ZOO_GATEWAY_DEFAULT_TEMPERATURE
+				}
+
+				requestOptions.max_completion_tokens = info.maxTokens
+
+				const response = await this.client.chat.completions.create(requestOptions, { signal })
+				return response.choices[0]?.message.content || ""
+			} catch (error) {
+				try {
+					await surfaceGatewayApiError(error)
+				} catch (surfaceError) {
+					console.error(
+						"Failed to surface Zoo Gateway error:",
+						surfaceError instanceof Error ? surfaceError.message : surfaceError,
+					)
+				}
+				if (error instanceof Error) {
+					throw new Error(`Zoo Gateway completion error: ${error.message}`)
+				}
+				throw error
 			}
-			if (error instanceof Error) {
-				throw new Error(`Zoo Gateway completion error: ${error.message}`)
-			}
-			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

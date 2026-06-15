@@ -131,10 +131,11 @@ describe("GeminiHandler", () => {
 			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
 				model: GEMINI_MODEL_NAME,
 				contents: [{ role: "user", parts: [{ text: "Test prompt" }] }],
-				config: {
+				config: expect.objectContaining({
 					httpOptions: undefined,
 					temperature: 1,
-				},
+					abortSignal: expect.any(AbortSignal),
+				}),
 			})
 		})
 
@@ -155,6 +156,29 @@ describe("GeminiHandler", () => {
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+
+		it("should handle grounding metadata in completePrompt response", async () => {
+			// Mock response with grounding metadata
+			;(handler["client"].models.generateContent as any).mockResolvedValue({
+				text: "Main response",
+				candidates: [
+					{
+						groundingMetadata: {
+							groundingChunks: [{ web: { uri: "https://example.com" } }],
+						},
+					},
+				],
+			})
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toContain("Main response")
+		})
+
+		it("should handle non-Error thrown in completePrompt", async () => {
+			;(handler["client"].models.generateContent as any).mockRejectedValue("string error")
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toBe("string error")
 		})
 	})
 
@@ -222,6 +246,17 @@ describe("GeminiHandler", () => {
 	})
 
 	describe("calculateCost", () => {
+		it("should set cacheReadsPrice to 0 when it is undefined", () => {
+			const infoWithoutCachePrice: ModelInfo = {
+				...mockInfo,
+				cacheReadsPrice: undefined,
+			}
+			const cost = handler.calculateCost({ info: infoWithoutCachePrice, inputTokens: 1000, outputTokens: 1000 })
+			// Should still compute cost without cache reads
+			expect(cost).toBeDefined()
+			expect(cost).toBeGreaterThan(0)
+		})
+
 		// Mock ModelInfo based on gemini-1.5-flash-latest pricing (per 1M tokens)
 		// Removed 'id' and 'name' as they are not part of ModelInfo type directly
 		const mockInfo: ModelInfo = {
@@ -364,6 +399,82 @@ describe("GeminiHandler", () => {
 
 			// Telemetry should have been captured before the error was thrown
 			expect(mockCaptureException).toHaveBeenCalled()
+		})
+	})
+
+	describe("getThoughtSignature and getResponseId", () => {
+		it("should return undefined for getThoughtSignature before any request", () => {
+			expect(handler.getThoughtSignature()).toBeUndefined()
+		})
+
+		it("should return undefined for getResponseId before any request", () => {
+			expect(handler.getResponseId()).toBeUndefined()
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+			const mockClient = handler["client"] as any
+			mockClient.models.generateContentStream.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const gen = handler.createMessage("", messages)
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+
+			const mockClient = handler["client"] as any
+			mockClient.models.generateContent.mockResolvedValue({
+				candidates: [{ content: { parts: [{ text: "response" }] } }],
+			})
+
+			await handler.completePrompt("Test prompt")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("abort() should not throw during createMessage streaming", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+			const mockClient = handler["client"] as any
+			mockClient.models.generateContentStream.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const gen = handler.createMessage("", messages)
+			await gen.next()
+			expect(() => handler.abort()).not.toThrow()
+			for await (const _ of gen) {
+				// drain
+			}
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
 		})
 	})
 })

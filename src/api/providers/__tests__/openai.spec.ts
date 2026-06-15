@@ -688,7 +688,7 @@ describe("OpenAiHandler", () => {
 					model: mockOptions.openAiModelId,
 					messages: [{ role: "user", content: "Test prompt" }],
 				},
-				{},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -703,6 +703,11 @@ describe("OpenAiHandler", () => {
 			}))
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+
+		it("should handle handleOpenAIError wrapping of non-Error in completePrompt", async () => {
+			mockCreate.mockRejectedValueOnce("non-error rejection")
+			await expect(handler.completePrompt("Test prompt")).rejects.toThrow()
 		})
 	})
 
@@ -776,7 +781,7 @@ describe("OpenAiHandler", () => {
 					tool_choice: undefined,
 					parallel_tool_calls: true,
 				},
-				{ path: "/models/chat/completions" },
+				expect.objectContaining({ path: "/models/chat/completions", signal: expect.any(AbortSignal) }),
 			)
 
 			// Verify max_tokens is NOT included when not explicitly set
@@ -825,7 +830,7 @@ describe("OpenAiHandler", () => {
 					tool_choice: undefined,
 					parallel_tool_calls: true,
 				},
-				{ path: "/models/chat/completions" },
+				expect.objectContaining({ path: "/models/chat/completions", signal: expect.any(AbortSignal) }),
 			)
 
 			// Verify max_tokens is NOT included when not explicitly set
@@ -842,7 +847,7 @@ describe("OpenAiHandler", () => {
 					model: azureOptions.openAiModelId,
 					messages: [{ role: "user", content: "Test prompt" }],
 				},
-				{ path: "/models/chat/completions" },
+				expect.objectContaining({ path: "/models/chat/completions", signal: expect.any(AbortSignal) }),
 			)
 
 			// Verify max_tokens is NOT included when includeMaxTokens is not set
@@ -882,7 +887,7 @@ describe("OpenAiHandler", () => {
 					model: grokOptions.openAiModelId,
 					stream: true,
 				}),
-				{},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 
 			const mockCalls = mockCreate.mock.calls
@@ -941,7 +946,7 @@ describe("OpenAiHandler", () => {
 					// O3 models do not support deprecated max_tokens but do support max_completion_tokens
 					max_completion_tokens: 32000,
 				}),
-				{},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -1098,7 +1103,7 @@ describe("OpenAiHandler", () => {
 					reasoning_effort: "medium",
 					temperature: undefined,
 				}),
-				{},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 
 			// Verify max_tokens is NOT included
@@ -1142,7 +1147,7 @@ describe("OpenAiHandler", () => {
 					// O3 models do not support deprecated max_tokens but do support max_completion_tokens
 					max_completion_tokens: 65536, // Using default maxTokens from o3Options
 				}),
-				{},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 
 			// Verify stream is not set
@@ -1219,7 +1224,7 @@ describe("OpenAiHandler", () => {
 				expect.objectContaining({
 					temperature: undefined, // Temperature is not supported for O3 models
 				}),
-				{},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -1244,7 +1249,7 @@ describe("OpenAiHandler", () => {
 				expect.objectContaining({
 					model: "o3-mini",
 				}),
-				{ path: "/models/chat/completions" },
+				expect.objectContaining({ path: "/models/chat/completions", signal: expect.any(AbortSignal) }),
 			)
 
 			// Verify max_tokens is NOT included when includeMaxTokens is false
@@ -1274,8 +1279,144 @@ describe("OpenAiHandler", () => {
 					model: "o3-mini",
 					// O3 models do not support max_tokens
 				}),
-				{ path: "/models/chat/completions" },
+				expect.objectContaining({ path: "/models/chat/completions", signal: expect.any(AbortSignal) }),
 			)
+		})
+
+		it("should handle O4 model (routed to handleO3FamilyMessage)", async () => {
+			const o4Handler = new OpenAiHandler({
+				...o3Options,
+				openAiModelId: "o4-mini",
+				openAiStreamingEnabled: false,
+			})
+			const systemPrompt = "You are a helpful assistant."
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: "Hello!",
+				},
+			]
+
+			const stream = o4Handler.createMessage(systemPrompt, messages)
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			// O4 models use developer role (same as O3 family)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "o4-mini",
+					messages: [
+						{
+							role: "developer",
+							content: "Formatting re-enabled\nYou are a helpful assistant.",
+						},
+						{ role: "user", content: "Hello!" },
+					],
+				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+	})
+
+	describe("error handling in createMessage", () => {
+		it("should handle streaming API errors via handleOpenAIError", async () => {
+			const errorHandler = new OpenAiHandler({
+				apiKey: "test-api-key",
+				openAiModelId: "o3-mini",
+			})
+			mockCreate.mockImplementationOnce(async () => {
+				throw new Error("streaming API failure")
+			})
+
+			const stream = errorHandler.createMessage("system", [{ role: "user", content: "hi" }])
+			await expect(async () => {
+				for await (const _ of stream) {
+					/* drain */
+				}
+			}).rejects.toThrow()
+		})
+
+		it("should handle non-streaming API errors via handleOpenAIError", async () => {
+			const errorHandler = new OpenAiHandler({
+				apiKey: "test-api-key",
+				openAiModelId: "o3-mini",
+				openAiStreamingEnabled: false,
+			})
+			mockCreate.mockImplementationOnce(async () => {
+				throw new Error("non-streaming API failure")
+			})
+
+			const stream = errorHandler.createMessage("system", [{ role: "user", content: "hi" }])
+			await expect(async () => {
+				for await (const _ of stream) {
+					/* drain */
+				}
+			}).rejects.toThrow()
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+			mockCreate.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const gen = handler.createMessage("", messages)
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+
+			mockCreate.mockResolvedValue({
+				choices: [{ message: { content: "response" } }],
+			})
+
+			await handler.completePrompt("Test prompt")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("abort() should not throw during createMessage streaming", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+			mockCreate.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const gen = handler.createMessage("", messages)
+			await gen.next()
+			expect(() => handler.abort()).not.toThrow()
+			for await (const _ of gen) {
+				// drain
+			}
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
 		})
 	})
 })

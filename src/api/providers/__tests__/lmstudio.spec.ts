@@ -133,12 +133,15 @@ describe("LmStudioHandler", () => {
 		it("should complete prompt successfully", async () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: mockOptions.lmStudioModelId,
-				messages: [{ role: "user", content: "Test prompt" }],
-				temperature: 0,
-				stream: false,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.lmStudioModelId,
+					messages: [{ role: "user", content: "Test prompt" }],
+					temperature: 0,
+					stream: false,
+				},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 
 		it("should handle API errors", async () => {
@@ -154,6 +157,21 @@ describe("LmStudioHandler", () => {
 			})
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
+		})
+
+		it("should add draft_model when speculative decoding is enabled", async () => {
+			const draftHandler = new (handler.constructor as any)({
+				...mockOptions,
+				lmStudioSpeculativeDecodingEnabled: true,
+				lmStudioDraftModelId: "draft-model",
+			})
+
+			const result = await draftHandler.completePrompt("Test prompt")
+			expect(result).toBe("Test response")
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ draft_model: "draft-model" }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 	})
 

@@ -1,3 +1,11 @@
+vitest.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			captureException: vitest.fn(),
+		},
+	},
+}))
+
 const mockStreamText = vitest.fn()
 const mockGenerateText = vitest.fn()
 const mockCreatePoe = vitest.fn()
@@ -229,6 +237,7 @@ describe("PoeHandler", () => {
 
 			expect(mockStreamText).toHaveBeenCalledWith(
 				expect.objectContaining({
+					abortSignal: expect.any(AbortSignal),
 					providerOptions: {
 						poe: {
 							reasoningEffort: "high",
@@ -304,10 +313,39 @@ describe("PoeHandler", () => {
 			expect(result).toBe("generated response")
 			expect(mockGenerateText).toHaveBeenCalledWith(
 				expect.objectContaining({
+					abortSignal: expect.any(AbortSignal),
 					model: mockLanguageModel,
 					prompt: "complete this",
 				}),
 			)
+		})
+
+		it("throws wrapped error when generateText fails", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockRejectedValue(new Error("model unavailable"))
+
+			await expect(handler.completePrompt("test")).rejects.toThrow("Poe completion error: model unavailable")
+		})
+	})
+
+	describe("createMessage error handling", () => {
+		it("throws wrapped error when streaming fails", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+
+			mockStreamText.mockReturnValue({
+				// eslint-disable-next-line require-yield
+				fullStream: (async function* () {
+					throw new Error("stream broke")
+				})(),
+				usage: Promise.resolve({ inputTokens: 0, outputTokens: 0 }),
+			})
+
+			const stream = handler.createMessage("sys", [{ role: "user" as const, content: "hi" }])
+			await expect(async () => {
+				for await (const _ of stream) {
+					/* drain */
+				}
+			}).rejects.toThrow("Poe streaming error: stream broke")
 		})
 	})
 })

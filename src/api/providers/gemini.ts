@@ -216,6 +216,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		const signal = this.createAbortSignal()
 		const { id: model, info, reasoning: thinkingConfig, maxTokens } = this.getModel()
 		// Reset per-request metadata that we persist into apiConversationHistory.
 		this.lastThoughtSignature = undefined
@@ -302,6 +303,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			maxOutputTokens,
 			temperature: temperatureConfig,
 			...(tools.length > 0 ? { tools } : {}),
+			abortSignal: signal,
 		}
 
 		// Do not pass metadata.allowedFunctionNames to Gemini. Live API testing showed
@@ -485,6 +487,8 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -577,6 +581,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
+		const signal = this.createAbortSignal()
 		const { id: model, info } = this.getModel()
 
 		try {
@@ -590,6 +595,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 					? { baseUrl: this.options.googleGeminiBaseUrl }
 					: undefined,
 				temperature: temperatureConfig,
+				abortSignal: signal,
 			}
 
 			const request = {
@@ -621,6 +627,8 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 

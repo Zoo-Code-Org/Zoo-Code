@@ -103,6 +103,7 @@ describe("QwenCodeHandler Native Tools", () => {
 					]),
 					parallel_tool_calls: true,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -126,6 +127,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect.objectContaining({
 					tool_choice: "auto",
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -237,6 +239,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect.objectContaining({
 					parallel_tool_calls: true,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -442,6 +445,69 @@ describe("QwenCodeHandler Native Tools", () => {
 			expect(reasoningChunks[0].text).toBe("Thinking about this...")
 			expect(partialChunks).toHaveLength(1)
 			expect(endChunks).toHaveLength(1)
+		})
+	})
+
+	describe("Thinking block parsing", () => {
+		it("should parse <think> tags into reasoning and text chunks", async () => {
+			mockCreate.mockImplementationOnce(() => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "before<think>inside</think>after" } }],
+					}
+					yield {
+						choices: [{ delta: {}, usage: { prompt_tokens: 1, completion_tokens: 1 } }],
+					}
+				},
+			}))
+
+			const stream = handler.createMessage("test", [{ role: "user", content: "hi" }], {
+				taskId: "test-task-id",
+				tools: [],
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			const reasoningChunks = chunks.filter((c) => c.type === "reasoning")
+
+			expect(textChunks.some((c) => c.text === "before")).toBe(true)
+			expect(textChunks.some((c) => c.text === "after")).toBe(true)
+			expect(reasoningChunks.some((c) => c.text === "inside")).toBe(true)
+		})
+	})
+
+	describe("completePrompt", () => {
+		it("should return completion text", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "done" } }],
+			})
+
+			const result = await handler.completePrompt("hello")
+			expect(result).toBe("done")
+		})
+
+		it("should return empty string when no content", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: {} }],
+			})
+
+			const result = await handler.completePrompt("hello")
+			expect(result).toBe("")
+		})
+
+		it("should re-throw non-401 errors from callApiWithRetry", async () => {
+			mockCreate.mockRejectedValueOnce({ status: 403 })
+			await expect(handler.completePrompt("hello")).rejects.toEqual({ status: 403 })
+		})
+	})
+
+	describe("getBaseUrl", () => {
+		it("should add https:// prefix to bare hostnames", () => {
+			expect((handler as any).getBaseUrl({ resource_url: "custom.api.com" })).toBe("https://custom.api.com/v1")
 		})
 	})
 })

@@ -266,7 +266,7 @@ describe("VertexHandler", () => {
 					tools: expect.any(Array),
 					tool_choice: expect.any(Object),
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -481,7 +481,7 @@ describe("VertexHandler", () => {
 						}),
 					],
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -834,18 +834,21 @@ describe("VertexHandler", () => {
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")
-			expect(handler["client"].messages.create).toHaveBeenCalledWith({
-				model: "claude-3-5-sonnet-v2@20241022",
-				max_tokens: 8192,
-				temperature: 0,
-				messages: [
-					{
-						role: "user",
-						content: [{ type: "text", text: "Test prompt", cache_control: { type: "ephemeral" } }],
-					},
-				],
-				stream: false,
-			})
+			expect(handler["client"].messages.create).toHaveBeenCalledWith(
+				{
+					model: "claude-3-5-sonnet-v2@20241022",
+					max_tokens: 8192,
+					temperature: 0,
+					messages: [
+						{
+							role: "user",
+							content: [{ type: "text", text: "Test prompt", cache_control: { type: "ephemeral" } }],
+						},
+					],
+					stream: false,
+				},
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 
 		it("should handle API errors for Claude", async () => {
@@ -862,6 +865,19 @@ describe("VertexHandler", () => {
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
 				"Vertex completion error: Vertex API error",
 			)
+		})
+
+		it("should rethrow non-Error values without wrapping", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest.fn().mockRejectedValue("raw error")
+			;(handler["client"].messages as any).create = mockCreate
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toBe("raw error")
 		})
 
 		it("should handle non-text content for Claude", async () => {
@@ -1156,7 +1172,10 @@ describe("VertexHandler", () => {
 			}
 
 			// Verify the API was called without the beta header
-			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), undefined)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 	})
 
@@ -1246,7 +1265,7 @@ describe("VertexHandler", () => {
 					thinking: { type: "enabled", budget_tokens: 4096 },
 					temperature: 1.0, // Thinking requires temperature 1.0
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -1273,7 +1292,7 @@ describe("VertexHandler", () => {
 				expect.objectContaining({
 					thinking: { type: "adaptive" },
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 
 			const request = mockCreate.mock.calls[0][0]
@@ -1302,7 +1321,7 @@ describe("VertexHandler", () => {
 				expect.objectContaining({
 					thinking: { type: "adaptive" },
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 
 			const request = mockCreate.mock.calls[0][0]
@@ -1393,7 +1412,7 @@ describe("VertexHandler", () => {
 					]),
 					tool_choice: { type: "auto", disable_parallel_tool_use: false },
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -1446,7 +1465,7 @@ describe("VertexHandler", () => {
 						}),
 					]),
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 

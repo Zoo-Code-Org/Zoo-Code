@@ -282,7 +282,10 @@ describe("OpenRouterHandler", () => {
 					temperature: 0,
 					top_p: undefined,
 				}),
-				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+				expect.objectContaining({
+					headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+					signal: expect.any(AbortSignal),
+				}),
 			)
 		})
 
@@ -325,7 +328,10 @@ describe("OpenRouterHandler", () => {
 						}),
 					]),
 				}),
-				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+				expect.objectContaining({
+					headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+					signal: expect.any(AbortSignal),
+				}),
 			)
 		})
 
@@ -566,7 +572,10 @@ describe("OpenRouterHandler", () => {
 					messages: [{ role: "user", content: "test prompt" }],
 					stream: false,
 				},
-				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+				expect.objectContaining({
+					headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+					signal: expect.any(AbortSignal),
+				}),
 			)
 		})
 
@@ -684,6 +693,30 @@ describe("OpenRouterHandler", () => {
 			)
 		})
 
+		it("parses OpenRouter structured error in completePrompt catch block", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const structuredError = {
+				error: {
+					message: "Provider returned error",
+					code: 502,
+					metadata: { raw: JSON.stringify({ error: { message: "Upstream timeout" } }) },
+				},
+			}
+			const mockCreate = vitest.fn().mockRejectedValue(structuredError)
+			;(OpenAI as any).prototype.chat = {
+				completions: { create: mockCreate },
+			} as any
+
+			await expect(handler.completePrompt("test prompt")).rejects.toThrow()
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					provider: "OpenRouter",
+					modelId: mockOptions.openRouterModelId,
+					operation: "completePrompt",
+				}),
+			)
+		})
+
 		it("passes 429 rate limit errors from response to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockError = {
@@ -713,6 +746,81 @@ describe("OpenRouterHandler", () => {
 					status: 429,
 				}),
 			)
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: { content: "test" } }] }
+				},
+			}
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			;(OpenAI as any).prototype.chat = {
+				completions: { create: mockCreate },
+			} as any
+
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+			const gen = handler.createMessage("", messages)
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+
+			const mockResponse = { choices: [{ message: { content: "response" } }] }
+			const mockCreate = vitest.fn().mockResolvedValue(mockResponse)
+			;(OpenAI as any).prototype.chat = {
+				completions: { create: mockCreate },
+			} as any
+
+			await handler.completePrompt("Test prompt")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
+		})
+
+		it("abort() should abort the active signal during createMessage", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: { content: "test" } }] }
+					yield { choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } }
+				},
+			}
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			;(OpenAI as any).prototype.chat = {
+				completions: { create: mockCreate },
+			} as any
+
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+			const gen = handler.createMessage("", messages)
+			await gen.next()
+			expect(() => handler.abort()).not.toThrow()
+			for await (const _ of gen) {
+				// drain
+			}
 		})
 	})
 })

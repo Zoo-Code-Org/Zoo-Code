@@ -115,80 +115,88 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const stream = await this.createStream(systemPrompt, messages, metadata)
+		const signal = this.createAbortSignal()
 
-		const matcher = new TagMatcher(
-			"think",
-			(chunk) =>
-				({
-					type: chunk.matched ? "reasoning" : "text",
-					text: chunk.data,
-				}) as const,
-		)
+		try {
+			const stream = await this.createStream(systemPrompt, messages, metadata, { signal })
 
-		let lastUsage: OpenAI.CompletionUsage | undefined
-		const activeToolCallIds = new Set<string>()
+			const matcher = new TagMatcher(
+				"think",
+				(chunk) =>
+					({
+						type: chunk.matched ? "reasoning" : "text",
+						text: chunk.data,
+					}) as const,
+			)
 
-		for await (const chunk of stream) {
-			// Check for provider-specific error responses (e.g., MiniMax base_resp)
-			const chunkAny = chunk as any
-			if (chunkAny.base_resp?.status_code && chunkAny.base_resp.status_code !== 0) {
-				throw new Error(
-					`${this.providerName} API Error (${chunkAny.base_resp.status_code}): ${chunkAny.base_resp.status_msg || "Unknown error"}`,
-				)
-			}
+			let lastUsage: OpenAI.CompletionUsage | undefined
+			const activeToolCallIds = new Set<string>()
 
-			const delta = chunk.choices?.[0]?.delta
-			const finishReason = chunk.choices?.[0]?.finish_reason
-
-			if (delta?.content) {
-				for (const processedChunk of matcher.update(delta.content)) {
-					yield processedChunk
+			for await (const chunk of stream) {
+				// Check for provider-specific error responses (e.g., MiniMax base_resp)
+				const chunkAny = chunk as any
+				if (chunkAny.base_resp?.status_code && chunkAny.base_resp.status_code !== 0) {
+					throw new Error(
+						`${this.providerName} API Error (${chunkAny.base_resp.status_code}): ${chunkAny.base_resp.status_msg || "Unknown error"}`,
+					)
 				}
-			}
 
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+				const delta = chunk.choices?.[0]?.delta
+				const finishReason = chunk.choices?.[0]?.finish_reason
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
-					if (toolCall.id) {
-						activeToolCallIds.add(toolCall.id)
-					}
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+				if (delta?.content) {
+					for (const processedChunk of matcher.update(delta.content)) {
+						yield processedChunk
 					}
 				}
-			}
 
-			// Emit tool_call_end events when finish_reason is "tool_calls"
-			// This ensures tool calls are finalized even if the stream doesn't properly close
-			if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
-				for (const id of activeToolCallIds) {
-					yield { type: "tool_call_end", id }
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
 				}
-				activeToolCallIds.clear()
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						if (toolCall.id) {
+							activeToolCallIds.add(toolCall.id)
+						}
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				// Emit tool_call_end events when finish_reason is "tool_calls"
+				// This ensures tool calls are finalized even if the stream doesn't properly close
+				if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
+					for (const id of activeToolCallIds) {
+						yield { type: "tool_call_end", id }
+					}
+					activeToolCallIds.clear()
+				}
+
+				if (chunk.usage) {
+					lastUsage = chunk.usage
+				}
 			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+			if (lastUsage) {
+				yield this.processUsageMetrics(lastUsage, this.getModel().info)
 			}
-		}
 
-		if (lastUsage) {
-			yield this.processUsageMetrics(lastUsage, this.getModel().info)
-		}
-
-		// Process any remaining content
-		for (const processedChunk of matcher.final()) {
-			yield processedChunk
+			// Process any remaining content
+			for (const processedChunk of matcher.final()) {
+				yield processedChunk
+			}
+		} catch (error) {
+			throw handleOpenAIError(error, this.providerName)
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -213,20 +221,22 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		const { id: modelId, info: modelInfo } = this.getModel()
-
-		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
-			model: modelId,
-			messages: [{ role: "user", content: prompt }],
-		}
-
-		// Add thinking parameter if reasoning is enabled and model supports it
-		if (this.options.enableReasoningEffort && modelInfo.supportsReasoningBinary) {
-			;(params as any).thinking = { type: "enabled" }
-		}
+		const signal = this.createAbortSignal()
 
 		try {
-			const response = await this.client.chat.completions.create(params)
+			const { id: modelId, info: modelInfo } = this.getModel()
+
+			const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
+				model: modelId,
+				messages: [{ role: "user", content: prompt }],
+			}
+
+			// Add thinking parameter if reasoning is enabled and model supports it
+			if (this.options.enableReasoningEffort && modelInfo.supportsReasoningBinary) {
+				;(params as any).thinking = { type: "enabled" }
+			}
+
+			const response = await this.client.chat.completions.create(params, { signal })
 
 			// Check for provider-specific error responses (e.g., MiniMax base_resp)
 			const responseAny = response as any
@@ -239,6 +249,8 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 

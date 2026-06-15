@@ -41,105 +41,115 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info } = await this.fetchModel()
+		const signal = this.createAbortSignal()
+		try {
+			const { id: modelId, info } = await this.fetchModel()
 
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOpenAiMessages(messages),
-		]
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages),
+			]
 
-		if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
-			addCacheBreakpoints(systemPrompt, openAiMessages)
-		}
-
-		const supportsTemperature = info.supportsTemperature !== false && this.supportsTemperature(modelId)
-
-		const body: OpenAI.Chat.ChatCompletionCreateParams = {
-			model: modelId,
-			messages: openAiMessages,
-			temperature: supportsTemperature
-				? (this.options.modelTemperature ?? VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE)
-				: undefined,
-			max_completion_tokens: info.maxTokens,
-			stream: true,
-			stream_options: { include_usage: true },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
-		}
-
-		const completion = await this.client.chat.completions.create(body)
-
-		for await (const chunk of completion) {
-			// Vercel AI Gateway reports mid-stream failures as an in-band error chunk
-			// rather than throwing, so surface it instead of returning an empty response.
-			if ("error" in chunk && chunk.error) {
-				const raw = chunk.error as { message?: unknown }
-				const message =
-					typeof raw.message === "string" && raw.message.length > 0
-						? raw.message
-						: "Vercel AI Gateway stream error"
-				throw new Error(message)
+			if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
+				addCacheBreakpoints(systemPrompt, openAiMessages)
 			}
 
-			const delta = chunk.choices[0]?.delta
-			if (delta?.content) {
-				yield {
-					type: "text",
-					text: delta.content,
+			const supportsTemperature = info.supportsTemperature !== false && this.supportsTemperature(modelId)
+
+			const body: OpenAI.Chat.ChatCompletionCreateParams = {
+				model: modelId,
+				messages: openAiMessages,
+				temperature: supportsTemperature
+					? (this.options.modelTemperature ?? VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE)
+					: undefined,
+				max_completion_tokens: info.maxTokens,
+				stream: true,
+				stream_options: { include_usage: true },
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			}
+
+			const completion = await this.client.chat.completions.create(body, { signal })
+
+			for await (const chunk of completion) {
+				// Vercel AI Gateway reports mid-stream failures as an in-band error chunk
+				// rather than throwing, so surface it instead of returning an empty response.
+				if ("error" in chunk && chunk.error) {
+					const raw = chunk.error as { message?: unknown }
+					const message =
+						typeof raw.message === "string" && raw.message.length > 0
+							? raw.message
+							: "Vercel AI Gateway stream error"
+					throw new Error(message)
 				}
-			}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				const delta = chunk.choices[0]?.delta
+				if (delta?.content) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "text",
+						text: delta.content,
+					}
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
+					const usage = chunk.usage as VercelAiGatewayUsage
+					yield {
+						type: "usage",
+						inputTokens: usage.prompt_tokens || 0,
+						outputTokens: usage.completion_tokens || 0,
+						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+						cacheReadTokens: usage.prompt_tokens_details?.cached_tokens || undefined,
+						totalCost: usage.cost ?? 0,
 					}
 				}
 			}
-
-			if (chunk.usage) {
-				const usage = chunk.usage as VercelAiGatewayUsage
-				yield {
-					type: "usage",
-					inputTokens: usage.prompt_tokens || 0,
-					outputTokens: usage.completion_tokens || 0,
-					cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-					cacheReadTokens: usage.prompt_tokens_details?.cached_tokens || undefined,
-					totalCost: usage.cost ?? 0,
-				}
-			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		const { id: modelId, info } = await this.fetchModel()
-
+		const signal = this.createAbortSignal()
 		try {
-			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
-				model: modelId,
-				messages: [{ role: "user", content: prompt }],
-				stream: false,
-			}
+			const { id: modelId, info } = await this.fetchModel()
 
-			if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
-				requestOptions.temperature = this.options.modelTemperature ?? VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE
-			}
+			try {
+				const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
+					model: modelId,
+					messages: [{ role: "user", content: prompt }],
+					stream: false,
+				}
 
-			requestOptions.max_completion_tokens = info.maxTokens
+				if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
+					requestOptions.temperature = this.options.modelTemperature ?? VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE
+				}
 
-			const response = await this.client.chat.completions.create(requestOptions)
-			return response.choices[0]?.message.content || ""
-		} catch (error) {
-			if (error instanceof Error) {
-				throw new Error(`Vercel AI Gateway completion error: ${error.message}`)
+				requestOptions.max_completion_tokens = info.maxTokens
+
+				const response = await this.client.chat.completions.create(requestOptions, { signal })
+				return response.choices[0]?.message.content || ""
+			} catch (error) {
+				if (error instanceof Error) {
+					throw new Error(`Vercel AI Gateway completion error: ${error.message}`)
+				}
+				throw error
 			}
-			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

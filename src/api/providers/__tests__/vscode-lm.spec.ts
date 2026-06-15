@@ -541,4 +541,25 @@ describe("VsCodeLmHandler", () => {
 			await expect(promise).rejects.toThrow("VSCode LM completion error: Completion failed")
 		})
 	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should cancel currentRequestCancellation when it exists", () => {
+			const mockModel = { ...mockLanguageModelChat }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([mockModel])
+			handler["client"] = mockLanguageModelChat
+
+			// Create a cancellation token source manually
+			const cts = new vscode.CancellationTokenSource()
+			handler["currentRequestCancellation"] = cts
+
+			// Call abort - should cancel the token
+			handler.abort()
+			expect(cts.cancel).toHaveBeenCalled()
+		})
+
+		it("abort() should not throw when no currentRequestCancellation exists", () => {
+			handler["currentRequestCancellation"] = null
+			expect(() => handler.abort()).not.toThrow()
+		})
+	})
 })

@@ -216,108 +216,113 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		await this.ensureAuthenticated()
-		const client = this.ensureClient()
-		const model = this.getModel()
+		const signal = this.createAbortSignal()
+		try {
+			await this.ensureAuthenticated()
+			const client = this.ensureClient()
+			const model = this.getModel()
 
-		const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
-			role: "system",
-			content: systemPrompt,
-		}
+			const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
+				role: "system",
+				content: systemPrompt,
+			}
 
-		const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages)]
+			const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages)]
 
-		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-			model: model.id,
-			temperature: 0,
-			messages: convertedMessages,
-			stream: true,
-			stream_options: { include_usage: true },
-			max_completion_tokens: model.info.maxTokens,
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
-		}
+			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+				model: model.id,
+				temperature: 0,
+				messages: convertedMessages,
+				stream: true,
+				stream_options: { include_usage: true },
+				max_completion_tokens: model.info.maxTokens,
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			}
 
-		const stream = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions))
+			const stream = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions, { signal }))
 
-		let fullContent = ""
+			let fullContent = ""
 
-		for await (const apiChunk of stream) {
-			const delta = apiChunk.choices[0]?.delta ?? {}
-			const finishReason = apiChunk.choices[0]?.finish_reason
+			for await (const apiChunk of stream) {
+				const delta = apiChunk.choices[0]?.delta ?? {}
+				const finishReason = apiChunk.choices[0]?.finish_reason
 
-			if (delta.content) {
-				let newText = delta.content
-				if (newText.startsWith(fullContent)) {
-					newText = newText.substring(fullContent.length)
-				}
-				fullContent = delta.content
+				if (delta.content) {
+					let newText = delta.content
+					if (newText.startsWith(fullContent)) {
+						newText = newText.substring(fullContent.length)
+					}
+					fullContent = delta.content
 
-				if (newText) {
-					// Check for thinking blocks
-					if (newText.includes("<think>") || newText.includes("</think>")) {
-						// Simple parsing for thinking blocks
-						const parts = newText.split(/<\/?think>/g)
-						for (let i = 0; i < parts.length; i++) {
-							if (parts[i]) {
-								if (i % 2 === 0) {
-									// Outside thinking block
-									yield {
-										type: "text",
-										text: parts[i],
-									}
-								} else {
-									// Inside thinking block
-									yield {
-										type: "reasoning",
-										text: parts[i],
+					if (newText) {
+						// Check for thinking blocks
+						if (newText.includes("<think>") || newText.includes("</think>")) {
+							// Simple parsing for thinking blocks
+							const parts = newText.split(/<\/?think>/g)
+							for (let i = 0; i < parts.length; i++) {
+								if (parts[i]) {
+									if (i % 2 === 0) {
+										// Outside thinking block
+										yield {
+											type: "text",
+											text: parts[i],
+										}
+									} else {
+										// Inside thinking block
+										yield {
+											type: "reasoning",
+											text: parts[i],
+										}
 									}
 								}
 							}
+						} else {
+							yield {
+								type: "text",
+								text: newText,
+							}
 						}
-					} else {
+					}
+				}
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
+				if (delta.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
 						yield {
-							type: "text",
-							text: newText,
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
 						}
 					}
 				}
-			}
 
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+				// Process finish_reason to emit tool_call_end events
+				if (finishReason) {
+					const endEvents = NativeToolCallParser.processFinishReason(finishReason)
+					for (const event of endEvents) {
+						yield event
+					}
+				}
 
-			// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
-			if (delta.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				if (apiChunk.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: apiChunk.usage.prompt_tokens || 0,
+						outputTokens: apiChunk.usage.completion_tokens || 0,
 					}
 				}
 			}
-
-			// Process finish_reason to emit tool_call_end events
-			if (finishReason) {
-				const endEvents = NativeToolCallParser.processFinishReason(finishReason)
-				for (const event of endEvents) {
-					yield event
-				}
-			}
-
-			if (apiChunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: apiChunk.usage.prompt_tokens || 0,
-					outputTokens: apiChunk.usage.completion_tokens || 0,
-				}
-			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -328,18 +333,25 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		await this.ensureAuthenticated()
-		const client = this.ensureClient()
-		const model = this.getModel()
+		const signal = this.createAbortSignal()
+		try {
+			await this.ensureAuthenticated()
+			const client = this.ensureClient()
+			const model = this.getModel()
 
-		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
-			model: model.id,
-			messages: [{ role: "user", content: prompt }],
-			max_completion_tokens: model.info.maxTokens,
+			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+				model: model.id,
+				messages: [{ role: "user", content: prompt }],
+				max_completion_tokens: model.info.maxTokens,
+			}
+
+			const response = await this.callApiWithRetry(() =>
+				client.chat.completions.create(requestOptions, { signal }),
+			)
+
+			return response.choices[0]?.message.content || ""
+		} finally {
+			this.abortAndCleanup()
 		}
-
-		const response = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions))
-
-		return response.choices[0]?.message.content || ""
 	}
 }

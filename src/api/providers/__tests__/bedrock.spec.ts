@@ -527,6 +527,13 @@ describe("AwsBedrockHandler", () => {
 			expect(imageBlock.image).toHaveProperty("format", "jpeg")
 			expect(imageBlock.image!.source).toHaveProperty("bytes")
 			expect(imageBlock.image!.source!.bytes).toBeInstanceOf(Uint8Array)
+
+			// Verify abortSignal is passed to client.send
+			const sendMock = vi.mocked(BedrockRuntimeClient).mock.results[0]?.value?.send
+			expect(sendMock).toHaveBeenCalledWith(
+				expect.any(ConverseStreamCommand),
+				expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+			)
 		})
 
 		it("should reject unsupported image formats", async () => {
@@ -1262,6 +1269,12 @@ describe("AwsBedrockHandler", () => {
 			// Call completePrompt - it should throw
 			await expect(errorHandler.completePrompt("Test prompt")).rejects.toThrow()
 
+			// Verify abortSignal is passed to client.send
+			expect(mockSendFn).toHaveBeenCalledWith(
+				expect.any(ConverseCommand),
+				expect.objectContaining({ abortSignal: expect.any(AbortSignal) }),
+			)
+
 			// Verify telemetry was captured
 			expect(mockCaptureException).toHaveBeenCalledTimes(1)
 			expect(mockCaptureException).toHaveBeenCalledWith(
@@ -1576,6 +1589,49 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
 			})
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+			const gen = handler.createMessage("", messages)
+			await gen.next()
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+			await handler.completePrompt("Test prompt")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("abort() should abort the active signal during createMessage", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+			const gen = handler.createMessage("", messages)
+			await gen.next()
+			// Calling abort should not throw
+			expect(() => handler.abort()).not.toThrow()
+			// Drain remaining
+			for await (const _ of gen) {
+				// drain
+			}
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
 		})
 	})
 })

@@ -179,6 +179,7 @@ describe("UnboundHandler", () => {
 					mode: "architect",
 				},
 			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 
@@ -200,5 +201,93 @@ describe("UnboundHandler", () => {
 				messages: [{ role: "system", content: "Write a haiku" }],
 			}),
 		)
+	})
+
+	it("yields tool_call_partial chunks when delta contains tool_calls", async () => {
+		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
+		mockCreate.mockResolvedValue({
+			async *[Symbol.asyncIterator]() {
+				yield {
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_1",
+										function: { name: "read_file", arguments: '{"path":' },
+									},
+								],
+							},
+						},
+					],
+				}
+				yield {
+					choices: [{ delta: {} }],
+					usage: { prompt_tokens: 1, completion_tokens: 1 },
+				}
+			},
+		})
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "hello" }]
+		const stream = handler.createMessage("system", messages, { taskId: "task-1", mode: "code", tools: [] })
+
+		const chunks: any[] = []
+		for await (const chunk of stream) {
+			chunks.push(chunk)
+		}
+
+		const toolPartials = chunks.filter((c) => c.type === "tool_call_partial")
+		expect(toolPartials.length).toBeGreaterThanOrEqual(1)
+		expect(toolPartials[0].name).toBe("read_file")
+	})
+
+	it("completePrompt returns response content", async () => {
+		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { content: "completion result" } }],
+		})
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		const result = await handler.completePrompt("do this")
+		expect(result).toBe("completion result")
+	})
+
+	it("completePrompt throws on API error", async () => {
+		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
+		mockCreate.mockRejectedValue(new Error("api down"))
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		await expect(handler.completePrompt("do this")).rejects.toThrow()
+	})
+
+	it("createMessage throws on API error", async () => {
+		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
+		mockCreate.mockRejectedValue(new Error("api down"))
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		const stream = handler.createMessage("system", [{ role: "user", content: "hi" }])
+		await expect(async () => {
+			for await (const _chunk of stream) {
+				// should throw
+			}
+		}).rejects.toThrow()
 	})
 })

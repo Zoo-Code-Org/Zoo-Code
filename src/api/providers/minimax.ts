@@ -82,157 +82,165 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
-		const { id: modelId, info, maxTokens, temperature } = this.getModel()
+		const signal = this.createAbortSignal()
+		try {
+			let stream: AnthropicStream<Anthropic.Messages.RawMessageStreamEvent>
+			const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
+			const { id: modelId, info, maxTokens, temperature } = this.getModel()
 
-		// MiniMax M2 models support prompt caching
-		const supportsPromptCache = info.supportsPromptCache ?? false
+			// MiniMax M2 models support prompt caching
+			const supportsPromptCache = info.supportsPromptCache ?? false
 
-		// Merge environment_details from messages that follow tool_result blocks
-		// into the tool_result content. This preserves reasoning continuity for
-		// thinking models by preventing user messages from interrupting the
-		// reasoning context after tool use (similar to r1-format's mergeToolResultText).
-		const processedMessages = mergeEnvironmentDetailsForMiniMax(messages)
+			// Merge environment_details from messages that follow tool_result blocks
+			// into the tool_result content. This preserves reasoning continuity for
+			// thinking models by preventing user messages from interrupting the
+			// reasoning context after tool use (similar to r1-format's mergeToolResultText).
+			const processedMessages = mergeEnvironmentDetailsForMiniMax(messages)
 
-		// Build the system blocks array
-		const systemBlocks: Anthropic.Messages.TextBlockParam[] = [
-			supportsPromptCache
-				? { text: systemPrompt, type: "text", cache_control: cacheControl }
-				: { text: systemPrompt, type: "text" },
-		]
+			// Build the system blocks array
+			const systemBlocks: Anthropic.Messages.TextBlockParam[] = [
+				supportsPromptCache
+					? { text: systemPrompt, type: "text", cache_control: cacheControl }
+					: { text: systemPrompt, type: "text" },
+			]
 
-		// Prepare request parameters
-		const requestParams: Anthropic.Messages.MessageCreateParams = {
-			model: modelId,
-			max_tokens: maxTokens ?? 16_384,
-			temperature: temperature ?? 1.0,
-			system: systemBlocks,
-			messages: supportsPromptCache ? this.addCacheControl(processedMessages, cacheControl) : processedMessages,
-			stream: true,
-			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
-			tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
-		}
+			// Prepare request parameters
+			const requestParams: Anthropic.Messages.MessageCreateParams = {
+				model: modelId,
+				max_tokens: maxTokens ?? 16_384,
+				temperature: temperature ?? 1.0,
+				system: systemBlocks,
+				messages: supportsPromptCache
+					? this.addCacheControl(processedMessages, cacheControl)
+					: processedMessages,
+				stream: true,
+				tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
+				tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
+			}
 
-		const stream = await this.client.messages.create(requestParams)
+			stream = await this.client.messages.create(requestParams, { signal })
 
-		let inputTokens = 0
-		let outputTokens = 0
-		let cacheWriteTokens = 0
-		let cacheReadTokens = 0
+			let inputTokens = 0
+			let outputTokens = 0
+			let cacheWriteTokens = 0
+			let cacheReadTokens = 0
 
-		for await (const chunk of stream) {
-			switch (chunk.type) {
-				case "message_start": {
-					// Tells us cache reads/writes/input/output.
-					const {
-						input_tokens = 0,
-						output_tokens = 0,
-						cache_creation_input_tokens,
-						cache_read_input_tokens,
-					} = chunk.message.usage
+			for await (const chunk of stream) {
+				switch (chunk.type) {
+					case "message_start": {
+						// Tells us cache reads/writes/input/output.
+						const {
+							input_tokens = 0,
+							output_tokens = 0,
+							cache_creation_input_tokens,
+							cache_read_input_tokens,
+						} = chunk.message.usage
 
-					yield {
-						type: "usage",
-						inputTokens: input_tokens,
-						outputTokens: output_tokens,
-						cacheWriteTokens: cache_creation_input_tokens || undefined,
-						cacheReadTokens: cache_read_input_tokens || undefined,
+						yield {
+							type: "usage",
+							inputTokens: input_tokens,
+							outputTokens: output_tokens,
+							cacheWriteTokens: cache_creation_input_tokens || undefined,
+							cacheReadTokens: cache_read_input_tokens || undefined,
+						}
+
+						inputTokens += input_tokens
+						outputTokens += output_tokens
+						cacheWriteTokens += cache_creation_input_tokens || 0
+						cacheReadTokens += cache_read_input_tokens || 0
+
+						break
 					}
+					case "message_delta":
+						// Tells us stop_reason, stop_sequence, and output tokens
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: chunk.usage.output_tokens || 0,
+						}
 
-					inputTokens += input_tokens
-					outputTokens += output_tokens
-					cacheWriteTokens += cache_creation_input_tokens || 0
-					cacheReadTokens += cache_read_input_tokens || 0
+						break
+					case "message_stop":
+						// No usage data, just an indicator that the message is done.
+						break
+					case "content_block_start":
+						switch (chunk.content_block.type) {
+							case "thinking":
+								// Yield thinking/reasoning content
+								if (chunk.index > 0) {
+									yield { type: "reasoning", text: "\n" }
+								}
 
-					break
+								yield { type: "reasoning", text: chunk.content_block.thinking }
+								break
+							case "text":
+								// We may receive multiple text blocks
+								if (chunk.index > 0) {
+									yield { type: "text", text: "\n" }
+								}
+
+								yield { type: "text", text: chunk.content_block.text }
+								break
+							case "tool_use": {
+								// Emit initial tool call partial with id and name
+								yield {
+									type: "tool_call_partial",
+									index: chunk.index,
+									id: chunk.content_block.id,
+									name: chunk.content_block.name,
+									arguments: undefined,
+								}
+								break
+							}
+						}
+						break
+					case "content_block_delta":
+						switch (chunk.delta.type) {
+							case "thinking_delta":
+								yield { type: "reasoning", text: chunk.delta.thinking }
+								break
+							case "text_delta":
+								yield { type: "text", text: chunk.delta.text }
+								break
+							case "input_json_delta": {
+								// Emit tool call partial chunks as arguments stream in
+								yield {
+									type: "tool_call_partial",
+									index: chunk.index,
+									id: undefined,
+									name: undefined,
+									arguments: chunk.delta.partial_json,
+								}
+								break
+							}
+						}
+
+						break
+					case "content_block_stop":
+						// Block is complete - no action needed, NativeToolCallParser handles completion
+						break
 				}
-				case "message_delta":
-					// Tells us stop_reason, stop_sequence, and output tokens
-					yield {
-						type: "usage",
-						inputTokens: 0,
-						outputTokens: chunk.usage.output_tokens || 0,
-					}
-
-					break
-				case "message_stop":
-					// No usage data, just an indicator that the message is done.
-					break
-				case "content_block_start":
-					switch (chunk.content_block.type) {
-						case "thinking":
-							// Yield thinking/reasoning content
-							if (chunk.index > 0) {
-								yield { type: "reasoning", text: "\n" }
-							}
-
-							yield { type: "reasoning", text: chunk.content_block.thinking }
-							break
-						case "text":
-							// We may receive multiple text blocks
-							if (chunk.index > 0) {
-								yield { type: "text", text: "\n" }
-							}
-
-							yield { type: "text", text: chunk.content_block.text }
-							break
-						case "tool_use": {
-							// Emit initial tool call partial with id and name
-							yield {
-								type: "tool_call_partial",
-								index: chunk.index,
-								id: chunk.content_block.id,
-								name: chunk.content_block.name,
-								arguments: undefined,
-							}
-							break
-						}
-					}
-					break
-				case "content_block_delta":
-					switch (chunk.delta.type) {
-						case "thinking_delta":
-							yield { type: "reasoning", text: chunk.delta.thinking }
-							break
-						case "text_delta":
-							yield { type: "text", text: chunk.delta.text }
-							break
-						case "input_json_delta": {
-							// Emit tool call partial chunks as arguments stream in
-							yield {
-								type: "tool_call_partial",
-								index: chunk.index,
-								id: undefined,
-								name: undefined,
-								arguments: chunk.delta.partial_json,
-							}
-							break
-						}
-					}
-
-					break
-				case "content_block_stop":
-					// Block is complete - no action needed, NativeToolCallParser handles completion
-					break
 			}
-		}
 
-		// Calculate and yield final cost
-		if (inputTokens > 0 || outputTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0) {
-			const { totalCost } = calculateApiCostAnthropic(
-				this.getModel().info,
-				inputTokens,
-				outputTokens,
-				cacheWriteTokens,
-				cacheReadTokens,
-			)
+			// Calculate and yield final cost
+			if (inputTokens > 0 || outputTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0) {
+				const { totalCost } = calculateApiCostAnthropic(
+					this.getModel().info,
+					inputTokens,
+					outputTokens,
+					cacheWriteTokens,
+					cacheReadTokens,
+				)
 
-			yield {
-				type: "usage",
-				inputTokens: 0,
-				outputTokens: 0,
-				totalCost,
+				yield {
+					type: "usage",
+					inputTokens: 0,
+					outputTokens: 0,
+					totalCost,
+				}
 			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -290,17 +298,25 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 	}
 
 	async completePrompt(prompt: string) {
-		const { id: model, temperature } = this.getModel()
+		const signal = this.createAbortSignal()
+		try {
+			const { id: model, temperature } = this.getModel()
 
-		const message = await this.client.messages.create({
-			model,
-			max_tokens: 16_384,
-			temperature: temperature ?? 1.0,
-			messages: [{ role: "user", content: prompt }],
-			stream: false,
-		})
+			const message = await this.client.messages.create(
+				{
+					model,
+					max_tokens: 16_384,
+					temperature: temperature ?? 1.0,
+					messages: [{ role: "user", content: prompt }],
+					stream: false,
+				},
+				{ signal },
+			)
 
-		const content = message.content.find(({ type }) => type === "text")
-		return content?.type === "text" ? content.text : ""
+			const content = message.content.find(({ type }) => type === "text")
+			return content?.type === "text" ? content.text : ""
+		} finally {
+			this.abortAndCleanup()
+		}
 	}
 }

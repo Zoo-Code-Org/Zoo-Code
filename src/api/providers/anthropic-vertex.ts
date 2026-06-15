@@ -73,146 +73,153 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id, info, temperature, maxTokens, reasoning: thinking, betas } = this.getModel()
+		const signal = this.createAbortSignal()
+		try {
+			const { id, info, temperature, maxTokens, reasoning: thinking, betas } = this.getModel()
 
-		const { supportsPromptCache } = info
+			const { supportsPromptCache } = info
 
-		// Filter out non-Anthropic blocks (reasoning, thoughtSignature, etc.) before sending to the API
-		const sanitizedMessages = filterNonAnthropicBlocks(messages)
+			// Filter out non-Anthropic blocks (reasoning, thoughtSignature, etc.) before sending to the API
+			const sanitizedMessages = filterNonAnthropicBlocks(messages)
 
-		const nativeToolParams = {
-			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
-			tool_choice: convertOpenAIToolChoiceToAnthropic(metadata?.tool_choice, metadata?.parallelToolCalls),
-		}
+			const nativeToolParams = {
+				tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
+				tool_choice: convertOpenAIToolChoiceToAnthropic(metadata?.tool_choice, metadata?.parallelToolCalls),
+			}
 
-		/**
-		 * Vertex API has specific limitations for prompt caching:
-		 * 1. Maximum of 4 blocks can have cache_control
-		 * 2. Only text blocks can be cached (images and other content types cannot)
-		 * 3. Cache control can only be applied to user messages, not assistant messages
-		 *
-		 * Our caching strategy:
-		 * - Cache the system prompt (1 block)
-		 * - Cache the last text block of the second-to-last user message (1 block)
-		 * - Cache the last text block of the last user message (1 block)
-		 * This ensures we stay under the 4-block limit while maintaining effective caching
-		 * for the most relevant context.
-		 */
-		const params = {
-			model: id,
-			max_tokens: maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
-			temperature,
-			thinking,
-			// Cache the system prompt if caching is enabled.
-			system: supportsPromptCache
-				? [{ text: systemPrompt, type: "text" as const, cache_control: { type: "ephemeral" } }]
-				: systemPrompt,
-			messages: supportsPromptCache ? addCacheBreakpoints(sanitizedMessages) : sanitizedMessages,
-			stream: true,
-			...nativeToolParams,
-		} as Anthropic.Messages.MessageCreateParamsStreaming
+			/**
+			 * Vertex API has specific limitations for prompt caching:
+			 * 1. Maximum of 4 blocks can have cache_control
+			 * 2. Only text blocks can be cached (images and other content types cannot)
+			 * 3. Cache control can only be applied to user messages, not assistant messages
+			 *
+			 * Our caching strategy:
+			 * - Cache the system prompt (1 block)
+			 * - Cache the last text block of the second-to-last user message (1 block)
+			 * - Cache the last text block of the last user message (1 block)
+			 * This ensures we stay under the 4-block limit while maintaining effective caching
+			 * for the most relevant context.
+			 */
+			const params = {
+				model: id,
+				max_tokens: maxTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
+				temperature,
+				thinking,
+				// Cache the system prompt if caching is enabled.
+				system: supportsPromptCache
+					? [{ text: systemPrompt, type: "text" as const, cache_control: { type: "ephemeral" } }]
+					: systemPrompt,
+				messages: supportsPromptCache ? addCacheBreakpoints(sanitizedMessages) : sanitizedMessages,
+				stream: true,
+				...nativeToolParams,
+			} as Anthropic.Messages.MessageCreateParamsStreaming
 
-		// and prompt caching
-		const requestOptions = betas?.length ? { headers: { "anthropic-beta": betas.join(",") } } : undefined
+			// and prompt caching
+			const requestOptions = betas?.length
+				? { headers: { "anthropic-beta": betas.join(",") }, signal }
+				: { signal }
 
-		const stream = await this.client.messages.create(params, requestOptions)
+			const stream = await this.client.messages.create(params, requestOptions)
 
-		for await (const chunk of stream) {
-			switch (chunk.type) {
-				case "message_start": {
-					const usage = chunk.message!.usage
+			for await (const chunk of stream) {
+				switch (chunk.type) {
+					case "message_start": {
+						const usage = chunk.message!.usage
 
-					yield {
-						type: "usage",
-						inputTokens: usage.input_tokens || 0,
-						outputTokens: usage.output_tokens || 0,
-						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-						cacheReadTokens: usage.cache_read_input_tokens || undefined,
+						yield {
+							type: "usage",
+							inputTokens: usage.input_tokens || 0,
+							outputTokens: usage.output_tokens || 0,
+							cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+							cacheReadTokens: usage.cache_read_input_tokens || undefined,
+						}
+
+						break
 					}
+					case "message_delta": {
+						yield {
+							type: "usage",
+							inputTokens: 0,
+							outputTokens: chunk.usage!.output_tokens || 0,
+						}
 
-					break
-				}
-				case "message_delta": {
-					yield {
-						type: "usage",
-						inputTokens: 0,
-						outputTokens: chunk.usage!.output_tokens || 0,
+						break
 					}
+					case "content_block_start": {
+						switch (chunk.content_block!.type) {
+							case "text": {
+								if (chunk.index! > 0) {
+									yield { type: "text", text: "\n" }
+								}
 
-					break
-				}
-				case "content_block_start": {
-					switch (chunk.content_block!.type) {
-						case "text": {
-							if (chunk.index! > 0) {
-								yield { type: "text", text: "\n" }
+								yield { type: "text", text: chunk.content_block!.text }
+								break
 							}
+							case "thinking": {
+								if (chunk.index! > 0) {
+									yield { type: "reasoning", text: "\n" }
+								}
 
-							yield { type: "text", text: chunk.content_block!.text }
-							break
-						}
-						case "thinking": {
-							if (chunk.index! > 0) {
-								yield { type: "reasoning", text: "\n" }
+								yield { type: "reasoning", text: (chunk.content_block as any).thinking }
+								break
 							}
+							case "tool_use": {
+								// Emit initial tool call partial with id and name
+								yield {
+									type: "tool_call_partial",
+									index: chunk.index,
+									id: chunk.content_block!.id,
+									name: chunk.content_block!.name,
+									arguments: undefined,
+								}
+								break
+							}
+						}
 
-							yield { type: "reasoning", text: (chunk.content_block as any).thinking }
-							break
-						}
-						case "tool_use": {
-							// Emit initial tool call partial with id and name
-							yield {
-								type: "tool_call_partial",
-								index: chunk.index,
-								id: chunk.content_block!.id,
-								name: chunk.content_block!.name,
-								arguments: undefined,
-							}
-							break
-						}
+						break
 					}
-
-					break
-				}
-				case "content_block_delta": {
-					switch (chunk.delta!.type) {
-						case "text_delta": {
-							yield { type: "text", text: chunk.delta!.text }
-							break
-						}
-						case "thinking_delta": {
-							yield { type: "reasoning", text: (chunk.delta as any).thinking }
-							break
-						}
-						case "input_json_delta": {
-							// Emit tool call partial chunks as arguments stream in
-							yield {
-								type: "tool_call_partial",
-								index: chunk.index,
-								id: undefined,
-								name: undefined,
-								arguments: (chunk.delta as any).partial_json,
+					case "content_block_delta": {
+						switch (chunk.delta!.type) {
+							case "text_delta": {
+								yield { type: "text", text: chunk.delta!.text }
+								break
 							}
-							break
+							case "thinking_delta": {
+								yield { type: "reasoning", text: (chunk.delta as any).thinking }
+								break
+							}
+							case "input_json_delta": {
+								// Emit tool call partial chunks as arguments stream in
+								yield {
+									type: "tool_call_partial",
+									index: chunk.index,
+									id: undefined,
+									name: undefined,
+									arguments: (chunk.delta as any).partial_json,
+								}
+								break
+							}
 						}
-					}
 
-					break
-				}
-				case "content_block_stop": {
-					// Block complete - no action needed for now.
-					// NativeToolCallParser handles tool call completion
-					// Note: Signature for multi-turn thinking would require using stream.finalMessage()
-					// after iteration completes, which requires restructuring the streaming approach.
-					break
+						break
+					}
+					case "content_block_stop": {
+						// Block complete - no action needed for now.
+						// NativeToolCallParser handles tool call completion
+						// Note: Signature for multi-turn thinking would require using stream.finalMessage()
+						// after iteration completes, which requires restructuring the streaming approach.
+						break
+					}
 				}
 			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
 	getModel() {
 		const modelId = this.options.apiModelId
-		const id = modelId && modelId in vertexModels ? (modelId as VertexModelId) : vertexDefaultModelId
+		let id = modelId && modelId in vertexModels ? (modelId as VertexModelId) : vertexDefaultModelId
 		let info: ModelInfo = vertexModels[id]
 
 		// Check if 1M context beta should be enabled for supported models
@@ -271,8 +278,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 	}
 
 	async completePrompt(prompt: string) {
+		const signal = this.createAbortSignal()
 		try {
-			const {
+			let {
 				id,
 				info: { supportsPromptCache },
 				temperature,
@@ -296,7 +304,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 				stream: false,
 			} as Anthropic.Messages.MessageCreateParamsNonStreaming
 
-			const response = await this.client.messages.create(params)
+			const response = await this.client.messages.create(params, { signal })
 			const content = response.content[0]
 
 			if (content.type === "text") {
@@ -310,6 +318,8 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			}
 
 			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

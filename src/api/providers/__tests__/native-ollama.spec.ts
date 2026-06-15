@@ -166,9 +166,9 @@ describe("NativeOllamaHandler", () => {
 	})
 
 	describe("completePrompt", () => {
-		it("should complete a prompt without streaming", async () => {
-			mockChat.mockResolvedValue({
-				message: { content: "This is the response" },
+		it("should complete a prompt with streaming", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "This is the response" } }
 			})
 
 			const result = await handler.completePrompt("Tell me a joke")
@@ -176,7 +176,7 @@ describe("NativeOllamaHandler", () => {
 			expect(mockChat).toHaveBeenCalledWith({
 				model: "llama2",
 				messages: [{ role: "user", content: "Tell me a joke" }],
-				stream: false,
+				stream: true,
 				options: {
 					temperature: 0,
 				},
@@ -185,8 +185,8 @@ describe("NativeOllamaHandler", () => {
 		})
 
 		it("should not include num_ctx in completePrompt by default", async () => {
-			mockChat.mockResolvedValue({
-				message: { content: "Response" },
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "Response" } }
 			})
 
 			await handler.completePrompt("Test prompt")
@@ -211,8 +211,8 @@ describe("NativeOllamaHandler", () => {
 
 			handler = new NativeOllamaHandler(options)
 
-			mockChat.mockResolvedValue({
-				message: { content: "Response" },
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "Response" } }
 			})
 
 			await handler.completePrompt("Test prompt")
@@ -225,6 +225,18 @@ describe("NativeOllamaHandler", () => {
 					}),
 				}),
 			)
+		})
+
+		it("should wrap chat errors in completePrompt", async () => {
+			mockChat.mockRejectedValue(new Error("chat failure"))
+
+			await expect(handler.completePrompt("Test")).rejects.toThrow("Ollama completion error: chat failure")
+		})
+
+		it("should re-throw non-Error objects in completePrompt", async () => {
+			mockChat.mockRejectedValue("string error")
+
+			await expect(handler.completePrompt("Test")).rejects.toBe("string error")
 		})
 	})
 
@@ -255,6 +267,20 @@ describe("NativeOllamaHandler", () => {
 					// consume stream
 				}
 			}).rejects.toThrow("Model llama2 not found in Ollama")
+		})
+
+		it("should re-throw generic chat errors in createMessage", async () => {
+			const error = new Error("Internal server error") as any
+			error.status = 500
+			mockChat.mockRejectedValue(error)
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+
+			await expect(async () => {
+				for await (const _ of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow("Internal server error")
 		})
 	})
 
@@ -605,6 +631,194 @@ describe("NativeOllamaHandler", () => {
 			}
 			const firstEndIndex = results.findIndex((r) => r.type === "tool_call_end")
 			expect(firstEndIndex).toBeGreaterThan(lastPartialIndex)
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("abort() should abort the current signal during createMessage", async () => {
+			// Use a stream that blocks until aborted
+			let resolveStream: (() => void) | undefined
+			const streamDone = new Promise<void>((resolve) => {
+				resolveStream = resolve
+			})
+
+			const mockAbort = vitest.fn()
+			mockChat.mockImplementation(() => {
+				return {
+					[Symbol.asyncIterator]: async function* () {
+						yield { message: { content: "first" } }
+						// Wait until the test signals us to stop
+						await streamDone
+					},
+					abort: mockAbort,
+				}
+			})
+
+			const gen = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+			await gen.next() // Get first chunk, which starts the stream
+
+			// Now abort
+			handler.abort()
+
+			// Let the stream finish
+			resolveStream!()
+
+			// Consume remaining
+			for await (const _ of gen) {
+				// drain
+			}
+
+			// The stream.abort() should have been called via the abort event listener
+			expect(mockAbort).toHaveBeenCalled()
+		})
+
+		it("should handle already-aborted signal in createMessage", async () => {
+			const mockAbort = vitest.fn()
+			mockChat.mockImplementation(() => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { message: { content: "should not reach" } }
+				},
+				abort: mockAbort,
+			}))
+
+			// Spy on createAbortSignal to return an already-aborted signal
+			vitest.spyOn(handler as any, "createAbortSignal").mockReturnValue({
+				aborted: true,
+				addEventListener: vitest.fn(),
+				removeEventListener: vitest.fn(),
+			})
+
+			const gen = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+			const results = []
+			for await (const chunk of gen) {
+				results.push(chunk)
+			}
+
+			// The already-aborted signal should cause stream.abort() and break out of the loop
+			expect(mockAbort).toHaveBeenCalled()
+		})
+
+		it("should handle already-aborted signal in completePrompt", async () => {
+			const mockAbort = vitest.fn()
+			mockChat.mockImplementation(() => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { message: { content: "should not reach" } }
+				},
+				abort: mockAbort,
+			}))
+
+			vitest.spyOn(handler as any, "createAbortSignal").mockReturnValue({
+				aborted: true,
+				addEventListener: vitest.fn(),
+				removeEventListener: vitest.fn(),
+			})
+
+			const result = await handler.completePrompt("Test")
+
+			expect(mockAbort).toHaveBeenCalled()
+			// Should break out early, returning empty string
+			expect(result).toBe("")
+		})
+
+		it("should call stream.abort() when signal fires during completePrompt", async () => {
+			let abortController: AbortController | undefined
+			const mockAbort = vitest.fn()
+
+			vitest.spyOn(handler as any, "createAbortSignal").mockImplementation(() => {
+				abortController = new AbortController()
+				return abortController.signal
+			})
+
+			mockChat.mockImplementation(() => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { message: { content: "response" } }
+					// Delay to let the abort fire between chunk iterations
+					await new Promise((resolve) => setTimeout(resolve, 100))
+					yield { message: { content: " more" } }
+				},
+				abort: mockAbort,
+			}))
+
+			// Start completePrompt (we don't await it since we need to abort mid-stream)
+			const promptPromise = handler.completePrompt("Test")
+
+			// Wait a tick for the first chunk to be yielded and the onAbort listener
+			// to be attached, then fire the abort signal between chunk iterations.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+
+			// Fire the abort signal — this triggers onAbort → stream.abort()
+			abortController!.abort()
+
+			const result = await promptPromise
+
+			expect(mockAbort).toHaveBeenCalled()
+			expect(result).toBe("response")
+		})
+
+		it("should break out of stream loop when signal becomes aborted", async () => {
+			let abortController: AbortController | undefined
+			const mockAbort = vitest.fn()
+
+			vitest.spyOn(handler as any, "createAbortSignal").mockImplementation(() => {
+				abortController = new AbortController()
+				return abortController.signal
+			})
+
+			let chunkCount = 0
+			mockChat.mockImplementation(() => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { message: { content: "chunk1" } }
+					yield { message: { content: "chunk2" } }
+					yield { message: { content: "chunk3" } }
+				},
+				abort: mockAbort,
+			}))
+
+			const gen = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+
+			// Get first chunk
+			const first = await gen.next()
+			expect(first.value).toEqual({ type: "text", text: "chunk1" })
+			chunkCount++
+
+			// Abort after first chunk
+			abortController!.abort()
+
+			// Get next chunk - should break due to signal.aborted check
+			const second = await gen.next()
+			// The generator should finish
+			expect(second.done).toBe(true)
+		})
+
+		it("should call abortAndCleanup in finally block of createMessage", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "done" } }
+			})
+
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+
+			const gen = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+			for await (const _ of gen) {
+				// consume
+			}
+
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in finally block of completePrompt", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "response" } }
+			})
+
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+
+			await handler.completePrompt("Test")
+
+			expect(spy).toHaveBeenCalled()
 		})
 	})
 })

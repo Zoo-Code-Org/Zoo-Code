@@ -22,6 +22,35 @@ export abstract class BaseProvider implements ApiHandler {
 
 	abstract getModel(): { id: string; info: ModelInfo }
 
+	private _abortController?: AbortController
+
+	/**
+	 * Create a new AbortController and return its signal.
+	 * Call at the start of each createMessage/completePrompt invocation.
+	 */
+	protected createAbortSignal(): AbortSignal {
+		this._abortController?.abort() // cancel previous if any
+		this._abortController = new AbortController()
+		return this._abortController.signal
+	}
+
+	/**
+	 * Abort the current request and clean up the controller.
+	 * Call in the finally block of each createMessage/completePrompt.
+	 * Safe to call even if no controller exists or the request already completed.
+	 */
+	protected abortAndCleanup(): void {
+		this._abortController?.abort()
+		this._abortController = undefined
+	}
+
+	/**
+	 * Public method to allow external abort (e.g., from Task layer).
+	 */
+	abort(): void {
+		this._abortController?.abort()
+	}
+
 	/**
 	 * Converts an array of tools to be compatible with OpenAI's strict mode.
 	 * Filters for function tools, applies schema conversion to their parameters,

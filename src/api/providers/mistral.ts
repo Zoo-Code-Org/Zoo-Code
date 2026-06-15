@@ -77,90 +77,95 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: model, info, maxTokens, temperature } = this.getModel()
-
-		// Build request options
-		const requestOptions: {
-			model: string
-			messages: ReturnType<typeof convertToMistralMessages>
-			maxTokens: number
-			temperature: number
-			tools?: MistralTool[]
-			toolChoice?: "auto" | "none" | "any" | "required" | { type: "function"; function: { name: string } }
-		} = {
-			model,
-			messages: [{ role: "system", content: systemPrompt }, ...convertToMistralMessages(messages)],
-			maxTokens: maxTokens ?? info.maxTokens,
-			temperature,
-		}
-
-		requestOptions.tools = this.convertToolsForMistral(metadata?.tools ?? [])
-		// Always use "any" to require tool use
-		requestOptions.toolChoice = "any"
-
-		// Temporary debug log for QA
-		// console.log("[MISTRAL DEBUG] Raw API request body:", requestOptions)
-
-		let response
+		const signal = this.createAbortSignal()
 		try {
-			response = await this.client.chat.stream(requestOptions)
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
-			TelemetryService.instance.captureException(apiError)
-			throw new Error(`Mistral completion error: ${errorMessage}`)
-		}
+			const { id: model, info, maxTokens, temperature } = this.getModel()
 
-		for await (const event of response) {
-			const delta = event.data.choices[0]?.delta
+			// Build request options
+			const requestOptions: {
+				model: string
+				messages: ReturnType<typeof convertToMistralMessages>
+				maxTokens: number
+				temperature: number
+				tools?: MistralTool[]
+				toolChoice?: "auto" | "none" | "any" | "required" | { type: "function"; function: { name: string } }
+			} = {
+				model,
+				messages: [{ role: "system", content: systemPrompt }, ...convertToMistralMessages(messages)],
+				maxTokens: maxTokens ?? info.maxTokens,
+				temperature,
+			}
 
-			if (delta?.content) {
-				if (typeof delta.content === "string") {
-					// Handle string content as text
-					yield { type: "text", text: delta.content }
-				} else if (Array.isArray(delta.content)) {
-					// Handle array of content chunks
-					// The SDK v1.9.18 supports ThinkChunk with type "thinking"
-					for (const chunk of delta.content as ContentChunkWithThinking[]) {
-						if (chunk.type === "thinking" && chunk.thinking) {
-							// Handle thinking content as reasoning chunks
-							// ThinkChunk has a 'thinking' property that contains an array of text/reference chunks
-							for (const thinkingPart of chunk.thinking) {
-								if (thinkingPart.type === "text" && thinkingPart.text) {
-									yield { type: "reasoning", text: thinkingPart.text }
+			requestOptions.tools = this.convertToolsForMistral(metadata?.tools ?? [])
+			// Always use "any" to require tool use
+			requestOptions.toolChoice = "any"
+
+			// Temporary debug log for QA
+			// console.log("[MISTRAL DEBUG] Raw API request body:", requestOptions)
+
+			let response
+			try {
+				response = await this.client.chat.stream(requestOptions, { fetchOptions: { signal } })
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
+				TelemetryService.instance.captureException(apiError)
+				throw new Error(`Mistral completion error: ${errorMessage}`)
+			}
+
+			for await (const event of response) {
+				const delta = event.data.choices[0]?.delta
+
+				if (delta?.content) {
+					if (typeof delta.content === "string") {
+						// Handle string content as text
+						yield { type: "text", text: delta.content }
+					} else if (Array.isArray(delta.content)) {
+						// Handle array of content chunks
+						// The SDK v1.9.18 supports ThinkChunk with type "thinking"
+						for (const chunk of delta.content as ContentChunkWithThinking[]) {
+							if (chunk.type === "thinking" && chunk.thinking) {
+								// Handle thinking content as reasoning chunks
+								// ThinkChunk has a 'thinking' property that contains an array of text/reference chunks
+								for (const thinkingPart of chunk.thinking) {
+									if (thinkingPart.type === "text" && thinkingPart.text) {
+										yield { type: "reasoning", text: thinkingPart.text }
+									}
 								}
+							} else if (chunk.type === "text" && chunk.text) {
+								// Handle text content normally
+								yield { type: "text", text: chunk.text }
 							}
-						} else if (chunk.type === "text" && chunk.text) {
-							// Handle text content normally
-							yield { type: "text", text: chunk.text }
 						}
 					}
 				}
-			}
 
-			// Handle tool calls in stream
-			// Mistral SDK provides tool_calls in delta similar to OpenAI format
-			const toolCalls = (delta as { toolCalls?: MistralToolCall[] })?.toolCalls
-			if (toolCalls) {
-				for (let i = 0; i < toolCalls.length; i++) {
-					const toolCall = toolCalls[i]
+				// Handle tool calls in stream
+				// Mistral SDK provides tool_calls in delta similar to OpenAI format
+				const toolCalls = (delta as { toolCalls?: MistralToolCall[] })?.toolCalls
+				if (toolCalls) {
+					for (let i = 0; i < toolCalls.length; i++) {
+						const toolCall = toolCalls[i]
+						yield {
+							type: "tool_call_partial",
+							index: i,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (event.data.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: i,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: event.data.usage.promptTokens || 0,
+						outputTokens: event.data.usage.completionTokens || 0,
 					}
 				}
 			}
-
-			if (event.data.usage) {
-				yield {
-					type: "usage",
-					inputTokens: event.data.usage.promptTokens || 0,
-					outputTokens: event.data.usage.completionTokens || 0,
-				}
-			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -194,31 +199,39 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		const { id: model, temperature } = this.getModel()
-
+		const signal = this.createAbortSignal()
 		try {
-			const response = await this.client.chat.complete({
-				model,
-				messages: [{ role: "user", content: prompt }],
-				temperature,
-			})
+			const { id: model, temperature } = this.getModel()
 
-			const content = response.choices?.[0]?.message.content
+			try {
+				const response = await this.client.chat.complete(
+					{
+						model,
+						messages: [{ role: "user", content: prompt }],
+						temperature,
+					},
+					{ fetchOptions: { signal } },
+				)
 
-			if (Array.isArray(content)) {
-				// Only return text content, filter out thinking content for non-streaming
-				return (content as ContentChunkWithThinking[])
-					.filter((c) => c.type === "text" && c.text)
-					.map((c) => c.text || "")
-					.join("")
+				const content = response.choices?.[0]?.message.content
+
+				if (Array.isArray(content)) {
+					// Only return text content, filter out thinking content for non-streaming
+					return (content as ContentChunkWithThinking[])
+						.filter((c) => c.type === "text" && c.text)
+						.map((c) => c.text || "")
+						.join("")
+				}
+
+				return content || ""
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")
+				TelemetryService.instance.captureException(apiError)
+				throw new Error(`Mistral completion error: ${errorMessage}`)
 			}
-
-			return content || ""
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")
-			TelemetryService.instance.captureException(apiError)
-			throw new Error(`Mistral completion error: ${errorMessage}`)
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

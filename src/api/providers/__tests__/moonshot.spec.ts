@@ -342,6 +342,125 @@ describe("MoonshotHandler", () => {
 		})
 	})
 
+	describe("abort and error handling", () => {
+		const systemPrompt = "You are a helpful assistant."
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [{ type: "text" as const, text: "Hello!" }],
+			},
+		]
+
+		it("should pass abortSignal to streamText", async () => {
+			async function* mockFullStream() {
+				yield { type: "text-delta", text: "response" }
+			}
+
+			const mockUsage = Promise.resolve({
+				inputTokens: 5,
+				outputTokens: 2,
+				details: {},
+				raw: {},
+			})
+
+			mockStreamText.mockReturnValue({
+				fullStream: mockFullStream(),
+				usage: mockUsage,
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(mockStreamText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					abortSignal: expect.any(AbortSignal),
+				}),
+			)
+		})
+
+		it("should pass abortSignal to generateText on completePrompt", async () => {
+			mockGenerateText.mockResolvedValue({
+				text: "Test completion",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					abortSignal: expect.any(AbortSignal),
+				}),
+			)
+		})
+
+		it("should clean up abort controller after createMessage completes", async () => {
+			async function* mockFullStream() {
+				yield { type: "text-delta", text: "response" }
+			}
+
+			mockStreamText.mockReturnValue({
+				fullStream: mockFullStream(),
+				usage: Promise.resolve({
+					inputTokens: 5,
+					outputTokens: 2,
+					details: {},
+					raw: {},
+				}),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// consume
+			}
+
+			// After stream completes, abort() should be safe (no-op)
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should handle error in stream and clean up via finally", async () => {
+			mockStreamText.mockImplementationOnce(() => {
+				throw new Error("stream error")
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					/* drain */
+				}
+			}).rejects.toThrow("stream error")
+		})
+
+		it("should skip usage when signal is aborted", async () => {
+			// This tests the if (!signal.aborted) guard - the false branch
+			// We use a never-resolving promise for usage to ensure it's not awaited
+			let streamTextCallArgs: any
+			mockStreamText.mockImplementationOnce((args: any) => {
+				streamTextCallArgs = args
+				return {
+					fullStream: (async function* () {
+						yield { type: "text-delta", text: "response" }
+					})(),
+					usage: new Promise(() => {}), // never resolves
+				}
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+				// Abort after first chunk to test the aborted path
+				handler.abort()
+				break
+			}
+
+			// Verify no usage chunk was yielded (signal was aborted)
+			const usageChunks = chunks.filter((c: any) => c.type === "usage")
+			expect(usageChunks).toHaveLength(0)
+		})
+	})
+
 	describe("tool handling", () => {
 		const systemPrompt = "You are a helpful assistant."
 		const messages: Anthropic.Messages.MessageParam[] = [

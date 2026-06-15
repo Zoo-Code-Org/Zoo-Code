@@ -106,6 +106,7 @@ describe("XAIHandler", () => {
 				store: false,
 				include: ["reasoning.encrypted_content"],
 			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 
@@ -235,6 +236,7 @@ describe("XAIHandler", () => {
 				tool_choice: "auto",
 				parallel_tool_calls: true,
 			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 
@@ -272,6 +274,7 @@ describe("XAIHandler", () => {
 					reasoning_effort: "high",
 				}),
 			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 
@@ -296,5 +299,65 @@ describe("XAIHandler", () => {
 
 		const stream = handler.createMessage("test prompt", [])
 		await expect(stream.next()).rejects.toThrow(`xAI completion error: ${errorMessage}`)
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+
+			mockResponsesCreate.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const gen = handler.createMessage("test prompt", [])
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+
+			mockResponsesCreate.mockResolvedValue({
+				output_text: "response",
+			})
+
+			await handler.completePrompt("Test prompt")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
+		})
+
+		it("abort() should not throw during createMessage streaming", async () => {
+			mockResponsesCreate.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const gen = handler.createMessage("test prompt", [])
+			await gen.next()
+			expect(() => handler.abort()).not.toThrow()
+			for await (const _ of gen) {
+				// drain
+			}
+		})
 	})
 })

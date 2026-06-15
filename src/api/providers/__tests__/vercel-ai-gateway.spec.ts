@@ -270,6 +270,7 @@ describe("VercelAiGatewayHandler", () => {
 				expect.objectContaining({
 					temperature: customTemp,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -285,6 +286,7 @@ describe("VercelAiGatewayHandler", () => {
 				expect.objectContaining({
 					temperature: VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -302,6 +304,7 @@ describe("VercelAiGatewayHandler", () => {
 					temperature: undefined,
 					max_completion_tokens: 128000,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -332,6 +335,7 @@ describe("VercelAiGatewayHandler", () => {
 				expect.objectContaining({
 					max_completion_tokens: 64000, // max tokens for sonnet 4
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -410,6 +414,7 @@ describe("VercelAiGatewayHandler", () => {
 							}),
 						]),
 					}),
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				)
 			})
 
@@ -427,6 +432,7 @@ describe("VercelAiGatewayHandler", () => {
 					expect.objectContaining({
 						tool_choice: "auto",
 					}),
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				)
 			})
 
@@ -444,6 +450,7 @@ describe("VercelAiGatewayHandler", () => {
 					expect.objectContaining({
 						parallel_tool_calls: true,
 					}),
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				)
 			})
 
@@ -461,6 +468,7 @@ describe("VercelAiGatewayHandler", () => {
 						tools: expect.any(Array),
 						parallel_tool_calls: true,
 					}),
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				)
 			})
 
@@ -560,6 +568,7 @@ describe("VercelAiGatewayHandler", () => {
 					expect.objectContaining({
 						stream_options: { include_usage: true },
 					}),
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				)
 			})
 		})
@@ -598,6 +607,7 @@ describe("VercelAiGatewayHandler", () => {
 					temperature: VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
 					max_completion_tokens: 64000,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -614,6 +624,7 @@ describe("VercelAiGatewayHandler", () => {
 				expect.objectContaining({
 					temperature: customTemp,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -662,7 +673,17 @@ describe("VercelAiGatewayHandler", () => {
 				expect.objectContaining({
 					temperature: 0.9,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
+		})
+	})
+
+	describe("completePrompt error handling", () => {
+		it("should re-throw non-Error objects as-is", async () => {
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			mockCreate.mockRejectedValue("string error from gateway")
+
+			await expect(handler.completePrompt("Test")).rejects.toBe("string error from gateway")
 		})
 	})
 })

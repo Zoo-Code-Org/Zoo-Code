@@ -91,96 +91,103 @@ export class DeepSeekHandler extends OpenAiHandler {
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const modelId = this.options.apiModelId ?? deepSeekDefaultModelId
-		const { info: modelInfo, temperature, reasoningEffort, maxTokens } = this.getModel()
-
-		const isThinkingModel = isDeepSeekThinkingEnabled(modelId, this.options)
-		const thinking = supportsDeepSeekThinkingToggle(modelId)
-			? ({ type: isThinkingModel ? "enabled" : "disabled" } as const)
-			: isThinkingModel
-				? ({ type: "enabled" } as const)
-				: undefined
-		const deepSeekReasoningEffort = isThinkingModel ? normalizeDeepSeekReasoningEffort(reasoningEffort) : undefined
-
-		// Convert messages to R1 format (merges consecutive same-role messages)
-		// This is required for DeepSeek which does not support successive messages with the same role
-		// For thinking models, enable mergeToolResultText to preserve reasoning_content
-		// during tool call sequences. Without this, environment_details text after tool_results would
-		// create user messages that cause DeepSeek to drop all previous reasoning_content.
-		// See: https://api-docs.deepseek.com/guides/thinking_mode
-		const convertedMessages = convertToR1Format([{ role: "user", content: systemPrompt }, ...messages], {
-			mergeToolResultText: isThinkingModel,
-		})
-
-		const requestOptions: DeepSeekChatCompletionParams = {
-			model: modelId,
-			...(!isThinkingModel && { temperature: temperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE }),
-			messages: convertedMessages,
-			stream: true as const,
-			stream_options: { include_usage: true },
-			...(thinking && { thinking }),
-			...(deepSeekReasoningEffort && { reasoning_effort: deepSeekReasoningEffort }),
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
-		}
-
-		addDeepSeekMaxTokensIfNeeded(requestOptions, this.options, maxTokens)
-
-		// Check if base URL is Azure AI Inference (for DeepSeek via Azure)
-		const isAzureAiInference = this._isAzureAiInference(this.options.deepSeekBaseUrl)
-
-		let stream
+		const signal = this.createAbortSignal()
 		try {
-			stream = await this.client.chat.completions.create(
-				requestOptions as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
-				isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
-			)
-		} catch (error) {
-			const { handleOpenAIError } = await import("./utils/openai-error-handler")
-			throw handleOpenAIError(error, "DeepSeek")
-		}
+			const modelId = this.options.apiModelId ?? deepSeekDefaultModelId
+			const { info: modelInfo, temperature, reasoningEffort, maxTokens } = this.getModel()
 
-		let lastUsage
+			const isThinkingModel = isDeepSeekThinkingEnabled(modelId, this.options)
+			const thinking = supportsDeepSeekThinkingToggle(modelId)
+				? ({ type: isThinkingModel ? "enabled" : "disabled" } as const)
+				: isThinkingModel
+					? ({ type: "enabled" } as const)
+					: undefined
+			const deepSeekReasoningEffort = isThinkingModel
+				? normalizeDeepSeekReasoningEffort(reasoningEffort)
+				: undefined
 
-		for await (const chunk of stream) {
-			const delta = chunk.choices?.[0]?.delta ?? {}
+			// Convert messages to R1 format (merges consecutive same-role messages)
+			// This is required for DeepSeek which does not support successive messages with the same role
+			// For thinking models, enable mergeToolResultText to preserve reasoning_content
+			// during tool call sequences. Without this, environment_details text after tool_results would
+			// create user messages that cause DeepSeek to drop all previous reasoning_content.
+			// See: https://api-docs.deepseek.com/guides/thinking_mode
+			const convertedMessages = convertToR1Format([{ role: "user", content: systemPrompt }, ...messages], {
+				mergeToolResultText: isThinkingModel,
+			})
 
-			// Handle regular text content
-			if (delta.content) {
-				yield {
-					type: "text",
-					text: delta.content,
-				}
+			const requestOptions: DeepSeekChatCompletionParams = {
+				model: modelId,
+				...(!isThinkingModel && { temperature: temperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE }),
+				messages: convertedMessages,
+				stream: true as const,
+				stream_options: { include_usage: true },
+				...(thinking && { thinking }),
+				...(deepSeekReasoningEffort && { reasoning_effort: deepSeekReasoningEffort }),
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
 
-			// Handle reasoning_content from DeepSeek's interleaved thinking
-			// This is the proper way DeepSeek sends thinking content in streaming
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
+			addDeepSeekMaxTokensIfNeeded(requestOptions, this.options, maxTokens)
+
+			// Check if base URL is Azure AI Inference (for DeepSeek via Azure)
+			const isAzureAiInference = this._isAzureAiInference(this.options.deepSeekBaseUrl)
+
+			let stream
+			try {
+				stream = await this.client.chat.completions.create(
+					requestOptions as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH, signal } : { signal },
+				)
+			} catch (error) {
+				const { handleOpenAIError } = await import("./utils/openai-error-handler")
+				throw handleOpenAIError(error, "DeepSeek")
 			}
 
-			// Handle tool calls
-			if (delta.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+			let lastUsage
+
+			for await (const chunk of stream) {
+				const delta = chunk.choices?.[0]?.delta ?? {}
+
+				// Handle regular text content
+				if (delta.content) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "text",
+						text: delta.content,
 					}
 				}
+
+				// Handle reasoning_content from DeepSeek's interleaved thinking
+				// This is the proper way DeepSeek sends thinking content in streaming
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				// Handle tool calls
+				if (delta.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
+					lastUsage = chunk.usage
+				}
 			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+			if (lastUsage) {
+				yield this.processUsageMetrics(lastUsage, modelInfo)
 			}
-		}
-
-		if (lastUsage) {
-			yield this.processUsageMetrics(lastUsage, modelInfo)
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 

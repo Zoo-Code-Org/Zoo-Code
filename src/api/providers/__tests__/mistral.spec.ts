@@ -131,6 +131,7 @@ describe("MistralHandler", () => {
 					tools: expect.any(Array),
 					toolChoice: "any",
 				}),
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
 			)
 
 			expect(result.value).toBeDefined()
@@ -292,6 +293,7 @@ describe("MistralHandler", () => {
 					]),
 					toolChoice: "any",
 				}),
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
 			)
 		})
 
@@ -309,6 +311,7 @@ describe("MistralHandler", () => {
 					tools: expect.any(Array),
 					toolChoice: "any",
 				}),
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
 			)
 		})
 
@@ -452,6 +455,7 @@ describe("MistralHandler", () => {
 				expect.objectContaining({
 					toolChoice: "any",
 				}),
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
 			)
 		})
 	})
@@ -461,11 +465,14 @@ describe("MistralHandler", () => {
 			const prompt = "Test prompt"
 			const result = await handler.completePrompt(prompt)
 
-			expect(mockComplete).toHaveBeenCalledWith({
-				model: mockOptions.apiModelId,
-				messages: [{ role: "user", content: prompt }],
-				temperature: 0,
-			})
+			expect(mockComplete).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: prompt }],
+					temperature: 0,
+				},
+				expect.objectContaining({ fetchOptions: { signal: expect.any(AbortSignal) } }),
+			)
 
 			expect(result).toBe("Test response")
 		})
@@ -496,6 +503,89 @@ describe("MistralHandler", () => {
 		it("should handle errors in completePrompt", async () => {
 			mockComplete.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("Mistral completion error: API Error")
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+			const gen = handler.createMessage("You are a helpful assistant.", [
+				{ role: "user", content: [{ type: "text", text: "Hello!" }] },
+			])
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+			await handler.completePrompt("Test")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should trigger abortAndCleanup on early close of createMessage generator", async () => {
+			const spy = vi.spyOn(handler as any, "abortAndCleanup")
+			const gen = handler.createMessage("You are a helpful assistant.", [
+				{ role: "user", content: [{ type: "text", text: "Hello!" }] },
+			])
+			await gen.next() // Get first chunk
+			await gen.return(undefined) // Early close triggers finally
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("abort() should abort the active signal during createMessage", async () => {
+			const gen = handler.createMessage("You are a helpful assistant.", [
+				{ role: "user", content: [{ type: "text", text: "Hello!" }] },
+			])
+			await gen.next() // Start the stream
+			// Calling abort should not throw
+			expect(() => handler.abort()).not.toThrow()
+			// Drain remaining
+			for await (const _ of gen) {
+				// drain
+			}
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
+		})
+	})
+
+	describe("createMessage usage tracking", () => {
+		it("should yield usage chunk when event.data.usage is present", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						data: {
+							choices: [{ delta: { content: "Hello" }, index: 0 }],
+							usage: { promptTokens: 10, completionTokens: 5 },
+						},
+					}
+				},
+			}))
+
+			const stream = handler.createMessage("sys", [{ role: "user", content: "hi" }])
+			const chunks: any[] = []
+			for await (const c of stream) {
+				chunks.push(c)
+			}
+
+			const usageChunks = chunks.filter((c) => c.type === "usage")
+			expect(usageChunks.length).toBeGreaterThanOrEqual(1)
+			expect(usageChunks[0]).toEqual({
+				type: "usage",
+				inputTokens: 10,
+				outputTokens: 5,
+			})
 		})
 	})
 })

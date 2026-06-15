@@ -531,7 +531,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Create AbortController with 10 minute timeout
+		const signal = this.createAbortSignal()
 		const controller = new AbortController()
+		signal.addEventListener("abort", () => controller.abort(), { once: true })
 		let timeoutId: NodeJS.Timeout | undefined
 
 		try {
@@ -793,10 +795,13 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			} else {
 				throw new Error("An unknown error occurred")
 			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
+		const signal = this.createAbortSignal()
 		try {
 			const modelConfig = this.getModel()
 
@@ -838,7 +843,9 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 
 			const command = new ConverseCommand(payload)
-			const response = await this.client.send(command)
+			const response = await this.client.send(command, {
+				abortSignal: signal,
+			})
 
 			if (
 				response?.output?.message?.content &&
@@ -887,6 +894,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				}
 			}
 			throw enhancedError
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 

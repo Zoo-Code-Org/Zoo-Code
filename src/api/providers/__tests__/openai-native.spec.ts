@@ -181,6 +181,19 @@ describe("OpenAiNativeHandler", () => {
 				}
 			}).rejects.toThrow("OpenAI service error")
 		})
+
+		it("should re-throw AbortError without spawning fallback", async () => {
+			const abortError = new Error("The operation was aborted")
+			abortError.name = "AbortError"
+			mockResponsesCreate.mockRejectedValue(abortError)
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			await expect(async () => {
+				for await (const _ of stream) {
+					// should not reach
+				}
+			}).rejects.toThrow("The operation was aborted")
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -216,7 +229,7 @@ describe("OpenAiNativeHandler", () => {
 					],
 				}),
 				expect.objectContaining({
-					signal: expect.any(Object),
+					signal: expect.any(AbortSignal),
 				}),
 			)
 		})
@@ -228,6 +241,13 @@ describe("OpenAiNativeHandler", () => {
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
 				"OpenAI Native completion error: API Error",
 			)
+		})
+
+		it("should re-throw non-Error objects in completePrompt", async () => {
+			// Mock SDK to reject with a non-Error value
+			mockResponsesCreate.mockRejectedValue("raw string error")
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toBe("raw string error")
 		})
 
 		it("should return empty string when no text in response", async () => {
@@ -1624,7 +1644,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 					store: false,
 				}),
 				expect.objectContaining({
-					signal: expect.any(Object),
+					signal: expect.any(AbortSignal),
 				}),
 			)
 		})

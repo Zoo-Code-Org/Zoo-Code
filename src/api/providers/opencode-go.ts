@@ -162,77 +162,68 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
+		const signal = this.createAbortSignal()
+		try {
+			const { id: modelId, info } = await this.fetchModel()
 
-		if (format === "anthropic") {
-			yield* this.streamAnthropicMessage(modelId, info, temperature, maxTokens, systemPrompt, messages, metadata)
-			return
-		}
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages),
+			]
 
-		// preserveReasoning models (GLM/DeepSeek/MiMo/MiniMax/Qwen) require
-		// reasoning_content to be carried across tool-call continuations.
-		const preserveReasoning = info.preserveReasoning === true
-		const convertedMessages = preserveReasoning
-			? convertToR1Format(messages, { mergeToolResultText: true })
-			: convertToOpenAiMessages(messages)
-
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertedMessages,
-		]
-
-		const body: OpenAI.Chat.ChatCompletionCreateParams = {
-			model: modelId,
-			messages: openAiMessages,
-			temperature: this.supportsTemperature(modelId) ? temperature : undefined,
-			max_completion_tokens:
-				this.options.includeMaxTokens === true ? this.options.modelMaxTokens || maxTokens : maxTokens,
-			stream: true,
-			stream_options: { include_usage: true },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
-			...(reasoningEffort && {
-				reasoning_effort: reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"],
-			}),
-		}
-
-		const completion = await this.client.chat.completions.create(body)
-
-		for await (const chunk of completion) {
-			const delta = chunk.choices[0]?.delta
-
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
+			const body: OpenAI.Chat.ChatCompletionCreateParams = {
+				model: modelId,
+				messages: openAiMessages,
+				temperature: this.supportsTemperature(modelId)
+					? (this.options.modelTemperature ?? OPENCODE_GO_DEFAULT_TEMPERATURE)
+					: undefined,
+				max_completion_tokens: info.maxTokens,
+				stream: true,
+				stream_options: { include_usage: true },
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
 
-			// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+			const completion = await this.client.chat.completions.create(body, { signal })
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management.
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+			for await (const chunk of completion) {
+				const delta = chunk.choices[0]?.delta
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
+
+				// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management.
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: chunk.usage.prompt_tokens || 0,
+						outputTokens: chunk.usage.completion_tokens || 0,
+						cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
 					}
 				}
 			}
-
-			if (chunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-					cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
-				}
-			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -486,61 +477,33 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 * @throws Error with an Opencode Go-specific prefix if the request fails.
 	 */
 	async completePrompt(prompt: string): Promise<string> {
-		const { id: modelId, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
+		const signal = this.createAbortSignal()
+		try {
+			const { id: modelId, info } = await this.fetchModel()
 
-		if (format === "anthropic") {
 			try {
-				const message = await this.anthropicClient.messages.create({
+				const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
 					model: modelId,
-					// Honour the same includeMaxTokens/modelMaxTokens override
-					// logic as the streaming path so non-streaming completions
-					// respect the user's max-output slider instead of always
-					// falling back to the model default.
-					max_tokens:
-						this.options.includeMaxTokens === true
-							? this.options.modelMaxTokens || maxTokens || 16_384
-							: (maxTokens ?? 16_384),
-					temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
 					messages: [{ role: "user", content: prompt }],
 					stream: false,
-				})
+				}
 
-				const content = message.content.find(({ type }) => type === "text")
-				return content?.type === "text" ? content.text : ""
+				if (this.supportsTemperature(modelId)) {
+					requestOptions.temperature = this.options.modelTemperature ?? OPENCODE_GO_DEFAULT_TEMPERATURE
+				}
+
+				requestOptions.max_completion_tokens = info.maxTokens
+
+				const response = await this.client.chat.completions.create(requestOptions, { signal })
+				return response.choices[0]?.message.content || ""
 			} catch (error) {
 				if (error instanceof Error) {
 					throw new Error(`Opencode Go completion error: ${error.message}`)
 				}
 				throw error
 			}
-		}
-
-		try {
-			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
-				model: modelId,
-				messages: [{ role: "user", content: prompt }],
-				stream: false,
-			}
-
-			if (this.supportsTemperature(modelId)) {
-				requestOptions.temperature = temperature
-			}
-
-			requestOptions.max_completion_tokens =
-				this.options.includeMaxTokens === true ? this.options.modelMaxTokens || maxTokens : maxTokens
-
-			if (reasoningEffort) {
-				requestOptions.reasoning_effort =
-					reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"]
-			}
-
-			const response = await this.client.chat.completions.create(requestOptions)
-			return response.choices[0]?.message.content || ""
-		} catch (error) {
-			if (error instanceof Error) {
-				throw new Error(`Opencode Go completion error: ${error.message}`)
-			}
-			throw error
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

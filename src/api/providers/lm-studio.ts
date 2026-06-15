@@ -41,131 +41,139 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOpenAiMessages(messages),
-		]
+		const signal = this.createAbortSignal()
+		try {
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages),
+			]
 
-		// -------------------------
-		// Track token usage
-		// -------------------------
-		const toContentBlocks = (
-			blocks: Anthropic.Messages.MessageParam[] | string,
-		): Anthropic.Messages.ContentBlockParam[] => {
-			if (typeof blocks === "string") {
-				return [{ type: "text", text: blocks }]
-			}
+			// -------------------------
+			// Track token usage
+			// -------------------------
+			const toContentBlocks = (
+				blocks: Anthropic.Messages.MessageParam[] | string,
+			): Anthropic.Messages.ContentBlockParam[] => {
+				if (typeof blocks === "string") {
+					return [{ type: "text", text: blocks }]
+				}
 
-			const result: Anthropic.Messages.ContentBlockParam[] = []
-			for (const msg of blocks) {
-				if (typeof msg.content === "string") {
-					result.push({ type: "text", text: msg.content })
-				} else if (Array.isArray(msg.content)) {
-					for (const part of msg.content) {
-						if (part.type === "text") {
-							result.push({ type: "text", text: part.text })
+				const result: Anthropic.Messages.ContentBlockParam[] = []
+				for (const msg of blocks) {
+					if (typeof msg.content === "string") {
+						result.push({ type: "text", text: msg.content })
+					} else if (Array.isArray(msg.content)) {
+						for (const part of msg.content) {
+							if (part.type === "text") {
+								result.push({ type: "text", text: part.text })
+							}
 						}
 					}
 				}
-			}
-			return result
-		}
-
-		let inputTokens = 0
-		try {
-			inputTokens = await this.countTokens([{ type: "text", text: systemPrompt }, ...toContentBlocks(messages)])
-		} catch (err) {
-			console.error("[LmStudio] Failed to count input tokens:", err)
-			inputTokens = 0
-		}
-
-		let assistantText = ""
-
-		try {
-			const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming & { draft_model?: string } = {
-				model: this.getModel().id,
-				messages: openAiMessages,
-				temperature: this.options.modelTemperature ?? LMSTUDIO_DEFAULT_TEMPERATURE,
-				stream: true,
-				tools: this.convertToolsForOpenAI(metadata?.tools),
-				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				return result
 			}
 
-			if (this.options.lmStudioSpeculativeDecodingEnabled && this.options.lmStudioDraftModelId) {
-				params.draft_model = this.options.lmStudioDraftModelId
-			}
-
-			let results
+			let inputTokens = 0
 			try {
-				results = await this.client.chat.completions.create(params)
-			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
-			}
-
-			const matcher = new TagMatcher(
-				"think",
-				(chunk) =>
-					({
-						type: chunk.matched ? "reasoning" : "text",
-						text: chunk.data,
-					}) as const,
-			)
-
-			for await (const chunk of results) {
-				const delta = chunk.choices[0]?.delta
-				const finishReason = chunk.choices[0]?.finish_reason
-
-				if (delta?.content) {
-					assistantText += delta.content
-					for (const processedChunk of matcher.update(delta.content)) {
-						yield processedChunk
-					}
-				}
-
-				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
-				if (delta?.tool_calls) {
-					for (const toolCall of delta.tool_calls) {
-						yield {
-							type: "tool_call_partial",
-							index: toolCall.index,
-							id: toolCall.id,
-							name: toolCall.function?.name,
-							arguments: toolCall.function?.arguments,
-						}
-					}
-				}
-
-				// Process finish_reason to emit tool_call_end events
-				if (finishReason) {
-					const endEvents = NativeToolCallParser.processFinishReason(finishReason)
-					for (const event of endEvents) {
-						yield event
-					}
-				}
-			}
-
-			for (const processedChunk of matcher.final()) {
-				yield processedChunk
-			}
-
-			let outputTokens = 0
-			try {
-				outputTokens = await this.countTokens([{ type: "text", text: assistantText }])
+				inputTokens = await this.countTokens([
+					{ type: "text", text: systemPrompt },
+					...toContentBlocks(messages),
+				])
 			} catch (err) {
-				console.error("[LmStudio] Failed to count output tokens:", err)
-				outputTokens = 0
+				console.error("[LmStudio] Failed to count input tokens:", err)
+				inputTokens = 0
 			}
 
-			yield {
-				type: "usage",
-				inputTokens,
-				outputTokens,
-			} as const
-		} catch (error) {
-			throw new Error(
-				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Roo Code's prompts.",
-			)
+			let assistantText = ""
+
+			try {
+				const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming & { draft_model?: string } = {
+					model: this.getModel().id,
+					messages: openAiMessages,
+					temperature: this.options.modelTemperature ?? LMSTUDIO_DEFAULT_TEMPERATURE,
+					stream: true,
+					tools: this.convertToolsForOpenAI(metadata?.tools),
+					tool_choice: metadata?.tool_choice,
+					parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				}
+
+				if (this.options.lmStudioSpeculativeDecodingEnabled && this.options.lmStudioDraftModelId) {
+					params.draft_model = this.options.lmStudioDraftModelId
+				}
+
+				let results
+				try {
+					results = await this.client.chat.completions.create(params, { signal })
+				} catch (error) {
+					throw handleOpenAIError(error, this.providerName)
+				}
+
+				const matcher = new TagMatcher(
+					"think",
+					(chunk) =>
+						({
+							type: chunk.matched ? "reasoning" : "text",
+							text: chunk.data,
+						}) as const,
+				)
+
+				for await (const chunk of results) {
+					const delta = chunk.choices[0]?.delta
+					const finishReason = chunk.choices[0]?.finish_reason
+
+					if (delta?.content) {
+						assistantText += delta.content
+						for (const processedChunk of matcher.update(delta.content)) {
+							yield processedChunk
+						}
+					}
+
+					// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
+					if (delta?.tool_calls) {
+						for (const toolCall of delta.tool_calls) {
+							yield {
+								type: "tool_call_partial",
+								index: toolCall.index,
+								id: toolCall.id,
+								name: toolCall.function?.name,
+								arguments: toolCall.function?.arguments,
+							}
+						}
+					}
+
+					// Process finish_reason to emit tool_call_end events
+					if (finishReason) {
+						const endEvents = NativeToolCallParser.processFinishReason(finishReason)
+						for (const event of endEvents) {
+							yield event
+						}
+					}
+				}
+
+				for (const processedChunk of matcher.final()) {
+					yield processedChunk
+				}
+
+				let outputTokens = 0
+				try {
+					outputTokens = await this.countTokens([{ type: "text", text: assistantText }])
+				} catch (err) {
+					console.error("[LmStudio] Failed to count output tokens:", err)
+					outputTokens = 0
+				}
+
+				yield {
+					type: "usage",
+					inputTokens,
+					outputTokens,
+				} as const
+			} catch (error) {
+				throw new Error(
+					"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Roo Code's prompts.",
+				)
+			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
@@ -185,31 +193,36 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
+		const signal = this.createAbortSignal()
 		try {
-			// Create params object with optional draft model
-			const params: any = {
-				model: this.getModel().id,
-				messages: [{ role: "user", content: prompt }],
-				temperature: this.options.modelTemperature ?? LMSTUDIO_DEFAULT_TEMPERATURE,
-				stream: false,
-			}
-
-			// Add draft model if speculative decoding is enabled and a draft model is specified
-			if (this.options.lmStudioSpeculativeDecodingEnabled && this.options.lmStudioDraftModelId) {
-				params.draft_model = this.options.lmStudioDraftModelId
-			}
-
-			let response
 			try {
-				response = await this.client.chat.completions.create(params)
+				// Create params object with optional draft model
+				const params: any = {
+					model: this.getModel().id,
+					messages: [{ role: "user", content: prompt }],
+					temperature: this.options.modelTemperature ?? LMSTUDIO_DEFAULT_TEMPERATURE,
+					stream: false,
+				}
+
+				// Add draft model if speculative decoding is enabled and a draft model is specified
+				if (this.options.lmStudioSpeculativeDecodingEnabled && this.options.lmStudioDraftModelId) {
+					params.draft_model = this.options.lmStudioDraftModelId
+				}
+
+				let response
+				try {
+					response = await this.client.chat.completions.create(params, { signal })
+				} catch (error) {
+					throw handleOpenAIError(error, this.providerName)
+				}
+				return response.choices[0]?.message.content || ""
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw new Error(
+					"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Roo Code's prompts.",
+				)
 			}
-			return response.choices[0]?.message.content || ""
-		} catch (error) {
-			throw new Error(
-				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Roo Code's prompts.",
-			)
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

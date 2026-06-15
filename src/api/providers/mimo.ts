@@ -71,97 +71,102 @@ export class MimoHandler extends OpenAiHandler {
 		messages: any[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info: modelInfo } = this.getModel()
-
-		// Use shared R1-format conversion with tool ID sanitization and text merging
-		const convertedMessages = convertToR1Format(messages, {
-			mergeToolResultText: true,
-			normalizeToolCallId: sanitizeOpenAiCallId,
-		})
-
-		const tools = metadata?.tools
-
-		// Build request per MiMo's OpenAI-compatible API
-		// https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
-		// Note: temperature is omitted because MiMo forces it to 1.0 when thinking mode
-		// is enabled, regardless of what is passed (see model-hyperparameters docs).
-		const params: Record<string, any> = {
-			model: modelId,
-			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
-			stream: true,
-			stream_options: { include_usage: true },
-			// MiMo requires thinking to be enabled via extra_body
-			extra_body: { thinking: { type: "enabled" } },
-		}
-
-		if (tools && tools.length > 0) {
-			params.tools = tools
-		}
-
-		let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+		const signal = this.createAbortSignal()
 		try {
-			stream = (await this.client.chat.completions.create(params as any)) as any
-		} catch (error) {
-			throw handleProviderError(error, "MiMo")
-		}
+			const { id: modelId, info: modelInfo } = this.getModel()
 
-		let lastUsage: OpenAI.CompletionUsage | undefined
-		const activeToolCallIds = new Set<string>()
+			// Use shared R1-format conversion with tool ID sanitization and text merging
+			const convertedMessages = convertToR1Format(messages, {
+				mergeToolResultText: true,
+				normalizeToolCallId: sanitizeOpenAiCallId,
+			})
 
-		for await (const chunk of stream) {
-			const delta = chunk.choices?.[0]?.delta ?? {}
-			const finishReason = chunk.choices?.[0]?.finish_reason
-			const sanitizedDelta = delta.tool_calls
-				? {
-						...delta,
-						tool_calls: delta.tool_calls.map((toolCall) => ({
-							...toolCall,
-							id: toolCall.id ? sanitizeOpenAiCallId(toolCall.id) : toolCall.id,
-						})),
+			const tools = metadata?.tools
+
+			// Build request per MiMo's OpenAI-compatible API
+			// https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
+			// Note: temperature is omitted because MiMo forces it to 1.0 when thinking mode
+			// is enabled, regardless of what is passed (see model-hyperparameters docs).
+			const params: Record<string, any> = {
+				model: modelId,
+				messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
+				stream: true,
+				stream_options: { include_usage: true },
+				// MiMo requires thinking to be enabled via extra_body
+				extra_body: { thinking: { type: "enabled" } },
+			}
+
+			if (tools && tools.length > 0) {
+				params.tools = tools
+			}
+
+			let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+			try {
+				stream = (await this.client.chat.completions.create(params as any, { signal })) as any
+			} catch (error) {
+				throw handleProviderError(error, "MiMo")
+			}
+
+			let lastUsage: OpenAI.CompletionUsage | undefined
+			const activeToolCallIds = new Set<string>()
+
+			for await (const chunk of stream) {
+				const delta = chunk.choices?.[0]?.delta ?? {}
+				const finishReason = chunk.choices?.[0]?.finish_reason
+				const sanitizedDelta = delta.tool_calls
+					? {
+							...delta,
+							tool_calls: delta.tool_calls.map((toolCall) => ({
+								...toolCall,
+								id: toolCall.id ? sanitizeOpenAiCallId(toolCall.id) : toolCall.id,
+							})),
+						}
+					: delta
+
+				if (delta.content) {
+					yield {
+						type: "text",
+						text: delta.content,
 					}
-				: delta
+				}
 
-			if (delta.content) {
-				yield {
-					type: "text",
-					text: delta.content,
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				yield* this.processToolCalls(sanitizedDelta, finishReason, activeToolCallIds)
+
+				if (chunk.usage) {
+					lastUsage = chunk.usage
 				}
 			}
 
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
+			if (lastUsage) {
+				const inputTokens = lastUsage?.prompt_tokens || 0
+				const outputTokens = lastUsage?.completion_tokens || 0
+				const cacheWriteTokens = (lastUsage?.prompt_tokens_details as any)?.cache_write_tokens || 0
+				const cacheReadTokens = lastUsage?.prompt_tokens_details?.cached_tokens || 0
+
+				const { totalCost } = calculateApiCostOpenAI(
+					modelInfo,
+					inputTokens,
+					outputTokens,
+					cacheWriteTokens,
+					cacheReadTokens,
+				)
+
+				yield {
+					type: "usage",
+					inputTokens,
+					outputTokens,
+					cacheWriteTokens: cacheWriteTokens || undefined,
+					cacheReadTokens: cacheReadTokens || undefined,
+					totalCost,
+				}
 			}
-
-			yield* this.processToolCalls(sanitizedDelta, finishReason, activeToolCallIds)
-
-			if (chunk.usage) {
-				lastUsage = chunk.usage
-			}
-		}
-
-		if (lastUsage) {
-			const inputTokens = lastUsage?.prompt_tokens || 0
-			const outputTokens = lastUsage?.completion_tokens || 0
-			const cacheWriteTokens = (lastUsage?.prompt_tokens_details as any)?.cache_write_tokens || 0
-			const cacheReadTokens = lastUsage?.prompt_tokens_details?.cached_tokens || 0
-
-			const { totalCost } = calculateApiCostOpenAI(
-				modelInfo,
-				inputTokens,
-				outputTokens,
-				cacheWriteTokens,
-				cacheReadTokens,
-			)
-
-			yield {
-				type: "usage",
-				inputTokens,
-				outputTokens,
-				cacheWriteTokens: cacheWriteTokens || undefined,
-				cacheReadTokens: cacheReadTokens || undefined,
-				totalCost,
-			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

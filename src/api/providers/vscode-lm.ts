@@ -185,6 +185,12 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	 * converts the messages to VS Code LM format, and streams the response chunks.
 	 * Tool calls handling is currently a work in progress.
 	 */
+	override abort(): void {
+		if (this.currentRequestCancellation) {
+			this.currentRequestCancellation.cancel()
+		}
+	}
+
 	dispose(): void {
 		if (this.disposable) {
 			this.disposable.dispose()
@@ -565,10 +571,11 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	async completePrompt(prompt: string): Promise<string> {
 		try {
 			const client = await this.getClient()
+			this.currentRequestCancellation = new vscode.CancellationTokenSource()
 			const response = await client.sendRequest(
 				[vscode.LanguageModelChatMessage.User(prompt)],
 				{},
-				new vscode.CancellationTokenSource().token,
+				this.currentRequestCancellation.token,
 			)
 			let result = ""
 			for await (const chunk of response.stream) {

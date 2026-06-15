@@ -512,7 +512,7 @@ describe("FireworksHandler", () => {
 				stream: true,
 				stream_options: { include_usage: true },
 			}),
-			undefined,
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 
@@ -538,7 +538,7 @@ describe("FireworksHandler", () => {
 			expect.objectContaining({
 				temperature: 0.5,
 			}),
-			undefined,
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 
@@ -565,7 +565,7 @@ describe("FireworksHandler", () => {
 			expect.objectContaining({
 				temperature: 1.0,
 			}),
-			undefined,
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 
@@ -593,7 +593,7 @@ describe("FireworksHandler", () => {
 			expect.objectContaining({
 				temperature: 0.7,
 			}),
-			undefined,
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 

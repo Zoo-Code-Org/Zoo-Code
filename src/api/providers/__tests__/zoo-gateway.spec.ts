@@ -27,6 +27,7 @@ vitest.mock("../../../i18n", () => ({
 }))
 
 import OpenAI from "openai"
+import { Anthropic } from "@anthropic-ai/sdk"
 
 import { zooGatewayDefaultModelId, ZOO_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
@@ -445,6 +446,7 @@ describe("ZooGatewayHandler", () => {
 					temperature: ZOO_GATEWAY_DEFAULT_TEMPERATURE,
 					max_completion_tokens: 64000,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -633,6 +635,114 @@ describe("ZooGatewayHandler", () => {
 				"common:zooAuth.errors.out_of_credits",
 				"common:zooAuth.buttons.add_credits",
 			)
+		})
+
+		it("logs console.error when surfaceGatewayApiError throws in createMessage", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			// Make showErrorMessage throw to cause surfaceGatewayApiError to throw
+			showErrorMessage.mockImplementationOnce(() => {
+				throw new Error("showErrorMessage blew up")
+			})
+			mockCreate.mockImplementation(function () {
+				throw makeApiError(402, { message: "credits gone" })
+			})
+
+			const consoleSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			await expect(drainCreateMessage(handler)).rejects.toThrow()
+			expect(consoleSpy).toHaveBeenCalledWith("Failed to surface Zoo Gateway error:", expect.any(String))
+			consoleSpy.mockRestore()
+		})
+
+		it("logs console.error when surfaceGatewayApiError throws in completePrompt", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			showErrorMessage.mockImplementationOnce(() => {
+				throw new Error("showErrorMessage blew up")
+			})
+			mockCreate.mockImplementation(function () {
+				throw makeApiError(402, { message: "credits gone" })
+			})
+
+			const consoleSpy = vitest.spyOn(console, "error").mockImplementation(() => {})
+			await expect(handler.completePrompt("ping")).rejects.toThrow()
+			expect(consoleSpy).toHaveBeenCalledWith("Failed to surface Zoo Gateway error:", expect.any(String))
+			consoleSpy.mockRestore()
+		})
+
+		it("rethrows non-Error in completePrompt catch block", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(function () {
+				throw "string error"
+			})
+
+			await expect(handler.completePrompt("ping")).rejects.toBe("string error")
+		})
+	})
+
+	describe("abort lifecycle", () => {
+		it("abort() should not throw when no controller exists", () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should call abortAndCleanup in createMessage finally block", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+
+			mockCreate.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+			const gen = handler.createMessage("", messages)
+			for await (const _ of gen) {
+				// consume
+			}
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("should call abortAndCleanup in completePrompt finally block", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const spy = vitest.spyOn(handler as any, "abortAndCleanup")
+
+			mockCreate.mockResolvedValue({
+				choices: [{ message: { content: "response" } }],
+			})
+
+			await handler.completePrompt("Test prompt")
+			expect(spy).toHaveBeenCalled()
+		})
+
+		it("createAbortSignal should abort previous signal", () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const signal1 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(false)
+			const signal2 = (handler as any).createAbortSignal()
+			expect(signal1.aborted).toBe(true)
+			expect(signal2.aborted).toBe(false)
+		})
+
+		it("abort() should not throw during createMessage streaming", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			mockCreate.mockResolvedValue({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true, value: undefined }
+					},
+				}),
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+			const gen = handler.createMessage("", messages)
+			await gen.next()
+			expect(() => handler.abort()).not.toThrow()
+			for await (const _ of gen) {
+				// drain
+			}
 		})
 	})
 })

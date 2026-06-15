@@ -116,100 +116,110 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const {
-			id: model,
-			info,
-			maxTokens: max_tokens,
-			temperature,
-			reasoningEffort: reasoning_effort,
-			reasoning: thinking,
-		} = await this.fetchModel()
-
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOpenAiMessages(messages),
-		]
-
-		// Map extended efforts to OpenAI Chat Completions-accepted values (omit unsupported)
-		const allowedEffort = (["low", "medium", "high"] as const).includes(reasoning_effort as any)
-			? (reasoning_effort as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming["reasoning_effort"])
-			: undefined
-
-		const completionParams: UnboundChatCompletionParamsStreaming = {
-			messages: openAiMessages,
-			model,
-			max_tokens,
-			temperature,
-			...(allowedEffort && { reasoning_effort: allowedEffort }),
-			...(thinking && { thinking }),
-			stream: true,
-			stream_options: { include_usage: true },
-			unbound_metadata: { originApp: "zoo-code", taskId: metadata?.taskId, mode: metadata?.mode },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-		}
-
-		let stream
+		const signal = this.createAbortSignal()
 		try {
-			stream = await this.client.chat.completions.create(completionParams)
-		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
-		}
-		let lastUsage: any = undefined
+			const {
+				id: model,
+				info,
+				maxTokens: max_tokens,
+				temperature,
+				reasoningEffort: reasoning_effort,
+				reasoning: thinking,
+			} = await this.fetchModel()
 
-		for await (const chunk of stream) {
-			const delta = chunk.choices[0]?.delta
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages),
+			]
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
+			// Map extended efforts to OpenAI Chat Completions-accepted values (omit unsupported)
+			const allowedEffort = (["low", "medium", "high"] as const).includes(reasoning_effort as any)
+				? (reasoning_effort as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming["reasoning_effort"])
+				: undefined
+
+			const completionParams: UnboundChatCompletionParamsStreaming = {
+				messages: openAiMessages,
+				model,
+				max_tokens,
+				temperature,
+				...(allowedEffort && { reasoning_effort: allowedEffort }),
+				...(thinking && { thinking }),
+				stream: true,
+				stream_options: { include_usage: true },
+				unbound_metadata: { originApp: "zoo-code", taskId: metadata?.taskId, mode: metadata?.mode },
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
 			}
 
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
+			let stream
+			try {
+				stream = await this.client.chat.completions.create(completionParams, { signal })
+			} catch (error) {
+				throw handleOpenAIError(error, this.providerName)
 			}
+			let lastUsage: any = undefined
 
-			// Handle native tool calls
-			if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
-				for (const toolCall of delta.tool_calls) {
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+			for await (const chunk of stream) {
+				const delta = chunk.choices[0]?.delta
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				// Handle native tool calls
+				if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
 					}
+				}
+
+				if (chunk.usage) {
+					lastUsage = chunk.usage
 				}
 			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+			if (lastUsage) {
+				yield this.processUsageMetrics(lastUsage, info)
 			}
-		}
-
-		if (lastUsage) {
-			yield this.processUsageMetrics(lastUsage, info)
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
-
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
-
-		const completionParams: UnboundChatCompletionParams = {
-			model,
-			max_tokens,
-			messages: openAiMessages,
-			temperature: temperature,
-		}
-
-		let response: OpenAI.Chat.ChatCompletion
+		const signal = this.createAbortSignal()
 		try {
-			response = await this.client.chat.completions.create(completionParams)
-		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
+			const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
+
+			let openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
+
+			const completionParams: UnboundChatCompletionParams = {
+				model,
+				max_tokens,
+				messages: openAiMessages,
+				temperature: temperature,
+			}
+
+			let response: OpenAI.Chat.ChatCompletion
+			try {
+				response = await this.client.chat.completions.create(completionParams, { signal })
+			} catch (error) {
+				throw handleOpenAIError(error, this.providerName)
+			}
+			return response.choices[0]?.message.content || ""
+		} finally {
+			this.abortAndCleanup()
 		}
-		return response.choices[0]?.message.content || ""
 	}
 }

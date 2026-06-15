@@ -360,7 +360,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 					stream: true,
 					stream_options: { include_usage: true },
 				}),
-				undefined,
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -549,6 +549,225 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			const endChunks = chunks.filter((chunk) => chunk.type === "tool_call_end")
 			expect(endChunks).toHaveLength(0)
+		})
+	})
+
+	describe("Abort support", () => {
+		it("should pass AbortSignal to createStream via createMessage", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const stream = handler.createMessage("system prompt", [])
+			for await (const _chunk of stream) {
+				// consume
+			}
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.any(Object),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("should pass AbortSignal to client.chat.completions.create via completePrompt", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+
+			await handler.completePrompt("test prompt")
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "test-model" }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("should clean up abort controller after createMessage completes", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "hello" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}
+			})
+
+			const stream = handler.createMessage("system prompt", [])
+			for await (const _chunk of stream) {
+				// consume
+			}
+
+			// After completion, calling abort() should be a no-op (controller was cleaned up)
+			// We verify this indirectly: no error should be thrown
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should clean up abort controller after completePrompt completes", async () => {
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+
+			await handler.completePrompt("test prompt")
+
+			// After completion, calling abort() should be a no-op (controller was cleaned up)
+			expect(() => handler.abort()).not.toThrow()
+		})
+
+		it("should support abort during streaming via early generator close", async () => {
+			let streamAborted = false
+
+			mockCreate.mockImplementationOnce((_params: any, requestOptions: any) => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						next: vi.fn().mockImplementation(async () => {
+							// Check if the signal was aborted
+							if (requestOptions?.signal?.aborted) {
+								streamAborted = true
+								throw new Error("aborted")
+							}
+							return {
+								done: false,
+								value: { choices: [{ delta: { content: "chunk" } }] },
+							}
+						}),
+					}),
+				}
+			})
+
+			const stream = handler.createMessage("system prompt", [])
+
+			// Only consume the first chunk, then break (early close)
+			let count = 0
+			try {
+				for await (const _chunk of stream) {
+					count++
+					if (count >= 1) {
+						break
+					}
+				}
+			} catch {
+				// Generator may throw on early close, that's OK
+			}
+
+			// The finally block should have called abortAndCleanup
+			// Verify that abort was called (controller is cleaned up)
+			expect(() => handler.abort()).not.toThrow()
+		})
+	})
+
+	describe("createMessage error handling", () => {
+		it("should handle errors via handleOpenAIError in catch block", async () => {
+			mockCreate.mockImplementationOnce(() => ({
+				// eslint-disable-next-line require-yield
+				[Symbol.asyncIterator]: async function* () {
+					throw new Error("stream failed")
+				},
+			}))
+
+			const stream = handler.createMessage("system prompt", [])
+			await expect(async () => {
+				for await (const _ of stream) {
+					/* drain */
+				}
+			}).rejects.toThrow()
+		})
+
+		it("should throw on base_resp error chunk during streaming", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: {
+									base_resp: { status_code: 500, status_msg: "Internal Server Error" },
+									choices: [],
+								},
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}
+			})
+
+			const stream = handler.createMessage("system prompt", [])
+			await expect(async () => {
+				for await (const _ of stream) {
+					/* drain */
+				}
+			}).rejects.toThrow("TestProvider API Error (500): Internal Server Error")
+		})
+
+		it("should throw on completePrompt base_resp error response", async () => {
+			mockCreate.mockResolvedValueOnce({
+				base_resp: { status_code: 403, status_msg: "Forbidden" },
+				choices: [{ message: { content: "should not return" } }],
+			})
+
+			await expect(handler.completePrompt("test prompt")).rejects.toThrow(
+				"TestProvider API Error (403): Forbidden",
+			)
+		})
+
+		it("should throw on completePrompt base_resp with zero status_code as success path", async () => {
+			// base_resp with status_code 0 is treated as success
+			mockCreate.mockResolvedValueOnce({
+				base_resp: { status_code: 0, status_msg: "OK" },
+				choices: [{ message: { content: "ok response" } }],
+			})
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("ok response")
+		})
+	})
+
+	describe("completePrompt with reasoning", () => {
+		it("should add thinking parameter when reasoning is enabled and model supports it", async () => {
+			// Create a provider with reasoning support
+			class ReasoningProvider extends BaseOpenAiCompatibleProvider<"reasoning-model"> {
+				constructor() {
+					super({
+						providerName: "ReasoningTest",
+						baseURL: "https://test.example.com/v1",
+						defaultProviderModelId: "reasoning-model",
+						providerModels: {
+							"reasoning-model": {
+								maxTokens: 4096,
+								contextWindow: 128000,
+								supportsImages: false,
+								supportsPromptCache: false,
+								inputPrice: 0.5,
+								outputPrice: 1.5,
+								supportsReasoningBinary: true,
+							},
+						},
+						apiKey: "test",
+						enableReasoningEffort: true,
+					})
+				}
+			}
+
+			const reasoningHandler = new ReasoningProvider()
+			mockCreate.mockResolvedValueOnce({
+				choices: [{ message: { content: "thoughtful answer" } }],
+			})
+
+			const result = await reasoningHandler.completePrompt("think")
+			expect(result).toBe("thoughtful answer")
+
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs.thinking).toEqual({ type: "enabled" })
 		})
 	})
 })

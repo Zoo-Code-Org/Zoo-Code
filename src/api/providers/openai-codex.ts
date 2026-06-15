@@ -53,8 +53,6 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	private lastResponseOutput: any[] | undefined
 	// Last top-level response id
 	private lastResponseId: string | undefined
-	// Abort controller for cancelling ongoing requests
-	private abortController?: AbortController
 	// Session ID for the Codex API (persists for the lifetime of the handler)
 	private readonly sessionId: string
 	/**
@@ -346,8 +344,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		accessToken: string,
 		taskId?: string,
 	): ApiStream {
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
+		const signal = this.createAbortSignal()
 
 		try {
 			// Prefer OpenAI SDK streaming (same approach as openai-native) so event handling
@@ -375,7 +372,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 					})
 
 				const stream = (await (client as any).responses.create(requestBody, {
-					signal: this.abortController.signal,
+					signal,
 					// If the SDK supports per-request overrides, ensure headers are present.
 					headers: codexHeaders,
 				})) as AsyncIterable<any>
@@ -387,7 +384,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}
 
 				for await (const event of stream) {
-					if (this.abortController.signal.aborted) {
+					if (signal.aborted) {
 						break
 					}
 
@@ -400,10 +397,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}
 			} catch (_sdkErr) {
 				// Fallback to manual SSE via fetch (Codex backend).
-				yield* this.makeCodexRequest(requestBody, model, accessToken, taskId)
+				yield* this.makeCodexRequest(requestBody, model, accessToken, taskId, signal)
 			}
 		} finally {
-			this.abortController = undefined
+			this.abortAndCleanup()
 		}
 	}
 
@@ -493,6 +490,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		model: OpenAiCodexModel,
 		accessToken: string,
 		taskId?: string,
+		signal?: AbortSignal,
 	): ApiStream {
 		// Per the implementation guide: route to Codex backend with Bearer token
 		const url = `${CODEX_API_BASE_URL}/responses`
@@ -519,7 +517,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				method: "POST",
 				headers,
 				body: JSON.stringify(requestBody),
-				signal: this.abortController?.signal,
+				signal,
 			})
 
 			if (!response.ok) {
@@ -579,7 +577,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				throw new Error(t("common:errors.openAiCodex.noResponseBody"))
 			}
 
-			yield* this.handleStreamResponse(response.body, model)
+			yield* this.handleStreamResponse(response.body, model, signal)
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
@@ -595,7 +593,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		}
 	}
 
-	private async *handleStreamResponse(body: ReadableStream<Uint8Array>, model: OpenAiCodexModel): ApiStream {
+	private async *handleStreamResponse(
+		body: ReadableStream<Uint8Array>,
+		model: OpenAiCodexModel,
+		signal?: AbortSignal,
+	): ApiStream {
 		const reader = body.getReader()
 		const decoder = new TextDecoder()
 		let buffer = ""
@@ -603,7 +605,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 		try {
 			while (true) {
-				if (this.abortController?.signal.aborted) {
+				if (signal?.aborted) {
 					break
 				}
 
@@ -1153,7 +1155,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	}
 
 	async completePrompt(prompt: string): Promise<string> {
-		this.abortController = new AbortController()
+		const signal = this.createAbortSignal()
 
 		try {
 			const model = this.getModel()
@@ -1214,7 +1216,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				method: "POST",
 				headers,
 				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal,
+				signal,
 			})
 
 			if (!response.ok) {
@@ -1255,7 +1257,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			}
 			throw error
 		} finally {
-			this.abortController = undefined
+			this.abortAndCleanup()
 		}
 	}
 }

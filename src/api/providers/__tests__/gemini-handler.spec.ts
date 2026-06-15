@@ -160,6 +160,27 @@ describe("GeminiHandler backend support", () => {
 				await generator.next()
 			}).rejects.toThrow(t("common:errors.gemini.generate_stream", { error: "API rate limit exceeded" }))
 		})
+
+		it("should re-throw non-Error exceptions as-is in createMessage", async () => {
+			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const handler = new GeminiHandler(options)
+			const stub = vi.fn().mockRejectedValue("raw stream failure")
+			// @ts-ignore access private client
+			handler["client"].models.generateContentStream = stub
+
+			await expect(async () => {
+				const generator = handler.createMessage("test", [] as any)
+				await generator.next()
+			}).rejects.toBe("raw stream failure")
+		})
+	})
+
+	describe("extractCitationsOnly", () => {
+		it("should return null for empty grounding sources", () => {
+			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const handler = new GeminiHandler(options)
+			expect(handler["extractCitationsOnly"](undefined)).toBeNull()
+		})
 	})
 
 	describe("allowedFunctionNames support", () => {
