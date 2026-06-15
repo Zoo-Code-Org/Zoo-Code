@@ -153,7 +153,7 @@ Maintainers may close PRs that are incomplete, too broad, inactive, not aligned 
 PRs are also closed automatically by bot:
 
 - **60-day inactivity:** A PR with no activity for 60 days is marked stale and closed after a further 7 days if there is still no activity. Any new comment, commit, or review resets the timer.
-- **14-day no review response:** A PR labelled `awaiting-changes` with no response for 14 days is marked stale and closed after a further 7 days.
+- **14-day author inactivity:** After a reviewer requests changes, the PR is labelled `awaiting-author`. Author activity resets the inactivity timer. Once the changes are ready, re-request review from the reviewer; the PR will move to `awaiting-review` and is no longer eligible for automatic closure under this policy.
 
 To opt a PR out of automatic closure, apply the `do-not-close`, `pinned`, or `work-in-progress` label.
 
