@@ -1185,5 +1185,25 @@ describe("AnthropicHandler", () => {
 			const reasoning = chunks.filter((c) => c.type === "reasoning")
 			expect(reasoning.some((c) => c.text === "hmm")).toBe(true)
 		})
+
+		it("should yield usage from message_delta events", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "message_start", message: { usage: { input_tokens: 1, output_tokens: 1 } } }
+					yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "hi" } }
+					yield { type: "message_delta", usage: { output_tokens: 5 } }
+					yield { type: "message_stop" }
+				},
+			}))
+
+			const stream = handler.createMessage("sys", [{ role: "user", content: "hi" }])
+			const chunks: any[] = []
+			for await (const c of stream) {
+				chunks.push(c)
+			}
+			const usageChunks = chunks.filter((c) => c.type === "usage")
+			expect(usageChunks.length).toBeGreaterThanOrEqual(2)
+			expect(usageChunks[1]).toEqual({ type: "usage", inputTokens: 0, outputTokens: 5 })
+		})
 	})
 })

@@ -248,6 +248,35 @@ describe("PoeHandler", () => {
 			)
 		})
 
+		it("respects modelMaxTokens with reasoning effort", async () => {
+			const handler = new PoeHandler({
+				poeApiKey: "key",
+				apiModelId: "openai/o3",
+				enableReasoningEffort: true,
+				reasoningEffort: "high",
+				modelMaxTokens: 1024,
+			})
+
+			const fullStream = (async function* () {
+				yield { type: "text-delta", text: "Answer" }
+			})()
+
+			mockStreamText.mockReturnValue({
+				fullStream,
+				usage: Promise.resolve({ inputTokens: 10, outputTokens: 5 }),
+			})
+
+			for await (const _ of handler.createMessage("system", [{ role: "user" as const, content: "reason" }])) {
+				/* drain */
+			}
+
+			expect(mockStreamText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					maxOutputTokens: 1024,
+				}),
+			)
+		})
+
 		it("does not pass providerOptions when reasoning is disabled", async () => {
 			const handler = new PoeHandler({
 				poeApiKey: "key",
