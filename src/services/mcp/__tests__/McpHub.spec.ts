@@ -2112,7 +2112,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub
+			// Mock the config file read
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2124,9 +2124,11 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await mcpHub.waitUntilReady()
+
+			// Wait for initialization
+			await new Promise((resolve) => setTimeout(resolve, 100))
 
 			// Verify StdioClientTransport was called with wrapped command
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2174,7 +2176,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub
+			// Mock the config file read
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2186,9 +2188,11 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await mcpHub.waitUntilReady()
+
+			// Wait for initialization
+			await new Promise((resolve) => setTimeout(resolve, 100))
 
 			// Verify StdioClientTransport was called without wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2236,7 +2240,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub
+			// Mock the config file read with cmd.exe already as command
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2248,9 +2252,11 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await mcpHub.waitUntilReady()
+
+			// Wait for initialization
+			await new Promise((resolve) => setTimeout(resolve, 100))
 
 			// Verify StdioClientTransport was called without double-wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2305,7 +2311,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub - simulating fnm/nvm-windows scenario
+			// Mock the config file read - simulating fnm/nvm-windows scenario
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2323,9 +2329,11 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await mcpHub.waitUntilReady()
+
+			// Wait for initialization
+			await new Promise((resolve) => setTimeout(resolve, 100))
 
 			// Verify that the command was wrapped with cmd.exe
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2378,7 +2386,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub
+			// Mock the config file read with CMD (uppercase) as command
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2390,9 +2398,11 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await mcpHub.waitUntilReady()
+
+			// Wait for initialization
+			await new Promise((resolve) => setTimeout(resolve, 100))
 
 			// Verify StdioClientTransport was called without double-wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
