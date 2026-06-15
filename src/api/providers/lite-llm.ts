@@ -115,232 +115,242 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info } = await this.fetchModel()
+		const signal = this.createAbortSignal()
+		try {
+			const { id: modelId, info } = await this.fetchModel()
 
-		const openAiMessages = convertToOpenAiMessages(messages, {
-			normalizeToolCallId: sanitizeOpenAiCallId,
-		})
-
-		// Prepare messages with cache control if enabled and supported
-		let systemMessage: OpenAI.Chat.ChatCompletionMessageParam
-		let enhancedMessages: OpenAI.Chat.ChatCompletionMessageParam[]
-
-		if (this.options.litellmUsePromptCache && info.supportsPromptCache) {
-			// Create system message with cache control in the proper format
-			systemMessage = {
-				role: "system",
-				content: [
-					{
-						type: "text",
-						text: systemPrompt,
-						cache_control: { type: "ephemeral" },
-					} as any,
-				],
-			}
-
-			// Find the last two user messages to apply caching
-			const userMsgIndices = openAiMessages.reduce(
-				(acc, msg, index) => (msg.role === "user" ? [...acc, index] : acc),
-				[] as number[],
-			)
-			const lastUserMsgIndex = userMsgIndices[userMsgIndices.length - 1] ?? -1
-			const secondLastUserMsgIndex = userMsgIndices[userMsgIndices.length - 2] ?? -1
-
-			// Apply cache_control to the last two user messages
-			enhancedMessages = openAiMessages.map((message, index) => {
-				if ((index === lastUserMsgIndex || index === secondLastUserMsgIndex) && message.role === "user") {
-					// Handle both string and array content types
-					if (typeof message.content === "string") {
-						return {
-							...message,
-							content: [
-								{
-									type: "text",
-									text: message.content,
-									cache_control: { type: "ephemeral" },
-								} as any,
-							],
-						}
-					} else if (Array.isArray(message.content)) {
-						// Apply cache control to the last content item in the array
-						return {
-							...message,
-							content: message.content.map((content, contentIndex) =>
-								contentIndex === message.content.length - 1
-									? ({
-											...content,
-											cache_control: { type: "ephemeral" },
-										} as any)
-									: content,
-							),
-						}
-					}
-				}
-				return message
+			const openAiMessages = convertToOpenAiMessages(messages, {
+				normalizeToolCallId: sanitizeOpenAiCallId,
 			})
-		} else {
-			// No cache control - use simple format
-			systemMessage = { role: "system", content: systemPrompt }
-			enhancedMessages = openAiMessages
-		}
 
-		// Required by some providers; others default to max tokens allowed
-		const maxTokens: number | undefined = info.maxTokens ?? undefined
+			// Prepare messages with cache control if enabled and supported
+			let systemMessage: OpenAI.Chat.ChatCompletionMessageParam
+			let enhancedMessages: OpenAI.Chat.ChatCompletionMessageParam[]
 
-		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
-		const isGPT5Model = this.isGpt5(modelId)
-
-		// For Gemini models with native protocol: inject fake reasoning.encrypted block for tool calls
-		// This is required when switching from other models to Gemini to satisfy API validation.
-		// Gemini 3 models validate thought signatures for function calls, and when conversation
-		// history contains tool calls from other models (like Claude), they lack the required
-		// signatures. The "skip_thought_signature_validator" value bypasses this validation.
-		const isGemini = this.isGeminiModel(modelId)
-		let processedMessages = enhancedMessages
-		if (isGemini) {
-			processedMessages = this.injectThoughtSignatureForGemini(enhancedMessages)
-		}
-
-		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-			model: modelId,
-			messages: [systemMessage, ...processedMessages],
-			stream: true,
-			stream_options: {
-				include_usage: true,
-			},
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-		}
-
-		// GPT-5 models require max_completion_tokens instead of the deprecated max_tokens parameter
-		if (isGPT5Model && maxTokens) {
-			requestOptions.max_completion_tokens = maxTokens
-		} else if (maxTokens) {
-			requestOptions.max_tokens = maxTokens
-		}
-
-		if (this.supportsTemperature(modelId)) {
-			requestOptions.temperature = this.options.modelTemperature ?? 0
-		}
-
-		// LiteLLM recognizes X-<vendor>-Session-ID for per-conversation request correlation.
-		// This header enables LiteLLM to group related API calls by task for logging and tracing.
-		// Unlike Zoo gateways (which use X-Zoo-Task-ID to correlate requests across multiple
-		// models within a single conversation), this header is specific to the LiteLLM provider
-		// and facilitates provider-level logging and debugging on LiteLLM's admin panel.
-		// Matches the convention used by Claude Code (x-claude-code-session-id) and
-		// GitHub Copilot (x-copilot-session-id).
-		const requestHeaders: Record<string, string> = {}
-		if (metadata?.taskId) {
-			requestHeaders["X-Zoo-Session-ID"] = metadata.taskId
-		}
-
-		try {
-			const { data: completion } = await this.client.chat.completions
-				.create(requestOptions, { headers: requestHeaders })
-				.withResponse()
-
-			let lastUsage
-
-			for await (const chunk of completion) {
-				const delta = chunk.choices[0]?.delta
-				const usage = chunk.usage as LiteLLMUsage
-
-				if (delta?.content) {
-					yield { type: "text", text: delta.content }
+			if (this.options.litellmUsePromptCache && info.supportsPromptCache) {
+				// Create system message with cache control in the proper format
+				systemMessage = {
+					role: "system",
+					content: [
+						{
+							type: "text",
+							text: systemPrompt,
+							cache_control: { type: "ephemeral" },
+						} as any,
+					],
 				}
 
-				const reasoningText = extractReasoningFromDelta(delta)
-				if (reasoningText) {
-					yield { type: "reasoning", text: reasoningText }
-				}
+				// Find the last two user messages to apply caching
+				const userMsgIndices = openAiMessages.reduce(
+					(acc, msg, index) => (msg.role === "user" ? [...acc, index] : acc),
+					[] as number[],
+				)
+				const lastUserMsgIndex = userMsgIndices[userMsgIndices.length - 1] ?? -1
+				const secondLastUserMsgIndex = userMsgIndices[userMsgIndices.length - 2] ?? -1
 
-				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
-				if (delta?.tool_calls) {
-					for (const toolCall of delta.tool_calls) {
-						yield {
-							type: "tool_call_partial",
-							index: toolCall.index,
-							id: toolCall.id,
-							name: toolCall.function?.name,
-							arguments: toolCall.function?.arguments,
+				// Apply cache_control to the last two user messages
+				enhancedMessages = openAiMessages.map((message, index) => {
+					if ((index === lastUserMsgIndex || index === secondLastUserMsgIndex) && message.role === "user") {
+						// Handle both string and array content types
+						if (typeof message.content === "string") {
+							return {
+								...message,
+								content: [
+									{
+										type: "text",
+										text: message.content,
+										cache_control: { type: "ephemeral" },
+									} as any,
+								],
+							}
+						} else if (Array.isArray(message.content)) {
+							// Apply cache control to the last content item in the array
+							return {
+								...message,
+								content: message.content.map((content, contentIndex) =>
+									contentIndex === message.content.length - 1
+										? ({
+												...content,
+												cache_control: { type: "ephemeral" },
+											} as any)
+										: content,
+								),
+							}
 						}
 					}
-				}
-
-				if (usage) {
-					lastUsage = usage
-				}
+					return message
+				})
+			} else {
+				// No cache control - use simple format
+				systemMessage = { role: "system", content: systemPrompt }
+				enhancedMessages = openAiMessages
 			}
 
-			if (lastUsage) {
-				// Extract cache-related information if available
-				// LiteLLM may use different field names for cache tokens
-				const cacheWriteTokens =
-					lastUsage.cache_creation_input_tokens || (lastUsage as any).prompt_cache_miss_tokens || 0
-				const cacheReadTokens =
-					lastUsage.prompt_tokens_details?.cached_tokens ||
-					(lastUsage as any).cache_read_input_tokens ||
-					(lastUsage as any).prompt_cache_hit_tokens ||
-					0
+			// Required by some providers; others default to max tokens allowed
+			let maxTokens: number | undefined = info.maxTokens ?? undefined
 
-				const { totalCost } = calculateApiCostOpenAI(
-					info,
-					lastUsage.prompt_tokens || 0,
-					lastUsage.completion_tokens || 0,
-					cacheWriteTokens,
-					cacheReadTokens,
-				)
+			// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
+			const isGPT5Model = this.isGpt5(modelId)
 
-				const usageData: ApiStreamUsageChunk = {
-					type: "usage",
-					inputTokens: lastUsage.prompt_tokens || 0,
-					outputTokens: lastUsage.completion_tokens || 0,
-					cacheWriteTokens: cacheWriteTokens > 0 ? cacheWriteTokens : undefined,
-					cacheReadTokens: cacheReadTokens > 0 ? cacheReadTokens : undefined,
-					totalCost,
-				}
-
-				yield usageData
+			// For Gemini models with native protocol: inject fake reasoning.encrypted block for tool calls
+			// This is required when switching from other models to Gemini to satisfy API validation.
+			// Gemini 3 models validate thought signatures for function calls, and when conversation
+			// history contains tool calls from other models (like Claude), they lack the required
+			// signatures. The "skip_thought_signature_validator" value bypasses this validation.
+			const isGemini = this.isGeminiModel(modelId)
+			let processedMessages = enhancedMessages
+			if (isGemini) {
+				processedMessages = this.injectThoughtSignatureForGemini(enhancedMessages)
 			}
-		} catch (error) {
-			if (error instanceof Error) {
-				throw new Error(`LiteLLM streaming error: ${error.message}`)
-			}
-			throw error
-		}
-	}
 
-	async completePrompt(prompt: string): Promise<string> {
-		const { id: modelId, info } = await this.fetchModel()
-
-		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
-		const isGPT5Model = this.isGpt5(modelId)
-
-		try {
-			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 				model: modelId,
-				messages: [{ role: "user", content: prompt }],
+				messages: [systemMessage, ...processedMessages],
+				stream: true,
+				stream_options: {
+					include_usage: true,
+				},
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+			}
+
+			// GPT-5 models require max_completion_tokens instead of the deprecated max_tokens parameter
+			if (isGPT5Model && maxTokens) {
+				requestOptions.max_completion_tokens = maxTokens
+			} else if (maxTokens) {
+				requestOptions.max_tokens = maxTokens
 			}
 
 			if (this.supportsTemperature(modelId)) {
 				requestOptions.temperature = this.options.modelTemperature ?? 0
 			}
 
-			// GPT-5 models require max_completion_tokens instead of the deprecated max_tokens parameter
-			if (isGPT5Model && info.maxTokens) {
-				requestOptions.max_completion_tokens = info.maxTokens
-			} else if (info.maxTokens) {
-				requestOptions.max_tokens = info.maxTokens
+			// LiteLLM recognizes X-<vendor>-Session-ID for per-conversation request correlation.
+			// This header enables LiteLLM to group related API calls by task for logging and tracing.
+			// Unlike Zoo gateways (which use X-Zoo-Task-ID to correlate requests across multiple
+			// models within a single conversation), this header is specific to the LiteLLM provider
+			// and facilitates provider-level logging and debugging on LiteLLM's admin panel.
+			// Matches the convention used by Claude Code (x-claude-code-session-id) and
+			// GitHub Copilot (x-copilot-session-id).
+			const requestHeaders: Record<string, string> = {}
+			if (metadata?.taskId) {
+				requestHeaders["X-Zoo-Session-ID"] = metadata.taskId
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
-			return response.choices[0]?.message.content || ""
-		} catch (error) {
-			if (error instanceof Error) {
-				throw new Error(`LiteLLM completion error: ${error.message}`)
+			try {
+				const { data: completion } = await this.client.chat.completions
+					.create(requestOptions, { headers: requestHeaders, signal })
+					.withResponse()
+
+				let lastUsage
+
+				for await (const chunk of completion) {
+					const delta = chunk.choices[0]?.delta
+					const usage = chunk.usage as LiteLLMUsage
+
+					if (delta?.content) {
+						yield { type: "text", text: delta.content }
+					}
+
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
+
+					// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
+					if (delta?.tool_calls) {
+						for (const toolCall of delta.tool_calls) {
+							yield {
+								type: "tool_call_partial",
+								index: toolCall.index,
+								id: toolCall.id,
+								name: toolCall.function?.name,
+								arguments: toolCall.function?.arguments,
+							}
+						}
+					}
+
+					if (usage) {
+						lastUsage = usage
+					}
+				}
+
+				if (lastUsage) {
+					// Extract cache-related information if available
+					// LiteLLM may use different field names for cache tokens
+					const cacheWriteTokens =
+						lastUsage.cache_creation_input_tokens || (lastUsage as any).prompt_cache_miss_tokens || 0
+					const cacheReadTokens =
+						lastUsage.prompt_tokens_details?.cached_tokens ||
+						(lastUsage as any).cache_read_input_tokens ||
+						(lastUsage as any).prompt_cache_hit_tokens ||
+						0
+
+					const { totalCost } = calculateApiCostOpenAI(
+						info,
+						lastUsage.prompt_tokens || 0,
+						lastUsage.completion_tokens || 0,
+						cacheWriteTokens,
+						cacheReadTokens,
+					)
+
+					const usageData: ApiStreamUsageChunk = {
+						type: "usage",
+						inputTokens: lastUsage.prompt_tokens || 0,
+						outputTokens: lastUsage.completion_tokens || 0,
+						cacheWriteTokens: cacheWriteTokens > 0 ? cacheWriteTokens : undefined,
+						cacheReadTokens: cacheReadTokens > 0 ? cacheReadTokens : undefined,
+						totalCost,
+					}
+
+					yield usageData
+				}
+			} catch (error) {
+				if (error instanceof Error) {
+					throw new Error(`LiteLLM streaming error: ${error.message}`)
+				}
+				throw error
 			}
-			throw error
+		} finally {
+			this.abortAndCleanup()
+		}
+	}
+
+	async completePrompt(prompt: string): Promise<string> {
+		const signal = this.createAbortSignal()
+		try {
+			const { id: modelId, info } = await this.fetchModel()
+
+			// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
+			const isGPT5Model = this.isGpt5(modelId)
+
+			try {
+				const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+					model: modelId,
+					messages: [{ role: "user", content: prompt }],
+				}
+
+				if (this.supportsTemperature(modelId)) {
+					requestOptions.temperature = this.options.modelTemperature ?? 0
+				}
+
+				// GPT-5 models require max_completion_tokens instead of the deprecated max_tokens parameter
+				if (isGPT5Model && info.maxTokens) {
+					requestOptions.max_completion_tokens = info.maxTokens
+				} else if (info.maxTokens) {
+					requestOptions.max_tokens = info.maxTokens
+				}
+
+				const response = await this.client.chat.completions.create(requestOptions, { signal })
+				return response.choices[0]?.message.content || ""
+			} catch (error) {
+				if (error instanceof Error) {
+					throw new Error(`LiteLLM completion error: ${error.message}`)
+				}
+				throw error
+			}
+		} finally {
+			this.abortAndCleanup()
 		}
 	}
 }

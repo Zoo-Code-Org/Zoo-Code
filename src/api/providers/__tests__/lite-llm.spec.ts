@@ -214,6 +214,9 @@ describe("LiteLLMHandler", () => {
 			// Should have max_completion_tokens, not max_tokens
 			expect(createCall.max_completion_tokens).toBeDefined()
 			expect(createCall.max_tokens).toBeUndefined()
+
+			// Verify signal is passed as second argument
+			expect(mockCreate.mock.calls[0][1]).toMatchObject({ signal: expect.any(AbortSignal) })
 		})
 
 		it("should use max_completion_tokens for various GPT-5 model variations", async () => {
@@ -333,6 +336,9 @@ describe("LiteLLMHandler", () => {
 
 			expect(createCall.max_completion_tokens).toBeDefined()
 			expect(createCall.max_tokens).toBeUndefined()
+
+			// Verify signal is passed in completePrompt
+			expect(mockCreate.mock.calls[0][1]).toMatchObject({ signal: expect.any(AbortSignal) })
 		})
 
 		it("should not set any max token fields when maxTokens is undefined (GPT-5 streaming)", async () => {
