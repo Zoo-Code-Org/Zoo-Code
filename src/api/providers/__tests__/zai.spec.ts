@@ -647,6 +647,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "high",
 				}),
+				expect.anything(),
 			)
 		})
 
@@ -677,6 +678,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "max",
 				}),
+				expect.anything(),
 			)
 		})
 
@@ -733,6 +735,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "high",
 				}),
+				expect.anything(),
 			)
 		})
 
