@@ -1,0 +1,22 @@
+# .boo/config.yaml
+# Project-level settings for boo-code modes.
+# Copy this file to .boo/config.yaml and edit as needed.
+# .boo/config.yaml is gitignored by default — settings stay local to your machine.
+
+collaborate:
+  # The Roo Code API provider profile to use for drafting sub-tasks.
+  # This matches the profile name shown in Roo Code's settings under
+  # "API Provider" → "Profile Name" (the dropdown at the top of the settings panel).
+  #
+  # The default profile is named "default" unless you renamed it.
+  # You can create additional profiles in Roo Code settings and reference them here
+  # to use a different model for drafting without changing your main conversation model.
+  #
+  # Examples:
+  #   drafting_profile: "default"         # same profile as your main conversation
+  #   drafting_profile: "haiku-fast"      # a cheaper/faster profile for first drafts
+  #   drafting_profile: "opus-quality"    # a higher-quality profile for final polish
+  #
+  # Leave blank (or omit this file entirely) to inherit whatever profile is active
+  # in your main conversation.
+  drafting_profile: ""

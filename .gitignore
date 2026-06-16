@@ -60,3 +60,4 @@ roo-cli-*.tar.gz*
 planning/
 .reference/
 docs/
+.boo/config.yaml

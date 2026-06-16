@@ -1,6 +1,7 @@
 import * as path from "path"
 import * as os from "os"
 import fs from "fs/promises"
+import * as yaml from "yaml"
 
 /**
  * Gets the global .boo directory path based on the current platform
@@ -66,4 +67,55 @@ export async function readFileIfExists(filePath: string): Promise<string | null>
  */
 export function getBooDirectoriesForCwd(cwd: string): string[] {
 	return [getGlobalBooDirectory(), getProjectBooDirectoryForCwd(cwd)]
+}
+
+export interface BooCollaborateConfig {
+	drafting_profile?: string | null
+}
+
+export interface BooConfig {
+	collaborate?: BooCollaborateConfig
+}
+
+/**
+ * Reads and parses .boo/config.yaml from the given project root (cwd).
+ * Returns an empty object if the file is missing or malformed.
+ * Normalizes blank drafting_profile strings to null.
+ */
+export async function readProjectBooConfig(cwd: string): Promise<BooConfig> {
+	const configPath = path.join(cwd, ".boo", "config.yaml")
+	const content = await readFileIfExists(configPath)
+
+	if (content === null) {
+		return {}
+	}
+
+	let parsed: unknown
+	try {
+		parsed = yaml.parse(content)
+	} catch {
+		console.warn(`[boo-config] Failed to parse .boo/config.yaml: invalid YAML`)
+		return {}
+	}
+
+	if (!parsed || typeof parsed !== "object") {
+		return {}
+	}
+
+	const raw = parsed as Record<string, unknown>
+	const collaborate = raw["collaborate"]
+
+	if (!collaborate || typeof collaborate !== "object") {
+		return {}
+	}
+
+	const collaborateRaw = collaborate as Record<string, unknown>
+	const rawProfile = collaborateRaw["drafting_profile"]
+	const draftingProfile = typeof rawProfile === "string" && rawProfile.trim() !== "" ? rawProfile.trim() : null
+
+	return {
+		collaborate: {
+			drafting_profile: draftingProfile,
+		},
+	}
 }
