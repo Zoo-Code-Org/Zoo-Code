@@ -181,4 +181,24 @@ describe("UnboundHandler", () => {
 			}),
 		)
 	})
+
+	it("completePrompt returns the response text", async () => {
+		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { content: "completed text" } }],
+		})
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		const result = await handler.completePrompt("Write a haiku")
+		expect(result).toBe("completed text")
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				messages: [{ role: "system", content: "Write a haiku" }],
+			}),
+		)
+	})
 })
