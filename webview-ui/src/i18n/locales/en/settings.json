@@ -809,6 +809,13 @@
 		"inheritEnv": {
 			"label": "Inherit environment variables",
 			"description": "Turn this on to inherit environment variables from the parent VS Code process. <0>Learn more</0>"
+		},
+		"profile": {
+			"label": "Shell for Boo Code",
+			"followVscode": "Follow VS Code profile (recommended)",
+			"configureButton": "Choose default profile in VS Code",
+			"noProfiles": "(no path-based profiles found in terminal.integrated.profiles)",
+			"description": "Boo Code uses the shell configured in VS Code by default. Select a specific terminal profile to override this. Only path-based profiles from terminal.integrated.profiles are listed here. <0>Learn more</0>"
 		}
 	},
 	"advancedSettings": {

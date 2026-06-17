@@ -82,6 +82,8 @@ export const modelInfoSchema = z.object({
 	// Capability flag to indicate whether the model supports an output verbosity parameter
 	supportsVerbosity: z.boolean().optional(),
 	supportsReasoningBudget: z.boolean().optional(),
+	// Capability flag to indicate whether the model supports a user-configurable max output tokens slider
+	supportsMaxTokens: z.boolean().optional(),
 	// Capability flag to indicate whether the model supports simple on/off binary reasoning
 	supportsReasoningBinary: z.boolean().optional(),
 	// Capability flag to indicate whether the model supports temperature parameter

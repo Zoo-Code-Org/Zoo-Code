@@ -1,3 +1,6 @@
+import { existsSync } from "fs"
+import * as path from "path"
+
 import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
 
@@ -148,6 +151,128 @@ export class Terminal extends BaseTerminal {
 			await vscode.env.clipboard.writeText(tempCopyBuffer)
 			throw error
 		}
+	}
+
+	/**
+	 * Returns the VS Code config section key (`windows`/`osx`/`linux`) used for
+	 * platform-specific terminal profiles.
+	 */
+	public static getPlatformProfileKey(platform: NodeJS.Platform = process.platform): "windows" | "osx" | "linux" {
+		if (platform === "win32") {
+			return "windows"
+		}
+
+		if (platform === "darwin") {
+			return "osx"
+		}
+
+		return "linux"
+	}
+
+	/**
+	 * Resolves a profile path to an executable on disk. VS Code's built-in Unix
+	 * profiles commonly use bare command names such as `bash`, so check PATH in
+	 * addition to explicit filesystem paths.
+	 */
+	public static resolveProfilePath(
+		profilePath: unknown,
+		platform: NodeJS.Platform = process.platform,
+		env: NodeJS.ProcessEnv = process.env,
+	): string | undefined {
+		const candidates = Array.isArray(profilePath) ? profilePath : [profilePath]
+		const pathValue = env.PATH ?? env.Path ?? env.path
+		const pathEntries = pathValue?.split(platform === "win32" ? ";" : ":") ?? []
+		const platformJoin = platform === "win32" ? path.win32.join : path.posix.join
+
+		for (const value of candidates) {
+			if (typeof value !== "string") {
+				continue
+			}
+
+			const candidate = value.trim()
+
+			if (!candidate) {
+				continue
+			}
+
+			if (/[\\/]/.test(candidate)) {
+				if (existsSync(candidate)) {
+					return candidate
+				}
+
+				continue
+			}
+
+			const extensions =
+				platform === "win32" && path.extname(candidate) === ""
+					? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")
+					: [""]
+
+			for (const entry of pathEntries) {
+				const directory = entry.replace(/^"(.*)"$/, "$1")
+
+				for (const extension of extensions) {
+					const resolved = platformJoin(directory, `${candidate}${extension}`)
+
+					if (existsSync(resolved)) {
+						return resolved
+					}
+				}
+			}
+		}
+
+		return undefined
+	}
+
+	/**
+	 * Reads profiles from trusted settings scopes only. Workspace settings are
+	 * intentionally excluded because opening a repository must not allow its
+	 * `.vscode/settings.json` to select an executable for Boo Code to launch.
+	 */
+	public static getConfiguredProfiles(platform: NodeJS.Platform = process.platform): Record<string, unknown> {
+		const platformKey = Terminal.getPlatformProfileKey(platform)
+		const configuration = vscode.workspace.getConfiguration("terminal.integrated.profiles")
+
+		// Some test doubles and older embedders expose get() without inspect().
+		// Falling back to no profiles preserves the trusted-scope guarantee.
+		if (typeof configuration.inspect !== "function") {
+			return {}
+		}
+
+		const inspected = configuration.inspect<Record<string, unknown>>(platformKey)
+
+		return {
+			...(inspected?.defaultValue ?? {}),
+			...(inspected?.globalValue ?? {}),
+		}
+	}
+
+	/**
+	 * Returns true when the resolved shell path is cmd.exe. cmd.exe cannot emit
+	 * the OSC 633;C sequence (VS Code issue #164646, closed as not planned), so
+	 * shell integration will never work for it — exclude it from the picker.
+	 */
+	public static isCmdExe(shellPath: string): boolean {
+		return /[/\\]cmd\.exe$/i.test(shellPath)
+	}
+
+	public static getAvailableProfileNames(platform: NodeJS.Platform = process.platform): string[] {
+		const names: string[] = []
+
+		for (const [name, entry] of Object.entries(Terminal.getConfiguredProfiles(platform))) {
+			if (!entry || typeof entry !== "object") {
+				continue
+			}
+
+			const { path: profilePath } = entry as { path?: unknown }
+			const resolved = Terminal.resolveProfilePath(profilePath, platform)
+
+			if (resolved && !Terminal.isCmdExe(resolved)) {
+				names.push(name)
+			}
+		}
+
+		return names.sort()
 	}
 
 	public static getEnv(): Record<string, string> {
