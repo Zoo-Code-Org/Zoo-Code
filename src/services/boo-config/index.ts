@@ -70,17 +70,26 @@ export function getBooDirectoriesForCwd(cwd: string): string[] {
 }
 
 export interface BooCollaborateConfig {
-	drafting_profile?: string | null
+	drafting_model?: string | null
+}
+
+export interface BooKnowledgeLookupConfig {
+	lookup_model?: string | null
 }
 
 export interface BooConfig {
 	collaborate?: BooCollaborateConfig
+	knowledge_lookup?: BooKnowledgeLookupConfig
+}
+
+function parseProfileString(raw: unknown): string | null {
+	return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : null
 }
 
 /**
  * Reads and parses .boo/config.yaml from the given project root (cwd).
  * Returns an empty object if the file is missing or malformed.
- * Normalizes blank drafting_profile strings to null.
+ * Normalizes blank profile strings to null.
  */
 export async function readProjectBooConfig(cwd: string): Promise<BooConfig> {
 	const configPath = path.join(cwd, ".boo", "config.yaml")
@@ -103,19 +112,23 @@ export async function readProjectBooConfig(cwd: string): Promise<BooConfig> {
 	}
 
 	const raw = parsed as Record<string, unknown>
-	const collaborate = raw["collaborate"]
+	const result: BooConfig = {}
 
-	if (!collaborate || typeof collaborate !== "object") {
+	const collaborate = raw["collaborate"]
+	if (collaborate && typeof collaborate === "object") {
+		const c = collaborate as Record<string, unknown>
+		result.collaborate = { drafting_model: parseProfileString(c["drafting_model"]) }
+	}
+
+	const knowledgeLookup = raw["knowledge_lookup"]
+	if (knowledgeLookup && typeof knowledgeLookup === "object") {
+		const k = knowledgeLookup as Record<string, unknown>
+		result.knowledge_lookup = { lookup_model: parseProfileString(k["lookup_model"]) }
+	}
+
+	if (Object.keys(result).length === 0) {
 		return {}
 	}
 
-	const collaborateRaw = collaborate as Record<string, unknown>
-	const rawProfile = collaborateRaw["drafting_profile"]
-	const draftingProfile = typeof rawProfile === "string" && rawProfile.trim() !== "" ? rawProfile.trim() : null
-
-	return {
-		collaborate: {
-			drafting_profile: draftingProfile,
-		},
-	}
+	return result
 }

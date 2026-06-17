@@ -124,40 +124,76 @@ describe("boo-config", () => {
 			expect(result).toEqual({})
 		})
 
-		it("returns null drafting_profile when field is blank string", async () => {
-			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `collaborate:\n  drafting_profile: ""\n`)
+		it("returns null drafting_model when field is blank string", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `collaborate:\n  drafting_model: ""\n`)
 			const result = await readProjectBooConfig(tmpDir)
-			expect(result).toEqual({ collaborate: { drafting_profile: null } })
+			expect(result).toEqual({ collaborate: { drafting_model: null } })
 		})
 
-		it("returns null drafting_profile when field is whitespace", async () => {
-			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `collaborate:\n  drafting_profile: "   "\n`)
+		it("returns null drafting_model when field is whitespace", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `collaborate:\n  drafting_model: "   "\n`)
 			const result = await readProjectBooConfig(tmpDir)
-			expect(result).toEqual({ collaborate: { drafting_profile: null } })
+			expect(result).toEqual({ collaborate: { drafting_model: null } })
 		})
 
-		it("returns the profile name when drafting_profile is set", async () => {
+		it("returns the profile name when drafting_model is set", async () => {
 			await fs.writeFile(
 				path.join(tmpDir, ".boo", "config.yaml"),
-				`collaborate:\n  drafting_profile: "haiku-fast"\n`,
+				`collaborate:\n  drafting_model: "haiku-fast"\n`,
 			)
 			const result = await readProjectBooConfig(tmpDir)
-			expect(result).toEqual({ collaborate: { drafting_profile: "haiku-fast" } })
+			expect(result).toEqual({ collaborate: { drafting_model: "haiku-fast" } })
 		})
 
-		it("returns {} when collaborate section is missing", async () => {
+		it("returns {} when both collaborate and knowledge_lookup sections are missing", async () => {
 			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `other_key: value\n`)
 			const result = await readProjectBooConfig(tmpDir)
 			expect(result).toEqual({})
 		})
 
-		it("trims whitespace from drafting_profile value", async () => {
+		it("trims whitespace from drafting_model value", async () => {
 			await fs.writeFile(
 				path.join(tmpDir, ".boo", "config.yaml"),
-				`collaborate:\n  drafting_profile: "  opus-quality  "\n`,
+				`collaborate:\n  drafting_model: "  opus-quality  "\n`,
 			)
 			const result = await readProjectBooConfig(tmpDir)
-			expect(result).toEqual({ collaborate: { drafting_profile: "opus-quality" } })
+			expect(result).toEqual({ collaborate: { drafting_model: "opus-quality" } })
+		})
+
+		it("returns null lookup_model when field is blank string", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `knowledge_lookup:\n  lookup_model: ""\n`)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ knowledge_lookup: { lookup_model: null } })
+		})
+
+		it("returns the profile name when lookup_model is set", async () => {
+			await fs.writeFile(
+				path.join(tmpDir, ".boo", "config.yaml"),
+				`knowledge_lookup:\n  lookup_model: "haiku-fast"\n`,
+			)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ knowledge_lookup: { lookup_model: "haiku-fast" } })
+		})
+
+		it("trims whitespace from lookup_model value", async () => {
+			await fs.writeFile(
+				path.join(tmpDir, ".boo", "config.yaml"),
+				`knowledge_lookup:\n  lookup_model: "  haiku-fast  "\n`,
+			)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ knowledge_lookup: { lookup_model: "haiku-fast" } })
+		})
+
+		it("parses both collaborate and knowledge_lookup when both are present", async () => {
+			await fs.writeFile(
+				path.join(tmpDir, ".boo", "config.yaml"),
+				`collaborate:\n  drafting_model: "opus-quality"\nknowledge_lookup:\n  lookup_model: "haiku-fast"\n`,
+			)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({
+				collaborate: { drafting_model: "opus-quality" },
+				knowledge_lookup: { lookup_model: "haiku-fast" },
+			})
 		})
 	})
 })

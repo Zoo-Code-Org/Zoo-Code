@@ -13,10 +13,21 @@ collaborate:
   # to use a different model for drafting without changing your main conversation model.
   #
   # Examples:
-  #   drafting_profile: "default"         # same profile as your main conversation
-  #   drafting_profile: "haiku-fast"      # a cheaper/faster profile for first drafts
-  #   drafting_profile: "opus-quality"    # a higher-quality profile for final polish
+  #   drafting_model: "default"         # same profile as your main conversation
+  #   drafting_model: "haiku-fast"      # a cheaper/faster profile for first drafts
+  #   drafting_model: "opus-quality"    # a higher-quality profile for final polish
   #
   # Leave blank (or omit this file entirely) to inherit whatever profile is active
   # in your main conversation.
-  drafting_profile: ""
+  drafting_model: ""
+
+knowledge_lookup:
+  # The Roo Code API provider profile to use for knowledge lookup sub-tasks.
+  # Lookups are read-only and mechanical — a fast, inexpensive model works well here.
+  #
+  # Examples:
+  #   lookup_model: "haiku-fast"    # cheap profile for glossary/grep lookups
+  #   lookup_model: "default"       # same profile as your main conversation
+  #
+  # Leave blank (or omit) to inherit the active profile.
+  lookup_model: ""
