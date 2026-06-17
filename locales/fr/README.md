@@ -30,41 +30,11 @@
 
 Tu peux trouver un guide rapide pour passer de Roo Code à Zoo Code dans le [guide de migration Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). On veut aider au maximum pendant la transition, et notre [Reddit](https://www.reddit.com/r/ZooCode) et notre [Discord](https://discord.gg/VxfP4Vx3gX) sont là pour ça. Si tu rencontres un problème ou si tu as une question, viens demander.
 
-## Nouveautés de la v3.54.1
+## Nouveautés de la v3.60.0
 
-**Première version de Zoo Code** — établit Zoo Code comme une extension indépendante sur le VS Code Marketplace sous `ZooCodeOrganization.zoo-code`, avec des builds pre-release publiés automatiquement après chaque merge sur `main`.
-
-- Ajout du support de GPT-5.5 via le fournisseur OpenAI Codex.
-- Ajout du support de Claude Opus 4.7 sur Vertex AI.
-- Ajout de contrôles de navigation vers les checkpoints précédents dans le chat.
-- Support de DeepSeek V4 avec récupération dynamique des modèles.
-- Support du client OAuth MCP.
-
-<details>
-  <summary>🌐 Langues disponibles</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) et OpenAI GPT-5.5 sont désormais disponibles dans les paramètres du fournisseur
+- **Listes d'autorisation MCP par mode** — restreins les serveurs MCP actifs par mode grâce à une liste d'autorisation dans la configuration du mode
+- **Paramètre rootResolution pour l'espace de travail** — nouveau réglage pour contrôler la résolution des chemins de fichiers dans les espaces de travail multi-racines
 
 ## Que peut faire Zoo Code pour VOUS ?
 

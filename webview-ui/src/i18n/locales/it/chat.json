@@ -221,6 +221,7 @@
 		"running": "In esecuzione",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Uscito con stato {{exitCode}}",
+		"malformedCommand": "Comando non valido: errore di sintassi della shell",
 		"manageCommands": "Comandi approvati automaticamente",
 		"addToAllowed": "Aggiungi alla lista dei permessi",
 		"removeFromAllowed": "Rimuovi dalla lista dei permessi",
@@ -330,16 +331,11 @@
 	"announcement": {
 		"title": "Rilasciato Zoo Code {{version}}",
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
-		"handoff": {
-			"heading": "Roo Code è tornato! Ora come plugin mantenuto dalla community chiamato Zoo Code!!",
-			"description": "Se non l'hai seguito, il team di Roo Code ha annunciato di recente che interromperà lo sviluppo di Roo Code e archivierà il lavoro svolto. Ma niente paura: la community si è fatta avanti per continuare l'eredità di Roo Code con un nuovo nome e una nuova casa! Non siamo più solo un singolo \"Roo\", ma una community, uno \"Zoo\" se vuoi. Zoo Code è un plugin mantenuto dalla community che riprende da dove Roo Code si era fermato, e ci impegniamo a mantenere vivo lo spirito di Roo introducendo anche nuove funzionalità e miglioramenti. Vogliamo ringraziare di cuore tutto il team di Roo Code per il lavoro incredibile e per aver creato uno strumento così straordinario per gli sviluppatori. Siamo entusiasti di continuare a costruire sulla loro base e di vedere dove la community porterà Zoo Code in futuro!",
-			"readMore": "Vai alla nuova home page di Zoo Code e leggi l'annuncio completo"
-		},
 		"release": {
 			"heading": "Novità:",
-			"gpt55": "GPT-5.5 via OpenAI Codex: Aggiunto il supporto a GPT-5.5 nel provider OpenAI Codex così puoi usare il modello più recente direttamente da Zoo Code.",
-			"claudeOpus47": "Claude Opus 4.7 su Vertex AI: Aggiunto Claude Opus 4.7 al provider Vertex AI, il nuovo modello di ragionamento di punta di Anthropic.",
-			"checkpointNav": "Navigazione Checkpoint Precedenti: Aggiunti controlli nella chat per tornare indietro ai checkpoint precedenti, con pieno supporto i18n."
+			"highlight1": "Nuovi modelli AI — Claude Fable 5 per tutti i provider Anthropic e OpenAI GPT-5.5 sono ora disponibili nelle impostazioni del provider.",
+			"highlight2": "Allowlist MCP per modalità — limita i server MCP attivi per ogni modalità usando una nuova allowlist nella configurazione della modalità.",
+			"highlight3": "Impostazione rootResolution per il workspace — una nuova impostazione che controlla come Zoo Code risolve i percorsi file nei workspace multi-root."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",

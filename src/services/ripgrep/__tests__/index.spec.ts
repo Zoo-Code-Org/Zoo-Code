@@ -1,6 +1,16 @@
 // npx vitest run src/services/ripgrep/__tests__/index.spec.ts
 
-import { truncateLine } from "../index"
+import path from "path"
+import { vi, describe, it, expect, beforeEach } from "vitest"
+
+import { truncateLine, getBinPath } from "../index"
+import { fileExistsAtPath } from "../../../utils/fs"
+
+vi.mock("../../../utils/fs", () => ({
+	fileExistsAtPath: vi.fn(),
+}))
+
+const mockFileExists = vi.mocked(fileExistsAtPath)
 
 describe("Ripgrep line truncation", () => {
 	// The default MAX_LINE_LENGTH is 500 in the implementation
@@ -46,5 +56,43 @@ describe("Ripgrep line truncation", () => {
 
 		expect(truncated.length).toEqual(customLength + " [truncated...]".length)
 		expect(truncated).toContain("[truncated...]")
+	})
+})
+
+describe("getBinPath", () => {
+	const appRoot = "/fake/vscode/appRoot"
+	const binName = process.platform.startsWith("win") ? "rg.exe" : "rg"
+	const platformDir = `${process.platform}-${process.arch}`
+
+	beforeEach(() => {
+		mockFileExists.mockReset()
+		mockFileExists.mockResolvedValue(false)
+	})
+
+	it("resolves ripgrep from the classic @vscode/ripgrep layout", async () => {
+		const rg = path.join(appRoot, "node_modules/@vscode/ripgrep/bin", binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("resolves ripgrep from the @vscode/ripgrep-universal layout (VS Code Insiders)", async () => {
+		const rg = path.join(appRoot, "node_modules/@vscode/ripgrep-universal/bin", platformDir, binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("resolves ripgrep from the unpacked `@vscode/ripgrep-universal` layout", async () => {
+		const rg = path.join(appRoot, "node_modules.asar.unpacked/@vscode/ripgrep-universal/bin", platformDir, binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("returns undefined when ripgrep cannot be found", async () => {
+		mockFileExists.mockResolvedValue(false)
+
+		expect(await getBinPath(appRoot)).toBeUndefined()
 	})
 })

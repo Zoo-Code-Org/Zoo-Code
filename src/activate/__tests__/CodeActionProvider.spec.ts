@@ -3,22 +3,38 @@ import * as vscode from "vscode"
 
 import { EditorUtils } from "../../integrations/editor/EditorUtils"
 
-import { CodeActionProvider, TITLES } from "../CodeActionProvider"
+import { CodeActionProvider } from "../CodeActionProvider"
+
+vi.mock("../../i18n", () => ({
+	t: vi.fn((key: string) => {
+		const translations: Record<string, string> = {
+			"common:codeActions.explain": "Explain with Zoo Code",
+			"common:codeActions.fix": "Fix with Zoo Code",
+			"common:codeActions.improve": "Improve with Zoo Code",
+			"common:codeActions.addToContext": "Add to Zoo Code",
+		}
+		return translations[key] || key
+	}),
+}))
 
 vi.mock("vscode", () => ({
-	CodeAction: vi.fn().mockImplementation((title, kind) => ({
-		title,
-		kind,
-		command: undefined,
-	})),
+	CodeAction: vi.fn().mockImplementation(function (title, kind) {
+		return {
+			title,
+			kind,
+			command: undefined,
+		}
+	}),
 	CodeActionKind: {
 		QuickFix: { value: "quickfix" },
 		RefactorRewrite: { value: "refactor.rewrite" },
 	},
-	Range: vi.fn().mockImplementation((startLine, startChar, endLine, endChar) => ({
-		start: { line: startLine, character: startChar },
-		end: { line: endLine, character: endChar },
-	})),
+	Range: vi.fn().mockImplementation(function (startLine, startChar, endLine, endChar) {
+		return {
+			start: { line: startLine, character: startChar },
+			end: { line: endLine, character: endChar },
+		}
+	}),
 	DiagnosticSeverity: {
 		Error: 0,
 		Warning: 1,
@@ -66,7 +82,9 @@ describe("CodeActionProvider", () => {
 		})
 		;(EditorUtils.getFilePath as Mock).mockReturnValue("/test/file.ts")
 		;(EditorUtils.hasIntersectingRange as Mock).mockReturnValue(true)
-		;(EditorUtils.createDiagnosticData as Mock).mockImplementation((d) => d)
+		;(EditorUtils.createDiagnosticData as Mock).mockImplementation((d) => {
+			return d
+		})
 	})
 
 	describe("provideCodeActions", () => {
@@ -74,9 +92,9 @@ describe("CodeActionProvider", () => {
 			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
 
 			expect(actions).toHaveLength(3)
-			expect((actions as any)[0].title).toBe(TITLES.ADD_TO_CONTEXT)
-			expect((actions as any)[1].title).toBe(TITLES.EXPLAIN)
-			expect((actions as any)[2].title).toBe(TITLES.IMPROVE)
+			expect((actions as any)[0].title).toBe("Add to Zoo Code")
+			expect((actions as any)[1].title).toBe("Explain with Zoo Code")
+			expect((actions as any)[2].title).toBe("Improve with Zoo Code")
 		})
 
 		it("should provide fix action instead of fix logic when diagnostics exist", () => {
@@ -87,8 +105,8 @@ describe("CodeActionProvider", () => {
 			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
 
 			expect(actions).toHaveLength(2)
-			expect((actions as any).some((a: any) => a.title === `${TITLES.FIX}`)).toBe(true)
-			expect((actions as any).some((a: any) => a.title === `${TITLES.ADD_TO_CONTEXT}`)).toBe(true)
+			expect((actions as any).some((a: any) => a.title === "Fix with Zoo Code")).toBe(true)
+			expect((actions as any).some((a: any) => a.title === "Add to Zoo Code")).toBe(true)
 		})
 
 		it("should return empty array when no effective range", () => {
@@ -115,7 +133,7 @@ describe("CodeActionProvider", () => {
 		})
 
 		it("should handle errors gracefully", () => {
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// Reset the workspace mock to return true for enableCodeActions
 			const mockGet = vi.fn().mockReturnValue(true)
@@ -123,7 +141,7 @@ describe("CodeActionProvider", () => {
 				get: mockGet,
 			})
 			;(vscode.workspace.getConfiguration as Mock).mockReturnValue(mockGetConfiguration())
-			;(EditorUtils.getEffectiveRange as Mock).mockImplementation(() => {
+			;(EditorUtils.getEffectiveRange as Mock).mockImplementation(function () {
 				throw new Error("Test error")
 			})
 

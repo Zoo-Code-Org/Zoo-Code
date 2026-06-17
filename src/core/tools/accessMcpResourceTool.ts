@@ -5,6 +5,7 @@ import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { ensureMcpServerAllowed } from "./mcpServerRestriction"
 
 interface AccessMcpResourceParams {
 	server_name: string
@@ -30,6 +31,19 @@ export class AccessMcpResourceTool extends BaseTool<"access_mcp_resource"> {
 				task.consecutiveMistakeCount++
 				task.recordToolError("access_mcp_resource")
 				pushToolResult(await task.sayAndCreateMissingParamError("access_mcp_resource", "uri"))
+				return
+			}
+
+			// Execution-time defense: reject access to a server not permitted by the mode's
+			// allowedMcpServers allowlist, even if the model referenced it from history.
+			const serverAllowed = await ensureMcpServerAllowed(
+				task,
+				"access_mcp_resource",
+				server_name,
+				pushToolResult,
+				formatResponse.toolError,
+			)
+			if (!serverAllowed) {
 				return
 			}
 

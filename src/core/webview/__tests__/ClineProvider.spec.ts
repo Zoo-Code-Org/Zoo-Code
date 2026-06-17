@@ -24,6 +24,7 @@ import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
+import { Terminal } from "../../../integrations/terminal/Terminal"
 import { MessageManager } from "../../message-manager"
 
 // Mock setup must come before imports.
@@ -34,13 +35,25 @@ vi.mock("p-wait-for", () => ({
 	default: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("fs/promises", () => ({
-	mkdir: vi.fn().mockResolvedValue(undefined),
-	writeFile: vi.fn().mockResolvedValue(undefined),
-	readFile: vi.fn().mockResolvedValue(""),
-	unlink: vi.fn().mockResolvedValue(undefined),
-	rmdir: vi.fn().mockResolvedValue(undefined),
-}))
+vi.mock("fs/promises", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("fs/promises")>()
+	const mocked = {
+		mkdir: vi.fn().mockResolvedValue(undefined),
+		writeFile: vi.fn().mockResolvedValue(undefined),
+		readFile: vi.fn().mockResolvedValue(""),
+		unlink: vi.fn().mockResolvedValue(undefined),
+		rmdir: vi.fn().mockResolvedValue(undefined),
+	}
+
+	return {
+		...actual,
+		...mocked,
+		default: {
+			...actual,
+			...mocked,
+		},
+	}
+})
 
 vi.mock("axios", () => ({
 	default: {
@@ -106,30 +119,36 @@ vi.mock("delay", () => {
 // MCP-related modules are mocked once above (lines 87-109).
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
-	Client: vi.fn().mockImplementation(() => ({
-		connect: vi.fn().mockResolvedValue(undefined),
-		close: vi.fn().mockResolvedValue(undefined),
-		listTools: vi.fn().mockResolvedValue({ tools: [] }),
-		callTool: vi.fn().mockResolvedValue({ content: [] }),
-	})),
+	Client: vi.fn().mockImplementation(function () {
+		return {
+			connect: vi.fn().mockResolvedValue(undefined),
+			close: vi.fn().mockResolvedValue(undefined),
+			listTools: vi.fn().mockResolvedValue({ tools: [] }),
+			callTool: vi.fn().mockResolvedValue({ content: [] }),
+		}
+	}),
 }))
 
 vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
-	StdioClientTransport: vi.fn().mockImplementation(() => ({
-		connect: vi.fn().mockResolvedValue(undefined),
-		close: vi.fn().mockResolvedValue(undefined),
-	})),
+	StdioClientTransport: vi.fn().mockImplementation(function () {
+		return {
+			connect: vi.fn().mockResolvedValue(undefined),
+			close: vi.fn().mockResolvedValue(undefined),
+		}
+	}),
 }))
 
 vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
-	EventEmitter: vi.fn().mockImplementation(() => ({
-		event: vi.fn(),
-		fire: vi.fn(),
-		dispose: vi.fn(),
-	})),
+	EventEmitter: vi.fn().mockImplementation(function () {
+		return {
+			event: vi.fn(),
+			fire: vi.fn(),
+			dispose: vi.fn(),
+		}
+	}),
 	Uri: {
 		joinPath: vi.fn(),
 		file: vi.fn(),
@@ -154,9 +173,11 @@ vi.mock("vscode", () => ({
 			update: vi.fn(),
 		}),
 		getWorkspaceFolder: vi.fn(),
-		onDidChangeConfiguration: vi.fn().mockImplementation(() => ({
-			dispose: vi.fn(),
-		})),
+		onDidChangeConfiguration: vi.fn().mockImplementation(() => {
+			return {
+				dispose: vi.fn(),
+			}
+		}),
 		onDidSaveTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 		onDidOpenTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
@@ -191,29 +212,33 @@ vi.mock("../../prompts/system", () => ({
 
 vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 	return {
-		default: vi.fn().mockImplementation(() => ({
-			initializeFilePaths: vi.fn(),
-			dispose: vi.fn(),
-		})),
+		default: vi.fn().mockImplementation(function () {
+			return {
+				initializeFilePaths: vi.fn(),
+				dispose: vi.fn(),
+			}
+		}),
 	}
 })
 
 vi.mock("../../task/Task", () => ({
-	Task: vi.fn().mockImplementation((options: any) => ({
-		api: undefined,
-		abortTask: vi.fn(),
-		handleWebviewAskResponse: vi.fn(),
-		clineMessages: [],
-		apiConversationHistory: [],
-		overwriteClineMessages: vi.fn(),
-		overwriteApiConversationHistory: vi.fn(),
-		getTaskNumber: vi.fn().mockReturnValue(0),
-		setTaskNumber: vi.fn(),
-		setParentTask: vi.fn(),
-		setRootTask: vi.fn(),
-		taskId: options?.historyItem?.id || "test-task-id",
-		emit: vi.fn(),
-	})),
+	Task: vi.fn().mockImplementation(function (options: any) {
+		return {
+			api: undefined,
+			abortTask: vi.fn(),
+			handleWebviewAskResponse: vi.fn(),
+			clineMessages: [],
+			apiConversationHistory: [],
+			overwriteClineMessages: vi.fn(),
+			overwriteApiConversationHistory: vi.fn(),
+			getTaskNumber: vi.fn().mockReturnValue(0),
+			setTaskNumber: vi.fn(),
+			setParentTask: vi.fn(),
+			setRootTask: vi.fn(),
+			taskId: options?.historyItem?.id || "test-task-id",
+			emit: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("../../../integrations/misc/extract-text", () => ({
@@ -228,6 +253,14 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: vi.fn().mockResolvedValue({}),
 	flushModels: vi.fn(),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
+}))
+
+vi.mock("../../../services/zoo-code-auth", () => ({
+	getZooCodeBaseUrl: vi.fn(() => "https://www.zoocode.dev"),
+	getCachedZooCodeToken: vi.fn(),
+	handleAuthCallback: vi.fn(),
+	setZooCodeUserInfo: vi.fn(),
+	disconnectZooCode: vi.fn(),
 }))
 
 vi.mock("../../../shared/modes", () => ({
@@ -301,11 +334,13 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 }))
 
 vi.mock("../diff/strategies/multi-search-replace", () => ({
-	MultiSearchReplaceDiffStrategy: vi.fn().mockImplementation(() => ({
-		getToolDescription: () => "test",
-		getName: () => "test-strategy",
-		applyDiff: vi.fn(),
-	})),
+	MultiSearchReplaceDiffStrategy: vi.fn().mockImplementation(function () {
+		return {
+			getToolDescription: () => "test",
+			getName: () => "test-strategy",
+			applyDiff: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("@roo-code/cloud", () => ({
@@ -327,7 +362,7 @@ afterAll(() => {
 
 describe("ClineProvider", () => {
 	beforeAll(() => {
-		vi.mocked(Task).mockImplementation((options: any) => {
+		vi.mocked(Task).mockImplementation(function (options: any) {
 			const task: any = {
 				api: undefined,
 				abortTask: vi.fn(),
@@ -357,7 +392,7 @@ describe("ClineProvider", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
 	let mockOutputChannel: vscode.OutputChannel
-	let mockWebviewView: vscode.WebviewView
+	let mockWebviewView: any
 	let mockPostMessage: any
 	let updateGlobalStateSpy: any
 
@@ -379,16 +414,26 @@ describe("ClineProvider", () => {
 			extensionPath: "/test/path",
 			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
-				get: vi.fn().mockImplementation((key: string) => globalState[key]),
-				update: vi
-					.fn()
-					.mockImplementation((key: string, value: string | undefined) => (globalState[key] = value)),
-				keys: vi.fn().mockImplementation(() => Object.keys(globalState)),
+				get: vi.fn().mockImplementation((key: string) => {
+					return globalState[key]
+				}),
+				update: vi.fn().mockImplementation((key: string, value: string | undefined) => {
+					return (globalState[key] = value)
+				}),
+				keys: vi.fn().mockImplementation(() => {
+					return Object.keys(globalState)
+				}),
 			},
 			secrets: {
-				get: vi.fn().mockImplementation((key: string) => secrets[key]),
-				store: vi.fn().mockImplementation((key: string, value: string | undefined) => (secrets[key] = value)),
-				delete: vi.fn().mockImplementation((key: string) => delete secrets[key]),
+				get: vi.fn().mockImplementation((key: string) => {
+					return secrets[key]
+				}),
+				store: vi.fn().mockImplementation((key: string, value: string | undefined) => {
+					return (secrets[key] = value)
+				}),
+				delete: vi.fn().mockImplementation((key: string) => {
+					return delete secrets[key]
+				}),
 			},
 			workspaceState: {
 				get: vi.fn().mockReturnValue(undefined),
@@ -435,8 +480,10 @@ describe("ClineProvider", () => {
 				callback()
 				return { dispose: vi.fn() }
 			}),
-			onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
-		} as unknown as vscode.WebviewView
+			onDidChangeVisibility: vi.fn().mockImplementation(() => {
+				return { dispose: vi.fn() }
+			}),
+		}
 
 		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
@@ -471,6 +518,20 @@ describe("ClineProvider", () => {
 		expect(ClineProvider.getVisibleInstance()).toBe(provider)
 	})
 
+	test("resolveWebviewView hydrates the saved terminalProfile into the process-wide Terminal state", async () => {
+		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
+		// Seed the persisted setting so the real getState() returns it during hydration.
+		await (provider as any).contextProxy.setValue("terminalProfile", "Git Bash")
+
+		await provider.resolveWebviewView(mockWebviewView)
+		// The hydration runs in a getState().then(...) callback, so flush microtasks.
+		await new Promise((resolve) => setImmediate(resolve))
+
+		expect(setTerminalProfileSpy).toHaveBeenCalledWith("Git Bash")
+
+		setTerminalProfileSpy.mockRestore()
+	})
+
 	test("resolveWebviewView sets up webview correctly", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 
@@ -480,6 +541,48 @@ describe("ClineProvider", () => {
 		})
 
 		expect(mockWebviewView.webview.html).toContain("<!DOCTYPE html>")
+	})
+
+	describe("logWebviewHiddenDiagnostics", () => {
+		let visibilityCallback: () => void
+
+		beforeEach(async () => {
+			// Capture the visibility callback registered during resolveWebviewView
+			mockWebviewView.onDidChangeVisibility = vi.fn().mockImplementation((cb: () => void) => {
+				visibilityCallback = cb
+				return { dispose: vi.fn() }
+			})
+			// @ts-ignore - accessing private property for testing
+			provider.view = mockWebviewView
+			await provider.resolveWebviewView(mockWebviewView)
+			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
+		})
+
+		test("does not log when no task is active", () => {
+			// view becomes hidden with no task on the stack
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			visibilityCallback()
+			expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
+		})
+
+		test("does not log when the active task is aborted", async () => {
+			const task = new Task(defaultTaskOptions)
+			Object.defineProperty(task, "taskId", { value: "aborted-task", writable: true })
+			task.abort = true
+			await provider.addClineToStack(task)
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			visibilityCallback()
+			expect(mockOutputChannel.appendLine).not.toHaveBeenCalled()
+		})
+
+		test("logs task state to output channel when an active task is running", async () => {
+			const task = new Task(defaultTaskOptions)
+			Object.defineProperty(task, "taskId", { value: "running-task", writable: true })
+			await provider.addClineToStack(task)
+			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
+			visibilityCallback()
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(expect.stringContaining("running-task"))
+		})
 	})
 
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
@@ -819,9 +922,9 @@ describe("ClineProvider", () => {
 
 	test("writeDelayMs defaults to 1000ms", async () => {
 		// Mock globalState.get to return undefined for writeDelayMs
-		;(mockContext.globalState.get as any).mockImplementation((key: string) =>
-			key === "writeDelayMs" ? undefined : null,
-		)
+		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+			return key === "writeDelayMs" ? undefined : null
+		})
 
 		const state = await provider.getState()
 		expect(state.writeDelayMs).toBe(1000)
@@ -870,9 +973,9 @@ describe("ClineProvider", () => {
 
 	test("autoCondenseContext defaults to true", async () => {
 		// Mock globalState.get to return undefined for autoCondenseContext
-		;(mockContext.globalState.get as any).mockImplementation((key: string) =>
-			key === "autoCondenseContext" ? undefined : null,
-		)
+		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+			return key === "autoCondenseContext" ? undefined : null
+		})
 		const state = await provider.getState()
 		expect(state.autoCondenseContext).toBe(true)
 	})
@@ -888,9 +991,9 @@ describe("ClineProvider", () => {
 
 	test("autoCondenseContextPercent defaults to 100", async () => {
 		// Mock globalState.get to return undefined for autoCondenseContextPercent
-		;(mockContext.globalState.get as any).mockImplementation((key: string) =>
-			key === "autoCondenseContextPercent" ? undefined : null,
-		)
+		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+			return key === "autoCondenseContextPercent" ? undefined : null
+		})
 
 		const state = await provider.getState()
 		expect(state.autoCondenseContextPercent).toBe(100)
@@ -2036,7 +2139,7 @@ describe("Project MCP Settings", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
 	let mockOutputChannel: vscode.OutputChannel
-	let mockWebviewView: vscode.WebviewView
+	let mockWebviewView: any
 	let mockPostMessage: any
 
 	beforeEach(async () => {
@@ -2090,7 +2193,7 @@ describe("Project MCP Settings", () => {
 			visible: true,
 			onDidDispose: vi.fn(),
 			onDidChangeVisibility: vi.fn(),
-		} as unknown as vscode.WebviewView
+		}
 		;(vscode.window as any).activeTextEditor = undefined
 		;(vscode.workspace.getWorkspaceFolder as any).mockReset()
 		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
@@ -2353,7 +2456,7 @@ describe("ClineProvider - Router Models", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
 	let mockOutputChannel: vscode.OutputChannel
-	let mockWebviewView: vscode.WebviewView
+	let mockWebviewView: any
 	let mockPostMessage: any
 
 	beforeEach(() => {
@@ -2366,16 +2469,26 @@ describe("ClineProvider - Router Models", () => {
 			extensionPath: "/test/path",
 			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
-				get: vi.fn().mockImplementation((key: string) => globalState[key]),
-				update: vi
-					.fn()
-					.mockImplementation((key: string, value: string | undefined) => (globalState[key] = value)),
-				keys: vi.fn().mockImplementation(() => Object.keys(globalState)),
+				get: vi.fn().mockImplementation((key: string) => {
+					return globalState[key]
+				}),
+				update: vi.fn().mockImplementation((key: string, value: string | undefined) => {
+					return (globalState[key] = value)
+				}),
+				keys: vi.fn().mockImplementation(() => {
+					return Object.keys(globalState)
+				}),
 			},
 			secrets: {
-				get: vi.fn().mockImplementation((key: string) => secrets[key]),
-				store: vi.fn().mockImplementation((key: string, value: string | undefined) => (secrets[key] = value)),
-				delete: vi.fn().mockImplementation((key: string) => delete secrets[key]),
+				get: vi.fn().mockImplementation((key: string) => {
+					return secrets[key]
+				}),
+				store: vi.fn().mockImplementation((key: string, value: string | undefined) => {
+					return (secrets[key] = value)
+				}),
+				delete: vi.fn().mockImplementation((key: string) => {
+					return delete secrets[key]
+				}),
 			},
 			workspaceState: {
 				get: vi.fn().mockReturnValue(undefined),
@@ -2411,8 +2524,10 @@ describe("ClineProvider - Router Models", () => {
 				callback()
 				return { dispose: vi.fn() }
 			}),
-			onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
-		} as unknown as vscode.WebviewView
+			onDidChangeVisibility: vi.fn().mockImplementation(() => {
+				return { dispose: vi.fn() }
+			}),
+		}
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -2473,12 +2588,14 @@ describe("ClineProvider - Router Models", () => {
 				openrouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				litellm: mockModels,
 				ollama: {},
 				lmstudio: {},
-				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})
@@ -2508,6 +2625,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty fail
 			.mockResolvedValueOnce(mockModels) // unbound success
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway success
+			.mockResolvedValueOnce(mockModels) // zoo-gateway success
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
 
 		await messageHandler({ type: "requestRouterModels" })
@@ -2519,12 +2637,14 @@ describe("ClineProvider - Router Models", () => {
 				openrouter: mockModels,
 				requesty: {},
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				ollama: {},
 				lmstudio: {},
 				litellm: {},
-				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})
@@ -2614,12 +2734,14 @@ describe("ClineProvider - Router Models", () => {
 				openrouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
+				"vercel-ai-gateway": mockModels,
+				"zoo-gateway": mockModels,
 				litellm: {},
 				ollama: {},
 				lmstudio: {},
-				"vercel-ai-gateway": mockModels,
 				poe: {},
 				deepseek: {},
+				"opencode-go": {},
 			},
 			values: undefined,
 		})
@@ -2657,7 +2779,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	let provider: ClineProvider
 	let mockContext: vscode.ExtensionContext
 	let mockOutputChannel: vscode.OutputChannel
-	let mockWebviewView: vscode.WebviewView
+	let mockWebviewView: any
 	let mockPostMessage: any
 	let defaultTaskOptions: TaskOptions
 
@@ -2679,16 +2801,26 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			extensionPath: "/test/path",
 			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
 			globalState: {
-				get: vi.fn().mockImplementation((key: string) => globalState[key]),
-				update: vi
-					.fn()
-					.mockImplementation((key: string, value: string | undefined) => (globalState[key] = value)),
-				keys: vi.fn().mockImplementation(() => Object.keys(globalState)),
+				get: vi.fn().mockImplementation((key: string) => {
+					return globalState[key]
+				}),
+				update: vi.fn().mockImplementation((key: string, value: string | undefined) => {
+					return (globalState[key] = value)
+				}),
+				keys: vi.fn().mockImplementation(() => {
+					return Object.keys(globalState)
+				}),
 			},
 			secrets: {
-				get: vi.fn().mockImplementation((key: string) => secrets[key]),
-				store: vi.fn().mockImplementation((key: string, value: string | undefined) => (secrets[key] = value)),
-				delete: vi.fn().mockImplementation((key: string) => delete secrets[key]),
+				get: vi.fn().mockImplementation((key: string) => {
+					return secrets[key]
+				}),
+				store: vi.fn().mockImplementation((key: string, value: string | undefined) => {
+					return (secrets[key] = value)
+				}),
+				delete: vi.fn().mockImplementation((key: string) => {
+					return delete secrets[key]
+				}),
 			},
 			workspaceState: {
 				get: vi.fn().mockReturnValue(undefined),
@@ -2725,8 +2857,10 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				callback()
 				return { dispose: vi.fn() }
 			}),
-			onDidChangeVisibility: vi.fn().mockImplementation(() => ({ dispose: vi.fn() })),
-		} as unknown as vscode.WebviewView
+			onDidChangeVisibility: vi.fn().mockImplementation(() => {
+				return { dispose: vi.fn() }
+			}),
+		}
 
 		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
@@ -3655,6 +3789,183 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 			// Restore the spy
 			vi.mocked(fsUtils.fileExistsAtPath).mockRestore()
+		})
+	})
+
+	describe("Zoo Code auth profile sync", () => {
+		beforeEach(async () => {
+			const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+			vi.mocked(getCachedZooCodeToken).mockReturnValue("")
+		})
+
+		describe("handleZooCodeCallback", () => {
+			it("creates a Zoo Gateway profile when none exists", async () => {
+				vi.spyOn(provider, "getState").mockResolvedValue({
+					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
+				} as any)
+				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
+					apiProvider: "anthropic",
+				} as any)
+				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+					currentApiConfigName: "Anthropic",
+				} as any)
+				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([]),
+				}
+
+				await provider.handleZooCodeCallback("zoo_ext_token")
+
+				expect(postMessageSpy).toHaveBeenCalledWith({ type: "zooGatewayCredentialsReady" })
+				expect(upsertSpy).toHaveBeenCalledWith(
+					"Zoo Gateway",
+					expect.objectContaining({
+						apiProvider: "zoo-gateway",
+						zooSessionToken: "zoo_ext_token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+					false,
+				)
+			})
+
+			it("updates every zoo-gateway profile and activates only the active one", async () => {
+				vi.spyOn(provider, "getState").mockResolvedValue({
+					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
+				} as any)
+				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
+					apiProvider: "zoo-gateway",
+				} as any)
+				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
+					currentApiConfigName: "Zoo Gateway",
+				} as any)
+				const upsertSpy = vi.spyOn(provider, "upsertProviderProfile").mockResolvedValue("profile-id")
+				const saveConfig = vi.fn().mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([
+						{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
+						{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+					]),
+					getProfile: vi
+						.fn()
+						.mockResolvedValueOnce({
+							apiProvider: "zoo-gateway",
+							zooSessionToken: "old-token",
+							zooGatewayBaseUrl: "https://old.example/api/gateway/v1",
+						})
+						.mockResolvedValueOnce({
+							apiProvider: "zoo-gateway",
+							zooSessionToken: "old-token",
+						}),
+					saveConfig,
+				}
+
+				await provider.handleZooCodeCallback("new-token")
+
+				expect(upsertSpy).toHaveBeenCalledWith(
+					"Zoo Gateway",
+					expect.objectContaining({
+						zooSessionToken: "new-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+					true,
+				)
+				expect(saveConfig).toHaveBeenCalledWith(
+					"Backup Zoo",
+					expect.objectContaining({
+						zooSessionToken: "new-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+				)
+			})
+
+			it("logs and posts state when profile persistence fails", async () => {
+				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([]),
+				}
+
+				await provider.handleZooCodeCallback("zoo_ext_token")
+
+				expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+					expect.stringContaining("[handleZooCodeCallback] Failed to save zoo-gateway profile"),
+				)
+				// State must still be refreshed even when profile persistence fails.
+				expect(provider.postStateToWebview).toHaveBeenCalled()
+			})
+		})
+
+		describe("ensureZooGatewayProfileSeeded", () => {
+			it("does nothing when no cached auth token exists", async () => {
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn(),
+				}
+
+				await (provider as any).ensureZooGatewayProfileSeeded()
+
+				expect(handleSpy).not.toHaveBeenCalled()
+			})
+
+			it("skips seeding when every zoo-gateway profile already has the current token and base URL", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "current-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+				}
+
+				await (provider as any).ensureZooGatewayProfileSeeded()
+
+				expect(handleSpy).not.toHaveBeenCalled()
+				expect(postMessageSpy).toHaveBeenCalledWith({ type: "zooGatewayCredentialsReady" })
+			})
+
+			it("re-seeds when any zoo-gateway profile has a stale or missing token", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("fresh-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "stale-token",
+						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
+					}),
+				}
+
+				await (provider as any).ensureZooGatewayProfileSeeded()
+
+				expect(handleSpy).toHaveBeenCalledWith("fresh-token")
+			})
+
+			it("re-seeds when any zoo-gateway profile has a stale base URL", async () => {
+				const { getCachedZooCodeToken } = await import("../../../services/zoo-code-auth")
+				vi.mocked(getCachedZooCodeToken).mockReturnValue("current-token")
+				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
+
+				;(provider as any).providerSettingsManager = {
+					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					getProfile: vi.fn().mockResolvedValue({
+						zooSessionToken: "current-token",
+						zooGatewayBaseUrl: "https://staging.zoocode.dev/api/gateway/v1",
+					}),
+				}
+
+				await (provider as any).ensureZooGatewayProfileSeeded()
+
+				expect(handleSpy).toHaveBeenCalledWith("current-token")
+			})
 		})
 	})
 })

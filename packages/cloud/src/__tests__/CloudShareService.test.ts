@@ -34,12 +34,12 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-vi.mock("../Config", () => ({
+vi.mock("../config", () => ({
 	getRooCodeApiUrl: () => "https://app.roocode.com",
 }))
 
 vi.mock("../utils", () => ({
-	getUserAgent: () => "Roo-Code 1.0.0",
+	getUserAgent: () => "Zoo-Code 1.0.0",
 }))
 
 describe("CloudShareService", () => {
@@ -93,7 +93,7 @@ describe("CloudShareService", () => {
 				headers: {
 					"Content-Type": "application/json",
 					Authorization: "Bearer session-token",
-					"User-Agent": "Roo-Code 1.0.0",
+					"User-Agent": "Zoo-Code 1.0.0",
 				},
 				body: JSON.stringify({
 					taskId: "task-123",
@@ -127,7 +127,7 @@ describe("CloudShareService", () => {
 				headers: {
 					"Content-Type": "application/json",
 					Authorization: "Bearer session-token",
-					"User-Agent": "Roo-Code 1.0.0",
+					"User-Agent": "Zoo-Code 1.0.0",
 				},
 				body: JSON.stringify({ taskId: "task-123", visibility: "public" }),
 				signal: expect.any(AbortSignal),
@@ -154,7 +154,7 @@ describe("CloudShareService", () => {
 				headers: {
 					"Content-Type": "application/json",
 					Authorization: "Bearer session-token",
-					"User-Agent": "Roo-Code 1.0.0",
+					"User-Agent": "Zoo-Code 1.0.0",
 				},
 				body: JSON.stringify({
 					taskId: "task-123",

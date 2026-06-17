@@ -30,41 +30,11 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.54.1
+## Yang Baru di v3.60.0
 
-**Rilis awal Zoo Code** — menetapkan Zoo Code sebagai extension independen di VS Code Marketplace dengan nama `ZooCodeOrganization.zoo-code`, dengan build pre-release yang dipublikasikan otomatis setiap kali ada merge ke `main`.
-
-- Menambahkan dukungan GPT-5.5 melalui provider OpenAI Codex.
-- Menambahkan dukungan Claude Opus 4.7 di Vertex AI.
-- Menambahkan kontrol navigasi ke checkpoint sebelumnya di chat.
-- Dukungan DeepSeek V4 dengan pengambilan model dinamis.
-- Dukungan klien OAuth MCP.
-
-<details>
-  <summary>🌐 Bahasa yang tersedia</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) dan OpenAI GPT-5.5 kini tersedia di pengaturan penyedia
+- **Allowlist MCP per mode** — batasi server MCP yang aktif per mode menggunakan allowlist baru di konfigurasi mode
+- **Pengaturan rootResolution workspace** — pengaturan baru untuk mengontrol resolusi path file di workspace multi-root
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

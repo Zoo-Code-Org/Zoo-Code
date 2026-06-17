@@ -30,41 +30,11 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.54.1 新功能
+## v3.60.0 新功能
 
-**Zoo Code 首次發行** —— Zoo Code 現在已作為獨立擴充套件上架 VS Code Marketplace，識別名稱為 `ZooCodeOrganization.zoo-code`，並且每次 merge 到 `main` 後都會自動發佈 pre-release 版本。
-
-- 透過 OpenAI Codex 供應商新增對 GPT-5.5 的支援。
-- 在 Vertex AI 上新增對 Claude Opus 4.7 的支援。
-- 在聊天中新增前一個 checkpoint 的導覽控制項。
-- 支援動態擷取模型的 DeepSeek V4。
-- 支援 MCP OAuth 用戶端。
-
-<details>
-  <summary>🌐 支援語言</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5（Anthropic、Bedrock、Vertex）和 OpenAI GPT-5.5 現已在提供商設定中可用
+- **按模式的 MCP 允許清單** — 在模式設定中使用允許清單限制每個模式下活躍的 MCP 伺服器
+- **工作區 rootResolution 設定** — 新設定，用於控制 Zoo Code 在多根工作區中解析檔案路徑的方式
 
 ## Zoo Code 能為您做什麼？
 

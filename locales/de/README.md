@@ -30,41 +30,11 @@
 
 Eine kurze Anleitung für den Wechsel von Roo Code zu Zoo Code findest du im [Roo→Zoo-Migrationsleitfaden](https://docs.zoocode.dev/roo-to-zoo-migration). Wir wollen Nutzer beim Umstieg so gut wie möglich unterstützen, und genau dafür sind unser [Reddit](https://www.reddit.com/r/ZooCode) und [Discord](https://discord.gg/VxfP4Vx3gX) da. Wenn du Probleme hast oder Fragen auftauchen, komm vorbei und frag nach.
 
-## Neu in v3.54.1
+## Neu in v3.60.0
 
-**Erste Zoo Code-Version** — etabliert Zoo Code als unabhängige Erweiterung im VS Code Marketplace unter `ZooCodeOrganization.zoo-code`, wobei pre-release Builds nach jedem Merge in `main` automatisch veröffentlicht werden.
-
-- GPT-5.5-Unterstützung über den OpenAI Codex-Provider hinzugefügt.
-- Claude Opus 4.7-Unterstützung auf Vertex AI hinzugefügt.
-- Navigationssteuerungen für vorherige Checkpoints im Chat hinzugefügt.
-- DeepSeek V4-Unterstützung mit dynamischem Model-Fetching.
-- Unterstützung für den MCP OAuth-Client.
-
-<details>
-  <summary>🌐 Verfügbare Sprachen</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) und OpenAI GPT-5.5 sind jetzt in den Anbieter-Einstellungen verfügbar
+- **MCP-Allowlists pro Modus** — schränke ein, welche MCP-Server pro Modus aktiv sind, mit einer Allowlist in der Moduskonfiguration
+- **Workspace-Einstellung rootResolution** — neue Einstellung zur Steuerung der Dateipfadauflösung in Multi-Root-Workspaces
 
 ## Was kann Zoo Code für DICH tun?
 

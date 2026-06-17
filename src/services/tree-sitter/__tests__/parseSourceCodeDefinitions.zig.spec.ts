@@ -19,8 +19,8 @@ describe("Zig Source Code Definition Tests", () => {
 
 	it("should parse function definitions", () => {
 		expect(parseResult).toMatch(/\d+--\d+ \| pub fn main\(\) !void/)
-		expect(parseResult).toMatch(/\d+--\d+ \|     pub fn init\(x: f32, y: f32\) Point/)
-		expect(parseResult).toMatch(/\d+--\d+ \|     pub fn distance\(self: Point\) f32/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {5}pub fn init\(x: f32, y: f32\) Point/)
+		expect(parseResult).toMatch(/\d+--\d+ \| {5}pub fn distance\(self: Point\) f32/)
 	})
 
 	it("should parse container definitions", () => {

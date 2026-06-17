@@ -16,11 +16,13 @@ vi.mock("node-cache", () => {
 	const mockDel = vi.fn()
 
 	return {
-		default: vi.fn().mockImplementation(() => ({
-			get: mockGet,
-			set: mockSet,
-			del: mockDel,
-		})),
+		default: vi.fn().mockImplementation(function () {
+			return {
+				get: mockGet,
+				set: mockSet,
+				del: mockDel,
+			}
+		}),
 	}
 })
 
@@ -220,11 +222,11 @@ describe("getModelsFromCache disk fallback", () => {
 
 	it("handles disk read errors gracefully", () => {
 		vi.mocked(fsSync.existsSync).mockReturnValue(true)
-		vi.mocked(fsSync.readFileSync).mockImplementation(() => {
+		vi.mocked(fsSync.readFileSync).mockImplementation(function () {
 			throw new Error("Disk read failed")
 		})
 
-		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 		const result = getModelsFromCache("openrouter")
 
@@ -238,7 +240,7 @@ describe("getModelsFromCache disk fallback", () => {
 		vi.mocked(fsSync.existsSync).mockReturnValue(true)
 		vi.mocked(fsSync.readFileSync).mockReturnValue("invalid json{")
 
-		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 		const result = getModelsFromCache("openrouter")
 

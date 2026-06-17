@@ -53,17 +53,19 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.54.1
+## What's New in v3.60.0
 
-**Initial Zoo Code release** — establishes Zoo Code as an independent extension
-on the VS Code Marketplace under `ZooCodeOrganization.zoo-code`, with
-pre-release builds published automatically on every merge to `main`.
-
-- Add GPT-5.5 support via the OpenAI Codex provider
-- Add Claude Opus 4.7 support on Vertex AI
-- Add previous checkpoint navigation controls in chat
-- DeepSeek V4 support with dynamic model fetching
-- MCP OAuth client support
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) and OpenAI GPT-5.5 are now available in your provider settings
+- **Per-mode MCP allowlists** — restrict which MCP servers are active for each mode using a new allowlist in your mode configuration
+- **Workspace rootResolution** — new setting to control how Zoo Code resolves file paths across roots in multi-root workspaces
+- **Configurable chat font size** and **VS Code integrated terminal shell override**
+- **GitHub-style alerts** rendered in the webview
+- **Configurable max output tokens** for GLM models
+- **WorkspacePathResolver** — reliable path handling across symlinked workspaces
+- Fix React crash from malformed follow-up suggestion mode
+- Fix OpenAI temperature being omitted when no custom value is set
+- Handle per-key failures during settings import
+- Security updates: mermaid v11.15.0, axios v1.16.0
 
 <details>
   <summary>🌐 Available languages</summary>
@@ -87,7 +89,7 @@ pre-release builds published automatically on every merge to `main`.
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 

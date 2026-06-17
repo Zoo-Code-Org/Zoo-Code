@@ -12,13 +12,15 @@ const mockCreate = vi.fn()
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
-	default: vi.fn(() => ({
-		chat: {
-			completions: {
-				create: mockCreate,
+	default: vi.fn(function () {
+		return {
+			chat: {
+				completions: {
+					create: mockCreate,
+				},
 			},
-		},
-	})),
+		}
+	}),
 }))
 
 // Create a concrete test implementation of the abstract base class
@@ -229,7 +231,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 	})
 
 	describe("reasoning_content field", () => {
-		it("should filter out whitespace-only reasoning_content", async () => {
+		it("should preserve whitespace-only reasoning_content so streamed boundaries survive concatenation", async () => {
 			mockCreate.mockImplementationOnce(() => {
 				return {
 					[Symbol.asyncIterator]: () => ({
@@ -262,8 +264,12 @@ describe("BaseOpenAiCompatibleProvider", () => {
 				chunks.push(chunk)
 			}
 
-			// Should only have the regular content, not the whitespace-only reasoning
-			expect(chunks).toEqual([{ type: "text", text: "Regular content" }])
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "\n" },
+				{ type: "reasoning", text: "   " },
+				{ type: "reasoning", text: "\t\n  " },
+				{ type: "text", text: "Regular content" },
+			])
 		})
 
 		it("should yield non-empty reasoning_content", async () => {
@@ -295,9 +301,9 @@ describe("BaseOpenAiCompatibleProvider", () => {
 				chunks.push(chunk)
 			}
 
-			// Should only yield the non-empty reasoning content
 			expect(chunks).toEqual([
 				{ type: "reasoning", text: "Thinking step 1" },
+				{ type: "reasoning", text: "\n" },
 				{ type: "reasoning", text: "Thinking step 2" },
 			])
 		})

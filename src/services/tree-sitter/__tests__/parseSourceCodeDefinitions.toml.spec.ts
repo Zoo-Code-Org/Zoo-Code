@@ -12,7 +12,9 @@ vi.mock("../languageParser", () => ({
 
 // Mock file existence check
 vi.mock("../../../utils/fs", () => ({
-	fileExistsAtPath: vi.fn().mockImplementation(() => Promise.resolve(true)),
+	fileExistsAtPath: vi.fn().mockImplementation(function () {
+		return Promise.resolve(true)
+	}),
 }))
 
 describe("TOML Source Code Definition Tests", () => {
@@ -41,7 +43,7 @@ describe("TOML Source Code Definition Tests", () => {
 
 	it("should parse table arrays", () => {
 		expect(parseResult).toMatch(/\d+--\d+ \|\s*\[\[products\]\]/)
-		expect(parseResult).toMatch(/\d+--\d+ \|\s*\[\[products\]\]  # Array of tables/)
+		expect(parseResult).toMatch(/\d+--\d+ \|\s*\[\[products\]\] {2}# Array of tables/)
 	})
 
 	it("should parse inline tables", () => {

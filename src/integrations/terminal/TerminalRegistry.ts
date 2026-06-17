@@ -48,8 +48,6 @@ export class TerminalRegistry {
 		try {
 			const startDisposable = vscode.window.onDidStartTerminalShellExecution?.(
 				async (e: vscode.TerminalShellExecutionStartEvent) => {
-					// Get a handle to the stream as early as possible:
-					const stream = e.execution.read()
 					const terminal = this.getTerminalByVSCETerminal(e.terminal)
 
 					console.info("[onDidStartTerminalShellExecution]", {
@@ -57,7 +55,13 @@ export class TerminalRegistry {
 						terminalId: terminal?.id,
 					})
 
-					if (terminal) {
+					if (terminal instanceof Terminal) {
+						if (terminal.activeShellExecution === e.execution) {
+							return
+						}
+
+						// Get a handle to the stream as early as possible.
+						const stream = e.execution.read()
 						terminal.setActiveStream(stream)
 						terminal.busy = true // Mark terminal as busy when shell execution starts
 					} else {
@@ -92,6 +96,10 @@ export class TerminalRegistry {
 						)
 
 						return
+					}
+
+					if (terminal instanceof Terminal && terminal.activeShellExecution === e.execution) {
+						terminal.activeShellExecution = undefined
 					}
 
 					if (!terminal.running) {
@@ -155,13 +163,14 @@ export class TerminalRegistry {
 		provider: RooTerminalProvider = "vscode",
 	): Promise<RooTerminal> {
 		const terminals = this.getAllTerminals()
+		const reuseKey = provider === "vscode" ? Terminal.getReuseKey() : provider
 		let terminal: RooTerminal | undefined
 
 		// First priority: Find a terminal already assigned to this task with
 		// matching directory.
 		if (taskId) {
 			terminal = terminals.find((t) => {
-				if (t.busy || t.taskId !== taskId || t.provider !== provider) {
+				if (t.busy || t.taskId !== taskId || t.provider !== provider || t.reuseKey !== reuseKey) {
 					return false
 				}
 
@@ -178,7 +187,7 @@ export class TerminalRegistry {
 		// Second priority: Find any available terminal with matching directory.
 		if (!terminal) {
 			terminal = terminals.find((t) => {
-				if (t.busy || t.provider !== provider) {
+				if (t.busy || t.provider !== provider || t.reuseKey !== reuseKey) {
 					return false
 				}
 
@@ -277,6 +286,22 @@ export class TerminalRegistry {
 	}
 
 	/**
+	 * Disposes all idle (non-busy) VS Code terminals so they are not reused
+	 * after a shell profile change. Busy terminals are left untouched.
+	 */
+	public static closeIdleTerminals(): void {
+		this.terminals = this.terminals.filter((t) => {
+			if (t.busy || !(t instanceof Terminal)) {
+				return true
+			}
+
+			t.terminal.dispose()
+			ShellIntegrationManager.zshCleanupTmpDir(t.id)
+			return false
+		})
+	}
+
+	/**
 	 * Releases all terminals associated with a task.
 	 *
 	 * @param taskId The task ID
@@ -284,6 +309,22 @@ export class TerminalRegistry {
 	public static releaseTerminalsForTask(taskId: string): void {
 		this.terminals.forEach((terminal) => {
 			if (terminal.taskId === taskId) {
+				// #245: If the terminal is still executing a command when its task is torn
+				// down (user pressed cancel ✕, or the task was switched/removed), abort the
+				// process. Otherwise the command keeps running orphaned and the terminal stays
+				// stuck "busy" — the cancel-doesn't-terminate bug. abort() is safe when idle
+				// (Ctrl+C is gated on an active stream; Execa abort is idempotent).
+				if (terminal.busy) {
+					try {
+						terminal.process?.abort()
+					} catch (error) {
+						console.error(
+							`[TerminalRegistry] Error aborting process for terminal ${terminal.id} on release:`,
+							error,
+						)
+					}
+				}
+
 				terminal.taskId = undefined
 			}
 		})

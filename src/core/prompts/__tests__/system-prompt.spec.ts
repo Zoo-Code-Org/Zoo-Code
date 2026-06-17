@@ -33,10 +33,6 @@ vi.mock("os", () => ({
 	userInfo: () => ({ username: "test", uid: 1000, gid: 1000, shell: "/bin/bash", homedir: "/home/user" }),
 }))
 
-vi.mock("default-shell", () => ({
-	default: "/bin/zsh",
-}))
-
 vi.mock("os-name", () => ({
 	default: () => "Linux",
 }))
@@ -131,11 +127,13 @@ vi.mock("vscode", () => ({
 	window: {
 		activeTextEditor: undefined,
 	},
-	EventEmitter: vi.fn().mockImplementation(() => ({
-		event: vi.fn(),
-		fire: vi.fn(),
-		dispose: vi.fn(),
-	})),
+	EventEmitter: vi.fn().mockImplementation(function () {
+		return {
+			event: vi.fn(),
+			fire: vi.fn(),
+			dispose: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("../../../utils/shell", () => ({
@@ -294,11 +292,13 @@ describe("SYSTEM_PROMPT", () => {
 		vscode.window = {
 			activeTextEditor: undefined,
 		}
-		vscode.EventEmitter = vi.fn().mockImplementation(() => ({
-			event: vi.fn(),
-			fire: vi.fn(),
-			dispose: vi.fn(),
-		}))
+		vscode.EventEmitter = vi.fn().mockImplementation(function () {
+			return {
+				event: vi.fn(),
+				fire: vi.fn(),
+				dispose: vi.fn(),
+			}
+		})
 
 		const prompt = await SYSTEM_PROMPT(
 			mockContext,
@@ -337,11 +337,13 @@ describe("SYSTEM_PROMPT", () => {
 		vscode.window = {
 			activeTextEditor: undefined,
 		}
-		vscode.EventEmitter = vi.fn().mockImplementation(() => ({
-			event: vi.fn(),
-			fire: vi.fn(),
-			dispose: vi.fn(),
-		}))
+		vscode.EventEmitter = vi.fn().mockImplementation(function () {
+			return {
+				event: vi.fn(),
+				fire: vi.fn(),
+				dispose: vi.fn(),
+			}
+		})
 	})
 
 	it("should include custom mode role definition at top and instructions at bottom", async () => {
@@ -573,6 +575,70 @@ describe("SYSTEM_PROMPT", () => {
 		expect(prompt).toContain("RULES")
 		expect(prompt).toContain("SYSTEM INFORMATION")
 		expect(prompt).toContain("OBJECTIVE")
+	})
+
+	describe("allowedMcpServers filtering in system prompt", () => {
+		it("should exclude MCP capability text when allowedMcpServers is empty array", async () => {
+			mockMcpHub = createMockMcpHub(true)
+
+			const customModes: ModeConfig[] = [
+				{
+					slug: "filtered-mode",
+					name: "Filtered Mode",
+					roleDefinition: "A filtered mode",
+					groups: ["read", "mcp"] as const,
+					allowedMcpServers: [],
+				},
+			]
+
+			const prompt = await SYSTEM_PROMPT(
+				mockContext,
+				"/test/path",
+				false,
+				mockMcpHub, // mcpHub with servers
+				undefined, // diffStrategy
+				"filtered-mode", // mode
+				undefined, // customModePrompts
+				customModes, // customModes
+				undefined, // globalCustomInstructions
+				experiments,
+				undefined, // language
+				undefined, // rooIgnoreInstructions
+			)
+
+			expect(prompt).not.toContain("MCP servers")
+		})
+
+		it("should include MCP capability text when allowedMcpServers matches connected servers", async () => {
+			mockMcpHub = createMockMcpHub(true) // has "test-server"
+
+			const customModes: ModeConfig[] = [
+				{
+					slug: "mcp-mode",
+					name: "MCP Mode",
+					roleDefinition: "A mode with MCP",
+					groups: ["read", "mcp"] as const,
+					allowedMcpServers: ["test-server"],
+				},
+			]
+
+			const prompt = await SYSTEM_PROMPT(
+				mockContext,
+				"/test/path",
+				false,
+				mockMcpHub,
+				undefined,
+				"mcp-mode",
+				undefined,
+				customModes,
+				undefined,
+				experiments,
+				undefined,
+				undefined,
+			)
+
+			expect(prompt).toContain("MCP servers")
+		})
 	})
 
 	afterAll(() => {

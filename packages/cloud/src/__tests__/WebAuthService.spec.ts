@@ -97,14 +97,16 @@ describe("WebAuthService", () => {
 			reset: vi.fn(),
 		}
 		const MockedRefreshTimer = vi.mocked(RefreshTimer)
-		MockedRefreshTimer.mockImplementation(() => mockTimer as unknown as RefreshTimer)
+		MockedRefreshTimer.mockImplementation(function () {
+			return mockTimer as unknown as RefreshTimer
+		})
 
 		// Setup config mocks - use production URL by default to maintain existing test behavior
 		vi.mocked(getClerkBaseUrl).mockReturnValue("https://clerk.roocode.com")
 		vi.mocked(getRooCodeApiUrl).mockReturnValue("https://api.test.com")
 
 		// Setup utils mock
-		vi.mocked(getUserAgent).mockReturnValue("Roo-Code 1.0.0")
+		vi.mocked(getUserAgent).mockReturnValue("Zoo-Code 1.0.0")
 
 		// Setup crypto mock
 		vi.mocked(crypto.randomBytes).mockReturnValue(Buffer.from("test-random-bytes") as never)

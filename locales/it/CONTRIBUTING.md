@@ -20,6 +20,8 @@ Zoo Code è un progetto guidato dalla comunità e apprezziamo profondamente ogni
 - [Prima di contribuire](#prima-di-contribuire)
 - [Trovare e pianificare il tuo contributo](#trovare-e-pianificare-il-tuo-contributo)
 - [Processo di sviluppo e invio](#processo-di-sviluppo-e-invio)
+- [Aspettative sulle Pull Request](#aspettative-sulle-pull-request)
+- [Contributi assistiti da IA](#contributi-assistiti-da-ia)
 - [Legale](#legale)
 
 ## Prima di contribuire
@@ -135,6 +137,32 @@ pnpm install
 - **Triage giornaliero:** controlli rapidi da parte dei manutentori.
 - **Revisione approfondita settimanale:** valutazione completa.
 - **Itera prontamente** in base al feedback.
+
+### Aspettative sulle Pull Request
+
+Le Pull Request devono essere revisionabili, testate e manutenibili. Prima di aprire una PR, assicurati che:
+
+- La modifica sia limitata a un issue, bug o miglioramento specifico.
+- Tu possa spiegare cosa fa la modifica e perché è corretta.
+- Tu abbia testato la modifica localmente dove pratico.
+- Tu sia disposto a rispondere al feedback della revisione e ad apportare ragionevoli modifiche di follow-up.
+- La PR non richieda ai manutentori di riscrivere, riprogettare o assumere sostanzialmente la proprietà dell'implementazione prima di poter essere unita.
+
+I manutentori possono chiudere le PR che sono incomplete, troppo ampie, inattive, non allineate con la direzione del progetto o che creano un onere di revisione o manutenzione sproporzionato. La chiusura di una PR non è un giudizio sul contributore; è una decisione dei manutentori che la modifica non può essere accettata nella sua forma attuale.
+
+### Contributi assistiti da IA
+
+L'uso di strumenti di IA è consentito, ma i contributori rimangono completamente responsabili delle loro contribuzioni.
+
+Se utilizzi strumenti di IA per aiutare a creare una PR, devi:
+
+- Revisionare e comprendere ogni modifica significativa.
+- Essere in grado di spiegare l'implementazione e i compromessi con parole tue.
+- Testare tu stesso la modifica. Se i test non sono praticamente fattibili nel tuo ambiente, spiega il motivo nella descrizione della PR e descrivi come i revisori possono verificare la modifica.
+- Verificare che il codice generato sia corretto, necessario e compatibile con la licenza del progetto.
+- Valuta di divulgare l'assistenza dell'IA nella descrizione della PR quando ha influenzato sostanzialmente il codice, i test o il design — questo aiuta i revisori a fornire un feedback migliore.
+
+Si prega di non inviare modifiche generate dall'IA che non si comprendono o che non si possono mantenere durante la revisione. I manutentori possono chiudere le PR che sembrano sostanzialmente assistite dall'IA ma prive di verifica umana, motivazione chiara o adeguato seguito nella revisione.
 
 ## Legale
 

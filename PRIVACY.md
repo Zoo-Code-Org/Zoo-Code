@@ -40,13 +40,6 @@ go—and, importantly, where they don't.
   We retain telemetry only as long as needed for product analytics and debugging.
   Telemetry does **not** collect your code or AI prompts, and you can opt out at
   any time through the settings.
-- **Zoo Code Observability (Authenticated Subscribers Only):** If you sign in to
-  Zoo Code and have an active subscription, Zoo Code will send LLM usage
-  telemetry to the Zoo Code backend (zoocode.dev). This includes task ID, AI
-  provider name, model name, token counts (input/output/cache), and estimated
-  cost. This data is linked to your authenticated Zoo Code account. You can stop
-  this collection at any time by signing out via the Zoo Code badge in the chat
-  area.
 - **Marketplace Requests**: When you browse or search the Marketplace for Model
   Configuration Profiles (MCPs) or Custom Modes, Zoo Code makes a secure API
   call to Zoo Code's backend servers to retrieve listing information. These

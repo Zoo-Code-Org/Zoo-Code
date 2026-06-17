@@ -98,7 +98,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("calls child.start() only after parent metadata is persisted (no race condition)", async () => {
 		const callOrder: string[] = []
 
-		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+		const parentTask = {
+			taskId: "parent-1",
+			emit: vi.fn(),
+		} as any
 		const childStart = vi.fn(() => callOrder.push("child.start"))
 
 		const updateTaskHistory = vi.fn(async () => {
@@ -141,5 +144,53 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 		// Verify ordering: createTask → updateTaskHistory → child.start
 		expect(callOrder).toEqual(["createTask", "updateTaskHistory", "child.start"])
+	})
+
+	it("rolls back the paused child and restores the parent when metadata persistence fails", async () => {
+		const persistError = new Error("parent metadata persist failed")
+		const parentHistory = {
+			id: "parent-1",
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			mode: "code",
+		}
+		const parentTask = {
+			taskId: "parent-1",
+			emit: vi.fn(),
+		} as any
+		const childStart = vi.fn()
+		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
+		const deleteTaskWithId = vi.fn().mockResolvedValue(undefined)
+		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
+
+		const provider = {
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack,
+			createTask: vi.fn().mockResolvedValue({ taskId: "child-1", start: childStart }),
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistory }),
+			updateTaskHistory: vi.fn().mockRejectedValue(persistError),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId,
+			createTaskWithHistoryItem,
+			log: vi.fn(),
+		} as unknown as ClineProvider
+
+		await expect(
+			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).rejects.toThrow(persistError)
+
+		expect(childStart).not.toHaveBeenCalled()
+		expect(removeClineFromStack).toHaveBeenNthCalledWith(1, { skipDelegationRepair: true })
+		expect(removeClineFromStack).toHaveBeenNthCalledWith(2, { skipDelegationRepair: true })
+		expect(deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
+		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(parentHistory)
 	})
 })

@@ -666,9 +666,9 @@ describe("CustomModesManager", () => {
 			const configPath = path.join(mockStoragePath, "settings", GlobalFileNames.customModes)
 
 			;(fs.readFile as Mock).mockResolvedValue(yaml.stringify({ customModes: [] }))
-			;(arePathsEqual as Mock).mockImplementation(
-				(path1: string, path2: string) => path.normalize(path1) === path.normalize(path2),
-			)
+			;(arePathsEqual as Mock).mockImplementation((path1: string, path2: string) => {
+				return path.normalize(path1) === path.normalize(path2)
+			})
 
 			// Mock createFileSystemWatcher to return a mock watcher
 			const mockWatcher = {

@@ -1127,6 +1127,86 @@ describe("CodeIndexConfigManager", () => {
 				expect(requiresRestart).toBe(true)
 			})
 		})
+
+		describe("semble provider configuration", () => {
+			it("should load semble provider configuration", async () => {
+				mockContextProxy.getGlobalState.mockReturnValue({
+					codebaseIndexEnabled: true,
+					codebaseIndexEmbedderProvider: "semble",
+				})
+				mockContextProxy.getSecret.mockReturnValue(undefined)
+
+				const result = await configManager.loadConfiguration()
+
+				expect(result.currentConfig.embedderProvider).toBe("semble")
+				expect(result.currentConfig.isConfigured).toBe(true)
+			})
+
+			it("should require restart when switching from openai to semble", async () => {
+				// Initial state with OpenAI
+				mockContextProxy.getGlobalState.mockReturnValue({
+					codebaseIndexEnabled: true,
+					codebaseIndexQdrantUrl: "http://qdrant.local",
+					codebaseIndexEmbedderProvider: "openai",
+					codebaseIndexEmbedderModelId: "text-embedding-3-small",
+				})
+				setupSecretMocks({
+					codeIndexOpenAiKey: "test-key",
+				})
+
+				await configManager.loadConfiguration()
+
+				// Switch to semble
+				mockContextProxy.getGlobalState.mockReturnValue({
+					codebaseIndexEnabled: true,
+					codebaseIndexEmbedderProvider: "semble",
+				})
+				mockContextProxy.getSecret.mockReturnValue(undefined)
+
+				const result = await configManager.loadConfiguration()
+				expect(result.requiresRestart).toBe(true)
+			})
+
+			it("should require restart when switching from semble to openai", async () => {
+				// Initial state with semble
+				mockContextProxy.getGlobalState.mockReturnValue({
+					codebaseIndexEnabled: true,
+					codebaseIndexEmbedderProvider: "semble",
+				})
+				mockContextProxy.getSecret.mockReturnValue(undefined)
+
+				await configManager.loadConfiguration()
+
+				// Switch to openai
+				mockContextProxy.getGlobalState.mockReturnValue({
+					codebaseIndexEnabled: true,
+					codebaseIndexQdrantUrl: "http://qdrant.local",
+					codebaseIndexEmbedderProvider: "openai",
+					codebaseIndexEmbedderModelId: "text-embedding-3-small",
+				})
+				setupSecretMocks({
+					codeIndexOpenAiKey: "test-key",
+				})
+
+				const result = await configManager.loadConfiguration()
+				expect(result.requiresRestart).toBe(true)
+			})
+
+			it("should not require restart when semble config stays the same", async () => {
+				// Initial state with semble
+				mockContextProxy.getGlobalState.mockReturnValue({
+					codebaseIndexEnabled: true,
+					codebaseIndexEmbedderProvider: "semble",
+				})
+				mockContextProxy.getSecret.mockReturnValue(undefined)
+
+				await configManager.loadConfiguration()
+
+				// Same semble config again
+				const result = await configManager.loadConfiguration()
+				expect(result.requiresRestart).toBe(false)
+			})
+		})
 	})
 
 	describe("isConfigured", () => {
@@ -1682,6 +1762,30 @@ describe("CodeIndexConfigManager", () => {
 
 			configManager = new CodeIndexConfigManager(mockContextProxy)
 			expect(configManager.isConfigured()).toBe(false)
+		})
+
+		it("should always return true for semble provider (no API keys or Qdrant needed)", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexEmbedderProvider: "semble",
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(true)
+		})
+
+		it("should return true for semble even without any other configuration", () => {
+			mockContextProxy.getGlobalState.mockReturnValue({
+				codebaseIndexEnabled: true,
+				codebaseIndexEmbedderProvider: "semble",
+				// No qdrant URL, no API keys
+			})
+			mockContextProxy.getSecret.mockReturnValue(undefined)
+
+			configManager = new CodeIndexConfigManager(mockContextProxy)
+			expect(configManager.isConfigured()).toBe(true)
+			expect(configManager.isFeatureConfigured).toBe(true)
 		})
 
 		describe("currentModelDimension", () => {

@@ -4,7 +4,7 @@ describe("toRequestyServiceUrl", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		// Mock console.warn to avoid noise in test output
-		vi.spyOn(console, "warn").mockImplementation(() => {})
+		vi.spyOn(console, "warn").mockImplementation(function () {})
 	})
 
 	describe("with default parameters", () => {

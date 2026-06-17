@@ -15,10 +15,11 @@ concurrency:
 jobs:
   publish-prerelease:
     runs-on: ubuntu-latest
+    environment: marketplace-prerelease
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup Node.js and pnpm
         uses: ./.github/actions/setup-node-pnpm
@@ -32,6 +33,13 @@ jobs:
 
           test "$package_name" = "zoo-code"
           test "$publisher" = "ZooCodeOrganization"
+
+      - name: Validate publish ref
+        run: |
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Pre-release publishes must run from main, not ${GITHUB_REF_NAME}."
+            exit 1
+          fi
 
       - name: Set pre-release version
         id: version

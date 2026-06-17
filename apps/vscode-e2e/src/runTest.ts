@@ -7,9 +7,11 @@ import { LLMock } from "@copilotkit/aimock"
 
 import { addApplyDiffResultFixtures } from "./fixtures/apply-diff"
 import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
+import { addTerminalProfileResultFixtures } from "./fixtures/terminal-profile"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
 import { addSearchFilesResultFixtures } from "./fixtures/search-files"
+import { addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 
@@ -26,17 +28,31 @@ function isDeepSeekTargetedRun(testFile?: string, testGrep?: string) {
 	return testGrep?.toLowerCase().includes("deepseek") ?? false
 }
 
+function isBedrockTargetedRun(testFile?: string, testGrep?: string) {
+	if (testFile?.toLowerCase().includes("bedrock.test")) {
+		return true
+	}
+
+	return testGrep?.toLowerCase().includes("bedrock") ?? false
+}
+
 async function main() {
 	const isRecord = process.env.AIMOCK_RECORD === "true"
 	const testGrep = getCliFlagValue("--grep") || process.env.TEST_GREP
 	const testFile = getCliFlagValue("--file") || process.env.TEST_FILE
 	const isDeepSeekTest = isDeepSeekTargetedRun(testFile, testGrep)
+	const isGeminiTest = testFile?.toLowerCase().includes("gemini.test") ?? false
+	const isBedrockTest = isBedrockTargetedRun(testFile, testGrep)
 
 	if (isRecord && isDeepSeekTest && !process.env.DEEPSEEK_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
 	}
 
-	if (isRecord && !isDeepSeekTest && !process.env.OPENROUTER_API_KEY) {
+	if (isRecord && isGeminiTest && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
+		throw new Error("AIMOCK_RECORD=true requires GEMINI_API_KEY to record Gemini fixtures")
+	}
+
+	if (isRecord && !isDeepSeekTest && !isGeminiTest && !process.env.OPENROUTER_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires OPENROUTER_API_KEY to record fixtures")
 	}
 
@@ -44,7 +60,9 @@ async function main() {
 	// Replay mode starts aimock when no real API key is present or USE_MOCK is forced.
 	const hasRealApiKey = isDeepSeekTest
 		? !!process.env.DEEPSEEK_API_KEY
-		: !!(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY)
+		: isBedrockTest
+			? true // Bedrock test starts its own binary-event-stream mock server when no real token
+			: !!(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY)
 	const useMock = isRecord || !hasRealApiKey || process.env.USE_MOCK === "true"
 
 	let mock: InstanceType<typeof LLMock> | undefined
@@ -78,6 +96,8 @@ async function main() {
 							openai: isDeepSeekTest ? "https://api.deepseek.com" : "https://openrouter.ai/api",
 							// aimock forwards the x-api-key header from the Anthropic SDK to the real API.
 							anthropic: "https://api.anthropic.com",
+							// aimock forwards the x-goog-api-key header from the Google AI SDK.
+							...(isGeminiTest && { gemini: "https://generativelanguage.googleapis.com" }),
 						},
 						fixturePath: fixturesDir,
 					},
@@ -89,9 +109,11 @@ async function main() {
 			if (!isRecord) {
 				addApplyDiffResultFixtures(mock)
 				addExecuteCommandResultFixtures(mock)
+				addTerminalProfileResultFixtures(mock)
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
+				addSubtaskFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 
@@ -139,7 +161,7 @@ async function main() {
 			extensionTestsPath,
 			launchArgs: [testWorkspace],
 			extensionTestsEnv,
-			version: process.env.VSCODE_VERSION || "1.101.2",
+			version: process.env.VSCODE_VERSION || "1.100.0",
 		})
 	} catch (error) {
 		console.error("Failed to run tests", error)

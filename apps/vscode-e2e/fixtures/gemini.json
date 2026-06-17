@@ -1,0 +1,49 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"model": "gemini-3-flash-preview",
+				"userMessage": "gemini-e2e:reasoning-high: what is 2+2? Reply with only the number."
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_gemini_reasoning_high_done"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "gemini-3-flash-preview",
+				"userMessage": "gemini-e2e:reasoning-low: what is 2+2? Reply with only the number."
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_gemini_reasoning_low_done"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "gemini-3-flash-preview",
+				"userMessage": "gemini-e2e:reasoning-disable: what is 2+2? Reply with only the number."
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_gemini_reasoning_disable_done"
+					}
+				]
+			}
+		}
+	]
+}

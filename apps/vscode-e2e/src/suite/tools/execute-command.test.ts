@@ -43,7 +43,7 @@ suite("Roo Code execute_command Tool", function () {
 
 	suiteTeardown(async () => {
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
@@ -62,7 +62,7 @@ suite("Roo Code execute_command Tool", function () {
 
 	setup(async () => {
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
@@ -74,7 +74,7 @@ suite("Roo Code execute_command Tool", function () {
 
 	teardown(async () => {
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}

@@ -11,7 +11,7 @@ vi.mock("../config", () => ({
 	getRooCodeApiUrl: vi.fn().mockReturnValue("https://app.roocode.com"),
 }))
 
-global.fetch = vi.fn()
+global.fetch = vi.fn() as unknown as typeof fetch
 
 describe("CloudSettingsService", () => {
 	let mockContext: ExtensionContext
@@ -27,7 +27,7 @@ describe("CloudSettingsService", () => {
 		stop: ReturnType<typeof vi.fn>
 	}
 	let cloudSettingsService: CloudSettingsService
-	let mockLog: ReturnType<typeof vi.fn>
+	let mockLog: (...args: unknown[]) => void
 
 	const mockSettings: OrganizationSettings = {
 		version: 1,
@@ -75,7 +75,9 @@ describe("CloudSettingsService", () => {
 		mockLog = vi.fn()
 
 		// Mock RefreshTimer constructor
-		vi.mocked(RefreshTimer).mockImplementation(() => mockRefreshTimer as unknown as RefreshTimer)
+		vi.mocked(RefreshTimer).mockImplementation(function () {
+			return mockRefreshTimer as unknown as RefreshTimer
+		})
 
 		cloudSettingsService = new CloudSettingsService(mockContext, mockAuthService as unknown as AuthService, mockLog)
 	})

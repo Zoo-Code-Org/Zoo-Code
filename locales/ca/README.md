@@ -30,41 +30,11 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.54.1
+## Novetats a la v3.60.0
 
-**Llançament inicial de Zoo Code** — estableix Zoo Code com una extensió independent al VS Code Marketplace sota `ZooCodeOrganization.zoo-code`, amb versions pre-release publicades automàticament a cada merge a `main`.
-
-- S'ha afegit suport per a GPT-5.5 a través del proveïdor OpenAI Codex.
-- S'ha afegit suport per a Claude Opus 4.7 a Vertex AI.
-- S'han afegit controls de navegació cap als checkpoints anteriors al xat.
-- Suport per a DeepSeek V4 amb obtenció dinàmica de models.
-- Suport per al client OAuth de MCP.
-
-<details>
-  <summary>🌐 Idiomes disponibles</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) i OpenAI GPT-5.5 ara estan disponibles a la configuració del proveïdor
+- **Llistes d'accés MCP per mode** — restringeix quins servidors MCP estan actius per mode usant una llista d'accés a la configuració del mode
+- **rootResolution per a l'espai de treball** — nou ajust per controlar com Zoo Code resol les rutes d'arxiu entre arrels en espais de treball multi-arrel
 
 ## Què pot fer Zoo Code per TU?
 

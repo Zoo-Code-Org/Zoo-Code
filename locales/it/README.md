@@ -30,41 +30,11 @@
 
 Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida alla migrazione Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Vogliamo aiutare gli utenti il più possibile durante la transizione, e per questo abbiamo il nostro [Reddit](https://www.reddit.com/r/ZooCode) e il nostro [Discord](https://discord.gg/VxfP4Vx3gX). Se hai problemi o domande, passa pure e chiedi.
 
-## Novità in v3.54.1
+## Novità in v3.60.0
 
-**Release iniziale di Zoo Code** — rende Zoo Code un'estensione indipendente sul VS Code Marketplace con il nome `ZooCodeOrganization.zoo-code`, con build pre-release pubblicate automaticamente a ogni merge su `main`.
-
-- Aggiunto supporto a GPT-5.5 tramite il provider OpenAI Codex.
-- Aggiunto supporto a Claude Opus 4.7 su Vertex AI.
-- Aggiunti controlli di navigazione ai checkpoint precedenti nella chat.
-- Supporto per DeepSeek V4 con recupero dinamico dei modelli.
-- Supporto per il client OAuth MCP.
-
-<details>
-  <summary>🌐 Lingue disponibili</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) e OpenAI GPT-5.5 sono ora disponibili nelle impostazioni del provider
+- **Allowlist MCP per modalità** — limita i server MCP attivi per modalità con una allowlist nella configurazione della modalità
+- **Impostazione rootResolution per il workspace** — nuova impostazione per controllare la risoluzione dei percorsi file nei workspace multi-root
 
 ## Cosa può fare Zoo Code per TE?
 

@@ -1,8 +1,9 @@
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
+import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
-import { type ProviderSettings, VERTEX_REGIONS, VERTEX_1M_CONTEXT_MODEL_IDS } from "@roo-code/types"
+import { type ProviderSettings, VERTEX_REGIONS, VERTEX_1M_CONTEXT_MODEL_IDS, looksLikeFilePath } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
@@ -33,6 +34,11 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				setApiConfigurationField(field, transform(event as E))
 			},
 		[setApiConfigurationField],
+	)
+
+	const credentialsLooksLikePath = useMemo(
+		() => looksLikeFilePath(apiConfiguration?.vertexJsonCredentials),
+		[apiConfiguration?.vertexJsonCredentials],
 	)
 
 	return (
@@ -68,6 +74,20 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:providers.googleCloudCredentials")}</label>
 			</VSCodeTextField>
+			{credentialsLooksLikePath && (
+				<div
+					data-testid="vertex-credentials-path-warning"
+					role="status"
+					className="text-sm text-vscode-errorForeground">
+					<Trans
+						i18nKey="settings:providers.googleCloudCredentialsPathWarning"
+						components={{
+							strong: <strong />,
+							code: <code />,
+						}}
+					/>
+				</div>
+			)}
 			<VSCodeTextField
 				value={apiConfiguration?.vertexKeyFile || ""}
 				onInput={handleInputChange("vertexKeyFile")}

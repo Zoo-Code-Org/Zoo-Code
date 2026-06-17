@@ -13,19 +13,21 @@ const mockCreate = vi.fn()
 
 vi.mock("openai", () => {
 	return {
-		default: vi.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate,
+		default: vi.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate,
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 
 // Mock model fetching
 vi.mock("../fetchers/modelCache", () => ({
-	getModels: vi.fn().mockImplementation(() => {
+	getModels: vi.fn().mockImplementation(function () {
 		return Promise.resolve({
 			[litellmDefaultModelId]: litellmDefaultModelInfo,
 			"gpt-5": { ...litellmDefaultModelInfo, maxTokens: 8192 },
@@ -719,6 +721,201 @@ describe("LiteLLMHandler", () => {
 		})
 	})
 
+	describe("reasoning field handling", () => {
+		it("should yield reasoning chunks from reasoning_content delta", async () => {
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						choices: [{ delta: { reasoning_content: "Let me think..." } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { content: "The answer is 42." } }],
+						usage: { prompt_tokens: 20, completion_tokens: 10 },
+					}
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "What is the answer?" }])
+			const results = []
+			for await (const chunk of generator) {
+				results.push(chunk)
+			}
+
+			const reasoningChunk = results.find((c) => c.type === "reasoning")
+			expect(reasoningChunk).toBeDefined()
+			expect(reasoningChunk).toMatchObject({ type: "reasoning", text: "Let me think..." })
+
+			const textChunk = results.find((c) => c.type === "text")
+			expect(textChunk).toMatchObject({ type: "text", text: "The answer is 42." })
+		})
+
+		it("should yield reasoning chunks from reasoning delta field", async () => {
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						choices: [{ delta: { reasoning: "Analyzing the problem..." } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { content: "Done." } }],
+						usage: { prompt_tokens: 10, completion_tokens: 5 },
+					}
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "Solve this." }])
+			const results = []
+			for await (const chunk of generator) {
+				results.push(chunk)
+			}
+
+			const reasoningChunk = results.find((c) => c.type === "reasoning")
+			expect(reasoningChunk).toBeDefined()
+			expect(reasoningChunk).toMatchObject({ type: "reasoning", text: "Analyzing the problem..." })
+		})
+
+		it("should prefer reasoning_content over reasoning when both are present", async () => {
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						choices: [
+							{ delta: { reasoning_content: "from_reasoning_content", reasoning: "from_reasoning" } },
+						],
+						usage: { prompt_tokens: 5, completion_tokens: 5 },
+					}
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "Test." }])
+			const results = []
+			for await (const chunk of generator) {
+				results.push(chunk)
+			}
+
+			const reasoningChunks = results.filter((c) => c.type === "reasoning")
+			expect(reasoningChunks).toHaveLength(1)
+			expect(reasoningChunks[0]).toMatchObject({ type: "reasoning", text: "from_reasoning_content" })
+		})
+
+		it("should not yield reasoning chunk when reasoning field is present but falsy", async () => {
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						choices: [{ delta: { reasoning_content: undefined } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { reasoning: "" } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { content: "Hello" } }],
+						usage: { prompt_tokens: 5, completion_tokens: 5 },
+					}
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "Hi" }])
+			const results = []
+			for await (const chunk of generator) {
+				results.push(chunk)
+			}
+
+			const reasoningChunks = results.filter((c) => c.type === "reasoning")
+			expect(reasoningChunks).toHaveLength(0)
+		})
+
+		it("should preserve whitespace-only reasoning chunks so streamed boundaries survive concatenation", async () => {
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						choices: [{ delta: { reasoning_content: "Let's" } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { reasoning_content: " " } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { reasoning_content: "think" } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { reasoning_content: "\n\n" } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { reasoning_content: "next" } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { content: "Hello" } }],
+						usage: { prompt_tokens: 5, completion_tokens: 5 },
+					}
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "Hi" }])
+			const results = []
+			for await (const chunk of generator) {
+				results.push(chunk)
+			}
+
+			const reasoningChunks = results.filter((c) => c.type === "reasoning")
+			expect(reasoningChunks.map((c) => (c as { text: string }).text).join("")).toBe("Let's think\n\nnext")
+		})
+
+		it("should fall back to reasoning when reasoning_content is null on the same delta", async () => {
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						choices: [{ delta: { reasoning_content: null, reasoning: "fallback thinking" } }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: { content: "Answer." } }],
+						usage: { prompt_tokens: 5, completion_tokens: 5 },
+					}
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "Test." }])
+			const results = []
+			for await (const chunk of generator) {
+				results.push(chunk)
+			}
+
+			const reasoningChunks = results.filter((c) => c.type === "reasoning")
+			expect(reasoningChunks).toHaveLength(1)
+			expect(reasoningChunks[0]).toMatchObject({ type: "reasoning", text: "fallback thinking" })
+		})
+	})
+
 	describe("tool ID normalization", () => {
 		it("should truncate tool IDs longer than 64 characters", async () => {
 			const optionsWithBedrock: ApiHandlerOptions = {
@@ -918,6 +1115,63 @@ describe("LiteLLMHandler", () => {
 
 			// They should be different (hash suffix ensures uniqueness)
 			expect(id1).not.toBe(id2)
+		})
+	})
+
+	describe("session ID header", () => {
+		const mockStream = {
+			async *[Symbol.asyncIterator]() {
+				yield {
+					choices: [{ delta: { content: "ok" } }],
+					usage: { prompt_tokens: 1, completion_tokens: 1 },
+				}
+			},
+		}
+
+		it("should send the X-Zoo-Session-ID header when a taskId is provided", async () => {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+				taskId: "task-123",
+			})
+			for await (const _chunk of generator) {
+				// drain the stream
+			}
+
+			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
+			expect(requestHeaders).toMatchObject({ "X-Zoo-Session-ID": "task-123" })
+		})
+
+		it("should not send the X-Zoo-Session-ID header when no taskId is provided", async () => {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }])
+			for await (const _chunk of generator) {
+				// drain the stream
+			}
+
+			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
+			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
+		})
+
+		it("should not send the X-Zoo-Session-ID header when taskId is an empty string", async () => {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+				taskId: "",
+			})
+			for await (const _chunk of generator) {
+				// drain the stream
+			}
+
+			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
+			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
 		})
 	})
 })

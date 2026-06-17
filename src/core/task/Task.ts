@@ -1136,6 +1136,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		let askTs: number
 
+		// Resolve auto-approval before adding the message so the state snapshot
+		// sent to the webview already carries isAnswered:true when the ask will
+		// be immediately resolved. This eliminates the race between the state
+		// update (which shows approval buttons) and the former separate
+		// clearApprovalButtons message (which could arrive before buttons were
+		// rendered, leaving them stuck on-screen).
+		const provider = this.providerRef.deref()
+		const state = provider ? await provider.getState() : undefined
+		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
+		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
+
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
 
@@ -1190,6 +1201,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.partial = false
 					lastMessage.progressStatus = progressStatus
 					lastMessage.isProtected = isProtected
+					if (isAutoAnswered) {
+						lastMessage.isAnswered = true
+					}
 					await this.saveClineMessages()
 					this.updateClineMessage(lastMessage)
 				} else {
@@ -1199,7 +1213,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponseImages = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
-					await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, isProtected })
+					await this.addToClineMessages({
+						ts: askTs,
+						type: "ask",
+						ask: type,
+						text,
+						isProtected,
+						isAnswered: isAutoAnswered || undefined,
+					})
 				}
 			}
 		} else {
@@ -1209,15 +1230,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponseImages = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
-			await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text, isProtected })
+			await this.addToClineMessages({
+				ts: askTs,
+				type: "ask",
+				ask: type,
+				text,
+				isProtected,
+				isAnswered: isAutoAnswered || undefined,
+			})
 		}
 
 		const timeouts: NodeJS.Timeout[] = []
-
-		// Automatically approve if the ask according to the user's settings.
-		const provider = this.providerRef.deref()
-		const state = provider ? await provider.getState() : undefined
-		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
 
 		if (approval.decision === "approve") {
 			this.approveAsk()
@@ -3013,27 +3036,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cacheReadTokens: tokens.cacheRead,
 									cost: tokens.total ?? costResult.totalCost,
 								})
-
-								// Zoo Code observability telemetry
-								import("../../services/zoo-telemetry")
-									.then(async ({ sendLlmTelemetry }) => {
-										const mode = await this.getTaskMode().catch(() => "unknown")
-										return sendLlmTelemetry({
-											taskId: this.taskId,
-											provider: this.apiConfiguration?.apiProvider ?? "unknown",
-											model: this.apiConfiguration
-												? (getModelId(this.apiConfiguration) ?? "unknown")
-												: "unknown",
-											mode,
-											inputTokens: costResult.totalInputTokens,
-											outputTokens: costResult.totalOutputTokens,
-											cacheReadTokens: tokens.cacheRead ?? 0,
-											cacheWriteTokens: tokens.cacheWrite ?? 0,
-											totalCost: tokens.total ?? costResult.totalCost,
-											status,
-										}).catch(() => {})
-									})
-									.catch(() => {})
 							}
 						}
 
@@ -3470,7 +3472,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// 	this.userMessageContentReady = true
 					// }
 
-					await pWaitFor(() => this.userMessageContentReady)
+					await pWaitFor(() => this.userMessageContentReady || this.abort || this.abandoned)
+
+					if (this.abort || this.abandoned) {
+						throw new Error(
+							`[RooCode#recursivelyMakeRooRequests] task ${this.taskId}.${this.instanceId} aborted`,
+						)
+					}
 
 					// If the model did not tool use, then we need to tell it to
 					// either use a tool or attempt_completion.

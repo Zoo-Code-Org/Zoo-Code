@@ -1,6 +1,18 @@
 import "@testing-library/jest-dom"
 import "@testing-library/jest-dom/vitest"
 
+// Mock the VSCode webview-ui-toolkit to avoid dual React instance issues caused
+// by FAST Foundation web component registration. Registered here (rather than via
+// a resolve.alias in vitest.config.ts) so the global config stays clean.
+//
+// The factory delegates to the JSX mock implementation in
+// `src/__mocks__/@vscode/webview-ui-toolkit/react.tsx`, imported through the `@`
+// alias so it resolves on Vite's (deduped) module graph and shares the test's
+// React instance.
+vi.mock("@vscode/webview-ui-toolkit/react", async () => {
+	return await import("@/__mocks__/@vscode/webview-ui-toolkit/react")
+})
+
 // Force React into development mode for tests
 // This is needed to enable act(...) function in React Testing Library
 globalThis.process = globalThis.process || {}

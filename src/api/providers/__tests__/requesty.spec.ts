@@ -12,20 +12,26 @@ const mockCreate = vitest.fn()
 
 vitest.mock("openai", () => {
 	return {
-		default: vitest.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate,
+		default: vitest.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate,
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 
-vitest.mock("delay", () => ({ default: vitest.fn(() => Promise.resolve()) }))
+vitest.mock("delay", () => ({
+	default: vitest.fn(function () {
+		return Promise.resolve()
+	}),
+}))
 
 vitest.mock("../fetchers/modelCache", () => ({
-	getModels: vitest.fn().mockImplementation(() => {
+	getModels: vitest.fn().mockImplementation(function () {
 		return Promise.resolve({
 			"coding/claude-4-sonnet": {
 				maxTokens: 8192,
@@ -37,6 +43,20 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheWritesPrice: 3.75,
 				cacheReadsPrice: 0.3,
 				description: "Claude 4 Sonnet",
+			},
+			"anthropic/claude-fable-5": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				supportsReasoningBinary: true,
+				supportsTemperature: false,
+				inputPrice: 10,
+				outputPrice: 50,
+				cacheWritesPrice: 12.5,
+				cacheReadsPrice: 1,
+				description: "Claude Fable 5",
 			},
 		})
 	}),
@@ -58,9 +78,9 @@ describe("RequestyHandler", () => {
 			baseURL: "https://router.requesty.ai/v1",
 			apiKey: mockOptions.requestyApiKey,
 			defaultHeaders: {
-				"HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
-				"X-Title": "Roo Code",
-				"User-Agent": `RooCode/${Package.version}`,
+				"HTTP-Referer": "https://github.com/Zoo-Code-Org/Zoo-Code",
+				"X-Title": "Zoo Code",
+				"User-Agent": `ZooCode/${Package.version}`,
 			},
 		})
 	})
@@ -73,9 +93,9 @@ describe("RequestyHandler", () => {
 			baseURL: "https://custom.requesty.ai/v1",
 			apiKey: mockOptions.requestyApiKey,
 			defaultHeaders: {
-				"HTTP-Referer": "https://github.com/RooVetGit/Roo-Cline",
-				"X-Title": "Roo Code",
-				"User-Agent": `RooCode/${Package.version}`,
+				"HTTP-Referer": "https://github.com/Zoo-Code-Org/Zoo-Code",
+				"X-Title": "Zoo Code",
+				"User-Agent": `ZooCode/${Package.version}`,
 			},
 		})
 	})
@@ -193,6 +213,39 @@ describe("RequestyHandler", () => {
 			)
 		})
 
+		it("uses adaptive thinking for Claude Fable 5 when reasoning is enabled", async () => {
+			const handler = new RequestyHandler({
+				requestyApiKey: "test-key",
+				requestyModelId: "anthropic/claude-fable-5",
+				enableReasoningEffort: true,
+				modelMaxTokens: 32768,
+			})
+
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						id: "test-id",
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 10, completion_tokens: 20 },
+					}
+				},
+			}
+
+			mockCreate.mockResolvedValue(mockStream)
+
+			const generator = handler.createMessage("test system prompt", [{ role: "user" as const, content: "test" }])
+			await generator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-fable-5",
+					max_tokens: 32768,
+					thinking: { type: "adaptive" },
+					temperature: undefined,
+				}),
+			)
+		})
+
 		it("handles API errors", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const mockError = new Error("API Error")
@@ -200,6 +253,84 @@ describe("RequestyHandler", () => {
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("API Error")
+		})
+
+		it("streams reasoning chunks from delta.reasoning_content", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { id: "1", choices: [{ delta: { reasoning_content: "thinking..." } }] }
+					yield { id: "1", choices: [{ delta: { content: "answer" } }] }
+					yield {
+						id: "1",
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 1, completion_tokens: 1 },
+					}
+				},
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "hi" }])) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
+		})
+
+		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { id: "1", choices: [{ delta: { reasoning: "router-style thought" } }] }
+					yield {
+						id: "1",
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 1, completion_tokens: 1 },
+					}
+				},
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "hi" }])) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
+		})
+
+		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
+			const handler = new RequestyHandler(mockOptions)
+
+			mockCreate.mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield {
+						id: "1",
+						choices: [
+							{
+								delta: {
+									reasoning_content: "primary thought",
+									reasoning: "fallback thought",
+								},
+							},
+						],
+					}
+					yield {
+						id: "1",
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 1, completion_tokens: 1 },
+					}
+				},
+			})
+
+			const chunks: any[] = []
+
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "hi" }])) {
+				chunks.push(chunk)
+			}
+
+			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
+
+			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
 		})
 
 		describe("native tool support", () => {
@@ -364,6 +495,23 @@ describe("RequestyHandler", () => {
 				max_tokens: 8192,
 				messages: [{ role: "system", content: "test prompt" }],
 				temperature: 0,
+			})
+		})
+
+		it("omits temperature for Claude Fable 5 in completePrompt", async () => {
+			const handler = new RequestyHandler({
+				requestyApiKey: "test-key",
+				requestyModelId: "anthropic/claude-fable-5",
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "test completion" } }] })
+
+			await handler.completePrompt("test prompt")
+
+			expect(mockCreate).toHaveBeenCalledWith({
+				model: "anthropic/claude-fable-5",
+				max_tokens: 8192,
+				messages: [{ role: "system", content: "test prompt" }],
+				temperature: undefined,
 			})
 		})
 

@@ -567,10 +567,17 @@ export class ProviderSettingsManager {
 						const supportsReasoningBudget =
 							modelInfo.supportsReasoningBudget || modelInfo.requiredReasoningBudget
 
-						// If the model doesn't support reasoning budgets, remove the token fields
+						// modelMaxThinkingTokens only applies to reasoning budgets, but modelMaxTokens
+						// also caps output on models that expose a configurable max (e.g. GLM), so keep
+						// it whenever the model supports either feature.
+						const supportsMaxTokens = supportsReasoningBudget || modelInfo.supportsMaxTokens
+
 						if (!supportsReasoningBudget) {
-							delete configs[name].modelMaxTokens
 							delete configs[name].modelMaxThinkingTokens
+						}
+
+						if (!supportsMaxTokens) {
+							delete configs[name].modelMaxTokens
 						}
 					} catch (error) {
 						// If we can't build the API handler or get model info, skip filtering

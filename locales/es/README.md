@@ -30,41 +30,11 @@
 
 Puedes encontrar una guía rápida para pasar de Roo Code a Zoo Code en la [guía de migración Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Queremos ayudar a los usuarios durante la transición, y para eso tenemos nuestro [Reddit](https://www.reddit.com/r/ZooCode) y [Discord](https://discord.gg/VxfP4Vx3gX). Si tienes problemas o alguna pregunta, entra y pregúntanos.
 
-## Novedades de la v3.54.1
+## Novedades de la v3.60.0
 
-**Lanzamiento inicial de Zoo Code** — establece Zoo Code como una extensión independiente en VS Code Marketplace bajo `ZooCodeOrganization.zoo-code`, con compilaciones pre-release publicadas automáticamente en cada merge a `main`.
-
-- Se añadió soporte para GPT-5.5 a través del proveedor OpenAI Codex.
-- Se añadió soporte para Claude Opus 4.7 en Vertex AI.
-- Se añadieron controles de navegación a checkpoints anteriores en el chat.
-- Soporte para DeepSeek V4 con obtención dinámica de modelos.
-- Soporte para el cliente OAuth de MCP.
-
-<details>
-  <summary>🌐 Idiomas disponibles</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) y OpenAI GPT-5.5 ya están disponibles en la configuración del proveedor
+- **Listas de permitidos de MCP por modo** — restringe qué servidores MCP están activos por modo con una lista de permitidos en la configuración del modo
+- **rootResolution para el espacio de trabajo** — nuevo ajuste para controlar la resolución de rutas de archivos en espacios de trabajo multi-raíz
 
 ## ¿Qué puede hacer Zoo Code por TI?
 

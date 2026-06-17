@@ -61,10 +61,12 @@ vi.mock("vscode", () => ({
 		Information: 2,
 		Hint: 3,
 	},
-	WorkspaceEdit: vi.fn().mockImplementation(() => ({
-		replace: vi.fn(),
-		delete: vi.fn(),
-	})),
+	WorkspaceEdit: vi.fn().mockImplementation(function () {
+		return {
+			replace: vi.fn(),
+			delete: vi.fn(),
+		}
+	}),
 	ViewColumn: {
 		Active: 1,
 		Beside: 2,
@@ -93,12 +95,14 @@ vi.mock("vscode", () => ({
 
 // Mock DecorationController
 vi.mock("../DecorationController", () => ({
-	DecorationController: vi.fn().mockImplementation(() => ({
-		setActiveLine: vi.fn(),
-		updateOverlayAfterLine: vi.fn(),
-		addLines: vi.fn(),
-		clear: vi.fn(),
-	})),
+	DecorationController: vi.fn().mockImplementation(function () {
+		return {
+			setActiveLine: vi.fn(),
+			updateOverlayAfterLine: vi.fn(),
+			addLines: vi.fn(),
+			clear: vi.fn(),
+		}
+	}),
 }))
 
 describe("DiffViewProvider", () => {
@@ -113,7 +117,9 @@ describe("DiffViewProvider", () => {
 			replace: vi.fn(),
 			delete: vi.fn(),
 		}
-		vi.mocked(vscode.WorkspaceEdit).mockImplementation(() => mockWorkspaceEdit as any)
+		vi.mocked(vscode.WorkspaceEdit).mockImplementation(function () {
+			return mockWorkspaceEdit as any
+		})
 
 		// Create a mock Task instance
 		mockTask = {

@@ -253,6 +253,13 @@ html {
 	height: 100%;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
+	/*
+	 * Font size for the Zoo Code chat message surface (consumed by MarkdownBlock).
+	 * Defaults to VS Code's font size so appearance is unchanged unless the user
+	 * configures the "Chat font size" setting, which overrides this variable at
+	 * runtime. Scoped to chat rendering so it does not resize settings/other UI.
+	 */
+	--zoo-chat-font-size: var(--vscode-font-size);
 }
 
 body {

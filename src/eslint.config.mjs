@@ -7,7 +7,7 @@ export default [
 		rules: {
 			"prefer-const": ["error", { destructuring: "all" }],
 
-			// TODO: These should be fixed and the rules re-enabled.
+			// TODO: The rules listed below should be re-enabled once their existing violations are fixed.
 			"no-regex-spaces": "off",
 			"no-useless-escape": "off",
 			"no-empty": "off",
@@ -28,6 +28,20 @@ export default [
 		files: ["__mocks__/**/*.js"],
 		rules: {
 			"no-undef": "off",
+		},
+	},
+	{
+		// Ratchet: enforce no-floating-promises directory by directory. Each
+		// directory is added here once its floating promises are resolved.
+		files: ["activate/**/*.ts"],
+		languageOptions: {
+			parserOptions: {
+				project: true,
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+		rules: {
+			"@typescript-eslint/no-floating-promises": "error",
 		},
 	},
 	{

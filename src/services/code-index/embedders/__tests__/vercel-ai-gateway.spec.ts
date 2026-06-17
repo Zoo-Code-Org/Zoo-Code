@@ -29,7 +29,9 @@ describe("VercelAiGatewayEmbedder", () => {
 			createEmbeddings: vi.fn(),
 			validateConfiguration: vi.fn(),
 		}
-		MockedOpenAICompatibleEmbedder.mockImplementation(() => mockOpenAICompatibleEmbedder)
+		MockedOpenAICompatibleEmbedder.mockImplementation(function () {
+			return mockOpenAICompatibleEmbedder
+		})
 	})
 
 	describe("constructor", () => {

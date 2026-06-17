@@ -20,6 +20,8 @@ Zoo Code is a community-driven project, and we deeply value every contribution. 
 - [Before You Contribute](#before-you-contribute)
 - [Finding & Planning Your Contribution](#finding--planning-your-contribution)
 - [Development & Submission Process](#development--submission-process)
+    - [Pull Request Expectations](#pull-request-expectations)
+    - [AI-Assisted Contributions](#ai-assisted-contributions)
 - [Legal](#legal)
 
 ## Before You Contribute
@@ -135,6 +137,39 @@ pnpm install
 - **Daily Triage:** Quick checks by maintainers.
 - **Weekly In-depth Review:** Comprehensive assessment.
 - **Iterate promptly** based on feedback.
+
+### Pull Request Expectations
+
+Pull requests should be reviewable, tested, and maintainable. Before opening a PR, please make sure that:
+
+- The change is scoped to a specific issue, bug, or improvement.
+- You can explain what the change does and why it is correct.
+- You have tested the change locally where practical.
+- You are willing to respond to review feedback and make reasonable follow-up changes.
+- The PR does not require maintainers to substantially rewrite, redesign, or take ownership of the implementation before it can be merged.
+
+Maintainers may close PRs that are incomplete, too broad, inactive, not aligned with the project direction, or that create disproportionate review or maintenance burden. Closing a PR is not a judgment on the contributor; it is a maintainer decision that the change cannot be accepted in its present form.
+
+PRs are also closed automatically by bot:
+
+- **60-day inactivity:** A PR with no activity for 60 days is marked stale and closed after a further 7 days if there is still no activity. Any new comment, commit, or review resets the timer.
+- **14-day author inactivity:** After a reviewer requests changes, the PR is labelled `awaiting-author`. Author activity resets the inactivity timer. Once the changes are ready, re-request review from the reviewer; the PR will move to `awaiting-review` and is no longer eligible for automatic closure under this policy.
+
+To opt a PR out of automatic closure, apply the `do-not-close`, `pinned`, or `work-in-progress` label.
+
+### AI-Assisted Contributions
+
+Use of AI tools is allowed, but contributors remain fully responsible for their submissions.
+
+If you use AI tools to help create a PR, you must:
+
+- Review and understand every meaningful change.
+- Be able to explain the implementation and tradeoffs in your own words.
+- Test the change yourself. If testing is impractical for your environment, explain why in the PR description and describe how reviewers can verify the change instead.
+- Verify that generated code is correct, necessary, and compatible with the project license.
+- Consider disclosing AI assistance in the PR description when it materially shaped the code, tests, or design — this helps reviewers give better feedback.
+
+Please do not submit AI-generated changes that you do not understand or cannot maintain through review. Maintainers may close PRs that appear substantially AI-assisted but lack human verification, clear rationale, or review follow-through.
 
 ## Legal
 

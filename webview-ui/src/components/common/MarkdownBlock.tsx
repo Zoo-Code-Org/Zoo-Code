@@ -7,9 +7,28 @@ import remarkMath from "remark-math"
 import remarkGfm from "remark-gfm"
 
 import { vscode } from "@src/utils/vscode"
+import { type AlertType, remarkGithubAlerts } from "@src/utils/markdown"
 
 import CodeBlock from "./CodeBlock"
 import MermaidBlock from "./MermaidBlock"
+
+// Codicon glyphs used as the leading icon for each GitHub-style alert type.
+const ALERT_ICONS: Record<AlertType, string> = {
+	note: "codicon-info",
+	tip: "codicon-lightbulb",
+	important: "codicon-report",
+	warning: "codicon-warning",
+	caution: "codicon-flame",
+}
+
+// Human-readable label shown in the alert header.
+const ALERT_LABELS: Record<AlertType, string> = {
+	note: "Note",
+	tip: "Tip",
+	important: "Important",
+	warning: "Warning",
+	caution: "Caution",
+}
 
 interface MarkdownBlockProps {
 	markdown?: string
@@ -83,7 +102,7 @@ const StyledMarkdown = styled.div`
 		"Helvetica Neue",
 		sans-serif;
 
-	font-size: var(--vscode-font-size, 13px);
+	font-size: var(--zoo-chat-font-size, var(--vscode-font-size, 13px));
 
 	p,
 	li,
@@ -201,6 +220,57 @@ const StyledMarkdown = styled.div`
 	tr:hover {
 		background-color: var(--vscode-list-hoverBackground);
 	}
+
+	/* GitHub-style Markdown alerts (#258). The accent color per type is set via
+	   the --alert-accent custom property on the element itself. */
+	.markdown-alert {
+		margin: 1em 0;
+		padding: 0.5em 1em;
+		border-left: 0.25em solid var(--alert-accent, var(--vscode-textBlockQuote-border));
+		border-radius: 3px;
+		background-color: var(--vscode-textBlockQuote-background);
+	}
+
+	.markdown-alert > :first-child {
+		margin-top: 0;
+	}
+
+	.markdown-alert > :last-child {
+		margin-bottom: 0;
+	}
+
+	.markdown-alert-title {
+		display: flex;
+		align-items: center;
+		gap: 0.5em;
+		font-weight: 600;
+		color: var(--alert-accent, var(--vscode-foreground));
+		margin-bottom: 0.25em;
+	}
+
+	.markdown-alert-title .codicon {
+		font-size: 1em;
+	}
+
+	.markdown-alert-note {
+		--alert-accent: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+	}
+
+	.markdown-alert-tip {
+		--alert-accent: var(--vscode-charts-green, var(--vscode-terminal-ansiGreen));
+	}
+
+	.markdown-alert-important {
+		--alert-accent: var(--vscode-charts-purple, var(--vscode-textLink-foreground));
+	}
+
+	.markdown-alert-warning {
+		--alert-accent: var(--vscode-charts-yellow, var(--vscode-editorWarning-foreground));
+	}
+
+	.markdown-alert-caution {
+		--alert-accent: var(--vscode-charts-red, var(--vscode-editorError-foreground));
+	}
 `
 
 const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
@@ -299,6 +369,27 @@ const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
 					</code>
 				)
 			},
+			blockquote: ({ children, className, "data-alert-type": alertType, ..._rest }: any) => {
+				// The remarkGithubAlerts plugin tags alert blockquotes with a
+				// `data-alert-type` attribute and `markdown-alert*` classes.
+				// Anything without that attribute is a normal blockquote and
+				// must render unchanged.
+				const typedAlertType = alertType as AlertType | undefined
+
+				if (!typedAlertType || !(typedAlertType in ALERT_ICONS)) {
+					return <blockquote className={className}>{children}</blockquote>
+				}
+
+				return (
+					<blockquote className={className} data-alert-type={typedAlertType}>
+						<div className="markdown-alert-title">
+							<span className={`codicon ${ALERT_ICONS[typedAlertType]}`} aria-hidden="true" />
+							<span>{ALERT_LABELS[typedAlertType]}</span>
+						</div>
+						{children}
+					</blockquote>
+				)
+			},
 		}),
 		[],
 	)
@@ -307,8 +398,11 @@ const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
 		<StyledMarkdown>
 			<ReactMarkdown
 				remarkPlugins={[
-					remarkGfm,
+					// singleTilde: false so a single "~" around text (e.g. "1~3", "~10") is not
+					// rendered as strikethrough; only "~~text~~" is. Matches VS Code's markdown. (#154)
+					[remarkGfm, { singleTilde: false }],
 					remarkMath,
+					remarkGithubAlerts,
 					() => {
 						return (tree: any) => {
 							visit(tree, "code", (node: any) => {

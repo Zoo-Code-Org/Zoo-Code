@@ -129,9 +129,9 @@ This directory contains various files and subdirectories for testing the list_fi
 
 	// Clean up test files and directories after all tests
 	suiteTeardown(async () => {
-		// Cancel any running tasks before cleanup
+		// Clear any running tasks before cleanup
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
@@ -149,9 +149,9 @@ This directory contains various files and subdirectories for testing the list_fi
 
 	// Clean up before each test
 	setup(async () => {
-		// Cancel any previous task
+		// Clear any previous task
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}
@@ -162,9 +162,9 @@ This directory contains various files and subdirectories for testing the list_fi
 
 	// Clean up after each test
 	teardown(async () => {
-		// Cancel the current task
+		// Clear the current task
 		try {
-			await globalThis.api.cancelCurrentTask()
+			await globalThis.api.clearCurrentTask()
 		} catch {
 			// Task might not be running
 		}

@@ -7,7 +7,7 @@ import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
 import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
-import { ToolUse, ToolResponse } from "../../../shared/tools"
+import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { writeToFileTool } from "../WriteToFileTool"
 
 vi.mock("path", async () => {
@@ -48,18 +48,22 @@ vi.mock("../../../utils/path", () => ({
 }))
 
 vi.mock("../../../utils/text-normalization", () => ({
-	unescapeHtmlEntities: vi.fn().mockImplementation((content) => content),
+	unescapeHtmlEntities: vi.fn().mockImplementation((content) => {
+		return content
+	}),
 }))
 
 vi.mock("../../../integrations/misc/extract-text", () => ({
 	everyLineHasLineNumbers: vi.fn().mockReturnValue(false),
-	stripLineNumbers: vi.fn().mockImplementation((content) => content),
-	addLineNumbers: vi.fn().mockImplementation((content: string) =>
-		content
+	stripLineNumbers: vi.fn().mockImplementation((content) => {
+		return content
+	}),
+	addLineNumbers: vi.fn().mockImplementation((content: string) => {
+		return content
 			.split("\n")
 			.map((line: string, i: number) => `${i + 1} | ${line}`)
-			.join("\n"),
-	),
+			.join("\n")
+	}),
 }))
 
 vi.mock("vscode", () => ({
@@ -103,9 +107,9 @@ describe("writeToFileTool", () => {
 	const mockedPathResolve = path.resolve as MockedFunction<typeof path.resolve>
 
 	const mockCline: any = {}
-	let mockAskApproval: ReturnType<typeof vi.fn>
-	let mockHandleError: ReturnType<typeof vi.fn>
-	let mockPushToolResult: ReturnType<typeof vi.fn>
+	let mockAskApproval: ReturnType<typeof vi.fn<AskApproval>>
+	let mockHandleError: ReturnType<typeof vi.fn<HandleError>>
+	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
 	let toolResult: ToolResponse | undefined
 
 	beforeEach(() => {
@@ -116,9 +120,13 @@ describe("writeToFileTool", () => {
 		mockedFileExistsAtPath.mockResolvedValue(false)
 		mockedIsPathOutsideWorkspace.mockReturnValue(false)
 		mockedGetReadablePath.mockReturnValue("test/path.txt")
-		mockedUnescapeHtmlEntities.mockImplementation((content) => content)
+		mockedUnescapeHtmlEntities.mockImplementation((content) => {
+			return content
+		})
 		mockedEveryLineHasLineNumbers.mockReturnValue(false)
-		mockedStripLineNumbers.mockImplementation((content) => content)
+		mockedStripLineNumbers.mockImplementation((content) => {
+			return content
+		})
 
 		mockCline.cwd = "/"
 		mockCline.consecutiveMistakeCount = 0

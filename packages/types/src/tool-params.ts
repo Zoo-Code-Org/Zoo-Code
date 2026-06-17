@@ -89,7 +89,14 @@ export type ReadFileToolParams = ReadFileParams | LegacyReadFileParams
  * Type guard to check if params are in legacy format.
  */
 export function isLegacyReadFileParams(params: ReadFileToolParams): params is LegacyReadFileParams {
-	return "_legacyFormat" in params && params._legacyFormat === true
+	// `NativeToolCallParser` always tags freshly parsed legacy calls with `_legacyFormat: true`.
+	// The bare-`files` fallback only matters for chat history persisted before that flag was
+	// introduced (commit cc86049f1) and re-hydrated on a later run. Note that params matched via
+	// that fallback narrow to `LegacyReadFileParams` but leave `_legacyFormat` `undefined`, so
+	// callers should branch on the presence of `files`, not on `_legacyFormat === true`.
+	const hasLegacyFlag = "_legacyFormat" in params && params._legacyFormat === true
+	const hasFilesArray = "files" in params && Array.isArray((params as unknown as Record<string, unknown>).files)
+	return hasLegacyFlag || hasFilesArray
 }
 
 export interface Coordinate {

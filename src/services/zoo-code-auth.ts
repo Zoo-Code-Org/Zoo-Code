@@ -11,12 +11,10 @@ let secretStorage: vscode.SecretStorage | undefined
 
 // In-memory cache for synchronous access in ZooCodeHandler hot path
 let _cachedToken: string | undefined = undefined
+let _sessionCleared = false
 let _cachedUserName: string | undefined = undefined
 let _cachedUserEmail: string | undefined = undefined
 let _cachedUserImage: string | undefined = undefined
-let _cachedSubscriptionStatus: "active" | "inactive" | "unknown" = "unknown"
-let _lastSubscriptionCheck: number = 0
-const SUBSCRIPTION_CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise<void> {
 	if (!context.secrets) {
@@ -28,24 +26,19 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 
 	// Pre-load the token and user info into memory on init so ZooCodeHandler can access them synchronously
 	_cachedToken = await secretStorage.get(ZOO_CODE_TOKEN_KEY)
+	_sessionCleared = false
 	_cachedUserName = await secretStorage.get(ZOO_CODE_USER_NAME_KEY)
 	_cachedUserEmail = await secretStorage.get(ZOO_CODE_USER_EMAIL_KEY)
 	_cachedUserImage = await secretStorage.get(ZOO_CODE_USER_IMAGE_KEY)
 
 	// Validate persisted auth state on init before reporting the user as connected.
+	// Network errors / 5xx ("unreachable") leave the cached session in place so a
+	// transient backend blip doesn't force users to sign in again.
 	if (_cachedToken) {
 		const result = await verifyZooCodeToken()
 		if (result === "invalid") {
-			// Token is definitively rejected by the backend — clear everything.
 			await clearZooCodeUserInfo()
 			await clearZooCodeToken()
-		} else if (result === "unreachable") {
-			// Network is temporarily down; keep the cached session but mark subscription
-			// status as unknown so callers know it hasn't been confirmed.
-			_cachedSubscriptionStatus = "unknown"
-		} else {
-			// result === "valid"
-			void checkSubscriptionStatus().catch(() => {})
 		}
 	}
 
@@ -54,12 +47,6 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 		if (e.key === ZOO_CODE_TOKEN_KEY) {
 			secretStorage?.get(ZOO_CODE_TOKEN_KEY).then((token) => {
 				_cachedToken = token
-				// Reset subscription status when token changes
-				_cachedSubscriptionStatus = "unknown"
-				_lastSubscriptionCheck = 0
-				if (token) {
-					checkSubscriptionStatus().catch(() => {})
-				}
 			})
 		}
 		if (e.key === ZOO_CODE_USER_NAME_KEY) {
@@ -85,62 +72,26 @@ export function getCachedZooCodeToken(): string {
 	return _cachedToken ?? ""
 }
 
+/**
+ * Resolves the Zoo Gateway session token for API calls.
+ * Secret-storage cache wins over profile-persisted tokens; after an explicit sign-out
+ * or 401 clear, profile tokens are ignored so stale credentials cannot be reused.
+ */
+export function resolveZooGatewaySessionToken(profileToken?: string): string | undefined {
+	if (_cachedToken) {
+		return _cachedToken
+	}
+	if (_sessionCleared) {
+		return undefined
+	}
+	return profileToken || undefined
+}
+
 export function getCachedZooCodeUserInfo(): { name?: string; email?: string; image?: string } {
 	return {
 		name: _cachedUserName,
 		email: _cachedUserEmail,
 		image: _cachedUserImage,
-	}
-}
-
-/**
- * Get the cached subscription status. This is a synchronous getter that returns
- * the last known subscription status. Call checkSubscriptionStatus() to refresh.
- */
-export function getCachedSubscriptionStatus(): "active" | "inactive" | "unknown" {
-	return _cachedSubscriptionStatus
-}
-
-/**
- * Check the subscription status from the backend API.
- * Updates the cached status and returns it.
- * Implements caching to avoid excessive API calls (5 minute cache).
- */
-export async function checkSubscriptionStatus(): Promise<"active" | "inactive" | "unknown"> {
-	const token = await getZooCodeToken()
-	if (!token) {
-		_cachedSubscriptionStatus = "inactive"
-		return "inactive"
-	}
-
-	// Return cached status if checked recently
-	const now = Date.now()
-	if (now - _lastSubscriptionCheck < SUBSCRIPTION_CHECK_INTERVAL_MS && _cachedSubscriptionStatus !== "unknown") {
-		return _cachedSubscriptionStatus
-	}
-
-	const baseUrl = getZooCodeBaseUrl()
-
-	try {
-		const response = await fetch(`${baseUrl}/api/subscription/status`, {
-			headers: { Authorization: `Bearer ${token}` },
-			signal: AbortSignal.timeout(10_000),
-		})
-
-		if (!response.ok) {
-			_cachedSubscriptionStatus = "unknown"
-			_lastSubscriptionCheck = now
-			return "unknown"
-		}
-
-		const data = (await response.json()) as { isSubscriber?: boolean }
-		_cachedSubscriptionStatus = data.isSubscriber ? "active" : "inactive"
-		_lastSubscriptionCheck = now
-		return _cachedSubscriptionStatus
-	} catch {
-		_cachedSubscriptionStatus = "unknown"
-		_lastSubscriptionCheck = now
-		return "unknown"
 	}
 }
 
@@ -153,9 +104,7 @@ export async function setZooCodeToken(token: string): Promise<void> {
 	if (!secretStorage) return
 	await secretStorage.store(ZOO_CODE_TOKEN_KEY, token)
 	_cachedToken = token
-	// Reset subscription status when token is set
-	_cachedSubscriptionStatus = "unknown"
-	_lastSubscriptionCheck = 0
+	_sessionCleared = false
 }
 
 export async function setZooCodeUserInfo(info: {
@@ -204,8 +153,7 @@ export async function clearZooCodeToken(): Promise<void> {
 	if (!secretStorage) return
 	await secretStorage.delete(ZOO_CODE_TOKEN_KEY)
 	_cachedToken = undefined
-	_cachedSubscriptionStatus = "unknown"
-	_lastSubscriptionCheck = 0
+	_sessionCleared = true
 }
 
 export function getZooCodeBaseUrl(): string {
@@ -226,7 +174,13 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
 			signal: AbortSignal.timeout(10_000),
 		})
 		if (!response.ok) {
-			vscode.window.showErrorMessage(t("common:zooAuth.errors.token_verification_failed"))
+			// Treat 5xx as a transient backend issue (e.g. DB unreachable) so the
+			// user can retry sign-in instead of being told the token is bad.
+			if (response.status >= 500) {
+				vscode.window.showErrorMessage(t("common:zooAuth.errors.could_not_verify_token"))
+			} else {
+				vscode.window.showErrorMessage(t("common:zooAuth.errors.token_verification_failed"))
+			}
 			return false
 		}
 		const data = (await response.json()) as { valid?: boolean }
@@ -241,9 +195,6 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
 
 	await setZooCodeToken(token)
 
-	// Check subscription status after successful auth
-	await checkSubscriptionStatus().catch(() => {})
-
 	vscode.window.showInformationMessage(t("common:zooAuth.info.connected"))
 	return true
 }
@@ -252,8 +203,12 @@ export async function handleAuthCallback(token: string): Promise<boolean> {
  * Verify the stored token against the backend.
  * Returns:
  *   - "valid"       — backend confirmed the token is good
- *   - "invalid"     — backend explicitly rejected the token (HTTP error or valid: false)
- *   - "unreachable" — network error / timeout; token state is unknown
+ *   - "invalid"     — backend explicitly rejected the token (4xx or valid: false)
+ *   - "unreachable" — network error / timeout / 5xx backend error; token state is unknown
+ *
+ * 5xx responses are treated as transient: the website returns 503 when the
+ * database is unreachable, and clearing a real session on a backend hiccup
+ * forces users to sign in again every time the API blips.
  *
  * This function has no side-effects; callers are responsible for acting on the result.
  */
@@ -270,6 +225,9 @@ export async function verifyZooCodeToken(): Promise<"valid" | "invalid" | "unrea
 		})
 
 		if (!response.ok) {
+			if (response.status >= 500) {
+				return "unreachable"
+			}
 			return "invalid"
 		}
 

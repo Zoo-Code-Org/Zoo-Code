@@ -6,7 +6,8 @@ export type EmbedderProvider =
 	| "mistral"
 	| "vercel-ai-gateway"
 	| "bedrock"
-	| "openrouter" // Add other providers as needed.
+	| "openrouter"
+	| "semble" // Local hybrid search via semble CLI — no API keys or Qdrant required.
 
 export interface EmbeddingModelProfile {
 	dimension: number

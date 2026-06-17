@@ -7,17 +7,24 @@ import { SetCachedStateField } from "./types"
 import { SectionHeader } from "./SectionHeader"
 import { Section } from "./Section"
 import { SearchableSetting } from "./SearchableSetting"
+import { Slider, Button } from "../ui"
 import { ExtensionStateContextType } from "@/context/ExtensionStateContext"
+
+export const CHAT_FONT_SIZE_MIN = 8
+export const CHAT_FONT_SIZE_MAX = 32
+export const CHAT_FONT_SIZE_DEFAULT = 13
 
 interface UISettingsProps extends HTMLAttributes<HTMLDivElement> {
 	reasoningBlockCollapsed: boolean
 	enterBehavior: "send" | "newline"
+	chatFontSize?: number
 	setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType>
 }
 
 export const UISettings = ({
 	reasoningBlockCollapsed,
 	enterBehavior,
+	chatFontSize,
 	setCachedStateField,
 	...props
 }: UISettingsProps) => {
@@ -46,6 +53,22 @@ export const UISettings = ({
 		telemetryClient.capture("ui_settings_enter_behavior_changed", {
 			behavior: newBehavior,
 		})
+	}
+
+	const handleChatFontSizeChange = (value: number) => {
+		setCachedStateField("chatFontSize", value)
+
+		// Track telemetry event
+		telemetryClient.capture("ui_settings_chat_font_size_changed", {
+			value,
+		})
+	}
+
+	const handleChatFontSizeReset = () => {
+		setCachedStateField("chatFontSize", undefined)
+
+		// Track telemetry event
+		telemetryClient.capture("ui_settings_chat_font_size_reset")
 	}
 
 	return (
@@ -88,6 +111,38 @@ export const UISettings = ({
 							</VSCodeCheckbox>
 							<div className="text-vscode-descriptionForeground text-sm ml-5 mt-1">
 								{t("settings:ui.requireCtrlEnterToSend.description", { primaryMod })}
+							</div>
+						</div>
+					</SearchableSetting>
+
+					{/* Chat Font Size Setting */}
+					<SearchableSetting
+						settingId="ui-chat-font-size"
+						section="ui"
+						label={t("settings:ui.chatFontSize.label")}>
+						<div className="flex flex-col gap-1">
+							<label className="block font-medium mb-1">{t("settings:ui.chatFontSize.label")}</label>
+							<div className="flex items-center gap-2">
+								<Slider
+									min={CHAT_FONT_SIZE_MIN}
+									max={CHAT_FONT_SIZE_MAX}
+									step={1}
+									value={[chatFontSize ?? CHAT_FONT_SIZE_DEFAULT]}
+									onValueChange={([value]) => handleChatFontSizeChange(value)}
+									data-testid="chat-font-size-slider"
+								/>
+								<span className="w-12 text-right">{chatFontSize ?? CHAT_FONT_SIZE_DEFAULT}px</span>
+								<Button
+									variant="secondary"
+									size="sm"
+									disabled={chatFontSize === undefined}
+									onClick={handleChatFontSizeReset}
+									data-testid="chat-font-size-reset">
+									{t("settings:ui.chatFontSize.reset")}
+								</Button>
+							</div>
+							<div className="text-vscode-descriptionForeground text-sm mt-1">
+								{t("settings:ui.chatFontSize.description")}
 							</div>
 						</div>
 					</SearchableSetting>

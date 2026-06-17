@@ -20,6 +20,8 @@ Zoo Code es un proyecto impulsado por la comunidad y valoramos profundamente cad
 - [Antes de contribuir](#antes-de-contribuir)
 - [Encontrar y planificar su contribución](#encontrar-y-planificar-su-contribución)
 - [Proceso de desarrollo y envío](#proceso-de-desarrollo-y-envío)
+- [Expectativas de las solicitudes de extracción](#expectativas-de-las-solicitudes-de-extracción)
+- [Contribuciones asistidas por IA](#contribuciones-asistidas-por-ia)
 - [Legal](#legal)
 
 ## Antes de contribuir
@@ -135,6 +137,32 @@ pnpm install
 - **Clasificación diaria:** comprobaciones rápidas por parte de los mantenedores.
 - **Revisión semanal en profundidad:** evaluación exhaustiva.
 - **Itere rápidamente** en función de los comentarios.
+
+### Expectativas de las solicitudes de extracción
+
+Las solicitudes de extracción deben ser revisables, probadas y mantenibles. Antes de abrir una PR, asegúrese de que:
+
+- El cambio se limita a un problema, error o mejora específicos.
+- Puede explicar qué hace el cambio y por qué es correcto.
+- Ha probado el cambio localmente donde sea práctico.
+- Está dispuesto a responder a los comentarios de revisión y realizar cambios de seguimiento razonables.
+- La PR no requiere que los mantenedores reescriban, rediseñen o asuman sustancialmente la propiedad de la implementación antes de poder fusionarla.
+
+Los mantenedores pueden cerrar PRs que estén incompletas, sean demasiado amplias, inactivas, no estén alineadas con la dirección del proyecto o que creen una carga desproporcionada de revisión o mantenimiento. Cerrar una PR no es un juicio sobre el colaborador; es una decisión de los mantenedores de que el cambio no puede aceptarse en su forma actual.
+
+### Contribuciones asistidas por IA
+
+El uso de herramientas de IA está permitido, pero los colaboradores siguen siendo completamente responsables de sus aportaciones.
+
+Si utiliza herramientas de IA para ayudar a crear una PR, debe:
+
+- Revisar y comprender cada cambio significativo.
+- Ser capaz de explicar la implementación y las compensaciones con sus propias palabras.
+- Probar el cambio usted mismo. Si las pruebas no son prácticas en su entorno, explique por qué en la descripción de la PR y describa cómo los revisores pueden verificar el cambio.
+- Verificar que el código generado sea correcto, necesario y compatible con la licencia del proyecto.
+- Considere revelar la asistencia de IA en la descripción de la PR cuando haya influido materialmente en el código, las pruebas o el diseño — esto ayuda a los revisores a dar mejor retroalimentación.
+
+Por favor, no envíe cambios generados por IA que no entienda o que no pueda mantener durante la revisión. Los mantenedores pueden cerrar las PRs que parezcan sustancialmente asistidas por IA pero que carezcan de verificación humana, justificación clara o seguimiento de la revisión.
 
 ## Legal
 

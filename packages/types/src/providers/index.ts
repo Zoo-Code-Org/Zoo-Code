@@ -22,9 +22,11 @@ export * from "./vertex.js"
 export * from "./vscode-llm.js"
 export * from "./xai.js"
 export * from "./vercel-ai-gateway.js"
+export * from "./opencode-go.js"
 export * from "./zai.js"
 export * from "./minimax.js"
 export * from "./mimo.js"
+export * from "./zoo-gateway.js"
 
 import { anthropicDefaultModelId } from "./anthropic.js"
 import { basetenDefaultModelId } from "./baseten.js"
@@ -46,9 +48,11 @@ import { vertexDefaultModelId } from "./vertex.js"
 import { vscodeLlmDefaultModelId } from "./vscode-llm.js"
 import { xaiDefaultModelId } from "./xai.js"
 import { vercelAiGatewayDefaultModelId } from "./vercel-ai-gateway.js"
+import { opencodeGoDefaultModelId } from "./opencode-go.js"
 import { internationalZAiDefaultModelId, mainlandZAiDefaultModelId } from "./zai.js"
 import { minimaxDefaultModelId } from "./minimax.js"
 import { mimoDefaultModelId } from "./mimo.js"
+import { zooGatewayDefaultModelId } from "./zoo-gateway.js"
 
 // Import the ProviderName type from provider-settings to avoid duplication
 import type { ProviderName } from "../provider-settings.js"
@@ -115,6 +119,10 @@ export function getProviderDefaultModelId(
 			return unboundDefaultModelId
 		case "vercel-ai-gateway":
 			return vercelAiGatewayDefaultModelId
+		case "opencode-go":
+			return opencodeGoDefaultModelId
+		case "zoo-gateway":
+			return zooGatewayDefaultModelId
 		case "anthropic":
 		case "gemini-cli":
 		case "fake-ai":

@@ -30,41 +30,11 @@
 
 Je vindt een korte handleiding voor de overstap van Roo Code naar Zoo Code in de [Roo→Zoo-migratiegids](https://docs.zoocode.dev/roo-to-zoo-migration). We willen gebruikers zo goed mogelijk helpen tijdens de overgang, en precies daarvoor zijn onze [Reddit](https://www.reddit.com/r/ZooCode) en [Discord](https://discord.gg/VxfP4Vx3gX) er. Als je ergens tegenaan loopt of vragen hebt, kom langs en vraag het.
 
-## Nieuw in v3.54.1
+## Nieuw in v3.60.0
 
-**Eerste Zoo Code-release** — maakt Zoo Code een onafhankelijke extensie in de VS Code Marketplace onder `ZooCodeOrganization.zoo-code`, met pre-release builds die automatisch worden gepubliceerd na elke merge naar `main`.
-
-- GPT-5.5-ondersteuning toegevoegd via de OpenAI Codex-provider.
-- Claude Opus 4.7-ondersteuning op Vertex AI toegevoegd.
-- Navigatieknoppen toegevoegd voor eerdere checkpoints in de chat.
-- DeepSeek V4-ondersteuning met dynamisch model ophalen.
-- Ondersteuning voor de MCP OAuth-client.
-
-<details>
-  <summary>🌐 Beschikbare talen</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) en OpenAI GPT-5.5 zijn nu beschikbaar in de providerinstellingen
+- **MCP-allowlists per modus** — beperk welke MCP-servers actief zijn per modus met een allowlist in de modusconfiguratie
+- **Workspace rootResolution-instelling** — nieuwe instelling voor het beheren van bestandspadresolutie in multi-root-workspaces
 
 ## Wat kan Zoo Code voor JOU doen?
 

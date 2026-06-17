@@ -3,36 +3,87 @@
 import os from "os"
 import * as path from "path"
 
-import { arePathsEqual, getReadablePath, getWorkspacePath } from "../path"
+// `vscode` resolves to `src/__mocks__/vscode.js` (see src/vitest.config.ts
+// resolve.alias). We import it here so the workspace-root tests can mutate
+// the shared mock object directly; inline `vi.mock("vscode", ...)` is a no-op
+// against a `resolve.alias` mapping.
+import * as vscodeMock from "vscode"
 
-// Mock modules
+import { arePathsEqual, getReadablePath, getWorkspacePath, getWorkspacePathForContext } from "../path"
 
-vi.mock("vscode", () => ({
-	window: {
-		activeTextEditor: {
-			document: {
-				uri: { fsPath: "/test/workspaceFolder/file.ts" },
-			},
+// Loose typing for the mock object — the file is plain JS and exposes a
+// hand-rolled subset of the VS Code API.
+const mockWorkspace = (
+	vscodeMock as unknown as {
+		workspace: {
+			workspaceFolders: Array<{ uri: { fsPath: string }; name: string; index: number }> | undefined
+			getWorkspaceFolder: (...args: unknown[]) => { uri: { fsPath: string } } | null | undefined
+			getConfiguration: (section?: string) => { get: (key: string, defaultValue?: unknown) => unknown }
+		}
+		window: {
+			activeTextEditor: { document: { uri: { fsPath: string } } } | null
+		}
+	}
+).workspace
+const mockWindow = (
+	vscodeMock as unknown as {
+		window: { activeTextEditor: { document: { uri: { fsPath: string } } } | null }
+	}
+).window
+
+/**
+ * Set the value returned for `zoo-code.workspace.rootResolution` in tests.
+ * Pass `undefined` to fall back to the default ("activeEditor").
+ */
+function setRootResolution(value: "activeEditor" | "firstFolder" | undefined) {
+	mockWorkspace.getConfiguration = (section?: string) => ({
+		get: (key: string, defaultValue?: unknown) => {
+			if (section === "zoo-code" && key === "workspace.rootResolution") {
+				return value ?? defaultValue
+			}
+			return defaultValue
 		},
-	},
-	workspace: {
-		workspaceFolders: [
-			{
-				uri: { fsPath: "/test/workspace" },
-				name: "test",
-				index: 0,
-			},
-		],
-		getWorkspaceFolder: vi.fn().mockReturnValue({
-			uri: {
-				fsPath: "/test/workspaceFolder",
-			},
-		}),
-	},
-}))
+	})
+}
+
+/**
+ * Configure the mock workspace folders + active editor for a single test.
+ * Returns a cleanup callback that restores the previous state.
+ */
+function withWorkspaceMock(opts: {
+	folders?: Array<{ uri: { fsPath: string }; name: string; index: number }> | undefined
+	getWorkspaceFolder?: (...args: unknown[]) => { uri: { fsPath: string } } | null | undefined
+	activeEditor?: { document: { uri: { fsPath: string } } } | null
+	getConfiguration?: (section?: string) => { get: (key: string, defaultValue?: unknown) => unknown }
+}): () => void {
+	const previousFolders = mockWorkspace.workspaceFolders
+	const previousGetWorkspaceFolder = mockWorkspace.getWorkspaceFolder
+	const previousActiveEditor = mockWindow.activeTextEditor
+	// Capture getConfiguration too: tests that mutate it must not leak a broken
+	// mock into sibling tests if the outer beforeEach is ever changed or moved.
+	const previousGetConfiguration = mockWorkspace.getConfiguration
+
+	if ("folders" in opts) mockWorkspace.workspaceFolders = opts.folders
+	if (opts.getWorkspaceFolder) mockWorkspace.getWorkspaceFolder = opts.getWorkspaceFolder
+	if ("activeEditor" in opts) mockWindow.activeTextEditor = opts.activeEditor ?? null
+	if (opts.getConfiguration) mockWorkspace.getConfiguration = opts.getConfiguration
+
+	return () => {
+		mockWorkspace.workspaceFolders = previousFolders
+		mockWorkspace.getWorkspaceFolder = previousGetWorkspaceFolder
+		mockWindow.activeTextEditor = previousActiveEditor
+		mockWorkspace.getConfiguration = previousGetConfiguration
+	}
+}
+
 describe("Path Utilities", () => {
 	const originalPlatform = process.platform
 	// Helper to mock VS Code configuration
+
+	beforeEach(() => {
+		// Default to legacy "activeEditor" behavior unless a test opts in.
+		setRootResolution(undefined)
+	})
 
 	afterEach(() => {
 		Object.defineProperty(process, "platform", {
@@ -62,7 +113,172 @@ describe("Path Utilities", () => {
 			expect(getWorkspacePath(workspacePath)).toBe("/Users/test/project")
 		})
 
-		it("should return undefined when outside a workspace", () => {})
+		describe("rootResolution = 'activeEditor' (default)", () => {
+			it("prefers the workspace folder containing the active editor", () => {
+				setRootResolution("activeEditor")
+				const restore = withWorkspaceMock({
+					folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+					activeEditor: { document: { uri: { fsPath: "/test/workspaceFolder/file.ts" } } },
+					getWorkspaceFolder: () => ({ uri: { fsPath: "/test/workspaceFolder" } }),
+				})
+				try {
+					expect(getWorkspacePath()).toBe("/test/workspaceFolder")
+				} finally {
+					restore()
+				}
+			})
+
+			it("falls back to workspaceFolders[0] when the active file is outside any workspace folder", () => {
+				setRootResolution("activeEditor")
+				const restore = withWorkspaceMock({
+					folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+					activeEditor: { document: { uri: { fsPath: "/somewhere/else/file.ts" } } },
+					getWorkspaceFolder: () => null,
+				})
+				try {
+					expect(getWorkspacePath()).toBe("/test/workspace")
+				} finally {
+					restore()
+				}
+			})
+
+			it("falls back to defaultCwdPath when there are no workspace folders and no active editor folder", () => {
+				setRootResolution("activeEditor")
+				const restore = withWorkspaceMock({
+					folders: undefined,
+					activeEditor: null,
+					getWorkspaceFolder: () => null,
+				})
+				try {
+					expect(getWorkspacePath("/fallback")).toBe("/fallback")
+				} finally {
+					restore()
+				}
+			})
+		})
+
+		describe("rootResolution = 'firstFolder'", () => {
+			it("ignores the active editor and always returns workspaceFolders[0]", () => {
+				setRootResolution("firstFolder")
+				const restore = withWorkspaceMock({
+					folders: [
+						{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 },
+						{ uri: { fsPath: "/test/secondary" }, name: "secondary", index: 1 },
+					],
+					activeEditor: { document: { uri: { fsPath: "/test/secondary/file.ts" } } },
+					getWorkspaceFolder: () => ({ uri: { fsPath: "/test/secondary" } }),
+				})
+				try {
+					expect(getWorkspacePath()).toBe("/test/workspace")
+				} finally {
+					restore()
+				}
+			})
+
+			it("does not consult getWorkspaceFolder at all", () => {
+				setRootResolution("firstFolder")
+				const spy = vi.fn(() => ({ uri: { fsPath: "/test/secondary" } }))
+				const restore = withWorkspaceMock({
+					folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+					activeEditor: { document: { uri: { fsPath: "/test/secondary/file.ts" } } },
+					getWorkspaceFolder: spy,
+				})
+				try {
+					getWorkspacePath()
+					expect(spy).not.toHaveBeenCalled()
+				} finally {
+					restore()
+				}
+			})
+
+			it("falls back to defaultCwdPath when there are no workspace folders", () => {
+				setRootResolution("firstFolder")
+				const restore = withWorkspaceMock({
+					folders: undefined,
+					activeEditor: null,
+					getWorkspaceFolder: () => null,
+				})
+				try {
+					expect(getWorkspacePath("/fallback")).toBe("/fallback")
+				} finally {
+					restore()
+				}
+			})
+		})
+
+		it("falls back to default behavior when reading the setting throws", () => {
+			// Route the throwing config mock through withWorkspaceMock so it is
+			// restored by the cleanup callback and cannot leak into sibling tests.
+			const restore = withWorkspaceMock({
+				folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+				activeEditor: { document: { uri: { fsPath: "/test/workspaceFolder/file.ts" } } },
+				getWorkspaceFolder: () => ({ uri: { fsPath: "/test/workspaceFolder" } }),
+				getConfiguration: () => {
+					throw new Error("not available in this context")
+				},
+			})
+			try {
+				// Should not throw and should resolve via active-editor logic.
+				expect(getWorkspacePath()).toBe("/test/workspaceFolder")
+			} finally {
+				restore()
+			}
+		})
+	})
+
+	describe("getWorkspacePathForContext", () => {
+		it("(activeEditor) returns the workspace folder for the given path", () => {
+			setRootResolution("activeEditor")
+			const restore = withWorkspaceMock({
+				folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+				activeEditor: null,
+				getWorkspaceFolder: (uri: unknown) => {
+					const u = uri as { fsPath?: string } | undefined
+					if (u?.fsPath?.startsWith("/some/other/workspace")) {
+						return { uri: { fsPath: "/some/other/workspace" } }
+					}
+					return null
+				},
+			})
+			try {
+				expect(getWorkspacePathForContext("/some/other/workspace/file.ts")).toBe("/some/other/workspace")
+			} finally {
+				restore()
+			}
+		})
+
+		it("(activeEditor) falls back to getWorkspacePath when the context path has no workspace folder", () => {
+			setRootResolution("activeEditor")
+			// contextPath is provided but getWorkspaceFolder returns null, exercising
+			// the console.debug fallback branch in getWorkspacePathForContext.
+			const restore = withWorkspaceMock({
+				folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+				activeEditor: null,
+				getWorkspaceFolder: () => null,
+			})
+			try {
+				expect(getWorkspacePathForContext("/unknown/path/file.ts")).toBe("/test/workspace")
+			} finally {
+				restore()
+			}
+		})
+
+		it("(firstFolder) ignores the context path and returns workspaceFolders[0]", () => {
+			setRootResolution("firstFolder")
+			const spy = vi.fn(() => ({ uri: { fsPath: "/some/other/workspace" } }))
+			const restore = withWorkspaceMock({
+				folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+				activeEditor: null,
+				getWorkspaceFolder: spy,
+			})
+			try {
+				expect(getWorkspacePathForContext("/some/other/workspace/file.ts")).toBe("/test/workspace")
+				// Should not have looked up the context path's workspace folder.
+				expect(spy).not.toHaveBeenCalled()
+			} finally {
+				restore()
+			}
+		})
 	})
 	describe("arePathsEqual", () => {
 		describe("on Windows", () => {

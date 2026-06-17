@@ -30,41 +30,11 @@
 
 Você encontra um guia rápido para migrar do Roo Code para o Zoo Code no [guia de migração Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Queremos ajudar os usuários durante essa transição da melhor forma possível, e é exatamente para isso que temos nosso [Reddit](https://www.reddit.com/r/ZooCode) e nosso [Discord](https://discord.gg/VxfP4Vx3gX). Se você tiver algum problema ou dúvida, apareça por lá e pergunte.
 
-## Novidades na v3.54.1
+## Novidades na v3.60.0
 
-**Lançamento inicial do Zoo Code** — estabelece o Zoo Code como uma extensão independente no VS Code Marketplace sob `ZooCodeOrganization.zoo-code`, com builds pre-release publicados automaticamente a cada merge na `main`.
-
-- Adicionado suporte ao GPT-5.5 através do provedor OpenAI Codex.
-- Adicionado suporte ao Claude Opus 4.7 no Vertex AI.
-- Adicionados controles de navegação para checkpoints anteriores no chat.
-- Suporte ao DeepSeek V4 com busca dinâmica de modelos.
-- Suporte ao cliente OAuth do MCP.
-
-<details>
-  <summary>🌐 Idiomas disponíveis</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) e OpenAI GPT-5.5 já estão disponíveis nas configurações do provedor
+- **Allowlists de MCP por modo** — restrinja quais servidores MCP ficam ativos por modo com uma allowlist na configuração do modo
+- **Configuração rootResolution para workspace** — nova configuração para controlar a resolução de caminhos de arquivos em workspaces multi-root
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

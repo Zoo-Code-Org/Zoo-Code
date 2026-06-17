@@ -6,6 +6,7 @@ import { OpenAiCodexHandler } from "../openai-codex"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { NativeToolCallParser } from "../../../core/assistant-message/NativeToolCallParser"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
+import { Package } from "../../../shared/package"
 
 describe("OpenAiCodexHandler native tool calls", () => {
 	let handler: OpenAiCodexHandler
@@ -404,5 +405,126 @@ describe("OpenAiCodexHandler native tool calls", () => {
 
 		const textChunks = chunks.filter((c) => c.type === "text")
 		expect(textChunks.map((c) => c.text).join("")).toBe("hello world")
+	})
+
+	it("identifies SDK requests as Zoo Code", async () => {
+		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockCreate = vi.fn().mockResolvedValue({
+			async *[Symbol.asyncIterator]() {
+				yield { type: "response.output_text.delta", delta: "ok" }
+				yield {
+					type: "response.completed",
+					response: {
+						id: "resp_sdk_headers",
+						status: "completed",
+						output: [],
+						usage: { input_tokens: 1, output_tokens: 1 },
+					},
+				}
+			},
+		})
+		;(handler as any).client = { responses: { create: mockCreate } }
+
+		const stream = handler.createMessage("system", [{ role: "user", content: "headers" } as any], {
+			taskId: "task-123",
+			tools: [],
+		})
+		for await (const _chunk of stream) {
+			// drain stream
+		}
+
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					originator: "zoo-code",
+					session_id: "task-123",
+					"ChatGPT-Account-Id": "acct_test",
+					"User-Agent": expect.stringContaining(`zoo-code/${Package.version}`),
+				}),
+			}),
+		)
+	})
+
+	it("identifies fetch fallback requests as Zoo Code", async () => {
+		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vi.fn().mockResolvedValue({
+			ok: true,
+			body: new ReadableStream({
+				start(controller) {
+					controller.enqueue(
+						new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"fallback"}\n\n'),
+					)
+					controller.enqueue(
+						new TextEncoder().encode(
+							'data: {"type":"response.completed","response":{"id":"resp_fetch_headers","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+						),
+					)
+					controller.close()
+				},
+			}),
+		})
+		global.fetch = mockFetch as any
+		;(handler as any).client = {
+			responses: {
+				create: vi.fn().mockRejectedValue(new Error("SDK unavailable")),
+			},
+		}
+
+		const stream = handler.createMessage("system", [{ role: "user", content: "fallback" } as any], {
+			taskId: "task-456",
+			tools: [],
+		})
+		for await (const _chunk of stream) {
+			// drain stream
+		}
+
+		expect(mockFetch).toHaveBeenCalledWith(
+			expect.stringContaining("/responses"),
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					originator: "zoo-code",
+					session_id: "task-456",
+					"ChatGPT-Account-Id": "acct_test",
+					"User-Agent": expect.stringContaining(`zoo-code/${Package.version}`),
+				}),
+			}),
+		)
+	})
+
+	it("identifies completePrompt requests as Zoo Code", async () => {
+		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "done" }],
+					},
+				],
+			}),
+		})
+		global.fetch = mockFetch as any
+
+		await expect(handler.completePrompt("Test prompt")).resolves.toBe("done")
+
+		expect(mockFetch).toHaveBeenCalledWith(
+			expect.stringContaining("/responses"),
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					originator: "zoo-code",
+					"ChatGPT-Account-Id": "acct_test",
+					"User-Agent": expect.stringContaining(`zoo-code/${Package.version}`),
+					session_id: expect.any(String),
+				}),
+			}),
+		)
 	})
 })

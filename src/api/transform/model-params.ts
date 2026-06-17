@@ -176,11 +176,13 @@ export function getModelParams({
 			reasoning: getGeminiReasoning({ model, reasoningBudget, reasoningEffort, settings }),
 		}
 	} else {
+		if (model.supportsTemperature === false) {
+			params.temperature = undefined
+		}
+
 		// Special case for o1-pro, which doesn't support temperature.
 		// Note that OpenRouter's `supported_parameters` field includes
 		// `temperature`, which is probably a bug.
-		// TODO: Add a `supportsTemperature` field to the model info and populate
-		// it appropriately in the OpenRouter fetcher.
 		if (modelId === "openai/o1-pro") {
 			params.temperature = undefined
 		}

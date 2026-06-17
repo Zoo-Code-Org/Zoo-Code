@@ -305,4 +305,102 @@ describe("ThinkingBudget", () => {
 			expect(screen.getByTestId("select-item-high")).toBeInTheDocument()
 		})
 	})
+
+	describe("configurable max output tokens (supportsMaxTokens)", () => {
+		// Mirrors Z.ai GLM models: max output budget plus a reasoning-effort dropdown,
+		// but no reasoning-budget control.
+		const glmModelInfo: ModelInfo = {
+			supportsMaxTokens: true,
+			supportsReasoningEffort: ["disable", "medium"],
+			maxTokens: 131072,
+			contextWindow: 200000,
+			supportsPromptCache: true,
+		}
+
+		const glmApiConfiguration = { apiProvider: "zai", apiModelId: "glm-5.1" } as const
+
+		it("should render the max output tokens slider alongside the reasoning effort dropdown", () => {
+			render(<ThinkingBudget {...defaultProps} apiConfiguration={glmApiConfiguration} modelInfo={glmModelInfo} />)
+
+			expect(screen.getByTestId("max-output-tokens")).toBeInTheDocument()
+			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
+		})
+
+		it("should default the slider to the 20% clamp when modelMaxTokens is unset", () => {
+			render(<ThinkingBudget {...defaultProps} apiConfiguration={glmApiConfiguration} modelInfo={glmModelInfo} />)
+
+			// 20% of 200000 = 40000 (the runtime clamp), since maxTokens (131072) exceeds it.
+			const slider = screen.getByTestId("max-output-tokens").querySelector("input[type='range']")!
+			expect(slider).toHaveValue("40000")
+		})
+
+		it("should reflect an explicit modelMaxTokens override on the slider", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ ...glmApiConfiguration, modelMaxTokens: 100000 }}
+					modelInfo={glmModelInfo}
+				/>,
+			)
+
+			const slider = screen.getByTestId("max-output-tokens").querySelector("input[type='range']")!
+			expect(slider).toHaveValue("100000")
+		})
+
+		it("should NOT persist modelMaxTokens on initial render (no user action)", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					setApiConfigurationField={setApiConfigurationField}
+					apiConfiguration={glmApiConfiguration}
+					modelInfo={glmModelInfo}
+				/>,
+			)
+
+			// Initialization must not write the default clamp back to settings.
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("modelMaxTokens", expect.anything())
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith(
+				"modelMaxTokens",
+				expect.anything(),
+				expect.anything(),
+			)
+		})
+
+		it("should persist modelMaxTokens as a user action when the slider changes", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					setApiConfigurationField={setApiConfigurationField}
+					apiConfiguration={glmApiConfiguration}
+					modelInfo={glmModelInfo}
+				/>,
+			)
+
+			const slider = screen.getByTestId("max-output-tokens").querySelector("input[type='range']")!
+			fireEvent.change(slider, { target: { value: "65536" } })
+
+			// A real user edit persists modelMaxTokens without the isUserAction=false flag.
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", 65536)
+		})
+
+		it("should not render the standalone slider when supportsMaxTokens is absent", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={glmApiConfiguration}
+					modelInfo={{
+						supportsReasoningEffort: ["disable", "medium"],
+						maxTokens: 131072,
+						contextWindow: 200000,
+						supportsPromptCache: true,
+					}}
+				/>,
+			)
+
+			expect(screen.queryByTestId("max-output-tokens")).not.toBeInTheDocument()
+			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
+		})
+	})
 })

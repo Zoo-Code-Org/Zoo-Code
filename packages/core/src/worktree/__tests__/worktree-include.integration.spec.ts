@@ -38,6 +38,7 @@ describe.sequential("WorktreeIncludeService integration", () => {
 			await execGit(repoDir, ["init"])
 			await execGit(repoDir, ["config", "user.name", "Test User"])
 			await execGit(repoDir, ["config", "user.email", "test@example.com"])
+			await execGit(repoDir, ["config", "commit.gpgSign", "false"])
 
 			await fs.writeFile(path.join(repoDir, "README.md"), "test")
 			await execGit(repoDir, ["add", "README.md"])

@@ -220,6 +220,9 @@ export function applyModelToolCustomization(
  * @param codeIndexManager - Code index manager for codebase_search feature check
  * @param settings - Additional settings for tool filtering (includes modelInfo for model-specific customization)
  * @param mcpHub - MCP hub for checking available resources
+ * @param allowedMcpServers - Optional allowlist of MCP server names for the current mode. When
+ *   provided, the resource-availability check only considers servers in this list, so a mode that
+ *   restricts MCP servers cannot retain `access_mcp_resource` based on resources from disallowed servers.
  * @returns Filtered array of tools allowed for the mode
  */
 export function filterNativeToolsForMode(
@@ -230,6 +233,7 @@ export function filterNativeToolsForMode(
 	codeIndexManager?: CodeIndexManager,
 	settings?: Record<string, any>,
 	mcpHub?: McpHub,
+	allowedMcpServers?: string[],
 ): OpenAI.Chat.ChatCompletionTool[] {
 	// Get mode configuration and all tools for this mode
 	const modeSlug = mode ?? defaultModeSlug
@@ -301,8 +305,13 @@ export function filterNativeToolsForMode(
 		}
 	}
 
-	// Conditionally exclude access_mcp_resource if MCP is not enabled or there are no resources
-	if (!mcpHub || !hasAnyMcpResources(mcpHub)) {
+	// Conditionally exclude access_mcp_resource if MCP is not enabled or there are no resources.
+	// When the mode restricts MCP servers via allowedMcpServers, only resources from allowed
+	// servers count — otherwise a restricted mode could still read resources from disallowed servers.
+	// Fall back to the mode config's own allowlist when the caller omits the parameter, so the
+	// restriction is enforced regardless of call site (defense in depth).
+	const effectiveAllowedMcpServers = allowedMcpServers ?? modeConfig.allowedMcpServers
+	if (!mcpHub || !hasAnyMcpResources(mcpHub, effectiveAllowedMcpServers)) {
 		allowedToolNames.delete("access_mcp_resource")
 	}
 
@@ -330,10 +339,18 @@ export function filterNativeToolsForMode(
 }
 
 /**
- * Helper function to check if any MCP server has resources available
+ * Helper function to check if any MCP server has resources available.
+ *
+ * When `allowedServers` is provided, only servers whose name is in the allowlist are considered.
+ * This keeps the `access_mcp_resource` availability check consistent with the mode's MCP server
+ * allowlist so a restricted mode cannot retain the tool based on resources from disallowed servers.
  */
-function hasAnyMcpResources(mcpHub: McpHub): boolean {
-	const servers = mcpHub.getServers()
+function hasAnyMcpResources(mcpHub: McpHub, allowedServers?: string[]): boolean {
+	let servers = mcpHub.getServers()
+	if (allowedServers) {
+		const allowSet = new Set(allowedServers)
+		servers = servers.filter((server) => allowSet.has(server.name))
+	}
 	return servers.some((server) => server.resources && server.resources.length > 0)
 }
 

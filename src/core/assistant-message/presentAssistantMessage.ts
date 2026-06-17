@@ -60,7 +60,7 @@ import { sanitizeToolUseId } from "../../utils/tool-id"
 
 export async function presentAssistantMessage(cline: Task) {
 	if (cline.abort) {
-		throw new Error(`[Task#presentAssistantMessage] task ${cline.taskId}.${cline.instanceId} aborted`)
+		return
 	}
 
 	if (cline.presentAssistantMessageLocked) {

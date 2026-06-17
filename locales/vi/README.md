@@ -30,41 +30,11 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.54.1
+## Điểm mới trong v3.60.0
 
-**Bản phát hành đầu tiên của Zoo Code** — đưa Zoo Code trở thành một extension độc lập trên VS Code Marketplace với tên `ZooCodeOrganization.zoo-code`, đồng thời các bản build pre-release sẽ được phát hành tự động sau mỗi lần merge vào `main`.
-
-- Thêm hỗ trợ GPT-5.5 thông qua nhà cung cấp OpenAI Codex.
-- Thêm hỗ trợ Claude Opus 4.7 trên Vertex AI.
-- Thêm các điều khiển điều hướng tới checkpoint trước đó trong chat.
-- Hỗ trợ DeepSeek V4 với khả năng lấy model động.
-- Hỗ trợ client OAuth của MCP.
-
-<details>
-  <summary>🌐 Các ngôn ngữ có sẵn</summary>
-
-- [English](../../README.md)
-- [Català](../ca/README.md)
-- [Deutsch](../de/README.md)
-- [Español](../es/README.md)
-- [Français](../fr/README.md)
-- [हिंदी](../hi/README.md)
-- [Bahasa Indonesia](../id/README.md)
-- [Italiano](../it/README.md)
-- [日本語](../ja/README.md)
-- [한국어](../ko/README.md)
-- [Nederlands](../nl/README.md)
-- [Polski](../pl/README.md)
-- [Português (BR)](../pt-BR/README.md)
-- [Русский](../ru/README.md)
-- [Türkçe](../tr/README.md)
-- [Tiếng Việt](../vi/README.md)
-- [简体中文](../zh-CN/README.md)
-- [繁體中文](../zh-TW/README.md)
-- ...
-      </details>
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) và OpenAI GPT-5.5 hiện có trong cài đặt nhà cung cấp
+- **Allowlist MCP theo chế độ** — hạn chế máy chủ MCP nào hoạt động cho mỗi chế độ bằng allowlist trong cấu hình chế độ
+- **Cài đặt rootResolution cho không gian làm việc** — cài đặt mới kiểm soát cách phân giải đường dẫn tệp trong không gian làm việc nhiều gốc
 
 ## Zoo Code có thể làm gì cho BẠN?
 

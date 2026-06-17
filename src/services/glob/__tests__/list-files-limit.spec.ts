@@ -23,6 +23,10 @@ vi.mock("../../../utils/path", () => ({
 	arePathsEqual: vi.fn().mockReturnValue(false),
 }))
 
+vi.mock("../../../services/roo-config", () => ({
+	directoryExists: vi.fn().mockResolvedValue(true),
+}))
+
 import * as childProcess from "child_process"
 
 const createMockRipgrepProcess = (chunks: string[] = [], exitCode = 0) => ({

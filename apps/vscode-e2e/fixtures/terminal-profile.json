@@ -1,0 +1,32 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "TERMINAL_PROFILE_E2E_OVERRIDE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"printf 'zoo-profile-override-ok\\\\n' > terminal-profile-e2e/terminal-profile-override.txt\"}",
+						"id": "call_terminal_profile_override_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "TERMINAL_PROFILE_E2E_DEFAULT"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"printf 'zoo-profile-default-ok\\\\n' > terminal-profile-e2e/terminal-profile-default.txt\"}",
+						"id": "call_terminal_profile_default_001"
+					}
+				]
+			}
+		}
+	]
+}
