@@ -5,6 +5,7 @@ import {
 	fileExists,
 	readFileIfExists,
 	getBooDirectoriesForCwd,
+	readProjectBooConfig,
 } from "../index"
 import path from "path"
 import fs from "fs/promises"
@@ -84,13 +85,115 @@ describe("boo-config", () => {
 
 	describe("boo-config exports", () => {
 		it("exports all public functions", () => {
-			const booConfig = require("../index")
-			expect(typeof booConfig.getGlobalBooDirectory).toBe("function")
-			expect(typeof booConfig.getProjectBooDirectoryForCwd).toBe("function")
-			expect(typeof booConfig.directoryExists).toBe("function")
-			expect(typeof booConfig.fileExists).toBe("function")
-			expect(typeof booConfig.readFileIfExists).toBe("function")
-			expect(typeof booConfig.getBooDirectoriesForCwd).toBe("function")
+			expect(typeof getGlobalBooDirectory).toBe("function")
+			expect(typeof getProjectBooDirectoryForCwd).toBe("function")
+			expect(typeof directoryExists).toBe("function")
+			expect(typeof fileExists).toBe("function")
+			expect(typeof readFileIfExists).toBe("function")
+			expect(typeof getBooDirectoriesForCwd).toBe("function")
+			expect(typeof readProjectBooConfig).toBe("function")
+		})
+	})
+
+	describe("readProjectBooConfig", () => {
+		let tmpDir: string
+
+		beforeEach(async () => {
+			tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "boo-config-test-"))
+			await fs.mkdir(path.join(tmpDir, ".boo"), { recursive: true })
+		})
+
+		afterEach(async () => {
+			await fs.rm(tmpDir, { recursive: true, force: true })
+		})
+
+		it("returns {} when config.yaml is missing", async () => {
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({})
+		})
+
+		it("returns {} when config.yaml has invalid YAML", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), "collaborate: [invalid: yaml: here")
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({})
+		})
+
+		it("returns {} when config.yaml is empty", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), "")
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({})
+		})
+
+		it("returns null drafting_model when field is blank string", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `collaborate:\n  drafting_model: ""\n`)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ collaborate: { drafting_model: null } })
+		})
+
+		it("returns null drafting_model when field is whitespace", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `collaborate:\n  drafting_model: "   "\n`)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ collaborate: { drafting_model: null } })
+		})
+
+		it("returns the profile name when drafting_model is set", async () => {
+			await fs.writeFile(
+				path.join(tmpDir, ".boo", "config.yaml"),
+				`collaborate:\n  drafting_model: "haiku-fast"\n`,
+			)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ collaborate: { drafting_model: "haiku-fast" } })
+		})
+
+		it("returns {} when both collaborate and knowledge_lookup sections are missing", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `other_key: value\n`)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({})
+		})
+
+		it("trims whitespace from drafting_model value", async () => {
+			await fs.writeFile(
+				path.join(tmpDir, ".boo", "config.yaml"),
+				`collaborate:\n  drafting_model: "  opus-quality  "\n`,
+			)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ collaborate: { drafting_model: "opus-quality" } })
+		})
+
+		it("returns null lookup_model when field is blank string", async () => {
+			await fs.writeFile(path.join(tmpDir, ".boo", "config.yaml"), `knowledge_lookup:\n  lookup_model: ""\n`)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ knowledge_lookup: { lookup_model: null } })
+		})
+
+		it("returns the profile name when lookup_model is set", async () => {
+			await fs.writeFile(
+				path.join(tmpDir, ".boo", "config.yaml"),
+				`knowledge_lookup:\n  lookup_model: "haiku-fast"\n`,
+			)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ knowledge_lookup: { lookup_model: "haiku-fast" } })
+		})
+
+		it("trims whitespace from lookup_model value", async () => {
+			await fs.writeFile(
+				path.join(tmpDir, ".boo", "config.yaml"),
+				`knowledge_lookup:\n  lookup_model: "  haiku-fast  "\n`,
+			)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({ knowledge_lookup: { lookup_model: "haiku-fast" } })
+		})
+
+		it("parses both collaborate and knowledge_lookup when both are present", async () => {
+			await fs.writeFile(
+				path.join(tmpDir, ".boo", "config.yaml"),
+				`collaborate:\n  drafting_model: "opus-quality"\nknowledge_lookup:\n  lookup_model: "haiku-fast"\n`,
+			)
+			const result = await readProjectBooConfig(tmpDir)
+			expect(result).toEqual({
+				collaborate: { drafting_model: "opus-quality" },
+				knowledge_lookup: { lookup_model: "haiku-fast" },
+			})
 		})
 	})
 })

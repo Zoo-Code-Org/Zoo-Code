@@ -1612,7 +1612,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			) : (
 				<div className="flex flex-col h-full p-6 min-h-0 overflow-y-auto gap-4 relative">
 					<div className="flex flex-col items-start gap-2 my-auto min-[400px]:px-6">
-						<VersionIndicator onClick={() => {}} className="absolute top-2 right-3 z-10" />
+						<VersionIndicator
+							onClick={() => setShowAnnouncementModal(true)}
+							className="absolute top-2 right-3 z-10"
+						/>
 						<div className="flex flex-col gap-4 w-full">
 							<RooHero />
 							<RooTips />

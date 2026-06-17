@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## 3.59.2
+
+### Added
+
+- **Collaborate Mode: Sub-Agent Drafting:** Beat prose is now delegated to a draft-mode sub-agent rather than written directly by the orchestrator
+    - Orchestrator builds a structured sub-task message containing the beat description, a directorial brief (synthesized from user steering, style guidance, and editorial judgment), and trailing context from `main.md` (~3000 tokens)
+    - Sub-agent appends prose to `main.md` and returns; orchestrator resumes the turn loop at the mark-drafted step
+    - Optional `drafting_profile` setting in `.boo/config.yaml` specifies a Roo Code API provider profile for sub-agent tasks — allows a different model for drafting without changing the main conversation model
+    - Blank or absent `drafting_profile` inherits the active profile (zero-friction default)
+    - `.boo/config.yaml.example` template committed for easy onboarding; actual config file is gitignored
+
+### Changed
+
+- **Custom Modes:** Removed upstream zoo/developer placeholder modes (`translate`, `issue-fixer`, `pr-fixer`, `merge-resolver`, etc.) from `.roomodes`; replaced with a minimal `example-mode` template
+
+---
+
 ## 3.59.1
 
 ### Added
