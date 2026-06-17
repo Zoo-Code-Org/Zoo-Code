@@ -162,6 +162,11 @@
 				"category": "%configuration.title%"
 			},
 			{
+				"command": "boo-code.showRipgrepDiagnostic",
+				"title": "%command.showRipgrepDiagnostic.title%",
+				"category": "%configuration.title%"
+			},
+			{
 				"command": "boo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"

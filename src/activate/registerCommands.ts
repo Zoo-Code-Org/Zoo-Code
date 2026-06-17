@@ -15,6 +15,7 @@ import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { t } from "../i18n"
 import { initWorkspace, detectWorkspace } from "../services/boo-workspace"
+import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
 
 /**
  * Helper to get the visible ClineProvider instance or log if not found.
@@ -69,9 +70,20 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 		const command = getCommand(id as CommandId)
 		context.subscriptions.push(vscode.commands.registerCommand(command, callback))
 	}
+
+	context.subscriptions.push(registerRipgrepDiagnosticCommand())
 }
 
-const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOptions): Record<CommandId, any> => ({
+// `showRipgrepDiagnostic` is registered separately by
+// `registerRipgrepDiagnosticCommand` (above), which owns the OutputChannel
+// lifecycle alongside the command registration, so it's intentionally
+// excluded from this map.
+type CommandCallback = (...args: any[]) => unknown
+const getCommandsMap = ({
+	context,
+	outputChannel,
+	provider,
+}: RegisterCommandOptions): Record<Exclude<CommandId, "showRipgrepDiagnostic">, CommandCallback> => ({
 	activationCompleted: () => {},
 	plusButtonClicked: async () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)
