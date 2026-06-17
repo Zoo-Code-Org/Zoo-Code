@@ -735,15 +735,10 @@ describe("Cline", () => {
 				const iterator = cline.attemptApiRequest(0)
 				await iterator.next()
 
-				// The retry should have used the rate limit window.
-				// recordRequest() was called during attemptApiRequest, so the
-				// clock has a timestamp, and rateLimitSeconds=10 means the
-				// backoff should account for the rate limit window (10s) being
-				// larger than the base exponential delay (3s).
-				const retryMessages = saySpy.mock.calls.filter((call) => call[0] === "api_req_retry_delayed")
-				expect(retryMessages.length).toBeGreaterThan(0)
-
-				// Verify the clock was used (it should have a recorded timestamp)
+				// rateLimitSeconds=10 > exponentialDelay=ceil(3*2^0)=3, so
+				// finalDelay=10 and the countdown loop fires delay(1000) ten times.
+				expect(mockDelay).toHaveBeenCalledWith(1000)
+				expect(mockDelay).toHaveBeenCalledTimes(10)
 				expect(clock.getLastRequestTime()).toBeDefined()
 			})
 
