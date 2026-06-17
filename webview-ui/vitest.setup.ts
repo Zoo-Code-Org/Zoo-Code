@@ -62,3 +62,9 @@ Object.defineProperty(window, "matchMedia", {
 
 // Mock scrollIntoView which is not available in jsdom
 Element.prototype.scrollIntoView = vi.fn()
+
+// Ensure all dynamic imports are settled before jsdom teardown to prevent
+// EnvironmentTeardownError. See https://github.com/vitest-dev/vitest/issues/9872
+afterEach(async () => {
+	await vi.dynamicImportSettled()
+})
