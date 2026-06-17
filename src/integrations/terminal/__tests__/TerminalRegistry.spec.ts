@@ -205,6 +205,88 @@ describe("TerminalRegistry", () => {
 		})
 	})
 
+	describe("onDidEndTerminalShellExecution race condition (#489, #622)", () => {
+		let endHandler: (e: any) => Promise<void>
+
+		beforeEach(() => {
+			// Reset the initialized flag so we can call initialize() in this block.
+			TerminalRegistry["isInitialized"] = false
+
+			// The global vscode mock doesn't define shell execution event
+			// methods, so add them before spying.
+			;(vscode.window as any).onDidStartTerminalShellExecution ??= () => ({ dispose: () => {} })
+			;(vscode.window as any).onDidEndTerminalShellExecution ??= () => ({ dispose: () => {} })
+
+			vi.spyOn(vscode.window, "onDidStartTerminalShellExecution" as any).mockImplementation((_handler: any) => ({
+				dispose: vi.fn(),
+			}))
+
+			vi.spyOn(vscode.window, "onDidEndTerminalShellExecution" as any).mockImplementation((handler: any) => {
+				endHandler = handler
+				return { dispose: vi.fn() }
+			})
+
+			TerminalRegistry.initialize()
+		})
+
+		afterEach(() => {
+			// Reset so other test blocks aren't affected.
+			TerminalRegistry["isInitialized"] = false
+		})
+
+		it("calls shellExecutionComplete when end event fires before running is set (race)", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			const mockProcess = {
+				command: "echo hello",
+				emit: vi.fn(),
+				hasUnretrievedOutput: vi.fn().mockReturnValue(false),
+			} as any
+			terminal.process = mockProcess
+
+			// Simulate the race: running is still false (setActiveStream hasn't
+			// been called yet), but the end event fires.
+			expect(terminal.running).toBe(false)
+
+			const mockExecution = { commandLine: { value: "echo hello" } }
+			await endHandler({
+				terminal: terminal.terminal,
+				execution: mockExecution,
+				exitCode: 0,
+			})
+
+			// shellExecutionComplete should have been called exactly once, emitting
+			// shell_execution_complete so TerminalProcess.run() unblocks.
+			expect(mockProcess.emit).toHaveBeenCalledWith(
+				"shell_execution_complete",
+				expect.objectContaining({ exitCode: 0 }),
+			)
+			expect(mockProcess.emit).toHaveBeenCalledTimes(1)
+
+			// Terminal should be back to idle state.
+			expect(terminal.busy).toBe(false)
+			expect(terminal.running).toBe(false)
+		})
+
+		it("sets busy=false without calling shellExecutionComplete when no process exists", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.busy = true
+			terminal.process = undefined
+			const completeSpy = vi.spyOn(terminal, "shellExecutionComplete")
+
+			expect(terminal.running).toBe(false)
+
+			const mockExecution = { commandLine: { value: "echo hello" } }
+			await endHandler({
+				terminal: terminal.terminal,
+				execution: mockExecution,
+				exitCode: 0,
+			})
+
+			expect(terminal.busy).toBe(false)
+			expect(completeSpy).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("releaseTerminalsForTask", () => {
 		it("aborts a busy terminal's running process and disassociates it from the task (#245)", () => {
 			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode")
