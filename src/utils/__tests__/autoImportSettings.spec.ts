@@ -215,7 +215,7 @@ describe("autoImportSettings", () => {
 		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
 			"[AutoImport] Successfully imported settings from /absolute/path/to/config.json",
 		)
-		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("info.auto_import_success")
+		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("common:info.auto_import_success")
 		expect(mockProviderSettingsManager.import).toHaveBeenCalled()
 		expect(mockContextProxy.setValues).toHaveBeenCalled()
 	})

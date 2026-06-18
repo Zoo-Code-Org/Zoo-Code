@@ -9,12 +9,6 @@ vi.mock("../../task-persistence", () => ({
 	saveTaskMessages: vi.fn(),
 }))
 
-// Mock the i18n module
-vi.mock("../../../i18n", () => ({
-	t: vi.fn((key: string) => key),
-	changeLanguage: vi.fn(),
-}))
-
 vi.mock("vscode", () => ({
 	window: {
 		showErrorMessage: vi.fn(),

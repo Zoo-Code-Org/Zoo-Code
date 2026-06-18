@@ -47,6 +47,8 @@ export const commandIds = [
 	"focusPanel",
 	"toggleAutoApprove",
 
+	"showRipgrepDiagnostic",
+
 	"workspaceInit",
 ] as const
 

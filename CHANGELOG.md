@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## 3.60.0
+
+### Added
+
+- **Claude Fable 5:** New Anthropic model available across Anthropic, Bedrock, and Vertex providers
+- **OpenAI GPT-5.5:** Added GPT-5.5 to the OpenAI provider
+- **Gemini 3.5 Flash:** Added Gemini 3.5 Flash to the Gemini provider
+- **Semble Embedding Provider:** Local on-the-fly embedding provider for code indexing — no external API required
+- **VS Code Terminal Shell Override:** New setting to control which shell profile is used in the integrated terminal
+- **Configurable Chat Font Size:** Slider in UI settings to adjust chat panel font size (8–32px)
+- **GitHub-Style Alerts:** Webview now renders `> [!NOTE]`, `> [!WARNING]`, `> [!TIP]`, `> [!IMPORTANT]`, and `> [!CAUTION]` blocks as styled callout boxes
+- **Configurable Max Output Tokens for GLM Models:** Models with adjustable output limits now show a dedicated max output tokens slider
+- **WorkspacePathResolver:** Symlink-aware path canonicalization for rules and instructions files
+- **Per-Mode MCP Server Restrictions:** Configure an allowlist per mode to restrict which MCP servers are active
+- **LiteLLM Reasoning Field Support:** LiteLLM streaming responses now surface `reasoning_content` and `reasoning` fields from models like DeepSeek R1
+- **Show Ripgrep Diagnostic Command:** New command palette entry that generates a ripgrep diagnostic report for troubleshooting
+- **Terminal Profile Settings Redesign:** Unified dropdown with "Follow VS Code" option, profile selector, and configure button
+
+### Fixed
+
+- Chat window running out of memory when transcript grows large
+- Relative symlinks in rules files not resolving correctly
+- Removed unsupported `--no-absolute-filenames` tar argument in Semble downloader
+
+---
+
 ## 3.59.2
 
 ### Added

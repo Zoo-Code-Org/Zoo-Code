@@ -7,30 +7,35 @@ import { TOOL_GROUPS } from "../../../shared/tools"
 
 import { validateToolUse, isToolAllowedForMode } from "../validateToolUse"
 
-const draftMode = modes.find((m) => m.slug === "draft")?.slug || "draft"
+// interview has read/edit/command/mcp — use as the "full-access" mode for tests that
+// need a broad set of tools allowed (replaces the old "code" mode from upstream).
+const fullAccessMode = modes.find((m) => m.slug === "interview")?.slug || "interview"
 const outlineMode = modes.find((m) => m.slug === "outline")?.slug || "outline"
 const interviewMode = modes.find((m) => m.slug === "interview")?.slug || "interview"
+// draft has read/edit only
+const draftMode = modes.find((m) => m.slug === "draft")?.slug || "draft"
 
 describe("mode-validator", () => {
 	describe("isToolAllowedForMode", () => {
-		describe("draft mode", () => {
-			it("allows all draft mode tools", () => {
-				// Draft mode has all groups
-				Object.entries(TOOL_GROUPS).forEach(([_, config]) => {
-					config.tools.forEach((tool: string) => {
-						expect(isToolAllowedForMode(tool, draftMode, [])).toBe(true)
+		describe("interview mode (full-access)", () => {
+			it("allows all interview mode tools", () => {
+				// Interview mode has read/edit/command/mcp groups
+				const allowedGroups = ["read", "edit", "command", "mcp"] as const
+				allowedGroups.forEach((groupName) => {
+					TOOL_GROUPS[groupName].tools.forEach((tool: string) => {
+						expect(isToolAllowedForMode(tool, fullAccessMode, [])).toBe(true)
 					})
 				})
 			})
 
 			it("disallows unknown tools", () => {
-				expect(isToolAllowedForMode("unknown_tool" as any, draftMode, [])).toBe(false)
+				expect(isToolAllowedForMode("unknown_tool" as any, fullAccessMode, [])).toBe(false)
 			})
 		})
 
 		describe("outline mode", () => {
 			it("allows configured tools", () => {
-				// Outline mode has read and mcp groups
+				// Outline mode has read/edit/command/mcp groups
 				const outlineTools = [...TOOL_GROUPS.read.tools, ...TOOL_GROUPS.mcp.tools]
 				outlineTools.forEach((tool) => {
 					expect(isToolAllowedForMode(tool, outlineMode, [])).toBe(true)
@@ -40,7 +45,7 @@ describe("mode-validator", () => {
 
 		describe("interview mode", () => {
 			it("allows configured tools", () => {
-				// Interview mode has read and mcp groups
+				// Interview mode has read/edit/command/mcp groups
 				const interviewTools = [...TOOL_GROUPS.read.tools, ...TOOL_GROUPS.mcp.tools]
 				interviewTools.forEach((tool) => {
 					expect(isToolAllowedForMode(tool, interviewMode, [])).toBe(true)
@@ -101,9 +106,9 @@ describe("mode-validator", () => {
 
 		describe("dynamic MCP tools", () => {
 			it("allows dynamic MCP tools when mcp group is in mode groups", () => {
-				// Code mode has mcp group, so dynamic MCP tools should be allowed
-				expect(isToolAllowedForMode("mcp_context7_resolve-library-id", draftMode, [])).toBe(true)
-				expect(isToolAllowedForMode("mcp_serverName_toolName", draftMode, [])).toBe(true)
+				// Interview mode has mcp group, so dynamic MCP tools should be allowed
+				expect(isToolAllowedForMode("mcp_context7_resolve-library-id", fullAccessMode, [])).toBe(true)
+				expect(isToolAllowedForMode("mcp_serverName_toolName", fullAccessMode, [])).toBe(true)
 			})
 
 			it("disallows dynamic MCP tools when mcp group is not in mode groups", () => {
@@ -179,18 +184,19 @@ describe("mode-validator", () => {
 			)
 		})
 
-		it("throws error for disallowed tools in outline mode", () => {
-			// execute_command is a valid tool but not allowed in outline mode
-			expect(() => validateToolUse("execute_command", "outline", [])).toThrow(
-				'Tool "execute_command" is not allowed in outline mode.',
+		it("throws error for disallowed tools in draft mode", () => {
+			// execute_command is a valid tool but not allowed in draft mode (read/edit only)
+			expect(() => validateToolUse("execute_command", "draft", [])).toThrow(
+				'Tool "execute_command" is not allowed in draft mode.',
 			)
 		})
 
 		it("blocks mode-disallowed tools even if a provider declared them", () => {
 			// Gemini may receive all tool declarations for history compatibility, so
 			// execution-time validation must remain the final mode restriction guard.
-			expect(() => validateToolUse("write_to_file", interviewMode, [])).toThrow(
-				`Tool "write_to_file" is not allowed in ${interviewMode} mode.`,
+			// knowledge-lookup mode only has read group, so write_to_file should be blocked.
+			expect(() => validateToolUse("write_to_file", "knowledge-lookup", [])).toThrow(
+				'Tool "write_to_file" is not allowed in knowledge-lookup mode.',
 			)
 		})
 
@@ -201,7 +207,7 @@ describe("mode-validator", () => {
 		it("throws error when tool requirement is not met", () => {
 			const requirements = { apply_diff: false }
 			expect(() => validateToolUse("apply_diff", draftMode, [], requirements)).toThrow(
-				'Tool "apply_diff" is not allowed in code mode.',
+				'Tool "apply_diff" is not allowed in draft mode.',
 			)
 		})
 
@@ -225,10 +231,10 @@ describe("mode-validator", () => {
 			)
 
 			expect(() => validateToolUse("execute_command", draftMode, [], toolRequirements)).toThrow(
-				'Tool "execute_command" is not allowed in code mode.',
+				'Tool "execute_command" is not allowed in draft mode.',
 			)
 			expect(() => validateToolUse("search_files", draftMode, [], toolRequirements)).toThrow(
-				'Tool "search_files" is not allowed in code mode.',
+				'Tool "search_files" is not allowed in draft mode.',
 			)
 		})
 
@@ -256,7 +262,7 @@ describe("mode-validator", () => {
 				{} as Record<string, boolean>,
 			)
 
-			expect(() => validateToolUse("execute_command", draftMode, [], toolRequirements)).not.toThrow()
+			expect(() => validateToolUse("execute_command", fullAccessMode, [], toolRequirements)).not.toThrow()
 		})
 	})
 })

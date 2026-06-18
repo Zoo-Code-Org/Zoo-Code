@@ -13,8 +13,16 @@ vi.mock("vscode", () => ({
 		QuickFix: { value: "quickfix" },
 		RefactorRewrite: { value: "refactor.rewrite" },
 	},
+	Disposable: {
+		from: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+	},
 	window: {
 		createTextEditorDecorationType: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+		createOutputChannel: vi.fn().mockReturnValue({
+			appendLine: vi.fn(),
+			show: vi.fn(),
+			dispose: vi.fn(),
+		}),
 	},
 	workspace: {
 		workspaceFolders: [
@@ -35,7 +43,7 @@ vi.mock("../../core/webview/ClineProvider")
 
 vi.mock("../../shared/package", () => ({
 	Package: {
-		name: "zoo-code",
+		name: "boo-code",
 	},
 }))
 
@@ -75,10 +83,6 @@ vi.mock("../../core/config/ContextProxy", () => ({
 	ContextProxy: {
 		getInstance: vi.fn(),
 	},
-}))
-
-vi.mock("../../i18n", () => ({
-	t: (key: string) => key,
 }))
 
 describe("getVisibleProviderOrLog", () => {

@@ -16,10 +16,6 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-vi.mock("../../../i18n", () => ({
-	t: vi.fn((key: string) => key),
-}))
-
 vi.mock("fs/promises", () => {
 	const readFile = vi.fn().mockResolvedValue("file content here")
 	return {

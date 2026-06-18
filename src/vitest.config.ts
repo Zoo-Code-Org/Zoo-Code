@@ -37,8 +37,12 @@ export default defineConfig({
 		},
 	},
 	resolve: {
-		alias: {
-			vscode: path.resolve(__dirname, "./__mocks__/vscode.js"),
-		},
+		alias: [
+			{ find: "vscode", replacement: path.resolve(__dirname, "./__mocks__/vscode.js") },
+			{
+				find: /^(\.\.\/)+i18n$/,
+				replacement: path.resolve(__dirname, "./__mocks__/i18n.ts"),
+			},
+		],
 	},
 })

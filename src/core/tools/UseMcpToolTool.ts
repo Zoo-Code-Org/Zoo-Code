@@ -7,6 +7,7 @@ import type { ToolUse } from "../../shared/tools"
 import { toolNamesMatch } from "../../utils/mcp-name"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { ensureMcpServerAllowed } from "./mcpServerRestriction"
 
 interface UseMcpToolParams {
 	server_name: string
@@ -41,6 +42,20 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			// Validate that the tool exists on the server
 			const toolValidation = await this.validateToolExists(task, serverName, toolName, pushToolResult)
 			if (!toolValidation.isValid) {
+				return
+			}
+
+			// Execution-time defense: reject invocation of a server not permitted by the mode's
+			// allowedMcpServers allowlist, even if the model referenced it from history. This runs
+			// before approval/execution so a disallowed server can never be reached.
+			const serverAllowed = await ensureMcpServerAllowed(
+				task,
+				"use_mcp_tool",
+				serverName,
+				pushToolResult,
+				formatResponse.toolError,
+			)
+			if (!serverAllowed) {
 				return
 			}
 

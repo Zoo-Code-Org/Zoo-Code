@@ -273,7 +273,7 @@ describe("custom-instructions global .roo support", () => {
 
 			const result = await addCustomInstructions("", "", mockCwd, mode)
 
-			expect(result).toContain("# Rules from .roorules-code:")
+			expect(result).toContain("# Rules from .roorules-draft:")
 			expect(result).toContain("legacy mode rule content")
 		})
 	})

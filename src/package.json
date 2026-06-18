@@ -3,7 +3,7 @@
 	"displayName": "%extension.displayName%",
 	"description": "%extension.description%",
 	"publisher": "anthologist",
-	"version": "3.59.3",
+	"version": "3.60.0",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
 		"color": "#0d0d0f",
@@ -159,6 +159,11 @@
 			{
 				"command": "boo-code.acceptInput",
 				"title": "%command.acceptInput.title%",
+				"category": "%configuration.title%"
+			},
+			{
+				"command": "boo-code.showRipgrepDiagnostic",
+				"title": "%command.showRipgrepDiagnostic.title%",
 				"category": "%configuration.title%"
 			},
 			{

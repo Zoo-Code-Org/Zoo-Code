@@ -746,6 +746,7 @@ export class ClineProvider
 				terminalZshP10k = false,
 				terminalPowershellCounter = false,
 				terminalZdotdir = false,
+				terminalProfile,
 				ttsEnabled,
 				ttsSpeed,
 			}) => {
@@ -757,6 +758,7 @@ export class ClineProvider
 				Terminal.setTerminalZshP10k(terminalZshP10k)
 				Terminal.setPowershellCounter(terminalPowershellCounter)
 				Terminal.setTerminalZdotdir(terminalZdotdir)
+				Terminal.setTerminalProfile(terminalProfile)
 				setTtsEnabled(ttsEnabled ?? false)
 				setTtsSpeed(ttsSpeed ?? 1)
 			},
@@ -803,6 +805,8 @@ export class ClineProvider
 			const viewStateDisposable = webviewView.onDidChangeViewState(() => {
 				if (this.view?.visible) {
 					this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+				} else {
+					this.logWebviewHiddenDiagnostics()
 				}
 			})
 
@@ -812,6 +816,8 @@ export class ClineProvider
 			const visibilityDisposable = webviewView.onDidChangeVisibility(() => {
 				if (this.view?.visible) {
 					this.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+				} else {
+					this.logWebviewHiddenDiagnostics()
 				}
 			})
 
@@ -2049,6 +2055,7 @@ export class ClineProvider
 			terminalZshOhMy,
 			terminalZshP10k,
 			terminalZdotdir,
+			terminalProfile,
 			mcpEnabled,
 			currentApiConfigName,
 			listApiConfigMeta,
@@ -2202,6 +2209,7 @@ export class ClineProvider
 			terminalZshOhMy: terminalZshOhMy ?? false,
 			terminalZshP10k: terminalZshP10k ?? false,
 			terminalZdotdir: terminalZdotdir ?? false,
+			terminalProfile,
 			mcpEnabled: mcpEnabled ?? true,
 			currentApiConfigName: currentApiConfigName ?? "default",
 			listApiConfigMeta: listApiConfigMeta ?? [],
@@ -2406,6 +2414,7 @@ export class ClineProvider
 			terminalZshOhMy: stateValues.terminalZshOhMy ?? false,
 			terminalZshP10k: stateValues.terminalZshP10k ?? false,
 			terminalZdotdir: stateValues.terminalZdotdir ?? false,
+			terminalProfile: stateValues.terminalProfile,
 			mode: stateValues.mode ?? defaultModeSlug,
 			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
@@ -2732,6 +2741,20 @@ export class ClineProvider
 		}
 
 		return this.clineStack[this.clineStack.length - 1]
+	}
+
+	private logWebviewHiddenDiagnostics(): void {
+		const task = this.getCurrentTask()
+		if (!task || task.abort || task.abandoned) {
+			return
+		}
+		this.log(
+			`[Boo Code] Webview hidden during active task.\n` +
+				`  taskId:       ${task.taskId}\n` +
+				`  messageCount: ${task.clineMessages.length}\n` +
+				`  stackDepth:   ${this.clineStack.length}\n` +
+				`  timestamp:    ${new Date().toISOString()}\n`,
+		)
 	}
 
 	public getRecentTasks(): string[] {

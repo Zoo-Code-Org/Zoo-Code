@@ -230,6 +230,7 @@ export function filterNativeToolsForMode(
 	codeIndexManager?: CodeIndexManager,
 	settings?: Record<string, any>,
 	mcpHub?: McpHub,
+	allowedMcpServers?: string[],
 ): OpenAI.Chat.ChatCompletionTool[] {
 	// Get mode configuration and all tools for this mode
 	const modeSlug = mode ?? defaultModeSlug
@@ -301,8 +302,12 @@ export function filterNativeToolsForMode(
 		}
 	}
 
-	// Conditionally exclude access_mcp_resource if MCP is not enabled or there are no resources
-	if (!mcpHub || !hasAnyMcpResources(mcpHub)) {
+	// Conditionally exclude access_mcp_resource if MCP is not enabled or there are no resources.
+	// When the mode restricts MCP servers via allowedMcpServers, only resources from allowed
+	// servers count — otherwise a restricted mode could still read resources from disallowed servers.
+	// Fall back to the mode config's own allowlist when the caller omits the parameter.
+	const effectiveAllowedMcpServers = allowedMcpServers ?? modeConfig.allowedMcpServers
+	if (!mcpHub || !hasAnyMcpResources(mcpHub, effectiveAllowedMcpServers)) {
 		allowedToolNames.delete("access_mcp_resource")
 	}
 
@@ -332,8 +337,12 @@ export function filterNativeToolsForMode(
 /**
  * Helper function to check if any MCP server has resources available
  */
-function hasAnyMcpResources(mcpHub: McpHub): boolean {
-	const servers = mcpHub.getServers()
+function hasAnyMcpResources(mcpHub: McpHub, allowedMcpServers?: string[]): boolean {
+	let servers = mcpHub.getServers()
+	if (allowedMcpServers) {
+		const allowSet = new Set(allowedMcpServers)
+		servers = servers.filter((s) => allowSet.has(s.name))
+	}
 	return servers.some((server) => server.resources && server.resources.length > 0)
 }
 

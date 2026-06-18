@@ -161,6 +161,7 @@ export abstract class BaseTerminal implements RooTerminal {
 	private static terminalZshOhMy: boolean = false
 	private static terminalZshP10k: boolean = false
 	private static terminalZdotdir: boolean = false
+	private static terminalProfile: string | undefined = undefined
 	private static execaShellPath: string | undefined = undefined
 
 	/**
@@ -294,6 +295,15 @@ export abstract class BaseTerminal implements RooTerminal {
 	 */
 	public static getTerminalZdotdir(): boolean {
 		return BaseTerminal.terminalZdotdir
+	}
+
+	public static setTerminalProfile(profile: string | undefined): void {
+		const normalized = profile?.trim()
+		BaseTerminal.terminalProfile = normalized && normalized.length > 0 ? normalized : undefined
+	}
+
+	public static getTerminalProfile(): string | undefined {
+		return BaseTerminal.terminalProfile
 	}
 
 	public static setExecaShellPath(shellPath: string | undefined): void {

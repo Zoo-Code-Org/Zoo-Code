@@ -259,7 +259,7 @@ html {
 	 * configures the "Chat font size" setting, which overrides this variable at
 	 * runtime. Scoped to chat rendering so it does not resize settings/other UI.
 	 */
-	--zoo-chat-font-size: var(--vscode-font-size);
+	--boo-chat-font-size: var(--vscode-font-size);
 }
 
 body {

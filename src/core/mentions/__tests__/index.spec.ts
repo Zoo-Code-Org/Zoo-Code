@@ -11,11 +11,6 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-// Mock i18n
-vi.mock("../../../i18n", () => ({
-	t: vi.fn((key: string) => key),
-}))
-
 describe("parseMentions - URL mention handling", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

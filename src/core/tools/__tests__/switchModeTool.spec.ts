@@ -19,9 +19,9 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 		defaultModeSlug: "draft",
 		getModeBySlug: vi.fn((slug: string, customModes?: Array<{ slug: string; name: string }>) => {
 			const builtInModes: Record<string, { slug: string; name: string }> = {
-				code: { slug: "draft", name: "Code" },
-				architect: { slug: "outline", name: "Architect" },
-				ask: { slug: "interview", name: "Ask" },
+				draft: { slug: "draft", name: "Code" },
+				outline: { slug: "outline", name: "Architect" },
+				interview: { slug: "interview", name: "Ask" },
 			}
 			return customModes?.find((mode) => mode.slug === slug) ?? builtInModes[slug]
 		}),

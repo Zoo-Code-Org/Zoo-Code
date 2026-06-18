@@ -67,7 +67,13 @@ async function generatePrompt(
 
 	// Check if MCP functionality should be included
 	const hasMcpGroup = modeConfig.groups.some((groupEntry) => getGroupName(groupEntry) === "mcp")
-	const hasMcpServers = mcpHub && mcpHub.getServers().length > 0
+	const allowedMcpServers = modeConfig.allowedMcpServers
+	const allowSet = allowedMcpServers ? new Set(allowedMcpServers) : undefined
+	let hasMcpServers = false
+	if (mcpHub) {
+		const servers = allowSet ? mcpHub.getServers().filter((s) => allowSet.has(s.name)) : mcpHub.getServers()
+		hasMcpServers = servers.length > 0
+	}
 	const shouldIncludeMcp = hasMcpGroup && hasMcpServers
 
 	const codeIndexManager = CodeIndexManager.getInstance(context, cwd)
@@ -91,7 +97,7 @@ ${getSharedToolUseSection()}${toolsCatalog}
 
 	${getToolUseGuidelinesSection()}
 
-${getCapabilitiesSection(cwd, shouldIncludeMcp ? mcpHub : undefined)}
+${getCapabilitiesSection(cwd, hasMcpGroup ? mcpHub : undefined, allowedMcpServers)}
 
 ${modesSection}
 ${skillsSection ? `\n${skillsSection}` : ""}

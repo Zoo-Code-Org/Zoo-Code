@@ -109,7 +109,7 @@ describe("ExtensionStateContext", () => {
 	})
 
 	it("does not set the chat font-size CSS variable when unset (init)", () => {
-		document.documentElement.style.removeProperty("--zoo-chat-font-size")
+		document.documentElement.style.removeProperty("--boo-chat-font-size")
 
 		render(
 			<ExtensionStateContextProvider>
@@ -118,11 +118,11 @@ describe("ExtensionStateContext", () => {
 		)
 
 		expect(JSON.parse(screen.getByTestId("chat-font-size").textContent!)).toBe(null)
-		expect(document.documentElement.style.getPropertyValue("--zoo-chat-font-size")).toBe("")
+		expect(document.documentElement.style.getPropertyValue("--boo-chat-font-size")).toBe("")
 	})
 
 	it("applies the chat font-size CSS variable when set, and clears it on reset", () => {
-		document.documentElement.style.removeProperty("--zoo-chat-font-size")
+		document.documentElement.style.removeProperty("--boo-chat-font-size")
 
 		render(
 			<ExtensionStateContextProvider>
@@ -135,14 +135,14 @@ describe("ExtensionStateContext", () => {
 		})
 
 		expect(JSON.parse(screen.getByTestId("chat-font-size").textContent!)).toBe(20)
-		expect(document.documentElement.style.getPropertyValue("--zoo-chat-font-size")).toBe("20px")
+		expect(document.documentElement.style.getPropertyValue("--boo-chat-font-size")).toBe("20px")
 
 		act(() => {
 			screen.getByTestId("reset-font-size-button").click()
 		})
 
 		expect(JSON.parse(screen.getByTestId("chat-font-size").textContent!)).toBe(null)
-		expect(document.documentElement.style.getPropertyValue("--zoo-chat-font-size")).toBe("")
+		expect(document.documentElement.style.getPropertyValue("--boo-chat-font-size")).toBe("")
 	})
 
 	it("updates allowedCommands through setAllowedCommands", () => {
