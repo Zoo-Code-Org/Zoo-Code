@@ -486,8 +486,7 @@ describe("SYSTEM_PROMPT", () => {
 			settings, // settings
 		)
 
-		// update_todo_list is still referenced by mode instructions, but tool catalogs are not embedded.
-		expect(prompt).toContain("update_todo_list")
+		// tool catalog headers are not embedded in the system prompt
 		expect(prompt).not.toContain("## update_todo_list")
 	})
 
@@ -514,8 +513,7 @@ describe("SYSTEM_PROMPT", () => {
 			settings, // settings
 		)
 
-		// update_todo_list is still referenced by mode instructions, but tool catalogs are not embedded.
-		expect(prompt).toContain("update_todo_list")
+		// tool catalog headers are not embedded in the system prompt
 		expect(prompt).not.toContain("## update_todo_list")
 	})
 

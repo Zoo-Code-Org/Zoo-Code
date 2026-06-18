@@ -171,11 +171,6 @@ vi.mock("../activate", () => ({
 	})),
 }))
 
-vi.mock("../i18n", () => ({
-	initializeI18n: vi.fn(),
-	t: vi.fn((key) => key),
-}))
-
 // Mock ClineProvider
 vi.mock("../core/webview/ClineProvider", async () => {
 	const mockInstance = {

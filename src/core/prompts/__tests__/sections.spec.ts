@@ -44,7 +44,7 @@ describe("getCapabilitiesSection", () => {
 	})
 
 	it("includes MCP reference when mcpHub is provided", () => {
-		const mockMcpHub = {} as McpHub
+		const mockMcpHub = { getServers: vi.fn().mockReturnValue([{ name: "test-server" }]) } as unknown as McpHub
 		const result = getCapabilitiesSection(cwd, mockMcpHub)
 
 		expect(result).toContain("MCP servers")
