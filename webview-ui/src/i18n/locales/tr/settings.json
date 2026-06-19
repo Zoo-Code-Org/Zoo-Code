@@ -213,7 +213,8 @@
 		"stoppingButton": "Durduruluyor...",
 		"workspaceToggleLabel": "Bu çalışma alanı için indekslemeyi etkinleştir",
 		"workspaceDisabledMessage": "İndeksleme yapılandırıldı ancak bu çalışma alanı için etkinleştirilmedi.",
-		"autoEnableDefaultLabel": "Yeni çalışma alanları için indekslemeyi otomatik etkinleştir"
+		"autoEnableDefaultLabel": "Yeni çalışma alanları için indekslemeyi otomatik etkinleştir",
+		"sembleProvider": "Semble - Yerel"
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDE tercihlerinizde</SettingsLink> bu ayar için genel bir kısayol yapılandırabilirsiniz.",
@@ -543,6 +544,7 @@
 			"minimal": "Minimal (en hızlı)",
 			"high": "Yüksek",
 			"xhigh": "Çok yüksek",
+			"max": "Maksimum",
 			"medium": "Orta",
 			"low": "Düşük"
 		},
@@ -560,6 +562,13 @@
 			"placeholder": "Varsayılan: claude",
 			"maxTokensLabel": "Maksimum Çıktı Token sayısı",
 			"maxTokensDescription": "Claude Code yanıtları için maksimum çıktı token sayısı. Varsayılan 8000'dir."
+		},
+		"zooGateway": {
+			"account": "Zoo Code Hesabı",
+			"signInButton": "Zoo Code'a giriş yap",
+			"signInDescription": "Hesabınızla Zoo Gateway kullanmak için giriş yapın",
+			"authenticated": "Kimlik doğrulandı",
+			"authenticatedAs": "{{name}} olarak kimlik doğrulandı"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +750,13 @@
 		"inheritEnv": {
 			"label": "Ortam değişkenlerini devral",
 			"description": "Ana VS Code işleminden ortam değişkenlerini devralmak için bunu açın. <0>Daha fazla bilgi edinin</0>"
+		},
+		"profile": {
+			"label": "Zoo Code terminal profili",
+			"followVscode": "VS Code profili takip ediliyor (önerilir)",
+			"description": "Varsayılan olarak Zoo Code, VS Code'da yapılandırılmış kabuğu kullanır. VS Code'un sunduğu yol tabanlı bir kabuk profili seçmek için listeden bir kabuk profili seçin. Yalnızca kaynak profiller (örn. yerleşik PowerShell girişi) burada listelenemez. <0>Daha fazla bilgi</0>",
+			"configureButton": "VS Code'da varsayılan profili seç",
+			"noProfiles": "(terminal.integrated.profiles'da yol tabanlı profil bulunamadı)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "Sağlayıcı '{{provider}}' kuruluşunuz tarafından izin verilmiyor",
 		"modelNotAllowed": "Model '{{model}}' sağlayıcı '{{provider}}' için kuruluşunuz tarafından izin verilmiyor",
 		"profileInvalid": "Bu profil, kuruluşunuz tarafından izin verilmeyen bir sağlayıcı veya model içeriyor",
-		"qwenCodeOauthPath": "Geçerli bir OAuth kimlik bilgileri yolu sağlamalısın"
+		"qwenCodeOauthPath": "Geçerli bir OAuth kimlik bilgileri yolu sağlamalısınız",
+		"zooGatewaySignIn": "Zoo Gateway'i kullanmak için Zoo Code'a giriş yapın."
 	},
 	"placeholders": {
 		"apiKey": "API anahtarını girin...",
@@ -968,6 +985,18 @@
 			"label": "Sohbet yazı tipi boyutu",
 			"description": "Zoo Code sohbeti için yazı tipi boyutunu (piksel cinsinden) ayarlayın. VS Code yazı tipi boyutuyla eşleşmesi için varsayılan değerde bırakın.",
 			"reset": "VS Code varsayılanını kullan"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Zoo tarafindan acilan dosyalari otomatik kapat",
+			"description": "Etkinlestirildiginde, Zoo'nun bir diff icin gecici olarak actigi duzenleyici sekmeleri, degisiklik kabul edildikten veya reddedildikten sonra otomatik olarak kapatilir. Kullanicinin duzenleme oncesinde zaten acik oldugu sekmeler hicbir zaman otomatik olarak kapatilmaz."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Kullanici etkilesiminden sonra da otomatik kapat",
+			"description": "Etkinlestirildiginde, kullanici duzenleme oturumu sirasinda dosyaya veya diff'e tiklasa ya da yazsa bile Zoo tarafindan acilan sekmeler kapatilir. 'Zoo tarafindan acilan dosyalari otomatik kapat' devre disi ise etkisi yoktur."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Yeni olusturulan dosyalari otomatik kapat",
+			"description": "Etkinlestirildiginde, Zoo'nun olusturdugu (degistirmedigi) dosyalarin sekmeleri de degisiklik kabul edildikten sonra otomatik olarak kapatilir."
 		}
 	},
 	"skills": {

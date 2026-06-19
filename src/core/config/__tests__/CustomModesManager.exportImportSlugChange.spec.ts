@@ -226,8 +226,8 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 				],
 			})
 
-			let writtenFiles: Record<string, string> = {}
-			let createdDirs: string[] = []
+			const writtenFiles: Record<string, string> = {}
+			const createdDirs: string[] = []
 
 			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 				if (path === mockSettingsPath) {
@@ -286,7 +286,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 				],
 			})
 
-			let writtenFiles: Record<string, string> = {}
+			const writtenFiles: Record<string, string> = {}
 
 			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 				if (path === mockSettingsPath) {
@@ -346,7 +346,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 				],
 			})
 
-			let writtenFiles: Record<string, string> = {}
+			const writtenFiles: Record<string, string> = {}
 
 			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
 				if (path === mockSettingsPath) {
@@ -413,7 +413,7 @@ describe("CustomModesManager - Export/Import with Slug Changes", () => {
 			const modifiedYaml = yaml.stringify(exportData)
 
 			// Step 4: Import with the new slug
-			let writtenFiles: Record<string, string> = {}
+			const writtenFiles: Record<string, string> = {}
 			;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
 				writtenFiles[path] = content
 				return Promise.resolve()

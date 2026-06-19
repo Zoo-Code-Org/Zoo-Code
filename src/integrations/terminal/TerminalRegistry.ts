@@ -48,8 +48,6 @@ export class TerminalRegistry {
 		try {
 			const startDisposable = vscode.window.onDidStartTerminalShellExecution?.(
 				async (e: vscode.TerminalShellExecutionStartEvent) => {
-					// Get a handle to the stream as early as possible:
-					const stream = e.execution.read()
 					const terminal = this.getTerminalByVSCETerminal(e.terminal)
 
 					console.info("[onDidStartTerminalShellExecution]", {
@@ -57,7 +55,13 @@ export class TerminalRegistry {
 						terminalId: terminal?.id,
 					})
 
-					if (terminal) {
+					if (terminal instanceof Terminal) {
+						if (terminal.activeShellExecution === e.execution) {
+							return
+						}
+
+						// Get a handle to the stream as early as possible.
+						const stream = e.execution.read()
 						terminal.setActiveStream(stream)
 						terminal.busy = true // Mark terminal as busy when shell execution starts
 					} else {
@@ -94,13 +98,26 @@ export class TerminalRegistry {
 						return
 					}
 
-					if (!terminal.running) {
-						console.error(
-							"[TerminalRegistry] Shell execution end event received, but process is not running for terminal:",
-							{ terminalId: terminal?.id, command: process?.command, exitCode: e.exitCode },
-						)
+					if (terminal instanceof Terminal && terminal.activeShellExecution === e.execution) {
+						terminal.activeShellExecution = undefined
+					}
 
-						terminal.busy = false
+					if (!terminal.running) {
+						// The end event can arrive before setActiveStream() has set
+						// running=true (race between the global VS Code event and the
+						// synchronous call in TerminalProcess.run). If a process is
+						// waiting for completion, deliver the signal so it doesn't
+						// hang forever. See #489 / #622.
+						if (process) {
+							console.info(
+								"[TerminalRegistry] End event arrived before running=true (race); delivering completion signal",
+								{ terminalId: terminal.id, exitCode: e.exitCode },
+							)
+							terminal.shellExecutionComplete(exitDetails)
+						} else {
+							terminal.busy = false
+						}
+
 						return
 					}
 
@@ -115,7 +132,6 @@ export class TerminalRegistry {
 
 					// Signal completion to any waiting processes.
 					terminal.shellExecutionComplete(exitDetails)
-					terminal.busy = false // Mark terminal as not busy when shell execution ends
 				},
 			)
 
@@ -155,13 +171,14 @@ export class TerminalRegistry {
 		provider: RooTerminalProvider = "vscode",
 	): Promise<RooTerminal> {
 		const terminals = this.getAllTerminals()
+		const reuseKey = provider === "vscode" ? Terminal.getReuseKey() : provider
 		let terminal: RooTerminal | undefined
 
 		// First priority: Find a terminal already assigned to this task with
 		// matching directory.
 		if (taskId) {
 			terminal = terminals.find((t) => {
-				if (t.busy || t.taskId !== taskId || t.provider !== provider) {
+				if (t.busy || t.taskId !== taskId || t.provider !== provider || t.reuseKey !== reuseKey) {
 					return false
 				}
 
@@ -178,7 +195,7 @@ export class TerminalRegistry {
 		// Second priority: Find any available terminal with matching directory.
 		if (!terminal) {
 			terminal = terminals.find((t) => {
-				if (t.busy || t.provider !== provider) {
+				if (t.busy || t.provider !== provider || t.reuseKey !== reuseKey) {
 					return false
 				}
 
@@ -274,6 +291,22 @@ export class TerminalRegistry {
 		ShellIntegrationManager.clear()
 		this.disposables.forEach((disposable) => disposable.dispose())
 		this.disposables = []
+	}
+
+	/**
+	 * Disposes all idle (non-busy) VS Code terminals so they are not reused
+	 * after a shell profile change. Busy terminals are left untouched.
+	 */
+	public static closeIdleTerminals(): void {
+		this.terminals = this.terminals.filter((t) => {
+			if (t.busy || !(t instanceof Terminal)) {
+				return true
+			}
+
+			t.terminal.dispose()
+			ShellIntegrationManager.zshCleanupTmpDir(t.id)
+			return false
+		})
 	}
 
 	/**

@@ -213,7 +213,8 @@
 		"stoppingButton": "Đang dừng...",
 		"workspaceToggleLabel": "Bật lập chỉ mục cho không gian làm việc này",
 		"workspaceDisabledMessage": "Lập chỉ mục đã được cấu hình nhưng chưa được bật cho không gian làm việc này.",
-		"autoEnableDefaultLabel": "Tự động bật lập chỉ mục cho không gian làm việc mới"
+		"autoEnableDefaultLabel": "Tự động bật lập chỉ mục cho không gian làm việc mới",
+		"sembleProvider": "Semble - Cục bộ"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Bạn có thể định cấu hình một phím tắt chung cho cài đặt này <SettingsLink>trong tùy chọn IDE của bạn</SettingsLink>.",
@@ -543,6 +544,7 @@
 			"minimal": "Tối thiểu (nhanh nhất)",
 			"high": "Cao",
 			"xhigh": "Rất cao",
+			"max": "Tối đa",
 			"medium": "Trung bình",
 			"low": "Thấp"
 		},
@@ -560,6 +562,13 @@
 			"placeholder": "Mặc định: claude",
 			"maxTokensLabel": "Số token đầu ra tối đa",
 			"maxTokensDescription": "Số lượng token đầu ra tối đa cho các phản hồi của Claude Code. Mặc định là 8000."
+		},
+		"zooGateway": {
+			"account": "Tài khoản Zoo Code",
+			"signInButton": "Đăng nhập vào Zoo Code",
+			"signInDescription": "Đăng nhập để sử dụng Zoo Gateway với tài khoản của bạn",
+			"authenticated": "Đã xác thực",
+			"authenticatedAs": "Đã xác thực với tên {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +750,13 @@
 		"inheritEnv": {
 			"label": "Kế thừa biến môi trường",
 			"description": "Bật tính năng này để kế thừa các biến môi trường từ quy trình mẹ của VS Code. <0>Tìm hiểu thêm</0>"
+		},
+		"profile": {
+			"label": "Hồ sơ terminal Zoo Code",
+			"followVscode": "Đang theo hồ sơ VS Code (được khuyến nghị)",
+			"description": "Theo mặc định Zoo Code sử dụng shell được cấu hình trong VS Code. Chọn một hồ sơ shell từ danh sách để chọn hồ sơ shell dựa trên đường dẫn được VS Code cung cấp. Các hồ sơ chỉ nguồn (ví dụ: mục PowerShell tích hợp) không thể được liệt kê ở đây. <0>Tìm hiểu thêm</0>",
+			"configureButton": "Chọn hồ sơ mặc định trong VS Code",
+			"noProfiles": "(không tìm thấy hồ sơ dựa trên đường dẫn trong terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "Nhà cung cấp '{{provider}}' không được phép bởi tổ chức của bạn",
 		"modelNotAllowed": "Mô hình '{{model}}' không được phép cho nhà cung cấp '{{provider}}' bởi tổ chức của bạn",
 		"profileInvalid": "Hồ sơ này chứa một nhà cung cấp hoặc mô hình không được phép bởi tổ chức của bạn",
-		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ"
+		"qwenCodeOauthPath": "Bạn phải cung cấp đường dẫn thông tin xác thực OAuth hợp lệ",
+		"zooGatewaySignIn": "Đăng nhập vào Zoo Code để sử dụng Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Nhập khóa API...",
@@ -968,6 +985,18 @@
 			"label": "Cỡ chữ trò chuyện",
 			"description": "Đặt cỡ chữ (tính bằng pixel) cho cuộc trò chuyện Zoo Code. Để ở giá trị mặc định để khớp với cỡ chữ của VS Code.",
 			"reset": "Dùng mặc định của VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Tự động đóng các tệp do Zoo mở",
+			"description": "Khi bật, các tab trình soạn thảo mà Zoo mở tạm thời để hiển thị diff sẽ tự động đóng sau khi chấp nhận hoặc từ chối thay đổi. Các tab mà người dùng đã mở trước khi chỉnh sửa sẽ không bao giờ bị tự động đóng."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Tự động đóng ngay cả sau khi người dùng tương tác",
+			"description": "Khi bật, các tab do Zoo mở sẽ đóng ngay cả khi người dùng đã nhấn chuột hoặc gõ phím vào tệp hoặc diff trong phiên chỉnh sửa. Không có tác dụng nếu 'Tự động đóng các tệp do Zoo mở' bị tắt."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Tự động đóng các tệp mới tạo",
+			"description": "Khi bật, các tab của các tệp mà Zoo đã tạo (thay vì chỉnh sửa) cũng sẽ tự động đóng sau khi chấp nhận thay đổi."
 		}
 	},
 	"skills": {

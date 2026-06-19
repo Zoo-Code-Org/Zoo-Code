@@ -20,6 +20,8 @@ Zoo Code és un projecte impulsat per la comunitat i valorem profundament cada c
 - [Abans de contribuir](#abans-de-contribuir)
 - [Trobar i planificar la vostra contribució](#trobar-i-planificar-la-vostra-contribució)
 - [Procés de desenvolupament i submissió](#procés-de-desenvolupament-i-submissió)
+- [Expectatives de les sol·licituds d'extracció](#expectatives-de-les-sollicituds-dextracció)
+- [Contribucions amb assistència d'IA](#contribucions-amb-assistència-dia)
 - [Legal](#legal)
 
 ## Abans de contribuir
@@ -135,6 +137,32 @@ pnpm install
 - **Triatge diari:** revisions ràpides per part dels mantenidors.
 - **Revisió setmanal en profunditat:** avaluació completa.
 - **Itereu ràpidament** en funció dels comentaris.
+
+### Expectatives de les sol·licituds d'extracció
+
+Les sol·licituds d'extracció han de ser revisables, provades i mantenibles. Abans d'obrir una PR, assegureu-vos que:
+
+- El canvi s'adapta a un problema, error o millora específics.
+- Podeu explicar què fa el canvi i per què és correcte.
+- Heu provat el canvi localment on sigui pràctic.
+- Esteu disposats a respondre als comentaris de la revisió i fer canvis raonables de seguiment.
+- La PR no requereix que els mantenidors reescriguin, redissenyin o assumeixin la propietat substancial de la implementació abans de poder fusionar-la.
+
+Els mantenidors poden tancar les PR que estiguin incompletes, siguin massa àmplies, inactives, no estiguin alineades amb la direcció del projecte o que creïn una càrrega desproporcionada de revisió o manteniment. Tancar una PR no és un judici sobre el col·laborador; és una decisió dels mantenidors que el canvi no pot ser acceptat en la seva forma actual.
+
+### Contribucions amb assistència d'IA
+
+L'ús d'eines d'IA és permès, però els col·laboradors continuen sent completament responsables de les seves aportacions.
+
+Si utiliseu eines d'IA per ajudar a crear una PR, heu de:
+
+- Revisar i comprendre cada canvi significatiu.
+- Ser capaços d'explicar la implementació i els compromisos amb les vostres pròpies paraules.
+- Provar el canvi vosaltres mateixos. Si les proves no són pràctiques en el vostre entorn, expliqueu per què a la descripció de la PR i descriviu com els revisors poden verificar el canvi.
+- Verificar que el codi generat és correcte, necessari i compatible amb la llicència del projecte.
+- Considereu revelar l'assistència d'IA a la descripció de la PR quan hagi influït materialment en el codi, les proves o el disseny — això ajuda els revisors a donar millors comentaris.
+
+Si us plau, no envieu canvis generats per IA que no enteneu o que no podeu mantenir durant la revisió. Els mantenidors poden tancar les PR que semblin substancialment assistides per IA però que manquin de verificació humana, raonament clar o seguiment de la revisió.
 
 ## Legal
 

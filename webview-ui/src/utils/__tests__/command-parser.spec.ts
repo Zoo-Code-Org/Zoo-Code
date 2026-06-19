@@ -133,4 +133,46 @@ describe("extractPatternsFromCommand", () => {
 		expect(patterns).toEqual(["docker", "docker run"])
 		// Stops at -it flag
 	})
+
+	describe("heredoc handling", () => {
+		// A terminated heredoc is a single opaque token from parseCommand.
+		// extractPatternsFromCommand must extract only the leading command word
+		// and not feed the raw heredoc body to shell-quote (which would split on
+		// << and embedded newlines, producing garbage tokens).
+		it("extracts only the leading command from a terminated heredoc", () => {
+			const heredoc = "sh << EOF\necho hello\nEOF"
+			const patterns = extractPatternsFromCommand(heredoc)
+			expect(patterns).toEqual(["sh"])
+			expect(patterns).not.toContain("EOF")
+			expect(patterns).not.toContain("echo")
+		})
+
+		it("extracts only the leading command from an unterminated heredoc", () => {
+			// An unterminated heredoc is returned as one opaque token by parseCommand.
+			// The pattern extractor must not split it into components interior to the heredoc
+			const heredoc = "sh << EOF\necho hello"
+			const patterns = extractPatternsFromCommand(heredoc)
+			expect(patterns).toEqual(["sh"])
+			expect(patterns).not.toContain("EOF")
+			expect(patterns).not.toContain("echo")
+			expect(patterns).not.toContain("hello")
+		})
+		it("does not produce tokens from heredoc body lines", () => {
+			const heredoc = "sh << EOF\necho body-line\nEOF"
+			const patterns = extractPatternsFromCommand(heredoc)
+			// body commands must not surface as auto-approvable patterns
+			expect(patterns).not.toContain("echo")
+			expect(patterns).toEqual(["sh"])
+		})
+
+		it("handles a heredoc followed by another command", () => {
+			// parseCommand splits this into the heredoc token and 'echo done'
+			const input = "sh << EOF\necho hello\nEOF\necho done"
+			const patterns = extractPatternsFromCommand(input)
+			expect(patterns).toContain("sh")
+			expect(patterns).toContain("echo")
+			expect(patterns).not.toContain("EOF")
+			expect(patterns).not.toContain("hello")
+		})
+	})
 })

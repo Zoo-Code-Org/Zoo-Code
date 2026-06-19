@@ -386,7 +386,7 @@ describe("ListFilesTool", () => {
 
 	it("should call handleError when formatFilesList throws", async () => {
 		const error = new Error("Format error")
-		vi.mocked(formatResponse.formatFilesList).mockImplementation(() => {
+		vi.mocked(formatResponse.formatFilesList).mockImplementation(function () {
 			throw error
 		})
 		const params = { path: "src", recursive: false }
@@ -471,7 +471,7 @@ describe("ListFilesTool", () => {
 	})
 
 	it("should propagate errors thrown before task.ask in handlePartial", async () => {
-		vi.mocked(getReadablePath).mockImplementation(() => {
+		vi.mocked(getReadablePath).mockImplementation(function () {
 			throw new Error("path error")
 		})
 		const block = createBlock({ path: "src" }, true)

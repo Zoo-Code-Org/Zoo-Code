@@ -30,19 +30,11 @@
 
 Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
-## v3.56.0 の新機能
+## v3.60.0 の新機能
 
-- Anthropic・Bedrock・Vertex で **Claude Opus 4.8** をサポート
-- **Opencode Go** を新たな正式 API プロバイダーとして追加
-- **タスクキャンセルの改善** — タスクをキャンセルすると実行中のプロセスが正しく終了。応答しないプロセスには Ctrl+C の自動リトライも実施
-- Gemini のカスタムモデル ID が無視されてデフォルトにフォールバックする問題を修正
-- マーカー欠落による Grok diff の切り捨てを修正
-- シェルプロファイルが未設定の Windows での PowerShell 検出を修正
-- VS Code コードアクションが Roo Code のブランド名を表示していた問題を修正。全サポート言語にローカライズ済み
-- Google Cloud 認証情報フィールドにファイルパスを受け取った際の Vertex AI の誤警告を修正
-- 6 件のセキュリティ依存関係更新 (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5（Anthropic、Bedrock、Vertex）と OpenAI GPT-5.5 がプロバイダー設定で利用可能になりました
+- **モード別 MCP allowlist** — モード設定の allowlist を使用して、各モードで有効にする MCP サーバーを制限できます
+- **ワークスペース rootResolution 設定** — マルチルートワークスペースでのファイルパス解決方法を制御する新しい設定
 
 ## Zoo Codeがあなたのためにできること
 

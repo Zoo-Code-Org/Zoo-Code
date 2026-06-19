@@ -23,7 +23,7 @@ export type ReasoningEffortWithMinimal = z.infer<typeof reasoningEffortWithMinim
  * Extended Reasoning Effort (includes "none" and "minimal")
  * Note: "disable" is a UI/control value, not a value sent as effort
  */
-export const reasoningEffortsExtended = ["none", "minimal", "low", "medium", "high", "xhigh"] as const
+export const reasoningEffortsExtended = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
 export const reasoningEffortExtendedSchema = z.enum(reasoningEffortsExtended)
 
@@ -32,7 +32,16 @@ export type ReasoningEffortExtended = z.infer<typeof reasoningEffortExtendedSche
 /**
  * Reasoning Effort user setting (includes "disable")
  */
-export const reasoningEffortSettingValues = ["disable", "none", "minimal", "low", "medium", "high", "xhigh"] as const
+export const reasoningEffortSettingValues = [
+	"disable",
+	"none",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+] as const
 export const reasoningEffortSettingSchema = z.enum(reasoningEffortSettingValues)
 
 /**
@@ -81,6 +90,10 @@ export const modelInfoSchema = z.object({
 	promptCacheRetention: z.enum(["in_memory", "24h"]).optional(),
 	// Capability flag to indicate whether the model supports an output verbosity parameter
 	supportsVerbosity: z.boolean().optional(),
+	// Capability flag to indicate whether the model exposes a user-configurable max output
+	// tokens control in settings. When set, the settings UI surfaces a slider that persists
+	// `modelMaxTokens`; when the user leaves it unset, the default output clamp is used.
+	supportsMaxTokens: z.boolean().optional(),
 	supportsReasoningBudget: z.boolean().optional(),
 	// Capability flag to indicate whether the model supports simple on/off binary reasoning
 	supportsReasoningBinary: z.boolean().optional(),
@@ -89,7 +102,7 @@ export const modelInfoSchema = z.object({
 	defaultTemperature: z.number().optional(),
 	requiredReasoningBudget: z.boolean().optional(),
 	supportsReasoningEffort: z
-		.union([z.boolean(), z.array(z.enum(["disable", "none", "minimal", "low", "medium", "high", "xhigh"]))])
+		.union([z.boolean(), z.array(z.enum(["disable", "none", "minimal", "low", "medium", "high", "xhigh", "max"]))])
 		.optional(),
 	requiredReasoningEffort: z.boolean().optional(),
 	preserveReasoning: z.boolean().optional(),

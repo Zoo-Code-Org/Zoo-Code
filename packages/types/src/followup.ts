@@ -22,6 +22,19 @@ export interface SuggestionItem {
 	mode?: string
 }
 
+export const getSuggestionMode = (mode: unknown): string | undefined => {
+	if (typeof mode === "string" && mode.trim().length > 0) {
+		return mode.trim()
+	}
+
+	if (mode && typeof mode === "object" && "mode_slug" in mode) {
+		const modeSlug = (mode as { mode_slug?: unknown }).mode_slug
+		return typeof modeSlug === "string" && modeSlug.trim().length > 0 ? modeSlug.trim() : undefined
+	}
+
+	return undefined
+}
+
 /**
  * Zod schema for SuggestionItem
  */

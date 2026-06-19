@@ -213,7 +213,8 @@
 		"stoppingButton": "Arrêt en cours...",
 		"workspaceToggleLabel": "Activer l'indexation pour cet espace de travail",
 		"workspaceDisabledMessage": "L'indexation est configurée mais non activée pour cet espace de travail.",
-		"autoEnableDefaultLabel": "Activer automatiquement l'indexation pour les nouveaux espaces de travail"
+		"autoEnableDefaultLabel": "Activer automatiquement l'indexation pour les nouveaux espaces de travail",
+		"sembleProvider": "Semble - Local"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Vous pouvez configurer un raccourci global pour ce paramètre <SettingsLink>dans les préférences de votre IDE</SettingsLink>.",
@@ -543,6 +544,7 @@
 			"minimal": "Minimal (le plus rapide)",
 			"high": "Élevé",
 			"xhigh": "Très élevé",
+			"max": "Maximum",
 			"medium": "Moyen",
 			"low": "Faible"
 		},
@@ -560,6 +562,13 @@
 			"placeholder": "Défaut : claude",
 			"maxTokensLabel": "Jetons de sortie max",
 			"maxTokensDescription": "Nombre maximum de jetons de sortie pour les réponses de Claude Code. La valeur par défaut est 8000."
+		},
+		"zooGateway": {
+			"account": "Compte Zoo Code",
+			"signInButton": "Se connecter à Zoo Code",
+			"signInDescription": "Connectez-vous pour utiliser Zoo Gateway avec votre compte",
+			"authenticated": "Authentifié",
+			"authenticatedAs": "Authentifié en tant que {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +750,13 @@
 		"inheritEnv": {
 			"label": "Hériter des variables d'environnement",
 			"description": "Activez pour hériter des variables d'environnement du processus parent VS Code. <0>En savoir plus</0>"
+		},
+		"profile": {
+			"label": "Profil de terminal Zoo Code",
+			"followVscode": "Suivre le profil de VS Code (recommandé)",
+			"description": "Par défaut, Zoo Code utilise le shell configuré dans VS Code. Sélectionnez un profil shell dans la liste pour choisir un profil shell avec chemin exposé par VS Code. Les profils source uniquement (ex. : l'entrée PowerShell intégrée) ne peuvent pas être listés ici. <0>En savoir plus</0>",
+			"configureButton": "Choisir le profil par défaut dans VS Code",
+			"noProfiles": "(aucun profil avec chemin trouvé dans terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "Le fournisseur '{{provider}}' n'est pas autorisé par votre organisation",
 		"modelNotAllowed": "Le modèle '{{model}}' n'est pas autorisé pour le fournisseur '{{provider}}' par votre organisation",
 		"profileInvalid": "Ce profil contient un fournisseur ou un modèle qui n'est pas autorisé par votre organisation",
-		"qwenCodeOauthPath": "Tu dois fournir un chemin valide pour les identifiants OAuth"
+		"qwenCodeOauthPath": "Tu dois fournir un chemin valide pour les identifiants OAuth",
+		"zooGatewaySignIn": "Connectez-vous à Zoo Code pour utiliser Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Saisissez la clé API...",
@@ -968,6 +985,18 @@
 			"label": "Taille de police du chat",
 			"description": "Définissez la taille de police (en pixels) du chat Zoo Code. Laissez la valeur par défaut pour correspondre à la taille de police de VS Code.",
 			"reset": "Utiliser la valeur par défaut de VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Fermer automatiquement les fichiers ouverts par Zoo",
+			"description": "Quand cette option est activée, les onglets d'éditeur que Zoo a ouverts temporairement pour un diff sont fermés automatiquement après l'acceptation ou le rejet de la modification. Les onglets que l'utilisateur avait déjà ouverts avant la modification ne sont jamais fermés automatiquement."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Fermer automatiquement même après interaction utilisateur",
+			"description": "Quand cette option est activée, les onglets ouverts par Zoo sont fermés même si l'utilisateur a cliqué ou tapé dans le fichier ou le diff pendant la session de modification. N'a aucun effet si 'Fermer automatiquement les fichiers ouverts par Zoo' est désactivé."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Fermer automatiquement les nouveaux fichiers créés",
+			"description": "Quand cette option est activée, les onglets des fichiers que Zoo a créés (plutôt que modifiés) sont également fermés automatiquement après l'acceptation de la modification."
 		}
 	},
 	"skills": {

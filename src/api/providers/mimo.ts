@@ -9,6 +9,7 @@ import { convertToR1Format } from "../transform/r1-format"
 import { getModelParams } from "../transform/model-params"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { handleProviderError } from "./utils/error-handler"
+import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 import { OpenAiHandler } from "./openai"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
@@ -127,11 +128,9 @@ export class MimoHandler extends OpenAiHandler {
 				}
 			}
 
-			if ("reasoning_content" in delta && delta.reasoning_content) {
-				yield {
-					type: "reasoning",
-					text: (delta.reasoning_content as string) || "",
-				}
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
 			}
 
 			yield* this.processToolCalls(sanitizedDelta, finishReason, activeToolCallIds)

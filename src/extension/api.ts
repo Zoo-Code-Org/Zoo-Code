@@ -24,6 +24,8 @@ import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import { Terminal } from "../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { openClineInNewTab } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
@@ -475,6 +477,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		await this.sidebarProvider.contextProxy.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		await this.sidebarProvider.postStateToWebview()
+	}
+
+	public setTerminalProfile(name: string | undefined): void {
+		const previousProfile = Terminal.getTerminalProfile()
+		Terminal.setTerminalProfile(name)
+
+		if (Terminal.getTerminalProfile() !== previousProfile) {
+			TerminalRegistry.closeIdleTerminals()
+		}
 	}
 
 	// Provider Profile Management

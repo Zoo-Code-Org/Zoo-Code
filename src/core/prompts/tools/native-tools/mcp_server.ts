@@ -11,12 +11,18 @@ import { normalizeToolSchema, type JsonSchema } from "../../../../utils/json-sch
  * @param mcpHub The McpHub instance containing connected servers.
  * @returns An array of OpenAI.Chat.ChatCompletionTool definitions.
  */
-export function getMcpServerTools(mcpHub?: McpHub): OpenAI.Chat.ChatCompletionTool[] {
+export function getMcpServerTools(mcpHub?: McpHub, allowedServers?: string[]): OpenAI.Chat.ChatCompletionTool[] {
 	if (!mcpHub) {
 		return []
 	}
 
-	const servers = mcpHub.getServers()
+	let servers = mcpHub.getServers()
+
+	// Filter servers by allowlist if provided
+	if (allowedServers) {
+		const allowSet = new Set(allowedServers)
+		servers = servers.filter((s) => allowSet.has(s.name))
+	}
 	const tools: OpenAI.Chat.ChatCompletionTool[] = []
 	// Track seen tool names to prevent duplicates (e.g., when same server exists in both global and project configs)
 	const seenToolNames = new Set<string>()

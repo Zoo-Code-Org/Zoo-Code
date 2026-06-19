@@ -20,6 +20,12 @@ import CodeBlock from "@src/components/common/CodeBlock"
 import { CommandPatternSelector } from "./CommandPatternSelector"
 import { TerminalOutput } from "./TerminalOutput"
 
+// Module-level cache of the most recent status for each executionId. Populated
+// by every onMessage handler so that a CommandExecution component that mounts
+// after the "started" event was already delivered can recover the status from
+// the cache rather than staying stuck at null.
+const statusCache = new Map<string, CommandExecutionStatus>()
+
 interface CommandPattern {
 	pattern: string
 	description?: string
@@ -47,7 +53,9 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 	// to expanding the command execution output.
 	const [isExpanded, setIsExpanded] = useState(terminalShellIntegrationDisabled)
 	const [streamingOutput, setStreamingOutput] = useState("")
-	const [status, setStatus] = useState<CommandExecutionStatus | null>(null)
+	// Initialize from the module-level cache so that components mounting after
+	// the "started" event was delivered still show the running indicator.
+	const [status, setStatus] = useState<CommandExecutionStatus | null>(() => statusCache.get(executionId) ?? null)
 
 	// The command's output can either come from the text associated with the
 	// task message (this is the case for completed commands) or from the
@@ -57,14 +65,17 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 	// Extract command patterns from the actual command that was executed
 	const commandPatterns = useMemo<CommandPattern[]>(() => {
 		// First get all individual commands (including subshell commands) using parseCommand
-		const allCommands = parseCommand(command)
+		const { commands: allCommands } = parseCommand(command)
 
 		// Then extract patterns from each command using the existing pattern extraction logic
 		const allPatterns = new Set<string>()
 
-		// Add all individual commands first
+		// Add all individual commands first. Multi-line patterns (e.g. heredocs,
+		// unterminated quotes) are opaque tokens and must not be added verbatim --
+		// their body lines would surface as approvable patterns. Only add
+		// single-line commands; multi-line tokens are covered by pattern extraction.
 		allCommands.forEach((cmd) => {
-			if (cmd.trim()) {
+			if (cmd.trim() && !cmd.includes("\n")) {
 				allPatterns.add(cmd.trim())
 			}
 		})
@@ -125,13 +136,31 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 
 					switch (data.status) {
 						case "started":
+							// Cache the started status so a component that mounts
+							// after this event (e.g. after auto-approval causes a
+							// fast remount) can recover the running indicator.
+							statusCache.set(executionId, data)
 							setStatus(data)
+							break
+						case "exited":
+						case "error":
+						case "timeout":
+							// Terminal states clear the cache so a fresh component
+							// mounting after execution ends does not inherit a stale
+							// "started" entry and incorrectly show the pulse dot.
+							// Map.delete on a missing key is a no-op, so duplicate
+							// deletes (e.g. error followed by exited) are safe.
+							statusCache.delete(executionId)
+							setStatus(data)
+							break
+						case "fallback":
+							// Not a terminal state -- signals a mid-execution retry
+							// via execa after a shell integration failure. A new
+							// "started" event will follow, so leave the cache intact.
+							setIsExpanded(true)
 							break
 						case "output":
 							setStreamingOutput(data.output)
-							break
-						case "fallback":
-							setIsExpanded(true)
 							break
 						default:
 							setStatus(data)
@@ -151,6 +180,11 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 				<div className="flex flex-row items-center gap-2">
 					{icon}
 					{title}
+					{status?.status === "started" && (
+						<StandardTooltip content={t("chat:commandExecution.running")}>
+							<div className="rounded-full size-2 bg-yellow-500 animate-pulse" />
+						</StandardTooltip>
+					)}
 					{status?.status === "exited" && (
 						<div className="flex flex-row items-center gap-2 font-mono text-xs">
 							<StandardTooltip
@@ -161,6 +195,13 @@ export const CommandExecution = ({ executionId, text, icon, title }: CommandExec
 										status.exitCode === 0 ? "bg-green-600" : "bg-red-600",
 									)}
 								/>
+							</StandardTooltip>
+						</div>
+					)}
+					{status?.status === "error" && (
+						<div className="flex flex-row items-center gap-2 font-mono text-xs text-vscode-errorForeground">
+							<StandardTooltip content={status.message ?? t("chat:commandExecution.malformedCommand")}>
+								<div className="rounded-full size-2 bg-red-600" />
 							</StandardTooltip>
 						</div>
 					)}

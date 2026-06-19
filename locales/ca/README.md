@@ -30,19 +30,11 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.56.0
+## Novetats a la v3.60.0
 
-- Suport per a **Claude Opus 4.8** als proveïdors Anthropic, Bedrock i Vertex
-- **Opencode Go** afegit com a nou proveïdor d'API de primera classe
-- **Cancel·lació de tasques fiable** — cancel·lar una tasca ara finalitza el procés en execució, amb reintent automàtic de Ctrl+C per als processos que no responen
-- S'han corregit els ID de model personalitzats de Gemini que s'ignoraven i tornaven al valor predeterminat
-- S'han corregit els diffs de Grok truncats per marcadors faltants
-- S'ha corregit la detecció de PowerShell a Windows quan no hi ha cap perfil de shell configurat
-- S'han corregit les accions de codi del VS Code que encara mostraven la marca Roo Code; localitzades en tots els idiomes suportats
-- S'ha corregit l'avís de Vertex AI quan el camp de credencials de Google Cloud rep una ruta de fitxer
-- Sis actualitzacions de seguretat de dependències (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) i OpenAI GPT-5.5 ara estan disponibles a la configuració del proveïdor
+- **Llistes d'accés MCP per mode** — restringeix quins servidors MCP estan actius per mode usant una llista d'accés a la configuració del mode
+- **rootResolution per a l'espai de treball** — nou ajust per controlar com Zoo Code resol les rutes d'arxiu entre arrels en espais de treball multi-arrel
 
 ## Què pot fer Zoo Code per TU?
 

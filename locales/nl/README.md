@@ -30,19 +30,11 @@
 
 Je vindt een korte handleiding voor de overstap van Roo Code naar Zoo Code in de [Roo→Zoo-migratiegids](https://docs.zoocode.dev/roo-to-zoo-migration). We willen gebruikers zo goed mogelijk helpen tijdens de overgang, en precies daarvoor zijn onze [Reddit](https://www.reddit.com/r/ZooCode) en [Discord](https://discord.gg/VxfP4Vx3gX) er. Als je ergens tegenaan loopt of vragen hebt, kom langs en vraag het.
 
-## Nieuw in v3.56.0
+## Nieuw in v3.60.0
 
-- **Claude Opus 4.8**-ondersteuning voor Anthropic, Bedrock en Vertex
-- **Opencode Go** toegevoegd als nieuwe eersteklas API-provider
-- **Betrouwbare taakafsluiting** — een taak annuleren beëindigt nu correct het lopende proces, met automatische Ctrl+C-herpoging voor hardnekkige processen
-- Aangepaste Gemini-model-ID's die werden genegeerd en terugvielen op de standaard zijn gecorrigeerd
-- Afgeknipte Grok-diffs door ontbrekende markeerders zijn opgelost
-- PowerShell-detectie op Windows zonder geconfigureerd shell-profiel is gecorrigeerd
-- VS Code-code-acties die nog de Roo Code-naam toonden zijn gecorrigeerd; gelokaliseerd in alle ondersteunde talen
-- Vertex AI-waarschuwing bij een bestandspad in het Google Cloud Credentials-veld is opgelost
-- Zes beveiligingsupdates voor afhankelijkheden (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) en OpenAI GPT-5.5 zijn nu beschikbaar in de providerinstellingen
+- **MCP-allowlists per modus** — beperk welke MCP-servers actief zijn per modus met een allowlist in de modusconfiguratie
+- **Workspace rootResolution-instelling** — nieuwe instelling voor het beheren van bestandspadresolutie in multi-root-workspaces
 
 ## Wat kan Zoo Code voor JOU doen?
 

@@ -118,24 +118,28 @@ describe("MarkdownBlock", () => {
 		["IMPORTANT", "important", "codicon-report"],
 		["WARNING", "warning", "codicon-warning"],
 		["CAUTION", "caution", "codicon-flame"],
-	])("renders a [!%s] GitHub-style alert (#258)", async (marker, type, iconClass) => {
-		const markdown = `> [!${marker}]\n> Body content here.`
-		const { container } = render(<MarkdownBlock markdown={markdown} />)
+	])(
+		"renders a [!%s] GitHub-style alert (#258)",
+		async (marker, type, iconClass) => {
+			const markdown = `> [!${marker}]\n> Body content here.`
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
 
-		await screen.findByText(/Body content here/, { exact: false })
+			await screen.findByText(/Body content here/, { exact: false })
 
-		const alert = container.querySelector(`blockquote[data-alert-type="${type}"]`)
-		expect(alert).not.toBeNull()
-		expect(alert?.classList.contains("markdown-alert")).toBe(true)
-		expect(alert?.classList.contains(`markdown-alert-${type}`)).toBe(true)
+			const alert = container.querySelector(`blockquote[data-alert-type="${type}"]`)
+			expect(alert).not.toBeNull()
+			expect(alert?.classList.contains("markdown-alert")).toBe(true)
+			expect(alert?.classList.contains(`markdown-alert-${type}`)).toBe(true)
 
-		// Distinct icon for the alert type.
-		expect(alert?.querySelector(`.${iconClass}`)).not.toBeNull()
+			// Distinct icon for the alert type.
+			expect(alert?.querySelector(`.${iconClass}`)).not.toBeNull()
 
-		// The raw "[!TYPE]" marker must not leak into the rendered text.
-		expect(alert?.textContent).not.toContain(`[!${marker}]`)
-		expect(alert?.textContent).toContain("Body content here.")
-	}, 10000)
+			// The raw "[!TYPE]" marker must not leak into the rendered text.
+			expect(alert?.textContent).not.toContain(`[!${marker}]`)
+			expect(alert?.textContent).toContain("Body content here.")
+		},
+		10000,
+	)
 
 	it("recognizes alert markers case-insensitively", async () => {
 		const markdown = `> [!note]\n> lowercase marker`

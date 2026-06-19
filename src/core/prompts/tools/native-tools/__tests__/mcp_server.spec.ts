@@ -197,4 +197,53 @@ describe("getMcpServerTools", () => {
 		})
 		expect(getFunction(result[0]).parameters).not.toHaveProperty("required")
 	})
+	describe("allowedServers filtering", () => {
+		it("should return all tools when allowedServers is undefined", () => {
+			const server1 = createMockServer("server1", [createMockTool("tool1")])
+			const server2 = createMockServer("server2", [createMockTool("tool2")])
+			const mockHub = createMockMcpHub([server1, server2])
+
+			const result = getMcpServerTools(mockHub as McpHub, undefined)
+
+			expect(result).toHaveLength(2)
+			const toolNames = result.map((t) => getFunction(t).name)
+			expect(toolNames).toContain("mcp--server1--tool1")
+			expect(toolNames).toContain("mcp--server2--tool2")
+		})
+
+		it("should return only tools from allowed servers when allowedServers is provided", () => {
+			const server1 = createMockServer("server1", [createMockTool("tool1")])
+			const server2 = createMockServer("server2", [createMockTool("tool2")])
+			const server3 = createMockServer("server3", [createMockTool("tool3")])
+			const mockHub = createMockMcpHub([server1, server2, server3])
+
+			const result = getMcpServerTools(mockHub as McpHub, ["server1", "server3"])
+
+			expect(result).toHaveLength(2)
+			const toolNames = result.map((t) => getFunction(t).name)
+			expect(toolNames).toContain("mcp--server1--tool1")
+			expect(toolNames).toContain("mcp--server3--tool3")
+			expect(toolNames).not.toContain("mcp--server2--tool2")
+		})
+
+		it("should return empty array when allowedServers is empty array", () => {
+			const server1 = createMockServer("server1", [createMockTool("tool1")])
+			const server2 = createMockServer("server2", [createMockTool("tool2")])
+			const mockHub = createMockMcpHub([server1, server2])
+
+			const result = getMcpServerTools(mockHub as McpHub, [])
+
+			expect(result).toEqual([])
+		})
+
+		it("should ignore server names in allowedServers not found in hub", () => {
+			const server1 = createMockServer("server1", [createMockTool("tool1")])
+			const mockHub = createMockMcpHub([server1])
+
+			const result = getMcpServerTools(mockHub as McpHub, ["server1", "nonexistent-server"])
+
+			expect(result).toHaveLength(1)
+			expect(getFunction(result[0]).name).toBe("mcp--server1--tool1")
+		})
+	})
 })

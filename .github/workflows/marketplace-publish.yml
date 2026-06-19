@@ -7,8 +7,53 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish-stable:
+  check-pr-approval:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Check PR approval status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          pr_number=$(gh api "repos/${REPO}/commits/${SHA}/pulls" \
+            --header "Accept: application/vnd.github+json" \
+            --jq '.[0].number // empty')
+
+          if [ -z "$pr_number" ]; then
+            echo "No PR found for commit ${SHA}. Deployment requires an approved PR."
+            exit 1
+          fi
+
+          review_decision=$(gh api graphql \
+            -f owner="${REPO%%/*}" \
+            -f name="${REPO#*/}" \
+            -F number="$pr_number" \
+            -f query='
+              query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                  pullRequest(number: $number) {
+                    reviewDecision
+                  }
+                }
+              }' \
+            --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
+
+          echo "PR #${pr_number} review_decision: ${review_decision}"
+
+          if [ "$review_decision" != "APPROVED" ]; then
+            echo "PR #${pr_number} is not approved (state: ${review_decision}). Deployment blocked."
+            exit 1
+          fi
+
+          echo "PR #${pr_number} is approved. Proceeding."
+
+  publish-stable:
+    needs: [check-pr-approval]
+    runs-on: ubuntu-latest
+    environment: marketplace-production
     permissions:
       contents: write
 
@@ -28,6 +73,13 @@ jobs:
 
           test "$package_name" = "zoo-code"
           test "$publisher" = "ZooCodeOrganization"
+
+      - name: Validate publish ref
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Manual stable publishes must run from main, not ${GITHUB_REF_NAME}."
+            exit 1
+          fi
 
       - name: Validate release tag
         if: github.event_name == 'push'

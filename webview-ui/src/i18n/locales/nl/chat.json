@@ -216,6 +216,7 @@
 		"abort": "Afbreken",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Afgesloten met status {{exitCode}}",
+		"malformedCommand": "Ongeldig commando: shell syntaxisfout",
 		"manageCommands": "Automatisch goedgekeurde commando's",
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
@@ -303,16 +304,11 @@
 	"announcement": {
 		"title": "Zoo Code {{version}} uitgebracht",
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
-		"handoff": {
-			"heading": "Roo Code is terug! Nu als een door de community onderhouden plugin genaamd Zoo Code!!",
-			"description": "Als je het gemist hebt: het Roo Code-team heeft onlangs aangekondigd dat het de ontwikkeling van Roo Code afbouwt en het bestaande werk archiveert. Maar geen zorgen: de community is opgestaan om de erfenis van Roo Code voort te zetten met een nieuwe naam en een nieuw thuis. We zijn niet langer slechts één \"Roo\", maar een community — een \"Zoo\", zogezegd. Zoo Code is een door de community onderhouden plugin die verdergaat waar Roo Code ophield, en we zetten ons ervoor in om de geest van Roo levend te houden terwijl we ook nieuwe functies en verbeteringen introduceren. We willen het hele Roo Code-team enorm bedanken voor hun geweldige werk en voor het maken van zo'n fantastisch hulpmiddel voor ontwikkelaars. We kijken ernaar uit om verder te bouwen op hun fundament en te zien waar de community Zoo Code in de toekomst naartoe brengt!",
-			"readMore": "Bekijk de nieuwe homepage van Zoo Code en lees de volledige aankondiging"
-		},
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Claude Opus 4.8 en Opencode Go: Claude Opus 4.8 toegevoegd voor Anthropic, Bedrock en Vertex, plus Opencode Go als nieuwe eersteklas provider.",
-			"highlight2": "Betrouwbare taakafsluiting: Een taak annuleren beëindigt nu correct het lopende proces, met automatische Ctrl+C-herpoging voor hardnekkige processen.",
-			"highlight3": "Provider- en editorfixes: Aangepaste Gemini-model-ID's, afgeknipte Grok-diffs, PowerShell-detectie op Windows en de VS Code-code-actienaam zijn gecorrigeerd."
+			"highlight1": "Nieuwe AI-modellen — Claude Fable 5 voor alle Anthropic-providers en OpenAI GPT-5.5 zijn nu beschikbaar in je providerinstellingen.",
+			"highlight2": "MCP-allowlists per modus — beperk welke MCP-servers actief zijn per modus met een nieuwe allowlist in je modusconfiguratie.",
+			"highlight3": "Workspace rootResolution-instelling — een nieuwe instelling die bepaalt hoe Zoo Code bestandspaden oplost in multi-root-workspaces."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

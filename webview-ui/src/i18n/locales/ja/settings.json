@@ -213,7 +213,8 @@
 		"stoppingButton": "停止中...",
 		"workspaceToggleLabel": "このワークスペースのインデックス作成を有効にする",
 		"workspaceDisabledMessage": "インデックス作成は設定済みですが、このワークスペースでは有効になっていません。",
-		"autoEnableDefaultLabel": "新しいワークスペースのインデックス作成を自動的に有効にする"
+		"autoEnableDefaultLabel": "新しいワークスペースのインデックス作成を自動的に有効にする",
+		"sembleProvider": "Semble - ローカル"
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDEの環境設定</SettingsLink>で、この設定のグローバルショートカットを設定できます。",
@@ -543,6 +544,7 @@
 			"minimal": "最小 (最速)",
 			"high": "高",
 			"xhigh": "非常に高い",
+			"max": "最高",
 			"medium": "中",
 			"low": "低"
 		},
@@ -560,6 +562,13 @@
 			"placeholder": "デフォルト：claude",
 			"maxTokensLabel": "最大出力トークン",
 			"maxTokensDescription": "Claude Codeレスポンスの最大出力トークン数。デフォルトは8000です。"
+		},
+		"zooGateway": {
+			"account": "Zoo Code アカウント",
+			"signInButton": "Zoo Code にサインイン",
+			"signInDescription": "Zoo Gateway をアカウントで使用するにはサインインしてください",
+			"authenticated": "認証済み",
+			"authenticatedAs": "{{name}} として認証済み"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +750,13 @@
 		"inheritEnv": {
 			"label": "環境変数を継承",
 			"description": "親VS Codeプロセスから環境変数を継承するには、これをオンにします。<0>詳細情報</0>"
+		},
+		"profile": {
+			"label": "Zoo Code シェルプロファイル",
+			"followVscode": "VS Code プロファイルに従う（推奨）",
+			"description": "デフォルトでは Zoo Code は VS Code に設定されたシェルを使用します。VS Code が公開するパスベースのシェルプロファイルを選択するには一覧からシェルプロファイルを選択してください。ソースのみのプロファイル（例：組み込みの PowerShell エントリ）はここに表示できません。 <0>詳細を見る</0>",
+			"configureButton": "VS Code でデフォルトプロファイルを選択",
+			"noProfiles": "(terminal.integrated.profiles にパスベースのプロファイルが見つかりません)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "プロバイダー「{{provider}}」は組織によって許可されていません",
 		"modelNotAllowed": "モデル「{{model}}」はプロバイダー「{{provider}}」に対して組織によって許可されていません",
 		"profileInvalid": "このプロファイルには、組織によって許可されていないプロバイダーまたはモデルが含まれています",
-		"qwenCodeOauthPath": "有効なOAuth認証情報のパスを提供する必要があります"
+		"qwenCodeOauthPath": "有効なOAuth認証情報のパスを提供する必要があります",
+		"zooGatewaySignIn": "Zoo Gatewayを使用するにはZoo Codeにサインインしてください。"
 	},
 	"placeholders": {
 		"apiKey": "API キーを入力...",
@@ -968,6 +985,18 @@
 			"label": "チャットのフォントサイズ",
 			"description": "Zoo Code チャットのフォントサイズ（ピクセル単位）を設定します。VS Code のフォントサイズに合わせるには既定値のままにしてください。",
 			"reset": "VS Code の既定値を使用"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Zooが開いたファイルを自動的に閉じる",
+			"description": "有効にすると、Zooがdiffのために一時的に開いたエディタタブが、変更を承認または拒否した後に自動的に閉じられます。編集前にユーザーがすでに開いていたタブは、自動的に閉じられることはありません。"
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "ユーザー操作後も自動的に閉じる",
+			"description": "有効にすると、ユーザーが編集セッション中にファイルまたはdiffをクリックまたは入力した場合でも、Zooが開いたタブが閉じられます。「Zooが開いたファイルを自動的に閉じる」が無効の場合は効果がありません。"
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "新しく作成されたファイルを自動的に閉じる",
+			"description": "有効にすると、Zooが作成した（変更ではなく）ファイルのタブも、変更を承認した後に自動的に閉じられます。"
 		}
 	},
 	"skills": {

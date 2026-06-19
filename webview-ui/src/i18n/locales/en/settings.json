@@ -165,6 +165,18 @@
 			"label": "Chat font size",
 			"description": "Set the font size (in pixels) for the Zoo Code chat. Leave at the default to match VS Code's font size.",
 			"reset": "Use VS Code default"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Auto-close files Zoo opened",
+			"description": "When enabled, editor tabs that Zoo opened transiently for a diff will be closed automatically after the edit is accepted or rejected. Tabs the user already had open before the edit are never auto-closed."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Auto-close even after user interaction",
+			"description": "When enabled, Zoo-opened tabs are closed even if the user clicked or typed inside the file or diff during the edit session. Has no effect when 'Auto-close files Zoo opened' is disabled."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Auto-close newly created files",
+			"description": "When enabled, tabs for files that Zoo created (rather than modified) will also be closed automatically after the edit is accepted."
 		}
 	},
 	"prompts": {
@@ -203,6 +215,7 @@
 		"openRouterApiKeyPlaceholder": "Enter your OpenRouter API key",
 		"openRouterProviderRoutingLabel": "OpenRouter Provider Routing",
 		"openRouterProviderRoutingDescription": "OpenRouter routes requests to the best available providers for your embedding model. By default, requests are load balanced across the top providers to maximize uptime. However, you can choose a specific provider to use for this model.",
+		"sembleProvider": "Semble - Local",
 		"openaiCompatibleProvider": "OpenAI Compatible",
 		"openAiKeyLabel": "OpenAI API Key",
 		"openAiKeyPlaceholder": "Enter your OpenAI API key",
@@ -553,6 +566,13 @@
 				"learnMore": "Learn more about provider routing"
 			}
 		},
+		"zooGateway": {
+			"account": "Zoo Code Account",
+			"signInButton": "Sign in to Zoo Code",
+			"signInDescription": "Sign in to use Zoo Gateway with your account",
+			"authenticated": "Authenticated",
+			"authenticatedAs": "Authenticated as {{name}}"
+		},
 		"customModel": {
 			"capabilities": "Configure the capabilities and pricing for your custom OpenAI-compatible model. Be careful when specifying the model capabilities, as they can affect how Zoo Code performs.",
 			"maxTokens": {
@@ -612,7 +632,8 @@
 			"low": "Low",
 			"medium": "Medium",
 			"high": "High",
-			"xhigh": "Extra High"
+			"xhigh": "Extra High",
+			"max": "Max"
 		},
 		"verbosity": {
 			"label": "Output Verbosity",
@@ -809,6 +830,13 @@
 		"inheritEnv": {
 			"label": "Inherit environment variables",
 			"description": "Turn this on to inherit environment variables from the parent VS Code process. <0>Learn more</0>"
+		},
+		"profile": {
+			"label": "Shell for Zoo Code",
+			"followVscode": "Follow VS Code profile (recommended)",
+			"configureButton": "Choose default profile in VS Code",
+			"noProfiles": "(no path-based profiles found in terminal.integrated.profiles)",
+			"description": "Zoo Code uses the shell configured in VS Code by default. Select a specific terminal profile to override this. Only path-based profiles from terminal.integrated.profiles are listed here. <0>Learn more</0>"
 		}
 	},
 	"advancedSettings": {
@@ -969,7 +997,8 @@
 		"providerNotAllowed": "Provider '{{provider}}' is not allowed by your organization",
 		"modelNotAllowed": "Model '{{model}}' is not allowed for provider '{{provider}}' by your organization",
 		"profileInvalid": "This profile contains a provider or model that is not allowed by your organization",
-		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path."
+		"qwenCodeOauthPath": "You must provide a valid OAuth credentials path.",
+		"zooGatewaySignIn": "Sign in to Zoo Code to use Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Enter API Key...",

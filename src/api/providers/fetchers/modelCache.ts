@@ -27,6 +27,7 @@ import { getOllamaModels } from "./ollama"
 import { getLMStudioModels } from "./lmstudio"
 import { getPoeModels } from "./poe"
 import { getDeepSeekModels } from "./deepseek"
+import { getZooGatewayModels } from "./zoo-gateway"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
 
@@ -36,6 +37,16 @@ const modelRecordSchema = z.record(z.string(), modelInfoSchema)
 // Track in-flight refresh requests to prevent concurrent API calls for the same provider
 // This prevents race conditions where multiple calls might overwrite each other's results
 const inFlightRefresh = new Map<RouterName, Promise<ModelRecord>>()
+
+// Providers whose model lists are scoped to the signed-in user (e.g. per-account
+// allowlists or org policies). For these we MUST NOT cache results on disk or
+// in memory: a sign-in/out cycle could otherwise serve a previous user's model
+// list to the next user, and stale data could mask backend allowlist updates.
+const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set(["zoo-gateway"])
+
+function isAuthScopedProvider(provider: RouterName): boolean {
+	return AUTH_SCOPED_PROVIDERS.has(provider)
+}
 
 async function writeModels(router: RouterName, data: ModelRecord) {
 	const filename = `${router}_models.json`
@@ -96,6 +107,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 		case "deepseek":
 			models = await getDeepSeekModels(options.baseUrl, options.apiKey)
 			break
+		case "zoo-gateway":
+			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
+			break
 		default: {
 			// Ensures router is exhaustively checked if RouterName is a strict union.
 			const exhaustiveCheck: never = provider
@@ -120,7 +134,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 export const getModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
 	const { provider } = options
 
-	let models = getModelsFromCache(provider)
+	const shouldSkipCache = isAuthScopedProvider(provider)
+
+	let models = shouldSkipCache ? undefined : getModelsFromCache(provider)
 
 	if (models) {
 		return models
@@ -130,15 +146,15 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 		models = await fetchModelsFromProvider(options)
 		const modelCount = Object.keys(models).length
 
-		// Only cache non-empty results to prevent persisting failed API responses
-		// Empty results could indicate API failure rather than "no models exist"
-		if (modelCount > 0) {
+		// Only cache non-empty results so a failed API response doesn't get persisted
+		// as if the provider had no models. Auth-scoped providers skip caching entirely.
+		if (modelCount > 0 && !shouldSkipCache) {
 			memoryCache.set(provider, models)
 
 			await writeModels(provider, models).catch((err) =>
 				console.error(`[MODEL_CACHE] Error writing ${provider} models to file cache:`, err),
 			)
-		} else {
+		} else if (modelCount === 0) {
 			TelemetryService.instance.captureEvent(TelemetryEventName.MODEL_CACHE_EMPTY_RESPONSE, {
 				provider,
 				context: "getModels",
@@ -167,12 +183,19 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 export const refreshModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
 	const { provider } = options
 
-	// Check if there's already an in-flight refresh for this provider
+	const shouldSkipCache = isAuthScopedProvider(provider)
+
+	// Check if there's already an in-flight refresh for this provider.
 	// This prevents race conditions where multiple concurrent refreshes might
-	// overwrite each other's results
-	const existingRequest = inFlightRefresh.get(provider)
-	if (existingRequest) {
-		return existingRequest
+	// overwrite each other's results. Skip de-duplication for auth-scoped
+	// providers because two concurrent calls may carry different tokens
+	// (e.g., after a sign-out/sign-in within the same session) and we must
+	// not return the first caller's results to the second caller.
+	if (!shouldSkipCache) {
+		const existingRequest = inFlightRefresh.get(provider)
+		if (existingRequest) {
+			return existingRequest
+		}
 	}
 
 	// Create the refresh promise and track it
@@ -183,7 +206,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 			const modelCount = Object.keys(models).length
 
 			// Get existing cached data for comparison
-			const existingCache = getModelsFromCache(provider)
+			const existingCache = shouldSkipCache ? undefined : getModelsFromCache(provider)
 			const existingCount = existingCache ? Object.keys(existingCache).length : 0
 
 			if (modelCount === 0) {
@@ -200,27 +223,36 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 				}
 			}
 
-			// Update memory cache first
-			memoryCache.set(provider, models)
+			if (!shouldSkipCache) {
+				memoryCache.set(provider, models)
 
-			// Atomically write to disk (safeWriteJson handles atomic writes)
-			await writeModels(provider, models).catch((err) =>
-				console.error(`[refreshModels] Error writing ${provider} models to disk:`, err),
-			)
+				await writeModels(provider, models).catch((err) =>
+					console.error(`[refreshModels] Error writing ${provider} models to disk:`, err),
+				)
+			}
 
 			return models
 		} catch (error) {
-			// Log the error for debugging, then return existing cache if available (graceful degradation)
+			// Log the error for debugging, then return existing cache if available (graceful degradation).
+			// For auth-scoped providers (zoo-gateway) we MUST NOT return cached models from a prior
+			// session, since they could belong to a different user — return empty instead.
 			console.error(`[refreshModels] Failed to refresh ${provider} models:`, error)
+			if (shouldSkipCache) {
+				return {}
+			}
 			return getModelsFromCache(provider) || {}
 		} finally {
 			// Always clean up the in-flight tracking
-			inFlightRefresh.delete(provider)
+			if (!shouldSkipCache) {
+				inFlightRefresh.delete(provider)
+			}
 		}
 	})()
 
-	// Track the in-flight request
-	inFlightRefresh.set(provider, refreshPromise)
+	// Track the in-flight request (auth-scoped providers are excluded; see above).
+	if (!shouldSkipCache) {
+		inFlightRefresh.set(provider, refreshPromise)
+	}
 
 	return refreshPromise
 }

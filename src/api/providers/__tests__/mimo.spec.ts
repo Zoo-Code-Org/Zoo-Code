@@ -2,31 +2,33 @@ const mockCreate = vi.fn()
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
-		default: vi.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate.mockImplementation(async (options) => {
-						return {
-							[Symbol.asyncIterator]: async function* () {
-								yield {
-									choices: [{ delta: { content: "Test response" }, index: 0 }],
-									usage: null,
-								}
-								yield {
-									choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
-									usage: {
-										prompt_tokens: 10,
-										completion_tokens: 5,
-										total_tokens: 15,
-										prompt_tokens_details: { cached_tokens: 2 },
-									},
-								}
-							},
-						}
-					}),
+		default: vi.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate.mockImplementation(async (options) => {
+							return {
+								[Symbol.asyncIterator]: async function* () {
+									yield {
+										choices: [{ delta: { content: "Test response" }, index: 0 }],
+										usage: null,
+									}
+									yield {
+										choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+										usage: {
+											prompt_tokens: 10,
+											completion_tokens: 5,
+											total_tokens: 15,
+											prompt_tokens_details: { cached_tokens: 2 },
+										},
+									}
+								},
+							}
+						}),
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 
@@ -468,21 +470,14 @@ describe("MimoHandler", () => {
 			expect(usageChunks[0].outputTokens).toBe(5)
 		})
 
-		it("should handle reasoning_content in stream", async () => {
-			// Override mock to return reasoning_content
+		it("streams reasoning chunks from delta.reasoning_content", async () => {
 			mockCreate.mockImplementationOnce(async () => ({
 				[Symbol.asyncIterator]: async function* () {
+					yield { choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] }
+					yield { choices: [{ delta: { content: "answer" }, index: 0 }] }
 					yield {
-						choices: [{ delta: { reasoning_content: "Thinking..." }, index: 0 }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: { content: "Done" }, index: 0 }],
-						usage: null,
-					}
-					yield {
-						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
-						usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
 					}
 				},
 			}))
@@ -492,14 +487,68 @@ describe("MimoHandler", () => {
 			]
 
 			const chunks: any[] = []
-			const stream = handler.createMessage("System prompt", messages)
-			for await (const chunk of stream) {
+			for await (const chunk of handler.createMessage("System prompt", messages)) {
 				chunks.push(chunk)
 			}
 
-			const reasoningChunks = chunks.filter((c) => c.type === "reasoning")
-			expect(reasoningChunks).toHaveLength(1)
-			expect(reasoningChunks[0].text).toBe("Thinking...")
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
+		})
+
+		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] }
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("System prompt", messages)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
+		})
+
+		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [
+							{
+								delta: {
+									reasoning_content: "primary thought",
+									reasoning: "fallback thought",
+								},
+								index: 0,
+							},
+						],
+					}
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("System prompt", messages)) {
+				chunks.push(chunk)
+			}
+
+			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
+			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
 		})
 
 		it("should yield tool_call_partial chunks from stream", async () => {

@@ -183,6 +183,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		terminalZshOhMy,
 		terminalZshP10k,
 		terminalZdotdir,
+		terminalProfile,
 		writeDelayMs,
 		showRooIgnoredFiles,
 		enableSubfolderRules,
@@ -204,6 +205,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		includeCurrentTime,
 		includeCurrentCost,
 		maxGitStatusFiles,
+		autoCloseZooOpenedFiles,
+		autoCloseZooOpenedFilesAfterUserEdited,
+		autoCloseZooOpenedNewFiles,
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
@@ -397,6 +401,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					terminalZshOhMy,
 					terminalZshP10k,
 					terminalZdotdir,
+					terminalProfile: terminalProfile ?? "", // "" clears a saved profile; undefined is dropped by JSON.stringify
 					terminalOutputPreviewSize: terminalOutputPreviewSize ?? "medium",
 					mcpEnabled,
 					maxOpenTabsContext: Math.min(Math.max(0, maxOpenTabsContext ?? 20), 500),
@@ -418,6 +423,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
 					maxGitStatusFiles: maxGitStatusFiles ?? 0,
+					autoCloseZooOpenedFiles: autoCloseZooOpenedFiles ?? true,
+					autoCloseZooOpenedFilesAfterUserEdited: autoCloseZooOpenedFilesAfterUserEdited ?? false,
+					autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? false,
 					profileThresholds,
 					imageGenerationProvider,
 					openRouterImageApiKey,
@@ -864,6 +872,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalZshOhMy={terminalZshOhMy}
 								terminalZshP10k={terminalZshP10k}
 								terminalZdotdir={terminalZdotdir}
+								terminalProfile={terminalProfile}
+								onTerminalProfilePickerOpened={() => setChangeDetected(true)}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}
@@ -895,6 +905,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								reasoningBlockCollapsed={reasoningBlockCollapsed ?? true}
 								enterBehavior={enterBehavior ?? "send"}
 								chatFontSize={chatFontSize ?? undefined}
+								autoCloseZooOpenedFiles={autoCloseZooOpenedFiles}
+								autoCloseZooOpenedFilesAfterUserEdited={autoCloseZooOpenedFilesAfterUserEdited}
+								autoCloseZooOpenedNewFiles={autoCloseZooOpenedNewFiles}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

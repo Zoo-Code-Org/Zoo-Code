@@ -272,6 +272,7 @@
 		"running": "Menjalankan",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "Keluar dengan status {{exitCode}}",
+		"malformedCommand": "Perintah tidak valid: kesalahan sintaks shell",
 		"manageCommands": "Perintah yang disetujui secara otomatis",
 		"addToAllowed": "Tambahkan ke daftar yang diizinkan",
 		"removeFromAllowed": "Hapus dari daftar yang diizinkan",
@@ -359,16 +360,11 @@
 	"announcement": {
 		"title": "Zoo Code {{version}} Dirilis",
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
-		"handoff": {
-			"heading": "Roo Code kembali! Sekarang sebagai plugin yang dikelola komunitas bernama Zoo Code!!",
-			"description": "Kalau kamu belum mengikuti kabarnya, tim Roo Code baru-baru ini mengumumkan bahwa mereka menghentikan pengembangan Roo Code dan mengarsipkan pekerjaan yang telah mereka lakukan. Tapi jangan khawatir, komunitas telah melangkah maju untuk melanjutkan warisan Roo Code dengan nama baru dan rumah baru! Kita bukan lagi satu \"Roo\" saja, kita adalah sebuah komunitas, sebuah \"Zoo\" kalau boleh dibilang. Zoo Code adalah plugin yang dikelola komunitas dan melanjutkan dari titik terakhir Roo Code, dan kami berkomitmen menjaga semangat Roo tetap hidup sambil menghadirkan fitur dan peningkatan baru. Kami juga ingin memberi apresiasi besar kepada seluruh tim Roo Code atas kerja luar biasa mereka dan karena telah menciptakan alat yang luar biasa untuk para developer. Kami antusias melanjutkan fondasi mereka dan melihat ke mana komunitas akan membawa Zoo Code ke depannya!",
-			"readMore": "Lihat halaman beranda baru Zoo Code dan baca pengumuman lengkapnya"
-		},
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Claude Opus 4.8 dan Opencode Go: Claude Opus 4.8 ditambahkan ke Anthropic, Bedrock, dan Vertex, ditambah Opencode Go sebagai provider baru kelas utama.",
-			"highlight2": "Pembatalan tugas yang andal: Membatalkan tugas kini benar-benar menghentikan proses yang berjalan, dengan percobaan ulang Ctrl+C otomatis untuk proses yang sulit dihentikan.",
-			"highlight3": "Perbaikan provider dan editor: Memperbaiki ID model kustom Gemini, pemotongan diff Grok, deteksi PowerShell di Windows, dan branding code action VS Code."
+			"highlight1": "Model AI baru — Claude Fable 5 di semua penyedia Anthropic dan OpenAI GPT-5.5 kini tersedia di pengaturan penyedia kamu.",
+			"highlight2": "Allowlist MCP per mode — batasi server MCP mana yang aktif untuk setiap mode menggunakan allowlist baru di konfigurasi mode kamu.",
+			"highlight3": "Pengaturan rootResolution workspace — pengaturan baru yang mengontrol cara Zoo Code menyelesaikan path file di workspace multi-root."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

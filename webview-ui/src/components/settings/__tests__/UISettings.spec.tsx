@@ -83,15 +83,89 @@ describe("UISettings", () => {
 			const resetUnset = getByTestId("chat-font-size-reset") as HTMLButtonElement
 			expect(resetUnset.disabled).toBe(true)
 
-			rerender(
-				<UISettings {...defaultProps} chatFontSize={18} setCachedStateField={setCachedStateField} />,
-			)
+			rerender(<UISettings {...defaultProps} chatFontSize={18} setCachedStateField={setCachedStateField} />)
 			const resetSet = getByTestId("chat-font-size-reset") as HTMLButtonElement
 			expect(resetSet.disabled).toBe(false)
 
 			fireEvent.click(resetSet)
 			expect(setCachedStateField).toHaveBeenCalledWith("chatFontSize", undefined)
 			expect(telemetryClient.capture).toHaveBeenCalledWith("ui_settings_chat_font_size_reset")
+		})
+	})
+
+	describe("auto-close Zoo-opened files checkboxes", () => {
+		it("renders all three auto-close checkboxes", () => {
+			const { getByTestId } = render(
+				<UISettings
+					{...defaultProps}
+					autoCloseZooOpenedFiles={true}
+					autoCloseZooOpenedFilesAfterUserEdited={false}
+					autoCloseZooOpenedNewFiles={false}
+				/>,
+			)
+			expect(getByTestId("auto-close-zoo-opened-files-checkbox")).toBeTruthy()
+			expect(getByTestId("auto-close-zoo-opened-files-after-user-edited-checkbox")).toBeTruthy()
+			expect(getByTestId("auto-close-zoo-opened-new-files-checkbox")).toBeTruthy()
+		})
+
+		it("autoCloseZooOpenedFiles checkbox reflects true prop", () => {
+			const { getByTestId } = render(<UISettings {...defaultProps} autoCloseZooOpenedFiles={true} />)
+			const checkbox = getByTestId("auto-close-zoo-opened-files-checkbox") as HTMLInputElement
+			expect(checkbox.checked).toBe(true)
+		})
+
+		it("autoCloseZooOpenedFiles checkbox reflects false prop", () => {
+			const { getByTestId } = render(<UISettings {...defaultProps} autoCloseZooOpenedFiles={false} />)
+			const checkbox = getByTestId("auto-close-zoo-opened-files-checkbox") as HTMLInputElement
+			expect(checkbox.checked).toBe(false)
+		})
+
+		it("calls setCachedStateField with autoCloseZooOpenedFiles when toggled", async () => {
+			const setCachedStateField = vi.fn()
+			const { getByTestId } = render(
+				<UISettings
+					{...defaultProps}
+					autoCloseZooOpenedFiles={true}
+					setCachedStateField={setCachedStateField}
+				/>,
+			)
+			const checkbox = getByTestId("auto-close-zoo-opened-files-checkbox")
+			fireEvent.click(checkbox)
+			await waitFor(() => {
+				expect(setCachedStateField).toHaveBeenCalledWith("autoCloseZooOpenedFiles", false)
+			})
+		})
+
+		it("calls setCachedStateField with autoCloseZooOpenedFilesAfterUserEdited when toggled", async () => {
+			const setCachedStateField = vi.fn()
+			const { getByTestId } = render(
+				<UISettings
+					{...defaultProps}
+					autoCloseZooOpenedFilesAfterUserEdited={false}
+					setCachedStateField={setCachedStateField}
+				/>,
+			)
+			const checkbox = getByTestId("auto-close-zoo-opened-files-after-user-edited-checkbox")
+			fireEvent.click(checkbox)
+			await waitFor(() => {
+				expect(setCachedStateField).toHaveBeenCalledWith("autoCloseZooOpenedFilesAfterUserEdited", true)
+			})
+		})
+
+		it("calls setCachedStateField with autoCloseZooOpenedNewFiles when toggled", async () => {
+			const setCachedStateField = vi.fn()
+			const { getByTestId } = render(
+				<UISettings
+					{...defaultProps}
+					autoCloseZooOpenedNewFiles={false}
+					setCachedStateField={setCachedStateField}
+				/>,
+			)
+			const checkbox = getByTestId("auto-close-zoo-opened-new-files-checkbox")
+			fireEvent.click(checkbox)
+			await waitFor(() => {
+				expect(setCachedStateField).toHaveBeenCalledWith("autoCloseZooOpenedNewFiles", true)
+			})
 		})
 	})
 })

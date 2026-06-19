@@ -11,15 +11,20 @@ import {
 	zaiApiLineConfigs,
 } from "@roo-code/types"
 
-import { type ApiHandlerOptions, getModelMaxOutputTokens, shouldUseReasoningEffort } from "../../shared/api"
+import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/api"
 import { convertToZAiFormat } from "../transform/zai-format"
 
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
+import { handleOpenAIError } from "./utils/openai-error-handler"
 
-// Custom interface for Z.ai params to support thinking mode
-type ZAiChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParamsStreaming & {
+// Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
+// Z.ai accepts the standard `reasoning_effort` ladder (none/minimal/low/medium/high/xhigh/max)
+// alongside the GLM-specific `thinking` toggle. Omit the OpenAI-typed `reasoning_effort` so we
+// can widen it to include provider-specific values such as "max".
+type ZAiChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsStreaming, "reasoning_effort"> & {
 	thinking?: { type: "enabled" | "disabled" }
+	reasoning_effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 }
 
 export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
@@ -56,12 +61,8 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		const isThinkingModel = Array.isArray(info.supportsReasoningEffort)
 
 		if (isThinkingModel) {
-			// For GLM-4.7, thinking is ON by default in the API.
-			// We need to explicitly disable it when reasoning is off.
-			const useReasoning = shouldUseReasoningEffort({ model: info, settings: this.options })
-
 			// Create the stream with our custom thinking parameter
-			return this.createStreamWithThinking(systemPrompt, messages, metadata, useReasoning)
+			return this.createStreamWithThinking(systemPrompt, messages, metadata)
 		}
 
 		// For non-thinking models, use the default behavior
@@ -75,9 +76,21 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
-		useReasoning?: boolean,
 	) {
 		const { id: model, info } = this.getModel()
+
+		// Fall back to the model default when the resolved effort isn't supported by the model.
+		const supported = info.supportsReasoningEffort
+		const raw =
+			this.options.enableReasoningEffort === false
+				? undefined
+				: (this.options.reasoningEffort ?? info.reasoningEffort)
+		const effort =
+			raw && raw !== "disable" && Array.isArray(supported) && !supported.includes(raw)
+				? info.reasoningEffort
+				: raw
+		const reasoningEffort = effort && effort !== "disable" ? effort : undefined
+		const useReasoning = reasoningEffort !== undefined
 
 		const max_tokens =
 			this.options.modelMaxTokens ||
@@ -103,11 +116,18 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			stream_options: { include_usage: true },
 			// Thinking is ON by default for these models, so explicitly disable it when needed.
 			thinking: useReasoning ? { type: "enabled" } : { type: "disabled" },
+			reasoning_effort: reasoningEffort,
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
-		return this.client.chat.completions.create(params)
+		try {
+			return this.client.chat.completions.create(
+				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+			)
+		} catch (error) {
+			throw handleOpenAIError(error, this.providerName)
+		}
 	}
 }

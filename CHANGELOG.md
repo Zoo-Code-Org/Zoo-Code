@@ -1,5 +1,62 @@
 # Zoo Code Changelog
 
+## [3.60.0]
+
+### Minor Changes
+
+- Add Claude Fable 5 support across Anthropic, Bedrock, and Vertex providers (PR #555 by @taltas)
+- Add OpenAI GPT-5.5 support (PR #537 by @scream4ik)
+- Add per-mode MCP server restrictions — configure an allowlist to restrict which MCP servers are active per mode (PR #453 by @simurg79)
+- Add workspace `rootResolution` setting for controlling path resolution in multi-root workspaces (PR #538 by @simurg79)
+- Add LiteLLM support for `reasoning_content` and `reasoning` fields in streaming responses (PR #449 by @daewoongoh)
+- Add Show Ripgrep Diagnostic command for easier ripgrep troubleshooting (PR #281 by @0xMink)
+- Redesign terminal profile settings UX — unified dropdown, consistent layout, and improved styling (#119 by @chenyuanrun, #321 by @F915, PR #533 by @F915)
+- Fix chat window running out of memory when transcript grows large (PR #153 by @app/roomote)
+- Fix relative symlinks in rules files not resolving correctly using realpath of parent directory (PR #442 by @p12tic)
+- Fix command approval buttons not clearing when auto-executed (PR #480 by @awschmeder)
+- Fix multi-line quoted command parsing, auto-approval behavior, and malformed-command error surfacing (PR #483 by @awschmeder)
+- Fix `list-files` tool to validate directory exists before spawning ripgrep (#557 by @edelauna, PR #558 by @edelauna)
+- Fix child tasks returning to parent when parent status is active in AttemptCompletionTool (PR #510 by @edelauna)
+- Fix surface in-stream errors from Zoo and Vercel AI gateways (PR #569 by @JamesRobert20)
+- Gate marketplace publish behind PR approval check (PR #516 by @edelauna)
+- Stabilize flaky e2e provider suite ordering and zai requestCapture race (#512 by @edelauna, #514 by @edelauna, PR #45 by @app/roomote)
+- Fix flaky e2e subtasks fixture collision and task identity prompt (#561, PR #563 by @simurg79)
+- Add contributing guidelines: PR expectations and AI-assisted contribution policy (PR #562 by @edelauna)
+- Configure knip and remove dead code (PR #225 by @app/roomote)
+- Pin dependencies (PR #423 by @app/renovate)
+
+## [3.58.1]
+
+### Patch Changes
+
+- Fix: Remove unsupported `--no-absolute-filenames` tar argument (#491 by @kazenshi, PR #492 by @kazenshi)
+
+## 3.58.0
+
+### Minor Changes
+
+- Add Zoo Gateway provider with auth callback and multi-profile token sync (PR #344 by @JamesRobert20, PR #345 by @JamesRobert20, PR #347 by @JamesRobert20)
+- Add Gemini 3.5 Flash support (PR #331 by @jeanbispo)
+- Add Semble as a local on-the-fly embedding provider for code indexing (PR #399 by @navedmerchant)
+- Remove extension-side LLM telemetry; server logs only through gateway (PR #346 by @JamesRobert20)
+- Add VS Code integrated terminal shell override (PR #277 by @proyectoauraorg)
+- Add configurable chat font size (#157 by @duvw, PR #276 by @proyectoauraorg)
+- Render GitHub-style alerts in the webview (#258 by @melck, PR #275 by @proyectoauraorg)
+- Add configurable max output tokens for GLM models (#161 by @app/roomote, PR #274 by @proyectoauraorg)
+- Introduce WorkspacePathResolver for async symlink-aware path canonicalization (#389 by @edelauna, PR #428 by @proyectoauraorg)
+- Better secure release workflows and GitHub Actions (PR #482 by @edelauna)
+- Fix React crash from malformed follow-up suggestion mode (PR #414 by @edelauna)
+- Fix OpenAI temperature omitted when no custom value is set (#242 by @brunocasado, PR #247 by @proyectoauraorg)
+- Handle per-key failures during settings import (PR #401 by @taltas)
+- Add comprehensive test coverage for ReadFileTool (PR #222 by @proyectoauraorg)
+- Unskip VS Code e2e replay for subtasks (PR #94 by @app/roomote)
+- Fix e2e cache: replace paths filter with content-hash cache skip (PR #268 by @app/roomote)
+- Remove deprecated requestRooCreditBalance handler (PR #385 by @JamesRobert20)
+- Update mermaid to v11.15.0 for a security fix (PR #235 by @app/renovate)
+- Update axios to v1.16.0 for a security fix (PR #400 by @app/renovate)
+- Pin dependencies (PR #353 by @app/renovate)
+- Remove unused tmp dependency and other unused packages (PR #341 by @app/renovate)
+
 ## 3.56.0
 
 ### Minor Changes

@@ -43,8 +43,8 @@ describe("OpenRouterEmbedder", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
-		vi.spyOn(console, "warn").mockImplementation(() => {})
-		vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.spyOn(console, "warn").mockImplementation(function () {})
+		vi.spyOn(console, "error").mockImplementation(function () {})
 
 		// Setup mock OpenAI instance
 		mockEmbeddingsCreate = vi.fn()
@@ -54,7 +54,9 @@ describe("OpenRouterEmbedder", () => {
 			},
 		}
 
-		MockedOpenAI.mockImplementation(() => mockOpenAIInstance)
+		MockedOpenAI.mockImplementation(function () {
+			return mockOpenAIInstance
+		})
 	})
 
 	afterEach(() => {

@@ -13,6 +13,7 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { RouterProvider } from "./router-provider"
+import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 /**
  * LiteLLM provider handler
@@ -184,7 +185,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		}
 
 		// Required by some providers; others default to max tokens allowed
-		let maxTokens: number | undefined = info.maxTokens ?? undefined
+		const maxTokens: number | undefined = info.maxTokens ?? undefined
 
 		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
 		const isGPT5Model = this.isGpt5(modelId)
@@ -222,8 +223,22 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			requestOptions.temperature = this.options.modelTemperature ?? 0
 		}
 
+		// LiteLLM recognizes X-<vendor>-Session-ID for per-conversation request correlation.
+		// This header enables LiteLLM to group related API calls by task for logging and tracing.
+		// Unlike Zoo gateways (which use X-Zoo-Task-ID to correlate requests across multiple
+		// models within a single conversation), this header is specific to the LiteLLM provider
+		// and facilitates provider-level logging and debugging on LiteLLM's admin panel.
+		// Matches the convention used by Claude Code (x-claude-code-session-id) and
+		// GitHub Copilot (x-copilot-session-id).
+		const requestHeaders: Record<string, string> = {}
+		if (metadata?.taskId) {
+			requestHeaders["X-Zoo-Session-ID"] = metadata.taskId
+		}
+
 		try {
-			const { data: completion } = await this.client.chat.completions.create(requestOptions).withResponse()
+			const { data: completion } = await this.client.chat.completions
+				.create(requestOptions, { headers: requestHeaders })
+				.withResponse()
 
 			let lastUsage
 
@@ -233,6 +248,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 
 				if (delta?.content) {
 					yield { type: "text", text: delta.content }
+				}
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
 				}
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser

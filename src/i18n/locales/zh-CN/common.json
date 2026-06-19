@@ -266,11 +266,20 @@
 			"invalid_token_received": "Zoo Code: 收到无效的认证 token。",
 			"token_verification_failed": "Zoo Code: Token 验证失败。",
 			"invalid_token": "Zoo Code: 无效的 token。",
-			"could_not_verify_token": "Zoo Code: 无法验证 token。"
+			"could_not_verify_token": "Zoo Code: 无法验证 token。",
+			"session_expired": "Zoo Code 会话已过期。请重新登录以继续使用 Zoo Gateway。",
+			"out_of_credits": "Zoo Gateway：积分不足。请添加积分以继续。",
+			"account_unavailable": "Zoo Gateway：你的账户当前不可用。请联系支持。",
+			"budget_exceeded": "Zoo Gateway：已达到使用预算。请等待预算重置或充值。"
 		},
 		"info": {
 			"connected": "Zoo Code: 连接成功！你现在可以使用 Zoo Code 作为 AI 提供商。",
 			"disconnected": "Zoo Code: 已成功断开连接。"
+		},
+		"buttons": {
+			"sign_in": "登录",
+			"add_credits": "添加积分",
+			"contact_support": "联系支持"
 		}
 	},
 	"codeActions": {

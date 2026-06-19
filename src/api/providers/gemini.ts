@@ -678,7 +678,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		// Bill both completion and reasoning ("thoughts") tokens as output.
 		const billedOutputTokens = outputTokens + reasoningTokens
 
-		let cacheReadCost = cacheReadTokens > 0 ? cacheReadsPrice * (cacheReadTokens / 1_000_000) : 0
+		const cacheReadCost = cacheReadTokens > 0 ? cacheReadsPrice * (cacheReadTokens / 1_000_000) : 0
 
 		const inputTokensCost = inputPrice * (uncachedInputTokens / 1_000_000)
 		const outputTokensCost = outputPrice * (billedOutputTokens / 1_000_000)

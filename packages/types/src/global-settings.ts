@@ -176,9 +176,13 @@ export const globalSettingsSchema = z.object({
 	terminalZshOhMy: z.boolean().optional(),
 	terminalZshP10k: z.boolean().optional(),
 	terminalZdotdir: z.boolean().optional(),
+	terminalProfile: z.string().optional(),
 	execaShellPath: z.string().optional(),
 
 	diagnosticsEnabled: z.boolean().optional(),
+	autoCloseZooOpenedFiles: z.boolean().optional(),
+	autoCloseZooOpenedFilesAfterUserEdited: z.boolean().optional(),
+	autoCloseZooOpenedNewFiles: z.boolean().optional(),
 
 	rateLimitSeconds: z.number().optional(),
 	experiments: experimentsSchema.optional(),

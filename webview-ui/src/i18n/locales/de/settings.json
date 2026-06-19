@@ -213,7 +213,8 @@
 		"stoppingButton": "Wird gestoppt...",
 		"workspaceToggleLabel": "Indexierung für diesen Arbeitsbereich aktivieren",
 		"workspaceDisabledMessage": "Indexierung ist konfiguriert, aber nicht für diesen Arbeitsbereich aktiviert.",
-		"autoEnableDefaultLabel": "Indexierung für neue Arbeitsbereiche automatisch aktivieren"
+		"autoEnableDefaultLabel": "Indexierung für neue Arbeitsbereiche automatisch aktivieren",
+		"sembleProvider": "Semble - Lokal"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Du kannst <SettingsLink>in deinen IDE-Einstellungen</SettingsLink> einen globalen Shortcut für diese Einstellung konfigurieren.",
@@ -543,6 +544,7 @@
 			"minimal": "Minimal (schnellste)",
 			"high": "Hoch",
 			"xhigh": "Sehr hoch",
+			"max": "Maximum",
 			"medium": "Mittel",
 			"low": "Niedrig"
 		},
@@ -560,6 +562,13 @@
 			"placeholder": "Standard: claude",
 			"maxTokensLabel": "Maximale Ausgabe-Tokens",
 			"maxTokensDescription": "Maximale Anzahl an Ausgabe-Tokens für Claude Code-Antworten. Standard ist 8000."
+		},
+		"zooGateway": {
+			"account": "Zoo Code Konto",
+			"signInButton": "Bei Zoo Code anmelden",
+			"signInDescription": "Melde dich an, um Zoo Gateway mit deinem Konto zu nutzen",
+			"authenticated": "Authentifiziert",
+			"authenticatedAs": "Authentifiziert als {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +750,13 @@
 		"inheritEnv": {
 			"label": "Umgebungsvariablen erben",
 			"description": "Schalte dies ein, um Umgebungsvariablen vom übergeordneten VS Code-Prozess zu erben. <0>Mehr erfahren</0>"
+		},
+		"profile": {
+			"label": "Shell für Zoo Code",
+			"followVscode": "VS Code-Profil folgen (empfohlen)",
+			"description": "Standardmäßig verwendet Zoo Code die in VS Code konfigurierte Shell. Wähle ein Shell-Profil aus der Liste, um ein pfadbasiertes Shell-Profil zu verwenden, das VS Code bereitstellt. Quellenbasierte Profile (z. B. der integrierte PowerShell-Eintrag) können hier nicht aufgelistet werden. <0>Mehr erfahren</0>",
+			"configureButton": "Standardprofil in VS Code auswählen",
+			"noProfiles": "(keine pfadbasierten Profile in terminal.integrated.profiles gefunden)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "Anbieter '{{provider}}' ist von deiner Organisation nicht erlaubt",
 		"modelNotAllowed": "Modell '{{model}}' ist für Anbieter '{{provider}}' von deiner Organisation nicht erlaubt",
 		"profileInvalid": "Dieses Profil enthält einen Anbieter oder ein Modell, das von deiner Organisation nicht erlaubt ist",
-		"qwenCodeOauthPath": "Du musst einen gültigen OAuth-Anmeldedaten-Pfad angeben"
+		"qwenCodeOauthPath": "Du musst einen gültigen OAuth-Anmeldedaten-Pfad angeben",
+		"zooGatewaySignIn": "Melde dich bei Zoo Code an, um Zoo Gateway zu verwenden."
 	},
 	"placeholders": {
 		"apiKey": "API-Schlüssel eingeben...",
@@ -968,6 +985,18 @@
 			"label": "Chat-Schriftgröße",
 			"description": "Lege die Schriftgröße (in Pixeln) für den Zoo Code-Chat fest. Belasse den Standardwert, um die Schriftgröße von VS Code zu übernehmen.",
 			"reset": "VS Code-Standard verwenden"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Von Zoo geöffnete Dateien automatisch schließen",
+			"description": "Wenn aktiviert, werden Editor-Tabs, die Zoo vorübergehend für einen Diff geöffnet hat, nach dem Akzeptieren oder Ablehnen der Änderung automatisch geschlossen. Tabs, die der Nutzer bereits vor der Bearbeitung geöffnet hatte, werden nie automatisch geschlossen."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Auch nach Nutzer-Interaktion automatisch schließen",
+			"description": "Wenn aktiviert, werden von Zoo geöffnete Tabs auch dann geschlossen, wenn der Nutzer während der Bearbeitung in die Datei oder den Diff geklickt oder getippt hat. Hat keine Auswirkung, wenn 'Von Zoo geöffnete Dateien automatisch schließen' deaktiviert ist."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Neu erstellte Dateien automatisch schließen",
+			"description": "Wenn aktiviert, werden Tabs für Dateien, die Zoo neu erstellt hat (anstatt sie zu bearbeiten), nach dem Akzeptieren der Änderung ebenfalls automatisch geschlossen."
 		}
 	},
 	"skills": {

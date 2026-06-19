@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: S'ha rebut un token d'autenticació no vàlid.",
 			"token_verification_failed": "Zoo Code: Ha fallat la verificació del token.",
 			"invalid_token": "Zoo Code: Token no vàlid.",
-			"could_not_verify_token": "Zoo Code: No s'ha pogut verificar el token."
+			"could_not_verify_token": "Zoo Code: No s'ha pogut verificar el token.",
+			"session_expired": "Sessió de Zoo Code caducada. Torna a iniciar sessió per continuar utilitzant Zoo Gateway.",
+			"out_of_credits": "Zoo Gateway: crèdits insuficients. Afegeix crèdits per continuar.",
+			"account_unavailable": "Zoo Gateway: el teu compte no està disponible. Contacta amb el suport.",
+			"budget_exceeded": "Zoo Gateway: pressupost d'ús assolit. Espera que es restableixi o afegeix crèdits."
 		},
 		"info": {
 			"connected": "Zoo Code: Connectat correctament! Ara podeu utilitzar Zoo Code com a proveïdor d'IA.",
 			"disconnected": "Zoo Code: Desconnectat correctament."
+		},
+		"buttons": {
+			"sign_in": "Inicia sessió",
+			"add_credits": "Afegeix crèdits",
+			"contact_support": "Contacta amb el suport"
 		}
 	},
 	"codeActions": {

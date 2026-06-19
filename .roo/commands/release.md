@@ -36,16 +36,9 @@ mode: code
     - Do not manually edit `src/README.md`; the extension bundle step copies root `README.md` into `src/README.md`.
     - Check for stale upstream Roo Code wording that should now say Zoo Code.
 
-6. Create the release notes as a changeset file at `.changeset/v[version].md`, then run `pnpm changeset:version` on the release branch before opening the PR.
+6. Write the release notes directly into `CHANGELOG.md` on the release branch.
 
-    ```md
-    ---
-    "zoo-code": patch|minor|major
-    ---
-
-    [list of changes]
-    ```
-
+    - Use the heading format `## [version]` (with square brackets) — e.g. `## [3.58.1]`. The publish workflow at `.github/workflows/marketplace-publish.yml` extracts release notes by matching this exact pattern; headings without brackets will be missed and the GitHub release will fall back to a generic message.
     - Always include contributor attribution and the PR number: use `(PR #<prNumber> by @username)`.
     - For PRs that close issues, include both issue and PR authors: `- Fix: Description (#123 by @reporter, PR #456 by @contributor)`.
     - For PRs without linked issues, include the PR number and author: `- Add support for feature (PR #456 by @contributor)`.
@@ -58,7 +51,8 @@ mode: code
     - Ask the user what three areas should be highlighted.
     - Update relevant announcement files and documentation, including `webview-ui/src/components/chat/Announcement.tsx`, `README.md`, and the `latestAnnouncementId` in `src/core/webview/ClineProvider.ts`.
     - Ask the user to confirm the English announcement before proceeding.
-    - Arrange translation updates for all supported locales affected by README, announcement, or package localization changes.
+    - Arrange translation updates for all supported locales affected by README, announcement, or package localization changes. Use the `/roo-translate` skill to propagate the updated `chat.json` announcement highlight keys and the "What's New" section to all supported locales.
+    - All 17 locale READMEs should contain a translated "What's New" section. Check each one and add a translated section where missing.
 
 8. Create the release branch:
 
@@ -66,13 +60,10 @@ mode: code
     git checkout -b release/v[version]
     ```
 
-9. Generate the final release state on that branch:
+9. Bump the version in `src/package.json` to the target release version and ensure `CHANGELOG.md` and `src/CHANGELOG.md` are up to date.
 
-    ```bash
-    pnpm changeset:version
-    ```
-
-    - This should update `src/package.json`, `CHANGELOG.md`, and `src/CHANGELOG.md`, then consume the `.changeset` file.
+    - Verify the `CHANGELOG.md` heading uses `## [version]` (with brackets).
+    - Copy or sync `CHANGELOG.md` to `src/CHANGELOG.md` if the project keeps both.
     - Review the generated version and changelog before opening the PR.
 
 10. Open a single release PR with the fully generated release state.
@@ -91,32 +82,31 @@ mode: code
     - If the release includes translated README or package-localization updates, include those files in the same PR.
     - Let the release validation workflow and normal PR checks run before merge.
 
-11. After the release PR is merged, stop for a release review on the resulting `main` commit.
+11. Once the release PR is open and passing checks, get it approved by a reviewer before proceeding.
+
+    - Do not create the tag until the PR has at least one approval — the publish workflow enforces this automatically and will fail if no approved PR is found for the tagged commit.
+
+12. After the PR is approved, create the release tag on the release branch tip and push it:
 
     ```bash
-    git switch main
-    git pull origin main
-    REVIEWED_SHA=$(git rev-parse HEAD)
-    git rev-parse --short "$REVIEWED_SHA"
-    ```
-
-    - Review the merged release state before any publish step.
-    - Confirm that `src/package.json`, `CHANGELOG.md`, `src/CHANGELOG.md`, and the Marketplace-facing `README.md` all reflect the intended release.
-    - Check that the release PR checks passed and that the merged commit is the one you want to ship.
-    - Share that review summary, including `REVIEWED_SHA`, with the user and wait for explicit confirmation before creating the tag.
-    - Do not create the tag or trigger publishing until the user says to proceed.
-
-12. Only after explicit confirmation, create the release tag on that reviewed `main` commit:
-
-    ```bash
-    git tag v[version] "$REVIEWED_SHA"
+    git tag v[version]
     git push origin v[version]
     ```
 
-    - If `main` advances after the review pause, keep using the pinned `REVIEWED_SHA` for the tag instead of silently tagging a newer commit.
-
-13. The stable publish workflow runs from the `v[version]` tag.
-
-    - Do not create the tag before the release PR is merged.
+    - Tag the branch tip as-is. Do not rebase or merge additional commits into the release branch before tagging — doing so changes the commit SHA and may pull in unreviewed changes that weren't part of the approval.
     - The publish workflow validates that the tag version matches `src/package.json`.
-    - Marketplace and Open VSX publishing use the configured CI secrets.
+
+13. The tag push triggers the stable publish workflow.
+
+    - The workflow first checks that the tagged commit belongs to an approved PR. If the PR is not yet approved this step fails — approve the PR first, then retrigger by recreating and pushing the tag: `git tag -d v[version] && git push origin :refs/tags/v[version] && git tag v[version] && git push origin v[version]`.
+    - Once the approval check passes, the `marketplace-production` environment gate fires and notifies the configured approvers.
+    - A human approver must then approve the deployment before the extension is published to VS Code Marketplace and Open VSX.
+
+14. After a successful deployment, add the release PR to the merge queue.
+
+    ```bash
+    gh pr merge [pr-number] --auto --squash
+    ```
+
+    - Do not merge before the deployment succeeds — merging first and then discovering a publish failure leaves `main` ahead of what was actually shipped.
+    - The merge queue runs all required checks against the release branch before merging to `main`.

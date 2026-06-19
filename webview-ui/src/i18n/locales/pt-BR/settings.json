@@ -213,7 +213,8 @@
 		"stoppingButton": "Parando...",
 		"workspaceToggleLabel": "Ativar indexação para este workspace",
 		"workspaceDisabledMessage": "A indexação está configurada, mas não ativada para este workspace.",
-		"autoEnableDefaultLabel": "Ativar indexação automaticamente para novos workspaces"
+		"autoEnableDefaultLabel": "Ativar indexação automaticamente para novos workspaces",
+		"sembleProvider": "Semble - Local"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Você pode configurar um atalho global para esta configuração <SettingsLink>nas preferências do seu IDE</SettingsLink>.",
@@ -543,6 +544,7 @@
 			"minimal": "Mínimo (mais rápido)",
 			"high": "Alto",
 			"xhigh": "Muito alto",
+			"max": "Máximo",
 			"medium": "Médio",
 			"low": "Baixo"
 		},
@@ -560,6 +562,13 @@
 			"placeholder": "Padrão: claude",
 			"maxTokensLabel": "Tokens de saída máximos",
 			"maxTokensDescription": "Número máximo de tokens de saída para respostas do Claude Code. O padrão é 8000."
+		},
+		"zooGateway": {
+			"account": "Conta Zoo Code",
+			"signInButton": "Entrar no Zoo Code",
+			"signInDescription": "Entre para usar o Zoo Gateway com sua conta",
+			"authenticated": "Autenticado",
+			"authenticatedAs": "Autenticado como {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +750,13 @@
 		"inheritEnv": {
 			"label": "Herdar variáveis de ambiente",
 			"description": "Ative isso para herdar variáveis de ambiente do processo pai do VS Code. <0>Saiba mais</0>"
+		},
+		"profile": {
+			"label": "Perfil de terminal do Zoo Code",
+			"followVscode": "Seguindo o perfil do VS Code (recomendado)",
+			"description": "Por padrão, o Zoo Code usa o shell configurado no VS Code. Selecione um perfil de shell na lista para escolher um perfil de shell com caminho exposto pelo VS Code. Perfis somente de fonte (ex.: a entrada integrada do PowerShell) não podem ser listados aqui. <0>Saiba mais</0>",
+			"configureButton": "Escolher perfil padrão no VS Code",
+			"noProfiles": "(nenhum perfil com caminho encontrado em terminal.integrated.profiles)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "O provedor '{{provider}}' não é permitido pela sua organização",
 		"modelNotAllowed": "O modelo '{{model}}' não é permitido para o provedor '{{provider}}' pela sua organização",
 		"profileInvalid": "Este perfil contém um provedor ou modelo que não é permitido pela sua organização",
-		"qwenCodeOauthPath": "Você deve fornecer um caminho válido de credenciais OAuth"
+		"qwenCodeOauthPath": "Você deve fornecer um caminho válido de credenciais OAuth",
+		"zooGatewaySignIn": "Faça login no Zoo Code para usar o Zoo Gateway."
 	},
 	"placeholders": {
 		"apiKey": "Digite a chave API...",
@@ -968,6 +985,18 @@
 			"label": "Tamanho da fonte do chat",
 			"description": "Defina o tamanho da fonte (em pixels) do chat do Zoo Code. Deixe no padrão para corresponder ao tamanho da fonte do VS Code.",
 			"reset": "Usar o padrão do VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Fechar automaticamente arquivos abertos pelo Zoo",
+			"description": "Quando ativada, as abas do editor que o Zoo abriu temporariamente para um diff sao fechadas automaticamente apos aceitar ou rejeitar a modificacao. As abas que o usuario ja tinha abertas antes da edicao nunca sao fechadas automaticamente."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Fechar automaticamente mesmo apos interacao do usuario",
+			"description": "Quando ativada, as abas abertas pelo Zoo sao fechadas mesmo que o usuario tenha clicado ou digitado no arquivo ou diff durante a sessao de edicao. Nao tem efeito se 'Fechar automaticamente arquivos abertos pelo Zoo' estiver desativada."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Fechar automaticamente novos arquivos criados",
+			"description": "Quando ativada, as abas de arquivos que o Zoo criou (em vez de modificar) tambem sao fechadas automaticamente apos aceitar a modificacao."
 		}
 	},
 	"skills": {

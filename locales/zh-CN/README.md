@@ -30,19 +30,11 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.56.0 新增内容
+## v3.60.0 新增内容
 
-- 为 Anthropic、Bedrock 和 Vertex 提供商添加 **Claude Opus 4.8** 支持
-- 新增 **Opencode Go** 作为一等 API 提供商
-- **可靠的任务取消** — 取消任务现在会正确终止正在运行的进程，对于顽固进程还会自动重试 Ctrl+C
-- 修复 Gemini 自定义模型 ID 被忽略并回退到默认值的问题
-- 修复因缺少标记导致的 Grok diff 截断问题
-- 修复 Windows 上未配置 shell 配置文件时 PowerShell 检测失败的问题
-- 修复 VS Code 代码操作仍显示 Roo Code 品牌名称的问题；已本地化为所有支持的语言
-- 修复 Google Cloud 凭据字段收到文件路径时 Vertex AI 的错误警告
-- 六项安全依赖更新（diff、i18next-http-backend、fast-xml-parser、simple-git、uuid、turbo）
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5（Anthropic、Bedrock、Vertex）和 OpenAI GPT-5.5 现已在提供商设置中可用
+- **按模式的 MCP 允许列表** — 在模式配置中使用允许列表限制每个模式下活跃的 MCP 服务器
+- **工作区 rootResolution 设置** — 新设置，用于控制 Zoo Code 在多根工作区中解析文件路径的方式
 
 ## Zoo Code 能为您做什么？
 

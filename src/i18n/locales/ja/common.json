@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: 無効な認証 token を受信しました。",
 			"token_verification_failed": "Zoo Code: Token の検証に失敗しました。",
 			"invalid_token": "Zoo Code: 無効な token です。",
-			"could_not_verify_token": "Zoo Code: Token を検証できませんでした。"
+			"could_not_verify_token": "Zoo Code: Token を検証できませんでした。",
+			"session_expired": "Zoo Codeのセッションの有効期限が切れました。Zoo Gatewayを引き続き使用するには、再度サインインしてください。",
+			"out_of_credits": "Zoo Gateway: クレジットが不足しています。続行するにはクレジットを追加してください。",
+			"account_unavailable": "Zoo Gateway: 現在アカウントを利用できません。サポートまでお問い合わせください。",
+			"budget_exceeded": "Zoo Gateway: 利用予算に達しました。リセットを待つかチャージしてください。"
 		},
 		"info": {
 			"connected": "Zoo Code: 接続に成功しました！Zoo Code を AI プロバイダーとして使用できます。",
 			"disconnected": "Zoo Code: 正常に切断されました。"
+		},
+		"buttons": {
+			"sign_in": "サインイン",
+			"add_credits": "クレジットを追加",
+			"contact_support": "サポートに連絡"
 		}
 	},
 	"codeActions": {

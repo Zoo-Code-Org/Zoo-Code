@@ -137,6 +137,22 @@ describe("AskFollowupQuestionTool", () => {
 		expect(mockTask.ask).toHaveBeenCalledWith("followup", expectedJson, false)
 	})
 
+	it("should normalize malformed object mode values", async () => {
+		const params = {
+			question: "Switch mode?",
+			follow_up: [{ text: "Use code mode", mode: { mode_slug: "code" } }],
+		} as any
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		const expectedJson = JSON.stringify({
+			question: "Switch mode?",
+			suggest: [{ answer: "Use code mode", mode: "code" }],
+		})
+
+		expect(mockTask.ask).toHaveBeenCalledWith("followup", expectedJson, false)
+	})
+
 	it("should say user_feedback and push tool result after user answers", async () => {
 		const params = {
 			question: "Which approach?",

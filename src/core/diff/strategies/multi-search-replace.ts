@@ -391,7 +391,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 			  Matches the final ">>>>>>> REPLACE" marker on its own line (and requires a following newline or the end of file).
 		*/
 
-		let matches = [
+		const matches = [
 			...repairedDiff.matchAll(
 				/(?:^|\n)(?<!\\)<<<<<<< SEARCH>?\s*\n((?:\:start_line:\s*(\d+)\s*\n))?((?:\:end_line:\s*(\d+)\s*\n))?((?<!\\)-------\s*\n)?([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)=======\s*\n)([\s\S]*?)(?:\n)?(?:(?<=\n)(?<!\\)>>>>>>> REPLACE)(?=\n|$)/g,
 			),
@@ -407,7 +407,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 		const lineEnding = originalContent.includes("\r\n") ? "\r\n" : "\n"
 		let resultLines = originalContent.split(/\r?\n/)
 		let delta = 0
-		let diffResults: DiffResult[] = []
+		const diffResults: DiffResult[] = []
 		let appliedCount = 0
 		const replacements = matches
 			.map((match) => ({
@@ -465,13 +465,13 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				continue
 			}
 
-			let endLine = replacement.startLine + searchLines.length - 1
+			const endLine = replacement.startLine + searchLines.length - 1
 
 			// Initialize search variables
 			let matchIndex = -1
 			let bestMatchScore = 0
 			let bestMatchContent = ""
-			let searchChunk = searchLines.join("\n")
+			const searchChunk = searchLines.join("\n")
 
 			// Determine search bounds
 			let searchStartIndex = 0

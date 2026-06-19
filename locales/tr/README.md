@@ -30,19 +30,11 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
-## v3.56.0'daki Yenilikler
+## v3.60.0'daki Yenilikler
 
-- Anthropic, Bedrock ve Vertex sağlayıcılarında **Claude Opus 4.8** desteği
-- **Opencode Go** yeni birinci sınıf API sağlayıcısı olarak eklendi
-- **Güvenilir görev iptali** — bir görevi iptal etmek artık çalışan işlemi doğru şekilde sonlandırıyor; inatçı işlemler için otomatik Ctrl+C yeniden denemesi
-- Gemini özel model ID'lerinin yok sayılarak varsayılana geri dönmesi düzeltildi
-- Eksik işaretçilerden kaynaklanan Grok diff kesintileri düzeltildi
-- Yapılandırılmış shell profili olmayan Windows'ta PowerShell algılama düzeltildi
-- VS Code code action'larının hâlâ Roo Code markasını göstermesi düzeltildi; tüm desteklenen dillere yerelleştirildi
-- Google Cloud Credentials alanına dosya yolu girildiğinde Vertex AI uyarısı düzeltildi
-- Altı güvenlik bağımlılık güncellemesi (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) ve OpenAI GPT-5.5 artık sağlayıcı ayarlarında mevcut
+- **Mod başına MCP allowlist'leri** — mod yapılandırmasındaki allowlist ile her mod için aktif MCP sunucularını kısıtla
+- **Çalışma alanı rootResolution ayarı** — çok köklü çalışma alanlarında dosya yolu çözümlemesini kontrol eden yeni ayar
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

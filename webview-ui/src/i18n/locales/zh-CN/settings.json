@@ -213,7 +213,8 @@
 		"stoppingButton": "正在停止...",
 		"workspaceToggleLabel": "为此工作区启用索引",
 		"workspaceDisabledMessage": "索引已配置，但尚未为此工作区启用。",
-		"autoEnableDefaultLabel": "自动为新工作区启用索引"
+		"autoEnableDefaultLabel": "自动为新工作区启用索引",
+		"sembleProvider": "Semble - 本地"
 	},
 	"autoApprove": {
 		"toggleShortcut": "您可以<SettingsLink>在 IDE 首选项中</SettingsLink>为此设置配置全局快捷方式。",
@@ -543,6 +544,7 @@
 			"minimal": "最小 (最快)",
 			"high": "高",
 			"xhigh": "超高",
+			"max": "最高",
 			"medium": "中",
 			"low": "低"
 		},
@@ -560,6 +562,13 @@
 			"placeholder": "默认：claude",
 			"maxTokensLabel": "最大输出 Token",
 			"maxTokensDescription": "Claude Code 响应的最大输出 Token 数量。默认为 8000。"
+		},
+		"zooGateway": {
+			"account": "Zoo Code 账户",
+			"signInButton": "登录 Zoo Code",
+			"signInDescription": "登录以使用您的账户访问 Zoo Gateway",
+			"authenticated": "已认证",
+			"authenticatedAs": "已认证为 {{name}}"
 		}
 	},
 	"checkpoints": {
@@ -741,6 +750,13 @@
 		"inheritEnv": {
 			"label": "继承环境变量",
 			"description": "启用此选项以从父 VS Code 进程继承环境变量。<0>了解更多</0>"
+		},
+		"profile": {
+			"label": "Zoo Code 使用的 Shell",
+			"followVscode": "跟随 VS Code 配置文件（推荐）",
+			"description": "Zoo Code 默认使用 VS Code 配置的 Shell。选择一个终端配置文件来覆盖此行为。此处仅列出 terminal.integrated.profiles 中的路径型配置文件。<0>了解更多</0>",
+			"configureButton": "在 VS Code 中选择默认配置文件",
+			"noProfiles": "(在 terminal.integrated.profiles 中未找到路径型配置文件)"
 		}
 	},
 	"advancedSettings": {
@@ -901,7 +917,8 @@
 		"providerNotAllowed": "提供商 '{{provider}}' 不允许用于您的组织",
 		"modelNotAllowed": "模型 '{{model}}' 不允许用于提供商 '{{provider}}'，您的组织不允许",
 		"profileInvalid": "此配置文件包含您的组织不允许的提供商或模型",
-		"qwenCodeOauthPath": "您必须提供有效的 OAuth 凭证路径"
+		"qwenCodeOauthPath": "您必须提供有效的 OAuth 凭证路径",
+		"zooGatewaySignIn": "请登录 Zoo Code 以使用 Zoo Gateway。"
 	},
 	"placeholders": {
 		"apiKey": "请输入 API 密钥...",
@@ -968,6 +985,18 @@
 			"label": "聊天字体大小",
 			"description": "设置 Zoo Code 聊天的字体大小（以像素为单位）。保留默认值以匹配 VS Code 的字体大小。",
 			"reset": "使用 VS Code 默认值"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "自动关闭 Zoo 打开的文件",
+			"description": "启用后，Zoo 为 diff 临时打开的编辑器标签页将在接受或拒绝更改后自动关闭。用户在编辑前已打开的标签页不会被自动关闭。"
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "用户操作后也自动关闭",
+			"description": "启用后，即使用户在编辑会话中点击或输入了文件或 diff，Zoo 打开的标签页也会被关闭。若「自动关闭 Zoo 打开的文件」已禁用，则此选项无效。"
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "自动关闭新建的文件",
+			"description": "启用后，Zoo 新建（而非修改）的文件标签页在接受更改后也会自动关闭。"
 		}
 	},
 	"skills": {

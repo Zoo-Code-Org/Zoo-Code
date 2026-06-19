@@ -267,6 +267,7 @@
 		"running": "執行中",
 		"pid": "PID: {{pid}}",
 		"exitStatus": "已結束，狀態碼 {{exitCode}}",
+		"malformedCommand": "命令格式錯誤：shell 語法錯誤",
 		"manageCommands": "自動核准的命令",
 		"addToAllowed": "新增至允許清單",
 		"removeFromAllowed": "從允許清單中移除",
@@ -352,16 +353,11 @@
 	"announcement": {
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
-		"handoff": {
-			"heading": "Roo Code 回來了！現在以社群維護的 Zoo Code 外掛重新登場！！",
-			"description": "如果你最近沒有追蹤消息，Roo Code 團隊最近宣布將逐步停止 Roo Code 的開發，並封存他們至今完成的工作。不過別擔心，社群已經挺身而出，將以新名稱與新家園延續 Roo Code 的傳承！我們不再只是單一的「Roo」，而是一個社群，也就是你可以稱之為「Zoo」的集合。Zoo Code 是一款由社群維護的外掛，接續 Roo Code 停下的地方繼續前進；我們承諾在保留 Roo 精神的同時，也會帶來新功能與改進。我們也要向整個 Roo Code 團隊致上最深的敬意，感謝他們不可思議的付出，以及為開發者打造出如此出色的工具。我們很期待在他們奠定的基礎上繼續建設，也期待看看社群未來會把 Zoo Code 帶往何方！",
-			"readMore": "查看 Zoo Code 的新首頁並閱讀完整公告"
-		},
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "Claude Opus 4.8 與 Opencode Go：已為 Anthropic、Bedrock 和 Vertex 新增 Claude Opus 4.8，並新增 Opencode Go 作為一等供應商。",
-			"highlight2": "可靠的任務取消：取消任務現在會正確終止正在執行的程序，對於頑固程序還會自動重試 Ctrl+C。",
-			"highlight3": "供應商與編輯器修正：修正了 Gemini 自訂模型 ID、Grok diff 截斷、Windows 上的 PowerShell 偵測以及 VS Code 程式碼動作的品牌名稱。"
+			"highlight1": "新 AI 模型 — Claude Fable 5（適用於所有 Anthropic 提供商）和 OpenAI GPT-5.5 現已在提供商設定中可用。",
+			"highlight2": "按模式的 MCP 允許清單 — 在模式設定中使用新的允許清單，限制每個模式下哪些 MCP 伺服器處於活動狀態。",
+			"highlight3": "工作區 rootResolution 設定 — 一項新設定，用於控制 Zoo Code 在多根工作區中解析檔案路徑的方式。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

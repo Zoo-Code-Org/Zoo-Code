@@ -10,7 +10,11 @@ import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 
 vitest.mock("openai")
-vitest.mock("delay", () => ({ default: vitest.fn(() => Promise.resolve()) }))
+vitest.mock("delay", () => ({
+	default: vitest.fn(function () {
+		return Promise.resolve()
+	}),
+}))
 
 const mockCaptureException = vitest.fn()
 
@@ -23,7 +27,7 @@ vitest.mock("@roo-code/telemetry", () => ({
 }))
 
 vitest.mock("../fetchers/modelCache", () => ({
-	getModels: vitest.fn().mockImplementation(() => {
+	getModels: vitest.fn().mockImplementation(function () {
 		return Promise.resolve({
 			"anthropic/claude-sonnet-4": {
 				maxTokens: 8192,

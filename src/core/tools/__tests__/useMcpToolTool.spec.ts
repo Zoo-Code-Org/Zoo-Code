@@ -2,7 +2,7 @@
 
 import { useMcpToolTool } from "../UseMcpToolTool"
 import { Task } from "../../task/Task"
-import { ToolUse } from "../../../shared/tools"
+import { ToolUse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 
 // Mock dependencies
 vi.mock("../../prompts/responses", () => ({
@@ -43,16 +43,16 @@ vi.mock("../../../i18n", () => ({
 
 describe("useMcpToolTool", () => {
 	let mockTask: Partial<Task>
-	let mockAskApproval: ReturnType<typeof vi.fn>
-	let mockHandleError: ReturnType<typeof vi.fn>
-	let mockPushToolResult: ReturnType<typeof vi.fn>
+	let mockAskApproval: ReturnType<typeof vi.fn<AskApproval>>
+	let mockHandleError: ReturnType<typeof vi.fn<HandleError>>
+	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
 	let mockRemoveClosingTag: ReturnType<typeof vi.fn>
 	let mockProviderRef: any
 
 	beforeEach(() => {
-		mockAskApproval = vi.fn()
-		mockHandleError = vi.fn()
-		mockPushToolResult = vi.fn()
+		mockAskApproval = vi.fn<AskApproval>()
+		mockHandleError = vi.fn<HandleError>()
+		mockPushToolResult = vi.fn<PushToolResult>()
 		mockRemoveClosingTag = vi.fn((tag: string, value?: string) => value || "")
 
 		mockProviderRef = {
@@ -252,6 +252,55 @@ describe("useMcpToolTool", () => {
 			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_request_started")
 			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_response", "Tool executed successfully", [])
 			expect(mockPushToolResult).toHaveBeenCalledWith("Tool result: Tool executed successfully")
+		})
+
+		it("should parse JSON-string arguments and pass parsed object to callTool", async () => {
+			const callToolMock = vi.fn().mockResolvedValue({
+				content: [{ type: "text", text: "Browser session started" }],
+				isError: false,
+			})
+
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					callTool: callToolMock,
+					getAllServers: vi
+						.fn()
+						.mockReturnValue([
+							{ name: "test_server", tools: [{ name: "test_tool", description: "Test Tool" }] },
+						]),
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			const block: ToolUse = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "test_server",
+					tool_name: "test_tool",
+					arguments: '{"headless": true}',
+				},
+				nativeArgs: {
+					server_name: "test_server",
+					tool_name: "test_tool",
+					arguments: '{"headless": true}' as unknown as Record<string, unknown>,
+				},
+				partial: false,
+			}
+
+			mockAskApproval.mockResolvedValue(true)
+
+			await useMcpToolTool.handle(mockTask as Task, block as any, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockTask.recordToolError).not.toHaveBeenCalled()
+			expect(callToolMock).toHaveBeenCalledWith("test_server", "test_tool", { headless: true })
+			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_request_started")
+			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_response", "Browser session started", [])
 		})
 
 		it("should handle user rejection", async () => {

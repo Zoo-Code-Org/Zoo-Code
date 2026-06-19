@@ -358,6 +358,15 @@ function getSelectedModel({
 			const info = routerModels["opencode-go"]?.[id] ?? opencodeGoDefaultModelInfo
 			return { id, info }
 		}
+		case "zoo-gateway": {
+			const id = getValidatedModelId(
+				apiConfiguration.zooGatewayModelId,
+				routerModels["zoo-gateway"],
+				defaultModelId,
+			)
+			const info = routerModels["zoo-gateway"]?.[id]
+			return { id, info }
+		}
 		// case "anthropic":
 		// case "fake-ai":
 		default: {

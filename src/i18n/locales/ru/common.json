@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: Получен недействительный token аутентификации.",
 			"token_verification_failed": "Zoo Code: Не удалось проверить token.",
 			"invalid_token": "Zoo Code: Недействительный token.",
-			"could_not_verify_token": "Zoo Code: Не удалось проверить token."
+			"could_not_verify_token": "Zoo Code: Не удалось проверить token.",
+			"session_expired": "Сессия Zoo Code истекла. Войдите снова, чтобы продолжить использовать Zoo Gateway.",
+			"out_of_credits": "Zoo Gateway: недостаточно кредитов. Добавьте кредиты, чтобы продолжить.",
+			"account_unavailable": "Zoo Gateway: ваша учётная запись сейчас недоступна. Обратитесь в поддержку.",
+			"budget_exceeded": "Zoo Gateway: лимит использования достигнут. Дождитесь сброса или пополните счёт."
 		},
 		"info": {
 			"connected": "Zoo Code: Успешно подключено! Теперь ты можешь использовать Zoo Code в качестве AI-провайдера.",
 			"disconnected": "Zoo Code: Успешно отключено."
+		},
+		"buttons": {
+			"sign_in": "Войти",
+			"add_credits": "Добавить кредиты",
+			"contact_support": "Связаться с поддержкой"
 		}
 	},
 	"codeActions": {

@@ -261,11 +261,20 @@
 			"invalid_token_received": "Zoo Code: Geçersiz kimlik doğrulama token'ı alındı.",
 			"token_verification_failed": "Zoo Code: Token doğrulaması başarısız oldu.",
 			"invalid_token": "Zoo Code: Geçersiz token.",
-			"could_not_verify_token": "Zoo Code: Token doğrulanamadı."
+			"could_not_verify_token": "Zoo Code: Token doğrulanamadı.",
+			"session_expired": "Zoo Code oturumunun süresi doldu. Zoo Gateway'i kullanmaya devam etmek için lütfen tekrar giriş yapın.",
+			"out_of_credits": "Zoo Gateway: yetersiz kredi. Devam etmek için kredi ekleyin.",
+			"account_unavailable": "Zoo Gateway: hesabınız şu anda kullanılamıyor. Lütfen destek ile iletişime geçin.",
+			"budget_exceeded": "Zoo Gateway: kullanım bütçesine ulaşıldı. Sıfırlanmasını bekleyin veya kredi ekleyin."
 		},
 		"info": {
 			"connected": "Zoo Code: Başarıyla bağlandı! Artık Zoo Code'u AI sağlayıcısı olarak kullanabilirsin.",
 			"disconnected": "Zoo Code: Başarıyla bağlantı kesildi."
+		},
+		"buttons": {
+			"sign_in": "Giriş Yap",
+			"add_credits": "Kredi Ekle",
+			"contact_support": "Destek ile İletişim"
 		}
 	},
 	"codeActions": {

@@ -2,13 +2,13 @@
 	"fixtures": [
 		{
 			"match": {
-				"userMessage": "Hello world, what is your name? Respond with 'My name is ...'"
+				"userMessage": "TASK_HELLO_WORLD_SMOKE"
 			},
 			"response": {
 				"toolCalls": [
 					{
 						"name": "attempt_completion",
-						"arguments": "{\"result\":\"My name is Zoo! I'm your AI coding assistant, here to help you with development tasks.\"}",
+						"arguments": "{\"result\":\"My name is Zoo.\"}",
 						"id": "call_task_hello_world_001"
 					}
 				]

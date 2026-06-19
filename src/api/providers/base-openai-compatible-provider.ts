@@ -14,6 +14,7 @@ import { BaseProvider } from "./base-provider"
 import { handleOpenAIError } from "./utils/openai-error-handler"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { getApiRequestTimeout } from "./utils/timeout-config"
+import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -147,16 +148,9 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 				}
 			}
 
-			if (delta) {
-				for (const key of ["reasoning_content", "reasoning"] as const) {
-					if (key in delta) {
-						const reasoning_content = ((delta as any)[key] as string | undefined) || ""
-						if (reasoning_content?.trim()) {
-							yield { type: "reasoning", text: reasoning_content }
-						}
-						break
-					}
-				}
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
 			}
 
 			// Emit raw tool call chunks - NativeToolCallParser handles state management

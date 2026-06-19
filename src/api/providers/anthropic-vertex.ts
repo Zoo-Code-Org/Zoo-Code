@@ -71,7 +71,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		let { id, info, temperature, maxTokens, reasoning: thinking, betas } = this.getModel()
+		const { id, info, temperature, maxTokens, reasoning: thinking, betas } = this.getModel()
 
 		const { supportsPromptCache } = info
 
@@ -210,7 +210,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 
 	getModel() {
 		const modelId = this.options.apiModelId
-		let id = modelId && modelId in vertexModels ? (modelId as VertexModelId) : vertexDefaultModelId
+		const id = modelId && modelId in vertexModels ? (modelId as VertexModelId) : vertexDefaultModelId
 		let info: ModelInfo = vertexModels[id]
 
 		// Check if 1M context beta should be enabled for supported models
@@ -270,7 +270,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 
 	async completePrompt(prompt: string) {
 		try {
-			let {
+			const {
 				id,
 				info: { supportsPromptCache },
 				temperature,

@@ -356,6 +356,17 @@ describe("CodeIndexServiceFactory", () => {
 			// Act & Assert
 			expect(() => factory.createEmbedder()).toThrow("serviceFactory.invalidEmbedderType")
 		})
+
+		it("should throw when provider is semble (semble handles its own embedding)", () => {
+			const testConfig = {
+				embedderProvider: "semble",
+			}
+			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
+
+			expect(() => factory.createEmbedder()).toThrow(
+				"Semble provider handles its own embedding. Do not call createEmbedder() for semble",
+			)
+		})
 	})
 
 	describe("createVectorStore", () => {
@@ -678,6 +689,17 @@ describe("CodeIndexServiceFactory", () => {
 			// Act & Assert
 			expect(() => factory.createVectorStore()).toThrow("serviceFactory.qdrantUrlMissing")
 		})
+
+		it("should throw when provider is semble (semble handles its own vector storage)", () => {
+			const testConfig = {
+				embedderProvider: "semble",
+			}
+			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
+
+			expect(() => factory.createVectorStore()).toThrow(
+				"Semble provider handles its own vector storage. Do not call createVectorStore() for semble",
+			)
+		})
 	})
 
 	describe("validateEmbedder", () => {
@@ -699,7 +721,9 @@ describe("CodeIndexServiceFactory", () => {
 				},
 			}
 			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
-			MockedOpenAiEmbedder.mockImplementation(() => mockEmbedderInstance)
+			MockedOpenAiEmbedder.mockImplementation(function () {
+				return mockEmbedderInstance
+			})
 			mockEmbedderInstance.validateConfiguration.mockResolvedValue({ valid: true })
 
 			// Act
@@ -721,7 +745,9 @@ describe("CodeIndexServiceFactory", () => {
 				},
 			}
 			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
-			MockedOpenAiEmbedder.mockImplementation(() => mockEmbedderInstance)
+			MockedOpenAiEmbedder.mockImplementation(function () {
+				return mockEmbedderInstance
+			})
 			mockEmbedderInstance.validateConfiguration.mockResolvedValue({
 				valid: false,
 				error: "embeddings:validation.authenticationFailed",
@@ -748,7 +774,9 @@ describe("CodeIndexServiceFactory", () => {
 				},
 			}
 			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
-			MockedCodeIndexOllamaEmbedder.mockImplementation(() => mockEmbedderInstance)
+			MockedCodeIndexOllamaEmbedder.mockImplementation(function () {
+				return mockEmbedderInstance
+			})
 			mockEmbedderInstance.validateConfiguration.mockResolvedValue({ valid: true })
 
 			// Act
@@ -771,7 +799,9 @@ describe("CodeIndexServiceFactory", () => {
 				},
 			}
 			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
-			MockedOpenAICompatibleEmbedder.mockImplementation(() => mockEmbedderInstance)
+			MockedOpenAICompatibleEmbedder.mockImplementation(function () {
+				return mockEmbedderInstance
+			})
 			mockEmbedderInstance.validateConfiguration.mockResolvedValue({ valid: true })
 
 			// Act
@@ -792,7 +822,9 @@ describe("CodeIndexServiceFactory", () => {
 				},
 			}
 			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
-			MockedGeminiEmbedder.mockImplementation(() => mockEmbedderInstance)
+			MockedGeminiEmbedder.mockImplementation(function () {
+				return mockEmbedderInstance
+			})
 			mockEmbedderInstance.validateConfiguration.mockResolvedValue({ valid: true })
 
 			// Act
@@ -814,7 +846,9 @@ describe("CodeIndexServiceFactory", () => {
 				},
 			}
 			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
-			MockedOpenAiEmbedder.mockImplementation(() => mockEmbedderInstance)
+			MockedOpenAiEmbedder.mockImplementation(function () {
+				return mockEmbedderInstance
+			})
 			const networkError = new Error("Network error")
 			mockEmbedderInstance.validateConfiguration.mockRejectedValue(networkError)
 

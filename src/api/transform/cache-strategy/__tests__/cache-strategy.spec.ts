@@ -326,9 +326,7 @@ describe("Cache Strategy", () => {
 			} as unknown as BedrockRuntimeClient
 
 			// Mock the convertToBedrockConverseMessages method to capture the config
-			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation(function (
-				...args: any[]
-			) {
+			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation((...args: any[]) => {
 				const messages = args[0]
 				const systemMessage = args[1]
 				const usePromptCache = args[2]
@@ -344,9 +342,8 @@ describe("Cache Strategy", () => {
 				convertToBedrockConverseMessagesMock.lastConfig = config
 
 				// Create a strategy based on the config
-				let strategy
 				// Use MultiPointStrategy for all cases
-				strategy = new MultiPointStrategy(config as any)
+				const strategy = new MultiPointStrategy(config as any)
 
 				// Store the result
 				const result = strategy.determineOptimalCachePoints()
@@ -470,9 +467,7 @@ describe("Cache Strategy", () => {
 			} as unknown as BedrockRuntimeClient
 
 			// Mock the convertToBedrockConverseMessages method again for the new handler
-			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation(function (
-				...args: any[]
-			) {
+			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation((...args: any[]) => {
 				const messages = args[0]
 				const systemMessage = args[1]
 				const usePromptCache = args[2]
@@ -488,9 +483,8 @@ describe("Cache Strategy", () => {
 				convertToBedrockConverseMessagesMock.lastConfig = config
 
 				// Create a strategy based on the config
-				let strategy
 				// Use MultiPointStrategy for all cases
-				strategy = new MultiPointStrategy(config as any)
+				const strategy = new MultiPointStrategy(config as any)
 
 				// Store the result
 				const result = strategy.determineOptimalCachePoints()

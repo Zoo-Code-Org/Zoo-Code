@@ -7,6 +7,7 @@ import { customToolRegistry, formatNative } from "@roo-code/core"
 
 import type { ClineProvider } from "../webview/ClineProvider"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
+import { getModeBySlug, defaultModeSlug } from "../../shared/modes"
 
 import { getNativeTools, getMcpServerTools } from "../prompts/tools/native-tools"
 import {
@@ -113,7 +114,13 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		supportsImages,
 	})
 
-	// Filter native tools based on mode restrictions.
+	// Resolve mode config to get allowedMcpServers for MCP server filtering.
+	const modeConfig = getModeBySlug(mode ?? defaultModeSlug, customModes)
+	const allowedMcpServers = modeConfig?.allowedMcpServers
+
+	// Filter native tools based on mode restrictions. The allowlist is forwarded so the
+	// access_mcp_resource availability check only considers resources from allowed servers;
+	// otherwise a restricted mode could still read resources from disallowed servers.
 	const filteredNativeTools = filterNativeToolsForMode(
 		nativeTools,
 		mode,
@@ -122,10 +129,11 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		codeIndexManager,
 		filterSettings,
 		mcpHub,
+		allowedMcpServers,
 	)
 
 	// Filter MCP tools based on mode restrictions.
-	const mcpTools = getMcpServerTools(mcpHub)
+	const mcpTools = getMcpServerTools(mcpHub, allowedMcpServers)
 	const filteredMcpTools = filterMcpToolsForMode(mcpTools, mode, customModes, experiments)
 
 	// Add custom tools if they are available and the experiment is enabled.

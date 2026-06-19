@@ -41,28 +41,6 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 					<DialogTitle>{t("chat:announcement.title", { version: Package.version })}</DialogTitle>
 				</DialogHeader>
 				<div>
-					{/* Community Handoff Notice */}
-					<div className="mb-4 p-3 rounded border border-vscode-textLink-foreground/40 bg-vscode-textLink-foreground/5">
-						<p className="font-semibold mb-1.5 text-vscode-textLink-foreground">
-							{t("chat:announcement.handoff.heading")}
-						</p>
-						<p className="text-sm mb-2">
-							<Trans i18nKey="chat:announcement.handoff.description" components={{ bold: <strong /> }} />
-						</p>
-						<VSCodeLink
-							href="https://www.zoocode.dev?utm_source=zoocode&utm_medium=announcement&utm_campaign=community_handoff"
-							onClick={(e) => {
-								e.preventDefault()
-								vscode.postMessage({
-									type: "openExternal",
-									url: "https://www.zoocode.dev?utm_source=zoocode&utm_medium=announcement&utm_campaign=community_handoff",
-								})
-							}}>
-							{t("chat:announcement.handoff.readMore")}
-						</VSCodeLink>
-					</div>
-
-					{/* Regular Release Highlights */}
 					<div className="mb-4">
 						<p className="mb-3">{t("chat:announcement.release.heading")}</p>
 						<ul className="list-disc list-inside text-sm space-y-1.5">

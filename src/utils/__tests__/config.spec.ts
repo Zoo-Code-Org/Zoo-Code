@@ -76,7 +76,7 @@ describe("injectEnv", () => {
 	})
 
 	it("should use notFoundValue for missing env variables", async () => {
-		const consoleWarnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+		const consoleWarnSpy = vitest.spyOn(console, "warn").mockImplementation(function () {})
 		process.env.EXISTING_VAR = "exists"
 		const configString = "Value: ${env:EXISTING_VAR}, Missing: ${env:MISSING_VAR}"
 		const expectedString = "Value: exists, Missing: NOT_FOUND"
@@ -89,7 +89,7 @@ describe("injectEnv", () => {
 	})
 
 	it("should use default empty string for missing env variables if notFoundValue is not provided", async () => {
-		const consoleWarnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+		const consoleWarnSpy = vitest.spyOn(console, "warn").mockImplementation(function () {})
 		const configString = "Missing: ${env:ANOTHER_MISSING}"
 		const expectedString = "Missing: "
 		const result = await injectEnv(configString)

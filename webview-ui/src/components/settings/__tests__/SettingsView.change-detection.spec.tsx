@@ -286,6 +286,7 @@ describe("SettingsView - Change Detection Fix", () => {
 		terminalZshOhMy: false,
 		terminalZshP10k: false,
 		terminalZdotdir: false,
+		terminalProfile: undefined,
 		writeDelayMs: 0,
 		showRooIgnoredFiles: false,
 		maxReadFileLine: -1,
@@ -302,6 +303,9 @@ describe("SettingsView - Change Detection Fix", () => {
 		openRouterImageApiKey: undefined,
 		openRouterImageGenerationSelectedModel: undefined,
 		reasoningBlockCollapsed: true,
+		autoCloseZooOpenedFiles: true,
+		autoCloseZooOpenedFilesAfterUserEdited: false,
+		autoCloseZooOpenedNewFiles: false,
 		...overrides,
 	})
 

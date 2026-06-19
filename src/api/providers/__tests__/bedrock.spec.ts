@@ -26,9 +26,11 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => {
 	const mockConverseStreamCommand = vi.fn()
 
 	return {
-		BedrockRuntimeClient: vi.fn().mockImplementation(() => ({
-			send: mockSend,
-		})),
+		BedrockRuntimeClient: vi.fn().mockImplementation(function () {
+			return {
+				send: mockSend,
+			}
+		}),
 		ConverseStreamCommand: mockConverseStreamCommand,
 		ConverseCommand: vi.fn(),
 	}
@@ -690,6 +692,37 @@ describe("AwsBedrockHandler", () => {
 			expect(model.info.contextWindow).toBeDefined()
 			expect(typeof model.info.supportsImages).toBe("boolean")
 			expect(typeof model.info.supportsPromptCache).toBe("boolean")
+		})
+
+		it("should return Claude Fable 5 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-fable-5")
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it("should apply global inference prefix for Claude Fable 5 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("global.anthropic.claude-fable-5")
 		})
 	})
 
@@ -1524,6 +1557,7 @@ describe("AwsBedrockHandler", () => {
 			it("returns true for all adaptive-thinking model patterns (opus/sonnet 4.7 and 4.8)", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-8")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-fable-5")).toBe(true)
 				// Future-proof Sonnet patterns — guarded even before a registry entry exists.
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-8")).toBe(true)
@@ -1531,6 +1565,7 @@ describe("AwsBedrockHandler", () => {
 
 			it("returns true when the id carries a cross-region or global prefix", () => {
 				expect(isAdaptiveThinkingModel("us.anthropic.claude-opus-4-8")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("eu.anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-4-8")).toBe(true)
 			})

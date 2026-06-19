@@ -126,11 +126,13 @@ vi.mock("vscode", () => ({
 	window: {
 		activeTextEditor: undefined,
 	},
-	EventEmitter: vi.fn().mockImplementation(() => ({
-		event: vi.fn(),
-		fire: vi.fn(),
-		dispose: vi.fn(),
-	})),
+	EventEmitter: vi.fn().mockImplementation(function () {
+		return {
+			event: vi.fn(),
+			fire: vi.fn(),
+			dispose: vi.fn(),
+		}
+	}),
 }))
 
 vi.mock("../../../utils/shell", () => ({

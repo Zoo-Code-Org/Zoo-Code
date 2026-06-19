@@ -18,19 +18,23 @@ vi.mock("../../i18n", () => ({
 }))
 
 vi.mock("vscode", () => ({
-	CodeAction: vi.fn().mockImplementation((title, kind) => ({
-		title,
-		kind,
-		command: undefined,
-	})),
+	CodeAction: vi.fn().mockImplementation(function (title, kind) {
+		return {
+			title,
+			kind,
+			command: undefined,
+		}
+	}),
 	CodeActionKind: {
 		QuickFix: { value: "quickfix" },
 		RefactorRewrite: { value: "refactor.rewrite" },
 	},
-	Range: vi.fn().mockImplementation((startLine, startChar, endLine, endChar) => ({
-		start: { line: startLine, character: startChar },
-		end: { line: endLine, character: endChar },
-	})),
+	Range: vi.fn().mockImplementation(function (startLine, startChar, endLine, endChar) {
+		return {
+			start: { line: startLine, character: startChar },
+			end: { line: endLine, character: endChar },
+		}
+	}),
 	DiagnosticSeverity: {
 		Error: 0,
 		Warning: 1,
@@ -78,7 +82,9 @@ describe("CodeActionProvider", () => {
 		})
 		;(EditorUtils.getFilePath as Mock).mockReturnValue("/test/file.ts")
 		;(EditorUtils.hasIntersectingRange as Mock).mockReturnValue(true)
-		;(EditorUtils.createDiagnosticData as Mock).mockImplementation((d) => d)
+		;(EditorUtils.createDiagnosticData as Mock).mockImplementation((d) => {
+			return d
+		})
 	})
 
 	describe("provideCodeActions", () => {
@@ -127,7 +133,7 @@ describe("CodeActionProvider", () => {
 		})
 
 		it("should handle errors gracefully", () => {
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
 			// Reset the workspace mock to return true for enableCodeActions
 			const mockGet = vi.fn().mockReturnValue(true)
@@ -135,7 +141,7 @@ describe("CodeActionProvider", () => {
 				get: mockGet,
 			})
 			;(vscode.workspace.getConfiguration as Mock).mockReturnValue(mockGetConfiguration())
-			;(EditorUtils.getEffectiveRange as Mock).mockImplementation(() => {
+			;(EditorUtils.getEffectiveRange as Mock).mockImplementation(function () {
 				throw new Error("Test error")
 			})
 

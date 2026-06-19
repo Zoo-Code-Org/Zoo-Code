@@ -30,19 +30,11 @@
 
 Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku migracji Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chcemy jak najlepiej pomagać użytkownikom w czasie przejścia i właśnie do tego służą nasze [Reddit](https://www.reddit.com/r/ZooCode) oraz [Discord](https://discord.gg/VxfP4Vx3gX). Jeśli masz problem albo pytanie, wpadaj i pytaj.
 
-## Nowości w v3.56.0
+## Nowości w v3.60.0
 
-- Wsparcie dla **Claude Opus 4.8** u dostawców Anthropic, Bedrock i Vertex
-- **Opencode Go** dodany jako nowy dostawca API pierwszej klasy
-- **Niezawodne anulowanie zadań** — anulowanie zadania teraz poprawnie kończy uruchomiony proces, z automatycznym ponowieniem Ctrl+C dla opornych procesów
-- Naprawiono niestandardowe ID modeli Gemini, które były ignorowane i wracały do domyślnego
-- Naprawiono obcinanie diffów Grok przez brakujące znaczniki
-- Naprawiono wykrywanie PowerShell na Windows bez skonfigurowanego profilu powłoki
-- Naprawiono akcje kodu VS Code wyświetlające nazwę Roo Code; zlokalizowane we wszystkich obsługiwanych językach
-- Naprawiono ostrzeżenie Vertex AI przy ścieżce pliku w polu poświadczeń Google Cloud
-- Sześć aktualizacji bezpieczeństwa zależności (diff, i18next-http-backend, fast-xml-parser, simple-git, uuid, turbo)
-
----
+- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) i OpenAI GPT-5.5 są teraz dostępne w ustawieniach dostawcy
+- **Allowlisty MCP per tryb** — ogranicz aktywne serwery MCP dla każdego trybu za pomocą allowlisty w konfiguracji trybu
+- **Ustawienie rootResolution dla workspace** — nowe ustawienie do kontrolowania rozwiązywania ścieżek plików w środowiskach wielokorzeniowych
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 

@@ -221,6 +221,7 @@
 		"running": "चल रहा है",
 		"pid": "पीआईडी: {{pid}}",
 		"exitStatus": "{{exitCode}} स्थिति के साथ बाहर निकल गया",
+		"malformedCommand": "गलत कमांड: shell सिंटैक्स त्रुटि",
 		"manageCommands": "स्वतः-अनुमोदित कमांड",
 		"addToAllowed": "अनुमत सूची में जोड़ें",
 		"removeFromAllowed": "अनुमत सूची से हटाएँ",
@@ -330,16 +331,11 @@
 	"announcement": {
 		"title": "Zoo Code {{version}} रिलीज़ हो गया",
 		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
-		"handoff": {
-			"heading": "Roo Code वापस आ गया है! अब Zoo Code नाम के community-maintained plugin के रूप में!!",
-			"description": "अगर आपने हाल की खबर नहीं देखी, तो Roo Code टीम ने हाल ही में घोषणा की कि वे Roo Code का विकास बंद कर रहे हैं और अब तक किए गए काम को archive कर रहे हैं। लेकिन चिंता मत करें, community नए नाम और नए घर के साथ Roo Code की विरासत को आगे बढ़ाने के लिए आगे आई है! अब हम सिर्फ एक \"Roo\" नहीं हैं, हम एक community हैं — अगर चाहो तो एक \"Zoo\"। Zoo Code एक community-maintained plugin है जो वहीं से आगे बढ़ता है जहाँ Roo Code रुका था, और हम Roo की भावना को ज़िंदा रखते हुए नई सुविधाएँ और सुधार लाने के लिए प्रतिबद्ध हैं। हम पूरी Roo Code टीम को उनके शानदार काम और डेवलपर्स के लिए इतना बेहतरीन tool बनाने के लिए दिल से धन्यवाद देना चाहते हैं। हम उनकी बनाई नींव पर आगे निर्माण करने और यह देखने के लिए उत्साहित हैं कि community Zoo Code को आगे कहाँ ले जाती है!",
-			"readMore": "Zoo Code का नया होम पेज देखें और पूरी घोषणा पढ़ें"
-		},
 		"release": {
 			"heading": "नया क्या है:",
-			"highlight1": "Claude Opus 4.8 और Opencode Go: Anthropic, Bedrock और Vertex पर Claude Opus 4.8 जोड़ा गया, साथ ही Opencode Go को नए first-class provider के रूप में शामिल किया गया।",
-			"highlight2": "भरोसेमंद task cancellation: किसी task को cancel करने पर अब चल रहा process सही तरीके से बंद हो जाता है, और जिद्दी processes के लिए automatic Ctrl+C retry भी होता है।",
-			"highlight3": "Provider और editor fixes: Gemini के custom model IDs, Grok diff truncation, Windows पर PowerShell detection, और VS Code code action branding को ठीक किया गया।"
+			"highlight1": "नए AI मॉडल — Claude Fable 5 सभी Anthropic providers पर और OpenAI GPT-5.5 अब आपके provider settings में उपलब्ध हैं।",
+			"highlight2": "प्रति-मोड MCP allowlists — mode configuration में नई allowlist का उपयोग करके प्रत्येक mode के लिए सक्रिय MCP servers को सीमित करें।",
+			"highlight3": "Workspace rootResolution सेटिंग — एक नई सेटिंग जो नियंत्रित करती है कि Zoo Code multi-root workspaces में फ़ाइल पथों को कैसे resolve करता है।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",
