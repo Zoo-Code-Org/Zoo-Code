@@ -214,7 +214,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		try {
 			const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
 
-			let openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
 
 			const completionParams: RequestyChatCompletionParams = {
 				model,
