@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## 3.60.1
+
+### Added
+
+- **Brainstorm Mode:** New mode for open-ended, big-picture project development after the foundation is established. Engages flexibly with whatever is on the writer's mind instead of redirecting "out of scope" topics, and offers to hand off to Outline when the structural picture has genuinely settled.
+
+### Changed
+
+- **Outline Mode is now sub-agent only:** Its `whenToUse` discourages direct switching — it is spawned via sub-task by Collaborate (and now Brainstorm). Users are pointed to Brainstorm for project-level planning and Collaborate for writing.
+- **Knowledge Lookup delegation across modes:** Collaborate, Brainstorm, and Outline no longer bulk-read the `knowledge/` detail files. They read the lightweight `glossary.md` index inline and delegate fact-finding to the Knowledge Lookup sub-agent, keeping the main thread light. A new `knowledge_lookup.model` field in `.boo/config.yaml` lets lookups run on a cheaper model.
+- **Knowledge Lookup favors targeted grep:** Instructions now encourage grepping the grep-friendly knowledge files and reading only matching sections, then returning a synthesized, self-contained report. Callers are guided to pass fully-formed questions rather than bare keywords.
+- **Collaborate pre-draft exploration is more free-form:** Before the structured drafting process, Collaborate now opens a relaxed, multi-turn back-and-forth to clarify section details with the user, rather than a single orienting question.
+
 ## 3.60.0
 
 ### Added
