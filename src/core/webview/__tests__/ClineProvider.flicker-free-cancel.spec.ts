@@ -685,4 +685,8 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect(createTaskWithHistoryItemSpy).not.toHaveBeenCalled()
 		expect((provider as any).cancelledDelegationChildIds.has("child-1")).toBe(true)
 	})
+
+	afterAll(() => {
+		vi.restoreAllMocks()
+	})
 })
