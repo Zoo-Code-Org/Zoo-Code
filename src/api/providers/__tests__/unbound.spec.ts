@@ -200,6 +200,7 @@ describe("UnboundHandler", () => {
 			expect.objectContaining({
 				messages: [{ role: "system", content: "Write a haiku" }],
 			}),
+			expect.objectContaining({ signal: expect.any(AbortSignal) }),
 		)
 	})
 
