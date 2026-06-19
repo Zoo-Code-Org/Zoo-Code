@@ -73,6 +73,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		this.client = new Anthropic({
 			baseURL,
 			apiKey: options.minimaxApiKey,
+			timeout: this.timeoutMs,
 		})
 	}
 

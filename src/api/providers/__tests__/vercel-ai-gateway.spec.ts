@@ -1,7 +1,13 @@
 // npx vitest run src/api/providers/__tests__/vercel-ai-gateway.spec.ts
 
 // Mock vscode first to avoid import errors
-vitest.mock("vscode", () => ({}))
+vitest.mock("vscode", () => ({
+	workspace: {
+		getConfiguration: () => ({
+			get: (_key: string, defaultValue?: unknown) => defaultValue,
+		}),
+	},
+}))
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
@@ -118,6 +124,7 @@ describe("VercelAiGatewayHandler", () => {
 				"X-Title": "Zoo Code",
 				"User-Agent": expect.stringContaining("ZooCode/"),
 			}),
+			timeout: expect.any(Number),
 		})
 	})
 

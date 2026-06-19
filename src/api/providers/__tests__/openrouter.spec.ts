@@ -1,6 +1,18 @@
 // pnpm --filter roo-cline test api/providers/__tests__/openrouter.spec.ts
 
-vitest.mock("vscode", () => ({}))
+vitest.mock("vscode", () => ({
+	workspace: {
+		getConfiguration: () => ({
+			get: (_key: string, defaultValue?: unknown) => defaultValue,
+		}),
+	},
+}))
+
+vitest.mock("../utils/timeout-config", () => ({
+	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
+}))
+
+const MOCK_TIMEOUT_MS = 300_000
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
@@ -108,6 +120,7 @@ describe("OpenRouterHandler", () => {
 				"X-Title": "Zoo Code",
 				"User-Agent": `ZooCode/${Package.version}`,
 			},
+			timeout: MOCK_TIMEOUT_MS,
 		})
 	})
 

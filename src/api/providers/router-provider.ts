@@ -52,6 +52,7 @@ export abstract class RouterProvider extends BaseProvider {
 				...DEFAULT_HEADERS,
 				...(options.openAiHeaders || {}),
 			},
+			timeout: this.timeoutMs,
 		})
 	}
 

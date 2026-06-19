@@ -104,6 +104,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				session_id: this.sessionId,
 				"User-Agent": userAgent,
 			},
+			timeout: this.timeoutMs,
 		})
 	}
 

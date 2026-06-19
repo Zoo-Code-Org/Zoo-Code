@@ -8,6 +8,12 @@ import { openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo
 import { Package } from "../../../shared/package"
 import axios from "axios"
 
+vitest.mock("../utils/timeout-config", () => ({
+	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
+}))
+
+const MOCK_TIMEOUT_MS = 300_000
+
 const mockCreate = vitest.fn()
 
 vitest.mock("openai", () => {
@@ -117,7 +123,7 @@ describe("OpenAiHandler", () => {
 					"X-Title": "Zoo Code",
 					"User-Agent": `ZooCode/${Package.version}`,
 				},
-				timeout: expect.any(Number),
+				timeout: MOCK_TIMEOUT_MS,
 			})
 		})
 	})

@@ -379,9 +379,9 @@
 					"description": "%settings.useAgentRules.description%"
 				},
 				"zoo-code.apiRequestTimeout": {
-					"type": "number",
+					"type": "integer",
 					"default": 600,
-					"minimum": 0,
+					"minimum": 1,
 					"maximum": 3600,
 					"description": "%settings.apiRequestTimeout.description%"
 				},

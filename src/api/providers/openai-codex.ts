@@ -371,6 +371,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 						apiKey: accessToken,
 						baseURL: CODEX_API_BASE_URL,
 						defaultHeaders: codexHeaders,
+						timeout: this.timeoutMs,
 					})
 
 				const stream = (await (client as any).responses.create(requestBody, {
