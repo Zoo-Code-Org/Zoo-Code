@@ -20,3 +20,281 @@ export const opencodeGoDefaultModelInfo: ModelInfo = {
 }
 
 export const OPENCODE_GO_DEFAULT_TEMPERATURE = 0
+
+/**
+ * Native per-model configuration for the Opencode Go plan.
+ *
+ * The Go `/v1/models` endpoint only reliably returns `id` and (sometimes)
+ * `context_window`/`max_tokens`. It does NOT advertise capability flags such
+ * as `supportsReasoningEffort`, `preserveReasoning`, `supportsMaxTokens`,
+ * `supportsPromptCache`, or pricing — all of which are required for the
+ * extension to drive reasoning controls, interleaved-thinking tool calls,
+ * the max-output-tokens slider, and accurate cost reporting.
+ *
+ * This registry encodes the native capabilities of each curated Go model,
+ * sourced from the same vendor specs used by the dedicated providers
+ * (zai/moonshot/mimo/minimax/deepseek/qwen) and the Go pricing table at
+ * https://opencode.ai/docs/go/#usage-limits. The fetcher merges the live
+ * `/models` payload on top of these defaults so that context-window and
+ * max-token values stay in sync with the gateway while capability flags and
+ * pricing remain correct.
+ *
+ * `supportsPromptCache` is intentionally `true` for models whose Go pricing
+ * table lists a "Cached Read" price: the gateway honours server-side caching
+ * and reports `cached_tokens` in usage, which the handler forwards for cost
+ * calculation. Client-side `cache_control` injection is not used on this path.
+ */
+export const opencodeGoModels: Record<string, ModelInfo> = {
+	// --- Zhipu GLM ---
+	"glm-5": {
+		maxTokens: 16_384,
+		contextWindow: 202_752,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 1.0,
+		outputPrice: 3.2,
+		cacheReadsPrice: 0.2,
+		description:
+			"GLM-5 is Zhipu's next-generation model with a 202k context window and built-in thinking capabilities. Available via the Opencode Go plan.",
+	},
+	"glm-5.1": {
+		maxTokens: 131_072,
+		contextWindow: 204_800,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "medium"],
+		reasoningEffort: "medium",
+		preserveReasoning: true,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheReadsPrice: 0.26,
+		description:
+			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. Available via the Opencode Go plan.",
+	},
+	"glm-5.2": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "high", "max"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		// Go pricing matches GLM-5.1 ($1.4 / $0.26 cache / $4.4 out per 1M tokens).
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheReadsPrice: 0.26,
+		description:
+			"GLM-5.2 is Zhipu's flagship model with a 1M context window, 128k max output, and dual thinking-effort modes (High/Max). It delivers top-tier long-context reasoning, coding, and agentic performance. Available via the Opencode Go plan.",
+	},
+
+	// --- Moonshot Kimi ---
+	"kimi-k2.5": {
+		maxTokens: 16_384,
+		contextWindow: 262_144,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsTemperature: true,
+		defaultTemperature: 1.0,
+		inputPrice: 0.6,
+		outputPrice: 3.0,
+		cacheReadsPrice: 0.1,
+		description:
+			"Kimi K2.5 is the latest generation of Moonshot AI's Kimi series, featuring improved reasoning capabilities. Available via the Opencode Go plan.",
+	},
+	"kimi-k2.6": {
+		maxTokens: 16_384,
+		contextWindow: 262_144,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsTemperature: true,
+		defaultTemperature: 1.0,
+		inputPrice: 0.95,
+		outputPrice: 4.0,
+		cacheReadsPrice: 0.16,
+		description:
+			"Kimi K2.6 is Moonshot AI's native multimodal agentic MoE model with a 256k context window, built for long-horizon coding and tool use. Available via the Opencode Go plan.",
+	},
+
+	// --- Xiaomi MiMo ---
+	"mimo-v2.5": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 0.14,
+		outputPrice: 0.28,
+		cacheReadsPrice: 0.0028,
+		longContextPricing: {
+			thresholdTokens: 256_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"MiMo V2.5 - Xiaomi's full-modal understanding model (text, image, audio, video) with 1M context, deep thinking, and tool calling. Available via the Opencode Go plan.",
+	},
+	"mimo-v2.5-pro": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: false,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 1.74,
+		outputPrice: 3.48,
+		cacheReadsPrice: 0.0145,
+		longContextPricing: {
+			thresholdTokens: 256_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"MiMo V2.5 Pro - Xiaomi's flagship reasoning model with 1M context, deep thinking, and tool calling. Available via the Opencode Go plan.",
+	},
+
+	// --- MiniMax ---
+	"minimax-m2.5": {
+		maxTokens: 16_384,
+		contextWindow: 204_800,
+		supportsImages: false,
+		supportsPromptCache: true,
+		includedTools: ["search_and_replace"],
+		excludedTools: ["apply_diff"],
+		preserveReasoning: true,
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		cacheWritesPrice: 0.375,
+		cacheReadsPrice: 0.06,
+		description:
+			"MiniMax M2.5, the latest MiniMax model with enhanced coding and agentic capabilities. Available via the Opencode Go plan.",
+	},
+	"minimax-m2.7": {
+		maxTokens: 16_384,
+		contextWindow: 204_800,
+		supportsImages: false,
+		supportsPromptCache: true,
+		includedTools: ["search_and_replace"],
+		excludedTools: ["apply_diff"],
+		preserveReasoning: true,
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		cacheWritesPrice: 0.375,
+		cacheReadsPrice: 0.06,
+		description:
+			"MiniMax M2.7, the latest MiniMax model with recursive self-improvement capabilities. Available via the Opencode Go plan.",
+	},
+	"minimax-m3": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		includedTools: ["search_and_replace"],
+		excludedTools: ["apply_diff"],
+		preserveReasoning: true,
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		cacheReadsPrice: 0.06,
+		description:
+			"MiniMax M3, a frontier multimodal coding model with a 1M context window, agentic reasoning, and tool use. Available via the Opencode Go plan.",
+	},
+
+	// --- Alibaba Qwen ---
+	"qwen3.6-plus": {
+		maxTokens: 65_536,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		preserveReasoning: true,
+		inputPrice: 0.5,
+		outputPrice: 3.0,
+		cacheReadsPrice: 0.05,
+		cacheWritesPrice: 0.625,
+		longContextPricing: {
+			thresholdTokens: 256_000,
+			inputPriceMultiplier: 4,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 4,
+			cacheWritesPriceMultiplier: 4,
+		},
+		description:
+			"Qwen3.6 Plus - Alibaba's balanced coding and reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	"qwen3.7-plus": {
+		maxTokens: 65_536,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		preserveReasoning: true,
+		inputPrice: 0.4,
+		outputPrice: 1.6,
+		cacheReadsPrice: 0.04,
+		cacheWritesPrice: 0.5,
+		longContextPricing: {
+			thresholdTokens: 256_000,
+			inputPriceMultiplier: 3,
+			outputPriceMultiplier: 3,
+			cacheReadsPriceMultiplier: 3,
+			cacheWritesPriceMultiplier: 3,
+		},
+		description:
+			"Qwen3.7 Plus - Alibaba's multimodal reasoning model with a 1M context window and low-cost agentic coding. Available via the Opencode Go plan.",
+	},
+	"qwen3.7-max": {
+		maxTokens: 65_536,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		preserveReasoning: true,
+		inputPrice: 2.5,
+		outputPrice: 7.5,
+		cacheReadsPrice: 0.5,
+		cacheWritesPrice: 3.125,
+		description:
+			"Qwen3.7 Max - Alibaba's flagship text-only reasoning agent model with a 1M context window, designed for long-horizon agent workflows. Available via the Opencode Go plan.",
+	},
+
+	// --- DeepSeek ---
+	"deepseek-v4-pro": {
+		maxTokens: 384_000,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
+		preserveReasoning: true,
+		reasoningEffort: "high",
+		inputPrice: 1.74,
+		outputPrice: 3.48,
+		cacheReadsPrice: 0.0145,
+		description:
+			"DeepSeek-V4-Pro is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. Available via the Opencode Go plan.",
+	},
+	"deepseek-v4-flash": {
+		maxTokens: 384_000,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
+		preserveReasoning: true,
+		reasoningEffort: "high",
+		inputPrice: 0.14,
+		outputPrice: 0.28,
+		cacheReadsPrice: 0.0028,
+		description:
+			"DeepSeek-V4-Flash is DeepSeek's fast, cost-efficient V4 model supporting thinking and non-thinking modes. Available via the Opencode Go plan.",
+	},
+}
+
+/**
+ * Returns the native {@link ModelInfo} for a Go-plan model ID, or `undefined`
+ * when the ID is not part of the curated registry. Callers should fall back to
+ * {@link opencodeGoDefaultModelInfo} when this returns `undefined`.
+ */
+export function getOpencodeGoModelInfo(modelId: string): ModelInfo | undefined {
+	return opencodeGoModels[modelId]
+}

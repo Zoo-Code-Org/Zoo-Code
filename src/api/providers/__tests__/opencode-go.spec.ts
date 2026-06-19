@@ -6,7 +6,7 @@ vitest.mock("vscode", () => ({}))
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { opencodeGoDefaultModelId } from "@roo-code/types"
+import { opencodeGoDefaultModelId, opencodeGoModels } from "@roo-code/types"
 
 import { OpencodeGoHandler } from "../opencode-go"
 import { ApiHandlerOptions } from "../../../shared/api"
@@ -20,13 +20,9 @@ vitest.mock("delay", () => ({
 vitest.mock("../fetchers/modelCache", () => ({
 	getModels: vitest.fn().mockImplementation(function () {
 		return Promise.resolve({
-			"glm-5.1": {
-				maxTokens: 32768,
-				contextWindow: 200000,
-				supportsImages: false,
-				supportsPromptCache: false,
-				description: "GLM 5.1",
-			},
+			// Use the native registry entry so capability flags (reasoning
+			// effort, preserveReasoning, prompt cache) are exercised.
+			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
@@ -63,13 +59,17 @@ describe("OpencodeGoHandler", () => {
 	})
 
 	describe("fetchModel", () => {
-		it("returns the configured model info", async () => {
+		it("returns the configured model info with native capability flags", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const result = await handler.fetchModel()
 			expect(result.id).toBe("glm-5.1")
-			expect(result.info.maxTokens).toBe(32768)
-			expect(result.info.contextWindow).toBe(200000)
-			expect(result.info.supportsPromptCache).toBe(false)
+			// Native registry values for glm-5.1.
+			expect(result.info.maxTokens).toBe(131_072)
+			expect(result.info.contextWindow).toBe(204_800)
+			expect(result.info.supportsPromptCache).toBe(true)
+			expect(result.info.supportsReasoningEffort).toEqual(["disable", "medium"])
+			expect(result.info.preserveReasoning).toBe(true)
+			expect(result.info.supportsMaxTokens).toBe(true)
 		})
 
 		it("falls back to the default model id when none is configured", async () => {
@@ -141,7 +141,7 @@ describe("OpencodeGoHandler", () => {
 			})
 		})
 
-		it("requests a streaming completion with usage included", async () => {
+		it("requests a streaming completion with usage included and native max tokens", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 			for await (const _chunk of handler.createMessage("sys", messages)) {
@@ -153,10 +153,58 @@ describe("OpencodeGoHandler", () => {
 					model: "glm-5.1",
 					stream: true,
 					stream_options: { include_usage: true },
-					max_completion_tokens: 32768,
+					// glm-5.1 maxTokens (131_072) is clamped to 20% of its 204_800
+					// context window => 40_960.
+					max_completion_tokens: 40_960,
 					temperature: expect.any(Number),
 				}),
 			)
+		})
+
+		it("forwards the model's default reasoning_effort for reasoning-capable models", async () => {
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk // drain
+			}
+
+			// glm-5.1 advertises supportsReasoningEffort with a default of "medium".
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.1",
+					reasoning_effort: "medium",
+				}),
+			)
+		})
+
+		it("omits reasoning_effort when the user disables reasoning", async () => {
+			const handler = new OpencodeGoHandler({ ...mockOptions, reasoningEffort: "disable" })
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk // drain
+			}
+
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.reasoning_effort).toBeUndefined()
+		})
+
+		it("uses convertToR1Format for preserveReasoning models to keep interleaved thinking", async () => {
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Hi" }],
+				},
+			]
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk // drain
+			}
+
+			const callArgs = mockCreate.mock.calls[0][0] as { messages: Array<{ role: string }> }
+			// The system prompt is prepended, then the R1-converted user message.
+			expect(callArgs.messages[0]).toEqual({ role: "system", content: "sys" })
+			// convertToR1Format keeps a single user turn as one user message.
+			expect(callArgs.messages.filter((m) => m.role === "user")).toHaveLength(1)
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
@@ -247,7 +295,9 @@ describe("OpencodeGoHandler", () => {
 				expect.objectContaining({
 					model: "glm-5.1",
 					stream: false,
-					max_completion_tokens: 32768,
+					// glm-5.1 maxTokens (131_072) clamped to 20% of 204_800 => 40_960.
+					max_completion_tokens: 40_960,
+					reasoning_effort: "medium",
 				}),
 			)
 		})
