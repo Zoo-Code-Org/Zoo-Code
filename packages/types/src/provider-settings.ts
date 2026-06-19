@@ -21,6 +21,7 @@ import {
 	internationalZAiModels,
 	minimaxModels,
 	mimoModels,
+	isOpencodeGoAnthropicFormatModel,
 } from "./providers/index.js"
 
 /**
@@ -592,6 +593,17 @@ export const getApiProtocol = (provider: ProviderName | undefined, modelId?: str
 		modelId &&
 		modelId.toLowerCase().startsWith("anthropic/")
 	) {
+		return "anthropic"
+	}
+
+	// Opencode Go routes a subset of its models (Qwen, MiniMax) through the
+	// Anthropic Messages wire format (`/v1/messages`), which reports usage in
+	// Anthropic style: `input_tokens` excludes cache tokens, with separate
+	// `cache_creation_input_tokens` / `cache_read_input_tokens` fields. These
+	// models must use the anthropic protocol so token/cost aggregation adds the
+	// cache tokens back into the input total — otherwise the cached prefix is
+	// dropped from `contextTokens`, undercounting context-window usage.
+	if (provider && provider === "opencode-go" && modelId && isOpencodeGoAnthropicFormatModel(modelId)) {
 		return "anthropic"
 	}
 

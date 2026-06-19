@@ -53,6 +53,32 @@ describe("getApiProtocol", () => {
 		})
 	})
 
+	describe("Opencode Go provider", () => {
+		it("should return 'anthropic' for opencode-go Anthropic-format models (Qwen/MiniMax)", () => {
+			expect(getApiProtocol("opencode-go", "qwen3.7-max")).toBe("anthropic")
+			expect(getApiProtocol("opencode-go", "qwen3.7-plus")).toBe("anthropic")
+			expect(getApiProtocol("opencode-go", "qwen3.6-plus")).toBe("anthropic")
+			expect(getApiProtocol("opencode-go", "minimax-m3")).toBe("anthropic")
+			expect(getApiProtocol("opencode-go", "minimax-m2.7")).toBe("anthropic")
+			expect(getApiProtocol("opencode-go", "minimax-m2.5")).toBe("anthropic")
+		})
+
+		it("should return 'openai' for opencode-go OpenAI-format models (GLM/DeepSeek/etc.)", () => {
+			expect(getApiProtocol("opencode-go", "glm-5.2")).toBe("openai")
+			expect(getApiProtocol("opencode-go", "deepseek-v4-pro")).toBe("openai")
+			expect(getApiProtocol("opencode-go", "kimi-k2.5")).toBe("openai")
+			expect(getApiProtocol("opencode-go", "mimo-v2.5")).toBe("openai")
+		})
+
+		it("should return 'openai' for opencode-go without a model", () => {
+			expect(getApiProtocol("opencode-go")).toBe("openai")
+		})
+
+		it("should return 'openai' for opencode-go with an unknown model id", () => {
+			expect(getApiProtocol("opencode-go", "some-future-model")).toBe("openai")
+		})
+	})
+
 	describe("Other providers", () => {
 		it("should return 'openai' for non-anthropic providers regardless of model", () => {
 			expect(getApiProtocol("openrouter", "claude-3-opus")).toBe("openai")
