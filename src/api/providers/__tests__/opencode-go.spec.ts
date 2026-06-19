@@ -516,8 +516,13 @@ describe("OpencodeGoHandler", () => {
 			})
 			// ... message_delta output tokens ...
 			expect(chunks).toContainEqual({ type: "usage", inputTokens: 0, outputTokens: 5 })
-			// ... and a final cost chunk.
-			expect(chunks.some((c) => c.type === "usage" && c.totalCost !== undefined)).toBe(true)
+			// ... and a final cost chunk. Assert totalCost > 0 (not just
+			// defined) so CI catches the output-token accumulation regression —
+			// without accumulation the cost would be computed from
+			// outputTokens: 0 and report ~$0.
+			expect(chunks.some((c) => c.type === "usage" && typeof c.totalCost === "number" && c.totalCost > 0)).toBe(
+				true,
+			)
 		})
 
 		it("applies cache-control breakpoints when the model supports prompt caching", async () => {
@@ -821,6 +826,20 @@ describe("OpencodeGoHandler", () => {
 			mockAnthropicCreate.mockRejectedValue(new Error("boom"))
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			await expect(handler.completePrompt("ping")).rejects.toThrow("Opencode Go completion error: boom")
+		})
+
+		it("wraps pre-stream Anthropic errors from createMessage with an Opencode Go-specific message", async () => {
+			// Pre-stream failures (401, 429, network) reject the create() call
+			// before any chunk is emitted; they must be wrapped consistently
+			// with completePrompt rather than propagating raw.
+			mockAnthropicCreate.mockRejectedValue(new Error("rate limited"))
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			await expect(async () => {
+				for await (const _chunk of handler.createMessage("sys", messages)) {
+					void _chunk
+				}
+			}).rejects.toThrow("Opencode Go completion error: rate limited")
 		})
 	})
 

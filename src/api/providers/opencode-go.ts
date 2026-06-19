@@ -3,6 +3,7 @@ import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
 import OpenAI from "openai"
 
 import {
+	type ModelInfo,
 	opencodeGoDefaultModelId,
 	opencodeGoDefaultModelInfo,
 	OPENCODE_GO_DEFAULT_TEMPERATURE,
@@ -249,7 +250,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 */
 	private async *streamAnthropicMessage(
 		modelId: string,
-		info: { supportsPromptCache?: boolean },
+		info: ModelInfo,
 		temperature: number | undefined,
 		maxTokens: number | undefined,
 		systemPrompt: string,
@@ -298,7 +299,19 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				: {}),
 		}
 
-		const stream = await this.anthropicClient.messages.create(requestParams)
+		// Wrap pre-stream errors (401, 429, network) with the same
+		// "Opencode Go completion error:" prefix used by completePrompt so the
+		// Anthropic-format path surfaces failures consistently. Mid-stream
+		// errors propagate unchanged, matching the OpenAI streaming path.
+		let stream
+		try {
+			stream = await this.anthropicClient.messages.create(requestParams)
+		} catch (error) {
+			if (error instanceof Error) {
+				throw new Error(`Opencode Go completion error: ${error.message}`)
+			}
+			throw error
+		}
 
 		let inputTokens = 0
 		let outputTokens = 0
@@ -411,7 +424,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// Calculate and yield final cost
 		if (inputTokens > 0 || outputTokens > 0 || cacheWriteTokens > 0 || cacheReadTokens > 0) {
 			const { totalCost } = calculateApiCostAnthropic(
-				info as Parameters<typeof calculateApiCostAnthropic>[0],
+				info,
 				inputTokens,
 				outputTokens,
 				cacheWriteTokens,

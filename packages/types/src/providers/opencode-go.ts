@@ -39,10 +39,21 @@ export const OPENCODE_GO_DEFAULT_TEMPERATURE = 0
  * max-token values stay in sync with the gateway while capability flags and
  * pricing remain correct.
  *
- * `supportsPromptCache` is intentionally `true` for models whose Go pricing
- * table lists a "Cached Read" price: the gateway honours server-side caching
- * and reports `cached_tokens` in usage, which the handler forwards for cost
- * calculation. Client-side `cache_control` injection is not used on this path.
+ * `supportsPromptCache` has two distinct meanings depending on the wire format:
+ *
+ *   - Anthropic-format models (Qwen/MiniMax): `true` enables client-side
+ *     `cache_control` breakpoint injection in the handler's `/v1/messages`
+ *     path. The gateway then reports `cache_creation_input_tokens` /
+ *     `cache_read_input_tokens`, which are priced via `cacheWritesPrice` /
+ *     `cacheReadsPrice`.
+ *   - OpenAI-compatible models (GLM/Kimi/DeepSeek/MiMo): there is no
+ *     client-side `cache_control` concept, so the flag is NOT used to build
+ *     the request. The gateway performs server-side caching and reports
+ *     `cached_tokens` in `prompt_tokens_details`, which the handler forwards
+ *     as `cacheReadTokens` and prices via `cacheReadsPrice` regardless of the
+ *     flag. MiMo therefore declares `supportsPromptCache: false` (no
+ *     client-side injection, matching the dedicated `mimo` provider) while
+ *     still carrying a `cacheReadsPrice` for its server-side cache reads.
  */
 export const opencodeGoModels: Record<string, ModelInfo> = {
 	// --- Zhipu GLM ---
@@ -199,6 +210,12 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		preserveReasoning: true,
 		inputPrice: 0.3,
 		outputPrice: 1.2,
+		// M3 routes through the Anthropic Messages path with client-side
+		// cache_control injection active, so cache_creation_input_tokens are
+		// reported and billed. Matches the MiniMax write price shared by
+		// M2.5/M2.7 (same vendor/pricing tier: $0.3 in / $1.2 out / $0.06
+		// cache read).
+		cacheWritesPrice: 0.375,
 		cacheReadsPrice: 0.06,
 		description:
 			"MiniMax M3, a frontier multimodal coding model with a 1M context window, agentic reasoning, and tool use. Available via the Opencode Go plan.",
@@ -265,6 +282,12 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		contextWindow: 1_000_000,
 		supportsImages: false,
 		supportsPromptCache: true,
+		// DeepSeek advertises a large, explicit max-output ceiling (384k), so
+		// expose the configurable max-output slider like GLM. Without this the
+		// slider is hidden and the effective default is the 20% context-window
+		// clamp (200k); with it, users can raise the budget up to the model's
+		// 384k ceiling.
+		supportsMaxTokens: true,
 		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
 		preserveReasoning: true,
 		reasoningEffort: "high",
@@ -279,6 +302,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		contextWindow: 1_000_000,
 		supportsImages: false,
 		supportsPromptCache: true,
+		supportsMaxTokens: true,
 		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
 		preserveReasoning: true,
 		reasoningEffort: "high",

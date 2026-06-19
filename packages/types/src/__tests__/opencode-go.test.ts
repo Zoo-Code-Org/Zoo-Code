@@ -101,6 +101,26 @@ describe("opencode-go registry", () => {
 				}
 			}
 		})
+
+		it("every Anthropic-format model with prompt-cache injection declares a cacheWritesPrice", () => {
+			// MiniMax/Qwen route through /v1/messages with client-side
+			// cache_control breakpoints, so cache_creation_input_tokens are
+			// reported and billed — each must carry a cacheWritesPrice or the
+			// write cost is silently reported as $0.
+			for (const id of OPENCODE_GO_ANTHROPIC_FORMAT_MODELS) {
+				const info = getOpencodeGoModelInfo(id)
+				expect(info).toBeDefined()
+				if (info?.supportsPromptCache) {
+					expect(info.cacheWritesPrice).toBeDefined()
+					expect(info.cacheReadsPrice).toBeDefined()
+				}
+			}
+		})
+
+		it("DeepSeek entries expose supportsMaxTokens so the max-output slider is available", () => {
+			expect(getOpencodeGoModelInfo("deepseek-v4-pro")?.supportsMaxTokens).toBe(true)
+			expect(getOpencodeGoModelInfo("deepseek-v4-flash")?.supportsMaxTokens).toBe(true)
+		})
 	})
 
 	describe("defaults", () => {
