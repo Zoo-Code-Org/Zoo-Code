@@ -1,15 +1,20 @@
-import { useCallback } from "react"
+import { useCallback, useState, useEffect, useRef } from "react"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import {
 	type ProviderSettings,
 	type OrganizationAllowList,
 	type RouterModels,
+	type ExtensionMessage,
 	opencodeGoDefaultModelId,
 } from "@roo-code/types"
 
+import type { RouterName } from "@roo/api"
+
+import { vscode } from "@src/utils/vscode"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
+import { Button } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
 import { ModelPicker } from "../ModelPicker"
@@ -32,6 +37,34 @@ export const OpenCodeGo = ({
 	simplifySettings,
 }: OpenCodeGoProps) => {
 	const { t } = useAppTranslation()
+	const [refreshStatus, setRefreshStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
+	const [refreshError, setRefreshError] = useState<string | undefined>()
+	const errorJustReceived = useRef(false)
+
+	useEffect(() => {
+		const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
+			const message = event.data
+			if (message.type === "singleRouterModelFetchResponse" && !message.success) {
+				const providerName = message.values?.provider as RouterName
+				if (providerName === "opencode-go") {
+					errorJustReceived.current = true
+					setRefreshStatus("error")
+					setRefreshError(message.error)
+				}
+			} else if (message.type === "routerModels") {
+				if (refreshStatus === "loading") {
+					if (!errorJustReceived.current) {
+						setRefreshStatus("success")
+					}
+				}
+			}
+		}
+
+		window.addEventListener("message", handleMessage)
+		return () => {
+			window.removeEventListener("message", handleMessage)
+		}
+	}, [refreshStatus])
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -43,6 +76,16 @@ export const OpenCodeGo = ({
 			},
 		[setApiConfigurationField],
 	)
+
+	const handleRefreshModels = useCallback(() => {
+		errorJustReceived.current = false
+		setRefreshStatus("loading")
+		setRefreshError(undefined)
+		vscode.postMessage({
+			type: "requestRouterModels",
+			values: { provider: "opencode-go", refresh: true, opencodeGoApiKey: apiConfiguration.opencodeGoApiKey },
+		})
+	}, [apiConfiguration.opencodeGoApiKey])
 
 	return (
 		<>
@@ -61,6 +104,33 @@ export const OpenCodeGo = ({
 				<VSCodeButtonLink href="https://opencode.ai/docs/go/" appearance="primary" style={{ width: "100%" }}>
 					{t("settings:providers.getOpencodeGoApiKey")}
 				</VSCodeButtonLink>
+			)}
+			<Button
+				variant="outline"
+				onClick={handleRefreshModels}
+				disabled={refreshStatus === "loading"}
+				className="w-full">
+				<div className="flex items-center gap-2">
+					{refreshStatus === "loading" ? (
+						<span className="codicon codicon-loading codicon-modifier-spin" />
+					) : (
+						<span className="codicon codicon-refresh" />
+					)}
+					{t("settings:providers.refreshModels.label")}
+				</div>
+			</Button>
+			{refreshStatus === "loading" && (
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.refreshModels.loading")}
+				</div>
+			)}
+			{refreshStatus === "success" && (
+				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
+			)}
+			{refreshStatus === "error" && (
+				<div className="text-sm text-vscode-errorForeground">
+					{refreshError || t("settings:providers.refreshModels.error")}
+				</div>
 			)}
 			<ModelPicker
 				apiConfiguration={apiConfiguration}
