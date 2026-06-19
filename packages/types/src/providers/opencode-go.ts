@@ -6,7 +6,7 @@ import type { ModelInfo } from "../model.js"
 // The full model list (and metadata) is fetched dynamically from
 // `https://opencode.ai/zen/go/v1/models`, so models can be switched on the fly.
 // The values below are only a fallback used before the live list resolves.
-export const opencodeGoDefaultModelId = "glm-5.1"
+export const opencodeGoDefaultModelId = "glm-5.2"
 
 export const opencodeGoDefaultModelInfo: ModelInfo = {
 	maxTokens: 32_768,
