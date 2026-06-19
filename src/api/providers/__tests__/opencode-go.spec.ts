@@ -9,6 +9,7 @@ import OpenAI from "openai"
 import { opencodeGoDefaultModelId, opencodeGoModels, isOpencodeGoAnthropicFormatModel } from "@roo-code/types"
 
 import { OpencodeGoHandler } from "../opencode-go"
+import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
 
 vitest.mock("openai")
@@ -310,6 +311,68 @@ describe("OpencodeGoHandler", () => {
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
 		})
+
+		it("uses convertToOpenAiMessages for non-preserveReasoning models", async () => {
+			// kimi-k2.6 has no preserveReasoning flag, so messages bypass
+			// convertToR1Format and go through the plain OpenAI converter.
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"kimi-k2.6": { ...opencodeGoModels["kimi-k2.6"] },
+			}))
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { choices: [{ delta: { content: "Hi" }, index: 0 }] }
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const handler = new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "kimi-k2.6" })
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk
+			}
+
+			const callArgs = mockCreate.mock.calls[0][0] as { messages: Array<{ role: string }> }
+			expect(callArgs.messages[0]).toEqual({ role: "system", content: "sys" })
+			// A single user turn stays a single user message after OpenAI conversion.
+			expect(callArgs.messages.filter((m) => m.role === "user")).toHaveLength(1)
+		})
+
+		it("emits a usage chunk with zeroed tokens when the stream reports no usage", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { choices: [{ delta: { content: "Hi" }, index: 0 }] }
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+					}
+				},
+			}))
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", messages)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({ type: "usage", inputTokens: 0, outputTokens: 0 })
+		})
+
+		it("honors includeMaxTokens/modelMaxTokens override for max_completion_tokens", async () => {
+			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 999 })
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk
+			}
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 999 }))
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -332,6 +395,25 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockRejectedValue(new Error("boom"))
 			const handler = new OpencodeGoHandler(mockOptions)
 			await expect(handler.completePrompt("ping")).rejects.toThrow("Opencode Go completion error: boom")
+		})
+
+		it("rethrows non-Error values unchanged", async () => {
+			mockCreate.mockRejectedValue("not an error")
+			const handler = new OpencodeGoHandler(mockOptions)
+			await expect(handler.completePrompt("ping")).rejects.toBe("not an error")
+		})
+
+		it("returns an empty string when no content is returned", async () => {
+			mockCreate.mockResolvedValue({ choices: [] })
+			const handler = new OpencodeGoHandler(mockOptions)
+			expect(await handler.completePrompt("ping")).toBe("")
+		})
+
+		it("honors includeMaxTokens/modelMaxTokens override for max_completion_tokens", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 4321 })
+			await handler.completePrompt("ping")
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4321 }))
 		})
 	})
 
@@ -471,9 +553,268 @@ describe("OpencodeGoHandler", () => {
 					model: "qwen3.7-max",
 					stream: false,
 					messages: [{ role: "user", content: "ping" }],
+					// qwen3.7-max maxTokens (65_536) clamped to 20% of its 1M
+					// context window (200_000) => 65_536. includeMaxTokens is off,
+					// so the model default is used.
+					max_tokens: 65_536,
 				}),
 			)
 			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("completePrompt honors includeMaxTokens/modelMaxTokens override for max_tokens", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new OpencodeGoHandler({
+				...anthropicOptions,
+				includeMaxTokens: true,
+				modelMaxTokens: 2048,
+			})
+			await handler.completePrompt("ping")
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 2048 }))
+		})
+
+		it("completePrompt rethrows non-Error values unchanged from the Anthropic path", async () => {
+			mockAnthropicCreate.mockRejectedValue("not an error")
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await expect(handler.completePrompt("ping")).rejects.toBe("not an error")
+		})
+
+		it("completePrompt returns an empty string when no text content is returned", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "tool_use", id: "x", name: "n", input: {} }] })
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			expect(await handler.completePrompt("ping")).toBe("")
+		})
+
+		it("omits tools and tool_choice from the Anthropic request when no tools are provided", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk
+			}
+
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			// Disable-tools path: with no tools, neither field is sent so the
+			// gateway doesn't force a tool-use-only turn.
+			expect(callArgs.tools).toBeUndefined()
+			expect(callArgs.tool_choice).toBeUndefined()
+		})
+
+		it("includes tools and tool_choice in the Anthropic request when tools are provided", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "read a file",
+						parameters: { type: "object", properties: {} },
+					},
+				},
+			]
+
+			for await (const _chunk of handler.createMessage("sys", messages, { tools })) {
+				void _chunk
+			}
+
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(Array.isArray(callArgs.tools)).toBe(true)
+			expect((callArgs.tools as unknown[]).length).toBe(1)
+			expect(callArgs.tool_choice).toBeDefined()
+		})
+
+		it("skips cache-control breakpoints when the Anthropic-format model does not support prompt caching", async () => {
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"], supportsPromptCache: false },
+			}))
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "first" },
+				{ role: "assistant", content: "ok" },
+				{ role: "user", content: "second" },
+			]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk
+			}
+
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as {
+				system: Array<{ cache_control?: unknown }>
+				messages: Array<{ cache_control?: unknown }>
+			}
+			expect(callArgs.system[0].cache_control).toBeUndefined()
+			expect(callArgs.messages.every((m) => m.cache_control === undefined)).toBe(true)
+		})
+
+		it("applies cache-control to the last block of array-content user messages", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "first" }] },
+				{ role: "assistant", content: "ok" },
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "part-a" },
+						{ type: "text", text: "part-b" },
+					],
+				},
+			]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk
+			}
+
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as { messages: Array<{ content: any }> }
+			const lastUserMsg = callArgs.messages[callArgs.messages.length - 1]
+			const blocks = lastUserMsg.content as any[]
+			// Only the final content block of the last user message is cached.
+			expect(blocks[blocks.length - 1].cache_control).toEqual({ type: "ephemeral" })
+			expect(blocks[0].cache_control).toBeUndefined()
+		})
+
+		it("leaves messages unchanged when there are no user messages to cache", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "assistant", content: "only assistant" }]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk
+			}
+
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as {
+				messages: Array<{ cache_control?: unknown }>
+			}
+			expect(callArgs.messages.every((m) => m.cache_control === undefined)).toBe(true)
+		})
+
+		it("streams thinking content blocks and thinking deltas", async () => {
+			mockAnthropicCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { type: "message_start", message: { usage: { input_tokens: 5, output_tokens: 0 } } }
+					// index 0: thinking block (no leading newline at index 0).
+					yield {
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "thinking", thinking: "initial thought" },
+					}
+					yield {
+						type: "content_block_delta",
+						index: 0,
+						delta: { type: "thinking_delta", thinking: " more" },
+					}
+					// index 1: text block gets a leading newline separator.
+					yield { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } }
+					yield { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "answer" } }
+					// index 2: a second thinking block also gets a newline separator.
+					yield {
+						type: "content_block_start",
+						index: 2,
+						content_block: { type: "thinking", thinking: "second thought" },
+					}
+					yield { type: "message_delta", usage: { output_tokens: 3 } }
+					yield { type: "message_stop" }
+				},
+			}))
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", messages)) {
+				chunks.push(chunk)
+			}
+
+			// index 0 thinking block (no leading newline separator at index 0).
+			expect(chunks).toContainEqual({ type: "reasoning", text: "initial thought" })
+			expect(chunks).toContainEqual({ type: "reasoning", text: " more" })
+			// index 1 text block gets a leading newline separator.
+			expect(chunks).toContainEqual({ type: "text", text: "\n" })
+			expect(chunks).toContainEqual({ type: "text", text: "answer" })
+			// index 2 thinking block gets a leading newline separator.
+			expect(chunks).toContainEqual({ type: "reasoning", text: "\n" })
+			expect(chunks).toContainEqual({ type: "reasoning", text: "second thought" })
+		})
+
+		it("honors includeMaxTokens/modelMaxTokens override for the streaming Anthropic max_tokens", async () => {
+			const handler = new OpencodeGoHandler({
+				...anthropicOptions,
+				includeMaxTokens: true,
+				modelMaxTokens: 8192,
+			})
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk
+			}
+
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 8192 }))
+		})
+
+		it("falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
+			const handler = new OpencodeGoHandler({ ...anthropicOptions, includeMaxTokens: true })
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk
+			}
+
+			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 65_536 }))
+		})
+
+		it("accumulates output tokens across message_delta events into the final cost", async () => {
+			mockAnthropicCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 0 } } }
+					yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
+					yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } }
+					yield { type: "message_delta", usage: { output_tokens: 4 } }
+					yield { type: "message_delta", usage: { output_tokens: 6 } }
+					yield { type: "message_stop" }
+				},
+			}))
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", messages)) {
+				chunks.push(chunk)
+			}
+
+			const costChunk = chunks.find((c) => c.type === "usage" && c.totalCost !== undefined)
+			expect(costChunk).toBeDefined()
+			// qwen3.7-max: input $2.5/M, output $7.5/M. Accumulated output
+			// tokens (4 + 6 = 10) must feed the cost calc — without the
+			// accumulation fix this would only reflect the 10 input tokens
+			// (0.000025) instead of input + output (0.0001).
+			expect(costChunk.totalCost).toBeCloseTo((10 * 2.5 + 10 * 7.5) / 1_000_000, 10)
+		})
+
+		it("does not yield a cost chunk when the stream reports no token usage", async () => {
+			mockAnthropicCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { type: "message_start", message: { usage: { input_tokens: 0, output_tokens: 0 } } }
+					yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
+					yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } }
+					yield { type: "message_delta", usage: { output_tokens: 0 } }
+					yield { type: "message_stop" }
+				},
+			}))
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", messages)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.some((c) => c.type === "usage" && c.totalCost !== undefined)).toBe(false)
 		})
 
 		it("completePrompt wraps Anthropic errors with an Opencode Go-specific message", async () => {

@@ -269,6 +269,12 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				: { text: systemPrompt, type: "text" },
 		]
 
+		// Only attach tools/tool_choice when the caller actually provides
+		// tools — sending an empty tool list (or a tool_choice derived from an
+		// empty set) forces some Anthropic-compatible gateways into a
+		// tool-use-only mode and is wasteful for plain text turns.
+		const tools = metadata?.tools && metadata.tools.length > 0 ? metadata.tools : undefined
+
 		const requestParams: Anthropic.Messages.MessageCreateParams = {
 			model: modelId,
 			max_tokens:
@@ -281,8 +287,15 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				? this.addAnthropicCacheControl(sanitizedMessages, cacheControl)
 				: sanitizedMessages,
 			stream: true,
-			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
-			tool_choice: convertOpenAIToolChoiceToAnthropic(metadata?.tool_choice, metadata?.parallelToolCalls),
+			...(tools
+				? {
+						tools: convertOpenAIToolsToAnthropic(tools),
+						tool_choice: convertOpenAIToolChoiceToAnthropic(
+							metadata?.tool_choice,
+							metadata?.parallelToolCalls,
+						),
+					}
+				: {}),
 		}
 
 		const stream = await this.anthropicClient.messages.create(requestParams)
@@ -320,6 +333,12 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				}
 				case "message_delta":
 					// Tells us stop_reason, stop_sequence, and output tokens.
+					// Anthropic streams the cumulative output token count in each
+					// message_delta (the final event carries the total), so
+					// accumulate it into the running total used for cost
+					// calculation — otherwise the final cost only reflects the
+					// (typically zero) message_start output tokens.
+					outputTokens += chunk.usage.output_tokens || 0
 					yield {
 						type: "usage",
 						inputTokens: 0,
@@ -460,7 +479,14 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			try {
 				const message = await this.anthropicClient.messages.create({
 					model: modelId,
-					max_tokens: maxTokens ?? 16_384,
+					// Honour the same includeMaxTokens/modelMaxTokens override
+					// logic as the streaming path so non-streaming completions
+					// respect the user's max-output slider instead of always
+					// falling back to the model default.
+					max_tokens:
+						this.options.includeMaxTokens === true
+							? this.options.modelMaxTokens || maxTokens || 16_384
+							: (maxTokens ?? 16_384),
 					temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
 					messages: [{ role: "user", content: prompt }],
 					stream: false,
