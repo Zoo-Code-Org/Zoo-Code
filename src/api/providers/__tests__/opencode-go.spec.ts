@@ -12,10 +12,14 @@ import { OpencodeGoHandler } from "../opencode-go"
 import { ApiHandlerOptions } from "../../../shared/api"
 
 vitest.mock("openai")
-vitest.mock("delay", () => ({ default: vitest.fn(() => Promise.resolve()) }))
+vitest.mock("delay", () => ({
+	default: vitest.fn(function () {
+		return Promise.resolve()
+	}),
+}))
 vitest.mock("../fetchers/modelCache", () => ({
-	getModels: vitest.fn().mockImplementation(() =>
-		Promise.resolve({
+	getModels: vitest.fn().mockImplementation(function () {
+		return Promise.resolve({
 			"glm-5.1": {
 				maxTokens: 32768,
 				contextWindow: 200000,
@@ -23,16 +27,18 @@ vitest.mock("../fetchers/modelCache", () => ({
 				supportsPromptCache: false,
 				description: "GLM 5.1",
 			},
-		}),
-	),
+		})
+	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
 
 const mockCreate = vitest.fn()
 
-;(OpenAI as any).mockImplementation(() => ({
-	chat: { completions: { create: mockCreate } },
-}))
+;(OpenAI as any).mockImplementation(function () {
+	return {
+		chat: { completions: { create: mockCreate } },
+	}
+})
 
 describe("OpencodeGoHandler", () => {
 	const mockOptions: ApiHandlerOptions = {
@@ -151,6 +157,84 @@ describe("OpencodeGoHandler", () => {
 					temperature: expect.any(Number),
 				}),
 			)
+		})
+
+		it("streams reasoning chunks from delta.reasoning_content", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] }
+					yield { choices: [{ delta: { content: "answer" }, index: 0 }] }
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", messages)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
+		})
+
+		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] }
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", messages)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
+		})
+
+		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [
+							{
+								delta: {
+									reasoning_content: "primary thought",
+									reasoning: "fallback thought",
+								},
+								index: 0,
+							},
+						],
+					}
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", messages)) {
+				chunks.push(chunk)
+			}
+
+			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
+			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
 		})
 	})
 

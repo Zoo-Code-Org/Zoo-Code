@@ -180,6 +180,9 @@ export const globalSettingsSchema = z.object({
 	execaShellPath: z.string().optional(),
 
 	diagnosticsEnabled: z.boolean().optional(),
+	autoCloseZooOpenedFiles: z.boolean().optional(),
+	autoCloseZooOpenedFilesAfterUserEdited: z.boolean().optional(),
+	autoCloseZooOpenedNewFiles: z.boolean().optional(),
 
 	rateLimitSeconds: z.number().optional(),
 	experiments: experimentsSchema.optional(),

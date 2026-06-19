@@ -544,6 +544,7 @@
 			"minimal": "Minimalny (najszybszy)",
 			"high": "Wysoki",
 			"xhigh": "Bardzo wysoki",
+			"max": "Maksymalny",
 			"medium": "Średni",
 			"low": "Niski"
 		},
@@ -984,6 +985,18 @@
 			"label": "Rozmiar czcionki czatu",
 			"description": "Ustaw rozmiar czcionki (w pikselach) dla czatu Zoo Code. Pozostaw wartość domyślną, aby dopasować ją do rozmiaru czcionki VS Code.",
 			"reset": "Użyj wartości domyślnej VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Automatycznie zamykaj pliki otwarte przez Zoo",
+			"description": "Gdy wlaczone, karty edytora, ktore Zoo otworzylo tymczasowo dla diffa, sa automatycznie zamykane po zaakceptowaniu lub odrzuceniu zmiany. Karty, ktore uzytkownik mial juz otwarte przed edycja, nigdy nie sa automatycznie zamykane."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Automatycznie zamykaj rowniez po interakcji uzytkownika",
+			"description": "Gdy wlaczone, karty otwarte przez Zoo sa zamykane nawet jesli uzytkownik kliknal lub pisal w pliku lub diffie podczas sesji edycji. Nie ma efektu, jesli 'Automatycznie zamykaj pliki otwarte przez Zoo' jest wylaczone."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Automatycznie zamykaj nowo utworzone pliki",
+			"description": "Gdy wlaczone, karty plikow, ktore Zoo utworzylo (zamiast zmodyfikowalo), sa rowniez automatycznie zamykane po zaakceptowaniu zmiany."
 		}
 	},
 	"skills": {

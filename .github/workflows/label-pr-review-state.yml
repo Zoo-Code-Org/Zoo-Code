@@ -1,0 +1,94 @@
+name: Label PR review state
+
+on:
+  schedule:
+    - cron: '0 * * * *' # hourly
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+
+concurrency:
+  group: label-pr-review-state
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reconcile PR review state labels
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const stateLabels = ['awaiting-author', 'awaiting-review'];
+            const failures = [];
+
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+
+            for (const pr of prs) {
+              try {
+                const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                  owner, repo, pull_number: pr.number, per_page: 100,
+                });
+
+                // Reviews are returned chronologically, so later entries replace
+                // each reviewer's earlier decision.
+                const latest = new Map();
+                for (const r of reviews) {
+                  if (r.state !== 'COMMENTED') {
+                    latest.set(r.user.login, r);
+                  }
+                }
+
+                const changeRequestReviewers = [...latest.entries()]
+                  .filter(([, review]) => review.state === 'CHANGES_REQUESTED')
+                  .map(([login]) => login);
+                const requestedReviewers = new Set(
+                  pr.requested_reviewers.map(reviewer => reviewer.login),
+                );
+
+                let desiredLabel = null;
+                if (changeRequestReviewers.length > 0) {
+                  desiredLabel = changeRequestReviewers.every(
+                    reviewer => requestedReviewers.has(reviewer),
+                  )
+                    ? 'awaiting-review'
+                    : 'awaiting-author';
+                }
+
+                const currentLabels = new Set(pr.labels.map(label => label.name));
+                for (const label of stateLabels) {
+                  if (label !== desiredLabel && currentLabels.has(label)) {
+                    await github.rest.issues.removeLabel({
+                      owner, repo, issue_number: pr.number, name: label,
+                    });
+                  }
+                }
+
+                if (desiredLabel && !currentLabels.has(desiredLabel)) {
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: pr.number, labels: [desiredLabel],
+                  });
+                }
+
+                if (
+                  desiredLabel !== 'awaiting-author' &&
+                  currentLabels.has('stale-awaiting-author')
+                ) {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number: pr.number,
+                    name: 'stale-awaiting-author',
+                  });
+                }
+              } catch (error) {
+                failures.push(`#${pr.number}: ${error.message}`);
+                core.error(`Failed to reconcile PR #${pr.number}: ${error.message}`);
+              }
+            }
+
+            if (failures.length > 0) {
+              core.setFailed(`Failed to reconcile ${failures.length} PR(s): ${failures.join('; ')}`);
+            }

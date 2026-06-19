@@ -63,8 +63,8 @@ describe("OpenAICompatibleEmbedder", () => {
 
 	beforeEach(() => {
 		vitest.clearAllMocks()
-		vitest.spyOn(console, "warn").mockImplementation(() => {})
-		vitest.spyOn(console, "error").mockImplementation(() => {})
+		vitest.spyOn(console, "warn").mockImplementation(function () {})
+		vitest.spyOn(console, "error").mockImplementation(function () {})
 
 		// Setup mock OpenAI instance
 		mockEmbeddingsCreate = vitest.fn()
@@ -74,7 +74,9 @@ describe("OpenAICompatibleEmbedder", () => {
 			},
 		}
 
-		MockedOpenAI.mockImplementation(() => mockOpenAIInstance)
+		MockedOpenAI.mockImplementation(function () {
+			return mockOpenAIInstance
+		})
 
 		// Reset global rate limit state to prevent interference between tests
 		const tempEmbedder = new OpenAICompatibleEmbedder(testBaseUrl, testApiKey, testModelId)

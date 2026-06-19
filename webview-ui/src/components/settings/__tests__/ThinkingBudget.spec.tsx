@@ -320,26 +320,14 @@ describe("ThinkingBudget", () => {
 		const glmApiConfiguration = { apiProvider: "zai", apiModelId: "glm-5.1" } as const
 
 		it("should render the max output tokens slider alongside the reasoning effort dropdown", () => {
-			render(
-				<ThinkingBudget
-					{...defaultProps}
-					apiConfiguration={glmApiConfiguration}
-					modelInfo={glmModelInfo}
-				/>,
-			)
+			render(<ThinkingBudget {...defaultProps} apiConfiguration={glmApiConfiguration} modelInfo={glmModelInfo} />)
 
 			expect(screen.getByTestId("max-output-tokens")).toBeInTheDocument()
 			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
 		})
 
 		it("should default the slider to the 20% clamp when modelMaxTokens is unset", () => {
-			render(
-				<ThinkingBudget
-					{...defaultProps}
-					apiConfiguration={glmApiConfiguration}
-					modelInfo={glmModelInfo}
-				/>,
-			)
+			render(<ThinkingBudget {...defaultProps} apiConfiguration={glmApiConfiguration} modelInfo={glmModelInfo} />)
 
 			// 20% of 200000 = 40000 (the runtime clamp), since maxTokens (131072) exceeds it.
 			const slider = screen.getByTestId("max-output-tokens").querySelector("input[type='range']")!

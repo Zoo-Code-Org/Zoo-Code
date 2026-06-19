@@ -165,6 +165,18 @@
 			"label": "Chat font size",
 			"description": "Set the font size (in pixels) for the Zoo Code chat. Leave at the default to match VS Code's font size.",
 			"reset": "Use VS Code default"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Auto-close files Zoo opened",
+			"description": "When enabled, editor tabs that Zoo opened transiently for a diff will be closed automatically after the edit is accepted or rejected. Tabs the user already had open before the edit are never auto-closed."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Auto-close even after user interaction",
+			"description": "When enabled, Zoo-opened tabs are closed even if the user clicked or typed inside the file or diff during the edit session. Has no effect when 'Auto-close files Zoo opened' is disabled."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Auto-close newly created files",
+			"description": "When enabled, tabs for files that Zoo created (rather than modified) will also be closed automatically after the edit is accepted."
 		}
 	},
 	"prompts": {
@@ -620,7 +632,8 @@
 			"low": "Low",
 			"medium": "Medium",
 			"high": "High",
-			"xhigh": "Extra High"
+			"xhigh": "Extra High",
+			"max": "Max"
 		},
 		"verbosity": {
 			"label": "Output Verbosity",

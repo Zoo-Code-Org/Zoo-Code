@@ -95,7 +95,11 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			if (parseError !== null) {
 				const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
 				const provider = await task.providerRef.deref()
-				const errorStatus: CommandExecutionStatus = { executionId, status: "error", message: parseError.message }
+				const errorStatus: CommandExecutionStatus = {
+					executionId,
+					status: "error",
+					message: parseError.message,
+				}
 				provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(errorStatus) })
 				task.didToolFailInCurrentTurn = true
 				pushToolResult(formatResponse.toolError(parseError.message))
@@ -331,9 +335,8 @@ export async function executeCommandInTerminal(
 	// Track when onCompleted callback finishes to avoid race condition.
 	// The callback is async but Terminal/ExecaTerminal don't await it, so we track completion
 	// explicitly to ensure persistedResult is set before we use it.
-	let onCompletedPromise: Promise<void> | undefined
 	let resolveOnCompleted: (() => void) | undefined
-	onCompletedPromise = new Promise((resolve) => {
+	const onCompletedPromise = new Promise<void>((resolve) => {
 		resolveOnCompleted = resolve
 	})
 

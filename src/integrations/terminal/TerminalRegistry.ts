@@ -103,12 +103,21 @@ export class TerminalRegistry {
 					}
 
 					if (!terminal.running) {
-						console.error(
-							"[TerminalRegistry] Shell execution end event received, but process is not running for terminal:",
-							{ terminalId: terminal?.id, command: process?.command, exitCode: e.exitCode },
-						)
+						// The end event can arrive before setActiveStream() has set
+						// running=true (race between the global VS Code event and the
+						// synchronous call in TerminalProcess.run). If a process is
+						// waiting for completion, deliver the signal so it doesn't
+						// hang forever. See #489 / #622.
+						if (process) {
+							console.info(
+								"[TerminalRegistry] End event arrived before running=true (race); delivering completion signal",
+								{ terminalId: terminal.id, exitCode: e.exitCode },
+							)
+							terminal.shellExecutionComplete(exitDetails)
+						} else {
+							terminal.busy = false
+						}
 
-						terminal.busy = false
 						return
 					}
 
@@ -123,7 +132,6 @@ export class TerminalRegistry {
 
 					// Signal completion to any waiting processes.
 					terminal.shellExecutionComplete(exitDetails)
-					terminal.busy = false // Mark terminal as not busy when shell execution ends
 				},
 			)
 

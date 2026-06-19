@@ -1,0 +1,60 @@
+name: Close stale PRs
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  stale-inactivity:
+    name: 60-day inactivity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 60
+          days-before-pr-close: 7
+
+          stale-pr-label: stale-inactive
+          stale-pr-message: >
+            This PR has had no activity for 60 days and will be automatically
+            closed in 7 days unless there is new activity. If you'd like to
+            continue, please rebase and leave a comment.
+          close-pr-message: >
+            Closing due to 60+ days of inactivity. Feel free to reopen if
+            you'd like to resume this work.
+
+          exempt-pr-labels: 'do-not-close,pinned,work-in-progress'
+
+  stale-review-inactivity:
+    name: 14-day author inactivity after requested changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@5bef64f19d7facfb25b37b414482c7164d639639 # v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          only-labels: awaiting-author
+          days-before-issue-stale: -1
+          days-before-issue-close: -1
+          days-before-pr-stale: 14
+          days-before-pr-close: 7
+
+          stale-pr-label: stale-awaiting-author
+          stale-pr-message: >
+            This PR has been awaiting author changes for 14 days and will be
+            automatically closed in 7 days. Please address the review comments
+            or leave a comment if you need more time.
+          close-pr-message: >
+            Closing due to author inactivity after requested changes. Feel free
+            to reopen once the requested changes have been addressed.
+
+          exempt-pr-labels: 'do-not-close,pinned,work-in-progress'

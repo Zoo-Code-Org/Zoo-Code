@@ -540,7 +540,6 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/clone-deep": "4.0.4",
-		"@types/debug": "4.1.12",
 		"@types/diff": "5.2.3",
 		"@types/lodash.debounce": "4.0.9",
 		"@types/mocha": "10.0.10",
@@ -551,7 +550,7 @@
 		"@types/semver-compare": "1.0.3",
 		"@types/shell-quote": "1.7.5",
 		"@types/vscode": "1.100.0",
-		"@vitest/coverage-v8": "3.2.6",
+		"@vitest/coverage-v8": "4.1.0",
 		"@vscode/vsce": "3.3.2",
 		"ai": "6.0.77",
 		"esbuild-wasm": "0.25.12",
@@ -560,6 +559,6 @@
 		"nock": "14.0.10",
 		"ovsx": "0.10.4",
 		"rimraf": "6.0.1",
-		"vitest": "3.2.6"
+		"vitest": "4.1.0"
 	}
 }

@@ -30,7 +30,9 @@ describe("API - terminal profile", () => {
 	})
 
 	it("closes idle terminals only when the normalized profile changes", () => {
-		const closeIdleTerminalsSpy = vi.spyOn(TerminalRegistry, "closeIdleTerminals").mockImplementation(() => {})
+		const closeIdleTerminalsSpy = vi
+			.spyOn(TerminalRegistry, "closeIdleTerminals")
+			.mockImplementation(function () {})
 
 		api.setTerminalProfile(" Git Bash ")
 		api.setTerminalProfile("Git Bash")

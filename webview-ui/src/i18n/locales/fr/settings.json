@@ -544,6 +544,7 @@
 			"minimal": "Minimal (le plus rapide)",
 			"high": "Élevé",
 			"xhigh": "Très élevé",
+			"max": "Maximum",
 			"medium": "Moyen",
 			"low": "Faible"
 		},
@@ -984,6 +985,18 @@
 			"label": "Taille de police du chat",
 			"description": "Définissez la taille de police (en pixels) du chat Zoo Code. Laissez la valeur par défaut pour correspondre à la taille de police de VS Code.",
 			"reset": "Utiliser la valeur par défaut de VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Fermer automatiquement les fichiers ouverts par Zoo",
+			"description": "Quand cette option est activée, les onglets d'éditeur que Zoo a ouverts temporairement pour un diff sont fermés automatiquement après l'acceptation ou le rejet de la modification. Les onglets que l'utilisateur avait déjà ouverts avant la modification ne sont jamais fermés automatiquement."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Fermer automatiquement même après interaction utilisateur",
+			"description": "Quand cette option est activée, les onglets ouverts par Zoo sont fermés même si l'utilisateur a cliqué ou tapé dans le fichier ou le diff pendant la session de modification. N'a aucun effet si 'Fermer automatiquement les fichiers ouverts par Zoo' est désactivé."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Fermer automatiquement les nouveaux fichiers créés",
+			"description": "Quand cette option est activée, les onglets des fichiers que Zoo a créés (plutôt que modifiés) sont également fermés automatiquement après l'acceptation de la modification."
 		}
 	},
 	"skills": {

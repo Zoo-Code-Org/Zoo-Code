@@ -544,6 +544,7 @@
 			"minimal": "Minimal (Tercepat)",
 			"high": "Tinggi",
 			"xhigh": "Sangat tinggi",
+			"max": "Maksimum",
 			"medium": "Sedang",
 			"low": "Rendah"
 		},
@@ -984,6 +985,18 @@
 			"label": "Ukuran font obrolan",
 			"description": "Atur ukuran font (dalam piksel) untuk obrolan Zoo Code. Biarkan pada nilai default agar sesuai dengan ukuran font VS Code.",
 			"reset": "Gunakan default VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Tutup otomatis file yang dibuka Zoo",
+			"description": "Saat diaktifkan, tab editor yang dibuka Zoo untuk sementara waktu untuk diff akan ditutup secara otomatis setelah perubahan diterima atau ditolak. Tab yang sudah dibuka pengguna sebelum pengeditan tidak pernah ditutup secara otomatis."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Tutup otomatis meski setelah interaksi pengguna",
+			"description": "Saat diaktifkan, tab yang dibuka Zoo tetap ditutup meski pengguna mengklik atau mengetik di file atau diff selama sesi pengeditan. Tidak berpengaruh jika 'Tutup otomatis file yang dibuka Zoo' dinonaktifkan."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Tutup otomatis file baru yang dibuat",
+			"description": "Saat diaktifkan, tab untuk file yang dibuat Zoo (bukan dimodifikasi) juga ditutup secara otomatis setelah perubahan diterima."
 		}
 	},
 	"skills": {

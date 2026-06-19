@@ -29,10 +29,12 @@ vi.mock("vscode", () => ({
 		Directory: 2,
 		File: 1,
 	},
-	Selection: vi.fn((startLine: number, startChar: number, endLine: number, endChar: number) => ({
-		start: { line: startLine, character: startChar },
-		end: { line: endLine, character: endChar },
-	})),
+	Selection: vi.fn((startLine: number, startChar: number, endLine: number, endChar: number) => {
+		return {
+			start: { line: startLine, character: startChar },
+			end: { line: endLine, character: endChar },
+		}
+	}),
 	TabInputText: vi.fn(),
 }))
 

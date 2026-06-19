@@ -174,7 +174,7 @@ describe("TerminalProcess", () => {
 
 		it("handles terminals without shell integration", async () => {
 			// Temporarily suppress the expected console.warn for this test
-			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(function () {})
 
 			// Create a terminal without shell integration
 			const noShellTerminal = {

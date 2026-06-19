@@ -25,11 +25,13 @@ const mockResponsesCreate = vitest.fn()
 vitest.mock("openai", () => {
 	return {
 		__esModule: true,
-		default: vitest.fn().mockImplementation(() => ({
-			responses: {
-				create: mockResponsesCreate,
-			},
-		})),
+		default: vitest.fn().mockImplementation(function () {
+			return {
+				responses: {
+					create: mockResponsesCreate,
+				},
+			}
+		}),
 	}
 })
 

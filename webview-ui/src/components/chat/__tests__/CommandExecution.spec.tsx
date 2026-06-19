@@ -710,46 +710,46 @@ Output:
 			)
 
 			expect(document.querySelector(".animate-pulse")).toBeInTheDocument()
-			})
-	
-			it("should not show the pulsing dot on mount after the command has exited (cache cleared)", async () => {
-				const executionId = "exec-cache-cleared"
-	
-				const { unmount } = render(
-					<ExtensionStateWrapper>
-						<CommandExecution executionId={executionId} text="npm start" />
-					</ExtensionStateWrapper>,
-				)
-	
-				// Start the command -- populates the cache.
-				await act(async () => {
-					sendStatusMessage(executionId, { status: "started", command: "npm start", pid: 1234 })
-				})
-	
-				expect(document.querySelector(".animate-pulse")).toBeInTheDocument()
-	
-				// Transition to exited -- cache entry must be deleted.
-				await act(async () => {
-					sendStatusMessage(executionId, { status: "exited", exitCode: 0 })
-				})
-	
-				expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument()
-	
-				unmount()
-	
-				// A fresh instance with the same executionId must NOT show the dot
-				// because the cache was cleared when the command exited.
-				render(
-					<ExtensionStateWrapper>
-						<CommandExecution executionId={executionId} text="npm start" />
-					</ExtensionStateWrapper>,
-				)
-	
-				expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument()
-			})
 		})
-	
-		describe("multi-line script wrapped in a quoted argument", () => {
+
+		it("should not show the pulsing dot on mount after the command has exited (cache cleared)", async () => {
+			const executionId = "exec-cache-cleared"
+
+			const { unmount } = render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId={executionId} text="npm start" />
+				</ExtensionStateWrapper>,
+			)
+
+			// Start the command -- populates the cache.
+			await act(async () => {
+				sendStatusMessage(executionId, { status: "started", command: "npm start", pid: 1234 })
+			})
+
+			expect(document.querySelector(".animate-pulse")).toBeInTheDocument()
+
+			// Transition to exited -- cache entry must be deleted.
+			await act(async () => {
+				sendStatusMessage(executionId, { status: "exited", exitCode: 0 })
+			})
+
+			expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument()
+
+			unmount()
+
+			// A fresh instance with the same executionId must NOT show the dot
+			// because the cache was cleared when the command exited.
+			render(
+				<ExtensionStateWrapper>
+					<CommandExecution executionId={executionId} text="npm start" />
+				</ExtensionStateWrapper>,
+			)
+
+			expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument()
+		})
+	})
+
+	describe("multi-line script wrapped in a quoted argument", () => {
 		// A wrapper command carrying a multi-line script inside a single quoted
 		// argument must be treated as one command. The pattern breakdown must not
 		// surface stray fragments from the embedded script lines, which would both
@@ -803,9 +803,9 @@ Output:
 			expect(selector.textContent).toContain("sh")
 
 			const fragments = Array.from(selector.querySelectorAll("span")).map((s) => s.textContent ?? "")
-				expect(fragments.some((f) => f.includes("EOF"))).toBe(false)
-				expect(fragments.some((f) => f.includes("echo"))).toBe(false)
-				expect(fragments.some((f) => f.includes("hello"))).toBe(false)
+			expect(fragments.some((f) => f.includes("EOF"))).toBe(false)
+			expect(fragments.some((f) => f.includes("echo"))).toBe(false)
+			expect(fragments.some((f) => f.includes("hello"))).toBe(false)
 		})
 	})
 })

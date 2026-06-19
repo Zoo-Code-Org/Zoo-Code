@@ -544,6 +544,7 @@
 			"minimal": "Mínimo (mais rápido)",
 			"high": "Alto",
 			"xhigh": "Muito alto",
+			"max": "Máximo",
 			"medium": "Médio",
 			"low": "Baixo"
 		},
@@ -984,6 +985,18 @@
 			"label": "Tamanho da fonte do chat",
 			"description": "Defina o tamanho da fonte (em pixels) do chat do Zoo Code. Deixe no padrão para corresponder ao tamanho da fonte do VS Code.",
 			"reset": "Usar o padrão do VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Fechar automaticamente arquivos abertos pelo Zoo",
+			"description": "Quando ativada, as abas do editor que o Zoo abriu temporariamente para um diff sao fechadas automaticamente apos aceitar ou rejeitar a modificacao. As abas que o usuario ja tinha abertas antes da edicao nunca sao fechadas automaticamente."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Fechar automaticamente mesmo apos interacao do usuario",
+			"description": "Quando ativada, as abas abertas pelo Zoo sao fechadas mesmo que o usuario tenha clicado ou digitado no arquivo ou diff durante a sessao de edicao. Nao tem efeito se 'Fechar automaticamente arquivos abertos pelo Zoo' estiver desativada."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Fechar automaticamente novos arquivos criados",
+			"description": "Quando ativada, as abas de arquivos que o Zoo criou (em vez de modificar) tambem sao fechadas automaticamente apos aceitar a modificacao."
 		}
 	},
 	"skills": {

@@ -58,7 +58,7 @@ describe("custom-instructions global .roo support", () => {
 	const projectRooDir = path.join(mockCwd, ".roo")
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		vi.resetAllMocks()
 		mockHomedir.mockReturnValue(mockHomeDir)
 		mockGetRooDirectoriesForCwd.mockReturnValue([globalRooDir, projectRooDir])
 		// getAllRooDirectoriesForCwd is now async and returns the same directories by default
@@ -264,12 +264,10 @@ describe("custom-instructions global .roo support", () => {
 				.mockRejectedValueOnce(new Error("ENOENT")) // global rules dir doesn't exist
 				.mockRejectedValueOnce(new Error("ENOENT")) // project rules dir doesn't exist
 
-			// Mock legacy mode file reading
-			mockReadFile
-				.mockResolvedValueOnce("legacy mode rule content") // .roorules-code
-				.mockResolvedValueOnce("") // AGENTS.md file (empty)
-				.mockResolvedValueOnce("") // generic .roorules (empty)
-				.mockResolvedValueOnce("") // generic .clinerules (empty)
+			// Mock legacy mode file reading by path so optional file checks cannot affect ordering.
+			mockReadFile.mockImplementation(async (filePath: string) =>
+				filePath.endsWith(".roorules-code") ? "legacy mode rule content" : "",
+			)
 
 			const result = await addCustomInstructions("", "", mockCwd, mode)
 

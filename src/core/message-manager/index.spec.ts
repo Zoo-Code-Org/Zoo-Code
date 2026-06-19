@@ -17,7 +17,9 @@ describe("MessageManager", () => {
 
 		// Mock cleanupAfterTruncation to track calls and return input by default
 		cleanupAfterTruncationSpy = vi.spyOn(condenseModule, "cleanupAfterTruncation")
-		cleanupAfterTruncationSpy.mockImplementation((messages: any[]) => messages)
+		cleanupAfterTruncationSpy.mockImplementation((messages: any[]) => {
+			return messages
+		})
 	})
 
 	afterEach(() => {

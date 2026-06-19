@@ -10,66 +10,18 @@ const mockCreate = vitest.fn()
 vitest.mock("openai", () => {
 	return {
 		__esModule: true,
-		default: vitest.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate.mockImplementation(async (options) => {
-						if (!options.stream) {
-							return {
-								id: "test-completion",
-								choices: [
-									{
-										message: { role: "assistant", content: "Test response", refusal: null },
-										finish_reason: "stop",
-										index: 0,
-									},
-								],
-								usage: {
-									prompt_tokens: 10,
-									completion_tokens: 5,
-									total_tokens: 15,
-								},
-							}
-						}
-
-						// Return a stream with multiple chunks that include usage metrics
-						return {
-							[Symbol.asyncIterator]: async function* () {
-								// First chunk with partial usage
-								yield {
+		default: vitest.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate.mockImplementation(async (options) => {
+							if (!options.stream) {
+								return {
+									id: "test-completion",
 									choices: [
 										{
-											delta: { content: "Test " },
-											index: 0,
-										},
-									],
-									usage: {
-										prompt_tokens: 10,
-										completion_tokens: 2,
-										total_tokens: 12,
-									},
-								}
-
-								// Second chunk with updated usage
-								yield {
-									choices: [
-										{
-											delta: { content: "response" },
-											index: 0,
-										},
-									],
-									usage: {
-										prompt_tokens: 10,
-										completion_tokens: 4,
-										total_tokens: 14,
-									},
-								}
-
-								// Final chunk with complete usage
-								yield {
-									choices: [
-										{
-											delta: {},
+											message: { role: "assistant", content: "Test response", refusal: null },
+											finish_reason: "stop",
 											index: 0,
 										},
 									],
@@ -79,12 +31,62 @@ vitest.mock("openai", () => {
 										total_tokens: 15,
 									},
 								}
-							},
-						}
-					}),
+							}
+
+							// Return a stream with multiple chunks that include usage metrics
+							return {
+								[Symbol.asyncIterator]: async function* () {
+									// First chunk with partial usage
+									yield {
+										choices: [
+											{
+												delta: { content: "Test " },
+												index: 0,
+											},
+										],
+										usage: {
+											prompt_tokens: 10,
+											completion_tokens: 2,
+											total_tokens: 12,
+										},
+									}
+
+									// Second chunk with updated usage
+									yield {
+										choices: [
+											{
+												delta: { content: "response" },
+												index: 0,
+											},
+										],
+										usage: {
+											prompt_tokens: 10,
+											completion_tokens: 4,
+											total_tokens: 14,
+										},
+									}
+
+									// Final chunk with complete usage
+									yield {
+										choices: [
+											{
+												delta: {},
+												index: 0,
+											},
+										],
+										usage: {
+											prompt_tokens: 10,
+											completion_tokens: 5,
+											total_tokens: 15,
+										},
+									}
+								},
+							}
+						}),
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 

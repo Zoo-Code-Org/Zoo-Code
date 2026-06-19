@@ -17,7 +17,6 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "20.19.41",
-		"@types/node-ipc": "9.2.3",
-		"vitest": "3.2.6"
+		"@types/node-ipc": "9.2.3"
 	}
 }

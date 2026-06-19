@@ -6,7 +6,7 @@ import type { MockedFunction } from "vitest"
 import { fileExistsAtPath } from "../../../utils/fs"
 import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
-import { ToolUse, ToolResponse } from "../../../shared/tools"
+import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { searchReplaceTool } from "../SearchReplaceTool"
 
 vi.mock("fs/promises", () => ({
@@ -24,7 +24,9 @@ vi.mock("path", async () => {
 			return args.join(separator)
 		}),
 		isAbsolute: vi.fn().mockReturnValue(false),
-		relative: vi.fn().mockImplementation((from, to) => to),
+		relative: vi.fn().mockImplementation((from, to) => {
+			return to
+		}),
 	}
 })
 
@@ -88,9 +90,9 @@ describe("searchReplaceTool", () => {
 	const mockedPathIsAbsolute = path.isAbsolute as MockedFunction<typeof path.isAbsolute>
 
 	const mockCline: any = {}
-	let mockAskApproval: ReturnType<typeof vi.fn>
-	let mockHandleError: ReturnType<typeof vi.fn>
-	let mockPushToolResult: ReturnType<typeof vi.fn>
+	let mockAskApproval: ReturnType<typeof vi.fn<AskApproval>>
+	let mockHandleError: ReturnType<typeof vi.fn<HandleError>>
+	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
 	let toolResult: ToolResponse | undefined
 
 	beforeEach(() => {

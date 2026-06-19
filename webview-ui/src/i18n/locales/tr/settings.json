@@ -544,6 +544,7 @@
 			"minimal": "Minimal (en hızlı)",
 			"high": "Yüksek",
 			"xhigh": "Çok yüksek",
+			"max": "Maksimum",
 			"medium": "Orta",
 			"low": "Düşük"
 		},
@@ -984,6 +985,18 @@
 			"label": "Sohbet yazı tipi boyutu",
 			"description": "Zoo Code sohbeti için yazı tipi boyutunu (piksel cinsinden) ayarlayın. VS Code yazı tipi boyutuyla eşleşmesi için varsayılan değerde bırakın.",
 			"reset": "VS Code varsayılanını kullan"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Zoo tarafindan acilan dosyalari otomatik kapat",
+			"description": "Etkinlestirildiginde, Zoo'nun bir diff icin gecici olarak actigi duzenleyici sekmeleri, degisiklik kabul edildikten veya reddedildikten sonra otomatik olarak kapatilir. Kullanicinin duzenleme oncesinde zaten acik oldugu sekmeler hicbir zaman otomatik olarak kapatilmaz."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Kullanici etkilesiminden sonra da otomatik kapat",
+			"description": "Etkinlestirildiginde, kullanici duzenleme oturumu sirasinda dosyaya veya diff'e tiklasa ya da yazsa bile Zoo tarafindan acilan sekmeler kapatilir. 'Zoo tarafindan acilan dosyalari otomatik kapat' devre disi ise etkisi yoktur."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Yeni olusturulan dosyalari otomatik kapat",
+			"description": "Etkinlestirildiginde, Zoo'nun olusturdugu (degistirmedigi) dosyalarin sekmeleri de degisiklik kabul edildikten sonra otomatik olarak kapatilir."
 		}
 	},
 	"skills": {

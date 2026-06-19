@@ -4,7 +4,7 @@ const mockPid = 12345
 
 vitest.mock("execa", () => {
 	const mockKill = vitest.fn()
-	const execa = vitest.fn((options: any) => {
+	const execa = vitest.fn(function (options: any) {
 		return (_template: TemplateStringsArray, ...args: any[]) => ({
 			pid: mockPid,
 			iterable: (_opts: any) =>
@@ -18,7 +18,9 @@ vitest.mock("execa", () => {
 })
 
 vitest.mock("ps-tree", () => ({
-	default: vitest.fn((_: number, cb: any) => cb(null, [])),
+	default: vitest.fn(function (_: number, cb: any) {
+		return cb(null, [])
+	}),
 }))
 
 import { execa } from "execa"

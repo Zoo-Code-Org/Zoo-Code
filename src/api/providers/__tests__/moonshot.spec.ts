@@ -14,7 +14,7 @@ vi.mock("ai", async (importOriginal) => {
 })
 
 vi.mock("@ai-sdk/openai-compatible", () => ({
-	createOpenAICompatible: vi.fn(() => {
+	createOpenAICompatible: vi.fn(function () {
 		// Return a function that returns a mock language model
 		return vi.fn(() => ({
 			modelId: "moonshot-chat",

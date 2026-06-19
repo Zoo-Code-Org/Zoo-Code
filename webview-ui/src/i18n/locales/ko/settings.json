@@ -544,6 +544,7 @@
 			"minimal": "최소 (가장 빠름)",
 			"high": "높음",
 			"xhigh": "매우 높음",
+			"max": "최대",
 			"medium": "중간",
 			"low": "낮음"
 		},
@@ -984,6 +985,18 @@
 			"label": "채팅 글꼴 크기",
 			"description": "Zoo Code 채팅의 글꼴 크기(픽셀)를 설정합니다. VS Code 글꼴 크기에 맞추려면 기본값으로 두세요.",
 			"reset": "VS Code 기본값 사용"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Zoo가 열었던 파일 자동 닫기",
+			"description": "활성화 시, Zoo가 diff를 위해 일시적으로 열었던 편집기 탭이 변경 사항을 승인하거나 거부한 후 자동으로 닫힙니다. 편집 전에 사용자가 이미 열어 둔 탭은 자동으로 닫히지 않습니다."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "사용자 상호작용 후에도 자동 닫기",
+			"description": "활성화 시, 사용자가 편집 세션 중에 파일이나 diff를 클릭하거나 입력했더라도 Zoo가 열었던 탭이 닫힙니다. 'Zoo가 열었던 파일 자동 닫기'가 비활성화된 경우에는 효과가 없습니다."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "새로 만든 파일 자동 닫기",
+			"description": "활성화 시, Zoo가 수정한 것이 아니라 새로 만든 파일의 탭도 변경 사항을 승인한 후 자동으로 닫힙니다."
 		}
 	},
 	"skills": {

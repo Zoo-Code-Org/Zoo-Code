@@ -544,6 +544,7 @@
 			"minimal": "Minimal (schnellste)",
 			"high": "Hoch",
 			"xhigh": "Sehr hoch",
+			"max": "Maximum",
 			"medium": "Mittel",
 			"low": "Niedrig"
 		},
@@ -984,6 +985,18 @@
 			"label": "Chat-Schriftgröße",
 			"description": "Lege die Schriftgröße (in Pixeln) für den Zoo Code-Chat fest. Belasse den Standardwert, um die Schriftgröße von VS Code zu übernehmen.",
 			"reset": "VS Code-Standard verwenden"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Von Zoo geöffnete Dateien automatisch schließen",
+			"description": "Wenn aktiviert, werden Editor-Tabs, die Zoo vorübergehend für einen Diff geöffnet hat, nach dem Akzeptieren oder Ablehnen der Änderung automatisch geschlossen. Tabs, die der Nutzer bereits vor der Bearbeitung geöffnet hatte, werden nie automatisch geschlossen."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Auch nach Nutzer-Interaktion automatisch schließen",
+			"description": "Wenn aktiviert, werden von Zoo geöffnete Tabs auch dann geschlossen, wenn der Nutzer während der Bearbeitung in die Datei oder den Diff geklickt oder getippt hat. Hat keine Auswirkung, wenn 'Von Zoo geöffnete Dateien automatisch schließen' deaktiviert ist."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Neu erstellte Dateien automatisch schließen",
+			"description": "Wenn aktiviert, werden Tabs für Dateien, die Zoo neu erstellt hat (anstatt sie zu bearbeiten), nach dem Akzeptieren der Änderung ebenfalls automatisch geschlossen."
 		}
 	},
 	"skills": {

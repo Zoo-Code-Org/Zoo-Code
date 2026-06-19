@@ -278,13 +278,7 @@ describe("parseCommand", () => {
 		})
 
 		it("does not split body lines of a multi-line heredoc", () => {
-			const input = [
-				"sh -c bash << 'EOF'",
-				"echo line1",
-				"echo line2",
-				"echo line3",
-				"EOF",
-			].join("\n")
+			const input = ["sh -c bash << 'EOF'", "echo line1", "echo line2", "echo line3", "EOF"].join("\n")
 			expect(parseCommand(input).commands).toEqual([input])
 		})
 
@@ -371,7 +365,7 @@ describe("parseCommand", () => {
 		})
 	})
 
-	describe("locale quoting ($\"...\")", () => {
+	describe('locale quoting ($"...")', () => {
 		// Locale quoting $"..." behaves like double quotes for delimiter purposes
 		// but the $ prefix is part of the token and must be preserved verbatim.
 

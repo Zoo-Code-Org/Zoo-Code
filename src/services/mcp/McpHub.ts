@@ -1129,14 +1129,13 @@ export class McpHub {
 
 		return new Promise<void>((resolve) => {
 			let disposed = false
-			let cancellationDisposable: vscode.Disposable | undefined
 
-			const cleanup = () => {
+			const cleanup = (disposable?: vscode.Disposable) => {
 				if (disposed) return
 				disposed = true
 				clearTimeout(timeoutHandle)
 				unsubscribe()
-				cancellationDisposable?.dispose()
+				disposable?.dispose()
 				this._oauthWatchers.delete(watcherKey)
 			}
 
@@ -1147,7 +1146,7 @@ export class McpHub {
 				// from another window fired after _completeOAuthFlow already succeeded).
 				const conn = this.findConnection(name, source)
 				if (!conn || conn.server.status === "connected") {
-					cleanup()
+					cleanup(cancellationDisposable)
 					return
 				}
 				try {
@@ -1156,7 +1155,7 @@ export class McpHub {
 					// fired while getOAuthData was in flight.
 					if (disposed || this.isDisposed) return
 					if (data && Date.now() < data.expires_at - TOKEN_EXPIRY_BUFFER_MS) {
-						cleanup()
+						cleanup(cancellationDisposable)
 						await authProvider.close()
 						await this.deleteConnection(name, source)
 						const validatedConfig = this.validateServerConfig(config, name)
@@ -1176,7 +1175,7 @@ export class McpHub {
 			// --- Timeout ---
 			const timeoutHandle = setTimeout(() => {
 				if (disposed) return
-				cleanup()
+				cleanup(cancellationDisposable)
 				void authProvider.close()
 				const conn = this.findConnection(name, source)
 				if (conn && conn.server.status === "connecting") {
@@ -1187,9 +1186,24 @@ export class McpHub {
 				resolve()
 			}, OAUTH_FLOW_TIMEOUT_MS)
 
+			// Register in _oauthWatchers so deleteConnection() and dispose() can clean up.
+			// This must happen BEFORE installing the cancellation callback below: if the
+			// token is already cancelled at registration time, VS Code fires the callback
+			// synchronously inside onCancellationRequested(...), and cleanup() must find
+			// the watcher entry in the map in order to delete it. Registering after the
+			// callback would leave an orphan entry that survives disposal.
+			this._oauthWatchers.set(watcherKey, { unsubscribe, abortHandle: timeoutHandle })
+
 			// --- Cancellation (progress bar's Cancel button) ---
-			cancellationDisposable = cancellationToken.onCancellationRequested(() => {
+			const cancellationDisposable = cancellationToken.onCancellationRequested(() => {
 				if (disposed) return
+				// Don't pass cancellationDisposable here: if the token was already
+				// cancelled at registration time, VS Code fires this callback
+				// synchronously inside onCancellationRequested(...) — before the
+				// `const cancellationDisposable = ...` assignment completes, so the
+				// binding is still in the TDZ. VS Code also disposes its own
+				// listener once the token transitions to cancelled, so explicit
+				// disposal from inside the callback would be redundant anyway.
 				cleanup()
 				void authProvider.close()
 				const conn = this.findConnection(name, source)
@@ -1201,13 +1215,10 @@ export class McpHub {
 				resolve()
 			})
 
-			// Register in _oauthWatchers so deleteConnection() and dispose() can clean up
-			this._oauthWatchers.set(watcherKey, { unsubscribe, abortHandle: timeoutHandle })
-
 			// In test mode, skip user interaction and proceed directly to complete the OAuth flow.
 			if (process.env.MCP_OAUTH_TEST_MODE === "true") {
 				void (async () => {
-					cleanup()
+					cleanup(cancellationDisposable)
 					try {
 						await this._completeOAuthFlow(
 							authProvider,
@@ -1245,7 +1256,7 @@ export class McpHub {
 				const tokens = await this.secretStorage!.getOAuthData(serverUrl)
 				if (disposed) return
 				if (tokens && Date.now() < tokens.expires_at - TOKEN_EXPIRY_BUFFER_MS) {
-					cleanup()
+					cleanup(cancellationDisposable)
 					await authProvider.close()
 					await this.deleteConnection(name, source)
 					const validatedFastPathConfig = this.validateServerConfig(config, name)
@@ -1258,7 +1269,7 @@ export class McpHub {
 				// Clean up before exchanging tokens — this sets disposed=true so the
 				// cross-window token watcher doesn't race to reconnect when SecretStorage
 				// fires onDidChange during token exchange inside _completeOAuthFlow.
-				cleanup()
+				cleanup(cancellationDisposable)
 				try {
 					await this._completeOAuthFlow(authProvider, transport, connection, name, source, cancellationToken)
 				} catch {

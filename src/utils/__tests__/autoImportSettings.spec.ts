@@ -56,16 +56,18 @@ vi.mock("../../core/config/ProviderSettingsManager", async (importOriginal) => {
 		// We need to mock the class constructor and its methods,
 		// but keep other exports (like schemas) as their original values.
 		...(originalModule || {}), // Spread original exports
-		ProviderSettingsManager: vi.fn().mockImplementation(() => ({
-			// Mock the class
-			export: vi.fn().mockResolvedValue({
-				apiConfigs: {},
-				modeApiConfigs: {},
-				currentApiConfigName: "default",
-			}),
-			import: vi.fn().mockResolvedValue({ success: true }),
-			listConfig: vi.fn().mockResolvedValue([]),
-		})),
+		ProviderSettingsManager: vi.fn().mockImplementation(function () {
+			return {
+				// Mock the class
+				export: vi.fn().mockResolvedValue({
+					apiConfigs: {},
+					modeApiConfigs: {},
+					currentApiConfigName: "default",
+				}),
+				import: vi.fn().mockResolvedValue({ success: true }),
+				listConfig: vi.fn().mockResolvedValue([]),
+			}
+		}),
 	}
 })
 vi.mock("../../core/config/ContextProxy")

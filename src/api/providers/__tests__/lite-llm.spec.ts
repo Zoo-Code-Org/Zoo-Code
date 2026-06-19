@@ -13,19 +13,21 @@ const mockCreate = vi.fn()
 
 vi.mock("openai", () => {
 	return {
-		default: vi.fn().mockImplementation(() => ({
-			chat: {
-				completions: {
-					create: mockCreate,
+		default: vi.fn().mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate,
+					},
 				},
-			},
-		})),
+			}
+		}),
 	}
 })
 
 // Mock model fetching
 vi.mock("../fetchers/modelCache", () => ({
-	getModels: vi.fn().mockImplementation(() => {
+	getModels: vi.fn().mockImplementation(function () {
 		return Promise.resolve({
 			[litellmDefaultModelId]: litellmDefaultModelInfo,
 			"gpt-5": { ...litellmDefaultModelInfo, maxTokens: 8192 },
@@ -1113,6 +1115,63 @@ describe("LiteLLMHandler", () => {
 
 			// They should be different (hash suffix ensures uniqueness)
 			expect(id1).not.toBe(id2)
+		})
+	})
+
+	describe("session ID header", () => {
+		const mockStream = {
+			async *[Symbol.asyncIterator]() {
+				yield {
+					choices: [{ delta: { content: "ok" } }],
+					usage: { prompt_tokens: 1, completion_tokens: 1 },
+				}
+			},
+		}
+
+		it("should send the X-Zoo-Session-ID header when a taskId is provided", async () => {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+				taskId: "task-123",
+			})
+			for await (const _chunk of generator) {
+				// drain the stream
+			}
+
+			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
+			expect(requestHeaders).toMatchObject({ "X-Zoo-Session-ID": "task-123" })
+		})
+
+		it("should not send the X-Zoo-Session-ID header when no taskId is provided", async () => {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }])
+			for await (const _chunk of generator) {
+				// drain the stream
+			}
+
+			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
+			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
+		})
+
+		it("should not send the X-Zoo-Session-ID header when taskId is an empty string", async () => {
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+				taskId: "",
+			})
+			for await (const _chunk of generator) {
+				// drain the stream
+			}
+
+			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
+			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
 		})
 	})
 })

@@ -544,6 +544,7 @@
 			"minimal": "Tối thiểu (nhanh nhất)",
 			"high": "Cao",
 			"xhigh": "Rất cao",
+			"max": "Tối đa",
 			"medium": "Trung bình",
 			"low": "Thấp"
 		},
@@ -984,6 +985,18 @@
 			"label": "Cỡ chữ trò chuyện",
 			"description": "Đặt cỡ chữ (tính bằng pixel) cho cuộc trò chuyện Zoo Code. Để ở giá trị mặc định để khớp với cỡ chữ của VS Code.",
 			"reset": "Dùng mặc định của VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Tự động đóng các tệp do Zoo mở",
+			"description": "Khi bật, các tab trình soạn thảo mà Zoo mở tạm thời để hiển thị diff sẽ tự động đóng sau khi chấp nhận hoặc từ chối thay đổi. Các tab mà người dùng đã mở trước khi chỉnh sửa sẽ không bao giờ bị tự động đóng."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Tự động đóng ngay cả sau khi người dùng tương tác",
+			"description": "Khi bật, các tab do Zoo mở sẽ đóng ngay cả khi người dùng đã nhấn chuột hoặc gõ phím vào tệp hoặc diff trong phiên chỉnh sửa. Không có tác dụng nếu 'Tự động đóng các tệp do Zoo mở' bị tắt."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Tự động đóng các tệp mới tạo",
+			"description": "Khi bật, các tab của các tệp mà Zoo đã tạo (thay vì chỉnh sửa) cũng sẽ tự động đóng sau khi chấp nhận thay đổi."
 		}
 	},
 	"skills": {

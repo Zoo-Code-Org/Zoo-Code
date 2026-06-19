@@ -544,6 +544,7 @@
 			"minimal": "Mínim (el més ràpid)",
 			"high": "Alt",
 			"xhigh": "Molt alt",
+			"max": "Màxim",
 			"medium": "Mitjà",
 			"low": "Baix"
 		},
@@ -984,6 +985,18 @@
 			"label": "Mida de lletra del xat",
 			"description": "Defineix la mida de la lletra (en píxels) del xat de Zoo Code. Deixa-ho al valor per defecte per coincidir amb la mida de lletra del VS Code.",
 			"reset": "Utilitza el valor per defecte del VS Code"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Tanca automaticament els fitxers oberts per Zoo",
+			"description": "Quan esta activat, les pestanyes de l'editor que Zoo ha obert temporalment per a un diff es tanquen automaticament despres d'acceptar o rebutjar el canvi. Les pestanyes que l'usuari ja tenia obertes abans de l'edicio mai no es tanquen automaticament."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Tanca automaticament fins i tot despres de la interaccio de l'usuari",
+			"description": "Quan esta activat, les pestanyes obertes per Zoo es tanquen fins i tot si l'usuari ha fet clic o ha escrit al fitxer o al diff durant la sessio d'edicio. No te cap efecte si 'Tanca automaticament els fitxers oberts per Zoo' esta desactivat."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Tanca automaticament els fitxers nous creats",
+			"description": "Quan esta activat, les pestanyes dels fitxers que Zoo ha creat (en lloc de modificar) tambe es tanquen automaticament despres d'acceptar el canvi."
 		}
 	},
 	"skills": {

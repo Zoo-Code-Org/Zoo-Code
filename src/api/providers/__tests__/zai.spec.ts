@@ -18,7 +18,9 @@ import { ZAiHandler } from "../zai"
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
 	return {
-		default: vitest.fn(() => ({ chat: { completions: { create: createMock } } })),
+		default: vitest.fn(function () {
+			return { chat: { completions: { create: createMock } } }
+		}),
 	}
 })
 
@@ -114,6 +116,27 @@ describe("ZAiHandler", () => {
 			expect(model.info.reasoningEffort).toBe("medium")
 			expect(model.info.preserveReasoning).toBe(true)
 			expect(model.info.supportsImages).toBe(false)
+		})
+
+		it("should return GLM-5.2 international model with High/Max effort tiers and 1M context", () => {
+			const testModelId: InternationalZAiModelId = "glm-5.2"
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: testModelId,
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe(testModelId)
+			expect(model.info).toEqual(internationalZAiModels[testModelId])
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.maxTokens).toBe(131_072)
+			expect(model.info.supportsReasoningEffort).toEqual(["disable", "high", "max"])
+			expect(model.info.reasoningEffort).toBe("high")
+			expect(model.info.preserveReasoning).toBe(true)
+			expect(model.info.supportsMaxTokens).toBe(true)
+			expect(model.info.inputPrice).toBe(1.4)
+			expect(model.info.outputPrice).toBe(4.4)
+			expect(model.info.cacheReadsPrice).toBe(0.26)
 		})
 
 		it("should return GLM-5-Turbo international model with thinking support", () => {
@@ -229,6 +252,27 @@ describe("ZAiHandler", () => {
 			expect(model.info.reasoningEffort).toBe("medium")
 			expect(model.info.preserveReasoning).toBe(true)
 			expect(model.info.supportsImages).toBe(false)
+		})
+
+		it("should return GLM-5.2 China model with High/Max effort tiers and 1M context", () => {
+			const testModelId: MainlandZAiModelId = "glm-5.2"
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: testModelId,
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "china_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe(testModelId)
+			expect(model.info).toEqual(mainlandZAiModels[testModelId])
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.maxTokens).toBe(131_072)
+			expect(model.info.supportsReasoningEffort).toEqual(["disable", "high", "max"])
+			expect(model.info.reasoningEffort).toBe("high")
+			expect(model.info.preserveReasoning).toBe(true)
+			expect(model.info.supportsMaxTokens).toBe(true)
+			expect(model.info.inputPrice).toBe(0.68)
+			expect(model.info.outputPrice).toBe(2.28)
+			expect(model.info.cacheReadsPrice).toBe(0.13)
 		})
 
 		it("should return GLM-4.7 China model with thinking support", () => {
@@ -569,6 +613,122 @@ describe("ZAiHandler", () => {
 				expect.objectContaining({
 					model: "glm-4.7",
 					thinking: { type: "enabled" },
+				}),
+			)
+		})
+
+		it("should send reasoning_effort:high by default for GLM-5.2 (model default)", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.2",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				// No reasoningEffort setting - should use model default (high)
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.2",
+					thinking: { type: "enabled" },
+					reasoning_effort: "high",
+				}),
+			)
+		})
+
+		it("should send reasoning_effort:max for GLM-5.2 when reasoningEffort is set to max", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.2",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				reasoningEffort: "max",
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.2",
+					thinking: { type: "enabled" },
+					reasoning_effort: "max",
+				}),
+			)
+		})
+
+		it("should omit reasoning_effort for GLM-5.2 when reasoningEffort is set to disable", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.2",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				reasoningEffort: "disable",
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs.thinking).toEqual({ type: "disabled" })
+			expect(callArgs.reasoning_effort).toBeUndefined()
+		})
+
+		it("should fall back to the model default effort when a persisted value is unsupported", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.2",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				reasoningEffort: "medium",
+			})
+
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				}
+			})
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.2",
+					thinking: { type: "enabled" },
+					reasoning_effort: "high",
 				}),
 			)
 		})

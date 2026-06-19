@@ -16,9 +16,15 @@ export default defineConfig({
 		environment: "jsdom",
 		include: ["src/**/*.spec.ts", "src/**/*.spec.tsx"],
 		onConsoleLog,
+		server: {
+			deps: {
+				inline: ["@radix-ui/react-slot"],
+			},
+		},
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "lcov"],
+			include: ["src/**/*.ts", "src/**/*.tsx"],
 			exclude: [
 				"**/*.test.ts",
 				"**/*.test.tsx",

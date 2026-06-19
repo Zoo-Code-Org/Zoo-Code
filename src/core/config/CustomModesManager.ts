@@ -775,7 +775,7 @@ export class CustomModesManager {
 				? path.join(baseDir, `rules-${slug}`)
 				: path.join(baseDir, ".roo", `rules-${slug}`)
 
-			let rulesFiles: RuleFile[] = []
+			const rulesFiles: RuleFile[] = []
 			try {
 				const stats = await fs.stat(modeRulesDir)
 				if (stats.isDirectory()) {

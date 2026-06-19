@@ -14,4 +14,4 @@ Quote masking is comment-aware: a quote character inside a `#` comment is not pa
 
 **Pattern selector (UI)**: the command pattern breakdown shown after execution now uses the same heredoc- and quote-aware parser (`parseCommand`) before extracting patterns, so an unterminated or terminated heredoc no longer produces spurious tokens like `EOF`, body-line words, or `<<` fragments in the allow/deny selector.
 
-Note: this change only prevents *auto-approval* of fragments from a malformed command; it does not reject malformed commands before execution, which will be addressed in a separate PR to keep the scope focused here.
+Note: this change only prevents _auto-approval_ of fragments from a malformed command; it does not reject malformed commands before execution, which will be addressed in a separate PR to keep the scope focused here.

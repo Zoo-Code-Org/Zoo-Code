@@ -3,8 +3,12 @@ import OpenAI from "openai"
 import { convertToAiSdkMessages, convertToolsForAiSdk, processAiSdkStreamPart } from "../ai-sdk"
 
 vitest.mock("ai", () => ({
-	tool: vitest.fn((t) => t),
-	jsonSchema: vitest.fn((s) => s),
+	tool: vitest.fn(function (t) {
+		return t
+	}),
+	jsonSchema: vitest.fn(function (s) {
+		return s
+	}),
 }))
 
 describe("AI SDK conversion utilities", () => {

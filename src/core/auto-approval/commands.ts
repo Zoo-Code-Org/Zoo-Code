@@ -1,6 +1,5 @@
 import { parseCommand } from "../../shared/parse-command"
 
-
 /**
  * Detect dangerous parameter substitutions that could lead to command execution.
  * These patterns are never auto-approved and always require explicit user approval.

@@ -544,6 +544,7 @@
 			"minimal": "न्यूनतम (सबसे तेज़)",
 			"high": "उच्च",
 			"xhigh": "बहुत उच्च",
+			"max": "अधिकतम",
 			"medium": "मध्यम",
 			"low": "निम्न"
 		},
@@ -984,6 +985,18 @@
 			"label": "चैट फ़ॉन्ट आकार",
 			"description": "Zoo Code चैट के लिए फ़ॉन्ट आकार (पिक्सेल में) सेट करें। VS Code के फ़ॉन्ट आकार से मेल खाने के लिए डिफ़ॉल्ट पर छोड़ दें।",
 			"reset": "VS Code डिफ़ॉल्ट का उपयोग करें"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Zoo dvara kholi gayi files ko svachalit band karo",
+			"description": "Saksham hone par, Zoo dvara diff ke liye aasthayi roop se kholi gayi editor tabs ko parivartan svikaar ya asviikaar hone ke baad svachalit roop se band kar diya jaata hai. Sampadak ke pehle se hi khule tabs ko kabhi svachalit roop se band nahin kiya jaata."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Upayogkarta ki interaction ke baad bhi svachalit band karo",
+			"description": "Saksham hone par, Zoo dvara kholi gayi tabs tab bhi band ho jaati hain jab upayogkarta ne sampadak satra mein file ya diff mein click ya type kiya ho. Iska koi prabhav nahin hota agar 'Zoo dvara kholi gayi files ko svachalit band karo' aksham hai."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Nai banayi gayi files ko svachalit band karo",
+			"description": "Saksham hone par, Zoo dvara banaayi gayi (sanshodhit nahin) files ki tabs ko bhi parivartan svikaar hone ke baad svachalit roop se band kar diya jaata hai."
 		}
 	},
 	"skills": {

@@ -544,6 +544,7 @@
 			"minimal": "Minimaal (Snelst)",
 			"high": "Hoog",
 			"xhigh": "Zeer hoog",
+			"max": "Maximum",
 			"medium": "Middel",
 			"low": "Laag"
 		},
@@ -984,6 +985,18 @@
 			"label": "Lettergrootte van chat",
 			"description": "Stel de lettergrootte (in pixels) in voor de Zoo Code-chat. Laat op de standaardwaarde staan om overeen te komen met de lettergrootte van VS Code.",
 			"reset": "VS Code-standaard gebruiken"
+		},
+		"autoCloseZooOpenedFiles": {
+			"label": "Automatisch sluiten van door Zoo geopende bestanden",
+			"description": "Wanneer ingeschakeld, worden editor-tabbladen die Zoo tijdelijk heeft geopend voor een diff automatisch gesloten nadat de wijziging is geaccepteerd of geweigerd. Tabbladen die de gebruiker al had geopend voor de bewerking worden nooit automatisch gesloten."
+		},
+		"autoCloseZooOpenedFilesAfterUserEdited": {
+			"label": "Automatisch sluiten ook na gebruikersinteractie",
+			"description": "Wanneer ingeschakeld, worden door Zoo geopende tabbladen gesloten, zelfs als de gebruiker tijdens de bewerkingssessie in het bestand of de diff heeft geklikt of getypt. Heeft geen effect als 'Automatisch sluiten van door Zoo geopende bestanden' is uitgeschakeld."
+		},
+		"autoCloseZooOpenedNewFiles": {
+			"label": "Automatisch sluiten van nieuw gemaakte bestanden",
+			"description": "Wanneer ingeschakeld, worden tabbladen van bestanden die Zoo heeft aangemaakt (in plaats van gewijzigd) ook automatisch gesloten nadat de wijziging is geaccepteerd."
 		}
 	},
 	"skills": {

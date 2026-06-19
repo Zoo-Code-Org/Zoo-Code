@@ -10,10 +10,12 @@ vi.mock("../../tools/helpers/imageHelpers", () => ({
 	),
 	readImageAsDataUrlWithBuffer: vi.fn(),
 	validateImageForProcessing: vi.fn(),
-	ImageMemoryTracker: vi.fn().mockImplementation(() => ({
-		getTotalMemoryUsed: vi.fn().mockReturnValue(0),
-		addMemoryUsage: vi.fn(),
-	})),
+	ImageMemoryTracker: vi.fn().mockImplementation(function () {
+		return {
+			getTotalMemoryUsed: vi.fn().mockReturnValue(0),
+			addMemoryUsage: vi.fn(),
+		}
+	}),
 	DEFAULT_MAX_IMAGE_FILE_SIZE_MB: 5,
 	DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB: 20,
 }))

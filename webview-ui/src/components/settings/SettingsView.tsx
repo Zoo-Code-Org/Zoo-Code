@@ -205,6 +205,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		includeCurrentTime,
 		includeCurrentCost,
 		maxGitStatusFiles,
+		autoCloseZooOpenedFiles,
+		autoCloseZooOpenedFilesAfterUserEdited,
+		autoCloseZooOpenedNewFiles,
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
@@ -420,6 +423,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
 					maxGitStatusFiles: maxGitStatusFiles ?? 0,
+					autoCloseZooOpenedFiles: autoCloseZooOpenedFiles ?? true,
+					autoCloseZooOpenedFilesAfterUserEdited: autoCloseZooOpenedFilesAfterUserEdited ?? false,
+					autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? false,
 					profileThresholds,
 					imageGenerationProvider,
 					openRouterImageApiKey,
@@ -899,6 +905,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								reasoningBlockCollapsed={reasoningBlockCollapsed ?? true}
 								enterBehavior={enterBehavior ?? "send"}
 								chatFontSize={chatFontSize ?? undefined}
+								autoCloseZooOpenedFiles={autoCloseZooOpenedFiles}
+								autoCloseZooOpenedFilesAfterUserEdited={autoCloseZooOpenedFilesAfterUserEdited}
+								autoCloseZooOpenedNewFiles={autoCloseZooOpenedNewFiles}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

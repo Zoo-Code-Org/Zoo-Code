@@ -289,7 +289,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 
 		const mockClient = {
 			responses: {
-				create: vi.fn().mockImplementation(() => {
+				create: vi.fn().mockImplementation(function () {
 					return {
 						[Symbol.asyncIterator]: async function* () {
 							// 1. Emit output_item.added with tool identity

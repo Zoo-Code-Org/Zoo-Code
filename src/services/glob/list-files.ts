@@ -656,7 +656,7 @@ async function execRipgrep(rgPath: string, args: string[], limit: number, cwd?: 
 	return new Promise((resolve, reject) => {
 		const rgProcess = childProcess.spawn(rgPath, args, cwd ? { cwd } : undefined)
 		let output = ""
-		let results: string[] = []
+		const results: string[] = []
 
 		// Set timeout to avoid hanging
 		const timeoutId = setTimeout(() => {

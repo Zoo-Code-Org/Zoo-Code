@@ -116,7 +116,9 @@ describe("importExport", () => {
 		mockContextProxy = {
 			setValues: vi.fn(),
 			setValue: vi.fn(),
-			export: vi.fn().mockImplementation(() => Promise.resolve({})),
+			export: vi.fn().mockImplementation(() => {
+				return Promise.resolve({})
+			}),
 			setProviderSettings: vi.fn(),
 			getValue: vi.fn(),
 		} as unknown as ReturnType<typeof vi.mocked<ContextProxy>>
@@ -129,8 +131,12 @@ describe("importExport", () => {
 
 		mockExtensionContext = {
 			secrets: {
-				get: vi.fn().mockImplementation((key: string) => map.get(key)),
-				store: vi.fn().mockImplementation((key: string, value: string) => map.set(key, value)),
+				get: vi.fn().mockImplementation((key: string) => {
+					return map.get(key)
+				}),
+				store: vi.fn().mockImplementation((key: string, value: string) => {
+					return map.set(key, value)
+				}),
 			},
 		} as unknown as ReturnType<typeof vi.mocked<vscode.ExtensionContext>>
 	})

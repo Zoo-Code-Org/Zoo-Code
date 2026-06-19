@@ -61,7 +61,9 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 	}
 
 	beforeEach(() => {
-		createTerminalSpy = vi.spyOn(vscode.window, "createTerminal").mockImplementation(() => mockTerminal())
+		createTerminalSpy = vi.spyOn(vscode.window, "createTerminal").mockImplementation(() => {
+			return mockTerminal()
+		})
 		// Default: explicit profile paths exist unless a test says otherwise.
 		mockedExistsSync.mockReset()
 		mockedExistsSync.mockReturnValue(true)
@@ -128,7 +130,9 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 					missing: { path: "/missing/bash" },
 				},
 			})
-			mockedExistsSync.mockImplementation((profilePath: string) => profilePath !== "/missing/bash")
+			mockedExistsSync.mockImplementation((profilePath: string) => {
+				return profilePath !== "/missing/bash"
+			})
 
 			expect(Terminal.getAvailableProfileNames("linux")).toEqual(["bash", "zsh"])
 		})
@@ -430,7 +434,9 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 				},
 			})
 			// Only the second candidate exists on disk; VS Code would pick it.
-			mockedExistsSync.mockImplementation((p: string) => p === "C:\\Program Files\\Git\\bin\\bash.exe")
+			mockedExistsSync.mockImplementation((p: string) => {
+				return p === "C:\\Program Files\\Git\\bin\\bash.exe"
+			})
 
 			Terminal.setTerminalProfile("Git Bash")
 
@@ -545,7 +551,9 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 
 	describe("resolveProfilePath", () => {
 		it("resolves a bare executable name through PATH", () => {
-			mockedExistsSync.mockImplementation((p: string) => p === "/usr/local/bin/fish")
+			mockedExistsSync.mockImplementation((p: string) => {
+				return p === "/usr/local/bin/fish"
+			})
 
 			expect(Terminal.resolveProfilePath("fish", "linux", { PATH: "/usr/bin:/usr/local/bin" })).toBe(
 				"/usr/local/bin/fish",
@@ -564,7 +572,9 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 		})
 
 		it("resolves a bare Windows executable name through PATH and PATHEXT", () => {
-			mockedExistsSync.mockImplementation((p: string) => p === "C:\\Tools\\pwsh.EXE")
+			mockedExistsSync.mockImplementation((p: string) => {
+				return p === "C:\\Tools\\pwsh.EXE"
+			})
 
 			expect(
 				Terminal.resolveProfilePath("pwsh", "win32", {
@@ -575,7 +585,9 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 		})
 
 		it("resolves a bare Windows executable name through Path when PATH is absent", () => {
-			mockedExistsSync.mockImplementation((p: string) => p === "C:\\Tools\\pwsh.EXE")
+			mockedExistsSync.mockImplementation((p: string) => {
+				return p === "C:\\Tools\\pwsh.EXE"
+			})
 
 			expect(
 				Terminal.resolveProfilePath("pwsh", "win32", {

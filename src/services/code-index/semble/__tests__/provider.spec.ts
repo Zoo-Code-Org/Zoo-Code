@@ -12,7 +12,9 @@ const sharedMockCli = {
 }
 
 vi.mock("../semble-cli", () => ({
-	SembleCLI: vi.fn().mockImplementation(() => sharedMockCli),
+	SembleCLI: vi.fn().mockImplementation(function () {
+		return sharedMockCli
+	}),
 }))
 
 // Mock semble-downloader
