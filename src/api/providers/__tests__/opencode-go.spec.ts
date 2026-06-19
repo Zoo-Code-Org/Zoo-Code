@@ -606,7 +606,7 @@ describe("OpencodeGoHandler", () => {
 		it("includes tools and tool_choice in the Anthropic request when tools are provided", async () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
-			const tools = [
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
 				{
 					type: "function",
 					function: {
@@ -617,7 +617,7 @@ describe("OpencodeGoHandler", () => {
 				},
 			]
 
-			for await (const _chunk of handler.createMessage("sys", messages, { tools })) {
+			for await (const _chunk of handler.createMessage("sys", messages, { taskId: "test-task", tools })) {
 				void _chunk
 			}
 
