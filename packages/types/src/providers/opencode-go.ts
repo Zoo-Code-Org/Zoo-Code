@@ -291,6 +291,43 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 }
 
 /**
+ * OpenCode Go models that are only reachable via the Anthropic Messages wire
+ * format (`/v1/messages`), not the OpenAI-compatible chat completions format
+ * (`/v1/chat/completions` — referred to by the gateway as "oa-compat").
+ *
+ * The Go gateway maps every model to exactly one wire format (see the model
+ * table at https://opencode.ai/docs/go). Models listed here use
+ * `@ai-sdk/anthropic`; every other curated model uses
+ * `@ai-sdk/openai-compatible`. Sending an Anthropic-format model to the
+ * OpenAI chat completions endpoint is rejected with:
+ *
+ *   401 Model <id> is not supported for format oa-compat
+ *
+ * This is the set that drives format routing in the handler — keep it in sync
+ * with the Go model table.
+ */
+export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
+	// --- Alibaba Qwen ---
+	"qwen3.7-max",
+	"qwen3.7-plus",
+	"qwen3.6-plus",
+	// --- MiniMax ---
+	"minimax-m3",
+	"minimax-m2.7",
+	"minimax-m2.5",
+])
+
+/**
+ * Returns `true` when the given Go-plan model ID must be requested via the
+ * Anthropic Messages format (`/v1/messages`) rather than the OpenAI-compatible
+ * chat completions format. Unknown (non-curated) model IDs default to the
+ * OpenAI-compatible format, matching the gateway's default routing.
+ */
+export function isOpencodeGoAnthropicFormatModel(modelId: string): boolean {
+	return OPENCODE_GO_ANTHROPIC_FORMAT_MODELS.has(modelId)
+}
+
+/**
  * Returns the native {@link ModelInfo} for a Go-plan model ID, or `undefined`
  * when the ID is not part of the curated registry. Callers should fall back to
  * {@link opencodeGoDefaultModelInfo} when this returns `undefined`.

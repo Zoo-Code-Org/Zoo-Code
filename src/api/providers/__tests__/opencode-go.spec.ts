@@ -6,7 +6,7 @@ vitest.mock("vscode", () => ({}))
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { opencodeGoDefaultModelId, opencodeGoModels } from "@roo-code/types"
+import { opencodeGoDefaultModelId, opencodeGoModels, isOpencodeGoAnthropicFormatModel } from "@roo-code/types"
 
 import { OpencodeGoHandler } from "../opencode-go"
 import { ApiHandlerOptions } from "../../../shared/api"
@@ -23,18 +23,31 @@ vitest.mock("../fetchers/modelCache", () => ({
 			// Use the native registry entry so capability flags (reasoning
 			// effort, preserveReasoning, prompt cache) are exercised.
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
+			// Anthropic-format model used to exercise the /v1/messages path.
+			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
 
 const mockCreate = vitest.fn()
+const mockAnthropicCreate = vitest.fn()
 
 ;(OpenAI as any).mockImplementation(function () {
 	return {
 		chat: { completions: { create: mockCreate } },
 	}
 })
+
+vitest.mock("@anthropic-ai/sdk", () => ({
+	Anthropic: vitest.fn(function () {
+		return {
+			messages: {
+				create: mockAnthropicCreate,
+			},
+		}
+	}),
+}))
 
 describe("OpencodeGoHandler", () => {
 	const mockOptions: ApiHandlerOptions = {
@@ -45,6 +58,7 @@ describe("OpencodeGoHandler", () => {
 	beforeEach(() => {
 		vitest.clearAllMocks()
 		mockCreate.mockClear()
+		mockAnthropicCreate.mockClear()
 	})
 
 	it("initializes the OpenAI client with the Opencode Go base URL and key", () => {
@@ -53,6 +67,18 @@ describe("OpencodeGoHandler", () => {
 		expect(OpenAI).toHaveBeenCalledWith(
 			expect.objectContaining({
 				baseURL: "https://opencode.ai/zen/go/v1",
+				apiKey: "test-key",
+			}),
+		)
+	})
+
+	it("initializes an Anthropic client rooted at /zen/go (SDK appends /v1/messages)", () => {
+		new OpencodeGoHandler(mockOptions)
+		expect(Anthropic).toHaveBeenCalledWith(
+			expect.objectContaining({
+				// The Anthropic SDK posts to `/v1/messages`, so the base URL must
+				// NOT include the trailing `/v1` used by the OpenAI client.
+				baseURL: "https://opencode.ai/zen/go",
 				apiKey: "test-key",
 			}),
 		)
@@ -306,6 +332,176 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockRejectedValue(new Error("boom"))
 			const handler = new OpencodeGoHandler(mockOptions)
 			await expect(handler.completePrompt("ping")).rejects.toThrow("Opencode Go completion error: boom")
+		})
+	})
+
+	describe("Anthropic-format models (qwen3.7-max)", () => {
+		// qwen3.7-max is only reachable via the Anthropic Messages endpoint
+		// (/v1/messages); sending it to /v1/chat/completions is what produces
+		// "401 Model qwen3.7-max is not supported for format oa-compat".
+		const anthropicOptions: ApiHandlerOptions = {
+			opencodeGoApiKey: "test-key",
+			opencodeGoModelId: "qwen3.7-max",
+		}
+
+		beforeEach(() => {
+			mockAnthropicCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
+								cache_creation_input_tokens: 2,
+								cache_read_input_tokens: 3,
+							},
+						},
+					}
+					yield {
+						type: "content_block_start",
+						index: 0,
+						content_block: { type: "text", text: "" },
+					}
+					yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }
+					yield {
+						type: "content_block_start",
+						index: 1,
+						content_block: { type: "tool_use", id: "toolu_1", name: "read_file", input: {} },
+					}
+					yield {
+						type: "content_block_delta",
+						index: 1,
+						delta: { type: "input_json_delta", partial_json: '{"path":' },
+					}
+					yield { type: "content_block_stop", index: 1 }
+					yield { type: "message_delta", usage: { output_tokens: 5 } }
+					yield { type: "message_stop" }
+				},
+			}))
+		})
+
+		it("routes the request through the Anthropic /v1/messages client, not chat completions", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk // drain
+			}
+
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "qwen3.7-max",
+					stream: true,
+					system: expect.arrayContaining([expect.objectContaining({ type: "text", text: "sys" })]),
+				}),
+			)
+			// The OpenAI chat completions endpoint must NOT be used for this model.
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("streams text, tool-call, usage and cost chunks from the Anthropic stream", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: any[] = []
+			for await (const chunk of handler.createMessage("sys", messages)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
+			expect(chunks).toContainEqual({
+				type: "tool_call_partial",
+				index: 1,
+				id: "toolu_1",
+				name: "read_file",
+				arguments: undefined,
+			})
+			expect(chunks).toContainEqual({
+				type: "tool_call_partial",
+				index: 1,
+				id: undefined,
+				name: undefined,
+				arguments: '{"path":',
+			})
+			// message_start usage (with cache tokens) ...
+			expect(chunks).toContainEqual({
+				type: "usage",
+				inputTokens: 10,
+				outputTokens: 0,
+				cacheWriteTokens: 2,
+				cacheReadTokens: 3,
+			})
+			// ... message_delta output tokens ...
+			expect(chunks).toContainEqual({ type: "usage", inputTokens: 0, outputTokens: 5 })
+			// ... and a final cost chunk.
+			expect(chunks.some((c) => c.type === "usage" && c.totalCost !== undefined)).toBe(true)
+		})
+
+		it("applies cache-control breakpoints when the model supports prompt caching", async () => {
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "first" },
+				{ role: "assistant", content: "ok" },
+				{ role: "user", content: "second" },
+			]
+
+			for await (const _chunk of handler.createMessage("sys", messages)) {
+				void _chunk // drain
+			}
+
+			const callArgs = mockAnthropicCreate.mock.calls[0][0] as {
+				system: Array<{ cache_control?: unknown }>
+				messages: Array<{ content: unknown }>
+			}
+			// qwen3.7-max advertises supportsPromptCache, so the system prompt
+			// gets an ephemeral cache_control breakpoint.
+			expect(callArgs.system[0].cache_control).toEqual({ type: "ephemeral" })
+		})
+
+		it("completePrompt uses the Anthropic messages endpoint and returns text content", async () => {
+			mockAnthropicCreate.mockResolvedValue({
+				content: [{ type: "text", text: "the answer" }],
+			})
+
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			expect(await handler.completePrompt("ping")).toBe("the answer")
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "qwen3.7-max",
+					stream: false,
+					messages: [{ role: "user", content: "ping" }],
+				}),
+			)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("completePrompt wraps Anthropic errors with an Opencode Go-specific message", async () => {
+			mockAnthropicCreate.mockRejectedValue(new Error("boom"))
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await expect(handler.completePrompt("ping")).rejects.toThrow("Opencode Go completion error: boom")
+		})
+	})
+
+	describe("isOpencodeGoAnthropicFormatModel", () => {
+		it("classifies Qwen and MiniMax Go models as Anthropic-format", () => {
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-max")).toBe(true)
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-plus")).toBe(true)
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.6-plus")).toBe(true)
+			expect(isOpencodeGoAnthropicFormatModel("minimax-m3")).toBe(true)
+			expect(isOpencodeGoAnthropicFormatModel("minimax-m2.7")).toBe(true)
+			expect(isOpencodeGoAnthropicFormatModel("minimax-m2.5")).toBe(true)
+		})
+
+		it("classifies OpenAI-compatible Go models as non-Anthropic-format", () => {
+			expect(isOpencodeGoAnthropicFormatModel("glm-5.2")).toBe(false)
+			expect(isOpencodeGoAnthropicFormatModel("kimi-k2.6")).toBe(false)
+			expect(isOpencodeGoAnthropicFormatModel("deepseek-v4-pro")).toBe(false)
+			expect(isOpencodeGoAnthropicFormatModel("mimo-v2.5")).toBe(false)
+		})
+
+		it("defaults unknown model IDs to the OpenAI-compatible format", () => {
+			expect(isOpencodeGoAnthropicFormatModel("some-unknown-model")).toBe(false)
 		})
 	})
 })
