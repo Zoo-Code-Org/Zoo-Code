@@ -186,29 +186,25 @@ describe("OpencodeGoHandler", () => {
 					model: "glm-5.1",
 					stream: true,
 					stream_options: { include_usage: true },
-					// glm-5.1 maxTokens (131_072) is clamped to 20% of its 204_800
-					// context window => 40_960.
-					max_completion_tokens: 40_960,
+					// glm-5.1 maxTokens is 131_072 (native registry value).
+					max_completion_tokens: 131_072,
 					temperature: expect.any(Number),
 				}),
 				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
-		it("forwards the model's default reasoning_effort for reasoning-capable models", async () => {
+		// The OpenAI completion path does not inject reasoning_effort —
+		// reasoning is controlled server-side by the Go gateway.
+		it("does not inject reasoning_effort into OpenAI-style requests", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 			for await (const _chunk of handler.createMessage("sys", messages)) {
 				void _chunk // drain
 			}
 
-			// glm-5.1 advertises supportsReasoningEffort with a default of "medium".
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "glm-5.1",
-					reasoning_effort: "medium",
-				}),
-			)
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.reasoning_effort).toBeUndefined()
 		})
 
 		it("omits reasoning_effort when the user disables reasoning", async () => {
@@ -370,7 +366,7 @@ describe("OpencodeGoHandler", () => {
 			expect(chunks).toContainEqual({ type: "usage", inputTokens: 0, outputTokens: 0 })
 		})
 
-		it("honors includeMaxTokens/modelMaxTokens override for max_completion_tokens", async () => {
+		it("uses native model maxTokens even with includeMaxTokens set", async () => {
 			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 999 })
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
@@ -378,7 +374,12 @@ describe("OpencodeGoHandler", () => {
 				void _chunk
 			}
 
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 999 }))
+			// OpenAI path uses info.maxTokens directly (131_072); includeMaxTokens
+			// only affects the Anthropic-format path.
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_completion_tokens: 131_072 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 	})
 
@@ -391,9 +392,8 @@ describe("OpencodeGoHandler", () => {
 				expect.objectContaining({
 					model: "glm-5.1",
 					stream: false,
-					// glm-5.1 maxTokens (131_072) clamped to 20% of 204_800 => 40_960.
-					max_completion_tokens: 40_960,
-					reasoning_effort: "medium",
+					// glm-5.1 maxTokens is 131_072 (native registry value).
+					max_completion_tokens: 131_072,
 				}),
 				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
