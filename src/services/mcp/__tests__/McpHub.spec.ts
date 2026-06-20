@@ -2439,7 +2439,7 @@ describe("McpHub", () => {
 
 			mockSecretStorage = {
 				getOAuthData: vi.fn().mockResolvedValue(null),
-				onDidChange: vi.fn().mockReturnValue(vi.fn()),
+				onDidChange: vi.fn().mockImplementation(() => vi.fn()),
 			}
 			;(mcpHub as any).secretStorage = mockSecretStorage
 
@@ -2585,11 +2585,9 @@ describe("McpHub", () => {
 				mockConnection,
 			)
 
-			// _initiateOAuthFlow awaits getOAuthData() before calling withProgress.
-			// Two ticks: tick 1 resolves getOAuthData, tick 2 runs the continuation
-			// that calls withProgress, setting capturedCancellationToken.
-			await Promise.resolve()
-			await Promise.resolve()
+			// Wait for withProgress to be invoked: getOAuthData must resolve first,
+			// then the continuation calls withProgress synchronously, setting capturedCancellationToken.
+			await vi.waitFor(() => expect(capturedCancellationToken).toBeDefined())
 			capturedCancellationToken._fire()
 
 			await flowPromise
@@ -2917,9 +2915,9 @@ describe("McpHub", () => {
 				mockConnection,
 			)
 
-			// Two ticks: getOAuthData resolves, then withProgress registers the watcher
-			await Promise.resolve()
-			await Promise.resolve()
+			// Flush microtasks: getOAuthData resolves, then withProgress fires synchronously
+			// (registering the watcher) — no tick-counting needed.
+			await vi.advanceTimersByTimeAsync(0)
 			expect((mcpHub as any)._oauthWatchers.size).toBe(1)
 			const firstEntry = (mcpHub as any)._oauthWatchers.get(`${serverName}:${source}`)
 
@@ -2933,10 +2931,11 @@ describe("McpHub", () => {
 				mockConnection,
 			)
 
-			await Promise.resolve()
-			await Promise.resolve()
+			await vi.advanceTimersByTimeAsync(0)
 			// Still exactly one watcher for this server key
 			expect((mcpHub as any)._oauthWatchers.size).toBe(1)
+			// The first watcher's unsubscribe must have been called before replacement
+			expect(firstEntry.unsubscribe).toHaveBeenCalledOnce()
 			// Watcher entry was replaced (second flow's entry, not first)
 			const secondEntry = (mcpHub as any)._oauthWatchers.get(`${serverName}:${source}`)
 			expect(secondEntry).not.toBe(firstEntry)
