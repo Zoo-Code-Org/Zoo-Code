@@ -1,5 +1,28 @@
 # Zoo Code Changelog
 
+## [3.62.0]
+
+### Minor Changes
+
+- Add GLM-5.2 support — the latest GLM model is now available in your provider settings (#597 by @percy4, PR #608 by @MobCode100)
+- Add OpenCode-Go native model parameters, Anthropic-format routing, and context-token fix for more reliable responses (#646 by @ykoneee, PR #652 by @navedmerchant)
+- Add tool-writer mode to the Marketplace — a new specialized mode for writing and maintaining tool definitions (#603 by @RayCarro, PR #604 by @RayCarro)
+- Add LiteLLM support for forwarding taskId as X-Zoo-Session-ID request header for better request tracing (#590 by @awschmeder, PR #591 by @awschmeder)
+- Fix: Apply apiRequestTimeout consistently across all providers (#565 by @daewoongoh, PR #567 by @daewoongoh)
+- Fix: Restore diff view scroll position and fix tab handling on save/deny (#586 by @awschmeder, PR #589 by @awschmeder)
+- Fix: Deliver terminal completion signal when end event wins the race against setActiveStream (#489 by @drzraf, #622 by @onlineapps-cloud, PR #645 by @edelauna)
+- Fix: Fetch OpenCode-Go models unconditionally — the /models endpoint is public (PR #437 by @proyectoauraorg)
+- Refactor: Extract RateLimitClock from Task static state for cleaner rate-limit handling (#361 by @edelauna, PR #628 by @edelauna)
+- Refactor: Use extractReasoningFromDelta helper for reasoning extraction across providers (PR #588 by @daewoongoh)
+- Fix: Automate PR review-state and stale labels in GitHub Actions (PR #636 by @edelauna)
+- Re-enable the prefer-const ESLint rule (PR #250 by @0xMink)
+- Add stale PR workflows and auto-closure policy (PR #631 by @edelauna)
+- Update dependency vitest to v4 [security] (PR #443 by @app/renovate)
+- Update dependency shell-quote to v1.8.4 [security] (PR #554 by @app/renovate)
+- Update dependency esbuild to v0.28.1 [security] (PR #595 by @app/renovate)
+- Update dependency vite to v8.0.16 [security] (PR #642 by @app/renovate)
+- Update GitHub Actions (PR #521 by @app/renovate)
+
 ## [3.60.0]
 
 ### Minor Changes

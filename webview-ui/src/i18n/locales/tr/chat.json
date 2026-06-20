@@ -334,9 +334,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Yeni yapay zeka modelleri — Tüm Anthropic sağlayıcılarında Claude Fable 5 ve OpenAI GPT-5.5 artık sağlayıcı ayarlarında mevcut.",
-			"highlight2": "Mod başına MCP allowlist'leri — Mod yapılandırmasındaki yeni allowlist ile her mod için hangi MCP sunucularının aktif olacağını kısıtla.",
-			"highlight3": "Çalışma alanı rootResolution ayarı — Zoo Code'un çok köklü çalışma alanlarında dosya yollarını nasıl çözdüğünü kontrol eden yeni bir ayar."
+			"highlight1": "GLM-5.2 desteği — en yeni GLM modeli artık sağlayıcı ayarlarında mevcut.",
+			"highlight2": "OpenCode-Go iyileştirmeleri — yerel model parametreleri, Anthropic formatı yönlendirme ve daha güvenilir yanıtlar için context-token düzeltmesi.",
+			"highlight3": "Tool-writer modu — araç tanımlarını yazmak ve sürdürmek için yeni bir uzmanlaşmış mod, artık Marketplace'te mevcut."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

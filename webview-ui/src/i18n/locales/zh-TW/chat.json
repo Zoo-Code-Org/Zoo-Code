@@ -355,9 +355,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "新 AI 模型 — Claude Fable 5（適用於所有 Anthropic 提供商）和 OpenAI GPT-5.5 現已在提供商設定中可用。",
-			"highlight2": "按模式的 MCP 允許清單 — 在模式設定中使用新的允許清單，限制每個模式下哪些 MCP 伺服器處於活動狀態。",
-			"highlight3": "工作區 rootResolution 設定 — 一項新設定，用於控制 Zoo Code 在多根工作區中解析檔案路徑的方式。"
+			"highlight1": "GLM-5.2 支援 — 最新 GLM 模型現已在提供商設定中可用。",
+			"highlight2": "OpenCode-Go 改進 — 原生模型參數、Anthropic 格式路由和 context-token 修復，提供更可靠的回應。",
+			"highlight3": "Tool-writer 模式 — 用於編寫和維護工具定義的新專用模式，現已在 Marketplace 中可用。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

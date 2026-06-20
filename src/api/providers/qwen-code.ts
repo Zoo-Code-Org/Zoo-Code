@@ -76,6 +76,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 					"X-DashScope-UserAgent": `QwenCode/1.0.0 (${os.platform()}; ${os.arch()})`,
 					"X-DashScope-AuthType": "qwen-oauth",
 				},
+				timeout: this.timeoutMs,
 			})
 		}
 		return this.client

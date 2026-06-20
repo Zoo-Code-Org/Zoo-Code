@@ -333,9 +333,9 @@
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "新しい AI モデル — すべての Anthropic プロバイダーで Claude Fable 5、OpenAI GPT-5.5 がプロバイダー設定で利用可能になりました。",
-			"highlight2": "モード別 MCP allowlist — モード設定の新しい allowlist を使用して、各モードで有効にする MCP サーバーを制限できます。",
-			"highlight3": "ワークスペース rootResolution 設定 — マルチルートワークスペースでのファイルパス解決方法を制御する新しい設定です。"
+			"highlight1": "GLM-5.2 サポート — 最新の GLM モデルがプロバイダー設定で利用可能になりました。",
+			"highlight2": "OpenCode-Go の改善 — ネイティブモデルパラメータ、Anthropic フォーマットルーティング、より信頼性の高い応答のための context-token 修正。",
+			"highlight3": "Tool-writer モード — ツール定義の作成と保守のための新しい専門モードが Marketplace で利用可能になりました。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

@@ -6,7 +6,13 @@ import { ApiHandlerOptions } from "../../../shared/api"
 import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 
 // Mock vscode first to avoid import errors
-vi.mock("vscode", () => ({}))
+vi.mock("vscode", () => ({
+	workspace: {
+		getConfiguration: () => ({
+			get: (_key: string, defaultValue?: unknown) => defaultValue,
+		}),
+	},
+}))
 
 // Mock OpenAI
 const mockCreate = vi.fn()

@@ -30,11 +30,11 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.60.0 新增内容
+## v3.62.0 新增内容
 
-- **Fable 5 + GPT-5.5** — Claude Fable 5（Anthropic、Bedrock、Vertex）和 OpenAI GPT-5.5 现已在提供商设置中可用
-- **按模式的 MCP 允许列表** — 在模式配置中使用允许列表限制每个模式下活跃的 MCP 服务器
-- **工作区 rootResolution 设置** — 新设置，用于控制 Zoo Code 在多根工作区中解析文件路径的方式
+- **GLM-5.2 支持** — 最新 GLM 模型现已在提供商设置中可用
+- **OpenCode-Go 改进** — 原生模型参数、Anthropic 格式路由和 context-token 修复，提供更可靠的响应
+- **Tool-writer 模式** — 用于编写和维护工具定义的新专用模式，现已在 Marketplace 中可用
 
 ## Zoo Code 能为您做什么？
 

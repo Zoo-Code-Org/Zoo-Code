@@ -30,11 +30,11 @@
 
 Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
-## v3.60.0 の新機能
+## v3.62.0 の新機能
 
-- **Fable 5 + GPT-5.5** — Claude Fable 5（Anthropic、Bedrock、Vertex）と OpenAI GPT-5.5 がプロバイダー設定で利用可能になりました
-- **モード別 MCP allowlist** — モード設定の allowlist を使用して、各モードで有効にする MCP サーバーを制限できます
-- **ワークスペース rootResolution 設定** — マルチルートワークスペースでのファイルパス解決方法を制御する新しい設定
+- **GLM-5.2 サポート** — 最新の GLM モデルがプロバイダー設定で利用可能になりました
+- **OpenCode-Go の改善** — ネイティブモデルパラメータ、Anthropic フォーマットルーティング、より信頼性の高い応答のための context-token 修正
+- **Tool-writer モード** — ツール定義の作成と保守のための新しい専門モードが Marketplace で利用可能になりました
 
 ## Zoo Codeがあなたのためにできること
 

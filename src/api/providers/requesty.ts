@@ -69,6 +69,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			baseURL: this.baseURL,
 			apiKey: apiKey,
 			defaultHeaders: DEFAULT_HEADERS,
+			timeout: this.timeoutMs,
 		})
 	}
 

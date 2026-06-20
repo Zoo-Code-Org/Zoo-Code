@@ -3,7 +3,7 @@
 	"displayName": "%extension.displayName%",
 	"description": "%extension.description%",
 	"publisher": "ZooCodeOrganization",
-	"version": "3.60.0",
+	"version": "3.62.0",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
 		"color": "#617A91",
@@ -379,9 +379,9 @@
 					"description": "%settings.useAgentRules.description%"
 				},
 				"zoo-code.apiRequestTimeout": {
-					"type": "number",
+					"type": "integer",
 					"default": 600,
-					"minimum": 0,
+					"minimum": 1,
 					"maximum": 3600,
 					"description": "%settings.apiRequestTimeout.description%"
 				},

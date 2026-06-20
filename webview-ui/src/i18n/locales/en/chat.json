@@ -352,9 +352,9 @@
 		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "What's New:",
-			"highlight1": "New AI models — Claude Fable 5 across all Anthropic providers and OpenAI GPT-5.5 are now available in your provider settings.",
-			"highlight2": "Per-mode MCP allowlists — restrict which MCP servers are active for each mode using a new allowlist in your mode configuration.",
-			"highlight3": "Workspace rootResolution — a new setting that controls how Zoo Code resolves file paths across roots in multi-root workspaces."
+			"highlight1": "GLM-5.2 support — the latest GLM model is now available in your provider settings.",
+			"highlight2": "OpenCode-Go improvements — native model parameters, Anthropic-format routing, and a context-token fix for more reliable responses.",
+			"highlight3": "Tool-writer mode — a new specialized mode for writing and maintaining tool definitions is now available in the Marketplace."
 		},
 		"cloudAgents": {
 			"heading": "New in the Cloud:",

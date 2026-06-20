@@ -6,11 +6,14 @@ import type { ApiHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { ApiStream } from "../transform/stream"
 import { countTokens } from "../../utils/countTokens"
 import { isMcpTool } from "../../utils/mcp-name"
+import { getApiRequestTimeout } from "./utils/timeout-config"
 
 /**
  * Base class for API providers that implements common functionality.
  */
 export abstract class BaseProvider implements ApiHandler {
+	protected readonly timeoutMs: number = getApiRequestTimeout()
+
 	abstract createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],

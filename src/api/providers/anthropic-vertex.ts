@@ -51,6 +51,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					scopes: ["https://www.googleapis.com/auth/cloud-platform"],
 					credentials: parsedVertexCredentials,
 				}),
+				timeout: this.timeoutMs,
 			})
 		} else if (this.options.vertexKeyFile) {
 			this.client = new AnthropicVertex({
@@ -60,9 +61,10 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 					scopes: ["https://www.googleapis.com/auth/cloud-platform"],
 					keyFile: this.options.vertexKeyFile,
 				}),
+				timeout: this.timeoutMs,
 			})
 		} else {
-			this.client = new AnthropicVertex({ projectId, region })
+			this.client = new AnthropicVertex({ projectId, region, timeout: this.timeoutMs })
 		}
 	}
 

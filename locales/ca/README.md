@@ -30,11 +30,11 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.60.0
+## Novetats a la v3.62.0
 
-- **Fable 5 + GPT-5.5** — Claude Fable 5 (Anthropic, Bedrock, Vertex) i OpenAI GPT-5.5 ara estan disponibles a la configuració del proveïdor
-- **Llistes d'accés MCP per mode** — restringeix quins servidors MCP estan actius per mode usant una llista d'accés a la configuració del mode
-- **rootResolution per a l'espai de treball** — nou ajust per controlar com Zoo Code resol les rutes d'arxiu entre arrels en espais de treball multi-arrel
+- **Suport per a GLM-5.2** — l'últim model GLM ja està disponible a la configuració del proveïdor
+- **Millores d'OpenCode-Go** — paràmetres de model natius, encaminament en format Anthropic i correcció de context-token per a respostes més fiables
+- **Mode tool-writer** — un nou mode especialitzat per escriure i mantenir definicions d'eines, ja disponible al Marketplace
 
 ## Què pot fer Zoo Code per TU?
 
