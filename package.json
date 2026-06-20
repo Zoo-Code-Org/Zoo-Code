@@ -40,7 +40,7 @@
 		"lint-staged": "16.4.0",
 		"mkdirp": "3.0.1",
 		"only-allow": "1.2.1",
-		"ovsx": "0.10.4",
+		"ovsx": "0.10.12",
 		"prettier": "3.5.3",
 		"rimraf": "6.0.1",
 		"tsx": "4.19.4",
