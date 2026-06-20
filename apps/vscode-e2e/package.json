@@ -17,7 +17,7 @@
 		"@roo-code/types": "workspace:^",
 		"@copilotkit/aimock": "1.15.1",
 		"@types/mocha": "10.0.10",
-		"@types/node": "20.19.41",
+		"@types/node": "20.19.43",
 		"@types/vscode": "1.100.0",
 		"@vscode/test-cli": "0.0.11",
 		"@vscode/test-electron": "2.5.2",

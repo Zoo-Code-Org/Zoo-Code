@@ -543,7 +543,7 @@
 		"@types/diff": "5.2.3",
 		"@types/lodash.debounce": "4.0.9",
 		"@types/mocha": "10.0.10",
-		"@types/node": "20.19.41",
+		"@types/node": "20.19.43",
 		"@types/node-cache": "4.2.5",
 		"@types/proper-lockfile": "4.1.4",
 		"@types/ps-tree": "1.1.6",

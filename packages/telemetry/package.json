@@ -19,7 +19,7 @@
 	"devDependencies": {
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
-		"@types/node": "20.19.41",
+		"@types/node": "20.19.43",
 		"@types/vscode": "1.100.0",
 		"@vitest/coverage-v8": "4.1.0",
 		"vitest": "4.1.0"
