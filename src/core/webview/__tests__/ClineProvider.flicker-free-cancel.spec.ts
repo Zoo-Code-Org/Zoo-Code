@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
 
 import { ClineProvider } from "../ClineProvider"
@@ -44,20 +44,35 @@ vi.mock("vscode", () => {
 	}
 })
 
-vi.mock("../../task/Task")
-vi.mock("../../config/ContextProxy")
+vi.mock("../../task/Task", () => ({
+	Task: vi.fn().mockImplementation(function () {
+		return {
+			taskId: "mock-task-id",
+			instanceId: "mock-instance-id",
+			abortTask: vi.fn(),
+			emit: vi.fn(),
+			on: vi.fn(),
+			off: vi.fn(),
+		}
+	}),
+}))
 vi.mock("../../../services/mcp/McpServerManager", () => ({
 	McpServerManager: {
 		getInstance: vi.fn().mockResolvedValue({
 			registerClient: vi.fn(),
+			unregisterClient: vi.fn(),
 		}),
 		unregisterProvider: vi.fn(),
 	},
 }))
-vi.mock("../../../services/marketplace")
-vi.mock("../../../integrations/workspace/WorkspaceTracker")
-vi.mock("../../config/ProviderSettingsManager")
-vi.mock("../../config/CustomModesManager")
+vi.mock("../../../integrations/workspace/WorkspaceTracker", () => ({
+	default: vi.fn().mockImplementation(function () {
+		return {
+			initializeFilePaths: vi.fn(),
+			dispose: vi.fn(),
+		}
+	}),
+}))
 vi.mock("../../../utils/path", () => ({
 	getWorkspacePath: vi.fn().mockReturnValue("/test/workspace"),
 }))
@@ -85,6 +100,155 @@ vi.mock("@roo-code/cloud", () => ({
 
 vi.mock("../../../shared/embeddingModels", () => ({
 	EMBEDDING_MODEL_PROFILES: [],
+}))
+
+vi.mock("../../../shared/modes", () => ({
+	modes: [{ slug: "code", name: "Code Mode", roleDefinition: "You are a code assistant", groups: ["read", "edit"] }],
+	getModeBySlug: vi.fn().mockReturnValue({
+		slug: "code",
+		name: "Code Mode",
+		roleDefinition: "You are a code assistant",
+		groups: ["read", "edit"],
+	}),
+	getGroupName: vi.fn().mockReturnValue("General Tools"),
+	defaultModeSlug: "code",
+}))
+
+vi.mock("p-wait-for", () => ({
+	__esModule: true,
+	default: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock("fs/promises", () => ({
+	mkdir: vi.fn().mockResolvedValue(undefined),
+	writeFile: vi.fn().mockResolvedValue(undefined),
+	readFile: vi.fn().mockResolvedValue(""),
+	readdir: vi.fn().mockResolvedValue([]),
+	unlink: vi.fn().mockResolvedValue(undefined),
+	rmdir: vi.fn().mockResolvedValue(undefined),
+	access: vi.fn().mockResolvedValue(undefined),
+	rm: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock("axios", () => ({
+	default: { get: vi.fn().mockResolvedValue({ data: { data: [] } }), post: vi.fn() },
+	get: vi.fn().mockResolvedValue({ data: { data: [] } }),
+	post: vi.fn(),
+}))
+
+vi.mock("delay", () => {
+	const delayFn = (_ms: number) => Promise.resolve()
+	delayFn.createDelay = () => delayFn
+	delayFn.reject = () => Promise.reject(new Error("Delay rejected"))
+	delayFn.range = () => Promise.resolve()
+	return { default: delayFn }
+})
+
+vi.mock("../../../utils/storage", () => ({
+	getSettingsDirectoryPath: vi.fn().mockResolvedValue("/test/settings/path"),
+	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/task/path"),
+	getGlobalStoragePath: vi.fn().mockResolvedValue("/test/storage/path"),
+	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
+}))
+
+vi.mock("../../../utils/safeWriteJson", () => ({
+	safeWriteJson: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock("../../../utils/tts", () => ({
+	setTtsEnabled: vi.fn(),
+	setTtsSpeed: vi.fn(),
+}))
+
+vi.mock("../../../api", () => ({
+	buildApiHandler: vi.fn().mockReturnValue({
+		getModel: vi.fn().mockReturnValue({ id: "claude-3-sonnet" }),
+	}),
+}))
+
+vi.mock("../../prompts/system", () => ({
+	SYSTEM_PROMPT: vi.fn().mockImplementation(async () => "mocked system prompt"),
+	codeMode: "code",
+}))
+
+vi.mock("../../prompts/sections/custom-instructions")
+
+vi.mock("../../../api/providers/fetchers/modelCache", () => ({
+	getModels: vi.fn().mockResolvedValue({}),
+	flushModels: vi.fn(),
+	getModelsFromCache: vi.fn().mockReturnValue(undefined),
+}))
+
+vi.mock("../../../integrations/misc/extract-text", () => ({
+	extractTextFromFile: vi.fn().mockResolvedValue("file content"),
+}))
+
+vi.mock("../diff/strategies/multi-search-replace", () => ({
+	MultiSearchReplaceDiffStrategy: vi.fn().mockImplementation(function () {
+		return { getName: () => "test-strategy", applyDiff: vi.fn() }
+	}),
+}))
+
+vi.mock("@modelcontextprotocol/sdk/types.js", () => ({
+	CallToolResultSchema: {},
+	ListResourcesResultSchema: {},
+	ListResourceTemplatesResultSchema: {},
+	ListToolsResultSchema: {},
+	ReadResourceResultSchema: {},
+	ErrorCode: { InvalidRequest: "InvalidRequest", MethodNotFound: "MethodNotFound", InternalError: "InternalError" },
+	McpError: class McpError extends Error {
+		code: string
+		constructor(code: string, message: string) {
+			super(message)
+			this.code = code
+			this.name = "McpError"
+		}
+	},
+}))
+
+vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
+	Client: vi.fn().mockImplementation(function () {
+		return {
+			connect: vi.fn().mockResolvedValue(undefined),
+			close: vi.fn().mockResolvedValue(undefined),
+			listTools: vi.fn().mockResolvedValue({ tools: [] }),
+			callTool: vi.fn().mockResolvedValue({ content: [] }),
+		}
+	}),
+}))
+
+vi.mock("@modelcontextprotocol/sdk/client/stdio.js", () => ({
+	StdioClientTransport: vi.fn().mockImplementation(function () {
+		return { connect: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) }
+	}),
+}))
+
+vi.mock("../../../services/skills/SkillsManager", () => ({
+	SkillsManager: vi.fn().mockImplementation(function () {
+		return {
+			initialize: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+	}),
+}))
+
+vi.mock("../../task-persistence", () => ({
+	TaskHistoryStore: vi.fn().mockImplementation(function () {
+		return {
+			initialize: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn(),
+			initialized: Promise.resolve(),
+			get: vi.fn().mockReturnValue(undefined),
+			getAll: vi.fn().mockReturnValue([]),
+			upsert: vi.fn().mockResolvedValue([]),
+			delete: vi.fn().mockResolvedValue(undefined),
+			deleteMany: vi.fn().mockResolvedValue(undefined),
+			migrateFromGlobalState: vi.fn().mockResolvedValue(undefined),
+		}
+	}),
+	readApiMessages: vi.fn().mockResolvedValue([]),
+	saveApiMessages: vi.fn().mockResolvedValue(undefined),
+	saveTaskMessages: vi.fn().mockResolvedValue(undefined),
 }))
 
 describe("ClineProvider flicker-free cancel", () => {
@@ -195,6 +359,10 @@ describe("ClineProvider flicker-free cancel", () => {
 		})
 	})
 
+	afterEach(async () => {
+		await provider.dispose()
+	})
+
 	it("should not remove current task from stack when rehydrating same taskId", async () => {
 		// Setup: Add a task to the stack first
 		;(provider as any).clineStack = [mockTask1]
@@ -242,7 +410,9 @@ describe("ClineProvider flicker-free cancel", () => {
 		;(provider as any).clineStack = [mockTask1]
 
 		// Spy on removeClineFromStack to verify it IS called
-		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockResolvedValue(undefined)
+		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockImplementation(async () => {
+			;(provider as any).clineStack.pop()
+		})
 
 		// Create history item with different taskId
 		const historyItem: HistoryItem = {
@@ -268,7 +438,9 @@ describe("ClineProvider flicker-free cancel", () => {
 		;(provider as any).clineStack = []
 
 		// Spy on removeClineFromStack
-		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockResolvedValue(undefined)
+		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockImplementation(async () => {
+			;(provider as any).clineStack.pop()
+		})
 
 		// Create history item
 		const historyItem: HistoryItem = {
