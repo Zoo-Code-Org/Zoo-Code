@@ -1,4 +1,4 @@
-import fs from "fs/promises"
+import * as fs from "fs/promises"
 
 import type { Mock } from "vitest"
 import type { ExtensionContext, Uri } from "vscode"
@@ -10,33 +10,20 @@ import { ServerConfigSchema, McpHub } from "../McpHub"
 import { OAUTH_FLOW_TIMEOUT_MS } from "../constants"
 import { t } from "../../../i18n"
 
-// Mock fs/promises before importing anything that uses it
-vi.mock("fs/promises", () => ({
-	default: {
-		access: vi.fn().mockResolvedValue(undefined),
-		writeFile: vi.fn().mockResolvedValue(undefined),
-		readFile: vi.fn().mockResolvedValue("{}"),
-		unlink: vi.fn().mockResolvedValue(undefined),
-		rename: vi.fn().mockResolvedValue(undefined),
-		lstat: vi.fn().mockImplementation(() => {
-			return Promise.resolve({
-				isDirectory: () => true,
-			})
-		}),
-		mkdir: vi.fn().mockResolvedValue(undefined),
-	},
-	access: vi.fn().mockResolvedValue(undefined),
-	writeFile: vi.fn().mockResolvedValue(undefined),
-	readFile: vi.fn().mockResolvedValue("{}"),
-	unlink: vi.fn().mockResolvedValue(undefined),
-	rename: vi.fn().mockResolvedValue(undefined),
-	lstat: vi.fn().mockImplementation(() => {
-		return Promise.resolve({
-			isDirectory: () => true,
-		})
-	}),
-	mkdir: vi.fn().mockResolvedValue(undefined),
-}))
+// Mock fs/promises before importing anything that uses it.
+// Named exports and the default export must share the same vi.fn() instances so that
+// `import * as fs` (used by McpHub.ts) and `import fs` (default) both see the same mocks.
+vi.mock("fs/promises", () => {
+	const access = vi.fn().mockResolvedValue(undefined)
+	const writeFile = vi.fn().mockResolvedValue(undefined)
+	const readFile = vi.fn().mockResolvedValue("{}")
+	const unlink = vi.fn().mockResolvedValue(undefined)
+	const rename = vi.fn().mockResolvedValue(undefined)
+	const lstat = vi.fn().mockImplementation(() => Promise.resolve({ isDirectory: () => true }))
+	const mkdir = vi.fn().mockResolvedValue(undefined)
+	const shared = { access, writeFile, readFile, unlink, rename, lstat, mkdir }
+	return { default: shared, ...shared }
+})
 
 // Import safeWriteJson to use in mocks
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -93,7 +80,6 @@ vi.mock("vscode", () => ({
 		from: vi.fn(),
 	},
 }))
-vi.mock("fs/promises")
 vi.mock("../../../core/webview/ClineProvider")
 
 // Mock the MCP SDK modules
@@ -124,7 +110,7 @@ describe("McpHub", () => {
 	const originalConsoleError = console.error
 	const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks()
 
 		// Mock console.error to suppress error messages during tests
@@ -194,6 +180,7 @@ describe("McpHub", () => {
 		)
 
 		mcpHub = new McpHub(mockProvider as ClineProvider)
+		await mcpHub.waitUntilReady()
 	})
 
 	afterEach(() => {
@@ -426,7 +413,7 @@ describe("McpHub", () => {
 			)
 
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify watcher was created
 			expect(chokidar.watch).toHaveBeenCalledWith(["/path/to/watch"], expect.any(Object))
@@ -503,7 +490,7 @@ describe("McpHub", () => {
 			)
 
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify watchers were created
 			expect(chokidar.watch).toHaveBeenCalled()
@@ -537,7 +524,7 @@ describe("McpHub", () => {
 			vi.mocked(chokidar.watch).mockClear()
 
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify no watcher was created for disabled server
 			expect(chokidar.watch).not.toHaveBeenCalled()
@@ -561,7 +548,7 @@ describe("McpHub", () => {
 			)
 
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Find the connection
 			const connection = mcpHub.connections.find((conn) => conn.server.name === "mcp-disabled-server")
@@ -587,7 +574,7 @@ describe("McpHub", () => {
 			)
 
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Find the connection
 			const connection = mcpHub.connections.find((conn) => conn.server.name === "server-disabled-server")
@@ -614,7 +601,7 @@ describe("McpHub", () => {
 			)
 
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Find the connection
 			const connection = mcpHub.connections.find((conn) => conn.server.name === "both-reasons-server")
@@ -645,7 +632,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// The server should be created as a disconnected connection with null client/transport
 			const connection = mcpHub.connections.find((conn) => conn.server.name === "null-safety-server")
@@ -715,7 +702,7 @@ describe("McpHub", () => {
 			)
 
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Get the connection
 			const connection = mcpHub.connections.find((conn) => conn.server.name === "type-check-server")
@@ -733,7 +720,7 @@ describe("McpHub", () => {
 
 		it("should handle missing connections safely", async () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Try operations on non-existent server
 			await expect(mcpHub.callTool("non-existent-server", "test-tool", {})).rejects.toThrow(
@@ -791,7 +778,7 @@ describe("McpHub", () => {
 			)
 
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Delete the connection
 			await mcpHub.deleteConnection("delete-safety-server")
@@ -1414,7 +1401,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// The server should be created as a disconnected connection
 			const connection = mcpHub.connections.find((conn) => conn.server.name === "disabled-server")
@@ -1445,7 +1432,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// The server should be created as a disconnected connection
 			const connection = mcpHub.connections.find((conn) => conn.server.name === "disabled-server")
@@ -1831,7 +1818,7 @@ describe("McpHub", () => {
 
 			// Create McpHub and let it initialize with MCP enabled
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify server is connected
 			const connectedServer = mcpHub.connections.find((conn) => conn.server.name === "toggle-test-server")
@@ -1889,7 +1876,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(disabledMockProvider as unknown as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Find the disabled-test-server
 			const disabledServer = mcpHub.connections.find((conn) => conn.server.name === "disabled-test-server")
@@ -1961,7 +1948,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(enabledMockProvider as unknown as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Find the enabled-test-server
 			const enabledServer = mcpHub.connections.find((conn) => conn.server.name === "enabled-test-server")
@@ -2000,7 +1987,7 @@ describe("McpHub", () => {
 
 			// Create McpHub with disabled MCP
 			const mcpHub = new McpHub(disabledMockProvider as unknown as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Clear previous calls
 			vi.clearAllMocks()
@@ -2047,7 +2034,7 @@ describe("McpHub", () => {
 
 			// Create McpHub with disabled MCP
 			const mcpHub = new McpHub(disabledMockProvider as unknown as ClineProvider)
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Set isConnecting to false to ensure it's properly reset
 			mcpHub.isConnecting = false
@@ -2125,10 +2112,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Create a new McpHub instance
-			const mcpHub = new McpHub(mockProvider as ClineProvider)
-
-			// Mock the config file read
+			// Mock the config file read BEFORE creating McpHub
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2140,8 +2124,9 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Initialize servers (this will trigger connectToServer)
-			await mcpHub["initializeGlobalMcpServers"]()
+			// Create a new McpHub instance and wait for initialization
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called with wrapped command
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2189,10 +2174,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Create a new McpHub instance
-			const mcpHub = new McpHub(mockProvider as ClineProvider)
-
-			// Mock the config file read
+			// Mock the config file read BEFORE creating McpHub
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2204,8 +2186,9 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Initialize servers (this will trigger connectToServer)
-			await mcpHub["initializeGlobalMcpServers"]()
+			// Create a new McpHub instance and wait for initialization
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2253,10 +2236,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Create a new McpHub instance
-			const mcpHub = new McpHub(mockProvider as ClineProvider)
-
-			// Mock the config file read with cmd.exe already as command
+			// Mock the config file read BEFORE creating McpHub
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2268,8 +2248,9 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Initialize servers (this will trigger connectToServer)
-			await mcpHub["initializeGlobalMcpServers"]()
+			// Create a new McpHub instance and wait for initialization
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without double-wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2324,10 +2305,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Create a new McpHub instance
-			const mcpHub = new McpHub(mockProvider as ClineProvider)
-
-			// Mock the config file read - simulating fnm/nvm-windows scenario
+			// Mock the config file read BEFORE creating McpHub - simulating fnm/nvm-windows scenario
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2345,8 +2323,9 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Initialize servers (this will trigger connectToServer)
-			await mcpHub["initializeGlobalMcpServers"]()
+			// Create a new McpHub instance and wait for initialization
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await mcpHub.waitUntilReady()
 
 			// Verify that the command was wrapped with cmd.exe
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2399,10 +2378,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Create a new McpHub instance
-			const mcpHub = new McpHub(mockProvider as ClineProvider)
-
-			// Mock the config file read with CMD (uppercase) as command
+			// Mock the config file read BEFORE creating McpHub
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2414,8 +2390,9 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Initialize servers (this will trigger connectToServer)
-			await mcpHub["initializeGlobalMcpServers"]()
+			// Create a new McpHub instance and wait for initialization
+			const mcpHub = new McpHub(mockProvider as ClineProvider)
+			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without double-wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
