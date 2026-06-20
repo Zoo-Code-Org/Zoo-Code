@@ -34,6 +34,17 @@ jobs:
             - name: Install xvfb
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
               run: sudo apt-get install -y xvfb
+
+            - name: Cache VS Code test binary
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      apps/vscode-e2e/.vscode-test/
+                  key: vscode-test-${{ runner.os }}-v1
+                  restore-keys: |
+                      vscode-test-${{ runner.os }}-
+
             - name: Run mocked E2E tests
               id: run-e2e
               # merge_group and workflow_dispatch always run; cache skip is pull_request only
