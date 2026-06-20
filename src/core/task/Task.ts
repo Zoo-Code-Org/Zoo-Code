@@ -4161,6 +4161,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Create an AbortController to allow cancelling the request mid-stream
 		this.currentRequestAbortController = new AbortController()
 		const abortSignal = this.currentRequestAbortController.signal
+		metadata.abortSignal = abortSignal
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 

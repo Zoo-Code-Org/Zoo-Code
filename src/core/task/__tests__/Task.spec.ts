@@ -1795,6 +1795,145 @@ describe("Cline", () => {
 				// Verify cancelCurrentRequest was called
 				expect(cancelSpy).toHaveBeenCalled()
 			})
+			describe("abortSignal", () => {
+				it("should pass AbortController signal to createMessage metadata", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					// Mock required methods for attemptApiRequest to work without hanging
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+
+					const providerState = await mockProvider.getState()
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						apiConfiguration: mockApiConfig,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					})
+
+					// Mock the API stream response
+					const mockStream = {
+						async *[Symbol.asyncIterator]() {
+							yield { type: "text", text: "response" }
+						},
+						async next() {
+							return { done: true, value: { type: "text", text: "response" } }
+						},
+						async return() {
+							return { done: true, value: undefined }
+						},
+						async throw(e: any) {
+							throw e
+						},
+						[Symbol.asyncDispose]: async () => {},
+					} as AsyncGenerator<ApiStreamChunk>
+
+					const createMessageSpy = vi.spyOn(task.api, "createMessage").mockReturnValue(mockStream)
+
+					task.apiConversationHistory = [
+						{
+							role: "user" as const,
+							content: [{ type: "text" as const, text: "test message" }],
+							ts: Date.now(),
+						},
+					] as any
+
+					const iterator = task.attemptApiRequest(0)
+					await iterator.next()
+
+					// Verify createMessage was called with metadata containing abortSignal
+					expect(createMessageSpy).toHaveBeenCalled()
+					const [, , metadata] = createMessageSpy.mock.calls[0]!
+
+					expect(metadata).toBeDefined()
+					expect(metadata!.abortSignal).toBeInstanceOf(AbortSignal)
+				})
+
+				it("should use the same AbortController signal as currentRequestAbortController", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					// Mock required methods for attemptApiRequest to work without hanging
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+
+					const providerState = await mockProvider.getState()
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						apiConfiguration: mockApiConfig,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					})
+
+					// Mock the API stream response
+					const mockStream = {
+						async *[Symbol.asyncIterator]() {
+							yield { type: "text", text: "response" }
+						},
+						async next() {
+							return { done: true, value: { type: "text", text: "response" } }
+						},
+						async return() {
+							return { done: true, value: undefined }
+						},
+						async throw(e: any) {
+							throw e
+						},
+						[Symbol.asyncDispose]: async () => {},
+					} as AsyncGenerator<ApiStreamChunk>
+
+					const createMessageSpy = vi.spyOn(task.api, "createMessage").mockReturnValue(mockStream)
+
+					task.apiConversationHistory = [
+						{
+							role: "user" as const,
+							content: [{ type: "text" as const, text: "test message" }],
+							ts: Date.now(),
+						},
+					] as any
+
+					const iterator = task.attemptApiRequest(0)
+					await iterator.next()
+
+					// Get the signal from metadata
+					const [, , metadata] = createMessageSpy.mock.calls[0]!
+					const metadataSignal = metadata!.abortSignal
+
+					// The signal in metadata should be the same as the one from currentRequestAbortController
+					expect(metadataSignal).toBe(task.currentRequestAbortController!.signal)
+				})
+			})
 		})
 	})
 
