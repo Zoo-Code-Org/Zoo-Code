@@ -3,6 +3,7 @@
 	"extends": ["config:best-practices"],
 	"forkProcessing": "enabled",
 	"timezone": "America/Los_Angeles",
+	"postUpdateOptions": ["pnpmDedupe"],
 	"prConcurrentLimit": 5,
 	"prCreation": "not-pending",
 	"ignoreDeps": ["@vscode/vsce"],
