@@ -11,6 +11,9 @@ vi.mock("vscode", () => ({
 	},
 }))
 
+const makeHistoryItem = (id: string, extra: Record<string, unknown> = {}) =>
+	JSON.stringify({ id, number: 1, ts: 1000, task: "t", tokensIn: 0, tokensOut: 0, totalCost: 0, ...extra })
+
 describe("importRooTaskHistory", () => {
 	let tempRoot: string
 
@@ -113,7 +116,7 @@ describe("importRooTaskHistory", () => {
 		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-default"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooDefaultStorageRoot, "tasks", "task-default", "history_item.json"),
-			JSON.stringify({ id: "task-default" }),
+			makeHistoryItem("task-default"),
 		)
 		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "task-default", "ui_messages.json"), "default")
 		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "_index.json"), "{}")
@@ -121,7 +124,7 @@ describe("importRooTaskHistory", () => {
 		await fs.mkdir(path.join(rooCustomStorageRoot, "tasks", "task-custom"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooCustomStorageRoot, "tasks", "task-custom", "history_item.json"),
-			JSON.stringify({ id: "task-custom" }),
+			makeHistoryItem("task-custom"),
 		)
 		await fs.writeFile(
 			path.join(rooCustomStorageRoot, "tasks", "task-custom", "api_conversation_history.json"),
@@ -156,7 +159,7 @@ describe("importRooTaskHistory", () => {
 		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-repeat"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooDefaultStorageRoot, "tasks", "task-repeat", "history_item.json"),
-			JSON.stringify({ id: "task-repeat", source: "first-import" }),
+			makeHistoryItem("task-repeat", { source: "first-import" }),
 		)
 		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "task-repeat", "ui_messages.json"), "first-ui")
 
@@ -167,7 +170,7 @@ describe("importRooTaskHistory", () => {
 
 		await fs.writeFile(
 			path.join(rooDefaultStorageRoot, "tasks", "task-repeat", "history_item.json"),
-			JSON.stringify({ id: "task-repeat", source: "second-import" }),
+			makeHistoryItem("task-repeat", { source: "second-import" }),
 		)
 		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "task-repeat", "ui_messages.json"), "second-ui")
 
@@ -178,7 +181,7 @@ describe("importRooTaskHistory", () => {
 		expect(secondImportResult.importedFileCount).toBe(0)
 		expect(
 			await fs.readFile(path.join(zooGlobalStoragePath, "tasks", "task-repeat", "history_item.json"), "utf8"),
-		).toBe(JSON.stringify({ id: "task-repeat", source: "first-import" }))
+		).toBe(makeHistoryItem("task-repeat", { source: "first-import" }))
 		expect(
 			await fs.readFile(path.join(zooGlobalStoragePath, "tasks", "task-repeat", "ui_messages.json"), "utf8"),
 		).toBe("first-ui")
@@ -194,21 +197,21 @@ describe("importRooTaskHistory", () => {
 		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-shared"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooDefaultStorageRoot, "tasks", "task-shared", "history_item.json"),
-			JSON.stringify({ id: "task-shared", source: "default-root" }),
+			makeHistoryItem("task-shared", { source: "default-root" }),
 		)
 		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "task-shared", "ui_messages.json"), "default-ui")
 
 		await fs.mkdir(path.join(rooCustomStorageRoot, "tasks", "task-shared"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooCustomStorageRoot, "tasks", "task-shared", "history_item.json"),
-			JSON.stringify({ id: "task-shared", source: "custom-root" }),
+			makeHistoryItem("task-shared", { source: "custom-root" }),
 		)
 		await fs.writeFile(path.join(rooCustomStorageRoot, "tasks", "task-shared", "ui_messages.json"), "custom-ui")
 
 		await fs.mkdir(path.join(rooCustomStorageRoot, "tasks", "task-custom-only"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooCustomStorageRoot, "tasks", "task-custom-only", "history_item.json"),
-			JSON.stringify({ id: "task-custom-only", source: "custom-root" }),
+			makeHistoryItem("task-custom-only", { source: "custom-root" }),
 		)
 		await fs.writeFile(
 			path.join(rooCustomStorageRoot, "tasks", "task-custom-only", "ui_messages.json"),
@@ -221,7 +224,7 @@ describe("importRooTaskHistory", () => {
 		expect(result.importedFileCount).toBe(4)
 		expect(
 			await fs.readFile(path.join(zooGlobalStoragePath, "tasks", "task-shared", "history_item.json"), "utf8"),
-		).toBe(JSON.stringify({ id: "task-shared", source: "default-root" }))
+		).toBe(makeHistoryItem("task-shared", { source: "default-root" }))
 		expect(
 			await fs.readFile(path.join(zooGlobalStoragePath, "tasks", "task-shared", "ui_messages.json"), "utf8"),
 		).toBe("default-ui")
@@ -230,7 +233,7 @@ describe("importRooTaskHistory", () => {
 				path.join(zooGlobalStoragePath, "tasks", "task-custom-only", "history_item.json"),
 				"utf8",
 			),
-		).toBe(JSON.stringify({ id: "task-custom-only", source: "custom-root" }))
+		).toBe(makeHistoryItem("task-custom-only", { source: "custom-root" }))
 	})
 
 	it("reports Roo history import progress as files are copied", async () => {
@@ -243,7 +246,7 @@ describe("importRooTaskHistory", () => {
 		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-progress"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooDefaultStorageRoot, "tasks", "task-progress", "history_item.json"),
-			JSON.stringify({ id: "task-progress" }),
+			makeHistoryItem("task-progress"),
 		)
 		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "task-progress", "ui_messages.json"), "ui")
 		await fs.writeFile(
@@ -314,7 +317,7 @@ describe("importRooTaskHistory", () => {
 		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "_task-hidden"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooDefaultStorageRoot, "tasks", "task-visible", "history_item.json"),
-			JSON.stringify({ id: "task-visible" }),
+			makeHistoryItem("task-visible"),
 		)
 		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "task-visible", "ui_messages.json"), "visible-ui")
 		await fs.writeFile(
@@ -373,7 +376,19 @@ describe("importRooTaskHistory", () => {
 		mockStorageConfiguration({ roo: rooMissingCustomStorageRoot })
 
 		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-default"), { recursive: true })
-		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "task-default", "history_item.json"), "default")
+		const taskDefaultHistoryJson = JSON.stringify({
+			id: "task-default",
+			number: 1,
+			ts: 1000,
+			task: "t",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		})
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-default", "history_item.json"),
+			taskDefaultHistoryJson,
+		)
 
 		const result = await importRooTaskHistory(zooGlobalStoragePath)
 
@@ -382,7 +397,7 @@ describe("importRooTaskHistory", () => {
 		expect(result.importedFileCount).toBe(1)
 		expect(
 			await fs.readFile(path.join(zooGlobalStoragePath, "tasks", "task-default", "history_item.json"), "utf8"),
-		).toBe("default")
+		).toBe(taskDefaultHistoryJson)
 	})
 
 	it("skips tasks that do not have an importable history_item.json", async () => {
@@ -437,7 +452,7 @@ describe("importRooTaskHistory", () => {
 		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-existing"), { recursive: true })
 		await fs.writeFile(
 			path.join(rooDefaultStorageRoot, "tasks", "task-existing", "history_item.json"),
-			JSON.stringify({ id: "task-existing", source: "roo" }),
+			makeHistoryItem("task-existing", { source: "roo" }),
 		)
 		await fs.writeFile(path.join(rooDefaultStorageRoot, "tasks", "task-existing", "ui_messages.json"), "roo-ui")
 		await fs.mkdir(existingZooTaskDirectory, { recursive: true })
@@ -450,6 +465,87 @@ describe("importRooTaskHistory", () => {
 		expect(result.importedFileCount).toBe(0)
 		expect(await fs.readFile(path.join(existingZooTaskDirectory, "history_item.json"), "utf8")).toBe("existing")
 		expect(await fs.readFile(path.join(existingZooTaskDirectory, "ui_messages.json"), "utf8")).toBe("existing-ui")
+	})
+
+	it("rejects task IDs containing dots or underscore prefixes to prevent traversal", async () => {
+		const zooGlobalStoragePath = path.join(tempRoot, "globalStorage", "zoocodeorganization.zoo-code")
+		const rooDefaultStorageRoot = path.join(tempRoot, "globalStorage", "rooveterinaryinc.roo-cline")
+
+		mockStorageConfiguration()
+
+		// These directory names look like valid FS entries but should be rejected.
+		// (Slash/backslash can't exist in directory names on Linux/Mac/Windows.)
+		const unsafeCandidates = ["task.id", ".hidden-task", "_reserved-task"]
+		for (const name of unsafeCandidates) {
+			const dir = path.join(rooDefaultStorageRoot, "tasks", name)
+			await fs.mkdir(dir, { recursive: true })
+			await fs.writeFile(path.join(dir, "history_item.json"), "unsafe")
+		}
+
+		// A safe task alongside unsafe ones should still be imported.
+		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-safe"), { recursive: true })
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-safe", "history_item.json"),
+			makeHistoryItem("task-safe"),
+		)
+
+		const result = await importRooTaskHistory(zooGlobalStoragePath)
+
+		expect(result.importedTaskCount).toBe(1)
+		for (const name of unsafeCandidates) {
+			await expect(fs.access(path.join(zooGlobalStoragePath, "tasks", name))).rejects.toMatchObject({
+				code: "ENOENT",
+			})
+		}
+	})
+
+	it("rejects tasks whose history_item.json id field does not match the directory name or contains unsafe characters", async () => {
+		const zooGlobalStoragePath = path.join(tempRoot, "globalStorage", "zoocodeorganization.zoo-code")
+		const rooDefaultStorageRoot = path.join(tempRoot, "globalStorage", "rooveterinaryinc.roo-cline")
+
+		mockStorageConfiguration()
+
+		// id mismatches the directory name — could drive path traversal in TaskHistoryStore
+		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-mismatch"), { recursive: true })
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-mismatch", "history_item.json"),
+			makeHistoryItem("different-task-id"),
+		)
+
+		// id contains a path traversal sequence
+		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-traversal"), { recursive: true })
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-traversal", "history_item.json"),
+			makeHistoryItem("../../evil"),
+		)
+
+		// id fails schema validation (not a valid HistoryItem)
+		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-invalid-schema"), { recursive: true })
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-invalid-schema", "history_item.json"),
+			JSON.stringify({ id: "task-invalid-schema" }),
+		)
+
+		// A task with a correct, schema-valid id should still import.
+		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-valid"), { recursive: true })
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-valid", "history_item.json"),
+			makeHistoryItem("task-valid"),
+		)
+
+		const result = await importRooTaskHistory(zooGlobalStoragePath)
+
+		expect(result.importedTaskCount).toBe(1)
+		await expect(fs.access(path.join(zooGlobalStoragePath, "tasks", "task-mismatch"))).rejects.toMatchObject({
+			code: "ENOENT",
+		})
+		await expect(fs.access(path.join(zooGlobalStoragePath, "tasks", "task-traversal"))).rejects.toMatchObject({
+			code: "ENOENT",
+		})
+		await expect(fs.access(path.join(zooGlobalStoragePath, "tasks", "task-invalid-schema"))).rejects.toMatchObject({
+			code: "ENOENT",
+		})
+		await expect(fs.access(path.join(zooGlobalStoragePath, "tasks", "task-valid"))).resolves.toBeUndefined()
 	})
 
 	it("rethrows unexpected task-root errors while importing Roo history", async () => {

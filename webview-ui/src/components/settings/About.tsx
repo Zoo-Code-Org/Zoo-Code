@@ -73,16 +73,12 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 					copied: rooHistoryImportProgress.copiedFileCount,
 					total: rooHistoryImportProgress.totalFileCount,
 				})
-	const importTaskCount = Math.max(
-		rooHistoryImportProgress?.totalTaskCount ?? 0,
-		rooHistoryImportProgress?.importedTaskCount ?? 0,
-	)
 	const importProgressDetail = isImportFailed
 		? t("settings:about.rooHistoryImport.detailFailed")
 		: rooHistoryImportProgress && rooHistoryImportProgress.importedTaskCount > 0
 			? t("settings:about.rooHistoryImport.detailTasksImported", {
-					count: importTaskCount,
-					total: importTaskCount,
+					count: rooHistoryImportProgress.importedTaskCount,
+					total: rooHistoryImportProgress.totalTaskCount,
 				})
 			: t("settings:about.rooHistoryImport.detailPreparing")
 

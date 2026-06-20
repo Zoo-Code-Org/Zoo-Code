@@ -218,8 +218,12 @@ describe("webviewMessageHandler - importRooHistory", () => {
 
 		await webviewMessageHandler(mockProvider as any, { type: "importRooHistory" } as any)
 
-		expect(mockProvider.taskHistoryStore.invalidateAll).not.toHaveBeenCalled()
-		expect(mockProvider.postStateToWebview).not.toHaveBeenCalled()
+		// History is refreshed even when nothing new was imported, so a retry
+		// after a partial-copy failure still reconciles the store.
+		expect(mockProvider.taskHistoryStore.invalidateAll).toHaveBeenCalledTimes(1)
+		expect(mockProvider.taskHistoryStore.reconcile).toHaveBeenCalledTimes(1)
+		expect(mockProvider.taskHistoryStore.flushIndex).toHaveBeenCalledTimes(1)
+		expect(mockProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
 			"common:warnings.rooHistoryImport.alreadyImported",
 		)

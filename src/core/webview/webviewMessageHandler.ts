@@ -935,7 +935,7 @@ export const webviewMessageHandler = async (
 					},
 				)
 
-				if (result.importedTaskCount === 0) {
+				if (result.foundTaskCount === 0) {
 					await provider.postMessageToWebview({
 						type: "rooHistoryImportProgress",
 						rooHistoryImportProgress: {
@@ -943,14 +943,14 @@ export const webviewMessageHandler = async (
 							...latestProgress,
 						},
 					})
-					const warningMessage =
-						result.foundTaskCount === 0
-							? t("common:warnings.rooHistoryImport.nothingFound", { domain: result.rooExtensionDomain })
-							: t("common:warnings.rooHistoryImport.alreadyImported", { count: result.foundTaskCount })
-					vscode.window.showWarningMessage(warningMessage)
+					vscode.window.showWarningMessage(
+						t("common:warnings.rooHistoryImport.nothingFound", { domain: result.rooExtensionDomain }),
+					)
 					break
 				}
 
+				// Refresh history whenever Roo tasks were found — even if all already existed —
+				// so a retry after a partial-copy failure still reconciles the store.
 				provider.taskHistoryStore.invalidateAll()
 				await provider.taskHistoryStore.reconcile()
 				await provider.taskHistoryStore.flushIndex()
@@ -967,9 +967,15 @@ export const webviewMessageHandler = async (
 					},
 				})
 
-				vscode.window.showInformationMessage(
-					t("common:info.rooHistoryImport.success", { count: result.importedTaskCount }),
-				)
+				if (result.importedTaskCount === 0) {
+					vscode.window.showWarningMessage(
+						t("common:warnings.rooHistoryImport.alreadyImported", { count: result.foundTaskCount }),
+					)
+				} else {
+					vscode.window.showInformationMessage(
+						t("common:info.rooHistoryImport.success", { count: result.importedTaskCount }),
+					)
+				}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error)
 				provider.log(`[importRooHistory] failed: ${message}`)

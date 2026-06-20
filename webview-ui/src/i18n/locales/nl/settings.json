@@ -76,7 +76,7 @@
 			"summaryFailedNoFiles": "Het importeren is gestopt voordat er bestanden werden gekopieerd.",
 			"summaryCopied": "{{copied}} van {{total}} bestanden gekopieerd",
 			"detailFailed": "Start een nieuwe importpoging om het opnieuw te proberen.",
-			"detailTasksImported_one": "{{count}} van {{total}} taakgeschiedeni geïmporteerd.",
+			"detailTasksImported_one": "{{count}} van {{total}} taakgeschiedenis geïmporteerd.",
 			"detailTasksImported_other": "{{count}} van {{total}} taakgeschiedenissen geïmporteerd.",
 			"detailPreparing": "Importeren van Roo Code-geschiedenis voorbereiden."
 		}

@@ -3,6 +3,8 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import * as vscode from "vscode"
 
+import { historyItemSchema } from "@roo-code/types"
+
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { Package } from "../../shared/package"
 import { getStorageBasePath } from "../../utils/storage"
@@ -16,6 +18,12 @@ const IMPORTABLE_TASK_FILE_NAMES = [
 	GlobalFileNames.apiConversationHistory,
 	GlobalFileNames.taskMetadata,
 ]
+
+// Reject task IDs that could cause path traversal or filesystem confusion.
+// Valid Roo task IDs are Unix-millisecond timestamps (all digits), but we
+// conservatively allow any name that doesn't contain path separators or dots,
+// and doesn't start with a hidden/reserved prefix.
+const UNSAFE_TASK_ID_RE = /[/\\.]|^_/
 
 export interface RooHistoryImportPaths {
 	rooExtensionDomain: string
@@ -74,27 +82,49 @@ const getConfiguredCustomStoragePath = (configurationSection: string) => {
 	}
 }
 
-const isSkippableImportError = (error: unknown) => {
-	const nodeError = error as NodeJS.ErrnoException
-	return nodeError.code === "ENOENT" || nodeError.code === "EACCES" || nodeError.code === "EPERM"
+// Only treat missing files as skippable — permission errors should propagate.
+const isAbsent = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT"
+
+// Validate that history_item.json parses as a HistoryItem and that its `id`
+// field matches the task directory name. Prevents imported metadata from
+// driving unsafe path operations downstream (TaskHistoryStore uses item.id
+// directly in path.join calls).
+const validateHistoryItem = async (filePath: string, expectedTaskId: string): Promise<boolean> => {
+	try {
+		const raw = await fs.readFile(filePath, "utf8")
+		const parsed = historyItemSchema.safeParse(JSON.parse(raw))
+		if (!parsed.success) {
+			return false
+		}
+		return parsed.data.id === expectedTaskId && !UNSAFE_TASK_ID_RE.test(parsed.data.id)
+	} catch {
+		return false
+	}
+}
+
+const isRegularFile = async (filePath: string): Promise<boolean> => {
+	try {
+		const stat = await fs.lstat(filePath)
+		return stat.isFile()
+	} catch {
+		return false
+	}
 }
 
 const copyTaskFileIfPresent = async (
 	sourceTaskDirectory: string,
-	destinationTaskDirectory: string,
+	stagingTaskDirectory: string,
 	fileName: string,
-) => {
-	try {
-		await fs.mkdir(destinationTaskDirectory, { recursive: true })
-		await fs.copyFile(path.join(sourceTaskDirectory, fileName), path.join(destinationTaskDirectory, fileName))
-		return true
-	} catch (error) {
-		if (isSkippableImportError(error)) {
-			return false
-		}
+): Promise<boolean> => {
+	const sourcePath = path.join(sourceTaskDirectory, fileName)
 
-		throw error
+	if (!(await isRegularFile(sourcePath))) {
+		return false
 	}
+
+	await fs.mkdir(stagingTaskDirectory, { recursive: true })
+	await fs.copyFile(sourcePath, path.join(stagingTaskDirectory, fileName))
+	return true
 }
 
 const pathExists = async (candidatePath: string) => {
@@ -111,13 +141,14 @@ const getImportableTaskFileNames = async (sourceTaskDirectory: string) => {
 
 	for (const fileName of IMPORTABLE_TASK_FILE_NAMES) {
 		try {
-			await fs.access(path.join(sourceTaskDirectory, fileName))
-			fileNames.push(fileName)
+			const filePath = path.join(sourceTaskDirectory, fileName)
+			if (await isRegularFile(filePath)) {
+				fileNames.push(fileName)
+			}
 		} catch (error) {
-			if (isSkippableImportError(error)) {
+			if (isAbsent(error)) {
 				continue
 			}
-
 			throw error
 		}
 	}
@@ -144,7 +175,7 @@ const collectImportableTaskPlans = async (sourceRoots: string[]) => {
 		}
 
 		for (const entry of entries) {
-			if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name.startsWith("_")) {
+			if (!entry.isDirectory() || UNSAFE_TASK_ID_RE.test(entry.name)) {
 				continue
 			}
 
@@ -203,6 +234,10 @@ export const importRooTaskHistory = async (
 	const importedTaskIds = new Set<string>()
 	let importedFileCount = 0
 	let copiedFileCount = 0
+	let stagingFileCount = 0
+	// Tracks tasks whose history_item has been staged but not yet atomically
+	// promoted — used so progress reports show 1-based task count during copy.
+	let inFlightTaskCount = 0
 	const importableTaskPlans: ImportableTaskPlan[] = []
 
 	await fs.mkdir(destinationTasksRoot, { recursive: true })
@@ -227,7 +262,7 @@ export const importRooTaskHistory = async (
 		await onProgress({
 			copiedFileCount,
 			totalFileCount,
-			importedTaskCount: importedTaskIds.size,
+			importedTaskCount: importedTaskIds.size + inFlightTaskCount,
 			totalTaskCount,
 			currentTaskId,
 			currentFileName,
@@ -238,46 +273,80 @@ export const importRooTaskHistory = async (
 
 	for (const taskPlan of importableTaskPlans) {
 		const destinationTaskDirectory = path.join(destinationTasksRoot, taskPlan.taskId)
-		const destinationTaskDirectoryExisted = await pathExists(destinationTaskDirectory)
 
-		if (destinationTaskDirectoryExisted) {
+		// Re-check under the loop — a concurrent import may have claimed this task.
+		if (await pathExists(destinationTaskDirectory)) {
 			totalFileCount -= taskPlan.fileNames.length
 			continue
 		}
 
-		const historyItemCopied = await copyTaskFileIfPresent(
-			taskPlan.sourceTaskDirectory,
-			destinationTaskDirectory,
-			GlobalFileNames.historyItem,
-		)
+		// Stage into a temp directory, then atomically rename to avoid leaving
+		// partial task directories that a retry would skip as already-present.
+		const stagingDirectory = path.join(destinationTasksRoot, `_staging_${taskPlan.taskId}`)
+		await fs.rm(stagingDirectory, { recursive: true, force: true })
+		stagingFileCount = 0
 
-		if (!historyItemCopied) {
-			totalFileCount -= taskPlan.fileNames.length
-			if (!destinationTaskDirectoryExisted) {
-				await fs.rm(destinationTaskDirectory, { recursive: true, force: true })
-			}
-			await reportProgress(taskPlan.taskId, GlobalFileNames.historyItem)
-			continue
-		}
+		try {
+			const historyItemCopied = await copyTaskFileIfPresent(
+				taskPlan.sourceTaskDirectory,
+				stagingDirectory,
+				GlobalFileNames.historyItem,
+			)
 
-		importedTaskIds.add(taskPlan.taskId)
-		importedFileCount += 1
-		copiedFileCount += 1
-		await reportProgress(taskPlan.taskId, GlobalFileNames.historyItem)
-
-		for (const fileName of taskPlan.fileNames) {
-			if (fileName === GlobalFileNames.historyItem) {
+			if (!historyItemCopied) {
+				totalFileCount -= taskPlan.fileNames.length
+				await reportProgress(taskPlan.taskId, GlobalFileNames.historyItem)
 				continue
 			}
 
-			if (await copyTaskFileIfPresent(taskPlan.sourceTaskDirectory, destinationTaskDirectory, fileName)) {
-				importedFileCount += 1
-				copiedFileCount += 1
-			} else {
-				totalFileCount -= 1
+			// Validate the staged history_item.json: it must parse as a valid
+			// HistoryItem and its id must match the directory name exactly.
+			const stagedHistoryItemPath = path.join(stagingDirectory, GlobalFileNames.historyItem)
+			if (!(await validateHistoryItem(stagedHistoryItemPath, taskPlan.taskId))) {
+				totalFileCount -= taskPlan.fileNames.length
+				await reportProgress(taskPlan.taskId, GlobalFileNames.historyItem)
+				continue
 			}
 
-			await reportProgress(taskPlan.taskId, fileName)
+			stagingFileCount += 1
+			copiedFileCount += 1
+			inFlightTaskCount = 1
+			await reportProgress(taskPlan.taskId, GlobalFileNames.historyItem)
+
+			for (const fileName of taskPlan.fileNames) {
+				if (fileName === GlobalFileNames.historyItem) {
+					continue
+				}
+
+				if (await copyTaskFileIfPresent(taskPlan.sourceTaskDirectory, stagingDirectory, fileName)) {
+					stagingFileCount += 1
+					copiedFileCount += 1
+				} else {
+					totalFileCount -= 1
+				}
+
+				await reportProgress(taskPlan.taskId, fileName)
+			}
+
+			// Atomic promotion: rename staging → destination.
+			// If destination was concurrently created, treat it as a skip.
+			try {
+				await fs.rename(stagingDirectory, destinationTaskDirectory)
+				importedTaskIds.add(taskPlan.taskId)
+				importedFileCount += stagingFileCount
+			} catch (renameError) {
+				const nodeError = renameError as NodeJS.ErrnoException
+				if (nodeError.code !== "EEXIST" && nodeError.code !== "ENOTEMPTY") {
+					throw renameError
+				}
+				// Destination claimed concurrently — discard staging, uncount progress.
+				copiedFileCount -= stagingFileCount
+				totalFileCount -= taskPlan.fileNames.length
+			} finally {
+				inFlightTaskCount = 0
+			}
+		} finally {
+			await fs.rm(stagingDirectory, { recursive: true, force: true })
 		}
 	}
 
