@@ -83,7 +83,7 @@ describe("AskFollowupQuestionTool", () => {
 		expect(mockTask.sayAndCreateMissingParamError).toHaveBeenCalledWith("ask_followup_question", "follow_up")
 	})
 
-	it("should handle follow_up that is not an array", async () => {
+	it("should report a type error when follow_up is a string", async () => {
 		const params = { question: "What?", follow_up: "not-an-array" as any }
 
 		await tool.execute(params, mockTask, mockCallbacks)
@@ -91,7 +91,35 @@ describe("AskFollowupQuestionTool", () => {
 		expect(mockTask.consecutiveMistakeCount).toBe(1)
 		expect(mockTask.recordToolError).toHaveBeenCalledWith("ask_followup_question")
 		expect(mockTask.didToolFailInCurrentTurn).toBe(true)
-		expect(mockTask.sayAndCreateMissingParamError).toHaveBeenCalledWith("ask_followup_question", "follow_up")
+		// A present-but-non-array value is a type error.
+		expect(mockTask.sayAndCreateMissingParamError).not.toHaveBeenCalled()
+		const pushed = (mockCallbacks.pushToolResult as any).mock.calls[0][0]
+		expect(pushed).toContain("must be an array")
+		expect(pushed).not.toContain("Missing value")
+	})
+
+	it("should report a type error when follow_up is an object", async () => {
+		// Reproduces the issue: follow_up arrives as a keyed object instead of an array.
+		const params = {
+			question: "How should I proceed?",
+			follow_up: {
+				"0": { mode: null, text: "Keep the guard" },
+				"1": { mode: null, text: "Remove the guard" },
+			} as any,
+		}
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		expect(mockTask.consecutiveMistakeCount).toBe(1)
+		expect(mockTask.recordToolError).toHaveBeenCalledWith("ask_followup_question")
+		expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		expect(mockTask.sayAndCreateMissingParamError).not.toHaveBeenCalled()
+		expect(mockTask.say).toHaveBeenCalledWith("error", expect.stringContaining("must be an array"))
+		const pushed = (mockCallbacks.pushToolResult as any).mock.calls[0][0]
+		expect(pushed).toContain("must be an array")
+		expect(pushed).not.toContain("Missing value")
+		// The tool must not proceed to ask the user with an invalid payload.
+		expect(mockTask.ask).not.toHaveBeenCalled()
 	})
 
 	// ===== Happy path tests =====
@@ -510,6 +538,32 @@ describe("AskFollowupQuestionTool", () => {
 						{ text: "Yes", mode: "code" },
 						{ text: "No", mode: null },
 					],
+				})
+			}
+		})
+
+		it("should finalize and forward a non-array follow_up so the tool can report it", () => {
+			NativeToolCallParser.startStreamingToolCall("call_789", "ask_followup_question")
+
+			// follow_up arrives as a keyed object instead of an array (the bug repro).
+			const completeJson =
+				'{"question":"How should I proceed?","follow_up":{"0":{"mode":null,"text":"Keep"},"1":{"mode":null,"text":"Remove"}}}'
+			NativeToolCallParser.processStreamingChunk("call_789", completeJson)
+
+			const result = NativeToolCallParser.finalizeStreamingToolCall("call_789")
+
+			// The call must NOT be dropped (null) - it should reach the tool with the raw
+			// value so the tool can emit a precise "must be an array" error.
+			expect(result).not.toBeNull()
+			expect(result?.type).toBe("tool_use")
+			expect(result?.name).toBe("ask_followup_question")
+			if (result?.type === "tool_use") {
+				const nativeArgs = result.nativeArgs as { question: string; follow_up: unknown }
+				expect(nativeArgs.question).toBe("How should I proceed?")
+				expect(Array.isArray(nativeArgs.follow_up)).toBe(false)
+				expect(nativeArgs.follow_up).toEqual({
+					"0": { mode: null, text: "Keep" },
+					"1": { mode: null, text: "Remove" },
 				})
 			}
 		})

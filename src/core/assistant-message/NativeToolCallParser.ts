@@ -819,6 +819,12 @@ export class NativeToolCallParser {
 					break
 
 				case "ask_followup_question":
+					// Require a question and a present follow_up. When follow_up is
+					// present-but-not-an-array (e.g. an object/string/number produced by
+					// incremental JSON parsing), we still construct nativeArgs and forward
+					// the raw value so the tool can emit a precise "must be an array" error
+					// instead of the generic parser failure, which would surface as a
+					// misleading "Missing value for required parameter 'follow_up'" error.
 					if (args.question !== undefined && args.follow_up !== undefined) {
 						nativeArgs = {
 							question: args.question,
