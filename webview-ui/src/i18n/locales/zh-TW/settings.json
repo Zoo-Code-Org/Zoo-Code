@@ -78,7 +78,8 @@
 			"detailFailed": "開始新的匯入嘗試以重試。",
 			"detailTasksImported_one": "已匯入 {{total}} 個工作歷史記錄中的 {{count}} 個。",
 			"detailTasksImported_other": "已匯入 {{total}} 個工作歷史記錄中的 {{count}} 個。",
-			"detailPreparing": "正在準備匯入 Roo Code 歷史記錄。"
+			"detailPreparing": "正在準備匯入 Roo Code 歷史記錄。",
+			"progressAriaLabel": "Roo Code 歷史記錄匯入進度"
 		}
 	},
 	"slashCommands": {

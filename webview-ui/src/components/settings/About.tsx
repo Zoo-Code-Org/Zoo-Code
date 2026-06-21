@@ -261,7 +261,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 								<div
 									className="h-2 overflow-hidden rounded-full bg-[var(--vscode-editorWidget-border)]"
 									role="progressbar"
-									aria-label="Roo history import progress"
+									aria-label={t("settings:about.rooHistoryImport.progressAriaLabel")}
 									aria-valuemin={0}
 									aria-valuemax={100}
 									aria-valuenow={importProgressPercent}>

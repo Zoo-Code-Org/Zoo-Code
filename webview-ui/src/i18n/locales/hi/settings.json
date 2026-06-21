@@ -78,7 +78,8 @@
 			"detailFailed": "दोबारा प्रयास करने के लिए नया आयात शुरू करें।",
 			"detailTasksImported_one": "{{total}} में से {{count}} कार्य इतिहास आयात किया।",
 			"detailTasksImported_other": "{{total}} में से {{count}} कार्य इतिहास आयात किए।",
-			"detailPreparing": "Roo Code इतिहास आयात की तैयारी हो रही है।"
+			"detailPreparing": "Roo Code इतिहास आयात की तैयारी हो रही है।",
+			"progressAriaLabel": "Roo Code इतिहास आयात की प्रगति"
 		}
 	},
 	"slashCommands": {

@@ -78,7 +78,8 @@
 			"detailFailed": "Mulai percobaan impor baru untuk mencoba lagi.",
 			"detailTasksImported_one": "{{count}} dari {{total}} riwayat tugas diimpor.",
 			"detailTasksImported_other": "{{count}} dari {{total}} riwayat tugas diimpor.",
-			"detailPreparing": "Mempersiapkan impor riwayat Roo Code."
+			"detailPreparing": "Mempersiapkan impor riwayat Roo Code.",
+			"progressAriaLabel": "Progres impor riwayat Roo Code"
 		}
 	},
 	"slashCommands": {

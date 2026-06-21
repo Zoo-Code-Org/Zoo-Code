@@ -78,7 +78,8 @@
 			"detailFailed": "Starte einen neuen Importversuch, um es erneut zu versuchen.",
 			"detailTasksImported_one": "{{count}} von {{total}} Aufgabenverlauf importiert.",
 			"detailTasksImported_other": "{{count}} von {{total}} Aufgabenverläufe importiert.",
-			"detailPreparing": "Roo Code-Verlaufsimport wird vorbereitet."
+			"detailPreparing": "Roo Code-Verlaufsimport wird vorbereitet.",
+			"progressAriaLabel": "Fortschritt des Roo Code-Verlaufsimports"
 		}
 	},
 	"slashCommands": {

@@ -78,7 +78,8 @@
 			"detailFailed": "Inicia un nou intent d'importació per tornar-ho a provar.",
 			"detailTasksImported_one": "S'ha importat {{count}} de {{total}} historial de tasques.",
 			"detailTasksImported_other": "S'han importat {{count}} de {{total}} historials de tasques.",
-			"detailPreparing": "Preparant la importació de l'historial de Roo Code."
+			"detailPreparing": "Preparant la importació de l'historial de Roo Code.",
+			"progressAriaLabel": "Progrés de la importació de l'historial de Roo Code"
 		}
 	},
 	"slashCommands": {

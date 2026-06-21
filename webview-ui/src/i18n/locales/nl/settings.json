@@ -78,7 +78,8 @@
 			"detailFailed": "Start een nieuwe importpoging om het opnieuw te proberen.",
 			"detailTasksImported_one": "{{count}} van {{total}} taakgeschiedenis geïmporteerd.",
 			"detailTasksImported_other": "{{count}} van {{total}} taakgeschiedenissen geïmporteerd.",
-			"detailPreparing": "Importeren van Roo Code-geschiedenis voorbereiden."
+			"detailPreparing": "Importeren van Roo Code-geschiedenis voorbereiden.",
+			"progressAriaLabel": "Voortgang van import van Roo Code-geschiedenis"
 		}
 	},
 	"slashCommands": {

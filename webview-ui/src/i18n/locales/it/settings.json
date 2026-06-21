@@ -78,7 +78,8 @@
 			"detailFailed": "Avvia un nuovo tentativo di importazione per riprovare.",
 			"detailTasksImported_one": "Importato {{count}} di {{total}} cronologia attività.",
 			"detailTasksImported_other": "Importati {{count}} di {{total}} cronologie attività.",
-			"detailPreparing": "Preparazione dell'importazione della cronologia Roo Code."
+			"detailPreparing": "Preparazione dell'importazione della cronologia Roo Code.",
+			"progressAriaLabel": "Avanzamento importazione cronologia Roo Code"
 		}
 	},
 	"slashCommands": {

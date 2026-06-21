@@ -78,7 +78,8 @@
 			"detailFailed": "다시 시도하려면 새 가져오기를 시작하세요.",
 			"detailTasksImported_one": "{{total}}개 중 {{count}}개의 작업 기록을 가져왔습니다.",
 			"detailTasksImported_other": "{{total}}개 중 {{count}}개의 작업 기록을 가져왔습니다.",
-			"detailPreparing": "Roo Code 기록 가져오기를 준비 중입니다."
+			"detailPreparing": "Roo Code 기록 가져오기를 준비 중입니다.",
+			"progressAriaLabel": "Roo Code 기록 가져오기 진행률"
 		}
 	},
 	"slashCommands": {

@@ -78,7 +78,8 @@
 			"detailFailed": "Yeniden denemek için yeni bir içe aktarma başlat.",
 			"detailTasksImported_one": "{{total}} görev geçmişinden {{count}} tanesi içe aktarıldı.",
 			"detailTasksImported_other": "{{total}} görev geçmişinden {{count}} tanesi içe aktarıldı.",
-			"detailPreparing": "Roo Code geçmişi içe aktarma hazırlanıyor."
+			"detailPreparing": "Roo Code geçmişi içe aktarma hazırlanıyor.",
+			"progressAriaLabel": "Roo Code geçmişi içe aktarma ilerlemesi"
 		}
 	},
 	"slashCommands": {

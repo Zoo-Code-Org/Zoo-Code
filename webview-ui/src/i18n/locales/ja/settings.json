@@ -78,7 +78,8 @@
 			"detailFailed": "新しいインポートを開始して再試行してください。",
 			"detailTasksImported_one": "{{total}} 件中 {{count}} 件のタスク履歴をインポートしました。",
 			"detailTasksImported_other": "{{total}} 件中 {{count}} 件のタスク履歴をインポートしました。",
-			"detailPreparing": "Roo Code の履歴インポートを準備中です。"
+			"detailPreparing": "Roo Code の履歴インポートを準備中です。",
+			"progressAriaLabel": "Roo Code の履歴インポートの進行状況"
 		}
 	},
 	"slashCommands": {

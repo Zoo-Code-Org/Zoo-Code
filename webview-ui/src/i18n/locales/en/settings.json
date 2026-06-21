@@ -78,7 +78,8 @@
 			"detailFailed": "Start a new import attempt to try again.",
 			"detailTasksImported_one": "Imported {{count}} of {{total}} task history.",
 			"detailTasksImported_other": "Imported {{count}} of {{total}} task histories.",
-			"detailPreparing": "Preparing Roo Code history import."
+			"detailPreparing": "Preparing Roo Code history import.",
+			"progressAriaLabel": "Roo history import progress"
 		}
 	},
 	"slashCommands": {

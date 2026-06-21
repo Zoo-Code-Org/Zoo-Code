@@ -187,6 +187,9 @@ describe("About", () => {
 
 		expect(screen.getByText("settings:about.rooHistoryImport.statusImporting")).toBeInTheDocument()
 		expect(screen.getByText("25%")).toBeInTheDocument()
+		expect(
+			screen.getByRole("progressbar", { name: "settings:about.rooHistoryImport.progressAriaLabel" }),
+		).toHaveAttribute("aria-valuenow", "25")
 		expect(screen.getByText("settings:about.rooHistoryImport.summaryCopied")).toBeInTheDocument()
 		expect(screen.getByText("settings:about.rooHistoryImport.detailTasksImported")).toBeInTheDocument()
 	})

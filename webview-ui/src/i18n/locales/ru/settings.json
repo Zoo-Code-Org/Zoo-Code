@@ -78,7 +78,8 @@
 			"detailFailed": "Начни новую попытку импорта, чтобы повторить.",
 			"detailTasksImported_one": "Импортирована {{count}} из {{total}} история задач.",
 			"detailTasksImported_other": "Импортировано {{count}} из {{total}} историй задач.",
-			"detailPreparing": "Подготовка импорта истории Roo Code."
+			"detailPreparing": "Подготовка импорта истории Roo Code.",
+			"progressAriaLabel": "Ход импорта истории Roo Code"
 		}
 	},
 	"slashCommands": {

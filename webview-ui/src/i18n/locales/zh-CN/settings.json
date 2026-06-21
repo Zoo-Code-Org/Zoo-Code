@@ -78,7 +78,8 @@
 			"detailFailed": "开始新的导入尝试以重试。",
 			"detailTasksImported_one": "已导入 {{total}} 个任务历史记录中的 {{count}} 个。",
 			"detailTasksImported_other": "已导入 {{total}} 个任务历史记录中的 {{count}} 个。",
-			"detailPreparing": "正在准备导入 Roo Code 历史记录。"
+			"detailPreparing": "正在准备导入 Roo Code 历史记录。",
+			"progressAriaLabel": "Roo Code 历史记录导入进度"
 		}
 	},
 	"slashCommands": {

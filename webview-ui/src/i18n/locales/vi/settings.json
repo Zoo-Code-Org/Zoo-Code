@@ -78,7 +78,8 @@
 			"detailFailed": "Bắt đầu một lần thử nhập mới để thử lại.",
 			"detailTasksImported_one": "Đã nhập {{count}} trong {{total}} lịch sử nhiệm vụ.",
 			"detailTasksImported_other": "Đã nhập {{count}} trong {{total}} lịch sử nhiệm vụ.",
-			"detailPreparing": "Đang chuẩn bị nhập lịch sử Roo Code."
+			"detailPreparing": "Đang chuẩn bị nhập lịch sử Roo Code.",
+			"progressAriaLabel": "Tiến trình nhập lịch sử Roo Code"
 		}
 	},
 	"slashCommands": {
