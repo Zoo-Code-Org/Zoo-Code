@@ -35,6 +35,7 @@ function installZAiFetchInterceptor(
 	passthrough?: boolean,
 ): () => void {
 	const original = globalThis.fetch
+	const capturedRequests: Array<{ maxTokens?: number }> = []
 
 	globalThis.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url
@@ -46,6 +47,8 @@ function installZAiFetchInterceptor(
 						max_tokens?: number
 					})
 				: {}
+
+			capturedRequests.push({ maxTokens: body.max_tokens })
 
 			if (capture) {
 				capture.maxTokens = body.max_tokens
@@ -73,6 +76,9 @@ function installZAiFetchInterceptor(
 
 	return () => {
 		globalThis.fetch = original
+		if (capture && capturedRequests.length > 0) {
+			capture.maxTokens = capturedRequests[capturedRequests.length - 1].maxTokens
+		}
 	}
 }
 
@@ -219,6 +225,8 @@ suite("Z.ai GLM provider", function () {
 		})
 
 		await waitUntilCompleted({ api, taskId })
+		// Allow any pending async requests to finish before snapshotting max_tokens
+		await new Promise((resolve) => setTimeout(resolve, 100))
 		const capturedMaxTokens = requestCapture.maxTokens
 
 		const completionMessage = messages.find(
@@ -229,8 +237,6 @@ suite("Z.ai GLM provider", function () {
 
 		// Verify max_tokens uses the restored default clamp (20% of context window)
 		// unless the user explicitly overrides it via modelMaxTokens.
-		// Snapshot immediately after waitUntilCompleted to avoid straggling async calls
-		// from this task overwriting requestCapture before the assertion runs.
 		assert.strictEqual(
 			capturedMaxTokens,
 			40_000,
@@ -263,6 +269,8 @@ suite("Z.ai GLM provider", function () {
 		})
 
 		await waitUntilCompleted({ api, taskId })
+		// Allow any pending async requests to finish before snapshotting max_tokens
+		await new Promise((resolve) => setTimeout(resolve, 100))
 		const capturedMaxTokens = requestCapture.maxTokens
 
 		const completionMessage = messages.find(
@@ -273,8 +281,6 @@ suite("Z.ai GLM provider", function () {
 
 		// Verify max_tokens uses the restored default clamp (20% of context window)
 		// unless the user explicitly overrides it via modelMaxTokens.
-		// Snapshot immediately after waitUntilCompleted to avoid straggling async calls
-		// from the prior test overwriting requestCapture before this assertion runs.
 		assert.strictEqual(
 			capturedMaxTokens,
 			40_000,
