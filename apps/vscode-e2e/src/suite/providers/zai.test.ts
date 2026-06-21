@@ -277,8 +277,8 @@ suite("Z.ai GLM provider", function () {
 		// from the prior test overwriting requestCapture before this assertion runs.
 		assert.strictEqual(
 			capturedMaxTokens,
-			40_551,
-			`max_tokens should default to the glm-5-turbo clamp (40_551) but was ${capturedMaxTokens}`,
+			40_000,
+			`max_tokens should default to the glm-5-turbo clamp (40_000) but was ${capturedMaxTokens}`,
 		)
 	})
 })
