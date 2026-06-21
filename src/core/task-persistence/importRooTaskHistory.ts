@@ -136,6 +136,14 @@ const pathExists = async (candidatePath: string) => {
 	}
 }
 
+export const isConcurrentDestinationClaimError = (error: unknown, destinationWasClaimed: boolean) => {
+	const nodeError = error as NodeJS.ErrnoException
+	return (
+		destinationWasClaimed &&
+		(nodeError.code === "EEXIST" || nodeError.code === "ENOTEMPTY" || nodeError.code === "EPERM")
+	)
+}
+
 const getImportableTaskFileNames = async (sourceTaskDirectory: string) => {
 	const fileNames: string[] = []
 
@@ -280,10 +288,10 @@ export const importRooTaskHistory = async (
 			continue
 		}
 
-		// Stage into a temp directory, then atomically rename to avoid leaving
-		// partial task directories that a retry would skip as already-present.
-		const stagingDirectory = path.join(destinationTasksRoot, `_staging_${taskPlan.taskId}`)
-		await fs.rm(stagingDirectory, { recursive: true, force: true })
+		// Stage into a unique temp directory, then atomically rename to avoid
+		// leaving partial task directories that a retry would skip as already-present.
+		// Using mkdtemp ensures concurrent imports for the same task ID don't collide.
+		const stagingDirectory = await fs.mkdtemp(path.join(destinationTasksRoot, `_staging_${taskPlan.taskId}_`))
 		stagingFileCount = 0
 
 		try {
@@ -335,8 +343,8 @@ export const importRooTaskHistory = async (
 				importedTaskIds.add(taskPlan.taskId)
 				importedFileCount += stagingFileCount
 			} catch (renameError) {
-				const nodeError = renameError as NodeJS.ErrnoException
-				if (nodeError.code !== "EEXIST" && nodeError.code !== "ENOTEMPTY") {
+				const destinationWasClaimed = await pathExists(destinationTaskDirectory)
+				if (!isConcurrentDestinationClaimError(renameError, destinationWasClaimed)) {
 					throw renameError
 				}
 				// Destination claimed concurrently — discard staging, uncount progress.

@@ -3,7 +3,11 @@ import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
 
-import { importRooTaskHistory, resolveRooHistoryImportPaths } from "../importRooTaskHistory"
+import {
+	importRooTaskHistory,
+	isConcurrentDestinationClaimError,
+	resolveRooHistoryImportPaths,
+} from "../importRooTaskHistory"
 
 vi.mock("vscode", () => ({
 	workspace: {
@@ -560,5 +564,57 @@ describe("importRooTaskHistory", () => {
 		await expect(importRooTaskHistory(zooGlobalStoragePath)).rejects.toMatchObject({
 			code: "ENOTDIR",
 		})
+	})
+
+	it("treats Windows EPERM rename as a concurrent destination claim only when the destination exists", () => {
+		const error = new Error("operation not permitted") as NodeJS.ErrnoException
+		error.code = "EPERM"
+
+		expect(isConcurrentDestinationClaimError(error, true)).toBe(true)
+		expect(isConcurrentDestinationClaimError(error, false)).toBe(false)
+	})
+
+	it("imports the complete file set when two calls run concurrently against the same Roo task", async () => {
+		const zooGlobalStoragePath = path.join(tempRoot, "globalStorage", "zoocodeorganization.zoo-code")
+		const rooDefaultStorageRoot = path.join(tempRoot, "globalStorage", "rooveterinaryinc.roo-cline")
+
+		mockStorageConfiguration()
+
+		await fs.mkdir(path.join(rooDefaultStorageRoot, "tasks", "task-concurrent"), { recursive: true })
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-concurrent", "history_item.json"),
+			makeHistoryItem("task-concurrent"),
+		)
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-concurrent", "ui_messages.json"),
+			"concurrent-ui",
+		)
+		await fs.writeFile(
+			path.join(rooDefaultStorageRoot, "tasks", "task-concurrent", "api_conversation_history.json"),
+			"concurrent-api",
+		)
+
+		const [result1, result2] = await Promise.all([
+			importRooTaskHistory(zooGlobalStoragePath),
+			importRooTaskHistory(zooGlobalStoragePath),
+		])
+
+		// Exactly one call should win the atomic rename; the other should skip gracefully.
+		expect(result1.importedTaskCount + result2.importedTaskCount).toBe(1)
+
+		const destTaskDir = path.join(zooGlobalStoragePath, "tasks", "task-concurrent")
+
+		// The winning import must have written all three files completely.
+		expect(await fs.readFile(path.join(destTaskDir, "history_item.json"), "utf8")).toBe(
+			makeHistoryItem("task-concurrent"),
+		)
+		expect(await fs.readFile(path.join(destTaskDir, "ui_messages.json"), "utf8")).toBe("concurrent-ui")
+		expect(await fs.readFile(path.join(destTaskDir, "api_conversation_history.json"), "utf8")).toBe(
+			"concurrent-api",
+		)
+
+		// No staging directories should be left behind.
+		const tasksEntries = await fs.readdir(path.join(zooGlobalStoragePath, "tasks"))
+		expect(tasksEntries.filter((e) => e.startsWith("_staging_"))).toHaveLength(0)
 	})
 })
