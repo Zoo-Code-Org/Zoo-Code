@@ -2690,7 +2690,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								} else {
 									signal.addEventListener("abort", () => {
 										reject(new Error("Request cancelled by user"))
-									})
+									}, { once: true })
 								}
 							})
 							return await Promise.race([nextPromise, abortPromise])
@@ -4194,7 +4194,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		abortSignal.addEventListener("abort", () => {
 			console.log(`[Task#${this.taskId}.${this.instanceId}] AbortSignal triggered for current request`)
 			this.currentRequestAbortController = undefined
-		})
+		}, { once: true })
 
 		try {
 			// Awaiting first chunk to see if it will throw an error.
@@ -4208,7 +4208,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				} else {
 					abortSignal.addEventListener("abort", () => {
 						reject(new Error("Request cancelled by user"))
-					})
+					}, { once: true })
 				}
 			})
 
