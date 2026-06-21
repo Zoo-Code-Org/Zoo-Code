@@ -76,8 +76,9 @@ function installZAiFetchInterceptor(
 
 	return () => {
 		globalThis.fetch = original
-		if (capture && capturedRequests.length > 0) {
-			capture.maxTokens = capturedRequests[capturedRequests.length - 1].maxTokens
+		const lastCaptured = capturedRequests[capturedRequests.length - 1]
+		if (capture && lastCaptured) {
+			capture.maxTokens = lastCaptured.maxTokens
 		}
 	}
 }
@@ -281,10 +282,11 @@ suite("Z.ai GLM provider", function () {
 
 		// Verify max_tokens uses the restored default clamp (20% of context window)
 		// unless the user explicitly overrides it via modelMaxTokens.
+		const expectedMaxTokens = 40_551 // Math.ceil(202_752 * 0.2) for glm-5-turbo
 		assert.strictEqual(
 			capturedMaxTokens,
-			40_000,
-			`max_tokens should default to the glm-5-turbo clamp (40_000) but was ${capturedMaxTokens}`,
+			expectedMaxTokens,
+			`max_tokens should default to the glm-5-turbo clamp (40_551) but was ${capturedMaxTokens}`,
 		)
 	})
 })
