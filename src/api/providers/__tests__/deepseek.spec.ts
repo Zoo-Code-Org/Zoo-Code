@@ -710,4 +710,152 @@ describe("DeepSeekHandler", () => {
 			expect(toolCallChunks[0].name).toBe("get_weather")
 		})
 	})
+	describe("abort signal", () => {
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+			const testHandler = new DeepSeekHandler(mockOptions)
+
+			mockCreate.mockImplementation(async () => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						while (!controller.signal.aborted) {
+							await new Promise((resolve) => setTimeout(resolve, 10))
+							if (controller.signal.aborted) {
+								throw new Error("AbortError: The operation was aborted")
+							}
+							yield {
+								choices: [{ delta: { content: "response" }, index: 0 }],
+								usage: null,
+							}
+						}
+					},
+				}
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			setTimeout(() => controller.abort(), 50)
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			const testHandler = new DeepSeekHandler(mockOptions)
+
+			mockCreate.mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: { content: "Hello" }, index: 0 }] }
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+					}
+				},
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const testHandler = new DeepSeekHandler(mockOptions)
+
+			mockCreate.mockImplementation(async () => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						if (controller.signal.aborted) {
+							throw new Error("AbortError: The operation was aborted")
+						}
+						yield { choices: [{ delta: { content: "response" }, index: 0 }] }
+					},
+				}
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should pass abort signal to OpenAI client create call", async () => {
+			const controller = new AbortController()
+			const testHandler = new DeepSeekHandler(mockOptions)
+
+			let receivedConfig: any
+			mockCreate.mockImplementation(async (options: unknown, config?: unknown) => {
+				receivedConfig = config
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield { choices: [{ delta: { content: "response" }, index: 0 }] }
+						yield {
+							choices: [{ delta: {}, index: 0 }],
+							usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+						}
+					},
+				}
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await stream.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({
+					signal: controller.signal,
+				}),
+			)
+		})
+
+		it("should not pass signal when no abortSignal is provided", async () => {
+			const testHandler = new DeepSeekHandler(mockOptions)
+
+			let receivedConfig: any
+			mockCreate.mockImplementation(async (options: unknown, config?: unknown) => {
+				receivedConfig = config
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield { choices: [{ delta: { content: "response" }, index: 0 }] }
+						yield {
+							choices: [{ delta: {}, index: 0 }],
+							usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+						}
+					},
+				}
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			await stream.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), {})
+		})
+	})
 })

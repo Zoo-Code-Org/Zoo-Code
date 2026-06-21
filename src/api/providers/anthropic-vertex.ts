@@ -112,10 +112,11 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			...nativeToolParams,
 		} as Anthropic.Messages.MessageCreateParamsStreaming
 
-		// and prompt caching
-		const requestOptions = betas?.length ? { headers: { "anthropic-beta": betas.join(",") } } : undefined
-
-		const stream = await this.client.messages.create(params, requestOptions)
+		const stream = await this.client.messages.create(params, {
+			// and prompt caching
+			...(betas?.length ? { headers: { "anthropic-beta": betas.join(",") } } : {}),
+			...(metadata?.abortSignal ? { signal: metadata.abortSignal } : {}),
+		})
 
 		for await (const chunk of stream) {
 			switch (chunk.type) {

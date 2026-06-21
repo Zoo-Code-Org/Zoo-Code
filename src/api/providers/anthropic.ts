@@ -150,6 +150,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						stream: true,
 						...nativeToolParams,
 					}
+					const abortSignal = metadata?.abortSignal
 					stream = await this.client.messages.create(
 						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
 						(() => {
@@ -176,9 +177,12 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 								case "claude-haiku-4-5-20251001":
 								case "claude-3-haiku-20240307":
 									betas.push("prompt-caching-2024-07-31")
-									return { headers: { "anthropic-beta": betas.join(",") } }
+									return {
+										headers: { "anthropic-beta": betas.join(",") },
+										...(metadata?.abortSignal ? { signal: metadata.abortSignal } : {}),
+									}
 								default:
-									return undefined
+									return abortSignal ? { signal: abortSignal } : undefined
 							}
 						})(),
 					)
@@ -209,6 +213,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					}
 					stream = (await this.client.messages.create(
 						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
+						metadata?.abortSignal ? { signal: metadata?.abortSignal } : undefined,
 					)) as any
 				} catch (error) {
 					TelemetryService.instance.captureException(

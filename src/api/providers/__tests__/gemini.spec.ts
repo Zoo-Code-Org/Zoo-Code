@@ -366,4 +366,106 @@ describe("GeminiHandler", () => {
 			expect(mockCaptureException).toHaveBeenCalled()
 		})
 	})
+
+	describe("abort signal", () => {
+		it("should pass abortSignal to the SDK options", async () => {
+			const controller = new AbortController()
+			let capturedConfig: any
+
+			handler["client"].models.generateContentStream = vitest.fn().mockImplementation(async (params) => {
+				capturedConfig = params?.config
+				return {
+					[Symbol.asyncIterator]: async function* () {
+						yield { text: "Hello world!" }
+						yield { usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } }
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+			expect(capturedConfig).toHaveProperty("signal", controller.signal)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			handler["client"].models.generateContentStream = vitest.fn().mockResolvedValue({
+				[Symbol.asyncIterator]: async function* () {
+					yield { text: "Hello world!" }
+					yield { usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } }
+				},
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should not pass signal when abortSignal is undefined", async () => {
+			let capturedConfig: any
+
+			handler["client"].models.generateContentStream = vitest.fn().mockImplementation(async (params) => {
+				capturedConfig = params?.config
+				return {
+					[Symbol.asyncIterator]: async function* () {
+						yield { text: "Hello world!" }
+						yield { usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } }
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+			expect(capturedConfig).not.toHaveProperty("signal")
+		})
+
+		it("should pass signal when provided", async () => {
+			const controller = new AbortController()
+			let capturedConfig: any
+
+			handler["client"].models.generateContentStream = vitest.fn().mockImplementation(async (params) => {
+				capturedConfig = params?.config
+				return {
+					[Symbol.asyncIterator]: async function* () {
+						yield { text: "Hello world!" }
+						yield { usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } }
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+			expect(capturedConfig).toHaveProperty("signal", controller.signal)
+		})
+	})
 })

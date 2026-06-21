@@ -98,9 +98,17 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 
 			let results
 			try {
-				results = await this.client.chat.completions.create(params)
+				results = await this.client.chat.completions.create(
+					params,
+					metadata?.abortSignal ? { signal: metadata?.abortSignal } : undefined,
+				)
 			} catch (error) {
 				throw handleOpenAIError(error, this.providerName)
+			}
+
+			// Check if signal was already aborted before entering the loop
+			if (metadata?.abortSignal?.aborted) {
+				throw new DOMException("The operation was aborted.", "AbortError")
 			}
 
 			const matcher = new TagMatcher(
@@ -113,6 +121,11 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			)
 
 			for await (const chunk of results) {
+				// Check abort signal during stream iteration
+				if (metadata?.abortSignal?.aborted) {
+					throw new DOMException("The operation was aborted.", "AbortError")
+				}
+
 				const delta = chunk.choices[0]?.delta
 				const finishReason = chunk.choices[0]?.finish_reason
 
@@ -163,6 +176,11 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				outputTokens,
 			} as const
 		} catch (error) {
+			// Preserve AbortError instead of wrapping it
+			if (error instanceof DOMException && error.name === "AbortError") {
+				throw error
+			}
+
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Roo Code's prompts.",
 			)

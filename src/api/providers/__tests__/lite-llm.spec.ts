@@ -1180,4 +1180,164 @@ describe("LiteLLMHandler", () => {
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
 		})
 	})
+
+	describe("abort signal", () => {
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+			const testHandler = new LiteLLMHandler(mockOptions)
+
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					while (!controller.signal.aborted) {
+						await new Promise((resolve) => setTimeout(resolve, 10))
+						if (controller.signal.aborted) {
+							throw new Error("AbortError: The operation was aborted")
+						}
+						yield {
+							choices: [{ delta: { content: "response" } }],
+							usage: null,
+						}
+					}
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			setTimeout(() => controller.abort(), 50)
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			const testHandler = new LiteLLMHandler(mockOptions)
+
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: { content: "Hello" } }] }
+					yield { choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 5 } }
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const testHandler = new LiteLLMHandler(mockOptions)
+
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					if (controller.signal.aborted) {
+						throw new Error("AbortError: The operation was aborted")
+					}
+					yield { choices: [{ delta: { content: "response" } }] }
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should pass abort signal to OpenAI client create call", async () => {
+			const controller = new AbortController()
+			const testHandler = new LiteLLMHandler(mockOptions)
+
+			let receivedConfig: any
+			mockCreate.mockImplementation((options: unknown, config?: unknown) => {
+				receivedConfig = config
+				const mockStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { choices: [{ delta: { content: "response" } }] }
+						yield {
+							choices: [{ delta: {} }],
+							usage: { prompt_tokens: 1, completion_tokens: 1 },
+						}
+					},
+				}
+				return {
+					withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				}
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await stream.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({
+					signal: controller.signal,
+				}),
+			)
+		})
+
+		it("should not pass signal when no abortSignal is provided", async () => {
+			const testHandler = new LiteLLMHandler(mockOptions)
+
+			let receivedConfig: any
+			mockCreate.mockImplementation((options: unknown, config?: unknown) => {
+				receivedConfig = config
+				const mockStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { choices: [{ delta: { content: "response" } }] }
+						yield {
+							choices: [{ delta: {} }],
+							usage: { prompt_tokens: 1, completion_tokens: 1 },
+						}
+					},
+				}
+				return {
+					withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				}
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			await stream.next()
+
+			expect(receivedConfig).not.toHaveProperty("signal")
+		})
+	})
 })

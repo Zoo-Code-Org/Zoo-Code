@@ -1057,4 +1057,78 @@ describe("AnthropicHandler", () => {
 			})
 		})
 	})
+
+	describe("abort signal", () => {
+		it("should pass abortSignal to the SDK options", async () => {
+			const controller = new AbortController()
+
+			mockCreate.mockImplementation(async (options, requestOptions) => {
+				// Verify that the signal was passed
+				expect(requestOptions).toHaveProperty("signal", controller.signal)
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield {
+							type: "message_start",
+							message: { usage: { input_tokens: 10, output_tokens: 5 } },
+						}
+						yield {
+							type: "content_block_delta",
+							delta: { type: "text_delta", text: "response" },
+						}
+					},
+				}
+			})
+
+			const handler = new AnthropicHandler(mockOptions)
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }], {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			const handler = new AnthropicHandler(mockOptions)
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }])
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should not pass signal when abortSignal is undefined", async () => {
+			mockCreate.mockImplementation(async (options, requestOptions) => {
+				// When no abortSignal is provided, requestOptions should be undefined or not have signal
+				expect(requestOptions).toBeUndefined()
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield {
+							type: "message_start",
+							message: { usage: { input_tokens: 10, output_tokens: 5 } },
+						}
+					},
+				}
+			})
+
+			const handler = new AnthropicHandler(mockOptions)
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }])
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+	})
 })

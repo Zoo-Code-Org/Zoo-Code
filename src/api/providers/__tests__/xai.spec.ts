@@ -106,6 +106,7 @@ describe("XAIHandler", () => {
 				store: false,
 				include: ["reasoning.encrypted_content"],
 			}),
+			undefined,
 		)
 	})
 
@@ -235,6 +236,7 @@ describe("XAIHandler", () => {
 				tool_choice: "auto",
 				parallel_tool_calls: true,
 			}),
+			undefined,
 		)
 	})
 
@@ -272,6 +274,7 @@ describe("XAIHandler", () => {
 					reasoning_effort: "high",
 				}),
 			}),
+			undefined,
 		)
 	})
 
@@ -296,5 +299,86 @@ describe("XAIHandler", () => {
 
 		const stream = handler.createMessage("test prompt", [])
 		await expect(stream.next()).rejects.toThrow(`xAI completion error: ${errorMessage}`)
+	})
+
+	describe("abort signal", () => {
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+
+			mockResponsesCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: async function* () {
+					while (true) {
+						await new Promise((resolve) => setTimeout(resolve, 10))
+						if (controller.signal.aborted) {
+							throw new Error("AbortError: The operation was aborted")
+						}
+						yield { type: "response.output_text.delta", delta: "chunk" }
+					}
+				},
+			})
+
+			handler = new XAIHandler({ xaiApiKey: "test-key" })
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			setTimeout(() => controller.abort(), 50)
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			handler = new XAIHandler({ xaiApiKey: "test-key" })
+
+			mockResponsesCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: async function* () {
+					yield { type: "response.output_text.delta", delta: "Hello" }
+					yield { type: "response.output_text.delta", delta: " world!" }
+					yield { type: "response.completed", response: { id: "test" }, usage: {} }
+				},
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			mockResponsesCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: async function* () {
+					if (controller.signal.aborted) {
+						throw new Error("AbortError: The operation was aborted")
+					}
+					yield { type: "text", text: "response" }
+				},
+			})
+
+			handler = new XAIHandler({ xaiApiKey: "test-key" })
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
 	})
 })

@@ -220,6 +220,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		try {
 			const completion = await this.client.chat.completions.create(body, {
 				headers: requestHeaders,
+				...(metadata?.abortSignal ? { signal: metadata.abortSignal } : {}),
 			})
 
 			for await (const chunk of completion) {

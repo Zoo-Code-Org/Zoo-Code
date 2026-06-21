@@ -157,6 +157,85 @@ describe("LmStudioHandler", () => {
 		})
 	})
 
+	describe("abort signal", () => {
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+
+			mockCreate.mockImplementation(async (options: unknown) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						while (!controller.signal.aborted) {
+							await new Promise((resolve) => setTimeout(resolve, 10))
+							if (controller.signal.aborted) {
+								throw new DOMException("The operation was aborted.", "AbortError")
+							}
+							yield {
+								choices: [{ delta: { content: "response" }, index: 0 }],
+								usage: null,
+							}
+						}
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			setTimeout(() => controller.abort(), 50)
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			mockCreate.mockImplementation(async (options: unknown) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						if (controller.signal.aborted) {
+							throw new DOMException("The operation was aborted.", "AbortError")
+						}
+						yield {
+							choices: [{ delta: { content: "response" }, index: 0 }],
+							usage: null,
+						}
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+	})
+
 	describe("getModel", () => {
 		it("should return model info", () => {
 			const modelInfo = handler.getModel()

@@ -115,7 +115,12 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const stream = await this.createStream(systemPrompt, messages, metadata)
+		const stream = await this.createStream(
+			systemPrompt,
+			messages,
+			metadata,
+			metadata?.abortSignal ? { signal: metadata.abortSignal } : undefined,
+		)
 
 		const matcher = new TagMatcher(
 			"think",

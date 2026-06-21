@@ -302,6 +302,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			maxOutputTokens,
 			temperature: temperatureConfig,
 			...(tools.length > 0 ? { tools } : {}),
+			...(metadata?.abortSignal ? { signal: metadata.abortSignal } : {}),
 		}
 
 		// Do not pass metadata.allowedFunctionNames to Gemini. Live API testing showed

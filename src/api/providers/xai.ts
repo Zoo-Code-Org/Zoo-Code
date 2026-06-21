@@ -127,10 +127,15 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 
 		let stream: AsyncIterable<any>
 		try {
-			stream = (await this.client.responses.create({
-				...requestBody,
-				stream: true,
-			} as any)) as unknown as AsyncIterable<any>
+			// Support metadata.abortSignal for request cancellation (OpenAI SDK Responses API)
+			const createOptions = metadata?.abortSignal ? { signal: metadata.abortSignal } : undefined
+			stream = (await this.client.responses.create(
+				{
+					...requestBody,
+					stream: true,
+				} as any,
+				createOptions,
+			)) as unknown as AsyncIterable<any>
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")

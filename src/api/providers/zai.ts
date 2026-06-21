@@ -125,6 +125,7 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		try {
 			return this.client.chat.completions.create(
 				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+				metadata?.abortSignal ? { signal: metadata.abortSignal } : undefined,
 			)
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)

@@ -296,16 +296,17 @@ describe("MiniMaxHandler", () => {
 			const messageGenerator = handlerWithModel.createMessage(systemPrompt, messages)
 			await messageGenerator.next()
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: modelId,
-					max_tokens: Math.min(modelInfo.maxTokens, Math.ceil(modelInfo.contextWindow * 0.2)),
-					temperature: 1,
-					system: expect.any(Array),
-					messages: expect.any(Array),
-					stream: true,
-				}),
+			// Verify the first argument contains the expected request params
+			const firstCallArgs = mockCreate.mock.calls[0]
+			const requestParams = firstCallArgs[0]
+			expect(requestParams.model).toBe(modelId)
+			expect(requestParams.stream).toBe(true)
+			expect(requestParams.max_tokens).toBe(
+				Math.min(modelInfo.maxTokens, Math.ceil(modelInfo.contextWindow * 0.2)),
 			)
+			expect(requestParams.temperature).toBe(1)
+			expect(requestParams.system).toBeInstanceOf(Array)
+			expect(requestParams.messages).toBeInstanceOf(Array)
 		})
 
 		it("should use temperature 1 by default", async () => {
@@ -320,11 +321,10 @@ describe("MiniMaxHandler", () => {
 			const messageGenerator = handler.createMessage("test", [])
 			await messageGenerator.next()
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					temperature: 1,
-				}),
-			)
+			// Verify the first argument contains the expected request params
+			const firstCallArgs = mockCreate.mock.calls[0]
+			const requestParams = firstCallArgs[0]
+			expect(requestParams.temperature).toBe(1)
 		})
 
 		it("should handle thinking blocks in stream", async () => {
@@ -478,6 +478,94 @@ describe("MiniMaxHandler", () => {
 		it("should correctly configure MiniMax-M2 model properties with updated context window", () => {
 			const model = minimaxModels["MiniMax-M2"]
 			expect(model.contextWindow).toBe(204_800)
+		})
+	})
+
+	describe("abort signal", () => {
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+			handler = new MiniMaxHandler({ minimaxApiKey: "test-key" })
+
+			mockCreate.mockImplementation(async (options: unknown) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						while (!controller.signal.aborted) {
+							await new Promise((resolve) => setTimeout(resolve, 10))
+							if (controller.signal.aborted) {
+								throw new Error("AbortError: The operation was aborted")
+							}
+							yield {
+								type: "content_block_start",
+								content_block: { type: "text", text: "" },
+							}
+						}
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			setTimeout(() => controller.abort(), 50)
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			handler = new MiniMaxHandler({ minimaxApiKey: "test-key" })
+
+			mockCreate.mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } }
+					yield { type: "content_block_delta", delta: { type: "text_delta", text: "response" } }
+				},
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			handler = new MiniMaxHandler({ minimaxApiKey: "test-key" })
+
+			mockCreate.mockImplementation(async (options: unknown) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						if (controller.signal.aborted) {
+							throw new Error("AbortError: The operation was aborted")
+						}
+						yield { type: "content_block_delta", delta: { type: "text_delta", text: "response" } }
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
 		})
 	})
 })

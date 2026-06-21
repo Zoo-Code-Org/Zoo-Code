@@ -113,7 +113,10 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 			tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
 		}
 
-		const stream = await this.client.messages.create(requestParams)
+		const stream = await this.client.messages.create(
+			requestParams,
+			metadata?.abortSignal ? { signal: metadata.abortSignal } : undefined,
+		)
 
 		let inputTokens = 0
 		let outputTokens = 0

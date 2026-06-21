@@ -544,6 +544,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5.1",
 					max_tokens: 40_000,
 				}),
+				undefined,
 			)
 		})
 
@@ -584,6 +585,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5.1",
 					max_tokens: 100_000,
 				}),
+				undefined,
 			)
 		})
 
@@ -614,6 +616,7 @@ describe("ZAiHandler", () => {
 					model: "glm-4.7",
 					thinking: { type: "enabled" },
 				}),
+				undefined,
 			)
 		})
 
@@ -644,6 +647,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "high",
 				}),
+				undefined,
 			)
 		})
 
@@ -674,6 +678,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "max",
 				}),
+				undefined,
 			)
 		})
 
@@ -730,6 +735,7 @@ describe("ZAiHandler", () => {
 					thinking: { type: "enabled" },
 					reasoning_effort: "high",
 				}),
+				undefined,
 			)
 		})
 
@@ -761,6 +767,7 @@ describe("ZAiHandler", () => {
 					model: "glm-4.7",
 					thinking: { type: "disabled" },
 				}),
+				undefined,
 			)
 		})
 
@@ -792,6 +799,7 @@ describe("ZAiHandler", () => {
 					model: "glm-4.7",
 					thinking: { type: "enabled" },
 				}),
+				undefined,
 			)
 		})
 
@@ -845,6 +853,7 @@ describe("ZAiHandler", () => {
 					model: "glm-5-turbo",
 					thinking: { type: "enabled" },
 				}),
+				undefined,
 			)
 		})
 
@@ -875,7 +884,100 @@ describe("ZAiHandler", () => {
 					model: "glm-5-turbo",
 					thinking: { type: "disabled" },
 				}),
+				undefined,
 			)
+		})
+	})
+
+	describe("abort signal", () => {
+		beforeEach(() => {
+			vitest.clearAllMocks()
+		})
+
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+			handler = new ZAiHandler({ zaiApiKey: "test-zai-api-key", zaiApiLine: "international_coding" })
+
+			mockCreate.mockImplementation(async (options: unknown) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						while (!controller.signal.aborted) {
+							await new Promise((resolve) => setTimeout(resolve, 10))
+							if (controller.signal.aborted) {
+								throw new Error("AbortError: The operation was aborted")
+							}
+							yield {
+								choices: [{ delta: { content: "response" } }],
+								usage: null,
+							}
+						}
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			setTimeout(() => controller.abort(), 50)
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			handler = new ZAiHandler({ zaiApiKey: "test-zai-api-key", zaiApiLine: "international_coding" })
+
+			mockCreate.mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: { content: "Hello" } }], usage: null }
+					yield { choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 5 } }
+				},
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			handler = new ZAiHandler({ zaiApiKey: "test-zai-api-key", zaiApiLine: "international_coding" })
+
+			mockCreate.mockImplementation(async (options: unknown) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						if (controller.signal.aborted) {
+							throw new Error("AbortError: The operation was aborted")
+						}
+						yield { choices: [{ delta: { content: "response" } }], usage: null }
+					},
+				}
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
 		})
 	})
 })

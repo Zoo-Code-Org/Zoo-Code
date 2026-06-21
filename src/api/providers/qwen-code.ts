@@ -239,7 +239,12 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
-		const stream = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions))
+		const stream = await this.callApiWithRetry(() =>
+			client.chat.completions.create(
+				requestOptions,
+				metadata?.abortSignal ? { signal: metadata.abortSignal } : undefined,
+			),
+		)
 
 		let fullContent = ""
 

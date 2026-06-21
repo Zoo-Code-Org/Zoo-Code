@@ -103,6 +103,7 @@ describe("QwenCodeHandler Native Tools", () => {
 					]),
 					parallel_tool_calls: true,
 				}),
+				undefined,
 			)
 		})
 
@@ -126,6 +127,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect.objectContaining({
 					tool_choice: "auto",
 				}),
+				undefined,
 			)
 		})
 
@@ -237,6 +239,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect.objectContaining({
 					parallel_tool_calls: true,
 				}),
+				undefined,
 			)
 		})
 
@@ -442,6 +445,96 @@ describe("QwenCodeHandler Native Tools", () => {
 			expect(reasoningChunks[0].text).toBe("Thinking about this...")
 			expect(partialChunks).toHaveLength(1)
 			expect(endChunks).toHaveLength(1)
+		})
+	})
+
+	describe("abort signal", () => {
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+
+			mockCreate.mockImplementation(async (options: unknown) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						while (!controller.signal.aborted) {
+							await new Promise((resolve) => setTimeout(resolve, 10))
+							if (controller.signal.aborted) {
+								throw new Error("AbortError: The operation was aborted")
+							}
+							yield { choices: [{ delta: { content: "response" } }], usage: null }
+						}
+					},
+				}
+			})
+
+			const handler = new QwenCodeHandler({
+				apiKey: "test-key",
+			} as any)
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			setTimeout(() => controller.abort(), 50)
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			const handler = new QwenCodeHandler({
+				apiKey: "test-key",
+			} as any)
+
+			mockCreate.mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: { content: "Hello" } }], usage: null }
+					yield { choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 5 } }
+				},
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any)
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			mockCreate.mockImplementation(async (options: unknown) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						if (controller.signal.aborted) {
+							throw new Error("AbortError: The operation was aborted")
+						}
+						yield { choices: [{ delta: { content: "response" } }], usage: null }
+					},
+				}
+			})
+
+			const handler = new QwenCodeHandler({
+				apiKey: "test-key",
+			} as any)
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }] as any, {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
 		})
 	})
 })

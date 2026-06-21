@@ -471,4 +471,88 @@ describe("MoonshotHandler", () => {
 			expect(toolCallChunks[0].arguments).toBe('{"path":"test.ts"}')
 		})
 	})
+
+	describe("abort signal", () => {
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+
+			async function* mockFullStream() {
+				while (!controller.signal.aborted) {
+					await new Promise((resolve) => setTimeout(resolve, 10))
+					if (controller.signal.aborted) {
+						throw new Error("AbortError: The operation was aborted")
+					}
+					yield { type: "text-delta", text: "response" }
+				}
+			}
+
+			mockStreamText.mockReturnValue({
+				fullStream: mockFullStream(),
+				usage: Promise.resolve({ inputTokens: 1, outputTokens: 1, details: {}, raw: {} }),
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "Hello" }], {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			setTimeout(() => controller.abort(), 50)
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should work normally without abortSignal", async () => {
+			async function* mockFullStream() {
+				yield { type: "text-delta", text: "Hello" }
+			}
+
+			mockStreamText.mockReturnValue({
+				fullStream: mockFullStream(),
+				usage: Promise.resolve({ inputTokens: 10, outputTokens: 5, details: {}, raw: {} }),
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "Hello" }])
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			async function* mockFullStream() {
+				if (controller.signal.aborted) {
+					throw new Error("AbortError: The operation was aborted")
+				}
+				yield { type: "text-delta", text: "response" }
+			}
+
+			mockStreamText.mockReturnValue({
+				fullStream: mockFullStream(),
+				usage: Promise.resolve({ inputTokens: 1, outputTokens: 1, details: {}, raw: {} }),
+			})
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "Hello" }], {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+	})
 })

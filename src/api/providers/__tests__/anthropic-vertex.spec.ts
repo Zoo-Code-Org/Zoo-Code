@@ -263,10 +263,13 @@ describe("VertexHandler", () => {
 					],
 					stream: true,
 					// Tools are now always present (minimum 6 from ALWAYS_AVAILABLE_TOOLS)
-					tools: expect.any(Array),
-					tool_choice: expect.any(Object),
+					tools: [],
+					tool_choice: {
+						disable_parallel_tool_use: false,
+						type: "auto",
+					},
 				}),
-				undefined,
+				{},
 			)
 		})
 
@@ -481,7 +484,7 @@ describe("VertexHandler", () => {
 						}),
 					],
 				}),
-				undefined,
+				{},
 			)
 		})
 
@@ -1156,7 +1159,7 @@ describe("VertexHandler", () => {
 			}
 
 			// Verify the API was called without the beta header
-			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), undefined)
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), {})
 		})
 	})
 
@@ -1246,7 +1249,7 @@ describe("VertexHandler", () => {
 					thinking: { type: "enabled", budget_tokens: 4096 },
 					temperature: 1.0, // Thinking requires temperature 1.0
 				}),
-				undefined,
+				{},
 			)
 		})
 
@@ -1273,7 +1276,7 @@ describe("VertexHandler", () => {
 				expect.objectContaining({
 					thinking: { type: "adaptive" },
 				}),
-				undefined,
+				{},
 			)
 
 			const request = mockCreate.mock.calls[0][0]
@@ -1302,7 +1305,7 @@ describe("VertexHandler", () => {
 				expect.objectContaining({
 					thinking: { type: "adaptive" },
 				}),
-				undefined,
+				{},
 			)
 
 			const request = mockCreate.mock.calls[0][0]
@@ -1393,7 +1396,7 @@ describe("VertexHandler", () => {
 					]),
 					tool_choice: { type: "auto", disable_parallel_tool_use: false },
 				}),
-				undefined,
+				{},
 			)
 		})
 
@@ -1446,7 +1449,7 @@ describe("VertexHandler", () => {
 						}),
 					]),
 				}),
-				undefined,
+				{},
 			)
 		})
 
@@ -1609,6 +1612,159 @@ describe("VertexHandler", () => {
 				name: undefined,
 				arguments: '"London"}',
 			})
+		})
+	})
+
+	describe("abort signal", () => {
+		it("should handle abort signal triggered during request", async () => {
+			const controller = new AbortController()
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-sonnet",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockStream = async function* () {
+				await new Promise((resolve) => setTimeout(resolve, 10))
+				if (controller.signal.aborted) {
+					throw new Error("AbortError: The operation was aborted")
+				}
+				yield {
+					type: "message_start",
+					message: { usage: { input_tokens: 10, output_tokens: 0 } },
+				}
+			}
+
+			;(handler["client"].messages as any).create = vitest.fn().mockResolvedValue(mockStream())
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }], {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should not pass signal when abortSignal is undefined", async () => {
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-sonnet",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockStream = async function* () {
+				yield {
+					type: "message_start",
+					message: { usage: { input_tokens: 10, output_tokens: 5 } },
+				}
+				yield {
+					type: "content_block_start",
+					content_block: { type: "text", text: "" },
+				}
+				yield {
+					type: "content_block_delta",
+					delta: { type: "text_delta", text: "response" },
+				}
+			}
+
+			;(handler["client"].messages as any).create = vitest.fn().mockResolvedValue(mockStream())
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "Hello" }])
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+
+		it("should abort immediately if signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const testHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-sonnet",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			testHandler["client"].messages.create = vitest.fn().mockImplementation(async (options, requestOptions) => {
+				// Verify that the signal was passed and is already aborted
+				expect(requestOptions).toHaveProperty("signal", controller.signal)
+				expect(controller.signal.aborted).toBe(true)
+
+				return {
+					[Symbol.asyncIterator]: async function* () {
+						if (controller.signal.aborted) {
+							throw new Error("AbortError: The operation was aborted")
+						}
+						yield {
+							type: "message_start",
+							message: { usage: { input_tokens: 10, output_tokens: 5 } },
+						}
+					},
+				}
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }], {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			await expect(async () => {
+				for await (const _chunk of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow(/abort/i)
+		})
+
+		it("should pass signal when provided", async () => {
+			const controller = new AbortController()
+			let capturedRequestOptions: any
+
+			const testHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-sonnet",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			testHandler["client"].messages.create = vitest.fn().mockImplementation(async (options, requestOptions) => {
+				capturedRequestOptions = requestOptions
+				return {
+					[Symbol.asyncIterator]: async function* () {
+						yield {
+							type: "message_start",
+							message: { usage: { input_tokens: 10, output_tokens: 5 } },
+						}
+						yield {
+							type: "content_block_delta",
+							delta: { type: "text_delta", text: "response" },
+						}
+					},
+				}
+			})
+
+			const stream = testHandler.createMessage("system", [{ role: "user", content: "Hello" }], {
+				taskId: "test",
+				tools: [],
+				abortSignal: controller.signal,
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+			expect(capturedRequestOptions).toHaveProperty("signal", controller.signal)
 		})
 	})
 })

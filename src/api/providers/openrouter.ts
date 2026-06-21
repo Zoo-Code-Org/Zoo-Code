@@ -331,14 +331,15 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			tool_choice: metadata?.tool_choice,
 		}
 
-		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		const requestOptions = modelId.startsWith("anthropic/")
-			? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
-			: undefined
-
 		let stream
 		try {
-			stream = await this.client.chat.completions.create(completionParams, requestOptions)
+			stream = await this.client.chat.completions.create(completionParams, {
+				// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
+				...(modelId.startsWith("anthropic/")
+					? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
+					: {}),
+				...(metadata?.abortSignal ? { signal: metadata.abortSignal } : {}),
+			})
 		} catch (error) {
 			// Try to parse as OpenRouter error structure using Zod
 			const parseResult = OpenRouterErrorResponseSchema.safeParse(error)

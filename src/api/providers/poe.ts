@@ -101,6 +101,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 				tools: aiSdkTools,
 				toolChoice: mapToolChoice(metadata?.tool_choice as any),
 				...(Object.keys(providerOptions).length > 0 && { providerOptions }),
+				...(metadata?.abortSignal ? { signal: metadata.abortSignal } : {}),
 			})
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
