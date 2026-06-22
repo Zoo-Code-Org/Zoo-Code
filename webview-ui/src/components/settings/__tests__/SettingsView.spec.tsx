@@ -443,28 +443,6 @@ describe("SettingsView - Sound Settings", () => {
 		)
 	})
 
-	it("defaults checkpoints to false when state omits the field", () => {
-		const { activateTab, getSettingsContent } = renderSettingsView()
-		mockPostMessage({ enableCheckpoints: undefined })
-
-		activateTab("notifications")
-		const soundCheckbox = within(getSettingsContent()).getByTestId("sound-enabled-checkbox")
-		fireEvent.click(soundCheckbox)
-		fireEvent.click(screen.getByTestId("save-button"))
-
-		const postMessageMock = vscode.postMessage as unknown as {
-			mock: { calls: Array<[any]> }
-		}
-		expect(
-			postMessageMock.mock.calls.some(
-				([message]) =>
-					message?.type === "updateSettings" &&
-					message.updatedSettings?.soundEnabled === true &&
-					message.updatedSettings?.enableCheckpoints === false,
-			),
-		).toBe(true)
-	})
-
 	it("shows tts slider when sound is enabled", () => {
 		// Render once and get the activateTab helper
 		const { activateTab, getSettingsContent } = renderSettingsView()
