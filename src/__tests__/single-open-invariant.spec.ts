@@ -73,6 +73,46 @@ describe("Single-open-task invariant", () => {
 		expect(addClineToStack).toHaveBeenCalledTimes(1)
 	})
 
+	it("Subtask create: keeps existing task open when parentTask is provided", async () => {
+		vi.spyOn(ProfileValidatorMod.ProfileValidator, "isProfileAllowed").mockReturnValue(true)
+
+		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
+		const addClineToStack = vi.fn().mockResolvedValue(undefined)
+		const parentTask = { taskId: "parent-1" }
+
+		const provider = {
+			clineStack: [parentTask],
+			setValues: vi.fn(),
+			getState: vi.fn().mockResolvedValue({
+				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				organizationAllowList: "*",
+				enableCheckpoints: true,
+				checkpointTimeout: 60,
+				cloudUserInfo: null,
+			}),
+			removeClineFromStack,
+			addClineToStack,
+			setProviderProfile: vi.fn(),
+			log: vi.fn(),
+			getStateToPostToWebview: vi.fn(),
+			providerSettingsManager: { getModeConfigId: vi.fn(), listConfig: vi.fn() },
+			customModesManager: { getCustomModes: vi.fn().mockResolvedValue([]) },
+			taskCreationCallback: vi.fn(),
+			contextProxy: {
+				extensionUri: {},
+				setValue: vi.fn(),
+				getValue: vi.fn(),
+				setProviderSettings: vi.fn(),
+				getProviderSettings: vi.fn(() => ({})),
+			},
+		} as unknown as ClineProvider
+
+		await (ClineProvider.prototype as any).createTask.call(provider, "Subtask", undefined, parentTask as any)
+
+		expect(removeClineFromStack).not.toHaveBeenCalled()
+		expect(addClineToStack).toHaveBeenCalledTimes(1)
+	})
+
 	it("History resume path always closes current before rehydration (non-rehydrating case)", async () => {
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const addClineToStack = vi.fn().mockResolvedValue(undefined)

@@ -14,6 +14,7 @@ import {
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -930,6 +931,32 @@ describe("ClineProvider", () => {
 
 		const state = await provider.getState()
 		expect(state.writeDelayMs).toBe(1000)
+	})
+
+	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
+		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+			if (
+				[
+					"writeDelayMs",
+					"diffFuzzyThreshold",
+					"terminalShellIntegrationTimeout",
+					"terminalShellIntegrationDisabled",
+					"terminalCommandDelay",
+				].includes(key)
+			) {
+				return undefined
+			}
+
+			return null
+		})
+
+		const state = await provider.getState()
+
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+		expect(state.diffFuzzyThreshold).toBe(DEFAULT_DIFF_FUZZY_THRESHOLD)
+		expect(state.terminalShellIntegrationTimeout).toBe(Terminal.defaultShellIntegrationTimeout)
+		expect(state.terminalShellIntegrationDisabled).toBe(true)
+		expect(state.terminalCommandDelay).toBe(0)
 	})
 
 	test("handles writeDelayMs message", async () => {
