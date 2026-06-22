@@ -540,7 +540,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				} else {
 					// No match found with either method
 					const originalContentSection =
-						startLine !== undefined && endLine !== undefined
+						startLine && endLine
 							? `\n\nOriginal Content:\n${addLineNumbers(
 									resultLines
 										.slice(
