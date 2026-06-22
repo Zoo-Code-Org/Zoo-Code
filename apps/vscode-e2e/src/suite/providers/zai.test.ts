@@ -35,7 +35,6 @@ function installZAiFetchInterceptor(
 	passthrough?: boolean,
 ): () => void {
 	const original = globalThis.fetch
-	const capturedRequests: Array<{ maxTokens?: number }> = []
 
 	globalThis.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url
@@ -47,8 +46,6 @@ function installZAiFetchInterceptor(
 						max_tokens?: number
 					})
 				: {}
-
-			capturedRequests.push({ maxTokens: body.max_tokens })
 
 			if (capture) {
 				capture.maxTokens = body.max_tokens

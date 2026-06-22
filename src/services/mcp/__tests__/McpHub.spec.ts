@@ -2128,7 +2128,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called with wrapped command
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2192,7 +2192,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2256,7 +2256,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without double-wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2333,7 +2333,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify that the command was wrapped with cmd.exe
 			expect(StdioClientTransport).toHaveBeenCalledWith(
@@ -2402,7 +2402,7 @@ describe("McpHub", () => {
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
 
 			// Wait for initialization
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without double-wrapping
 			expect(StdioClientTransport).toHaveBeenCalledWith(
