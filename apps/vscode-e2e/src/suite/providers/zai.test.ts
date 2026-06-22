@@ -76,10 +76,6 @@ function installZAiFetchInterceptor(
 
 	return () => {
 		globalThis.fetch = original
-		const lastCaptured = capturedRequests[capturedRequests.length - 1]
-		if (capture && lastCaptured) {
-			capture.maxTokens = lastCaptured.maxTokens
-		}
 	}
 }
 
@@ -226,9 +222,11 @@ suite("Z.ai GLM provider", function () {
 		})
 
 		await waitUntilCompleted({ api, taskId })
-		// Allow any pending async requests to finish before snapshotting max_tokens
-		await new Promise((resolve) => setTimeout(resolve, 100))
 		const capturedMaxTokens = requestCapture.maxTokens
+		assert.ok(
+			capturedMaxTokens !== undefined,
+			"max_tokens should have been captured by the fetch interceptor before task completion",
+		)
 
 		const completionMessage = messages.find(
 			({ say, text }) => (say === "completion_result" || say === "text") && text?.trim() === "4",
@@ -270,9 +268,11 @@ suite("Z.ai GLM provider", function () {
 		})
 
 		await waitUntilCompleted({ api, taskId })
-		// Allow any pending async requests to finish before snapshotting max_tokens
-		await new Promise((resolve) => setTimeout(resolve, 100))
 		const capturedMaxTokens = requestCapture.maxTokens
+		assert.ok(
+			capturedMaxTokens !== undefined,
+			"max_tokens should have been captured by the fetch interceptor before task completion",
+		)
 
 		const completionMessage = messages.find(
 			({ say, text }) => (say === "completion_result" || say === "text") && text?.trim() === "4",
