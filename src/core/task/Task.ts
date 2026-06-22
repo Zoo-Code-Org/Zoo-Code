@@ -1555,6 +1555,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
+			...(this.currentRequestAbortController?.signal
+				? {
+						abortSignal: this.currentRequestAbortController.signal,
+					}
+				: {}),
 			...(allTools.length > 0
 				? {
 						tools: allTools,
@@ -3763,6 +3768,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
+			...(this.currentRequestAbortController?.signal
+				? {
+						abortSignal: this.currentRequestAbortController.signal,
+					}
+				: {}),
 			...(allTools.length > 0
 				? {
 						tools: allTools,
@@ -3979,6 +3989,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
 				mode,
 				taskId: this.taskId,
+				...(this.currentRequestAbortController?.signal
+					? {
+							abortSignal: this.currentRequestAbortController.signal,
+						}
+					: {}),
 				...(contextMgmtTools.length > 0
 					? {
 							tools: contextMgmtTools,
@@ -4141,10 +4156,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const shouldIncludeTools = allTools.length > 0
 
+		// Create an AbortController to allow cancelling the request mid-stream
+		this.currentRequestAbortController = new AbortController()
+		const abortSignal = this.currentRequestAbortController.signal
+
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode: mode,
 			taskId: this.taskId,
 			suppressPreviousResponseId: this.skipPrevResponseIdOnce,
+			abortSignal,
 			// Include tools whenever they are present.
 			...(shouldIncludeTools
 				? {
@@ -4157,11 +4177,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 				: {}),
 		}
-
-		// Create an AbortController to allow cancelling the request mid-stream
-		this.currentRequestAbortController = new AbortController()
-		const abortSignal = this.currentRequestAbortController.signal
-		metadata.abortSignal = abortSignal
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 
@@ -4200,8 +4215,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.isWaitingForFirstChunk = false
 		} catch (error) {
 			this.isWaitingForFirstChunk = false
-			this.currentRequestAbortController = undefined
 			const isContextWindowExceededError = checkContextWindowExceededError(error)
+
+			if (!isContextWindowExceededError) {
+				this.currentRequestAbortController = undefined
+			}
 
 			// If it's a context window error and we haven't exceeded max retries for this error type
 			if (isContextWindowExceededError && retryAttempt < MAX_CONTEXT_WINDOW_RETRIES) {
