@@ -28,6 +28,8 @@ describe("ExperimentalSettings", () => {
 
 		expect(screen.getByText("settings:experimental.PREVENT_FOCUS_DISRUPTION.name")).toBeInTheDocument()
 		expect(screen.getByText("settings:experimental.RUN_SLASH_COMMAND.name")).toBeInTheDocument()
+		expect(screen.getByText("settings:experimental.IMAGE_GENERATION.name")).toBeInTheDocument()
+		expect(screen.getByText("settings:experimental.CUSTOM_TOOLS.name")).toBeInTheDocument()
 		expect(screen.queryByText("settings:experimental.PARALLEL_TOOL_EXECUTION.name")).not.toBeInTheDocument()
 	})
 })
