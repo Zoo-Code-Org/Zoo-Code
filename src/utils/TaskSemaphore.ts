@@ -1,5 +1,24 @@
 import { Semaphore } from "async-mutex"
 
+/**
+ * A thin wrapper around `async-mutex`'s `Semaphore` that adds observable
+ * queue-depth (`waiting`) and safe bulk-cancellation (`cancel()`).
+ *
+ * **Why not use `Semaphore` directly?**
+ * `Semaphore` has no way to inspect how many callers are blocked waiting for a
+ * permit. `TaskSemaphore` tracks that count so callers can make scheduling
+ * decisions (e.g. "don't enqueue more work when the queue is already deep").
+ *
+ * **`_waiting`** is incremented before `sem.acquire()` is awaited (only when
+ * the semaphore is already locked, i.e. the caller will actually block) and
+ * decremented once the permit is granted or the acquire is rejected.
+ *
+ * **`_generation`** is a monotonically-increasing counter bumped on every
+ * `cancel()` call. Each in-flight `acquire()` captures the generation at
+ * enqueue time; when the acquire settles it only adjusts `_waiting` if the
+ * generation hasn't changed, preventing stale decrements after a cancel has
+ * already reset the counter to 0.
+ */
 export class TaskSemaphore {
 	private sem: Semaphore
 	private _waiting = 0
@@ -32,6 +51,12 @@ export class TaskSemaphore {
 		}
 	}
 
+	/**
+	 * Rejects all queued waiters and resets the waiting count to 0.
+	 * Does NOT release or alter any held permits — callers that already
+	 * received a release function must still call it.
+	 * The semaphore remains usable after cancellation.
+	 */
 	cancel(): void {
 		this._waiting = 0
 		this._generation++

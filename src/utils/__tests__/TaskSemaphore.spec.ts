@@ -1,14 +1,6 @@
 import { TaskSemaphore } from "../TaskSemaphore"
 
 describe("TaskSemaphore", () => {
-	beforeEach(() => {
-		vi.useFakeTimers()
-	})
-
-	afterEach(() => {
-		vi.useRealTimers()
-	})
-
 	it("acquire() resolves immediately when permits are available", async () => {
 		const sem = new TaskSemaphore(2)
 		const release = await sem.acquire()
@@ -140,5 +132,21 @@ describe("TaskSemaphore", () => {
 
 		expect(sem.waiting).toBe(0)
 		release()
+	})
+
+	it("acquire() works after cancel() with permits still available", async () => {
+		const sem = new TaskSemaphore(1)
+		sem.cancel() // no waiters, no holders
+		const release = await sem.acquire()
+		expect(sem.available).toBe(0)
+		release()
+		expect(sem.available).toBe(1)
+	})
+
+	it("cancel() on an idle semaphore is a safe no-op", () => {
+		const sem = new TaskSemaphore(2)
+		expect(() => sem.cancel()).not.toThrow()
+		expect(sem.waiting).toBe(0)
+		expect(sem.available).toBe(2)
 	})
 })
