@@ -959,6 +959,22 @@ describe("ClineProvider", () => {
 		expect(state.terminalCommandDelay).toBe(0)
 	})
 
+	test("getState passes through defined write/diff/terminal values instead of defaults", async () => {
+		await provider.contextProxy.setValue("writeDelayMs", 500)
+		await provider.contextProxy.setValue("diffFuzzyThreshold", 0.5)
+		await provider.contextProxy.setValue("terminalShellIntegrationTimeout", 99999)
+		await provider.contextProxy.setValue("terminalShellIntegrationDisabled", false)
+		await provider.contextProxy.setValue("terminalCommandDelay", 1234)
+
+		const state = await provider.getState()
+
+		expect(state.writeDelayMs).toBe(500)
+		expect(state.diffFuzzyThreshold).toBe(0.5)
+		expect(state.terminalShellIntegrationTimeout).toBe(99999)
+		expect(state.terminalShellIntegrationDisabled).toBe(false)
+		expect(state.terminalCommandDelay).toBe(1234)
+	})
+
 	test("handles writeDelayMs message", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]

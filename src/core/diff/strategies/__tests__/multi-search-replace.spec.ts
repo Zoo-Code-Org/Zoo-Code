@@ -964,6 +964,33 @@ function processUsers(data) {
 			expect(error).toContain("Best Match Found:\n1 | function processUsers(data)")
 		})
 
+		it("should include zero-match info when unscoped search finds no similarity at all", async () => {
+			const strictStrategy = new MultiSearchReplaceDiffStrategy(1, 0)
+			const originalContent = "xxxxxx\nyyyyyy\nzzzzzz"
+			const diffContent = `test.ts
+<<<<<<< SEARCH
+!!!!!!
+=======
+aaaaaa
+>>>>>>> REPLACE`
+
+			const result = await strictStrategy.applyDiff(originalContent, diffContent)
+			expect(result.success).toBe(false)
+			const error =
+				!result.success && result.failParts?.[0]
+					? "error" in result.failParts[0]
+						? result.failParts[0].error
+						: ""
+					: ""
+			expect(error).toContain("No sufficiently similar match found")
+			expect(error).toContain("Search Range: start to end")
+			expect(error).toContain("Best Match Found:\n(no match)")
+			expect(error).toContain("Levenshtein Distance: N/A")
+			expect(error).toContain("Best Match Length: 0 characters")
+			expect(error).toContain("Original Content:")
+			expect(error).toContain("1 | xxxxxx")
+		})
+
 		it("should match content with extra whitespace", async () => {
 			const originalContent = "function sum(a, b) {\n    return a + b;\n}"
 			const diffContent = `test.ts
