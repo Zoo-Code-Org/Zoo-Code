@@ -1455,5 +1455,28 @@ function sum(a, b) {
 			expect(errorMsg).toContain("Search Length:")
 			expect(errorMsg).toContain("Best Match Length:")
 		})
+		it("should report no-match diagnostics when search content is completely different and no :start_line: is given", async () => {
+			const strategy = new MultiSearchReplaceDiffStrategy(0.9)
+			const diff =
+				"<<<<<<< SEARCH\n" +
+				"§§§§§§§§§§§§\n" +
+				"§§§§§§§§§§§§\n" +
+				"=======\n" +
+				"¤¤¤¤¤¤¤¤¤¤¤¤\n" +
+				"¤¤¤¤¤¤¤¤¤¤¤¤\n" +
+				">>>>>>> REPLACE"
+
+			const result = await strategy.applyDiff(originalContent, diff)
+			expect(result.success).toBe(false)
+			expect(result.failParts).toBeDefined()
+			expect(result.failParts!.length).toBeGreaterThan(0)
+			const failedPart = result.failParts![0]
+			expect(failedPart).toHaveProperty("error")
+			const errorMsg = (failedPart as { error: string }).error
+			expect(errorMsg).toContain("No sufficiently similar match found")
+			expect(errorMsg).toContain("Best Match Found:")
+			expect(errorMsg).toContain("Levenshtein Distance:")
+			expect(errorMsg).toContain("Search Range: start to end")
+		})
 	})
 })
