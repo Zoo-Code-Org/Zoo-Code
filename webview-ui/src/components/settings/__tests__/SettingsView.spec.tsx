@@ -448,14 +448,16 @@ describe("SettingsView - Sound Settings", () => {
 	})
 
 	it("saves fallback defaults for checkpoint and terminal settings", async () => {
-		renderSettingsView({
+		const { activateTab, getSettingsContent } = renderSettingsView({
 			enableCheckpoints: undefined,
 			checkpointTimeout: undefined,
 			terminalShellIntegrationTimeout: undefined,
 			settingsImportedAt: new Date().toISOString(),
 		})
 
-		await waitFor(() => expect(screen.getByTestId("save-button")).toBeInTheDocument())
+		activateTab("notifications")
+		const content = getSettingsContent()
+		fireEvent.click(await within(content).findByTestId("sound-enabled-checkbox"))
 		fireEvent.click(screen.getByTestId("save-button"))
 
 		await waitFor(() =>
@@ -463,6 +465,7 @@ describe("SettingsView - Sound Settings", () => {
 				expect.objectContaining({
 					type: "updateSettings",
 					updatedSettings: expect.objectContaining({
+						soundEnabled: true,
 						enableCheckpoints: false,
 						checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 						terminalShellIntegrationTimeout: 30_000,
