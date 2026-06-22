@@ -878,6 +878,92 @@ function processData(data) {
 			expect(result.success).toBe(false)
 		})
 
+		it("should include line range debug info when search fails with start_line marker", async () => {
+			const originalContent = "line one\nline two"
+			const diffContent = `test.ts
+<<<<<<< SEARCH
+:start_line:999
+-------
+non-existent content that cannot be found in the file
+=======
+replacement content here
+>>>>>>> REPLACE`
+
+			const result = await strategy.applyDiff(originalContent, diffContent)
+			expect(result.success).toBe(false)
+			const error =
+				!result.success && result.failParts?.[0]
+					? "error" in result.failParts[0]
+						? result.failParts[0].error
+						: ""
+					: ""
+			expect(error).toContain("No sufficiently similar match found")
+			expect(error).toContain("at line: 999")
+			expect(error).toContain("Search Range: starting at line 999")
+			expect(error).toContain("Best Match Found:\n(no match)")
+			expect(error).toContain("Levenshtein Distance: N/A")
+			expect(error).toContain("Best Match Length: 0 characters")
+		})
+
+		it("should include scoped original content when search fails with start_line that has a low-score match", async () => {
+			const originalContent = "function existing() {\n    return 42;\n}\n"
+			const diffContent = `test.ts
+<<<<<<< SEARCH
+:start_line:1
+-------
+function different() {
+    return 99;
+}
+=======
+function newVersion() {
+    return 99;
+}
+>>>>>>> REPLACE`
+
+			const result = await strategy.applyDiff(originalContent, diffContent)
+			expect(result.success).toBe(false)
+			const error =
+				!result.success && result.failParts?.[0]
+					? "error" in result.failParts[0]
+						? result.failParts[0].error
+						: ""
+					: ""
+			expect(error).toContain("No sufficiently similar match found")
+			expect(error).toContain("at line: 1")
+			expect(error).toContain("Search Range: starting at line 1")
+			expect(error).toContain("Best Match Found:")
+			expect(error).toContain("Original Content:\n1 | function existing()")
+		})
+
+		it("should include best-match debug info when unscoped search is below threshold", async () => {
+			const strictStrategy = new MultiSearchReplaceDiffStrategy(1, 5)
+			const originalContent = "function processUsers(data) {\n    return data.map(user => user.name);\n}\n"
+			const diffContent = `test.ts
+<<<<<<< SEARCH
+function processUsers(data) {
+    return data.map(user => user.username);
+}
+=======
+function processUsers(data) {
+    return data.map(user => user.displayName);
+}
+>>>>>>> REPLACE`
+
+			const result = await strictStrategy.applyDiff(originalContent, diffContent)
+			expect(result.success).toBe(false)
+			const error =
+				!result.success && result.failParts?.[0]
+					? "error" in result.failParts[0]
+						? result.failParts[0].error
+						: ""
+					: ""
+			expect(error).toContain("Search Range: start to end")
+			expect(error).toContain("Levenshtein Distance:")
+			expect(error).toContain("characters")
+			expect(error).toContain("Best Match Length:")
+			expect(error).toContain("Best Match Found:\n1 | function processUsers(data)")
+		})
+
 		it("should match content with extra whitespace", async () => {
 			const originalContent = "function sum(a, b) {\n    return a + b;\n}"
 			const diffContent = `test.ts
