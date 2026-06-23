@@ -102,7 +102,13 @@ import { Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
-import { readApiMessages, saveApiMessages, saveTaskMessages, TaskHistoryStore } from "../task-persistence"
+import {
+	readApiMessages,
+	saveApiMessages,
+	saveTaskMessages,
+	TaskHistoryStore,
+	assertValidTransition,
+} from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
@@ -527,6 +533,7 @@ export class ClineProvider
 						const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
 
 						if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === childTaskId) {
+							assertValidTransition(parentHistory.status, "active")
 							await this.updateTaskHistory({
 								...parentHistory,
 								status: "active",
@@ -3204,6 +3211,7 @@ export class ClineProvider
 					const { historyItem: parentHistory } = await this.getTaskWithId(task.parentTaskId!)
 
 					if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === task.taskId) {
+						assertValidTransition(parentHistory.status, "active")
 						await this.updateTaskHistory({
 							...parentHistory,
 							status: "active",
@@ -3520,6 +3528,7 @@ export class ClineProvider
 		//    Broadcast and cache invalidation happen outside the lock after it releases.
 		try {
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
+				assertValidTransition(historyItem.status, "delegated")
 				const childIds = Array.from(new Set([...(historyItem.childIds ?? []), child.taskId]))
 				return {
 					...historyItem,
@@ -3790,8 +3799,7 @@ export class ClineProvider
 				}
 				if (updatedParent) {
 					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedParent })
-				}
-			}
+				}			}
 
 			// 6) Emit TaskDelegationCompleted (provider-level)
 			try {

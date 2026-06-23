@@ -34,6 +34,7 @@ vi.mock("../core/task-persistence", () => ({
 	readApiMessages: vi.fn().mockResolvedValue([]),
 	saveApiMessages: vi.fn().mockResolvedValue(undefined),
 	saveTaskMessages: vi.fn().mockResolvedValue(undefined),
+	assertValidTransition: vi.fn(),
 }))
 
 import { ClineProvider } from "../core/webview/ClineProvider"
