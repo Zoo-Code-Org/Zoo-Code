@@ -526,7 +526,7 @@
 		"tiktoken": "^1.0.21",
 		"tree-sitter-wasms": "^0.1.12",
 		"undici": "^6.21.3",
-		"uuid": "^11.1.0",
+		"uuid": "^14.0.0",
 		"vscode-material-icons": "^0.1.1",
 		"web-tree-sitter": "^0.25.6",
 		"workerpool": "^9.2.0",
