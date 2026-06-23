@@ -1,0 +1,136 @@
+import type { ApiHandlerCreateMessageMetadata } from "../../index"
+
+/**
+ * A generic, SDK-agnostic request configuration builder.
+ *
+ * Provides a fluent API for building request configurations with:
+ * - Chainable method calls
+ * - Generic type support (TOptions)
+ * - Abort signal handling
+ * - Header merging
+ * - Static factory methods
+ */
+export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<string, any>> {
+	protected options: TOptions
+
+	constructor(defaultOptions?: Partial<TOptions>) {
+		this.options = (defaultOptions ? { ...defaultOptions } : {}) as TOptions
+	}
+
+	/**
+	 * Add an abort signal from metadata.
+	 *
+	 * @param metadata - Optional metadata containing an abortSignal
+	 * @returns this for chainable calls
+	 */
+	addAbortSignal(metadata?: ApiHandlerCreateMessageMetadata): this {
+		if (!metadata?.abortSignal) {
+			return this
+		}
+
+		this.options = { ...this.options, signal: metadata.abortSignal } as TOptions
+		return this
+	}
+
+	/**
+	 * Add or merge custom headers.
+	 *
+	 * @param headers - Key-value pairs of header names and values
+	 * @returns this for chainable calls
+	 */
+	addHeaders(headers: Record<string, string>): this {
+		if (Object.keys(headers).length === 0) {
+			return this
+		}
+
+		const existingHeaders = (this.options as any).headers ?? {}
+		this.options = { ...this.options, headers: { ...existingHeaders, ...headers } } as TOptions
+		return this
+	}
+
+	/**
+	 * Set a single option by key (type-safe).
+	 *
+	 * @param key - Option key
+	 * @param value - Option value
+	 * @returns this for chainable calls
+	 */
+	setOption<K extends keyof TOptions>(key: K, value: TOptions[K]): this {
+		if (value === undefined) {
+			return this
+		}
+
+		this.options = { ...this.options, [key]: value } as TOptions
+		return this
+	}
+
+	/**
+	 * Get an option by key.
+	 *
+	 * @param key - Option key
+	 * @returns The option value or undefined if not set
+	 */
+	getOption<K extends keyof TOptions>(key: K): TOptions[K] | undefined {
+		return this.options[key]
+	}
+
+	/**
+	 * Build the final configuration object.
+	 *
+	 * Returns a shallow copy of the internal options to ensure immutability.
+	 * Returns undefined if no options have been set.
+	 *
+	 * @returns The built configuration or undefined if empty
+	 */
+	build(): TOptions | undefined {
+		const keys = Object.keys(this.options as object)
+		if (keys.length === 0) {
+			return undefined
+		}
+
+		return { ...this.options } as TOptions
+	}
+
+	/**
+	 * Factory method to quickly create and configure a builder from metadata.
+	 *
+	 * @param metadata - Optional metadata containing an abortSignal
+	 * @param extraOptions - Additional options to merge
+	 * @returns The built configuration or undefined if empty
+	 */
+	static fromMetadata<TOptions extends Record<string, any> = Record<string, any>>(
+		metadata?: ApiHandlerCreateMessageMetadata,
+		extraOptions?: Partial<TOptions>,
+	): TOptions | undefined {
+		const builder = new RequestConfigBuilder<TOptions>(extraOptions)
+		builder.addAbortSignal(metadata)
+		return builder.build()
+	}
+
+	/**
+	 * Merge multiple abort signals.
+	 *
+	 * If any signal is aborted, the returned signal will be aborted.
+	 *
+	 * @param primarySignal - The primary abort signal
+	 * @param secondarySignal - Optional secondary abort signal
+	 * @returns A merged AbortSignal
+	 */
+	static mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: AbortSignal): AbortSignal {
+		if (!secondarySignal || secondarySignal.aborted) {
+			return primarySignal
+		}
+
+		const controller = new AbortController()
+
+		if (primarySignal.aborted) {
+			controller.abort()
+			return controller.signal
+		}
+
+		primarySignal.addEventListener("abort", () => controller.abort(), { once: true })
+		secondarySignal.addEventListener("abort", () => controller.abort(), { once: true })
+
+		return controller.signal
+	}
+}
