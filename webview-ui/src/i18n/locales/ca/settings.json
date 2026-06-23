@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Activa les regles dels subdirectoris",
 			"description": "Descobreix i carrega recursivament fitxers .roo/rules i AGENTS.md des de subdirectoris. Útil per a monorepos amb regles per paquet."
+		},
+		"compactToolUI": {
+			"label": "Visualització compacta d'eines",
+			"description": "Replega els blocs d'eines ja executades a una sola línia al xat; fes clic en una eina per veure'n els detalls. Les indicacions d'aprovació sempre es mostren completes."
 		}
 	},
 	"terminal": {

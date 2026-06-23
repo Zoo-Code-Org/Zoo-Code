@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Włącz reguły podfolderów",
 			"description": "Rekursywnie odkrywaj i ładuj pliki .roo/rules i AGENTS.md z podkatalogów. Przydatne dla monorepo z regułami dla poszczególnych pakietów."
+		},
+		"compactToolUI": {
+			"label": "Kompaktowy widok narzędzi",
+			"description": "Zwija wykonane bloki narzędzi do jednej linii w czacie; kliknij narzędzie, aby rozwinąć szczegóły. Monity o zatwierdzenie są zawsze pokazywane w całości."
 		}
 	},
 	"terminal": {

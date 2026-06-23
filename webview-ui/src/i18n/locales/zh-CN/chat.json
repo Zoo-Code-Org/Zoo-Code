@@ -485,5 +485,9 @@
 		"title": "供应商不再受支持",
 		"message": "此提供商已不可用。请选择受支持的提供商以继续。",
 		"openSettings": "打开设置"
+	},
+	"compactTool": {
+		"label": "工具：{{tool}}",
+		"expandHint": "点击展开工具详情"
 	}
 }

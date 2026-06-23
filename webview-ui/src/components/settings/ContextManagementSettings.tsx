@@ -33,6 +33,7 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	maxOpenTabsContext: number
 	maxWorkspaceFiles: number
 	showRooIgnoredFiles?: boolean
+	compactToolUI?: boolean
 	enableSubfolderRules?: boolean
 	maxImageFileSize?: number
 	maxTotalImageSize?: number
@@ -52,6 +53,7 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "maxOpenTabsContext"
 		| "maxWorkspaceFiles"
 		| "showRooIgnoredFiles"
+		| "compactToolUI"
 		| "enableSubfolderRules"
 		| "maxImageFileSize"
 		| "maxTotalImageSize"
@@ -73,6 +75,7 @@ export const ContextManagementSettings = ({
 	maxOpenTabsContext,
 	maxWorkspaceFiles,
 	showRooIgnoredFiles,
+	compactToolUI,
 	enableSubfolderRules,
 	setCachedStateField,
 	maxImageFileSize,
@@ -230,6 +233,23 @@ export const ContextManagementSettings = ({
 					</VSCodeCheckbox>
 					<div className="text-vscode-descriptionForeground text-sm mt-1 mb-3">
 						{t("settings:contextManagement.rooignore.description")}
+					</div>
+				</SearchableSetting>
+
+				<SearchableSetting
+					settingId="context-compact-tool-ui"
+					section="contextManagement"
+					label={t("settings:contextManagement.compactToolUI.label")}>
+					<VSCodeCheckbox
+						checked={compactToolUI}
+						onChange={(e: any) => setCachedStateField("compactToolUI", e.target.checked)}
+						data-testid="compact-tool-ui-checkbox">
+						<label className="block font-medium mb-1">
+							{t("settings:contextManagement.compactToolUI.label")}
+						</label>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1 mb-3">
+						{t("settings:contextManagement.compactToolUI.description")}
 					</div>
 				</SearchableSetting>
 

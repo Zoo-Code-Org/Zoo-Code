@@ -71,6 +71,7 @@ import {
 	Split,
 	ArrowRight,
 	Check,
+	ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PathTooltip } from "../ui/PathTooltip"
@@ -182,8 +183,16 @@ export const ChatRowContent = ({
 }: ChatRowContentProps) => {
 	const { t, i18n } = useTranslation()
 
-	const { mcpServers, alwaysAllowMcp, currentCheckpoint, mode, apiConfiguration, clineMessages, currentTaskItem } =
-		useExtensionState()
+	const {
+		mcpServers,
+		alwaysAllowMcp,
+		currentCheckpoint,
+		mode,
+		apiConfiguration,
+		clineMessages,
+		currentTaskItem,
+		compactToolUI,
+	} = useExtensionState()
 	const { info: model } = useSelectedModel(apiConfiguration)
 	const [isEditing, setIsEditing] = useState(false)
 	const [editedContent, setEditedContent] = useState("")
@@ -1404,6 +1413,28 @@ export const ChatRowContent = ({
 					// Handle say tool messages
 					const sayTool = safeJsonParse<ClineSayTool>(message.text)
 					if (!sayTool) return null
+
+					// Compact mode (#322): collapse executed (history) tool blocks to a single
+					// clickable line, hiding verbose params/payloads until expanded. Only applies
+					// to `say` tool rows here — approval prompts (`ask`) are never compacted.
+					if (compactToolUI && !isExpanded) {
+						const compactLabel = sayTool.path ? `${sayTool.tool}: ${sayTool.path}` : sayTool.tool
+						return (
+							<button
+								type="button"
+								onClick={handleToggleExpand}
+								aria-expanded={false}
+								className="flex items-center gap-2 py-0.5 cursor-pointer text-vscode-descriptionForeground hover:text-vscode-foreground bg-transparent border-none text-inherit w-full text-left"
+								data-testid="compact-tool-row"
+								title={t("chat:compactTool.expandHint")}>
+								<ChevronRight className="w-3.5 h-3.5 shrink-0" />
+								<PocketKnife className="w-3.5 h-3.5 shrink-0" />
+								<span className="truncate text-sm">
+									{t("chat:compactTool.label", { tool: compactLabel })}
+								</span>
+							</button>
+						)
+					}
 
 					switch (sayTool.tool) {
 						case "runSlashCommand": {

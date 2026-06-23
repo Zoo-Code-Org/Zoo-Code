@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "하위 폴더 규칙 활성화",
 			"description": "하위 디렉토리에서 .roo/rules 및 AGENTS.md 파일을 재귀적으로 검색하고 로드합니다. 패키지별 규칙이 있는 모노레포에 유용합니다."
+		},
+		"compactToolUI": {
+			"label": "도구 컴팩트 표시",
+			"description": "실행된 도구 블록을 채팅에서 한 줄로 접습니다. 도구를 클릭하면 세부 정보가 펼쳐집니다. 승인 프롬프트는 항상 전체가 표시됩니다."
 		}
 	},
 	"terminal": {

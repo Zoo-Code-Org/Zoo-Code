@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Activar reglas de subcarpetas",
 			"description": "Descubrir y cargar recursivamente archivos .roo/rules y AGENTS.md desde subdirectorios. Útil para monorepos con reglas por paquete."
+		},
+		"compactToolUI": {
+			"label": "Visualización compacta de herramientas",
+			"description": "Colapsa los bloques de herramientas ya ejecutadas a una sola línea en el chat; haz clic en una herramienta para ver sus detalles. Los prompts de aprobación siempre se muestran completos."
 		}
 	},
 	"terminal": {

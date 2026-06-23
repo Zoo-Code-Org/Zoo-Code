@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Aktifkan aturan subfolder",
 			"description": "Temukan dan muat file .roo/rules dan AGENTS.md secara rekursif dari subdirektori. Berguna untuk monorepo dengan aturan per-paket."
+		},
+		"compactToolUI": {
+			"label": "Tampilan alat ringkas",
+			"description": "Menciutkan blok alat yang sudah dijalankan menjadi satu baris di obrolan; klik alat untuk membuka detailnya. Prompt persetujuan selalu ditampilkan penuh."
 		}
 	},
 	"terminal": {

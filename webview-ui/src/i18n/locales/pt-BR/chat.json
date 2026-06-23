@@ -484,5 +484,9 @@
 		"title": "Provedor não é mais suportado",
 		"message": "Este provedor não está mais disponível. Selecione um provedor compatível para continuar.",
 		"openSettings": "Abrir configurações"
+	},
+	"compactTool": {
+		"label": "Ferramenta: {{tool}}",
+		"expandHint": "Clique para expandir os detalhes da ferramenta"
 	}
 }

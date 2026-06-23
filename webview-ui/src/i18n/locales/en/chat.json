@@ -472,5 +472,9 @@
 		"title": "Provider no longer supported",
 		"message": "This provider is no longer available. Select a supported provider to continue.",
 		"openSettings": "Open Settings"
+	},
+	"compactTool": {
+		"label": "Tool: {{tool}}",
+		"expandHint": "Click to expand tool details"
 	}
 }

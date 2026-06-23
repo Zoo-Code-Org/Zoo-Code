@@ -791,6 +791,10 @@
 		"enableSubfolderRules": {
 			"label": "Enable subfolder rules",
 			"description": "Recursively discover and load .roo/rules and AGENTS.md files from subdirectories. Useful for monorepos with per-package rules."
+		},
+		"compactToolUI": {
+			"label": "Compact tool display",
+			"description": "Collapse executed tool blocks to a single line in the chat; click a tool to expand its details. Approval prompts are always shown in full."
 		}
 	},
 	"terminal": {

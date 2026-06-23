@@ -484,5 +484,9 @@
 		"title": "Dostawca nie jest już obsługiwany",
 		"message": "Ten dostawca nie jest już dostępny. Wybierz obsługiwanego dostawcę, aby kontynuować.",
 		"openSettings": "Otwórz ustawienia"
+	},
+	"compactTool": {
+		"label": "Narzędzie: {{tool}}",
+		"expandHint": "Kliknij, aby rozwinąć szczegóły narzędzia"
 	}
 }

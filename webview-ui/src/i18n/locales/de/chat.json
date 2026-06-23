@@ -484,5 +484,9 @@
 		"title": "Anbieter wird nicht mehr unterstützt",
 		"message": "Dieser Anbieter ist nicht mehr verfügbar. Wähle einen unterstützten Anbieter aus, um fortzufahren.",
 		"openSettings": "Einstellungen öffnen"
+	},
+	"compactTool": {
+		"label": "Tool: {{tool}}",
+		"expandHint": "Zum Einblenden der Tool-Details klicken"
 	}
 }

@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Activer les règles des sous-dossiers",
 			"description": "Découvrir et charger récursivement les fichiers .roo/rules et AGENTS.md depuis les sous-répertoires. Utile pour les monorepos avec des règles par package."
+		},
+		"compactToolUI": {
+			"label": "Affichage compact des outils",
+			"description": "Réduit les blocs d'outils exécutés à une seule ligne dans le chat ; cliquez sur un outil pour afficher ses détails. Les invites d'approbation sont toujours affichées en entier."
 		}
 	},
 	"terminal": {

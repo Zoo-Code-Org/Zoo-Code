@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "启用子文件夹规则",
 			"description": "递归发现并加载子目录中的 .roo/rules 和 AGENTS.md 文件。适用于具有每包规则的 monorepo。"
+		},
+		"compactToolUI": {
+			"label": "紧凑工具显示",
+			"description": "将聊天中已执行的工具块折叠为单行；点击工具可展开其详细信息。审批提示始终完整显示。"
 		}
 	},
 	"terminal": {

@@ -485,5 +485,9 @@
 		"title": "Sağlayıcı artık desteklenmiyor",
 		"message": "Bu sağlayıcı artık kullanılamıyor. Devam etmek için desteklenen bir sağlayıcı seçin.",
 		"openSettings": "Ayarları aç"
+	},
+	"compactTool": {
+		"label": "Araç: {{tool}}",
+		"expandHint": "Araç ayrıntılarını genişletmek için tıklayın"
 	}
 }

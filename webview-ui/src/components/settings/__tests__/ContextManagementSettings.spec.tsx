@@ -92,6 +92,7 @@ describe("ContextManagementSettings", () => {
 		maxOpenTabsContext: 20,
 		maxWorkspaceFiles: 200,
 		showRooIgnoredFiles: false,
+		compactToolUI: false,
 		profileThresholds: {},
 		includeDiagnosticMessages: true,
 		maxDiagnosticMessages: 50,
@@ -147,6 +148,23 @@ describe("ContextManagementSettings", () => {
 
 		await waitFor(() => {
 			expect(setCachedStateField).toHaveBeenCalledWith("includeDiagnosticMessages", false)
+		})
+	})
+
+	it("renders the compact tool UI toggle", () => {
+		render(<ContextManagementSettings {...defaultProps} />)
+		expect(screen.getByTestId("compact-tool-ui-checkbox")).toBeInTheDocument()
+	})
+
+	it("calls setCachedStateField when the compact tool UI checkbox is toggled", async () => {
+		const setCachedStateField = vi.fn()
+		render(<ContextManagementSettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+
+		const checkbox = screen.getByTestId("compact-tool-ui-checkbox").querySelector("input")!
+		fireEvent.click(checkbox)
+
+		await waitFor(() => {
+			expect(setCachedStateField).toHaveBeenCalledWith("compactToolUI", true)
 		})
 	})
 

@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Bật quy tắc thư mục con",
 			"description": "Khám phá và tải đệ quy các tệp .roo/rules và AGENTS.md từ các thư mục con. Hữu ích cho monorepo có quy tắc theo gói."
+		},
+		"compactToolUI": {
+			"label": "Hiển thị công cụ thu gọn",
+			"description": "Thu gọn các khối công cụ đã thực thi thành một dòng trong trò chuyện; nhấp vào một công cụ để mở rộng chi tiết. Lời nhắc phê duyệt luôn được hiển thị đầy đủ."
 		}
 	},
 	"terminal": {

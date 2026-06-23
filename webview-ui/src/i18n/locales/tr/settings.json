@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Alt klasör kurallarını etkinleştir",
 			"description": "Alt dizinlerden .roo/rules ve AGENTS.md dosyalarını yinelemeli olarak keşfet ve yükle. Paket başına kuralları olan monorepo'lar için kullanışlı."
+		},
+		"compactToolUI": {
+			"label": "Kompakt araç görünümü",
+			"description": "Yürütülen araç bloklarını sohbette tek satıra daraltır; ayrıntıları görmek için bir araca tıklayın. Onay istemleri her zaman tam olarak gösterilir."
 		}
 	},
 	"terminal": {

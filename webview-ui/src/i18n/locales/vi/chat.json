@@ -485,5 +485,9 @@
 		"title": "Nhà cung cấp không còn được hỗ trợ",
 		"message": "Nhà cung cấp này không còn khả dụng. Hãy chọn một nhà cung cấp được hỗ trợ để tiếp tục.",
 		"openSettings": "Mở cài đặt"
+	},
+	"compactTool": {
+		"label": "Công cụ: {{tool}}",
+		"expandHint": "Nhấp để mở rộng chi tiết công cụ"
 	}
 }

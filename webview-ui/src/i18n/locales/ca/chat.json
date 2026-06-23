@@ -484,5 +484,9 @@
 		"title": "Proveïdor ja no compatible",
 		"message": "Aquest proveïdor ja no està disponible. Selecciona un proveïdor compatible per continuar.",
 		"openSettings": "Obrir configuració"
+	},
+	"compactTool": {
+		"label": "Eina: {{tool}}",
+		"expandHint": "Fes clic per ampliar els detalls de l'eina"
 	}
 }

@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Unterordner-Regeln aktivieren",
 			"description": "Rekursiv .roo/rules und AGENTS.md-Dateien aus Unterverzeichnissen laden. Nützlich für Monorepos mit paketspezifischen Regeln."
+		},
+		"compactToolUI": {
+			"label": "Kompakte Tool-Anzeige",
+			"description": "Reduziert ausgeführte Tool-Blöcke im Chat auf eine einzige Zeile; klicken Sie auf ein Tool, um die Details einzublenden. Genehmigungsdialoge werden immer vollständig angezeigt."
 		}
 	},
 	"terminal": {

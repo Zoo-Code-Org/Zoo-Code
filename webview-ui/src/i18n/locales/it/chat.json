@@ -484,5 +484,9 @@
 		"title": "Provider non più supportato",
 		"message": "Questo provider non è più disponibile. Seleziona un provider supportato per continuare.",
 		"openSettings": "Apri impostazioni"
+	},
+	"compactTool": {
+		"label": "Strumento: {{tool}}",
+		"expandHint": "Fai clic per espandere i dettagli dello strumento"
 	}
 }

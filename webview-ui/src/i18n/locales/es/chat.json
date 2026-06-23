@@ -484,5 +484,9 @@
 		"title": "Proveedor ya no compatible",
 		"message": "Este proveedor ya no está disponible. Selecciona un proveedor compatible para continuar.",
 		"openSettings": "Abrir configuración"
+	},
+	"compactTool": {
+		"label": "Herramienta: {{tool}}",
+		"expandHint": "Clic para expandir los detalles de la herramienta"
 	}
 }

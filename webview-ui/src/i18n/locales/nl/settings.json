@@ -711,6 +711,10 @@
 		"enableSubfolderRules": {
 			"label": "Submap-regels inschakelen",
 			"description": "Recursief .roo/rules en AGENTS.md-bestanden uit submappen ontdekken en laden. Handig voor monorepo's met regels per pakket."
+		},
+		"compactToolUI": {
+			"label": "Compacte toolweergave",
+			"description": "Vouwt uitgevoerde toolblokken in de chat samen tot één regel; klik op een tool om de details uit te vouwen. Goedkeuringsprompts worden altijd volledig getoond."
 		}
 	},
 	"terminal": {
