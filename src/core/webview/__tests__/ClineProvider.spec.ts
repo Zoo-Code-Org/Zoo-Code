@@ -1105,6 +1105,15 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	it("getStateToPostToWebview passes through defined diffFuzzyThreshold value", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("diffFuzzyThreshold", 0.5)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.diffFuzzyThreshold).toBe(0.5)
+	})
+
 	it("loads saved API config when switching modes", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
