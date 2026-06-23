@@ -59,6 +59,7 @@ export class ProfileValidator {
 			case "vertex":
 			case "gemini":
 			case "mistral":
+			case "novita":
 			case "deepseek":
 			case "xai":
 			case "sambanova":

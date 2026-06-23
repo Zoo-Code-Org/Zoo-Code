@@ -258,6 +258,21 @@ describe("ProfileValidator", () => {
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
 		})
 
+		it("should extract apiModelId for novita provider", () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					novita: { allowAll: false, models: ["moonshotai/kimi-k2.7-code"] },
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: "novita",
+				apiModelId: "moonshotai/kimi-k2.7-code",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+		})
+
 		it("should extract requestyModelId for requesty provider", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,

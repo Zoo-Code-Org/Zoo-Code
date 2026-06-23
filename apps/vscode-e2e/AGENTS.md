@@ -229,6 +229,25 @@ After converting the generated `openai-*.json` files into stable named fixtures,
 USE_MOCK=true TEST_FILE=deepseek-v4.test pnpm --filter @roo-code/vscode-e2e test:run
 ```
 
+### Novita AI (`suite/providers/novita.test.ts`)
+
+Novita exposes an OpenAI-compatible endpoint, so the suite redirects the provider through aimock with
+`novitaBaseUrl: ${AIMOCK_URL}/v1`. The default model is `moonshotai/kimi-k2.7-code`; override it with
+`NOVITA_MODEL_ID` only when refreshing matching fixtures.
+
+Record Novita fixtures with the targeted file filter so aimock proxies OpenAI-compatible traffic to
+`https://api.novita.ai/openai`:
+
+```sh
+NOVITA_API_KEY=<key> TEST_FILE=novita.test pnpm --filter @roo-code/vscode-e2e test:record
+```
+
+After converting generated `openai-*.json` files into `fixtures/novita.json`, verify in mock mode:
+
+```sh
+USE_MOCK=true TEST_FILE=novita.test pnpm --filter @roo-code/vscode-e2e test:run
+```
+
 ## Tests that use a non-default provider
 
 If your test calls `api.setConfiguration({ apiProvider: "anthropic", ... })`, point aimock at the

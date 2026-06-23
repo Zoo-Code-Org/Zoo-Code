@@ -20,6 +20,7 @@ import {
 	OpenAiNativeHandler,
 	DeepSeekHandler,
 	MoonshotHandler,
+	NovitaHandler,
 	MistralHandler,
 	VsCodeLmHandler,
 	RequestyHandler,
@@ -160,6 +161,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new QwenCodeHandler(options)
 		case "moonshot":
 			return new MoonshotHandler(options)
+		case "novita":
+			return new NovitaHandler(options)
 		case "vscode-lm":
 			return new VsCodeLmHandler(options)
 		case "mistral":

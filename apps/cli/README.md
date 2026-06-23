@@ -76,6 +76,8 @@ By default, the CLI auto-approves actions and runs in interactive TUI mode:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-...
+# or use Novita AI, the AI-native cloud for builders and agents:
+export NOVITA_API_KEY=...
 
 roo "What is this project?" -w ~/Documents/my-project
 ```
@@ -160,7 +162,7 @@ If you never used Roo Code Router, you can ignore this section entirely.
 | `-d, --debug`                           | Enable debug output (includes detailed debug information, prompts, paths, etc)          | `false`                     |
 | `-a, --require-approval`                | Require manual approval before actions execute                                          | `false`                     |
 | `-k, --api-key <key>`                   | API key for the LLM provider                                                            | From env var                |
-| `--provider <provider>`                 | API provider (anthropic, openai-native, gemini, openrouter, vercel-ai-gateway)          | `openrouter`                |
+| `--provider <provider>`                 | API provider (anthropic, openai-native, gemini, openrouter, novita, vercel-ai-gateway)  | `openrouter`                |
 | `-m, --model <model>`                   | Model to use                                                                            | `anthropic/claude-opus-4.6` |
 | `--mode <mode>`                         | Mode to start in (code, architect, ask, debug, etc.)                                    | `code`                      |
 | `--terminal-shell <path>`               | Absolute shell path for inline terminal command execution                               | Auto-detected shell         |
@@ -186,6 +188,7 @@ The CLI will look for API keys in environment variables if not provided via `--a
 | anthropic         | `ANTHROPIC_API_KEY`         |
 | openai-native     | `OPENAI_API_KEY`            |
 | openrouter        | `OPENROUTER_API_KEY`        |
+| novita            | `NOVITA_API_KEY`            |
 | gemini            | `GOOGLE_API_KEY`            |
 | vercel-ai-gateway | `VERCEL_AI_GATEWAY_API_KEY` |
 
@@ -233,6 +236,10 @@ The CLI will look for API keys in environment variables if not provided via `--a
 ```bash
 # Run directly from source (no build required)
 pnpm dev --provider openrouter --api-key $OPENROUTER_API_KEY --print "Hello"
+
+# Novita AI: The AI-Native Cloud for Builders and Agents.
+# Run models, scale GPUs, and build AI agents, all on one platform.
+pnpm dev --provider novita --api-key $NOVITA_API_KEY --model moonshotai/kimi-k2.7-code --print "Hello"
 
 # Run tests
 pnpm test

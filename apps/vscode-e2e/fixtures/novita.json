@@ -1,0 +1,35 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"model": "moonshotai/kimi-k2.7-code",
+				"userMessage": "novita-e2e:tool-use",
+				"sequenceIndex": 0
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"novita-e2e-marker.txt\"}",
+						"id": "call_novita_read"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "moonshotai/kimi-k2.7-code",
+				"toolCallId": "call_novita_read"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"NOVITA_E2E_MARKER\"}",
+						"id": "call_novita_done"
+					}
+				]
+			}
+		}
+	]
+}
