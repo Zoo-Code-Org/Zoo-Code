@@ -1,4 +1,4 @@
-import { getApiKeyFromEnv } from "../provider.js"
+import { getApiKeyFromEnv, getProviderSettings } from "../provider.js"
 
 describe("getApiKeyFromEnv", () => {
 	const originalEnv = process.env
@@ -35,5 +35,15 @@ describe("getApiKeyFromEnv", () => {
 	it("should return undefined when API key is not set", () => {
 		delete process.env.ANTHROPIC_API_KEY
 		expect(getApiKeyFromEnv("anthropic")).toBeUndefined()
+	})
+})
+
+describe("getProviderSettings", () => {
+	it("should map Novita key and model into provider settings", () => {
+		expect(getProviderSettings("novita", "test-novita-key", "moonshotai/kimi-k2.7-code")).toEqual({
+			apiProvider: "novita",
+			novitaApiKey: "test-novita-key",
+			apiModelId: "moonshotai/kimi-k2.7-code",
+		})
 	})
 })

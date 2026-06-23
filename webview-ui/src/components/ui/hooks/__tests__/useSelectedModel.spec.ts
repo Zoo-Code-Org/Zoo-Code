@@ -13,6 +13,8 @@ import {
 	openAiModelInfoSaneDefaults,
 	minimaxDefaultModelId,
 	minimaxModels,
+	novitaDefaultModelId,
+	novitaModels,
 	openRouterDefaultModelId,
 } from "@roo-code/types"
 
@@ -770,6 +772,53 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe("minimax")
 			expect(result.current.id).toBe("MiniMax-M2.7")
 			expect(result.current.info).toEqual(minimaxModels["MiniMax-M2.7"])
+		})
+	})
+
+	describe("novita provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return default Novita model when no custom model is specified", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "novita",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("novita")
+			expect(result.current.id).toBe(novitaDefaultModelId)
+			expect(result.current.info).toEqual(novitaModels[novitaDefaultModelId])
+		})
+
+		it("should use custom model ID and info when model exists in novitaModels", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "novita",
+				apiModelId: "minimax/minimax-m3",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("novita")
+			expect(result.current.id).toBe("minimax/minimax-m3")
+			expect(result.current.info).toEqual(novitaModels["minimax/minimax-m3"])
 		})
 	})
 })

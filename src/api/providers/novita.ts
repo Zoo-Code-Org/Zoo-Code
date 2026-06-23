@@ -32,7 +32,7 @@ export class NovitaHandler extends OpenAICompatibleHandler {
 			modelId: id,
 			model: info,
 			settings: this.options,
-			defaultTemperature: info.defaultTemperature ?? 0,
+			defaultTemperature: "defaultTemperature" in info ? info.defaultTemperature : 0,
 		})
 		return { id, info, ...params }
 	}

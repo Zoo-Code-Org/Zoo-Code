@@ -79,7 +79,7 @@ export OPENROUTER_API_KEY=sk-or-v1-...
 # or use Novita AI, the AI-native cloud for builders and agents:
 export NOVITA_API_KEY=...
 
-roo "What is this project?" -w ~/Documents/my-project
+roo "What is this project?" --provider novita -w ~/Documents/my-project
 ```
 
 You can also run without a prompt and enter it interactively in TUI mode:

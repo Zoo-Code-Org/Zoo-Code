@@ -64,4 +64,15 @@ describe("NovitaHandler", () => {
 		expect(model.id).toBe("provider/new-model")
 		expect(model.info).toBe(novitaModels[novitaDefaultModelId])
 	})
+
+	it("applies custom model max tokens and temperature settings", () => {
+		const handler = new NovitaHandler({
+			...mockOptions,
+			modelMaxTokens: 2048,
+			modelTemperature: 0.3,
+		})
+
+		const model = handler.getModel()
+		expect(model.temperature).toBe(0.3)
+	})
 })
