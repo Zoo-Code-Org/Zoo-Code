@@ -1,4 +1,4 @@
-import { NativeToolCallParser } from "../NativeToolCallParser"
+import { NativeToolCallParser, type ToolCallStreamEvent } from "../NativeToolCallParser"
 
 describe("NativeToolCallParser", () => {
 	describe("parseToolCall", () => {
@@ -448,6 +448,148 @@ describe("NativeToolCallParser", () => {
 					expect(nativeArgs.limit).toBe(10)
 				}
 			})
+		})
+	})
+
+	describe("processRawChunk streaming reassembly", () => {
+		// Mirror the sequencing Task.ts performs: feed each raw chunk through
+		// processRawChunk, drive startStreamingToolCall on tool_call_start, feed
+		// tool_call_delta into processStreamingChunk, and finalize at the end.
+		// Returns the ordered event types/ids plus the finalized tool uses by id.
+		const drive = (
+			rawChunks: Array<{ index: number; id?: string; name?: string; arguments?: string }>,
+			finishReason: string | null = "tool_calls",
+		) => {
+			const events: ToolCallStreamEvent[] = []
+
+			const handleEvent = (event: ToolCallStreamEvent) => {
+				events.push(event)
+				if (event.type === "tool_call_start") {
+					NativeToolCallParser.startStreamingToolCall(event.id, event.name)
+				} else if (event.type === "tool_call_delta") {
+					NativeToolCallParser.processStreamingChunk(event.id, event.delta)
+				}
+			}
+
+			for (const chunk of rawChunks) {
+				for (const event of NativeToolCallParser.processRawChunk(chunk)) {
+					handleEvent(event)
+				}
+			}
+
+			// Task.ts emits ends via processFinishReason on finish_reason: "tool_calls".
+			// Use clearRawChunkState (not finalizeRawChunks) for cleanup so we don't
+			// double-count the end events both paths would produce.
+			for (const event of NativeToolCallParser.processFinishReason(finishReason)) {
+				handleEvent(event)
+			}
+			NativeToolCallParser.clearRawChunkState()
+
+			const finalized = new Map<string, ReturnType<typeof NativeToolCallParser.finalizeStreamingToolCall>>()
+			const startIds = events.filter((e) => e.type === "tool_call_start").map((e) => e.id)
+			for (const id of startIds) {
+				finalized.set(id, NativeToolCallParser.finalizeStreamingToolCall(id))
+			}
+
+			return { events, finalized }
+		}
+
+		it("preserves leading argument bytes that arrive before the id", () => {
+			// First chunk carries arguments but NO id; id+name arrive later, then more args.
+			const fullArgs = JSON.stringify({ path: "src/leading.ts", mode: "slice" })
+			const firstHalf = fullArgs.slice(0, 10)
+			const secondHalf = fullArgs.slice(10)
+
+			const { events, finalized } = drive([
+				{ index: 0, arguments: firstHalf },
+				{ index: 0, id: "call_late_id", name: "read_file" },
+				{ index: 0, arguments: secondHalf },
+			])
+
+			// Exactly one start, in the right order, with the late id.
+			const starts = events.filter((e) => e.type === "tool_call_start")
+			expect(starts).toHaveLength(1)
+			expect(starts[0].id).toBe("call_late_id")
+
+			// The finalized arguments must contain the complete, uncorrupted payload.
+			const result = finalized.get("call_late_id")
+			expect(result).not.toBeNull()
+			expect(result?.type).toBe("tool_use")
+			if (result?.type === "tool_use") {
+				const nativeArgs = result.nativeArgs as { path: string; mode?: string }
+				expect(nativeArgs.path).toBe("src/leading.ts")
+				expect(nativeArgs.mode).toBe("slice")
+			}
+		})
+
+		it("handles id and name arriving in separate chunks (issue #218)", () => {
+			const fullArgs = JSON.stringify({ path: "src/split.ts" })
+
+			const { events, finalized } = drive([
+				{ index: 0, id: "call_split" },
+				{ index: 0, name: "read_file" },
+				{ index: 0, arguments: fullArgs },
+			])
+
+			const starts = events.filter((e) => e.type === "tool_call_start")
+			expect(starts).toHaveLength(1)
+			expect(starts[0].id).toBe("call_split")
+
+			const result = finalized.get("call_split")
+			expect(result?.type).toBe("tool_use")
+			if (result?.type === "tool_use") {
+				const nativeArgs = result.nativeArgs as { path: string }
+				expect(nativeArgs.path).toBe("src/split.ts")
+			}
+		})
+
+		it("keeps two parallel tool calls on distinct indices isolated", () => {
+			const argsA = JSON.stringify({ path: "src/a.ts" })
+			const argsB = JSON.stringify({ path: "src/b.ts" })
+
+			const { events, finalized } = drive([
+				{ index: 0, arguments: argsA.slice(0, 8) },
+				{ index: 1, arguments: argsB.slice(0, 8) },
+				{ index: 0, id: "call_a", name: "read_file" },
+				{ index: 1, id: "call_b", name: "read_file" },
+				{ index: 0, arguments: argsA.slice(8) },
+				{ index: 1, arguments: argsB.slice(8) },
+			])
+
+			const starts = events.filter((e) => e.type === "tool_call_start")
+			expect(starts).toHaveLength(2)
+
+			const resultA = finalized.get("call_a")
+			const resultB = finalized.get("call_b")
+			if (resultA?.type === "tool_use") {
+				expect((resultA.nativeArgs as { path: string }).path).toBe("src/a.ts")
+			}
+			if (resultB?.type === "tool_use") {
+				expect((resultB.nativeArgs as { path: string }).path).toBe("src/b.ts")
+			}
+		})
+
+		it("emits the same event sequence for the single-chunk-with-id flow (regression guard)", () => {
+			const fullArgs = JSON.stringify({ path: "src/single.ts" })
+
+			const { events, finalized } = drive([
+				{ index: 0, id: "call_single", name: "read_file", arguments: fullArgs },
+			])
+
+			expect(events.map((e) => e.type)).toEqual(["tool_call_start", "tool_call_delta", "tool_call_end"])
+			expect(events.every((e) => e.id === "call_single")).toBe(true)
+
+			const result = finalized.get("call_single")
+			if (result?.type === "tool_use") {
+				expect((result.nativeArgs as { path: string }).path).toBe("src/single.ts")
+			}
+		})
+
+		it("does not emit a phantom tool_call_end for a tracker that never received an id", () => {
+			const { events } = drive([{ index: 0, arguments: '{"path":"orphan.ts"}' }])
+
+			expect(events.filter((e) => e.type === "tool_call_start")).toHaveLength(0)
+			expect(events.filter((e) => e.type === "tool_call_end")).toHaveLength(0)
 		})
 	})
 })
