@@ -116,7 +116,7 @@ export const globalSettingsSchema = z.object({
 	 * Range: 0.5 (50% minimum similarity) to 1.0 (exact match only).
 	 * `@default` 1.0
 	 */
-	diffFuzzyThreshold: z.number().min(0).max(1).optional(),
+	diffFuzzyThreshold: z.number().min(0.5).max(1).optional(),
 	requestDelaySeconds: z.number().optional(),
 	alwaysAllowMcp: z.boolean().optional(),
 	alwaysAllowModeSwitch: z.boolean().optional(),
