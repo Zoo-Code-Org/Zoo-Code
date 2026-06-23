@@ -8,6 +8,7 @@ export * from "./lite-llm.js"
 export * from "./lm-studio.js"
 export * from "./mistral.js"
 export * from "./moonshot.js"
+export * from "./novita.js"
 export * from "./ollama.js"
 export * from "./openai.js"
 export * from "./openai-codex.js"
@@ -37,6 +38,7 @@ import { geminiDefaultModelId } from "./gemini.js"
 import { litellmDefaultModelId } from "./lite-llm.js"
 import { mistralDefaultModelId } from "./mistral.js"
 import { moonshotDefaultModelId } from "./moonshot.js"
+import { novitaDefaultModelId } from "./novita.js"
 import { openAiCodexDefaultModelId } from "./openai-codex.js"
 import { openRouterDefaultModelId } from "./openrouter.js"
 import { poeDefaultModelId } from "./poe.js"
@@ -87,6 +89,8 @@ export function getProviderDefaultModelId(
 			return deepSeekDefaultModelId
 		case "moonshot":
 			return moonshotDefaultModelId
+		case "novita":
+			return novitaDefaultModelId
 		case "minimax":
 			return minimaxDefaultModelId
 		case "mimo":

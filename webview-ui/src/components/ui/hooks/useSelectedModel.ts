@@ -8,6 +8,7 @@ import {
 	bedrockModels,
 	deepSeekModels,
 	moonshotModels,
+	novitaModels,
 	minimaxModels,
 	mimoModels,
 	geminiModels,
@@ -245,6 +246,11 @@ function getSelectedModel({
 		case "moonshot": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = moonshotModels[id as keyof typeof moonshotModels]
+			return { id, info }
+		}
+		case "novita": {
+			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const info = novitaModels[id as keyof typeof novitaModels]
 			return { id, info }
 		}
 		case "minimax": {

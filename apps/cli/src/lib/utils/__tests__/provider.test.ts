@@ -22,6 +22,11 @@ describe("getApiKeyFromEnv", () => {
 		expect(getApiKeyFromEnv("openrouter")).toBe("test-openrouter-key")
 	})
 
+	it("should return API key from environment variable for novita", () => {
+		process.env.NOVITA_API_KEY = "test-novita-key"
+		expect(getApiKeyFromEnv("novita")).toBe("test-novita-key")
+	})
+
 	it("should return API key from environment variable for openai", () => {
 		process.env.OPENAI_API_KEY = "test-openai-key"
 		expect(getApiKeyFromEnv("openai-native")).toBe("test-openai-key")

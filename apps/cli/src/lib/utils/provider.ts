@@ -7,6 +7,7 @@ const envVarMap: Record<SupportedProvider, string> = {
 	"openai-native": "OPENAI_API_KEY",
 	gemini: "GOOGLE_API_KEY",
 	openrouter: "OPENROUTER_API_KEY",
+	novita: "NOVITA_API_KEY",
 	"vercel-ai-gateway": "VERCEL_AI_GATEWAY_API_KEY",
 }
 
@@ -42,6 +43,10 @@ export function getProviderSettings(
 		case "openrouter":
 			if (apiKey) config.openRouterApiKey = apiKey
 			if (model) config.openRouterModelId = model
+			break
+		case "novita":
+			if (apiKey) config.novitaApiKey = apiKey
+			if (model) config.apiModelId = model
 			break
 		case "vercel-ai-gateway":
 			if (apiKey) config.vercelAiGatewayApiKey = apiKey

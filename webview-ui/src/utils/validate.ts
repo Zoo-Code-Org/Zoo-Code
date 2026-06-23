@@ -92,6 +92,11 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
+		case "novita":
+			if (!apiConfiguration.novitaApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
 		case "openai":
 			if (!apiConfiguration.openAiBaseUrl || !apiConfiguration.openAiApiKey || !apiConfiguration.openAiModelId) {
 				return i18next.t("settings:validation.openAi")

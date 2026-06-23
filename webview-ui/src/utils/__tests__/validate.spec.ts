@@ -182,6 +182,29 @@ describe("Model Validation Functions", () => {
 		})
 	})
 
+	describe("Novita validation", () => {
+		it("returns an apiKey error when the Novita API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: "novita",
+				apiModelId: "moonshotai/kimi-k2.7-code",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined for a valid Novita configuration", () => {
+			const config: ProviderSettings = {
+				apiProvider: "novita",
+				novitaApiKey: "valid-key",
+				apiModelId: "moonshotai/kimi-k2.7-code",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+	})
+
 	describe("Opencode Go validation", () => {
 		it("returns an apiKey error when the Opencode Go API key is missing", () => {
 			const config: ProviderSettings = {

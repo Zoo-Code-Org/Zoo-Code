@@ -56,6 +56,7 @@ import {
 	LiteLLM,
 	Mistral,
 	Moonshot,
+	Novita,
 	Ollama,
 	OpenAI,
 	OpenAICompatible,
@@ -563,6 +564,10 @@ const ApiOptions = ({
 							setApiConfigurationField={setApiConfigurationField}
 							simplifySettings={fromWelcomeView}
 						/>
+					)}
+
+					{selectedProvider === "novita" && (
+						<Novita apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
 					)}
 
 					{selectedProvider === "minimax" && (

@@ -28,6 +28,14 @@ function isDeepSeekTargetedRun(testFile?: string, testGrep?: string) {
 	return testGrep?.toLowerCase().includes("deepseek") ?? false
 }
 
+function isNovitaTargetedRun(testFile?: string, testGrep?: string) {
+	if (testFile?.toLowerCase().includes("novita.test")) {
+		return true
+	}
+
+	return testGrep?.toLowerCase().includes("novita") ?? false
+}
+
 function isBedrockTargetedRun(testFile?: string, testGrep?: string) {
 	if (testFile?.toLowerCase().includes("bedrock.test")) {
 		return true
@@ -41,6 +49,7 @@ async function main() {
 	const testGrep = getCliFlagValue("--grep") || process.env.TEST_GREP
 	const testFile = getCliFlagValue("--file") || process.env.TEST_FILE
 	const isDeepSeekTest = isDeepSeekTargetedRun(testFile, testGrep)
+	const isNovitaTest = isNovitaTargetedRun(testFile, testGrep)
 	const isGeminiTest = testFile?.toLowerCase().includes("gemini.test") ?? false
 	const isBedrockTest = isBedrockTargetedRun(testFile, testGrep)
 
@@ -48,11 +57,15 @@ async function main() {
 		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
 	}
 
+	if (isRecord && isNovitaTest && !process.env.NOVITA_API_KEY) {
+		throw new Error("AIMOCK_RECORD=true requires NOVITA_API_KEY to record Novita fixtures")
+	}
+
 	if (isRecord && isGeminiTest && !process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires GEMINI_API_KEY to record Gemini fixtures")
 	}
 
-	if (isRecord && !isDeepSeekTest && !isGeminiTest && !process.env.OPENROUTER_API_KEY) {
+	if (isRecord && !isDeepSeekTest && !isNovitaTest && !isGeminiTest && !process.env.OPENROUTER_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires OPENROUTER_API_KEY to record fixtures")
 	}
 
@@ -60,9 +73,11 @@ async function main() {
 	// Replay mode starts aimock when no real API key is present or USE_MOCK is forced.
 	const hasRealApiKey = isDeepSeekTest
 		? !!process.env.DEEPSEEK_API_KEY
-		: isBedrockTest
-			? true // Bedrock test starts its own binary-event-stream mock server when no real token
-			: !!(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY)
+		: isNovitaTest
+			? !!process.env.NOVITA_API_KEY
+			: isBedrockTest
+				? true // Bedrock test starts its own binary-event-stream mock server when no real token
+				: !!(process.env.OPENROUTER_API_KEY || process.env.ANTHROPIC_API_KEY)
 	const useMock = isRecord || !hasRealApiKey || process.env.USE_MOCK === "true"
 
 	let mock: InstanceType<typeof LLMock> | undefined
@@ -93,7 +108,11 @@ async function main() {
 						// Use /api (not /api/v1) — aimock appends the request path (/v1/chat/completions)
 						// so including /v1 here would produce a doubled /v1/v1 upstream URL.
 						providers: {
-							openai: isDeepSeekTest ? "https://api.deepseek.com" : "https://openrouter.ai/api",
+							openai: isDeepSeekTest
+								? "https://api.deepseek.com"
+								: isNovitaTest
+									? "https://api.novita.ai/openai"
+									: "https://openrouter.ai/api",
 							// aimock forwards the x-api-key header from the Anthropic SDK to the real API.
 							anthropic: "https://api.anthropic.com",
 							// aimock forwards the x-goog-api-key header from the Google AI SDK.

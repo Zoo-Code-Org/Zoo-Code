@@ -1,4 +1,5 @@
 import { getApiProtocol } from "../provider-settings.js"
+import { getProviderDefaultModelId, novitaDefaultModelId } from "../providers/index.js"
 
 describe("getApiProtocol", () => {
 	describe("Anthropic-style providers", () => {
@@ -85,6 +86,13 @@ describe("getApiProtocol", () => {
 			expect(getApiProtocol("openai", "claude-3-sonnet")).toBe("openai")
 			expect(getApiProtocol("litellm", "claude-instant")).toBe("openai")
 			expect(getApiProtocol("ollama", "claude-model")).toBe("openai")
+			expect(getApiProtocol("novita", "moonshotai/kimi-k2.7-code")).toBe("openai")
+		})
+	})
+
+	describe("Novita provider defaults", () => {
+		it("returns the Novita default model ID", () => {
+			expect(getProviderDefaultModelId("novita")).toBe(novitaDefaultModelId)
 		})
 	})
 
