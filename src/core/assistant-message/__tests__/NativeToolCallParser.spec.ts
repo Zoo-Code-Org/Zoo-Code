@@ -591,5 +591,60 @@ describe("NativeToolCallParser", () => {
 			expect(events.filter((e) => e.type === "tool_call_start")).toHaveLength(0)
 			expect(events.filter((e) => e.type === "tool_call_end")).toHaveLength(0)
 		})
+
+		it("finalizeRawChunks() emits end events and guards against missing id", () => {
+			// Simulate a started tool call: process chunks to populate state
+			const chunks = [
+				{ index: 0, id: "call_finalize", name: "read_file" },
+				{ index: 0, arguments: '{"path":"file.ts"' },
+				{ index: 0, arguments: ',"mode":"slice"}' },
+			]
+
+			const events: Array<{ type: string; id?: string }> = []
+			for (const chunk of chunks) {
+				for (const event of NativeToolCallParser.processRawChunk(chunk)) {
+					events.push(event)
+					if (event.type === "tool_call_start") {
+						NativeToolCallParser.startStreamingToolCall(event.id, event.name)
+					} else if (event.type === "tool_call_delta") {
+						NativeToolCallParser.processStreamingChunk(event.id, event.delta)
+					}
+				}
+			}
+
+			// Now finalize the raw chunks to emit the end event
+			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
+			for (const event of finalizeEvents) {
+				events.push(event)
+			}
+
+			// Verify the end event was produced by finalizeRawChunks
+			const ends = events.filter((e) => e.type === "tool_call_end")
+			expect(ends).toHaveLength(1)
+			expect(ends[0].id).toBe("call_finalize")
+
+			// Finalize the tool call to ensure it contains the complete arguments
+			const result = NativeToolCallParser.finalizeStreamingToolCall("call_finalize")
+			expect(result?.type).toBe("tool_use")
+			if (result?.type === "tool_use") {
+				expect((result.nativeArgs as { path: string }).path).toBe("file.ts")
+			}
+		})
+
+		it("finalizeRawChunks() does not emit end for tracker without id", () => {
+			// Start a tracker with arguments but no id, then finalize
+			const chunks = [{ index: 0, arguments: '{"incomplete":true}' }]
+
+			for (const chunk of chunks) {
+				NativeToolCallParser.processRawChunk(chunk)
+			}
+
+			// Finalize should not emit an end event if id was never set
+			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
+			const ends = finalizeEvents.filter((e) => e.type === "tool_call_end")
+			expect(ends).toHaveLength(0)
+
+			NativeToolCallParser.clearRawChunkState()
+		})
 	})
 })
