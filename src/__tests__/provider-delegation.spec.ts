@@ -28,10 +28,23 @@ function makeStoreStub(
 	}
 }
 
+/**
+ * Parent task double with the methods delegateParentAndOpenChild reads from
+ * `parent`. Without flushPendingToolResultsToHistory the method hits its
+ * non-fatal flush-error branch and never reaches the happy delegation path.
+ */
+const makeParentTask = () =>
+	({
+		taskId: "parent-1",
+		emit: vi.fn(),
+		flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
+		retrySaveApiConversationHistory: vi.fn(),
+	}) as any
+
 describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("persists parent delegation metadata via atomicReadAndUpdate and emits TaskDelegated", async () => {
 		const providerEmit = vi.fn()
-		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+		const parentTask = makeParentTask()
 
 		const childStart = vi.fn()
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
@@ -98,7 +111,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("posts taskHistoryItemUpdated to the webview when isViewLaunched is true", async () => {
 		const updatedParent = { ...parentHistoryItem, status: "delegated" } as HistoryItem
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
-		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+		const parentTask = makeParentTask()
 		const taskHistoryStore = makeStoreStub({
 			get: vi.fn().mockReturnValue(updatedParent),
 		})
@@ -131,7 +144,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 	it("skips postMessageToWebview when isViewLaunched is true but store returns undefined", async () => {
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
-		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+		const parentTask = makeParentTask()
 		const taskHistoryStore = makeStoreStub({
 			get: vi.fn().mockReturnValue(undefined),
 		})
@@ -162,7 +175,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("calls child.start() only after atomicReadAndUpdate completes (no race condition)", async () => {
 		const callOrder: string[] = []
 
-		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+		const parentTask = makeParentTask()
 		const childStart = vi.fn(() => callOrder.push("child.start"))
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const createTask = vi.fn(async () => {
@@ -202,7 +215,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 	it("rolls back the paused child and restores the parent when atomicReadAndUpdate fails", async () => {
 		const persistError = new Error("parent metadata persist failed")
-		const parentTask = { taskId: "parent-1", emit: vi.fn() } as any
+		const parentTask = makeParentTask()
 		const childStart = vi.fn()
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const deleteTaskWithId = vi.fn().mockResolvedValue(undefined)

@@ -110,7 +110,11 @@ describe("TaskHistoryStore.atomicReadAndUpdate", () => {
 		// Both child IDs present — neither write clobbered the other's childIds.
 		expect(final.childIds).toContain("child-A")
 		expect(final.childIds).toContain("child-B")
-		expect(["active", "delegated"]).toContain(final.status)
+		// The last writer wins on scalar fields; whichever child ran second is authoritative.
+		expect(final.status).toBe("delegated")
+		expect(["child-A", "child-B"]).toContain(final.awaitingChildId)
+		expect(final.delegatedToId).toBe(final.awaitingChildId)
+		expect(final.childIds).toContain(final.awaitingChildId)
 	})
 
 	it("completes without deadlock — updater is pure and does not re-acquire the lock", async () => {
