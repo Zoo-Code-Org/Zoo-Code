@@ -15,7 +15,7 @@ A generic, SDK-agnostic request configuration builder that provides a fluent API
 - [Deep Dive: Abort Signal Handling](#deep-dive-abort-signal-handling)
     - [Why Abort Signals Matter](#why-abort-signals-matter)
     - [How `addAbortSignal` Works](#how-addabortsignal-works)
-    - [How `mergeAbortSignals` Works](#how-mergesignals-works)
+    - [How `mergeAbortSignals` Works](#how-mergeabortsignals-works)
 - [Generic Design](#generic-design)
 - [Multi-SDK Usage Examples](#multi-sdk-usage-examples)
 - [Extending for Your SDK](#extending-for-your-sdk)

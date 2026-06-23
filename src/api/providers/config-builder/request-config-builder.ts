@@ -124,8 +124,7 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 		const controller = new AbortController()
 
 		if (primarySignal.aborted) {
-			controller.abort()
-			return controller.signal
+			return primarySignal
 		}
 
 		primarySignal.addEventListener("abort", () => controller.abort(), { once: true })
