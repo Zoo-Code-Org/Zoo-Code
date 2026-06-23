@@ -81,10 +81,10 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 	}
 
 	constructor(fuzzyThreshold?: number, bufferLines?: number) {
-		// Use provided threshold or default to relaxed matching (0.9)
-		// A value of 0.9 means 90% similarity is required for a match.
-		// This was previously 1.0 (exact match) which caused frequent
-		// "Edit Unsuccessful" errors on minor whitespace differences.
+		// Use provided threshold or default to exact matching (1.0)
+		// A value of 0.9 means 90% similarity is required for a match,
+		// but the default remains 1.0 (exact match). Users can opt in
+		// to relaxed matching via diffFuzzyThreshold in settings.
 		// Clamp the threshold to [0.5, 1.0] as a defence-in-depth guard.
 		const thresholdVal = fuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD
 		this.fuzzyThreshold = Math.max(0.5, Math.min(1.0, thresholdVal))
