@@ -767,12 +767,6 @@
 				"description": "Lower thresholds make file edits more resilient to formatting and whitespace variations. A threshold of 100% requires an exact match."
 			}
 		},
-		"fileEdits": {
-			"diffFuzzyThreshold": {
-				"label": "Diff match threshold",
-				"description": "Lower thresholds make file edits more resilient to formatting and whitespace variations. A threshold of 100% requires an exact match."
-			}
-		},
 		"condensingThreshold": {
 			"label": "Condensing Trigger Threshold",
 			"selectProfile": "Configure threshold for profile",
