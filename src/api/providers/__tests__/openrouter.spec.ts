@@ -714,5 +714,48 @@ describe("OpenRouterHandler", () => {
 				}),
 			)
 		})
+
+		it("should pass abort signal through to client", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const mockResponse = { choices: [{ message: { content: "response" } }] }
+			const mockCreate = vitest.fn().mockResolvedValue(mockResponse)
+			;(OpenAI as any).prototype.chat = {
+				completions: { create: mockCreate },
+			} as any
+
+			await handler.completePrompt("test prompt", { signal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockResponse = { choices: [{ message: { content: "response" } }] }
+			const mockCreate = vitest.fn().mockResolvedValue(mockResponse)
+			;(OpenAI as any).prototype.chat = {
+				completions: { create: mockCreate },
+			} as any
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockResponse = { choices: [{ message: { content: "response" } }] }
+			const mockCreate = vitest.fn().mockResolvedValue(mockResponse)
+			;(OpenAI as any).prototype.chat = {
+				completions: { create: mockCreate },
+			} as any
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
 	})
 })

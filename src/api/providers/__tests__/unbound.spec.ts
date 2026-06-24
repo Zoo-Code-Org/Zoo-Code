@@ -199,6 +199,59 @@ describe("UnboundHandler", () => {
 			expect.objectContaining({
 				messages: [{ role: "system", content: "Write a haiku" }],
 			}),
+			{},
 		)
+	})
+
+	it("completePrompt should pass abort signal through to client", async () => {
+		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
+		const controller = new AbortController()
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { content: "completed text" } }],
+		})
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		await handler.completePrompt("Write a haiku", { signal: controller.signal })
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: expect.any(String) }),
+			expect.objectContaining({ signal: controller.signal }),
+		)
+	})
+
+	it("completePrompt should pass timeout through to client", async () => {
+		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { content: "completed text" } }],
+		})
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		await handler.completePrompt("Write a haiku", { timeoutMs: 5000 })
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: expect.any(String) }),
+			expect.objectContaining({ timeout: 5000 }),
+		)
+	})
+
+	it("completePrompt should work without options (backward compatible)", async () => {
+		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
+		mockCreate.mockResolvedValue({
+			choices: [{ message: { content: "completed text" } }],
+		})
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		const result = await handler.completePrompt("Write a haiku")
+		expect(result).toBe("completed text")
 	})
 })

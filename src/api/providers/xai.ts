@@ -142,15 +142,18 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		yield* processResponsesApiStream(stream, normalizeUsage)
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
 		const model = this.getModel()
 
 		try {
-			const response = await this.client.responses.create({
-				model: model.id,
-				input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-				store: false,
-			})
+			const response = await this.client.responses.create(
+				{
+					model: model.id,
+					input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
+					store: false,
+				},
+				options?.signal ? { signal: options.signal } : undefined,
+			)
 
 			// output_text is a convenience field on the Responses API response
 			return response.output_text || ""

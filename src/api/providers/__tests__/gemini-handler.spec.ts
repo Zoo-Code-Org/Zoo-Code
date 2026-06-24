@@ -55,6 +55,44 @@ describe("GeminiHandler backend support", () => {
 		expect(promptConfig.tools).toBeUndefined()
 	})
 
+	it("completePrompt should pass abort signal through to client via httpOptions", async () => {
+		const options = {
+			apiProvider: "gemini",
+			enableUrlContext: false,
+			enableGrounding: false,
+		} as ApiHandlerOptions
+		const handler = new GeminiHandler(options)
+
+		const controller = new AbortController()
+		const stub = vi.fn().mockResolvedValue({ text: "response" })
+		handler["client"].models.generateContent = stub
+
+		await handler.completePrompt("test prompt", { signal: controller.signal })
+
+		expect(stub).toHaveBeenCalledWith(
+			expect.objectContaining({
+				config: expect.objectContaining({
+					httpOptions: { signal: controller.signal },
+				}),
+			}),
+		)
+	})
+
+	it("completePrompt should work without options (backward compatible)", async () => {
+		const options = {
+			apiProvider: "gemini",
+			enableUrlContext: false,
+			enableGrounding: false,
+		} as ApiHandlerOptions
+		const handler = new GeminiHandler(options)
+
+		const stub = vi.fn().mockResolvedValue({ text: "response" })
+		handler["client"].models.generateContent = stub
+
+		const result = await handler.completePrompt("test prompt")
+		expect(result).toBe("response")
+	})
+
 	describe("error scenarios", () => {
 		it("should handle grounding metadata extraction failure gracefully", async () => {
 			const options = {

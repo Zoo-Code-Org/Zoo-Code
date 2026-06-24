@@ -538,7 +538,81 @@ describe("VsCodeLmHandler", () => {
 			handler["client"] = mockLanguageModelChat
 
 			const promise = handler.completePrompt("Test prompt")
-			await expect(promise).rejects.toThrow("VSCode LM completion error: Completion failed")
+			await expect(promise).rejects.toThrow("Completion failed")
+		})
+
+		it("should bridge abort signal to CancellationToken", async () => {
+			const mockModel = { ...mockLanguageModelChat }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([mockModel])
+
+			const responseText = "Completed text"
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart(responseText)
+					return
+				})(),
+				text: (async function* () {
+					yield responseText
+					return
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			const controller = new AbortController()
+			await handler.completePrompt("Test prompt", { signal: controller.signal })
+
+			// Verify that tokenSource.dispose was called (via the mock)
+			const TokenSourceInstance = (vscode.CancellationTokenSource as any).mock.results[0].value
+			expect(TokenSourceInstance.dispose).toHaveBeenCalled()
+		})
+
+		it("should cancel token when signal is already aborted", async () => {
+			const mockModel = { ...mockLanguageModelChat }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([mockModel])
+
+			const responseText = "Completed text"
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart(responseText)
+					return
+				})(),
+				text: (async function* () {
+					yield responseText
+					return
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			const controller = new AbortController()
+			controller.abort()
+			await handler.completePrompt("Test prompt", { signal: controller.signal })
+
+			const TokenSourceInstance = (vscode.CancellationTokenSource as any).mock.results[0].value
+			expect(TokenSourceInstance.cancel).toHaveBeenCalled()
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const mockModel = { ...mockLanguageModelChat }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([mockModel])
+
+			const responseText = "Completed text"
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart(responseText)
+					return
+				})(),
+				text: (async function* () {
+					yield responseText
+					return
+				})(),
+			})
+
+			handler["client"] = mockLanguageModelChat
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe(responseText)
 		})
 	})
 })

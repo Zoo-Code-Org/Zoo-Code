@@ -574,7 +574,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		return { id, info, topP: isDeepSeekR1 ? 0.95 : undefined, ...params }
 	}
 
-	async completePrompt(prompt: string) {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions) {
 		const { id: modelId, maxTokens, temperature, reasoning } = await this.fetchModel()
 
 		const completionParams: OpenRouterChatCompletionParams = {
@@ -596,9 +596,14 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		const requestOptions = modelId.startsWith("anthropic/")
-			? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
-			: undefined
+		// Merge signal + timeout with existing headers
+		const requestOptions: OpenAI.RequestOptions = {
+			...(modelId.startsWith("anthropic/")
+				? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
+				: undefined),
+			...(options?.signal && { signal: options.signal }),
+			...(options?.timeoutMs && { timeout: options.timeoutMs }),
+		}
 
 		let response
 

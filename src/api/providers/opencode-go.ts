@@ -485,25 +485,28 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 * @returns The model's reply text, or an empty string if no content is returned.
 	 * @throws Error with an Opencode Go-specific prefix if the request fails.
 	 */
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
 		const { id: modelId, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
 
 		if (format === "anthropic") {
 			try {
-				const message = await this.anthropicClient.messages.create({
-					model: modelId,
-					// Honour the same includeMaxTokens/modelMaxTokens override
-					// logic as the streaming path so non-streaming completions
-					// respect the user's max-output slider instead of always
-					// falling back to the model default.
-					max_tokens:
-						this.options.includeMaxTokens === true
-							? this.options.modelMaxTokens || maxTokens || 16_384
-							: (maxTokens ?? 16_384),
-					temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
-					messages: [{ role: "user", content: prompt }],
-					stream: false,
-				})
+				const message = await this.anthropicClient.messages.create(
+					{
+						model: modelId,
+						// Honour the same includeMaxTokens/modelMaxTokens override
+						// logic as the streaming path so non-streaming completions
+						// respect the user's max-output slider instead of always
+						// falling back to the model default.
+						max_tokens:
+							this.options.includeMaxTokens === true
+								? this.options.modelMaxTokens || maxTokens || 16_384
+								: (maxTokens ?? 16_384),
+						temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
+						messages: [{ role: "user", content: prompt }],
+						stream: false,
+					},
+					options?.signal ? { signal: options.signal } : undefined,
+				)
 
 				const content = message.content.find(({ type }) => type === "text")
 				return content?.type === "text" ? content.text : ""
@@ -534,7 +537,16 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"]
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Build request options with signal and/or timeout for OpenAI path
+			const createOptions: OpenAI.RequestOptions = {}
+			if (options?.signal) {
+				createOptions.signal = options.signal
+			}
+			if (options?.timeoutMs) {
+				createOptions.timeout = options.timeoutMs
+			}
+
+			const response = await this.client.chat.completions.create(requestOptions, createOptions || undefined)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (error instanceof Error) {

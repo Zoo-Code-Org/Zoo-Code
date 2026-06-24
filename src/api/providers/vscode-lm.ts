@@ -562,13 +562,24 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
+		const client = await this.getClient()
+
+		// Bridge external AbortSignal to VSCode CancellationToken
+		const tokenSource = new vscode.CancellationTokenSource()
+		if (options?.signal) {
+			if (options.signal.aborted) {
+				tokenSource.cancel()
+			} else {
+				options.signal.addEventListener("abort", () => tokenSource.cancel(), { once: true })
+			}
+		}
+
 		try {
-			const client = await this.getClient()
 			const response = await client.sendRequest(
 				[vscode.LanguageModelChatMessage.User(prompt)],
 				{},
-				new vscode.CancellationTokenSource().token,
+				tokenSource.token,
 			)
 			let result = ""
 			for await (const chunk of response.stream) {
@@ -577,12 +588,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				}
 			}
 			return result
-		} catch (error) {
-			if (error instanceof Error) {
-				throw new Error(`VSCode LM completion error: ${error.message}`)
-			}
-			throw error
+		} finally {
+			tokenSource.dispose()
 		}
+	}
+	catch(error: any) {
+		if (error instanceof Error) {
+			throw new Error(`VSCode LM completion error: ${error.message}`)
+		}
+		throw error
 	}
 }
 

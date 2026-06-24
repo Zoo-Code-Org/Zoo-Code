@@ -40,8 +40,15 @@ import {
 } from "./providers"
 import { NativeOllamaHandler } from "./providers/native-ollama"
 
+export interface CompletePromptOptions {
+	/** Abort signal for cancelling the request mid-flight */
+	signal?: AbortSignal
+	/** Optional timeout override (ms) — falls back to provider default if omitted */
+	timeoutMs?: number
+}
+
 export interface SingleCompletionHandler {
-	completePrompt(prompt: string): Promise<string>
+	completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string>
 }
 
 export interface ApiHandlerCreateMessageMetadata {

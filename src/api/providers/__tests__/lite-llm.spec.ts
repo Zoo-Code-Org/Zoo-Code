@@ -1180,4 +1180,31 @@ describe("LiteLLMHandler", () => {
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
 		})
 	})
+
+	describe("completePrompt", () => {
+		it("should pass abort signal through to client", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const controller = new AbortController()
+			await handler.completePrompt("test prompt", { signal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should pass timeout through to client", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+	})
 })

@@ -255,6 +255,27 @@ describe("XAIHandler", () => {
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow(`xAI completion error: ${errorMessage}`)
 	})
 
+	it("completePrompt should pass abort signal through to client", async () => {
+		const controller = new AbortController()
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { signal: controller.signal })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+			signal: controller.signal,
+		})
+	})
+
+	it("completePrompt should work without options (backward compatible)", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		const result = await handler.completePrompt("test prompt")
+		expect(result).toBe("response")
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: expect.any(String) }),
+			undefined,
+		)
+	})
+
 	it("should include reasoning_effort for mini models", async () => {
 		const miniModelHandler = new XAIHandler({
 			apiModelId: "grok-3-mini",

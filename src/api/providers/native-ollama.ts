@@ -344,7 +344,8 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		}
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, _options?: import("../index").CompletePromptOptions): Promise<string> {
+		// Ollama native client doesn't support abort signals at all — accept param but ignore
 		try {
 			const client = this.ensureClient()
 			const { id: modelId } = await this.fetchModel()

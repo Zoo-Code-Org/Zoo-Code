@@ -134,12 +134,13 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		}
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
 		const { id } = this.getModel()
 		try {
 			const { text } = await generateText({
 				model: this.poe(id),
 				prompt,
+				...(options?.signal && { signal: options.signal }),
 			})
 			return text
 		} catch (error) {

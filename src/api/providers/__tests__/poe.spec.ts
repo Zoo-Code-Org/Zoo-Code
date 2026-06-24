@@ -309,5 +309,34 @@ describe("PoeHandler", () => {
 				}),
 			)
 		})
+
+		it("completePrompt should pass abort signal through to generateText", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+
+			await handler.completePrompt("test prompt", { signal: controller.signal })
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: mockLanguageModel,
+					prompt: "test prompt",
+					signal: controller.signal,
+				}),
+			)
+		})
+
+		it("completePrompt should work without options (backward compatible)", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: mockLanguageModel,
+					prompt: "test prompt",
+				}),
+			)
+		})
 	})
 })

@@ -1576,6 +1576,48 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
 			})
+
+			it("should pass abort signal through to client.send", async () => {
+				const mockConverseCommand = vi.mocked(ConverseCommand)
+				const mockSend = BedrockRuntimeClient.prototype.send as any
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const controller = new AbortController()
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				await handler.completePrompt("test prompt", { signal: controller.signal })
+
+				expect(mockSend).toHaveBeenCalledWith(expect.any(Object), { abortSignal: controller.signal })
+			})
+
+			it("should work without options (backward compatible)", async () => {
+				const mockConverseCommand = vi.mocked(ConverseCommand)
+				const mockSend = BedrockRuntimeClient.prototype.send as any
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("response")
+				expect(mockSend).toHaveBeenCalledWith(expect.any(Object), undefined)
+			})
 		})
 	})
 })

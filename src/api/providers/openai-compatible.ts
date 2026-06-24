@@ -197,7 +197,7 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	/**
 	 * Complete a prompt using the AI SDK generateText.
 	 */
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
 		const languageModel = this.getLanguageModel()
 
 		const { text } = await generateText({
@@ -205,6 +205,7 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 			prompt,
 			maxOutputTokens: this.getMaxOutputTokens(),
 			temperature: this.config.temperature ?? 0,
+			...(options?.signal && { signal: options.signal }),
 		})
 
 		return text

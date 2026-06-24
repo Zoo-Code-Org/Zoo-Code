@@ -245,6 +245,39 @@ describe("OpenAiNativeHandler", () => {
 
 			expect(result).toBe("")
 		})
+
+		it("should merge incoming signal with existing controller", async () => {
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "response" }],
+					},
+				],
+			})
+
+			const controller = new AbortController()
+			await handler.completePrompt("Test prompt", { signal: controller.signal })
+
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expect.any(Object),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "response" }],
+					},
+				],
+			})
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe("response")
+		})
 	})
 
 	describe("getModel", () => {

@@ -576,7 +576,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		return citationLinks.join(", ")
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
 		const { id: model, info } = this.getModel()
 
 		try {
@@ -585,10 +585,16 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 				: info.defaultTemperature
 
+			const httpOpts: Record<string, any> = {}
+			if (options?.signal) {
+				httpOpts.signal = options.signal
+			}
+			if (this.options.googleGeminiBaseUrl) {
+				httpOpts.baseUrl = this.options.googleGeminiBaseUrl
+			}
+
 			const promptConfig: GenerateContentConfig = {
-				httpOptions: this.options.googleGeminiBaseUrl
-					? { baseUrl: this.options.googleGeminiBaseUrl }
-					: undefined,
+				httpOptions: Object.keys(httpOpts).length > 0 ? httpOpts : undefined,
 				temperature: temperatureConfig,
 			}
 

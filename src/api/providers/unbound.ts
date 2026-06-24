@@ -192,7 +192,7 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		}
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
 		const { id: model, maxTokens: max_tokens, temperature } = await this.fetchModel()
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "system", content: prompt }]
@@ -204,9 +204,18 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			temperature: temperature,
 		}
 
+		// Build request options with signal and/or timeout
+		const createOptions: OpenAI.RequestOptions = {}
+		if (options?.signal) {
+			createOptions.signal = options.signal
+		}
+		if (options?.timeoutMs) {
+			createOptions.timeout = options.timeoutMs
+		}
+
 		let response: OpenAI.Chat.ChatCompletion
 		try {
-			response = await this.client.chat.completions.create(completionParams)
+			response = await this.client.chat.completions.create(completionParams, createOptions || undefined)
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
 		}

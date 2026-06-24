@@ -238,6 +238,24 @@ describe("MoonshotHandler", () => {
 				}),
 			)
 		})
+
+		it("should pass abort signal through to generateText", async () => {
+			const controller = new AbortController()
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+			await handler.completePrompt("test prompt", { signal: controller.signal })
+			expect(mockGenerateText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					prompt: "test prompt",
+					signal: controller.signal,
+				}),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockGenerateText.mockResolvedValueOnce({ text: "response" })
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
 	})
 
 	describe("processUsageMetrics", () => {

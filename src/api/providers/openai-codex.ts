@@ -26,6 +26,7 @@ import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { openAiCodexOAuthManager } from "../../integrations/openai-codex/oauth"
 import { t } from "../../i18n"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
 export type OpenAiCodexModel = ReturnType<OpenAiCodexHandler["getModel"]>
 
@@ -1152,8 +1153,17 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		return this.lastResponseId
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
+		// Merge incoming signal with existing class-level controller if needed
+		const defaultSignal = new AbortController().signal
+		const mergedSignal = RequestConfigBuilder.mergeAbortSignals(defaultSignal, options?.signal)
 		this.abortController = new AbortController()
+		// Link the merged signal to our abort controller
+		if (mergedSignal.aborted) {
+			this.abortController.abort()
+		} else {
+			mergedSignal.addEventListener("abort", () => this.abortController?.abort(), { once: true })
+		}
 
 		try {
 			const model = this.getModel()
@@ -1214,7 +1224,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				method: "POST",
 				headers,
 				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal,
+				signal: mergedSignal,
 			})
 
 			if (!response.ok) {

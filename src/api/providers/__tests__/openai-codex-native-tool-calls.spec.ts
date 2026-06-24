@@ -527,4 +527,49 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			}),
 		)
 	})
+
+	it("completePrompt should pass abort signal through to fetch", async () => {
+		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "done" }],
+					},
+				],
+			}),
+		})
+		global.fetch = mockFetch as any
+
+		const controller = new AbortController()
+		await handler.completePrompt("Test prompt", { signal: controller.signal })
+
+		const fetchCallArgs = mockFetch.mock.calls[0]
+		expect(fetchCallArgs[1]).toHaveProperty("signal")
+	})
+
+	it("completePrompt should work without options (backward compatible)", async () => {
+		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vi.fn().mockResolvedValue({
+			ok: true,
+			json: vi.fn().mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "done" }],
+					},
+				],
+			}),
+		})
+		global.fetch = mockFetch as any
+
+		const result = await handler.completePrompt("Test prompt")
+		expect(result).toBe("done")
+	})
 })

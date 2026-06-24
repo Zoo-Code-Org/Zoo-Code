@@ -598,6 +598,7 @@ describe("VercelAiGatewayHandler", () => {
 					temperature: VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
 					max_completion_tokens: 64000,
 				}),
+				{},
 			)
 		})
 
@@ -614,6 +615,7 @@ describe("VercelAiGatewayHandler", () => {
 				expect.objectContaining({
 					temperature: customTemp,
 				}),
+				{},
 			)
 		})
 
@@ -645,6 +647,61 @@ describe("VercelAiGatewayHandler", () => {
 
 			const result = await handler.completePrompt("Test")
 			expect(result).toBe("")
+		})
+
+		it("should pass abort signal through to client", async () => {
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			mockCreate.mockImplementation(async () => ({
+				choices: [
+					{
+						message: { role: "assistant", content: "response" },
+						finish_reason: "stop",
+						index: 0,
+					},
+				],
+			}))
+
+			await handler.completePrompt("test prompt", { signal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [
+					{
+						message: { role: "assistant", content: "response" },
+						finish_reason: "stop",
+						index: 0,
+					},
+				],
+			}))
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [
+					{
+						message: { role: "assistant", content: "response" },
+						finish_reason: "stop",
+						index: 0,
+					},
+				],
+			}))
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
 		})
 	})
 

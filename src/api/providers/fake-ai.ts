@@ -28,7 +28,7 @@ interface FakeAI {
 	): ApiStream
 	getModel(): { id: string; info: ModelInfo }
 	countTokens(content: Array<Anthropic.Messages.ContentBlockParam>): Promise<number>
-	completePrompt(prompt: string): Promise<string>
+	completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string>
 }
 
 /**
@@ -75,7 +75,7 @@ export class FakeAIHandler implements ApiHandler, SingleCompletionHandler {
 		return this.ai.countTokens(content)
 	}
 
-	completePrompt(prompt: string): Promise<string> {
-		return this.ai.completePrompt(prompt)
+	completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
+		return (this.ai as any).completePrompt(prompt, options)
 	}
 }

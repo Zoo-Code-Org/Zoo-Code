@@ -796,7 +796,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 	}
 
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: import("../index").CompletePromptOptions): Promise<string> {
 		try {
 			const modelConfig = this.getModel()
 
@@ -838,7 +838,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 
 			const command = new ConverseCommand(payload)
-			const response = await this.client.send(command)
+			const response = await this.client.send(
+				command,
+				options?.signal ? { abortSignal: options.signal } : undefined,
+			)
 
 			if (
 				response?.output?.message?.content &&

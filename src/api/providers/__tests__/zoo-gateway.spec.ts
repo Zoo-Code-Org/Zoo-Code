@@ -445,6 +445,7 @@ describe("ZooGatewayHandler", () => {
 					temperature: ZOO_GATEWAY_DEFAULT_TEMPERATURE,
 					max_completion_tokens: 64000,
 				}),
+				{},
 			)
 		})
 
@@ -466,6 +467,43 @@ describe("ZooGatewayHandler", () => {
 			}))
 
 			await expect(handler.completePrompt("Test")).resolves.toBe("")
+		})
+
+		it("should pass abort signal through to client", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			await handler.completePrompt("test prompt", { signal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
 		})
 	})
 
