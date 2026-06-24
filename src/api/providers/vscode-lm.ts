@@ -2,7 +2,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 import OpenAI from "openai"
 
-import { type ModelInfo, openAiModelInfoSaneDefaults } from "@roo-code/types"
+import { type ModelInfo, openAiModelInfoSaneDefaults, vscodeLlmModels } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared/vsCodeSelectorUtils"
@@ -560,6 +560,28 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				description: `VSCode Language Model (Fallback): ${fallbackId}`,
 			},
 		}
+	}
+
+	/**
+	 * Context window used for auto-condense / context-management decisions.
+	 *
+	 * VS Code's LM API reports `client.maxInputTokens` as Copilot's *advertised* window,
+	 * which is far larger than the realistic usable window; relying on it keeps auto-condense
+	 * from ever firing. For condense decisions we instead measure usage against the curated
+	 * static table's `maxInputTokens` — the same value the context bar uses via
+	 * `useSelectedModel` — so the gate and the gauge stay on one source of truth.
+	 *
+	 * Falls back to the live runtime window when the selected model isn't in the static table.
+	 */
+	getCondenseContextWindow(): number {
+		const family = this.client?.family ?? this.options.vsCodeLmModelSelector?.family
+		const staticModel = family ? vscodeLlmModels[family as keyof typeof vscodeLlmModels] : undefined
+
+		if (staticModel && typeof staticModel.maxInputTokens === "number" && staticModel.maxInputTokens > 0) {
+			return staticModel.maxInputTokens
+		}
+
+		return this.getModel().info.contextWindow
 	}
 
 	async completePrompt(prompt: string): Promise<string> {

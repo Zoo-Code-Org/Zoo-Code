@@ -14,6 +14,8 @@ import {
 	minimaxDefaultModelId,
 	minimaxModels,
 	openRouterDefaultModelId,
+	vscodeLlmModels,
+	vscodeLlmDefaultModelId,
 } from "@roo-code/types"
 
 import { useSelectedModel } from "../useSelectedModel"
@@ -770,6 +772,59 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe("minimax")
 			expect(result.current.id).toBe("MiniMax-M2.7")
 			expect(result.current.info).toEqual(minimaxModels["MiniMax-M2.7"])
+		})
+	})
+
+	describe("vscode-lm provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("resolves a listed family's contextWindow to its maxInputTokens", () => {
+			const family = vscodeLlmDefaultModelId
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("vscode-lm")
+			expect(result.current.id).toBe(`copilot/${family}`)
+			// The bar and the condense gate share one source of truth: contextWindow === maxInputTokens.
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
+			expect(result.current.info?.supportsImages).toBe(false)
+		})
+
+		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family: "totally-unknown-family" },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// On a family miss we must NOT fall back to openAiModelInfoSaneDefaults' 128000 window,
+			// which would diverge from the gate. Instead, use the default model's maxInputTokens.
+			expect(result.current.info?.contextWindow).not.toBe(128000)
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
+			expect(result.current.info?.supportsImages).toBe(false)
 		})
 	})
 })

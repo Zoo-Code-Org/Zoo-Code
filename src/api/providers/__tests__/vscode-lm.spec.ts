@@ -63,6 +63,7 @@ import * as vscode from "vscode"
 import { VsCodeLmHandler } from "../vscode-lm"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
+import { openAiModelInfoSaneDefaults, vscodeLlmModels } from "@roo-code/types"
 
 const mockLanguageModelChat = {
 	id: "test-model",
@@ -439,6 +440,55 @@ describe("VsCodeLmHandler", () => {
 			handler["client"] = null
 			const model = handler.getModel()
 			expect(model.info).toBeDefined()
+		})
+
+		it("should use the full advertised maxInputTokens without an upper cap", async () => {
+			// VS Code can report a very large advertised window; getModel surfaces it as-is
+			// (Math.max(0, maxInputTokens)) rather than clamping to a smaller default.
+			const mockModel = { ...mockLanguageModelChat, maxInputTokens: 936000 }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
+			handler["client"] = null
+			await handler.initializeClient()
+
+			const model = handler.getModel()
+			expect(model.info.contextWindow).toBe(936000)
+		})
+
+		it("should pass through a small maxInputTokens unchanged", async () => {
+			const mockModel = { ...mockLanguageModelChat, maxInputTokens: 4096 }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
+			handler["client"] = null
+			await handler.initializeClient()
+
+			const model = handler.getModel()
+			expect(model.info.contextWindow).toBe(4096)
+		})
+
+		it("should fall back to sane defaults when maxInputTokens is not a number", async () => {
+			const mockModel = { ...mockLanguageModelChat, maxInputTokens: undefined as unknown as number }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
+			handler["client"] = null
+			await handler.initializeClient()
+
+			const model = handler.getModel()
+			expect(model.info.contextWindow).toBe(openAiModelInfoSaneDefaults.contextWindow)
+		})
+	})
+
+	describe("getCondenseContextWindow", () => {
+		it("uses the static-table maxInputTokens for a known VS Code LM family", () => {
+			const opusHandler = new VsCodeLmHandler({
+				vsCodeLmModelSelector: { vendor: "copilot", family: "claude-opus-4.8" },
+			})
+			expect(opusHandler.getCondenseContextWindow()).toBe(vscodeLlmModels["claude-opus-4.8"].maxInputTokens)
+			opusHandler.dispose()
+		})
+
+		it("falls back to the live model context window for families not in the static table", () => {
+			// test-family is not a curated row, so the gate uses the live runtime window.
+			handler["client"] = mockLanguageModelChat as unknown as vscode.LanguageModelChat
+			expect(handler.getCondenseContextWindow()).toBe(handler.getModel().info.contextWindow)
+			expect(handler.getCondenseContextWindow()).toBe(mockLanguageModelChat.maxInputTokens)
 		})
 	})
 

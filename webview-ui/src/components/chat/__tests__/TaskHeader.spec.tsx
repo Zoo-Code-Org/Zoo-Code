@@ -267,5 +267,19 @@ describe("TaskHeader", () => {
 			// Should show 0% when available input space is 0
 			expect(screen.getByText("0%")).toBeInTheDocument()
 		})
+
+		it("should treat a negative maxTokens (vscode-lm reports -1) as zero reserve", () => {
+			// vscode-lm reports maxTokens: -1 (unlimited). A naive `maxTokens || 0` keeps -1,
+			// which would inflate available input space and skew the percentage. The guard must
+			// treat -1 as a zero reserve so available space == contextWindow.
+			// contextTokens = 250, contextWindow = 1000, reservedForOutput = 0
+			// Percentage = 250 / 1000 * 100 = 25%
+			mockModelInfo = { contextWindow: 1000, maxTokens: -1 }
+			mockMaxOutputTokens = -1
+
+			renderTaskHeader({ contextTokens: 250 })
+
+			expect(screen.getByText("25%")).toBeInTheDocument()
+		})
 	})
 })

@@ -108,6 +108,17 @@ export interface ApiHandler {
 	getModel(): { id: string; info: ModelInfo }
 
 	/**
+	 * Optional: the context window (in tokens) to use for context-management /
+	 * auto-condense decisions, when it must differ from getModel().info.contextWindow.
+	 *
+	 * Only the VS Code LM (Copilot) provider overrides this, to measure usage against the
+	 * model's static `maxInputTokens` instead of the inflated live window VS Code reports.
+	 * Other providers leave it undefined and callers fall back to getModel().info.contextWindow,
+	 * so their behavior is unchanged.
+	 */
+	getCondenseContextWindow?(): number
+
+	/**
 	 * Counts tokens for content blocks
 	 * All providers extend BaseProvider which provides a default tiktoken implementation,
 	 * but they can override this to use their native token counting endpoints

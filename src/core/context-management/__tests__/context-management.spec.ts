@@ -810,9 +810,10 @@ describe("Context Management", () => {
 			const summarizeSpy = vi.spyOn(condenseModule, "summarizeConversation")
 
 			const modelInfo = createModelInfo(100000, 30000)
-			// Set tokens to be below both the allowedTokens threshold and the percentage threshold
+			// Usage is measured against available input space (contextWindow - maxTokens reserve).
+			// available = 100000 - 30000 = 70000; 30000 / 70000 ≈ 43% < 50% threshold.
 			const contextWindow = modelInfo.contextWindow
-			const totalTokens = 40000 // 40% of context window
+			const totalTokens = 30000
 			const messagesWithSmallContent = [
 				...messages.slice(0, -1),
 				{ ...messages[messages.length - 1], content: "" },
@@ -825,7 +826,7 @@ describe("Context Management", () => {
 				maxTokens: modelInfo.maxTokens,
 				apiHandler: mockApiHandler,
 				autoCondenseContext: true,
-				autoCondenseContextPercent: 50, // Set threshold to 50% - our tokens are at 40%
+				autoCondenseContextPercent: 50, // Set threshold to 50% - usage is ~43% of available input
 				systemPrompt: "System prompt",
 				taskId,
 				profileThresholds: {},
@@ -1507,17 +1508,39 @@ describe("Context Management", () => {
 		})
 
 		it("should return false when context percent is below threshold", () => {
+			// Usage is measured against available input space (contextWindow - maxTokens reserve).
+			// available = 100000 - 30000 = 70000; 30000 / 70000 ≈ 43% < 50% threshold.
 			const result = willManageContext({
-				totalTokens: 40000,
-				contextWindow: 100000, // 40% of context window
+				totalTokens: 30000,
+				contextWindow: 100000,
 				maxTokens: 30000,
 				autoCondenseContext: true,
-				autoCondenseContextPercent: 50, // 50% threshold
+				autoCondenseContextPercent: 50, // 50% threshold; usage is ~43% of available input
 				profileThresholds: {},
 				currentProfileId: "default",
 				lastMessageTokens: 0,
 			})
 			expect(result).toBe(false)
+		})
+
+		it("should treat a negative maxTokens (vscode-lm reports -1) as the default reserve, not -1", () => {
+			// vscode-lm reports maxTokens: -1 (unlimited). A naive `maxTokens || DEFAULT` keeps -1,
+			// which would make allowedTokens balloon past the window and skew the percentage. The
+			// guard must treat -1 like an unknown reserve (ANTHROPIC_DEFAULT_MAX_TOKENS for the
+			// allowed-tokens math, zero reserve for the available-input percentage).
+			// With autoCondenseContext disabled, only the allowedTokens path can trigger:
+			// allowedTokens = 100000 * 0.9 - 8192 = 81808; totalTokens 85000 > 81808 → true.
+			const result = willManageContext({
+				totalTokens: 85000,
+				contextWindow: 100000,
+				maxTokens: -1,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 50,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+			expect(result).toBe(true)
 		})
 
 		it("should return true when tokens exceed allowedTokens even if autoCondenseContext is false", () => {
@@ -1581,10 +1604,12 @@ describe("Context Management", () => {
 		})
 
 		it("should include lastMessageTokens in the calculation", () => {
-			// Without lastMessageTokens: 49000 tokens = 49%
-			// With lastMessageTokens: 49000 + 2000 = 51000 tokens = 51%
+			// Usage is measured against available input space (contextWindow - maxTokens reserve).
+			// available = 100000 - 30000 = 70000.
+			// Without lastMessageTokens: 34000 / 70000 ≈ 48.6% < 50% threshold.
+			// With lastMessageTokens: (34000 + 2000) / 70000 ≈ 51.4% ≥ 50% threshold.
 			const resultWithoutLastMessage = willManageContext({
-				totalTokens: 49000,
+				totalTokens: 34000,
 				contextWindow: 100000,
 				maxTokens: 30000,
 				autoCondenseContext: true,
@@ -1596,14 +1621,14 @@ describe("Context Management", () => {
 			expect(resultWithoutLastMessage).toBe(false)
 
 			const resultWithLastMessage = willManageContext({
-				totalTokens: 49000,
+				totalTokens: 34000,
 				contextWindow: 100000,
 				maxTokens: 30000,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: 50, // 50% threshold
 				profileThresholds: {},
 				currentProfileId: "default",
-				lastMessageTokens: 2000, // Pushes total to 51%
+				lastMessageTokens: 2000, // Pushes usage over 50% of available input
 			})
 			expect(resultWithLastMessage).toBe(true)
 		})
@@ -1699,6 +1724,124 @@ describe("Context Management", () => {
 			// a significant fraction of prevContextTokens after 50% truncation
 			// With system prompt included, we expect roughly 50% of the messages remaining
 			expect(result.newContextTokensAfterTruncation).toBeGreaterThan(0)
+		})
+	})
+
+	/**
+	 * Regression tests: the condense gate must measure usage against available input space
+	 * (contextWindow - reserved output), not the raw context window. This keeps the gate in
+	 * lockstep with the UI context gauge and ensures it actually fires for providers like
+	 * vscode-lm that report maxTokens: -1.
+	 */
+	describe("contextPercent uses available input space (regression)", () => {
+		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
+			contextWindow,
+			supportsPromptCache: true,
+			maxTokens,
+		})
+
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "First message" },
+			{ role: "assistant", content: "Second message" },
+			{ role: "user", content: "Third message" },
+			{ role: "assistant", content: "Fourth message" },
+			{ role: "user", content: "Fifth message" },
+		]
+
+		it("willManageContext measures the percentage against available input, not the full window", () => {
+			// contextWindow 200000, reserve 64000 → available input 136000.
+			// totalTokens 100000 → 100000 / 136000 ≈ 73.5%, which clears the 70% threshold.
+			// Against the full window it would be only 50% and the gate would (wrongly) stay closed.
+			const result = willManageContext({
+				totalTokens: 100000,
+				contextWindow: 200000,
+				maxTokens: 64000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("willManageContext stays below threshold when usage is under available input", () => {
+			// available input 136000; totalTokens 90000 → ≈ 66.2% < 70% threshold.
+			const result = willManageContext({
+				totalTokens: 90000,
+				contextWindow: 200000,
+				maxTokens: 64000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+			expect(result).toBe(false)
+		})
+
+		it("willManageContext treats an unlimited (-1) reserve as zero reserve for the percentage", () => {
+			// vscode-lm reports maxTokens: -1. The percentage denominator should fall back to the
+			// full window (zero reserve): 150000 / 200000 = 75% ≥ 70% threshold.
+			const result = willManageContext({
+				totalTokens: 150000,
+				contextWindow: 200000,
+				maxTokens: -1,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("manageContext summarizes based on available input space, end-to-end", async () => {
+			const mockSummary = "Available-input summary"
+			const mockSummarizeResponse: condenseModule.SummarizeResponse = {
+				messages: [
+					{ role: "user", content: "First message" },
+					{ role: "user", content: mockSummary, isSummary: true },
+					{ role: "assistant", content: "Last message" },
+				],
+				summary: mockSummary,
+				cost: 0.05,
+				newContextTokens: 100,
+			}
+			const summarizeSpy = vi
+				.spyOn(condenseModule, "summarizeConversation")
+				.mockResolvedValue(mockSummarizeResponse)
+
+			const modelInfo = createModelInfo(200000, 64000)
+			// available input 136000; totalTokens 100000 → ≈ 73.5% ≥ 70% threshold, but only 50% of
+			// the raw window. The end-to-end path must trigger summarization on the available-input math.
+			const totalTokens = 100000
+			const messagesWithSmallContent = [
+				...messages.slice(0, -1),
+				{ ...messages[messages.length - 1], content: "" },
+			]
+
+			const result = await manageContext({
+				messages: messagesWithSmallContent,
+				totalTokens,
+				contextWindow: modelInfo.contextWindow,
+				maxTokens: modelInfo.maxTokens,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(summarizeSpy).toHaveBeenCalled()
+			expect(result).toMatchObject({
+				summary: mockSummary,
+				prevContextTokens: totalTokens,
+			})
+
+			summarizeSpy.mockRestore()
 		})
 	})
 })

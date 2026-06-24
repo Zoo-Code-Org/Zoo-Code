@@ -170,13 +170,15 @@ export function willManageContext({
 }: WillManageContextOptions): boolean {
 	if (!autoCondenseContext) {
 		// When auto-condense is disabled, only truncation can occur
-		const reservedTokens = maxTokens || ANTHROPIC_DEFAULT_MAX_TOKENS
+		// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
+		const reservedTokens = maxTokens && maxTokens > 0 ? maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS
 		const prevContextTokens = totalTokens + lastMessageTokens
 		const allowedTokens = contextWindow * (1 - TOKEN_BUFFER_PERCENTAGE) - reservedTokens
 		return prevContextTokens > allowedTokens
 	}
 
-	const reservedTokens = maxTokens || ANTHROPIC_DEFAULT_MAX_TOKENS
+	// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
+	const reservedTokens = maxTokens && maxTokens > 0 ? maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS
 	const prevContextTokens = totalTokens + lastMessageTokens
 	const allowedTokens = contextWindow * (1 - TOKEN_BUFFER_PERCENTAGE) - reservedTokens
 
@@ -192,7 +194,14 @@ export function willManageContext({
 		// Invalid values fall back to global setting (effectiveThreshold already set)
 	}
 
-	const contextPercent = (100 * prevContextTokens) / contextWindow
+	// Measure usage against the available input space (context window minus the
+	// reserved output budget), matching the context gauge shown in the UI. Reserved
+	// output tokens can never hold conversation context, so this is the meaningful
+	// "how full is my usable input" figure. When the reserve is unknown/unlimited
+	// (e.g., vscode-lm reports -1), fall back to the full context window.
+	const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
+	const availableInputTokens = contextWindow - reservedForOutput
+	const contextPercent = availableInputTokens > 0 ? (100 * prevContextTokens) / availableInputTokens : 100
 	return contextPercent >= effectiveThreshold || prevContextTokens > allowedTokens
 }
 
@@ -267,7 +276,8 @@ export async function manageContext({
 	let errorDetails: string | undefined
 	let cost = 0
 	// Calculate the maximum tokens reserved for response
-	const reservedTokens = maxTokens || ANTHROPIC_DEFAULT_MAX_TOKENS
+	// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
+	const reservedTokens = maxTokens && maxTokens > 0 ? maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS
 
 	// Estimate tokens for the last message (which is always a user message)
 	const lastMessage = messages[messages.length - 1]
@@ -304,7 +314,14 @@ export async function manageContext({
 	// If no specific threshold is found for the profile, fall back to global setting
 
 	if (autoCondenseContext) {
-		const contextPercent = (100 * prevContextTokens) / contextWindow
+		// Measure usage against the available input space (context window minus the
+		// reserved output budget), matching the context gauge shown in the UI. Reserved
+		// output tokens can never hold conversation context, so this is the meaningful
+		// "how full is my usable input" figure. When the reserve is unknown/unlimited
+		// (e.g., vscode-lm reports -1), fall back to the full context window.
+		const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
+		const availableInputTokens = contextWindow - reservedForOutput
+		const contextPercent = availableInputTokens > 0 ? (100 * prevContextTokens) / availableInputTokens : 100
 		if (contextPercent >= effectiveThreshold || prevContextTokens > allowedTokens) {
 			// Attempt to intelligently condense the context
 			const result = await summarizeConversation({
