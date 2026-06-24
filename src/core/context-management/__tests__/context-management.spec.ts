@@ -1796,6 +1796,87 @@ describe("Context Management", () => {
 			expect(result).toBe(true)
 		})
 
+		it("willManageContext falls back to 100% when the reserve is >= the window (availableInput <= 0)", () => {
+			// When maxTokens (reserve) >= contextWindow, availableInputTokens = window - reserve <= 0.
+			// The denominator guard must short-circuit contextPercent to 100 rather than divide by
+			// a non-positive number, so the gate fires regardless of the (tiny) totalTokens.
+			const result = willManageContext({
+				totalTokens: 1,
+				contextWindow: 50000,
+				maxTokens: 60000, // reserve > window → availableInput = -10000
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 80,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+			// contextPercent === 100 >= 80 threshold → true.
+			expect(result).toBe(true)
+		})
+
+		it("willManageContext falls back to 100% when the reserve exactly equals the window (availableInput === 0)", () => {
+			// Boundary: reserve === window → availableInputTokens === 0, still the FALSE branch (> 0 is false).
+			const result = willManageContext({
+				totalTokens: 1,
+				contextWindow: 50000,
+				maxTokens: 50000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 90,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("manageContext summarizes via the 100% fallback when the reserve >= the window (availableInput <= 0)", async () => {
+			// Mirror the willManageContext edge for the manageContext path: reserve >= window forces
+			// contextPercent to 100 via the denominator guard, so summarization triggers even though
+			// totalTokens is small relative to the raw window.
+			const mockSummary = "Reserve-exceeds-window summary"
+			const mockSummarizeResponse: condenseModule.SummarizeResponse = {
+				messages: [
+					{ role: "user", content: "First message" },
+					{ role: "user", content: mockSummary, isSummary: true },
+					{ role: "assistant", content: "Last message" },
+				],
+				summary: mockSummary,
+				cost: 0.05,
+				newContextTokens: 100,
+			}
+			const summarizeSpy = vi
+				.spyOn(condenseModule, "summarizeConversation")
+				.mockResolvedValue(mockSummarizeResponse)
+
+			// contextWindow 50000, maxTokens 60000 → availableInput = -10000 → contextPercent = 100.
+			const messagesWithSmallContent = [
+				...messages.slice(0, -1),
+				{ ...messages[messages.length - 1], content: "" },
+			]
+
+			const result = await manageContext({
+				messages: messagesWithSmallContent,
+				totalTokens: 1,
+				contextWindow: 50000,
+				maxTokens: 60000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 80,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(summarizeSpy).toHaveBeenCalled()
+			expect(result).toMatchObject({
+				summary: mockSummary,
+				prevContextTokens: 1,
+			})
+
+			summarizeSpy.mockRestore()
+		})
+
 		it("manageContext summarizes based on available input space, end-to-end", async () => {
 			const mockSummary = "Available-input summary"
 			const mockSummarizeResponse: condenseModule.SummarizeResponse = {
