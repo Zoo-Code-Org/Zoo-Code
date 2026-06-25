@@ -42,6 +42,9 @@ import {
 	openRouterDefaultModelId,
 	DEFAULT_WRITE_DELAY_MS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -2471,9 +2474,10 @@ export class ClineProvider
 			imageGenerationProvider,
 			openRouterImageApiKey,
 			openRouterImageGenerationSelectedModel,
-			autoCloseZooOpenedFiles: autoCloseZooOpenedFiles ?? true,
-			autoCloseZooOpenedFilesAfterUserEdited: autoCloseZooOpenedFilesAfterUserEdited ?? false,
-			autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? false,
+			autoCloseZooOpenedFiles: autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+			autoCloseZooOpenedFilesAfterUserEdited:
+				autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+			autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 			openAiCodexIsAuthenticated: await (async () => {
 				try {
 					const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")

@@ -1072,7 +1072,7 @@ describe("ClineProvider", () => {
 			expect(state.autoCloseZooOpenedNewFiles).toBe(true)
 		})
 
-		it("getStateToPostToWebview defaults autoCloseZooOpenedFiles to true when unset", async () => {
+		it("getStateToPostToWebview defaults autoCloseZooOpenedFiles to false when unset", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// Ensure the settings are not set.
@@ -1082,8 +1082,8 @@ describe("ClineProvider", () => {
 
 			const state = await provider.getStateToPostToWebview()
 
-			// Unset values should default to their documented defaults.
-			expect(state.autoCloseZooOpenedFiles).toBe(true)
+			// Unset values should default to their documented defaults (opt-in).
+			expect(state.autoCloseZooOpenedFiles).toBe(false)
 			expect(state.autoCloseZooOpenedFilesAfterUserEdited).toBe(false)
 			expect(state.autoCloseZooOpenedNewFiles).toBe(false)
 		})

@@ -35,6 +35,9 @@ import {
 	type ProviderSettings,
 	type ExperimentId,
 	type TelemetrySetting,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	ImageGenerationProvider,
 } from "@roo-code/types"
@@ -425,9 +428,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					includeCurrentTime: includeCurrentTime ?? true,
 					includeCurrentCost: includeCurrentCost ?? true,
 					maxGitStatusFiles: maxGitStatusFiles ?? 0,
-					autoCloseZooOpenedFiles: autoCloseZooOpenedFiles ?? true,
-					autoCloseZooOpenedFilesAfterUserEdited: autoCloseZooOpenedFilesAfterUserEdited ?? false,
-					autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? false,
+					autoCloseZooOpenedFiles: autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+					autoCloseZooOpenedFilesAfterUserEdited:
+						autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+					autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 					profileThresholds,
 					imageGenerationProvider,
 					openRouterImageApiKey,
