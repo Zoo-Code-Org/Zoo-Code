@@ -19,9 +19,6 @@ export class TagMatcher<Result = TagMatcherResult> {
 	pointer = 0
 	private readonly tagNames: string[]
 	private activeTagNames: string[] = []
-	private inCode = false
-	private codeFence = 0
-	private tickRun = 0
 	private candidates: { name: string; index: number }[] = []
 
 	constructor(
