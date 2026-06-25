@@ -554,7 +554,7 @@ export class TaskHistoryStore {
 				throw new Error(`[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`)
 			}
 			// Deep-copy so a mutating updater cannot alter cached state before persistence.
-			const snapshot = JSON.parse(JSON.stringify(current)) as HistoryItem
+			const snapshot = structuredClone(current)
 			const updated = updater(snapshot)
 			if (updated.id !== taskId) {
 				throw new Error(
