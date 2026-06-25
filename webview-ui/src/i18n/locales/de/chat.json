@@ -40,6 +40,14 @@
 		"title": "Neue Aufgabe starten",
 		"tooltip": "Beginne eine neue Aufgabe"
 	},
+	"seeNewChanges": {
+		"title": "Neue Änderungen ansehen",
+		"tooltip": "Zeige Änderungen seit deinem letzten Prompt"
+	},
+	"restoreChanges": {
+		"title": "Änderungen wiederherstellen",
+		"tooltip": "Stelle Dateien und Aufgabenstatus auf deinen letzten Prompt zurück"
+	},
 	"proceedAnyways": {
 		"title": "Trotzdem fortfahren",
 		"tooltip": "Während der Befehlsausführung fortfahren"

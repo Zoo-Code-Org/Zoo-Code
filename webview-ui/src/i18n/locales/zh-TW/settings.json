@@ -708,6 +708,12 @@
 				"description": "在繼續之前寫入檔案後等待的時間，允許診斷工具處理變更並偵測問題。"
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "差異匹配閾值",
+				"description": "較低的閾值使檔案編輯對格式和空白變化更具彈性。100%的閾值要求完全匹配。"
+			}
+		},
 		"condensingThreshold": {
 			"label": "壓縮觸發閾值",
 			"selectProfile": "設定檔的閾值",

@@ -32,6 +32,14 @@
 		"title": "開始新工作",
 		"tooltip": "開始一項新工作"
 	},
+	"seeNewChanges": {
+		"title": "查看新變更",
+		"tooltip": "查看自上次 prompt 以來所做的變更"
+	},
+	"restoreChanges": {
+		"title": "還原變更",
+		"tooltip": "將檔案和工作狀態還原到上次 prompt"
+	},
 	"proceedAnyways": {
 		"title": "仍要繼續",
 		"tooltip": "在命令執行時繼續"

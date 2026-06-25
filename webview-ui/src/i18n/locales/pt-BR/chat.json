@@ -40,6 +40,14 @@
 		"title": "Iniciar nova tarefa",
 		"tooltip": "Começar uma nova tarefa"
 	},
+	"seeNewChanges": {
+		"title": "Ver novas alterações",
+		"tooltip": "Veja alterações feitas desde seu último prompt"
+	},
+	"restoreChanges": {
+		"title": "Restaurar alterações",
+		"tooltip": "Restaure arquivos e estado da tarefa para seu último prompt"
+	},
 	"proceedAnyways": {
 		"title": "Prosseguir mesmo assim",
 		"tooltip": "Continuar enquanto o comando executa"

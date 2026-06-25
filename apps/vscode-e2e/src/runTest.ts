@@ -1,6 +1,7 @@
 import * as path from "path"
 import * as os from "os"
 import * as fs from "fs/promises"
+import { readFileSync } from "fs"
 
 import { runTests } from "@vscode/test-electron"
 import { LLMock } from "@copilotkit/aimock"
@@ -156,12 +157,16 @@ async function main() {
 		}
 
 		// Download VS Code, unzip it and run the integration test
+		// Read VS Code version from package.json to keep in sync with @types/vscode
+		const pkg = JSON.parse(readFileSync(path.resolve(__dirname, "../package.json"), "utf-8"))
+		const vscodeVersion = process.env.VSCODE_VERSION || pkg.devDependencies["@types/vscode"]
+
 		await runTests({
 			extensionDevelopmentPath,
 			extensionTestsPath,
 			launchArgs: [testWorkspace],
 			extensionTestsEnv,
-			version: process.env.VSCODE_VERSION || "1.100.0",
+			version: vscodeVersion,
 		})
 	} catch (error) {
 		console.error("Failed to run tests", error)

@@ -671,6 +671,12 @@
 				"description": "ファイルの書き込み後に処理を続行するまでの待機時間。これにより、診断ツールが変更を処理して問題を検出できます。"
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Diff一致しきい値",
+				"description": "しきい値を低くすると、ファイル編集が書式や空白のバリエーションに対してより柔軟になります。100%のしきい値は完全一致が必要です。"
+			}
+		},
 		"condensingThreshold": {
 			"label": "圧縮トリガーしきい値",
 			"selectProfile": "プロファイルのしきい値を設定",

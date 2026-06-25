@@ -2112,7 +2112,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub
+			// Mock the config file read
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2124,8 +2124,10 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
+
+			// Wait for initialization
 			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called with wrapped command
@@ -2174,7 +2176,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub
+			// Mock the config file read
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2186,8 +2188,10 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
+
+			// Wait for initialization
 			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without wrapping
@@ -2236,7 +2240,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub
+			// Mock the config file read with cmd.exe already as command
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2248,8 +2252,10 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
+
+			// Wait for initialization
 			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without double-wrapping
@@ -2305,7 +2311,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub - simulating fnm/nvm-windows scenario
+			// Mock the config file read - simulating fnm/nvm-windows scenario
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2323,8 +2329,10 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
+
+			// Wait for initialization
 			await mcpHub.waitUntilReady()
 
 			// Verify that the command was wrapped with cmd.exe
@@ -2378,7 +2386,7 @@ describe("McpHub", () => {
 				}
 			})
 
-			// Mock the config file read BEFORE creating McpHub
+			// Mock the config file read with CMD (uppercase) as command
 			vi.mocked(fs.readFile).mockResolvedValue(
 				JSON.stringify({
 					mcpServers: {
@@ -2390,8 +2398,10 @@ describe("McpHub", () => {
 				}),
 			)
 
-			// Create a new McpHub instance and wait for initialization
+			// Create a new McpHub instance
 			const mcpHub = new McpHub(mockProvider as ClineProvider)
+
+			// Wait for initialization
 			await mcpHub.waitUntilReady()
 
 			// Verify StdioClientTransport was called without double-wrapping

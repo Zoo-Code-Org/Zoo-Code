@@ -6,6 +6,7 @@ import {
 	type ExtensionState,
 	type ClineMessage,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_DIFF_FUZZY_THRESHOLD,
 } from "@roo-code/types"
 
 import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
@@ -270,6 +271,7 @@ describe("mergeExtensionState", () => {
 			taskSyncEnabled: false,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Add the checkpoint timeout property
 			maxReadFileLine: -1,
+			diffFuzzyThreshold: DEFAULT_DIFF_FUZZY_THRESHOLD,
 		}
 
 		const prevState: ExtensionState = {
@@ -339,6 +341,7 @@ describe("mergeExtensionState", () => {
 			taskSyncEnabled: false,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 			maxReadFileLine: -1,
+			diffFuzzyThreshold: DEFAULT_DIFF_FUZZY_THRESHOLD,
 		}
 
 		const makeMessage = (ts: number, text: string): ClineMessage =>

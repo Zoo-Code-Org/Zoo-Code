@@ -40,6 +40,14 @@
 		"title": "新しいタスクを開始",
 		"tooltip": "新しいタスクを開始"
 	},
+	"seeNewChanges": {
+		"title": "新しい変更を表示",
+		"tooltip": "最後のprompt以降に行われた変更を表示"
+	},
+	"restoreChanges": {
+		"title": "変更を復元",
+		"tooltip": "ファイルとタスク状態を最後のpromptに復元"
+	},
 	"proceedAnyways": {
 		"title": "それでも続行",
 		"tooltip": "コマンド実行中でも続行"

@@ -13,6 +13,8 @@ import {
 	type ExtensionState,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -673,6 +675,7 @@ describe("ClineProvider", () => {
 			openRouterImageGenerationSelectedModel: undefined,
 			taskSyncEnabled: false,
 			checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+			diffFuzzyThreshold: DEFAULT_DIFF_FUZZY_THRESHOLD,
 		}
 
 		const message: ExtensionMessage = {
@@ -930,6 +933,48 @@ describe("ClineProvider", () => {
 		expect(state.writeDelayMs).toBe(1000)
 	})
 
+	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
+		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
+			if (
+				[
+					"writeDelayMs",
+					"diffFuzzyThreshold",
+					"terminalShellIntegrationTimeout",
+					"terminalShellIntegrationDisabled",
+					"terminalCommandDelay",
+				].includes(key)
+			) {
+				return undefined
+			}
+
+			return null
+		})
+
+		const state = await provider.getState()
+
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+		expect(state.diffFuzzyThreshold).toBe(DEFAULT_DIFF_FUZZY_THRESHOLD)
+		expect(state.terminalShellIntegrationTimeout).toBe(Terminal.defaultShellIntegrationTimeout)
+		expect(state.terminalShellIntegrationDisabled).toBe(true)
+		expect(state.terminalCommandDelay).toBe(0)
+	})
+
+	test("getState passes through defined write/diff/terminal values instead of defaults", async () => {
+		await provider.contextProxy.setValue("writeDelayMs", 500)
+		await provider.contextProxy.setValue("diffFuzzyThreshold", 0.5)
+		await provider.contextProxy.setValue("terminalShellIntegrationTimeout", 99999)
+		await provider.contextProxy.setValue("terminalShellIntegrationDisabled", false)
+		await provider.contextProxy.setValue("terminalCommandDelay", 1234)
+
+		const state = await provider.getState()
+
+		expect(state.writeDelayMs).toBe(500)
+		expect(state.diffFuzzyThreshold).toBe(0.5)
+		expect(state.terminalShellIntegrationTimeout).toBe(99999)
+		expect(state.terminalShellIntegrationDisabled).toBe(false)
+		expect(state.terminalCommandDelay).toBe(1234)
+	})
+
 	test("handles writeDelayMs message", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
@@ -1058,6 +1103,15 @@ describe("ClineProvider", () => {
 			expect(state.autoCloseZooOpenedFilesAfterUserEdited).toBe(true)
 			expect(state.autoCloseZooOpenedNewFiles).toBe(true)
 		})
+	})
+
+	it("getStateToPostToWebview passes through defined diffFuzzyThreshold value", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("diffFuzzyThreshold", 0.5)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.diffFuzzyThreshold).toBe(0.5)
 	})
 
 	it("loads saved API config when switching modes", async () => {

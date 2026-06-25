@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
 
 import { ClineProvider } from "../ClineProvider"
@@ -257,11 +257,23 @@ describe("ClineProvider flicker-free cancel", () => {
 	let mockOutputChannel: any
 	let mockTask1: any
 	let mockTask2: any
+	let consoleLogSpy: ReturnType<typeof vi.spyOn>
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
 	const mockApiConfig: ProviderSettings = {
 		apiProvider: "anthropic",
 		apiKey: "test-key",
 	} as ProviderSettings
+
+	beforeAll(() => {
+		consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+	})
+
+	afterAll(() => {
+		consoleLogSpy.mockRestore()
+		consoleErrorSpy.mockRestore()
+	})
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -684,5 +696,9 @@ describe("ClineProvider flicker-free cancel", () => {
 		await expect(provider.cancelTask()).rejects.toThrow("standalone persist failed")
 		expect(createTaskWithHistoryItemSpy).not.toHaveBeenCalled()
 		expect((provider as any).cancelledDelegationChildIds.has("child-1")).toBe(true)
+	})
+
+	afterAll(() => {
+		vi.restoreAllMocks()
 	})
 })

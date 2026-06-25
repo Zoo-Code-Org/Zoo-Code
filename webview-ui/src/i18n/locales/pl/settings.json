@@ -671,6 +671,12 @@
 				"description": "Czas oczekiwania po zapisie plików przed kontynuowaniem, aby narzędzia diagnostyczne mogły przetworzyć zmiany i wykryć problemy."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Próg dopasowania diff",
+				"description": "Niższe progi sprawiają, że edycje plików są bardziej odporne na różnice w formatowaniu i białych znakach. Próg 100% wymaga dokładnego dopasowania."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Próg wyzwalania kondensacji",
 			"selectProfile": "Skonfiguruj próg dla profilu",

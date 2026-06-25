@@ -671,6 +671,12 @@
 				"description": "파일 쓰기 후 계속 진행하기 전에 대기하는 시간으로, 진단 도구가 변경 사항을 처리하고 문제를 감지할 수 있도록 합니다."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Diff 일치 임계값",
+				"description": "낮은 임계값은 파일 편집이 서식 및 공백 변동에 더 탄력적으로 대응하게 합니다. 100% 임계값은 정확히 일치해야 합니다."
+			}
+		},
 		"condensingThreshold": {
 			"label": "압축 트리거 임계값",
 			"selectProfile": "프로필 임계값 구성",

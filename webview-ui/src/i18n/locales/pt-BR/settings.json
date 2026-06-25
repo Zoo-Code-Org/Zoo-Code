@@ -671,6 +671,12 @@
 				"description": "Tempo de espera após a gravação de arquivos antes de prosseguir, permitindo que as ferramentas de diagnóstico processem as alterações e detectem problemas."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Limite de correspondência de diff",
+				"description": "Limites mais baixos tornam as edições de arquivo mais resistentes a variações de formatação e espaços em branco. Um limite de 100% exige uma correspondência exata."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Limite de Ativação de Condensação",
 			"selectProfile": "Configurar limite para perfil",

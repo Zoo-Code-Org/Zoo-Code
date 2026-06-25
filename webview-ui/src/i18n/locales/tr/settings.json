@@ -671,6 +671,12 @@
 				"description": "Devam etmeden önce dosya yazımlarından sonra beklenecek süre, tanılama araçlarının değişiklikleri işlemesine ve sorunları tespit etmesine olanak tanır."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Diff eşleşme eşiği",
+				"description": "Düşük eşikler, dosya düzenlemelerini biçimlendirme ve boşluk farklılıklarına karşı daha dayanıklı hale getirir. %100 eşik, tam eşleşme gerektirir."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Sıkıştırma Tetikleme Eşiği",
 			"selectProfile": "Profil için eşik yapılandır",

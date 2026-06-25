@@ -1,19 +1,18 @@
 import { z } from "zod"
 
-import { type Keys } from "./type-fu.js"
+import { codebaseIndexConfigSchema, codebaseIndexModelsSchema } from "./codebase-index.js"
+import { experimentsSchema } from "./experiment.js"
+import { historyItemSchema } from "./history.js"
+import { customModePromptsSchema, customSupportPromptsSchema, modeConfigSchema } from "./mode.js"
 import {
 	type ProviderSettings,
 	PROVIDER_SETTINGS_KEYS,
 	providerSettingsEntrySchema,
 	providerSettingsSchema,
 } from "./provider-settings.js"
-import { historyItemSchema } from "./history.js"
-import { codebaseIndexModelsSchema, codebaseIndexConfigSchema } from "./codebase-index.js"
-import { experimentsSchema } from "./experiment.js"
 import { telemetrySettingsSchema } from "./telemetry.js"
-import { modeConfigSchema } from "./mode.js"
-import { customModePromptsSchema, customSupportPromptsSchema } from "./mode.js"
 import { toolNamesSchema } from "./tool.js"
+import { type Keys } from "./type-fu.js"
 import { languagesSchema } from "./vscode.js"
 
 /**
@@ -22,6 +21,16 @@ import { languagesSchema } from "./vscode.js"
  * need time to automatically clean up unused imports.
  */
 export const DEFAULT_WRITE_DELAY_MS = 1000
+
+/**
+ * Default fuzzy matching threshold for the multi-search-replace diff strategy.
+ * A value of 1.0 (exact match) is used by default for safety, especially when
+ * auto-approval for writes is enabled. This prevents unintended changes from
+ * being applied due to minor mismatches. Users can lower this threshold manually
+ * in settings to reduce "Edit Unsuccessful" errors caused by minor whitespace
+ * or formatting differences, accepting a higher risk of unintended edits.
+ */
+export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 
 /**
  * Terminal output preview size options for persisted command output.
@@ -102,6 +111,12 @@ export const globalSettingsSchema = z.object({
 	alwaysAllowWriteOutsideWorkspace: z.boolean().optional(),
 	alwaysAllowWriteProtected: z.boolean().optional(),
 	writeDelayMs: z.number().min(0).optional(),
+	/**
+	 * Fuzzy matching threshold for the multi-search-replace diff strategy.
+	 * Range: 0.5 (50% minimum similarity) to 1.0 (exact match only).
+	 * `@default` 1.0
+	 */
+	diffFuzzyThreshold: z.number().min(0.5).max(1).optional(),
 	requestDelaySeconds: z.number().optional(),
 	alwaysAllowMcp: z.boolean().optional(),
 	alwaysAllowModeSwitch: z.boolean().optional(),

@@ -40,6 +40,14 @@
 		"title": "Començar una nova tasca",
 		"tooltip": "Comença una nova tasca"
 	},
+	"seeNewChanges": {
+		"title": "Veure els canvis nous",
+		"tooltip": "Mostra els canvis fets des del teu últim prompt"
+	},
+	"restoreChanges": {
+		"title": "Restaurar canvis",
+		"tooltip": "Restaura els fitxers i l'estat de la tasca al teu últim prompt"
+	},
 	"proceedAnyways": {
 		"title": "Continuar de totes maneres",
 		"tooltip": "Continua mentre s'executa l'ordre"

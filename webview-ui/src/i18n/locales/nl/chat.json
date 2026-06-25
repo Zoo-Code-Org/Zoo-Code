@@ -32,6 +32,14 @@
 		"title": "Nieuwe taak starten",
 		"tooltip": "Begin een nieuwe taak"
 	},
+	"seeNewChanges": {
+		"title": "Nieuwe wijzigingen bekijken",
+		"tooltip": "Bekijk wijzigingen sinds je laatste prompt"
+	},
+	"restoreChanges": {
+		"title": "Wijzigingen herstellen",
+		"tooltip": "Herstel bestanden en taakstatus naar je laatste prompt"
+	},
 	"proceedAnyways": {
 		"title": "Toch doorgaan",
 		"tooltip": "Ga door terwijl het commando wordt uitgevoerd"

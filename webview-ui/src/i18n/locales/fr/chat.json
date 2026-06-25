@@ -40,6 +40,14 @@
 		"title": "Commencer une nouvelle tâche",
 		"tooltip": "Démarrer une nouvelle tâche"
 	},
+	"seeNewChanges": {
+		"title": "Voir les nouveaux changements",
+		"tooltip": "Affiche les changements effectués depuis ton dernier prompt"
+	},
+	"restoreChanges": {
+		"title": "Restaurer les changements",
+		"tooltip": "Restaure les fichiers et l'état de la tâche à ton dernier prompt"
+	},
 	"proceedAnyways": {
 		"title": "Continuer quand même",
 		"tooltip": "Continuer pendant l'exécution de la commande"

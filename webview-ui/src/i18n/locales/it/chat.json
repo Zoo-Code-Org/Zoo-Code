@@ -40,6 +40,14 @@
 		"title": "Inizia nuova attività",
 		"tooltip": "Inizia una nuova attività"
 	},
+	"seeNewChanges": {
+		"title": "Vedi nuove modifiche",
+		"tooltip": "Mostra le modifiche fatte dal tuo ultimo prompt"
+	},
+	"restoreChanges": {
+		"title": "Ripristina modifiche",
+		"tooltip": "Ripristina file e stato dell'attività al tuo ultimo prompt"
+	},
 	"proceedAnyways": {
 		"title": "Procedi comunque",
 		"tooltip": "Continua mentre il comando è in esecuzione"

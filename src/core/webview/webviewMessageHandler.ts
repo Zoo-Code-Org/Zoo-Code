@@ -21,6 +21,7 @@ import {
 	ExperimentId,
 	checkoutDiffPayloadSchema,
 	checkoutRestorePayloadSchema,
+	getCompletionCheckpoint,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -111,6 +112,10 @@ export const webviewMessageHandler = async (
 
 	const showCloudUnavailableMessage = () => {
 		vscode.window.showInformationMessage(getRouterUnavailableSignInMessage())
+	}
+
+	const resolveCompletionCheckpoint = (currentCline: { clineMessages: ClineMessage[] }) => {
+		return getCompletionCheckpoint(currentCline.clineMessages)
 	}
 
 	const getCurrentMode = async (): Promise<string> => {
@@ -1367,11 +1372,62 @@ export const webviewMessageHandler = async (
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
 				} catch (error) {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+					return
 				}
 
 				try {
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
 				} catch (error) {
+					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				}
+			}
+
+			break
+		}
+		case "completionCheckpointDiff": {
+			const currentCline = provider.getCurrentTask()
+			const checkpoint = currentCline ? resolveCompletionCheckpoint(currentCline) : undefined
+
+			if (currentCline && checkpoint) {
+				await currentCline.checkpointDiff({
+					ts: checkpoint.ts,
+					commitHash: checkpoint.commitHash,
+					mode: "to-current",
+				})
+			}
+
+			break
+		}
+		case "completionCheckpointRestore": {
+			const currentCline = provider.getCurrentTask()
+			const checkpoint = currentCline ? resolveCompletionCheckpoint(currentCline) : undefined
+
+			if (currentCline && checkpoint) {
+				const originalTaskId = currentCline.taskId
+				await provider.cancelTask()
+
+				try {
+					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
+				} catch (error) {
+					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+					return
+				}
+
+				try {
+					const restoredTask = provider.getCurrentTask()
+
+					if (!restoredTask || restoredTask.taskId !== originalTaskId) {
+						vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+						return
+					}
+
+					await restoredTask.checkpointRestore({
+						ts: checkpoint.ts,
+						commitHash: checkpoint.commitHash,
+						mode: "restore",
+					})
+				} catch (error) {
+					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
 				}
 			}

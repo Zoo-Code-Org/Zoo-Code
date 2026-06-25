@@ -35,6 +35,14 @@
 		"title": "Mulai Tugas Baru",
 		"tooltip": "Mulai tugas baru"
 	},
+	"seeNewChanges": {
+		"title": "Lihat Perubahan Baru",
+		"tooltip": "Lihat perubahan yang dibuat sejak prompt terakhirmu"
+	},
+	"restoreChanges": {
+		"title": "Pulihkan Perubahan",
+		"tooltip": "Pulihkan file dan status tugas ke prompt terakhirmu"
+	},
 	"reportBug": {
 		"title": "Laporkan Bug"
 	},

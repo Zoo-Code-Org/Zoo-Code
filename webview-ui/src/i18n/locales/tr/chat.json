@@ -40,6 +40,14 @@
 		"title": "Yeni Görev Başlat",
 		"tooltip": "Yeni bir görev başlat"
 	},
+	"seeNewChanges": {
+		"title": "Yeni Değişiklikleri Gör",
+		"tooltip": "Son prompt'undan bu yana yapılan değişiklikleri göster"
+	},
+	"restoreChanges": {
+		"title": "Değişiklikleri Geri Yükle",
+		"tooltip": "Dosyaları ve görev durumunu son prompt'una geri yükle"
+	},
 	"proceedAnyways": {
 		"title": "Yine de Devam Et",
 		"tooltip": "Komut çalışırken devam et"

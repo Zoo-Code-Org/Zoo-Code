@@ -11,7 +11,7 @@ import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
 import { batchConsecutive } from "@src/utils/batchConsecutive"
 
 import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
-import { getSuggestionMode, isRetiredProvider } from "@roo-code/types"
+import { getCompletionCheckpoint, getSuggestionMode, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
 import { combineApiRequests } from "@roo/combineApiRequests"
@@ -129,6 +129,25 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	}, [messages, currentTaskTodos])
 
 	const modifiedMessages = useMemo(() => combineApiRequests(combineCommandSequences(messages.slice(1))), [messages])
+	const completionCheckpoint = useMemo(() => getCompletionCheckpoint(messages), [messages])
+	const completionResultTs = useMemo(() => {
+		for (let i = messages.length - 1; i >= 0; i--) {
+			const message = messages[i]
+
+			if (message?.type === "say" && message.say === "completion_result") {
+				return message.ts
+			}
+
+			// Zero-text ask completion rows are hidden by visibleMessages below, so attach
+			// actions to the latest renderable completion row while the extension host
+			// still derives the checkpoint target from authoritative task state.
+			if (message?.type === "ask" && message.ask === "completion_result" && (message.text ?? "") !== "") {
+				return message.ts
+			}
+		}
+
+		return undefined
+	}, [messages])
 
 	// Has to be after api_req_finished are all reduced into api_req_started messages.
 	const apiMetrics = useMemo(() => getApiMetrics(modifiedMessages), [modifiedMessages])
@@ -374,6 +393,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							break
 						case "completion_result":
 							// Extension waiting for feedback, but we can just present a new task button.
+							// Kilo-style change inspection/restoration buttons are rendered inline on the completion row.
 							// Only play celebration sound if there are no queued messages.
 							if (!isPartial && messageQueue.length === 0) {
 								playSound("celebration")
@@ -788,6 +808,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}
 					break
 				case "completion_result":
+					startNewTask()
+					break
 				case "resume_completed_task":
 					// Waiting for feedback, but we can just present a new task button
 					startNewTask()
@@ -1476,6 +1498,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						})()
 					}
 					hasCheckpoint={hasCheckpoint}
+					completionCheckpoint={messageOrGroup.ts === completionResultTs ? completionCheckpoint : undefined}
 					onJumpToPreviousCheckpoint={handleScrollToLatestCheckpoint}
 				/>
 			)
@@ -1485,6 +1508,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			toggleRowExpansion,
 			modifiedMessages,
 			groupedMessages.length,
+			completionCheckpoint,
+			completionResultTs,
 			handleRowHeightChange,
 			isStreaming,
 			handleSuggestionClickInRow,

@@ -40,6 +40,14 @@
 		"title": "Bắt đầu nhiệm vụ mới",
 		"tooltip": "Bắt đầu một nhiệm vụ mới"
 	},
+	"seeNewChanges": {
+		"title": "Xem thay đổi mới",
+		"tooltip": "Xem các thay đổi được thực hiện kể từ prompt cuối của bạn"
+	},
+	"restoreChanges": {
+		"title": "Khôi phục thay đổi",
+		"tooltip": "Khôi phục tệp và trạng thái nhiệm vụ về prompt cuối của bạn"
+	},
 	"proceedAnyways": {
 		"title": "Vẫn tiếp tục",
 		"tooltip": "Tiếp tục trong khi lệnh đang chạy"

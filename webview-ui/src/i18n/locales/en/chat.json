@@ -32,6 +32,14 @@
 		"title": "Start New Task",
 		"tooltip": "Begin a new task"
 	},
+	"seeNewChanges": {
+		"title": "See New Changes",
+		"tooltip": "View changes made since your last prompt"
+	},
+	"restoreChanges": {
+		"title": "Restore Changes",
+		"tooltip": "Restore files and task state to your last prompt"
+	},
 	"proceedAnyways": {
 		"title": "Proceed Anyways",
 		"tooltip": "Continue while command executes"

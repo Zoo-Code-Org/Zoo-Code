@@ -671,6 +671,12 @@
 				"description": "Thời gian chờ sau khi ghi tệp trước khi tiếp tục, cho phép các công cụ chẩn đoán xử lý các thay đổi và phát hiện sự cố."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Ngưỡng khớp diff",
+				"description": "Ngưỡng thấp hơn làm cho việc chỉnh sửa tệp linh hoạt hơn với các biến thể định dạng và khoảng trắng. Ngưỡng 100% yêu cầu khớp chính xác."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Ngưỡng kích hoạt nén",
 			"selectProfile": "Cấu hình ngưỡng cho hồ sơ",

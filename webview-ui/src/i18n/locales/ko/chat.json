@@ -40,6 +40,14 @@
 		"title": "새 작업 시작",
 		"tooltip": "새 작업 시작하기"
 	},
+	"seeNewChanges": {
+		"title": "새 변경 사항 보기",
+		"tooltip": "마지막 prompt 이후 적용된 변경 사항 보기"
+	},
+	"restoreChanges": {
+		"title": "변경 사항 복원",
+		"tooltip": "파일과 작업 상태를 마지막 prompt로 복원"
+	},
 	"proceedAnyways": {
 		"title": "그래도 계속",
 		"tooltip": "명령 실행 중에도 계속 진행"

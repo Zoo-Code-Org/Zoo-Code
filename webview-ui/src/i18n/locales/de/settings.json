@@ -671,6 +671,12 @@
 				"description": "Wartezeit nach Dateischreibvorgängen vor dem Fortfahren, damit Diagnosetools Änderungen verarbeiten und Probleme erkennen können."
 			}
 		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Diff-Übereinstimmungsschwellwert",
+				"description": "Niedrigere Schwellenwerte machen Dateibearbeitungen widerstandsfähiger gegen Formatierungs- und Leerzeichenunterschiede. Ein Schwellenwert von 100% erfordert eine exakte Übereinstimmung."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Schwellenwert für Kontextkomprimierung",
 			"selectProfile": "Profil für Schwellenwert konfigurieren",

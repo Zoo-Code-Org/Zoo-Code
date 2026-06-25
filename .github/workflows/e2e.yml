@@ -34,6 +34,22 @@ jobs:
             - name: Install xvfb
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
               run: sudo apt-get install -y xvfb
+
+            - name: Get VS Code version from package.json
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              id: vscode-ver
+              run: |
+                  VERSION=$(node -p 'require("./apps/vscode-e2e/package.json").devDependencies["@types/vscode"]')
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+            - name: Cache VS Code test binary
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+              with:
+                  path: |
+                      apps/vscode-e2e/.vscode-test/
+                  key: vscode-test-${{ runner.os }}-${{ steps.vscode-ver.outputs.version }}-v1
+
             - name: Run mocked E2E tests
               id: run-e2e
               # merge_group and workflow_dispatch always run; cache skip is pull_request only

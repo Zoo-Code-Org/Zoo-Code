@@ -32,6 +32,14 @@
 		"title": "Iniciar nueva tarea",
 		"tooltip": "Comienza una nueva tarea"
 	},
+	"seeNewChanges": {
+		"title": "Ver cambios nuevos",
+		"tooltip": "Muestra los cambios hechos desde tu último prompt"
+	},
+	"restoreChanges": {
+		"title": "Restaurar cambios",
+		"tooltip": "Restaura los archivos y el estado de la tarea a tu último prompt"
+	},
 	"proceedAnyways": {
 		"title": "Continuar de todos modos",
 		"tooltip": "Continuar mientras se ejecuta el comando"

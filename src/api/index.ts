@@ -90,6 +90,12 @@ export interface ApiHandlerCreateMessageMetadata {
 	 * Only applies to providers that support function calling restrictions (e.g., Gemini).
 	 */
 	allowedFunctionNames?: string[]
+	/**
+	 * Abort signal for cancelling the HTTP request mid-stream.
+	 * Passed through to AI SDK's streamText() so the underlying HTTP request is aborted
+	 * when the user clicks stop, preventing wasted API tokens/compute on the provider side.
+	 */
+	abortSignal?: AbortSignal
 }
 
 export interface ApiHandler {
