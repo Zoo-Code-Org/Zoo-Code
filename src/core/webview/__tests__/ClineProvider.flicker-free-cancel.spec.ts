@@ -232,24 +232,28 @@ vi.mock("../../../services/skills/SkillsManager", () => ({
 	}),
 }))
 
-vi.mock("../../task-persistence", () => ({
-	TaskHistoryStore: vi.fn().mockImplementation(function () {
-		return {
-			initialize: vi.fn().mockResolvedValue(undefined),
-			dispose: vi.fn(),
-			initialized: Promise.resolve(),
-			get: vi.fn().mockReturnValue(undefined),
-			getAll: vi.fn().mockReturnValue([]),
-			upsert: vi.fn().mockResolvedValue([]),
-			delete: vi.fn().mockResolvedValue(undefined),
-			deleteMany: vi.fn().mockResolvedValue(undefined),
-			migrateFromGlobalState: vi.fn().mockResolvedValue(undefined),
-		}
-	}),
-	readApiMessages: vi.fn().mockResolvedValue([]),
-	saveApiMessages: vi.fn().mockResolvedValue(undefined),
-	saveTaskMessages: vi.fn().mockResolvedValue(undefined),
-}))
+vi.mock("../../task-persistence", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../../task-persistence")>()
+	return {
+		...mod,
+		TaskHistoryStore: vi.fn().mockImplementation(function () {
+			return {
+				initialize: vi.fn().mockResolvedValue(undefined),
+				dispose: vi.fn(),
+				initialized: Promise.resolve(),
+				get: vi.fn().mockReturnValue(undefined),
+				getAll: vi.fn().mockReturnValue([]),
+				upsert: vi.fn().mockResolvedValue([]),
+				delete: vi.fn().mockResolvedValue(undefined),
+				deleteMany: vi.fn().mockResolvedValue(undefined),
+				migrateFromGlobalState: vi.fn().mockResolvedValue(undefined),
+			}
+		}),
+		readApiMessages: vi.fn().mockResolvedValue([]),
+		saveApiMessages: vi.fn().mockResolvedValue(undefined),
+		saveTaskMessages: vi.fn().mockResolvedValue(undefined),
+	}
+})
 
 describe("ClineProvider flicker-free cancel", () => {
 	let provider: ClineProvider

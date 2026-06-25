@@ -5,7 +5,8 @@ import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
 // Mock dependencies
-vi.mock("../../task-persistence", () => ({
+vi.mock("../../task-persistence", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../task-persistence")>()),
 	saveTaskMessages: vi.fn(),
 }))
 vi.mock("p-wait-for")
