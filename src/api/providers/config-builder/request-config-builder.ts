@@ -38,7 +38,7 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 	 * @param headers - Key-value pairs of header names and values
 	 * @returns this for chainable calls
 	 */
-	addHeaders(headers: Record<string, string>): this {
+	addHeaders(headers: Record<string, string> = {}): this {
 		if (Object.keys(headers).length === 0) {
 			return this
 		}
@@ -121,11 +121,11 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 			return primarySignal
 		}
 
-		const controller = new AbortController()
-
 		if (primarySignal.aborted) {
 			return primarySignal
 		}
+
+		const controller = new AbortController()
 
 		primarySignal.addEventListener("abort", () => controller.abort(), { once: true })
 		secondarySignal.addEventListener("abort", () => controller.abort(), { once: true })
