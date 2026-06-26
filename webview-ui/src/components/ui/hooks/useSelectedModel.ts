@@ -315,9 +315,10 @@ function getSelectedModel({
 			// auto-condense never fires (the gate uses the live window).
 			const listedModel =
 				vscodeLlmModels[modelFamily as keyof typeof vscodeLlmModels] ?? vscodeLlmModels[vscodeLlmDefaultModelId]
-			// contextWindow MUST equal maxInputTokens: that is the exact value the gate consumes via
-			// getModel().info.contextWindow = Math.max(0, client.maxInputTokens) in src/api/providers/vscode-lm.ts,
-			// so the UI bar and the condense gate share a single source of truth.
+			// Set contextWindow = maxInputTokens so the UI bar matches what the condense gate uses for
+			// vscode-lm. The gate's primary window comes from getCondenseContextWindow() (which returns the
+			// static-table maxInputTokens); getModel().info.contextWindow is only the fallback. Sharing
+			// maxInputTokens keeps the bar and the gate on a single source of truth.
 			const info: ModelInfo = {
 				...openAiModelInfoSaneDefaults,
 				...listedModel,

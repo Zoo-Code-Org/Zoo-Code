@@ -811,6 +811,26 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.supportsImages).toBe(false)
 		})
 
+		it("pins a divergent family's contextWindow to maxInputTokens, not its advertised window", () => {
+			// claude-opus-4.8 is the row where contextWindow (679560) and maxInputTokens (197897) DIFFER.
+			// The hook must surface maxInputTokens so the bar matches the condense gate; a field swap to
+			// the advertised contextWindow would be caught here (unlike the default model where they match).
+			const family = "claude-opus-4.8"
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("vscode-lm")
+			expect(result.current.id).toBe(`copilot/${family}`)
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens) // 197897
+			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow) // NOT 679560
+			expect(result.current.info?.supportsImages).toBe(false)
+		})
+
 		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: "vscode-lm",

@@ -3743,6 +3743,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// provider returns undefined here and falls back to modelInfo.contextWindow.
 		const contextWindow = this.api.getCondenseContextWindow?.() ?? modelInfo.contextWindow
 
+		// Only vscode-lm implements getCondenseContextWindow, so its presence scopes the
+		// available-input condense denominator to that provider; all others use the full window.
+		const useAvailableInputForContextPercent = typeof this.api.getCondenseContextWindow === "function"
+
 		// Get the current profile ID using the helper method
 		const currentProfileId = this.getCurrentProfileId(state)
 
@@ -3810,6 +3814,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				currentProfileId,
 				metadata,
 				environmentDetails,
+				useAvailableInputForContextPercent,
 			})
 
 			if (truncateResult.messages !== this.apiConversationHistory) {
@@ -3942,6 +3947,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// provider returns undefined here and falls back to modelInfo.contextWindow.
 			const contextWindow = this.api.getCondenseContextWindow?.() ?? modelInfo.contextWindow
 
+			// Only vscode-lm implements getCondenseContextWindow, so its presence scopes the
+			// available-input condense denominator to that provider; all others use the full window.
+			const useAvailableInputForContextPercent = typeof this.api.getCondenseContextWindow === "function"
+
 			// Get the current profile ID using the helper method
 			const currentProfileId = this.getCurrentProfileId(state)
 			// Check if context management will likely run (threshold check)
@@ -3965,6 +3974,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				profileThresholds,
 				currentProfileId,
 				lastMessageTokens,
+				useAvailableInputForContextPercent,
 			})
 
 			// Send condenseTaskContextStarted BEFORE manageContext to show in-progress indicator
@@ -4047,6 +4057,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					filesReadByRoo: contextMgmtFilesReadByRoo,
 					cwd: this.cwd,
 					rooIgnoreController: this.rooIgnoreController,
+					useAvailableInputForContextPercent,
 				})
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
