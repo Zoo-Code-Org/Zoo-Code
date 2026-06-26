@@ -1831,6 +1831,21 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
 
+	/**
+		* Finalize the last partial "tool" ask message without blocking for user input.
+		* Call this in error paths where a partial tool message was opened during streaming
+		* but execution failed before the normal approval flow could close it, so the webview
+		* spinner does not get stuck in a loading state.
+		*/
+	async finalizePartialToolAsk(): Promise<void> {
+		const lastMessage = this.clineMessages.at(-1)
+
+		if (lastMessage && lastMessage.partial && lastMessage.type === "ask" && lastMessage.ask === "tool") {
+			lastMessage.partial = false
+			await this.updateClineMessage(lastMessage)
+		}
+	}
+
 	// Lifecycle
 	// Start / Resume / Abort / Dispose
 

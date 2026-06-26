@@ -26,6 +26,19 @@ interface WriteToFileParams {
 export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	readonly name = "write_to_file" as const
 
+	/**
+	 * Set when a filesystem error aborts diff-view streaming during handlePartial for the
+	 * current tool invocation. Subsequent streaming deltas for the same block then skip the
+	 * doomed open()/update() retry, which would otherwise create a fresh "Zoo wants to edit
+	 * this file" message on every delta. Cleared by resetPartialState() between invocations.
+	 */
+	private partialStreamFailed = false
+
+	override resetPartialState(): void {
+		super.resetPartialState()
+		this.partialStreamFailed = false
+	}
+
 	async execute(params: WriteToFileParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { pushToolResult, handleError, askApproval } = callbacks
 		const relPath = params.path
@@ -187,6 +200,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 			return
 		} catch (error) {
+			// Finalize any open partial tool message so the UI spinner doesn't get stuck.
+			// The partial ask fired during streaming (handlePartial) or early in execute sets
+			// partial: true on the webview message; without this, the spinner persists even
+			// after the error bubble appears.
+			await task.finalizePartialToolAsk()
 			await handleError("writing file", error as Error)
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
@@ -197,6 +215,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	override async handlePartial(task: Task, block: ToolUse<"write_to_file">): Promise<void> {
 		const relPath: string | undefined = block.params.path
 		const newContent: string | undefined = block.params.content
+
+		// A prior streaming delta for this invocation already hit a fatal filesystem error.
+		// Skip further streaming work so we don't create a new partial tool message on every
+		// subsequent delta. execute() will report the error once when the block completes.
+		if (this.partialStreamFailed) {
+			return
+		}
 
 		// Wait for path to stabilize before showing UI (prevents truncated paths)
 		if (!this.hasPathStabilized(relPath) || newContent === undefined) {
@@ -240,14 +265,31 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		await task.ask("tool", partialMessage, block.partial).catch(() => {})
 
 		if (newContent) {
-			if (!task.diffViewProvider.isEditing) {
-				await task.diffViewProvider.open(relPath!)
-			}
+			try {
+				if (!task.diffViewProvider.isEditing) {
+					await task.diffViewProvider.open(relPath!)
+				}
 
-			await task.diffViewProvider.update(
-				everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
-				false,
-			)
+				await task.diffViewProvider.update(
+					everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
+					false,
+				)
+			} catch (error) {
+				// Opening or updating the diff view can throw on filesystem errors
+				// (EACCES/EROFS on read-only paths). Finalize the partial tool message
+				// so the UI spinner doesn't get stuck and reset the diff view. Do NOT
+				// rethrow: the same filesystem operation is retried in execute() once the
+				// block completes, and that authoritative non-partial path reports the
+				// error to the user. Surfacing it here too would show the same error twice.
+				// Swallowing it here is safe because the agent loop advances naturally when
+				// the non-partial block arrives (it does not depend on this throw).
+				console.error(`Error streaming write_to_file diff view:`, error)
+				// Mark the stream as failed so later deltas don't re-attempt and spawn a new
+				// partial tool message each time.
+				this.partialStreamFailed = true
+				await task.finalizePartialToolAsk()
+				await task.diffViewProvider.reset()
+			}
 		}
 	}
 }
