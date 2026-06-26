@@ -298,19 +298,21 @@ describe("RequestConfigBuilder", () => {
 	})
 
 	describe("static mergeAbortSignals", () => {
-		test("should return primarySignal when secondarySignal is undefined", () => {
+		test("should return merged signal when secondarySignal is undefined", () => {
 			const controller = new AbortController()
 			const result = RequestConfigBuilder.mergeAbortSignals(controller.signal)
-			expect(result).toBe(controller.signal)
+			// AbortSignal.any() always returns a new signal
+			expect(result).not.toBe(controller.signal)
+			expect(result.aborted).toBe(false)
 		})
 
-		test("should return primarySignal when secondarySignal is already aborted", () => {
+		test("should return merged signal when secondarySignal is already aborted", () => {
 			const primaryController = new AbortController()
 			const secondaryController = new AbortController()
 			secondaryController.abort()
 
 			const result = RequestConfigBuilder.mergeAbortSignals(primaryController.signal, secondaryController.signal)
-			expect(result).toBe(primaryController.signal)
+			expect(result.aborted).toBe(true)
 		})
 
 		test("should return merged signal when both signals are active", () => {
@@ -320,6 +322,7 @@ describe("RequestConfigBuilder", () => {
 			const result = RequestConfigBuilder.mergeAbortSignals(primaryController.signal, secondaryController.signal)
 			expect(result).not.toBe(primaryController.signal)
 			expect(result).not.toBe(secondaryController.signal)
+			expect(result.aborted).toBe(false)
 		})
 
 		test("should abort merged signal when primarySignal is aborted", async () => {

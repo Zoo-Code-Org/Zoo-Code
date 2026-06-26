@@ -108,28 +108,20 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 	}
 
 	/**
-	 * Merge multiple abort signals.
+	 * Merge multiple abort signals using the standard API.
 	 *
-	 * If any signal is aborted, the returned signal will be aborted.
+	 * Uses `AbortSignal.any()` which correctly handles the case where
+	 * any signal is already aborted.
 	 *
 	 * @param primarySignal - The primary abort signal
 	 * @param secondarySignal - Optional secondary abort signal
-	 * @returns A merged AbortSignal
+	 * @returns A merged AbortSignal that aborts when any input signal aborts
 	 */
 	static mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: AbortSignal): AbortSignal {
-		if (!secondarySignal || secondarySignal.aborted) {
-			return primarySignal
+		if (!secondarySignal) {
+			return AbortSignal.any([primarySignal])
 		}
 
-		if (primarySignal.aborted) {
-			return primarySignal
-		}
-
-		const controller = new AbortController()
-
-		primarySignal.addEventListener("abort", () => controller.abort(), { once: true })
-		secondarySignal.addEventListener("abort", () => controller.abort(), { once: true })
-
-		return controller.signal
+		return AbortSignal.any([primarySignal, secondarySignal])
 	}
 }
