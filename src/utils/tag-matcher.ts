@@ -22,7 +22,7 @@ export class TagMatcher<Result = TagMatcherResult> {
 	private candidates: { name: string; index: number }[] = []
 
 	constructor(
-		tagName: string | string[],
+		tagName: string | [string, ...string[]],
 		readonly transform?: (chunks: TagMatcherResult) => Result,
 		readonly position = 0,
 	) {
@@ -62,7 +62,6 @@ export class TagMatcher<Result = TagMatcherResult> {
 			if (this.state === "TEXT") {
 				if (char === "<" && (this.pointer <= this.position + 1 || this.matched)) {
 					this.state = "TAG_OPEN"
-					this.index = 0
 					if (this.depth === 0) {
 						this.candidates = this.tagNames.map((name) => ({ name, index: 0 }))
 					} else {
@@ -84,6 +83,9 @@ export class TagMatcher<Result = TagMatcherResult> {
 						this.depth++
 						this.matched = true
 						continue
+					} else {
+						this.state = "TEXT"
+						this.collect()
 					}
 				} else if (this.candidates.every((c) => c.index === 0) && char === "/") {
 					this.state = "TAG_CLOSE"
@@ -106,7 +108,7 @@ export class TagMatcher<Result = TagMatcherResult> {
 					}
 				}
 			} else if (this.state === "TAG_CLOSE") {
-				const tagName = this.activeTagNames.at(-1) || this.tagNames[0]
+				const tagName = this.activeTagNames.at(-1) ?? this.tagNames[0]
 				if (char === ">" && this.index === tagName.length) {
 					this.state = "TEXT"
 					this.depth--

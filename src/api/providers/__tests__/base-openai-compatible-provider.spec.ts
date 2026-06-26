@@ -222,13 +222,8 @@ describe("BaseOpenAiCompatibleProvider", () => {
 				chunks.push(chunk)
 			}
 
-			// TagMatcher should handle incomplete tags and flush remaining content
-			expect(chunks.length).toBeGreaterThan(0)
-			expect(
-				chunks.some(
-					(c) => (c.type === "text" || c.type === "reasoning") && c.text.includes("Incomplete thought"),
-				),
-			).toBe(true)
+			// TagMatcher should flush incomplete reasoning content on stream end
+			expect(chunks).toContainEqual({ type: "reasoning", text: "Incomplete thought" })
 		})
 
 		it("should handle text without any <think> tags", async () => {

@@ -54,6 +54,86 @@ describe("TagMatcher", () => {
 		})
 	})
 
+	describe("multi-tag constructor (string[])", () => {
+		it("opens and closes <thought> when constructed with array", () => {
+			const matcher = new TagMatcher(["think", "thought"])
+			const result = matcher.final("<thought>deep reasoning</thought>done")
+			expect(result.some((r) => r.matched && r.data === "deep reasoning")).toBe(true)
+			expect(result.some((r) => !r.matched && r.data === "done")).toBe(true)
+		})
+
+		it("opens and closes <think> when constructed with array", () => {
+			const matcher = new TagMatcher(["think", "thought"])
+			const result = matcher.final("<think>thinking</think>done")
+			expect(result.some((r) => r.matched && r.data === "thinking")).toBe(true)
+			expect(result.some((r) => !r.matched && r.data === "done")).toBe(true)
+		})
+
+		it("<think> open is not closed by </thought> (cross-tag isolation)", () => {
+			const matcher = new TagMatcher(["think", "thought"])
+			const result = matcher.final("<think>reasoning</thought>still reasoning</think>done")
+			// </thought> must be treated as text since active tag is <think>
+			expect(result.some((r) => r.matched && r.data.includes("</thought>"))).toBe(true)
+			expect(result.some((r) => !r.matched && r.data === "done")).toBe(true)
+		})
+
+		it("<thought> open is not closed by </think> (inverse cross-tag isolation)", () => {
+			const matcher = new TagMatcher(["think", "thought"])
+			const result = matcher.final("<thought>reasoning</think>still reasoning</thought>done")
+			// </think> must be treated as text since active tag is <thought>
+			expect(result.some((r) => r.matched && r.data.includes("</think>"))).toBe(true)
+			expect(result.some((r) => !r.matched && r.data === "done")).toBe(true)
+		})
+	})
+
+	describe("chunk split at mid-tag-name boundary", () => {
+		it("correctly opens tag split across two update() calls", () => {
+			const matcher = new TagMatcher("think")
+			const first = matcher.update("<thi")
+			// Tag not yet complete — no chunks emitted yet
+			expect(first).toEqual([])
+			const second = matcher.update("nk>content</think>")
+			expect(second.some((r) => r.matched && r.data === "content")).toBe(true)
+		})
+	})
+
+	describe("unmatched > in TAG_OPEN falls back to TEXT", () => {
+		it("treats <xyz> as plain text when xyz is not a configured tag name", () => {
+			const matcher = new TagMatcher("think")
+			const result = matcher.final("<xyz>content")
+			expect(result.every((r) => !r.matched)).toBe(true)
+		})
+
+		it("treats stray closing tag as plain text when no tag is open", () => {
+			const matcher = new TagMatcher(["think", "thought"])
+			const result = matcher.final("final</think>text")
+			expect(result).toEqual([{ matched: false, data: "final</think>text" }])
+		})
+
+		it("treats extra closing tag after a closed block as plain text", () => {
+			const matcher = new TagMatcher(["think", "thought"])
+			const result = matcher.final("<think>thinking</think>final</think>text")
+			expect(result.some((r) => r.matched && r.data === "thinking")).toBe(true)
+			expect(result.some((r) => !r.matched && r.data === "final</think>text")).toBe(true)
+		})
+	})
+
+	describe("nested tags", () => {
+		it("treats inner <thought> as text when outer <think> is active", () => {
+			const matcher = new TagMatcher(["think", "thought"])
+			const result = matcher.final("<think>outer<thought>inner</thought> middle</think>final")
+			expect(result.some((r) => r.matched && r.data.includes("<thought>inner</thought>"))).toBe(true)
+			expect(result.some((r) => !r.matched && r.data === "final")).toBe(true)
+		})
+
+		it("correctly unwinds nested same-name tags", () => {
+			const matcher = new TagMatcher(["think", "thought"])
+			const result = matcher.final("<think>outer<think>inner</think> middle</think>final")
+			expect(result.some((r) => r.matched && r.data.includes("<think>inner</think>"))).toBe(true)
+			expect(result.some((r) => !r.matched && r.data === "final")).toBe(true)
+		})
+	})
+
 	describe("space handling in TAG_CLOSE (line 119)", () => {
 		it("tolerates a trailing space before > in closing tag (</think >)", () => {
 			// space at index === tagName.length hits line 119 (continue)
