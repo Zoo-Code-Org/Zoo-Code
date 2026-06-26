@@ -61,7 +61,17 @@ export class NativeToolCallParser {
 	// Raw chunk tracking state (keyed by index from one API stream)
 	private static rawChunkTrackersByScope = new WeakMap<
 		object,
-		Map<number, { id?: string; name: string; hasStarted: boolean; deltaBuffer: string[] }>
+		Map<
+			number,
+			{
+				id?: string
+				name: string
+				// Track whether the provider sent a name, including an empty name.
+				nameSeen: boolean
+				hasStarted: boolean
+				deltaBuffer: string[]
+			}
+		>
 	>()
 
 	public static createScope(): object {
@@ -131,6 +141,7 @@ export class NativeToolCallParser {
 			tracked = {
 				id,
 				name: name || "",
+				nameSeen: name !== undefined,
 				hasStarted: false,
 				deltaBuffer: [],
 			}
@@ -141,13 +152,14 @@ export class NativeToolCallParser {
 		if (id) {
 			tracked.id = id
 		}
-		if (name) {
+		if (name !== undefined) {
 			tracked.name = name
+			tracked.nameSeen = true
 		}
 
 		// Emit start event only once both id and name are known. Using a local
 		// non-null id keeps emitted events typed as id: string.
-		if (!tracked.hasStarted && tracked.id && tracked.name) {
+		if (!tracked.hasStarted && tracked.id && tracked.nameSeen) {
 			const startedId = tracked.id
 			events.push({
 				type: "tool_call_start",

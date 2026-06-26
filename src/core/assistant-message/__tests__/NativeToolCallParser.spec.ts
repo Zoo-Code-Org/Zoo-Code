@@ -543,6 +543,36 @@ describe("NativeToolCallParser", () => {
 			}
 		})
 
+		it("handles name arriving before id with buffered args in between (reverse ordering)", () => {
+			const fullArgs = JSON.stringify({ path: "src/reverse.ts" })
+			const firstHalf = fullArgs.slice(0, 9)
+			const secondHalf = fullArgs.slice(9)
+
+			const { events, finalized } = drive([
+				{ index: 0, name: "read_file" },
+				{ index: 0, arguments: firstHalf },
+				{ index: 0, id: "call_reverse" },
+				{ index: 0, arguments: secondHalf },
+			])
+
+			// Start must not fire until the id arrives, so exactly one start with the late id.
+			const starts = events.filter((e) => e.type === "tool_call_start")
+			expect(starts).toHaveLength(1)
+			expect(starts[0].id).toBe("call_reverse")
+
+			// The buffered delta must be flushed only after the start event.
+			const startIndex = events.findIndex((e) => e.type === "tool_call_start")
+			const firstDeltaIndex = events.findIndex((e) => e.type === "tool_call_delta")
+			expect(startIndex).toBeLessThan(firstDeltaIndex)
+
+			const result = finalized.get("call_reverse")
+			expect(result).not.toBeNull()
+			expect(result?.type).toBe("tool_use")
+			if (result?.type === "tool_use") {
+				expect((result.nativeArgs as { path: string }).path).toBe("src/reverse.ts")
+			}
+		})
+
 		it("keeps two parallel tool calls on distinct indices isolated", () => {
 			const argsA = JSON.stringify({ path: "src/a.ts" })
 			const argsB = JSON.stringify({ path: "src/b.ts" })
@@ -561,6 +591,8 @@ describe("NativeToolCallParser", () => {
 
 			const resultA = finalized.get("call_a")
 			const resultB = finalized.get("call_b")
+			expect(resultA).not.toBeNull()
+			expect(resultB).not.toBeNull()
 			if (resultA?.type === "tool_use") {
 				expect((resultA.nativeArgs as { path: string }).path).toBe("src/a.ts")
 			}
@@ -580,6 +612,8 @@ describe("NativeToolCallParser", () => {
 			expect(events.every((e) => e.id === "call_single")).toBe(true)
 
 			const result = finalized.get("call_single")
+			expect(result).not.toBeNull()
+			expect(result?.type).toBe("tool_use")
 			if (result?.type === "tool_use") {
 				expect((result.nativeArgs as { path: string }).path).toBe("src/single.ts")
 			}
@@ -643,6 +677,28 @@ describe("NativeToolCallParser", () => {
 			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
 			const ends = finalizeEvents.filter((e) => e.type === "tool_call_end")
 			expect(ends).toHaveLength(0)
+
+			NativeToolCallParser.clearRawChunkState()
+		})
+
+		it("does not double-fire end events across processFinishReason and finalizeRawChunks", () => {
+			// Drive a started tool call through the raw chunk path.
+			const chunks = [
+				{ index: 0, id: "call_dup", name: "read_file" },
+				{ index: 0, arguments: '{"path":"file.ts"}' },
+			]
+			for (const chunk of chunks) {
+				NativeToolCallParser.processRawChunk(chunk)
+			}
+
+			// Task.ts emits ends via processFinishReason, then calls finalizeRawChunks
+			// unconditionally. Both must not emit an end for the same tracker.
+			const finishEvents = NativeToolCallParser.processFinishReason("tool_calls")
+			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
+
+			const allEnds = [...finishEvents, ...finalizeEvents].filter((e) => e.type === "tool_call_end")
+			expect(allEnds).toHaveLength(1)
+			expect(allEnds[0].id).toBe("call_dup")
 
 			NativeToolCallParser.clearRawChunkState()
 		})

@@ -4,7 +4,7 @@ const ASK_FOLLOWUP_QUESTION_DESCRIPTION = `Ask the user a question to gather add
 
 Parameters:
 - question: (required) A clear, specific question addressing the information needed
-- follow_up: (required) An array of 1-4 suggested answers. Always provide this as an array, even when there is only one suggestion. Each suggestion must be a complete, actionable answer without placeholders. Suggestions optionally include mode to switch modes (code/architect/etc.)
+- follow_up: (required) A list of 2-4 suggested answers. Suggestions must be complete, actionable answers without placeholders. Optionally include mode to switch modes (code/architect/etc.)
 
 Example: Asking for file path
 { "question": "What is the path to the frontend-config.json file?", "follow_up": [{ "text": "./src/frontend-config.json", "mode": null }, { "text": "./config/frontend-config.json", "mode": null }, { "text": "./frontend-config.json", "mode": null }] }
@@ -14,7 +14,7 @@ Example: Asking with mode switch
 
 const QUESTION_PARAMETER_DESCRIPTION = `Clear, specific question that captures the missing information you need`
 
-const FOLLOW_UP_PARAMETER_DESCRIPTION = `Required array of 1-4 suggested responses, always an array even for a single suggestion; each suggestion must be a complete, actionable answer and may include a mode switch`
+const FOLLOW_UP_PARAMETER_DESCRIPTION = `Required list of 2-4 suggested responses; each suggestion must be a complete, actionable answer and may include a mode switch`
 
 const FOLLOW_UP_TEXT_DESCRIPTION = `Suggested answer the user can pick`
 
