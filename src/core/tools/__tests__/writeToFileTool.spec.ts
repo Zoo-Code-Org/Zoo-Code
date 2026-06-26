@@ -287,15 +287,16 @@ describe("writeToFileTool", () => {
 		)
 
 		it.skipIf(process.platform === "win32")(
-			"creates parent directories when path has stabilized (partial)",
+			"does not create directories in handlePartial -- only execute() creates them",
 			async () => {
-				// First call - path not yet stabilized
+				// First call - path not yet stabilized, early return
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 				expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
 
-				// Second call with same path - path is now stabilized
+				// Second call with same path - path stabilized, handlePartial runs but
+				// must NOT call createDirectoriesForFile (directory creation belongs in execute)
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
-				expect(mockedCreateDirectoriesForFile).toHaveBeenCalledWith(absoluteFilePath)
+				expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
 			},
 		)
 
@@ -471,5 +472,50 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { isPartial: true })
 			expect(mockHandleError).toHaveBeenCalledWith("handling partial write_to_file", expect.any(Error))
 		})
+
+		it.skipIf(process.platform === "win32")(
+			"EROFS in handlePartial does not stall agent loop -- createDirectoriesForFile is not called",
+			async () => {
+				// Regression test: before the fix, createDirectoriesForFile was called in handlePartial
+				// with no .catch() guard. An EROFS throw escaped to BaseTool.handle(), which called
+				// handleError but did not set didRejectTool/didAlreadyUseTool, so the advancement gate
+				// in presentAssistantMessage was never reached and the agent loop stalled permanently.
+				// After the fix the call is removed entirely -- handlePartial never touches the filesystem.
+				mockedCreateDirectoriesForFile.mockRejectedValue(
+					Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
+				)
+
+				// First call -- path not yet stabilized, returns early
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				expect(mockHandleError).not.toHaveBeenCalled()
+
+				// Second call -- path stabilized; createDirectoriesForFile must NOT be called from
+				// handlePartial, so the mock rejection must not trigger and handleError must not be called
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
+				expect(mockHandleError).not.toHaveBeenCalled()
+			},
+		)
+
+		it.skipIf(process.platform === "win32")(
+			"EROFS in execute() routes through handleError with cleanup rather than escaping unhandled",
+			async () => {
+				// Regression test: before the fix, createDirectoriesForFile in execute() sat outside
+				// the try block (lines 70-74), so an EROFS error escaped the catch at line 188 entirely.
+				// After the fix the call is inside the try block, so filesystem errors are caught and
+				// routed through handleError with proper diffViewProvider.reset() cleanup.
+				mockedCreateDirectoriesForFile.mockRejectedValue(
+					Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
+				)
+
+				await executeWriteFileTool({}, { fileExists: false })
+
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				// The tool must not have proceeded to open or save
+				expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			},
+		)
 	})
 })

@@ -67,12 +67,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.diffViewProvider.editType = fileExists ? "modify" : "create"
 		}
 
-		// Create parent directories early for new files to prevent ENOENT errors
-		// in subsequent operations (e.g., diffViewProvider.open, fs.readFile)
-		if (!fileExists) {
-			await createDirectoriesForFile(absolutePath)
-		}
-
 		if (newContent.startsWith("```")) {
 			newContent = newContent.split("\n").slice(1).join("\n")
 		}
@@ -98,6 +92,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 		try {
 			task.consecutiveMistakeCount = 0
+
+			// Create parent directories for new files inside the try block so filesystem
+			// errors (EROFS, EACCES, etc.) route through handleError with proper cleanup
+			// and consecutive-mistake counting, rather than escaping unhandled.
+			if (!fileExists) {
+				await createDirectoriesForFile(absolutePath)
+			}
 
 			const provider = task.providerRef.deref()
 			const state = await provider?.getState()
@@ -222,12 +223,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		} else {
 			fileExists = await fileExistsAtPath(absolutePath)
 			task.diffViewProvider.editType = fileExists ? "modify" : "create"
-		}
-
-		// Create parent directories early for new files to prevent ENOENT errors
-		// in subsequent operations (e.g., diffViewProvider.open)
-		if (!fileExists) {
-			await createDirectoriesForFile(absolutePath)
 		}
 
 		const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath!) || false
