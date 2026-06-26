@@ -310,15 +310,13 @@ function getSelectedModel({
 				? `${apiConfiguration.vsCodeLmModelSelector.vendor}/${apiConfiguration.vsCodeLmModelSelector.family}`
 				: vscodeLlmDefaultModelId
 			const modelFamily = apiConfiguration?.vsCodeLmModelSelector?.family ?? vscodeLlmDefaultModelId
-			// On a family miss, fall back to the default model entry instead of openAiModelInfoSaneDefaults,
-			// whose 128K contextWindow would diverge from the gate and make the bar read >100% while
-			// auto-condense never fires (the gate uses the live window).
+			// On a family miss, fall back to the default model entry, not openAiModelInfoSaneDefaults
+			// (whose 128K contextWindow would diverge from the gate and skew the bar).
 			const listedModel =
 				vscodeLlmModels[modelFamily as keyof typeof vscodeLlmModels] ?? vscodeLlmModels[vscodeLlmDefaultModelId]
-			// Set contextWindow = maxInputTokens so the UI bar matches what the condense gate uses for
-			// vscode-lm. The gate's primary window comes from getCondenseContextWindow() (which returns the
-			// static-table maxInputTokens); getModel().info.contextWindow is only the fallback. Sharing
-			// maxInputTokens keeps the bar and the gate on a single source of truth.
+			// Set contextWindow = maxInputTokens so the UI bar shares one source of truth with the gate,
+			// whose primary window is getCondenseContextWindow() (static-table maxInputTokens); this
+			// info.contextWindow is only the gate's fallback.
 			const info: ModelInfo = {
 				...openAiModelInfoSaneDefaults,
 				...listedModel,

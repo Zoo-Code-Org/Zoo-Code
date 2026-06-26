@@ -269,11 +269,8 @@ describe("TaskHeader", () => {
 		})
 
 		it("should treat a negative maxTokens (vscode-lm reports -1) as zero reserve", () => {
-			// vscode-lm reports maxTokens: -1 (unlimited). A naive `maxTokens || 0` keeps -1,
-			// which would inflate available input space and skew the percentage. The guard must
-			// treat -1 as a zero reserve so available space == contextWindow.
-			// contextTokens = 250, contextWindow = 1000, reservedForOutput = 0
-			// Percentage = 250 / 1000 * 100 = 25%
+			// vscode-lm reports maxTokens: -1 (unlimited). The guard must treat that negative reserve
+			// as zero, so available space == contextWindow rather than being inflated by a kept -1.
 			mockModelInfo = { contextWindow: 1000, maxTokens: -1 }
 			mockMaxOutputTokens = -1
 

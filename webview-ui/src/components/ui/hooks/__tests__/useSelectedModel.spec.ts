@@ -812,9 +812,8 @@ describe("useSelectedModel", () => {
 		})
 
 		it("pins a divergent family's contextWindow to maxInputTokens, not its advertised window", () => {
-			// claude-opus-4.8 is the row where contextWindow (679560) and maxInputTokens (197897) DIFFER.
-			// The hook must surface maxInputTokens so the bar matches the condense gate; a field swap to
-			// the advertised contextWindow would be caught here (unlike the default model where they match).
+			// claude-opus-4.8 is the row where contextWindow and maxInputTokens differ; a field swap to
+			// the advertised window would be caught here.
 			const family = "claude-opus-4.8"
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: "vscode-lm",
@@ -840,8 +839,7 @@ describe("useSelectedModel", () => {
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			// On a family miss we must NOT fall back to openAiModelInfoSaneDefaults' 128000 window,
-			// which would diverge from the gate. Instead, use the default model's maxInputTokens.
+			// A family miss must not use the 128000 sane-defaults window; use the default model's instead.
 			expect(result.current.info?.contextWindow).not.toBe(128000)
 			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
 			expect(result.current.info?.supportsImages).toBe(false)

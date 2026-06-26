@@ -3,11 +3,8 @@ import { vscodeLlmModels, vscodeLlmDefaultModelId } from "../providers/vscode-ll
 
 describe("vscodeLlmModels", () => {
 	it("exposes the opus-4.8 row with its measured maxInputTokens and contextWindow", () => {
-		// The VS Code LM API exposes only maxInputTokens; that is the value the UI reads from this
-		// table (useSelectedModel.ts). For claude-opus-4.8 the two fields intentionally DIVERGE:
-		// maxInputTokens (197897) is the enforced input ceiling, while contextWindow (679560) records
-		// the larger advertised window. The UI reads maxInputTokens, so the divergence is a deliberate
-		// tripwire — assert the actual on-disk literals rather than forcing equality.
+		// claude-opus-4.8 intentionally diverges: maxInputTokens (197897) is the enforced ceiling the
+		// UI reads, contextWindow (679560) the advertised window. Assert the on-disk literals as a tripwire.
 		expect(vscodeLlmModels).toHaveProperty("claude-opus-4.8")
 		expect(vscodeLlmModels["claude-opus-4.8"].contextWindow).toBe(679560)
 		expect(vscodeLlmModels["claude-opus-4.8"].maxInputTokens).toBe(197897)

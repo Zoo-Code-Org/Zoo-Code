@@ -108,13 +108,9 @@ export interface ApiHandler {
 	getModel(): { id: string; info: ModelInfo }
 
 	/**
-	 * Optional: the context window (in tokens) to use for context-management /
-	 * auto-condense decisions, when it must differ from getModel().info.contextWindow.
-	 *
-	 * Only the VS Code LM (Copilot) provider overrides this, to measure usage against the
-	 * model's static `maxInputTokens` instead of the inflated live window VS Code reports.
-	 * Other providers leave it undefined and callers fall back to getModel().info.contextWindow,
-	 * so their behavior is unchanged.
+	 * Optional context window for context-management / auto-condense when it must differ from
+	 * getModel().info.contextWindow. Only VS Code LM overrides it (static `maxInputTokens` vs its
+	 * inflated live window); others leave it undefined and callers fall back.
 	 */
 	getCondenseContextWindow?(): number
 

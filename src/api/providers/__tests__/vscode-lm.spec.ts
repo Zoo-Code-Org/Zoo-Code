@@ -443,8 +443,7 @@ describe("VsCodeLmHandler", () => {
 		})
 
 		it("should use the full advertised maxInputTokens without an upper cap", async () => {
-			// VS Code can report a very large advertised window; getModel surfaces it as-is
-			// (Math.max(0, maxInputTokens)) rather than clamping to a smaller default.
+			// A large advertised window is surfaced as-is, not clamped to a smaller default.
 			const mockModel = { ...mockLanguageModelChat, maxInputTokens: 936000 }
 			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
 			handler["client"] = null
@@ -485,15 +484,15 @@ describe("VsCodeLmHandler", () => {
 		})
 
 		it("falls back to the live model context window for families not in the static table", () => {
-			// test-family is not a curated row, so the gate uses the live runtime window.
+			// Not a curated row, so the gate uses the live runtime window.
 			handler["client"] = mockLanguageModelChat as unknown as vscode.LanguageModelChat
 			expect(handler.getCondenseContextWindow()).toBe(handler.getModel().info.contextWindow)
 			expect(handler.getCondenseContextWindow()).toBe(mockLanguageModelChat.maxInputTokens)
 		})
 
 		it("falls back to the live window when no family is resolvable (no client, no selector family)", () => {
-			// With neither a client nor a selector family, `family` is undefined, so the static-table
-			// lookup is skipped entirely and the gate uses getModel().info.contextWindow (fallback info).
+			// No client and no selector family means `family` is undefined, so the gate skips the
+			// static lookup and uses getModel().info.contextWindow.
 			const noFamilyHandler = new VsCodeLmHandler({ vsCodeLmModelSelector: { vendor: "copilot" } })
 			noFamilyHandler["client"] = null
 			expect(noFamilyHandler.getCondenseContextWindow()).toBe(noFamilyHandler.getModel().info.contextWindow)
@@ -502,10 +501,8 @@ describe("VsCodeLmHandler", () => {
 		})
 
 		it("falls back to the derived window when the static row exists but maxInputTokens is non-positive", () => {
-			// Guard sub-condition: a curated family is found but its maxInputTokens is <= 0 (corrupt/zeroed).
-			// With the selector family `claude-opus-4.8` and no live client, the zeroed static row is the one
-			// consulted, so the `maxInputTokens > 0` guard fails and the gate falls back to the derived window
-			// from getModel().info.contextWindow (sane defaults here, since there is no live client).
+			// A curated row exists but its maxInputTokens is <= 0, so the `> 0` guard fails and the gate
+			// falls back to getModel().info.contextWindow.
 			const family = "claude-opus-4.8"
 			const original = vscodeLlmModels[family].maxInputTokens
 			try {
@@ -513,8 +510,8 @@ describe("VsCodeLmHandler", () => {
 				const guardHandler = new VsCodeLmHandler({
 					vsCodeLmModelSelector: { vendor: "copilot", family },
 				})
-				// Leave the client unset so `family` resolves from the selector (claude-opus-4.8),
-				// forcing the zeroed static row to be read instead of a live client's family.
+				// Leave the client unset so `family` resolves from the selector, forcing the zeroed
+				// static row to be read instead of a live client's family.
 				guardHandler["client"] = null
 				expect(guardHandler.getCondenseContextWindow()).toBe(guardHandler.getModel().info.contextWindow)
 				expect(guardHandler.getCondenseContextWindow()).toBe(openAiModelInfoSaneDefaults.contextWindow)

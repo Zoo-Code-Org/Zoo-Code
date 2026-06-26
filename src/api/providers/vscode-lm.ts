@@ -563,15 +563,10 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	/**
-	 * Context window used for auto-condense / context-management decisions.
-	 *
-	 * VS Code's LM API reports `client.maxInputTokens` as Copilot's *advertised* window,
-	 * which is far larger than the realistic usable window; relying on it keeps auto-condense
-	 * from ever firing. For condense decisions we instead measure usage against the curated
-	 * static table's `maxInputTokens` — the same value the context bar uses via
-	 * `useSelectedModel` — so the gate and the gauge stay on one source of truth.
-	 *
-	 * Falls back to the live runtime window when the selected model isn't in the static table.
+	 * Context window for auto-condense. The API's advertised `client.maxInputTokens` is far larger
+	 * than usable, so relying on it stops auto-condense from firing; measure against the curated
+	 * static table's `maxInputTokens` instead (the same value the bar uses). Fall back to the live
+	 * window when the model isn't in the table.
 	 */
 	getCondenseContextWindow(): number {
 		const family = this.client?.family ?? this.options.vsCodeLmModelSelector?.family

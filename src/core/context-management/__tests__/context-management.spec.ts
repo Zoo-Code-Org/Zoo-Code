@@ -810,8 +810,7 @@ describe("Context Management", () => {
 			const summarizeSpy = vi.spyOn(condenseModule, "summarizeConversation")
 
 			const modelInfo = createModelInfo(100000, 30000)
-			// Usage is measured against available input space (contextWindow - maxTokens reserve).
-			// available = 100000 - 30000 = 70000; 30000 / 70000 ≈ 43% < 50% threshold.
+			// Usage measured against available input space stays below the threshold.
 			const contextWindow = modelInfo.contextWindow
 			const totalTokens = 30000
 			const messagesWithSmallContent = [
@@ -1508,8 +1507,7 @@ describe("Context Management", () => {
 		})
 
 		it("should return false when context percent is below threshold", () => {
-			// Available-input denominator (opt-in): available = 100000 - 30000 = 70000;
-			// 30000 / 70000 ≈ 43% < 50% threshold.
+			// Opt-in available-input denominator: usage stays below threshold.
 			const result = willManageContext({
 				totalTokens: 30000,
 				contextWindow: 100000,
@@ -1525,12 +1523,7 @@ describe("Context Management", () => {
 		})
 
 		it("should treat a negative maxTokens (vscode-lm reports -1) as the default reserve, not -1", () => {
-			// vscode-lm reports maxTokens: -1 (unlimited). A naive `maxTokens || DEFAULT` keeps -1,
-			// which would make allowedTokens balloon past the window and skew the percentage. The
-			// guard must treat -1 like an unknown reserve (ANTHROPIC_DEFAULT_MAX_TOKENS for the
-			// allowed-tokens math, zero reserve for the available-input percentage).
-			// With autoCondenseContext disabled, only the allowedTokens path can trigger:
-			// allowedTokens = 100000 * 0.9 - 8192 = 81808; totalTokens 85000 > 81808 → true.
+			// A -1 reserve must be treated as unknown (default reserve), not kept as -1.
 			const result = willManageContext({
 				totalTokens: 85000,
 				contextWindow: 100000,
@@ -1605,10 +1598,7 @@ describe("Context Management", () => {
 		})
 
 		it("should include lastMessageTokens in the calculation", () => {
-			// Available-input denominator (opt-in): available = 100000 - 30000 = 70000.
-			// Without lastMessageTokens: 34000 / 70000 ≈ 48.6% < 50% threshold.
-			// With lastMessageTokens: (34000 + 2000) / 70000 ≈ 51.4% ≥ 50% threshold.
-			// (Against the full window both cases are < 50%, so this case requires the opt-in flag.)
+			// Adding lastMessageTokens pushes usage over the threshold (opt-in available-input denominator).
 			const resultWithoutLastMessage = willManageContext({
 				totalTokens: 34000,
 				contextWindow: 100000,
@@ -1731,11 +1721,8 @@ describe("Context Management", () => {
 	})
 
 	/**
-	 * Regression tests for the opt-in available-input denominator (vscode-lm). With the flag on,
-	 * the condense gate measures usage against available input space (contextWindow - reserved
-	 * output), not the raw context window. This keeps the gate in lockstep with the UI context
-	 * gauge and ensures it actually fires for vscode-lm, which reports maxTokens: -1. The default
-	 * (full-window) behavior for every other provider is covered by the sibling describe below.
+	 * Regression: with the opt-in flag on, the gate measures usage against available input space
+	 * (contextWindow - reserved output) so it stays in lockstep with the UI gauge and fires for vscode-lm.
 	 */
 	describe("contextPercent uses available input space (opt-in, regression)", () => {
 		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
@@ -1753,9 +1740,7 @@ describe("Context Management", () => {
 		]
 
 		it("willManageContext measures the percentage against available input, not the full window", () => {
-			// contextWindow 200000, reserve 64000 → available input 136000.
-			// totalTokens 100000 → 100000 / 136000 ≈ 73.5%, which clears the 70% threshold.
-			// Against the full window it would be only 50% and the gate would (wrongly) stay closed.
+			// Dividing by available input clears the threshold; the full window would keep the gate closed.
 			const result = willManageContext({
 				totalTokens: 100000,
 				contextWindow: 200000,
@@ -1771,7 +1756,7 @@ describe("Context Management", () => {
 		})
 
 		it("willManageContext stays below threshold when usage is under available input", () => {
-			// available input 136000; totalTokens 90000 → ≈ 66.2% < 70% threshold.
+			// Usage under available input stays below threshold.
 			const result = willManageContext({
 				totalTokens: 90000,
 				contextWindow: 200000,
@@ -1787,8 +1772,7 @@ describe("Context Management", () => {
 		})
 
 		it("willManageContext treats an unlimited (-1) reserve as zero reserve for the percentage", () => {
-			// vscode-lm reports maxTokens: -1. The percentage denominator should fall back to the
-			// full window (zero reserve): 150000 / 200000 = 75% ≥ 70% threshold.
+			// A -1 reserve falls back to the full window (zero reserve) for the percentage.
 			const result = willManageContext({
 				totalTokens: 150000,
 				contextWindow: 200000,
@@ -1804,9 +1788,7 @@ describe("Context Management", () => {
 		})
 
 		it("willManageContext falls back to 100% when the reserve is >= the window (availableInput <= 0)", () => {
-			// When maxTokens (reserve) >= contextWindow, availableInputTokens = window - reserve <= 0.
-			// The denominator guard must short-circuit contextPercent to 100 rather than divide by
-			// a non-positive number, so the gate fires regardless of the (tiny) totalTokens.
+			// Non-positive available input must short-circuit contextPercent to 100 rather than divide.
 			const result = willManageContext({
 				totalTokens: 1,
 				contextWindow: 50000,
@@ -1818,12 +1800,11 @@ describe("Context Management", () => {
 				lastMessageTokens: 0,
 				useAvailableInputForContextPercent: true,
 			})
-			// contextPercent === 100 >= 80 threshold → true.
 			expect(result).toBe(true)
 		})
 
 		it("willManageContext falls back to 100% when the reserve exactly equals the window (availableInput === 0)", () => {
-			// Boundary: reserve === window → availableInputTokens === 0, still the FALSE branch (> 0 is false).
+			// Boundary: reserve === window → available input 0, still the non-positive guard.
 			const result = willManageContext({
 				totalTokens: 1,
 				contextWindow: 50000,
@@ -1839,9 +1820,7 @@ describe("Context Management", () => {
 		})
 
 		it("manageContext summarizes via the 100% fallback when the reserve >= the window (availableInput <= 0)", async () => {
-			// Mirror the willManageContext edge for the manageContext path: reserve >= window forces
-			// contextPercent to 100 via the denominator guard, so summarization triggers even though
-			// totalTokens is small relative to the raw window.
+			// reserve >= window forces contextPercent to 100, so summarization triggers.
 			const mockSummary = "Reserve-exceeds-window summary"
 			const mockSummarizeResponse: condenseModule.SummarizeResponse = {
 				messages: [
@@ -1857,7 +1836,6 @@ describe("Context Management", () => {
 				.spyOn(condenseModule, "summarizeConversation")
 				.mockResolvedValue(mockSummarizeResponse)
 
-			// contextWindow 50000, maxTokens 60000 → availableInput = -10000 → contextPercent = 100.
 			const messagesWithSmallContent = [
 				...messages.slice(0, -1),
 				{ ...messages[messages.length - 1], content: "" },
@@ -1904,8 +1882,7 @@ describe("Context Management", () => {
 				.mockResolvedValue(mockSummarizeResponse)
 
 			const modelInfo = createModelInfo(200000, 64000)
-			// available input 136000; totalTokens 100000 → ≈ 73.5% ≥ 70% threshold, but only 50% of
-			// the raw window. The end-to-end path must trigger summarization on the available-input math.
+			// Clears the threshold against available input but not the raw window; end-to-end must summarize.
 			const totalTokens = 100000
 			const messagesWithSmallContent = [
 				...messages.slice(0, -1),
@@ -1938,9 +1915,8 @@ describe("Context Management", () => {
 	})
 
 	/**
-	 * Scoping tests: the available-input denominator is opt-in. By default (flag omitted), the gate
-	 * divides by the FULL context window, exactly as every non-vscode-lm provider did before the
-	 * vscode-lm fix. The maxTokens: -1 reserve guard, however, remains global on the default path.
+	 * Scoping: the available-input denominator is opt-in; default divides by the full window.
+	 * The maxTokens: -1 reserve guard stays global on the default path.
 	 */
 	describe("contextPercent denominator is opt-in (default = full window)", () => {
 		const messages: ApiMessage[] = [
@@ -1952,9 +1928,7 @@ describe("Context Management", () => {
 		]
 
 		it("willManageContext divides by the full window when the flag is omitted (default)", () => {
-			// Same inputs as the regression block: contextWindow 200000, reserve 64000, totalTokens 100000.
-			// Default (full window): 100000 / 200000 = 50% < 70% threshold → false. Under the opt-in
-			// available-input math it would be ≈ 73.5% and fire — this proves the scoping.
+			// Default divides by the full window, staying below threshold where the opt-in math would fire.
 			const result = willManageContext({
 				totalTokens: 100000,
 				contextWindow: 200000,
@@ -1969,7 +1943,7 @@ describe("Context Management", () => {
 		})
 
 		it("willManageContext fires on the same inputs when the opt-in flag is true", () => {
-			// Identical inputs, flag on: available input 136000 → 100000 / 136000 ≈ 73.5% ≥ 70% → true.
+			// Same inputs, flag on: dividing by available input clears the threshold.
 			const result = willManageContext({
 				totalTokens: 100000,
 				contextWindow: 200000,
@@ -1985,9 +1959,7 @@ describe("Context Management", () => {
 		})
 
 		it("keeps the maxTokens:-1 reserve guard on the default (full-window) path", () => {
-			// The reserve guard is global, independent of the percent denominator. With auto-condense
-			// off, only the allowedTokens path can fire: allowedTokens = 100000 * 0.9 - 8192 = 81808;
-			// totalTokens 85000 > 81808 → true. (A naive `maxTokens || DEFAULT` keeping -1 would break this.)
+			// The -1 reserve guard is global, independent of the percent denominator.
 			const result = willManageContext({
 				totalTokens: 85000,
 				contextWindow: 100000,
@@ -2002,10 +1974,7 @@ describe("Context Management", () => {
 		})
 
 		it("manageContext does NOT summarize on the default path where the opt-in math would have", async () => {
-			// contextWindow 200000, reserve 64000, totalTokens 100000. Default full-window percent is
-			// 50% < 70% threshold, and allowedTokens = 200000 * 0.9 - 64000 = 116000 > 100000, so neither
-			// condense nor truncation runs. With the opt-in flag this same case summarizes (asserted above
-			// in the regression block), proving the default path reverts to pre-fix behavior.
+			// Default full-window math leaves this case below threshold; the opt-in flag would summarize it.
 			const summarizeSpy = vi.spyOn(condenseModule, "summarizeConversation")
 
 			const messagesWithSmallContent = [

@@ -5,15 +5,8 @@ export type VscodeLlmModelId = keyof typeof vscodeLlmModels
 export const vscodeLlmDefaultModelId: VscodeLlmModelId = "claude-sonnet-4.5"
 
 // Curated VS Code LM (GitHub Copilot) model catalog.
-//
-// The VS Code LM API only exposes `maxInputTokens` per model; it does NOT report a separate
-// total context window. For each row, `contextWindow` records the model's advertised window
-// while `maxInputTokens` is the enforced input ceiling the UI actually reads (via
-// useSelectedModel.ts) and the condense gate measures against. For most rows the two values
-// match. They intentionally DIVERGE only where the provider advertises a larger window than the
-// usable input ceiling (e.g. claude-opus-4.8): keeping both fields lets the context bar and the
-// auto-condense gate stay on a single source of truth (maxInputTokens) without losing the real
-// advertised window.
+// The API exposes only `maxInputTokens`; the UI and condense gate read that. `contextWindow` is
+// the advertised window, kept for rows where it diverges from the ceiling (e.g. claude-opus-4.8).
 export const vscodeLlmModels = {
 	"claude-opus-4.8": {
 		contextWindow: 679560,

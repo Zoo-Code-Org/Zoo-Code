@@ -3738,13 +3738,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			settings: this.apiConfiguration,
 		})
 
-		// VS Code LM (Copilot) measures usage against its static-table maxInputTokens, not the
-		// inflated live window, so context management runs in line with the context bar. Every other
-		// provider returns undefined here and falls back to modelInfo.contextWindow.
+		// vscode-lm condenses against its static-table maxInputTokens (not the inflated live window);
+		// only it implements getCondenseContextWindow, so others fall back to the full contextWindow.
 		const contextWindow = this.api.getCondenseContextWindow?.() ?? modelInfo.contextWindow
-
-		// Only vscode-lm implements getCondenseContextWindow, so its presence scopes the
-		// available-input condense denominator to that provider; all others use the full window.
 		const useAvailableInputForContextPercent = typeof this.api.getCondenseContextWindow === "function"
 
 		// Get the current profile ID using the helper method
@@ -3942,13 +3938,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				settings: this.apiConfiguration,
 			})
 
-			// VS Code LM (Copilot) measures usage against its static-table maxInputTokens, not the
-			// inflated live window, so context management runs in line with the context bar. Every other
-			// provider returns undefined here and falls back to modelInfo.contextWindow.
+			// vscode-lm condenses against its static-table maxInputTokens (not the inflated live window);
+			// only it implements getCondenseContextWindow, so others fall back to the full contextWindow.
 			const contextWindow = this.api.getCondenseContextWindow?.() ?? modelInfo.contextWindow
-
-			// Only vscode-lm implements getCondenseContextWindow, so its presence scopes the
-			// available-input condense denominator to that provider; all others use the full window.
 			const useAvailableInputForContextPercent = typeof this.api.getCondenseContextWindow === "function"
 
 			// Get the current profile ID using the helper method

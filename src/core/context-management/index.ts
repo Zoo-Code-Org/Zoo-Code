@@ -148,11 +148,8 @@ export type WillManageContextOptions = {
 	currentProfileId: string
 	lastMessageTokens: number
 	/**
-	 * Opt-in: measure the condense percentage against the available input space
-	 * (contextWindow - reserved output) instead of the full context window. Only providers
-	 * whose advertised live window is inflated relative to the usable input ceiling (vscode-lm,
-	 * which exposes the seam via getCondenseContextWindow) set this. All other providers leave it
-	 * undefined and keep dividing by the full context window (original behavior).
+	 * Opt-in (vscode-lm): measure the condense percentage against available input space
+	 * (contextWindow - reserved output) instead of the full window. Others leave it undefined.
 	 */
 	useAvailableInputForContextPercent?: boolean
 }
@@ -203,12 +200,8 @@ export function willManageContext({
 		// Invalid values fall back to global setting (effectiveThreshold already set)
 	}
 
-	// By default, measure usage against the full context window (original behavior shared by all
-	// providers). Opt-in (vscode-lm via getCondenseContextWindow) measures against the available
-	// input space (context window minus the reserved output budget) to match the UI context gauge,
-	// because that provider's advertised window is inflated relative to its usable input ceiling.
-	// Reserved output tokens can never hold conversation context. When the reserve is
-	// unknown/unlimited (e.g., vscode-lm reports -1), fall back to the full context window.
+	// Default: divide by the full context window. Opt-in (vscode-lm) divides by available input
+	// (window minus reserved output); an unknown/unlimited reserve (-1) falls back to the full window.
 	let contextPercent: number
 	if (useAvailableInputForContextPercent) {
 		const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
@@ -254,11 +247,8 @@ export type ContextManagementOptions = {
 	/** Optional controller for file access validation */
 	rooIgnoreController?: RooIgnoreController
 	/**
-	 * Opt-in: measure the condense percentage against the available input space
-	 * (contextWindow - reserved output) instead of the full context window. Only providers
-	 * whose advertised live window is inflated relative to the usable input ceiling (vscode-lm,
-	 * which exposes the seam via getCondenseContextWindow) set this. All other providers leave it
-	 * undefined and keep dividing by the full context window (original behavior).
+	 * Opt-in (vscode-lm): measure the condense percentage against available input space
+	 * (contextWindow - reserved output) instead of the full window. Others leave it undefined.
 	 */
 	useAvailableInputForContextPercent?: boolean
 }
@@ -338,12 +328,8 @@ export async function manageContext({
 	// If no specific threshold is found for the profile, fall back to global setting
 
 	if (autoCondenseContext) {
-		// By default, measure usage against the full context window (original behavior shared by all
-		// providers). Opt-in (vscode-lm via getCondenseContextWindow) measures against the available
-		// input space (context window minus the reserved output budget) to match the UI context gauge,
-		// because that provider's advertised window is inflated relative to its usable input ceiling.
-		// Reserved output tokens can never hold conversation context. When the reserve is
-		// unknown/unlimited (e.g., vscode-lm reports -1), fall back to the full context window.
+		// Default: divide by the full context window. Opt-in (vscode-lm) divides by available input
+		// (window minus reserved output); an unknown/unlimited reserve (-1) falls back to the full window.
 		let contextPercent: number
 		if (useAvailableInputForContextPercent) {
 			const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
