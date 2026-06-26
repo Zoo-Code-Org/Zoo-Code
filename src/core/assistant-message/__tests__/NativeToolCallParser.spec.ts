@@ -454,12 +454,10 @@ describe("NativeToolCallParser", () => {
 	describe("processRawChunk streaming reassembly", () => {
 		// Mirror the sequencing Task.ts performs: feed each raw chunk through
 		// processRawChunk, drive startStreamingToolCall on tool_call_start, feed
-		// tool_call_delta into processStreamingChunk, and finalize at the end.
+		// tool_call_delta into processStreamingChunk, and emit ends at stream close
+		// via finalizeRawChunks() (the same call Task.ts makes after the stream ends).
 		// Returns the ordered event types/ids plus the finalized tool uses by id.
-		const drive = (
-			rawChunks: Array<{ index: number; id?: string; name?: string; arguments?: string }>,
-			finishReason: string | null = "tool_calls",
-		) => {
+		const drive = (rawChunks: Array<{ index: number; id?: string; name?: string; arguments?: string }>) => {
 			const events: ToolCallStreamEvent[] = []
 
 			const handleEvent = (event: ToolCallStreamEvent) => {
@@ -477,13 +475,11 @@ describe("NativeToolCallParser", () => {
 				}
 			}
 
-			// Task.ts emits ends via processFinishReason on finish_reason: "tool_calls".
-			// Use clearRawChunkState (not finalizeRawChunks) for cleanup so we don't
-			// double-count the end events both paths would produce.
-			for (const event of NativeToolCallParser.processFinishReason(finishReason)) {
+			// Task.ts finalizes any tool calls still open at stream end via
+			// finalizeRawChunks(), which emits the tool_call_end events.
+			for (const event of NativeToolCallParser.finalizeRawChunks()) {
 				handleEvent(event)
 			}
-			NativeToolCallParser.clearRawChunkState()
 
 			const finalized = new Map<string, ReturnType<typeof NativeToolCallParser.finalizeStreamingToolCall>>()
 			const startIds = events.filter((e) => e.type === "tool_call_start").map((e) => e.id)
