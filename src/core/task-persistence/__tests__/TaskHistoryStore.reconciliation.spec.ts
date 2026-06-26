@@ -179,8 +179,14 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(unchanged?.awaitingChildId).toBe("child-4")
 	})
 
-	it("repairs invalid delegation: delegated parent with no awaitingChildId → active (clears delegatedToId)", async () => {
-		const parent = makeItem({ id: "parent-5", status: "delegated", delegatedToId: "stale-child" })
+	it("repairs invalid delegation: delegated parent with no awaitingChildId → active (clears delegatedToId and awaitingChildId)", async () => {
+		// awaitingChildId is falsy but explicitly set (empty string), delegatedToId is stale
+		const parent = makeItem({
+			id: "parent-5",
+			status: "delegated",
+			delegatedToId: "stale-child",
+			awaitingChildId: "",
+		} as any)
 		await seedItems([parent])
 
 		await store.initialize()
@@ -188,6 +194,8 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		const repaired = store.get("parent-5")
 		expect(repaired?.status).toBe("active")
 		expect(repaired?.delegatedToId).toBeUndefined()
+		// Fix #4: falsy awaitingChildId must also be cleared
+		expect(repaired?.awaitingChildId).toBeUndefined()
 	})
 
 	it("does not touch active or completed tasks", async () => {
@@ -265,5 +273,120 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("parent-log"))
 
 		warnSpy.mockRestore()
+	})
+
+	it("invokes onWrite callback after startup repairs", async () => {
+		const onWrite = vi.fn().mockResolvedValue(undefined)
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir, { onWrite })
+
+		const parent = makeItem({ id: "parent-onwrite", status: "delegated", awaitingChildId: "nonexistent-child" })
+		await seedItems([parent])
+
+		await store.initialize()
+
+		// The startup repair writes the repaired item, which must trigger onWrite
+		expect(onWrite).toHaveBeenCalled()
+		// The final state passed to onWrite must contain the repaired item
+		const lastCall = onWrite.mock.calls[onWrite.mock.calls.length - 1][0] as HistoryItem[]
+		const repaired = lastCall.find((i) => i.id === "parent-onwrite")
+		expect(repaired?.status).toBe("active")
+	})
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// upsert — transition guard enforcement at the write boundary
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TaskHistoryStore upsert transition guard", () => {
+	let tmpDir: string
+	let store: TaskHistoryStore
+
+	async function seedItems(items: HistoryItem[]): Promise<void> {
+		const tasksDir = path.join(tmpDir, "tasks")
+		await fs.mkdir(tasksDir, { recursive: true })
+		for (const item of items) {
+			const taskDir = path.join(tasksDir, item.id)
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(path.join(taskDir, "history_item.json"), JSON.stringify(item))
+		}
+	}
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "upsert-guard-test-"))
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+	})
+
+	afterEach(async () => {
+		store.dispose()
+		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+	})
+
+	it("rejects completed → active transition, preserving the completed status", async () => {
+		const item = makeItem({ id: "task-guard-1", status: "completed" })
+		await seedItems([item])
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+
+		// Fire-and-forget late save: tries to write status: "active" over "completed"
+		await expect(store.upsert({ ...item, status: "active" })).rejects.toThrow(
+			"Invalid task status transition: completed → active",
+		)
+
+		// The completed status must be preserved in the cache
+		expect(store.get("task-guard-1")?.status).toBe("completed")
+	})
+
+	it("rejects delegated → completed transition", async () => {
+		// Must include a live active child so reconciliation doesn't repair the parent to active
+		const child = makeItem({ id: "child-guard-2", status: "active" })
+		const item = makeItem({ id: "task-guard-2", status: "delegated", awaitingChildId: "child-guard-2" })
+		await seedItems([child, item])
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+
+		// Confirm reconciliation left the delegated status alone
+		expect(store.get("task-guard-2")?.status).toBe("delegated")
+
+		await expect(store.upsert({ ...item, status: "completed" })).rejects.toThrow(
+			"Invalid task status transition: delegated → completed",
+		)
+
+		expect(store.get("task-guard-2")?.status).toBe("delegated")
+	})
+
+	it("allows valid active → completed transition", async () => {
+		const item = makeItem({ id: "task-guard-3", status: "active" })
+		await seedItems([item])
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+
+		await expect(store.upsert({ ...item, status: "completed" })).resolves.toBeDefined()
+		expect(store.get("task-guard-3")?.status).toBe("completed")
+	})
+
+	it("allows first insert with status: active (no prior record to transition from)", async () => {
+		const item = makeItem({ id: "task-guard-new", status: "active" })
+		// Do NOT seed — this is the very first write for this task
+		await expect(store.upsert(item)).resolves.toBeDefined()
+		expect(store.get("task-guard-new")?.status).toBe("active")
+	})
+
+	it("allows upsert without a status field (no-op on status)", async () => {
+		const item = makeItem({ id: "task-guard-4", status: "completed" })
+		await seedItems([item])
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+
+		// Omitting status entirely — no transition should be validated
+		const { status: _omit, ...noStatus } = item
+		await expect(store.upsert(noStatus as HistoryItem)).resolves.toBeDefined()
+		// Status is preserved from the existing cache entry
+		expect(store.get("task-guard-4")?.status).toBe("completed")
 	})
 })
