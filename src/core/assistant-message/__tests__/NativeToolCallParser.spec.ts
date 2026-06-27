@@ -286,6 +286,67 @@ describe("NativeToolCallParser", () => {
 				})
 			})
 		})
+
+		describe("fetch_web_content tool", () => {
+			it("should parse fetch_web_content with url and prompt", () => {
+				const toolCall = {
+					id: "toolu_fetch_1",
+					name: "fetch_web_content" as const,
+					arguments: JSON.stringify({
+						url: "https://example.com",
+						prompt: "Find the main heading",
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					expect(result.nativeArgs).toBeDefined()
+					const nativeArgs = result.nativeArgs as { url: string; prompt?: string }
+					expect(nativeArgs.url).toBe("https://example.com")
+					expect(nativeArgs.prompt).toBe("Find the main heading")
+				}
+			})
+
+			it("should parse fetch_web_content with url only (no prompt)", () => {
+				const toolCall = {
+					id: "toolu_fetch_2",
+					name: "fetch_web_content" as const,
+					arguments: JSON.stringify({
+						url: "https://api.example.com/status",
+						prompt: null,
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					expect(result.nativeArgs).toBeDefined()
+					const nativeArgs = result.nativeArgs as { url: string; prompt?: string | null }
+					expect(nativeArgs.url).toBe("https://api.example.com/status")
+					expect(nativeArgs.prompt).toBeNull()
+				}
+			})
+
+			it("should return null when url is missing", () => {
+				const toolCall = {
+					id: "toolu_fetch_3",
+					name: "fetch_web_content" as const,
+					arguments: JSON.stringify({
+						prompt: "some prompt",
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				// Should return null because nativeArgs can't be constructed without url
+				expect(result).toBeNull()
+			})
+		})
 	})
 
 	describe("processStreamingChunk", () => {
@@ -416,6 +477,85 @@ describe("NativeToolCallParser", () => {
 				expect(nativeArgs.path).toBe("src/test.ts")
 			})
 		})
+
+		describe("fetch_web_content tool", () => {
+			it("should emit a partial ToolUse with nativeArgs.url during streaming", () => {
+				const id = "toolu_streaming_fetch_1"
+				const scope = NativeToolCallParser.createScope()
+				NativeToolCallParser.startStreamingToolCall(id, "fetch_web_content", scope)
+
+				const fullArgs = JSON.stringify({ url: "https://example.com", prompt: "Find info" })
+				const result = NativeToolCallParser.processStreamingChunk(id, fullArgs, scope)
+
+				expect(result).not.toBeNull()
+				expect(result?.nativeArgs).toBeDefined()
+				const nativeArgs = result?.nativeArgs as { url: string; prompt?: string }
+				expect(nativeArgs.url).toBe("https://example.com")
+				expect(nativeArgs.prompt).toBe("Find info")
+			})
+
+			it("should accumulate nativeArgs across fragmented chunks split in awkward places", () => {
+				const id = "toolu_streaming_fetch_fragmented_1"
+				const scope = NativeToolCallParser.createScope()
+				NativeToolCallParser.startStreamingToolCall(id, "fetch_web_content", scope)
+
+				// Split the JSON arguments across several fragmented chunks,
+				// including splits mid-key, mid-string-value, and between url and prompt.
+				const chunks = [
+					'{"ur', // mid-key: "url" is not complete yet
+					'l":"https://exa', // completes the key, starts the value mid-string
+					'mple.com"', // completes the url value
+					',"prom', // mid-key for "prompt"
+					'pt":"summ', // completes the key, starts the value mid-string
+					'arize"}', // completes the prompt value and the object
+				]
+
+				let lastResult: ReturnType<typeof NativeToolCallParser.processStreamingChunk> = null
+				for (const chunk of chunks) {
+					// Feeding fragmented chunks must never throw.
+					expect(() => {
+						lastResult = NativeToolCallParser.processStreamingChunk(id, chunk, scope)
+					}).not.toThrow()
+				}
+
+				// After all chunks arrive, the partial ToolUse should have the full url and prompt.
+				expect(lastResult).not.toBeNull()
+				expect(lastResult!.partial).toBe(true)
+				expect(lastResult!.nativeArgs).toBeDefined()
+				const nativeArgs = lastResult!.nativeArgs as { url: string; prompt?: string }
+				expect(nativeArgs.url).toBe("https://example.com")
+				expect(nativeArgs.prompt).toBe("summarize")
+			})
+
+			it("should expose the url before the prompt has fully arrived", () => {
+				const id = "toolu_streaming_fetch_fragmented_2"
+				const scope = NativeToolCallParser.createScope()
+				NativeToolCallParser.startStreamingToolCall(id, "fetch_web_content", scope)
+
+				// Before the url value is complete, nativeArgs may be absent (partialArgs.url undefined).
+				const beforeUrl = NativeToolCallParser.processStreamingChunk(id, '{"url":"https://exa', scope)
+				expect(beforeUrl).not.toBeNull()
+				// partial-json exposes the in-progress url string immediately.
+				const beforeUrlArgs = beforeUrl?.nativeArgs as { url?: string; prompt?: string } | undefined
+				expect(beforeUrlArgs?.url).toBe("https://exa")
+				// The prompt has not been seen at all yet.
+				expect(beforeUrlArgs?.prompt).toBeUndefined()
+
+				// The url completes and the prompt key begins, but its value hasn't arrived.
+				const midPrompt = NativeToolCallParser.processStreamingChunk(id, 'mple.com","prompt":"su', scope)
+				expect(midPrompt).not.toBeNull()
+				const midPromptArgs = midPrompt?.nativeArgs as { url?: string; prompt?: string } | undefined
+				expect(midPromptArgs?.url).toBe("https://example.com")
+				expect(midPromptArgs?.prompt).toBe("su")
+
+				// The remaining chunk completes the prompt value and the object.
+				const complete = NativeToolCallParser.processStreamingChunk(id, 'mmarize"}', scope)
+				expect(complete).not.toBeNull()
+				const completeArgs = complete?.nativeArgs as { url: string; prompt?: string }
+				expect(completeArgs.url).toBe("https://example.com")
+				expect(completeArgs.prompt).toBe("summarize")
+			})
+		})
 	})
 
 	describe("finalizeStreamingToolCall", () => {
@@ -446,6 +586,96 @@ describe("NativeToolCallParser", () => {
 					expect(nativeArgs.path).toBe("finalized.ts")
 					expect(nativeArgs.offset).toBe(1)
 					expect(nativeArgs.limit).toBe(10)
+				}
+			})
+		})
+
+		describe("fetch_web_content tool", () => {
+			it("should parse fetch_web_content args on finalize", () => {
+				const id = "toolu_finalize_fetch_1"
+				const scope = NativeToolCallParser.createScope()
+				NativeToolCallParser.startStreamingToolCall(id, "fetch_web_content", scope)
+
+				NativeToolCallParser.processStreamingChunk(
+					id,
+					JSON.stringify({
+						url: "https://docs.example.com/api",
+						prompt: "Find authentication methods",
+					}),
+					scope,
+				)
+
+				const result = NativeToolCallParser.finalizeStreamingToolCall(id, scope)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					const nativeArgs = result.nativeArgs as { url: string; prompt?: string }
+					expect(nativeArgs.url).toBe("https://docs.example.com/api")
+					expect(nativeArgs.prompt).toBe("Find authentication methods")
+				}
+			})
+
+			it("should finalize fetch_web_content args delivered across fragmented chunks", () => {
+				const id = "toolu_finalize_fetch_fragmented"
+				const scope = NativeToolCallParser.createScope()
+				NativeToolCallParser.startStreamingToolCall(id, "fetch_web_content", scope)
+
+				// Deliver the JSON arguments across several fragmented chunks,
+				// including splits mid-key, mid-string-value, and between url and prompt.
+				const chunks = [
+					'{"ur',
+					'l":"https://docs.example.',
+					'com/api"',
+					',"prom',
+					'pt":"Find authentication ',
+					'methods"}',
+				]
+
+				let lastPartial: ReturnType<typeof NativeToolCallParser.processStreamingChunk> = null
+				for (const chunk of chunks) {
+					lastPartial = NativeToolCallParser.processStreamingChunk(id, chunk, scope)
+					// Partial updates must remain flagged partial while streaming.
+					if (lastPartial) {
+						expect(lastPartial.partial).toBe(true)
+					}
+				}
+
+				const result = NativeToolCallParser.finalizeStreamingToolCall(id, scope)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					// The finalized tool call must no longer be partial.
+					expect(result.partial).toBe(false)
+					const nativeArgs = result.nativeArgs as { url: string; prompt?: string }
+					expect(nativeArgs.url).toBe("https://docs.example.com/api")
+					expect(nativeArgs.prompt).toBe("Find authentication methods")
+				}
+			})
+
+			it("should parse fetch_web_content with null prompt on finalize", () => {
+				const id = "toolu_finalize_fetch_2"
+				const scope = NativeToolCallParser.createScope()
+				NativeToolCallParser.startStreamingToolCall(id, "fetch_web_content", scope)
+
+				NativeToolCallParser.processStreamingChunk(
+					id,
+					JSON.stringify({
+						url: "https://api.example.com/status",
+						prompt: null,
+					}),
+					scope,
+				)
+
+				const result = NativeToolCallParser.finalizeStreamingToolCall(id, scope)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					const nativeArgs = result.nativeArgs as { url: string; prompt?: string | null }
+					expect(nativeArgs.url).toBe("https://api.example.com/status")
+					expect(nativeArgs.prompt).toBeNull()
 				}
 			})
 		})
