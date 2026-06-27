@@ -39,7 +39,6 @@
 		"knip": "5.60.2",
 		"lint-staged": "16.4.0",
 		"mkdirp": "3.0.1",
-		"only-allow": "1.2.2",
 		"ovsx": "0.10.4",
 		"prettier": "3.5.3",
 		"rimraf": "6.0.1",

@@ -1,7 +1,7 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
 	"ignore": ["**/__tests__/**", "apps/vscode-e2e/**", "scripts/**", "apps/cli/scripts/**"],
-	"ignoreDependencies": ["lint-staged", "only-allow", "ovsx"],
+	"ignoreDependencies": ["lint-staged", "ovsx"],
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {
 		"src": {
