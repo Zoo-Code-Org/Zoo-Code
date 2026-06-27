@@ -2,6 +2,7 @@ import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
 import { DispatchState } from "../dispatchState"
+import { ToolRequestSupersededError } from "../ToolRequestSupersededError"
 import * as fsReal from "fs"
 import * as os from "os"
 import * as path from "path"
@@ -1353,6 +1354,53 @@ describe("Cline", () => {
 				await Promise.allSettled([request, cancel])
 				vi.mocked(pWaitFor).mockImplementation(async () => {})
 			}
+		})
+
+		it("aborts registered tool requests as superseded before a mid-stream retry", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "retry tool abort test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+
+			// An approved tool from the failing attempt registers its controller
+			// while the stream is still running.
+			const toolController = new AbortController()
+			const metadataController = new AbortController()
+			let stateWhenRetryStarted: { toolAborted: boolean; metadataAborted: boolean } | undefined
+			const failingStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				task.registerToolAbortController(toolController)
+				task.metadataFetchAbortController = metadataController
+				yield { type: "text", text: "partial" }
+				throw new Error("simulated mid-stream failure")
+			}
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => failingStream())
+				.mockImplementationOnce(() => {
+					stateWhenRetryStarted = {
+						toolAborted: toolController.signal.aborted,
+						metadataAborted: metadataController.signal.aborted,
+					}
+					return asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_retry", name: "read_file" },
+						{ type: "tool_call_partial", index: 0, arguments: '{"path":"retry.ts"}' },
+					])
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "retry tool abort test" }])
+
+			// The tool was stopped before the retry request started, with a reason
+			// that tells it to drop its result instead of reporting a cancellation.
+			expect(stateWhenRetryStarted).toEqual({ toolAborted: true, metadataAborted: false })
+			expect(toolController.signal.reason).toBeInstanceOf(ToolRequestSupersededError)
+			// The metadata-fetch waiter is not a tool request: the retry leaves it alone.
+			expect(task.metadataFetchAbortController).toBe(metadataController)
 		})
 
 		it("finalizes MCP tool call using the request-scoped parser state", async () => {
@@ -5168,6 +5216,65 @@ describe("Cline", () => {
 
 				// Should not throw when called with no controller
 				expect(() => task.cancelCurrentRequest()).not.toThrow()
+			})
+
+			it("should abort and clear tool-owned abort controllers", () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const controller = new AbortController()
+				const abortSpy = vi.spyOn(controller, "abort")
+				const unregister = task.registerToolAbortController(controller)
+
+				task.cancelCurrentRequest()
+
+				expect(abortSpy).toHaveBeenCalledTimes(1)
+				expect(controller.signal.aborted).toBe(true)
+
+				// A second cancel must not re-abort a controller the task dropped.
+				task.cancelCurrentRequest()
+				expect(abortSpy).toHaveBeenCalledTimes(1)
+
+				unregister()
+			})
+
+			it("should not abort a tool controller that was unregistered", () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				const controller = new AbortController()
+				const abortSpy = vi.spyOn(controller, "abort")
+				const unregister = task.registerToolAbortController(controller)
+
+				unregister()
+				task.cancelCurrentRequest()
+
+				expect(abortSpy).not.toHaveBeenCalled()
+			})
+
+			it("should abort a tool controller registered after the task started aborting", () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				task.requestAbort(false)
+
+				const controller = new AbortController()
+				task.registerToolAbortController(controller)
+
+				// A tool that starts after a cancel must not outlive it.
+				expect(controller.signal.aborted).toBe(true)
 			})
 
 			it("should be called during dispose", () => {

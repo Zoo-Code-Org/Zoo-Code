@@ -112,6 +112,7 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { DispatchState, type PendingWork } from "./dispatchState"
+import { ToolRequestSupersededError } from "./ToolRequestSupersededError"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
@@ -408,6 +409,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	cancellationGeneration: number = 0
 	currentRequestAbortController?: AbortController
 	/**
+	 * Abort controllers owned by long-running tool executions (e.g. an outbound
+	 * web fetch) that must stop when the task is cancelled or disposed.
+	 * `cancelCurrentRequest()` aborts and clears them alongside the API request
+	 * controller, so a cancelled task cannot keep a tool's network request (or
+	 * its body read) open until the tool's own timeout fires.
+	 */
+	private readonly toolAbortControllers = new Set<AbortController>()
+	/**
 	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
 	 * safeEnsureModelFetched). Aborting it detaches this task from the provider-side
 	 * metadata fetch; it is aborted when the bounded wait expires and when the task's
@@ -537,6 +546,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	pendingWork: PendingWork | null = null
 	userMessageContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolResultBlockParam)[] = []
 	userMessageContentReady = false
+	/**
+	 * Incremented whenever the stream resets (i.e. `userMessageContent` is cleared for a new API
+	 * attempt). Tools capture this value before any approval wait; if it has advanced by the time
+	 * they call `registerToolAbortController`, the registration is immediately aborted so a stale
+	 * tool from a previous attempt cannot publish into the new one.
+	 */
+	streamAttemptId: number = 0
 
 	/**
 	 * Flag indicating whether the assistant message for the current streaming session
@@ -3555,6 +3571,32 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
+	 * Register an abort controller owned by a long-running tool execution so
+	 * `cancelCurrentRequest()` (cancel/dispose) aborts it. A stream retry
+	 * aborts it too, with a {@link ToolRequestSupersededError} reason. Returns
+	 * an unregister function the tool must call when its execution finishes.
+	 *
+	 * The controller is aborted immediately if the task is already aborting, so
+	 * a tool that starts after a cancel cannot outlive it.
+	 */
+	public registerToolAbortController(controller: AbortController, expectedAttemptId?: number): () => void {
+		if (
+			this.abort ||
+			this.abandoned ||
+			(expectedAttemptId !== undefined && expectedAttemptId !== this.streamAttemptId)
+		) {
+			controller.abort(new ToolRequestSupersededError())
+			return () => {}
+		}
+
+		this.toolAbortControllers.add(controller)
+
+		return () => {
+			this.toolAbortControllers.delete(controller)
+		}
+	}
+
+	/**
 	 * Cancels the current HTTP request if one is in progress.
 	 * This immediately aborts the underlying stream rather than waiting for the next chunk.
 	 */
@@ -3570,6 +3612,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.metadataFetchAbortController.abort()
 			this.metadataFetchAbortController = undefined
 		}
+		// Tool-owned requests (e.g. an outbound web fetch) are as stale as the
+		// stream: abort them so a cancelled task does not keep a network
+		// request or body read open until the tool's own timeout fires.
+		this.abortToolRequests()
+	}
+
+	/**
+	 * Abort and forget every registered tool controller. `reason` becomes the
+	 * controllers' `signal.reason`, so a tool can tell a superseded attempt
+	 * from a task cancellation.
+	 */
+	private abortToolRequests(reason?: unknown): void {
+		for (const controller of this.toolAbortControllers) {
+			controller.abort(reason)
+		}
+		this.toolAbortControllers.clear()
 	}
 
 	/**
@@ -4258,6 +4316,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.assistantMessageContent = []
 				this.didCompleteReadingStream = false
 				this.userMessageContent = []
+				this.streamAttemptId++
 				this.userMessageContentReady = false
 				this.activeToolContexts.clear()
 				this.didRejectTool = false
@@ -4822,6 +4881,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						const streamingFailedMessage = this.abort
 							? undefined
 							: `${t("common:interruption.streamTerminatedByProvider")}: ${rawErrorMessage}`
+
+						// Every branch below either retries (which resets
+						// `userMessageContent` and the dispatch state) or ends the
+						// request. A tool approved from a complete tool call in the
+						// failed stream would otherwise keep running and push its
+						// result into the next attempt's turn. A cancel already
+						// aborted them in `cancelCurrentRequest()`; the metadata-fetch
+						// waiter is not a tool request and is left alone.
+						if (!this.abort) {
+							this.abortToolRequests(new ToolRequestSupersededError())
+						}
 
 						// Clean up partial state
 						await abortStream(cancelReason, streamingFailedMessage)
