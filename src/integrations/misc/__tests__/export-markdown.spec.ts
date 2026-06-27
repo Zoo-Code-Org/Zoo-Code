@@ -76,8 +76,8 @@ describe("export-markdown", () => {
 		it("should format document blocks", () => {
 			const block = {
 				type: "document",
-				source: { type: "base64", media_type: "application/pdf", data: "abc" },
-			} as any as ExtendedContentBlock
+				source: { type: "base64", media_type: "application/pdf", data: "abc" } as const,
+			} satisfies ExtendedContentBlock
 			expect(formatContentBlockToMarkdown(block)).toBe("[Document]")
 		})
 
@@ -86,17 +86,16 @@ describe("export-markdown", () => {
 				type: "search_result",
 				source: "https://example.com",
 				title: "Example",
-				content: [],
-			} as any as ExtendedContentBlock
+				content: [{ type: "text", text: "result text" }],
+			} satisfies ExtendedContentBlock
 			expect(formatContentBlockToMarkdown(block)).toBe("[Search Result]")
 		})
 
 		it("should format tool_reference blocks", () => {
 			const block = {
 				type: "tool_reference",
-				id: "tool-1",
-				name: "read_file",
-			} as any as ExtendedContentBlock
+				tool_name: "read_file",
+			} satisfies ExtendedContentBlock
 			expect(formatContentBlockToMarkdown(block)).toBe("[Tool Reference]")
 		})
 	})

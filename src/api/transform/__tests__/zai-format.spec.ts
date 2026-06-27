@@ -1,4 +1,4 @@
-// npx vitest run api/transform/__tests__/zai-format.spec.ts
+// pnpm exec vitest run api/transform/__tests__/zai-format.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
 

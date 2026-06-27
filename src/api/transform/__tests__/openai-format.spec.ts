@@ -1,4 +1,4 @@
-// npx vitest run api/transform/__tests__/openai-format.spec.ts
+// pnpm exec vitest run api/transform/__tests__/openai-format.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
@@ -143,7 +143,33 @@ describe("convertToOpenAiMessages", () => {
 		expect((openAiMessages[0] as any).content).toBe("some text\n")
 	})
 
-	it("should handle base64 image in tool result with placeholder and skip URL images", () => {
+	it("should handle base64 image in tool result with placeholder", () => {
+		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-1",
+						content: [
+							{
+								type: "image",
+								source: { type: "base64", media_type: "image/png", data: "base64data" },
+							},
+						],
+					},
+				],
+			},
+		]
+
+		const openAiMessages = convertToOpenAiMessages(anthropicMessages)
+		expect(openAiMessages[0].role).toBe("tool")
+		// base64 images in tool results emit a placeholder; the image itself is
+		// flushed in a separate user message (see comment block in openai-format.ts)
+		expect((openAiMessages[0] as any).content).toBe("(see following user message for image)")
+	})
+
+	it("should render [Image] placeholder for URL image in tool result", () => {
 		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
 			{
 				role: "user",
