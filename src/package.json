@@ -551,7 +551,7 @@
 		"@types/shell-quote": "1.7.5",
 		"@types/vscode": "1.100.0",
 		"@vitest/coverage-v8": "4.1.0",
-		"@vscode/vsce": "3.3.2",
+		"@vscode/vsce": "3.9.2",
 		"ai": "6.0.77",
 		"esbuild-wasm": "0.25.12",
 		"execa": "9.6.1",
