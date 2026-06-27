@@ -26,7 +26,8 @@
 			"read": "Đọc tệp",
 			"edit": "Chỉnh sửa tệp",
 			"command": "Chạy lệnh",
-			"mcp": "Sử dụng MCP"
+			"mcp": "Sử dụng MCP",
+			"web": "Lấy nội dung web"
 		},
 		"noTools": "Không có"
 	},
