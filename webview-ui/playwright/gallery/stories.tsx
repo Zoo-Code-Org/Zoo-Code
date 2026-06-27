@@ -262,6 +262,40 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"fetch-web-content-long-url": async () => {
+		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/ChatRow"),
+		])
+		// A long, look-alike host: the approval row must wrap the whole URL so the real host stays visible.
+		const url = `https://www.bbc.com.${"a".repeat(120)}.attacker.example/path?q=${"b".repeat(40)}`
+		const message: import("@roo-code/types").ClineMessage = {
+			type: "ask",
+			ask: "tool",
+			ts: 0,
+			text: JSON.stringify({ tool: "fetchWebContent", url }),
+			partial: false,
+		}
+		return (
+			<AppProviders>
+				<div
+					data-testid="fetch-web-content-story"
+					className="w-[360px] max-w-full bg-vscode-editor-background px-[15px] py-[10px] text-vscode-foreground">
+					<ChatRowContent
+						message={message}
+						isExpanded={false}
+						isLast={false}
+						isStreaming={false}
+						onToggleExpand={() => undefined}
+						onSuggestionClick={() => undefined}
+						onBatchFileResponse={() => undefined}
+						onFollowUpUnmount={() => undefined}
+						isFollowUpAnswered={false}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"io-intelligence-settings": async () => {
 		const [{ AppProviders }, { IOIntelligence }, { providerIdentifiers }] = await Promise.all([
 			import("../AppProviders"),
