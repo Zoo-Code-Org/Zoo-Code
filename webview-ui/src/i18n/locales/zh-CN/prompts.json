@@ -26,7 +26,8 @@
 			"read": "读取文件",
 			"edit": "编辑文件",
 			"command": "运行命令",
-			"mcp": "MCP服务"
+			"mcp": "MCP服务",
+			"web": "获取网页内容"
 		},
 		"noTools": "无"
 	},
