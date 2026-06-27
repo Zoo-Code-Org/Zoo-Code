@@ -613,11 +613,24 @@ describe("FileRestrictionError", () => {
 				name: "🪲 Debug",
 				roleDefinition:
 					"You are Zoo, an expert software debugger specializing in systematic problem diagnosis and resolution.",
-				groups: ["read", "edit", "command", "mcp"],
+				groups: ["read", "edit", "command", "mcp", "web"],
 			})
 			expect(debugMode?.customInstructions).toContain(
 				"Reflect on 5-7 different possible sources of the problem, distill those down to 1-2 most likely sources, and then add logs to validate your assumptions. Explicitly ask the user to confirm the diagnosis before fixing the problem.",
 			)
+		})
+	})
+
+	describe("code mode", () => {
+		it("includes the web tool group", () => {
+			// The `web` group is what exposes `fetch_web_content`; dropping it
+			// from code mode would silently remove the tool from the main mode.
+			const codeMode = modes.find((mode) => mode.slug === "code")
+			expect(codeMode).toBeDefined()
+			expect(codeMode).toMatchObject({
+				slug: "code",
+				groups: ["read", "edit", "command", "mcp", "web"],
+			})
 		})
 	})
 
