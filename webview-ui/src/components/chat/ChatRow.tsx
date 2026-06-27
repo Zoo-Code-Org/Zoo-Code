@@ -59,6 +59,7 @@ import { useSelectedModel } from "../ui/hooks/useSelectedModel"
 import {
 	Eye,
 	FileDiff,
+	Globe,
 	ListTree,
 	User,
 	Edit,
@@ -206,6 +207,51 @@ const ChatRow = memo(
 )
 
 export default ChatRow
+
+interface FetchWebContentRowProps {
+	headerStyle: React.CSSProperties
+	title: string
+	url?: string
+}
+
+/**
+ * Approval ("wants to fetch") and completion ("fetched") row for `fetch_web_content`.
+ *
+ * - The URL is shown in full (wrapped, never truncated) and is selectable, so a
+ *   deceptive host hidden past an ellipsis can be inspected before approval.
+ * - The Globe icon is decorative: the translated title already names the action.
+ * - A polite live region announces the row to screen readers. It is mounted
+ *   empty and populated after mount, because screen readers only reliably
+ *   announce changes to a live region that already exists in the DOM.
+ */
+export const FetchWebContentRow = ({ headerStyle, title, url }: FetchWebContentRowProps) => {
+	const [announcement, setAnnouncement] = useState("")
+
+	useEffect(() => {
+		setAnnouncement(url ? `${title}: ${url}` : title)
+	}, [title, url])
+
+	return (
+		<>
+			<div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+				{announcement}
+			</div>
+			<div style={headerStyle}>
+				<Globe className="w-4 shrink-0" aria-hidden="true" />
+				<span style={{ fontWeight: "bold" }}>{title}</span>
+			</div>
+			<div className="pl-6">
+				<ToolUseBlock className="cursor-auto">
+					<ToolUseBlockHeader className="select-text">
+						<span className="whitespace-normal break-all text-left select-text" data-testid="fetch-url">
+							{url}
+						</span>
+					</ToolUseBlockHeader>
+				</ToolUseBlock>
+			</div>
+		</>
+	)
+}
 
 export const ChatRowContent = ({
 	message,
@@ -488,6 +534,7 @@ export const ChatRowContent = ({
 	}, [message.type, message.ask, message.partial, message.text])
 
 	if (tool) {
+		// Entering this branch implies message.ask === "tool". See tool useMemo above
 		const toolIcon = (name: string) => (
 			<span
 				className={`codicon codicon-${name}`}
@@ -1060,6 +1107,14 @@ export const ChatRowContent = ({
 						)}
 					</>
 				)
+			case "fetchWebContent":
+				return (
+					<FetchWebContentRow
+						headerStyle={headerStyle}
+						title={t("chat:webFetch.wantsToFetch")}
+						url={tool.url}
+					/>
+				)
 			default:
 				return null
 		}
@@ -1491,6 +1546,14 @@ export const ChatRowContent = ({
 					if (!sayTool) return null
 
 					switch (sayTool.tool) {
+						case "fetchWebContent":
+							return (
+								<FetchWebContentRow
+									headerStyle={headerStyle}
+									title={t("chat:webFetch.didFetch")}
+									url={sayTool.url}
+								/>
+							)
 						case "runSlashCommand": {
 							const slashCommandInfo = sayTool
 							return (
