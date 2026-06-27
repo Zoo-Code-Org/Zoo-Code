@@ -509,5 +509,9 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "{{count}} baris tersembunyi"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo ingin mengambil konten web",
+		"didFetch": "Zoo telah mengambil konten web"
 	}
 }

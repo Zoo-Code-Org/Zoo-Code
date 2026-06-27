@@ -26,7 +26,8 @@
 			"read": "Ler arquivos",
 			"edit": "Editar arquivos",
 			"command": "Executar comandos",
-			"mcp": "Usar MCP"
+			"mcp": "Usar MCP",
+			"web": "Buscar conteúdo web"
 		},
 		"noTools": "Nenhuma"
 	},

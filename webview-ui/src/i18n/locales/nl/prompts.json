@@ -26,7 +26,8 @@
 			"read": "Bestanden lezen",
 			"edit": "Bestanden bewerken",
 			"command": "Commando's uitvoeren",
-			"mcp": "MCP gebruiken"
+			"mcp": "MCP gebruiken",
+			"web": "Webinhoud ophalen"
 		},
 		"noTools": "Geen"
 	},

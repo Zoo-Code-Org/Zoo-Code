@@ -528,5 +528,9 @@
 		"hiddenLines_few": "{{count}} скрытые строки",
 		"hiddenLines_many": "{{count}} скрытых строк",
 		"hiddenLines_other": "{{count}} скрытой строки"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo хочет получить веб-контент",
+		"didFetch": "Zoo получил веб-контент"
 	}
 }

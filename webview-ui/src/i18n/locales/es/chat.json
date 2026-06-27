@@ -519,5 +519,9 @@
 		"hiddenLines_one": "{{count}} línea oculta",
 		"hiddenLines_many": "{{count}} de líneas ocultas",
 		"hiddenLines_other": "{{count}} líneas ocultas"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo quiere obtener contenido web",
+		"didFetch": "Zoo obtuvo contenido web"
 	}
 }

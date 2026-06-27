@@ -511,5 +511,9 @@
 	"diffView": {
 		"hiddenLines_one": "{{count}} verborgen regel",
 		"hiddenLines_other": "{{count}} verborgen regels"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo wil webinhoud ophalen",
+		"didFetch": "Zoo heeft webinhoud opgehaald"
 	}
 }
