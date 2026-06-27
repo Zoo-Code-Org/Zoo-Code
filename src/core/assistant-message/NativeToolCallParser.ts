@@ -712,6 +712,15 @@ export class NativeToolCallParser {
 				}
 				break
 
+			case "fetch_web_content":
+				if (partialArgs.url !== undefined) {
+					nativeArgs = {
+						url: partialArgs.url,
+						prompt: partialArgs.prompt,
+					}
+				}
+				break
+
 			default:
 				break
 		}
@@ -1063,6 +1072,15 @@ export class NativeToolCallParser {
 							mode: args.mode,
 							message: args.message,
 							todos: args.todos,
+						} as NativeArgsFor<TName>
+					}
+					break
+
+				case "fetch_web_content":
+					if (args.url !== undefined) {
+						nativeArgs = {
+							url: args.url,
+							prompt: args.prompt,
 						} as NativeArgsFor<TName>
 					}
 					break
