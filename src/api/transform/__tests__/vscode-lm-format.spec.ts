@@ -178,6 +178,48 @@ describe("convertToVsCodeLmMessages", () => {
 		const imagePlaceholder = result[0].content[1] as MockLanguageModelTextPart
 		expect(imagePlaceholder.value).toContain("[Image (base64): image/png not supported by VSCode LM API]")
 	})
+
+	it("should produce correct placeholder for URL image in non-tool messages", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "image",
+						source: { type: "url", url: "https://example.com/img.png" } as any,
+					},
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const imagePlaceholder = result[0].content[0] as MockLanguageModelTextPart
+		expect(imagePlaceholder.value).toContain("[Image (url): not supported by VSCode LM API]")
+	})
+
+	it("should produce correct placeholder for URL image inside tool result", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-1",
+						content: [
+							{
+								type: "image",
+								source: { type: "url", url: "https://example.com/img.png" } as any,
+							},
+						],
+					},
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const toolResult = result[0].content[0] as any
+		expect(toolResult.content[0].value).toContain("[Image (url): not supported by VSCode LM API]")
+	})
 })
 
 describe("convertToAnthropicRole", () => {

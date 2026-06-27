@@ -112,6 +112,12 @@ export function convertToMistralMessages(anthropicMessages: Anthropic.Messages.M
 										},
 									}
 								}
+								if (part.source.type === "url") {
+									return {
+										type: "image_url",
+										imageUrl: { url: part.source.url },
+									}
+								}
 								return { type: "text", text: "[Image]" }
 							}
 							if (part.type === "text") {

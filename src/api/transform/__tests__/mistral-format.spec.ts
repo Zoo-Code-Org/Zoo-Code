@@ -106,6 +106,45 @@ describe("convertToMistralMessages", () => {
 		})
 	})
 
+	it("should handle user messages with URL image content", () => {
+		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "Describe this:" },
+					{
+						type: "image",
+						source: { type: "url", url: "https://example.com/photo.jpg" } as any,
+					},
+				],
+			},
+		]
+
+		const mistralMessages = convertToMistralMessages(anthropicMessages)
+		const content = mistralMessages[0].content as Array<{ type: string; imageUrl?: { url: string }; text?: string }>
+
+		expect(content[1]).toEqual({ type: "image_url", imageUrl: { url: "https://example.com/photo.jpg" } })
+	})
+
+	it("should fall back to [Image] placeholder for unsupported image source types", () => {
+		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "image",
+						source: { type: "file" } as any,
+					},
+				],
+			},
+		]
+
+		const mistralMessages = convertToMistralMessages(anthropicMessages)
+		const content = mistralMessages[0].content as Array<{ type: string; text?: string }>
+
+		expect(content[0]).toEqual({ type: "text", text: "[Image]" })
+	})
+
 	it("should handle user messages with only tool results", () => {
 		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
 			{

@@ -358,8 +358,11 @@ export function convertToOpenAiMessages(
 							toolMessage.content
 								?.map((part) => {
 									if (part.type === "image") {
-										toolResultImages.push(part)
-										return "(see following user message for image)"
+										if (part.source.type === "base64") {
+											toolResultImages.push(part)
+											return "(see following user message for image)"
+										}
+										return "[Image]"
 									}
 									if (part.type === "text") {
 										return part.text
@@ -428,7 +431,15 @@ export function convertToOpenAiMessages(
 									if (part.source.type === "base64") {
 										return {
 											type: "image_url",
-											image_url: { url: `data:${part.source.media_type};base64,${part.source.data}` },
+											image_url: {
+												url: `data:${part.source.media_type};base64,${part.source.data}`,
+											},
+										}
+									}
+									if (part.source.type === "url") {
+										return {
+											type: "image_url",
+											image_url: { url: part.source.url },
 										}
 									}
 									return { type: "text", text: "[Image]" }
