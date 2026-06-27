@@ -11,7 +11,8 @@ export const REFLOW_VIEWPORT_WIDTH = 320
 
 interface BoundedLayoutOptions {
 	actionRows?: Locator[]
-	focusedControl: Locator
+	/** Omit only for read-only content that has no focusable control. */
+	focusedControl?: Locator
 }
 
 export function collectBoundedLayoutFailures(element: HTMLElement) {
@@ -39,19 +40,27 @@ export function collectBoundedLayoutFailures(element: HTMLElement) {
 			"h1, h2, h3, h4, h5, h6, p, label, button, input, textarea, select, [role='button'], [role='checkbox'], [role='combobox'], [role='slider'], [role='textbox']",
 		),
 	)
+	const clips = (styles: CSSStyleDeclaration) =>
+		styles.overflowX === "hidden" ||
+		styles.overflowX === "clip" ||
+		styles.overflowY === "hidden" ||
+		styles.overflowY === "clip"
+	const hasClippingAncestor = (candidate: HTMLElement) => {
+		let ancestor = candidate.parentElement
+		while (ancestor && element.contains(ancestor)) {
+			if (clips(getComputedStyle(ancestor))) return true
+			ancestor = ancestor.parentElement
+		}
+		return false
+	}
+	// Plain text containers are checked when they clip themselves, or when an ancestor could clip them: a long
+	// value (such as a URL) in a `span` can otherwise be cut off by an `overflow-hidden` wrapper unnoticed.
 	const clippedTextCandidates = Array.from(element.querySelectorAll<HTMLElement>("span, div")).filter((candidate) => {
 		const styles = getComputedStyle(candidate)
 		const hasDirectText = Array.from(candidate.childNodes).some(
 			(node) => node.nodeType === Node.TEXT_NODE && Boolean(node.textContent?.trim()),
 		)
-		return (
-			hasDirectText &&
-			(styles.overflowX === "hidden" ||
-				styles.overflowX === "clip" ||
-				styles.overflowY === "hidden" ||
-				styles.overflowY === "clip" ||
-				styles.textOverflow === "ellipsis")
-		)
+		return hasDirectText && (clips(styles) || styles.textOverflow === "ellipsis" || hasClippingAncestor(candidate))
 	})
 	const candidates = [...new Set([...semanticCandidates, ...clippedTextCandidates])].filter(
 		(candidate) => candidate.getClientRects().length > 0 && !isScreenReaderOnly(candidate),
@@ -109,7 +118,7 @@ export function collectBoundedLayoutFailures(element: HTMLElement) {
 export async function expectBoundedLayout(
 	page: Page,
 	root: Locator,
-	{ actionRows = [], focusedControl }: BoundedLayoutOptions,
+	{ actionRows = [], focusedControl }: BoundedLayoutOptions = {},
 ) {
 	await page.setViewportSize({ width: REFLOW_VIEWPORT_WIDTH, height: 640 })
 	await page.evaluate((spacing) => {
@@ -145,6 +154,8 @@ export async function expectBoundedLayout(
 		expect(containment).toEqual({ controlCount: expect.any(Number), overflows: false, controlsContained: true })
 		expect(containment.controlCount).toBeGreaterThan(0)
 	}
+
+	if (!focusedControl) return
 
 	await focusedControl.focus()
 	await expect(focusedControl).toBeFocused()

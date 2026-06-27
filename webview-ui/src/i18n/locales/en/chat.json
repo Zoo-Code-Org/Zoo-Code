@@ -267,6 +267,10 @@
 		"resultTooltip": "Similarity score: {{score}} (click to open file)",
 		"displayError": "Error displaying search results."
 	},
+	"webFetch": {
+		"wantsToFetch": "Zoo wants to fetch web content",
+		"didFetch": "Zoo fetched web content"
+	},
 	"commandExecution": {
 		"abort": "Abort",
 		"running": "Running",
