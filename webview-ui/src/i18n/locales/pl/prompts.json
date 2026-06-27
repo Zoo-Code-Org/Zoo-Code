@@ -26,7 +26,8 @@
 			"read": "Czytaj pliki",
 			"edit": "Edytuj pliki",
 			"command": "Uruchamiaj polecenia",
-			"mcp": "Używaj MCP"
+			"mcp": "Używaj MCP",
+			"web": "Pobierz treść z sieci"
 		},
 		"noTools": "Brak"
 	},

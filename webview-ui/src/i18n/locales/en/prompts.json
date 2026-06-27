@@ -26,7 +26,8 @@
 			"read": "Read Files",
 			"edit": "Edit Files",
 			"command": "Run Commands",
-			"mcp": "Use MCP"
+			"mcp": "Use MCP",
+			"web": "Fetch Web Content"
 		},
 		"noTools": "None"
 	},

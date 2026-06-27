@@ -26,7 +26,8 @@
 			"read": "Dosyaları Oku",
 			"edit": "Dosyaları Düzenle",
 			"command": "Komutları Çalıştır",
-			"mcp": "MCP Kullan"
+			"mcp": "MCP Kullan",
+			"web": "Web İçeriği Getir"
 		},
 		"noTools": "Yok"
 	},
