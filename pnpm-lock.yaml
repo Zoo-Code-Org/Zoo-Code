@@ -441,7 +441,7 @@ importers:
         version: 2.0.39(zod@3.25.76)
       '@ai-sdk/fireworks':
         specifier: ^2.0.32
-        version: 2.0.58(zod@3.25.76)
+        version: 2.0.57(zod@3.25.76)
       '@ai-sdk/google':
         specifier: ^3.0.22
         version: 3.0.83(zod@3.25.76)
@@ -600,7 +600,7 @@ importers:
         version: 1.2.0
       reconnecting-eventsource:
         specifier: ^1.6.4
-        version: 1.6.5
+        version: 1.6.4
       safe-stable-stringify:
         specifier: ^2.5.0
         version: 2.5.0
@@ -1035,8 +1035,8 @@ packages:
     peerDependencies:
       zod: 3.25.76
 
-  '@ai-sdk/fireworks@2.0.58':
-    resolution: {integrity: sha512-crx9t+HugsZZohodZavOfcQUuqZnrh4FgGvdS0gN+wYkOM8TA97S37mimxzCZsZYM/Sp5JyWi8Mje5o5gcmvHA==}
+  '@ai-sdk/fireworks@2.0.57':
+    resolution: {integrity: sha512-G7ZNDg31Tl81RTR0dfBhNBMpkPBB1ufGP46o7TYX/FSoz6IqGnRuA23SAzaVJkQ3ag22onsvpNHRPRwYWX6OBg==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: 3.25.76
@@ -7440,8 +7440,8 @@ packages:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
 
-  reconnecting-eventsource@1.6.5:
-    resolution: {integrity: sha512-L7ADnbp7yA42vvjwx7cZFNmiyHNBu/UldL1NCEvB23xBkZhESF83s2cnD9sLfvcX9wMIzW1UpIS7EOq/iu3E2g==}
+  reconnecting-eventsource@1.6.4:
+    resolution: {integrity: sha512-0L3IS3wxcNFApTPPHkcbY8Aya7XZIpYDzhxa8j6QSufVkUN018XJKfh2ZaThLBGP/iN5UTz2yweMhkqr0PKa7A==}
     engines: {node: '>=12.0.0'}
 
   redent@3.0.0:
@@ -8950,7 +8950,7 @@ snapshots:
       '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
       zod: 3.25.76
 
-  '@ai-sdk/fireworks@2.0.58(zod@3.25.76)':
+  '@ai-sdk/fireworks@2.0.57(zod@3.25.76)':
     dependencies:
       '@ai-sdk/openai-compatible': 2.0.51(zod@3.25.76)
       '@ai-sdk/provider': 3.0.10
@@ -16287,7 +16287,7 @@ snapshots:
 
   readdirp@4.1.2: {}
 
-  reconnecting-eventsource@1.6.5: {}
+  reconnecting-eventsource@1.6.4: {}
 
   redent@3.0.0:
     dependencies:
