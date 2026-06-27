@@ -141,12 +141,18 @@
 			"streamProcessingError": "Error processing response stream: {{message}}",
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
-		}
+		},
+		"rooHistoryImport": "Ошибка импорта истории Roo Code: {{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Не выбрано содержимое терминала",
 		"missing_task_files": "Файлы этой задачи отсутствуют. Хотите удалить её из списка задач?",
-		"auto_import_failed": "Не удалось автоматически импортировать настройки ZooCode: {{error}}"
+		"auto_import_failed": "Не удалось автоматически импортировать настройки ZooCode: {{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "История задач Roo Code для импорта из {{domain}} не найдена.",
+			"alreadyImported_one": "{{count}} история задач Roo Code уже импортирована в Zoo Code.",
+			"alreadyImported_other": "Все {{count}} истории задач Roo Code уже импортированы в Zoo Code."
+		}
 	},
 	"info": {
 		"no_changes": "Изменения не найдены.",
@@ -165,6 +171,10 @@
 		"mode_imported": "Режим успешно импортирован",
 		"roo": {
 			"signInUnavailable": "Вход в Roo Code Cloud сейчас недоступен. Настрой другого провайдера, чтобы продолжить."
+		},
+		"rooHistoryImport": {
+			"success_one": "{{count}} история задач Roo Code импортирована в Zoo Code.",
+			"success_other": "{{count}} историй задач Roo Code импортировано в Zoo Code."
 		}
 	},
 	"answers": {

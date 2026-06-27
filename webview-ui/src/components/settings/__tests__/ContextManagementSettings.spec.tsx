@@ -479,4 +479,25 @@ describe("ContextManagementSettings", () => {
 			expect(screen.getByText("settings:contextManagement.rooignore.label")).toBeInTheDocument()
 		})
 	})
+
+	describe("diffFuzzyThreshold", () => {
+		it("renders diff fuzzy threshold slider with default value", () => {
+			render(<ContextManagementSettings {...defaultProps} />)
+
+			const slider = screen.getByTestId("diff-fuzzy-threshold-slider")
+			expect(slider).toBeInTheDocument()
+		})
+
+		it("calls setCachedStateField when slider changes", async () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+
+			const slider = screen.getByTestId("diff-fuzzy-threshold-slider")
+			fireEvent.change(slider, { target: { value: "0.85" } })
+
+			await waitFor(() => {
+				expect(setCachedStateField).toHaveBeenCalledWith("diffFuzzyThreshold", 0.85)
+			})
+		})
+	})
 })

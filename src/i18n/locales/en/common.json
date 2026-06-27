@@ -78,6 +78,7 @@
 		"share_not_enabled": "Task sharing is not enabled for this organization.",
 		"share_task_not_found": "Task not found or access denied.",
 		"mode_import_failed": "Failed to import mode: {{error}}",
+		"rooHistoryImport": "Failed to import Roo Code history: {{error}}",
 		"delete_rules_folder_failed": "Failed to delete rules folder: {{rulesFolderPath}}. Error: {{error}}",
 		"command_not_found": "Command '{{name}}' not found",
 		"open_command_file": "Failed to open command file",
@@ -146,7 +147,12 @@
 	"warnings": {
 		"no_terminal_content": "No terminal content selected",
 		"missing_task_files": "This task's files are missing. Would you like to remove it from the task list?",
-		"auto_import_failed": "Failed to auto-import ZooCode settings: {{error}}"
+		"auto_import_failed": "Failed to auto-import ZooCode settings: {{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "No Roo Code task history was found to import from {{domain}}.",
+			"alreadyImported_one": "All {{count}} Roo Code task history has already been imported into Zoo Code.",
+			"alreadyImported_other": "All {{count}} Roo Code task histories have already been imported into Zoo Code."
+		}
 	},
 	"info": {
 		"no_changes": "No changes found.",
@@ -163,6 +169,10 @@
 		"image_saved": "Image saved to {{path}}",
 		"mode_exported": "Mode '{{mode}}' exported successfully",
 		"mode_imported": "Mode imported successfully",
+		"rooHistoryImport": {
+			"success_one": "Imported {{count}} Roo Code task history into Zoo Code.",
+			"success_other": "Imported {{count}} Roo Code task histories into Zoo Code."
+		},
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud sign-in is currently unavailable. Configure another provider to continue."
 		}

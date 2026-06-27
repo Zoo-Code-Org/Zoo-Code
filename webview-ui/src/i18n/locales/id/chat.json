@@ -35,6 +35,14 @@
 		"title": "Mulai Tugas Baru",
 		"tooltip": "Mulai tugas baru"
 	},
+	"seeNewChanges": {
+		"title": "Lihat Perubahan Baru",
+		"tooltip": "Lihat perubahan yang dibuat sejak prompt terakhirmu"
+	},
+	"restoreChanges": {
+		"title": "Pulihkan Perubahan",
+		"tooltip": "Pulihkan file dan status tugas ke prompt terakhirmu"
+	},
 	"reportBug": {
 		"title": "Laporkan Bug"
 	},
@@ -362,9 +370,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Dukungan GLM-5.2 — model GLM terbaru kini tersedia di pengaturan penyedia kamu.",
-			"highlight2": "Peningkatan OpenCode-Go — parameter model native, routing format Anthropic, dan perbaikan context-token untuk respons yang lebih andal.",
-			"highlight3": "Mode tool-writer — mode khusus baru untuk menulis dan memelihara definisi tool, kini tersedia di Marketplace."
+			"highlight1": "UI Manajemen Aturan — tab Aturan baru di Pengaturan memungkinkan Anda membuat, menghapus, dan membuka aturan Zoo global dan ruang kerja langsung dari editor.",
+			"highlight2": "Tinjauan Perubahan Penyelesaian — setelah tugas selesai, tombol \"Lihat Perubahan Baru\" dan \"Pulihkan Perubahan\" yang baru memungkinkan Anda memeriksa dan membatalkan perubahan dari prompt terakhir.",
+			"highlight3": "Ambang Diff yang Dilonggarkan — ambang kemiripan yang dapat dikonfigurasi mengurangi kesalahan \"pengeditan gagal\" saat menerapkan diff, dengan diagnostik baru untuk membantu menyetel pengaturan."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

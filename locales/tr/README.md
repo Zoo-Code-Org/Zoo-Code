@@ -30,11 +30,11 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
-## v3.62.0'daki Yenilikler
+## v3.64.0'daki Yenilikler
 
-- **GLM-5.2 desteği** — en yeni GLM modeli artık sağlayıcı ayarlarında mevcut
-- **OpenCode-Go iyileştirmeleri** — yerel model parametreleri, Anthropic formatı yönlendirme ve daha güvenilir yanıtlar için context-token düzeltmesi
-- **Tool-writer modu** — araç tanımlarını yazmak ve sürdürmek için yeni bir uzmanlaşmış mod, artık Marketplace'te mevcut
+- **Kural Yönetimi Arayüzü** — Ayarlar'daki yeni Kurallar sekmesi, genel ve çalışma alanı Zoo kurallarını doğrudan editörden oluşturmanıza, silmenize ve açmanıza olanak tanır
+- **Tamamlama Değişikliği İncelemesi** — bir görev tamamlandığında, yeni "Yeni Değişiklikleri Gör" ve "Değişiklikleri Geri Yükle" düğmeleri, son istemdeki değişiklikleri incelemenize ve geri almanıza olanak tanır
+- **Gevşetilmiş Diff Eşikleri** — yapılandırılabilir benzerlik eşikleri, diff uygularken "düzenleme başarısız" hatalarını azaltır; ayarları ince ayar yapmak için yeni tanı araçları da eklenmiştir
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

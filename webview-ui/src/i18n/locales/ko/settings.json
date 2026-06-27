@@ -41,7 +41,8 @@
 		"experimental": "실험적",
 		"language": "언어",
 		"about": "Zoo Code 정보",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "규칙"
 	},
 	"about": {
 		"bugReport": {
@@ -62,6 +63,24 @@
 		"debugMode": {
 			"label": "디버그 모드 활성화",
 			"description": "디버그 모드를 활성화하여 작업 헤더에 API 대화 기록과 UI 메시지를 임시 파일에 포맷된 JSON으로 볼 수 있는 추가 버튼을 표시합니다."
+		},
+		"rooHistoryImport": {
+			"settingLabel": "Roo Code에서 기록 가져오기",
+			"cardTitle": "Roo Code 기록",
+			"cardDescription": "저장된 Roo Code 대화를 Zoo Code로 복사합니다.",
+			"statusImporting": "기록 가져오는 중",
+			"statusFailed": "가져오기 실패",
+			"statusComplete": "가져오기 완료",
+			"buttonImporting": "Roo Code에서 가져오는 중...",
+			"buttonIdle": "Roo Code에서 기록 가져오기",
+			"summaryFailedWithFiles": "가져오기가 중단되기 전에 {{total}}개 중 {{copied}}개의 파일이 복사되었습니다.",
+			"summaryFailedNoFiles": "파일이 복사되기 전에 가져오기가 중단되었습니다.",
+			"summaryCopied": "{{total}}개 중 {{copied}}개 파일 복사됨",
+			"detailFailed": "다시 시도하려면 새 가져오기를 시작하세요.",
+			"detailTasksImported_one": "{{total}}개 중 {{count}}개의 작업 기록을 가져왔습니다.",
+			"detailTasksImported_other": "{{total}}개 중 {{count}}개의 작업 기록을 가져왔습니다.",
+			"detailPreparing": "Roo Code 기록 가져오기를 준비 중입니다.",
+			"progressAriaLabel": "Roo Code 기록 가져오기 진행률"
 		}
 	},
 	"slashCommands": {
@@ -98,6 +117,52 @@
 			"nameInvalid": "이름은 문자, 숫자, 하이픈 및 밑줄만 포함할 수 있습니다"
 		},
 		"footer": "슬래시 명령을 사용하여 자주 사용하는 프롬프트 및 워크플로에 빠르게 액세스합니다."
+	},
+	"rules": {
+		"description": "전역 및 워크스페이스 .roo/rules 디렉터리에서 Zoo Code 규칙 파일을 관리합니다. 설정 폴더를 직접 찾아보지 않고 일반 규칙이나 모드별 규칙을 만들 수 있습니다.",
+		"workspaceRules": "워크스페이스 규칙",
+		"globalRules": "전역 규칙",
+		"noWorkspaceRules": "이 프로젝트에는 아직 규칙이 없습니다.",
+		"noGlobalRules": "아직 전역 규칙이 없습니다.",
+		"addRule": "규칙 추가",
+		"editRule": "규칙 편집",
+		"deleteRule": "규칙 삭제",
+		"modeLabel": "모드: {{mode}}",
+		"deleteDialog": {
+			"title": "규칙 삭제",
+			"description": "규칙 \"{{name}}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
+			"confirm": "삭제",
+			"cancel": "취소"
+		},
+		"createDialog": {
+			"title": "새 규칙 만들기",
+			"nameLabel": "이름",
+			"namePlaceholder": "my-rule-name",
+			"nameHint": "소문자, 숫자, 하이픈, 밑줄만 사용할 수 있습니다. .md는 자동으로 추가됩니다.",
+			"scopeLabel": "위치",
+			"kindLabel": "규칙 유형",
+			"modeLabel": "모드",
+			"modePlaceholder": "모드 선택",
+			"create": "만들기",
+			"cancel": "취소"
+		},
+		"scope": {
+			"global": "전역(모든 워크스페이스에서 사용 가능)",
+			"project": "워크스페이스"
+		},
+		"kind": {
+			"generic": "일반 규칙",
+			"mode": "모드별 규칙",
+			"genericBadge": "일반",
+			"modeBadge": "모드"
+		},
+		"validation": {
+			"nameRequired": "이름은 필수입니다",
+			"nameTooLong": "이름은 64자 이하여야 합니다",
+			"nameInvalid": "이름에는 소문자, 숫자, 하이픈, 밑줄만 사용할 수 있습니다",
+			"modeRequired": "모드별 규칙에는 모드가 필요합니다"
+		},
+		"footer": "규칙은 일반 지침보다 모드별 지침을 먼저 로드합니다. 전역 규칙은 워크스페이스 규칙보다 먼저 로드됩니다."
 	},
 	"prompts": {
 		"description": "프롬프트 향상, 코드 설명, 문제 해결과 같은 빠른 작업에 사용되는 지원 프롬프트를 구성합니다. 이러한 프롬프트는 Roo가 일반적인 개발 작업에 대해 더 나은 지원을 제공하는 데 도움이 됩니다."
@@ -651,6 +716,12 @@
 			"delayAfterWrite": {
 				"label": "진단이 잠재적인 문제를 감지할 수 있도록 쓰기 후 지연",
 				"description": "파일 쓰기 후 계속 진행하기 전에 대기하는 시간으로, 진단 도구가 변경 사항을 처리하고 문제를 감지할 수 있도록 합니다."
+			}
+		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Diff 일치 임계값",
+				"description": "낮은 임계값은 파일 편집이 서식 및 공백 변동에 더 탄력적으로 대응하게 합니다. 100% 임계값은 정확히 일치해야 합니다."
 			}
 		},
 		"condensingThreshold": {

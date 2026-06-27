@@ -2,6 +2,11 @@ import { HTMLAttributes, useMemo } from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import { telemetryClient } from "@/utils/TelemetryClient"
+import {
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+} from "@roo-code/types"
 
 import { SetCachedStateField } from "./types"
 import { SectionHeader } from "./SectionHeader"
@@ -160,7 +165,7 @@ export const UISettings = ({
 						label={t("settings:ui.autoCloseZooOpenedFiles.label")}>
 						<div className="flex flex-col gap-1">
 							<VSCodeCheckbox
-								checked={autoCloseZooOpenedFiles ?? true}
+								checked={autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES}
 								onChange={(e: any) => setCachedStateField("autoCloseZooOpenedFiles", e.target.checked)}
 								data-testid="auto-close-zoo-opened-files-checkbox">
 								<span className="font-medium">{t("settings:ui.autoCloseZooOpenedFiles.label")}</span>
@@ -178,7 +183,10 @@ export const UISettings = ({
 						label={t("settings:ui.autoCloseZooOpenedFilesAfterUserEdited.label")}>
 						<div className="flex flex-col gap-1">
 							<VSCodeCheckbox
-								checked={autoCloseZooOpenedFilesAfterUserEdited ?? false}
+								checked={
+									autoCloseZooOpenedFilesAfterUserEdited ??
+									DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED
+								}
 								onChange={(e: any) =>
 									setCachedStateField("autoCloseZooOpenedFilesAfterUserEdited", e.target.checked)
 								}
@@ -200,7 +208,7 @@ export const UISettings = ({
 						label={t("settings:ui.autoCloseZooOpenedNewFiles.label")}>
 						<div className="flex flex-col gap-1">
 							<VSCodeCheckbox
-								checked={autoCloseZooOpenedNewFiles ?? false}
+								checked={autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES}
 								onChange={(e: any) =>
 									setCachedStateField("autoCloseZooOpenedNewFiles", e.target.checked)
 								}

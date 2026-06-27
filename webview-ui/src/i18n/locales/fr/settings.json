@@ -41,7 +41,8 @@
 		"experimental": "Expérimental",
 		"language": "Langue",
 		"about": "À propos de Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Règles"
 	},
 	"about": {
 		"bugReport": {
@@ -62,6 +63,24 @@
 		"debugMode": {
 			"label": "Activer le mode debug",
 			"description": "Active le mode debug pour afficher des boutons supplémentaires dans l'en-tête de la tâche permettant de consulter l'historique de conversation de l'API et les messages de l'interface utilisateur au format JSON dans des fichiers temporaires."
+		},
+		"rooHistoryImport": {
+			"settingLabel": "Importer l'historique depuis Roo Code",
+			"cardTitle": "Historique Roo Code",
+			"cardDescription": "Copier les conversations Roo Code sauvegardées dans Zoo Code.",
+			"statusImporting": "Importation de l'historique",
+			"statusFailed": "Échec de l'importation",
+			"statusComplete": "Importation terminée",
+			"buttonImporting": "Importation depuis Roo Code...",
+			"buttonIdle": "Importer l'historique depuis Roo Code",
+			"summaryFailedWithFiles": "{{copied}} sur {{total}} fichiers copiés avant l'arrêt de l'importation.",
+			"summaryFailedNoFiles": "L'importation s'est arrêtée avant que des fichiers soient copiés.",
+			"summaryCopied": "{{copied}} sur {{total}} fichiers copiés",
+			"detailFailed": "Démarre une nouvelle tentative d'importation pour réessayer.",
+			"detailTasksImported_one": "{{count}} sur {{total}} historique de tâche importé.",
+			"detailTasksImported_other": "{{count}} sur {{total}} historiques de tâches importés.",
+			"detailPreparing": "Préparation de l'importation de l'historique Roo Code.",
+			"progressAriaLabel": "Progression de l'importation de l'historique Roo Code"
 		}
 	},
 	"slashCommands": {
@@ -98,6 +117,52 @@
 			"nameInvalid": "Le nom ne peut contenir que des lettres, des chiffres, des tirets et des traits de soulignement"
 		},
 		"footer": "Utilisez les commandes slash pour accéder rapidement aux invites et flux de travail fréquemment utilisés."
+	},
+	"rules": {
+		"description": "Gère les fichiers de règles Zoo Code depuis les répertoires .roo/rules globaux et d’espace de travail. Crée des règles générales ou propres à un mode sans parcourir manuellement les dossiers de configuration.",
+		"workspaceRules": "Règles de l’espace de travail",
+		"globalRules": "Règles globales",
+		"noWorkspaceRules": "Aucune règle dans ce projet pour le moment.",
+		"noGlobalRules": "Aucune règle globale pour le moment.",
+		"addRule": "Ajouter une règle",
+		"editRule": "Modifier la règle",
+		"deleteRule": "Supprimer la règle",
+		"modeLabel": "Mode : {{mode}}",
+		"deleteDialog": {
+			"title": "Supprimer la règle",
+			"description": "Veux-tu vraiment supprimer la règle \"{{name}}\" ? Cette action est irréversible.",
+			"confirm": "Supprimer",
+			"cancel": "Annuler"
+		},
+		"createDialog": {
+			"title": "Créer une nouvelle règle",
+			"nameLabel": "Nom",
+			"namePlaceholder": "nom-de-ma-regle",
+			"nameHint": "Lettres minuscules, chiffres, tirets et underscores uniquement. .md est ajouté automatiquement.",
+			"scopeLabel": "Emplacement",
+			"kindLabel": "Type de règle",
+			"modeLabel": "Mode",
+			"modePlaceholder": "Sélectionne un mode",
+			"create": "Créer",
+			"cancel": "Annuler"
+		},
+		"scope": {
+			"global": "Global (disponible dans tous les espaces de travail)",
+			"project": "Espace de travail"
+		},
+		"kind": {
+			"generic": "Règles générales",
+			"mode": "Règles propres à un mode",
+			"genericBadge": "Général",
+			"modeBadge": "Mode"
+		},
+		"validation": {
+			"nameRequired": "Le nom est obligatoire",
+			"nameTooLong": "Le nom doit comporter 64 caractères ou moins",
+			"nameInvalid": "Le nom ne peut contenir que des lettres minuscules, des chiffres, des tirets et des underscores",
+			"modeRequired": "Le mode est obligatoire pour les règles propres à un mode"
+		},
+		"footer": "Les règles chargent les consignes propres au mode avant les consignes générales. Les règles globales se chargent avant les règles de l’espace de travail."
 	},
 	"prompts": {
 		"description": "Configurez les invites de support utilisées pour les actions rapides comme l'amélioration des invites, l'explication du code et la résolution des problèmes. Ces invites aident Zoo à fournir une meilleure assistance pour les tâches de développement courantes."
@@ -661,6 +726,12 @@
 			"delayAfterWrite": {
 				"label": "Délai après les écritures pour permettre aux diagnostics de détecter les problèmes potentiels",
 				"description": "Temps d'attente après les écritures de fichiers avant de continuer, permettant aux outils de diagnostic de traiter les modifications et de détecter les problèmes."
+			}
+		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Seuil de correspondance du diff",
+				"description": "Des seuils plus bas rendent les modifications de fichiers plus résistantes aux variations de formatage et d'espaces blancs. Un seuil de 100% nécessite une correspondance exacte."
 			}
 		},
 		"condensingThreshold": {

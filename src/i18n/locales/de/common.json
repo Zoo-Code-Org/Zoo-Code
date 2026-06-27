@@ -141,12 +141,18 @@
 		"manual_url_no_query": "Ungültige Callback-URL: Query-Parameter fehlen",
 		"manual_url_missing_params": "Ungültige Callback-URL: erforderliche Parameter (code und state) fehlen",
 		"manual_url_auth_failed": "Manuelle URL-Authentifizierung fehlgeschlagen",
-		"manual_url_auth_error": "Authentifizierung fehlgeschlagen"
+		"manual_url_auth_error": "Authentifizierung fehlgeschlagen",
+		"rooHistoryImport": "Fehler beim Importieren des Roo Code-Verlaufs: {{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Kein Terminal-Inhalt ausgewählt",
 		"missing_task_files": "Die Dateien dieser Aufgabe fehlen. Möchtest du sie aus der Aufgabenliste entfernen?",
-		"auto_import_failed": "Fehler beim automatischen Import der ZooCode-Einstellungen: {{error}}"
+		"auto_import_failed": "Fehler beim automatischen Import der ZooCode-Einstellungen: {{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "Es wurde kein Roo Code-Aufgabenverlauf zum Importieren von {{domain}} gefunden.",
+			"alreadyImported_one": "Der {{count}} Roo Code-Aufgabenverlauf wurde bereits in Zoo Code importiert.",
+			"alreadyImported_other": "Alle {{count}} Roo Code-Aufgabenverläufe wurden bereits in Zoo Code importiert."
+		}
 	},
 	"info": {
 		"no_changes": "Keine Änderungen gefunden.",
@@ -165,6 +171,10 @@
 		"mode_imported": "Modus erfolgreich importiert",
 		"roo": {
 			"signInUnavailable": "Die Anmeldung bei Roo Code Cloud ist derzeit nicht verfügbar. Konfiguriere einen anderen Anbieter, um fortzufahren."
+		},
+		"rooHistoryImport": {
+			"success_one": "{{count}} Roo Code-Aufgabenverlauf in Zoo Code importiert.",
+			"success_other": "{{count}} Roo Code-Aufgabenverläufe in Zoo Code importiert."
 		}
 	},
 	"answers": {

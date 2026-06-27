@@ -3,6 +3,7 @@ import React from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { VSCodeCheckbox, VSCodeTextArea } from "@vscode/webview-ui-toolkit/react"
 import { FoldVertical } from "lucide-react"
+import { DEFAULT_DIFF_FUZZY_THRESHOLD } from "@roo-code/types"
 
 import { supportPrompt } from "@roo/support-prompt"
 
@@ -39,6 +40,7 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	includeDiagnosticMessages?: boolean
 	maxDiagnosticMessages?: number
 	writeDelayMs: number
+	diffFuzzyThreshold?: number
 	includeCurrentTime?: boolean
 	includeCurrentCost?: boolean
 	maxGitStatusFiles?: number
@@ -57,6 +59,7 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "includeDiagnosticMessages"
 		| "maxDiagnosticMessages"
 		| "writeDelayMs"
+		| "diffFuzzyThreshold"
 		| "includeCurrentTime"
 		| "includeCurrentCost"
 		| "maxGitStatusFiles"
@@ -78,6 +81,7 @@ export const ContextManagementSettings = ({
 	includeDiagnosticMessages,
 	maxDiagnosticMessages,
 	writeDelayMs,
+	diffFuzzyThreshold,
 	includeCurrentTime,
 	includeCurrentCost,
 	maxGitStatusFiles,
@@ -403,6 +407,31 @@ export const ContextManagementSettings = ({
 					</div>
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
 						{t("settings:contextManagement.diagnostics.delayAfterWrite.description")}
+					</div>
+				</SearchableSetting>
+
+				<SearchableSetting
+					settingId="context-diff-fuzzy-threshold"
+					section="contextManagement"
+					label={t("settings:contextManagement.fileEdits.diffFuzzyThreshold.label")}>
+					<span className="block font-medium mb-1">
+						{t("settings:contextManagement.fileEdits.diffFuzzyThreshold.label")}
+					</span>
+					<div className="flex items-center gap-2">
+						<Slider
+							min={0.5}
+							max={1}
+							step={0.01}
+							value={[diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD]}
+							onValueChange={([value]) => setCachedStateField("diffFuzzyThreshold", value)}
+							data-testid="diff-fuzzy-threshold-slider"
+						/>
+						<span className="w-20">
+							{((diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD) * 100).toFixed(0)}%
+						</span>
+					</div>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:contextManagement.fileEdits.diffFuzzyThreshold.description")}
 					</div>
 				</SearchableSetting>
 

@@ -141,12 +141,18 @@
 			"streamProcessingError": "Error processing response stream: {{message}}",
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
-		}
+		},
+		"rooHistoryImport": "Roo Codeの履歴のインポートに失敗しました: {{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "選択されたターミナルコンテンツがありません",
 		"missing_task_files": "このタスクのファイルが見つかりません。タスクリストから削除しますか？",
-		"auto_import_failed": "ZooCode設定の自動インポートに失敗しました：{{error}}"
+		"auto_import_failed": "ZooCode設定の自動インポートに失敗しました：{{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "{{domain}}からインポートするRoo Codeのタスク履歴が見つかりませんでした。",
+			"alreadyImported_one": "{{count}}件のRoo Codeタスク履歴はすでにZoo Codeにインポート済みです。",
+			"alreadyImported_other": "{{count}}件のRoo Codeタスク履歴はすでにZoo Codeにインポート済みです。"
+		}
 	},
 	"info": {
 		"no_changes": "変更は見つかりませんでした。",
@@ -165,6 +171,10 @@
 		"mode_imported": "モードが正常にインポートされました",
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud へのサインインは現在利用できません。続行するには別のプロバイダーを設定してください。"
+		},
+		"rooHistoryImport": {
+			"success_one": "{{count}}件のRoo CodeタスクをZoo Codeにインポートしました。",
+			"success_other": "{{count}}件のRoo CodeタスクをZoo Codeにインポートしました。"
 		}
 	},
 	"answers": {

@@ -40,6 +40,14 @@
 		"title": "새 작업 시작",
 		"tooltip": "새 작업 시작하기"
 	},
+	"seeNewChanges": {
+		"title": "새 변경 사항 보기",
+		"tooltip": "마지막 prompt 이후 적용된 변경 사항 보기"
+	},
+	"restoreChanges": {
+		"title": "변경 사항 복원",
+		"tooltip": "파일과 작업 상태를 마지막 prompt로 복원"
+	},
 	"proceedAnyways": {
 		"title": "그래도 계속",
 		"tooltip": "명령 실행 중에도 계속 진행"
@@ -333,9 +341,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "GLM-5.2 지원 — 최신 GLM 모델이 이제 공급자 설정에서 사용 가능합니다.",
-			"highlight2": "OpenCode-Go 개선 — 네이티브 모델 매개변수, Anthropic 형식 라우팅, 더 안정적인 응답을 위한 context-token 수정.",
-			"highlight3": "Tool-writer 모드 — 도구 정의를 작성하고 유지 관리하는 새로운 전문 모드가 Marketplace에서 사용 가능합니다."
+			"highlight1": "규칙 관리 UI — 설정의 새 규칙 탭에서 전역 및 작업 공간 Zoo 규칙을 편집기에서 직접 만들고, 삭제하고, 열 수 있습니다.",
+			"highlight2": "완료 변경 사항 검토 — 작업이 완료되면 새 \"새 변경 사항 보기\" 및 \"변경 사항 복원\" 버튼으로 마지막 프롬프트의 변경 사항을 검사하고 취소할 수 있습니다.",
+			"highlight3": "완화된 Diff 임계값 — 구성 가능한 유사도 임계값으로 diff 적용 시 \"편집 실패\" 오류가 줄어들며, 설정 조정을 돕는 새 진단 기능이 추가되었습니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

@@ -51,6 +51,7 @@ export const ExperimentalSettings = ({
 			<Section>
 				{Object.entries(experimentConfigsMap)
 					.filter(([key]) => key in EXPERIMENT_IDS)
+					.filter(([, config]) => config.showInSettings !== false)
 					.map((config) => {
 						// Use the same translation key pattern as ExperimentalFeature
 						const experimentKey = config[0]

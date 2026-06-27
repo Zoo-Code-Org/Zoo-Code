@@ -40,6 +40,14 @@
 		"title": "Rozpocznij nowe zadanie",
 		"tooltip": "Rozpocznij nowe zadanie"
 	},
+	"seeNewChanges": {
+		"title": "Zobacz nowe zmiany",
+		"tooltip": "Wyświetl zmiany wprowadzone od twojego ostatniego promptu"
+	},
+	"restoreChanges": {
+		"title": "Przywróć zmiany",
+		"tooltip": "Przywróć pliki i stan zadania do twojego ostatniego promptu"
+	},
 	"proceedAnyways": {
 		"title": "Kontynuuj mimo to",
 		"tooltip": "Kontynuuj podczas wykonywania polecenia"
@@ -333,9 +341,9 @@
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Co nowego:",
-			"highlight1": "Obsługa GLM-5.2 — najnowszy model GLM jest teraz dostępny w ustawieniach dostawcy.",
-			"highlight2": "Ulepszenia OpenCode-Go — natywne parametry modelu, routing w formacie Anthropic i poprawka context-token dla bardziej niezawodnych odpowiedzi.",
-			"highlight3": "Tryb tool-writer — nowy specjalistyczny tryb do pisania i utrzymania definicji narzędzi, teraz dostępny w Marketplace."
+			"highlight1": "Interfejs zarządzania regułami — nowa karta Reguły w Ustawieniach umożliwia tworzenie, usuwanie i otwieranie globalnych i obszaru roboczego reguł Zoo bezpośrednio z edytora.",
+			"highlight2": "Przegląd zmian ukończenia — po zakończeniu zadania nowe przyciski \"Zobacz nowe zmiany\" i \"Przywróć zmiany\" pozwalają sprawdzić i cofnąć zmiany z ostatniego polecenia.",
+			"highlight3": "Złagodzone progi diff — konfigurowalne progi podobieństwa zmniejszają błędy \"edycja nieudana\" podczas stosowania diffów, z nowymi diagnostykami pomagającymi dostroić ustawienia."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",

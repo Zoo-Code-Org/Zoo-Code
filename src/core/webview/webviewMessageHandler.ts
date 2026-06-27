@@ -21,6 +21,7 @@ import {
 	ExperimentId,
 	checkoutDiffPayloadSchema,
 	checkoutRestorePayloadSchema,
+	getCompletionCheckpoint,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -28,6 +29,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
+import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
@@ -40,6 +42,13 @@ import {
 	handleUpdateSkillModes,
 	handleOpenSkillFile,
 } from "./skillsMessageHandler"
+import {
+	handleRequestRules,
+	handleCreateRule,
+	handleDeleteRule,
+	handleOpenRuleFile,
+	handleOpenRulesDirectory,
+} from "./rulesMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
@@ -110,6 +119,10 @@ export const webviewMessageHandler = async (
 
 	const showCloudUnavailableMessage = () => {
 		vscode.window.showInformationMessage(getRouterUnavailableSignInMessage())
+	}
+
+	const resolveCompletionCheckpoint = (currentCline: { clineMessages: ClineMessage[] }) => {
+		return getCompletionCheckpoint(currentCline.clineMessages)
 	}
 
 	const getCurrentMode = async (): Promise<string> => {
@@ -903,6 +916,92 @@ export const webviewMessageHandler = async (
 
 			break
 		}
+		case "importRooHistory": {
+			let latestProgress = {
+				copiedFileCount: 0,
+				totalFileCount: 0,
+				importedTaskCount: 0,
+				totalTaskCount: 0,
+			}
+
+			try {
+				await provider.postMessageToWebview({
+					type: "rooHistoryImportProgress",
+					rooHistoryImportProgress: {
+						status: "starting",
+						...latestProgress,
+					},
+				})
+
+				const result = await importRooTaskHistory(
+					provider.contextProxy.globalStorageUri.fsPath,
+					async (progress) => {
+						latestProgress = progress
+						await provider.postMessageToWebview({
+							type: "rooHistoryImportProgress",
+							rooHistoryImportProgress: {
+								status: "copying",
+								...progress,
+							},
+						})
+					},
+				)
+
+				if (result.foundTaskCount === 0) {
+					await provider.postMessageToWebview({
+						type: "rooHistoryImportProgress",
+						rooHistoryImportProgress: {
+							status: "finished",
+							...latestProgress,
+						},
+					})
+					vscode.window.showWarningMessage(
+						t("common:warnings.rooHistoryImport.nothingFound", { domain: result.rooExtensionDomain }),
+					)
+					break
+				}
+
+				// Refresh history whenever Roo tasks were found — even if all already existed —
+				// so a retry after a partial-copy failure still reconciles the store.
+				provider.taskHistoryStore.invalidateAll()
+				await provider.taskHistoryStore.reconcile()
+				await provider.taskHistoryStore.flushIndex()
+				await provider.postStateToWebview()
+				await provider.postMessageToWebview({
+					type: "rooHistoryImportProgress",
+					rooHistoryImportProgress: {
+						status: "finished",
+						...latestProgress,
+						copiedFileCount: result.importedFileCount,
+						totalFileCount: latestProgress.totalFileCount || result.importedFileCount,
+						importedTaskCount: result.importedTaskCount,
+						totalTaskCount: latestProgress.totalTaskCount || result.importedTaskCount,
+					},
+				})
+
+				if (result.importedTaskCount === 0) {
+					vscode.window.showWarningMessage(
+						t("common:warnings.rooHistoryImport.alreadyImported", { count: result.foundTaskCount }),
+					)
+				} else {
+					vscode.window.showInformationMessage(
+						t("common:info.rooHistoryImport.success", { count: result.importedTaskCount }),
+					)
+				}
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error)
+				provider.log(`[importRooHistory] failed: ${message}`)
+				await provider.postMessageToWebview({
+					type: "rooHistoryImportProgress",
+					rooHistoryImportProgress: {
+						status: "failed",
+						...latestProgress,
+					},
+				})
+				vscode.window.showErrorMessage(t("common:errors.rooHistoryImport", { error: message }))
+			}
+			break
+		}
 		case "exportSettings":
 			await exportSettings({
 				providerSettingsManager: provider.providerSettingsManager,
@@ -1280,11 +1379,62 @@ export const webviewMessageHandler = async (
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
 				} catch (error) {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+					return
 				}
 
 				try {
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
 				} catch (error) {
+					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				}
+			}
+
+			break
+		}
+		case "completionCheckpointDiff": {
+			const currentCline = provider.getCurrentTask()
+			const checkpoint = currentCline ? resolveCompletionCheckpoint(currentCline) : undefined
+
+			if (currentCline && checkpoint) {
+				await currentCline.checkpointDiff({
+					ts: checkpoint.ts,
+					commitHash: checkpoint.commitHash,
+					mode: "to-current",
+				})
+			}
+
+			break
+		}
+		case "completionCheckpointRestore": {
+			const currentCline = provider.getCurrentTask()
+			const checkpoint = currentCline ? resolveCompletionCheckpoint(currentCline) : undefined
+
+			if (currentCline && checkpoint) {
+				const originalTaskId = currentCline.taskId
+				await provider.cancelTask()
+
+				try {
+					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
+				} catch (error) {
+					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+					return
+				}
+
+				try {
+					const restoredTask = provider.getCurrentTask()
+
+					if (!restoredTask || restoredTask.taskId !== originalTaskId) {
+						vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+						return
+					}
+
+					await restoredTask.checkpointRestore({
+						ts: checkpoint.ts,
+						commitHash: checkpoint.commitHash,
+						mode: "restore",
+					})
+				} catch (error) {
+					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
 				}
 			}
@@ -3134,6 +3284,26 @@ export const webviewMessageHandler = async (
 		}
 		case "openSkillFile": {
 			await handleOpenSkillFile(provider, message)
+			break
+		}
+		case "requestRules": {
+			await handleRequestRules(provider, getCurrentCwd())
+			break
+		}
+		case "createRule": {
+			await handleCreateRule(provider, getCurrentCwd(), message)
+			break
+		}
+		case "deleteRule": {
+			await handleDeleteRule(provider, getCurrentCwd(), message)
+			break
+		}
+		case "openRuleFile": {
+			await handleOpenRuleFile(provider, getCurrentCwd(), message)
+			break
+		}
+		case "openRulesDirectory": {
+			await handleOpenRulesDirectory(provider, getCurrentCwd(), message)
 			break
 		}
 		case "openCommandFile": {

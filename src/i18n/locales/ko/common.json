@@ -141,12 +141,18 @@
 			"streamProcessingError": "Error processing response stream: {{message}}",
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
-		}
+		},
+		"rooHistoryImport": "Roo Code 기록 가져오기 실패: {{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "선택된 터미널 내용이 없습니다",
 		"missing_task_files": "이 작업의 파일이 누락되었습니다. 작업 목록에서 제거하시겠습니까?",
-		"auto_import_failed": "ZooCode 설정 자동 가져오기 실패: {{error}}"
+		"auto_import_failed": "ZooCode 설정 자동 가져오기 실패: {{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "{{domain}}에서 가져올 Roo Code 작업 기록을 찾을 수 없습니다.",
+			"alreadyImported_one": "{{count}}개의 Roo Code 작업 기록이 이미 Zoo Code로 가져와졌습니다.",
+			"alreadyImported_other": "{{count}}개의 Roo Code 작업 기록이 이미 Zoo Code로 가져와졌습니다."
+		}
 	},
 	"info": {
 		"no_changes": "변경 사항이 없습니다.",
@@ -165,6 +171,10 @@
 		"mode_imported": "모드를 성공적으로 가져왔습니다",
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud 로그인은 현재 사용할 수 없습니다. 계속하려면 다른 제공업체를 구성하세요."
+		},
+		"rooHistoryImport": {
+			"success_one": "Roo Code 작업 기록 {{count}}개를 Zoo Code로 가져왔습니다.",
+			"success_other": "Roo Code 작업 기록 {{count}}개를 Zoo Code로 가져왔습니다."
 		}
 	},
 	"answers": {

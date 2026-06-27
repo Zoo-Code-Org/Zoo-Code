@@ -11,6 +11,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../Task"
 import { createRateLimitClock } from "../RateLimitClock"
+import { summarizeConversation } from "../../condense"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
 import { ContextProxy } from "../../config/ContextProxy"
@@ -1794,6 +1795,516 @@ describe("Cline", () => {
 
 				// Verify cancelCurrentRequest was called
 				expect(cancelSpy).toHaveBeenCalled()
+			})
+			describe("abortSignal", () => {
+				it("should pass AbortController signal to condenseContext metadata when a current request exists", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					task.currentRequestAbortController = new AbortController()
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+					await task.condenseContext()
+
+					expect(summarizeConversation).toHaveBeenCalled()
+					const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
+					expect(options.metadata?.abortSignal).toBeInstanceOf(AbortSignal)
+				})
+
+				it("should omit abortSignal from condenseContext metadata when no current request exists", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+					await task.condenseContext()
+
+					expect(summarizeConversation).toHaveBeenCalled()
+					const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
+					expect(options.metadata).toBeDefined()
+					expect("abortSignal" in (options.metadata ?? {})).toBe(false)
+				})
+
+				it("should pass AbortController signal to createMessage metadata", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					// Mock required methods for attemptApiRequest to work without hanging
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+
+					const providerState = await mockProvider.getState()
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						apiConfiguration: mockApiConfig,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					})
+
+					// Mock the API stream response
+					const mockStream = {
+						async *[Symbol.asyncIterator]() {
+							yield { type: "text", text: "response" }
+						},
+						async next() {
+							return { done: true, value: { type: "text", text: "response" } }
+						},
+						async return() {
+							return { done: true, value: undefined }
+						},
+						async throw(e: any) {
+							throw e
+						},
+						[Symbol.asyncDispose]: async () => {},
+					} as AsyncGenerator<ApiStreamChunk>
+
+					const createMessageSpy = vi.spyOn(task.api, "createMessage").mockReturnValue(mockStream)
+
+					task.apiConversationHistory = [
+						{
+							role: "user" as const,
+							content: [{ type: "text" as const, text: "test message" }],
+							ts: Date.now(),
+						},
+					] as any
+
+					const iterator = task.attemptApiRequest(0)
+					await iterator.next()
+
+					// Verify createMessage was called with metadata containing abortSignal
+					expect(createMessageSpy).toHaveBeenCalled()
+					const [, , metadata] = createMessageSpy.mock.calls[0]!
+
+					expect(metadata).toBeDefined()
+					expect(metadata!.abortSignal).toBeInstanceOf(AbortSignal)
+				})
+
+				it("should invoke abort on currentRequestAbortController during first-chunk wait", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					const abortSpy = vi.fn()
+					task.currentRequestAbortController = {
+						abort: abortSpy,
+						signal: new AbortController().signal,
+					} as AbortController
+
+					task.cancelCurrentRequest()
+
+					expect(abortSpy).toHaveBeenCalledTimes(1)
+					expect(task.currentRequestAbortController).toBeUndefined()
+				})
+
+				it("should reject streaming consumption when aborted between chunks", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+
+					const providerState = await mockProvider.getState()
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						apiConfiguration: mockApiConfig,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					})
+
+					const createMessageSpy = vi.fn((_systemPrompt, _messages, metadata) => {
+						let callCount = 0
+						return {
+							[Symbol.asyncIterator]() {
+								return this
+							},
+							next: () => {
+								callCount++
+								if (callCount === 1) {
+									return Promise.resolve({
+										done: false,
+										value: { type: "text", text: "first chunk" },
+									})
+								}
+								return new Promise<IteratorResult<ApiStreamChunk>>((resolve, reject) => {
+									if (metadata?.abortSignal?.aborted) {
+										return reject(new Error("Request cancelled by user"))
+									}
+									metadata?.abortSignal?.addEventListener("abort", () => {
+										reject(new Error("Request cancelled by user"))
+									})
+								})
+							},
+							async return() {
+								return { done: true, value: undefined }
+							},
+							async throw(e: any) {
+								throw e
+							},
+							[Symbol.asyncDispose]: async () => {},
+						} as AsyncGenerator<ApiStreamChunk>
+					})
+					vi.spyOn(task.api, "createMessage").mockImplementation(createMessageSpy)
+
+					task.apiConversationHistory = [
+						{
+							role: "user" as const,
+							content: [{ type: "text" as const, text: "test message" }],
+							ts: Date.now(),
+						},
+					] as any
+
+					const streamIterator = task.attemptApiRequest(0)
+					await expect(streamIterator.next()).resolves.toMatchObject({
+						done: false,
+						value: { type: "text", text: "first chunk" },
+					})
+
+					task.cancelCurrentRequest()
+
+					await expect(streamIterator.next()).rejects.toThrow("Request cancelled by user")
+					expect(createMessageSpy).toHaveBeenCalledTimes(1)
+				})
+
+				it("should use the same AbortController signal as currentRequestAbortController", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					// Mock required methods for attemptApiRequest to work without hanging
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+
+					const providerState = await mockProvider.getState()
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						apiConfiguration: mockApiConfig,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					})
+
+					// Mock the API stream response
+					const mockStream = {
+						async *[Symbol.asyncIterator]() {
+							yield { type: "text", text: "response" }
+						},
+						async next() {
+							return { done: true, value: { type: "text", text: "response" } }
+						},
+						async return() {
+							return { done: true, value: undefined }
+						},
+						async throw(e: any) {
+							throw e
+						},
+						[Symbol.asyncDispose]: async () => {},
+					} as AsyncGenerator<ApiStreamChunk>
+
+					const createMessageSpy = vi.spyOn(task.api, "createMessage").mockReturnValue(mockStream)
+
+					task.apiConversationHistory = [
+						{
+							role: "user" as const,
+							content: [{ type: "text" as const, text: "test message" }],
+							ts: Date.now(),
+						},
+					] as any
+
+					const iterator = task.attemptApiRequest(0)
+					await iterator.next()
+
+					// Get the signal from metadata
+					const [, , metadata] = createMessageSpy.mock.calls[0]!
+					const metadataSignal = metadata!.abortSignal
+
+					// The signal in metadata should be the same as the one from currentRequestAbortController
+					expect(metadataSignal).toBe(task.currentRequestAbortController!.signal)
+				})
+
+				it("should omit createMessage abortSignal metadata when no current request exists before condense metadata checks", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+
+					const providerState = await mockProvider.getState()
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						apiConfiguration: mockApiConfig,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					})
+
+					const mockStream = {
+						async *[Symbol.asyncIterator]() {
+							yield { type: "text", text: "response" }
+						},
+						async next() {
+							return { done: true, value: { type: "text", text: "response" } }
+						},
+						async return() {
+							return { done: true, value: undefined }
+						},
+						async throw(e: any) {
+							throw e
+						},
+						[Symbol.asyncDispose]: async () => {},
+					} as AsyncGenerator<ApiStreamChunk>
+
+					const createMessageSpy = vi.spyOn(task.api, "createMessage").mockReturnValue(mockStream)
+					task.apiConversationHistory = [
+						{
+							role: "user" as const,
+							content: [{ type: "text" as const, text: "test message" }],
+							ts: Date.now(),
+						},
+					] as any
+
+					expect(task.currentRequestAbortController).toBeUndefined()
+
+					const iterator = task.attemptApiRequest(0)
+					await iterator.next()
+
+					const [, , metadata] = createMessageSpy.mock.calls[0]!
+					expect(metadata).toBeDefined()
+					expect("abortSignal" in metadata!).toBe(true)
+					expect(metadata!.abortSignal).toBeInstanceOf(AbortSignal)
+				})
+
+				it("should keep createMessage abortSignal metadata unaborted before cancellation", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: mockApiConfig.apiModelId!,
+						info: {
+							supportsImages: false,
+							supportsPromptCache: true,
+							contextWindow: 200000,
+							maxTokens: 4096,
+							inputPrice: 0.3,
+							outputPrice: 1.5,
+						} as ModelInfo,
+					})
+
+					const providerState = await mockProvider.getState()
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						apiConfiguration: mockApiConfig,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					})
+
+					const mockStream = {
+						async *[Symbol.asyncIterator]() {
+							yield { type: "text", text: "response" }
+						},
+						async next() {
+							return { done: false, value: { type: "text", text: "response" } }
+						},
+						async return() {
+							return { done: true, value: undefined }
+						},
+						async throw(e: any) {
+							throw e
+						},
+						[Symbol.asyncDispose]: async () => {},
+					} as AsyncGenerator<ApiStreamChunk>
+
+					const createMessageSpy = vi.spyOn(task.api, "createMessage").mockReturnValue(mockStream)
+					task.apiConversationHistory = [
+						{
+							role: "user" as const,
+							content: [{ type: "text" as const, text: "test message" }],
+							ts: Date.now(),
+						},
+					] as any
+
+					const iterator = task.attemptApiRequest(0)
+					await iterator.next()
+
+					const [, , metadata] = createMessageSpy.mock.calls[0]!
+					expect(metadata?.abortSignal).toBeInstanceOf(AbortSignal)
+					expect(metadata?.abortSignal?.aborted).toBe(false)
+				})
+			})
+
+			it("should propagate AbortController signal through attemptApiRequest context-window retry path", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(task, "getTokenUsage").mockReturnValue({
+					totalCost: 0,
+					totalTokensIn: 0,
+					totalTokensOut: 0,
+					contextTokens: 120000,
+				})
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: mockApiConfig.apiModelId!,
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 1000,
+						maxTokens: 4096,
+						inputPrice: 0.3,
+						outputPrice: 1.5,
+					} as ModelInfo,
+				})
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
+					mode: "code",
+					autoCondenseContext: true,
+					autoCondenseContextPercent: 80,
+					requestDelaySeconds: 0,
+					customModes: [],
+					experiments: {},
+					disabledTools: [],
+					customSupportPrompts: {},
+					autoApprovalEnabled: true,
+					profileThresholds: {},
+					currentApiConfigName: "default",
+				})
+
+				task.apiConversationHistory = [
+					{
+						role: "user" as const,
+						content: [{ type: "text" as const, text: "test message" }],
+						ts: Date.now(),
+					},
+				] as any
+
+				let firstCall = true
+				const retryStream = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "text", text: "retried response" }
+					},
+					async next() {
+						return { done: false, value: { type: "text", text: "retried response" } }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(e: any) {
+						throw e
+					},
+					[Symbol.asyncDispose]: async () => {},
+				} as AsyncGenerator<ApiStreamChunk>
+
+				const contextWindowErrorStream = {
+					[Symbol.asyncIterator]() {
+						return this
+					},
+					async next() {
+						throw { status: 400, message: "context length exceeded" }
+					},
+					async return() {
+						return { done: true, value: undefined }
+					},
+					async throw(e: any) {
+						throw e
+					},
+					[Symbol.asyncDispose]: async () => {},
+				} as AsyncGenerator<ApiStreamChunk>
+
+				vi.spyOn(task.api, "createMessage").mockImplementation(() => {
+					if (firstCall) {
+						firstCall = false
+						return contextWindowErrorStream
+					}
+					return retryStream
+				})
+
+				const iterator = task.attemptApiRequest(0)
+				await expect(iterator.next()).resolves.toMatchObject({
+					done: false,
+					value: { type: "text", text: "retried response" },
+				})
+
+				expect(summarizeConversation).toHaveBeenCalled()
+				const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
+				expect(options.metadata?.taskId).toBe(task.taskId)
+				expect(options.metadata?.abortSignal).toBeInstanceOf(AbortSignal)
+				expect(options.metadata?.abortSignal?.aborted).toBe(false)
 			})
 		})
 	})

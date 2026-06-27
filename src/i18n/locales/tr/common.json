@@ -141,12 +141,18 @@
 			"streamProcessingError": "Error processing response stream: {{message}}",
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
-		}
+		},
+		"rooHistoryImport": "Roo Code geçmişi içe aktarılamadı: {{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Seçili terminal içeriği yok",
 		"missing_task_files": "Bu görevin dosyaları eksik. Görev listesinden kaldırmak istiyor musunuz?",
-		"auto_import_failed": "ZooCode ayarları otomatik olarak içe aktarılamadı: {{error}}"
+		"auto_import_failed": "ZooCode ayarları otomatik olarak içe aktarılamadı: {{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "{{domain}} kaynağından içe aktarılacak Roo Code görev geçmişi bulunamadı.",
+			"alreadyImported_one": "{{count}} Roo Code görev geçmişinin tamamı zaten Zoo Code'a aktarılmış.",
+			"alreadyImported_other": "{{count}} Roo Code görev geçmişinin tamamı zaten Zoo Code'a aktarılmış."
+		}
 	},
 	"info": {
 		"no_changes": "Değişiklik bulunamadı.",
@@ -165,6 +171,10 @@
 		"mode_imported": "Mod başarıyla içe aktarıldı",
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud girişi şu anda kullanılamıyor. Devam etmek için farklı bir sağlayıcı yapılandırın."
+		},
+		"rooHistoryImport": {
+			"success_one": "{{count}} Roo Code görev geçmişi Zoo Code'a aktarıldı.",
+			"success_other": "{{count}} Roo Code görev geçmişi Zoo Code'a aktarıldı."
 		}
 	},
 	"answers": {

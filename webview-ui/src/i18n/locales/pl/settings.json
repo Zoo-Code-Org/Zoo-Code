@@ -41,7 +41,8 @@
 		"experimental": "Eksperymentalne",
 		"language": "Język",
 		"about": "O Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Reguły"
 	},
 	"about": {
 		"bugReport": {
@@ -62,6 +63,24 @@
 		"debugMode": {
 			"label": "Włącz tryb debugowania",
 			"description": "Włącz tryb debugowania, aby wyświetlić dodatkowe przyciski w nagłówku zadania umożliwiające przeglądanie historii konwersacji API i komunikatów UI jako sformatowany JSON w plikach tymczasowych."
+		},
+		"rooHistoryImport": {
+			"settingLabel": "Importuj historię z Roo Code",
+			"cardTitle": "Historia Roo Code",
+			"cardDescription": "Skopiuj zapisane rozmowy Roo Code do Zoo Code.",
+			"statusImporting": "Importowanie historii",
+			"statusFailed": "Import nie powiódł się",
+			"statusComplete": "Import zakończony",
+			"buttonImporting": "Importowanie z Roo Code...",
+			"buttonIdle": "Importuj historię z Roo Code",
+			"summaryFailedWithFiles": "Skopiowano {{copied}} z {{total}} plików przed zatrzymaniem importu.",
+			"summaryFailedNoFiles": "Import zatrzymał się przed skopiowaniem jakichkolwiek plików.",
+			"summaryCopied": "Skopiowano {{copied}} z {{total}} plików",
+			"detailFailed": "Rozpocznij nową próbę importu, aby spróbować ponownie.",
+			"detailTasksImported_one": "Zaimportowano {{count}} z {{total}} historię zadań.",
+			"detailTasksImported_other": "Zaimportowano {{count}} z {{total}} historii zadań.",
+			"detailPreparing": "Przygotowywanie importu historii Roo Code.",
+			"progressAriaLabel": "Postęp importu historii Roo Code"
 		}
 	},
 	"slashCommands": {
@@ -98,6 +117,52 @@
 			"nameInvalid": "Nazwa może zawierać tylko litery, cyfry, łączniki i podkreślenia"
 		},
 		"footer": "Używaj poleceń slash do szybkiego dostępu do często używanych podpowiedzi i przepływów pracy."
+	},
+	"rules": {
+		"description": "Zarządzaj plikami reguł Zoo Code z globalnych i workspace’owych katalogów .roo/rules. Twórz reguły ogólne lub specyficzne dla trybu bez ręcznego przeglądania folderów konfiguracji.",
+		"workspaceRules": "Reguły workspace",
+		"globalRules": "Reguły globalne",
+		"noWorkspaceRules": "W tym projekcie nie ma jeszcze reguł.",
+		"noGlobalRules": "Nie ma jeszcze reguł globalnych.",
+		"addRule": "Dodaj regułę",
+		"editRule": "Edytuj regułę",
+		"deleteRule": "Usuń regułę",
+		"modeLabel": "Tryb: {{mode}}",
+		"deleteDialog": {
+			"title": "Usuń regułę",
+			"description": "Czy na pewno chcesz usunąć regułę \"{{name}}\"? Tej akcji nie można cofnąć.",
+			"confirm": "Usuń",
+			"cancel": "Anuluj"
+		},
+		"createDialog": {
+			"title": "Utwórz nową regułę",
+			"nameLabel": "Nazwa",
+			"namePlaceholder": "moja-nazwa-reguly",
+			"nameHint": "Tylko małe litery, cyfry, myślniki i podkreślenia. .md jest dodawane automatycznie.",
+			"scopeLabel": "Lokalizacja",
+			"kindLabel": "Typ reguły",
+			"modeLabel": "Tryb",
+			"modePlaceholder": "Wybierz tryb",
+			"create": "Utwórz",
+			"cancel": "Anuluj"
+		},
+		"scope": {
+			"global": "Globalne (dostępne we wszystkich workspace’ach)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "Reguły ogólne",
+			"mode": "Reguły specyficzne dla trybu",
+			"genericBadge": "Ogólne",
+			"modeBadge": "Tryb"
+		},
+		"validation": {
+			"nameRequired": "Nazwa jest wymagana",
+			"nameTooLong": "Nazwa musi mieć 64 znaki lub mniej",
+			"nameInvalid": "Nazwa może zawierać tylko małe litery, cyfry, myślniki i podkreślenia",
+			"modeRequired": "Tryb jest wymagany dla reguł specyficznych dla trybu"
+		},
+		"footer": "Reguły ładują wskazówki specyficzne dla trybu przed ogólnymi. Reguły globalne ładują się przed regułami workspace."
 	},
 	"prompts": {
 		"description": "Skonfiguruj podpowiedzi wsparcia używane do szybkich działań, takich jak ulepszanie podpowiedzi, wyjaśnianie kodu i rozwiązywanie problemów. Te podpowiedzi pomagają Zoo zapewnić lepsze wsparcie dla typowych zadań programistycznych."
@@ -651,6 +716,12 @@
 			"delayAfterWrite": {
 				"label": "Opóźnienie po zapisie, aby umożliwić diagnostyce wykrycie potencjalnych problemów",
 				"description": "Czas oczekiwania po zapisie plików przed kontynuowaniem, aby narzędzia diagnostyczne mogły przetworzyć zmiany i wykryć problemy."
+			}
+		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Próg dopasowania diff",
+				"description": "Niższe progi sprawiają, że edycje plików są bardziej odporne na różnice w formatowaniu i białych znakach. Próg 100% wymaga dokładnego dopasowania."
 			}
 		},
 		"condensingThreshold": {

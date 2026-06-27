@@ -141,12 +141,18 @@
 			"streamProcessingError": "Error processing response stream: {{message}}",
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
-		}
+		},
+		"rooHistoryImport": "Échec de l'importation de l'historique Roo Code : {{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "Aucun contenu de terminal sélectionné",
 		"missing_task_files": "Les fichiers de cette tâche sont introuvables. Souhaitez-vous la supprimer de la liste des tâches ?",
-		"auto_import_failed": "Échec de l'importation automatique des paramètres ZooCode : {{error}}"
+		"auto_import_failed": "Échec de l'importation automatique des paramètres ZooCode : {{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "Aucun historique de tâches Roo Code trouvé à importer depuis {{domain}}.",
+			"alreadyImported_one": "L'historique de {{count}} tâche Roo Code a déjà été importé dans Zoo Code.",
+			"alreadyImported_other": "Les {{count}} historiques de tâches Roo Code ont déjà été importés dans Zoo Code."
+		}
 	},
 	"info": {
 		"no_changes": "Aucun changement trouvé.",
@@ -165,6 +171,10 @@
 		"mode_imported": "Mode importé avec succès",
 		"roo": {
 			"signInUnavailable": "La connexion à Roo Code Cloud n'est pas disponible pour le moment. Configure un autre fournisseur pour continuer."
+		},
+		"rooHistoryImport": {
+			"success_one": "{{count}} historique de tâche Roo Code importé dans Zoo Code.",
+			"success_other": "{{count}} historiques de tâches Roo Code importés dans Zoo Code."
 		}
 	},
 	"answers": {

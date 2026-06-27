@@ -30,11 +30,11 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.62.0
+## Điểm mới trong v3.64.0
 
-- **Hỗ trợ GLM-5.2** — mô hình GLM mới nhất hiện có trong cài đặt nhà cung cấp của bạn
-- **Cải tiến OpenCode-Go** — tham số mô hình gốc, định tuyến định dạng Anthropic và sửa lỗi context-token để phản hồi đáng tin cậy hơn
-- **Chế độ tool-writer** — chế độ chuyên biệt mới để viết và duy trì các định nghĩa công cụ, hiện có trên Marketplace
+- **Giao diện Quản lý Quy tắc** — tab Quy tắc mới trong Cài đặt cho phép bạn tạo, xóa và mở các quy tắc Zoo toàn cục và không gian làm việc trực tiếp từ trình soạn thảo
+- **Xem xét Thay đổi Hoàn thành** — sau khi nhiệm vụ hoàn thành, các nút mới "Xem thay đổi mới" và "Khôi phục thay đổi" cho phép bạn kiểm tra và hoàn tác các thay đổi từ lệnh nhắc cuối cùng
+- **Ngưỡng Diff được nới lỏng** — các ngưỡng tương đồng có thể cấu hình giúp giảm lỗi "chỉnh sửa không thành công" khi áp dụng diff, kèm theo chẩn đoán mới để tinh chỉnh cài đặt
 
 ## Zoo Code có thể làm gì cho BẠN?
 

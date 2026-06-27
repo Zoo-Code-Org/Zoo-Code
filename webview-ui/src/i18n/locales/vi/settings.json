@@ -41,7 +41,8 @@
 		"experimental": "Thử nghiệm",
 		"language": "Ngôn ngữ",
 		"about": "Giới thiệu",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Quy tắc"
 	},
 	"about": {
 		"bugReport": {
@@ -62,6 +63,24 @@
 		"debugMode": {
 			"label": "Bật chế độ debug",
 			"description": "Bật chế độ debug để hiển thị các nút bổ sung trong tiêu đề nhiệm vụ cho phép xem lịch sử hội thoại API và tin nhắn UI dưới dạng JSON được định dạng trong các tệp tạm thời."
+		},
+		"rooHistoryImport": {
+			"settingLabel": "Nhập lịch sử từ Roo Code",
+			"cardTitle": "Lịch sử Roo Code",
+			"cardDescription": "Sao chép các cuộc trò chuyện Roo Code đã lưu vào Zoo Code.",
+			"statusImporting": "Đang nhập lịch sử",
+			"statusFailed": "Nhập thất bại",
+			"statusComplete": "Nhập hoàn tất",
+			"buttonImporting": "Đang nhập từ Roo Code...",
+			"buttonIdle": "Nhập lịch sử từ Roo Code",
+			"summaryFailedWithFiles": "Đã sao chép {{copied}} trong {{total}} tệp trước khi quá trình nhập dừng lại.",
+			"summaryFailedNoFiles": "Quá trình nhập đã dừng trước khi bất kỳ tệp nào được sao chép.",
+			"summaryCopied": "Đã sao chép {{copied}} trong {{total}} tệp",
+			"detailFailed": "Bắt đầu một lần thử nhập mới để thử lại.",
+			"detailTasksImported_one": "Đã nhập {{count}} trong {{total}} lịch sử nhiệm vụ.",
+			"detailTasksImported_other": "Đã nhập {{count}} trong {{total}} lịch sử nhiệm vụ.",
+			"detailPreparing": "Đang chuẩn bị nhập lịch sử Roo Code.",
+			"progressAriaLabel": "Tiến trình nhập lịch sử Roo Code"
 		}
 	},
 	"slashCommands": {
@@ -98,6 +117,52 @@
 			"nameInvalid": "Tên chỉ có thể chứa chữ cái, số, dấu gạch ngang và dấu gạch dưới"
 		},
 		"footer": "Sử dụng lệnh slash để truy cập nhanh các prompt và quy trình công việc được sử dụng thường xuyên."
+	},
+	"rules": {
+		"description": "Quản lý các tệp quy tắc Zoo Code từ thư mục .roo/rules toàn cục và workspace. Tạo quy tắc chung hoặc quy tắc theo mode mà không cần tự duyệt các thư mục cấu hình.",
+		"workspaceRules": "Quy tắc Workspace",
+		"globalRules": "Quy tắc Toàn cục",
+		"noWorkspaceRules": "Chưa có quy tắc nào trong dự án này.",
+		"noGlobalRules": "Chưa có quy tắc toàn cục.",
+		"addRule": "Thêm Quy tắc",
+		"editRule": "Sửa quy tắc",
+		"deleteRule": "Xóa quy tắc",
+		"modeLabel": "Mode: {{mode}}",
+		"deleteDialog": {
+			"title": "Xóa Quy tắc",
+			"description": "Bạn có chắc muốn xóa quy tắc \"{{name}}\" không? Không thể hoàn tác hành động này.",
+			"confirm": "Xóa",
+			"cancel": "Hủy"
+		},
+		"createDialog": {
+			"title": "Tạo Quy tắc Mới",
+			"nameLabel": "Tên",
+			"namePlaceholder": "ten-quy-tac-cua-toi",
+			"nameHint": "Chỉ dùng chữ thường, số, dấu gạch nối và dấu gạch dưới. .md được thêm tự động.",
+			"scopeLabel": "Vị trí",
+			"kindLabel": "Loại quy tắc",
+			"modeLabel": "Mode",
+			"modePlaceholder": "Chọn mode",
+			"create": "Tạo",
+			"cancel": "Hủy"
+		},
+		"scope": {
+			"global": "Toàn cục (có trong mọi workspace)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "Quy tắc chung",
+			"mode": "Quy tắc theo mode",
+			"genericBadge": "Chung",
+			"modeBadge": "Mode"
+		},
+		"validation": {
+			"nameRequired": "Tên là bắt buộc",
+			"nameTooLong": "Tên phải có 64 ký tự trở xuống",
+			"nameInvalid": "Tên chỉ được chứa chữ thường, số, dấu gạch nối và dấu gạch dưới",
+			"modeRequired": "Mode là bắt buộc cho quy tắc theo mode"
+		},
+		"footer": "Quy tắc tải hướng dẫn theo mode trước hướng dẫn chung. Quy tắc toàn cục tải trước quy tắc workspace."
 	},
 	"prompts": {
 		"description": "Cấu hình các lời nhắc hỗ trợ được sử dụng cho các hành động nhanh như cải thiện lời nhắc, giải thích mã và khắc phục sự cố. Những lời nhắc này giúp Zoo cung cấp hỗ trợ tốt hơn cho các tác vụ phát triển phổ biến."
@@ -651,6 +716,12 @@
 			"delayAfterWrite": {
 				"label": "Trì hoãn sau khi ghi để cho phép chẩn đoán phát hiện các sự cố tiềm ẩn",
 				"description": "Thời gian chờ sau khi ghi tệp trước khi tiếp tục, cho phép các công cụ chẩn đoán xử lý các thay đổi và phát hiện sự cố."
+			}
+		},
+		"fileEdits": {
+			"diffFuzzyThreshold": {
+				"label": "Ngưỡng khớp diff",
+				"description": "Ngưỡng thấp hơn làm cho việc chỉnh sửa tệp linh hoạt hơn với các biến thể định dạng và khoảng trắng. Ngưỡng 100% yêu cầu khớp chính xác."
 			}
 		},
 		"condensingThreshold": {

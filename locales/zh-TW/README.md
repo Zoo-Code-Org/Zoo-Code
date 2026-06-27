@@ -30,11 +30,11 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.62.0 新功能
+## v3.64.0 新功能
 
-- **GLM-5.2 支援** — 最新 GLM 模型現已在提供商設定中可用
-- **OpenCode-Go 改進** — 原生模型參數、Anthropic 格式路由和 context-token 修復，提供更可靠的回應
-- **Tool-writer 模式** — 用於編寫和維護工具定義的新專用模式，現已在 Marketplace 中可用
+- **規則管理介面** — 設定中新增的規則標籤頁，可直接在編輯器中建立、刪除和開啟全域及工作區 Zoo 規則
+- **完成變更審查** — 任務完成後，新的「查看新變更」和「還原變更」按鈕讓您檢視並復原最新提示帶來的變更
+- **寬鬆的 Diff 閾值** — 可設定的相似度閾值減少了套用 diff 時的「編輯失敗」錯誤，並提供新的診斷工具協助調整設定
 
 ## Zoo Code 能為您做什麼？
 

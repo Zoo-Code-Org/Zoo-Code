@@ -41,6 +41,10 @@ import {
 	requestyDefaultModelId,
 	openRouterDefaultModelId,
 	DEFAULT_WRITE_DELAY_MS,
+	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -195,7 +199,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "jun-2026-v3.62.0-glm52-opencodego-toolwriter" // v3.62.0 GLM-5.2, OpenCode-Go native model params & routing, tool-writer mode
+	public readonly latestAnnouncementId = "jun-2026-v3.64.0-rules-ui-completion-actions-diff-thresholds" // v3.64.0 Rules Management UI, completion change review actions, relaxed diff thresholds
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -1076,8 +1080,15 @@ export class ClineProvider
 			)
 		}
 
-		const { apiConfiguration, enableCheckpoints, checkpointTimeout, experiments, cloudUserInfo, taskSyncEnabled } =
-			await this.getState()
+		const {
+			apiConfiguration,
+			enableCheckpoints,
+			checkpointTimeout,
+			experiments,
+			cloudUserInfo,
+			taskSyncEnabled,
+			diffFuzzyThreshold,
+		} = await this.getState()
 
 		const task = new Task({
 			provider: this,
@@ -1096,6 +1107,7 @@ export class ClineProvider
 			// Preserve the status from the history item to avoid overwriting it when the task saves messages
 			initialStatus: historyItem.status,
 			rateLimitClock: this.rateLimitClock,
+			diffFuzzyThreshold,
 		})
 
 		if (isRehydratingCurrentTask) {
@@ -2222,6 +2234,7 @@ export class ClineProvider
 			taskHistory,
 			soundVolume,
 			writeDelayMs,
+			diffFuzzyThreshold,
 			terminalShellIntegrationTimeout,
 			terminalShellIntegrationDisabled,
 			terminalCommandDelay,
@@ -2278,6 +2291,9 @@ export class ClineProvider
 			openRouterImageApiKey,
 			openRouterImageGenerationSelectedModel,
 			lockApiConfigAcrossModes,
+			autoCloseZooOpenedFiles,
+			autoCloseZooOpenedFilesAfterUserEdited,
+			autoCloseZooOpenedNewFiles,
 		} = await this.getState()
 
 		let cloudOrganizations: CloudOrganizationMembership[] = []
@@ -2376,6 +2392,7 @@ export class ClineProvider
 			deniedCommands: mergedDeniedCommands,
 			soundVolume: soundVolume ?? 0.5,
 			writeDelayMs: writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
+			diffFuzzyThreshold: diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
 			terminalShellIntegrationTimeout: terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
 			terminalShellIntegrationDisabled: terminalShellIntegrationDisabled ?? true,
 			terminalCommandDelay: terminalCommandDelay ?? 0,
@@ -2457,6 +2474,10 @@ export class ClineProvider
 			imageGenerationProvider,
 			openRouterImageApiKey,
 			openRouterImageGenerationSelectedModel,
+			autoCloseZooOpenedFiles: autoCloseZooOpenedFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
+			autoCloseZooOpenedFilesAfterUserEdited:
+				autoCloseZooOpenedFilesAfterUserEdited ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
+			autoCloseZooOpenedNewFiles: autoCloseZooOpenedNewFiles ?? DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 			openAiCodexIsAuthenticated: await (async () => {
 				try {
 					const { openAiCodexOAuthManager } = await import("../../integrations/openai-codex/oauth")
@@ -2582,6 +2603,7 @@ export class ClineProvider
 			checkpointTimeout: stateValues.checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 			soundVolume: stateValues.soundVolume,
 			writeDelayMs: stateValues.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
+			diffFuzzyThreshold: stateValues.diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
 			terminalShellIntegrationTimeout:
 				stateValues.terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
 			terminalShellIntegrationDisabled: stateValues.terminalShellIntegrationDisabled ?? true,
@@ -2657,6 +2679,9 @@ export class ClineProvider
 			imageGenerationProvider: stateValues.imageGenerationProvider,
 			openRouterImageApiKey: stateValues.openRouterImageApiKey,
 			openRouterImageGenerationSelectedModel: stateValues.openRouterImageGenerationSelectedModel,
+			autoCloseZooOpenedFiles: stateValues.autoCloseZooOpenedFiles,
+			autoCloseZooOpenedFilesAfterUserEdited: stateValues.autoCloseZooOpenedFilesAfterUserEdited,
+			autoCloseZooOpenedNewFiles: stateValues.autoCloseZooOpenedNewFiles,
 		}
 	}
 
@@ -3033,8 +3058,14 @@ export class ClineProvider
 			}
 		}
 
-		const { apiConfiguration, organizationAllowList, enableCheckpoints, checkpointTimeout, experiments } =
-			await this.getState()
+		const {
+			apiConfiguration,
+			enableCheckpoints,
+			checkpointTimeout,
+			experiments,
+			organizationAllowList,
+			diffFuzzyThreshold,
+		} = await this.getState()
 
 		// Single-open-task invariant: always enforce for user-initiated top-level tasks
 		if (!parentTask) {
@@ -3066,6 +3097,7 @@ export class ClineProvider
 			// Ensure this task is present in clineStack before startTask() emits
 			// its initial state update, so state.currentTaskId is available ASAP.
 			startTask: false,
+			diffFuzzyThreshold,
 			...options,
 			rateLimitClock: this.rateLimitClock,
 		})
@@ -3482,17 +3514,28 @@ export class ClineProvider
 		})
 
 		// 5) Persist parent delegation metadata BEFORE the child starts writing.
+		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a
+		//    single lock acquisition — no concurrent writer can slip between the read and
+		//    write, and the pure updater cannot re-enter the lock (no deadlock).
+		//    Broadcast and cache invalidation happen outside the lock after it releases.
 		try {
-			const { historyItem } = await this.getTaskWithId(parentTaskId)
-			const childIds = Array.from(new Set([...(historyItem.childIds ?? []), child.taskId]))
-			const updatedHistory: typeof historyItem = {
-				...historyItem,
-				status: "delegated",
-				delegatedToId: child.taskId,
-				awaitingChildId: child.taskId,
-				childIds,
+			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
+				const childIds = Array.from(new Set([...(historyItem.childIds ?? []), child.taskId]))
+				return {
+					...historyItem,
+					status: "delegated",
+					delegatedToId: child.taskId,
+					awaitingChildId: child.taskId,
+					childIds,
+				}
+			})
+			this.recentTasksCache = undefined
+			if (this.isViewLaunched) {
+				const updatedItem = this.taskHistoryStore.get(parentTaskId)
+				if (updatedItem) {
+					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedItem })
+				}
 			}
-			await this.updateTaskHistory(updatedHistory)
 		} catch (err) {
 			this.log(
 				`[delegateParentAndOpenChild] Failed to persist parent metadata for ${parentTaskId} -> ${child.taskId}: ${

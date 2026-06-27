@@ -145,12 +145,18 @@
 		"manual_url_missing_params": "URL de callback no vàlida: falten paràmetres requerits (code i state)",
 		"manual_url_auth_failed": "Autenticació manual per URL ha fallat",
 		"manual_url_auth_error": "Autenticació fallida",
-		"mode_import_failed": "Ha fallat la importació del mode: {{error}}"
+		"mode_import_failed": "Ha fallat la importació del mode: {{error}}",
+		"rooHistoryImport": "No s'ha pogut importar l'historial de Roo Code: {{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "No s'ha seleccionat contingut de terminal",
 		"missing_task_files": "Els fitxers d'aquesta tasca falten. Vols eliminar-la de la llista de tasques?",
-		"auto_import_failed": "Ha fallat la importació automàtica de la configuració de ZooCode: {{error}}"
+		"auto_import_failed": "Ha fallat la importació automàtica de la configuració de ZooCode: {{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "No s'ha trobat historial de tasques de Roo Code per importar de {{domain}}.",
+			"alreadyImported_one": "Tot l'historial de tasca de Roo Code ({{count}}) ja s'ha importat a Zoo Code.",
+			"alreadyImported_other": "Tots els {{count}} historials de tasques de Roo Code ja s'han importat a Zoo Code."
+		}
 	},
 	"info": {
 		"no_changes": "No s'han trobat canvis.",
@@ -169,6 +175,10 @@
 		"mode_imported": "Mode importat correctament",
 		"roo": {
 			"signInUnavailable": "L'inici de sessió de Roo Code Cloud no està disponible en aquest moment. Configura un altre proveïdor per continuar."
+		},
+		"rooHistoryImport": {
+			"success_one": "S'ha importat {{count}} historial de tasca de Roo Code a Zoo Code.",
+			"success_other": "S'han importat {{count}} historials de tasques de Roo Code a Zoo Code."
 		}
 	},
 	"answers": {

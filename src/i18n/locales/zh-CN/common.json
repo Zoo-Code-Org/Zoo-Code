@@ -146,12 +146,18 @@
 			"streamProcessingError": "Error processing response stream: {{message}}",
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
-		}
+		},
+		"rooHistoryImport": "导入 Roo Code 历史记录失败：{{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "没有选择终端内容",
 		"missing_task_files": "此任务的文件丢失。您想从任务列表中删除它吗？",
-		"auto_import_failed": "自动导入 ZooCode 设置失败：{{error}}"
+		"auto_import_failed": "自动导入 ZooCode 设置失败：{{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "未找到可从 {{domain}} 导入的 Roo Code 任务历史记录。",
+			"alreadyImported_one": "全部 {{count}} 条 Roo Code 任务历史记录已导入 Zoo Code。",
+			"alreadyImported_other": "全部 {{count}} 条 Roo Code 任务历史记录已导入 Zoo Code。"
+		}
 	},
 	"info": {
 		"no_changes": "未找到更改。",
@@ -170,6 +176,10 @@
 		"mode_imported": "模式已成功导入",
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud 登录当前不可用。请配置其他提供商以继续。"
+		},
+		"rooHistoryImport": {
+			"success_one": "已将 {{count}} 条 Roo Code 任务历史记录导入 Zoo Code。",
+			"success_other": "已将 {{count}} 条 Roo Code 任务历史记录导入 Zoo Code。"
 		}
 	},
 	"answers": {

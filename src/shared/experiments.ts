@@ -5,6 +5,7 @@ export const EXPERIMENT_IDS = {
 	IMAGE_GENERATION: "imageGeneration",
 	RUN_SLASH_COMMAND: "runSlashCommand",
 	CUSTOM_TOOLS: "customTools",
+	PARALLEL_TOOL_EXECUTION: "parallelToolExecution",
 } as const satisfies Record<string, ExperimentId>
 
 type _AssertExperimentIds = AssertEqual<Equals<ExperimentId, Values<typeof EXPERIMENT_IDS>>>
@@ -13,6 +14,8 @@ type ExperimentKey = Keys<typeof EXPERIMENT_IDS>
 
 interface ExperimentConfig {
 	enabled: boolean
+	/** Defaults to true; set to false to hide from the Settings panel. */
+	showInSettings?: boolean
 }
 
 export const experimentConfigsMap: Record<ExperimentKey, ExperimentConfig> = {
@@ -20,6 +23,8 @@ export const experimentConfigsMap: Record<ExperimentKey, ExperimentConfig> = {
 	IMAGE_GENERATION: { enabled: false },
 	RUN_SLASH_COMMAND: { enabled: false },
 	CUSTOM_TOOLS: { enabled: false },
+	// TODO: add i18n keys (settings:experimental.PARALLEL_TOOL_EXECUTION.name/.description) in the same PR that sets showInSettings: true
+	PARALLEL_TOOL_EXECUTION: { enabled: false, showInSettings: false },
 }
 
 export const experimentDefault = Object.fromEntries(

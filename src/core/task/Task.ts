@@ -160,6 +160,7 @@ export interface TaskOptions extends CreateTaskOptions {
 	/** Initial status for the task's history item (e.g., "active" for child tasks) */
 	initialStatus?: "active" | "delegated" | "completed"
 	rateLimitClock?: RateLimitClock
+	diffFuzzyThreshold?: number
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -432,6 +433,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		workspacePath,
 		initialStatus,
 		rateLimitClock,
+		diffFuzzyThreshold,
 	}: TaskOptions) {
 		super()
 
@@ -529,7 +531,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.setupProviderProfileChangeListener(provider)
 
 		// Set up diff strategy
-		this.diffStrategy = new MultiSearchReplaceDiffStrategy()
+		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
 
 		this.toolRepetitionDetector = new ToolRepetitionDetector(this.consecutiveMistakeLimit)
 
@@ -1555,6 +1557,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
+			...(this.currentRequestAbortController?.signal
+				? {
+						abortSignal: this.currentRequestAbortController.signal,
+					}
+				: {}),
 			...(allTools.length > 0
 				? {
 						tools: allTools,
@@ -2683,7 +2690,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								} else {
 									signal.addEventListener("abort", () => {
 										reject(new Error("Request cancelled by user"))
-									})
+									}, { once: true })
 								}
 							})
 							return await Promise.race([nextPromise, abortPromise])
@@ -3763,6 +3770,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
+			...(this.currentRequestAbortController?.signal
+				? {
+						abortSignal: this.currentRequestAbortController.signal,
+					}
+				: {}),
 			...(allTools.length > 0
 				? {
 						tools: allTools,
@@ -3979,6 +3991,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
 				mode,
 				taskId: this.taskId,
+				...(this.currentRequestAbortController?.signal
+					? {
+							abortSignal: this.currentRequestAbortController.signal,
+						}
+					: {}),
 				...(contextMgmtTools.length > 0
 					? {
 							tools: contextMgmtTools,
@@ -4141,10 +4158,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const shouldIncludeTools = allTools.length > 0
 
+		// Create an AbortController to allow cancelling the request mid-stream
+		this.currentRequestAbortController = new AbortController()
+		const abortSignal = this.currentRequestAbortController.signal
+
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode: mode,
 			taskId: this.taskId,
 			suppressPreviousResponseId: this.skipPrevResponseIdOnce,
+			abortSignal,
 			// Include tools whenever they are present.
 			...(shouldIncludeTools
 				? {
@@ -4157,10 +4179,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 				: {}),
 		}
-
-		// Create an AbortController to allow cancelling the request mid-stream
-		this.currentRequestAbortController = new AbortController()
-		const abortSignal = this.currentRequestAbortController.signal
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 
@@ -4176,7 +4194,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		abortSignal.addEventListener("abort", () => {
 			console.log(`[Task#${this.taskId}.${this.instanceId}] AbortSignal triggered for current request`)
 			this.currentRequestAbortController = undefined
-		})
+		}, { once: true })
 
 		try {
 			// Awaiting first chunk to see if it will throw an error.
@@ -4190,7 +4208,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				} else {
 					abortSignal.addEventListener("abort", () => {
 						reject(new Error("Request cancelled by user"))
-					})
+					}, { once: true })
 				}
 			})
 
@@ -4199,8 +4217,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.isWaitingForFirstChunk = false
 		} catch (error) {
 			this.isWaitingForFirstChunk = false
-			this.currentRequestAbortController = undefined
 			const isContextWindowExceededError = checkContextWindowExceededError(error)
+
+			if (!isContextWindowExceededError) {
+				this.currentRequestAbortController = undefined
+			}
 
 			// If it's a context window error and we haven't exceeded max retries for this error type
 			if (isContextWindowExceededError && retryAttempt < MAX_CONTEXT_WINDOW_RETRIES) {

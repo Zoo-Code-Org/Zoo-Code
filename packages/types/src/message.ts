@@ -150,6 +150,7 @@ export const clineSays = [
 	"api_req_rate_limit_wait",
 	"api_req_deleted",
 	"text",
+	"task",
 	"image",
 	"reasoning",
 	"completion_result",
@@ -274,6 +275,76 @@ export const clineMessageSchema = z.object({
 })
 
 export type ClineMessage = z.infer<typeof clineMessageSchema>
+
+export interface CompletionCheckpoint {
+	ts: number
+	commitHash: string
+}
+
+const isInitialTaskMessage = (message: ClineMessage | undefined): boolean => {
+	return message?.type === "say" && (message.say === "text" || message.say === "task")
+}
+
+const isUserFeedbackMessage = (message: ClineMessage): boolean => {
+	return message.type === "say" && message.say === "user_feedback"
+}
+
+const isCompletionMessage = (message: ClineMessage): boolean => {
+	return (
+		(message.type === "ask" && message.ask === "completion_result") ||
+		(message.type === "say" && message.say === "completion_result")
+	)
+}
+
+const isCheckpointMessage = (message: ClineMessage): boolean => {
+	return message.type === "say" && message.say === "checkpoint_saved" && typeof message.text === "string"
+}
+
+function findLastIndexBefore(
+	messages: ClineMessage[],
+	beforeIndex: number,
+	predicate: (message: ClineMessage) => boolean,
+): number {
+	for (let i = beforeIndex - 1; i >= 0; i--) {
+		const message = messages[i]
+
+		if (message && predicate(message)) {
+			return i
+		}
+	}
+
+	return -1
+}
+
+/**
+ * Finds the checkpoint that should anchor completion-result actions.
+ *
+ * The baseline is the first checkpoint created after the latest user prompt in
+ * the turn that produced the completion. Restoring to that checkpoint reverts
+ * changes made for the latest prompt, and diffing from it shows the same scoped
+ * changes.
+ */
+export function getCompletionCheckpoint(messages: ClineMessage[]): CompletionCheckpoint | undefined {
+	const completionIndex = findLastIndexBefore(messages, messages.length, isCompletionMessage)
+	const searchEnd = completionIndex === -1 ? messages.length : completionIndex
+	const latestUserFeedbackIndex = findLastIndexBefore(messages, searchEnd, isUserFeedbackMessage)
+	const latestUserPromptIndex =
+		latestUserFeedbackIndex !== -1 ? latestUserFeedbackIndex : isInitialTaskMessage(messages[0]) ? 0 : -1
+
+	if (latestUserPromptIndex === -1) {
+		return undefined
+	}
+
+	for (let i = latestUserPromptIndex + 1; i < searchEnd; i++) {
+		const message = messages[i]
+
+		if (message && isCheckpointMessage(message)) {
+			return { ts: message.ts, commitHash: message.text! }
+		}
+	}
+
+	return undefined
+}
 
 /**
  * TokenUsage

@@ -21,6 +21,7 @@ describe("experiments", () => {
 				imageGeneration: false,
 				runSlashCommand: false,
 				customTools: false,
+				parallelToolExecution: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(false)
 		})
@@ -31,6 +32,7 @@ describe("experiments", () => {
 				imageGeneration: false,
 				runSlashCommand: false,
 				customTools: false,
+				parallelToolExecution: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(true)
 		})
@@ -41,8 +43,27 @@ describe("experiments", () => {
 				imageGeneration: false,
 				runSlashCommand: false,
 				customTools: false,
+				parallelToolExecution: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(false)
+		})
+	})
+
+	describe("PARALLEL_TOOL_EXECUTION", () => {
+		it("is configured correctly", () => {
+			expect(EXPERIMENT_IDS.PARALLEL_TOOL_EXECUTION).toBe("parallelToolExecution")
+			expect(experimentConfigsMap.PARALLEL_TOOL_EXECUTION).toMatchObject({
+				enabled: false,
+				showInSettings: false,
+			})
+		})
+
+		it("returns false by default", () => {
+			expect(Experiments.isEnabled({}, "parallelToolExecution")).toBe(false)
+		})
+
+		it("returns true when enabled", () => {
+			expect(Experiments.isEnabled({ parallelToolExecution: true }, "parallelToolExecution")).toBe(true)
 		})
 	})
 })

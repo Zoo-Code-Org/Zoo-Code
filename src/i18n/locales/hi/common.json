@@ -141,12 +141,18 @@
 			"streamProcessingError": "Error processing response stream: {{message}}",
 			"unexpectedStreamError": "Unexpected error processing response stream",
 			"completionError": "OpenAI Codex completion error: {{message}}"
-		}
+		},
+		"rooHistoryImport": "Roo Code इतिहास आयात करने में विफल: {{error}}"
 	},
 	"warnings": {
 		"no_terminal_content": "कोई टर्मिनल सामग्री चयनित नहीं",
 		"missing_task_files": "इस टास्क की फाइलें गायब हैं। क्या आप इसे टास्क सूची से हटाना चाहते हैं?",
-		"auto_import_failed": "ZooCode सेटिंग्स का स्वचालित आयात विफल: {{error}}"
+		"auto_import_failed": "ZooCode सेटिंग्स का स्वचालित आयात विफल: {{error}}",
+		"rooHistoryImport": {
+			"nothingFound": "{{domain}} से आयात करने के लिए कोई Roo Code कार्य इतिहास नहीं मिला।",
+			"alreadyImported_one": "सभी {{count}} Roo Code कार्य इतिहास पहले से ही Zoo Code में आयात किया जा चुका है।",
+			"alreadyImported_other": "सभी {{count}} Roo Code कार्य इतिहास पहले से ही Zoo Code में आयात किए जा चुके हैं।"
+		}
 	},
 	"info": {
 		"no_changes": "कोई परिवर्तन नहीं मिला।",
@@ -165,6 +171,10 @@
 		"mode_imported": "मोड सफलतापूर्वक आयात किया गया",
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud साइन-इन अभी उपलब्ध नहीं है। जारी रखने के लिए कोई दूसरा प्रदाता कॉन्फ़िगर करें।"
+		},
+		"rooHistoryImport": {
+			"success_one": "{{count}} Roo Code कार्य इतिहास Zoo Code में आयात किया।",
+			"success_other": "{{count}} Roo Code कार्य इतिहास Zoo Code में आयात किए।"
 		}
 	},
 	"answers": {

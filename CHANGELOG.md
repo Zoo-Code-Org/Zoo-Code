@@ -1,5 +1,28 @@
 # Zoo Code Changelog
 
+## [3.64.0]
+
+### Minor Changes
+
+- Add Rules Management UI — new Rules tab in Settings to create, delete, and open global and workspace Zoo rules (#660 by @ivanarifin, PR #657 by @ivanarifin)
+- Add completion change review actions — "See New Changes" and "Restore Changes" buttons after task completion let you inspect and undo changes from the latest prompt (#661 by @ivanarifin, PR #633 by @ivanarifin)
+- Add kimi-k2p7-code model on Fireworks provider (PR #599 by @p12tic)
+- feat: add abort signal core plumbing — threads AbortSignal through the API metadata layer for future provider-level cancellation (#434 by @easonLiangWorldedtech, PR #674 by @easonLiangWorldedtech)
+- feat: add TaskSemaphore utility for parallel task coordination (#362 by @edelauna, PR #675 by @edelauna)
+- feat(experiments): register PARALLEL_TOOL_EXECUTION feature flag (internal-only) (#363 by @edelauna, PR #678 by @edelauna)
+- Add Roo Code history import to the About page (PR #141 by @roomote)
+- Fix: configurable relaxed diff thresholds and diagnostics reduce "edit unsuccessful" errors (#452 by @DannyVarodBlueVine, PR #470 by @nigeldelviero)
+- Fix: auto-closing edited files is now opt-in — the setting defaults to off (#719 by @edelauna, PR #720 by @edelauna)
+- Fix(diff-view): make auto-closing edited files opt-in, fixing setting that could not be unchecked (#667 by @navedmerchant, PR #668 by @navedmerchant)
+- Fix(delegation): serialize delegateParentAndOpenChild with atomicReadAndUpdate to prevent race conditions (#364 by @edelauna, #365 by @edelauna, PR #691 by @edelauna)
+- Fix(ask_followup_question): report non-array follow_up suggestions as a type error (#511 by @nh2, PR #662 by @nh2)
+- Fix: parse Gemma 4 `<thought>` reasoning tags alongside `<think>` (#323 by @sagidM, PR #324 by @sagidM)
+- docs(prompt): enhance apply_diff tool instructions to improve Gemini model success rate (#611 by @awschmeder, PR #619 by @awschmeder)
+- chore(deps): update undici to v6.27.0 [security] (PR #659 by @renovate)
+- chore(deps): update @types/node, @vscode/test-cli, execa, axios (PR #669, #670, #671, #673 by @renovate)
+- test(mcp): fix McpHub Windows command wrapping test ordering (PR #632 by @HappyLiang12)
+- fix(McpHub): resolve flaky McpHub.spec.ts tests after Vitest 4 upgrade (PR #666 by @edelauna)
+
 ## [3.62.0]
 
 ### Minor Changes

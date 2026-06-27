@@ -30,11 +30,11 @@
 
 Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku migracji Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chcemy jak najlepiej pomagać użytkownikom w czasie przejścia i właśnie do tego służą nasze [Reddit](https://www.reddit.com/r/ZooCode) oraz [Discord](https://discord.gg/VxfP4Vx3gX). Jeśli masz problem albo pytanie, wpadaj i pytaj.
 
-## Nowości w v3.62.0
+## Nowości w v3.64.0
 
-- **Obsługa GLM-5.2** — najnowszy model GLM jest teraz dostępny w ustawieniach dostawcy
-- **Ulepszenia OpenCode-Go** — natywne parametry modelu, routing w formacie Anthropic i poprawka context-token dla bardziej niezawodnych odpowiedzi
-- **Tryb tool-writer** — nowy specjalistyczny tryb do pisania i utrzymania definicji narzędzi, teraz dostępny w Marketplace
+- **Interfejs zarządzania regułami** — nowa karta Reguły w Ustawieniach umożliwia tworzenie, usuwanie i otwieranie globalnych i obszaru roboczego reguł Zoo bezpośrednio z edytora
+- **Przegląd zmian ukończenia** — po zakończeniu zadania nowe przyciski "Zobacz nowe zmiany" i "Przywróć zmiany" pozwalają sprawdzić i cofnąć zmiany z ostatniego polecenia
+- **Złagodzone progi diff** — konfigurowalne progi podobieństwa zmniejszają błędy "edycja nieudana" podczas stosowania diffów, z nowymi diagnostykami pomagającymi dostroić ustawienia
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 

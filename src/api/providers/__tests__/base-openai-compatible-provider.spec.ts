@@ -97,6 +97,75 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			])
 		})
 
+		it("should handle reasoning tags (<thought>) from stream", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<thought>Deep thought" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " here</thought>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "Result: 42" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}
+			})
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "Deep thought" },
+				{ type: "reasoning", text: " here" },
+				{ type: "text", text: "Result: 42" },
+			])
+		})
+
+		it("should not close <think> tag with </thought> tag", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				return {
+					[Symbol.asyncIterator]: () => ({
+						next: vi
+							.fn()
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: "<think>Thinking" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " but closing with wrong tag</thought>" } }] },
+							})
+							.mockResolvedValueOnce({
+								done: false,
+								value: { choices: [{ delta: { content: " still thinking" } }] },
+							})
+							.mockResolvedValueOnce({ done: true }),
+					}),
+				}
+			})
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+			// The </thought> tag should be treated as text since it doesn't match the active <think> tag
+			expect(chunks).toEqual([
+				{ type: "reasoning", text: "Thinking" },
+				{ type: "reasoning", text: " but closing with wrong tag</thought>" },
+				{ type: "reasoning", text: " still thinking" },
+			])
+		})
+
 		it("should handle complete <think> tag in a single chunk", async () => {
 			mockCreate.mockImplementationOnce(() => {
 				return {
@@ -153,13 +222,8 @@ describe("BaseOpenAiCompatibleProvider", () => {
 				chunks.push(chunk)
 			}
 
-			// TagMatcher should handle incomplete tags and flush remaining content
-			expect(chunks.length).toBeGreaterThan(0)
-			expect(
-				chunks.some(
-					(c) => (c.type === "text" || c.type === "reasoning") && c.text.includes("Incomplete thought"),
-				),
-			).toBe(true)
+			// TagMatcher should flush incomplete reasoning content on stream end
+			expect(chunks).toContainEqual({ type: "reasoning", text: "Incomplete thought" })
 		})
 
 		it("should handle text without any <think> tags", async () => {

@@ -32,6 +32,14 @@
 		"title": "開始新工作",
 		"tooltip": "開始一項新工作"
 	},
+	"seeNewChanges": {
+		"title": "查看新變更",
+		"tooltip": "查看自上次 prompt 以來所做的變更"
+	},
+	"restoreChanges": {
+		"title": "還原變更",
+		"tooltip": "將檔案和工作狀態還原到上次 prompt"
+	},
 	"proceedAnyways": {
 		"title": "仍要繼續",
 		"tooltip": "在命令執行時繼續"
@@ -355,9 +363,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "GLM-5.2 支援 — 最新 GLM 模型現已在提供商設定中可用。",
-			"highlight2": "OpenCode-Go 改進 — 原生模型參數、Anthropic 格式路由和 context-token 修復，提供更可靠的回應。",
-			"highlight3": "Tool-writer 模式 — 用於編寫和維護工具定義的新專用模式，現已在 Marketplace 中可用。"
+			"highlight1": "規則管理介面 — 設定中新增的規則標籤頁，可直接在編輯器中建立、刪除和開啟全域及工作區 Zoo 規則。",
+			"highlight2": "完成變更審查 — 任務完成後，新的「查看新變更」和「還原變更」按鈕讓您檢視並復原最新提示帶來的變更。",
+			"highlight3": "寬鬆的 Diff 閾值 — 可設定的相似度閾值減少了套用 diff 時的「編輯失敗」錯誤，並提供新的診斷工具協助調整設定。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",
