@@ -9,6 +9,13 @@ test("detects clipped direct text containers", async ({ mount }) => {
 	expect(failures).toContain("Clipped direct text clips horizontally")
 })
 
+test("detects plain text clipped by an ancestor", async ({ mount }) => {
+	const component = mountedStory(await mount("layout-ancestor-clipped-text"))
+	const failures = await component.evaluate(collectBoundedLayoutFailures)
+
+	expect(failures).toContain("Ancestor clipped text is clipped horizontally by an ancestor")
+})
+
 test("ignores screen-reader-only content", async ({ mount }) => {
 	const component = mountedStory(await mount("layout-screen-reader-only"))
 	const failures = await component.evaluate(collectBoundedLayoutFailures)
