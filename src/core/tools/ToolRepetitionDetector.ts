@@ -3,36 +3,69 @@ import { ToolUse } from "../../shared/tools"
 import { t } from "../../i18n"
 
 /**
+ * Result of a repetition check.
+ *
+ * - `allow`: the tool may be executed normally.
+ * - `soft_block`: the tool is NOT executed; an error message is returned to the
+ *   model asking it to justify repeating the call. The user is NOT involved.
+ *   The internal counter keeps incrementing so continued repetition eventually
+ *   escalates to a `hard_block`.
+ * - `hard_block`: execution is stopped and the user is asked for guidance.
+ */
+export type RepetitionCheckResult =
+	| { action: "allow" }
+	| { action: "soft_block"; message: string }
+	| {
+			action: "hard_block"
+			askUser: {
+				messageKey: string
+				messageDetail: string
+			}
+	  }
+
+/**
  * Class for detecting consecutive identical tool calls
  * to prevent the AI from getting stuck in a loop.
+ *
+ * Uses a two-tier system:
+ * 1. Soft warning: after `softWarningLimit` identical consecutive calls, the
+ *    tool is blocked and the model is asked to justify the repeat (no user
+ *    involvement).
+ * 2. Hard stop: after `hardStopLimit` identical consecutive calls, execution
+ *    stops and the user is asked for guidance. This limit is supplied by the
+ *    caller from `consecutiveMistakeLimit`, so the existing consecutive mistake
+ *    limit also governs repeated identical tool calls.
  */
 export class ToolRepetitionDetector {
 	private previousToolCallJson: string | null = null
 	private consecutiveIdenticalToolCallCount: number = 0
-	private readonly consecutiveIdenticalToolCallLimit: number
+	private softWarningLimit: number
+	private hardStopLimit: number
 
 	/**
-	 * Creates a new ToolRepetitionDetector
-	 * @param limit The maximum number of identical consecutive tool calls allowed
+	 * Creates a new ToolRepetitionDetector.
+	 *
+	 * @param softLimit The number of identical consecutive tool calls allowed
+	 *   before soft-blocking (asking the model to justify). 0 disables soft
+	 *   blocking.
+	 * @param hardLimit The hard stop limit, supplied by the caller from
+	 *   `consecutiveMistakeLimit`. The number of identical consecutive tool calls
+	 *   allowed before hard-stopping (asking the user). 0 disables hard stopping.
 	 */
-	constructor(limit: number = 3) {
-		this.consecutiveIdenticalToolCallLimit = limit
+	constructor(softLimit: number = 2, hardLimit: number = 5) {
+		this.hardStopLimit = Math.max(0, hardLimit)
+		this.softWarningLimit = this.normalizeSoftLimit(softLimit)
 	}
 
 	/**
 	 * Checks if the current tool call is identical to the previous one
-	 * and determines if execution should be allowed
+	 * and determines if execution should be allowed, soft-blocked, or
+	 * hard-blocked.
 	 *
 	 * @param currentToolCallBlock ToolUse object representing the current tool call
-	 * @returns Object indicating if execution is allowed and a message to show if not
+	 * @returns A RepetitionCheckResult describing how the caller should proceed.
 	 */
-	public check(currentToolCallBlock: ToolUse): {
-		allowExecution: boolean
-		askUser?: {
-			messageKey: string
-			messageDetail: string
-		}
-	} {
+	public check(currentToolCallBlock: ToolUse): RepetitionCheckResult {
 		// Serialize the block to a canonical JSON string for comparison
 		const currentToolCallJson = this.serializeToolUse(currentToolCallBlock)
 
@@ -44,18 +77,14 @@ export class ToolRepetitionDetector {
 			this.previousToolCallJson = currentToolCallJson
 		}
 
-		// Check if limit is reached (0 means unlimited)
-		if (
-			this.consecutiveIdenticalToolCallLimit > 0 &&
-			this.consecutiveIdenticalToolCallCount >= this.consecutiveIdenticalToolCallLimit
-		) {
+		// Hard stop check (0 means unlimited / disabled).
+		// Checked first so it always takes precedence over the soft warning.
+		if (this.hardStopLimit > 0 && this.consecutiveIdenticalToolCallCount >= this.hardStopLimit) {
 			// Reset counters to allow recovery if user guides the AI past this point
-			this.consecutiveIdenticalToolCallCount = 0
-			this.previousToolCallJson = null
+			this.reset()
 
-			// Return result indicating execution should not be allowed
 			return {
-				allowExecution: false,
+				action: "hard_block",
 				askUser: {
 					messageKey: "mistake_limit_reached",
 					messageDetail: t("tools:toolRepetitionLimitReached", { toolName: currentToolCallBlock.name }),
@@ -63,8 +92,72 @@ export class ToolRepetitionDetector {
 			}
 		}
 
+		// Soft warning check (0 means unlimited / disabled).
+		// Do NOT reset the counter here so continued repetition escalates to a
+		// hard stop.
+		if (this.softWarningLimit > 0 && this.consecutiveIdenticalToolCallCount >= this.softWarningLimit) {
+			return {
+				action: "soft_block",
+				message: t("tools:toolRepetitionSoftBlock", { toolName: currentToolCallBlock.name }),
+			}
+		}
+
 		// Execution is allowed
-		return { allowExecution: true }
+		return { action: "allow" }
+	}
+
+	/**
+	 * Updates the soft and hard limits in place while preserving the current
+	 * repetition tracking state.
+	 *
+	 * This is used when the active provider profile changes during a task, so
+	 * the detector immediately enforces the newly configured limits without
+	 * discarding an in-progress repetition streak.
+	 *
+	 * @param softLimit The new soft warning limit. Negative values are treated
+	 *   as 0 (disabled).
+	 * @param hardLimit The new hard stop limit. Negative values are treated as 0
+	 *   (disabled).
+	 */
+	public updateLimits(softLimit: number, hardLimit: number): void {
+		this.hardStopLimit = Math.max(0, hardLimit)
+		this.softWarningLimit = this.normalizeSoftLimit(softLimit)
+	}
+
+	/**
+	 * Normalizes the soft warning limit so that, when the hard stop limit is
+	 * enabled, the soft warning always triggers before the hard stop.
+	 *
+	 * The hard stop check runs before the soft warning check, so a soft limit
+	 * greater than or equal to the hard limit would never take effect. Imported
+	 * or migrated provider profiles may configure such a combination, so we clamp
+	 * the soft limit to at most one below the hard limit here.
+	 *
+	 * `this.hardStopLimit` must be set before this is called.
+	 *
+	 * @param softLimit The requested soft warning limit. Negative values are
+	 *   treated as 0 (disabled).
+	 * @returns The normalized soft warning limit.
+	 */
+	private normalizeSoftLimit(softLimit: number): number {
+		// Treat negative values as 0 (unlimited / disabled).
+		const soft = Math.max(0, softLimit)
+
+		// When the hard stop is disabled (0), leave the soft limit untouched.
+		if (this.hardStopLimit <= 0) {
+			return soft
+		}
+
+		// Ensure the soft warning fires before the hard stop.
+		return Math.max(0, Math.min(soft, this.hardStopLimit - 1))
+	}
+
+	/**
+	 * Resets the internal repetition tracking state.
+	 */
+	private reset(): void {
+		this.consecutiveIdenticalToolCallCount = 0
+		this.previousToolCallJson = null
 	}
 
 	/**

@@ -15,6 +15,7 @@ import {
 	OpenAiModelsMessageType,
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
+	DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
 } from "@roo-code/types"
 
 import {
@@ -98,6 +99,8 @@ import { TodoListSettingsControl } from "./TodoListSettingsControl"
 import { TemperatureControl } from "./TemperatureControl"
 import { RateLimitSecondsControl } from "./RateLimitSecondsControl"
 import { ConsecutiveMistakeLimitControl } from "./ConsecutiveMistakeLimitControl"
+import { ToolRepetitionLimitControl } from "./ToolRepetitionLimitControl"
+import { clampToolRepetitionSoftLimit } from "./toolRepetitionLimits"
 import { BedrockCustomArn } from "./providers/BedrockCustomArn"
 import { buildDocLink } from "@src/utils/docLinks"
 import { BookOpenText } from "lucide-react"
@@ -822,7 +825,37 @@ const ApiOptions = ({
 											? apiConfiguration.consecutiveMistakeLimit
 											: DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
 									}
-									onChange={(value) => setApiConfigurationField("consecutiveMistakeLimit", value)}
+									onChange={(value) => {
+										setApiConfigurationField("consecutiveMistakeLimit", value)
+										// Re-clamp the soft limit so it never ends up at or above the new
+										// hard limit, which would make the soft-block path unreachable.
+										const currentSoft =
+											apiConfiguration.toolRepetitionSoftLimit !== undefined
+												? apiConfiguration.toolRepetitionSoftLimit
+												: DEFAULT_TOOL_REPETITION_SOFT_LIMIT
+										const clampedSoft = clampToolRepetitionSoftLimit(currentSoft, value)
+										if (clampedSoft !== currentSoft) {
+											setApiConfigurationField("toolRepetitionSoftLimit", clampedSoft)
+										}
+									}}
+								/>
+								<ToolRepetitionLimitControl
+									softValue={
+										apiConfiguration.toolRepetitionSoftLimit !== undefined
+											? apiConfiguration.toolRepetitionSoftLimit
+											: DEFAULT_TOOL_REPETITION_SOFT_LIMIT
+									}
+									onSoftChange={(value) =>
+										setApiConfigurationField(
+											"toolRepetitionSoftLimit",
+											clampToolRepetitionSoftLimit(
+												value,
+												apiConfiguration.consecutiveMistakeLimit !== undefined
+													? apiConfiguration.consecutiveMistakeLimit
+													: DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+											),
+										)
+									}
 								/>
 								{selectedProvider === providerIdentifiers.poe && (
 									<VSCodeTextField

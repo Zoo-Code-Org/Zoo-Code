@@ -55,6 +55,13 @@ import {
 export const DEFAULT_CONSECUTIVE_MISTAKE_LIMIT = 3
 
 /**
+ * Number of identical consecutive tool calls allowed before the tool is
+ * soft-blocked. When reached, the tool is not executed and the model is
+ * asked to justify why it needs to repeat the call. Set to 0 to disable.
+ */
+export const DEFAULT_TOOL_REPETITION_SOFT_LIMIT = 2
+
+/**
  * DynamicProvider
  *
  * Dynamic provider requires external API calls in order to get the model list.

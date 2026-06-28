@@ -35,7 +35,7 @@ vi.mock("../../../api", async () => {
 		}
 	}
 	return {
-		buildApiHandler: (config: any) => ({
+		buildApiHandler: (config: { apiProvider?: string; apiModelId?: string }) => ({
 			getModel: () => ({ id: config?.apiModelId ?? "", info: modelInfoFor(config) }),
 		}),
 	}
@@ -99,6 +99,7 @@ describe("ProviderSettingsManager", () => {
 						rateLimitSecondsMigrated: true,
 						openAiHeadersMigrated: true,
 						consecutiveMistakeLimitMigrated: true,
+						toolRepetitionLimitsMigrated: true,
 						todoListEnabledMigrated: true,
 						claudeCodeLegacySettingsMigrated: true,
 						routerProviderMigrated: true,
@@ -219,6 +220,201 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.migrations.consecutiveMistakeLimitMigrated).toEqual(true)
 		})
 
+		it("should call migrateToolRepetitionLimits if it has not done so already", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							config: {},
+							id: "default",
+						},
+						existing: {
+							apiProvider: providerIdentifiers.anthropic,
+							consecutiveMistakeLimit: 7,
+						},
+						preset: {
+							apiProvider: providerIdentifiers.anthropic,
+							// Pre-existing repetition limits should not be overwritten
+							toolRepetitionSoftLimit: 1,
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						toolRepetitionLimitsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// Default soft limit applied everywhere it was missing
+			expect(storedConfig.apiConfigs.default.toolRepetitionSoftLimit).toEqual(2)
+			expect(storedConfig.apiConfigs.existing.toolRepetitionSoftLimit).toEqual(2)
+
+			// Pre-existing soft limit is not overwritten
+			expect(storedConfig.apiConfigs.preset.toolRepetitionSoftLimit).toEqual(1)
+
+			expect(storedConfig.migrations.toolRepetitionLimitsMigrated).toEqual(true)
+		})
+
+		it("should preserve profiles with persisted null repetition limits and let migrations default them", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							apiProvider: providerIdentifiers.anthropic,
+							id: "default",
+							// A previously persisted null value must not cause the profile to be dropped
+							// during load() before migrateToolRepetitionLimits can default it.
+							consecutiveMistakeLimit: null,
+							toolRepetitionSoftLimit: null,
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: false,
+						toolRepetitionLimitsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// The profile must survive load() rather than being silently deleted.
+			expect(storedConfig.apiConfigs.default).toBeDefined()
+			// null values are normalized to defaults by the migrations.
+			expect(storedConfig.apiConfigs.default.consecutiveMistakeLimit).toEqual(3)
+			expect(storedConfig.apiConfigs.default.toolRepetitionSoftLimit).toEqual(2)
+		})
+
+		it("should not mark toolRepetitionLimitsMigrated complete when the migration fails", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							apiProvider: providerIdentifiers.anthropic,
+							id: "default",
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						toolRepetitionLimitsMigrated: false,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+						routerProviderMigrated: true,
+					},
+				}),
+			)
+
+			// Typed view of the private method so it can be spied on without `as any`.
+			const migrationSpy = vi
+				.spyOn(
+					providerSettingsManager as unknown as {
+						migrateToolRepetitionLimits: (profiles: ProviderProfiles) => Promise<boolean>
+					},
+					"migrateToolRepetitionLimits",
+				)
+				.mockResolvedValue(false)
+
+			await providerSettingsManager.initialize()
+
+			expect(migrationSpy).toHaveBeenCalledTimes(1)
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+			// The flag must remain false so the migration is retried on next initialization.
+			expect(storedConfig.migrations.toolRepetitionLimitsMigrated).toBe(false)
+		})
+
+		it("should retry the tool repetition migration on the next initialize after a failure", async () => {
+			const persisted = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					default: {
+						apiProvider: providerIdentifiers.anthropic,
+						id: "default",
+					},
+				},
+				migrations: {
+					rateLimitSecondsMigrated: true,
+					openAiHeadersMigrated: true,
+					consecutiveMistakeLimitMigrated: true,
+					toolRepetitionLimitsMigrated: false,
+					todoListEnabledMigrated: true,
+					claudeCodeLegacySettingsMigrated: true,
+					routerProviderMigrated: true,
+				},
+			}
+			let stored = JSON.stringify(persisted)
+			mockSecrets.get.mockImplementation(async () => stored)
+			mockSecrets.store.mockImplementation(async (_key: string, value: string) => {
+				stored = value
+			})
+
+			const migrationSpy = vi
+				.spyOn(
+					providerSettingsManager as unknown as {
+						migrateToolRepetitionLimits: (profiles: ProviderProfiles) => Promise<boolean>
+					},
+					"migrateToolRepetitionLimits",
+				)
+				.mockResolvedValueOnce(false)
+
+			await providerSettingsManager.initialize()
+			expect(JSON.parse(stored).migrations.toolRepetitionLimitsMigrated).toBe(false)
+
+			// Second run uses the real implementation and succeeds.
+			await providerSettingsManager.initialize()
+			expect(migrationSpy).toHaveBeenCalledTimes(2)
+			const finalConfig = JSON.parse(stored)
+			expect(finalConfig.migrations.toolRepetitionLimitsMigrated).toBe(true)
+			expect(finalConfig.apiConfigs.default.toolRepetitionSoftLimit).toEqual(2)
+		})
+
+		it("should not throw and report failure if migrateToolRepetitionLimits encounters an error", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// A frozen apiConfig causes the property assignment inside the migration
+			// to throw in strict mode, exercising the catch/error branch.
+			const frozenConfig = Object.freeze({ apiProvider: providerIdentifiers.anthropic })
+			const providerProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					frozen: frozenConfig,
+				},
+			} as unknown as ProviderProfiles
+
+			// The migration must swallow the error and report failure so the caller
+			// does not mark the migration as complete.
+			await expect(
+				(
+					providerSettingsManager as unknown as {
+						migrateToolRepetitionLimits: (profiles: ProviderProfiles) => Promise<boolean>
+					}
+				).migrateToolRepetitionLimits(providerProfiles),
+			).resolves.toBe(false)
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to migrate tool repetition limits"),
+				expect.anything(),
+			)
+
+			consoleErrorSpy.mockRestore()
+		})
+
 		it("should call migrateTodoListEnabled if it has not done so already", async () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
@@ -334,7 +530,7 @@ describe("ProviderSettingsManager", () => {
 				apiProvider: retiredProviderIdentifiers.roo,
 				apiModelId: "roo/code-supernova",
 				rooApiKey: "router-key",
-			} as any)
+			} as unknown as ProviderSettings)
 
 			const calls = mockSecrets.store.mock.calls
 			const storedConfig = JSON.parse(calls[calls.length - 1][1])
