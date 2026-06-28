@@ -132,6 +132,46 @@ describe("NativeOllamaHandler", () => {
 			)
 		})
 
+		it("should drop unknown block types in tool_result content (empty string contribution)", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "tool-1",
+							content: [
+								{ type: "text", text: "before" },
+								{ type: "document" } as any,
+								{ type: "text", text: "after" },
+							],
+						},
+					],
+				},
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			// The unknown block contributes "" so the join produces "before\n\nafter"
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "user",
+							content: "before\n\nafter",
+						}),
+					]),
+				}),
+			)
+		})
+
 		it("should not include num_ctx by default", async () => {
 			// Mock the chat response
 			mockChat.mockImplementation(async function* () {

@@ -444,10 +444,7 @@ export function convertToOpenAiMessages(
 									}
 									return { type: "text", text: "[Image]" }
 								}
-								if (part.type === "text") {
-									return { type: "text", text: part.text }
-								}
-								return { type: "text", text: "" }
+								return { type: "text", text: part.text }
 							}),
 						})
 					}

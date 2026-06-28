@@ -1894,5 +1894,51 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 			expect(userMsg.content).toEqual([{ type: "input_text", text: "Look at this:" }])
 			expect(bodyStr).not.toContain("input_image")
 		})
+
+		it("should emit input_image for base64 images in formatFullConversation", async () => {
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'),
+						)
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			})
+			global.fetch = mockFetch as any
+
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			const localHandler = new OpenAiNativeHandler({
+				apiModelId: "gpt-4.1",
+				openAiNativeApiKey: "test-api-key",
+			})
+
+			const b64ImageMessages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Look at this:" },
+						{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc123" } },
+					],
+				},
+			]
+
+			const stream = localHandler.createMessage("You are a helpful assistant.", b64ImageMessages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			const bodyStr = (mockFetch.mock.calls[0][1] as any).body as string
+			const parsedBody = JSON.parse(bodyStr)
+			const userMsg = parsedBody.input[0]
+			expect(userMsg.content).toContainEqual({
+				type: "input_image",
+				image_url: "data:image/png;base64,abc123",
+			})
+		})
 	})
 })

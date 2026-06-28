@@ -102,10 +102,7 @@ export function convertToVsCodeLmMessages(
 								`[Image (${part.source.type}): not supported by VSCode LM API]`,
 							)
 						}
-						if (part.type === "text") {
-							return new vscode.LanguageModelTextPart(part.text)
-						}
-						return new vscode.LanguageModelTextPart("")
+						return new vscode.LanguageModelTextPart(part.text)
 					}),
 				]
 
