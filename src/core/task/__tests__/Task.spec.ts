@@ -1533,10 +1533,208 @@ describe("Cline", () => {
 			expect(cline.consecutiveMistakeLimit).toBe(5)
 		})
 
+		it("should disable the tool repetition soft limit when consecutiveMistakeLimit is 0", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 0,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(0)
+
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+			for (let call = 0; call < 6; call++) {
+				expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("allow")
+			}
+		})
+
+		it("should default tool repetition soft limit when not provided", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+		})
+
+		it("should respect provided tool repetition soft limit", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 3,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(3)
+
+			// Verify the constructor actually wires the soft limit into the
+			// detector (soft=3 differs from the default of 2).
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+			const actions = Array.from(
+				{ length: 4 },
+				() => cline.toolRepetitionDetector.check(identicalToolCall).action,
+			)
+			expect(actions).toEqual(["allow", "allow", "allow", "soft_block"])
+		})
+
+		it("should derive the tool repetition hard stop from consecutiveMistakeLimit", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.consecutiveMistakeLimit).toBe(7)
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+			expect(cline.toolRepetitionDetector).toBeDefined()
+
+			// The detector's counter increments from the second identical call
+			// onward (the first call establishes the baseline at count 0), so the
+			// count reaches the hard limit of 7 on the 8th identical call.
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+
+			// Calls 1-7: count stays below the hard limit, so the hard stop must not fire.
+			for (let call = 1; call <= 7; call++) {
+				const result = cline.toolRepetitionDetector.check(identicalToolCall)
+				expect(result.action).not.toBe("hard_block")
+			}
+
+			// Call 8: count reaches the hard limit of 7, so the hard stop fires.
+			const hardBlockingCall = cline.toolRepetitionDetector.check(identicalToolCall)
+			expect(hardBlockingCall.action).toBe("hard_block")
+		})
+
 		it("should require either task or historyItem", () => {
 			expect(() => {
 				new Task({ provider: mockProvider, apiConfiguration: mockApiConfig })
 			}).toThrow("Either historyItem or task/images must be provided")
+		})
+	})
+
+	describe("updateApiConfiguration", () => {
+		it("refreshes the soft limit but preserves the task-level hard limit when the provider profile changes", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, consecutiveMistakeLimit: 5, toolRepetitionSoftLimit: 2 },
+				consecutiveMistakeLimit: 5,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.consecutiveMistakeLimit).toBe(5)
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+
+			// Switching provider profile mid-task applies the new soft limit to
+			// the live detector, but keeps the hard limit captured at creation.
+			cline.updateApiConfiguration({
+				...mockApiConfig,
+				consecutiveMistakeLimit: 2,
+				toolRepetitionSoftLimit: 1,
+			})
+
+			expect(cline.consecutiveMistakeLimit).toBe(5)
+			expect(cline.toolRepetitionSoftLimit).toBe(1)
+
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+
+			// Call 1 (count = 0) -> allow
+			expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("allow")
+			// Calls 2-5 (count = 1..4) -> soft_block (new soft limit 1, hard limit still 5)
+			for (let call = 2; call <= 5; call++) {
+				expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("soft_block")
+			}
+			// Call 6 (count = 5) -> hard_block (preserved hard limit 5)
+			expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("hard_block")
+		})
+
+		it("does not override an explicit task-level consecutiveMistakeLimit (e.g. extension API tasks)", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, consecutiveMistakeLimit: 3 },
+				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+				task: "test task",
+				startTask: false,
+			})
+
+			cline.updateApiConfiguration({ ...mockApiConfig, consecutiveMistakeLimit: 3 })
+
+			expect(cline.consecutiveMistakeLimit).toBe(Number.MAX_SAFE_INTEGER)
+		})
+
+		it("disables the soft tier for an unreachable hard limit, even after a profile switch", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, toolRepetitionSoftLimit: 2 },
+				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(0)
+
+			// A profile switch re-derives the soft limit from the new profile;
+			// it must stay disabled because the hard stop is still unreachable.
+			cline.updateApiConfiguration({ ...mockApiConfig, toolRepetitionSoftLimit: 2 })
+			expect(cline.toolRepetitionSoftLimit).toBe(0)
+
+			const identicalToolCall = {
+				type: "tool_use" as const,
+				name: "execute_command" as const,
+				params: { command: "ls" },
+				partial: false,
+			}
+			for (let call = 0; call < 10; call++) {
+				expect(cline.toolRepetitionDetector.check(identicalToolCall).action).toBe("allow")
+			}
+		})
+
+		it("falls back to the default soft limit when the new profile omits it", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: { ...mockApiConfig, consecutiveMistakeLimit: 7, toolRepetitionSoftLimit: 4 },
+				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 4,
+				task: "test task",
+				startTask: false,
+			})
+
+			cline.updateApiConfiguration({ ...mockApiConfig })
+
+			// The default soft limit is 2; the task-level hard limit is preserved.
+			expect(cline.consecutiveMistakeLimit).toBe(7)
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
 		})
 	})
 

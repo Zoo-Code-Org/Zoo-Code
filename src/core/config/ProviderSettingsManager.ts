@@ -9,6 +9,7 @@ import {
 	isSecretStateKey,
 	ProviderSettingsEntry,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
 	getModelId,
 	type ProviderName,
 	isProviderName,
@@ -43,6 +44,7 @@ export const providerProfilesSchema = z.object({
 			rateLimitSecondsMigrated: z.boolean().optional(),
 			openAiHeadersMigrated: z.boolean().optional(),
 			consecutiveMistakeLimitMigrated: z.boolean().optional(),
+			toolRepetitionLimitsMigrated: z.boolean().optional(),
 			todoListEnabledMigrated: z.boolean().optional(),
 			claudeCodeLegacySettingsMigrated: z.boolean().optional(),
 			routerProviderMigrated: z.boolean().optional(),
@@ -68,6 +70,7 @@ export class ProviderSettingsManager {
 			rateLimitSecondsMigrated: true, // Mark as migrated on fresh installs
 			openAiHeadersMigrated: true, // Mark as migrated on fresh installs
 			consecutiveMistakeLimitMigrated: true, // Mark as migrated on fresh installs
+			toolRepetitionLimitsMigrated: true, // Mark as migrated on fresh installs
 			todoListEnabledMigrated: true, // Mark as migrated on fresh installs
 			claudeCodeLegacySettingsMigrated: true, // Mark as migrated on fresh installs
 			routerProviderMigrated: true, // Mark as migrated on fresh installs
@@ -174,6 +177,15 @@ export class ProviderSettingsManager {
 					isDirty = true
 				}
 
+				if (!providerProfiles.migrations.toolRepetitionLimitsMigrated) {
+					// Partial defaults are safe to persist; the flag stays unset so the migration retries.
+					const migrated = await this.migrateToolRepetitionLimits(providerProfiles)
+					if (migrated) {
+						providerProfiles.migrations.toolRepetitionLimitsMigrated = true
+					}
+					isDirty = true
+				}
+
 				if (!providerProfiles.migrations.todoListEnabledMigrated) {
 					await this.migrateTodoListEnabled(providerProfiles)
 					providerProfiles.migrations.todoListEnabledMigrated = true
@@ -268,6 +280,30 @@ export class ProviderSettingsManager {
 			}
 		} catch (error) {
 			console.error(`[MigrateConsecutiveMistakeLimit] Failed to migrate consecutive mistake limit:`, error)
+		}
+	}
+
+	/**
+	 * Defaults `toolRepetitionSoftLimit` on every profile that lacks it.
+	 * Profiles that explicitly disabled the hard stop (`consecutiveMistakeLimit === 0`)
+	 * get the soft tier disabled too, so existing "unlimited" profiles keep
+	 * their previous behavior instead of silently soft-blocking repeats forever.
+	 * Returns true only if every profile was processed successfully, so the
+	 * caller can avoid marking the migration complete after a failure.
+	 */
+	private async migrateToolRepetitionLimits(providerProfiles: ProviderProfiles): Promise<boolean> {
+		try {
+			for (const [_name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+				// Default the soft warning threshold.
+				if (apiConfig.toolRepetitionSoftLimit == null) {
+					apiConfig.toolRepetitionSoftLimit =
+						apiConfig.consecutiveMistakeLimit === 0 ? 0 : DEFAULT_TOOL_REPETITION_SOFT_LIMIT
+				}
+			}
+			return true
+		} catch (error) {
+			console.error(`[MigrateToolRepetitionLimits] Failed to migrate tool repetition limits:`, error)
+			return false
 		}
 	}
 
