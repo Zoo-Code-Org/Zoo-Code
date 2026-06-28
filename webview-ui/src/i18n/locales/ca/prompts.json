@@ -26,7 +26,8 @@
 			"read": "Llegir fitxers",
 			"edit": "Editar fitxers",
 			"command": "Executar comandes",
-			"mcp": "Utilitzar MCP"
+			"mcp": "Utilitzar MCP",
+			"web": "Obtenir contingut web"
 		},
 		"noTools": "Cap"
 	},

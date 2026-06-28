@@ -493,5 +493,9 @@
 		"title": "Nhà cung cấp không còn được hỗ trợ",
 		"message": "Nhà cung cấp này không còn khả dụng. Hãy chọn một nhà cung cấp được hỗ trợ để tiếp tục.",
 		"openSettings": "Mở cài đặt"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo muốn lấy nội dung web",
+		"didFetch": "Zoo đã lấy nội dung web"
 	}
 }

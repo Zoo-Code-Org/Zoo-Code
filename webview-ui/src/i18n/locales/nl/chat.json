@@ -492,5 +492,9 @@
 		"title": "Provider wordt niet meer ondersteund",
 		"message": "Deze provider is niet meer beschikbaar. Selecteer een ondersteunde provider om door te gaan.",
 		"openSettings": "Instellingen openen"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo wil webinhoud ophalen",
+		"didFetch": "Zoo heeft webinhoud opgehaald"
 	}
 }

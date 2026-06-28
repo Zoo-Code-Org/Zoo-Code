@@ -492,5 +492,9 @@
 		"title": "Proveedor ya no compatible",
 		"message": "Este proveedor ya no está disponible. Selecciona un proveedor compatible para continuar.",
 		"openSettings": "Abrir configuración"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo quiere obtener contenido web",
+		"didFetch": "Zoo obtuvo contenido web"
 	}
 }

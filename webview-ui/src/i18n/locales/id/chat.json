@@ -498,5 +498,9 @@
 		"title": "Penyedia tidak lagi didukung",
 		"message": "Penyedia ini sudah tidak tersedia. Pilih penyedia yang didukung untuk melanjutkan.",
 		"openSettings": "Buka Pengaturan"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo ingin mengambil konten web",
+		"didFetch": "Zoo telah mengambil konten web"
 	}
 }
