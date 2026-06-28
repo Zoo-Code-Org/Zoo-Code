@@ -457,14 +457,6 @@
 		"clean": "rimraf README.md CHANGELOG.md LICENSE dist logs mock .turbo"
 	},
 	"dependencies": {
-		"@ai-sdk/amazon-bedrock": "^4.0.51",
-		"@ai-sdk/baseten": "^1.0.31",
-		"@ai-sdk/deepseek": "^2.0.18",
-		"@ai-sdk/fireworks": "^2.0.32",
-		"@ai-sdk/google": "^3.0.22",
-		"@ai-sdk/google-vertex": "^4.0.45",
-		"@ai-sdk/mistral": "^3.0.19",
-		"@ai-sdk/xai": "^3.0.48",
 		"@anthropic-ai/sdk": "^0.106.0",
 		"@anthropic-ai/vertex-sdk": "^0.18.0",
 		"@aws-sdk/client-bedrock-runtime": "^3.922.0",
@@ -515,7 +507,6 @@
 		"ps-tree": "^1.2.0",
 		"reconnecting-eventsource": "^1.6.4",
 		"safe-stable-stringify": "^2.5.0",
-		"sambanova-ai-provider": "^1.2.2",
 		"sanitize-filename": "^1.6.3",
 		"say": "^0.16.0",
 		"semver-compare": "^1.0.0",
@@ -531,7 +522,6 @@
 		"web-tree-sitter": "^0.25.6",
 		"workerpool": "^9.2.0",
 		"yaml": "^2.8.0",
-		"zhipu-ai-provider": "^0.3.0",
 		"zod": "3.25.76"
 	},
 	"devDependencies": {

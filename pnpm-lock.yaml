@@ -430,30 +430,6 @@ importers:
 
   src:
     dependencies:
-      '@ai-sdk/amazon-bedrock':
-        specifier: ^4.0.51
-        version: 4.0.121(zod@3.25.76)
-      '@ai-sdk/baseten':
-        specifier: ^1.0.31
-        version: 1.0.54(zod@3.25.76)
-      '@ai-sdk/deepseek':
-        specifier: ^2.0.18
-        version: 2.0.39(zod@3.25.76)
-      '@ai-sdk/fireworks':
-        specifier: ^2.0.32
-        version: 2.0.57(zod@3.25.76)
-      '@ai-sdk/google':
-        specifier: ^3.0.22
-        version: 3.0.83(zod@3.25.76)
-      '@ai-sdk/google-vertex':
-        specifier: ^4.0.45
-        version: 4.0.149(zod@3.25.76)
-      '@ai-sdk/mistral':
-        specifier: ^3.0.19
-        version: 3.0.40(zod@3.25.76)
-      '@ai-sdk/xai':
-        specifier: ^3.0.48
-        version: 3.0.97(zod@3.25.76)
       '@anthropic-ai/sdk':
         specifier: ^0.106.0
         version: 0.106.0(zod@3.25.76)
@@ -604,9 +580,6 @@ importers:
       safe-stable-stringify:
         specifier: ^2.5.0
         version: 2.5.0
-      sambanova-ai-provider:
-        specifier: ^1.2.2
-        version: 1.2.2(zod@3.25.76)
       sanitize-filename:
         specifier: ^1.6.3
         version: 1.6.3
@@ -652,9 +625,6 @@ importers:
       yaml:
         specifier: ^2.8.0
         version: 2.9.0
-      zhipu-ai-provider:
-        specifier: ^0.3.0
-        version: 0.3.1(zod@3.25.76)
       zod:
         specifier: 3.25.76
         version: 3.25.76
@@ -1005,68 +975,14 @@ packages:
   '@adobe/css-tools@4.4.2':
     resolution: {integrity: sha512-baYZExFpsdkBNuvGKTKWCwKH57HRZLVtycZS05WTQNVOiXVSeAki3nU35zlRbToeMW8aHlJfyS+1C4BOv27q0A==}
 
-  '@ai-sdk/amazon-bedrock@4.0.121':
-    resolution: {integrity: sha512-osyum0QGdIHvd/Z9dQHhouXQnd9NX0cUSX5De5MgHpn5oER61/qkJ8MUD5I+PaWeTYUYOAPrY1QHkbwqSNWa9Q==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
   '@ai-sdk/anthropic@3.0.42':
     resolution: {integrity: sha512-snoLXB9DmvAmmngbPN/Io8IGzZ9zWpC208EgIIztYf1e1JhwuMkgKCYkL30vGhSen4PrBafu2+sO4G/17wu45A==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: 3.25.76
 
-  '@ai-sdk/anthropic@3.0.86':
-    resolution: {integrity: sha512-IVUaTOz46dNniRaALEvphV5WOqPfKTJRZlJhJabz3kaXk1QiwdnzWQhKMKLiprD+872E9YHqmmyFNFFH1MfnBQ==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
-  '@ai-sdk/baseten@1.0.54':
-    resolution: {integrity: sha512-0mSzF4Mvlu5/PAbWwxt/tO6yOsuBdj92r2U2Gv0N/46f1NQEWLtoqMKAHzlBNv1IepKNWPtcK0ivki7mIgc6jw==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
-  '@ai-sdk/deepseek@2.0.39':
-    resolution: {integrity: sha512-3wUq1cvqSWkRadCSqcDXBLpOwUAe+JqfWQZS0fK0sWiqDeTIEzsse+r7xcN2x5XpJjefT0d7FQTa3u2lZ/yxbg==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
-  '@ai-sdk/fireworks@2.0.57':
-    resolution: {integrity: sha512-G7ZNDg31Tl81RTR0dfBhNBMpkPBB1ufGP46o7TYX/FSoz6IqGnRuA23SAzaVJkQ3ag22onsvpNHRPRwYWX6OBg==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
   '@ai-sdk/gateway@3.0.134':
     resolution: {integrity: sha512-PfUkQp01EihEyNM6e+nexXmVANiY5KcHMui/MmaHsC4KVVQYh/MwPeOsD3bTPu63e581BKO+AwaPPNmD4x943A==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
-  '@ai-sdk/google-vertex@4.0.149':
-    resolution: {integrity: sha512-iDs0SlIO3sHzWn0MG9JYlHBn5UNPyo4ZB7LWqdhvBYwmlr6wU4uLaj9JmJ1jVIrU5Fpv5wTQuBspxDEYx7KcxA==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
-  '@ai-sdk/google@3.0.83':
-    resolution: {integrity: sha512-Pz7aCX0dy+5x+r4K/37HbLZNaPtPL4q2NduzJW64VffLv5sI9Nb478wAd7PlH2r2asiypJsz/Jerf9draTciUA==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
-  '@ai-sdk/mistral@3.0.40':
-    resolution: {integrity: sha512-HzCV9jFsb04kpL/N+G7SCjFKJA0Q33p4Hc+1quYGGD8Ta37Pe5bzk9AjxaS8OYd//jmcny16yKhJ+e+h+P0AJg==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
-  '@ai-sdk/openai-compatible@1.0.11':
-    resolution: {integrity: sha512-eRD6dZviy31KYz4YvxAR/c6UEYx3p4pCiWZeDdYdAHj0rn8xZlGVxtQRs1qynhz6IYGOo4aLBf9zVW5w0tI/Uw==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: 3.25.76
@@ -1083,18 +999,6 @@ packages:
     peerDependencies:
       zod: 3.25.76
 
-  '@ai-sdk/openai@3.0.74':
-    resolution: {integrity: sha512-LPDBWd2WCv0GQs29K2pHcNrGx24hm4D8QEP386HwUAUPr1URho6bNVXHNmIv0FxaW+xDkLpNMTen+mFCUBp2LA==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
-  '@ai-sdk/provider-utils@3.0.5':
-    resolution: {integrity: sha512-HliwB/yzufw3iwczbFVE2Fiwf1XqROB/I6ng8EKUsPM5+2wnIa8f4VbljZcDx+grhFrPV+PnRZH7zBqi8WZM7Q==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
-
   '@ai-sdk/provider-utils@4.0.14':
     resolution: {integrity: sha512-7bzKd9lgiDeXM7O4U4nQ8iTxguAOkg8LZGD9AfDVZYjO5cKYRwBPwVjboFcVrxncRHu0tYxZtXZtiLKpG4pEng==}
     engines: {node: '>=18'}
@@ -1107,10 +1011,6 @@ packages:
     peerDependencies:
       zod: 3.25.76
 
-  '@ai-sdk/provider@2.0.0':
-    resolution: {integrity: sha512-6o7Y2SeO9vFKB8lArHXehNuusnpddKPk7xqL7T2/b+OvXMRIXUO1rR4wcv1hAFUAT9avGZshty3Wlua/XA7TvA==}
-    engines: {node: '>=18'}
-
   '@ai-sdk/provider@3.0.10':
     resolution: {integrity: sha512-Q3BZ27qfpYqnCYGvE3vt+Qi6LGOF9R5Nmzn+9JoM1lCRsD9mYaIhfJLkSunN48nfGXJ6n+XNV0J/XVpqGQl7Dw==}
     engines: {node: '>=18'}
@@ -1118,12 +1018,6 @@ packages:
   '@ai-sdk/provider@3.0.8':
     resolution: {integrity: sha512-oGMAgGoQdBXbZqNG0Ze56CHjDZ1IDYOwGYxYjO5KLSlz5HiNQ9udIXsPZ61VWaHGZ5XW/jyjmr6t2xz2jGVwbQ==}
     engines: {node: '>=18'}
-
-  '@ai-sdk/xai@3.0.97':
-    resolution: {integrity: sha512-mmLVKKu+97mHbWccCDf6vY3omZcKjwyqrMg9UgkqS2UJumCQgijUlDplM2B6stYDbv+unaXLSDszjv0yzTMyUw==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: 3.25.76
 
   '@alcalzone/ansi-tokenize@0.2.3':
     resolution: {integrity: sha512-jsElTJ0sQ4wHRz+C45tfect76BwbTbgkgKByOzpCN9xG61N5V6u/glvg1CsNJhq2xJIFpKHSwG3D2wPPuEYOrQ==}
@@ -1400,93 +1294,6 @@ packages:
   '@babel/types@7.29.0':
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
-
-  '@basetenlabs/performance-client-android-arm-eabi@0.0.10':
-    resolution: {integrity: sha512-gwDZ6GDJA0AAmQAHxt2vaCz0tYTaLjxJKZnoYt+0Eji4gy231JZZFAwvbAqNdQCrGEQ9lXnk7SNM1Apet4NlYg==}
-    engines: {node: '>= 10'}
-    cpu: [arm]
-    os: [android]
-
-  '@basetenlabs/performance-client-android-arm64@0.0.10':
-    resolution: {integrity: sha512-oGRB/6hH89majhsmoVmj1IAZv4C7F2aLeTSebevBelmdYO4CFkn5qewxLzU1pDkkmxVVk2k+TRpYa1Dt4B96qQ==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [android]
-
-  '@basetenlabs/performance-client-darwin-arm64@0.0.10':
-    resolution: {integrity: sha512-QpBOUjeO05tWgFWkDw2RUQZa3BMplX5jNiBBTi5mH1lIL/m1sm2vkxoc0iorEESp1mMPstYFS/fr4ssBuO7wyA==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@basetenlabs/performance-client-darwin-universal@0.0.10':
-    resolution: {integrity: sha512-CBM38GAhekjylrlf7jW/0WNyFAGnAMBCNHZxaPnAjjhDNzJh1tcrwhvtOs66XbAqCOjO/tkt5Pdu6mg2Ui2Pjw==}
-    engines: {node: '>= 10'}
-    os: [darwin]
-
-  '@basetenlabs/performance-client-darwin-x64@0.0.10':
-    resolution: {integrity: sha512-R+NsA72Axclh1CUpmaWOCLTWCqXn5/tFMj2z9BnHVSRTelx/pYFlx6ZngVTB1HYp1n21m3upPXGo8CHF8R7Itw==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [darwin]
-
-  '@basetenlabs/performance-client-linux-arm-gnueabihf@0.0.10':
-    resolution: {integrity: sha512-96kEo0Eas4GVQdFkxIB1aAv6dy5Ga57j+RIg5l0Yiawv+AYIEmgk9BsGkqcwayp8Iiu6LN22Z+AUsGY2gstNrg==}
-    engines: {node: '>= 10'}
-    cpu: [arm]
-    os: [linux]
-
-  '@basetenlabs/performance-client-linux-arm-musleabihf@0.0.10':
-    resolution: {integrity: sha512-lzEHeu+/BWDl2q+QZcqCkg1rDGF4MeyM3HgYwX+07t+vGZoqtM2we9vEV68wXMpl6ToEHQr7ML2KHA1Gb6ogxg==}
-    engines: {node: '>= 10'}
-    cpu: [arm]
-    os: [linux]
-
-  '@basetenlabs/performance-client-linux-arm64-gnu@0.0.10':
-    resolution: {integrity: sha512-MnY2cIRY/cQOYERWIHhh5CoaS2wgmmXtGDVGSLYyZvjwizrXZvjkEz7Whv2jaQ21T5S56VER67RABjz2TItrHQ==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [linux]
-
-  '@basetenlabs/performance-client-linux-riscv64-gnu@0.0.10':
-    resolution: {integrity: sha512-2KUvdK4wuoZdIqNnJhx7cu6ybXCwtiwGAtlrEvhai3FOkUQ3wE2Xa+TQ33mNGSyFbw6wAvLawYtKVFmmw27gJw==}
-    engines: {node: '>= 10'}
-    cpu: [riscv64]
-    os: [linux]
-
-  '@basetenlabs/performance-client-linux-x64-gnu@0.0.10':
-    resolution: {integrity: sha512-9jjQPjHLiVOGwUPlmhnBl7OmmO7hQ8WMt+v3mJuxkS5JTNDmVOngfmgGlbN9NjBhQMENjdcMUVOquVo7HeybGQ==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [linux]
-
-  '@basetenlabs/performance-client-linux-x64-musl@0.0.10':
-    resolution: {integrity: sha512-bjYB8FKcPvEa251Ep2Gm3tvywADL9eavVjZsikdf0AvJ1K5pT+vLLvJBU9ihBsTPWnbF4pJgxVjwS6UjVObsQA==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [linux]
-
-  '@basetenlabs/performance-client-win32-arm64-msvc@0.0.10':
-    resolution: {integrity: sha512-Vxq5UXEmfh3C3hpwXdp3Daaf0dnLR9zFH2x8MJ1Hf/TcilmOP1clneewNpIv0e7MrnT56Z4pM6P3d8VFMZqBKg==}
-    engines: {node: '>= 10'}
-    cpu: [arm64]
-    os: [win32]
-
-  '@basetenlabs/performance-client-win32-ia32-msvc@0.0.10':
-    resolution: {integrity: sha512-KJrm7CgZdP/UDC5+tHtqE6w9XMfY5YUfMOxJfBZGSsLMqS2OGsakQsaF0a55k+58l29X5w/nAkjHrI1BcQO03w==}
-    engines: {node: '>= 10'}
-    cpu: [ia32]
-    os: [win32]
-
-  '@basetenlabs/performance-client-win32-x64-msvc@0.0.10':
-    resolution: {integrity: sha512-M/mhvfTItUcUX+aeXRb5g5MbRlndfg6yelV7tSYfLU4YixMIe5yoGaAP3iDilpFJjcC99f+EU4l4+yLbPtpXig==}
-    engines: {node: '>= 10'}
-    cpu: [x64]
-    os: [win32]
-
-  '@basetenlabs/performance-client@0.0.10':
-    resolution: {integrity: sha512-H6bpd1JcDbuJsOS2dNft+CCGLzBqHJO/ST/4mMKhLAW641J6PpVJUw1szYsk/dTetdedbWxHpMkvFObOKeP8nw==}
-    engines: {node: '>= 10'}
 
   '@bcoe/v8-coverage@1.0.2':
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
@@ -3053,10 +2860,6 @@ packages:
     resolution: {integrity: sha512-18UMDMyrAbDcpmL1gLUA7ww0fRTcdCrSjSJOi2Sbld+tVjwD/pW+OAwjlScFLR7vvBnhZrIPQ7kVuTf1mnJLug==}
     engines: {node: '>=18.0.0'}
 
-  '@smithy/eventstream-codec@4.4.2':
-    resolution: {integrity: sha512-iv6jeGoL5dIGXglIe0aJb8vvTuJkGB4z0LeB2mKV0PH9iAlr4jNhRhEWU7ZGmIeNC+8Zj6jhmSumDez6DidTOA==}
-    engines: {node: '>=18.0.0'}
-
   '@smithy/fetch-http-handler@5.5.2':
     resolution: {integrity: sha512-Ei/UK/QMhq0rKaMqGPlOAkE2yS9DZeYmZdk1RAKc3vp3zxgleZHZyBLlZv8yLsxljX4svCRuMTD6u3LLIcU4Bg==}
     engines: {node: '>=18.0.0'}
@@ -3084,10 +2887,6 @@ packages:
   '@smithy/util-utf8@2.3.0':
     resolution: {integrity: sha512-R8Rdn8Hy72KKcebgLiv8jQcQkXoLMOGGv5uI1/k0l+snqkOzQ1R0ChUBCxWMlBsFMekWjq0wRudIweFs7sKT5A==}
     engines: {node: '>=14.0.0'}
-
-  '@smithy/util-utf8@4.4.2':
-    resolution: {integrity: sha512-N5CpfaL+/LPQU9PFdOT55ayUo5T0QypG4Almzd1/efJvoDypuT1shkgJk1+hhg/02scYluW6Q2JGnSHIPwCEGQ==}
-    engines: {node: '>=18.0.0'}
 
   '@stablelib/base64@1.0.1':
     resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
@@ -3903,9 +3702,6 @@ packages:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
 
-  aws4fetch@1.0.20:
-    resolution: {integrity: sha512-/djoAN709iY65ETD6LKCtyyEI04XIBP5xVvfmNxsEP0uJB5tyaGBztSryRr4HqMStr9R06PisQE7m9zDTXKu6g==}
-
   axios@1.18.0:
     resolution: {integrity: sha512-E32NzpYKp++W7XRe52rHiXV2ehxmh3wbdgO7MHeFM+vqxLBYHzt0ElkiImtOBxtOmyp0yoC8C6uESVV84Y2/hw==}
 
@@ -4699,10 +4495,6 @@ packages:
 
   dotenv@16.0.3:
     resolution: {integrity: sha512-7GO6HghkA5fYG9TYnNxi14/7K9f5occMlp3zXAuSxn7CKCxt9xbNWG7yF8hTCSUchlfWSe3uLmlPfigevRItzQ==}
-    engines: {node: '>=12'}
-
-  dotenv@16.4.5:
-    resolution: {integrity: sha512-ZmdL2rui+eB2YwhsWzjInR8LldtZHGDoQ1ugH85ppHKwpUHL7j7rN0Ti9NCnGiQbhaZ11FpR+7ao1dNsmduNUg==}
     engines: {node: '>=12'}
 
   dotenv@17.4.2:
@@ -7630,9 +7422,6 @@ packages:
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
 
-  sambanova-ai-provider@1.2.2:
-    resolution: {integrity: sha512-MU/D+9GCg6me0guDRPw/x0N8cnpkOkv03FR7QXdrcinX0hprS7bsZXXTYEz81Svc+oVwXDZwh0v+Sd5pUxV3mg==}
-
   sanitize-filename@1.6.3:
     resolution: {integrity: sha512-y/52Mcy7aw3gRm7IrcGDFx/bCk4AhRh2eI9luHOQM86nZsqwiRkkq2GekHXBBD+SmPidc8i2PqtYZl+pWJ8Oeg==}
 
@@ -8866,10 +8655,6 @@ packages:
   yoga-layout@3.2.1:
     resolution: {integrity: sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ==}
 
-  zhipu-ai-provider@0.3.1:
-    resolution: {integrity: sha512-3BGtV1RVLXU9GXFN7QGsoNZLkpp2E4Grt9GRWNcvYOQdUF7hvgZ59JxA4zys7j0gWuEq6Qvt9TlbzMAMwIyQyw==}
-    engines: {node: '>=18'}
-
   zip-stream@4.1.1:
     resolution: {integrity: sha512-9qv4rlDiopXg4E69k+vMHjNN63YFMe9sZMrdlvKnCjlCRWeCBswPPMPUfx+ipsAWq1LXHe70RcbaHdJJpS6hyQ==}
     engines: {node: '>= 10'}
@@ -8913,48 +8698,10 @@ snapshots:
 
   '@adobe/css-tools@4.4.2': {}
 
-  '@ai-sdk/amazon-bedrock@4.0.121(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/anthropic': 3.0.86(zod@3.25.76)
-      '@ai-sdk/openai': 3.0.74(zod@3.25.76)
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      '@smithy/eventstream-codec': 4.4.2
-      '@smithy/util-utf8': 4.4.2
-      aws4fetch: 1.0.20
-      zod: 3.25.76
-
   '@ai-sdk/anthropic@3.0.42(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@ai-sdk/provider-utils': 4.0.14(zod@3.25.76)
-      zod: 3.25.76
-
-  '@ai-sdk/anthropic@3.0.86(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      zod: 3.25.76
-
-  '@ai-sdk/baseten@1.0.54(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/openai-compatible': 2.0.51(zod@3.25.76)
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      '@basetenlabs/performance-client': 0.0.10
-      zod: 3.25.76
-
-  '@ai-sdk/deepseek@2.0.39(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      zod: 3.25.76
-
-  '@ai-sdk/fireworks@2.0.57(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/openai-compatible': 2.0.51(zod@3.25.76)
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
       zod: 3.25.76
 
   '@ai-sdk/gateway@3.0.134(zod@3.25.76)':
@@ -8962,36 +8709,6 @@ snapshots:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
       '@vercel/oidc': 3.2.0
-      zod: 3.25.76
-
-  '@ai-sdk/google-vertex@4.0.149(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/anthropic': 3.0.86(zod@3.25.76)
-      '@ai-sdk/google': 3.0.83(zod@3.25.76)
-      '@ai-sdk/openai-compatible': 2.0.51(zod@3.25.76)
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      google-auth-library: 10.9.0
-      zod: 3.25.76
-    transitivePeerDependencies:
-      - supports-color
-
-  '@ai-sdk/google@3.0.83(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      zod: 3.25.76
-
-  '@ai-sdk/mistral@3.0.40(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      zod: 3.25.76
-
-  '@ai-sdk/openai-compatible@1.0.11(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 2.0.0
-      '@ai-sdk/provider-utils': 3.0.5(zod@3.25.76)
       zod: 3.25.76
 
   '@ai-sdk/openai-compatible@2.0.51(zod@3.25.76)':
@@ -9005,20 +8722,6 @@ snapshots:
       '@ai-sdk/provider': 3.0.8
       '@ai-sdk/provider-utils': 4.0.14(zod@3.25.76)
       zod: 3.25.76
-
-  '@ai-sdk/openai@3.0.74(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      zod: 3.25.76
-
-  '@ai-sdk/provider-utils@3.0.5(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 2.0.0
-      '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.1.0
-      zod: 3.25.76
-      zod-to-json-schema: 3.25.1(zod@3.25.76)
 
   '@ai-sdk/provider-utils@4.0.14(zod@3.25.76)':
     dependencies:
@@ -9034,10 +8737,6 @@ snapshots:
       eventsource-parser: 3.1.0
       zod: 3.25.76
 
-  '@ai-sdk/provider@2.0.0':
-    dependencies:
-      json-schema: 0.4.0
-
   '@ai-sdk/provider@3.0.10':
     dependencies:
       json-schema: 0.4.0
@@ -9045,13 +8744,6 @@ snapshots:
   '@ai-sdk/provider@3.0.8':
     dependencies:
       json-schema: 0.4.0
-
-  '@ai-sdk/xai@3.0.97(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/openai-compatible': 2.0.51(zod@3.25.76)
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-      zod: 3.25.76
 
   '@alcalzone/ansi-tokenize@0.2.3':
     dependencies:
@@ -9557,65 +9249,6 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.29.7
-
-  '@basetenlabs/performance-client-android-arm-eabi@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-android-arm64@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-darwin-arm64@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-darwin-universal@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-darwin-x64@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-linux-arm-gnueabihf@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-linux-arm-musleabihf@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-linux-arm64-gnu@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-linux-riscv64-gnu@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-linux-x64-gnu@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-linux-x64-musl@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-win32-arm64-msvc@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-win32-ia32-msvc@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client-win32-x64-msvc@0.0.10':
-    optional: true
-
-  '@basetenlabs/performance-client@0.0.10':
-    optionalDependencies:
-      '@basetenlabs/performance-client-android-arm-eabi': 0.0.10
-      '@basetenlabs/performance-client-android-arm64': 0.0.10
-      '@basetenlabs/performance-client-darwin-arm64': 0.0.10
-      '@basetenlabs/performance-client-darwin-universal': 0.0.10
-      '@basetenlabs/performance-client-darwin-x64': 0.0.10
-      '@basetenlabs/performance-client-linux-arm-gnueabihf': 0.0.10
-      '@basetenlabs/performance-client-linux-arm-musleabihf': 0.0.10
-      '@basetenlabs/performance-client-linux-arm64-gnu': 0.0.10
-      '@basetenlabs/performance-client-linux-riscv64-gnu': 0.0.10
-      '@basetenlabs/performance-client-linux-x64-gnu': 0.0.10
-      '@basetenlabs/performance-client-linux-x64-musl': 0.0.10
-      '@basetenlabs/performance-client-win32-arm64-msvc': 0.0.10
-      '@basetenlabs/performance-client-win32-ia32-msvc': 0.0.10
-      '@basetenlabs/performance-client-win32-x64-msvc': 0.0.10
 
   '@bcoe/v8-coverage@1.0.2': {}
 
@@ -11168,11 +10801,6 @@ snapshots:
       '@smithy/types': 4.15.0
       tslib: 2.8.1
 
-  '@smithy/eventstream-codec@4.4.2':
-    dependencies:
-      '@smithy/core': 3.26.0
-      tslib: 2.8.1
-
   '@smithy/fetch-http-handler@5.5.2':
     dependencies:
       '@smithy/core': 3.26.0
@@ -11207,11 +10835,6 @@ snapshots:
   '@smithy/util-utf8@2.3.0':
     dependencies:
       '@smithy/util-buffer-from': 2.2.0
-      tslib: 2.8.1
-
-  '@smithy/util-utf8@4.4.2':
-    dependencies:
-      '@smithy/core': 3.26.0
       tslib: 2.8.1
 
   '@stablelib/base64@1.0.1': {}
@@ -12168,8 +11791,6 @@ snapshots:
     dependencies:
       possible-typed-array-names: 1.1.0
 
-  aws4fetch@1.0.20: {}
-
   axios@1.18.0:
     dependencies:
       follow-redirects: 1.16.0
@@ -12955,8 +12576,6 @@ snapshots:
       domhandler: 5.0.3
 
   dotenv@16.0.3: {}
-
-  dotenv@16.4.5: {}
 
   dotenv@17.4.2: {}
 
@@ -16574,15 +16193,6 @@ snapshots:
 
   safer-buffer@2.1.2: {}
 
-  sambanova-ai-provider@1.2.2(zod@3.25.76):
-    dependencies:
-      '@ai-sdk/openai-compatible': 1.0.11(zod@3.25.76)
-      '@ai-sdk/provider': 2.0.0
-      '@ai-sdk/provider-utils': 3.0.5(zod@3.25.76)
-      dotenv: 16.4.5
-    transitivePeerDependencies:
-      - zod
-
   sanitize-filename@1.6.3:
     dependencies:
       truncate-utf8-bytes: 1.0.2
@@ -17869,13 +17479,6 @@ snapshots:
   yoctocolors@2.1.2: {}
 
   yoga-layout@3.2.1: {}
-
-  zhipu-ai-provider@0.3.1(zod@3.25.76):
-    dependencies:
-      '@ai-sdk/provider': 3.0.10
-      '@ai-sdk/provider-utils': 4.0.30(zod@3.25.76)
-    transitivePeerDependencies:
-      - zod
 
   zip-stream@4.1.1:
     dependencies:

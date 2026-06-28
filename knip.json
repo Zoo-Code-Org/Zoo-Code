@@ -8,14 +8,6 @@
 			"entry": ["extension.ts", "extension/api.ts", "workers/countTokens.ts"],
 			"project": ["**/*.ts", "!**/__tests__/**"],
 			"ignoreDependencies": [
-				"@ai-sdk/amazon-bedrock",
-				"@ai-sdk/baseten",
-				"@ai-sdk/deepseek",
-				"@ai-sdk/fireworks",
-				"@ai-sdk/google",
-				"@ai-sdk/google-vertex",
-				"@ai-sdk/mistral",
-				"@ai-sdk/xai",
 				"@roo-code/config-typescript",
 				"@types/mocha",
 				"@types/node-cache",
@@ -23,10 +15,8 @@
 				"@vscode/codicons",
 				"@vscode/ripgrep",
 				"esbuild-wasm",
-				"sambanova-ai-provider",
 				"tree-sitter-wasms",
-				"vscode-material-icons",
-				"zhipu-ai-provider"
+				"vscode-material-icons"
 			]
 		},
 		"webview-ui": {
