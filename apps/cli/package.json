@@ -29,7 +29,6 @@
 		"@trpc/client": "^11.8.1",
 		"@vscode/ripgrep": "^1.15.9",
 		"commander": "^12.1.0",
-		"cross-spawn": "^7.0.6",
 		"execa": "^9.5.2",
 		"fuzzysort": "^3.1.0",
 		"ink": "^6.6.0",
@@ -43,11 +42,11 @@
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "20.19.43",
 		"@types/react": "18.3.23",
-		"@vitest/coverage-v8": "4.1.0",
+		"@vitest/coverage-v8": "4.1.9",
 		"ink-testing-library": "4.0.0",
 		"rimraf": "6.0.1",
 		"tsup": "8.5.0",
-		"tsx": "4.19.4",
-		"vitest": "4.1.0"
+		"tsx": "4.22.4",
+		"vitest": "4.1.9"
 	}
 }

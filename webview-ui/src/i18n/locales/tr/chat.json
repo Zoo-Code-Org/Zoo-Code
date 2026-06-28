@@ -40,6 +40,14 @@
 		"title": "Yeni Görev Başlat",
 		"tooltip": "Yeni bir görev başlat"
 	},
+	"seeNewChanges": {
+		"title": "Yeni Değişiklikleri Gör",
+		"tooltip": "Son prompt'undan bu yana yapılan değişiklikleri göster"
+	},
+	"restoreChanges": {
+		"title": "Değişiklikleri Geri Yükle",
+		"tooltip": "Dosyaları ve görev durumunu son prompt'una geri yükle"
+	},
 	"proceedAnyways": {
 		"title": "Yine de Devam Et",
 		"tooltip": "Komut çalışırken devam et"
@@ -334,9 +342,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "GLM-5.2 desteği — en yeni GLM modeli artık sağlayıcı ayarlarında mevcut.",
-			"highlight2": "OpenCode-Go iyileştirmeleri — yerel model parametreleri, Anthropic formatı yönlendirme ve daha güvenilir yanıtlar için context-token düzeltmesi.",
-			"highlight3": "Tool-writer modu — araç tanımlarını yazmak ve sürdürmek için yeni bir uzmanlaşmış mod, artık Marketplace'te mevcut."
+			"highlight1": "Kural Yönetimi Arayüzü — Ayarlar'daki yeni Kurallar sekmesi, genel ve çalışma alanı Zoo kurallarını doğrudan editörden oluşturmanıza, silmenize ve açmanıza olanak tanır.",
+			"highlight2": "Tamamlama Değişikliği İncelemesi — bir görev tamamlandığında, yeni \"Yeni Değişiklikleri Gör\" ve \"Değişiklikleri Geri Yükle\" düğmeleri, son istemdeki değişiklikleri incelemenize ve geri almanıza olanak tanır.",
+			"highlight3": "Gevşetilmiş Diff Eşikleri — yapılandırılabilir benzerlik eşikleri, diff uygularken \"düzenleme başarısız\" hatalarını azaltır; ayarları ince ayar yapmak için yeni tanı araçları da eklenmiştir."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

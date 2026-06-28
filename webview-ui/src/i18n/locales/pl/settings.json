@@ -41,7 +41,8 @@
 		"experimental": "Eksperymentalne",
 		"language": "Język",
 		"about": "O Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Reguły"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "Nazwa może zawierać tylko litery, cyfry, łączniki i podkreślenia"
 		},
 		"footer": "Używaj poleceń slash do szybkiego dostępu do często używanych podpowiedzi i przepływów pracy."
+	},
+	"rules": {
+		"description": "Zarządzaj plikami reguł Zoo Code z globalnych i workspace’owych katalogów .roo/rules. Twórz reguły ogólne lub specyficzne dla trybu bez ręcznego przeglądania folderów konfiguracji.",
+		"workspaceRules": "Reguły workspace",
+		"globalRules": "Reguły globalne",
+		"noWorkspaceRules": "W tym projekcie nie ma jeszcze reguł.",
+		"noGlobalRules": "Nie ma jeszcze reguł globalnych.",
+		"addRule": "Dodaj regułę",
+		"editRule": "Edytuj regułę",
+		"deleteRule": "Usuń regułę",
+		"modeLabel": "Tryb: {{mode}}",
+		"deleteDialog": {
+			"title": "Usuń regułę",
+			"description": "Czy na pewno chcesz usunąć regułę \"{{name}}\"? Tej akcji nie można cofnąć.",
+			"confirm": "Usuń",
+			"cancel": "Anuluj"
+		},
+		"createDialog": {
+			"title": "Utwórz nową regułę",
+			"nameLabel": "Nazwa",
+			"namePlaceholder": "moja-nazwa-reguly",
+			"nameHint": "Tylko małe litery, cyfry, myślniki i podkreślenia. .md jest dodawane automatycznie.",
+			"scopeLabel": "Lokalizacja",
+			"kindLabel": "Typ reguły",
+			"modeLabel": "Tryb",
+			"modePlaceholder": "Wybierz tryb",
+			"create": "Utwórz",
+			"cancel": "Anuluj"
+		},
+		"scope": {
+			"global": "Globalne (dostępne we wszystkich workspace’ach)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "Reguły ogólne",
+			"mode": "Reguły specyficzne dla trybu",
+			"genericBadge": "Ogólne",
+			"modeBadge": "Tryb"
+		},
+		"validation": {
+			"nameRequired": "Nazwa jest wymagana",
+			"nameTooLong": "Nazwa musi mieć 64 znaki lub mniej",
+			"nameInvalid": "Nazwa może zawierać tylko małe litery, cyfry, myślniki i podkreślenia",
+			"modeRequired": "Tryb jest wymagany dla reguł specyficznych dla trybu"
+		},
+		"footer": "Reguły ładują wskazówki specyficzne dla trybu przed ogólnymi. Reguły globalne ładują się przed regułami workspace."
 	},
 	"prompts": {
 		"description": "Skonfiguruj podpowiedzi wsparcia używane do szybkich działań, takich jak ulepszanie podpowiedzi, wyjaśnianie kodu i rozwiązywanie problemów. Te podpowiedzi pomagają Zoo zapewnić lepsze wsparcie dla typowych zadań programistycznych."

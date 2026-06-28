@@ -60,7 +60,10 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 										}
 										return "(see following user message for image)"
 									}
-									return part.text
+									if (part.type === "text") {
+										return part.text
+									}
+									return ""
 								})
 								.join("\n") ?? ""
 					}
@@ -215,7 +218,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		]
 
 		const matcher = new TagMatcher(
-			"think",
+			["think", "thought"],
 			(chunk) =>
 				({
 					type: chunk.matched ? "reasoning" : "text",

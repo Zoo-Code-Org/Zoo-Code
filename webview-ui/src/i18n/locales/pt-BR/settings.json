@@ -41,7 +41,8 @@
 		"experimental": "Experimental",
 		"language": "Idioma",
 		"about": "Sobre",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Regras"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "O nome pode conter apenas letras, números, hífens e sublinhados"
 		},
 		"footer": "Use comandos de barra para acesso rápido a prompts e fluxos de trabalho usados com frequência."
+	},
+	"rules": {
+		"description": "Gerencie arquivos de regras do Zoo Code nos diretórios .roo/rules globais e do workspace. Crie regras gerais ou específicas de modo sem procurar manualmente em pastas de configuração.",
+		"workspaceRules": "Regras do Workspace",
+		"globalRules": "Regras Globais",
+		"noWorkspaceRules": "Ainda não há regras neste projeto.",
+		"noGlobalRules": "Ainda não há regras globais.",
+		"addRule": "Adicionar Regra",
+		"editRule": "Editar regra",
+		"deleteRule": "Excluir regra",
+		"modeLabel": "Modo: {{mode}}",
+		"deleteDialog": {
+			"title": "Excluir Regra",
+			"description": "Tem certeza de que deseja excluir a regra \"{{name}}\"? Esta ação não pode ser desfeita.",
+			"confirm": "Excluir",
+			"cancel": "Cancelar"
+		},
+		"createDialog": {
+			"title": "Criar Nova Regra",
+			"nameLabel": "Nome",
+			"namePlaceholder": "nome-da-minha-regra",
+			"nameHint": "Apenas letras minúsculas, números, hífens e sublinhados. .md é adicionado automaticamente.",
+			"scopeLabel": "Local",
+			"kindLabel": "Tipo de regra",
+			"modeLabel": "Modo",
+			"modePlaceholder": "Selecione um modo",
+			"create": "Criar",
+			"cancel": "Cancelar"
+		},
+		"scope": {
+			"global": "Global (disponível em todos os workspaces)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "Regras gerais",
+			"mode": "Regras específicas de modo",
+			"genericBadge": "Geral",
+			"modeBadge": "Modo"
+		},
+		"validation": {
+			"nameRequired": "Nome é obrigatório",
+			"nameTooLong": "O nome deve ter 64 caracteres ou menos",
+			"nameInvalid": "O nome deve conter apenas letras minúsculas, números, hífens e sublinhados",
+			"modeRequired": "Modo é obrigatório para regras específicas de modo"
+		},
+		"footer": "As regras carregam orientações específicas de modo antes das orientações gerais. Regras globais carregam antes das regras do workspace."
 	},
 	"prompts": {
 		"description": "Configure prompts de suporte usados para ações rápidas como melhorar prompts, explicar código e corrigir problemas. Esses prompts ajudam o Zoo a fornecer melhor assistência para tarefas comuns de desenvolvimento."

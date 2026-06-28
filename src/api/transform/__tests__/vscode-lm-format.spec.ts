@@ -1,4 +1,4 @@
-// npx vitest run src/api/transform/__tests__/vscode-lm-format.spec.ts
+// pnpm exec vitest run api/transform/__tests__/vscode-lm-format.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
@@ -177,6 +177,91 @@ describe("convertToVsCodeLmMessages", () => {
 		expect(result).toHaveLength(1)
 		const imagePlaceholder = result[0].content[1] as MockLanguageModelTextPart
 		expect(imagePlaceholder.value).toContain("[Image (base64): image/png not supported by VSCode LM API]")
+	})
+
+	it("should produce correct placeholder for URL image in non-tool messages", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "image",
+						source: { type: "url", url: "https://example.com/img.png" } as any,
+					},
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const imagePlaceholder = result[0].content[0] as MockLanguageModelTextPart
+		expect(imagePlaceholder.value).toContain("[Image (url): not supported by VSCode LM API]")
+	})
+
+	it("should produce correct placeholder for URL image inside tool result", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-1",
+						content: [
+							{
+								type: "image",
+								source: { type: "url", url: "https://example.com/img.png" } as any,
+							},
+						],
+					},
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const toolResult = result[0].content[0] as any
+		expect(toolResult.content[0].value).toContain("[Image (url): not supported by VSCode LM API]")
+	})
+
+	it("should produce base64 image placeholder inside tool result", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-1",
+						content: [
+							{
+								type: "image",
+								source: { type: "base64", media_type: "image/jpeg", data: "abc" },
+							},
+						],
+					},
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const toolResult = result[0].content[0] as any
+		expect(toolResult.content[0].value).toBe("[Image (base64): image/jpeg not supported by VSCode LM API]")
+	})
+
+	it("should return empty string for unknown block types inside tool result", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-1",
+						content: [{ type: "document" } as any],
+					},
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+		const toolResult = result[0].content[0] as any
+		expect(toolResult.content[0].value).toBe("")
 	})
 })
 

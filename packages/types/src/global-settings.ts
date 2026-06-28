@@ -23,6 +23,20 @@ import { languagesSchema } from "./vscode.js"
 export const DEFAULT_WRITE_DELAY_MS = 1000
 
 /**
+ * Default values for the "auto-close files Zoo opened" settings.
+ *
+ * These are defined once here and consumed by every site that reads the setting
+ * (DiffViewProvider save/revert, ClineProvider state serialization, and the
+ * UISettings checkboxes) so there is a single source of truth for the default
+ * behavior. Auto-closing edited tabs is opt-in: by default, files Zoo edits stay
+ * open in the editor (the long-standing behavior). Users who want to save
+ * context tokens by closing the edited tab after each edit can enable it.
+ */
+export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES = false
+export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED = false
+export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES = false
+
+/**
  * Default fuzzy matching threshold for the multi-search-replace diff strategy.
  * A value of 1.0 (exact match) is used by default for safety, especially when
  * auto-approval for writes is enabled. This prevents unintended changes from

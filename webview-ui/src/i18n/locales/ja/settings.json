@@ -41,7 +41,8 @@
 		"experimental": "実験的",
 		"language": "言語",
 		"about": "Zoo Codeについて",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "ルール"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "名前は文字、数字、ハイフン、アンダースコアのみを含める必要があります"
 		},
 		"footer": "スラッシュコマンドを使用して、頻繁に使用するプロンプトとワークフローにすばやくアクセスします。"
+	},
+	"rules": {
+		"description": "グローバルおよびワークスペースの .roo/rules ディレクトリから Zoo Code ルールファイルを管理します。設定フォルダーを手動で探さずに、一般ルールまたはモード固有ルールを作成できます。",
+		"workspaceRules": "ワークスペースルール",
+		"globalRules": "グローバルルール",
+		"noWorkspaceRules": "このプロジェクトにはまだルールがありません。",
+		"noGlobalRules": "グローバルルールはまだありません。",
+		"addRule": "ルールを追加",
+		"editRule": "ルールを編集",
+		"deleteRule": "ルールを削除",
+		"modeLabel": "モード: {{mode}}",
+		"deleteDialog": {
+			"title": "ルールを削除",
+			"description": "ルール「{{name}}」を削除してもよろしいですか？この操作は元に戻せません。",
+			"confirm": "削除",
+			"cancel": "キャンセル"
+		},
+		"createDialog": {
+			"title": "新しいルールを作成",
+			"nameLabel": "名前",
+			"namePlaceholder": "my-rule-name",
+			"nameHint": "小文字、数字、ハイフン、アンダースコアのみ使用できます。.md は自動的に追加されます。",
+			"scopeLabel": "場所",
+			"kindLabel": "ルールの種類",
+			"modeLabel": "モード",
+			"modePlaceholder": "モードを選択",
+			"create": "作成",
+			"cancel": "キャンセル"
+		},
+		"scope": {
+			"global": "グローバル（すべてのワークスペースで利用可能）",
+			"project": "ワークスペース"
+		},
+		"kind": {
+			"generic": "一般ルール",
+			"mode": "モード固有ルール",
+			"genericBadge": "一般",
+			"modeBadge": "モード"
+		},
+		"validation": {
+			"nameRequired": "名前は必須です",
+			"nameTooLong": "名前は64文字以内にしてください",
+			"nameInvalid": "名前には小文字、数字、ハイフン、アンダースコアのみ使用できます",
+			"modeRequired": "モード固有ルールにはモードが必要です"
+		},
+		"footer": "ルールは一般ガイダンスの前にモード固有ガイダンスを読み込みます。グローバルルールはワークスペースルールより先に読み込まれます。"
 	},
 	"prompts": {
 		"description": "プロンプトの強化、コードの説明、問題の修正などの迅速なアクションに使用されるサポートプロンプトを設定します。これらのプロンプトは、Rooが一般的な開発タスクでより良いサポートを提供するのに役立ちます。"

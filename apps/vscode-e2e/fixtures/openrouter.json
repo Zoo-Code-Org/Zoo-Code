@@ -2,6 +2,20 @@
 	"fixtures": [
 		{
 			"match": {
+				"userMessage": "openrouter-image-e2e"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Red\"}",
+						"id": "call_openrouter_image_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
 				"userMessage": "openrouter-identity-smoke"
 			},
 			"response": {

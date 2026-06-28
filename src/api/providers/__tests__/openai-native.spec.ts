@@ -1845,4 +1845,100 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 			})
 		})
 	})
+
+	describe("URL image handling", () => {
+		it("should skip URL-sourced images in formatFullConversation (only base64 emits input_image)", async () => {
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'),
+						)
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			})
+			global.fetch = mockFetch as any
+
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			const localHandler = new OpenAiNativeHandler({
+				apiModelId: "gpt-4.1",
+				openAiNativeApiKey: "test-api-key",
+			})
+
+			const urlImageMessages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Look at this:" },
+						{
+							type: "image",
+							source: { type: "url", url: "https://example.com/img.png" } as any,
+						},
+					],
+				},
+			]
+
+			const stream = localHandler.createMessage("You are a helpful assistant.", urlImageMessages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			const bodyStr = (mockFetch.mock.calls[0][1] as any).body as string
+			const parsedBody = JSON.parse(bodyStr)
+			// URL image is skipped; only the text part is in the input
+			const userMsg = parsedBody.input[0]
+			expect(userMsg.content).toEqual([{ type: "input_text", text: "Look at this:" }])
+			expect(bodyStr).not.toContain("input_image")
+		})
+
+		it("should emit input_image for base64 images in formatFullConversation", async () => {
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'),
+						)
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			})
+			global.fetch = mockFetch as any
+
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			const localHandler = new OpenAiNativeHandler({
+				apiModelId: "gpt-4.1",
+				openAiNativeApiKey: "test-api-key",
+			})
+
+			const b64ImageMessages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Look at this:" },
+						{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc123" } },
+					],
+				},
+			]
+
+			const stream = localHandler.createMessage("You are a helpful assistant.", b64ImageMessages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			const bodyStr = (mockFetch.mock.calls[0][1] as any).body as string
+			const parsedBody = JSON.parse(bodyStr)
+			const userMsg = parsedBody.input[0]
+			expect(userMsg.content).toContainEqual({
+				type: "input_image",
+				image_url: "data:image/png;base64,abc123",
+			})
+		})
+	})
 })

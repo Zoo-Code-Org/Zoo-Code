@@ -41,7 +41,8 @@
 		"experimental": "Experimenteel",
 		"language": "Taal",
 		"about": "Over Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Regels"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "Naam mag alleen letters, cijfers, streepjes en onderstrepen bevatten"
 		},
 		"footer": "Gebruik slash-commando's voor snelle toegang tot veelgebruikte prompts en workflows."
+	},
+	"rules": {
+		"description": "Beheer Zoo Code-regelbestanden vanuit globale en workspace .roo/rules-mappen. Maak algemene regels of modusspecifieke regels zonder handmatig door configuratiemappen te bladeren.",
+		"workspaceRules": "Workspace-regels",
+		"globalRules": "Globale regels",
+		"noWorkspaceRules": "Nog geen regels in dit project.",
+		"noGlobalRules": "Nog geen globale regels.",
+		"addRule": "Regel toevoegen",
+		"editRule": "Regel bewerken",
+		"deleteRule": "Regel verwijderen",
+		"modeLabel": "Modus: {{mode}}",
+		"deleteDialog": {
+			"title": "Regel verwijderen",
+			"description": "Weet je zeker dat je de regel \"{{name}}\" wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.",
+			"confirm": "Verwijderen",
+			"cancel": "Annuleren"
+		},
+		"createDialog": {
+			"title": "Nieuwe regel maken",
+			"nameLabel": "Naam",
+			"namePlaceholder": "mijn-regel-naam",
+			"nameHint": "Alleen kleine letters, cijfers, koppeltekens en underscores. .md wordt automatisch toegevoegd.",
+			"scopeLabel": "Locatie",
+			"kindLabel": "Regeltype",
+			"modeLabel": "Modus",
+			"modePlaceholder": "Selecteer een modus",
+			"create": "Maken",
+			"cancel": "Annuleren"
+		},
+		"scope": {
+			"global": "Globaal (beschikbaar in alle workspaces)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "Algemene regels",
+			"mode": "Modusspecifieke regels",
+			"genericBadge": "Algemeen",
+			"modeBadge": "Modus"
+		},
+		"validation": {
+			"nameRequired": "Naam is vereist",
+			"nameTooLong": "Naam moet 64 tekens of minder zijn",
+			"nameInvalid": "Naam mag alleen kleine letters, cijfers, koppeltekens en underscores bevatten",
+			"modeRequired": "Modus is vereist voor modusspecifieke regels"
+		},
+		"footer": "Regels laden modusspecifieke richtlijnen vóór algemene richtlijnen. Globale regels worden vóór workspace-regels geladen."
 	},
 	"prompts": {
 		"description": "Configureer ondersteuningsprompts die worden gebruikt voor snelle acties zoals het verbeteren van prompts, het uitleggen van code en het oplossen van problemen. Deze prompts helpen Zoo om betere ondersteuning te bieden voor veelvoorkomende ontwikkelingstaken."

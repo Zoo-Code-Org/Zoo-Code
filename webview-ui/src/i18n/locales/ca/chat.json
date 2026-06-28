@@ -40,6 +40,14 @@
 		"title": "Començar una nova tasca",
 		"tooltip": "Comença una nova tasca"
 	},
+	"seeNewChanges": {
+		"title": "Veure els canvis nous",
+		"tooltip": "Mostra els canvis fets des del teu últim prompt"
+	},
+	"restoreChanges": {
+		"title": "Restaurar canvis",
+		"tooltip": "Restaura els fitxers i l'estat de la tasca al teu últim prompt"
+	},
 	"proceedAnyways": {
 		"title": "Continuar de totes maneres",
 		"tooltip": "Continua mentre s'executa l'ordre"
@@ -333,9 +341,9 @@
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novetats:",
-			"highlight1": "Suport per a GLM-5.2 — l'últim model GLM ja està disponible a la configuració del proveïdor.",
-			"highlight2": "Millores d'OpenCode-Go — paràmetres de model natius, encaminament en format Anthropic i correcció de context-token per a respostes més fiables.",
-			"highlight3": "Mode tool-writer — un nou mode especialitzat per escriure i mantenir definicions d'eines, ja disponible al Marketplace."
+			"highlight1": "Interfície de gestió de regles — una nova pestanya Regles a la Configuració us permet crear, suprimir i obrir regles de Zoo globals i de l'espai de treball directament des de l'editor.",
+			"highlight2": "Revisió de canvis de finalització — quan una tasca es completa, els nous botons \"Veure canvis nous\" i \"Restaurar canvis\" us permeten inspeccionar i desfer els canvis de l'últim missatge.",
+			"highlight3": "Llindars de diff relaxats — llindars de similitud configurables redueixen els errors \"edició fallida\" en aplicar diffs, amb nous diagnòstics per ajustar la configuració."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

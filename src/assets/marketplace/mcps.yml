@@ -1214,7 +1214,7 @@ items:
     parameters:
       - name: GitHub Personal Access Token
         key: GITHUB_PERSONAL_ACCESS_TOKEN
-        placeholder: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (classic PAT from https://github.com/settings/tokens/new)
+        placeholder: "YOUR_GITHUB_PAT (classic PAT from https://github.com/settings/tokens/new)"
   - id: gitlab
     name: GitLab
     description: Enables comprehensive GitLab project management including file operations, issue tracking, merge requests,
@@ -2634,7 +2634,7 @@ items:
     parameters:
       - name: Slack Bot Token
         key: SLACK_BOT_TOKEN
-        placeholder: xoxb-your-bot-token
+        placeholder: YOUR_SLACK_BOT_TOKEN
       - name: Slack Team ID
         key: SLACK_TEAM_ID
         placeholder: T01234567

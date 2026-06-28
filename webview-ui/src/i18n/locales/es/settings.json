@@ -41,7 +41,8 @@
 		"experimental": "Experimental",
 		"language": "Idioma",
 		"about": "Acerca de Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Reglas"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "El nombre solo puede contener letras, números, guiones y guiones bajos"
 		},
 		"footer": "Usa comandos de barra para acceder rápidamente a indicaciones y flujos de trabajo frecuentemente utilizados."
+	},
+	"rules": {
+		"description": "Gestiona los archivos de reglas de Zoo Code desde los directorios .roo/rules globales y del espacio de trabajo. Crea reglas generales o específicas de modo sin navegar manualmente por carpetas de configuración.",
+		"workspaceRules": "Reglas del espacio de trabajo",
+		"globalRules": "Reglas globales",
+		"noWorkspaceRules": "Aún no hay reglas en este proyecto.",
+		"noGlobalRules": "Aún no hay reglas globales.",
+		"addRule": "Agregar regla",
+		"editRule": "Editar regla",
+		"deleteRule": "Eliminar regla",
+		"modeLabel": "Modo: {{mode}}",
+		"deleteDialog": {
+			"title": "Eliminar regla",
+			"description": "¿Seguro que quieres eliminar la regla \"{{name}}\"? Esta acción no se puede deshacer.",
+			"confirm": "Eliminar",
+			"cancel": "Cancelar"
+		},
+		"createDialog": {
+			"title": "Crear nueva regla",
+			"nameLabel": "Nombre",
+			"namePlaceholder": "mi-nombre-de-regla",
+			"nameHint": "Solo letras minúsculas, números, guiones y guiones bajos. .md se agrega automáticamente.",
+			"scopeLabel": "Ubicación",
+			"kindLabel": "Tipo de regla",
+			"modeLabel": "Modo",
+			"modePlaceholder": "Selecciona un modo",
+			"create": "Crear",
+			"cancel": "Cancelar"
+		},
+		"scope": {
+			"global": "Global (disponible en todos los espacios de trabajo)",
+			"project": "Espacio de trabajo"
+		},
+		"kind": {
+			"generic": "Reglas generales",
+			"mode": "Reglas específicas de modo",
+			"genericBadge": "General",
+			"modeBadge": "Modo"
+		},
+		"validation": {
+			"nameRequired": "El nombre es obligatorio",
+			"nameTooLong": "El nombre debe tener 64 caracteres o menos",
+			"nameInvalid": "El nombre solo puede contener letras minúsculas, números, guiones y guiones bajos",
+			"modeRequired": "El modo es obligatorio para reglas específicas de modo"
+		},
+		"footer": "Las reglas cargan las instrucciones específicas de modo antes que las generales. Las reglas globales se cargan antes que las del espacio de trabajo."
 	},
 	"prompts": {
 		"description": "Configura indicaciones de soporte que se utilizan para acciones rápidas como mejorar indicaciones, explicar código y solucionar problemas. Estas indicaciones ayudan a Zoo a brindar mejor asistencia para tareas comunes de desarrollo."

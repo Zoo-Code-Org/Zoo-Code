@@ -41,7 +41,8 @@
 		"experimental": "Eksperimental",
 		"language": "Bahasa",
 		"about": "Tentang Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Aturan"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "Nama hanya dapat berisi huruf, angka, tanda hubung, dan garis bawah"
 		},
 		"footer": "Gunakan perintah slash untuk akses cepat ke prompt dan alur kerja yang sering digunakan."
+	},
+	"rules": {
+		"description": "Kelola file aturan Zoo Code dari direktori .roo/rules global dan workspace. Buat aturan umum atau aturan khusus mode tanpa menelusuri folder konfigurasi secara manual.",
+		"workspaceRules": "Aturan Workspace",
+		"globalRules": "Aturan Global",
+		"noWorkspaceRules": "Belum ada aturan di proyek ini.",
+		"noGlobalRules": "Belum ada aturan global.",
+		"addRule": "Tambah Aturan",
+		"editRule": "Edit aturan",
+		"deleteRule": "Hapus aturan",
+		"modeLabel": "Mode: {{mode}}",
+		"deleteDialog": {
+			"title": "Hapus Aturan",
+			"description": "Yakin ingin menghapus aturan \"{{name}}\"? Tindakan ini tidak bisa dibatalkan.",
+			"confirm": "Hapus",
+			"cancel": "Batal"
+		},
+		"createDialog": {
+			"title": "Buat Aturan Baru",
+			"nameLabel": "Nama",
+			"namePlaceholder": "nama-aturan-saya",
+			"nameHint": "Hanya huruf kecil, angka, tanda hubung, dan garis bawah. .md ditambahkan otomatis.",
+			"scopeLabel": "Lokasi",
+			"kindLabel": "Jenis aturan",
+			"modeLabel": "Mode",
+			"modePlaceholder": "Pilih mode",
+			"create": "Buat",
+			"cancel": "Batal"
+		},
+		"scope": {
+			"global": "Global (tersedia di semua workspace)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "Aturan umum",
+			"mode": "Aturan khusus mode",
+			"genericBadge": "Umum",
+			"modeBadge": "Mode"
+		},
+		"validation": {
+			"nameRequired": "Nama wajib diisi",
+			"nameTooLong": "Nama harus 64 karakter atau kurang",
+			"nameInvalid": "Nama hanya boleh berisi huruf kecil, angka, tanda hubung, dan garis bawah",
+			"modeRequired": "Mode wajib untuk aturan khusus mode"
+		},
+		"footer": "Aturan memuat panduan khusus mode sebelum panduan umum. Aturan global dimuat sebelum aturan workspace."
 	},
 	"prompts": {
 		"description": "Konfigurasi support prompt yang digunakan untuk aksi cepat seperti meningkatkan prompt, menjelaskan kode, dan memperbaiki masalah. Prompt ini membantu Zoo memberikan bantuan yang lebih baik untuk tugas pengembangan umum."

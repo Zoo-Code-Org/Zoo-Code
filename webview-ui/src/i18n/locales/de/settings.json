@@ -41,7 +41,8 @@
 		"experimental": "Experimentell",
 		"language": "Sprache",
 		"about": "Über Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Regeln"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "Name darf nur Buchstaben, Zahlen, Bindestriche und Unterstriche enthalten"
 		},
 		"footer": "Nutze Slash-Befehle, um schnell auf häufig verwendete Prompts und Workflows zuzugreifen."
+	},
+	"rules": {
+		"description": "Verwalte Zoo Code-Regeldateien aus globalen und Workspace-.roo/rules-Verzeichnissen. Erstelle allgemeine oder modusspezifische Regeln, ohne manuell durch Konfigurationsordner zu navigieren.",
+		"workspaceRules": "Workspace-Regeln",
+		"globalRules": "Globale Regeln",
+		"noWorkspaceRules": "Noch keine Regeln in diesem Projekt.",
+		"noGlobalRules": "Noch keine globalen Regeln.",
+		"addRule": "Regel hinzufügen",
+		"editRule": "Regel bearbeiten",
+		"deleteRule": "Regel löschen",
+		"modeLabel": "Modus: {{mode}}",
+		"deleteDialog": {
+			"title": "Regel löschen",
+			"description": "Bist du sicher, dass du die Regel \"{{name}}\" löschen möchtest? Diese Aktion kann nicht rückgängig gemacht werden.",
+			"confirm": "Löschen",
+			"cancel": "Abbrechen"
+		},
+		"createDialog": {
+			"title": "Neue Regel erstellen",
+			"nameLabel": "Name",
+			"namePlaceholder": "mein-regel-name",
+			"nameHint": "Nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche. .md wird automatisch hinzugefügt.",
+			"scopeLabel": "Speicherort",
+			"kindLabel": "Regeltyp",
+			"modeLabel": "Modus",
+			"modePlaceholder": "Modus auswählen",
+			"create": "Erstellen",
+			"cancel": "Abbrechen"
+		},
+		"scope": {
+			"global": "Global (in allen Workspaces verfügbar)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "Allgemeine Regeln",
+			"mode": "Modusspezifische Regeln",
+			"genericBadge": "Allgemein",
+			"modeBadge": "Modus"
+		},
+		"validation": {
+			"nameRequired": "Name ist erforderlich",
+			"nameTooLong": "Name muss 64 Zeichen oder weniger haben",
+			"nameInvalid": "Name darf nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche enthalten",
+			"modeRequired": "Für modusspezifische Regeln ist ein Modus erforderlich"
+		},
+		"footer": "Regeln laden modusspezifische Anweisungen vor allgemeinen Anweisungen. Globale Regeln werden vor Workspace-Regeln geladen."
 	},
 	"prompts": {
 		"description": "Konfiguriere Support-Prompts, die für schnelle Aktionen wie das Verbessern von Prompts, das Erklären von Code und das Beheben von Problemen verwendet werden. Diese Prompts helfen Zoo dabei, bessere Unterstützung für häufige Entwicklungsaufgaben zu bieten."

@@ -40,6 +40,14 @@
 		"title": "Neue Aufgabe starten",
 		"tooltip": "Beginne eine neue Aufgabe"
 	},
+	"seeNewChanges": {
+		"title": "Neue Änderungen ansehen",
+		"tooltip": "Zeige Änderungen seit deinem letzten Prompt"
+	},
+	"restoreChanges": {
+		"title": "Änderungen wiederherstellen",
+		"tooltip": "Stelle Dateien und Aufgabenstatus auf deinen letzten Prompt zurück"
+	},
 	"proceedAnyways": {
 		"title": "Trotzdem fortfahren",
 		"tooltip": "Während der Befehlsausführung fortfahren"
@@ -333,9 +341,9 @@
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
 			"heading": "Was ist neu:",
-			"highlight1": "GLM-5.2-Unterstützung — das neueste GLM-Modell ist jetzt in deinen Anbieter-Einstellungen verfügbar.",
-			"highlight2": "OpenCode-Go-Verbesserungen — native Modellparameter, Anthropic-Format-Routing und ein Context-Token-Fix für zuverlässigere Antworten.",
-			"highlight3": "Tool-Writer-Modus — ein neuer spezieller Modus zum Schreiben und Pflegen von Tool-Definitionen, jetzt im Marketplace verfügbar."
+			"highlight1": "Regelverwaltungs-UI — ein neuer Reiter „Regeln“ in den Einstellungen ermöglicht es, globale und arbeitsbereichsspezifische Zoo-Regeln direkt im Editor zu erstellen, zu löschen und zu öffnen.",
+			"highlight2": "Überprüfung von Abschlussänderungen — nach Abschluss einer Aufgabe ermöglichen neue Schaltflächen „Neue Änderungen anzeigen“ und „Änderungen wiederherstellen“, die Änderungen der letzten Eingabe zu prüfen und rückgängig zu machen.",
+			"highlight3": "Entspannte Diff-Schwellenwerte — konfigurierbare Ähnlichkeitsschwellen reduzieren „Bearbeitung fehlgeschlagen“-Fehler beim Anwenden von Diffs, mit neuen Diagnosen zur Feinabstimmung."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",

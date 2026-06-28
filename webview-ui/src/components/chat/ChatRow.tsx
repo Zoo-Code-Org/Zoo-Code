@@ -11,6 +11,7 @@ import type {
 	ClineApiReqInfo,
 	ClineAskUseMcpServer,
 	ClineSayTool,
+	CompletionCheckpoint,
 } from "@roo-code/types"
 
 import { Mode } from "@roo/modes"
@@ -75,6 +76,7 @@ import {
 import { cn } from "@/lib/utils"
 import { PathTooltip } from "../ui/PathTooltip"
 import { OpenMarkdownPreviewButton } from "./OpenMarkdownPreviewButton"
+import { SeeNewChangesButtons } from "./SeeNewChangesButtons"
 
 // Helper function to get previous todos before a specific message
 function getPreviousTodos(messages: ClineMessage[], currentMessageTs: number): any[] {
@@ -124,6 +126,7 @@ interface ChatRowProps {
 	isFollowUpAutoApprovalPaused?: boolean
 	editable?: boolean
 	hasCheckpoint?: boolean
+	completionCheckpoint?: CompletionCheckpoint
 	onJumpToPreviousCheckpoint?: () => void
 }
 
@@ -178,12 +181,21 @@ export const ChatRowContent = ({
 	onBatchFileResponse,
 	isFollowUpAnswered,
 	isFollowUpAutoApprovalPaused,
+	completionCheckpoint,
 	onJumpToPreviousCheckpoint,
 }: ChatRowContentProps) => {
 	const { t, i18n } = useTranslation()
 
-	const { mcpServers, alwaysAllowMcp, currentCheckpoint, mode, apiConfiguration, clineMessages, currentTaskItem } =
-		useExtensionState()
+	const {
+		mcpServers,
+		alwaysAllowMcp,
+		currentCheckpoint,
+		mode,
+		apiConfiguration,
+		clineMessages,
+		currentTaskItem,
+		enableCheckpoints,
+	} = useExtensionState()
 	const { info: model } = useSelectedModel(apiConfiguration)
 	const [isEditing, setIsEditing] = useState(false)
 	const [editedContent, setEditedContent] = useState("")
@@ -1331,6 +1343,9 @@ export const ChatRowContent = ({
 							</div>
 							<div className="border-l border-green-600/30 ml-2 pl-4 pb-1">
 								<Markdown markdown={message.text} />
+								{!message.partial && enableCheckpoints !== false && completionCheckpoint ? (
+									<SeeNewChangesButtons key={completionCheckpoint.ts} />
+								) : null}
 							</div>
 						</div>
 					)
@@ -1661,6 +1676,9 @@ export const ChatRowContent = ({
 								</div>
 								<div style={{ color: "var(--vscode-charts-green)", paddingTop: 10 }}>
 									<Markdown markdown={message.text} partial={message.partial} />
+									{!message.partial && enableCheckpoints !== false && completionCheckpoint ? (
+										<SeeNewChangesButtons key={completionCheckpoint.ts} />
+									) : null}
 								</div>
 							</div>
 						)

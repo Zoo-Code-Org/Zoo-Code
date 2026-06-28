@@ -72,11 +72,19 @@ export function convertToVsCodeLmMessages(
 								? [new vscode.LanguageModelTextPart(toolMessage.content)]
 								: (toolMessage.content?.map((part) => {
 										if (part.type === "image") {
+											if (part.source.type === "base64") {
+												return new vscode.LanguageModelTextPart(
+													`[Image (base64): ${part.source.media_type} not supported by VSCode LM API]`,
+												)
+											}
 											return new vscode.LanguageModelTextPart(
-												`[Image (${part.source?.type || "Unknown source-type"}): ${part.source?.media_type || "unknown media-type"} not supported by VSCode LM API]`,
+												`[Image (${part.source.type}): not supported by VSCode LM API]`,
 											)
 										}
-										return new vscode.LanguageModelTextPart(part.text)
+										if (part.type === "text") {
+											return new vscode.LanguageModelTextPart(part.text)
+										}
+										return new vscode.LanguageModelTextPart("")
 									}) ?? [new vscode.LanguageModelTextPart("")])
 
 						return new vscode.LanguageModelToolResultPart(toolMessage.tool_use_id, toolContentParts)
@@ -85,8 +93,13 @@ export function convertToVsCodeLmMessages(
 					// Convert non-tool messages to TextParts after tool messages
 					...nonToolMessages.map((part) => {
 						if (part.type === "image") {
+							if (part.source.type === "base64") {
+								return new vscode.LanguageModelTextPart(
+									`[Image (base64): ${part.source.media_type} not supported by VSCode LM API]`,
+								)
+							}
 							return new vscode.LanguageModelTextPart(
-								`[Image (${part.source?.type || "Unknown source-type"}): ${part.source?.media_type || "unknown media-type"} not supported by VSCode LM API]`,
+								`[Image (${part.source.type}): not supported by VSCode LM API]`,
 							)
 						}
 						return new vscode.LanguageModelTextPart(part.text)

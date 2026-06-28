@@ -41,7 +41,8 @@
 		"experimental": "Experimental",
 		"language": "Idioma",
 		"about": "Sobre Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Regles"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "El nom ha de contenir només lletres, números, guions i subratllats"
 		},
 		"footer": "Utilitza comandes de barra per accedir ràpidament a indicacions i fluxos de treball utilitzats freqüentment."
+	},
+	"rules": {
+		"description": "Gestiona els fitxers de regles de Zoo Code des dels directoris .roo/rules globals i de l’espai de treball. Crea regles generals o específiques de mode sense haver de navegar manualment per carpetes de configuració.",
+		"workspaceRules": "Regles de l’espai de treball",
+		"globalRules": "Regles globals",
+		"noWorkspaceRules": "Encara no hi ha regles en aquest projecte.",
+		"noGlobalRules": "Encara no hi ha regles globals.",
+		"addRule": "Afegeix una regla",
+		"editRule": "Edita la regla",
+		"deleteRule": "Suprimeix la regla",
+		"modeLabel": "Mode: {{mode}}",
+		"deleteDialog": {
+			"title": "Suprimeix la regla",
+			"description": "Segur que vols suprimir la regla \"{{name}}\"? Aquesta acció no es pot desfer.",
+			"confirm": "Suprimeix",
+			"cancel": "Cancel·la"
+		},
+		"createDialog": {
+			"title": "Crea una regla nova",
+			"nameLabel": "Nom",
+			"namePlaceholder": "nom-de-la-meva-regla",
+			"nameHint": "Només lletres minúscules, números, guions i guions baixos. .md s’afegeix automàticament.",
+			"scopeLabel": "Ubicació",
+			"kindLabel": "Tipus de regla",
+			"modeLabel": "Mode",
+			"modePlaceholder": "Selecciona un mode",
+			"create": "Crea",
+			"cancel": "Cancel·la"
+		},
+		"scope": {
+			"global": "Global (disponible en tots els espais de treball)",
+			"project": "Espai de treball"
+		},
+		"kind": {
+			"generic": "Regles generals",
+			"mode": "Regles específiques de mode",
+			"genericBadge": "General",
+			"modeBadge": "Mode"
+		},
+		"validation": {
+			"nameRequired": "El nom és obligatori",
+			"nameTooLong": "El nom ha de tenir 64 caràcters o menys",
+			"nameInvalid": "El nom només pot contenir lletres minúscules, números, guions i guions baixos",
+			"modeRequired": "El mode és obligatori per a les regles específiques de mode"
+		},
+		"footer": "Les regles carreguen la guia específica de mode abans de la guia general. Les regles globals es carreguen abans que les regles de l’espai de treball."
 	},
 	"prompts": {
 		"description": "Configura les indicacions de suport utilitzades per a accions ràpides com millorar indicacions, explicar codi i solucionar problemes. Aquestes indicacions ajuden Zoo a proporcionar millor assistència per a tasques comunes de desenvolupament."

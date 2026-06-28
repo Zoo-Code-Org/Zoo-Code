@@ -72,5 +72,31 @@ describe("export-markdown", () => {
 			const block = { type: "unknown_type" as const } as any
 			expect(formatContentBlockToMarkdown(block)).toBe("[Unexpected content type: unknown_type]")
 		})
+
+		it("should format document blocks", () => {
+			const block = {
+				type: "document",
+				source: { type: "base64", media_type: "application/pdf", data: "abc" } as const,
+			} satisfies ExtendedContentBlock
+			expect(formatContentBlockToMarkdown(block)).toBe("[Document]")
+		})
+
+		it("should format search_result blocks", () => {
+			const block = {
+				type: "search_result",
+				source: "https://example.com",
+				title: "Example",
+				content: [{ type: "text", text: "result text" }],
+			} satisfies ExtendedContentBlock
+			expect(formatContentBlockToMarkdown(block)).toBe("[Search Result]")
+		})
+
+		it("should format tool_reference blocks", () => {
+			const block = {
+				type: "tool_reference",
+				tool_name: "read_file",
+			} satisfies ExtendedContentBlock
+			expect(formatContentBlockToMarkdown(block)).toBe("[Tool Reference]")
+		})
 	})
 })

@@ -69,6 +69,26 @@ describe("convertToR1Format", () => {
 		expect(convertToR1Format(input)).toEqual(expected)
 	})
 
+	it("should skip non-base64 images (e.g. URL-sourced)", () => {
+		const input: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "Look at this:" },
+					{
+						type: "image",
+						source: { type: "url", url: "https://example.com/img.png" } as any,
+					},
+				],
+			},
+		]
+
+		const result = convertToR1Format(input)
+		// URL image is skipped; only the text part survives
+		expect(result).toHaveLength(1)
+		expect(result[0]).toEqual({ role: "user", content: "Look at this:" })
+	})
+
 	it("should handle mixed text and image content", () => {
 		const input: Anthropic.Messages.MessageParam[] = [
 			{

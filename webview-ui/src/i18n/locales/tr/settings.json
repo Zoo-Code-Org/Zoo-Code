@@ -41,7 +41,8 @@
 		"experimental": "Deneysel",
 		"language": "Dil",
 		"about": "Zoo Code Hakkında",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Kurallar"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "Ad yalnızca harfleri, sayıları, tirelemeyi ve alt çizgiyi içerebilir"
 		},
 		"footer": "Sık kullanılan komutlara ve iş akışlarına hızlı erişim için eğik çizgi komutlarını kullanın."
+	},
+	"rules": {
+		"description": "Genel ve workspace .roo/rules dizinlerinden Zoo Code kural dosyalarını yönet. Yapılandırma klasörlerinde manuel gezinmeden genel kurallar veya moda özel kurallar oluştur.",
+		"workspaceRules": "Workspace Kuralları",
+		"globalRules": "Genel Kurallar",
+		"noWorkspaceRules": "Bu projede henüz kural yok.",
+		"noGlobalRules": "Henüz genel kural yok.",
+		"addRule": "Kural Ekle",
+		"editRule": "Kuralı düzenle",
+		"deleteRule": "Kuralı sil",
+		"modeLabel": "Mod: {{mode}}",
+		"deleteDialog": {
+			"title": "Kuralı Sil",
+			"description": "\"{{name}}\" kuralını silmek istediğinden emin misin? Bu işlem geri alınamaz.",
+			"confirm": "Sil",
+			"cancel": "İptal"
+		},
+		"createDialog": {
+			"title": "Yeni Kural Oluştur",
+			"nameLabel": "Ad",
+			"namePlaceholder": "kural-adim",
+			"nameHint": "Yalnızca küçük harfler, sayılar, kısa çizgiler ve alt çizgiler. .md otomatik eklenir.",
+			"scopeLabel": "Konum",
+			"kindLabel": "Kural türü",
+			"modeLabel": "Mod",
+			"modePlaceholder": "Bir mod seç",
+			"create": "Oluştur",
+			"cancel": "İptal"
+		},
+		"scope": {
+			"global": "Genel (tüm workspace’lerde kullanılabilir)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "Genel kurallar",
+			"mode": "Moda özel kurallar",
+			"genericBadge": "Genel",
+			"modeBadge": "Mod"
+		},
+		"validation": {
+			"nameRequired": "Ad zorunludur",
+			"nameTooLong": "Ad 64 karakter veya daha kısa olmalıdır",
+			"nameInvalid": "Ad yalnızca küçük harfler, sayılar, kısa çizgiler ve alt çizgiler içerebilir",
+			"modeRequired": "Moda özel kurallar için mod zorunludur"
+		},
+		"footer": "Kurallar, genel rehberlikten önce moda özel rehberliği yükler. Genel kurallar workspace kurallarından önce yüklenir."
 	},
 	"prompts": {
 		"description": "Prompt geliştirme, kod açıklama ve sorun çözme gibi hızlı eylemler için kullanılan destek promptlarını yapılandırın. Bu promptlar, Zoo'nun yaygın geliştirme görevleri için daha iyi destek sağlamasına yardımcı olur."

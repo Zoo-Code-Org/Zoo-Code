@@ -158,30 +158,36 @@ export class TaskHistoryStore {
 	 * updates the in-memory Map, and schedules a debounced index write.
 	 */
 	async upsert(item: HistoryItem): Promise<HistoryItem[]> {
-		return this.withLock(async () => {
-			const existing = this.cache.get(item.id)
+		return this.withLock(() => this._upsertUnlocked(item))
+	}
 
-			// Merge: preserve existing metadata unless explicitly overwritten
-			const merged = existing ? { ...existing, ...item } : item
+	/**
+	 * Upsert body executed without acquiring the lock.
+	 * Must only be called from within a `withLock` callback.
+	 */
+	private async _upsertUnlocked(item: HistoryItem): Promise<HistoryItem[]> {
+		const existing = this.cache.get(item.id)
 
-			// Write per-task file (source of truth)
-			await this.writeTaskFile(merged)
+		// Merge: preserve existing metadata unless explicitly overwritten
+		const merged = existing ? { ...existing, ...item } : item
 
-			// Update in-memory cache
-			this.cache.set(merged.id, merged)
+		// Write per-task file (source of truth)
+		await this.writeTaskFile(merged)
 
-			// Schedule debounced index write
-			this.scheduleIndexWrite()
+		// Update in-memory cache
+		this.cache.set(merged.id, merged)
 
-			const all = this.getAll()
+		// Schedule debounced index write
+		this.scheduleIndexWrite()
 
-			// Call onWrite callback inside the lock for serialized write-through
-			if (this.onWrite) {
-				await this.onWrite(all)
-			}
+		const all = this.getAll()
 
-			return all
-		})
+		// Call onWrite callback inside the lock for serialized write-through
+		if (this.onWrite) {
+			await this.onWrite(all)
+		}
+
+		return all
 	}
 
 	/**
@@ -527,6 +533,36 @@ export class TaskHistoryStore {
 			}
 			this.startPeriodicReconciliation()
 		}, TaskHistoryStore.RECONCILE_INTERVAL_MS)
+	}
+
+	// ────────────────────────────── Atomic read-modify-write ──────────────────────────────
+
+	/**
+	 * Read a HistoryItem from the in-memory cache and write back an updated version,
+	 * all within a single lock acquisition so no concurrent writer can interleave
+	 * between the read and the write.
+	 *
+	 * The `updater` receives the current cached item and must return the new item
+	 * synchronously. It must not perform I/O or acquire any other lock.
+	 *
+	 * @throws If the task ID is not present in the cache.
+	 */
+	public atomicReadAndUpdate(taskId: string, updater: (current: HistoryItem) => HistoryItem): Promise<HistoryItem[]> {
+		return this.withLock(async () => {
+			const current = this.cache.get(taskId)
+			if (!current) {
+				throw new Error(`[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`)
+			}
+			// Deep-copy so a mutating updater cannot alter cached state before persistence.
+			const snapshot = structuredClone(current)
+			const updated = updater(snapshot)
+			if (updated.id !== taskId) {
+				throw new Error(
+					`[TaskHistoryStore] atomicReadAndUpdate: updater changed task id from ${taskId} to ${updated.id}`,
+				)
+			}
+			return this._upsertUnlocked(updated)
+		})
 	}
 
 	// ────────────────────────────── Private: Write lock ──────────────────────────────
