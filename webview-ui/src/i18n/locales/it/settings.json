@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Tentativi illimitati abilitati (procedi automaticamente). La finestra di dialogo non verrà mai visualizzata.",
 			"warning": "⚠️ L'impostazione a 0 consente tentativi illimitati che possono consumare un notevole utilizzo dell'API"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Soglia di avviso ripetizione (soft)",
+			"description": "Dopo questo numero di chiamate identiche consecutive allo strumento, lo strumento viene bloccato e all'IA viene chiesto di giustificare il nuovo tentativo, senza coinvolgerti. Imposta a 0 per disabilitare gli avvisi soft."
+		},
 		"reasoningEffort": {
 			"label": "Sforzo di ragionamento del modello",
 			"none": "Nessuno",

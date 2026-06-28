@@ -47,7 +47,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			},
 			recordToolUsage: vi.fn(),
 			toolRepetitionDetector: {
-				check: vi.fn().mockReturnValue({ allowExecution: true }),
+				check: vi.fn().mockReturnValue({ action: "allow" }),
 			},
 			providerRef: {
 				deref: () => ({

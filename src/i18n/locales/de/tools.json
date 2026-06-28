@@ -7,6 +7,7 @@
 		"imageWithSize": "Bilddatei ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo scheint in einer Schleife festzustecken und versucht wiederholt dieselbe Aktion ({{toolName}}). Dies könnte auf ein Problem mit der aktuellen Strategie hindeuten. Überlege dir, die Aufgabe umzuformulieren, genauere Anweisungen zu geben oder Zoo zu einem anderen Ansatz zu führen.",
+	"toolRepetitionSoftBlock": "Das Tool '{{toolName}}' wurde blockiert, da es soeben mit identischen Parametern aufgerufen wurde. Den exakt gleichen Aufruf zu wiederholen führt wahrscheinlich nicht zu einem anderen Ergebnis. Wenn du es wirklich erneut aufrufen musst, erkläre zuerst, warum der wiederholte Aufruf notwendig ist und was du dieses Mal anders erwartest. Andernfalls versuche einen anderen Ansatz.",
 	"unknownToolError": "Zoo hat versucht, ein unbekanntes Tool zu verwenden: \"{{toolName}}\". Wiederhole Versuch...",
 	"codebaseSearch": {
 		"approval": "Suche nach '{{query}}' im Codebase..."

@@ -7,6 +7,7 @@
 		"imageWithSize": "Görüntü dosyası ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo bir döngüye takılmış gibi görünüyor, aynı eylemi ({{toolName}}) tekrar tekrar deniyor. Bu, mevcut stratejisinde bir sorun olduğunu gösterebilir. Görevi yeniden ifade etmeyi, daha spesifik talimatlar vermeyi veya onu farklı bir yaklaşıma yönlendirmeyi düşünün.",
+	"toolRepetitionSoftBlock": "'{{toolName}}' aracı, az önce aynı parametrelerle çağrıldığı için engellendi. Tamamen aynı çağrıyı tekrarlamak büyük olasılıkla farklı bir sonuç vermeyecektir. Onu gerçekten tekrar çağırmanız gerekiyorsa, önce tekrarlanan çağrının neden gerekli olduğunu ve bu sefer neyin farklı olmasını beklediğinizi açıklayın. Aksi takdirde farklı bir yaklaşım deneyin.",
 	"unknownToolError": "Zoo bilinmeyen bir araç kullanmaya çalıştı: \"{{toolName}}\". Yeniden deneniyor...",
 	"codebaseSearch": {
 		"approval": "Kod tabanında '{{query}}' aranıyor..."

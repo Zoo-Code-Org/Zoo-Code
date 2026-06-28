@@ -630,6 +630,10 @@
 			"unlimitedDescription": "已啟用無限重試（自動繼續）。對話方塊將永遠不會出現。",
 			"warning": "⚠️ 設定為 0 允許無限重試，這可能會消耗大量 API 使用量"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "重複軟警告閾值",
+			"description": "在連續這麼多次相同的工具呼叫後，該工具將被封鎖，並要求 AI 說明重試理由——無需你參與。設定為 0 可停用軟警告。"
+		},
 		"reasoningEffort": {
 			"label": "模型推理強度",
 			"none": "無",

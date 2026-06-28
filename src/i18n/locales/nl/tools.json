@@ -7,6 +7,7 @@
 		"imageWithSize": "Afbeeldingsbestand ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo lijkt vast te zitten in een lus, waarbij hij herhaaldelijk dezelfde actie ({{toolName}}) probeert. Dit kan duiden op een probleem met de huidige strategie. Overweeg de taak te herformuleren, specifiekere instructies te geven of Zoo naar een andere aanpak te leiden.",
+	"toolRepetitionSoftBlock": "De tool '{{toolName}}' is geblokkeerd omdat deze zojuist met identieke parameters is aangeroepen. Exact dezelfde aanroep herhalen levert waarschijnlijk geen ander resultaat op. Als je deze echt opnieuw moet aanroepen, leg dan eerst uit waarom de herhaalde aanroep nodig is en wat je deze keer anders verwacht. Probeer anders een andere aanpak.",
 	"unknownToolError": "Zoo probeerde een onbekende tool te gebruiken: \"{{toolName}}\". Opnieuw proberen...",
 	"codebaseSearch": {
 		"approval": "Zoeken naar '{{query}}' in codebase..."

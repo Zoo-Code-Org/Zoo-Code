@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Đã bật thử lại không giới hạn (tự động tiếp tục). Hộp thoại sẽ không bao giờ xuất hiện.",
 			"warning": "⚠️ Đặt thành 0 cho phép thử lại không giới hạn, điều này có thể tiêu tốn mức sử dụng API đáng kể"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Ngưỡng cảnh báo mềm khi lặp lại",
+			"description": "Sau số lần gọi công cụ giống hệt liên tiếp này, công cụ sẽ bị chặn và AI được yêu cầu giải thích lý do thử lại — mà không cần bạn tham gia. Đặt thành 0 để tắt cảnh báo mềm."
+		},
 		"reasoningEffort": {
 			"label": "Nỗ lực suy luận của mô hình",
 			"none": "Không",

@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Réessais illimités activés (poursuite automatique). La boîte de dialogue n'apparaîtra jamais.",
 			"warning": "⚠️ Mettre à 0 autorise des réessais illimités, ce qui peut consommer une utilisation importante de l'API"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Seuil d'avertissement de répétition (souple)",
+			"description": "Après ce nombre d'appels d'outil identiques consécutifs, l'outil est bloqué et il est demandé à l'IA de justifier la nouvelle tentative, sans t'impliquer. Mets à 0 pour désactiver les avertissements souples."
+		},
 		"reasoningEffort": {
 			"label": "Effort de raisonnement du modèle",
 			"none": "Aucun",

@@ -686,9 +686,13 @@
 		},
 		"consecutiveMistakeLimit": {
 			"label": "Error & Repetition Limit",
-			"description": "Number of consecutive errors or repeated actions before showing 'Zoo is having trouble' dialog. Set to 0 to disable this safety mechanism (it will never trigger).",
+			"description": "Number of consecutive errors or repeated identical tool calls before showing 'Zoo is having trouble' dialog. Set to 0 to disable this safety mechanism (it will never trigger).",
 			"unlimitedDescription": "Unlimited retries enabled (auto-proceed). The dialog will never appear.",
 			"warning": "⚠️ Setting to 0 allows unlimited retries which may consume significant API usage"
+		},
+		"toolRepetitionSoftLimit": {
+			"label": "Repetition Soft Warning Threshold",
+			"description": "After this many identical consecutive tool calls, the tool is blocked and the AI is asked to justify retrying — without involving you. Set to 0 to disable soft warnings."
 		},
 		"reasoningEffort": {
 			"label": "Model Reasoning Effort",

@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Tentativas ilimitadas ativadas (prosseguimento automático). O diálogo nunca aparecerá.",
 			"warning": "⚠️ Definir como 0 permite tentativas ilimitadas, o que pode consumir um uso significativo da API"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Limite de aviso suave de repetição",
+			"description": "Após esse número de chamadas de ferramenta idênticas consecutivas, a ferramenta é bloqueada e a IA é solicitada a justificar a nova tentativa, sem envolver você. Defina como 0 para desativar os avisos suaves."
+		},
 		"reasoningEffort": {
 			"label": "Esforço de raciocínio do modelo",
 			"none": "Nenhum",

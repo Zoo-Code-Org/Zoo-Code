@@ -7,6 +7,7 @@
 		"imageWithSize": "Tệp hình ảnh ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo dường như đang bị mắc kẹt trong một vòng lặp, liên tục cố gắng thực hiện cùng một hành động ({{toolName}}). Điều này có thể cho thấy vấn đề với chiến lược hiện tại. Hãy cân nhắc việc diễn đạt lại nhiệm vụ, cung cấp hướng dẫn cụ thể hơn, hoặc hướng Zoo theo một cách tiếp cận khác.",
+	"toolRepetitionSoftBlock": "Công cụ '{{toolName}}' đã bị chặn vì vừa được gọi với các tham số giống hệt nhau. Lặp lại cùng một lệnh gọi y hệt khó có thể tạo ra kết quả khác. Nếu bạn thực sự cần gọi lại, trước tiên hãy giải thích tại sao việc gọi lại là cần thiết và bạn mong đợi điều gì khác lần này. Nếu không, hãy thử một cách tiếp cận khác.",
 	"unknownToolError": "Zoo đã cố gắng sử dụng một công cụ không xác định: \"{{toolName}}\". Đang thử lại...",
 	"codebaseSearch": {
 		"approval": "Đang tìm kiếm '{{query}}' trong cơ sở mã..."

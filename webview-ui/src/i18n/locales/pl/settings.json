@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Włączono nieograniczone próby (automatyczne kontynuowanie). Okno dialogowe nigdy się nie pojawi.",
 			"warning": "⚠️ Ustawienie na 0 pozwala na nieograniczone próby, co może zużyć znaczną ilość API"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Próg miękkiego ostrzeżenia o powtórzeniach",
+			"description": "Po tylu identycznych kolejnych wywołaniach narzędzia narzędzie zostaje zablokowane, a AI jest proszona o uzasadnienie ponownej próby — bez angażowania Ciebie. Ustaw 0, aby wyłączyć miękkie ostrzeżenia."
+		},
 		"reasoningEffort": {
 			"label": "Wysiłek rozumowania modelu",
 			"none": "Brak",

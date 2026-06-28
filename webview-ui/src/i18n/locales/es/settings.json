@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Reintentos ilimitados habilitados (proceder automáticamente). El diálogo nunca aparecerá.",
 			"warning": "⚠️ Establecer en 0 permite reintentos ilimitados que pueden consumir un uso significativo de la API"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Umbral de advertencia suave de repetición",
+			"description": "Después de esta cantidad de llamadas idénticas consecutivas a la herramienta, la herramienta se bloquea y se pide a la IA que justifique el reintento, sin involucrarte. Establece en 0 para desactivar las advertencias suaves."
+		},
 		"reasoningEffort": {
 			"label": "Esfuerzo de razonamiento del modelo",
 			"none": "Ninguno",

@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Reintents il·limitats habilitats (procediment automàtic). El diàleg no apareixerà mai.",
 			"warning": "⚠️ Establir a 0 permet reintents il·limitats que poden consumir un ús significatiu de l'API"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Llindar d'avís suau de repetició",
+			"description": "Després d'aquest nombre de crides idèntiques consecutives a l'eina, l'eina es bloqueja i es demana a la IA que justifiqui el reintent, sense implicar-te. Estableix-ho a 0 per desactivar els avisos suaus."
+		},
 		"reasoningEffort": {
 			"label": "Esforç de raonament del model",
 			"none": "Cap",

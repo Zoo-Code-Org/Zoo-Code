@@ -393,6 +393,44 @@ describe("Cline", () => {
 			expect(cline.consecutiveMistakeLimit).toBe(5)
 		})
 
+		it("should default tool repetition soft limit when not provided", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+		})
+
+		it("should respect provided tool repetition soft limit", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				toolRepetitionSoftLimit: 3,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.toolRepetitionSoftLimit).toBe(3)
+		})
+
+		it("should derive the tool repetition hard stop from consecutiveMistakeLimit", () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 7,
+				toolRepetitionSoftLimit: 2,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(cline.consecutiveMistakeLimit).toBe(7)
+			expect(cline.toolRepetitionSoftLimit).toBe(2)
+			expect(cline.toolRepetitionDetector).toBeDefined()
+		})
+
 		it("should require either task or historyItem", () => {
 			expect(() => {
 				new Task({ provider: mockProvider, apiConfiguration: mockApiConfig })

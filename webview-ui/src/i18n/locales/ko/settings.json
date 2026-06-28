@@ -603,6 +603,10 @@
 			"unlimitedDescription": "무제한 재시도 활성화 (자동 진행). 대화 상자가 나타나지 않습니다.",
 			"warning": "⚠️ 0으로 설정하면 무제한 재시도가 허용되어 상당한 API 사용량이 발생할 수 있습니다"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "반복 소프트 경고 임계값",
+			"description": "동일한 연속 도구 호출이 이 횟수에 도달하면 도구가 차단되고 사용자를 개입시키지 않고 AI에게 재시도 사유를 묻습니다. 0으로 설정하면 소프트 경고가 비활성화됩니다."
+		},
 		"reasoningEffort": {
 			"label": "모델 추론 노력",
 			"none": "없음",

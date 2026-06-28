@@ -629,8 +629,17 @@ export async function presentAssistantMessage(cline: Task) {
 				// block directly.
 				const repetitionCheck = cline.toolRepetitionDetector.check(block)
 
-				// If execution is not allowed, notify user and break.
-				if (!repetitionCheck.allowExecution && repetitionCheck.askUser) {
+				// Soft block: do NOT involve the user. Return an error to the
+				// model asking it to justify repeating the call (or try a
+				// different approach). The detector keeps counting so continued
+				// repetition will eventually escalate to a hard block.
+				if (repetitionCheck.action === "soft_block") {
+					pushToolResult(formatResponse.toolError(repetitionCheck.message))
+					break
+				}
+
+				// Hard block: stop and ask the user for guidance.
+				if (repetitionCheck.action === "hard_block") {
 					// Handle repetition similar to mistake_limit_reached pattern.
 					const { response, text, images } = await cline.ask(
 						repetitionCheck.askUser.messageKey as ClineAsk,

@@ -7,6 +7,7 @@
 		"imageWithSize": "File gambar ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo tampaknya terjebak dalam loop, mencoba aksi yang sama ({{toolName}}) berulang kali. Ini mungkin menunjukkan masalah dengan strategi saat ini. Pertimbangkan untuk mengubah frasa tugas, memberikan instruksi yang lebih spesifik, atau mengarahkannya ke pendekatan yang berbeda.",
+	"toolRepetitionSoftBlock": "Alat '{{toolName}}' diblokir karena baru saja dipanggil dengan parameter yang identik. Mengulangi panggilan yang sama persis kemungkinan tidak akan menghasilkan hasil yang berbeda. Jika kamu benar-benar perlu memanggilnya lagi, jelaskan terlebih dahulu mengapa panggilan berulang diperlukan dan apa yang kamu harapkan berbeda kali ini. Jika tidak, coba pendekatan yang berbeda.",
 	"unknownToolError": "Zoo mencoba menggunakan alat yang tidak dikenal: \"{{toolName}}\". Mencoba lagi...",
 	"codebaseSearch": {
 		"approval": "Mencari '{{query}}' di codebase..."

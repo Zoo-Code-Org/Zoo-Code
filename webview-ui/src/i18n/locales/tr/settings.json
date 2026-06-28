@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Sınırsız yeniden deneme etkin (otomatik devam et). Diyalog asla görünmeyecek.",
 			"warning": "⚠️ 0'a ayarlamak, önemli API kullanımına neden olabilecek sınırsız yeniden denemeye izin verir"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Tekrar Yumuşak Uyarı Eşiği",
+			"description": "Bu kadar aynı ardışık araç çağrısından sonra araç engellenir ve sizi dahil etmeden yapay zekadan yeniden denemeyi gerekçelendirmesi istenir. Yumuşak uyarıları devre dışı bırakmak için 0 olarak ayarlayın."
+		},
 		"reasoningEffort": {
 			"label": "Model Akıl Yürütme Çabası",
 			"none": "Yok",

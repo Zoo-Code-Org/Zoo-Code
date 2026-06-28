@@ -7,6 +7,7 @@
 		"imageWithSize": "圖片檔案 ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo 似乎陷入循環，反覆嘗試同一操作 ({{toolName}})。這可能表明目前策略存在問題。請考慮重新描述工作、提供更具體的指示或引導其嘗試不同的方法。",
+	"toolRepetitionSoftBlock": "工具 '{{toolName}}' 已被封鎖，因為它剛剛以完全相同的參數被呼叫。重複完全相同的呼叫不太可能產生不同的結果。如果你確實需要再次呼叫它，請先說明為什麼需要重複呼叫，以及這次你期望有什麼不同。否則，請嘗試不同的方法。",
 	"unknownToolError": "Zoo 嘗試使用未知工具：「{{toolName}}」。正在重試...",
 	"codebaseSearch": {
 		"approval": "正在搜尋程式碼庫中的「{{query}}」..."

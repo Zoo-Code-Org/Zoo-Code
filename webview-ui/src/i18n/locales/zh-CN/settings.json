@@ -603,6 +603,10 @@
 			"unlimitedDescription": "已启用无限重试（自动继续）。对话框将永远不会出现。",
 			"warning": "⚠️ 设置为 0 允许无限重试，这可能会消耗大量 API 使用量"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "重复软警告阈值",
+			"description": "在连续这么多次相同的工具调用后，该工具将被阻止，并要求 AI 说明重试理由——无需你参与。设置为 0 可禁用软警告。"
+		},
 		"reasoningEffort": {
 			"label": "模型推理强度",
 			"none": "无",

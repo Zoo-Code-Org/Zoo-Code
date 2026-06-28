@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Unbegrenzte Wiederholungen aktiviert (automatisches Fortfahren). Der Dialog wird niemals angezeigt.",
 			"warning": "⚠️ Das Setzen auf 0 erlaubt unbegrenzte Wiederholungen, was zu erheblichem API-Verbrauch führen kann"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Schwellenwert für sanfte Wiederholungswarnung",
+			"description": "Nach dieser Anzahl identischer aufeinanderfolgender Tool-Aufrufe wird das Tool blockiert und die KI wird gebeten, den erneuten Versuch zu begründen — ohne dich einzubeziehen. Auf 0 setzen, um sanfte Warnungen zu deaktivieren."
+		},
 		"reasoningEffort": {
 			"label": "Modell-Denkaufwand",
 			"none": "Keine",

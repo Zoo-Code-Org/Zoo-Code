@@ -9,6 +9,7 @@ import {
 	isSecretStateKey,
 	ProviderSettingsEntry,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
 	getModelId,
 	type ProviderName,
 	isProviderName,
@@ -43,6 +44,7 @@ export const providerProfilesSchema = z.object({
 			rateLimitSecondsMigrated: z.boolean().optional(),
 			openAiHeadersMigrated: z.boolean().optional(),
 			consecutiveMistakeLimitMigrated: z.boolean().optional(),
+			toolRepetitionLimitsMigrated: z.boolean().optional(),
 			todoListEnabledMigrated: z.boolean().optional(),
 			claudeCodeLegacySettingsMigrated: z.boolean().optional(),
 			routerProviderMigrated: z.boolean().optional(),
@@ -68,6 +70,7 @@ export class ProviderSettingsManager {
 			rateLimitSecondsMigrated: true, // Mark as migrated on fresh installs
 			openAiHeadersMigrated: true, // Mark as migrated on fresh installs
 			consecutiveMistakeLimitMigrated: true, // Mark as migrated on fresh installs
+			toolRepetitionLimitsMigrated: true, // Mark as migrated on fresh installs
 			todoListEnabledMigrated: true, // Mark as migrated on fresh installs
 			claudeCodeLegacySettingsMigrated: true, // Mark as migrated on fresh installs
 			routerProviderMigrated: true, // Mark as migrated on fresh installs
@@ -174,6 +177,12 @@ export class ProviderSettingsManager {
 					isDirty = true
 				}
 
+				if (!providerProfiles.migrations.toolRepetitionLimitsMigrated) {
+					await this.migrateToolRepetitionLimits(providerProfiles)
+					providerProfiles.migrations.toolRepetitionLimitsMigrated = true
+					isDirty = true
+				}
+
 				if (!providerProfiles.migrations.todoListEnabledMigrated) {
 					await this.migrateTodoListEnabled(providerProfiles)
 					providerProfiles.migrations.todoListEnabledMigrated = true
@@ -268,6 +277,19 @@ export class ProviderSettingsManager {
 			}
 		} catch (error) {
 			console.error(`[MigrateConsecutiveMistakeLimit] Failed to migrate consecutive mistake limit:`, error)
+		}
+	}
+
+	private async migrateToolRepetitionLimits(providerProfiles: ProviderProfiles) {
+		try {
+			for (const [_name, apiConfig] of Object.entries(providerProfiles.apiConfigs)) {
+				// Default the soft warning threshold.
+				if (apiConfig.toolRepetitionSoftLimit == null) {
+					apiConfig.toolRepetitionSoftLimit = DEFAULT_TOOL_REPETITION_SOFT_LIMIT
+				}
+			}
+		} catch (error) {
+			console.error(`[MigrateToolRepetitionLimits] Failed to migrate tool repetition limits:`, error)
 		}
 	}
 

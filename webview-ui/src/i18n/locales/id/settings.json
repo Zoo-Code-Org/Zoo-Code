@@ -603,6 +603,10 @@
 			"unlimitedDescription": "Percobaan ulang tak terbatas diaktifkan (lanjut otomatis). Dialog tidak akan pernah muncul.",
 			"warning": "⚠️ Mengatur ke 0 memungkinkan percobaan ulang tak terbatas yang dapat menghabiskan penggunaan API yang signifikan"
 		},
+		"toolRepetitionSoftLimit": {
+			"label": "Ambang Peringatan Lunak Pengulangan",
+			"description": "Setelah sekian banyak panggilan alat identik berturut-turut, alat diblokir dan AI diminta untuk menjelaskan alasan mencoba lagi, tanpa melibatkanmu. Atur ke 0 untuk menonaktifkan peringatan lunak."
+		},
 		"reasoningEffort": {
 			"label": "Upaya Reasoning Model",
 			"none": "Tidak Ada",

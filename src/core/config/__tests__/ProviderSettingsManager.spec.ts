@@ -91,6 +91,7 @@ describe("ProviderSettingsManager", () => {
 						rateLimitSecondsMigrated: true,
 						openAiHeadersMigrated: true,
 						consecutiveMistakeLimitMigrated: true,
+						toolRepetitionLimitsMigrated: true,
 						todoListEnabledMigrated: true,
 						claudeCodeLegacySettingsMigrated: true,
 						routerProviderMigrated: true,
@@ -209,6 +210,75 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.test.consecutiveMistakeLimit).toEqual(3)
 			expect(storedConfig.apiConfigs.existing.consecutiveMistakeLimit).toEqual(5)
 			expect(storedConfig.migrations.consecutiveMistakeLimitMigrated).toEqual(true)
+		})
+
+		it("should call migrateToolRepetitionLimits if it has not done so already", async () => {
+			mockSecrets.get.mockResolvedValue(
+				JSON.stringify({
+					currentApiConfigName: "default",
+					apiConfigs: {
+						default: {
+							config: {},
+							id: "default",
+						},
+						existing: {
+							apiProvider: "anthropic",
+							consecutiveMistakeLimit: 7,
+						},
+						preset: {
+							apiProvider: "anthropic",
+							// Pre-existing repetition limits should not be overwritten
+							toolRepetitionSoftLimit: 1,
+						},
+					},
+					migrations: {
+						rateLimitSecondsMigrated: true,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						toolRepetitionLimitsMigrated: false,
+					},
+				}),
+			)
+
+			await providerSettingsManager.initialize()
+
+			const calls = mockSecrets.store.mock.calls
+			const storedConfig = JSON.parse(calls[calls.length - 1][1])
+
+			// Default soft limit applied everywhere it was missing
+			expect(storedConfig.apiConfigs.default.toolRepetitionSoftLimit).toEqual(2)
+			expect(storedConfig.apiConfigs.existing.toolRepetitionSoftLimit).toEqual(2)
+
+			// Pre-existing soft limit is not overwritten
+			expect(storedConfig.apiConfigs.preset.toolRepetitionSoftLimit).toEqual(1)
+
+			expect(storedConfig.migrations.toolRepetitionLimitsMigrated).toEqual(true)
+		})
+
+		it("should not throw if migrateToolRepetitionLimits encounters an error", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// A frozen apiConfig causes the property assignment inside the migration
+			// to throw in strict mode, exercising the catch/error branch.
+			const frozenConfig = Object.freeze({ apiProvider: "anthropic" })
+			const providerProfiles = {
+				currentApiConfigName: "default",
+				apiConfigs: {
+					frozen: frozenConfig,
+				},
+			} as unknown as ProviderProfiles
+
+			// The migration must swallow the error rather than propagate it.
+			await expect(
+				(providerSettingsManager as any).migrateToolRepetitionLimits(providerProfiles),
+			).resolves.toBeUndefined()
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to migrate tool repetition limits"),
+				expect.anything(),
+			)
+
+			consoleErrorSpy.mockRestore()
 		})
 
 		it("should call migrateTodoListEnabled if it has not done so already", async () => {

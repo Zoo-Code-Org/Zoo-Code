@@ -7,6 +7,7 @@
 		"imageWithSize": "Fitxer d'imatge ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo sembla estar atrapat en un bucle, intentant la mateixa acció ({{toolName}}) repetidament. Això podria indicar un problema amb la seva estratègia actual. Considera reformular la tasca, proporcionar instruccions més específiques o guiar-lo cap a un enfocament diferent.",
+	"toolRepetitionSoftBlock": "L'eina '{{toolName}}' s'ha bloquejat perquè s'acaba de cridar amb paràmetres idèntics. Repetir exactament la mateixa crida difícilment produirà un resultat diferent. Si realment necessites cridar-la de nou, explica primer per què la crida repetida és necessària i què esperes que sigui diferent aquesta vegada. Si no, prova un enfocament diferent.",
 	"unknownToolError": "Zoo ha intentat utilitzar una eina desconeguda: \"{{toolName}}\". Reintentant...",
 	"codebaseSearch": {
 		"approval": "Cercant '{{query}}' a la base de codi..."

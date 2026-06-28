@@ -7,6 +7,7 @@
 		"imageWithSize": "Fichier image ({{size}} Ko)"
 	},
 	"toolRepetitionLimitReached": "Zoo semble être bloqué dans une boucle, tentant la même action ({{toolName}}) de façon répétée. Cela pourrait indiquer un problème avec sa stratégie actuelle. Envisage de reformuler la tâche, de fournir des instructions plus spécifiques ou de le guider vers une approche différente.",
+	"toolRepetitionSoftBlock": "L'outil '{{toolName}}' a été bloqué car il vient d'être appelé avec des paramètres identiques. Répéter exactement le même appel ne produira probablement pas un résultat différent. Si tu as vraiment besoin de l'appeler à nouveau, explique d'abord pourquoi l'appel répété est nécessaire et ce que tu attends de différent cette fois-ci. Sinon, essaie une approche différente.",
 	"unknownToolError": "Zoo a tenté d'utiliser un outil inconnu : \"{{toolName}}\". Nouvelle tentative...",
 	"codebaseSearch": {
 		"approval": "Recherche de '{{query}}' dans la base de code..."
