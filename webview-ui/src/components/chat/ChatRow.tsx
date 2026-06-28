@@ -57,6 +57,7 @@ import { useSelectedModel } from "../ui/hooks/useSelectedModel"
 import {
 	Eye,
 	FileDiff,
+	Globe,
 	ListTree,
 	User,
 	Edit,
@@ -1013,6 +1014,28 @@ export const ChatRowContent = ({
 								</ToolUseBlock>
 							</div>
 						)}
+					</>
+				)
+			case "fetchWebContent":
+				return (
+					<>
+						<div style={headerStyle}>
+							<Globe className="w-4 shrink-0" aria-label="Web fetch icon" />
+							<span style={{ fontWeight: "bold" }}>
+								{message.type === "ask"
+									? t("chat:webFetch.wantsToFetch")
+									: t("chat:webFetch.didFetch")}
+							</span>
+						</div>
+						<div className="pl-6">
+							<ToolUseBlock>
+								<ToolUseBlockHeader className="group">
+									<span className="whitespace-nowrap overflow-hidden text-ellipsis text-left mr-2">
+										{tool.url}
+									</span>
+								</ToolUseBlockHeader>
+							</ToolUseBlock>
+						</div>
 					</>
 				)
 			default:
