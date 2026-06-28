@@ -33,7 +33,7 @@
 		"@types/node": "20.19.43",
 		"globals": "16.3.0",
 		"tsup": "8.5.0",
-		"ajv": "8.18.0",
+		"ajv": "8.20.0",
 		"vitest": "4.1.0",
 		"zod-to-json-schema": "3.25.1"
 	}
