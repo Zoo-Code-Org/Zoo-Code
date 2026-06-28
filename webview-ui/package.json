@@ -64,7 +64,6 @@
 		"react-textarea-autosize": "^8.5.3",
 		"react-use": "^17.5.1",
 		"react-virtuoso": "^4.7.13",
-		"rehype-highlight": "^7.0.0",
 		"rehype-katex": "^7.0.1",
 		"remark-gfm": "^4.0.1",
 		"remark-math": "^6.0.0",
