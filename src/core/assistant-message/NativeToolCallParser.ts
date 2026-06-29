@@ -66,8 +66,12 @@ export class NativeToolCallParser {
 	private static rawChunkTracker = new Map<
 		number,
 		{
-			id: string
+			id?: string
 			name: string
+			// Tracks whether a name field has been observed at all, distinct from a
+			// truthy name. This is a defensive guard: should a provider ever send an
+			// empty name, the start-gate must not rely on name truthiness.
+			nameSeen: boolean
 			hasStarted: boolean
 			deltaBuffer: string[]
 		}
@@ -105,51 +109,55 @@ export class NativeToolCallParser {
 		const events: ToolCallStreamEvent[] = []
 		const { index, id, name, arguments: args } = chunk
 
+		// Create the tracker on first sight of this index, independent of whether
+		// an id has arrived yet. Keying the lifecycle by index (not id) ensures any
+		// `arguments` that stream before the id is known are buffered rather than dropped.
 		let tracked = this.rawChunkTracker.get(index)
-
-		// Initialize new tool call tracking when we receive an id
-		if (id && !tracked) {
+		if (!tracked) {
 			tracked = {
 				id,
 				name: name || "",
+				nameSeen: name !== undefined,
 				hasStarted: false,
 				deltaBuffer: [],
 			}
 			this.rawChunkTracker.set(index, tracked)
 		}
 
-		if (!tracked) {
-			return events
+		// Record id and name as they arrive (they may come in separate chunks).
+		if (id) {
+			tracked.id = id
 		}
-
-		// Update name if present in chunk and not yet set
-		if (name) {
+		if (name !== undefined) {
 			tracked.name = name
+			tracked.nameSeen = true
 		}
 
-		// Emit start event when we have the name
-		if (!tracked.hasStarted && tracked.name) {
+		// Emit start event only once both id and name are known. Using a local
+		// non-null id keeps emitted events typed as id: string.
+		if (!tracked.hasStarted && tracked.id && tracked.nameSeen) {
+			const startedId = tracked.id
 			events.push({
 				type: "tool_call_start",
-				id: tracked.id,
+				id: startedId,
 				name: tracked.name,
 			})
 			tracked.hasStarted = true
 
-			// Flush buffered deltas
+			// Flush buffered deltas accumulated during the pre-start window.
 			for (const bufferedDelta of tracked.deltaBuffer) {
 				events.push({
 					type: "tool_call_delta",
-					id: tracked.id,
+					id: startedId,
 					delta: bufferedDelta,
 				})
 			}
 			tracked.deltaBuffer = []
 		}
 
-		// Emit delta event for argument chunks
+		// Emit delta event for argument chunks, buffering until start is emitted.
 		if (args) {
-			if (tracked.hasStarted) {
+			if (tracked.hasStarted && tracked.id) {
 				events.push({
 					type: "tool_call_delta",
 					id: tracked.id,
@@ -172,11 +180,19 @@ export class NativeToolCallParser {
 
 		if (finishReason === "tool_calls" && this.rawChunkTracker.size > 0) {
 			for (const [, tracked] of this.rawChunkTracker.entries()) {
-				events.push({
-					type: "tool_call_end",
-					id: tracked.id,
-				})
+				// Only emit an end for trackers that actually started. A tracker that
+				// never received an id/name (malformed stream) must not emit a phantom
+				// end; since start requires an id, hasStarted implies tracked.id is set.
+				if (tracked.hasStarted && tracked.id) {
+					events.push({
+						type: "tool_call_end",
+						id: tracked.id,
+					})
+				}
 			}
+			// Clear so a subsequent finalizeRawChunks() is a safe no-op and cannot
+			// double-fire end events for the same trackers.
+			this.rawChunkTracker.clear()
 		}
 
 		return events
@@ -191,7 +207,7 @@ export class NativeToolCallParser {
 
 		if (this.rawChunkTracker.size > 0) {
 			for (const [, tracked] of this.rawChunkTracker.entries()) {
-				if (tracked.hasStarted) {
+				if (tracked.hasStarted && tracked.id) {
 					events.push({
 						type: "tool_call_end",
 						id: tracked.id,
