@@ -1771,12 +1771,14 @@ describe("Context Management", () => {
 			expect(result).toBe(false)
 		})
 
-		it("willManageContext treats an unlimited (-1) reserve as zero reserve for the percentage", () => {
-			// A -1 reserve falls back to the full window (zero reserve) for the percentage.
+		it("willManageContext treats a negative (unlimited) reserve as zero reserve for the percentage", () => {
+			// A strongly-negative reserve must clamp to zero, not be subtracted into a larger denominator:
+			// guard on → availableInput 200000 → 75% ≥ 70 (fires); without the > 0 guard → availableInput
+			// 400000 → 37.5% < 70 (would not fire). A small -1 can't tell the paths apart; -200000 can.
 			const result = willManageContext({
 				totalTokens: 150000,
 				contextWindow: 200000,
-				maxTokens: -1,
+				maxTokens: -200000,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: 70,
 				profileThresholds: {},
@@ -1971,6 +1973,41 @@ describe("Context Management", () => {
 				lastMessageTokens: 0,
 			})
 			expect(result).toBe(true)
+		})
+
+		it("manageContext treats an unlimited (-1) reserve as default reserve on the truncation path", async () => {
+			// manageContext duplicates willManageContext's reserve guard, so both must live or die together.
+			// maxTokens -1 → reserve ANTHROPIC_DEFAULT_MAX_TOKENS (8192): allowedTokens = 100000*0.9 − 8192 =
+			// 81808; empty last message keeps prevContextTokens = 81809 > 81808 → truncation runs. A mutant
+			// that left -1 unclamped would give allowedTokens 90001, and 81809 > 90001 is false → no truncation.
+			const summarizeSpy = vi.spyOn(condenseModule, "summarizeConversation")
+
+			const messagesWithSmallContent = [
+				...messages.slice(0, -1),
+				{ ...messages[messages.length - 1], content: "" },
+			]
+
+			const result = await manageContext({
+				messages: messagesWithSmallContent,
+				totalTokens: 81809,
+				contextWindow: 100000,
+				maxTokens: -1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 70,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(summarizeSpy).not.toHaveBeenCalled()
+			expect(result.truncationId).toBeDefined()
+			expect(result.messagesRemoved).toBe(2)
+			expect(result.summary).toBe("")
+			expect(result.prevContextTokens).toBe(81809)
+
+			summarizeSpy.mockRestore()
 		})
 
 		it("manageContext does NOT summarize on the default path where the opt-in math would have", async () => {
