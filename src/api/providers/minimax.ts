@@ -316,11 +316,15 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 	}
 
 	async completePrompt(prompt: string) {
-		const { id: model } = this.getModel()
+		const { id: model, maxTokens } = this.getModel()
 
+		// Honor the selected model's `maxTokens` registry value. Hard-coding a
+		// fixed 16_384 cap would silently truncate M3-1M (whose registry entry
+		// advertises 131_072) and any future model with a larger output budget.
+		// Falls back to 16_384 only when the model entry doesn't specify one.
 		const message = await this.client.messages.create({
 			model,
-			max_tokens: 16_384,
+			max_tokens: maxTokens ?? 16_384,
 			messages: [{ role: "user", content: prompt }],
 			stream: false,
 			...this.getMSeriesRequestParams(model),

@@ -557,6 +557,7 @@ describe("MiniMaxHandler", () => {
 			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
 			expect(lastCall).toMatchObject({
 				model: "MiniMax-M3-1M",
+				max_tokens: 131_072,
 				temperature: 1.0,
 				top_p: 0.95,
 				thinking: { type: "adaptive" },
@@ -580,11 +581,49 @@ describe("MiniMaxHandler", () => {
 			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
 			expect(lastCall).toMatchObject({
 				model: "MiniMax-M2.7",
+				max_tokens: 16_384,
 				temperature: 1.0,
 				top_p: 0.95,
 				top_k: 40,
 			})
 			expect(lastCall.thinking).toBeUndefined()
+		})
+
+		// Regression guard for the new max_tokens follow-up: completePrompt must
+		// honor the selected model's registry `maxTokens` (not the legacy 16_384
+		// cap). M3-1M's registry advertises 131_072; M2.x stays at 16_384.
+		it("should honor M3-1M 131_072 max_tokens in completePrompt (no legacy 16_384 cap)", async () => {
+			mockCreate.mockResolvedValueOnce({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new MiniMaxHandler({
+				apiModelId: "MiniMax-M3-1M",
+				minimaxApiKey: "test-minimax-api-key",
+			})
+
+			await handler.completePrompt("hello")
+
+			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(lastCall.max_tokens).toBe(131_072)
+			expect(lastCall.max_tokens).not.toBe(16_384)
+		})
+
+		it("should honor M3-512k 65_536 max_tokens in completePrompt", async () => {
+			mockCreate.mockResolvedValueOnce({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new MiniMaxHandler({
+				apiModelId: "MiniMax-M3-512k",
+				minimaxApiKey: "test-minimax-api-key",
+			})
+
+			await handler.completePrompt("hello")
+
+			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(lastCall.max_tokens).toBe(65_536)
+			expect(lastCall.max_tokens).not.toBe(16_384)
 		})
 
 		it("should handle thinking blocks in stream", async () => {
