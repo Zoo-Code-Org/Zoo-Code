@@ -844,5 +844,39 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("MiniMax-M2.7")
 			expect(result.current.info).toEqual(minimaxModels["MiniMax-M2.7"])
 		})
+
+		it("should resolve MiniMax-M3-512k with its 512K-context model info", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "minimax",
+				apiModelId: "MiniMax-M3-512k",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("minimax")
+			expect(result.current.id).toBe("MiniMax-M3-512k")
+			expect(result.current.info).toEqual(minimaxModels["MiniMax-M3-512k"])
+			expect(result.current.info?.contextWindow).toBe(524_288)
+			expect(result.current.info?.maxTokens).toBe(65_536)
+			expect(result.current.info?.supportsImages).toBe(true)
+		})
+
+		it("should resolve MiniMax-M3-1M with its 1M-context model info", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "minimax",
+				apiModelId: "MiniMax-M3-1M",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("minimax")
+			expect(result.current.id).toBe("MiniMax-M3-1M")
+			expect(result.current.info).toEqual(minimaxModels["MiniMax-M3-1M"])
+			expect(result.current.info?.contextWindow).toBe(1_048_576)
+			expect(result.current.info?.maxTokens).toBe(131_072)
+			expect(result.current.info?.supportsImages).toBe(true)
+		})
 	})
 })

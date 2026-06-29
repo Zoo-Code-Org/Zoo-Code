@@ -121,6 +121,50 @@ describe("MiniMaxHandler", () => {
 			expect(model.info.cacheReadsPrice).toBe(0.03)
 		})
 
+		it("should return MiniMax-M3-512k model with correct configuration", () => {
+			const testModelId: MinimaxModelId = "MiniMax-M3-512k"
+			const handlerWithModel = new MiniMaxHandler({
+				apiModelId: testModelId,
+				minimaxApiKey: "test-minimax-api-key",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe(testModelId)
+			expect(model.info).toEqual(minimaxModels[testModelId])
+			expect(model.info.contextWindow).toBe(524_288)
+			expect(model.info.maxTokens).toBe(65_536)
+			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.inputPrice).toBe(0.3)
+			expect(model.info.outputPrice).toBe(1.2)
+			expect(model.info.cacheWritesPrice).toBe(0.375)
+			expect(model.info.cacheReadsPrice).toBe(0.06)
+		})
+
+		it("should return MiniMax-M3-1M model with correct configuration", () => {
+			const testModelId: MinimaxModelId = "MiniMax-M3-1M"
+			const handlerWithModel = new MiniMaxHandler({
+				apiModelId: testModelId,
+				minimaxApiKey: "test-minimax-api-key",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe(testModelId)
+			expect(model.info).toEqual(minimaxModels[testModelId])
+			expect(model.info.contextWindow).toBe(1_048_576)
+			expect(model.info.maxTokens).toBe(131_072)
+			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.inputPrice).toBe(0.3)
+			expect(model.info.outputPrice).toBe(1.2)
+			expect(model.info.cacheWritesPrice).toBe(0.375)
+			expect(model.info.cacheReadsPrice).toBe(0.06)
+		})
+
+		it(`should default to ${minimaxDefaultModelId} model`, () => {
+			const handlerDefault = new MiniMaxHandler({ minimaxApiKey: "test-minimax-api-key" })
+			const model = handlerDefault.getModel()
+			expect(model.id).toBe(minimaxDefaultModelId)
+		})
+
 		it("should return MiniMax-M2-Stable model with correct configuration", () => {
 			const testModelId: MinimaxModelId = "MiniMax-M2-Stable"
 			const handlerWithModel = new MiniMaxHandler({
@@ -193,10 +237,20 @@ describe("MiniMaxHandler", () => {
 			expect(model.info).toEqual(minimaxModels[minimaxDefaultModelId])
 		})
 
-		it("should default to MiniMax-M2.7 model", () => {
+		it(`should default to ${minimaxDefaultModelId} model`, () => {
 			const handlerDefault = new MiniMaxHandler({ minimaxApiKey: "test-minimax-api-key" })
 			const model = handlerDefault.getModel()
+			expect(model.id).toBe(minimaxDefaultModelId)
+		})
+
+		it("should still resolve MiniMax-M2.7 when explicitly requested (back-compat)", () => {
+			const handlerWithModel = new MiniMaxHandler({
+				apiModelId: "MiniMax-M2.7",
+				minimaxApiKey: "test-minimax-api-key",
+			})
+			const model = handlerWithModel.getModel()
 			expect(model.id).toBe("MiniMax-M2.7")
+			expect(model.info).toEqual(minimaxModels["MiniMax-M2.7"])
 		})
 	})
 
@@ -327,6 +381,114 @@ describe("MiniMaxHandler", () => {
 			)
 		})
 
+		// Regression guard for the "double-think" hang: MiniMax M3 on the Anthropic
+		// endpoint defaults thinking OFF, so we must explicitly enable adaptive
+		// thinking and never pass budget_tokens (M-series is a binary toggle).
+		// Ported from kilo-code opencode provider transform (lines 661, 1208-1211).
+		it("should enable adaptive thinking for MiniMax-M3 models on Anthropic endpoint", async () => {
+			for (const modelId of ["MiniMax-M3-512k", "MiniMax-M3-1M"] as const) {
+				mockCreate.mockResolvedValueOnce({
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				})
+
+				const handlerForModel = new MiniMaxHandler({
+					apiModelId: modelId,
+					minimaxApiKey: "test-minimax-api-key",
+				})
+				const gen = handlerForModel.createMessage("test", [])
+				await gen.next()
+
+				expect(mockCreate).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						model: modelId,
+						thinking: { type: "adaptive" },
+					}),
+				)
+				// M-series is a binary toggle: budget_tokens must NEVER be sent.
+				const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+				expect(lastCall.thinking).not.toHaveProperty("budget_tokens")
+				expect(lastCall).not.toHaveProperty("budget_tokens")
+			}
+		})
+
+		it("should NOT enable adaptive thinking for MiniMax-M2.x models", async () => {
+			for (const modelId of ["MiniMax-M2", "MiniMax-M2.5", "MiniMax-M2.7"] as const) {
+				mockCreate.mockResolvedValueOnce({
+					[Symbol.asyncIterator]: () => ({
+						async next() {
+							return { done: true }
+						},
+					}),
+				})
+
+				const handlerForModel = new MiniMaxHandler({
+					apiModelId: modelId,
+					minimaxApiKey: "test-minimax-api-key",
+				})
+				const gen = handlerForModel.createMessage("test", [])
+				await gen.next()
+
+				const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+				expect(lastCall.thinking).toBeUndefined()
+			}
+		})
+
+		// Regression guard for the "hang" symptom: M-series sampling parameters
+		// must match kilo-code defaults (transform.ts lines 488-524). M2.x and M3
+		// both use top_p=0.95; M2.x additionally uses top_k=40.
+		it("should pass MiniMax-M2 sampling params (top_p=0.95, top_k=40)", async () => {
+			mockCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true }
+					},
+				}),
+			})
+
+			const handlerForModel = new MiniMaxHandler({
+				apiModelId: "MiniMax-M2.7",
+				minimaxApiKey: "test-minimax-api-key",
+			})
+			const gen = handlerForModel.createMessage("test", [])
+			await gen.next()
+
+			expect(mockCreate).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					temperature: 1,
+					top_p: 0.95,
+					top_k: 40,
+				}),
+			)
+		})
+
+		it("should pass MiniMax-M3 sampling params (top_p=0.95, no top_k)", async () => {
+			mockCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true }
+					},
+				}),
+			})
+
+			const handlerForModel = new MiniMaxHandler({
+				apiModelId: "MiniMax-M3-1M",
+				minimaxApiKey: "test-minimax-api-key",
+			})
+			const gen = handlerForModel.createMessage("test", [])
+			await gen.next()
+
+			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(lastCall).toMatchObject({
+				temperature: 1,
+				top_p: 0.95,
+			})
+			expect(lastCall).not.toHaveProperty("top_k")
+		})
+
 		it("should handle thinking blocks in stream", async () => {
 			const thinkingContent = "Let me think about this..."
 
@@ -434,6 +596,30 @@ describe("MiniMaxHandler", () => {
 			expect(model.cacheReadsPrice).toBe(0.06)
 		})
 
+		it("should correctly configure MiniMax-M3-512k model properties", () => {
+			const model = minimaxModels["MiniMax-M3-512k"]
+			expect(model.maxTokens).toBe(65_536)
+			expect(model.contextWindow).toBe(524_288)
+			expect(model.supportsImages).toBe(true)
+			expect(model.supportsPromptCache).toBe(true)
+			expect(model.inputPrice).toBe(0.3)
+			expect(model.outputPrice).toBe(1.2)
+			expect(model.cacheWritesPrice).toBe(0.375)
+			expect(model.cacheReadsPrice).toBe(0.06)
+		})
+
+		it("should correctly configure MiniMax-M3-1M model properties", () => {
+			const model = minimaxModels["MiniMax-M3-1M"]
+			expect(model.maxTokens).toBe(131_072)
+			expect(model.contextWindow).toBe(1_048_576)
+			expect(model.supportsImages).toBe(true)
+			expect(model.supportsPromptCache).toBe(true)
+			expect(model.inputPrice).toBe(0.3)
+			expect(model.outputPrice).toBe(1.2)
+			expect(model.cacheWritesPrice).toBe(0.375)
+			expect(model.cacheReadsPrice).toBe(0.06)
+		})
+
 		it("should correctly configure MiniMax-M2.7-highspeed model properties", () => {
 			const model = minimaxModels["MiniMax-M2.7-highspeed"]
 			expect(model.maxTokens).toBe(16_384)
@@ -478,6 +664,17 @@ describe("MiniMaxHandler", () => {
 		it("should correctly configure MiniMax-M2 model properties with updated context window", () => {
 			const model = minimaxModels["MiniMax-M2"]
 			expect(model.contextWindow).toBe(204_800)
+		})
+
+		// Regression guard: MiniMax M3 pricing is intentionally a single flat tier
+		// across the 512K and 1M context windows. Keep `longContextPricing` unset
+		// so the existing token math is reused end-to-end.
+		it("should NOT add longContextPricing to MiniMax-M3-512k (flat pricing by design)", () => {
+			expect(JSON.stringify(minimaxModels["MiniMax-M3-512k"])).not.toContain("longContextPricing")
+		})
+
+		it("should NOT add longContextPricing to MiniMax-M3-1M (flat pricing by design)", () => {
+			expect(JSON.stringify(minimaxModels["MiniMax-M3-1M"])).not.toContain("longContextPricing")
 		})
 	})
 })

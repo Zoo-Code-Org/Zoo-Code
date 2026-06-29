@@ -101,16 +101,33 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 				: { text: systemPrompt, type: "text" },
 		]
 
+		// MiniMax M-series sampling parameters (ported from kilo-code's opencode
+		// `transform.ts`). The Anthropic endpoint defaults thinking OFF, which makes
+		// M3 fall back to a single non-thinking turn and then re-think from scratch
+		// on the next turn — the "double-think" symptom. We default M3 to adaptive
+		// thinking and skip budget_tokens (M-series is a binary toggle, not effort
+		// levels). top_p/top_k match kilo's `minimax-m2` defaults and prevent the
+		// over-long reasoning cycles that cause the "hang" symptom.
+		const isM3 = modelId.startsWith("MiniMax-M3")
+		const samplingParams = isM3
+			? { temperature: temperature ?? 1.0, top_p: 0.95 }
+			: { temperature: temperature ?? 1.0, top_p: 0.95, top_k: 40 }
+
 		// Prepare request parameters
 		const requestParams: Anthropic.Messages.MessageCreateParams = {
 			model: modelId,
 			max_tokens: maxTokens ?? 16_384,
-			temperature: temperature ?? 1.0,
 			system: systemBlocks,
 			messages: supportsPromptCache ? this.addCacheControl(processedMessages, cacheControl) : processedMessages,
 			stream: true,
 			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
 			tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
+			// M3 on the Anthropic endpoint defaults thinking off; enable adaptive
+			// thinking so reasoning carries across turns via the prompt cache (avoiding
+			// the "double-think" hang). M-series does not accept budget_tokens — it is
+			// a binary on/off toggle, so we intentionally never set `budget_tokens`.
+			...(isM3 ? { thinking: { type: "adaptive" } } : {}),
+			...samplingParams,
 		}
 
 		const stream = await this.client.messages.create(requestParams)

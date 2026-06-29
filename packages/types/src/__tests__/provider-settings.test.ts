@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest"
 import { getApiProtocol } from "../provider-settings.js"
 
 describe("getApiProtocol", () => {
@@ -85,6 +86,17 @@ describe("getApiProtocol", () => {
 			expect(getApiProtocol("openai", "claude-3-sonnet")).toBe("openai")
 			expect(getApiProtocol("litellm", "claude-instant")).toBe("openai")
 			expect(getApiProtocol("ollama", "claude-model")).toBe("openai")
+		})
+	})
+
+	describe("MiniMax provider", () => {
+		it("should return 'anthropic' for MiniMax M3 and M2.x models", () => {
+			expect(getApiProtocol("minimax", "MiniMax-M3-1M")).toBe("anthropic")
+			expect(getApiProtocol("minimax", "MiniMax-M3-512k")).toBe("anthropic")
+			expect(getApiProtocol("minimax", "MiniMax-M2.7")).toBe("anthropic")
+			expect(getApiProtocol("minimax", "MiniMax-M2.5")).toBe("anthropic")
+			expect(getApiProtocol("minimax", "MiniMax-M2")).toBe("anthropic")
+			expect(getApiProtocol("minimax")).toBe("anthropic")
 		})
 	})
 
