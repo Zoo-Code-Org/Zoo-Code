@@ -41,6 +41,32 @@ export async function estimateTokenCount(
 }
 
 /**
+ * Computes the percentage of the context budget consumed by the prior context.
+ *
+ * Default: divide by the full context window. Opt-in (vscode-lm) divides by available input
+ * (window minus reserved output); an unknown/unlimited reserve (maxTokens -1) falls back to the
+ * full window. Shared by `willManageContext` and `manageContext` so the two stay in lockstep.
+ */
+function computeContextPercent({
+	prevContextTokens,
+	contextWindow,
+	maxTokens,
+	useAvailableInputForContextPercent,
+}: {
+	prevContextTokens: number
+	contextWindow: number
+	maxTokens?: number | null
+	useAvailableInputForContextPercent?: boolean
+}): number {
+	if (!useAvailableInputForContextPercent) {
+		return (100 * prevContextTokens) / contextWindow
+	}
+	const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
+	const availableInputTokens = contextWindow - reservedForOutput
+	return availableInputTokens > 0 ? (100 * prevContextTokens) / availableInputTokens : 100
+}
+
+/**
  * Result of truncation operation, includes the truncation ID for UI events.
  */
 export type TruncationResult = {
@@ -200,16 +226,12 @@ export function willManageContext({
 		// Invalid values fall back to global setting (effectiveThreshold already set)
 	}
 
-	// Default: divide by the full context window. Opt-in (vscode-lm) divides by available input
-	// (window minus reserved output); an unknown/unlimited reserve (-1) falls back to the full window.
-	let contextPercent: number
-	if (useAvailableInputForContextPercent) {
-		const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
-		const availableInputTokens = contextWindow - reservedForOutput
-		contextPercent = availableInputTokens > 0 ? (100 * prevContextTokens) / availableInputTokens : 100
-	} else {
-		contextPercent = (100 * prevContextTokens) / contextWindow
-	}
+	const contextPercent = computeContextPercent({
+		prevContextTokens,
+		contextWindow,
+		maxTokens,
+		useAvailableInputForContextPercent,
+	})
 	return contextPercent >= effectiveThreshold || prevContextTokens > allowedTokens
 }
 
@@ -328,16 +350,12 @@ export async function manageContext({
 	// If no specific threshold is found for the profile, fall back to global setting
 
 	if (autoCondenseContext) {
-		// Default: divide by the full context window. Opt-in (vscode-lm) divides by available input
-		// (window minus reserved output); an unknown/unlimited reserve (-1) falls back to the full window.
-		let contextPercent: number
-		if (useAvailableInputForContextPercent) {
-			const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
-			const availableInputTokens = contextWindow - reservedForOutput
-			contextPercent = availableInputTokens > 0 ? (100 * prevContextTokens) / availableInputTokens : 100
-		} else {
-			contextPercent = (100 * prevContextTokens) / contextWindow
-		}
+		const contextPercent = computeContextPercent({
+			prevContextTokens,
+			contextWindow,
+			maxTokens,
+			useAvailableInputForContextPercent,
+		})
 		if (contextPercent >= effectiveThreshold || prevContextTokens > allowedTokens) {
 			// Attempt to intelligently condense the context
 			const result = await summarizeConversation({

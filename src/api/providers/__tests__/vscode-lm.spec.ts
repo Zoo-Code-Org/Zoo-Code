@@ -63,7 +63,7 @@ import * as vscode from "vscode"
 import { VsCodeLmHandler } from "../vscode-lm"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
-import { openAiModelInfoSaneDefaults, vscodeLlmModels } from "@roo-code/types"
+import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
 
 const mockLanguageModelChat = {
 	id: "test-model",
@@ -483,20 +483,21 @@ describe("VsCodeLmHandler", () => {
 			opusHandler.dispose()
 		})
 
-		it("falls back to the live model context window for families not in the static table", () => {
-			// Not a curated row, so the gate uses the live runtime window.
+		it("falls back to the default-row maxInputTokens for an unknown family (catalog drift)", () => {
+			// `test-family` isn't a curated row (e.g. a selector left over from a dropped model), so the
+			// gate resolves the default row instead of the inflated live window.
 			handler["client"] = mockLanguageModelChat as unknown as vscode.LanguageModelChat
-			expect(handler.getCondenseContextWindow()).toBe(handler.getModel().info.contextWindow)
-			expect(handler.getCondenseContextWindow()).toBe(mockLanguageModelChat.maxInputTokens)
+			expect(handler.getCondenseContextWindow()).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
 		})
 
-		it("falls back to the live window when no family is resolvable (no client, no selector family)", () => {
-			// No client and no selector family means `family` is undefined, so the gate skips the
-			// static lookup and uses getModel().info.contextWindow.
+		it("falls back to the default-row maxInputTokens when no family is resolvable (no client, no selector family)", () => {
+			// No client and no selector family means `family` is undefined, so the gate uses the default
+			// row's maxInputTokens rather than the live getModel().info.contextWindow.
 			const noFamilyHandler = new VsCodeLmHandler({ vsCodeLmModelSelector: { vendor: "copilot" } })
 			noFamilyHandler["client"] = null
-			expect(noFamilyHandler.getCondenseContextWindow()).toBe(noFamilyHandler.getModel().info.contextWindow)
-			expect(noFamilyHandler.getCondenseContextWindow()).toBe(openAiModelInfoSaneDefaults.contextWindow)
+			expect(noFamilyHandler.getCondenseContextWindow()).toBe(
+				vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens,
+			)
 			noFamilyHandler.dispose()
 		})
 

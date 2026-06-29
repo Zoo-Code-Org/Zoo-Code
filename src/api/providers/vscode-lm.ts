@@ -2,7 +2,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 import OpenAI from "openai"
 
-import { type ModelInfo, openAiModelInfoSaneDefaults, vscodeLlmModels } from "@roo-code/types"
+import { type ModelInfo, openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared/vsCodeSelectorUtils"
@@ -565,12 +565,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	/**
 	 * Context window for auto-condense. The API's advertised `client.maxInputTokens` is far larger
 	 * than usable, so relying on it stops auto-condense from firing; measure against the curated
-	 * static table's `maxInputTokens` instead (the same value the bar uses). Fall back to the live
-	 * window when the model isn't in the table.
+	 * static table's `maxInputTokens` instead (the same value the bar uses). An unknown family (e.g.
+	 * a selector left over from a model dropped from the catalog) resolves to the default row rather
+	 * than the inflated live window; only a non-positive static `maxInputTokens` falls back to it.
 	 */
 	getCondenseContextWindow(): number {
 		const family = this.client?.family ?? this.options.vsCodeLmModelSelector?.family
-		const staticModel = family ? vscodeLlmModels[family as keyof typeof vscodeLlmModels] : undefined
+		const staticModel = family
+			? (vscodeLlmModels[family as keyof typeof vscodeLlmModels] ?? vscodeLlmModels[vscodeLlmDefaultModelId])
+			: vscodeLlmModels[vscodeLlmDefaultModelId]
 
 		if (staticModel && typeof staticModel.maxInputTokens === "number" && staticModel.maxInputTokens > 0) {
 			return staticModel.maxInputTokens
