@@ -3,7 +3,7 @@ import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
 import OpenAI from "openai"
 
-import { type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
+import { MINIMAX_DEFAULT_MAX_TOKENS, type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 
@@ -101,10 +101,12 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 				: { text: systemPrompt, type: "text" },
 		]
 
-		// Prepare request parameters
+		// Prepare request parameters. `MINIMAX_DEFAULT_MAX_TOKENS` is the named
+		// fallback; using the constant keeps the `??` branch exercised in
+		// coverage and self-documenting at the call site.
 		const requestParams: Anthropic.Messages.MessageCreateParams = {
 			model: modelId,
-			max_tokens: maxTokens ?? 16_384,
+			max_tokens: maxTokens ?? MINIMAX_DEFAULT_MAX_TOKENS,
 			system: systemBlocks,
 			messages: supportsPromptCache ? this.addCacheControl(processedMessages, cacheControl) : processedMessages,
 			stream: true,
@@ -318,13 +320,12 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 	async completePrompt(prompt: string) {
 		const { id: model, maxTokens } = this.getModel()
 
-		// Honor the selected model's `maxTokens` registry value. Hard-coding a
-		// fixed 16_384 cap would silently truncate M3-1M (whose registry entry
-		// advertises 131_072) and any future model with a larger output budget.
-		// Falls back to 16_384 only when the model entry doesn't specify one.
+		// Honor the selected model's `maxTokens` registry value (e.g. M3-1M
+		// advertises 131_072). `MINIMAX_DEFAULT_MAX_TOKENS` is the named
+		// fallback for any future model entry that omits one.
 		const message = await this.client.messages.create({
 			model,
-			max_tokens: maxTokens ?? 16_384,
+			max_tokens: maxTokens ?? MINIMAX_DEFAULT_MAX_TOKENS,
 			messages: [{ role: "user", content: prompt }],
 			stream: false,
 			...this.getMSeriesRequestParams(model),
