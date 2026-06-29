@@ -83,7 +83,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
-		const { id: modelId, info, maxTokens, temperature } = this.getModel()
+		const { id: modelId, info, maxTokens } = this.getModel()
 
 		// MiniMax M2 models support prompt caching
 		const supportsPromptCache = info.supportsPromptCache ?? false
@@ -101,18 +101,6 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 				: { text: systemPrompt, type: "text" },
 		]
 
-		// MiniMax M-series sampling parameters (ported from kilo-code's opencode
-		// `transform.ts`). The Anthropic endpoint defaults thinking OFF, which makes
-		// M3 fall back to a single non-thinking turn and then re-think from scratch
-		// on the next turn — the "double-think" symptom. We default M3 to adaptive
-		// thinking and skip budget_tokens (M-series is a binary toggle, not effort
-		// levels). top_p/top_k match kilo's `minimax-m2` defaults and prevent the
-		// over-long reasoning cycles that cause the "hang" symptom.
-		const isM3 = modelId.startsWith("MiniMax-M3")
-		const samplingParams = isM3
-			? { temperature: temperature ?? 1.0, top_p: 0.95 }
-			: { temperature: temperature ?? 1.0, top_p: 0.95, top_k: 40 }
-
 		// Prepare request parameters
 		const requestParams: Anthropic.Messages.MessageCreateParams = {
 			model: modelId,
@@ -122,12 +110,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 			stream: true,
 			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
 			tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
-			// M3 on the Anthropic endpoint defaults thinking off; enable adaptive
-			// thinking so reasoning carries across turns via the prompt cache (avoiding
-			// the "double-think" hang). M-series does not accept budget_tokens — it is
-			// a binary on/off toggle, so we intentionally never set `budget_tokens`.
-			...(isM3 ? { thinking: { type: "adaptive" } } : {}),
-			...samplingParams,
+			...this.getMSeriesRequestParams(modelId),
 		}
 
 		const stream = await this.client.messages.create(requestParams)
@@ -306,15 +289,41 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		}
 	}
 
+	/**
+	 * Build the M-series-specific request params shared by `createMessage` and
+	 * `completePrompt`. The MiniMax Anthropic endpoint defaults `thinking` OFF,
+	 * which makes M3 fall back to a single non-thinking turn and then re-think
+	 * from scratch on the next turn — the "double-think" symptom. We hard-code
+	 * `temperature: 1.0` (the regression-guarded default that the hang-fix
+	 * depends on), per-family `top_p`/`top_k` matching kilo-code's opencode
+	 * provider, and (for M3 only) enable adaptive thinking. We intentionally
+	 * never set `budget_tokens` — M-series is a binary on/off toggle, not
+	 * effort levels.
+	 *
+	 * The user-supplied temperature is intentionally ignored for the M-series
+	 * path: the hang/double-think fix depends on the exact M-series defaults.
+	 */
+	private getMSeriesRequestParams(modelId: string): {
+		temperature: number
+		top_p: number
+		top_k?: number
+		thinking?: { type: "adaptive" }
+	} {
+		const isM3 = modelId.startsWith("MiniMax-M3")
+		return isM3
+			? { temperature: 1.0, top_p: 0.95, thinking: { type: "adaptive" } }
+			: { temperature: 1.0, top_p: 0.95, top_k: 40 }
+	}
+
 	async completePrompt(prompt: string) {
-		const { id: model, temperature } = this.getModel()
+		const { id: model } = this.getModel()
 
 		const message = await this.client.messages.create({
 			model,
 			max_tokens: 16_384,
-			temperature: temperature ?? 1.0,
 			messages: [{ role: "user", content: prompt }],
 			stream: false,
+			...this.getMSeriesRequestParams(model),
 		})
 
 		const content = message.content.find(({ type }) => type === "text")

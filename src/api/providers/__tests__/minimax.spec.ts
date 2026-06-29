@@ -489,6 +489,104 @@ describe("MiniMaxHandler", () => {
 			expect(lastCall).not.toHaveProperty("top_k")
 		})
 
+		// Regression guard for CR-3: the M-series double-think/hang fix depends
+		// on the exact `temperature: 1.0` default. Any user-supplied temperature
+		// must be ignored on the M-series path.
+		it("should ignore user-supplied temperature for MiniMax-M3 M-series request", async () => {
+			mockCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true }
+					},
+				}),
+			})
+
+			const handlerWithCustomTemp = new MiniMaxHandler({
+				apiModelId: "MiniMax-M3-1M",
+				minimaxApiKey: "test-minimax-api-key",
+				// Attempt to override the M-series temperature hard-coded in
+				// `getMSeriesRequestParams`. If this propagates, the hang-fix
+				// contract is broken.
+				modelTemperature: 0.2 as any,
+			})
+
+			const messageGenerator = handlerWithCustomTemp.createMessage("system", [])
+			await messageGenerator.next()
+
+			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(lastCall).toMatchObject({ temperature: 1.0, top_p: 0.95 })
+		})
+
+		it("should ignore user-supplied temperature for MiniMax-M2 M-series request", async () => {
+			mockCreate.mockResolvedValueOnce({
+				[Symbol.asyncIterator]: () => ({
+					async next() {
+						return { done: true }
+					},
+				}),
+			})
+
+			const handlerWithCustomTemp = new MiniMaxHandler({
+				apiModelId: "MiniMax-M2.7",
+				minimaxApiKey: "test-minimax-api-key",
+				modelTemperature: 0.2 as any,
+			})
+
+			const messageGenerator = handlerWithCustomTemp.createMessage("system", [])
+			await messageGenerator.next()
+
+			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(lastCall).toMatchObject({ temperature: 1.0, top_p: 0.95, top_k: 40 })
+		})
+
+		// Regression guard for CR-2: the M-series request-param builder is shared
+		// by `createMessage` and `completePrompt`, so the M3 default still works
+		// for non-streaming single-turn completions.
+		it("should also apply adaptive thinking to MiniMax-M3 in completePrompt", async () => {
+			mockCreate.mockResolvedValueOnce({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new MiniMaxHandler({
+				apiModelId: "MiniMax-M3-1M",
+				minimaxApiKey: "test-minimax-api-key",
+			})
+
+			await handler.completePrompt("hello")
+
+			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(lastCall).toMatchObject({
+				model: "MiniMax-M3-1M",
+				temperature: 1.0,
+				top_p: 0.95,
+				thinking: { type: "adaptive" },
+			})
+			expect(lastCall).not.toHaveProperty("top_k")
+			expect(lastCall.thinking).not.toHaveProperty("budget_tokens")
+		})
+
+		it("should also apply M2 sampling params to completePrompt", async () => {
+			mockCreate.mockResolvedValueOnce({
+				content: [{ type: "text", text: "ok" }],
+			})
+
+			const handler = new MiniMaxHandler({
+				apiModelId: "MiniMax-M2.7",
+				minimaxApiKey: "test-minimax-api-key",
+			})
+
+			await handler.completePrompt("hello")
+
+			const lastCall = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(lastCall).toMatchObject({
+				model: "MiniMax-M2.7",
+				temperature: 1.0,
+				top_p: 0.95,
+				top_k: 40,
+			})
+			expect(lastCall.thinking).toBeUndefined()
+		})
+
 		it("should handle thinking blocks in stream", async () => {
 			const thinkingContent = "Let me think about this..."
 
@@ -668,13 +766,13 @@ describe("MiniMaxHandler", () => {
 
 		// Regression guard: MiniMax M3 pricing is intentionally a single flat tier
 		// across the 512K and 1M context windows. Keep `longContextPricing` unset
-		// so the existing token math is reused end-to-end.
+		// (not even `undefined`) so the existing token math is reused end-to-end.
 		it("should NOT add longContextPricing to MiniMax-M3-512k (flat pricing by design)", () => {
-			expect(JSON.stringify(minimaxModels["MiniMax-M3-512k"])).not.toContain("longContextPricing")
+			expect(minimaxModels["MiniMax-M3-512k"]).not.toHaveProperty("longContextPricing")
 		})
 
 		it("should NOT add longContextPricing to MiniMax-M3-1M (flat pricing by design)", () => {
-			expect(JSON.stringify(minimaxModels["MiniMax-M3-1M"])).not.toContain("longContextPricing")
+			expect(minimaxModels["MiniMax-M3-1M"]).not.toHaveProperty("longContextPricing")
 		})
 	})
 })
