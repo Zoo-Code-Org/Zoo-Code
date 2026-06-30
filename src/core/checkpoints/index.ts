@@ -4,8 +4,6 @@ import * as vscode from "vscode"
 import type { ClineApiReqInfo } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { Task } from "../task/Task"
-
 import { getWorkspacePath } from "../../utils/path"
 import { checkGitInstalled } from "../../utils/git"
 import { t } from "../../i18n"
@@ -18,14 +16,97 @@ import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../se
 
 const WARNING_THRESHOLD_MS = 5000
 
-function sendCheckpointInitWarn(task: Task, type?: "WAIT_TIMEOUT" | "INIT_TIMEOUT", timeout?: number) {
+export type CheckpointTaskContext = {
+	taskId: string
+	cwd?: string
+	providerRef: WeakRef<any>
+	clineMessages: any[]
+	messageManager: {
+		rewindToTimestamp: (ts: number, options: { includeTargetMessage: boolean }) => Promise<void>
+	}
+	say: (...args: any[]) => Promise<any>
+	combineMessages: (messages: any[]) => any
+}
+
+export type CheckpointRuntime = CheckpointTaskContext & {
+	enableCheckpoints: boolean
+	checkpointTimeout: number
+	checkpointService?: RepoPerTaskCheckpointService
+	checkpointServiceInitializing: boolean
+}
+
+export type CheckpointManagerOptions = {
+	enableCheckpoints: boolean
+	checkpointTimeout: number
+}
+
+export class CheckpointManager implements CheckpointRuntime {
+	public enableCheckpoints: boolean
+	public checkpointTimeout: number
+	public checkpointService?: RepoPerTaskCheckpointService
+	public checkpointServiceInitializing = false
+
+	constructor(
+		private readonly task: CheckpointTaskContext,
+		{ enableCheckpoints, checkpointTimeout }: CheckpointManagerOptions,
+	) {
+		this.enableCheckpoints = enableCheckpoints
+		this.checkpointTimeout = checkpointTimeout
+	}
+
+	get taskId() {
+		return this.task.taskId
+	}
+
+	get cwd() {
+		return this.task.cwd
+	}
+
+	get providerRef() {
+		return this.task.providerRef
+	}
+
+	get clineMessages() {
+		return this.task.clineMessages
+	}
+
+	get messageManager() {
+		return this.task.messageManager
+	}
+
+	public say(...args: any[]) {
+		return this.task.say(...args)
+	}
+
+	public combineMessages(messages: any[]) {
+		return this.task.combineMessages(messages)
+	}
+
+	public getService(options?: { interval?: number }) {
+		return getCheckpointService(this, options)
+	}
+
+	public save(force = false, suppressMessage = false) {
+		return checkpointSave(this, force, suppressMessage)
+	}
+
+	public restore(options: CheckpointRestoreOptions) {
+		return checkpointRestore(this, options)
+	}
+
+	public diff(options: CheckpointDiffOptions) {
+		return checkpointDiff(this, options)
+	}
+}
+
+function sendCheckpointInitWarn(task: CheckpointRuntime, type?: "WAIT_TIMEOUT" | "INIT_TIMEOUT", timeout?: number) {
 	task.providerRef.deref()?.postMessageToWebview({
 		type: "checkpointInitWarning",
 		checkpointWarning: type && timeout ? { type, timeout } : undefined,
 	})
 }
 
-export async function getCheckpointService(task: Task, { interval = 250 }: { interval?: number } = {}) {
+export async function getCheckpointService(task: CheckpointRuntime, { interval = 250 }: { interval?: number } = {}) {
 	if (!task.enableCheckpoints) {
 		return undefined
 	}
@@ -130,7 +211,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 }
 
 async function checkGitInstallation(
-	task: Task,
+	task: CheckpointRuntime,
 	service: RepoPerTaskCheckpointService,
 	log: (message: string) => void,
 	provider: any,
@@ -209,7 +290,7 @@ async function checkGitInstallation(
 	}
 }
 
-export async function checkpointSave(task: Task, force = false, suppressMessage = false) {
+export async function checkpointSave(task: CheckpointRuntime, force = false, suppressMessage = false) {
 	const service = await getCheckpointService(task)
 
 	if (!service) {
@@ -235,7 +316,7 @@ export type CheckpointRestoreOptions = {
 }
 
 export async function checkpointRestore(
-	task: Task,
+	task: CheckpointRuntime,
 	{ ts, commitHash, mode, operation = "delete" }: CheckpointRestoreOptions,
 ) {
 	const service = await getCheckpointService(task)
@@ -314,7 +395,10 @@ export type CheckpointDiffOptions = {
 	mode: "from-init" | "checkpoint" | "to-current" | "full"
 }
 
-export async function checkpointDiff(task: Task, { ts, previousCommitHash, commitHash, mode }: CheckpointDiffOptions) {
+export async function checkpointDiff(
+	task: CheckpointRuntime,
+	{ ts, previousCommitHash, commitHash, mode }: CheckpointDiffOptions,
+) {
 	const service = await getCheckpointService(task)
 
 	if (!service) {
