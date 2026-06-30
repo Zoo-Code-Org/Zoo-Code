@@ -2648,6 +2648,75 @@ describe("Cline", () => {
 			updateSpy.mockRestore()
 			saveSpy.mockRestore()
 		})
+
+		it("logs (instead of crashing) when updateClineMessage rejects from the ask() ignore-partial path", async () => {
+			// Pins the .catch arm on the fire-and-forget updateClineMessage call
+			// in ask() when a new partial ask arrives while the previous partial
+			// is still pending (AskIgnoredError path).
+			const boom = new Error("updateClineMessage boom")
+			const updateSpy = vi.spyOn(Task.prototype as any, "updateClineMessage").mockImplementation(async () => {
+				throw boom
+			})
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Seed a prior partial ask so the isUpdatingPreviousPartial branch fires.
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "ask",
+				ask: "tool",
+				text: "partial",
+				partial: true,
+			})
+
+			// Sending a new partial of the same type triggers updateClineMessage
+			// then throws AskIgnoredError — catch it so the test doesn't fail.
+			await task.ask("tool", "updated partial", true).catch(() => {})
+			await flushMicrotasks()
+
+			expect(updateSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#ask] updateClineMessage failed:", boom)
+		})
+
+		it("logs (instead of crashing) when updateClineMessage rejects from handleWebviewAskResponse", async () => {
+			// Pins the .catch arm on the fire-and-forget updateClineMessage call
+			// in handleWebviewAskResponse when marking a tool ask as answered.
+			const boom = new Error("updateClineMessage boom")
+			const updateSpy = vi.spyOn(Task.prototype as any, "updateClineMessage").mockImplementation(async () => {
+				throw boom
+			})
+			vi.spyOn(Task.prototype as any, "saveClineMessages").mockResolvedValue(undefined)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			// Seed an unanswered tool ask so the lastToolAskIndex branch fires.
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "ask",
+				ask: "tool",
+				text: "tool call",
+				partial: false,
+			})
+
+			task.handleWebviewAskResponse("yesButtonClicked")
+			await flushMicrotasks()
+
+			expect(updateSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#handleWebviewAskResponse] updateClineMessage failed:",
+				boom,
+			)
+		})
 	})
 })
 

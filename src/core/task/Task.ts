@@ -1319,6 +1319,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						if (message) {
 							this.interactiveAsk = message
 							this.emit(RooCodeEventName.TaskInteractive, this.taskId)
+							/* v8 ignore next 3 -- fires inside 2s timer after ask() resolves; not reachable in unit tests */
 							void provider?.postMessageToWebview({ type: "interactionRequired" }).catch((error) => {
 								console.error("[Task#ask] postMessageToWebview interactionRequired failed:", error)
 							})
