@@ -571,10 +571,83 @@ describe("useSelectedModel", () => {
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
 			expect(result.current.provider).toBe("litellm")
-			// Should fall back to default model ID since "some-model" doesn't exist in empty litellm models
-			expect(result.current.id).toBe("claude-3-7-sonnet-20250219")
+			// Should preserve configured model ID since "some-model" doesn't exist in empty litellm models
+			expect(result.current.id).toBe("some-model")
 			// Should use litellmDefaultModelInfo as fallback
 			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+		})
+
+		it("should return an empty model ID when the list is empty and no model is configured", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "litellm",
+				// litellmModelId intentionally omitted
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("litellm")
+			// LiteLLM has no inherent default; with nothing configured the ID is empty rather than a phantom model
+			expect(result.current.id).toBe("")
+			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+		})
+
+		it("preserves the selected model when the list transitions from populated to empty", () => {
+			// Primary user-visible scenario: a "Sync Models" click momentarily empties the
+			// router-models list before the refreshed list arrives. The selection must be held
+			// across that transition rather than reset.
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {
+						"my-custom-model": {
+							maxTokens: 4096,
+							contextWindow: 8192,
+							supportsImages: false,
+							supportsPromptCache: false,
+						},
+					},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "litellm",
+				litellmModelId: "my-custom-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result, rerender } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// Initially the configured model resolves from the populated list.
+			expect(result.current.id).toBe("my-custom-model")
+
+			// Simulate the list emptying mid-sync.
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+			rerender()
+
+			// Selection is preserved through the empty window.
+			expect(result.current.id).toBe("my-custom-model")
 		})
 
 		it("should use litellmDefaultModelInfo when selected model not found in routerModels", () => {

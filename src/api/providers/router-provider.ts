@@ -62,24 +62,38 @@ export abstract class RouterProvider extends BaseProvider {
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {
-		const id = this.modelId ?? this.defaultModelId
+		// Use `||` (not `??`) so an empty-string modelId also falls back to the default,
+		// guaranteeing a non-empty id rather than forwarding "" to the API as an invalid
+		// request. Note this guarantees non-empty, not viable: defaultModelId is provider-
+		// supplied and may not be a model that actually exists on the user's server (e.g.
+		// OpenAI-compatible have no inherent default), so a configured-but-empty selection
+		// can still resolve to a model the server rejects.
+		const id = this.modelId || this.defaultModelId
 
 		// First check instance models (populated by fetchModel)
 		if (this.models[id]) {
 			return { id, info: this.models[id] }
 		}
 
-		// Fall back to global cache (synchronous disk/memory cache)
-		// This ensures models are available before fetchModel() is called
-		const cachedModels = getModelsFromCache(this.name)
+		// Fall back to global cache (synchronous disk/memory cache).
+		// Pass the full options so URL-scoped providers (litellm, ollama, etc.)
+		// resolve the same compound cache key that fetchModel() wrote under.
+		const cachedModels = getModelsFromCache({
+			provider: this.name,
+			baseUrl: this.client.baseURL,
+			apiKey: this.client.apiKey,
+		})
 		if (cachedModels?.[id]) {
 			// Also populate instance models for future calls
 			this.models = cachedModels
 			return { id, info: cachedModels[id] }
 		}
 
-		// Last resort: return default model
-		return { id: this.defaultModelId, info: this.defaultModelInfo }
+		// Last resort: preserve the configured model ID (falling back to the default
+		// only when none is configured) so an as-yet-unfetched model isn't silently
+		// swapped for the hardcoded default. info still comes from defaults since we
+		// have no fetched or cached metadata for the configured model at this point.
+		return { id, info: this.defaultModelInfo }
 	}
 
 	protected supportsTemperature(modelId: string): boolean {

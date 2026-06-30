@@ -222,7 +222,15 @@ const ApiOptions = ({
 				requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl)
 			} else if (selectedProvider === "vscode-lm") {
 				vscode.postMessage({ type: "requestVsCodeLmModels" })
-			} else if (selectedProvider === "litellm" || selectedProvider === "poe") {
+			} else if (selectedProvider === "litellm") {
+				vscode.postMessage({
+					type: "requestRouterModels",
+					values: {
+						litellmApiKey: apiConfiguration?.litellmApiKey,
+						litellmBaseUrl: apiConfiguration?.litellmBaseUrl,
+					},
+				})
+			} else if (selectedProvider === "poe") {
 				vscode.postMessage({ type: "requestRouterModels" })
 			}
 		},

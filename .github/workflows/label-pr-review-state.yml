@@ -2,11 +2,16 @@ name: Label PR review state
 
 on:
   schedule:
-    - cron: '0 * * * *' # hourly
+    - cron: '0 * * * *' # hourly fallback
   workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize, review_requested]
+  pull_request_review:
+    types: [submitted, dismissed]
 
 permissions:
   pull-requests: write
+  checks: read
 
 concurrency:
   group: label-pr-review-state
@@ -22,70 +27,193 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const stateLabels = ['awaiting-author', 'awaiting-review'];
-            const failures = [];
 
-            const prs = await github.paginate(github.rest.pulls.list, {
-              owner, repo, state: 'open', per_page: 100,
-            });
+            // When triggered by a single PR event, only reconcile that PR.
+            // The hourly schedule and workflow_dispatch reconcile all open PRs.
+            let prs;
+            const prNumber = context.payload.pull_request?.number;
+            if (prNumber) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner, repo, pull_number: prNumber,
+              });
+              prs = [pr];
+            } else {
+              prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100,
+              });
+            }
+
+            // Strips stateLabels from a PR, optionally keeping one.
+            // Also removes stale-awaiting-author when not keeping awaiting-author.
+            async function reconcileLabels(pr, desiredLabel) {
+              const currentLabels = new Set(pr.labels.map(l => l.name));
+              for (const label of stateLabels) {
+                if (label !== desiredLabel && currentLabels.has(label)) {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner, repo, issue_number: pr.number, name: label,
+                    });
+                  } catch (err) {
+                    if (err.status !== 404) throw err; // 404 = already gone, benign
+                  }
+                }
+              }
+              if (desiredLabel && !currentLabels.has(desiredLabel)) {
+                await github.rest.issues.addLabels({
+                  owner, repo, issue_number: pr.number, labels: [desiredLabel],
+                });
+              }
+              if (desiredLabel !== 'awaiting-author' && currentLabels.has('stale-awaiting-author')) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number: pr.number, name: 'stale-awaiting-author',
+                  });
+                } catch (err) {
+                  if (err.status !== 404) throw err;
+                }
+              }
+            }
+
+            // Fetch required status check names from the branch ruleset.
+            // Uses the public /rules/branches endpoint — no admin token needed.
+            // Falls back to blocking on all checks if the endpoint is unavailable.
+            let requiredCheckNames = null;
+            try {
+              const { data: rules } = await github.request(
+                'GET /repos/{owner}/{repo}/rules/branches/{branch}',
+                { owner, repo, branch: 'main' },
+              );
+              const statusRule = rules.find(r => r.type === 'required_status_checks');
+              if (statusRule) {
+                requiredCheckNames = new Set(
+                  statusRule.parameters.required_status_checks.map(c => c.context),
+                );
+                core.info(`Required checks: ${[...requiredCheckNames].join(', ')}`);
+              }
+            } catch (err) {
+              core.warning(`Could not fetch branch rules, falling back to all checks: ${err.message}`);
+            }
+
+            const failures = [];
 
             for (const pr of prs) {
               try {
+                // Draft PRs never get a state label.
+                if (pr.draft) {
+                  core.info(`PR #${pr.number}: draft — stripping state labels`);
+                  await reconcileLabels(pr, null);
+                  continue;
+                }
+
+                // Check CI status for required checks on the PR's head commit only.
+                // Scoping to required checks avoids advisory checks (e.g. codecov/patch)
+                // incorrectly blocking label assignment on otherwise-ready PRs.
+                const [checkRuns, commitStatusRes] = await Promise.all([
+                  github.paginate(github.rest.checks.listForRef, {
+                    owner, repo, ref: pr.head.sha, per_page: 100,
+                  }),
+                  github.rest.repos.getCombinedStatusForRef({
+                    owner, repo, ref: pr.head.sha,
+                  }),
+                ]);
+
+                // Filter to required checks only (or all checks if rules unavailable).
+                // Always exclude this workflow's own run to avoid self-referential loops.
+                const relevantRuns = checkRuns.filter(run => {
+                  if (run.name === 'Reconcile PR review state labels') return false;
+                  return requiredCheckNames ? requiredCheckNames.has(run.name) : true;
+                });
+
+                // For commit statuses (external CIs), there's no per-status name filtering
+                // available from getCombinedStatusForRef — it aggregates all statuses.
+                // If required checks are known, we only use commitStatus as a signal when
+                // no required check runs exist for this ref (i.e. pure status-based CI).
+                const useCommitStatus = !requiredCheckNames || relevantRuns.length === 0;
+
+                core.debug(`PR #${pr.number}: ${relevantRuns.length} required check run(s), commit status=${commitStatusRes.data.state} (used=${useCommitStatus})`);
+                for (const run of relevantRuns) {
+                  core.debug(`  check: "${run.name}" status=${run.status} conclusion=${run.conclusion}`);
+                }
+
+                const ciPending = relevantRuns.some(
+                  run => run.status === 'queued' || run.status === 'in_progress',
+                ) || (useCommitStatus && commitStatusRes.data.state === 'pending');
+
+                const ciFailed = !ciPending && (
+                  relevantRuns.some(
+                    run => run.status === 'completed' &&
+                           run.conclusion !== 'success' &&
+                           run.conclusion !== 'skipped' &&
+                           run.conclusion !== 'neutral',
+                  ) || (useCommitStatus && (
+                    commitStatusRes.data.state === 'failure' ||
+                    commitStatusRes.data.state === 'error'
+                  ))
+                );
+
+                // While CI is running or has failed, remove state labels and move on.
+                // CI failure is its own signal; the label would add noise, not clarity.
+                if (ciPending || ciFailed) {
+                  core.info(`PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels`);
+                  await reconcileLabels(pr, null);
+                  continue;
+                }
+
+                // CI is passing. Now determine review state.
                 const reviews = await github.paginate(github.rest.pulls.listReviews, {
                   owner, repo, pull_number: pr.number, per_page: 100,
                 });
 
-                // Reviews are returned chronologically, so later entries replace
-                // each reviewer's earlier decision.
+                // Reduce to each reviewer's latest meaningful state.
+                // Reviews are returned oldest-first, so last-write-wins yields the latest state.
+                // COMMENTED and DISMISSED are treated as neutral — they do not
+                // block the PR or indicate the author needs to act.
                 const latest = new Map();
                 for (const r of reviews) {
-                  if (r.state !== 'COMMENTED') {
+                  if (r.state !== 'COMMENTED' && r.state !== 'DISMISSED') {
                     latest.set(r.user.login, r);
                   }
                 }
 
-                const changeRequestReviewers = [...latest.entries()]
-                  .filter(([, review]) => review.state === 'CHANGES_REQUESTED')
-                  .map(([login]) => login);
                 const requestedReviewers = new Set(
-                  pr.requested_reviewers.map(reviewer => reviewer.login),
+                  pr.requested_reviewers.map(r => r.login),
                 );
 
-                let desiredLabel = null;
-                if (changeRequestReviewers.length > 0) {
-                  desiredLabel = changeRequestReviewers.every(
-                    reviewer => requestedReviewers.has(reviewer),
-                  )
+                const changeRequesters = [...latest.entries()]
+                  .filter(([, r]) => r.state === 'CHANGES_REQUESTED')
+                  .map(([login]) => login);
+
+                let desiredLabel;
+                if (changeRequesters.length > 0) {
+                  // If every change-requester has been re-requested for review,
+                  // the author has addressed feedback and re-opened it for review.
+                  desiredLabel = changeRequesters.every(login => requestedReviewers.has(login))
                     ? 'awaiting-review'
                     : 'awaiting-author';
+                } else {
+                  // No outstanding change requests: awaiting first review, or all approved.
+                  // awaiting-review if: there are pending requested reviewers, or nobody
+                  // has given a meaningful review yet. null (approved) if everyone approved.
+                  const allApproved = latest.size > 0 &&
+                    [...latest.values()].every(r => r.state === 'APPROVED') &&
+                    requestedReviewers.size === 0;
+
+                  desiredLabel = allApproved ? null : 'awaiting-review';
                 }
 
-                const currentLabels = new Set(pr.labels.map(label => label.name));
-                for (const label of stateLabels) {
-                  if (label !== desiredLabel && currentLabels.has(label)) {
-                    await github.rest.issues.removeLabel({
-                      owner, repo, issue_number: pr.number, name: label,
-                    });
-                  }
-                }
+                core.info(
+                  `PR #${pr.number}: CI passing, reviews=${latest.size}, ` +
+                  `changeRequesters=[${changeRequesters.join(',')}], ` +
+                  `requestedReviewers=[${[...requestedReviewers].join(',')}] → ${desiredLabel ?? '(none)'}`
+                );
 
-                if (desiredLabel && !currentLabels.has(desiredLabel)) {
-                  await github.rest.issues.addLabels({
-                    owner, repo, issue_number: pr.number, labels: [desiredLabel],
-                  });
-                }
-
-                if (
-                  desiredLabel !== 'awaiting-author' &&
-                  currentLabels.has('stale-awaiting-author')
-                ) {
-                  await github.rest.issues.removeLabel({
-                    owner, repo, issue_number: pr.number,
-                    name: 'stale-awaiting-author',
-                  });
-                }
+                await reconcileLabels(pr, desiredLabel);
               } catch (error) {
-                failures.push(`#${pr.number}: ${error.message}`);
-                core.error(`Failed to reconcile PR #${pr.number}: ${error.message}`);
+                const detail = error.status
+                  ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`
+                  : error.message;
+                failures.push(`#${pr.number}: ${detail}`);
+                core.error(`Failed to reconcile PR #${pr.number}: ${detail}`);
               }
             }
 

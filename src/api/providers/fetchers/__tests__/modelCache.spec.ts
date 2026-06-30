@@ -432,5 +432,187 @@ describe("empty cache protection", () => {
 			expect(result1).toEqual(mockModels)
 			expect(result2).toEqual(mockModels)
 		})
+
+		it("scopes in-flight dedup by API key for key-scoped providers", async () => {
+			// In-flight dedup is keyed on the compound cache key, so concurrent refreshes for a
+			// key-scoped provider must dedup only when the API key matches. Two different keys
+			// (different compound keys) each trigger their own fetch; the same key shares one.
+			const mockModels = {
+				"requesty/model": {
+					maxTokens: 4096,
+					contextWindow: 200000,
+					supportsPromptCache: false,
+					description: "Requesty model",
+				},
+			}
+			mockGetRequestyModels.mockResolvedValue(mockModels)
+
+			const { refreshModels } = await import("../modelCache")
+
+			// Different keys -> separate compound keys -> two distinct fetches.
+			const [a, b] = await Promise.all([
+				refreshModels({ provider: "requesty", apiKey: "key-one" }),
+				refreshModels({ provider: "requesty", apiKey: "key-two" }),
+			])
+			expect(mockGetRequestyModels).toHaveBeenCalledTimes(2)
+			expect(a).toEqual(mockModels)
+			expect(b).toEqual(mockModels)
+
+			mockGetRequestyModels.mockClear()
+
+			// Same key -> same compound key -> a single shared in-flight fetch.
+			let resolveShared: (value: typeof mockModels) => void
+			mockGetRequestyModels.mockReturnValue(
+				new Promise<typeof mockModels>((resolve) => {
+					resolveShared = resolve
+				}),
+			)
+
+			const shared1 = refreshModels({ provider: "requesty", apiKey: "same-key" })
+			const shared2 = refreshModels({ provider: "requesty", apiKey: "same-key" })
+
+			expect(mockGetRequestyModels).toHaveBeenCalledTimes(1)
+
+			resolveShared!(mockModels)
+			const [s1, s2] = await Promise.all([shared1, shared2])
+			expect(s1).toEqual(mockModels)
+			expect(s2).toEqual(mockModels)
+		})
+	})
+})
+
+describe("key-scoped cache key derivation", () => {
+	// Exercises the per-API-key cache discriminator that all KEY_SCOPED_PROVIDERS share.
+	// Requesty is used only because it is a key-scoped provider with a mocked fetcher; the
+	// behavior under test is provider-agnostic.
+	const keyScopedProvider = "requesty" as const
+
+	let mockCache: any
+	let mockSet: Mock
+
+	const mockModels = {
+		"key-scoped/model": {
+			maxTokens: 4096,
+			contextWindow: 200000,
+			supportsPromptCache: false,
+			description: "Key-scoped provider model",
+		},
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		const MockedNodeCache = vi.mocked(NodeCache)
+		mockCache = new MockedNodeCache()
+		mockCache.get.mockReturnValue(undefined)
+		mockSet = mockCache.set
+		mockGetRequestyModels.mockResolvedValue(mockModels)
+	})
+
+	// Returns the cache key the result was written under (first arg of the matching set call).
+	const writtenCacheKey = (): string => {
+		const call = mockSet.mock.calls.find((c) => c[1] === mockModels)
+		return call?.[0] as string
+	}
+
+	it("writes different cache keys for different API keys", async () => {
+		await getModels({ provider: keyScopedProvider, apiKey: "key-one" })
+		const firstKey = writtenCacheKey()
+
+		mockSet.mockClear()
+		await getModels({ provider: keyScopedProvider, apiKey: "key-two" })
+		const secondKey = writtenCacheKey()
+
+		expect(firstKey).toBeDefined()
+		expect(secondKey).toBeDefined()
+		expect(firstKey).not.toEqual(secondKey)
+	})
+
+	it("writes the same cache key for repeated calls with the same API key", async () => {
+		await getModels({ provider: keyScopedProvider, apiKey: "stable-key" })
+		const firstKey = writtenCacheKey()
+
+		mockSet.mockClear()
+		await getModels({ provider: keyScopedProvider, apiKey: "stable-key" })
+		const secondKey = writtenCacheKey()
+
+		expect(firstKey).toEqual(secondKey)
+	})
+
+	it("does not embed the raw API key in the cache key and truncates the discriminator", async () => {
+		const apiKey = "super-secret-api-key-value"
+		await getModels({ provider: keyScopedProvider, apiKey })
+		const cacheKey = writtenCacheKey()
+
+		// The raw secret must never appear in the on-disk-bound cache key.
+		expect(cacheKey).not.toContain(apiKey)
+		// The discriminator is the trailing key-component: an 8-char (32-bit) hex string.
+		const discriminator = cacheKey.split(":").pop() as string
+		expect(discriminator).toMatch(/^[0-9a-f]{8}$/)
+	})
+})
+
+describe("compound cache key derivation across scoping dimensions", () => {
+	// Exercises every branch of getCacheKey via the public getModels() entry point.
+	// litellm is url-scoped AND key-scoped; openrouter is neither, so it hits the bare
+	// provider fallback. The fetcher mocks let us observe the cache key the result is
+	// written under (first arg of the matching memoryCache.set call).
+	const mockModels = {
+		"compound/model": {
+			maxTokens: 4096,
+			contextWindow: 200000,
+			supportsPromptCache: false,
+			description: "Compound cache key model",
+		},
+	}
+
+	let mockSet: Mock
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		const MockedNodeCache = vi.mocked(NodeCache)
+		const mockCache = new MockedNodeCache()
+		;(mockCache.get as Mock).mockReturnValue(undefined)
+		mockSet = mockCache.set as unknown as Mock
+		mockGetLiteLLMModels.mockResolvedValue(mockModels)
+		mockGetOpenRouterModels.mockResolvedValue(mockModels)
+	})
+
+	const writtenCacheKey = (): string => {
+		const call = mockSet.mock.calls.find((c) => c[1] === mockModels)
+		return call?.[0] as string
+	}
+
+	it("includes both the server URL and the key discriminator for url+key-scoped providers", async () => {
+		await getModels({ provider: "litellm", apiKey: "compound-key", baseUrl: "http://host:4000" })
+		const cacheKey = writtenCacheKey()
+
+		// Expected shape: provider:url:keyDiscriminator
+		expect(cacheKey).toMatch(/^litellm:http:\/\/host:4000:[0-9a-f]{8}$/)
+	})
+
+	it("normalizes trailing slashes in the server URL so equivalent URLs share a cache key", async () => {
+		await getModels({ provider: "litellm", apiKey: "compound-key", baseUrl: "http://host:4000/" })
+		const withSlash = writtenCacheKey()
+
+		mockSet.mockClear()
+		await getModels({ provider: "litellm", apiKey: "compound-key", baseUrl: "http://host:4000" })
+		const withoutSlash = writtenCacheKey()
+
+		expect(withSlash).toEqual(withoutSlash)
+	})
+
+	it("includes only the server URL when a url-scoped provider has no API key", async () => {
+		await getModels({ provider: "litellm", baseUrl: "http://host:4000" })
+		const cacheKey = writtenCacheKey()
+
+		// No trailing key discriminator when apiKey is absent.
+		expect(cacheKey).toBe("litellm:http://host:4000")
+	})
+
+	it("falls back to the bare provider name for providers that are neither url- nor key-scoped", async () => {
+		await getModels({ provider: "openrouter", apiKey: "ignored-key", baseUrl: "http://ignored:4000" })
+		const cacheKey = writtenCacheKey()
+
+		expect(cacheKey).toBe("openrouter")
 	})
 })
