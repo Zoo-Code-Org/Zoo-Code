@@ -85,9 +85,20 @@ import {
 	getSembleSupportedPlatforms,
 	downloadSemble,
 	getSembleBinaryPath,
+	SEMBLE_SHA256,
 } from "../semble-downloader"
 import * as https from "https"
 import { spawn } from "child_process"
+
+// Guards against drift: the local CHECKSUMS table that drives the crypto mock
+// must stay in lock-step with the production SEMBLE_SHA256 constant. A future
+// version bump that updates SEMBLE_SHA256 but misses this copy would otherwise
+// silently mock the wrong hash and let checksum verification pass spuriously.
+describe("SEMBLE_SHA256 checksum fixture", () => {
+	it("the local CHECKSUMS table matches the exported SEMBLE_SHA256 constant", () => {
+		expect(CHECKSUMS).toEqual(SEMBLE_SHA256)
+	})
+})
 
 describe("semble-downloader", () => {
 	beforeEach(() => {
@@ -223,6 +234,10 @@ describe("semble-downloader", () => {
 				const result = await downloadSemble("/storage")
 
 				expect(result).toBe(path.join("/storage", "semble", "semble"))
+				// The release URL must target the current SEMBLE_VERSION tag — a typo
+				// in SEMBLE_VERSION would otherwise fetch the wrong release while still
+				// matching the unversioned asset filename.
+				expect(https.get).toHaveBeenCalledWith(expect.stringContaining("v0.4.1"), expect.any(Function))
 				expect(https.get).toHaveBeenCalledWith(
 					expect.stringContaining("semble-linux-x64-fast.tar.gz"),
 					expect.any(Function),
@@ -764,8 +779,9 @@ describe("semble-downloader", () => {
 				const result = await downloadSemble("/storage")
 
 				expect(result).toBe(path.join("/storage", "semble", "semble"))
-				// Should download since binary was missing
-				expect(https.get).toHaveBeenCalled()
+				// Should download since binary was missing — pin the version tag so a
+				// wrong SEMBLE_VERSION can't fetch a stale release unnoticed.
+				expect(https.get).toHaveBeenCalledWith(expect.stringContaining("v0.4.1"), expect.any(Function))
 				// Should rename staging to final
 				expect(fs.rename).toHaveBeenCalledWith(
 					path.join("/storage", "semble.new"),
@@ -806,7 +822,8 @@ describe("semble-downloader", () => {
 				const result = await downloadSemble("/storage")
 
 				expect(result).toBe(path.join("/storage", "semble", "semble"))
-				expect(https.get).toHaveBeenCalled()
+				// First-install path: the download URL must target the current version.
+				expect(https.get).toHaveBeenCalledWith(expect.stringContaining("v0.4.1"), expect.any(Function))
 				// Should rename staging to final
 				expect(fs.rename).toHaveBeenCalledWith(
 					path.join("/storage", "semble.new"),

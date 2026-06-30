@@ -473,8 +473,13 @@ describe("SembleProvider", () => {
 				{
 					content: null,
 					file_path: "src/file.ts",
-					start_line: null,
-					end_line: null,
+					// Non-null line numbers exercise the flat-field access path
+					// (r.start_line / r.end_line). With null/undefined values the old
+					// nested `r.chunk?.start_line ?? 0` shape would coalesce to 0
+					// identically, so a regression to the wrapped schema would slip
+					// past unnoticed. Real values must round-trip through unchanged.
+					start_line: 5,
+					end_line: 20,
 					score: 0.6,
 				},
 			]
@@ -485,8 +490,8 @@ describe("SembleProvider", () => {
 
 			expect(results).toHaveLength(1)
 			expect(results[0].payload?.codeChunk).toBe("")
-			expect(results[0].payload?.startLine).toBe(0)
-			expect(results[0].payload?.endLine).toBe(0)
+			expect(results[0].payload?.startLine).toBe(5)
+			expect(results[0].payload?.endLine).toBe(20)
 		})
 
 		it("should handle results with undefined content fields", async () => {
@@ -528,6 +533,36 @@ describe("SembleProvider", () => {
 			expect(results).toHaveLength(1)
 			expect(results[0].payload?.filePath).not.toContain("\\")
 			expect(results[0].payload?.filePath).toContain("/")
+		})
+
+		it("should reject file paths that escape the workspace via traversal", async () => {
+			// A path-traversal payload (../../etc/passwd) resolves outside the
+			// workspace base. The guard at provider.ts must exclude it so semble
+			// results can never surface files outside the indexed workspace.
+			const mockResults = [
+				{
+					content: "secret",
+					file_path: "../../etc/passwd",
+					start_line: 1,
+					end_line: 10,
+					score: 0.9,
+				},
+				{
+					content: "safe",
+					file_path: "src/file.ts",
+					start_line: 1,
+					end_line: 10,
+					score: 0.8,
+				},
+			]
+
+			mockCli.search.mockResolvedValue(mockResults)
+
+			const results = await provider.searchIndex("test")
+
+			// Only the in-workspace result survives; the traversal entry is dropped.
+			expect(results).toHaveLength(1)
+			expect(results[0].payload?.filePath).toBe("/workspace/src/file.ts")
 		})
 
 		it("should always join file paths against workspace root, even with directoryPrefix", async () => {

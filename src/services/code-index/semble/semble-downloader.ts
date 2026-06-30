@@ -35,7 +35,7 @@ const VERSION_FILE = ".semble-version"
  *
  * To regenerate: `shasum -a 256 <archive-file>`
  */
-const SEMBLE_SHA256: Record<string, string> = {
+export const SEMBLE_SHA256: Record<string, string> = {
 	"linux-x64": "33a6c8ae78d750e917b291524d788747c62de795274def5c6b07b7a6d1671493",
 	"linux-arm64": "a4a3fbca363f5a894a57594679c787ff6b4ac1332ebf0edcb36cc89f348c7aba",
 	"darwin-arm64": "f8b5718e2264c9addbf61ac52f0106f1ebb6717980bf25ecfe135d12f164ed30",
