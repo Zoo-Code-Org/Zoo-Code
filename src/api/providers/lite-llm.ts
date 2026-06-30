@@ -9,6 +9,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
+import { GEMINI_THOUGHT_SIGNATURE_BYPASS } from "../transform/gemini-format"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
@@ -72,7 +73,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	 *
 	 * Per LiteLLM documentation:
 	 * - Thought signatures are stored in provider_specific_fields.thought_signature of tool calls
-	 * - The dummy signature base64("skip_thought_signature_validator") bypasses validation
+	 * - The bypass token (GEMINI_THOUGHT_SIGNATURE_BYPASS) skips signature validation
 	 *
 	 * We inject the dummy signature on EVERY tool call unconditionally to ensure Gemini
 	 * doesn't complain about missing/corrupted signatures when conversation history
@@ -81,8 +82,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	private injectThoughtSignatureForGemini(
 		openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[],
 	): OpenAI.Chat.ChatCompletionMessageParam[] {
-		// Base64 encoded "skip_thought_signature_validator" as per LiteLLM docs
-		const dummySignature = Buffer.from("skip_thought_signature_validator").toString("base64")
+		const dummySignature = GEMINI_THOUGHT_SIGNATURE_BYPASS
 
 		return openAiMessages.map((msg) => {
 			if (msg.role === "assistant") {
