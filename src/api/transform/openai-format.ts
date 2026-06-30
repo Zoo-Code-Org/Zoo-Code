@@ -307,7 +307,10 @@ export function convertToOpenAiMessages(
 			// If a message also contains reasoning_details (Gemini 3 / xAI / o-series, etc.),
 			// we must preserve it here as well.
 			const messageWithDetails = anthropicMessage as any
-			const baseMessage: OpenAI.Chat.ChatCompletionMessageParam & { reasoning_details?: any[] } = {
+			const baseMessage: OpenAI.Chat.ChatCompletionMessageParam & {
+				reasoning_details?: any[]
+				reasoning_content?: string
+			} = {
 				role: anthropicMessage.role,
 				content: anthropicMessage.content,
 			}
@@ -316,6 +319,10 @@ export function convertToOpenAiMessages(
 				const mapped = mapReasoningDetails(messageWithDetails.reasoning_details)
 				if (mapped) {
 					;(baseMessage as any).reasoning_details = mapped
+				}
+				// Pass through reasoning_content for DeepSeek / Z.ai thinking mode.
+				if (typeof messageWithDetails.reasoning_content === "string" && messageWithDetails.reasoning_content) {
+					baseMessage.reasoning_content = messageWithDetails.reasoning_content
 				}
 			}
 
@@ -450,6 +457,9 @@ export function convertToOpenAiMessages(
 					}
 				}
 			} else if (anthropicMessage.role === "assistant") {
+				const messageWithDetails = anthropicMessage as any
+
+				let extractedReasoning: string | undefined
 				const { nonToolMessages, toolMessages } = anthropicMessage.content.reduce<{
 					nonToolMessages: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]
 					toolMessages: Anthropic.ToolUseBlockParam[]
@@ -459,6 +469,11 @@ export function convertToOpenAiMessages(
 							acc.toolMessages.push(part)
 						} else if (part.type === "text" || part.type === "image") {
 							acc.nonToolMessages.push(part)
+						} else if ((part as any).type === "reasoning" && (part as any).text) {
+							// Extract reasoning stored as a content block (DeepSeek / Z.ai interleaved thinking).
+							// Must be passed back as top-level reasoning_content so providers like DeepSeek
+							// don't reject the request with "reasoning_content must be passed back to the API".
+							extractedReasoning = (part as any).text
 						} // assistant cannot send tool_result messages
 						return acc
 					},
@@ -489,14 +504,12 @@ export function convertToOpenAiMessages(
 					},
 				}))
 
-				// Check if the message has reasoning_details (used by Gemini 3, xAI, etc.)
-				const messageWithDetails = anthropicMessage as any
-
 				// Build message with reasoning_details BEFORE tool_calls to preserve
 				// the order expected by providers like Roo. Property order matters
 				// when sending messages back to some APIs.
 				const baseMessage: OpenAI.Chat.ChatCompletionAssistantMessageParam & {
 					reasoning_details?: any[]
+					reasoning_content?: string
 				} = {
 					role: "assistant",
 					// Use empty string instead of undefined for providers like Gemini (via OpenRouter)
@@ -509,6 +522,18 @@ export function convertToOpenAiMessages(
 				const mapped = mapReasoningDetails(messageWithDetails.reasoning_details)
 				if (mapped) {
 					baseMessage.reasoning_details = mapped
+				}
+
+				// Pass through reasoning_content for providers that require it in history
+				// (e.g. DeepSeek thinking mode: "reasoning_content must be passed back to the API").
+				// Prefer top-level field (already round-tripped); fall back to reasoning from content blocks.
+				const outgoingReasoningContent: string | undefined =
+					(typeof messageWithDetails.reasoning_content === "string" &&
+					messageWithDetails.reasoning_content.length > 0
+						? messageWithDetails.reasoning_content
+						: undefined) ?? extractedReasoning
+				if (outgoingReasoningContent) {
+					baseMessage.reasoning_content = outgoingReasoningContent
 				}
 
 				// Add tool_calls after reasoning_details
