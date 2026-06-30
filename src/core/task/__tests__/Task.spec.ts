@@ -2368,6 +2368,7 @@ describe("Cline", () => {
 
 		afterEach(() => {
 			consoleErrorSpy.mockRestore()
+			vi.restoreAllMocks()
 		})
 
 		it("logs (instead of crashing) when startTask rejects from the constructor", async () => {

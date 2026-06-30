@@ -1319,8 +1319,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						if (message) {
 							this.interactiveAsk = message
 							this.emit(RooCodeEventName.TaskInteractive, this.taskId)
-							/* v8 ignore next -- fire-and-forget webview notification inside setTimeout; rejection is benign */
-							void provider?.postMessageToWebview({ type: "interactionRequired" })
+							void provider?.postMessageToWebview({ type: "interactionRequired" }).catch((error) => {
+								console.error("[Task#ask] postMessageToWebview interactionRequired failed:", error)
+							})
 						}
 					}, statusMutationTimeout),
 				)
@@ -1460,7 +1461,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			)
 			if (lastToolAskIndex !== -1) {
 				this.clineMessages[lastToolAskIndex].isAnswered = true
-				void this.updateClineMessage(this.clineMessages[lastToolAskIndex])
+				void this.updateClineMessage(this.clineMessages[lastToolAskIndex]).catch((error) => {
+					console.error("[Task#handleWebviewAskResponse] updateClineMessage failed:", error)
+				})
 				this.saveClineMessages().catch((error) => {
 					console.error("Failed to save answered tool-ask state:", error)
 				})
