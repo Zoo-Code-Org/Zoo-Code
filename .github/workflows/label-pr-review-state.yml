@@ -74,6 +74,26 @@ jobs:
               }
             }
 
+            // Fetch required status check names from the branch ruleset.
+            // Uses the public /rules/branches endpoint — no admin token needed.
+            // Falls back to blocking on all checks if the endpoint is unavailable.
+            let requiredCheckNames = null;
+            try {
+              const { data: rules } = await github.request(
+                'GET /repos/{owner}/{repo}/rules/branches/{branch}',
+                { owner, repo, branch: 'main' },
+              );
+              const statusRule = rules.find(r => r.type === 'required_status_checks');
+              if (statusRule) {
+                requiredCheckNames = new Set(
+                  statusRule.parameters.required_status_checks.map(c => c.context),
+                );
+                core.info(`Required checks: ${[...requiredCheckNames].join(', ')}`);
+              }
+            } catch (err) {
+              core.warning(`Could not fetch branch rules, falling back to all checks: ${err.message}`);
+            }
+
             const failures = [];
 
             for (const pr of prs) {
@@ -85,8 +105,9 @@ jobs:
                   continue;
                 }
 
-                // Check aggregate CI status for the PR's head commit.
-                // We combine check runs (Actions) and commit statuses (external CIs).
+                // Check CI status for required checks on the PR's head commit only.
+                // Scoping to required checks avoids advisory checks (e.g. codecov/patch)
+                // incorrectly blocking label assignment on otherwise-ready PRs.
                 const [checkRuns, commitStatusRes] = await Promise.all([
                   github.paginate(github.rest.checks.listForRef, {
                     owner, repo, ref: pr.head.sha, per_page: 100,
@@ -96,19 +117,27 @@ jobs:
                   }),
                 ]);
 
-                // Exclude this workflow's own check run to avoid self-referential loops.
-                const relevantRuns = checkRuns.filter(
-                  run => run.name !== 'Reconcile PR review state labels',
-                );
+                // Filter to required checks only (or all checks if rules unavailable).
+                // Always exclude this workflow's own run to avoid self-referential loops.
+                const relevantRuns = checkRuns.filter(run => {
+                  if (run.name === 'Reconcile PR review state labels') return false;
+                  return requiredCheckNames ? requiredCheckNames.has(run.name) : true;
+                });
 
-                core.debug(`PR #${pr.number}: ${relevantRuns.length} check run(s), commit status=${commitStatusRes.data.state}`);
+                // For commit statuses (external CIs), there's no per-status name filtering
+                // available from getCombinedStatusForRef — it aggregates all statuses.
+                // If required checks are known, we only use commitStatus as a signal when
+                // no required check runs exist for this ref (i.e. pure status-based CI).
+                const useCommitStatus = !requiredCheckNames || relevantRuns.length === 0;
+
+                core.debug(`PR #${pr.number}: ${relevantRuns.length} required check run(s), commit status=${commitStatusRes.data.state} (used=${useCommitStatus})`);
                 for (const run of relevantRuns) {
                   core.debug(`  check: "${run.name}" status=${run.status} conclusion=${run.conclusion}`);
                 }
 
                 const ciPending = relevantRuns.some(
                   run => run.status === 'queued' || run.status === 'in_progress',
-                ) || commitStatusRes.data.state === 'pending';
+                ) || (useCommitStatus && commitStatusRes.data.state === 'pending');
 
                 const ciFailed = !ciPending && (
                   relevantRuns.some(
@@ -116,8 +145,10 @@ jobs:
                            run.conclusion !== 'success' &&
                            run.conclusion !== 'skipped' &&
                            run.conclusion !== 'neutral',
-                  ) || commitStatusRes.data.state === 'failure' ||
+                  ) || (useCommitStatus && (
+                    commitStatusRes.data.state === 'failure' ||
                     commitStatusRes.data.state === 'error'
+                  ))
                 );
 
                 // While CI is running or has failed, remove state labels and move on.
