@@ -272,6 +272,23 @@ describe("ThinkingBudget", () => {
 			expect(screen.getByTestId("select-item-high")).toBeInTheDocument()
 		})
 
+		it("should fall back to first available option when stored value is not in the explicit array", () => {
+			// Covers the clamp branch: defaultReasoningEffort="disable" but array omits "disable"
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["low", "high"],
+					}}
+				/>,
+			)
+
+			// The select value should be "low" (first item), not "disable"
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
+		})
+
 		it("should show 'disable' option when supportsReasoningEffort array explicitly includes disable", () => {
 			render(
 				<ThinkingBudget
