@@ -118,5 +118,9 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 		modelInfo.supportsTemperature = false
 	}
 
+	if (id === "anthropic/claude-sonnet-5") {
+		modelInfo.supportsTemperature = false
+	}
+
 	return modelInfo
 }

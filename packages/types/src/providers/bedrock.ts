@@ -51,6 +51,24 @@ export const bedrockModels = {
 			},
 		],
 	},
+	"anthropic.claude-sonnet-5": {
+		maxTokens: 8192,
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		inputPrice: 2.0, // $2 per million input tokens (introductory pricing through Aug 31, 2026)
+		outputPrice: 10.0, // $10 per million output tokens (introductory pricing through Aug 31, 2026)
+		cacheWritesPrice: 2.5, // $2.50 per million tokens (introductory pricing through Aug 31, 2026)
+		cacheReadsPrice: 0.2, // $0.20 per million tokens (introductory pricing through Aug 31, 2026)
+		minTokensPerCachePoint: 1024,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description:
+			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
+	},
 	"amazon.nova-pro-v1:0": {
 		maxTokens: 5000,
 		contextWindow: 300_000,
@@ -602,6 +620,7 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // - Claude Sonnet 4
 // - Claude Sonnet 4.5
 // - Claude Sonnet 4.6
+// - Claude Sonnet 5
 // - Claude Haiku 4.5
 // - Claude Opus 4.5
 // - Claude Opus 4.6
@@ -611,6 +630,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
 	"anthropic.claude-sonnet-4-6",
+	"anthropic.claude-sonnet-5",
 	"anthropic.claude-haiku-4-5-20251001-v1:0",
 	"anthropic.claude-opus-4-5-20251101-v1:0",
 	"anthropic.claude-opus-4-6-v1",
