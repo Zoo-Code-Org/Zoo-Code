@@ -325,13 +325,14 @@ describe("VercelAiGatewayHandler", () => {
 
 			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					model: "anthropic/claude-sonnet-5",
-					temperature: undefined,
-					max_completion_tokens: 128000,
-				}),
-			)
+			// Assert directly on the extracted call arg. `objectContaining({
+			// temperature: undefined })` passes whether temperature is explicitly
+			// undefined or simply absent, so it wouldn't catch a regression where the
+			// handler stops consulting supportsTemperature.
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(call.model).toBe("anthropic/claude-sonnet-5")
+			expect(call.temperature).toBeUndefined()
+			expect(call.max_completion_tokens).toBe(128000)
 		})
 
 		it("adds cache breakpoints for supported models", async () => {

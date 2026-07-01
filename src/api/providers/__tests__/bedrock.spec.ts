@@ -1457,6 +1457,36 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
+		it("should send adaptive thinking with effort xhigh for Claude Sonnet 5 when reasoning is enabled", async () => {
+			// End-to-end regression guard for the Sonnet 5 handler branch. The
+			// isAdaptiveThinkingModel predicate is unit-covered, but a regression in
+			// the createMessage adaptive-thinking branch for this specific model
+			// wouldn't be caught without a request-level test (see review feedback).
+			const sonnet5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+			})
+
+			const generator = sonnet5Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// Sonnet 5 uses the same adaptive-thinking contract as Opus 4.7/4.8 —
+			// budget_tokens causes a 400, so thinking.type is "adaptive" with effort.
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "xhigh" })
+			// Sonnet 5 rejects sampling parameters: temperature must be omitted entirely.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
 		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
 			const opus48Handler = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-opus-4-8",
