@@ -6,7 +6,7 @@ import * as os from "os"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { TaskHistoryStore } from "../TaskHistoryStore"
+import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 
 vi.mock("../../../utils/storage", () => ({
@@ -640,6 +640,79 @@ describe("TaskHistoryStore", () => {
 			expect(parentWritten?.status).toBe("active")
 
 			storeWithCallback.dispose()
+		})
+
+		it("propagates throw from first updater — neither record is written", async () => {
+			await store.initialize()
+
+			const child = makeHistoryItem({ id: "child-updater-throw", status: "active" })
+			const parent = makeHistoryItem({ id: "parent-updater-throw", status: "delegated" })
+			await store.upsert(child)
+			await store.upsert(parent)
+
+			await expect(
+				store.atomicUpdatePair(
+					"child-updater-throw",
+					"parent-updater-throw",
+					(_c) => {
+						throw new Error("updater exploded")
+					},
+					(p) => p,
+				),
+			).rejects.toThrow("updater exploded")
+
+			// Neither record should have been modified
+			expect(store.get("child-updater-throw")?.status).toBe("active")
+			expect(store.get("parent-updater-throw")?.status).toBe("delegated")
+		})
+
+		it("transition guard in first updater: delegated → completed throws assertValidTransition", async () => {
+			await store.initialize()
+
+			const child = makeHistoryItem({ id: "child-guard-pair", status: "delegated" })
+			const parent = makeHistoryItem({ id: "parent-guard-pair", status: "active" })
+			await store.upsert(child)
+			await store.upsert(parent)
+
+			await expect(
+				store.atomicUpdatePair(
+					"child-guard-pair",
+					"parent-guard-pair",
+					(c) => {
+						assertValidTransition(c.status, "completed")
+						return { ...c, status: "completed" as const }
+					},
+					(p) => p,
+				),
+			).rejects.toThrow("Invalid task status transition: delegated → completed")
+
+			// Original statuses preserved
+			expect(store.get("child-guard-pair")?.status).toBe("delegated")
+			expect(store.get("parent-guard-pair")?.status).toBe("active")
+		})
+
+		it("store-level guard in atomicUpdatePair rejects invalid transition even without explicit updater assertion", async () => {
+			await store.initialize()
+
+			const child = makeHistoryItem({ id: "child-store-guard", status: "delegated" })
+			const parent = makeHistoryItem({ id: "parent-store-guard", status: "active" })
+			await store.upsert(child)
+			await store.upsert(parent)
+
+			// Updater returns delegated → completed without calling assertValidTransition.
+			// The store's internal guard must still catch this.
+			await expect(
+				store.atomicUpdatePair(
+					"child-store-guard",
+					"parent-store-guard",
+					(c) => ({ ...c, status: "completed" as const }),
+					(p) => p,
+				),
+			).rejects.toThrow("Invalid task status transition: delegated → completed")
+
+			// Neither record modified
+			expect(store.get("child-store-guard")?.status).toBe("delegated")
+			expect(store.get("parent-store-guard")?.status).toBe("active")
 		})
 	})
 })

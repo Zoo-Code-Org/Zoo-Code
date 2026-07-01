@@ -89,6 +89,10 @@ describe("assertValidTransition", () => {
 				"Invalid task status transition: active → active",
 			)
 		})
+
+		it("undefined (implicit active) → delegated is valid", () => {
+			expect(() => assertValidTransition(undefined, "delegated")).not.toThrow()
+		})
 	})
 })
 
@@ -376,6 +380,20 @@ describe("TaskHistoryStore upsert transition guard", () => {
 		expect(store.get("task-guard-new")?.status).toBe("active")
 	})
 
+	it("allows writing status: active over a legacy item with status: undefined (implicit active → active no-op)", async () => {
+		// Legacy items pre-dating the status field have status: undefined, which normalizes
+		// to "active". Writing status: "active" must not throw as an invalid self-loop.
+		const item = makeItem({ id: "task-guard-legacy" })
+		delete (item as any).status
+		await seedItems([item])
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+
+		await expect(store.upsert({ ...item, status: "active" })).resolves.toBeDefined()
+		expect(store.get("task-guard-legacy")?.status).toBe("active")
+	})
+
 	it("allows upsert without a status field (no-op on status)", async () => {
 		const item = makeItem({ id: "task-guard-4", status: "completed" })
 		await seedItems([item])
@@ -388,5 +406,30 @@ describe("TaskHistoryStore upsert transition guard", () => {
 		await expect(store.upsert(noStatus as HistoryItem)).resolves.toBeDefined()
 		// Status is preserved from the existing cache entry
 		expect(store.get("task-guard-4")?.status).toBe("completed")
+	})
+
+	it("atomicReadAndUpdate enforces the upsertCore transition guard on status changes", async () => {
+		// atomicReadAndUpdate now flows through upsertCore without skipTransitionCheck,
+		// so invalid transitions are rejected at the store boundary.
+		const item = makeItem({ id: "task-atomic-guard", status: "active" })
+		await store.upsert(item)
+
+		// active → delegated via atomicReadAndUpdate — valid, must succeed
+		await expect(
+			store.atomicReadAndUpdate("task-atomic-guard", (current) => ({
+				...current,
+				status: "delegated" as const,
+				awaitingChildId: "some-child",
+			})),
+		).resolves.toBeDefined()
+		expect(store.get("task-atomic-guard")?.status).toBe("delegated")
+
+		// delegated → completed via atomicReadAndUpdate — invalid, must throw
+		await expect(
+			store.atomicReadAndUpdate("task-atomic-guard", (current) => ({
+				...current,
+				status: "completed" as const,
+			})),
+		).rejects.toThrow("Invalid task status transition: delegated → completed")
 	})
 })

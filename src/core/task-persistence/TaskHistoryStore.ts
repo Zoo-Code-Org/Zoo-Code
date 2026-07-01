@@ -202,8 +202,13 @@ export class TaskHistoryStore {
 		// Enforce transition validity at the write boundary so that any caller
 		// (including fire-and-forget saves) cannot silently stomp a terminal status.
 		// Skip when there is no existing record — first insert has no prior state to transition from.
-		if (!options.skipTransitionCheck && existing && item.status !== undefined && item.status !== existing.status) {
-			assertValidTransition(existing.status, item.status)
+		// Normalize existing.status (undefined = legacy "active") before comparing so that writing
+		// status: "active" onto a legacy item without a status field is not treated as a transition.
+		if (!options.skipTransitionCheck && existing && item.status !== undefined) {
+			const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
+			if (item.status !== normalizedExisting) {
+				assertValidTransition(existing.status, item.status)
+			}
 		}
 
 		// Merge: preserve existing metadata unless explicitly overwritten
@@ -684,7 +689,7 @@ export class TaskHistoryStore {
 					`[TaskHistoryStore] atomicReadAndUpdate: updater changed task id from ${taskId} to ${updated.id}`,
 				)
 			}
-			return this.upsertCore(updated, { skipTransitionCheck: true })
+			return this.upsertCore(updated)
 		})
 	}
 
@@ -720,6 +725,19 @@ export class TaskHistoryStore {
 				throw new Error(
 					`[TaskHistoryStore] atomicUpdatePair: second updater changed id from ${secondId} to ${updatedSecond.id}`,
 				)
+			}
+
+			// Validate status transitions before any disk write — mirrors upsertCore guard.
+			for (const [existing, updated] of [
+				[first, updatedFirst],
+				[second, updatedSecond],
+			] as const) {
+				if (updated.status !== undefined) {
+					const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
+					if (updated.status !== normalizedExisting) {
+						assertValidTransition(existing.status, updated.status)
+					}
+				}
 			}
 
 			// Merge with existing cache entries before writing, mirroring upsertCore.

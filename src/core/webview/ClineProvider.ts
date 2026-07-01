@@ -2348,9 +2348,8 @@ export class ClineProvider
 		}
 
 		try {
-			const { isZooCodeAuthenticated, getCachedZooCodeUserInfo, getZooCodeBaseUrl } = await import(
-				"../../services/zoo-code-auth"
-			)
+			const { isZooCodeAuthenticated, getCachedZooCodeUserInfo, getZooCodeBaseUrl } =
+				await import("../../services/zoo-code-auth")
 			const userInfo = getCachedZooCodeUserInfo()
 			zooCodeState = {
 				zooCodeIsAuthenticated: await isZooCodeAuthenticated(),
@@ -3778,8 +3777,14 @@ export class ClineProvider
 			await this.taskHistoryStore.atomicUpdatePair(
 				childTaskId,
 				parentTaskId,
-				(child) => ({ ...child, status: "completed" as const }),
+				(child) => {
+					assertValidTransition(child.status, "completed")
+					return { ...child, status: "completed" as const, completionResultSummary }
+				},
 				(parent) => {
+					if (parent.status !== "active") {
+						assertValidTransition(parent.status, "active")
+					}
 					const childIds = Array.from(new Set([...(parent.childIds ?? []), childTaskId]))
 					updatedHistory = {
 						...parent,
@@ -3803,7 +3808,8 @@ export class ClineProvider
 				}
 				if (updatedParent) {
 					await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updatedParent })
-				}			}
+				}
+			}
 
 			// 6) Emit TaskDelegationCompleted (provider-level)
 			try {

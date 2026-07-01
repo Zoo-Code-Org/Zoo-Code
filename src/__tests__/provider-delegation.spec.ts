@@ -226,11 +226,20 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			atomicReadAndUpdate: vi.fn().mockRejectedValue(persistError),
 		})
 
+		const child = { taskId: "child-1", start: childStart }
+		// Before createTask: getCurrentTask returns parent (used by step 3 close).
+		// After createTask: returns child so the rollback guard passes and the child is popped.
+		const getCurrentTask = vi.fn().mockReturnValue(parentTask)
+		const createTask = vi.fn().mockImplementation(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+
 		const provider = {
 			emit: vi.fn(),
-			getCurrentTask: vi.fn(() => parentTask),
+			getCurrentTask,
 			removeClineFromStack,
-			createTask: vi.fn().mockResolvedValue({ taskId: "child-1", start: childStart }),
+			createTask,
 			getTaskWithId,
 			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
 			deleteTaskWithId,
