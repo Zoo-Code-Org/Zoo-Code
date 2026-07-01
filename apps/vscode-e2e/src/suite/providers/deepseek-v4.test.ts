@@ -404,6 +404,17 @@ suite("DeepSeek V4 provider", function () {
 					undefined,
 					`Reasoning-disabled probe should omit reasoning_effort.\n${diagnostics}`,
 				)
+
+				// Negative guard: reasoning-off requests must never carry reasoning_content,
+				// which would indicate the capture flag itself is broken.
+				const secondRequestOff = result.requests[1]
+				if (secondRequestOff) {
+					assert.strictEqual(
+						secondRequestOff.hasReasoningContentInHistory,
+						false,
+						`Turn 2 request must NOT include reasoning_content when thinking is disabled.\n${diagnostics}`,
+					)
+				}
 			}
 
 			assert.ok(result.completed, `Task should complete cleanly.\n${diagnostics}`)

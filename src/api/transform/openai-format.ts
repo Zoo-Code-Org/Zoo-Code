@@ -473,7 +473,10 @@ export function convertToOpenAiMessages(
 							// Extract reasoning stored as a content block (DeepSeek / Z.ai interleaved thinking).
 							// Must be passed back as top-level reasoning_content so providers like DeepSeek
 							// don't reject the request with "reasoning_content must be passed back to the API".
-							extractedReasoning = (part as any).text
+							// Accumulate all blocks (a turn may have more than one) to preserve order.
+							extractedReasoning = extractedReasoning
+								? extractedReasoning + (part as any).text
+								: (part as any).text
 						} // assistant cannot send tool_result messages
 						return acc
 					},
