@@ -162,6 +162,33 @@ describe("getModelMaxOutputTokens", () => {
 		).toBe(32_768)
 	})
 
+	test("should preserve Anthropic hybrid token handling for Claude Sonnet 5", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningBudget: true,
+			supportsReasoningBinary: true,
+			supportsTemperature: false,
+			maxTokens: 128_000,
+		}
+
+		expect(
+			getModelMaxOutputTokens({
+				modelId: "claude-sonnet-5",
+				model,
+				settings: { apiProvider: "anthropic", enableReasoningEffort: false },
+			}),
+		).toBe(ANTHROPIC_DEFAULT_MAX_TOKENS)
+
+		expect(
+			getModelMaxOutputTokens({
+				modelId: "claude-sonnet-5",
+				model,
+				settings: { apiProvider: "anthropic", enableReasoningEffort: true, modelMaxTokens: 32_768 },
+			}),
+		).toBe(32_768)
+	})
+
 	test("should return model.maxTokens for non-Anthropic models that support reasoning budget but aren't using it", () => {
 		const geminiModelId = "gemini-2.5-flash-preview-04-17"
 		const model: ModelInfo = {

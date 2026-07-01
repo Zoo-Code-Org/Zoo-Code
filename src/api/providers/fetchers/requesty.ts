@@ -51,6 +51,12 @@ export async function getRequestyModels(baseUrl?: string, apiKey?: string): Prom
 				modelInfo.supportsTemperature = false
 			}
 
+			if (rawModel.id === "anthropic/claude-sonnet-5") {
+				modelInfo.supportsReasoningBudget = true
+				modelInfo.supportsReasoningBinary = true
+				modelInfo.supportsTemperature = false
+			}
+
 			models[rawModel.id] = modelInfo
 		}
 	} catch (error) {
