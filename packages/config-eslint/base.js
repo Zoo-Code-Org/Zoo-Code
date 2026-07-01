@@ -39,6 +39,15 @@ export const config = [
 					caughtErrorsIgnorePattern: "^_",
 				},
 			],
+			// Reject invisible/irregular whitespace (zero-width chars, etc.) in
+			// identifiers and between tokens. String literals are skipped to
+			// avoid noise in i18n locale files; the CI invisible-chars job in
+			// code-qa.yml is the authoritative defense for the string case
+			// (it scans raw bytes across strings, identifiers, and comments).
+			"no-irregular-whitespace": [
+				"error",
+				{ skipStrings: true, skipComments: false, skipRegExps: true, skipTemplates: false },
+			],
 		},
 	},
 ]
