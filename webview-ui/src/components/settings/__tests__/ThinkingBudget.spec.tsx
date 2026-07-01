@@ -289,6 +289,23 @@ describe("ThinkingBudget", () => {
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
 		})
 
+		it("should fall back to rawReasoningEffort when availableOptions is empty", () => {
+			// Covers the ?? rawReasoningEffort branch when availableOptions[0] is undefined
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "medium" }}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: [] as any,
+					}}
+				/>,
+			)
+
+			// With an empty options array, falls back to the stored value "medium"
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "medium")
+		})
+
 		it("should show 'disable' option when supportsReasoningEffort array explicitly includes disable", () => {
 			render(
 				<ThinkingBudget
