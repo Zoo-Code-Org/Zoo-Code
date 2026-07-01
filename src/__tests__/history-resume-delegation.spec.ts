@@ -148,6 +148,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			completedByChildId: "child-1",
 			completionResultSummary: "Child done",
 			awaitingChildId: undefined,
+			delegatedToId: undefined,
 			childIds: ["child-1"],
 		})
 

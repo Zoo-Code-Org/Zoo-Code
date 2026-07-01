@@ -299,6 +299,54 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
+// migrateFromGlobalState — reconciliation runs after migration
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("TaskHistoryStore migrateFromGlobalState reconciliation", () => {
+	let tmpDir: string
+	let store: TaskHistoryStore
+
+	beforeEach(async () => {
+		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "zoo-migrate-test-"))
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+	})
+
+	afterEach(async () => {
+		store.dispose()
+		await fs.rm(tmpDir, { recursive: true, force: true })
+	})
+
+	it("repairs a delegated parent introduced by migrateFromGlobalState on the same startup", async () => {
+		// Simulate a first-upgrade scenario: the child task file exists on disk
+		// (from a pre-migration run) but the parent arrives via migrateFromGlobalState
+		// with status "delegated" and an awaitingChildId whose task dir is also present.
+		// The child's history_item.json does NOT exist yet — it too will be migrated.
+		const tasksDir = path.join(tmpDir, "tasks")
+		const childId = "migrate-child-1"
+		const parentId = "migrate-parent-1"
+
+		// Create task directories (simulating existing task folders)
+		await fs.mkdir(path.join(tasksDir, childId), { recursive: true })
+		await fs.mkdir(path.join(tasksDir, parentId), { recursive: true })
+
+		const child = makeItem({ id: childId, status: "completed", completionResultSummary: "Done" })
+		const parent = makeItem({ id: parentId, status: "delegated", awaitingChildId: childId, delegatedToId: childId })
+
+		// Migrate both — parent is delegated with a completed child
+		await store.migrateFromGlobalState([child, parent])
+
+		// The parent should be repaired to active by the post-migration reconciliation
+		const repairedParent = store.get(parentId)
+		expect(repairedParent?.status).toBe("active")
+		expect(repairedParent?.awaitingChildId).toBeUndefined()
+		expect(repairedParent?.delegatedToId).toBeUndefined()
+		expect(repairedParent?.completedByChildId).toBe(childId)
+		expect(repairedParent?.completionResultSummary).toBe("Done")
+	})
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
 // upsert — transition guard enforcement at the write boundary
 // ─────────────────────────────────────────────────────────────────────────────
 

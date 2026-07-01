@@ -491,6 +491,10 @@ export class TaskHistoryStore {
 
 		// Write the index
 		await this.writeIndex()
+
+		// Repair any delegation inconsistencies introduced by the migrated entries.
+		// reconcileDelegationState() is idempotent so running it again is safe.
+		await this.reconcileDelegationState()
 	}
 
 	// ────────────────────────────── Private: Index management ──────────────────────────────

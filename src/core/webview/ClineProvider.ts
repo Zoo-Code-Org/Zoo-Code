@@ -538,6 +538,7 @@ export class ClineProvider
 								...parentHistory,
 								status: "active",
 								awaitingChildId: undefined,
+								delegatedToId: undefined,
 							})
 							const repairMsg =
 								`[ClineProvider#removeClineFromStack] Repaired parent ${parentTaskId} metadata: delegated → active (child ${childTaskId} removed). ` +
@@ -3215,6 +3216,7 @@ export class ClineProvider
 							...parentHistory,
 							status: "active",
 							awaitingChildId: undefined,
+							delegatedToId: undefined,
 						})
 
 						this.log(
@@ -3792,6 +3794,7 @@ export class ClineProvider
 						completedByChildId: childTaskId,
 						completionResultSummary,
 						awaitingChildId: undefined,
+						delegatedToId: undefined,
 						childIds,
 					}
 					return updatedHistory
