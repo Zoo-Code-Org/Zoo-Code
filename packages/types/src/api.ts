@@ -3,6 +3,7 @@ import type { Socket } from "net"
 
 import type { RooCodeEvents } from "./events.js"
 import type { RooCodeSettings } from "./global-settings.js"
+import type { HistoryItem } from "./history.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
 import type { IpcMessage, IpcServerEvents } from "./ipc.js"
 
@@ -38,6 +39,12 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * @returns True if the task is in the task history, false otherwise.
 	 */
 	isTaskInHistory(taskId: string): Promise<boolean>
+	/**
+	 * Returns the HistoryItem for a task by ID. Intended for use in tests only.
+	 * @param taskId The ID of the task.
+	 * @returns The HistoryItem, or undefined if not found.
+	 */
+	getTaskHistoryItem(taskId: string): Promise<HistoryItem | undefined>
 	/**
 	 * Returns the current task stack.
 	 * @returns An array of task IDs.
