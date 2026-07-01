@@ -39,11 +39,11 @@ export const config = [
 					caughtErrorsIgnorePattern: "^_",
 				},
 			],
-			// Reject invisible/irregular whitespace (zero-width chars, etc.) in
-			// identifiers and between tokens. String literals are skipped to
-			// avoid noise in i18n locale files; the CI invisible-chars job in
-			// code-qa.yml is the authoritative defense for the string case
-			// (it scans raw bytes across strings, identifiers, and comments).
+			// Reject irregular whitespace (incl. zero-width space U+200B and
+			// BOM U+FEFF) in identifiers and between tokens. This rule does NOT
+			// catch bidi-override, ZWJ/ZWNJ, or word-joiner characters; the CI
+			// invisible-chars job in code-qa.yml is the authoritative defense
+			// for the full Trojan Source character set across all files.
 			"no-irregular-whitespace": [
 				"error",
 				{ skipStrings: true, skipComments: false, skipRegExps: true, skipTemplates: false },

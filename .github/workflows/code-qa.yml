@@ -22,6 +22,9 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  # This job never pushes — don't persist the GITHUB_TOKEN.
+                  persist-credentials: false
             - name: Dependency review
               uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
@@ -35,6 +38,9 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  # This job never pushes — don't persist the GITHUB_TOKEN.
+                  persist-credentials: false
             - name: Reject invisible / homoglyph Unicode
               run: |
                   # zero-width (U+200B-200F), word joiner (U+2060), BOM (U+FEFF),
