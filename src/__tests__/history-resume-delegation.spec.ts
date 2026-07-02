@@ -30,11 +30,15 @@ vi.mock("vscode", () => {
 vi.mock("../core/task-persistence/taskMessages", () => ({
 	readTaskMessages: vi.fn().mockResolvedValue([]),
 }))
-vi.mock("../core/task-persistence", () => ({
-	readApiMessages: vi.fn().mockResolvedValue([]),
-	saveApiMessages: vi.fn().mockResolvedValue(undefined),
-	saveTaskMessages: vi.fn().mockResolvedValue(undefined),
-}))
+vi.mock("../core/task-persistence", async (importOriginal) => {
+	const real = await importOriginal<typeof import("../core/task-persistence")>()
+	return {
+		...real,
+		readApiMessages: vi.fn().mockResolvedValue([]),
+		saveApiMessages: vi.fn().mockResolvedValue(undefined),
+		saveTaskMessages: vi.fn().mockResolvedValue(undefined),
+	}
+})
 
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
@@ -130,9 +134,11 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(firstId).toBe("child-1")
 		expect(secondId).toBe("parent-1")
 
-		// Verify child updater produces completed status
+		// Verify child updater produces completed status and persists completionResultSummary
+		// so startup reconciliation has the real result if the parent write fails.
 		const updatedChild = firstUpdater({ id: "child-1", status: "active" } as HistoryItem)
 		expect(updatedChild.status).toBe("completed")
+		expect(updatedChild.completionResultSummary).toBe("Child done")
 
 		// Verify parent updater produces active status with correct fields
 		const updatedParent = secondUpdater(parentHistoryItem as HistoryItem)
@@ -142,6 +148,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			completedByChildId: "child-1",
 			completionResultSummary: "Child done",
 			awaitingChildId: undefined,
+			delegatedToId: undefined,
 			childIds: ["child-1"],
 		})
 

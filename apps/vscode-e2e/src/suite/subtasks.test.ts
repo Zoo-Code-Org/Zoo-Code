@@ -150,6 +150,103 @@ suite("Roo Code Subtasks", function () {
 		}
 	})
 
+	test("delegated child completion persists parent and child history state", async () => {
+		const api = globalThis.api
+		const asks: Record<string, ClineMessage[]> = {}
+		const says: Record<string, ClineMessage[]> = {}
+
+		let delegationCompletedParentId: string | undefined
+		let delegationCompletedChildId: string | undefined
+		let delegationCompletedSummary: string | undefined
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "ask") {
+				asks[taskId] = asks[taskId] || []
+				asks[taskId].push(message)
+			}
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		const delegationCompletedHandler = (parentId: string, childId: string, summary: string) => {
+			delegationCompletedParentId = parentId
+			delegationCompletedChildId = childId
+			delegationCompletedSummary = summary
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+		api.on(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+
+		try {
+			const parentTaskId = await api.startNewTask({
+				configuration: {
+					mode: "ask",
+					alwaysAllowModeSwitch: true,
+					alwaysAllowSubtasks: true,
+					autoApprovalEnabled: true,
+					enableCheckpoints: false,
+				},
+				text: SUBTASK_PARENT_PROMPT,
+			})
+
+			let childTaskId: string | undefined
+			await waitFor(() => {
+				const stack = api.getCurrentTaskStack()
+				const current = stack[stack.length - 1]
+				if (current && current !== parentTaskId) {
+					childTaskId = current
+					return true
+				}
+				return false
+			})
+
+			await waitFor(() => asks[childTaskId!]?.some(({ ask }) => ask === "followup") ?? false)
+
+			// Send the answer, then wait for TaskDelegationCompleted. That event fires after
+			// atomicUpdatePair writes the persisted history but before the parent is re-created,
+			// so it is the right gate for history assertions. waitUntilCompleted alone is not
+			// sufficient because the resumed parent runs into a mock 404 and never emits
+			// TaskCompleted in the test environment.
+			await api.sendMessage(SUBTASK_CHILD_FOLLOWUP_ANSWER)
+			await waitFor(() => delegationCompletedParentId !== undefined)
+
+			assert.strictEqual(
+				delegationCompletedParentId,
+				parentTaskId,
+				"TaskDelegationCompleted should fire for parent",
+			)
+			assert.strictEqual(delegationCompletedChildId, childTaskId, "TaskDelegationCompleted should fire for child")
+			assert.strictEqual(delegationCompletedSummary, "9", "TaskDelegationCompleted summary should be '9'")
+
+			const parent = await api.getTaskHistoryItem(parentTaskId)
+			assert.ok(parent, "Parent history item should exist")
+			assert.strictEqual(parent.status, "active", "Parent status should be 'active' after child completes")
+			assert.strictEqual(parent.awaitingChildId, undefined, "Parent awaitingChildId should be cleared")
+			assert.strictEqual(parent.delegatedToId, undefined, "Parent delegatedToId should be cleared")
+			assert.strictEqual(parent.completedByChildId, childTaskId, "Parent completedByChildId should be the child")
+			assert.strictEqual(parent.completionResultSummary, "9", "Parent completionResultSummary should be '9'")
+			assert.ok(parent.childIds?.includes(childTaskId!), "Parent childIds should include the child")
+
+			const child = await api.getTaskHistoryItem(childTaskId!)
+			assert.ok(child, "Child history item should exist")
+			assert.strictEqual(child.status, "completed", "Child status should be 'completed'")
+			assert.strictEqual(child.parentTaskId, parentTaskId, "Child parentTaskId should point to parent")
+			assert.strictEqual(child.completionResultSummary, "9", "Child completionResultSummary should be '9'")
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+			if (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			if (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+		}
+	})
+
 	// Race mitigation: skipDelegationRepair prevents removeClineFromStack from
 	// auto-resuming the parent when the child is cancelled (Race 2).
 	test("parent stays paused after subtask cancellation", async () => {

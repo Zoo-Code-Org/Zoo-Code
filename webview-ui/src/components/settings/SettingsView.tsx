@@ -148,6 +148,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const contentRef = useRef<HTMLDivElement | null>(null)
 
 	const prevApiConfigName = useRef(currentApiConfigName)
+	const handledSettingsImportedAt = useRef<number | undefined>(undefined)
 	const confirmDialogHandler = useRef<() => void>()
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
@@ -233,10 +234,13 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
-		if (settingsImportedAt) {
-			setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
-			setChangeDetected(false)
+		if (!settingsImportedAt || handledSettingsImportedAt.current === settingsImportedAt) {
+			return
 		}
+
+		handledSettingsImportedAt.current = settingsImportedAt
+		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
+		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
