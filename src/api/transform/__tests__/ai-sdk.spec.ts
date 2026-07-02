@@ -415,12 +415,38 @@ describe("AI SDK conversion utilities", () => {
 			expect(chunks[0]).toEqual({ type: "tool_call_delta", id: "call_1", delta: '{"path":' })
 		})
 
+		it("processes tool-input-delta chunks with toolCallId", () => {
+			const part = { type: "tool-input-delta" as const, toolCallId: "call_1", inputTextDelta: '{"path":' }
+			const chunks = [...processAiSdkStreamPart(part as any)]
+
+			expect(chunks).toHaveLength(1)
+			expect(chunks[0]).toEqual({ type: "tool_call_delta", id: "call_1", delta: '{"path":' })
+		})
+
 		it("processes tool-input-end chunks", () => {
 			const part = { type: "tool-input-end" as const, id: "call_1" }
 			const chunks = [...processAiSdkStreamPart(part)]
 
 			expect(chunks).toHaveLength(1)
 			expect(chunks[0]).toEqual({ type: "tool_call_end", id: "call_1" })
+		})
+
+		it("processes tool-input-available chunks", () => {
+			const part = {
+				type: "tool-input-available" as const,
+				toolCallId: "call_1",
+				toolName: "attempt_completion",
+				input: { result: "done" },
+			}
+			const chunks = [...processAiSdkStreamPart(part as any)]
+
+			expect(chunks).toHaveLength(1)
+			expect(chunks[0]).toEqual({
+				type: "tool_call",
+				id: "call_1",
+				name: "attempt_completion",
+				arguments: '{"result":"done"}',
+			})
 		})
 
 		it("processes complete tool-call chunks", () => {

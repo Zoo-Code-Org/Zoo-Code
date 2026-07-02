@@ -196,6 +196,23 @@ function stringifyToolInput(part: Extract<TextStreamPart<any>, { type: "tool-cal
 	return typeof input === "string" ? input : JSON.stringify(input)
 }
 
+type ToolInputPart = {
+	id?: string
+	toolCallId?: string
+	toolName?: string
+	delta?: string
+	inputTextDelta?: string
+	input?: unknown
+}
+
+function getToolCallId(part: ToolInputPart) {
+	return part.toolCallId ?? part.id ?? ""
+}
+
+function getToolInputDelta(part: ToolInputPart) {
+	return part.inputTextDelta ?? part.delta ?? ""
+}
+
 /**
  * Process a single AI SDK stream part and yield the appropriate ApiStreamChunk(s).
  * This generator handles all TextStreamPart types and converts them to the
@@ -219,7 +236,7 @@ export function* processAiSdkStreamPart(part: ExtendedStreamPart): Generator<Api
 		case "tool-input-start":
 			yield {
 				type: "tool_call_start",
-				id: part.id,
+				id: getToolCallId(part),
 				name: part.toolName,
 			}
 			break
@@ -227,15 +244,24 @@ export function* processAiSdkStreamPart(part: ExtendedStreamPart): Generator<Api
 		case "tool-input-delta":
 			yield {
 				type: "tool_call_delta",
-				id: part.id,
-				delta: part.delta,
+				id: getToolCallId(part),
+				delta: getToolInputDelta(part),
 			}
 			break
 
 		case "tool-input-end":
 			yield {
 				type: "tool_call_end",
-				id: part.id,
+				id: getToolCallId(part),
+			}
+			break
+
+		case "tool-input-available":
+			yield {
+				type: "tool_call",
+				id: getToolCallId(part),
+				name: part.toolName ?? "",
+				arguments: typeof part.input === "string" ? part.input : JSON.stringify(part.input ?? {}),
 			}
 			break
 
