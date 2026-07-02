@@ -16,15 +16,11 @@ function isInitialNovitaToolProbe(req: ChatCompletionRequest) {
 	return requestIncludes(req, "novita-e2e:tool-use") && !hasToolMessage(req)
 }
 
-function hasMarkerToolResult(req: ChatCompletionRequest) {
+function hasNovitaReadFileResult(req: ChatCompletionRequest) {
 	const messages = Array.isArray(req?.messages) ? req.messages : []
 
 	return messages.some((message) => {
-		if (message?.role !== "tool" && message?.role !== "user") {
-			return false
-		}
-
-		return JSON.stringify(message.content ?? "").includes("NOVITA_E2E_MARKER")
+		return message?.role === "tool" && message.tool_call_id === "call_novita_read"
 	})
 }
 
@@ -32,7 +28,7 @@ export function addNovitaFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			model: "moonshotai/kimi-k2.7-code",
-			predicate: hasMarkerToolResult,
+			predicate: hasNovitaReadFileResult,
 		},
 		response: {
 			toolCalls: [
