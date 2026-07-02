@@ -19,7 +19,8 @@
 		{
 			"match": {
 				"model": "moonshotai/kimi-k2.7-code",
-				"toolCallId": "call_novita_read"
+				"userMessage": "[ERROR] You did not use a tool in your previous response!",
+				"sequenceIndex": 0
 			},
 			"response": {
 				"toolCalls": [
