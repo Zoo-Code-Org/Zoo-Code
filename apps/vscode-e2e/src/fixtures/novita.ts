@@ -16,7 +16,7 @@ function isInitialNovitaToolProbe(req: ChatCompletionRequest) {
 }
 
 function hasNovitaReadFileResult(req: ChatCompletionRequest) {
-	return requestIncludes(req, "call_novita_read")
+	return requestIncludes(req, "novita-e2e:tool-use") && !isInitialNovitaToolProbe(req)
 }
 
 export function addNovitaFixtures(mock: InstanceType<typeof LLMock>) {
