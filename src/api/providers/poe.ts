@@ -113,8 +113,10 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		}
 
 		try {
+			const seenStreamingToolCallIds = new Set<string>()
+
 			for await (const part of result.fullStream) {
-				for (const chunk of processAiSdkStreamPart(part)) {
+				for (const chunk of processAiSdkStreamPart(part, seenStreamingToolCallIds)) {
 					yield chunk
 				}
 			}

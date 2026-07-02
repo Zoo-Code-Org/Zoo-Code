@@ -504,6 +504,36 @@ describe("AI SDK conversion utilities", () => {
 			})
 		})
 
+		it("ignores duplicate complete tool-call chunks after streaming input chunks", () => {
+			const seenStreamingToolCallIds = new Set<string>()
+			const chunks = [
+				...processAiSdkStreamPart(
+					{ type: "tool-input-start" as const, id: "call_1", toolName: "attempt_completion" },
+					seenStreamingToolCallIds,
+				),
+				...processAiSdkStreamPart(
+					{ type: "tool-input-delta" as const, id: "call_1", delta: '{"result":"done"}' },
+					seenStreamingToolCallIds,
+				),
+				...processAiSdkStreamPart({ type: "tool-input-end" as const, id: "call_1" }, seenStreamingToolCallIds),
+				...processAiSdkStreamPart(
+					{
+						type: "tool-call" as const,
+						toolCallId: "call_1",
+						toolName: "attempt_completion",
+						input: { result: "done" },
+					},
+					seenStreamingToolCallIds,
+				),
+			]
+
+			expect(chunks).toEqual([
+				{ type: "tool_call_start", id: "call_1", name: "attempt_completion" },
+				{ type: "tool_call_delta", id: "call_1", delta: '{"result":"done"}' },
+				{ type: "tool_call_end", id: "call_1" },
+			])
+		})
+
 		it("processes source chunks with URL", () => {
 			const part = {
 				type: "source" as const,

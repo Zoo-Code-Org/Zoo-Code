@@ -178,11 +178,12 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 
 		// Use streamText for streaming responses
 		const result = streamText(requestOptions)
+		const seenStreamingToolCallIds = new Set<string>()
 
 		// Process the full stream to get all events
 		for await (const part of result.fullStream) {
 			// Use the processAiSdkStreamPart utility to convert stream parts
-			for (const chunk of processAiSdkStreamPart(part)) {
+			for (const chunk of processAiSdkStreamPart(part, seenStreamingToolCallIds)) {
 				yield chunk
 			}
 		}

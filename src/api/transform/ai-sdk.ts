@@ -227,7 +227,10 @@ function getToolInputDelta(part: ToolInputPart) {
  * @param part - The AI SDK TextStreamPart to process (including fullStream event types)
  * @yields ApiStreamChunk objects corresponding to the stream part
  */
-export function* processAiSdkStreamPart(part: ExtendedStreamPart): Generator<ApiStreamChunk> {
+export function* processAiSdkStreamPart(
+	part: ExtendedStreamPart,
+	seenStreamingToolCallIds?: Set<string>,
+): Generator<ApiStreamChunk> {
 	switch (part.type) {
 		case "text":
 		case "text-delta":
@@ -240,6 +243,7 @@ export function* processAiSdkStreamPart(part: ExtendedStreamPart): Generator<Api
 			break
 
 		case "tool-input-start":
+			seenStreamingToolCallIds?.add(getToolCallId(part))
 			yield {
 				type: "tool_call_start",
 				id: getToolCallId(part),
@@ -272,6 +276,9 @@ export function* processAiSdkStreamPart(part: ExtendedStreamPart): Generator<Api
 			break
 
 		case "tool-call":
+			if (seenStreamingToolCallIds?.has(part.toolCallId)) {
+				break
+			}
 			// Complete tool call - emit for compatibility
 			yield {
 				type: "tool_call",
