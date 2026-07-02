@@ -174,6 +174,10 @@ async function runNovitaToolProbe(
 			if (message.ask === "mistake_limit_reached") {
 				mistakeLimitReached = true
 			}
+
+			if (message.ask === "completion_result" && message.text?.trim()) {
+				completionText = message.text.trim()
+			}
 		}
 	}
 
