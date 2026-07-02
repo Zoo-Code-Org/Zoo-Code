@@ -6,14 +6,13 @@ function requestIncludes(req: ChatCompletionRequest, text: string) {
 	return JSON.stringify(messages).includes(text)
 }
 
-function hasToolMessage(req: ChatCompletionRequest) {
-	const messages = Array.isArray(req?.messages) ? req.messages : []
-
-	return messages.some((message) => message?.role === "tool")
-}
-
 function isInitialNovitaToolProbe(req: ChatCompletionRequest) {
-	return requestIncludes(req, "novita-e2e:tool-use") && !hasToolMessage(req)
+	return (
+		requestIncludes(req, "novita-e2e:tool-use") &&
+		!requestIncludes(req, "call_novita_read") &&
+		!requestIncludes(req, "NOVITA_E2E_MARKER") &&
+		!requestIncludes(req, "[ERROR] You did not use a tool in your previous response!")
+	)
 }
 
 function hasNovitaReadFileResult(req: ChatCompletionRequest) {
