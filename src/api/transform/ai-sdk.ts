@@ -215,10 +215,6 @@ function getToolCallId(part: ToolInputPart) {
 	return part.toolCallId ?? part.id ?? ""
 }
 
-function getToolInputDelta(part: ToolInputPart) {
-	return part.inputTextDelta ?? part.delta ?? ""
-}
-
 /**
  * Process a single AI SDK stream part and yield the appropriate ApiStreamChunk(s).
  * This generator handles all TextStreamPart types and converts them to the
@@ -244,26 +240,12 @@ export function* processAiSdkStreamPart(
 
 		case "tool-input-start":
 			seenStreamingToolCallIds?.add(getToolCallId(part))
-			yield {
-				type: "tool_call_start",
-				id: getToolCallId(part),
-				name: part.toolName,
-			}
 			break
 
 		case "tool-input-delta":
-			yield {
-				type: "tool_call_delta",
-				id: getToolCallId(part),
-				delta: getToolInputDelta(part),
-			}
 			break
 
 		case "tool-input-end":
-			yield {
-				type: "tool_call_end",
-				id: getToolCallId(part),
-			}
 			break
 
 		case "tool-input-available":
@@ -276,9 +258,7 @@ export function* processAiSdkStreamPart(
 			break
 
 		case "tool-call":
-			if (seenStreamingToolCallIds?.has(part.toolCallId)) {
-				break
-			}
+			seenStreamingToolCallIds?.delete(part.toolCallId)
 			// Complete tool call - emit for compatibility
 			yield {
 				type: "tool_call",

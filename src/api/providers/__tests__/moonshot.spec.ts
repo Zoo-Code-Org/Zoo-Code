@@ -367,6 +367,12 @@ describe("MoonshotHandler", () => {
 					type: "tool-input-end",
 					id: "tool-call-1",
 				}
+				yield {
+					type: "tool-call",
+					toolCallId: "tool-call-1",
+					toolName: "read_file",
+					input: { path: "test.ts" },
+				}
 			}
 
 			const mockUsage = Promise.resolve({
@@ -404,19 +410,15 @@ describe("MoonshotHandler", () => {
 				chunks.push(chunk)
 			}
 
-			const toolCallStartChunks = chunks.filter((c) => c.type === "tool_call_start")
-			const toolCallDeltaChunks = chunks.filter((c) => c.type === "tool_call_delta")
-			const toolCallEndChunks = chunks.filter((c) => c.type === "tool_call_end")
+			const toolCallChunks = chunks.filter((c) => c.type === "tool_call")
 
-			expect(toolCallStartChunks.length).toBe(1)
-			expect(toolCallStartChunks[0].id).toBe("tool-call-1")
-			expect(toolCallStartChunks[0].name).toBe("read_file")
-
-			expect(toolCallDeltaChunks.length).toBe(1)
-			expect(toolCallDeltaChunks[0].delta).toBe('{"path":"test.ts"}')
-
-			expect(toolCallEndChunks.length).toBe(1)
-			expect(toolCallEndChunks[0].id).toBe("tool-call-1")
+			expect(toolCallChunks).toHaveLength(1)
+			expect(toolCallChunks[0]).toEqual({
+				type: "tool_call",
+				id: "tool-call-1",
+				name: "read_file",
+				arguments: '{"path":"test.ts"}',
+			})
 		})
 
 		it("should handle complete tool calls", async () => {

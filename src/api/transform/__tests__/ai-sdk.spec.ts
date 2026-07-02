@@ -399,36 +399,34 @@ describe("AI SDK conversion utilities", () => {
 			expect(chunks[0]).toEqual({ type: "reasoning", text: "reasoning from fullStream" })
 		})
 
-		it("processes tool-input-start chunks", () => {
+		it("tracks tool-input-start chunks without yielding executable chunks", () => {
+			const seenStreamingToolCallIds = new Set<string>()
 			const part = { type: "tool-input-start" as const, id: "call_1", toolName: "read_file" }
-			const chunks = [...processAiSdkStreamPart(part)]
+			const chunks = [...processAiSdkStreamPart(part, seenStreamingToolCallIds)]
 
-			expect(chunks).toHaveLength(1)
-			expect(chunks[0]).toEqual({ type: "tool_call_start", id: "call_1", name: "read_file" })
+			expect(chunks).toEqual([])
+			expect(seenStreamingToolCallIds.has("call_1")).toBe(true)
 		})
 
-		it("processes tool-input-delta chunks", () => {
+		it("ignores tool-input-delta chunks", () => {
 			const part = { type: "tool-input-delta" as const, id: "call_1", delta: '{"path":' }
 			const chunks = [...processAiSdkStreamPart(part)]
 
-			expect(chunks).toHaveLength(1)
-			expect(chunks[0]).toEqual({ type: "tool_call_delta", id: "call_1", delta: '{"path":' })
+			expect(chunks).toEqual([])
 		})
 
-		it("processes tool-input-delta chunks with toolCallId", () => {
+		it("ignores tool-input-delta chunks with toolCallId", () => {
 			const part = { type: "tool-input-delta" as const, toolCallId: "call_1", inputTextDelta: '{"path":' }
 			const chunks = [...processAiSdkStreamPart(part as any)]
 
-			expect(chunks).toHaveLength(1)
-			expect(chunks[0]).toEqual({ type: "tool_call_delta", id: "call_1", delta: '{"path":' })
+			expect(chunks).toEqual([])
 		})
 
-		it("processes tool-input-end chunks", () => {
+		it("ignores tool-input-end chunks", () => {
 			const part = { type: "tool-input-end" as const, id: "call_1" }
 			const chunks = [...processAiSdkStreamPart(part)]
 
-			expect(chunks).toHaveLength(1)
-			expect(chunks[0]).toEqual({ type: "tool_call_end", id: "call_1" })
+			expect(chunks).toEqual([])
 		})
 
 		it("processes tool-input-available chunks", () => {
@@ -504,7 +502,7 @@ describe("AI SDK conversion utilities", () => {
 			})
 		})
 
-		it("ignores duplicate complete tool-call chunks after streaming input chunks", () => {
+		it("emits the complete tool-call chunk after streaming input chunks", () => {
 			const seenStreamingToolCallIds = new Set<string>()
 			const chunks = [
 				...processAiSdkStreamPart(
@@ -528,10 +526,14 @@ describe("AI SDK conversion utilities", () => {
 			]
 
 			expect(chunks).toEqual([
-				{ type: "tool_call_start", id: "call_1", name: "attempt_completion" },
-				{ type: "tool_call_delta", id: "call_1", delta: '{"result":"done"}' },
-				{ type: "tool_call_end", id: "call_1" },
+				{
+					type: "tool_call",
+					id: "call_1",
+					name: "attempt_completion",
+					arguments: '{"result":"done"}',
+				},
 			])
+			expect(seenStreamingToolCallIds.has("call_1")).toBe(false)
 		})
 
 		it("processes source chunks with URL", () => {
