@@ -185,6 +185,17 @@ export function convertToolsForAiSdk(
  */
 type ExtendedStreamPart = TextStreamPart<any> | { type: "text"; text: string } | { type: "reasoning"; text: string }
 
+function stringifyToolInput(part: Extract<TextStreamPart<any>, { type: "tool-call" }>) {
+	const input =
+		"input" in part && part.input !== undefined
+			? part.input
+			: "args" in part
+				? (part as { args: unknown }).args
+				: {}
+
+	return typeof input === "string" ? input : JSON.stringify(input)
+}
+
 /**
  * Process a single AI SDK stream part and yield the appropriate ApiStreamChunk(s).
  * This generator handles all TextStreamPart types and converts them to the
@@ -234,7 +245,7 @@ export function* processAiSdkStreamPart(part: ExtendedStreamPart): Generator<Api
 				type: "tool_call",
 				id: part.toolCallId,
 				name: part.toolName,
-				arguments: typeof part.input === "string" ? part.input : JSON.stringify(part.input),
+				arguments: stringifyToolInput(part),
 			}
 			break
 
