@@ -17,11 +17,7 @@ function isInitialNovitaToolProbe(req: ChatCompletionRequest) {
 }
 
 function hasNovitaReadFileResult(req: ChatCompletionRequest) {
-	const messages = Array.isArray(req?.messages) ? req.messages : []
-
-	return messages.some((message) => {
-		return message?.role === "tool" && message.tool_call_id === "call_novita_read"
-	})
+	return requestIncludes(req, "call_novita_read")
 }
 
 export function addNovitaFixtures(mock: InstanceType<typeof LLMock>) {
