@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "Lập chỉ mục yêu cầu một thư mục workspace đang mở",
 		"indexingStopped": "Lập chỉ mục đã bị dừng bởi người dùng.",
 		"indexingStoppedPartial": "Lập chỉ mục đã dừng. Dữ liệu chỉ mục một phần được bảo toàn."
+	},
+	"semble": {
+		"downloadingBinary": "Đang tải xuống tệp nhị phân semble...",
+		"ready": "Semble {{version}} đã sẵn sàng. Tìm kiếm được lập chỉ mục tức thì.",
+		"unsupportedPlatform": "Semble không được hỗ trợ trên nền tảng này ({{platform}}-{{arch}}).",
+		"downloadFailed": "Tải xuống semble thất bại: {{errorMessage}}",
+		"checkFailed": "Kiểm tra semble thất bại: {{errorMessage}}",
+		"providerReset": "Nhà cung cấp Semble đã đặt lại. Bộ nhớ đệm trên đĩa vẫn còn cho đến lần xây dựng lại tiếp theo."
 	}
 }

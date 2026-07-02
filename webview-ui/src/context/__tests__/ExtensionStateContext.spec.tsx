@@ -30,6 +30,12 @@ const TestComponent = () => {
 	)
 }
 
+const RulesTestComponent = () => {
+	const { rules } = useExtensionState()
+
+	return <div data-testid="rules">{JSON.stringify(rules)}</div>
+}
+
 const ChatFontSizeTestComponent = () => {
 	const { chatFontSize, setChatFontSize } = useExtensionState()
 
@@ -73,6 +79,85 @@ describe("ExtensionStateContext", () => {
 		)
 
 		expect(JSON.parse(screen.getByTestId("allowed-commands").textContent!)).toEqual([])
+	})
+
+	it("initializes with empty rules array", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<RulesTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("rules").textContent!)).toEqual([])
+	})
+
+	it("updates rules from incoming rules message", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<RulesTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "rules",
+						rules: [
+							{
+								id: "global:generic:generic:rule.md",
+								name: "rule.md",
+								scope: "global",
+								kind: "generic",
+								filePath: "/home/.roo/rules/rule.md",
+								relativePath: "rule.md",
+								directoryPath: "/home/.roo/rules",
+							},
+						],
+					},
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("rules").textContent!)).toEqual([
+			expect.objectContaining({ id: "global:generic:generic:rule.md", name: "rule.md" }),
+		])
+	})
+
+	it("clears rules when incoming rules message omits rules", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<RulesTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "rules",
+						rules: [
+							{
+								id: "global:generic:generic:rule.md",
+								name: "rule.md",
+								scope: "global",
+								kind: "generic",
+								filePath: "/home/.roo/rules/rule.md",
+								relativePath: "rule.md",
+								directoryPath: "/home/.roo/rules",
+							},
+						],
+					},
+				}),
+			)
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "rules" },
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("rules").textContent!)).toEqual([])
 	})
 
 	it("initializes with soundEnabled set to false", () => {

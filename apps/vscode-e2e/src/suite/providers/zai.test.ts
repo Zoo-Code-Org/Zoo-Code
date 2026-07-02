@@ -47,11 +47,10 @@ function installZAiFetchInterceptor(
 					})
 				: {}
 
-			if (capture) {
-				capture.maxTokens = body.max_tokens
-			}
-
 			if (passthrough) {
+				if (capture) {
+					capture.maxTokens = body.max_tokens
+				}
 				return original.call(globalThis, input, init as RequestInit)
 			}
 
@@ -63,6 +62,10 @@ function installZAiFetchInterceptor(
 			const fixture = fixtures.find((f) => text.includes(f.match))
 			if (!fixture) {
 				throw new Error(`Z.ai fetch interceptor: no fixture matched. Last user message: ${text.slice(0, 200)}`)
+			}
+
+			if (capture) {
+				capture.maxTokens = body.max_tokens
 			}
 
 			return makeZAiSSEResponse(fixture.result)

@@ -40,6 +40,14 @@
 		"title": "Inizia nuova attività",
 		"tooltip": "Inizia una nuova attività"
 	},
+	"seeNewChanges": {
+		"title": "Vedi nuove modifiche",
+		"tooltip": "Mostra le modifiche fatte dal tuo ultimo prompt"
+	},
+	"restoreChanges": {
+		"title": "Ripristina modifiche",
+		"tooltip": "Ripristina file e stato dell'attività al tuo ultimo prompt"
+	},
 	"proceedAnyways": {
 		"title": "Procedi comunque",
 		"tooltip": "Continua mentre il comando è in esecuzione"
@@ -333,9 +341,9 @@
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novità:",
-			"highlight1": "Supporto GLM-5.2 — l'ultimo modello GLM è ora disponibile nelle impostazioni del provider.",
-			"highlight2": "Miglioramenti di OpenCode-Go — parametri del modello nativi, routing in formato Anthropic e correzione del context-token per risposte più affidabili.",
-			"highlight3": "Modalità tool-writer — una nuova modalità specializzata per scrivere e mantenere le definizioni degli strumenti, ora disponibile nel Marketplace."
+			"highlight1": "Interfaccia di gestione delle regole — una nuova scheda Regole nelle Impostazioni consente di creare, eliminare e aprire regole Zoo globali e dell'area di lavoro direttamente dall'editor.",
+			"highlight2": "Revisione delle modifiche di completamento — dopo il completamento di un'attività, i nuovi pulsanti \"Visualizza nuove modifiche\" e \"Ripristina modifiche\" consentono di ispezionare e annullare le modifiche dell'ultimo prompt.",
+			"highlight3": "Soglie diff ridotte — soglie di somiglianza configurabili riducono gli errori \"modifica non riuscita\" nell'applicazione dei diff, con nuovi diagnostici per ottimizzare le impostazioni."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",

@@ -154,6 +154,11 @@ describe("DiffViewProvider", () => {
 					getState: vi.fn().mockResolvedValue({
 						includeDiagnosticMessages: true,
 						maxDiagnosticMessages: 50,
+						// Auto-closing edited tabs is opt-in by default; the legacy
+						// "close/keep behavior" suite below asserts the close path, so
+						// enable it here. The opt-in default itself is covered by the
+						// dedicated "auto-close settings decision table" suite.
+						autoCloseZooOpenedFiles: true,
 					}),
 				}),
 			},
@@ -1711,7 +1716,24 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).toHaveBeenCalled()
 		})
 
-		it("transient tab is closed when autoCloseZooOpenedFiles is true (default)", async () => {
+		it("transient tab is kept by default when autoCloseZooOpenedFiles is unset (opt-in)", async () => {
+			// Empty state -> autoCloseZooOpenedFiles is undefined and falls back to the
+			// centralized default (false), so an untouched transient tab is kept.
+			const provider = setupProvider({})
+			const closeFileTab = vi.fn().mockResolvedValue(undefined)
+			;(provider as any).closeFileTab = closeFileTab
+			;(provider as any).documentWasOpen = false
+			;(provider as any).userTouchedDocument = false
+			;(provider as any).userTouchedDiffEditor = false
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({ revealRange: vi.fn() } as any)
+
+			await provider.saveChanges(false)
+
+			expect(closeFileTab).not.toHaveBeenCalled()
+			expect(vscode.window.showTextDocument).toHaveBeenCalled()
+		})
+
+		it("transient tab is closed when autoCloseZooOpenedFiles is true", async () => {
 			const provider = setupProvider({ autoCloseZooOpenedFiles: true })
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			;(provider as any).closeFileTab = closeFileTab
@@ -1739,7 +1761,12 @@ describe("DiffViewProvider", () => {
 		})
 
 		it("touched tab is closed when autoCloseZooOpenedFilesAfterUserEdited is true", async () => {
-			const provider = setupProvider({ autoCloseZooOpenedFilesAfterUserEdited: true })
+			// The after-edit override only closes when the base auto-close is also
+			// enabled, so set both (the base default is now opt-in/false).
+			const provider = setupProvider({
+				autoCloseZooOpenedFiles: true,
+				autoCloseZooOpenedFilesAfterUserEdited: true,
+			})
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			;(provider as any).closeFileTab = closeFileTab
 			;(provider as any).documentWasOpen = false
@@ -1807,18 +1834,21 @@ describe("DiffViewProvider", () => {
 			expect(vscode.window.showTextDocument).toHaveBeenCalled()
 		})
 
-		it("defaults preserve existing behavior when all settings are unset", async () => {
-			// No auto-close settings in state: transient tab should be closed (existing default).
+		it("defaults keep the transient tab open when all settings are unset", async () => {
+			// No auto-close settings in state: auto-closing is opt-in, so an
+			// untouched transient tab is kept and re-shown (long-standing behavior).
 			const provider = setupProvider({})
 			const closeFileTab = vi.fn().mockResolvedValue(undefined)
 			;(provider as any).closeFileTab = closeFileTab
 			;(provider as any).documentWasOpen = false
 			;(provider as any).userTouchedDocument = false
 			;(provider as any).userTouchedDiffEditor = false
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({ revealRange: vi.fn() } as any)
 
 			await provider.saveChanges(false)
 
-			expect(closeFileTab).toHaveBeenCalledWith(mockTargetPath)
+			expect(closeFileTab).not.toHaveBeenCalled()
+			expect(vscode.window.showTextDocument).toHaveBeenCalled()
 		})
 	})
 })

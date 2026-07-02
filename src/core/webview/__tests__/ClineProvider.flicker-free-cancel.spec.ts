@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import * as vscode from "vscode"
 
 import { ClineProvider } from "../ClineProvider"
@@ -232,24 +232,28 @@ vi.mock("../../../services/skills/SkillsManager", () => ({
 	}),
 }))
 
-vi.mock("../../task-persistence", () => ({
-	TaskHistoryStore: vi.fn().mockImplementation(function () {
-		return {
-			initialize: vi.fn().mockResolvedValue(undefined),
-			dispose: vi.fn(),
-			initialized: Promise.resolve(),
-			get: vi.fn().mockReturnValue(undefined),
-			getAll: vi.fn().mockReturnValue([]),
-			upsert: vi.fn().mockResolvedValue([]),
-			delete: vi.fn().mockResolvedValue(undefined),
-			deleteMany: vi.fn().mockResolvedValue(undefined),
-			migrateFromGlobalState: vi.fn().mockResolvedValue(undefined),
-		}
-	}),
-	readApiMessages: vi.fn().mockResolvedValue([]),
-	saveApiMessages: vi.fn().mockResolvedValue(undefined),
-	saveTaskMessages: vi.fn().mockResolvedValue(undefined),
-}))
+vi.mock("../../task-persistence", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../../task-persistence")>()
+	return {
+		...mod,
+		TaskHistoryStore: vi.fn().mockImplementation(function () {
+			return {
+				initialize: vi.fn().mockResolvedValue(undefined),
+				dispose: vi.fn(),
+				initialized: Promise.resolve(),
+				get: vi.fn().mockReturnValue(undefined),
+				getAll: vi.fn().mockReturnValue([]),
+				upsert: vi.fn().mockResolvedValue([]),
+				delete: vi.fn().mockResolvedValue(undefined),
+				deleteMany: vi.fn().mockResolvedValue(undefined),
+				migrateFromGlobalState: vi.fn().mockResolvedValue(undefined),
+			}
+		}),
+		readApiMessages: vi.fn().mockResolvedValue([]),
+		saveApiMessages: vi.fn().mockResolvedValue(undefined),
+		saveTaskMessages: vi.fn().mockResolvedValue(undefined),
+	}
+})
 
 describe("ClineProvider flicker-free cancel", () => {
 	let provider: ClineProvider
@@ -257,11 +261,23 @@ describe("ClineProvider flicker-free cancel", () => {
 	let mockOutputChannel: any
 	let mockTask1: any
 	let mockTask2: any
+	let consoleLogSpy: ReturnType<typeof vi.spyOn>
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
 	const mockApiConfig: ProviderSettings = {
 		apiProvider: "anthropic",
 		apiKey: "test-key",
 	} as ProviderSettings
+
+	beforeAll(() => {
+		consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+	})
+
+	afterAll(() => {
+		consoleLogSpy.mockRestore()
+		consoleErrorSpy.mockRestore()
+	})
 
 	beforeEach(() => {
 		vi.clearAllMocks()

@@ -37,6 +37,7 @@
 		"contextManagement": "Context",
 		"terminal": "Terminal",
 		"slashCommands": "Slash Commands",
+		"rules": "Rules",
 		"prompts": "Prompts",
 		"ui": "UI",
 		"experimental": "Experimental",
@@ -116,6 +117,52 @@
 			"nameInvalid": "Name must contain only letters, numbers, hyphens, and underscores"
 		},
 		"footer": "Use slash commands for quick access to frequently used prompts and workflows."
+	},
+	"rules": {
+		"description": "Manage Zoo Code rule files from global and workspace .roo/rules directories. Create general rules or mode-specific rules without manually browsing configuration folders.",
+		"workspaceRules": "Workspace Rules",
+		"globalRules": "Global Rules",
+		"noWorkspaceRules": "No rules in this project yet.",
+		"noGlobalRules": "No global rules yet.",
+		"addRule": "Add Rule",
+		"editRule": "Edit rule",
+		"deleteRule": "Delete rule",
+		"modeLabel": "Mode: {{mode}}",
+		"deleteDialog": {
+			"title": "Delete Rule",
+			"description": "Are you sure you want to delete the rule \"{{name}}\"? This action cannot be undone.",
+			"confirm": "Delete",
+			"cancel": "Cancel"
+		},
+		"createDialog": {
+			"title": "Create New Rule",
+			"nameLabel": "Name",
+			"namePlaceholder": "my-rule-name",
+			"nameHint": "Lowercase letters, numbers, hyphens and underscores only. .md is added automatically.",
+			"scopeLabel": "Location",
+			"kindLabel": "Rule type",
+			"modeLabel": "Mode",
+			"modePlaceholder": "Select a mode",
+			"create": "Create",
+			"cancel": "Cancel"
+		},
+		"scope": {
+			"global": "Global (available in all workspaces)",
+			"project": "Workspace"
+		},
+		"kind": {
+			"generic": "General rules",
+			"mode": "Mode-specific rules",
+			"genericBadge": "General",
+			"modeBadge": "Mode"
+		},
+		"validation": {
+			"nameRequired": "Name is required",
+			"nameTooLong": "Name must be 64 characters or less",
+			"nameInvalid": "Name must contain only lowercase letters, numbers, hyphens, and underscores",
+			"modeRequired": "Mode is required for mode-specific rules"
+		},
+		"footer": "Rules load mode-specific guidance before general guidance. Global rules load before workspace rules."
 	},
 	"skills": {
 		"description": "Skills encapsulate contextual instructions and workflows, which the agent can load on-demand. They can include general instructions, specific workflows and even scripts to be run as needed. <DocsLink>Learn more</DocsLink>",

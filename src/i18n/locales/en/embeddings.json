@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "Indexing requires an open workspace folder",
 		"indexingStopped": "Indexing stopped by user.",
 		"indexingStoppedPartial": "Indexing stopped. Partial index data preserved."
+	},
+	"semble": {
+		"downloadingBinary": "Downloading semble binary...",
+		"ready": "Semble {{version}} is ready. Searches index on-the-fly.",
+		"unsupportedPlatform": "Semble is not supported on this platform ({{platform}}-{{arch}}).",
+		"downloadFailed": "Failed to download semble: {{errorMessage}}",
+		"checkFailed": "Semble check failed: {{errorMessage}}",
+		"providerReset": "Semble provider reset. On-disk cache remains until next rebuild."
 	}
 }

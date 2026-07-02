@@ -120,6 +120,14 @@ describe("UISettings", () => {
 			expect(checkbox.checked).toBe(false)
 		})
 
+		it("autoCloseZooOpenedFiles checkbox defaults to unchecked when prop is unset", () => {
+			// Omitting the prop simulates the opt-in default (false). A regression that
+			// flips the fallback back to `?? true` would make this checkbox checked.
+			const { getByTestId } = render(<UISettings {...defaultProps} />)
+			const checkbox = getByTestId("auto-close-zoo-opened-files-checkbox") as HTMLInputElement
+			expect(checkbox.checked).toBe(false)
+		})
+
 		it("calls setCachedStateField with autoCloseZooOpenedFiles when toggled", async () => {
 			const setCachedStateField = vi.fn()
 			const { getByTestId } = render(

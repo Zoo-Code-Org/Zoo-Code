@@ -221,6 +221,22 @@ describe("Vercel AI Gateway Fetchers", () => {
 			expect(result.supportsTemperature).toBe(false)
 		})
 
+		it("marks Claude Sonnet 5 as not supporting temperature", () => {
+			const result = parseVercelAiGatewayModel({
+				id: "anthropic/claude-sonnet-5",
+				model: {
+					...baseModel,
+					id: "anthropic/claude-sonnet-5",
+					context_window: 1000000,
+					max_tokens: 128000,
+				},
+			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+		})
+
 		it("detects vision-only models", () => {
 			// claude 3.5 haiku in VERCEL_AI_GATEWAY_VISION_ONLY_MODELS
 			const visionModel = {

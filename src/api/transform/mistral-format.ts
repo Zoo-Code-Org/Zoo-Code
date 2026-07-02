@@ -104,12 +104,21 @@ export function convertToMistralMessages(anthropicMessages: Anthropic.Messages.M
 						role: "user",
 						content: nonToolMessages.map((part) => {
 							if (part.type === "image") {
-								return {
-									type: "image_url",
-									imageUrl: {
-										url: `data:${part.source.media_type};base64,${part.source.data}`,
-									},
+								if (part.source.type === "base64") {
+									return {
+										type: "image_url",
+										imageUrl: {
+											url: `data:${part.source.media_type};base64,${part.source.data}`,
+										},
+									}
 								}
+								if (part.source.type === "url") {
+									return {
+										type: "image_url",
+										imageUrl: { url: part.source.url },
+									}
+								}
+								return { type: "text", text: "[Image]" }
 							}
 							return { type: "text", text: part.text }
 						}),

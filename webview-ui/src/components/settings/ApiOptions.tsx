@@ -223,7 +223,15 @@ const ApiOptions = ({
 				requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl)
 			} else if (selectedProvider === "vscode-lm") {
 				vscode.postMessage({ type: "requestVsCodeLmModels" })
-			} else if (selectedProvider === "litellm" || selectedProvider === "poe") {
+			} else if (selectedProvider === "litellm") {
+				vscode.postMessage({
+					type: "requestRouterModels",
+					values: {
+						litellmApiKey: apiConfiguration?.litellmApiKey,
+						litellmBaseUrl: apiConfiguration?.litellmBaseUrl,
+					},
+				})
+			} else if (selectedProvider === "poe") {
 				vscode.postMessage({ type: "requestRouterModels" })
 			}
 		},
@@ -567,7 +575,10 @@ const ApiOptions = ({
 					)}
 
 					{selectedProvider === "novita" && (
-						<Novita apiConfiguration={apiConfiguration} setApiConfigurationField={setApiConfigurationField} />
+						<Novita
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+						/>
 					)}
 
 					{selectedProvider === "minimax" && (

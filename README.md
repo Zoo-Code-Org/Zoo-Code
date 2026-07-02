@@ -53,17 +53,16 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.62.0
+## What's New in v3.64.0
 
-- **GLM-5.2 support** — the latest GLM model is now available in your provider settings
-- **OpenCode-Go improvements** — native model parameters, Anthropic-format routing, and a context-token fix for more reliable responses
-- **Tool-writer mode** — a new specialized mode for writing and maintaining tool definitions, now available in the Marketplace
-- **LiteLLM session header** — forward taskId as X-Zoo-Session-ID request header for better request tracing
-- Fix apiRequestTimeout applied consistently across all providers
-- Fix diff view scroll position and tab handling on save/deny
-- Fix terminal completion signal delivery when end event wins the race
-- Refactor RateLimitClock out of Task static state for cleaner rate-limit handling
-- Security updates: vitest v4, shell-quote v1.8.4, esbuild v0.28.1, vite v8.0.16
+- **Rules Management UI** — a new Rules tab in Settings lets you create, delete, and open global and workspace Zoo rules directly from the editor
+- **Completion Change Review** — after a task completes, new "See New Changes" and "Restore Changes" buttons let you inspect and undo the changes from the latest prompt
+- **Relaxed Diff Thresholds** — configurable similarity thresholds reduce "edit unsuccessful" errors when applying diffs, with new diagnostics to help tune the settings
+- Add kimi-k2p7-code model on Fireworks provider
+- Fix: auto-closing edited files is now opt-in and defaults to off
+- Fix: delegation race condition in delegateParentAndOpenChild
+- Fix: parse Gemma 4 `<thought>` reasoning tags alongside `<think>`
+- Security update: undici v6.27.0
 
 <details>
   <summary>🌐 Available languages</summary>

@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "L'indexation nécessite l'ouverture d'un dossier workspace",
 		"indexingStopped": "Indexation arrêtée par l'utilisateur.",
 		"indexingStoppedPartial": "Indexation arrêtée. Données d'index partielles conservées."
+	},
+	"semble": {
+		"downloadingBinary": "Téléchargement du binaire semble...",
+		"ready": "Semble {{version}} est prêt. Les recherches s'indexent à la volée.",
+		"unsupportedPlatform": "Semble n'est pas pris en charge sur cette plateforme ({{platform}}-{{arch}}).",
+		"downloadFailed": "Échec du téléchargement de semble : {{errorMessage}}",
+		"checkFailed": "Vérification de semble échouée : {{errorMessage}}",
+		"providerReset": "Fournisseur Semble réinitialisé. Le cache sur disque reste jusqu'à la prochaine reconstruction."
 	}
 }

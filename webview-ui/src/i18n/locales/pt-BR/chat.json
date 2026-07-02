@@ -40,6 +40,14 @@
 		"title": "Iniciar nova tarefa",
 		"tooltip": "Começar uma nova tarefa"
 	},
+	"seeNewChanges": {
+		"title": "Ver novas alterações",
+		"tooltip": "Veja alterações feitas desde seu último prompt"
+	},
+	"restoreChanges": {
+		"title": "Restaurar alterações",
+		"tooltip": "Restaure arquivos e estado da tarefa para seu último prompt"
+	},
 	"proceedAnyways": {
 		"title": "Prosseguir mesmo assim",
 		"tooltip": "Continuar enquanto o comando executa"
@@ -333,9 +341,9 @@
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novidades:",
-			"highlight1": "Suporte a GLM-5.2 — o modelo GLM mais recente já está disponível nas configurações do provedor.",
-			"highlight2": "Melhorias no OpenCode-Go — parâmetros de modelo nativos, roteamento em formato Anthropic e correção de context-token para respostas mais confiáveis.",
-			"highlight3": "Modo tool-writer — um novo modo especializado para escrever e manter definições de ferramentas, agora disponível no Marketplace."
+			"highlight1": "Interface de Gerenciamento de Regras — uma nova aba de Regras nas Configurações permite criar, excluir e abrir regras Zoo globais e do espaço de trabalho diretamente do editor.",
+			"highlight2": "Revisão de Alterações de Conclusão — após a conclusão de uma tarefa, novos botões \"Ver Novas Alterações\" e \"Restaurar Alterações\" permitem inspecionar e desfazer as alterações do último prompt.",
+			"highlight3": "Limites de Diff Relaxados — limites de similaridade configuráveis reduzem erros de \"edição malsucedida\" ao aplicar diffs, com novos diagnósticos para ajustar as configurações."
 		},
 		"cloudAgents": {
 			"heading": "Novidades na Nuvem:",

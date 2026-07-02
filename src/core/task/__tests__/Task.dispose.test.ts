@@ -10,6 +10,18 @@ vi.mock("../../../integrations/terminal/TerminalRegistry", () => ({
 		releaseTerminalsForTask: vi.fn(),
 	},
 }))
+// dispose() fires an UNawaited getTaskDirectoryPath -> OutputInterceptor.cleanup chain.
+// Mock both so it resolves immediately with no real fs and no late console.error,
+// otherwise that dangling promise logs after the test ends and trips Vitest's
+// "Closing rpc while onUserConsoleLog was pending" teardown race.
+vi.mock("../../../utils/storage", () => ({
+	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/path/tasks/test-task"),
+}))
+vi.mock("../../../integrations/terminal/OutputInterceptor", () => ({
+	OutputInterceptor: {
+		cleanup: vi.fn().mockResolvedValue(undefined),
+	},
+}))
 vi.mock("../../ignore/RooIgnoreController")
 vi.mock("../../protect/RooProtectedController")
 vi.mock("../../context-tracking/FileContextTracker")

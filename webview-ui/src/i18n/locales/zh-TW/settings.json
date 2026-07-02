@@ -41,7 +41,8 @@
 		"experimental": "實驗性",
 		"language": "語言",
 		"about": "關於 Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "規則"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "名稱只能包含字母、數字、連字號和底線"
 		},
 		"footer": "使用斜線命令快速存取經常使用的提示詞和工作流程。"
+	},
+	"rules": {
+		"description": "從全域與工作區 .roo/rules 目錄管理 Zoo Code 規則檔案。無需手動瀏覽設定資料夾，即可建立一般規則或特定模式規則。",
+		"workspaceRules": "工作區規則",
+		"globalRules": "全域規則",
+		"noWorkspaceRules": "此專案尚無規則。",
+		"noGlobalRules": "尚無全域規則。",
+		"addRule": "新增規則",
+		"editRule": "編輯規則",
+		"deleteRule": "刪除規則",
+		"modeLabel": "模式：{{mode}}",
+		"deleteDialog": {
+			"title": "刪除規則",
+			"description": "確定要刪除規則「{{name}}」嗎？此動作無法復原。",
+			"confirm": "刪除",
+			"cancel": "取消"
+		},
+		"createDialog": {
+			"title": "建立新規則",
+			"nameLabel": "名稱",
+			"namePlaceholder": "my-rule-name",
+			"nameHint": "只能使用小寫字母、數字、連字號與底線。.md 會自動加入。",
+			"scopeLabel": "位置",
+			"kindLabel": "規則類型",
+			"modeLabel": "模式",
+			"modePlaceholder": "選擇模式",
+			"create": "建立",
+			"cancel": "取消"
+		},
+		"scope": {
+			"global": "全域（可用於所有工作區）",
+			"project": "工作區"
+		},
+		"kind": {
+			"generic": "一般規則",
+			"mode": "特定模式規則",
+			"genericBadge": "一般",
+			"modeBadge": "模式"
+		},
+		"validation": {
+			"nameRequired": "名稱為必填",
+			"nameTooLong": "名稱必須為 64 個字元或更少",
+			"nameInvalid": "名稱只能包含小寫字母、數字、連字號與底線",
+			"modeRequired": "特定模式規則需要選擇模式"
+		},
+		"footer": "規則會先載入特定模式指引，再載入一般指引。全域規則會先於工作區規則載入。"
 	},
 	"ui": {
 		"collapseThinking": {

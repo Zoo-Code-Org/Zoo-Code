@@ -41,7 +41,8 @@
 		"experimental": "Sperimentale",
 		"language": "Lingua",
 		"about": "Informazioni su Zoo Code",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "Regole"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "Il nome può contenere solo lettere, numeri, trattini e sottolineature"
 		},
 		"footer": "Usa i comandi slash per accedere rapidamente ai prompt e ai flussi di lavoro utilizzati di frequente."
+	},
+	"rules": {
+		"description": "Gestisci i file delle regole di Zoo Code dalle directory .roo/rules globali e dell’area di lavoro. Crea regole generali o specifiche per modalità senza esplorare manualmente le cartelle di configurazione.",
+		"workspaceRules": "Regole dell’area di lavoro",
+		"globalRules": "Regole globali",
+		"noWorkspaceRules": "Nessuna regola in questo progetto per ora.",
+		"noGlobalRules": "Nessuna regola globale per ora.",
+		"addRule": "Aggiungi regola",
+		"editRule": "Modifica regola",
+		"deleteRule": "Elimina regola",
+		"modeLabel": "Modalità: {{mode}}",
+		"deleteDialog": {
+			"title": "Elimina regola",
+			"description": "Vuoi davvero eliminare la regola \"{{name}}\"? Questa azione non può essere annullata.",
+			"confirm": "Elimina",
+			"cancel": "Annulla"
+		},
+		"createDialog": {
+			"title": "Crea nuova regola",
+			"nameLabel": "Nome",
+			"namePlaceholder": "nome-della-mia-regola",
+			"nameHint": "Solo lettere minuscole, numeri, trattini e underscore. .md viene aggiunto automaticamente.",
+			"scopeLabel": "Posizione",
+			"kindLabel": "Tipo di regola",
+			"modeLabel": "Modalità",
+			"modePlaceholder": "Seleziona una modalità",
+			"create": "Crea",
+			"cancel": "Annulla"
+		},
+		"scope": {
+			"global": "Globale (disponibile in tutte le aree di lavoro)",
+			"project": "Area di lavoro"
+		},
+		"kind": {
+			"generic": "Regole generali",
+			"mode": "Regole specifiche per modalità",
+			"genericBadge": "Generale",
+			"modeBadge": "Modalità"
+		},
+		"validation": {
+			"nameRequired": "Il nome è obbligatorio",
+			"nameTooLong": "Il nome deve avere al massimo 64 caratteri",
+			"nameInvalid": "Il nome può contenere solo lettere minuscole, numeri, trattini e underscore",
+			"modeRequired": "La modalità è obbligatoria per le regole specifiche per modalità"
+		},
+		"footer": "Le regole caricano la guida specifica per modalità prima della guida generale. Le regole globali vengono caricate prima delle regole dell’area di lavoro."
 	},
 	"prompts": {
 		"description": "Configura i prompt di supporto utilizzati per azioni rapide come il miglioramento dei prompt, la spiegazione del codice e la risoluzione dei problemi. Questi prompt aiutano Zoo a fornire una migliore assistenza per le attività di sviluppo comuni."

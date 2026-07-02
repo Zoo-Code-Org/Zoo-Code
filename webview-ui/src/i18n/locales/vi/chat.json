@@ -40,6 +40,14 @@
 		"title": "Bắt đầu nhiệm vụ mới",
 		"tooltip": "Bắt đầu một nhiệm vụ mới"
 	},
+	"seeNewChanges": {
+		"title": "Xem thay đổi mới",
+		"tooltip": "Xem các thay đổi được thực hiện kể từ prompt cuối của bạn"
+	},
+	"restoreChanges": {
+		"title": "Khôi phục thay đổi",
+		"tooltip": "Khôi phục tệp và trạng thái nhiệm vụ về prompt cuối của bạn"
+	},
 	"proceedAnyways": {
 		"title": "Vẫn tiếp tục",
 		"tooltip": "Tiếp tục trong khi lệnh đang chạy"
@@ -334,9 +342,9 @@
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Có gì mới:",
-			"highlight1": "Hỗ trợ GLM-5.2 — mô hình GLM mới nhất hiện có trong cài đặt nhà cung cấp của bạn.",
-			"highlight2": "Cải tiến OpenCode-Go — tham số mô hình gốc, định tuyến định dạng Anthropic và sửa lỗi context-token để phản hồi đáng tin cậy hơn.",
-			"highlight3": "Chế độ tool-writer — chế độ chuyên biệt mới để viết và duy trì các định nghĩa công cụ, hiện có trên Marketplace."
+			"highlight1": "Giao diện Quản lý Quy tắc — tab Quy tắc mới trong Cài đặt cho phép bạn tạo, xóa và mở các quy tắc Zoo toàn cục và không gian làm việc trực tiếp từ trình soạn thảo.",
+			"highlight2": "Xem xét Thay đổi Hoàn thành — sau khi nhiệm vụ hoàn thành, các nút mới \"Xem thay đổi mới\" và \"Khôi phục thay đổi\" cho phép bạn kiểm tra và hoàn tác các thay đổi từ lệnh nhắc cuối cùng.",
+			"highlight3": "Ngưỡng Diff được nới lỏng — các ngưỡng tương đồng có thể cấu hình giúp giảm lỗi \"chỉnh sửa không thành công\" khi áp dụng diff, kèm theo chẩn đoán mới để tinh chỉnh cài đặt."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",

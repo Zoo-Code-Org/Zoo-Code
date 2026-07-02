@@ -21,6 +21,7 @@ import {
 	ExperimentId,
 	checkoutDiffPayloadSchema,
 	checkoutRestorePayloadSchema,
+	getCompletionCheckpoint,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -41,6 +42,13 @@ import {
 	handleUpdateSkillModes,
 	handleOpenSkillFile,
 } from "./skillsMessageHandler"
+import {
+	handleRequestRules,
+	handleCreateRule,
+	handleDeleteRule,
+	handleOpenRuleFile,
+	handleOpenRulesDirectory,
+} from "./rulesMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
@@ -111,6 +119,10 @@ export const webviewMessageHandler = async (
 
 	const showCloudUnavailableMessage = () => {
 		vscode.window.showInformationMessage(getRouterUnavailableSignInMessage())
+	}
+
+	const resolveCompletionCheckpoint = (currentCline: { clineMessages: ClineMessage[] }) => {
+		return getCompletionCheckpoint(currentCline.clineMessages)
 	}
 
 	const getCurrentMode = async (): Promise<string> => {
@@ -1006,7 +1018,7 @@ export const webviewMessageHandler = async (
 			// For providers that need credentials, use their specific handlers
 			await flushModels({ provider: routerNameFlush } as GetModelsOptions, true)
 			break
-		case "requestRouterModels":
+		case "requestRouterModels": {
 			const { apiConfiguration } = await provider.getState()
 
 			// Optional single provider filter from webview
@@ -1074,9 +1086,11 @@ export const webviewMessageHandler = async (
 				},
 			]
 
-			// LiteLLM is conditional on baseUrl+apiKey
-			const litellmApiKey = apiConfiguration.litellmApiKey || message?.values?.litellmApiKey
-			const litellmBaseUrl = apiConfiguration.litellmBaseUrl || message?.values?.litellmBaseUrl
+			// LiteLLM is conditional on baseUrl+apiKey.
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const litellmApiKey = message?.values?.litellmApiKey ?? apiConfiguration.litellmApiKey
+			const litellmBaseUrl = message?.values?.litellmBaseUrl ?? apiConfiguration.litellmBaseUrl
 
 			if (litellmApiKey && litellmBaseUrl) {
 				// If explicit credentials are provided in message.values (from Refresh Models button),
@@ -1185,6 +1199,7 @@ export const webviewMessageHandler = async (
 				values: providerFilter ? { provider: requestedProvider } : undefined,
 			})
 			break
+		}
 		case "requestOllamaModels": {
 			// Specific handler for Ollama models only.
 			const { apiConfiguration: ollamaApiConfig } = await provider.getState()
@@ -1367,11 +1382,62 @@ export const webviewMessageHandler = async (
 					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
 				} catch (error) {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+					return
 				}
 
 				try {
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
 				} catch (error) {
+					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				}
+			}
+
+			break
+		}
+		case "completionCheckpointDiff": {
+			const currentCline = provider.getCurrentTask()
+			const checkpoint = currentCline ? resolveCompletionCheckpoint(currentCline) : undefined
+
+			if (currentCline && checkpoint) {
+				await currentCline.checkpointDiff({
+					ts: checkpoint.ts,
+					commitHash: checkpoint.commitHash,
+					mode: "to-current",
+				})
+			}
+
+			break
+		}
+		case "completionCheckpointRestore": {
+			const currentCline = provider.getCurrentTask()
+			const checkpoint = currentCline ? resolveCompletionCheckpoint(currentCline) : undefined
+
+			if (currentCline && checkpoint) {
+				const originalTaskId = currentCline.taskId
+				await provider.cancelTask()
+
+				try {
+					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
+				} catch (error) {
+					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+					return
+				}
+
+				try {
+					const restoredTask = provider.getCurrentTask()
+
+					if (!restoredTask || restoredTask.taskId !== originalTaskId) {
+						vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+						return
+					}
+
+					await restoredTask.checkpointRestore({
+						ts: checkpoint.ts,
+						commitHash: checkpoint.commitHash,
+						mode: "restore",
+					})
+				} catch (error) {
+					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
 				}
 			}
@@ -3221,6 +3287,26 @@ export const webviewMessageHandler = async (
 		}
 		case "openSkillFile": {
 			await handleOpenSkillFile(provider, message)
+			break
+		}
+		case "requestRules": {
+			await handleRequestRules(provider, getCurrentCwd())
+			break
+		}
+		case "createRule": {
+			await handleCreateRule(provider, getCurrentCwd(), message)
+			break
+		}
+		case "deleteRule": {
+			await handleDeleteRule(provider, getCurrentCwd(), message)
+			break
+		}
+		case "openRuleFile": {
+			await handleOpenRuleFile(provider, getCurrentCwd(), message)
+			break
+		}
+		case "openRulesDirectory": {
+			await handleOpenRulesDirectory(provider, getCurrentCwd(), message)
 			break
 		}
 		case "openCommandFile": {

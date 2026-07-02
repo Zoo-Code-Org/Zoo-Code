@@ -41,7 +41,8 @@
 		"experimental": "실험적",
 		"language": "언어",
 		"about": "Zoo Code 정보",
-		"skills": "Skills"
+		"skills": "Skills",
+		"rules": "규칙"
 	},
 	"about": {
 		"bugReport": {
@@ -116,6 +117,52 @@
 			"nameInvalid": "이름은 문자, 숫자, 하이픈 및 밑줄만 포함할 수 있습니다"
 		},
 		"footer": "슬래시 명령을 사용하여 자주 사용하는 프롬프트 및 워크플로에 빠르게 액세스합니다."
+	},
+	"rules": {
+		"description": "전역 및 워크스페이스 .roo/rules 디렉터리에서 Zoo Code 규칙 파일을 관리합니다. 설정 폴더를 직접 찾아보지 않고 일반 규칙이나 모드별 규칙을 만들 수 있습니다.",
+		"workspaceRules": "워크스페이스 규칙",
+		"globalRules": "전역 규칙",
+		"noWorkspaceRules": "이 프로젝트에는 아직 규칙이 없습니다.",
+		"noGlobalRules": "아직 전역 규칙이 없습니다.",
+		"addRule": "규칙 추가",
+		"editRule": "규칙 편집",
+		"deleteRule": "규칙 삭제",
+		"modeLabel": "모드: {{mode}}",
+		"deleteDialog": {
+			"title": "규칙 삭제",
+			"description": "규칙 \"{{name}}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
+			"confirm": "삭제",
+			"cancel": "취소"
+		},
+		"createDialog": {
+			"title": "새 규칙 만들기",
+			"nameLabel": "이름",
+			"namePlaceholder": "my-rule-name",
+			"nameHint": "소문자, 숫자, 하이픈, 밑줄만 사용할 수 있습니다. .md는 자동으로 추가됩니다.",
+			"scopeLabel": "위치",
+			"kindLabel": "규칙 유형",
+			"modeLabel": "모드",
+			"modePlaceholder": "모드 선택",
+			"create": "만들기",
+			"cancel": "취소"
+		},
+		"scope": {
+			"global": "전역(모든 워크스페이스에서 사용 가능)",
+			"project": "워크스페이스"
+		},
+		"kind": {
+			"generic": "일반 규칙",
+			"mode": "모드별 규칙",
+			"genericBadge": "일반",
+			"modeBadge": "모드"
+		},
+		"validation": {
+			"nameRequired": "이름은 필수입니다",
+			"nameTooLong": "이름은 64자 이하여야 합니다",
+			"nameInvalid": "이름에는 소문자, 숫자, 하이픈, 밑줄만 사용할 수 있습니다",
+			"modeRequired": "모드별 규칙에는 모드가 필요합니다"
+		},
+		"footer": "규칙은 일반 지침보다 모드별 지침을 먼저 로드합니다. 전역 규칙은 워크스페이스 규칙보다 먼저 로드됩니다."
 	},
 	"prompts": {
 		"description": "프롬프트 향상, 코드 설명, 문제 해결과 같은 빠른 작업에 사용되는 지원 프롬프트를 구성합니다. 이러한 프롬프트는 Roo가 일반적인 개발 작업에 대해 더 나은 지원을 제공하는 데 도움이 됩니다."

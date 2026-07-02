@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "इंडेक्सिंग के लिए एक खुला वर्कस्पेस फ़ोल्डर आवश्यक है",
 		"indexingStopped": "उपयोगकर्ता द्वारा इंडेक्सिंग रोकी गई।",
 		"indexingStoppedPartial": "इंडेक्सिंग रोकी गई। आंशिक इंडेक्स डेटा संरक्षित।"
+	},
+	"semble": {
+		"downloadingBinary": "semble बाइनरी डाउनलोड हो रहा है...",
+		"ready": "Semble {{version}} तैयार है। खोजें ऑन-द-फ्लाई इंडेक्स होती हैं।",
+		"unsupportedPlatform": "इस प्लेटफ़ॉर्म पर Semble समर्थित नहीं है ({{platform}}-{{arch}})।",
+		"downloadFailed": "semble डाउनलोड करने में विफल: {{errorMessage}}",
+		"checkFailed": "Semble जाँच विफल: {{errorMessage}}",
+		"providerReset": "Semble प्रदाता रीसेट किया गया। डिस्क कैश अगले रीबिल्ड तक बना रहता है।"
 	}
 }

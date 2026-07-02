@@ -38,7 +38,11 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 
 	override getModel() {
 		const id = this.options.apiModelId ?? poeDefaultModelId
-		const cached = getModelsFromCache("poe")
+		const cached = getModelsFromCache({
+			provider: "poe",
+			apiKey: this.options.poeApiKey,
+			baseUrl: this.options.poeBaseUrl,
+		})
 		const info: ModelInfo = cached?.[id] ?? getPoeDefaultModelInfo()
 		return { id, info }
 	}

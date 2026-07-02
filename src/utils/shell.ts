@@ -136,36 +136,36 @@ type LinuxTerminalProfiles = Record<string, LinuxTerminalProfile>
 // 1) VS Code Terminal Configuration Helpers
 // -----------------------------------------------------
 
-function getWindowsTerminalConfig() {
-	try {
-		const config = vscode.workspace.getConfiguration("terminal.integrated")
-		const defaultProfileName = config.get<string>("defaultProfile.windows")
-		const profiles = config.get<WindowsTerminalProfiles>("profiles.windows") || {}
-		return { defaultProfileName, profiles }
-	} catch {
-		return { defaultProfileName: null, profiles: {} as WindowsTerminalProfiles }
-	}
+type PlatformProfilesMap = {
+	windows: WindowsTerminalProfiles
+	osx: MacTerminalProfiles
+	linux: LinuxTerminalProfiles
 }
 
-function getMacTerminalConfig() {
+/**
+ * Reads the VS Code terminal profile configuration for the given platform.
+ *
+ * The key must be one of `"windows"`, `"osx"`, or `"linux"` — the exact strings
+ * VS Code uses in `terminal.integrated.defaultProfile.<key>` and
+ * `terminal.integrated.profiles.<key>`. Passing any other value is a compile-time
+ * error, which prevents silent mismatches such as `"darwin"` returning empty config.
+ *
+ * The return type (`defaultProfileName` and `profiles`) is inferred from `K` via
+ * `PlatformProfilesMap`, so callers don't need an explicit type parameter.
+ *
+ * Returns `{ defaultProfileName: null, profiles: {} }` on any VS Code API error.
+ */
+function getTerminalConfig<K extends keyof PlatformProfilesMap>(
+	platformKey: K,
+): { defaultProfileName: string | null; profiles: PlatformProfilesMap[K] } {
 	try {
 		const config = vscode.workspace.getConfiguration("terminal.integrated")
-		const defaultProfileName = config.get<string>("defaultProfile.osx")
-		const profiles = config.get<MacTerminalProfiles>("profiles.osx") || {}
+		const rawProfileName = config.get<string>(`defaultProfile.${platformKey}`)
+		const defaultProfileName = typeof rawProfileName === "string" ? rawProfileName : null
+		const profiles = config.get<PlatformProfilesMap[K]>(`profiles.${platformKey}`) ?? ({} as PlatformProfilesMap[K])
 		return { defaultProfileName, profiles }
 	} catch {
-		return { defaultProfileName: null, profiles: {} as MacTerminalProfiles }
-	}
-}
-
-function getLinuxTerminalConfig() {
-	try {
-		const config = vscode.workspace.getConfiguration("terminal.integrated")
-		const defaultProfileName = config.get<string>("defaultProfile.linux")
-		const profiles = config.get<LinuxTerminalProfiles>("profiles.linux") || {}
-		return { defaultProfileName, profiles }
-	} catch {
-		return { defaultProfileName: null, profiles: {} as LinuxTerminalProfiles }
+		return { defaultProfileName: null, profiles: {} as PlatformProfilesMap[K] }
 	}
 }
 
@@ -187,7 +187,7 @@ function normalizeShellPath(path: string | string[] | undefined): string | null 
 
 /** Attempts to retrieve a shell path from VS Code config on Windows. */
 function getWindowsShellFromVSCode(): string | null {
-	const { defaultProfileName, profiles } = getWindowsTerminalConfig()
+	const { defaultProfileName, profiles } = getTerminalConfig("windows")
 	if (!defaultProfileName) {
 		// No explicit Windows terminal profile is configured. VS Code auto-detects
 		// the default on modern Windows and prefers PowerShell 7 (pwsh.exe) when it
@@ -232,7 +232,7 @@ function getWindowsShellFromVSCode(): string | null {
 
 /** Attempts to retrieve a shell path from VS Code config on macOS. */
 function getMacShellFromVSCode(): string | null {
-	const { defaultProfileName, profiles } = getMacTerminalConfig()
+	const { defaultProfileName, profiles } = getTerminalConfig("osx")
 	if (!defaultProfileName) {
 		return null
 	}
@@ -243,7 +243,7 @@ function getMacShellFromVSCode(): string | null {
 
 /** Attempts to retrieve a shell path from VS Code config on Linux. */
 function getLinuxShellFromVSCode(): string | null {
-	const { defaultProfileName, profiles } = getLinuxTerminalConfig()
+	const { defaultProfileName, profiles } = getTerminalConfig("linux")
 	if (!defaultProfileName) {
 		return null
 	}

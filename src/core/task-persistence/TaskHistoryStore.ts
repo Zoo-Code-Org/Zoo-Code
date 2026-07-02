@@ -8,6 +8,28 @@ import { GlobalFileNames } from "../../shared/globalFileNames"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 
+/** Valid status values for a task's HistoryItem. */
+export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
+
+const VALID_TRANSITIONS: Record<HistoryItemStatus, HistoryItemStatus[]> = {
+	active: ["delegated", "completed"],
+	delegated: ["active"],
+	completed: [],
+}
+
+/**
+ * Asserts that a task status transition is valid, throwing if not.
+ *
+ * @throws {Error} When the transition is not allowed by the state machine.
+ */
+export function assertValidTransition(from: HistoryItemStatus | undefined, to: HistoryItemStatus): void {
+	const fromStatus: HistoryItemStatus = from ?? "active"
+	const validTargets = VALID_TRANSITIONS[fromStatus]
+	if (!validTargets.includes(to)) {
+		throw new Error(`Invalid task status transition: ${fromStatus} → ${to}`)
+	}
+}
+
 /**
  * Index file format for fast startup reads.
  */
@@ -88,10 +110,13 @@ export class TaskHistoryStore {
 			// 2. Reconcile cache against actual task directories on disk
 			await this.reconcile()
 
-			// 3. Start fs.watch for cross-instance reactivity
+			// 3. Repair delegation inconsistencies left by a previous crash
+			await this.reconcileDelegationState()
+
+			// 4. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
 
-			// 4. Start periodic reconciliation as a defensive fallback
+			// 5. Start periodic reconciliation as a defensive fallback
 			this.startPeriodicReconciliation()
 		} finally {
 			// Mark initialization as complete so callers awaiting `initialized` can proceed
@@ -158,30 +183,53 @@ export class TaskHistoryStore {
 	 * updates the in-memory Map, and schedules a debounced index write.
 	 */
 	async upsert(item: HistoryItem): Promise<HistoryItem[]> {
-		return this.withLock(async () => {
-			const existing = this.cache.get(item.id)
+		return this.withLock(() => this.upsertCore(item))
+	}
 
-			// Merge: preserve existing metadata unless explicitly overwritten
-			const merged = existing ? { ...existing, ...item } : item
+	/**
+	 * Core upsert logic — must only be called from within `withLock`.
+	 *
+	 * Enforces state-machine transition rules when `item.status` changes.
+	 * Pass `skipTransitionCheck: true` only for administrative repairs (reconciliation,
+	 * migration) that need to write corrected state outside the normal task lifecycle.
+	 */
+	private async upsertCore(
+		item: HistoryItem,
+		options: { skipTransitionCheck?: boolean } = {},
+	): Promise<HistoryItem[]> {
+		const existing = this.cache.get(item.id)
 
-			// Write per-task file (source of truth)
-			await this.writeTaskFile(merged)
-
-			// Update in-memory cache
-			this.cache.set(merged.id, merged)
-
-			// Schedule debounced index write
-			this.scheduleIndexWrite()
-
-			const all = this.getAll()
-
-			// Call onWrite callback inside the lock for serialized write-through
-			if (this.onWrite) {
-				await this.onWrite(all)
+		// Enforce transition validity at the write boundary so that any caller
+		// (including fire-and-forget saves) cannot silently stomp a terminal status.
+		// Skip when there is no existing record — first insert has no prior state to transition from.
+		// Normalize existing.status (undefined = legacy "active") before comparing so that writing
+		// status: "active" onto a legacy item without a status field is not treated as a transition.
+		if (!options.skipTransitionCheck && existing && item.status !== undefined) {
+			const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
+			if (item.status !== normalizedExisting) {
+				assertValidTransition(existing.status, item.status)
 			}
+		}
 
-			return all
-		})
+		// Merge: preserve existing metadata unless explicitly overwritten
+		const merged = existing ? { ...existing, ...item } : item
+
+		// Write per-task file (source of truth)
+		await this.writeTaskFile(merged)
+
+		// Update in-memory cache
+		this.cache.set(merged.id, merged)
+		// Schedule debounced index write
+		this.scheduleIndexWrite()
+
+		const all = this.getAll()
+
+		// Call onWrite callback inside the lock for serialized write-through
+		if (this.onWrite) {
+			await this.onWrite(all)
+		}
+
+		return all
 	}
 
 	/**
@@ -289,6 +337,92 @@ export class TaskHistoryStore {
 		})
 	}
 
+	/**
+	 * Repair delegation inconsistencies left by a crash mid-transition.
+	 *
+	 * Called once from `initialize()` after `reconcile()`. Runs inside `withLock` to
+	 * prevent interleaving with watcher-triggered reconcile() calls. Iterates until
+	 * convergence so that one-level chained delegations visible at startup are resolved.
+	 *
+	 * Must NOT be called from within `withLock` — `withLock` is non-reentrant (promise
+	 * chain); calling `upsert` (which acquires the lock) from inside would deadlock.
+	 * `upsertCore` is called directly here instead, bypassing transition validation via
+	 * `skipTransitionCheck: true` because these writes are administrative repairs, not
+	 * runtime state-machine transitions.
+	 *
+	 * Cases repaired per pass:
+	 * - Parent `delegated` with no `awaitingChildId` → parent → `active` (invalid state)
+	 * - Parent `delegated`, child not found → parent → `active` (orphaned delegation)
+	 * - Parent `delegated`, child `completed` → parent → `active` (interrupted handoff)
+	 *
+	 * A parent awaiting an `active` child is left as-is — the child is resumable.
+	 */
+	private async reconcileDelegationState(): Promise<void> {
+		return this.withLock(async () => {
+			let repairsInThisPass: number
+			do {
+				repairsInThisPass = 0
+				// Rebuild the lookup map each pass so repairs from the previous pass
+				// are visible when evaluating chained delegations.
+				const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
+
+				for (const [, item] of byId) {
+					if (item.status !== "delegated") {
+						continue
+					}
+
+					if (!item.awaitingChildId) {
+						await this.upsertCore(
+							{ ...item, status: "active", awaitingChildId: undefined, delegatedToId: undefined },
+							{ skipTransitionCheck: true },
+						)
+						console.warn(
+							`[TaskHistoryStore] Reconciled invalid delegation: task ${item.id} → active (no awaitingChildId)`,
+						)
+						repairsInThisPass++
+						continue
+					}
+
+					const child = byId.get(item.awaitingChildId)
+
+					if (!child) {
+						await this.upsertCore(
+							{
+								...item,
+								status: "active",
+								awaitingChildId: undefined,
+								delegatedToId: undefined,
+							},
+							{ skipTransitionCheck: true },
+						)
+						console.warn(
+							`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
+						)
+						repairsInThisPass++
+					} else if (child.status === "completed") {
+						await this.upsertCore(
+							{
+								...item,
+								status: "active",
+								awaitingChildId: undefined,
+								delegatedToId: undefined,
+								completedByChildId: child.id,
+								completionResultSummary:
+									child.completionResultSummary ?? "Task completed (recovered after interruption)",
+							},
+							{ skipTransitionCheck: true },
+						)
+						console.warn(
+							`[TaskHistoryStore] Reconciled interrupted handoff: task ${item.id} → active (child ${item.awaitingChildId} already completed)`,
+						)
+						repairsInThisPass++
+					}
+					// child.status === "active" or "delegated" → leave as-is this pass
+				}
+			} while (repairsInThisPass > 0)
+		})
+	}
+
 	// ────────────────────────────── Cache invalidation ──────────────────────────────
 
 	/**
@@ -357,6 +491,10 @@ export class TaskHistoryStore {
 
 		// Write the index
 		await this.writeIndex()
+
+		// Repair any delegation inconsistencies introduced by the migrated entries.
+		// reconcileDelegationState() is idempotent so running it again is safe.
+		await this.reconcileDelegationState()
 	}
 
 	// ────────────────────────────── Private: Index management ──────────────────────────────
@@ -527,6 +665,105 @@ export class TaskHistoryStore {
 			}
 			this.startPeriodicReconciliation()
 		}, TaskHistoryStore.RECONCILE_INTERVAL_MS)
+	}
+
+	// ────────────────────────────── Atomic read-modify-write ──────────────────────────────
+
+	/**
+	 * Read a HistoryItem from the in-memory cache and write back an updated version,
+	 * all within a single lock acquisition so no concurrent writer can interleave
+	 * between the read and the write.
+	 *
+	 * The `updater` receives the current cached item and must return the new item
+	 * synchronously. It must not perform I/O or acquire any other lock.
+	 *
+	 * @throws If the task ID is not present in the cache.
+	 */
+	public atomicReadAndUpdate(taskId: string, updater: (current: HistoryItem) => HistoryItem): Promise<HistoryItem[]> {
+		return this.withLock(async () => {
+			const current = this.cache.get(taskId)
+			if (!current) {
+				throw new Error(`[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`)
+			}
+			// Deep-copy so a mutating updater cannot alter cached state before persistence.
+			const snapshot = structuredClone(current)
+			const updated = updater(snapshot)
+			if (updated.id !== taskId) {
+				throw new Error(
+					`[TaskHistoryStore] atomicReadAndUpdate: updater changed task id from ${taskId} to ${updated.id}`,
+				)
+			}
+			return this.upsertCore(updated)
+		})
+	}
+
+	/**
+	 * Atomically update two related HistoryItems within a single lock acquisition.
+	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes are
+	 * committed before the lock releases — no concurrent writer can observe an
+	 * intermediate state.
+	 *
+	 * @throws If either task ID is not present in the cache.
+	 */
+	public atomicUpdatePair(
+		firstId: string,
+		secondId: string,
+		firstUpdater: (current: HistoryItem) => HistoryItem,
+		secondUpdater: (current: HistoryItem) => HistoryItem,
+	): Promise<HistoryItem[]> {
+		return this.withLock(async () => {
+			const first = this.cache.get(firstId)
+			if (!first) throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${firstId} not found`)
+			const second = this.cache.get(secondId)
+			if (!second) throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${secondId} not found`)
+
+			const updatedFirst = firstUpdater(structuredClone(first))
+			const updatedSecond = secondUpdater(structuredClone(second))
+
+			if (updatedFirst.id !== firstId) {
+				throw new Error(
+					`[TaskHistoryStore] atomicUpdatePair: first updater changed id from ${firstId} to ${updatedFirst.id}`,
+				)
+			}
+			if (updatedSecond.id !== secondId) {
+				throw new Error(
+					`[TaskHistoryStore] atomicUpdatePair: second updater changed id from ${secondId} to ${updatedSecond.id}`,
+				)
+			}
+
+			// Validate status transitions before any disk write — mirrors upsertCore guard.
+			for (const [existing, updated] of [
+				[first, updatedFirst],
+				[second, updatedSecond],
+			] as const) {
+				if (updated.status !== undefined) {
+					const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
+					if (updated.status !== normalizedExisting) {
+						assertValidTransition(existing.status, updated.status)
+					}
+				}
+			}
+
+			// Merge with existing cache entries before writing, mirroring upsertCore.
+			const mergedFirst = { ...first, ...updatedFirst }
+			const mergedSecond = { ...second, ...updatedSecond }
+
+			// Write both files before touching the cache so readers never observe a
+			// half-updated in-memory state between the two await points.
+			await this.writeTaskFile(mergedFirst)
+			await this.writeTaskFile(mergedSecond)
+
+			// Both disk writes succeeded — now update the cache atomically.
+			this.cache.set(firstId, mergedFirst)
+			this.cache.set(secondId, mergedSecond)
+
+			this.scheduleIndexWrite()
+			const all = this.getAll()
+			if (this.onWrite) {
+				await this.onWrite(all)
+			}
+			return all
+		})
 	}
 
 	// ────────────────────────────── Private: Write lock ──────────────────────────────

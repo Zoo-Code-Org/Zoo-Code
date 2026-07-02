@@ -5,13 +5,7 @@ export {
 	getSembleSupportedPlatforms,
 	downloadSemble,
 	getSembleBinaryPath,
+	SEMBLE_VERSION,
 } from "./semble-downloader"
-export type {
-	ISembleProvider,
-	SembleSearchResult,
-	SembleChunk,
-	SembleCheckResult,
-	SembleConfig,
-	SembleContentType,
-} from "./types"
+export type { ISembleProvider, SembleSearchResult, SembleCheckResult, SembleConfig, SembleContentType } from "./types"
 export { SEMBLE_DEFAULTS } from "./types"

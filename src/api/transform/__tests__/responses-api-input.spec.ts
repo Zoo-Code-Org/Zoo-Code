@@ -73,6 +73,25 @@ describe("convertToResponsesApiInput", () => {
 			])
 		})
 
+		it("should skip non-base64 images (e.g. URL-sourced)", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Look at this:" },
+						{
+							type: "image",
+							source: { type: "url", url: "https://example.com/img.png" } as any,
+						},
+					],
+				},
+			]
+
+			const result = convertToResponsesApiInput(messages)
+			// URL image is not emitted; only the text part survives
+			expect(result).toEqual([{ role: "user", content: [{ type: "input_text", text: "Look at this:" }] }])
+		})
+
 		it("should convert tool_result to function_call_output", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{

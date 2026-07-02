@@ -1,6 +1,8 @@
 // npx vitest run api/providers/__tests__/openai-codex.spec.ts
 
+import { Anthropic } from "@anthropic-ai/sdk"
 import { OpenAiCodexHandler } from "../openai-codex"
+import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 
 describe("OpenAiCodexHandler.getModel", () => {
 	it.each(["gpt-5.1", "gpt-5", "gpt-5.1-codex", "gpt-5-codex", "gpt-5-codex-mini", "gpt-5.3-codex-spark"])(
@@ -40,5 +42,106 @@ describe("OpenAiCodexHandler.getModel", () => {
 
 		expect(model.id).toBe("gpt-5.4-mini")
 		expect(model.info).toBeDefined()
+	})
+})
+
+describe("OpenAiCodexHandler.createMessage", () => {
+	it("should skip URL-sourced images in formatFullConversation (only base64 emits input_image)", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const capturedInput: any[] = []
+		;(handler as any).client = {
+			responses: {
+				create: vitest.fn().mockImplementation(async (body: any) => {
+					capturedInput.push(...(body.input ?? []))
+					return {
+						async *[Symbol.asyncIterator]() {
+							yield {
+								type: "response.completed",
+								response: {
+									id: "r1",
+									status: "completed",
+									output: [],
+									usage: { input_tokens: 1, output_tokens: 1 },
+								},
+							}
+						},
+					}
+				}),
+			},
+		}
+
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "Look at this:" },
+					{ type: "image", source: { type: "url", url: "https://example.com/img.png" } as any },
+				],
+			},
+		]
+
+		const stream = handler.createMessage("system", messages)
+		for await (const _ of stream) {
+			// consume
+		}
+
+		// URL image is skipped; only the text input_text block should be present
+		const userMsg = capturedInput.find((item: any) => item.role === "user")
+		expect(userMsg?.content).toEqual([{ type: "input_text", text: "Look at this:" }])
+		expect(JSON.stringify(capturedInput)).not.toContain("input_image")
+	})
+
+	it("should emit input_image for base64 images in formatFullConversation", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const capturedInput: any[] = []
+		;(handler as any).client = {
+			responses: {
+				create: vitest.fn().mockImplementation(async (body: any) => {
+					capturedInput.push(...(body.input ?? []))
+					return {
+						async *[Symbol.asyncIterator]() {
+							yield {
+								type: "response.completed",
+								response: {
+									id: "r1",
+									status: "completed",
+									output: [],
+									usage: { input_tokens: 1, output_tokens: 1 },
+								},
+							}
+						},
+					}
+				}),
+			},
+		}
+
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "Look at this:" },
+					{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc123" } },
+				],
+			},
+		]
+
+		const stream = handler.createMessage("system", messages)
+		for await (const _ of stream) {
+			// consume
+		}
+
+		const userMsg = capturedInput.find((item: any) => item.role === "user")
+		expect(userMsg?.content).toContainEqual({
+			type: "input_image",
+			image_url: "data:image/png;base64,abc123",
+		})
 	})
 })

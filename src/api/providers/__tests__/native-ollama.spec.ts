@@ -1,4 +1,6 @@
-// npx vitest run api/providers/__tests__/native-ollama.spec.ts
+// pnpm exec vitest run api/providers/__tests__/native-ollama.spec.ts
+
+import { Anthropic } from "@anthropic-ai/sdk"
 
 import { NativeOllamaHandler } from "../native-ollama"
 import { ApiHandlerOptions } from "../../../shared/api"
@@ -79,6 +81,95 @@ describe("NativeOllamaHandler", () => {
 			expect(results[0]).toEqual({ type: "text", text: "Hello" })
 			expect(results[1]).toEqual({ type: "text", text: " world" })
 			expect(results[2]).toEqual({ type: "usage", inputTokens: 10, outputTokens: 2 })
+		})
+
+		it("should map tool_result array content to a concatenated string, flushing base64 images", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "tool-1",
+							content: [
+								{ type: "text", text: "line one" },
+								{
+									type: "image",
+									source: {
+										type: "base64",
+										media_type: "image/png",
+										data: "imgdata",
+									},
+								},
+								{ type: "text", text: "line two" },
+							],
+						},
+					],
+				},
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume stream
+			}
+
+			// Text blocks are joined with "\n"; the image emits a placeholder and is
+			// flushed separately via the `images` field rather than inlined.
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "user",
+							content: "line one\n(see following user message for image)\nline two",
+							images: ["imgdata"],
+						}),
+					]),
+				}),
+			)
+		})
+
+		it("should drop unknown block types in tool_result content (empty string contribution)", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "tool-1",
+							content: [
+								{ type: "text", text: "before" },
+								{ type: "document" } as any,
+								{ type: "text", text: "after" },
+							],
+						},
+					],
+				},
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			// The unknown block contributes "" so the join produces "before\n\nafter"
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "user",
+							content: "before\n\nafter",
+						}),
+					]),
+				}),
+			)
 		})
 
 		it("should not include num_ctx by default", async () => {

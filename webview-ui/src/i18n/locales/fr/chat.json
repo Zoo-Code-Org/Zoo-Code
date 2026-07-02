@@ -40,6 +40,14 @@
 		"title": "Commencer une nouvelle tâche",
 		"tooltip": "Démarrer une nouvelle tâche"
 	},
+	"seeNewChanges": {
+		"title": "Voir les nouveaux changements",
+		"tooltip": "Affiche les changements effectués depuis ton dernier prompt"
+	},
+	"restoreChanges": {
+		"title": "Restaurer les changements",
+		"tooltip": "Restaure les fichiers et l'état de la tâche à ton dernier prompt"
+	},
 	"proceedAnyways": {
 		"title": "Continuer quand même",
 		"tooltip": "Continuer pendant l'exécution de la commande"
@@ -333,9 +341,9 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "Prise en charge de GLM-5.2 — le dernier modèle GLM est désormais disponible dans les paramètres du fournisseur.",
-			"highlight2": "Améliorations d'OpenCode-Go — paramètres de modèle natifs, routage au format Anthropic et correction de context-token pour des réponses plus fiables.",
-			"highlight3": "Mode tool-writer — un nouveau mode spécialisé pour écrire et maintenir des définitions d'outils, désormais disponible sur le Marketplace."
+			"highlight1": "Interface de gestion des règles — un nouvel onglet Règles dans les Paramètres permet de créer, supprimer et ouvrir des règles Zoo globales et d'espace de travail directement depuis l'éditeur.",
+			"highlight2": "Révision des changements de finalisation — après l'achèvement d'une tâche, les nouveaux boutons \"Voir les nouveaux changements\" et \"Restaurer les changements\" permettent d'inspecter et d'annuler les modifications de la dernière invite.",
+			"highlight3": "Seuils de diff assouplis — des seuils de similarité configurables réduisent les erreurs \"modification échouée\" lors de l'application de diffs, avec de nouveaux diagnostics pour régler les paramètres."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",
