@@ -34,7 +34,9 @@ describe("Novita provider settings", () => {
 		render(<Novita apiConfiguration={{} as ProviderSettings} setApiConfigurationField={vi.fn()} />)
 
 		expect(screen.getByLabelText("settings:providers.novitaBaseUrl")).toHaveValue("https://api.novita.ai/openai")
+		expect(screen.getByLabelText("settings:providers.novitaBaseUrl")).toHaveAttribute("type", "url")
 		expect(screen.getByLabelText("settings:providers.novitaApiKey")).toHaveValue("")
+		expect(screen.getByLabelText("settings:providers.novitaApiKey")).toHaveAttribute("type", "password")
 		expect(screen.getByRole("link", { name: "settings:providers.getNovitaApiKey" })).toHaveAttribute(
 			"href",
 			"https://novita.ai/settings/key-management",

@@ -56,7 +56,6 @@ for this exact support, so if you are having problems or if you have question, j
 ## What's New in v3.62.0
 
 - **GLM-5.2 support** — the latest GLM model is now available in your provider settings
-- **Novita AI support** — The AI-Native Cloud for Builders and Agents: run models, scale GPUs, and build AI agents, all on one platform
 - **OpenCode-Go improvements** — native model parameters, Anthropic-format routing, and a context-token fix for more reliable responses
 - **Tool-writer mode** — a new specialized mode for writing and maintaining tool definitions, now available in the Marketplace
 - **LiteLLM session header** — forward taskId as X-Zoo-Session-ID request header for better request tracing
@@ -88,7 +87,7 @@ for this exact support, so if you are having problems or if you have question, j
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 

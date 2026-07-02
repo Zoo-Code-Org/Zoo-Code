@@ -334,7 +334,7 @@ const moonshotSchema = apiModelIdProviderModelSchema.extend({
 })
 
 const novitaSchema = apiModelIdProviderModelSchema.extend({
-	novitaBaseUrl: z.string().optional(),
+	novitaBaseUrl: z.preprocess((value) => (value === "" ? undefined : value), z.string().url().optional()),
 	novitaApiKey: z.string().optional(),
 })
 

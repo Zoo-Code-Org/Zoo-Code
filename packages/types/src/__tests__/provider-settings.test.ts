@@ -1,4 +1,4 @@
-import { getApiProtocol } from "../provider-settings.js"
+import { getApiProtocol, providerSettingsSchema } from "../provider-settings.js"
 import { getProviderDefaultModelId, novitaDefaultModelId } from "../providers/index.js"
 
 describe("getApiProtocol", () => {
@@ -93,6 +93,29 @@ describe("getApiProtocol", () => {
 	describe("Novita provider defaults", () => {
 		it("returns the Novita default model ID", () => {
 			expect(getProviderDefaultModelId("novita")).toBe(novitaDefaultModelId)
+		})
+
+		it("validates Novita base URLs", () => {
+			expect(
+				providerSettingsSchema.safeParse({
+					apiProvider: "novita",
+					novitaBaseUrl: "https://api.novita.ai/openai",
+				}).success,
+			).toBe(true)
+
+			expect(
+				providerSettingsSchema.safeParse({
+					apiProvider: "novita",
+					novitaBaseUrl: "",
+				}).data?.novitaBaseUrl,
+			).toBeUndefined()
+
+			expect(
+				providerSettingsSchema.safeParse({
+					apiProvider: "novita",
+					novitaBaseUrl: "not-a-url",
+				}).success,
+			).toBe(false)
 		})
 	})
 

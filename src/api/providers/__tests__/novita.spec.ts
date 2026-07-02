@@ -54,6 +54,16 @@ describe("NovitaHandler", () => {
 		expect(handler.getModel().info).toBe(novitaModels[novitaDefaultModelId])
 	})
 
+	it("uses a sentinel API key when no Novita API key is configured", () => {
+		new NovitaHandler({})
+
+		expect(mockCreateOpenAICompatible).toHaveBeenCalledWith(
+			expect.objectContaining({
+				apiKey: "not-provided",
+			}),
+		)
+	})
+
 	it("returns the requested model ID with default model info for unknown models", () => {
 		const handler = new NovitaHandler({
 			...mockOptions,
@@ -73,6 +83,7 @@ describe("NovitaHandler", () => {
 		})
 
 		const model = handler.getModel()
+		expect((handler as unknown as { config: { modelMaxTokens?: number } }).config.modelMaxTokens).toBe(2048)
 		expect(model.temperature).toBe(0.3)
 	})
 })

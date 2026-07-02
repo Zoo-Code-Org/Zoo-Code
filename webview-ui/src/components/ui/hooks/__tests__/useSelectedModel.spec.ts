@@ -820,5 +820,19 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("minimax/minimax-m3")
 			expect(result.current.info).toEqual(novitaModels["minimax/minimax-m3"])
 		})
+
+		it("should return undefined model info for unknown Novita model IDs", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "novita",
+				apiModelId: "provider/new-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("novita")
+			expect(result.current.id).toBe("provider/new-model")
+			expect(result.current.info).toBeUndefined()
+		})
 	})
 })

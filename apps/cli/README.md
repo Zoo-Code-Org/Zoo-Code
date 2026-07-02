@@ -76,9 +76,11 @@ By default, the CLI auto-approves actions and runs in interactive TUI mode:
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-...
-# or use Novita AI, the AI-native cloud for builders and agents:
-export NOVITA_API_KEY=...
 
+roo "What is this project?" -w ~/Documents/my-project
+
+# Or use Novita AI explicitly:
+export NOVITA_API_KEY=...
 roo "What is this project?" --provider novita -w ~/Documents/my-project
 ```
 
@@ -237,8 +239,7 @@ The CLI will look for API keys in environment variables if not provided via `--a
 # Run directly from source (no build required)
 pnpm dev --provider openrouter --api-key $OPENROUTER_API_KEY --print "Hello"
 
-# Novita AI: The AI-Native Cloud for Builders and Agents.
-# Run models, scale GPUs, and build AI agents, all on one platform.
+# Novita AI (OpenAI-compatible)
 pnpm dev --provider novita --api-key $NOVITA_API_KEY --model moonshotai/kimi-k2.7-code --print "Hello"
 
 # Run tests

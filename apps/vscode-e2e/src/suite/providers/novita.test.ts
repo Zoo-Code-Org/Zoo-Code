@@ -181,9 +181,11 @@ async function runNovitaToolProbe(
 	let taskId: string | undefined
 
 	try {
+		const novitaApiKey = aimockUrl && !isRecord ? "mock-key" : NOVITA_API_KEY
+
 		await api.setConfiguration({
 			apiProvider: "novita" as const,
-			novitaApiKey: aimockUrl && !isRecord ? "mock-key" : NOVITA_API_KEY!,
+			...(novitaApiKey && { novitaApiKey }),
 			...(aimockUrl && { novitaBaseUrl: `${aimockUrl}/v1` }),
 			apiModelId: modelId,
 		})
@@ -244,9 +246,7 @@ async function runNovitaToolProbe(
 				mistakeLimitReached,
 				completionText,
 				usedReadFile: usedReadFile || transcript.some((line) => line.includes(fileName)),
-				requests: requests.filter(
-					(request) => request.model === modelId && (!request.probeTag || request.probeTag === probeTag),
-				),
+				requests: requests.filter((request) => request.model === modelId && request.probeTag === probeTag),
 				transcript,
 			},
 		}
@@ -275,7 +275,9 @@ suite("Novita provider", function () {
 	const requests: CapturedNovitaRequest[] = []
 
 	setup(function () {
-		if (!process.env.AIMOCK_URL && !NOVITA_API_KEY) {
+		const needsRealNovitaKey = process.env.AIMOCK_RECORD === "true" || !process.env.AIMOCK_URL
+
+		if (needsRealNovitaKey && !NOVITA_API_KEY) {
 			this.skip()
 		}
 	})
@@ -293,13 +295,15 @@ suite("Novita provider", function () {
 
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
+		const openRouterApiKey = aimockUrl
+			? isRecord
+				? (process.env.OPENROUTER_API_KEY ?? "mock-key")
+				: "mock-key"
+			: process.env.OPENROUTER_API_KEY
+
 		await globalThis.api.setConfiguration({
 			apiProvider: "openrouter" as const,
-			openRouterApiKey: aimockUrl
-				? isRecord
-					? (process.env.OPENROUTER_API_KEY ?? "mock-key")
-					: "mock-key"
-				: process.env.OPENROUTER_API_KEY!,
+			...(openRouterApiKey && { openRouterApiKey }),
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
 		})
@@ -320,9 +324,6 @@ suite("Novita provider", function () {
 		assert.strictEqual(result.aborted, false, `Novita task should not abort.\n${diagnostics}`)
 		assert.strictEqual(result.noToolErrors, 0, `Novita should not hit MODEL_NO_TOOLS_USED.\n${diagnostics}`)
 		assert.ok(result.usedReadFile, `Novita should use read_file for the marker file.\n${diagnostics}`)
-		assert.ok(
-			!result.completionText || result.completionText === marker,
-			`Novita should not return an incorrect marker.\n${diagnostics}`,
-		)
+		assert.strictEqual(result.completionText, marker, `Novita should return the exact marker.\n${diagnostics}`)
 	})
 })

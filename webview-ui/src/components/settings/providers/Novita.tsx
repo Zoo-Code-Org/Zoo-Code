@@ -32,6 +32,7 @@ export const Novita = ({ apiConfiguration, setApiConfigurationField }: NovitaPro
 			<div>
 				<VSCodeTextField
 					value={apiConfiguration?.novitaBaseUrl || "https://api.novita.ai/openai"}
+					type="url"
 					onInput={handleInputChange("novitaBaseUrl")}
 					placeholder="https://api.novita.ai/openai"
 					className="w-full">
