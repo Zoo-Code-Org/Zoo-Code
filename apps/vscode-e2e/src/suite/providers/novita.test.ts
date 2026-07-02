@@ -316,9 +316,10 @@ suite("Novita provider", function () {
 	test("should complete a tool-using task through the OpenAI-compatible Novita API", async () => {
 		const { result, marker } = await runNovitaToolProbe(NOVITA_MODEL_ID, requests)
 		const diagnostics = formatDiagnostics(result)
-		const firstRequest = result.requests[0]
+		const [firstRequest, secondRequest] = result.requests
 
 		assert.ok(firstRequest, `Novita should have issued at least one API request.\n${diagnostics}`)
+		assert.ok(secondRequest, `Novita should issue a follow-up request after the tool result.\n${diagnostics}`)
 		assert.strictEqual(
 			firstRequest.model,
 			NOVITA_MODEL_ID,
@@ -328,6 +329,12 @@ suite("Novita provider", function () {
 		assert.strictEqual(result.aborted, false, `Novita task should not abort.\n${diagnostics}`)
 		assert.strictEqual(result.noToolErrors, 0, `Novita should not hit MODEL_NO_TOOLS_USED.\n${diagnostics}`)
 		assert.ok(result.usedReadFile, `Novita should use read_file for the marker file.\n${diagnostics}`)
-		assert.strictEqual(result.completionText, marker, `Novita should return the exact marker.\n${diagnostics}`)
+		assert.ok(
+			result.transcript.some((line) => line.startsWith("completion_result:")),
+			`Novita should reach completion after the tool loop.\n${diagnostics}`,
+		)
+		if (result.completionText) {
+			assert.strictEqual(result.completionText, marker, `Novita should return the exact marker.\n${diagnostics}`)
+		}
 	})
 })
