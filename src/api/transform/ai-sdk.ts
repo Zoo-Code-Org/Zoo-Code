@@ -183,7 +183,11 @@ export function convertToolsForAiSdk(
  * Extended stream part type that includes additional fullStream event types
  * that are emitted at runtime but not included in the AI SDK TextStreamPart type definitions.
  */
-type ExtendedStreamPart = TextStreamPart<any> | { type: "text"; text: string } | { type: "reasoning"; text: string }
+type ExtendedStreamPart =
+	| TextStreamPart<any>
+	| { type: "text"; text: string }
+	| { type: "reasoning"; text: string }
+	| ({ type: "tool-input-available" } & ToolInputPart)
 
 function stringifyToolInput(part: Extract<TextStreamPart<any>, { type: "tool-call" }>) {
 	const input =
