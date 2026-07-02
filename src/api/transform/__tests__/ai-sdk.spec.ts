@@ -484,6 +484,25 @@ describe("AI SDK conversion utilities", () => {
 			})
 		})
 
+		it("uses args when tool-call input is an empty object", () => {
+			const part = {
+				type: "tool-call" as const,
+				toolCallId: "call_1",
+				toolName: "attempt_completion",
+				input: {},
+				args: { result: "done" },
+			}
+			const chunks = [...processAiSdkStreamPart(part as any)]
+
+			expect(chunks).toHaveLength(1)
+			expect(chunks[0]).toEqual({
+				type: "tool_call",
+				id: "call_1",
+				name: "attempt_completion",
+				arguments: '{"result":"done"}',
+			})
+		})
+
 		it("processes complete tool-call chunks with arguments", () => {
 			const part = {
 				type: "tool-call" as const,
@@ -502,7 +521,7 @@ describe("AI SDK conversion utilities", () => {
 			})
 		})
 
-		it("emits the complete tool-call chunk after streaming input chunks", () => {
+		it("emits complete tool-input-available after streaming input chunks", () => {
 			const seenStreamingToolCallIds = new Set<string>()
 			const chunks = [
 				...processAiSdkStreamPart(
@@ -514,6 +533,41 @@ describe("AI SDK conversion utilities", () => {
 					seenStreamingToolCallIds,
 				),
 				...processAiSdkStreamPart({ type: "tool-input-end" as const, id: "call_1" }, seenStreamingToolCallIds),
+				...processAiSdkStreamPart(
+					{
+						type: "tool-input-available" as const,
+						toolCallId: "call_1",
+						toolName: "attempt_completion",
+						input: { result: "done" },
+					},
+					seenStreamingToolCallIds,
+				),
+			]
+
+			expect(chunks).toEqual([
+				{
+					type: "tool_call",
+					id: "call_1",
+					name: "attempt_completion",
+					arguments: '{"result":"done"}',
+				},
+			])
+			expect(seenStreamingToolCallIds.has("call_1")).toBe(false)
+			expect(seenStreamingToolCallIds.has("completed:call_1")).toBe(true)
+		})
+
+		it("ignores duplicate tool-call chunks after complete tool-input-available chunks", () => {
+			const seenStreamingToolCallIds = new Set<string>()
+			const chunks = [
+				...processAiSdkStreamPart(
+					{
+						type: "tool-input-available" as const,
+						toolCallId: "call_1",
+						toolName: "attempt_completion",
+						input: { result: "done" },
+					},
+					seenStreamingToolCallIds,
+				),
 				...processAiSdkStreamPart(
 					{
 						type: "tool-call" as const,
@@ -533,7 +587,44 @@ describe("AI SDK conversion utilities", () => {
 					arguments: '{"result":"done"}',
 				},
 			])
-			expect(seenStreamingToolCallIds.has("call_1")).toBe(false)
+			expect(seenStreamingToolCallIds.has("completed:call_1")).toBe(false)
+		})
+
+		it("ignores tool-input-available for calls that are still streaming input", () => {
+			const seenStreamingToolCallIds = new Set<string>()
+			const chunks = [
+				...processAiSdkStreamPart(
+					{ type: "tool-input-start" as const, id: "call_1", toolName: "attempt_completion" },
+					seenStreamingToolCallIds,
+				),
+				...processAiSdkStreamPart(
+					{
+						type: "tool-input-available" as const,
+						toolCallId: "call_1",
+						toolName: "attempt_completion",
+						input: {},
+					},
+					seenStreamingToolCallIds,
+				),
+				...processAiSdkStreamPart(
+					{
+						type: "tool-call" as const,
+						toolCallId: "call_1",
+						toolName: "attempt_completion",
+						input: { result: "done" },
+					},
+					seenStreamingToolCallIds,
+				),
+			]
+
+			expect(chunks).toEqual([
+				{
+					type: "tool_call",
+					id: "call_1",
+					name: "attempt_completion",
+					arguments: '{"result":"done"}',
+				},
+			])
 		})
 
 		it("processes source chunks with URL", () => {

@@ -191,7 +191,7 @@ type ExtendedStreamPart =
 
 function stringifyToolInput(part: Extract<TextStreamPart<any>, { type: "tool-call" }>) {
 	const input =
-		"input" in part && part.input !== undefined
+		"input" in part && part.input !== undefined && !isEmptyObject(part.input)
 			? part.input
 			: "args" in part
 				? (part as { args: unknown }).args
@@ -200,6 +200,14 @@ function stringifyToolInput(part: Extract<TextStreamPart<any>, { type: "tool-cal
 					: {}
 
 	return typeof input === "string" ? input : JSON.stringify(input)
+}
+
+function isEmptyObject(value: unknown) {
+	return typeof value === "object" && value !== null && !Array.isArray(value) && Object.keys(value).length === 0
+}
+
+function hasToolInput(part: Pick<ToolInputPart, "input">) {
+	return part.input !== undefined && !isEmptyObject(part.input)
 }
 
 type ToolInputPart = {
@@ -213,6 +221,10 @@ type ToolInputPart = {
 
 function getToolCallId(part: ToolInputPart) {
 	return part.toolCallId ?? part.id ?? ""
+}
+
+function completedToolCallMarker(toolCallId: string) {
+	return `completed:${toolCallId}`
 }
 
 /**
@@ -249,6 +261,12 @@ export function* processAiSdkStreamPart(
 			break
 
 		case "tool-input-available":
+			if (seenStreamingToolCallIds?.has(getToolCallId(part)) && !hasToolInput(part)) {
+				break
+			}
+
+			seenStreamingToolCallIds?.delete(getToolCallId(part))
+			seenStreamingToolCallIds?.add(completedToolCallMarker(getToolCallId(part)))
 			yield {
 				type: "tool_call",
 				id: getToolCallId(part),
@@ -258,6 +276,11 @@ export function* processAiSdkStreamPart(
 			break
 
 		case "tool-call":
+			if (seenStreamingToolCallIds?.has(completedToolCallMarker(part.toolCallId))) {
+				seenStreamingToolCallIds.delete(completedToolCallMarker(part.toolCallId))
+				break
+			}
+
 			seenStreamingToolCallIds?.delete(part.toolCallId)
 			// Complete tool call - emit for compatibility
 			yield {
