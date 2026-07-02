@@ -895,6 +895,41 @@ describe("VertexHandler", () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
 		})
+
+		it("should handle empty content array for Claude", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest.fn().mockResolvedValue({
+				content: [],
+			})
+			;(handler["client"].messages as any).create = mockCreate
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe("")
+		})
+
+		it("should return text from first text block when mixed content for Claude", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest.fn().mockResolvedValue({
+				content: [
+					{ type: "thinking", thinking: "internal reasoning" },
+					{ type: "text", text: "visible response" },
+				],
+			})
+			;(handler["client"].messages as any).create = mockCreate
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe("visible response")
+		})
 	})
 
 	describe("getModel", () => {
@@ -1342,7 +1377,9 @@ describe("VertexHandler", () => {
 			}))
 			;(sonnetHandler["client"].messages as any).create = mockCreate
 
-			await sonnetHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
+			await sonnetHandler
+				.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }])
+				.next()
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
