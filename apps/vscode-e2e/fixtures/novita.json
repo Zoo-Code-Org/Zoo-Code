@@ -19,21 +19,6 @@
 		{
 			"match": {
 				"model": "moonshotai/kimi-k2.7-code",
-				"toolCallId": "call_novita_read"
-			},
-			"response": {
-				"toolCalls": [
-					{
-						"name": "attempt_completion",
-						"arguments": "{\"result\":\"NOVITA_E2E_MARKER\"}",
-						"id": "call_novita_done"
-					}
-				]
-			}
-		},
-		{
-			"match": {
-				"model": "moonshotai/kimi-k2.7-code",
 				"userMessage": "[ERROR] You did not use a tool in your previous response!",
 				"sequenceIndex": 0
 			},
