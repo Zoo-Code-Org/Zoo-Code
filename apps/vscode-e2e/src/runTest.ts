@@ -15,7 +15,6 @@ import { addSearchFilesResultFixtures } from "./fixtures/search-files"
 import { addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
-import { addNovitaFixtures } from "./fixtures/novita"
 
 function getCliFlagValue(flag: string) {
 	return process.argv.find((arg, index) => process.argv[index - 1] === flag)
@@ -137,7 +136,6 @@ async function main() {
 				addSubtaskFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
-				addNovitaFixtures(mock)
 
 				// The modes test (switch_mode → ask) triggers a second API call whose last
 				// user message starts with <environment_details> directly — no <user_message>
