@@ -1,13 +1,22 @@
-import { LLMock } from "@copilotkit/aimock"
+import { LLMock, type ChatCompletionRequest } from "@copilotkit/aimock"
 
-import { toolResultContains } from "./tool-result"
+function hasMarkerToolResult(req: ChatCompletionRequest) {
+	const messages = Array.isArray(req?.messages) ? req.messages : []
+
+	return messages.some((message) => {
+		if (message?.role !== "tool" && message?.role !== "user") {
+			return false
+		}
+
+		return JSON.stringify(message.content ?? "").includes("NOVITA_E2E_MARKER")
+	})
+}
 
 export function addNovitaFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			model: "moonshotai/kimi-k2.7-code",
-			toolCallId: "call_novita_read",
-			predicate: (req) => toolResultContains(req, "call_novita_read", ["NOVITA_E2E_MARKER"]),
+			predicate: hasMarkerToolResult,
 		},
 		response: {
 			toolCalls: [
