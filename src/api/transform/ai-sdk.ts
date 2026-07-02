@@ -195,7 +195,9 @@ function stringifyToolInput(part: Extract<TextStreamPart<any>, { type: "tool-cal
 			? part.input
 			: "args" in part
 				? (part as { args: unknown }).args
-				: {}
+				: "arguments" in part
+					? (part as { arguments: unknown }).arguments
+					: {}
 
 	return typeof input === "string" ? input : JSON.stringify(input)
 }

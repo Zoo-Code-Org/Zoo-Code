@@ -486,6 +486,24 @@ describe("AI SDK conversion utilities", () => {
 			})
 		})
 
+		it("processes complete tool-call chunks with arguments", () => {
+			const part = {
+				type: "tool-call" as const,
+				toolCallId: "call_1",
+				toolName: "attempt_completion",
+				arguments: '{"result":"done"}',
+			}
+			const chunks = [...processAiSdkStreamPart(part as any)]
+
+			expect(chunks).toHaveLength(1)
+			expect(chunks[0]).toEqual({
+				type: "tool_call",
+				id: "call_1",
+				name: "attempt_completion",
+				arguments: '{"result":"done"}',
+			})
+		})
+
 		it("processes source chunks with URL", () => {
 			const part = {
 				type: "source" as const,
