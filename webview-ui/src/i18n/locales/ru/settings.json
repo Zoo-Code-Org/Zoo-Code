@@ -382,6 +382,8 @@
 		"getVercelAiGatewayApiKey": "Получить ключ API Vercel AI Gateway",
 		"opencodeGoApiKey": "Ключ API Opencode Go",
 		"getOpencodeGoApiKey": "Получить ключ API Opencode Go",
+		"kenariApiKey": "Ключ API Kenari",
+		"getKenariApiKey": "Получить ключ API Kenari",
 		"apiKeyStorageNotice": "API-ключи хранятся безопасно в Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

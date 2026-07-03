@@ -73,6 +73,7 @@ import {
 	Fireworks,
 	VercelAiGateway,
 	OpenCodeGo,
+	Kenari,
 	ZooGateway,
 	MiniMax,
 	Mimo,
@@ -636,6 +637,17 @@ const ApiOptions = ({
 
 					{selectedProvider === "opencode-go" && (
 						<OpenCodeGo
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === "kenari" && (
+						<Kenari
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

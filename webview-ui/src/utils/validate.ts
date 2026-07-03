@@ -132,6 +132,11 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
+		case "kenari":
+			if (!apiConfiguration.kenariApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
 		case "zoo-gateway":
 			if (!apiConfiguration.zooSessionToken && !zooCodeIsAuthenticated) {
 				return i18next.t("settings:validation.zooGatewaySignIn")

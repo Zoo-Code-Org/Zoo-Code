@@ -384,6 +384,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
 		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
+		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
 
 		// Verify response was sent
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -400,6 +402,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -551,6 +554,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -610,6 +614,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
