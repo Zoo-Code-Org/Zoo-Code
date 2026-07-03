@@ -1215,6 +1215,25 @@ describe("convertToOpenAiMessages", () => {
 			expect(result).toHaveLength(1)
 			expect((result[0] as any).reasoning_content).toBeUndefined()
 		})
+
+		it("should ignore non-object content parts without crashing (defensive guard)", () => {
+			// getReasoningBlockText guards against non-object parts (e.g. a stray
+			// string in the content array). Such parts are not reasoning blocks and
+			// must be skipped rather than crashing or being misread as reasoning.
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: ["not-a-block" as any, { type: "text", text: "answer" }],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.content).toBe("answer")
+			expect(msg.reasoning_content).toBeUndefined()
+		})
 	})
 })
 
