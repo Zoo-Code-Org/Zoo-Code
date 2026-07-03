@@ -1149,6 +1149,35 @@ describe("convertToOpenAiMessages", () => {
 			expect(msg.tool_calls[0].id).toBe("call_abc")
 		})
 
+		it("should accumulate multiple reasoning blocks in order, separated by a tool call", () => {
+			// DeepSeek / Z.ai interleaved thinking can emit more than one reasoning block per
+			// turn. A regression that overwrites (instead of accumulates) would silently drop
+			// all but the last block.
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "First, I should check the file.", summary: [] },
+						{
+							type: "tool_use",
+							id: "call_abc",
+							name: "read_file",
+							input: { path: "foo.txt" },
+						},
+						{ type: "reasoning", text: "Now I know what to do next.", summary: [] },
+					],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.reasoning_content).toBe("First, I should check the file.Now I know what to do next.")
+			expect(msg.tool_calls).toHaveLength(1)
+			expect(msg.tool_calls[0].id).toBe("call_abc")
+		})
+
 		it("should prefer top-level reasoning_content over content block", () => {
 			const anthropicMessages = [
 				{
