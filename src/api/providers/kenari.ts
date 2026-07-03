@@ -81,7 +81,7 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 
 			// Several Kenari models (GLM, DeepSeek) stream reasoning via this field.
 			if (delta && "reasoning_content" in delta && delta.reasoning_content) {
-				yield { type: "reasoning", text: (delta.reasoning_content as string | undefined) || "" }
+				yield { type: "reasoning", text: delta.reasoning_content as string }
 			}
 
 			// Emit raw tool call chunks - NativeToolCallParser handles state management.

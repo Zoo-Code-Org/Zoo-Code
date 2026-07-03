@@ -257,6 +257,51 @@ describe("KenariHandler", () => {
 			)
 		})
 
+		it("sends an explicitly configured model temperature", async () => {
+			const handler = new KenariHandler({ ...mockOptions, modelTemperature: 0.7 })
+			for await (const _chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
+				void _chunk // drain
+			}
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.7 }))
+		})
+
+		it("honors metadata.parallelToolCalls false", async () => {
+			const handler = new KenariHandler(mockOptions)
+			for await (const _chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }], {
+				taskId: "task-1",
+				parallelToolCalls: false,
+			})) {
+				void _chunk // drain
+			}
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ parallel_tool_calls: false }))
+		})
+
+		it("reports zero usage when the upstream counts are zero", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "x" }, index: 0 }],
+						usage: { prompt_tokens: 0, completion_tokens: 0 },
+					}
+				},
+			}))
+
+			const handler = new KenariHandler(mockOptions)
+			const chunks = []
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({
+				type: "usage",
+				inputTokens: 0,
+				outputTokens: 0,
+				cacheReadTokens: undefined,
+			})
+		})
+
 		it("requests a streaming completion with usage included", async () => {
 			const handler = new KenariHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
@@ -288,6 +333,12 @@ describe("KenariHandler", () => {
 					max_completion_tokens: 32768,
 				}),
 			)
+		})
+
+		it("returns an empty string when the completion has no content", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: null } }] })
+			const handler = new KenariHandler(mockOptions)
+			expect(await handler.completePrompt("ping")).toBe("")
 		})
 
 		it("wraps errors with a Kenari-specific message", async () => {

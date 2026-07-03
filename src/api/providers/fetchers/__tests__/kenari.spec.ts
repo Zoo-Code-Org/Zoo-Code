@@ -100,6 +100,27 @@ describe("Kenari Fetchers", () => {
 	})
 
 	describe("parseKenariModel", () => {
+		it("sends no Authorization header when called without an API key", async () => {
+			mockedAxios.get.mockResolvedValue({ data: { data: [] } })
+
+			await getKenariModels()
+
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://kenari.id/v1/models", {
+				headers: undefined,
+				timeout: 10_000,
+			})
+		})
+
+		it("returns an empty map on a non-Error rejection", async () => {
+			mockedAxios.get.mockRejectedValue("boom")
+			expect(await getKenariModels("k")).toEqual({})
+		})
+
+		it("falls back to the model name when no description is provided", () => {
+			const info = parseKenariModel({ id: "x", name: "Model X" })
+			expect(info.description).toBe("Model X")
+		})
+
 		it("treats a model with no cache pricing as not cache-capable", () => {
 			const info = parseKenariModel({ id: "x", context_window: 100000, max_tokens: 8000 })
 			expect(info.supportsPromptCache).toBe(false)
