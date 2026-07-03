@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "インデックス作成には、開かれたワークスペースフォルダーが必要です",
 		"indexingStopped": "ユーザーによりインデックス作成が停止されました。",
 		"indexingStoppedPartial": "インデックス作成が停止されました。部分的なインデックスデータは保持されています。"
+	},
+	"semble": {
+		"downloadingBinary": "sembleバイナリをダウンロード中...",
+		"ready": "Semble {{version}}の準備ができました。検索はその場でインデックス化されます。",
+		"unsupportedPlatform": "このプラットフォームではSembleはサポートされていません ({{platform}}-{{arch}})。",
+		"downloadFailed": "sembleのダウンロードに失敗しました: {{errorMessage}}",
+		"checkFailed": "Sembleの確認に失敗しました: {{errorMessage}}",
+		"providerReset": "Sembleプロバイダーをリセットしました。次回の再構築までディスクキャッシュは残ります。"
 	}
 }

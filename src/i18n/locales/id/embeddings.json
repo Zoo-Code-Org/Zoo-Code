@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "Pengindeksan memerlukan folder workspace yang terbuka",
 		"indexingStopped": "Pengindeksan dihentikan oleh pengguna.",
 		"indexingStoppedPartial": "Pengindeksan dihentikan. Data indeks parsial dipertahankan."
+	},
+	"semble": {
+		"downloadingBinary": "Mengunduh biner semble...",
+		"ready": "Semble {{version}} siap. Pencarian diindeks secara langsung.",
+		"unsupportedPlatform": "Semble tidak didukung di platform ini ({{platform}}-{{arch}}).",
+		"downloadFailed": "Gagal mengunduh semble: {{errorMessage}}",
+		"checkFailed": "Pemeriksaan semble gagal: {{errorMessage}}",
+		"providerReset": "Penyedia Semble direset. Cache di disk tetap ada hingga pembangunan ulang berikutnya."
 	}
 }

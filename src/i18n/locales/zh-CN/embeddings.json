@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "索引需要打开的工作区文件夹",
 		"indexingStopped": "用户已停止索引。",
 		"indexingStoppedPartial": "索引已停止。部分索引数据已保留。"
+	},
+	"semble": {
+		"downloadingBinary": "正在下载 semble 二进制文件...",
+		"ready": "Semble {{version}} 已就绪。搜索即时建立索引。",
+		"unsupportedPlatform": "此平台不支持 Semble ({{platform}}-{{arch}})。",
+		"downloadFailed": "下载 semble 失败：{{errorMessage}}",
+		"checkFailed": "Semble 检查失败：{{errorMessage}}",
+		"providerReset": "Semble 提供程序已重置。磁盘缓存将保留至下次重建。"
 	}
 }

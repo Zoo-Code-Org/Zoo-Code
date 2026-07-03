@@ -1,5 +1,7 @@
 // npx vitest src/components/settings/__tests__/ThinkingBudget.spec.tsx
 
+import React from "react"
+
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
 import type { ModelInfo } from "@roo-code/types"
@@ -18,16 +20,20 @@ vi.mock("@/components/ui", () => ({
 			onChange={(e) => onValueChange([parseInt(e.target.value)])}
 		/>
 	),
-	Select: ({ children, value, onValueChange: _onValueChange }: any) => (
-		<div data-testid="select" data-value={value}>
-			{children}
+	Select: ({ children, value, onValueChange }: any) => (
+		<div data-testid="select" data-value={value} data-onvaluechange={onValueChange}>
+			{React.Children.map(children, (child) => React.cloneElement(child, { onValueChange }))}
 		</div>
 	),
 	SelectTrigger: ({ children }: any) => <button data-testid="select-trigger">{children}</button>,
 	SelectValue: ({ placeholder }: any) => <span data-testid="select-value">{placeholder}</span>,
-	SelectContent: ({ children }: any) => <div data-testid="select-content">{children}</div>,
-	SelectItem: ({ children, value }: any) => (
-		<div data-testid={`select-item-${value}`} data-value={value}>
+	SelectContent: ({ children, onValueChange }: any) => (
+		<div data-testid="select-content">
+			{React.Children.map(children, (child) => React.cloneElement(child, { onValueChange }))}
+		</div>
+	),
+	SelectItem: ({ children, value, onValueChange }: any) => (
+		<div data-testid={`select-item-${value}`} data-value={value} onClick={() => onValueChange?.(value)}>
 			{children}
 		</div>
 	),
@@ -266,6 +272,40 @@ describe("ThinkingBudget", () => {
 			expect(screen.getByTestId("select-item-high")).toBeInTheDocument()
 		})
 
+		it("should fall back to first available option when stored value is not in the explicit array", () => {
+			// Covers the clamp branch: defaultReasoningEffort="disable" but array omits "disable"
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["low", "high"],
+					}}
+				/>,
+			)
+
+			// The select value should be "low" (first item), not "disable"
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
+		})
+
+		it("should fall back to rawReasoningEffort when availableOptions is empty", () => {
+			// Covers the ?? rawReasoningEffort branch when availableOptions[0] is undefined
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "medium" }}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: [] as any,
+					}}
+				/>,
+			)
+
+			// With an empty options array, falls back to the stored value "medium"
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "medium")
+		})
+
 		it("should show 'disable' option when supportsReasoningEffort array explicitly includes disable", () => {
 			render(
 				<ThinkingBudget
@@ -303,6 +343,48 @@ describe("ThinkingBudget", () => {
 			expect(screen.getByTestId("select-item-low")).toBeInTheDocument()
 			expect(screen.getByTestId("select-item-medium")).toBeInTheDocument()
 			expect(screen.getByTestId("select-item-high")).toBeInTheDocument()
+		})
+
+		it("should show 'xhigh' option when supportsReasoningEffort array includes xhigh (e.g. gpt-5.5)", () => {
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh"],
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("reasoning-effort")).toBeInTheDocument()
+			// Exactly the declared options — no unsupported tiers or auto-added "disable"
+			expect(screen.getByTestId("select-item-none")).toBeInTheDocument()
+			expect(screen.getByTestId("select-item-low")).toBeInTheDocument()
+			expect(screen.getByTestId("select-item-medium")).toBeInTheDocument()
+			expect(screen.getByTestId("select-item-high")).toBeInTheDocument()
+			expect(screen.getByTestId("select-item-xhigh")).toBeInTheDocument()
+			expect(screen.queryByTestId("select-item-disable")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("select-item-max")).not.toBeInTheDocument()
+		})
+
+		it("should enable reasoning and persist 'xhigh' when xhigh is selected", () => {
+			const setApiConfigurationField = vi.fn()
+
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh"],
+					}}
+				/>,
+			)
+
+			fireEvent.click(screen.getByTestId("select-item-xhigh"))
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "xhigh")
 		})
 	})
 

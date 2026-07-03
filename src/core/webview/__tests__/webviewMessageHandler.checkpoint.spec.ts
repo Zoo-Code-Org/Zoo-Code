@@ -6,7 +6,10 @@ import { handleCheckpointRestoreOperation } from "../checkpointRestoreHandler"
 import { MessageManager } from "../../message-manager"
 
 // Mock dependencies
-vi.mock("../../task-persistence")
+vi.mock("../../task-persistence", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../task-persistence")>()),
+	saveTaskMessages: vi.fn(),
+}))
 vi.mock("../checkpointRestoreHandler")
 vi.mock("p-wait-for", () => ({
 	default: vi.fn(async (condition: () => boolean) => {

@@ -63,6 +63,7 @@ import * as vscode from "vscode"
 import { VsCodeLmHandler } from "../vscode-lm"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
+import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
 
 const mockLanguageModelChat = {
 	id: "test-model",
@@ -439,6 +440,86 @@ describe("VsCodeLmHandler", () => {
 			handler["client"] = null
 			const model = handler.getModel()
 			expect(model.info).toBeDefined()
+		})
+
+		it("should use the full advertised maxInputTokens without an upper cap", async () => {
+			// A large advertised window is surfaced as-is, not clamped to a smaller default.
+			const mockModel = { ...mockLanguageModelChat, maxInputTokens: 936000 }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
+			handler["client"] = null
+			await handler.initializeClient()
+
+			const model = handler.getModel()
+			expect(model.info.contextWindow).toBe(936000)
+		})
+
+		it("should pass through a small maxInputTokens unchanged", async () => {
+			const mockModel = { ...mockLanguageModelChat, maxInputTokens: 4096 }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
+			handler["client"] = null
+			await handler.initializeClient()
+
+			const model = handler.getModel()
+			expect(model.info.contextWindow).toBe(4096)
+		})
+
+		it("should fall back to sane defaults when maxInputTokens is not a number", async () => {
+			const mockModel = { ...mockLanguageModelChat, maxInputTokens: undefined as unknown as number }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
+			handler["client"] = null
+			await handler.initializeClient()
+
+			const model = handler.getModel()
+			expect(model.info.contextWindow).toBe(openAiModelInfoSaneDefaults.contextWindow)
+		})
+	})
+
+	describe("getCondenseContextWindow", () => {
+		it("uses the static-table maxInputTokens for a known VS Code LM family", () => {
+			const opusHandler = new VsCodeLmHandler({
+				vsCodeLmModelSelector: { vendor: "copilot", family: "claude-opus-4.8" },
+			})
+			expect(opusHandler.getCondenseContextWindow()).toBe(vscodeLlmModels["claude-opus-4.8"].maxInputTokens)
+			opusHandler.dispose()
+		})
+
+		it("falls back to the default-row maxInputTokens for an unknown family (catalog drift)", () => {
+			// `test-family` isn't a curated row (e.g. a selector left over from a dropped model), so the
+			// gate resolves the default row instead of the inflated live window.
+			handler["client"] = mockLanguageModelChat as unknown as vscode.LanguageModelChat
+			expect(handler.getCondenseContextWindow()).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
+		})
+
+		it("falls back to the default-row maxInputTokens when no family is resolvable (no client, no selector family)", () => {
+			// No client and no selector family means `family` is undefined, so the gate uses the default
+			// row's maxInputTokens rather than the live getModel().info.contextWindow.
+			const noFamilyHandler = new VsCodeLmHandler({ vsCodeLmModelSelector: { vendor: "copilot" } })
+			noFamilyHandler["client"] = null
+			expect(noFamilyHandler.getCondenseContextWindow()).toBe(
+				vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens,
+			)
+			noFamilyHandler.dispose()
+		})
+
+		it("falls back to the derived window when the static row exists but maxInputTokens is non-positive", () => {
+			// A curated row exists but its maxInputTokens is <= 0, so the `> 0` guard fails and the gate
+			// falls back to getModel().info.contextWindow.
+			const family = "claude-opus-4.8"
+			const original = vscodeLlmModels[family].maxInputTokens
+			try {
+				;(vscodeLlmModels[family] as { maxInputTokens: number }).maxInputTokens = 0
+				const guardHandler = new VsCodeLmHandler({
+					vsCodeLmModelSelector: { vendor: "copilot", family },
+				})
+				// Leave the client unset so `family` resolves from the selector, forcing the zeroed
+				// static row to be read instead of a live client's family.
+				guardHandler["client"] = null
+				expect(guardHandler.getCondenseContextWindow()).toBe(guardHandler.getModel().info.contextWindow)
+				expect(guardHandler.getCondenseContextWindow()).toBe(openAiModelInfoSaneDefaults.contextWindow)
+				guardHandler.dispose()
+			} finally {
+				;(vscodeLlmModels[family] as { maxInputTokens: number }).maxInputTokens = original
+			}
 		})
 	})
 

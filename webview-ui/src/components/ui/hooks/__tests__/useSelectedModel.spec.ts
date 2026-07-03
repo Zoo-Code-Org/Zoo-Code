@@ -14,6 +14,8 @@ import {
 	minimaxDefaultModelId,
 	minimaxModels,
 	openRouterDefaultModelId,
+	vscodeLlmModels,
+	vscodeLlmDefaultModelId,
 } from "@roo-code/types"
 
 import { useSelectedModel } from "../useSelectedModel"
@@ -843,6 +845,77 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe("minimax")
 			expect(result.current.id).toBe("MiniMax-M2.7")
 			expect(result.current.info).toEqual(minimaxModels["MiniMax-M2.7"])
+		})
+	})
+
+	describe("vscode-lm provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("resolves a listed family's contextWindow to its maxInputTokens", () => {
+			const family = vscodeLlmDefaultModelId
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("vscode-lm")
+			expect(result.current.id).toBe(`copilot/${family}`)
+			// The bar and the condense gate share one source of truth: contextWindow === maxInputTokens.
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
+			expect(result.current.info?.supportsImages).toBe(false)
+		})
+
+		it("pins a divergent family's contextWindow to maxInputTokens, not its advertised window", () => {
+			// claude-opus-4.8 is the row where contextWindow and maxInputTokens differ; a field swap to
+			// the advertised window would be caught here.
+			const family = "claude-opus-4.8"
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("vscode-lm")
+			expect(result.current.id).toBe(`copilot/${family}`)
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens) // 197897
+			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow) // NOT 679560
+			expect(result.current.info?.supportsImages).toBe(false)
+		})
+
+		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family: "totally-unknown-family" },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// A family miss must not use the 128000 sane-defaults window; use the default model's instead.
+			expect(result.current.info?.contextWindow).not.toBe(128000)
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
+			expect(result.current.info?.supportsImages).toBe(false)
 		})
 	})
 })

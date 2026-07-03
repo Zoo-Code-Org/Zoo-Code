@@ -73,26 +73,30 @@ vi.mock("p-wait-for", () => ({
 	default: mockPWaitFor,
 }))
 
-vi.mock("../../task-persistence", () => ({
-	saveApiMessages: mockSaveApiMessages,
-	saveTaskMessages: mockSaveTaskMessages,
-	readApiMessages: mockReadApiMessages,
-	readTaskMessages: mockReadTaskMessages,
-	taskMetadata: mockTaskMetadata,
-	TaskHistoryStore: vi.fn().mockImplementation(function () {
-		return {
-			initialize: vi.fn().mockResolvedValue(undefined),
-			dispose: vi.fn(),
-			get: vi.fn(),
-			getAll: vi.fn().mockReturnValue([]),
-			upsert: vi.fn().mockResolvedValue([]),
-			delete: vi.fn().mockResolvedValue(undefined),
-			deleteMany: vi.fn().mockResolvedValue(undefined),
-			reconcile: vi.fn().mockResolvedValue(undefined),
-			initialized: Promise.resolve(),
-		}
-	}),
-}))
+vi.mock("../../task-persistence", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../../task-persistence")>()
+	return {
+		...mod,
+		saveApiMessages: mockSaveApiMessages,
+		saveTaskMessages: mockSaveTaskMessages,
+		readApiMessages: mockReadApiMessages,
+		readTaskMessages: mockReadTaskMessages,
+		taskMetadata: mockTaskMetadata,
+		TaskHistoryStore: vi.fn().mockImplementation(function () {
+			return {
+				initialize: vi.fn().mockResolvedValue(undefined),
+				dispose: vi.fn(),
+				get: vi.fn(),
+				getAll: vi.fn().mockReturnValue([]),
+				upsert: vi.fn().mockResolvedValue([]),
+				delete: vi.fn().mockResolvedValue(undefined),
+				deleteMany: vi.fn().mockResolvedValue(undefined),
+				reconcile: vi.fn().mockResolvedValue(undefined),
+				initialized: Promise.resolve(),
+			}
+		}),
+	}
+})
 
 vi.mock("vscode", () => {
 	const mockDisposable = { dispose: vi.fn() }

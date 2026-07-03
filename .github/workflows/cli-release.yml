@@ -13,6 +13,11 @@ on:
         type: boolean
         default: false
 
+# Least privilege: the release job escalates to contents: write via its own
+# job-level permissions block.
+permissions:
+  contents: read
+
 jobs:
   # Build CLI for each platform.
   build:

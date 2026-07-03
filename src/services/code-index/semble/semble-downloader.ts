@@ -20,7 +20,11 @@ const SEMBLE_ARCHIVES: Record<string, { archive: string; binary: string }> = {
 	"win32-x64": { archive: "semble-windows-x64-fast.zip", binary: "semble.exe" },
 }
 
-const SEMBLE_VERSION = "v0.3.1"
+/**
+ * The bundled semble version. Surfaced to the UI via the provider's
+ * system-state message so users can see which version is active.
+ */
+export const SEMBLE_VERSION = "v0.4.1"
 const DOWNLOAD_BASE_URL = `https://github.com/Zoo-Code-Org/sembleexec/releases/download/${SEMBLE_VERSION}`
 const VERSION_FILE = ".semble-version"
 
@@ -31,11 +35,11 @@ const VERSION_FILE = ".semble-version"
  *
  * To regenerate: `shasum -a 256 <archive-file>`
  */
-const SEMBLE_SHA256: Record<string, string> = {
-	"linux-x64": "2bd4117dbd1ff7a26ed5ef44dad8d43162a4b9f431ec0bcc9dd2f9c6f5952e28",
-	"linux-arm64": "177d14f41d3272594844a2635d59d97ad20400868a874a59169fd26a868c32a5",
-	"darwin-arm64": "9130f447ff2c21803853a9aee58268f0e05134326384ac23d8b74ed22905e118",
-	"win32-x64": "c8ae86f3703675e356824e08cf79c8a20c41c602296d2a5bff15bf35d762a46b",
+export const SEMBLE_SHA256: Record<string, string> = {
+	"linux-x64": "33a6c8ae78d750e917b291524d788747c62de795274def5c6b07b7a6d1671493",
+	"linux-arm64": "a4a3fbca363f5a894a57594679c787ff6b4ac1332ebf0edcb36cc89f348c7aba",
+	"darwin-arm64": "f8b5718e2264c9addbf61ac52f0106f1ebb6717980bf25ecfe135d12f164ed30",
+	"win32-x64": "2a8734d486db1feaa3bd3cf111d1ac17c805102d758be8f5295fbc862ee00bb3",
 }
 
 /**
@@ -106,6 +110,42 @@ async function writeInstalledVersion(storageDir: string, version: string): Promi
 }
 
 /**
+ * Best-effort removal of archive files left over from previous semble versions.
+ *
+ * Because the local archive cache path is version-prefixed (see `downloadSemble`),
+ * upgrading SEMBLE_VERSION leaves the prior version's archive orphaned on disk.
+ * This sweeps those stale packages so a version upgrade doesn't accumulate them.
+ *
+ * Matches both the version-prefixed cache names (`${version}-${archiveName}`,
+ * used since v0.4.0) and the legacy unversioned cache name (`${archiveName}`,
+ * used before v0.4.0), so a v0.3.1 → v0.4.1 upgrade also clears the legacy file.
+ * The current archive path is always preserved.
+ *
+ * Errors are swallowed since this is purely cosmetic cleanup.
+ */
+async function cleanupStaleArchives(
+	storageDir: string,
+	archiveName: string,
+	currentArchivePath: string,
+): Promise<void> {
+	try {
+		const entries = await fs.readdir(storageDir)
+		const suffix = `-${archiveName}`
+		await Promise.all(
+			entries
+				.filter(
+					(name) =>
+						(name === archiveName || name.endsWith(suffix)) &&
+						path.join(storageDir, name) !== currentArchivePath,
+				)
+				.map((name) => fs.unlink(path.join(storageDir, name)).catch(() => {})),
+		)
+	} catch {
+		// ignore — storage dir may not be listable yet
+	}
+}
+
+/**
  * Downloads and extracts the semble archive for the current platform.
  *
  * Compares the hardcoded SEMBLE_VERSION against the version stored on disk.
@@ -152,7 +192,12 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 	}
 
 	const url = `${DOWNLOAD_BASE_URL}/${info.archive}`
-	const archivePath = path.join(storageDir, info.archive)
+	// Version-prefix the local archive cache path so a stale archive left over
+	// from a previous semble version can never be reused or verified against the
+	// new checksum. The release asset URL keeps the unversioned asset name
+	// (info.archive); only the on-disk cache path is versioned. This guarantees a
+	// fresh download immediately after a version upgrade.
+	const archivePath = path.join(storageDir, `${SEMBLE_VERSION}-${info.archive}`)
 	// Stage the new installation in a temporary directory. The old binary stays
 	// intact until the new one is fully verified, preventing broken state on failure.
 	const stagingDir = extractDir + ".new"
@@ -165,6 +210,16 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 			await fs.rm(stagingDir, { recursive: true, force: true })
 		} catch {
 			// ignore
+		}
+
+		// Remove any stale/partial archive from a previous attempt so we always
+		// download a fresh package. This is critical immediately after a version
+		// upgrade, where a corrupt leftover would otherwise fail checksum
+		// verification against the new SEMBLE_SHA256 on first launch.
+		try {
+			await fs.unlink(archivePath)
+		} catch {
+			// ignore — may not exist
 		}
 
 		await downloadFile(url, archivePath)
@@ -211,6 +266,10 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 		} catch {
 			// ignore cleanup errors
 		}
+
+		// Best-effort: remove orphaned archives left by previous semble versions
+		// so a version upgrade doesn't accumulate stale packages on disk.
+		await cleanupStaleArchives(storageDir, info.archive, archivePath)
 
 		console.log(`[SembleDownloader] Successfully installed semble ${SEMBLE_VERSION} to ${binaryPath}`)
 		return binaryPath

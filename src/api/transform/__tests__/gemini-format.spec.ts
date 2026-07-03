@@ -123,6 +123,11 @@ describe("convertAnthropicMessageToGemini", () => {
 
 		const result = convertAnthropicMessageToGemini(anthropicMessage)
 
+		// thoughtSignature must be base64-encoded: the Gemini API documents Part.thoughtSignature
+		// as "Encoded as base64 string". Sending the raw bypass token without base64 encoding fails
+		// on Vertex AI (Gemini 3.1/3.5 strict validation), causing empty-response loops on turn 2+.
+		const expectedBypassToken = Buffer.from("skip_thought_signature_validator").toString("base64")
+
 		expect(result).toEqual([
 			{
 				role: "model",
@@ -133,7 +138,7 @@ describe("convertAnthropicMessageToGemini", () => {
 							name: "calculator",
 							args: { operation: "add", numbers: [2, 3] },
 						},
-						thoughtSignature: "skip_thought_signature_validator",
+						thoughtSignature: expectedBypassToken,
 					},
 				],
 			},

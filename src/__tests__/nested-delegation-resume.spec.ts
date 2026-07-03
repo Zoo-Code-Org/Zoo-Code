@@ -44,7 +44,8 @@ vi.mock("vscode", () => {
 vi.mock("../core/task-persistence/taskMessages", () => ({
 	readTaskMessages: vi.fn().mockResolvedValue([]),
 }))
-vi.mock("../core/task-persistence", () => ({
+vi.mock("../core/task-persistence", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../core/task-persistence")>()),
 	readApiMessages: vi.fn().mockResolvedValue([]),
 	saveApiMessages: vi.fn().mockResolvedValue(undefined),
 	saveTaskMessages: vi.fn().mockResolvedValue(undefined),

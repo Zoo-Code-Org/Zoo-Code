@@ -79,6 +79,7 @@ describe("ClineProvider.removeClineFromStack() delegation awareness", () => {
 				id: "parent-1",
 				status: "active",
 				awaitingChildId: undefined,
+				delegatedToId: undefined,
 			}),
 		)
 

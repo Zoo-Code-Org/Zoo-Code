@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "Indexering vereist een geopende workspace map",
 		"indexingStopped": "Indexering gestopt door gebruiker.",
 		"indexingStoppedPartial": "Indexering gestopt. Gedeeltelijke indexgegevens bewaard."
+	},
+	"semble": {
+		"downloadingBinary": "Semble-binary downloaden...",
+		"ready": "Semble {{version}} is klaar. Zoekopdrachten worden direct geïndexeerd.",
+		"unsupportedPlatform": "Semble wordt niet ondersteund op dit platform ({{platform}}-{{arch}}).",
+		"downloadFailed": "Downloaden van semble mislukt: {{errorMessage}}",
+		"checkFailed": "Semble-controle mislukt: {{errorMessage}}",
+		"providerReset": "Semble-provider gereset. Schijfcache blijft behouden tot de volgende heropbouw."
 	}
 }

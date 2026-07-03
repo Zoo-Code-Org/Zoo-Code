@@ -54,6 +54,215 @@ describe("GeminiHandler", () => {
 		})
 	})
 
+	describe("thoughtSignature round-trip (issue #536)", () => {
+		const systemPrompt = "You are a helpful assistant"
+		const toolMetadata = { tools: [{ function: { name: "read_file", description: "", parameters: {} } }] } as any
+
+		// Helper: build a mock async-iterable stream from chunks
+		function makeStream(chunks: unknown[]) {
+			return {
+				[Symbol.asyncIterator]: async function* () {
+					for (const chunk of chunks) yield chunk
+				},
+			}
+		}
+
+		// Simulate a Gemini 3.x response: thoughtSignature arrives on its own part,
+		// alongside a functionCall part (the way the real Gemini 3 API returns it).
+		const turn1Response = makeStream([
+			{
+				candidates: [
+					{
+						content: {
+							parts: [
+								{ thought: true, text: "thinking…" },
+								{ functionCall: { name: "read_file", args: { path: "foo.ts" } } },
+								{ thoughtSignature: "sig-abc123" },
+							],
+						},
+					},
+				],
+			},
+			{ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } },
+		])
+
+		it("captures thoughtSignature from the stream after turn 1", async () => {
+			;(handler["client"].models.generateContentStream as any).mockResolvedValue(turn1Response)
+
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Read foo.ts" }]
+
+			for await (const _chunk of handler.createMessage(systemPrompt, messages, toolMetadata)) {
+				// drain
+			}
+
+			expect(handler.getThoughtSignature()).toBe("sig-abc123")
+		})
+
+		it("sends thoughtSignature from history on turn 2 (core regression)", async () => {
+			// This is the bug from issue #536: after turn 1 the thoughtSignature block is
+			// persisted into apiConversationHistory. On turn 2 the handler must include it
+			// in the outgoing request, otherwise Gemini 3.x returns an empty response.
+			const historyAfterTurn1: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read foo.ts" },
+				{
+					role: "assistant",
+					// assistant turn as stored by prepareApiConversationMessage:
+					// tool_use block + appended thoughtSignature block
+					content: [
+						{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "foo.ts" } },
+						{ type: "thoughtSignature", thoughtSignature: "sig-abc123" } as any,
+					],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "call-1", content: "file contents here" }],
+				},
+			]
+
+			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+				makeStream([
+					{ candidates: [{ content: { parts: [{ text: "Done." }] } }] },
+					{ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 } },
+				]),
+			)
+
+			for await (const _chunk of handler.createMessage(systemPrompt, historyAfterTurn1, toolMetadata)) {
+				// drain
+			}
+
+			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
+			const contents: any[] = callArgs.contents
+
+			// The model turn in the outgoing request must carry the thoughtSignature on its functionCall part
+			const modelTurn = contents.find((c: any) => c.role === "model")
+			expect(modelTurn).toBeDefined()
+			const fnPart = modelTurn.parts.find((p: any) => p.functionCall)
+			expect(fnPart).toBeDefined()
+			expect(fnPart.thoughtSignature).toBe("sig-abc123")
+		})
+
+		it("falls back to base64-encoded skip_thought_signature_validator when history has no signature", async () => {
+			// Cross-model history scenario: prior session used a non-Gemini model, no signature stored.
+			// The fallback bypass token must be base64-encoded because Part.thoughtSignature is
+			// documented as a base64 field. Vertex AI validates this strictly.
+			const historyNoSig: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read foo.ts" },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "foo.ts" } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "call-1", content: "file contents" }],
+				},
+			]
+
+			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+				makeStream([
+					{ candidates: [{ content: { parts: [{ text: "Done." }] } }] },
+					{ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 } },
+				]),
+			)
+
+			for await (const _chunk of handler.createMessage(systemPrompt, historyNoSig, toolMetadata)) {
+				// drain
+			}
+
+			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
+			const contents: any[] = callArgs.contents
+			const modelTurn = contents.find((c: any) => c.role === "model")
+			const fnPart = modelTurn?.parts.find((p: any) => p.functionCall)
+			expect(fnPart).toBeDefined()
+			const expectedBypass = Buffer.from("skip_thought_signature_validator").toString("base64")
+			expect(fnPart.thoughtSignature).toBe(expectedBypass)
+		})
+
+		it("sends thoughtSignature even when reasoningEffort is disabled", async () => {
+			// If the user disables reasoning effort, thinkingConfig=undefined.
+			// The old code: includeThoughtSignatures = Boolean(thinkingConfig) || Boolean(metadata?.tools?.length)
+			// With tools present this is still true — but if called with no tools it would be false.
+			// Verify the signature is sent regardless when tools are in the metadata.
+			const handlerNoReasoning = new GeminiHandler({
+				apiKey: "test-key",
+				geminiApiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				reasoningEffort: "disable" as any,
+			})
+			handlerNoReasoning["client"] = handler["client"] as any
+
+			const historyWithSig: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read foo.ts" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "foo.ts" } },
+						{ type: "thoughtSignature", thoughtSignature: "sig-xyz" } as any,
+					],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "call-1", content: "file contents" }],
+				},
+			]
+
+			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+				makeStream([
+					{ candidates: [{ content: { parts: [{ text: "Done." }] } }] },
+					{ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 } },
+				]),
+			)
+
+			for await (const _chunk of handlerNoReasoning.createMessage(systemPrompt, historyWithSig, toolMetadata)) {
+				// drain
+			}
+
+			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
+			const contents: any[] = callArgs.contents
+			const modelTurn = contents.find((c: any) => c.role === "model")
+			const fnPart = modelTurn?.parts.find((p: any) => p.functionCall)
+			expect(fnPart).toBeDefined()
+			expect(fnPart.thoughtSignature).toBe("sig-xyz")
+		})
+
+		it("does NOT capture thoughtSignature when there are no tools in metadata", async () => {
+			// Without tools, includeThoughtSignatures=false when thinkingConfig is also absent.
+			// This tests the boundary so we don't over-eagerly store signatures for non-tool calls.
+			const handlerNoReasoning = new GeminiHandler({
+				apiKey: "test-key",
+				geminiApiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				reasoningEffort: "disable" as any,
+			})
+			handlerNoReasoning["client"] = handler["client"] as any
+			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+				makeStream([
+					{
+						candidates: [
+							{
+								content: {
+									parts: [
+										{ functionCall: { name: "read_file", args: { path: "foo.ts" } } },
+										{ thoughtSignature: "sig-should-not-be-captured" },
+									],
+								},
+							},
+						],
+					},
+					{ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } },
+				]),
+			)
+
+			// No tools in metadata, no thinkingConfig → includeThoughtSignatures=false
+			for await (const _chunk of handlerNoReasoning.createMessage(systemPrompt, [
+				{ role: "user", content: "hi" },
+			])) {
+				// drain
+			}
+
+			expect(handlerNoReasoning.getThoughtSignature()).toBeUndefined()
+		})
+	})
+
 	describe("createMessage", () => {
 		const mockMessages: Anthropic.Messages.MessageParam[] = [
 			{
