@@ -15,6 +15,7 @@ import OpenAI from "openai"
 import { kenariDefaultModelId } from "@roo-code/types"
 
 import { KenariHandler } from "../kenari"
+import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
 
 vitest.mock("openai")
@@ -143,6 +144,119 @@ describe("KenariHandler", () => {
 			})
 		})
 
+		it("yields nothing for a chunk whose delta has no content, reasoning or tool calls", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield { choices: [{ delta: {}, index: 0 }], usage: null }
+					yield { choices: [], usage: null }
+				},
+			}))
+
+			const handler = new KenariHandler(mockOptions)
+			const chunks = []
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toEqual([])
+		})
+
+		it("streams tool call chunks even when the function name and arguments are missing", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { tool_calls: [{ index: 1 }] }, index: 0 }],
+						usage: null,
+					}
+				},
+			}))
+
+			const handler = new KenariHandler(mockOptions)
+			const chunks = []
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toEqual([
+				{
+					type: "tool_call_partial",
+					index: 1,
+					id: undefined,
+					name: undefined,
+					arguments: undefined,
+				},
+			])
+		})
+
+		it("reports undefined cache reads when usage has no prompt_tokens_details", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+					}
+				},
+			}))
+
+			const handler = new KenariHandler(mockOptions)
+			const chunks = []
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toEqual([
+				{
+					type: "usage",
+					inputTokens: 3,
+					outputTokens: 2,
+					cacheReadTokens: undefined,
+				},
+			])
+		})
+
+		it("skips the reasoning chunk when reasoning_content is an empty string", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Hi", reasoning_content: "" }, index: 0 }],
+						usage: null,
+					}
+				},
+			}))
+
+			const handler = new KenariHandler(mockOptions)
+			const chunks = []
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toEqual([{ type: "text", text: "Hi" }])
+		})
+
+		it("omits temperature for models that do not support it", async () => {
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"openai/o3-mini": {
+					maxTokens: 4096,
+					contextWindow: 128000,
+					supportsImages: false,
+					supportsPromptCache: false,
+					description: "o3-mini via Kenari",
+				},
+			})
+
+			const handler = new KenariHandler({ kenariApiKey: "test-key", kenariModelId: "openai/o3-mini" })
+			for await (const _chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
+				void _chunk // drain
+			}
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "openai/o3-mini",
+					temperature: undefined,
+				}),
+			)
+		})
+
 		it("requests a streaming completion with usage included", async () => {
 			const handler = new KenariHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
@@ -180,6 +294,32 @@ describe("KenariHandler", () => {
 			mockCreate.mockRejectedValue(new Error("boom"))
 			const handler = new KenariHandler(mockOptions)
 			await expect(handler.completePrompt("ping")).rejects.toThrow("Kenari completion error: boom")
+		})
+
+		it("re-throws non-Error rejections unchanged", async () => {
+			mockCreate.mockRejectedValue("string failure")
+			const handler = new KenariHandler(mockOptions)
+			await expect(handler.completePrompt("ping")).rejects.toBe("string failure")
+		})
+
+		it("omits temperature for models that do not support it", async () => {
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"openai/o3-mini": {
+					maxTokens: 4096,
+					contextWindow: 128000,
+					supportsImages: false,
+					supportsPromptCache: false,
+					description: "o3-mini via Kenari",
+				},
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+
+			const handler = new KenariHandler({ kenariApiKey: "test-key", kenariModelId: "openai/o3-mini" })
+			expect(await handler.completePrompt("ping")).toBe("ok")
+
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs.model).toBe("openai/o3-mini")
+			expect("temperature" in callArgs).toBe(false)
 		})
 	})
 })

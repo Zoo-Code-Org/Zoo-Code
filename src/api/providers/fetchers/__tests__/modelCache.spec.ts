@@ -43,6 +43,7 @@ vi.mock("fs", () => ({
 vi.mock("../litellm")
 vi.mock("../openrouter")
 vi.mock("../requesty")
+vi.mock("../kenari")
 
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
@@ -63,10 +64,12 @@ import { getModels, getModelsFromCache } from "../modelCache"
 import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
+import { getKenariModels } from "../kenari"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
 const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
 const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels>
+const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
 
@@ -127,6 +130,23 @@ describe("getModels with new GetModelsOptions", () => {
 		const result = await getModels({ provider: "requesty", apiKey: DUMMY_REQUESTY_KEY })
 
 		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY)
+		expect(result).toEqual(mockModels)
+	})
+
+	it("calls getKenariModels with optional API key", async () => {
+		const mockModels = {
+			"glm-5-2": {
+				maxTokens: 32768,
+				contextWindow: 1048576,
+				supportsPromptCache: false,
+				description: "GLM 5.2 via Kenari",
+			},
+		}
+		mockGetKenariModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({ provider: "kenari", apiKey: "kenari-key-for-testing" })
+
+		expect(mockGetKenariModels).toHaveBeenCalledWith("kenari-key-for-testing")
 		expect(result).toEqual(mockModels)
 	})
 

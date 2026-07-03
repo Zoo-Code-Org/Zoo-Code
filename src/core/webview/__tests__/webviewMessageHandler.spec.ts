@@ -471,6 +471,40 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 	})
 
+	it("flushes and fetches Kenari models when an explicit API key is supplied", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: {},
+		})
+		mockGetModels.mockResolvedValue({
+			"glm-5-2": {
+				maxTokens: 32768,
+				contextWindow: 1048576,
+				supportsPromptCache: false,
+				description: "Kenari model",
+			},
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: {
+				provider: "kenari",
+				kenariApiKey: "fresh-kenari-key",
+			},
+		})
+
+		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" }, true)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" })
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: {
+				kenari: {
+					"glm-5-2": expect.objectContaining({ description: "Kenari model" }),
+				},
+			},
+			values: { provider: "kenari" },
+		})
+	})
+
 	it("handles LiteLLM models with values from message when config is missing", async () => {
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
