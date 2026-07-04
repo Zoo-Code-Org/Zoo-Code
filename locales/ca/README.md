@@ -30,11 +30,11 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.64.0
+## Novetats a la v3.66.0
 
-- **Interfície de gestió de regles** — una nova pestanya Regles a la Configuració us permet crear, suprimir i obrir regles de Zoo globals i de l'espai de treball directament des de l'editor
-- **Revisió de canvis de finalització** — quan una tasca es completa, els nous botons "Veure canvis nous" i "Restaurar canvis" us permeten inspeccionar i desfer els canvis de l'últim missatge
-- **Llindars de diff relaxats** — llindars de similitud configurables redueixen els errors "edició fallida" en aplicar diffs, amb nous diagnòstics per ajustar la configuració
+- **Suport per a Claude Sonnet 5** — el model de Claude més recent ja està disponible als proveïdors Anthropic, Bedrock i Vertex
+- **Actualització a Semble v0.4.1** — anàlisi de resultats aplanada i missatges d'estat localitzats
+- **Guàrdia de transició d'estat del cicle de vida de tasques** — una nova guàrdia de transició d'estat i la reconciliació de delegació a l'inici eviten transicions d'estat de tasques no vàlides
 
 ## Què pot fer Zoo Code per TU?
 

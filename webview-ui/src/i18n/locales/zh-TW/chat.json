@@ -363,9 +363,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "規則管理介面 — 設定中新增的規則標籤頁，可直接在編輯器中建立、刪除和開啟全域及工作區 Zoo 規則。",
-			"highlight2": "完成變更審查 — 任務完成後，新的「查看新變更」和「還原變更」按鈕讓您檢視並復原最新提示帶來的變更。",
-			"highlight3": "寬鬆的 Diff 閾值 — 可設定的相似度閾值減少了套用 diff 時的「編輯失敗」錯誤，並提供新的診斷工具協助調整設定。"
+			"highlight1": "Claude Sonnet 5 支援 — 最新 Claude 模型現已於 Anthropic、Bedrock 和 Vertex 供應商可用。",
+			"highlight2": "Semble v0.4.1 升級 — 扁平化的結果解析和本地化的狀態訊息。",
+			"highlight3": "任務生命週期狀態轉換守衛 — 新的狀態轉換守衛和啟動時的委派對帳可防止無效的任務狀態轉換。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",

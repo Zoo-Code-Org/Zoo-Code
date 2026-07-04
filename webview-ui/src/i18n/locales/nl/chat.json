@@ -314,9 +314,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Regelbeheer-UI — een nieuw tabblad Regels in Instellingen maakt het mogelijk om globale en werkruimte Zoo-regels rechtstreeks vanuit de editor aan te maken, te verwijderen en te openen.",
-			"highlight2": "Beoordeling van voltooiingswijzigingen — na het voltooien van een taak kunt u met nieuwe knoppen \"Nieuwe wijzigingen bekijken\" en \"Wijzigingen herstellen\" de wijzigingen van de laatste prompt inspecteren en ongedaan maken.",
-			"highlight3": "Versoepelde diff-drempelwaarden — configureerbare gelijkheidsdrempels verminderen \"bewerking mislukt\"-fouten bij het toepassen van diffs, met nieuwe diagnostiek om de instellingen af te stemmen."
+			"highlight1": "Claude Sonnet 5 ondersteuning — het nieuwste Claude-model is nu beschikbaar bij de Anthropic, Bedrock en Vertex providers.",
+			"highlight2": "Semble v0.4.1 upgrade — afgevlakte resultaatverwerking en gelokaliseerde statusberichten.",
+			"highlight3": "Taak-levenscyclus statusovergangsbewaking — een nieuwe statusovergangsbewaking en opstart-delegatieverzoening voorkomen ongeldige taakstatusovergangen."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

@@ -30,11 +30,11 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.64.0 新功能
+## v3.66.0 新功能
 
-- **規則管理介面** — 設定中新增的規則標籤頁，可直接在編輯器中建立、刪除和開啟全域及工作區 Zoo 規則
-- **完成變更審查** — 任務完成後，新的「查看新變更」和「還原變更」按鈕讓您檢視並復原最新提示帶來的變更
-- **寬鬆的 Diff 閾值** — 可設定的相似度閾值減少了套用 diff 時的「編輯失敗」錯誤，並提供新的診斷工具協助調整設定
+- **Claude Sonnet 5 支援** — 最新 Claude 模型現已於 Anthropic、Bedrock 和 Vertex 供應商可用
+- **Semble v0.4.1 升級** — 扁平化的結果解析和本地化的狀態訊息
+- **任務生命週期狀態轉換守衛** — 新的狀態轉換守衛和啟動時的委派對帳可防止無效的任務狀態轉換
 
 ## Zoo Code 能為您做什麼？
 

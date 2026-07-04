@@ -205,7 +205,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "jun-2026-v3.64.0-rules-ui-completion-actions-diff-thresholds" // v3.64.0 Rules Management UI, completion change review actions, relaxed diff thresholds
+	public readonly latestAnnouncementId = "jul-2026-v3.66.0-claude-sonnet-5-semble-task-lifecycle" // v3.66.0 Claude Sonnet 5 support, Semble v0.4.1 upgrade, task-lifecycle status transition guard
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 

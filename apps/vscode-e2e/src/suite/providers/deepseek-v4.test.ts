@@ -19,6 +19,8 @@ type CapturedDeepSeekRequest = {
 	maxCompletionTokens?: number
 	probeTag?: string
 	lastUserMessage: string
+	/** True if any assistant message in the conversation history has a non-empty reasoning_content field. */
+	hasReasoningContentInHistory: boolean
 }
 
 type DeepSeekProbeResult = {
@@ -57,7 +59,7 @@ function getRequestBody(init?: RequestInit):
 			thinking?: { type?: "enabled" | "disabled" }
 			reasoning_effort?: string
 			max_completion_tokens?: number
-			messages?: Array<{ role?: string; content?: unknown }>
+			messages?: Array<{ role?: string; content?: unknown; reasoning_content?: string }>
 	  }
 	| undefined {
 	if (!init?.body || typeof init.body !== "string") {
@@ -83,6 +85,13 @@ function installDeepSeekRequestCapture(capture: CapturedDeepSeekRequest[], baseU
 			const allMessagesText = JSON.stringify(body.messages ?? [])
 			const probeTag = allMessagesText.match(/deepseek-v4-e2e:[^"\s]+/)?.[0]
 
+			const hasReasoningContentInHistory = (body.messages ?? []).some(
+				(message) =>
+					message.role === "assistant" &&
+					typeof message.reasoning_content === "string" &&
+					message.reasoning_content.length > 0,
+			)
+
 			const request = {
 				model: body.model,
 				thinkingType: body.thinking?.type,
@@ -90,6 +99,7 @@ function installDeepSeekRequestCapture(capture: CapturedDeepSeekRequest[], baseU
 				maxCompletionTokens: body.max_completion_tokens,
 				probeTag,
 				lastUserMessage,
+				hasReasoningContentInHistory,
 			} satisfies CapturedDeepSeekRequest
 
 			capture.push(request)
@@ -123,6 +133,7 @@ function formatDiagnostics(result: DeepSeekProbeResult) {
 				thinkingType: request.thinkingType,
 				reasoningEffort: request.reasoningEffort,
 				maxCompletionTokens: request.maxCompletionTokens,
+				hasReasoningContentInHistory: request.hasReasoningContentInHistory,
 				probeTag: request.probeTag,
 				lastUserMessage: request.lastUserMessage.slice(0, 160),
 			}
@@ -368,6 +379,20 @@ suite("DeepSeek V4 provider", function () {
 					firstRequest.reasoningEffort === "high" || firstRequest.reasoningEffort === "max",
 					`Reasoning-enabled probe should send a DeepSeek reasoning_effort.\n${diagnostics}`,
 				)
+
+				// Verify that reasoning_content from turn 1 is round-tripped in the turn 2 request.
+				// DeepSeek's API spec requires reasoning_content to be passed back when thinking mode
+				// is active — omitting it may cause a 400 error depending on model version (issue #201).
+				const secondRequest = result.requests[1]
+				assert.ok(
+					secondRequest,
+					`Reasoning-enabled probe should issue a second request (after tool call).\n${diagnostics}`,
+				)
+				assert.ok(
+					secondRequest.hasReasoningContentInHistory,
+					`Turn 2 request must include reasoning_content on the assistant message from turn 1 ` +
+						`(required by DeepSeek API spec when thinking mode is active — issue #201).\n${diagnostics}`,
+				)
 			} else {
 				assert.strictEqual(
 					firstRequest.thinkingType,
@@ -379,6 +404,17 @@ suite("DeepSeek V4 provider", function () {
 					undefined,
 					`Reasoning-disabled probe should omit reasoning_effort.\n${diagnostics}`,
 				)
+
+				// Negative guard: reasoning-off requests must never carry reasoning_content,
+				// which would indicate the capture flag itself is broken.
+				const secondRequestOff = result.requests[1]
+				if (secondRequestOff) {
+					assert.strictEqual(
+						secondRequestOff.hasReasoningContentInHistory,
+						false,
+						`Turn 2 request must NOT include reasoning_content when thinking is disabled.\n${diagnostics}`,
+					)
+				}
 			}
 
 			assert.ok(result.completed, `Task should complete cleanly.\n${diagnostics}`)

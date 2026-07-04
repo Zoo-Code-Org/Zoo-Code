@@ -30,11 +30,11 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.64.0
+## Yang Baru di v3.66.0
 
-- **UI Manajemen Aturan** — tab Aturan baru di Pengaturan memungkinkan Anda membuat, menghapus, dan membuka aturan Zoo global dan ruang kerja langsung dari editor
-- **Tinjauan Perubahan Penyelesaian** — setelah tugas selesai, tombol "Lihat Perubahan Baru" dan "Pulihkan Perubahan" yang baru memungkinkan Anda memeriksa dan membatalkan perubahan dari prompt terakhir
-- **Ambang Diff yang Dilonggarkan** — ambang kemiripan yang dapat dikonfigurasi mengurangi kesalahan "pengeditan gagal" saat menerapkan diff, dengan diagnostik baru untuk membantu menyetel pengaturan
+- **Dukungan Claude Sonnet 5** — model Claude terbaru kini tersedia di penyedia Anthropic, Bedrock, dan Vertex
+- **Peningkatan ke Semble v0.4.1** — penguraian hasil yang diratakan dan pesan status terlokalisasi
+- **Penjaga transisi status siklus hidup tugas** — penjaga transisi status baru dan rekonsiliasi delegasi saat startup mencegah transisi status tugas yang tidak valid
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

@@ -53,16 +53,22 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.64.0
+## What's New in v3.66.0
 
-- **Rules Management UI** — a new Rules tab in Settings lets you create, delete, and open global and workspace Zoo rules directly from the editor
-- **Completion Change Review** — after a task completes, new "See New Changes" and "Restore Changes" buttons let you inspect and undo the changes from the latest prompt
-- **Relaxed Diff Thresholds** — configurable similarity thresholds reduce "edit unsuccessful" errors when applying diffs, with new diagnostics to help tune the settings
-- Add kimi-k2p7-code model on Fireworks provider
-- Fix: auto-closing edited files is now opt-in and defaults to off
-- Fix: delegation race condition in delegateParentAndOpenChild
-- Fix: parse Gemma 4 `<thought>` reasoning tags alongside `<think>`
-- Security update: undici v6.27.0
+- **Claude Sonnet 5 support** — the latest Claude model is now available across Anthropic, Bedrock, and Vertex providers
+- **Semble v0.4.1 upgrade** — flattened result parsing and localized status messages
+- **Task-lifecycle status transition guard** — a new status transition guard and startup delegation reconciliation prevent invalid task state transitions
+- Fix: LiteLLM cache key collision and silent fallback to a non-existent default model
+- Fix: reliable auto context condensing for the VS Code Language Model API
+- Fix: ThinkingBudget now supports `xhigh` and all extended reasoning effort values
+- Fix: round-trip DeepSeek `reasoning_content` in thinking mode to prevent 400 errors
+- Fix: base64-encode Gemini `thoughtSignature` bypass token to fix the Vertex AI empty-response loop
+- Fix: provider cache reset after settings import
+- Fix: atomically serialize `reopenParentFromDelegation`
+- Fix: shell default profile name type guard
+- Security: dependency-review, invisible-char detection, and least-privilege workflow permissions
+- Upgrade `@anthropic-ai/sdk` to 0.104.1 and `@anthropic-ai/vertex-sdk` to 0.17.1
+- Dependency and tooling updates
 
 <details>
   <summary>🌐 Available languages</summary>
@@ -86,7 +92,7 @@ for this exact support, so if you are having problems or if you have question, j
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-  </details>
+    </details>
 
 ---
 

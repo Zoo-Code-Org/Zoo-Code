@@ -341,9 +341,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "규칙 관리 UI — 설정의 새 규칙 탭에서 전역 및 작업 공간 Zoo 규칙을 편집기에서 직접 만들고, 삭제하고, 열 수 있습니다.",
-			"highlight2": "완료 변경 사항 검토 — 작업이 완료되면 새 \"새 변경 사항 보기\" 및 \"변경 사항 복원\" 버튼으로 마지막 프롬프트의 변경 사항을 검사하고 취소할 수 있습니다.",
-			"highlight3": "완화된 Diff 임계값 — 구성 가능한 유사도 임계값으로 diff 적용 시 \"편집 실패\" 오류가 줄어들며, 설정 조정을 돕는 새 진단 기능이 추가되었습니다."
+			"highlight1": "Claude Sonnet 5 지원 — 최신 Claude 모델이 이제 Anthropic, Bedrock, Vertex 프로바이더에서 사용 가능합니다.",
+			"highlight2": "Semble v0.4.1 업그레이드 — 평면화된 결과 파싱과 현지화된 상태 메시지.",
+			"highlight3": "태스크 수명주기 상태 전환 가드 — 새로운 상태 전환 가드와 시작 시 위임 조정으로 잘못된 태스크 상태 전환을 방지합니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

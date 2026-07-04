@@ -43,9 +43,29 @@ jobs:
               });
             }
 
+            // Only a `pull_request`/`pull_request_review` run that was itself triggered
+            // FROM a fork gets a read-only GITHUB_TOKEN — label mutations there 403 with
+            // "Resource not accessible by integration". `schedule` and `workflow_dispatch`
+            // runs always execute in the base repo's context with a read/write token, even
+            // when the PR they're reconciling happens to come from a fork, so they must NOT
+            // be skipped or fork PRs would never get stale labels cleaned up.
+            // See: https://docs.github.com/en/actions/concepts/security/github_token
+            const isReadOnlyRun = Boolean(context.payload.pull_request) &&
+              context.payload.pull_request.head?.repo?.owner?.login !== owner;
+
+            function isForkPR(pr) {
+              return pr.head?.repo?.owner?.login && pr.head.repo.owner.login !== owner;
+            }
+
             // Strips stateLabels from a PR, optionally keeping one.
             // Also removes stale-awaiting-author when not keeping awaiting-author.
+            // Only skipped when this run's own token is read-only (see isReadOnlyRun) —
+            // schedule/workflow_dispatch runs reconcile fork PRs normally.
             async function reconcileLabels(pr, desiredLabel) {
+              if (isReadOnlyRun && isForkPR(pr)) {
+                core.info(`PR #${pr.number}: fork PR on a read-only run — skipping label mutation`);
+                return;
+              }
               const currentLabels = new Set(pr.labels.map(l => l.name));
               for (const label of stateLabels) {
                 if (label !== desiredLabel && currentLabels.has(label)) {

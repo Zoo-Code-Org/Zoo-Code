@@ -30,11 +30,11 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.64.0
+## Điểm mới trong v3.66.0
 
-- **Giao diện Quản lý Quy tắc** — tab Quy tắc mới trong Cài đặt cho phép bạn tạo, xóa và mở các quy tắc Zoo toàn cục và không gian làm việc trực tiếp từ trình soạn thảo
-- **Xem xét Thay đổi Hoàn thành** — sau khi nhiệm vụ hoàn thành, các nút mới "Xem thay đổi mới" và "Khôi phục thay đổi" cho phép bạn kiểm tra và hoàn tác các thay đổi từ lệnh nhắc cuối cùng
-- **Ngưỡng Diff được nới lỏng** — các ngưỡng tương đồng có thể cấu hình giúp giảm lỗi "chỉnh sửa không thành công" khi áp dụng diff, kèm theo chẩn đoán mới để tinh chỉnh cài đặt
+- **Hỗ trợ Claude Sonnet 5** — mô hình Claude mới nhất hiện có sẵn trên các nhà cung cấp Anthropic, Bedrock và Vertex
+- **Nâng cấp lên Semble v0.4.1** — phân tích kết quả làm phẳng và thông điệp trạng thái đã địa phương hóa
+- **Bảo vệ chuyển đổi trạng thái vòng đời tác vụ** — một bảo vệ chuyển đổi trạng thái mới và đối chiếu ủy quyền khi khởi động ngăn chặn các chuyển đổi trạng thái tác vụ không hợp lệ
 
 ## Zoo Code có thể làm gì cho BẠN?
 
