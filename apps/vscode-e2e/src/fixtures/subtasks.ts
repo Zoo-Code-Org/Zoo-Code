@@ -332,7 +332,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 			toolCalls: [
 				{
 					name: "attempt_completion",
-					arguments: JSON.stringify({ result: "9" }),
+					arguments: JSON.stringify({ result: SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER }),
 					id: "call_interrupt_child_completion_002",
 				},
 			],
@@ -348,7 +348,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 			toolCalls: [
 				{
 					name: "attempt_completion",
-					arguments: JSON.stringify({ result: "Interrupted parent resumed" }),
+					arguments: JSON.stringify({ result: SUBTASK_INTERRUPT_PARENT_RESULT }),
 					id: "call_interrupt_parent_completion_003",
 				},
 			],
