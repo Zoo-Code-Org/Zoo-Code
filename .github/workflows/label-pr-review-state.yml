@@ -26,7 +26,7 @@ jobs:
         with:
           script: |
             const { owner, repo } = context.repo;
-            const stateLabels = ['awaiting-author', 'awaiting-review'];
+            const stateLabels = ['awaiting-author', 'awaiting-review', 'has-conflicts'];
 
             // When triggered by a single PR event, only reconcile that PR.
             // The hourly schedule and workflow_dispatch reconcile all open PRs.
@@ -122,6 +122,22 @@ jobs:
                 if (pr.draft) {
                   core.info(`PR #${pr.number}: draft — stripping state labels`);
                   await reconcileLabels(pr, null);
+                  continue;
+                }
+
+                // `mergeable`/`mergeable_state` are only returned by the single-PR GET
+                // endpoint, and are computed asynchronously by GitHub — a PR fetched via
+                // pulls.list (schedule/workflow_dispatch runs) never has them, and even a
+                // single-PR fetch can return `null`/"unknown" if the merge check hasn't
+                // finished yet. Re-fetch the single PR to get a fresh value, and treat
+                // "unknown" as not-yet-computed rather than as conflicting.
+                const prDetail = prNumber
+                  ? pr
+                  : (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data;
+
+                if (prDetail.mergeable === false && prDetail.mergeable_state === 'dirty') {
+                  core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
+                  await reconcileLabels(pr, 'has-conflicts');
                   continue;
                 }
 
