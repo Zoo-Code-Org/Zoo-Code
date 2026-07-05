@@ -388,6 +388,7 @@ export async function addCustomInstructions(
 		language?: string
 		rooIgnoreInstructions?: string
 		settings?: SystemPromptSettings
+		doneWhen?: string
 	} = {},
 ): Promise<string> {
 	const sections = []
@@ -454,6 +455,15 @@ export async function addCustomInstructions(
 	// Add mode-specific instructions after
 	if (typeof modeCustomInstructions === "string" && modeCustomInstructions.trim()) {
 		sections.push(`Mode-specific Instructions:\n${modeCustomInstructions.trim()}`)
+	}
+
+	// If this mode was spawned as a delegated sub-agent, tell it when to propose completion
+	// and how to shape the result the parent conversation will see.
+	if (typeof options.doneWhen === "string" && options.doneWhen.trim()) {
+		sections.push(
+			`Definition of Done:\nPropose attempt_completion only when: ${options.doneWhen.trim()}\n\n` +
+				`When you do, shape your completion result as a structured summary covering: (1) artifacts you created or modified (with paths), (2) decisions made with the writer during this session, (3) unresolved threads or open questions, (4) any pending canon proposals awaiting approval. This is what the parent conversation will see in place of the full session.`,
+		)
 	}
 
 	// Add rules - include both mode-specific and generic rules if they exist

@@ -513,6 +513,28 @@ describe("addCustomInstructions", () => {
 		expect(result).toContain("Rules from .roorules-test-mode:\nmode specific rules")
 	})
 
+	it("should include Definition of Done section when doneWhen is provided", async () => {
+		statMock.mockRejectedValueOnce({ code: "ENOENT" })
+
+		const result = await addCustomInstructions("mode instructions", "", "/fake/path", "draft", {
+			doneWhen: "The prose has been appended and the writer has confirmed it.",
+		})
+
+		expect(result).toContain("Definition of Done:")
+		expect(result).toContain(
+			"Propose attempt_completion only when: The prose has been appended and the writer has confirmed it.",
+		)
+		expect(result).toContain("artifacts you created or modified")
+	})
+
+	it("should omit Definition of Done section when doneWhen is not provided", async () => {
+		statMock.mockRejectedValueOnce({ code: "ENOENT" })
+
+		const result = await addCustomInstructions("mode instructions", "", "/fake/path", "draft")
+
+		expect(result).not.toContain("Definition of Done:")
+	})
+
 	it("should load AGENTS.md when settings.useAgentRules is true", async () => {
 		// Simulate no .roo/rules-test-mode directory
 		statMock.mockRejectedValueOnce({ code: "ENOENT" })

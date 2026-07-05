@@ -82,7 +82,7 @@ async function generatePrompt(
 	const effectiveProtocol = "native"
 
 	const [modesSection, skillsSection] = await Promise.all([
-		getModesSection(context),
+		getModesSection(context, mode),
 		getSkillsSection(skillsManager, mode as string),
 	])
 
@@ -111,6 +111,7 @@ ${await addCustomInstructions(baseInstructions, globalCustomInstructions || "", 
 	language: language ?? formatLanguage(vscode.env.language),
 	rooIgnoreInstructions,
 	settings,
+	doneWhen: modeConfig.doneWhen,
 })}`
 
 	// Load boo context if enabled and file path is available
