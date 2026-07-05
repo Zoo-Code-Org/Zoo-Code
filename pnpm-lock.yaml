@@ -847,7 +847,7 @@ importers:
         version: 6.0.0
       remove-markdown:
         specifier: ^0.6.0
-        version: 0.6.2
+        version: 0.6.4
       shell-quote:
         specifier: ^1.8.2
         version: 1.8.4
@@ -7260,8 +7260,8 @@ packages:
   remark-stringify@11.0.0:
     resolution: {integrity: sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw==}
 
-  remove-markdown@0.6.2:
-    resolution: {integrity: sha512-EijDXJZbzpGbQBd852ViUzcqgpMujthM+SAEHiWCMcZonRbZ+xViWKLJA/vrwbDwYdxrs1aFDjpBhcGrZoJRGA==}
+  remove-markdown@0.6.4:
+    resolution: {integrity: sha512-BompiLClzjfh46irZmzv+1Q61jZYlKN3iq/hzae9EOUwf7ctr/5wpD4qwgn/FWDAYE18RORO7z/yr+HXZJCY8Q==}
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -15946,7 +15946,7 @@ snapshots:
       mdast-util-to-markdown: 2.1.2
       unified: 11.0.5
 
-  remove-markdown@0.6.2: {}
+  remove-markdown@0.6.4: {}
 
   require-directory@2.1.1: {}
 
