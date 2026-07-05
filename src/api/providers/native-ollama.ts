@@ -107,7 +107,7 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 				}
 			} else if (anthropicMessage.role === "assistant") {
 				const { nonToolMessages, toolMessages, reasoningText } = anthropicMessage.content.reduce<{
-					nonToolMessages: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]
+					nonToolMessages: Anthropic.TextBlockParam[]
 					toolMessages: Anthropic.ToolUseBlockParam[]
 					reasoningText: string
 				}>(
@@ -121,7 +121,10 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 						const block = part as AssistantContentBlock
 						if (block.type === "tool_use") {
 							acc.toolMessages.push(block)
-						} else if (block.type === "text" || block.type === "image") {
+						} else if (block.type === "text") {
+							// Note: assistant messages cannot contain image
+							// blocks (images are input-only in the Anthropic
+							// API), so only text blocks are collected here.
 							acc.nonToolMessages.push(block)
 						} else if (block.type === "reasoning") {
 							// Non-Anthropic protocols store reasoning as a block
@@ -144,14 +147,7 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 				// Process non-tool messages
 				let content: string = ""
 				if (nonToolMessages.length > 0) {
-					content = nonToolMessages
-						.map((part) => {
-							if (part.type === "image") {
-								return "" // impossible as the assistant cannot send images
-							}
-							return part.text
-						})
-						.join("\n")
+					content = nonToolMessages.map((part) => part.text).join("\n")
 				}
 
 				// Convert tool_use blocks to Ollama tool_calls format
@@ -238,7 +234,13 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	 * Maps the configured reasoning effort setting to Ollama's native `think`
 	 * request parameter (boolean | "high" | "medium" | "low").
 	 *
-	 * Returns undefined when reasoning is not explicitly configured, leaving
+	 * Requires an explicit Ollama opt-in (`enableReasoningEffort === true`)
+	 * before translating `reasoningEffort`. This prevents inherited
+	 * `apiConfiguration.reasoningEffort` values (left over from another
+	 * provider) from silently emitting a `think` param when the Ollama UI
+	 * checkbox is unchecked.
+	 *
+	 * Returns undefined when reasoning is not explicitly enabled, leaving
 	 * the model/Modelfile in control (preserving prior behavior where models
 	 * that emit think/thought tags in content are still handled by TagMatcher).
 	 *
@@ -248,15 +250,19 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	 * `boolean | "high" | "medium" | "low"`. Until the SDK types catch up,
 	 * "xhigh"/"max" efforts are clamped to "high".
 	 *
-	 * - "disable" or enableReasoningEffort === false -> false (thinking off)
+	 * - enableReasoningEffort !== true -> undefined (no think param sent)
+	 * - "disable" -> false (thinking off)
 	 * - "none" / "minimal" -> true (enable thinking with default budget)
 	 * - "low" / "medium" / "high" -> the matching effort level
 	 * - "xhigh" / "max" -> "high" (highest level the SDK currently supports)
 	 */
 	private getOllamaThinkParam(): boolean | "high" | "medium" | "low" | undefined {
-		// Explicit off switch
-		if (this.options.enableReasoningEffort === false) {
-			return false
+		// Require an explicit Ollama opt-in before mapping reasoningEffort.
+		// Without this guard, a stale reasoningEffort inherited from another
+		// provider config could still emit a think param when the UI checkbox
+		// is unchecked.
+		if (this.options.enableReasoningEffort !== true) {
+			return undefined
 		}
 
 		const effort = this.options.reasoningEffort
@@ -283,6 +289,31 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		}
 	}
 
+	/**
+	 * Builds the shared chat request options (temperature, num_ctx) and the
+	 * conditional `think` parameter used by both `createMessage` and
+	 * `completePrompt`. Centralizing this avoids drift between the streaming
+	 * and single-shot request paths.
+	 *
+	 * Returns a tuple of `[chatOptions, thinkParam]` where `thinkParam` is
+	 * `undefined` when no `think` field should be sent to Ollama.
+	 */
+	private buildChatRequestOptions(
+		useR1Format: boolean,
+	): [OllamaChatOptions, boolean | "high" | "medium" | "low" | undefined] {
+		const chatOptions: OllamaChatOptions = {
+			temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
+		}
+
+		// Only include num_ctx if explicitly set via ollamaNumCtx
+		if (this.options.ollamaNumCtx !== undefined) {
+			chatOptions.num_ctx = this.options.ollamaNumCtx
+		}
+
+		const thinkParam = this.getOllamaThinkParam()
+		return [chatOptions, thinkParam]
+	}
+
 	override async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
@@ -307,21 +338,12 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		)
 
 		try {
-			// Build options object conditionally
-			const chatOptions: OllamaChatOptions = {
-				temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
-			}
-
-			// Only include num_ctx if explicitly set via ollamaNumCtx
-			if (this.options.ollamaNumCtx !== undefined) {
-				chatOptions.num_ctx = this.options.ollamaNumCtx
-			}
-
-			// Conditionally enable Ollama's native think parameter so reasoning
-			// models (qwen3, deepseek-r1, etc.) emit thinking via the dedicated
-			// message.thinking field instead of (or in addition to) think/thought
-			// tags embedded in content.
-			const thinkParam = this.getOllamaThinkParam()
+			// Build the shared chat options and conditional think parameter.
+			// Conditionally enabling Ollama's native think parameter lets
+			// reasoning models (qwen3, deepseek-r1, etc.) emit thinking via
+			// the dedicated message.thinking field instead of (or in addition
+			// to) think/thought tags embedded in content.
+			const [chatOptions, thinkParam] = this.buildChatRequestOptions(useR1Format)
 
 			// Create the actual API request promise. The `stream: true` literal
 			// is kept inline so TypeScript selects the streaming overload of
@@ -455,19 +477,10 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			const { id: modelId } = await this.fetchModel()
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
-			// Build options object conditionally
-			const chatOptions: OllamaChatOptions = {
-				temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
-			}
-
-			// Only include num_ctx if explicitly set via ollamaNumCtx
-			if (this.options.ollamaNumCtx !== undefined) {
-				chatOptions.num_ctx = this.options.ollamaNumCtx
-			}
-
-			// Apply the same think parameter as the streaming path so
-			// single-shot completions respect the reasoning configuration.
-			const thinkParam = this.getOllamaThinkParam()
+			// Reuse the shared request-option builder so single-shot
+			// completions respect the same reasoning configuration as the
+			// streaming path.
+			const [chatOptions, thinkParam] = this.buildChatRequestOptions(useR1Format)
 
 			const response = await client.chat({
 				model: modelId,

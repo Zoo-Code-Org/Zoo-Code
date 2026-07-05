@@ -123,7 +123,7 @@ describe("Ollama Component - thinking setting", () => {
 		expect(screen.getByText("settings:providers.ollama.thinkingHelp")).toBeInTheDocument()
 	})
 
-	it("should enable reasoning effort and default reasoningEffort to medium when the checkbox is toggled on", () => {
+	it("should enable reasoning effort and default reasoningEffort to medium when the checkbox is toggled on with no prior value", () => {
 		render(
 			<Ollama
 				apiConfiguration={{} as ProviderSettings}
@@ -140,7 +140,34 @@ describe("Ollama Component - thinking setting", () => {
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "medium")
 	})
 
-	it("should disable reasoning effort and clear reasoningEffort when toggled off", () => {
+	it("should restore the prior reasoningEffort value when re-enabled after being toggled off", () => {
+		// The user previously selected "high", toggled the checkbox off (which
+		// preserves reasoningEffort), and is now toggling it back on. The
+		// prior effort level should be restored rather than reset to "medium".
+		const apiConfiguration: Partial<ProviderSettings> = {
+			enableReasoningEffort: false,
+			reasoningEffort: "high",
+		}
+
+		render(
+			<Ollama
+				apiConfiguration={apiConfiguration as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		const input = screen.getByTestId("checkbox-input-settings:providers.ollama.thinking")
+		fireEvent.click(input)
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true)
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "high")
+	})
+
+	it("should disable reasoning effort and preserve reasoningEffort when toggled off", () => {
+		// Toggling the checkbox off no longer wipes the user's prior effort
+		// choice. The handler gates on enableReasoningEffort === true, so a
+		// stale reasoningEffort value will not emit a think param while the
+		// checkbox is off, and the value is preserved for re-enabling.
 		const apiConfiguration: Partial<ProviderSettings> = {
 			enableReasoningEffort: true,
 			reasoningEffort: "high",
@@ -157,7 +184,9 @@ describe("Ollama Component - thinking setting", () => {
 		fireEvent.click(input)
 
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", false)
-		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
+		// reasoningEffort is intentionally left untouched so the user's prior
+		// selection survives across toggles.
+		expect(mockSetApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", undefined)
 	})
 
 	it("should render ThinkingBudget with supportsReasoningEffort when thinking is enabled", () => {

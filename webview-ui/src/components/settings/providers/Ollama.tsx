@@ -140,15 +140,22 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 						setApiConfigurationField("enableReasoningEffort", checked)
 
 						if (checked) {
-							// Default to "medium" so the request actually enables
-							// Ollama's native think parameter. Without this, the
-							// ThinkingBudget Select would show "None" (disable) and
-							// getOllamaThinkParam() would return undefined, sending
-							// no think parameter despite the checkbox being on.
-							setApiConfigurationField("reasoningEffort", "medium")
-						} else {
-							setApiConfigurationField("reasoningEffort", undefined)
+							// Restore the last selected effort level if one was
+							// previously chosen; otherwise default to "medium" so
+							// the request actually enables Ollama's native think
+							// parameter. Without a value, the ThinkingBudget Select
+							// would show "None" (disable) and getOllamaThinkParam()
+							// would return undefined, sending no think parameter
+							// despite the checkbox being on. Preserving the prior
+							// value avoids wiping the user's effort choice when
+							// toggling the checkbox off and back on.
+							setApiConfigurationField("reasoningEffort", apiConfiguration.reasoningEffort ?? "medium")
 						}
+						// When unchecked, leave reasoningEffort untouched so the
+						// user's prior selection is preserved across toggles. The
+						// handler gates on enableReasoningEffort === true, so a
+						// stale reasoningEffort value will not emit a think param
+						// while the checkbox is off.
 					}}>
 					{t("settings:providers.ollama.thinking")}
 				</Checkbox>
