@@ -28,7 +28,7 @@
 		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish"
 	},
 	"devDependencies": {
-		"@changesets/cli": "2.29.7",
+		"@changesets/cli": "2.31.0",
 		"@dotenvx/dotenvx": "1.66.0",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "20.19.43",
