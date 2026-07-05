@@ -606,6 +606,32 @@ describe("newTaskTool", () => {
 		})
 	})
 
+	it("blocks delegation when the current task is itself a delegated sub-agent", async () => {
+		const block: ToolUse<"new_task"> = {
+			type: "tool_use",
+			name: "new_task",
+			params: {
+				mode: "draft",
+				message: "Try to delegate further",
+				todos: "[ ] Test todo",
+			},
+			partial: false,
+		}
+
+		const nestedCline = { ...mockCline, parentTaskId: "mock-parent-task-id" }
+
+		await newTaskTool.handle(nestedCline as any, withNativeArgs(block), {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockAskApproval).not.toHaveBeenCalled()
+		expect(mockStartSubtask).not.toHaveBeenCalled()
+		expect(mockCline.recordToolError).toHaveBeenCalledWith("new_task")
+		expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("tools:newTask.noNestedDelegation"))
+	})
+
 	// Add more tests for error handling (invalid mode, approval denied) if needed
 })
 

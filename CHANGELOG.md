@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## 3.61.0
+
+### Added
+
+- **Collaborate mode becomes a concierge:** Collaborate now detects when your request matches a specialized sub-agent (Outline, Draft, Knowledge Lookup, etc.), composes a handoff brief, and delegates to it — you converse inside the sub-agent session as long as needed, then land back in Collaborate with a structured summary when it's done.
+- **User-editable sub-agents:** Sub-agent behavior is now defined in `.boo/agents.yaml`, a plain YAML file scaffolded into every new Boo workspace (with `.roomodes` still honored as a fallback in non-Boo workspaces, for fork compatibility). Two new optional fields drive the concierge flow:
+    - `inputs` — tells the concierge what the handoff brief must contain when delegating to this agent
+    - `doneWhen` — tells the sub-agent when it should propose completion
+    - Editing the file live-updates available agents; no extension update needed to change the writing workflow
+- **Visible handoff:** Before delegating, the concierge always surfaces the full handoff brief as a readable card for you to approve or reject — no silent delegation. Rejecting keeps you in Collaborate so you can redirect before the sub-agent spawns.
+- **Session breadcrumb and exit controls:** While a sub-agent session is active, the chat header shows a `Collaborate › Outlining`-style breadcrumb with **Done** and **Abandon** controls — Done wraps up the session now (even if its completion criteria aren't met yet), Abandon ends it without reporting results and returns you to Collaborate. Switching modes via the selector is blocked with a notice while a session is active, so you can't accidentally lose in-progress delegated work.
+- **Validate agents:** New "Validate agents" action in the Modes settings config menu checks `.boo/agents.yaml` (or `.roomodes`) and reports friendly errors (invalid YAML, schema issues, duplicate slugs) plus quality warnings — missing `whenToUse` (agent invisible to the concierge), missing `inputs`/`doneWhen` (low-quality delegation) — without needing to reload the workspace to find out something's wrong.
+
+### Changed
+
+- **Sub-agent completion summaries are now structured by convention:** every sub-agent's `attempt_completion` result states what was created or changed, decisions made with the writer, unresolved threads, and any pending canon proposals — so the concierge (and you) get a consistent report back regardless of which agent ran.
+- **"Edit Project Modes" now resolves the right file automatically:** the settings button no longer assumes `.roomodes` — it asks the extension host to resolve `.boo/agents.yaml` vs `.roomodes` based on the current workspace, so Boo-workspace writers no longer risk creating a stray `.roomodes` file.
+
+### Fixed
+
+- Sub-agents (delegated child sessions) could previously call `new_task` themselves, allowing nested delegation the design never intended. `new_task` now fails with a clear message when invoked from inside a delegated session — only the top-level concierge conversation can delegate.
+
 ## 3.60.1
 
 ### Added

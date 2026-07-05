@@ -7,10 +7,18 @@
 		"importMode": "Import Mode",
 		"editModesConfig": "Edit modes configuration",
 		"editGlobalModes": "Edit Global Modes",
-		"editProjectModes": "Edit Project Modes (.roomodes)",
+		"editProjectModes": "Edit Project Modes",
+		"validateAgents": "Validate agents",
 		"createModeHelpText": "Modes are specialized personas that tailor Zoo's behavior. <0>Learn about Using Modes</0> or <1>Customizing Modes.</1>",
 		"selectMode": "Search modes",
 		"noMatchFound": "No modes found"
+	},
+	"agentsValidation": {
+		"title": "Agents Validation",
+		"noFile": "No project modes file found in this workspace.",
+		"noIssues": "No issues found — this file is ready for the concierge to use.",
+		"errorsHeading": "Errors",
+		"warningsHeading": "Warnings"
 	},
 	"apiConfiguration": {
 		"title": "API Configuration",

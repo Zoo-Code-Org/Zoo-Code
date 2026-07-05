@@ -3,7 +3,7 @@
 	"displayName": "%extension.displayName%",
 	"description": "%extension.description%",
 	"publisher": "anthologist",
-	"version": "3.60.1",
+	"version": "3.61.0",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
 		"color": "#0d0d0f",

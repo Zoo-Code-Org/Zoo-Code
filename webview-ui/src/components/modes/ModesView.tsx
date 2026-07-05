@@ -97,6 +97,7 @@ const ModesView = () => {
 	const [isCreateModeDialogOpen, setIsCreateModeDialogOpen] = useState(false)
 	const [isExporting, setIsExporting] = useState(false)
 	const [isImporting, setIsImporting] = useState(false)
+	const [isValidatingAgents, setIsValidatingAgents] = useState(false)
 	const [showImportDialog, setShowImportDialog] = useState(false)
 	const [importLevel, setImportLevel] = useState<"global" | "project">("project")
 	const [hasRulesToExport, setHasRulesToExport] = useState<Record<string, boolean>>({})
@@ -562,6 +563,42 @@ const ModesView = () => {
 					...prev,
 					[message.slug]: message.hasContent,
 				}))
+			} else if (message.type === "agentsValidationResult") {
+				setIsValidatingAgents(false)
+				const validation = message.agentsValidation as
+					| { filePath?: string; errors: string[]; warnings: string[] }
+					| undefined
+
+				setSelectedPromptTitle(t("prompts:agentsValidation.title"))
+
+				if (!validation?.filePath) {
+					setSelectedPromptContent(t("prompts:agentsValidation.noFile"))
+				} else {
+					const sections = [`File: ${validation.filePath}`]
+
+					if (validation.errors.length === 0 && validation.warnings.length === 0) {
+						sections.push("", t("prompts:agentsValidation.noIssues"))
+					} else {
+						if (validation.errors.length > 0) {
+							sections.push(
+								"",
+								`${t("prompts:agentsValidation.errorsHeading")}:`,
+								...validation.errors.map((e) => `• ${e}`),
+							)
+						}
+						if (validation.warnings.length > 0) {
+							sections.push(
+								"",
+								`${t("prompts:agentsValidation.warningsHeading")}:`,
+								...validation.warnings.map((w) => `• ${w}`),
+							)
+						}
+					}
+
+					setSelectedPromptContent(sections.join("\n"))
+				}
+
+				setIsDialogOpen(true)
 			} else if (message.type === "deleteCustomModeCheck") {
 				// Handle the check response
 				// Use the ref to get the current modeToDelete value
@@ -578,7 +615,7 @@ const ModesView = () => {
 
 		window.addEventListener("message", handler)
 		return () => window.removeEventListener("message", handler)
-	}, [checkRulesDirectory, switchMode])
+	}, [checkRulesDirectory, switchMode, t])
 
 	const handleAgentReset = (
 		modeSlug: string,
@@ -645,17 +682,30 @@ const ModesView = () => {
 											onMouseDown={(e) => {
 												e.preventDefault() // Prevent blur
 												vscode.postMessage({
-													type: "openFile",
-													text: "./.roomodes",
-													values: {
-														create: true,
-														content: JSON.stringify({ customModes: [] }, null, 2),
-													},
+													type: "openProjectModesFile",
 												})
 												setShowConfigMenu(false)
 											}}
 											onClick={(e) => e.preventDefault()}>
 											{t("prompts:modes.editProjectModes")}
+										</div>
+										<div
+											className={`p-2 text-vscode-foreground text-sm border-t border-vscode-input-border ${
+												isValidatingAgents ? "opacity-50 cursor-wait" : "cursor-pointer"
+											}`}
+											onMouseDown={(e) => {
+												e.preventDefault() // Prevent blur
+												if (isValidatingAgents) {
+													return
+												}
+												setIsValidatingAgents(true)
+												vscode.postMessage({
+													type: "validateAgents",
+												})
+												setShowConfigMenu(false)
+											}}
+											onClick={(e) => e.preventDefault()}>
+											{t("prompts:modes.validateAgents")}
 										</div>
 									</div>
 								)}

@@ -14,7 +14,8 @@
 	"newTask": {
 		"errors": {
 			"policy_restriction": "Failed to create new task due to policy restrictions."
-		}
+		},
+		"noNestedDelegation": "Sub-agents cannot delegate to further sub-agents. Complete this task yourself, or use attempt_completion to return control to the parent."
 	},
 	"generateImage": {
 		"openRouterApiKeyRequired": "OpenRouter API key is required for image generation with OpenRouter models. Please configure it in the Image Generation experimental settings.",

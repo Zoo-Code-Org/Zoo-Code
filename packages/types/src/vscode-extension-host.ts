@@ -99,6 +99,7 @@ export interface ExtensionMessage {
 		| "folderSelected"
 		| "skills"
 		| "fileContent"
+		| "agentsValidationResult"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -234,6 +235,12 @@ export interface ExtensionMessage {
 	copyProgressItemName?: string
 	// folderSelected
 	path?: string
+	// agentsValidationResult
+	agentsValidation?: {
+		filePath?: string
+		errors: string[]
+		warnings: string[]
+	}
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -500,6 +507,8 @@ export interface WebviewMessage {
 		| "deleteCustomMode"
 		| "setopenAiCustomModelInfo"
 		| "openCustomModesSettings"
+		| "openProjectModesFile"
+		| "validateAgents"
 		| "checkpointDiff"
 		| "checkpointRestore"
 		| "deleteMcpServer"

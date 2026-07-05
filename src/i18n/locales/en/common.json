@@ -216,6 +216,14 @@
 		"scope": {
 			"project": "project",
 			"global": "global"
+		},
+		"validate": {
+			"yamlParseError": "Invalid YAML at line {{line}}. Please check for:\n• Proper indentation (use spaces, not tabs)\n• Matching quotes and brackets\n• Valid YAML syntax",
+			"noCustomModesKey": "The file does not contain a top-level customModes list.",
+			"missingWhenToUse": "\"{{slug}}\": missing whenToUse — this agent will be invisible to the concierge (Collaborate mode won't know when to delegate to it).",
+			"missingInputs": "\"{{slug}}\": missing inputs — the concierge won't know what to include in the handoff brief, so delegation will be low quality.",
+			"missingDoneWhen": "\"{{slug}}\": missing doneWhen — the sub-agent won't have clear completion criteria.",
+			"unexpectedError": "Unexpected error validating agents file: {{error}}"
 		}
 	},
 	"marketplace": {

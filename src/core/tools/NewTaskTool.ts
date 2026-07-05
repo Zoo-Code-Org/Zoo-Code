@@ -25,6 +25,16 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 		const { askApproval, handleError, pushToolResult } = callbacks
 
 		try {
+			// Sub-agents (delegated children) must not delegate further — nesting is
+			// explicitly out of scope. Only the top-level concierge conversation may
+			// spawn new_task.
+			if (task.parentTaskId) {
+				task.recordToolError("new_task")
+				task.didToolFailInCurrentTurn = true
+				pushToolResult(formatResponse.toolError(t("tools:newTask.noNestedDelegation")))
+				return
+			}
+
 			// Validate required parameters.
 			if (!mode) {
 				task.consecutiveMistakeCount++

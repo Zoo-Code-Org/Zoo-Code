@@ -1333,6 +1333,30 @@ export const webviewMessageHandler = async (
 
 			break
 		}
+		case "openProjectModesFile": {
+			const { filePath, defaultContent } = await provider.customModesManager.getProjectModesFileInfo()
+			openFile(filePath, { create: true, content: defaultContent })
+			break
+		}
+		case "validateAgents": {
+			try {
+				const agentsValidation = await provider.customModesManager.validateAgentsFile()
+				await provider.postMessageToWebview({ type: "agentsValidationResult", agentsValidation })
+			} catch (error) {
+				provider.log(
+					`Error validating agents file: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+				)
+				await provider.postMessageToWebview({
+					type: "agentsValidationResult",
+					agentsValidation: {
+						filePath: undefined,
+						errors: [t("common:customModes.validate.unexpectedError", { error: String(error) })],
+						warnings: [],
+					},
+				})
+			}
+			break
+		}
 		case "openTerminalProfilePicker": {
 			// Open VS Code's native terminal profile picker so the user can set the
 			// default shell without leaving VS Code's own settings UI.

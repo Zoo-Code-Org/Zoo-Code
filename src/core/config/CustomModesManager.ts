@@ -120,6 +120,88 @@ export class CustomModesManager {
 	}
 
 	/**
+	 * Resolves the project-modes file path and creation-default content for the
+	 * current workspace, without requiring the file to already exist. Used by
+	 * the "Edit Project Modes" webview action so the correct filename
+	 * (`.boo/agents.yaml` vs `.roomodes`) is picked server-side rather than
+	 * hardcoded in the webview.
+	 */
+	public async getProjectModesFileInfo(): Promise<{ filePath: string; defaultContent: string }> {
+		const workspaceRoot = getWorkspacePath()
+		const filename = await getProjectModesFilename(workspaceRoot)
+		const filePath = path.join(workspaceRoot, filename)
+		const defaultContent =
+			filename === BOO_AGENTS_FILENAME ? "customModes: []\n" : JSON.stringify({ customModes: [] }, null, 2)
+		return { filePath, defaultContent }
+	}
+
+	/**
+	 * Validates the workspace's project-modes file (`.boo/agents.yaml` in Boo
+	 * workspaces) and returns structured errors/warnings for display in the
+	 * "Validate agents" settings UI, instead of the toast-based error surfacing
+	 * `loadModesFromFile` uses for background loads.
+	 *
+	 * Warnings cover schema-legal-but-low-quality configs the Zod schema can't
+	 * express: missing/empty `whenToUse` (agent invisible to the concierge),
+	 * missing `inputs`/`doneWhen` (low-quality delegation).
+	 */
+	public async validateAgentsFile(): Promise<{ filePath: string | undefined; errors: string[]; warnings: string[] }> {
+		const filePath = await this.getWorkspaceProjectModesPath()
+		const errors: string[] = []
+		const warnings: string[] = []
+
+		if (!filePath) {
+			return { filePath: undefined, errors, warnings }
+		}
+
+		const content = await fs.readFile(filePath, "utf-8")
+		const cleanedContent = this.cleanInvisibleCharacters(stripBom(content))
+
+		let settings: any
+		try {
+			settings = yaml.parse(cleanedContent) ?? {}
+		} catch (yamlError) {
+			try {
+				settings = JSON.parse(content)
+			} catch {
+				const errorMsg = yamlError instanceof Error ? yamlError.message : String(yamlError)
+				const lineMatch = errorMsg.match(/at line (\d+)/)
+				const line = lineMatch ? lineMatch[1] : "unknown"
+				errors.push(t("common:customModes.validate.yamlParseError", { line }))
+				return { filePath, errors, warnings }
+			}
+		}
+
+		if (!settings || typeof settings !== "object" || !settings.customModes) {
+			errors.push(t("common:customModes.validate.noCustomModesKey"))
+			return { filePath, errors, warnings }
+		}
+
+		const result = customModesSettingsSchema.safeParse(settings)
+
+		if (!result.success) {
+			for (const issue of result.error.issues) {
+				errors.push(`${issue.path.join(".") || "customModes"}: ${issue.message}`)
+			}
+			return { filePath, errors, warnings }
+		}
+
+		for (const agentMode of result.data.customModes) {
+			if (!agentMode.whenToUse?.trim()) {
+				warnings.push(t("common:customModes.validate.missingWhenToUse", { slug: agentMode.slug }))
+			}
+			if (!agentMode.inputs?.trim()) {
+				warnings.push(t("common:customModes.validate.missingInputs", { slug: agentMode.slug }))
+			}
+			if (!agentMode.doneWhen?.trim()) {
+				warnings.push(t("common:customModes.validate.missingDoneWhen", { slug: agentMode.slug }))
+			}
+		}
+
+		return { filePath, errors, warnings }
+	}
+
+	/**
 	 * Regex pattern for problematic characters that need to be cleaned from YAML content
 	 * Includes:
 	 * - \u00A0: Non-breaking space

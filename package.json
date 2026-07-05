@@ -1,6 +1,6 @@
 {
 	"name": "roo-code",
-	"version": "3.60.1",
+	"version": "3.61.0",
 	"packageManager": "pnpm@10.8.1",
 	"engines": {
 		"node": "20.20.2"

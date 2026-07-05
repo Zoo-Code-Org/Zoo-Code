@@ -525,6 +525,126 @@ describe("CustomModesManager", () => {
 		})
 	})
 
+	describe("getProjectModesFileInfo", () => {
+		it("resolves .boo/agents.yaml with YAML default content in a Boo workspace", async () => {
+			;(fs.stat as Mock).mockImplementation(async (statPath: string) => {
+				if (statPath === path.join(mockWorkspacePath, "workspace.boo.md")) {
+					return { isFile: () => true, isDirectory: () => false }
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+
+			const info = await manager.getProjectModesFileInfo()
+
+			expect(info.filePath).toBe(path.join(mockWorkspacePath, ".boo", "agents.yaml"))
+			expect(info.defaultContent).toBe("customModes: []\n")
+		})
+
+		it("resolves .roomodes with JSON default content outside a Boo workspace", async () => {
+			const info = await manager.getProjectModesFileInfo()
+
+			expect(info.filePath).toBe(mockRoomodes)
+			expect(info.defaultContent).toBe(JSON.stringify({ customModes: [] }, null, 2))
+		})
+	})
+
+	describe("validateAgentsFile", () => {
+		it("returns no filePath when no project modes file exists in the workspace", async () => {
+			;(fileExistsAtPath as Mock).mockImplementation(async (p: string) => p === mockSettingsPath)
+
+			const result = await manager.validateAgentsFile()
+
+			expect(result.filePath).toBeUndefined()
+			expect(result.errors).toEqual([])
+			expect(result.warnings).toEqual([])
+		})
+
+		it("reports a friendly error for invalid YAML", async () => {
+			;(fileExistsAtPath as Mock).mockImplementation(async (p: string) => p === mockRoomodes)
+			;(fs.readFile as Mock).mockImplementation(async (p: string) => {
+				if (p === mockRoomodes) {
+					return "customModes:\n  - slug: [unterminated"
+				}
+				throw new Error("File not found")
+			})
+
+			const result = await manager.validateAgentsFile()
+
+			expect(result.filePath).toBe(mockRoomodes)
+			expect(result.errors).toHaveLength(1)
+			expect(result.warnings).toEqual([])
+		})
+
+		it("reports friendly schema errors, including duplicate slugs", async () => {
+			;(fileExistsAtPath as Mock).mockImplementation(async (p: string) => p === mockRoomodes)
+			;(fs.readFile as Mock).mockImplementation(async (p: string) => {
+				if (p === mockRoomodes) {
+					return yaml.stringify({
+						customModes: [
+							{ slug: "dup", name: "One", roleDefinition: "Role", groups: ["read"] },
+							{ slug: "dup", name: "Two", roleDefinition: "Role", groups: ["read"] },
+						],
+					})
+				}
+				throw new Error("File not found")
+			})
+
+			const result = await manager.validateAgentsFile()
+
+			expect(result.filePath).toBe(mockRoomodes)
+			expect(result.errors.some((e) => e.includes("Duplicate mode slugs"))).toBe(true)
+			expect(result.warnings).toEqual([])
+		})
+
+		it("warns on missing whenToUse/inputs/doneWhen but reports no errors for an otherwise-valid file", async () => {
+			;(fileExistsAtPath as Mock).mockImplementation(async (p: string) => p === mockRoomodes)
+			;(fs.readFile as Mock).mockImplementation(async (p: string) => {
+				if (p === mockRoomodes) {
+					return yaml.stringify({
+						customModes: [{ slug: "outline", name: "Outline", roleDefinition: "Role", groups: ["read"] }],
+					})
+				}
+				throw new Error("File not found")
+			})
+
+			const result = await manager.validateAgentsFile()
+
+			expect(result.errors).toEqual([])
+			expect(result.warnings).toEqual([
+				"common:customModes.validate.missingWhenToUse",
+				"common:customModes.validate.missingInputs",
+				"common:customModes.validate.missingDoneWhen",
+			])
+		})
+
+		it("reports no errors or warnings for a fully-specified agent", async () => {
+			;(fileExistsAtPath as Mock).mockImplementation(async (p: string) => p === mockRoomodes)
+			;(fs.readFile as Mock).mockImplementation(async (p: string) => {
+				if (p === mockRoomodes) {
+					return yaml.stringify({
+						customModes: [
+							{
+								slug: "outline",
+								name: "Outline",
+								roleDefinition: "Role",
+								groups: ["read"],
+								whenToUse: "When outlining.",
+								inputs: "Component name.",
+								doneWhen: "Plan confirmed.",
+							},
+						],
+					})
+				}
+				throw new Error("File not found")
+			})
+
+			const result = await manager.validateAgentsFile()
+
+			expect(result.errors).toEqual([])
+			expect(result.warnings).toEqual([])
+		})
+	})
+
 	describe("updateCustomMode", () => {
 		it("should update mode in settings file while preserving .roomodes precedence", async () => {
 			const newMode: ModeConfig = {
