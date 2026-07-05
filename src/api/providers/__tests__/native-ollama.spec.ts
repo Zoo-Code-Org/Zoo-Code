@@ -254,6 +254,200 @@ describe("NativeOllamaHandler", () => {
 			expect(results.some((r) => r.type === "reasoning")).toBe(true)
 			expect(results.some((r) => r.type === "text")).toBe(true)
 		})
+
+		it("should surface Ollama's native message.thinking field as reasoning", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "", thinking: "Reasoning step one" } }
+				yield { message: { content: "", thinking: " step two" } }
+				yield { message: { content: "The answer" } }
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Question?" }])
+			const results = []
+
+			for await (const chunk of stream) {
+				results.push(chunk)
+			}
+
+			const reasoningChunks = results.filter((r) => r.type === "reasoning")
+			expect(reasoningChunks).toHaveLength(2)
+			expect(reasoningChunks[0]).toEqual({ type: "reasoning", text: "Reasoning step one" })
+			expect(reasoningChunks[1]).toEqual({ type: "reasoning", text: " step two" })
+			expect(results.some((r) => r.type === "text" && r.text === "The answer")).toBe(true)
+		})
+
+		it("should send think parameter when reasoningEffort is set", async () => {
+			const options: ApiHandlerOptions = {
+				apiModelId: "qwen3",
+				ollamaModelId: "qwen3",
+				ollamaBaseUrl: "http://localhost:11434",
+				enableReasoningEffort: true,
+				reasoningEffort: "high",
+			}
+
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok", thinking: "hmm" } }
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					think: "high",
+				}),
+			)
+		})
+
+		it("should map reasoningEffort levels to Ollama think values", async () => {
+			const cases: Array<
+				[NonNullable<ApiHandlerOptions["reasoningEffort"]>, boolean | "high" | "medium" | "low"]
+			> = [
+				["low", "low"],
+				["medium", "medium"],
+				["high", "high"],
+				["xhigh", "high"],
+				["max", "high"],
+				["none", true],
+				["minimal", true],
+				["disable", false],
+			]
+
+			for (const [effort, expected] of cases) {
+				vitest.clearAllMocks()
+				mockGetOllamaModels.mockResolvedValue({
+					qwen3: { contextWindow: 4096, maxTokens: 4096, supportsImages: false, supportsPromptCache: false },
+				})
+				mockChat.mockImplementation(async function* () {
+					yield { message: { content: "ok" } }
+				})
+
+				const options: ApiHandlerOptions = {
+					apiModelId: "qwen3",
+					ollamaModelId: "qwen3",
+					ollamaBaseUrl: "http://localhost:11434",
+					enableReasoningEffort: true,
+					reasoningEffort: effort,
+				}
+
+				handler = new NativeOllamaHandler(options)
+				const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
+				for await (const _ of stream) {
+					// consume
+				}
+
+				expect(mockChat).toHaveBeenCalledWith(
+					expect.objectContaining({
+						think: expected,
+					}),
+				)
+			}
+		})
+
+		it("should not send think parameter when reasoningEffort is undefined", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
+			for await (const _ of stream) {
+				// consume
+			}
+
+			const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.think).toBeUndefined()
+		})
+
+		it("should send think=false when enableReasoningEffort is false", async () => {
+			const options: ApiHandlerOptions = {
+				apiModelId: "qwen3",
+				ollamaModelId: "qwen3",
+				ollamaBaseUrl: "http://localhost:11434",
+				enableReasoningEffort: false,
+				reasoningEffort: "high",
+			}
+
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					think: false,
+				}),
+			)
+		})
+
+		it("should round-trip reasoning blocks as the thinking field on assistant messages", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{ type: "reasoning", text: "Prior reasoning", summary: [] } as any,
+						{ type: "text", text: "Prior answer" },
+					],
+				},
+				{ role: "user" as const, content: "Follow up" },
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "assistant",
+							thinking: "Prior reasoning",
+						}),
+					]),
+				}),
+			)
+		})
+	})
+
+	it("should not send think parameter when enableReasoningEffort is true but reasoningEffort is undefined", async () => {
+		// This is the state the UI checkbox would produce if it only set
+		// enableReasoningEffort without a default reasoningEffort. The
+		// handler must not send a think param in that case.
+		const options: ApiHandlerOptions = {
+			apiModelId: "qwen3",
+			ollamaModelId: "qwen3",
+			ollamaBaseUrl: "http://localhost:11434",
+			enableReasoningEffort: true,
+			// reasoningEffort intentionally undefined
+		}
+
+		handler = new NativeOllamaHandler(options)
+
+		mockChat.mockImplementation(async function* () {
+			yield { message: { content: "ok" } }
+		})
+
+		const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
+		for await (const _ of stream) {
+			// consume
+		}
+
+		const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
+		expect(callArgs.think).toBeUndefined()
 	})
 
 	describe("completePrompt", () => {
@@ -317,6 +511,41 @@ describe("NativeOllamaHandler", () => {
 				}),
 			)
 		})
+	})
+
+	it("should send think parameter in completePrompt when reasoningEffort is set", async () => {
+		const options: ApiHandlerOptions = {
+			apiModelId: "qwen3",
+			ollamaModelId: "qwen3",
+			ollamaBaseUrl: "http://localhost:11434",
+			enableReasoningEffort: true,
+			reasoningEffort: "high",
+		}
+
+		handler = new NativeOllamaHandler(options)
+
+		mockChat.mockResolvedValue({
+			message: { content: "Response" },
+		})
+
+		await handler.completePrompt("Test prompt")
+
+		expect(mockChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				think: "high",
+			}),
+		)
+	})
+
+	it("should not send think parameter in completePrompt when reasoningEffort is undefined", async () => {
+		mockChat.mockResolvedValue({
+			message: { content: "Response" },
+		})
+
+		await handler.completePrompt("Test prompt")
+
+		const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
+		expect(callArgs.think).toBeUndefined()
 	})
 
 	describe("error handling", () => {
