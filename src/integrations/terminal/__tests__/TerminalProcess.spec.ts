@@ -104,7 +104,6 @@ describe("TerminalProcess", () => {
 				yield "More output\n"
 				yield "Final output"
 				yield "\x1b]633;D\x07" // The last chunk contains the command end sequence with bell character.
-				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
 			})()
 
 			mockExecution = {
@@ -115,10 +114,126 @@ describe("TerminalProcess", () => {
 
 			const runPromise = terminalProcess.run("test command")
 			terminalProcess.emit("stream_available", mockStream)
+
+			// onDidEndTerminalShellExecution is a separate global VSCode event, not
+			// something coupled to the stream iterator being pulled again -- emit it
+			// independently of stream consumption, matching real-world timing.
+			terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+
 			await runPromise
 
 			expect(lines).toEqual(["Initial output", "More output", "Final output"])
 			expect(terminalProcess.isHot).toBe(false)
+		})
+
+		it(
+			"completes promptly when the D marker arrives but the stream never closes and " +
+				"onDidEndTerminalShellExecution never fires (VSCode #316556 / #250764)",
+			async () => {
+				let lines: string[] = []
+				let completedOutput: string | undefined
+
+				terminalProcess.on("completed", (output) => {
+					completedOutput = output
+					if (output) {
+						lines = output.split("\n")
+					}
+				})
+
+				// Simulate the confirmed real-world hang: the shell writes the D marker
+				// (command output is fully visible), but the stream's async iterator never
+				// signals `done: true` afterward, and the global onDidEndTerminalShellExecution
+				// event never fires. Model this with a stream that yields the D marker and
+				// then never resolves any further -- exactly what "never closes" looks like.
+				let hangForever: () => void = () => {}
+				mockStream = (async function* () {
+					yield "\x1b]633;C\x07"
+					yield "some output\n"
+					yield "\x1b]633;D\x07"
+					// The generator never returns past this point -- the next `.next()` call
+					// (which would happen if the loop kept consuming) hangs forever, and no
+					// `shell_execution_complete` event is ever emitted.
+					await new Promise<void>((resolve) => {
+						hangForever = resolve
+					})
+				})()
+
+				mockExecution = {
+					read: vi.fn().mockReturnValue(mockStream),
+				}
+
+				mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+
+				const runPromise = terminalProcess.run("test command")
+				terminalProcess.emit("stream_available", mockStream)
+
+				// No shell_execution_complete is ever emitted here -- the fix must not
+				// depend on it to unblock once the D marker has been seen.
+				await runPromise
+
+				expect(lines).toEqual(["some output", ""])
+				expect(completedOutput).toBe("some output\n")
+				expect(terminalProcess.isHot).toBe(false)
+
+				// Clean up the still-pending generator await so it doesn't leak between tests.
+				hangForever()
+			},
+		)
+
+		it("does not complete a long-running, silent command until it actually produces the D marker or closes", async () => {
+			// A bare `sleep 60`-style command: prints the start marker and then genuinely
+			// nothing else for a long time because it is still running, not because VSCode
+			// lost the signal. There is no idle-timeout guessing -- run() simply keeps
+			// waiting on the stream, exactly like a real long-running command should.
+			let completedFired = false
+
+			terminalProcess.on("completed", () => {
+				completedFired = true
+			})
+
+			// Signals once the generator has actually reached its suspension point (i.e.
+			// once run()'s `for await` loop has consumed the first chunk and is genuinely
+			// waiting on the stream for the next one), so the test can assert "not yet
+			// completed" and then resume deterministically, instead of guessing how many
+			// microtask turns run()'s internal await chain (streamAvailable, etc.) needs.
+			let releaseStream: () => void = () => {}
+			let notifySuspended: () => void = () => {}
+			const suspended = new Promise<void>((resolve) => {
+				notifySuspended = resolve
+			})
+
+			mockStream = (async function* () {
+				yield "\x1b]633;C\x07"
+				notifySuspended()
+				await new Promise<void>((resolve) => {
+					releaseStream = resolve
+				})
+				yield "finally done\n"
+				yield "\x1b]633;D\x07"
+			})()
+
+			mockExecution = {
+				read: vi.fn().mockReturnValue(mockStream),
+			}
+
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+
+			const runPromise = terminalProcess.run("sleep 60")
+			terminalProcess.emit("stream_available", mockStream)
+
+			// Wait until the generator has genuinely suspended waiting for more input;
+			// it must still be waiting on the stream at this point, not completed.
+			await suspended
+			expect(completedFired).toBe(false)
+
+			// The command finally finishes. Emit shell_execution_complete directly (as
+			// onDidEndTerminalShellExecution normally would) so run() doesn't need to wait
+			// out its 1s D-marker grace period for this assertion to be deterministic.
+			releaseStream()
+			terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+			await runPromise
+
+			expect(completedFired).toBe(true)
 		})
 
 		it("wraps multiline POSIX scripts so VS Code tracks them as one shell execution", async () => {
@@ -308,7 +423,6 @@ describe("TerminalProcess", () => {
 				yield "still compiling...\n"
 				yield "done"
 				yield "\x1b]633;D\x07" // The last chunk contains the command end sequence with bell character.
-				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
 			})()
 
 			mockTerminal.shellIntegration.executeCommand.mockReturnValue({
@@ -319,6 +433,12 @@ describe("TerminalProcess", () => {
 			terminalProcess.emit("stream_available", mockStream)
 
 			expect(terminalProcess.isHot).toBe(true)
+
+			// onDidEndTerminalShellExecution is a separate global VSCode event, not
+			// something coupled to the stream iterator being pulled again -- emit it
+			// independently of stream consumption, matching real-world timing.
+			terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+
 			await runPromise
 
 			expect(lines).toEqual(["compiling...", "still compiling...", "done"])

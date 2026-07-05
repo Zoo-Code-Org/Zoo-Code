@@ -102,6 +102,29 @@ export class TerminalRegistry {
 						terminal.activeShellExecution = undefined
 					}
 
+					// Guard against a late end event for an execution that has already been
+					// superseded on this terminal. This can happen when a process self-finalizes
+					// after TerminalProcess's own D-marker grace period elapses without ever
+					// seeing this event (see TerminalProcess.ts's finalize()): the terminal gets
+					// reused for a new command before VSCode's stale event for the OLD command
+					// finally arrives. Without this check, that stale event would call
+					// shellExecutionComplete() on whatever process/exit-code tracking is
+					// currently attached -- the NEW command's -- corrupting its state instead of
+					// being a harmless no-op for the command it actually belongs to.
+					const isStaleExecution =
+						process instanceof TerminalProcess &&
+						process.ownExecution !== undefined &&
+						process.ownExecution !== e.execution
+
+					if (isStaleExecution) {
+						console.info(
+							"[TerminalRegistry] Ignoring stale onDidEndTerminalShellExecution for a superseded execution",
+							{ terminalId: terminal.id, exitCode: e.exitCode },
+						)
+
+						return
+					}
+
 					if (!terminal.running) {
 						// The end event can arrive before setActiveStream() has set
 						// running=true (race between the global VS Code event and the

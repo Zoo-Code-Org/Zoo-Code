@@ -118,11 +118,17 @@ async function testCmdCommand(
 			;({ stream, exitCode } = createCmdCommandStream(command))
 		}
 
-		// Configure the mock terminal to return our stream
+		// Configure the mock terminal to return our stream. Reused as the SAME object
+		// for the start/end event triggers below -- TerminalRegistry's end handler
+		// correlates events to TerminalProcess.ownExecution by identity (see #800 fix),
+		// so a real VSCode-like flow must reference this same execution throughout,
+		// exactly as the real API's TerminalShellExecution object would be.
+		const mockExecution = {
+			commandLine: { value: command },
+			read: vi.fn().mockReturnValue(stream),
+		}
 		mockTerminal.shellIntegration.executeCommand.mockImplementation(function () {
-			return {
-				read: vi.fn().mockReturnValue(stream),
-			}
+			return mockExecution
 		})
 
 		// Set up event listeners to capture output
@@ -157,10 +163,7 @@ async function testCmdCommand(
 		if (eventHandlers.startTerminalShellExecution) {
 			eventHandlers.startTerminalShellExecution({
 				terminal: mockTerminal,
-				execution: {
-					commandLine: { value: command },
-					read: () => stream,
-				},
+				execution: mockExecution,
 			})
 		}
 
@@ -182,10 +185,11 @@ async function testCmdCommand(
 			}, 500)
 		})
 
-		// Then trigger the end event
+		// Then trigger the end event, referencing the SAME execution object as above.
 		if (eventHandlers.endTerminalShellExecution) {
 			eventHandlers.endTerminalShellExecution({
 				terminal: mockTerminal,
+				execution: mockExecution,
 				exitCode: exitCode,
 			})
 		}

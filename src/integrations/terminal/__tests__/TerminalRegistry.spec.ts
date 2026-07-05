@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 import { ExecaTerminal } from "../ExecaTerminal"
 import { ShellIntegrationManager } from "../ShellIntegrationManager"
 import { Terminal } from "../Terminal"
+import { TerminalProcess } from "../TerminalProcess"
 import { TerminalRegistry } from "../TerminalRegistry"
 
 const PAGER = process.platform === "win32" ? "" : "cat"
@@ -285,6 +286,58 @@ describe("TerminalRegistry", () => {
 			expect(terminal.busy).toBe(false)
 			expect(completeSpy).not.toHaveBeenCalled()
 		})
+
+		it(
+			"ignores a late end event for a superseded execution instead of completing " +
+				"the next command on the same reused terminal",
+			async () => {
+				const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+
+				// Command A: started, then self-finalized (e.g. TerminalProcess's own D-marker
+				// grace period elapsed without ever seeing onDidEndTerminalShellExecution --
+				// see TerminalProcess.ts's finalize()). Its own execution reference is what the
+				// registry must compare against, since terminal.activeShellExecution may
+				// already be pointing at a different (or no) execution by the time A's stale
+				// event finally arrives.
+				const processA = new TerminalProcess(terminal)
+				const executionA = { commandLine: { value: "command A" } } as any
+				processA.ownExecution = executionA
+				const emitA = vi.spyOn(processA, "emit")
+
+				// Command B has since started on the SAME reused terminal -- this is the
+				// state TerminalRegistry sees by the time A's late event arrives: a live
+				// process with its own, different execution.
+				const processB = new TerminalProcess(terminal)
+				const executionB = { commandLine: { value: "command B" } } as any
+				processB.ownExecution = executionB
+				terminal.process = processB
+				terminal.running = true
+				const emitB = vi.spyOn(processB, "emit")
+
+				// A's end event finally arrives, referencing A's (now superseded) execution.
+				await endHandler({
+					terminal: terminal.terminal,
+					execution: executionA,
+					exitCode: 1,
+				})
+
+				// B must be completely unaffected: no shell_execution_complete delivered to
+				// either process, and B is still the terminal's live process.
+				expect(emitA).not.toHaveBeenCalled()
+				expect(emitB).not.toHaveBeenCalled()
+				expect(terminal.process).toBe(processB)
+				expect(terminal.running).toBe(true)
+
+				// B's own end event, referencing B's execution, must still work normally.
+				await endHandler({
+					terminal: terminal.terminal,
+					execution: executionB,
+					exitCode: 0,
+				})
+
+				expect(emitB).toHaveBeenCalledWith("shell_execution_complete", expect.objectContaining({ exitCode: 0 }))
+			},
+		)
 	})
 
 	describe("releaseTerminalsForTask", () => {

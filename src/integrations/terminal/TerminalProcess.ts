@@ -19,6 +19,13 @@ export class TerminalProcess extends BaseTerminalProcess {
 	// Guards against overlapping abort retry loops if abort() is called again
 	// while a previous loop is still re-sending Ctrl+C.
 	private aborting = false
+	// The specific VSCode shell execution this process was started with. Kept on the
+	// process (not just terminal.activeShellExecution, which gets reused/reassigned as
+	// soon as the next command starts) so TerminalRegistry can tell a late
+	// onDidEndTerminalShellExecution event for THIS execution apart from one belonging to
+	// whatever command is currently running on the same reused terminal -- see the
+	// self-finalize grace period in run()'s finalize().
+	public ownExecution?: vscode.TerminalShellExecution
 
 	constructor(terminal: Terminal) {
 		super()
@@ -136,6 +143,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 				this.prepareCommandForShellIntegration(commandToExecute, shellKind),
 			)
 
+			this.ownExecution = execution
 			this.terminal.activeShellExecution = execution
 
 			// VS Code only captures data written after read() is first called, so read
@@ -181,8 +189,37 @@ export class TerminalProcess extends BaseTerminalProcess {
 		 * - OSC 633 ; E ; <commandline> [; <nonce>] ST - Explicitly set command line with optional nonce
 		 */
 
-		// Process stream data
+		// Process stream data.
+		//
+		// VSCode bug: on some platforms/shells (observed with multi-line commands and
+		// certain compound single-line commands), the stream can fail to close on its own
+		// and onDidEndTerminalShellExecution can fail to fire, even though the ]633;D end
+		// marker IS written into the stream -- the command visibly finished, but the event
+		// that would normally tell us so is silently dropped. See:
+		// https://github.com/microsoft/vscode/issues/316556,
+		// https://github.com/microsoft/vscode/issues/250764,
+		// https://github.com/microsoft/vscode/issues/254724.
+		//
+		// We can safely self-finalize on the D marker text alone: it is real, positive
+		// proof the shell finished, independent of whether the stream/event machinery
+		// ever confirms it. What we deliberately do NOT do is guess a "gone quiet, must be
+		// done" timeout: legitimate long-running-but-silent commands (a cold `tsc --noEmit`
+		// on a large project easily runs 20-60s with zero interim output) are
+		// indistinguishable from the broken-signal case by elapsed time alone, so any fixed
+		// threshold either fires falsely on real work or is too long to help. If neither the
+		// marker nor the event ever arrives, this still hangs (the pre-existing behavior) --
+		// bounded only by the user's own commandExecutionTimeout / the model's agentTimeout
+		// at the tool layer, both already user-understood, opt-in settings.
+		let sawEndMarker = false
+		let chunkCount = 0
+		const streamStartedAt = Date.now()
+
 		for await (let data of stream) {
+			chunkCount++
+			console.info(
+				`[Terminal Process] stream chunk #${chunkCount} (+${Date.now() - streamStartedAt}ms, ${data.length} chars)`,
+			)
+
 			const match = this.fullOutput === "" ? this.matchAfterVsceStartMarkers(data) : undefined
 
 			if (match !== undefined) {
@@ -207,13 +244,57 @@ export class TerminalProcess extends BaseTerminalProcess {
 			}
 
 			this.startHotTimer(data)
+
+			if (this.matchBeforeVsceEndMarkers(this.fullOutput) !== undefined) {
+				sawEndMarker = true
+				console.info(
+					`[Terminal Process] D marker observed in stream after ${chunkCount} chunk(s), +${Date.now() - streamStartedAt}ms`,
+				)
+				break
+			}
+		}
+
+		if (!sawEndMarker) {
+			console.info(
+				`[Terminal Process] stream ended without a D marker after ${chunkCount} chunk(s), +${Date.now() - streamStartedAt}ms (stream closed naturally, or run() is about to await shellExecutionComplete indefinitely)`,
+			)
 		}
 
 		// Set streamClosed immediately after stream ends.
 		this.terminal.setActiveStream(undefined)
 
-		// Wait for shell execution to complete.
-		await shellExecutionComplete
+		// Wait for shell execution to complete. Normally this resolves promptly via
+		// onDidEndTerminalShellExecution. If we broke out of the loop early because we saw
+		// the D marker ourselves but that event never arrives (the same VSCode bug), give it
+		// a short grace period to still capture the real exit code, then proceed without one
+		// rather than hang indefinitely. Always clear the grace timer so it doesn't linger in
+		// the event loop after shellExecutionComplete wins the race.
+		if (sawEndMarker) {
+			let graceTimer: NodeJS.Timeout | undefined
+			let graceWon = false
+			const grace = new Promise<void>((resolve) => {
+				graceTimer = setTimeout(() => {
+					graceWon = true
+					resolve()
+				}, 1_000)
+			})
+
+			const waitStartedAt = Date.now()
+			await Promise.race([shellExecutionComplete, grace])
+			clearTimeout(graceTimer)
+			console.info(
+				`[Terminal Process] post-marker wait resolved after ${Date.now() - waitStartedAt}ms via ${
+					graceWon ? "grace timer (no onDidEndTerminalShellExecution)" : "shellExecutionComplete"
+				}`,
+			)
+		} else {
+			const waitStartedAt = Date.now()
+			await shellExecutionComplete
+			console.info(
+				`[Terminal Process] shellExecutionComplete resolved after ${Date.now() - waitStartedAt}ms (no D marker was ever seen in the stream)`,
+			)
+		}
+
 		this.terminal.activeShellExecution = undefined
 
 		this.isHot = false
