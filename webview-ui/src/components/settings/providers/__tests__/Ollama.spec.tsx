@@ -186,7 +186,7 @@ describe("Ollama Component - thinking setting", () => {
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", false)
 		// reasoningEffort is intentionally left untouched so the user's prior
 		// selection survives across toggles.
-		expect(mockSetApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", undefined)
+		expect(mockSetApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything())
 	})
 
 	it("should render ThinkingBudget with supportsReasoningEffort when thinking is enabled", () => {

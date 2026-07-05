@@ -479,6 +479,179 @@ describe("NativeOllamaHandler", () => {
 				}),
 			)
 		})
+		it("should round-trip Anthropic-protocol thinking blocks as the thinking field on assistant messages", async () => {
+			// Covers the `block.type === "thinking"` branch in the assistant
+			// message converter. Anthropic-protocol thinking blocks carry the
+			// reasoning text in a `thinking` field (not `text`).
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{ type: "thinking", thinking: "Anthropic thinking text" } as any,
+						{ type: "text", text: "Prior answer" },
+					],
+				},
+				{ role: "user" as const, content: "Follow up" },
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "assistant",
+							thinking: "Anthropic thinking text",
+						}),
+					]),
+				}),
+			)
+		})
+
+		it("should concatenate multiple reasoning and thinking blocks into the thinking field", async () => {
+			// Multiple reasoning/thinking blocks are joined with newlines so the
+			// full thinking context is preserved across turns.
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{ type: "reasoning", text: "First reasoning", summary: [] } as any,
+						{ type: "thinking", thinking: "Second thinking" } as any,
+						{ type: "text", text: "Answer" },
+					],
+				},
+				{ role: "user" as const, content: "Follow up" },
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "assistant",
+							thinking: "First reasoning\nSecond thinking",
+						}),
+					]),
+				}),
+			)
+		})
+
+		it("should not set thinking field when assistant reasoning/thinking blocks are empty", async () => {
+			// Covers the `block.text.length > 0` and `block.thinking.length > 0`
+			// false branches, and the `reasoningText || undefined` falsy branch.
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{ type: "reasoning", text: "", summary: [] } as any,
+						{ type: "thinking", thinking: "" } as any,
+						{ type: "text", text: "Answer" },
+					],
+				},
+				{ role: "user" as const, content: "Follow up" },
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "assistant",
+							thinking: undefined,
+						}),
+					]),
+				}),
+			)
+		})
+
+		it("should not set thinking field on assistant messages without reasoning blocks", async () => {
+			// Covers the `reasoningText || undefined` falsy branch for a plain
+			// assistant text+tool_use message (no reasoning/thinking blocks).
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "Answer" },
+						{
+							type: "tool_use",
+							id: "tool-1",
+							name: "get_weather",
+							input: { location: "SF" },
+						},
+					],
+				},
+				{ role: "user" as const, content: "Follow up" },
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "assistant",
+							thinking: undefined,
+						}),
+					]),
+				}),
+			)
+		})
+
+		it("should not send think parameter for an unknown reasoningEffort value", async () => {
+			// Covers the `default` branch of getOllamaThinkParam's switch,
+			// which returns undefined for unrecognized effort values.
+			const options: ApiHandlerOptions = {
+				apiModelId: "qwen3",
+				ollamaModelId: "qwen3",
+				ollamaBaseUrl: "http://localhost:11434",
+				enableReasoningEffort: true,
+				reasoningEffort: "bogus" as any,
+			}
+
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
+			for await (const _ of stream) {
+				// consume
+			}
+
+			const callArgs = mockChat.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.think).toBeUndefined()
+		})
 	})
 
 	it("should not send think parameter when enableReasoningEffort is true but reasoningEffort is undefined", async () => {
@@ -662,6 +835,58 @@ describe("NativeOllamaHandler", () => {
 					// consume stream
 				}
 			}).rejects.toThrow("Model llama2 not found in Ollama")
+		})
+
+		it("should wrap stream processing errors with a descriptive message", async () => {
+			// Covers the `catch (streamError)` branch: the chat() call
+			// resolves and returns an async iterable, but iterating it throws.
+			// The handler must wrap the error with "Ollama stream processing
+			// error: ..." and rethrow.
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "partial" } }
+				throw new Error("stream blew up")
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+
+			await expect(async () => {
+				for await (const _ of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow("Ollama stream processing error: stream blew up")
+		})
+
+		it("should wrap stream processing errors with unknown message fallback", async () => {
+			// Covers the `streamError.message || "Unknown error"` fallback in
+			// the stream processing catch block when the error has no message.
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "partial" } }
+				throw {}
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+
+			await expect(async () => {
+				for await (const _ of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow("Ollama stream processing error: Unknown error")
+		})
+
+		it("should rethrow non-ECONNREFUSED non-404 errors from chat()", async () => {
+			// Covers the fall-through `throw error` branch in the outer catch
+			// when the error is neither ECONNREFUSED nor a 404.
+			const error = new Error("something else") as any
+			error.status = 500
+			mockChat.mockRejectedValue(error)
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+
+			await expect(async () => {
+				for await (const _ of stream) {
+					// consume stream
+				}
+			}).rejects.toThrow("something else")
 		})
 	})
 
