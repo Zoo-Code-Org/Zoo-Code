@@ -1,7 +1,12 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { kenariDefaultModelId, kenariDefaultModelInfo, KENARI_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import {
+	kenariDefaultModelId,
+	kenariDefaultModelInfo,
+	KENARI_DEFAULT_TEMPERATURE,
+	KENARI_BASE_URL,
+} from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
 
@@ -10,6 +15,7 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { RouterProvider } from "./router-provider"
+import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 /**
  * API handler for Kenari, an Indonesian OpenAI-compatible AI gateway billed
@@ -32,7 +38,7 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 		super({
 			options,
 			name: "kenari",
-			baseURL: "https://kenari.id/v1",
+			baseURL: KENARI_BASE_URL,
 			apiKey: options.kenariApiKey,
 			modelId: options.kenariModelId,
 			defaultModelId: kenariDefaultModelId,
@@ -79,9 +85,11 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 				yield { type: "text", text: delta.content }
 			}
 
-			// Several Kenari models (GLM, DeepSeek) stream reasoning via this field.
-			if (delta && "reasoning_content" in delta && delta.reasoning_content) {
-				yield { type: "reasoning", text: delta.reasoning_content as string }
+			// Several Kenari models (GLM, DeepSeek) stream reasoning via reasoning_content,
+			// with an OpenRouter-style `reasoning` fallback; the shared helper handles both.
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
 			}
 
 			// Emit raw tool call chunks - NativeToolCallParser handles state management.

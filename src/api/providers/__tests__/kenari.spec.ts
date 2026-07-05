@@ -233,6 +233,25 @@ describe("KenariHandler", () => {
 			expect(chunks).toEqual([{ type: "text", text: "Hi" }])
 		})
 
+		it("emits reasoning from the OpenRouter-style `reasoning` field when reasoning_content is absent", async () => {
+			mockCreate.mockImplementation(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Hi", reasoning: "thinking…" }, index: 0 }],
+						usage: null,
+					}
+				},
+			}))
+
+			const handler = new KenariHandler(mockOptions)
+			const chunks = []
+			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking…" })
+		})
+
 		it("omits temperature for models that do not support it", async () => {
 			vitest.mocked(getModels).mockResolvedValueOnce({
 				"openai/o3-mini": {

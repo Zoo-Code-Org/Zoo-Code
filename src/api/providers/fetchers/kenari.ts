@@ -2,9 +2,7 @@ import axios from "axios"
 import { z } from "zod"
 
 import type { ModelInfo } from "@roo-code/types"
-import { kenariDefaultModelInfo } from "@roo-code/types"
-
-const KENARI_BASE_URL = "https://kenari.id/v1"
+import { kenariDefaultModelInfo, KENARI_BASE_URL } from "@roo-code/types"
 
 // The Kenari `/models` endpoint follows the OpenAI `/models` shape and is
 // public (no key required). The `id` is the only guaranteed field; metadata is

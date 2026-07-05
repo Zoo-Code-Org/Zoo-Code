@@ -6,6 +6,11 @@ import type { ModelInfo } from "../model.js"
 // The full model list (and metadata) is fetched dynamically from
 // `https://kenari.id/v1/models`, so models can be switched on the fly.
 // The values below are only a fallback used before the live list resolves.
+
+// Single source of truth for the gateway base URL, shared by the handler and
+// the model fetcher so the endpoint is defined in exactly one place.
+export const KENARI_BASE_URL = "https://kenari.id/v1"
+
 export const kenariDefaultModelId = "glm-5-2"
 
 export const kenariDefaultModelInfo: ModelInfo = {

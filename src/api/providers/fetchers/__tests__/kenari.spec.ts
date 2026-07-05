@@ -90,6 +90,9 @@ describe("Kenari Fetchers", () => {
 			const models = await getKenariModels("k")
 
 			expect(Object.keys(models)).toEqual(["valid-model"])
+			// The surviving entry keeps its mapped metadata (context_window -> contextWindow),
+			// so a field-mapping regression in this fallback branch is caught here.
+			expect(models["valid-model"].contextWindow).toBe(50000)
 			// Two warns: one for the outer schema mismatch, one for the invalid item
 			expect(warnSpy).toHaveBeenCalledTimes(2)
 			expect(warnSpy.mock.calls[0][0]).toContain("did not match expected schema")
@@ -119,6 +122,18 @@ describe("Kenari Fetchers", () => {
 		it("falls back to the model name when no description is provided", () => {
 			const info = parseKenariModel({ id: "x", name: "Model X" })
 			expect(info.description).toBe("Model X")
+		})
+
+		it("prefers context_window over context_length and max_output_tokens over max_tokens", () => {
+			const info = parseKenariModel({
+				id: "dual",
+				context_window: 111,
+				context_length: 222,
+				max_output_tokens: 33,
+				max_tokens: 44,
+			})
+			expect(info.contextWindow).toBe(111)
+			expect(info.maxTokens).toBe(33)
 		})
 
 		it("treats a model with no cache pricing as not cache-capable", () => {
