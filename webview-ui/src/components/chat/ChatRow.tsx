@@ -867,20 +867,68 @@ export const ChatRowContent = ({
 								/>
 							</span>
 						</div>
-						<div className="border-l border-muted-foreground/80 ml-2 pl-4 pb-1">
-							<MarkdownBlock markdown={tool.content} />
-							<div>
-								{childTaskId && !isFollowedBySubtaskResult && (
+						<div
+							style={{
+								marginTop: "4px",
+								backgroundColor: "var(--vscode-editor-background)",
+								border: "1px solid var(--vscode-editorGroup-border)",
+								borderRadius: "4px",
+								overflow: "hidden",
+							}}>
+							<div
+								style={{
+									padding: "10px 12px",
+									maxHeight: isExpanded ? "none" : "180px",
+									overflowY: isExpanded ? "visible" : "hidden",
+									position: "relative",
+								}}>
+								<MarkdownBlock markdown={tool.content} />
+								{!isExpanded && (
+									<div
+										style={{
+											position: "absolute",
+											bottom: 0,
+											left: 0,
+											right: 0,
+											height: "48px",
+											background:
+												"linear-gradient(to bottom, transparent, var(--vscode-editor-background))",
+											pointerEvents: "none",
+										}}
+									/>
+								)}
+							</div>
+							<div
+								className="cursor-pointer"
+								style={{
+									display: "flex",
+									alignItems: "center",
+									justifyContent: "space-between",
+									padding: "4px 12px 8px",
+								}}
+								onClick={handleToggleExpand}>
+								<span
+									className="text-vscode-descriptionForeground hover:underline"
+									style={{ fontSize: "calc(var(--vscode-font-size) - 2px)" }}>
+									{isExpanded ? t("chat:subtasks.collapseBrief") : t("chat:subtasks.expandBrief")}
+								</span>
+								<span
+									className={`codicon codicon-chevron-${isExpanded ? "up" : "down"}`}
+									style={{ opacity: 0.7 }}
+								/>
+							</div>
+							{childTaskId && !isFollowedBySubtaskResult && (
+								<div style={{ padding: "0 12px 10px" }}>
 									<button
-										className="cursor-pointer flex gap-1 items-center mt-2 text-vscode-descriptionForeground hover:text-vscode-descriptionForeground hover:underline font-normal"
+										className="cursor-pointer flex gap-1 items-center text-vscode-descriptionForeground hover:text-vscode-descriptionForeground hover:underline font-normal"
 										onClick={() =>
 											vscode.postMessage({ type: "showTaskWithId", text: childTaskId })
 										}>
 										{t("chat:subtasks.goToSubtask")}
 										<ArrowRight className="size-3" />
 									</button>
-								)}
-							</div>
+								</div>
+							)}
 						</div>
 					</>
 				)

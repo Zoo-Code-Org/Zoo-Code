@@ -320,6 +320,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 									setPrimaryButtonText(t("chat:completeSubtaskAndReturn"))
 									setSecondaryButtonText(undefined)
 									break
+								case "newTask":
+									setPrimaryButtonText(t("chat:subtasks.beginSession"))
+									setSecondaryButtonText(t("chat:subtasks.notNow"))
+									break
 								case "readFile":
 									if (tool.batchFiles && Array.isArray(tool.batchFiles)) {
 										setPrimaryButtonText(t("chat:read-batch.approve.title"))
@@ -1341,13 +1345,19 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	const switchToMode = useCallback(
 		(modeSlug: string): void => {
+			// Switching modes here would tear down the active delegated sub-agent session;
+			// the writer must finish (Done) or Abandon it first via the breadcrumb.
+			if (currentTaskItem?.parentTaskId) {
+				return
+			}
+
 			// Update local state and notify extension to sync mode change.
 			setMode(modeSlug)
 
 			// Send the mode switch message.
 			vscode.postMessage({ type: "mode", text: modeSlug })
 		},
-		[setMode],
+		[setMode, currentTaskItem?.parentTaskId],
 	)
 
 	const handleSuggestionClickInRow = useCallback(

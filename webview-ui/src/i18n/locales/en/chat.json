@@ -129,6 +129,7 @@
 		}
 	},
 	"selectMode": "Select mode for interaction",
+	"modeSwitchBlockedDuringDelegation": "Finish or abandon the current session before switching modes.",
 	"selectApiConfig": "Select API configuration",
 	"lockApiConfigAcrossModes": "Lock API configuration across all modes in this workspace",
 	"unlockApiConfigAcrossModes": "API configuration is locked across all modes in this workspace (click to unlock)",
@@ -140,6 +141,17 @@
 		"description": "Specialized personas that tailor Boo's behavior.",
 		"searchPlaceholder": "Search modes...",
 		"noResults": "No results found"
+	},
+	"delegation": {
+		"breadcrumb": "{{parentMode}} › {{childMode}}",
+		"done": "Done",
+		"doneTooltip": "Wrap up this session now and return to the previous mode",
+		"abandon": "Abandon",
+		"abandonTooltip": "End this session without completing it and return to the previous mode",
+		"abandonConfirmTitle": "Abandon this session?",
+		"abandonConfirmDescription": "This ends the session without completing its task. No results will be reported back.",
+		"abandonConfirmAction": "Abandon session",
+		"cancel": "Cancel"
 	},
 	"enhancePromptDescription": "The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works.",
 	"addImages": "Add images to message",
@@ -300,7 +312,11 @@
 		"resultContent": "Subtask completed",
 		"defaultResult": "Please continue to the next task.",
 		"completionInstructions": "You can review the results and suggest any corrections or next steps. If everything looks good, confirm to return the result to the parent task.",
-		"goToSubtask": "View task"
+		"goToSubtask": "View task",
+		"expandBrief": "Show full brief",
+		"collapseBrief": "Show less",
+		"beginSession": "Begin session",
+		"notNow": "Not now"
 	},
 	"questions": {
 		"hasQuestion": "Boo has a question"

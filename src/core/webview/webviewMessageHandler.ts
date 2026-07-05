@@ -1282,6 +1282,12 @@ export const webviewMessageHandler = async (
 		case "cancelTask":
 			await provider.cancelTask()
 			break
+		case "abandonSubtask":
+			await provider.abandonCurrentSubtask()
+			break
+		case "forceSubtaskDone":
+			await provider.forceCurrentSubtaskDone()
+			break
 		case "cancelAutoApproval":
 			// Cancel any pending auto-approval timeout for the current task
 			provider.getCurrentTask()?.cancelAutoApprovalTimeout()
@@ -1551,9 +1557,18 @@ export const webviewMessageHandler = async (
 
 			break
 
-		case "mode":
+		case "mode": {
+			const currentTask = provider.getCurrentTask()
+			if (currentTask?.parentTaskId) {
+				// Switching modes here would tear down the active delegated sub-agent
+				// session; the writer must finish or abandon it first (see breadcrumb
+				// Done/Abandon actions in the webview).
+				vscode.window.showInformationMessage(t("common:info.mode_switch_blocked_during_delegation"))
+				break
+			}
 			await provider.handleModeSwitch(message.text as Mode)
 			break
+		}
 		case "updatePrompt":
 			if (message.promptMode && message.customPrompt !== undefined) {
 				const existingPrompts = getGlobalState("customModePrompts") ?? {}

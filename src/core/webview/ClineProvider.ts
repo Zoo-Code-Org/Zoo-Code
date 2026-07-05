@@ -3482,6 +3482,65 @@ export class ClineProvider
 	}
 
 	/**
+	 * User-forced escape from an active delegated sub-agent session: end the child
+	 * without completion and resume the parent with a synthetic result. No-op if the
+	 * current task is not a delegated child.
+	 */
+	public async abandonCurrentSubtask(): Promise<void> {
+		const task = this.getCurrentTask()
+
+		if (!task?.parentTaskId) {
+			return
+		}
+
+		const parentTaskId = task.parentTaskId
+		const childTaskId = task.taskId
+
+		// Cancel any in-flight request before tearing the child down so we don't race
+		// a still-writing stream (mirrors cancelTask()'s abort sequencing).
+		task.cancelCurrentRequest()
+		task.abortTask()
+
+		await pWaitFor(
+			() =>
+				this.getCurrentTask()?.taskId !== childTaskId ||
+				this.getCurrentTask()?.isStreaming === false ||
+				this.getCurrentTask()?.didFinishAbortingStream === true ||
+				this.getCurrentTask()?.isWaitingForFirstChunk === true,
+			{ timeout: 3_000 },
+		).catch(() => {
+			console.error("Failed to abort subtask before abandoning")
+		})
+
+		await this.reopenParentFromDelegation({
+			parentTaskId,
+			childTaskId,
+			completionResultSummary: "Session abandoned by the writer; no results to report.",
+		})
+	}
+
+	/**
+	 * User-forced completion of an active delegated sub-agent session (the "/done"
+	 * escape): instructs the running sub-agent to summarize per the return protocol
+	 * and propose completion now, regardless of whether its `doneWhen` criteria are met.
+	 */
+	public async forceCurrentSubtaskDone(): Promise<void> {
+		const task = this.getCurrentTask()
+
+		if (!task?.parentTaskId) {
+			return
+		}
+
+		const instruction = t("common:info.force_done_instruction")
+
+		if (task.isStreaming) {
+			task.messageQueueService.addMessage(instruction)
+		} else {
+			await task.submitUserMessage(instruction)
+		}
+	}
+
+	/**
 	 * Convert a file path to a webview-accessible URI
 	 * This method safely converts file paths to URIs that can be loaded in the webview
 	 *

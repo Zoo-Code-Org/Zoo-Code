@@ -11,7 +11,7 @@ import TaskHeader, { TaskHeaderProps } from "../TaskHeader"
 // Mock i18n
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
-		t: (key: string) => key, // Simple mock that returns the key
+		t: (key: string, options?: Record<string, any>) => (options ? `${key}:${JSON.stringify(options)}` : key), // Simple mock that returns the key (with interpolation args for assertions)
 	}),
 	// Mock initReactI18next to prevent initialization errors in tests
 	initReactI18next: {
@@ -38,8 +38,10 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 // Create a variable to hold the mock state
 const mockExtensionState: {
 	apiConfiguration: ProviderSettings
-	currentTaskItem: { id: string } | null
+	currentTaskItem: { id: string; parentTaskId?: string; mode?: string } | null
 	clineMessages: any[]
+	taskHistory: Array<{ id: string; mode?: string; parentTaskId?: string }>
+	customModes: any[]
 } = {
 	apiConfiguration: {
 		apiProvider: "anthropic",
@@ -48,6 +50,8 @@ const mockExtensionState: {
 	} as ProviderSettings,
 	currentTaskItem: { id: "test-task-id" },
 	clineMessages: [],
+	taskHistory: [],
+	customModes: [],
 }
 
 // Mock the ExtensionStateContext
@@ -218,6 +222,61 @@ describe("TaskHeader", () => {
 			const backButton = screen.getByText("chat:task.backToParentTask").closest("button")
 			expect(backButton).toBeInTheDocument()
 			expect(backButton?.querySelector("svg.lucide-arrow-left")).toBeInTheDocument()
+		})
+	})
+
+	describe("Delegation breadcrumb and Done/Abandon actions", () => {
+		beforeEach(() => {
+			mockPostMessage.mockClear()
+			mockExtensionState.taskHistory = []
+			mockExtensionState.customModes = []
+			mockExtensionState.currentTaskItem = { id: "test-task-id" }
+		})
+
+		it("does not render Done/Abandon actions when there is no parent task", () => {
+			renderTaskHeader()
+			expect(screen.queryByText("chat:delegation.done")).not.toBeInTheDocument()
+			expect(screen.queryByText("chat:delegation.abandon")).not.toBeInTheDocument()
+		})
+
+		it("renders the breadcrumb and Done/Abandon actions for a delegated child session", () => {
+			mockExtensionState.taskHistory = [{ id: "parent-task-123", mode: "collaborate" }]
+			mockExtensionState.currentTaskItem = { id: "test-task-id", mode: "outline" }
+
+			renderTaskHeader({ parentTaskId: "parent-task-123" })
+
+			expect(screen.getByText("chat:delegation.done")).toBeInTheDocument()
+			expect(screen.getByText("chat:delegation.abandon")).toBeInTheDocument()
+			expect(
+				screen.getByText('chat:delegation.breadcrumb:{"parentMode":"🤝 Collaborate","childMode":"📋 Outline"}'),
+			).toBeInTheDocument()
+		})
+
+		it("posts forceSubtaskDone when Done is clicked", () => {
+			mockExtensionState.taskHistory = [{ id: "parent-task-123", mode: "collaborate" }]
+			mockExtensionState.currentTaskItem = { id: "test-task-id", mode: "outline" }
+
+			renderTaskHeader({ parentTaskId: "parent-task-123" })
+
+			fireEvent.click(screen.getByText("chat:delegation.done"))
+
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "forceSubtaskDone" })
+		})
+
+		it("opens a confirmation dialog on Abandon and posts abandonSubtask on confirm", () => {
+			mockExtensionState.taskHistory = [{ id: "parent-task-123", mode: "collaborate" }]
+			mockExtensionState.currentTaskItem = { id: "test-task-id", mode: "outline" }
+
+			renderTaskHeader({ parentTaskId: "parent-task-123" })
+
+			fireEvent.click(screen.getByText("chat:delegation.abandon"))
+
+			expect(mockPostMessage).not.toHaveBeenCalledWith({ type: "abandonSubtask" })
+			expect(screen.getByText("chat:delegation.abandonConfirmTitle")).toBeInTheDocument()
+
+			fireEvent.click(screen.getByText("chat:delegation.abandonConfirmAction"))
+
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "abandonSubtask" })
 		})
 	})
 

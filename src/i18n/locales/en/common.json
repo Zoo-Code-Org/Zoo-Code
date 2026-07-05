@@ -163,6 +163,8 @@
 		"image_saved": "Image saved to {{path}}",
 		"mode_exported": "Mode '{{mode}}' exported successfully",
 		"mode_imported": "Mode imported successfully",
+		"mode_switch_blocked_during_delegation": "Finish or abandon the current session before switching modes.",
+		"force_done_instruction": "The writer wants to wrap up this session now. Summarize per the return protocol (artifacts created/modified, decisions made with the writer, unresolved threads, any pending canon proposals awaiting approval) and propose completion now, even if your normal completion criteria aren't fully met.",
 		"roo": {
 			"signInUnavailable": "Roo Code Cloud sign-in is currently unavailable. Configure another provider to continue."
 		}

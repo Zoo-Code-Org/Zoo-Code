@@ -98,7 +98,10 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			commands,
 			enterBehavior,
 			lockApiConfigAcrossModes,
+			currentTaskItem,
 		} = useExtensionState()
+
+		const isDelegatedChildSession = !!currentTaskItem?.parentTaskId
 
 		// Find the ID and display text for the currently selected API configuration.
 		const { currentConfigId, displayName } = useMemo(() => {
@@ -929,10 +932,15 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		// Common mode selector handler
 		const handleModeChange = useCallback(
 			(value: Mode) => {
+				// Switching modes here would tear down the active delegated sub-agent
+				// session; the writer must finish (Done) or Abandon it first.
+				if (isDelegatedChildSession) {
+					return
+				}
 				setMode(value)
 				vscode.postMessage({ type: "mode", text: value })
 			},
-			[setMode],
+			[setMode, isDelegatedChildSession],
 		)
 
 		// Helper function to handle API config change
@@ -1299,8 +1307,13 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					<div className="flex items-center gap-2 min-w-0 overflow-clip flex-1">
 						<ModeSelector
 							value={mode}
-							title={t("chat:selectMode")}
+							title={
+								isDelegatedChildSession
+									? t("chat:modeSwitchBlockedDuringDelegation")
+									: t("chat:selectMode")
+							}
 							onChange={handleModeChange}
+							disabled={isDelegatedChildSession}
 							triggerClassName="text-ellipsis overflow-hidden flex-shrink-0"
 							modeShortcutText={modeShortcutText}
 							customModes={customModes}

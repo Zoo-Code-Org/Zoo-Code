@@ -457,6 +457,8 @@ export interface WebviewMessage {
 		| "openMention"
 		| "cancelTask"
 		| "cancelAutoApproval"
+		| "abandonSubtask"
+		| "forceSubtaskDone"
 		| "updateVSCodeSetting"
 		| "getVSCodeSetting"
 		| "vsCodeSetting"

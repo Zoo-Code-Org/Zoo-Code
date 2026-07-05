@@ -1,15 +1,41 @@
-import { memo, useRef, useState, useMemo } from "react"
+import { memo, useRef, useState, useMemo, useCallback } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronUp, ChevronDown, HardDriveDownload, HardDriveUpload, FoldVertical, ArrowLeft } from "lucide-react"
+import {
+	ChevronUp,
+	ChevronDown,
+	HardDriveDownload,
+	HardDriveUpload,
+	FoldVertical,
+	ArrowLeft,
+	CheckCircle2,
+	XCircle,
+} from "lucide-react"
 import prettyBytes from "pretty-bytes"
 
 import type { ClineMessage } from "@roo-code/types"
 
 import { getModelMaxOutputTokens } from "@roo/api"
+import { getAllModes } from "@roo/modes"
 
 import { formatLargeNumber } from "@src/utils/format"
 import { cn } from "@src/lib/utils"
-import { StandardTooltip, Button, Table, TableBody, TableRow, TableCell, CircularProgress } from "@src/components/ui"
+import {
+	StandardTooltip,
+	Button,
+	Table,
+	TableBody,
+	TableRow,
+	TableCell,
+	CircularProgress,
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@src/components/ui"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { vscode } from "@src/utils/vscode"
@@ -56,9 +82,10 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem } = useExtensionState()
+	const { apiConfiguration, currentTaskItem, taskHistory, customModes } = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
+	const [isAbandonDialogOpen, setIsAbandonDialogOpen] = useState(false)
 
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
@@ -98,20 +125,103 @@ const TaskHeader = ({
 		}
 	}
 
+	// Delegated child session breadcrumb: resolve parent/child mode display names.
+	const parentModeName = useMemo(() => {
+		if (!parentTaskId) return undefined
+		const parentMode = taskHistory?.find((item) => item.id === parentTaskId)?.mode
+		if (!parentMode) return undefined
+		return getAllModes(customModes).find((m) => m.slug === parentMode)?.name ?? parentMode
+	}, [parentTaskId, taskHistory, customModes])
+
+	const childModeName = useMemo(() => {
+		const childMode = currentTaskItem?.mode
+		if (!childMode) return undefined
+		return getAllModes(customModes).find((m) => m.slug === childMode)?.name ?? childMode
+	}, [currentTaskItem?.mode, customModes])
+
+	const handleForceDone = useCallback((e: React.MouseEvent) => {
+		e.stopPropagation()
+		vscode.postMessage({ type: "forceSubtaskDone" })
+	}, [])
+
+	const handleAbandon = useCallback((e: React.MouseEvent) => {
+		e.stopPropagation()
+		setIsAbandonDialogOpen(true)
+	}, [])
+
+	const handleConfirmAbandon = useCallback(() => {
+		vscode.postMessage({ type: "abandonSubtask" })
+		setIsAbandonDialogOpen(false)
+	}, [])
+
 	return (
 		<div className="group pt-2 pb-0 px-3">
 			{isSubtask && (
-				<div className="mb-2" onClick={(e) => e.stopPropagation()}>
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={handleBackToParent}
-						className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-foreground">
-						<ArrowLeft className="size-3" />
-						{t("chat:task.backToParentTask")}
-					</Button>
+				<div
+					className="mb-2 flex items-center justify-between gap-2 flex-wrap"
+					onClick={(e) => e.stopPropagation()}>
+					<div className="flex items-center gap-2">
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={handleBackToParent}
+							className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-foreground">
+							<ArrowLeft className="size-3" />
+							{t("chat:task.backToParentTask")}
+						</Button>
+						{parentModeName && childModeName && (
+							<span className="text-xs text-vscode-descriptionForeground">
+								{t("chat:delegation.breadcrumb", {
+									parentMode: parentModeName,
+									childMode: childModeName,
+								})}
+							</span>
+						)}
+					</div>
+					<div className="flex items-center gap-1">
+						<StandardTooltip content={t("chat:delegation.doneTooltip")}>
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={handleForceDone}
+								className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-foreground">
+								<CheckCircle2 className="size-3" />
+								{t("chat:delegation.done")}
+							</Button>
+						</StandardTooltip>
+						<StandardTooltip content={t("chat:delegation.abandonTooltip")}>
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={handleAbandon}
+								className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-errorForeground">
+								<XCircle className="size-3" />
+								{t("chat:delegation.abandon")}
+							</Button>
+						</StandardTooltip>
+					</div>
 				</div>
 			)}
+			<AlertDialog open={isAbandonDialogOpen} onOpenChange={setIsAbandonDialogOpen}>
+				<AlertDialogContent onEscapeKeyDown={() => setIsAbandonDialogOpen(false)}>
+					<AlertDialogHeader>
+						<AlertDialogTitle>{t("chat:delegation.abandonConfirmTitle")}</AlertDialogTitle>
+						<AlertDialogDescription>
+							{t("chat:delegation.abandonConfirmDescription")}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel asChild>
+							<Button variant="secondary">{t("chat:delegation.cancel")}</Button>
+						</AlertDialogCancel>
+						<AlertDialogAction asChild>
+							<Button variant="destructive" onClick={handleConfirmAbandon}>
+								{t("chat:delegation.abandonConfirmAction")}
+							</Button>
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 			<div
 				className={cn(
 					"px-3 pt-2.5 pb-2 flex flex-col gap-1.5 relative z-1 cursor-pointer",

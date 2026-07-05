@@ -1205,4 +1205,36 @@ describe("ChatTextArea", () => {
 			expect(sendButton).toHaveClass("pointer-events-auto")
 		})
 	})
+
+	describe("mode selector during active delegation", () => {
+		it("is enabled and posts a mode switch when there is no active delegated child", () => {
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+				filePaths: [],
+				openedTabs: [],
+				taskHistory: [],
+				cwd: "/test/workspace",
+				currentTaskItem: undefined,
+			})
+
+			render(<ChatTextArea {...defaultProps} />)
+
+			const trigger = screen.getByTestId("mode-selector-trigger")
+			expect(trigger).not.toBeDisabled()
+		})
+
+		it("is disabled when the current task is a delegated child session", () => {
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+				filePaths: [],
+				openedTabs: [],
+				taskHistory: [],
+				cwd: "/test/workspace",
+				currentTaskItem: { id: "child-1", parentTaskId: "parent-1" },
+			})
+
+			render(<ChatTextArea {...defaultProps} />)
+
+			const trigger = screen.getByTestId("mode-selector-trigger")
+			expect(trigger).toBeDisabled()
+		})
+	})
 })
