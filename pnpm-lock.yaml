@@ -153,8 +153,8 @@ importers:
   apps/vscode-e2e:
     devDependencies:
       '@copilotkit/aimock':
-        specifier: 1.15.1
-        version: 1.15.1(vitest@4.1.9)
+        specifier: 1.35.0
+        version: 1.35.0(vitest@4.1.9)
       '@roo-code/config-eslint':
         specifier: workspace:^
         version: link:../../packages/config-eslint
@@ -1317,9 +1317,9 @@ packages:
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
 
-  '@copilotkit/aimock@1.15.1':
-    resolution: {integrity: sha512-DG9p6fKdYmuTW0zaUe9iDbgB/CM3SWhpdhVBrszQ6+L2UW4+DZB0gvICFQXRWhVXMpqxEkI9Pqhm/MtMb8li9A==}
-    engines: {node: '>=24.0.0'}
+  '@copilotkit/aimock@1.35.0':
+    resolution: {integrity: sha512-dWtNUeaWD4jaC3Kv9oBiCoIczENM6u8pWBCmybn0/hSFEY57yqCtOGPsVNIG/YlmwbH8p5sgtL6xZzo1FnPi8g==}
+    engines: {node: '>=20.15.0'}
     hasBin: true
     peerDependencies:
       jest: '>=29'
@@ -9058,7 +9058,7 @@ snapshots:
 
   '@chevrotain/types@11.1.2': {}
 
-  '@copilotkit/aimock@1.15.1(vitest@4.1.9)':
+  '@copilotkit/aimock@1.35.0(vitest@4.1.9)':
     optionalDependencies:
       vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@20.19.43)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(jsdom@26.1.0)(vite@8.1.0(@types/node@20.19.43)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
