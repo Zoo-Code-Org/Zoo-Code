@@ -342,9 +342,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Kural Yönetimi Arayüzü — Ayarlar'daki yeni Kurallar sekmesi, genel ve çalışma alanı Zoo kurallarını doğrudan editörden oluşturmanıza, silmenize ve açmanıza olanak tanır.",
-			"highlight2": "Tamamlama Değişikliği İncelemesi — bir görev tamamlandığında, yeni \"Yeni Değişiklikleri Gör\" ve \"Değişiklikleri Geri Yükle\" düğmeleri, son istemdeki değişiklikleri incelemenize ve geri almanıza olanak tanır.",
-			"highlight3": "Gevşetilmiş Diff Eşikleri — yapılandırılabilir benzerlik eşikleri, diff uygularken \"düzenleme başarısız\" hatalarını azaltır; ayarları ince ayar yapmak için yeni tanı araçları da eklenmiştir."
+			"highlight1": "Claude Sonnet 5 desteği — en yeni Claude modeli artık Anthropic, Bedrock ve Vertex sağlayıcılarında kullanılabilir.",
+			"highlight2": "Semble v0.4.1 yükseltmesi — düzleştirilmiş sonuç ayrıştırma ve yerelleştirilmiş durum mesajları.",
+			"highlight3": "Görev yaşam döngüsü durum geçiş koruması — yeni bir durum geçiş koruması ve başlangıç yetkilendirme uzlaştırması geçersiz görev durum geçişlerini önler."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

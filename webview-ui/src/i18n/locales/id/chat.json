@@ -370,9 +370,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "UI Manajemen Aturan — tab Aturan baru di Pengaturan memungkinkan Anda membuat, menghapus, dan membuka aturan Zoo global dan ruang kerja langsung dari editor.",
-			"highlight2": "Tinjauan Perubahan Penyelesaian — setelah tugas selesai, tombol \"Lihat Perubahan Baru\" dan \"Pulihkan Perubahan\" yang baru memungkinkan Anda memeriksa dan membatalkan perubahan dari prompt terakhir.",
-			"highlight3": "Ambang Diff yang Dilonggarkan — ambang kemiripan yang dapat dikonfigurasi mengurangi kesalahan \"pengeditan gagal\" saat menerapkan diff, dengan diagnostik baru untuk membantu menyetel pengaturan."
+			"highlight1": "Dukungan Claude Sonnet 5 — model Claude terbaru kini tersedia di penyedia Anthropic, Bedrock, dan Vertex.",
+			"highlight2": "Peningkatan ke Semble v0.4.1 — penguraian hasil yang diratakan dan pesan status terlokalisasi.",
+			"highlight3": "Penjaga transisi status siklus hidup tugas — penjaga transisi status baru dan rekonsiliasi delegasi saat startup mencegah transisi status tugas yang tidak valid."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

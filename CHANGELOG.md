@@ -1,5 +1,35 @@
 # Zoo Code Changelog
 
+## [3.66.0]
+
+### Minor Changes
+
+- Add Claude Sonnet 5 support across Anthropic, Bedrock, and Vertex providers (#777 by @navedmerchant, PR #778 by @navedmerchant)
+- Upgrade Semble to v0.4.1 with flattened result parsing and localized status messages (#733 by @navedmerchant, PR #734 by @navedmerchant)
+- Add task-lifecycle status transition guard and startup delegation reconciliation to prevent invalid task state transitions (#366 by @edelauna, PR #692 by @edelauna)
+- Fix: LiteLLM cache key collision and silent fallback to a non-existent default model (#638 by @awschmeder, PR #647 by @awschmeder)
+- Fix: reliable auto context condensing for the VS Code Language Model API (#714 by @simurg79, PR #710 by @simurg79)
+- Fix(ThinkingBudget): support `xhigh` and all extended reasoning effort values (#713 by @6rz6, PR #774 by @edelauna)
+- Fix(deepseek): round-trip `reasoning_content` in thinking mode to prevent 400 errors (#201 by @leosdad, PR #775 by @edelauna)
+- Fix(gemini): base64-encode `thoughtSignature` bypass token to fix the Vertex AI empty-response loop (#536 by @edelauna, PR #776 by @edelauna)
+- Fix: provider cache reset after settings import (#689 by @JunyongParkDev, PR #726 by @JunyongParkDev)
+- Fix(delegation): atomically serialize `reopenParentFromDelegation` (#365 by @edelauna, PR #725 by @edelauna)
+- Fix: shell default profile name type guard (#686 by @daewoongoh, PR #687 by @daewoongoh)
+- chore(security): dependency-review, invisible-char detection, and least-privilege workflow permissions (#782 by @edelauna, PR #783 by @edelauna)
+- chore: upgrade `@anthropic-ai/sdk` to 0.104.1 and `@anthropic-ai/vertex-sdk` to 0.17.1 (#438 by @p12tic, PR #600 by @p12tic)
+- chore: enforce no-floating-promises in core/task/ (PR #253 by @0xMink)
+- ci: improve PR label reconciliation with CI gating and event triggers (PR #228 by @app/roomote)
+- fix(deps): update AI SDKs and providers (PR #744 by @app/renovate)
+- chore(deps): update build, lint, and test tooling (PR #745 by @app/renovate)
+- chore(deps): update dependency mermaid to v11.16.0 (PR #742 by @app/renovate)
+- chore(deps): update dependency posthog-js to v1.393.5 (PR #746 by @app/renovate)
+- chore(deps): update dependency ajv to v8.20.0 (PR #747 by @app/renovate)
+- chore(deps): update dependency react-use to v17.6.1 (PR #740 by @app/renovate)
+- chore(deps): update dependency reconnecting-eventsource to v1.6.5 (PR #741 by @app/renovate)
+- chore(deps): update dependency pdf-parse to v1.1.4 (PR #739 by @app/renovate)
+- chore(deps): update dependency ovsx to v0.10.12 (PR #738 by @app/renovate)
+- chore(deps): update dependency only-allow to v1.2.2 (PR #737 by @app/renovate)
+
 ## [3.64.0]
 
 ### Minor Changes

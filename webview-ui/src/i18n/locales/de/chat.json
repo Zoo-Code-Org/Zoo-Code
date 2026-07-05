@@ -341,9 +341,9 @@
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
 			"heading": "Was ist neu:",
-			"highlight1": "Regelverwaltungs-UI — ein neuer Reiter „Regeln“ in den Einstellungen ermöglicht es, globale und arbeitsbereichsspezifische Zoo-Regeln direkt im Editor zu erstellen, zu löschen und zu öffnen.",
-			"highlight2": "Überprüfung von Abschlussänderungen — nach Abschluss einer Aufgabe ermöglichen neue Schaltflächen „Neue Änderungen anzeigen“ und „Änderungen wiederherstellen“, die Änderungen der letzten Eingabe zu prüfen und rückgängig zu machen.",
-			"highlight3": "Entspannte Diff-Schwellenwerte — konfigurierbare Ähnlichkeitsschwellen reduzieren „Bearbeitung fehlgeschlagen“-Fehler beim Anwenden von Diffs, mit neuen Diagnosen zur Feinabstimmung."
+			"highlight1": "Claude Sonnet 5 Unterstützung — das neueste Claude-Modell ist jetzt bei den Anbietern Anthropic, Bedrock und Vertex verfügbar.",
+			"highlight2": "Semble v0.4.1 Upgrade — vereinfachte Ergebnisverarbeitung und lokalisierte Statusmeldungen.",
+			"highlight3": "Task-Lifecycle-Zustandsübergangs-Wächter — ein neuer Zustandsübergangs-Wächter und Startup-Delegationsabgleich verhindern ungültige Task-Zustandsübergänge."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",

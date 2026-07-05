@@ -254,6 +254,52 @@ export function sanitizeGeminiMessages(
 }
 
 /**
+ * A reasoning content block (DeepSeek / Z.ai interleaved thinking) that may
+ * appear in an assistant message's content array. Not part of Anthropic's
+ * ContentBlockParam union, so it's declared separately here.
+ */
+interface ReasoningContentBlock {
+	type: "reasoning"
+	text?: string
+}
+
+/**
+ * Extracts the reasoning text if `part` is a {@link ReasoningContentBlock}, or `undefined`
+ * otherwise. Providers like DeepSeek / Z.ai emit a `"reasoning"` content block that isn't part of
+ * Anthropic's `ContentBlockParam` union, so `part` is treated as `unknown` and its shape is
+ * validated at runtime rather than assumed via a cast. A boolean type-guard isn't viable here:
+ * TypeScript can't narrow `part` to `ReasoningContentBlock` because their `type` literals don't
+ * overlap with any variant of `ContentBlockParam`, so the narrowed type collapses to `never`.
+ */
+function getReasoningBlockText(part: unknown): string | undefined {
+	if (!part || typeof part !== "object") {
+		return undefined
+	}
+	const block = part as { type?: unknown; text?: unknown }
+	return block.type === "reasoning" && typeof block.text === "string" ? block.text : undefined
+}
+
+/**
+ * Non-standard fields Zoo Code attaches to Anthropic message params to
+ * round-trip provider-specific reasoning state (e.g. DeepSeek's
+ * `reasoning_content`, which must be echoed back or the API returns a 400).
+ */
+type AssistantMessageWithReasoning = Anthropic.Messages.MessageParam & {
+	reasoning_details?: any[]
+	reasoning_content?: string
+}
+
+/**
+ * Extra fields layered onto an outgoing OpenAI chat message to round-trip
+ * provider-specific reasoning state. Shared by both branches of the
+ * conversion below (string-content and content-block assistant messages).
+ */
+type ReasoningPassthroughFields = {
+	reasoning_details?: any[]
+	reasoning_content?: string
+}
+
+/**
  * Options for converting Anthropic messages to OpenAI format.
  */
 export interface ConvertToOpenAiMessagesOptions {
@@ -306,8 +352,8 @@ export function convertToOpenAiMessages(
 			// will convert a single text block into a string for compactness.
 			// If a message also contains reasoning_details (Gemini 3 / xAI / o-series, etc.),
 			// we must preserve it here as well.
-			const messageWithDetails = anthropicMessage as any
-			const baseMessage: OpenAI.Chat.ChatCompletionMessageParam & { reasoning_details?: any[] } = {
+			const messageWithDetails = anthropicMessage as AssistantMessageWithReasoning
+			const baseMessage: OpenAI.Chat.ChatCompletionMessageParam & ReasoningPassthroughFields = {
 				role: anthropicMessage.role,
 				content: anthropicMessage.content,
 			}
@@ -315,7 +361,11 @@ export function convertToOpenAiMessages(
 			if (anthropicMessage.role === "assistant") {
 				const mapped = mapReasoningDetails(messageWithDetails.reasoning_details)
 				if (mapped) {
-					;(baseMessage as any).reasoning_details = mapped
+					baseMessage.reasoning_details = mapped
+				}
+				// Pass through reasoning_content for DeepSeek / Z.ai thinking mode.
+				if (typeof messageWithDetails.reasoning_content === "string" && messageWithDetails.reasoning_content) {
+					baseMessage.reasoning_content = messageWithDetails.reasoning_content
 				}
 			}
 
@@ -450,6 +500,9 @@ export function convertToOpenAiMessages(
 					}
 				}
 			} else if (anthropicMessage.role === "assistant") {
+				const messageWithDetails = anthropicMessage as AssistantMessageWithReasoning
+
+				let extractedReasoning: string | undefined
 				const { nonToolMessages, toolMessages } = anthropicMessage.content.reduce<{
 					nonToolMessages: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]
 					toolMessages: Anthropic.ToolUseBlockParam[]
@@ -459,6 +512,17 @@ export function convertToOpenAiMessages(
 							acc.toolMessages.push(part)
 						} else if (part.type === "text" || part.type === "image") {
 							acc.nonToolMessages.push(part)
+						} else {
+							const reasoningText = getReasoningBlockText(part)
+							if (reasoningText) {
+								// Extract reasoning stored as a content block (DeepSeek / Z.ai interleaved thinking).
+								// Must be passed back as top-level reasoning_content so providers like DeepSeek
+								// don't reject the request with "reasoning_content must be passed back to the API".
+								// Accumulate all blocks (a turn may have more than one) to preserve order.
+								extractedReasoning = extractedReasoning
+									? extractedReasoning + reasoningText
+									: reasoningText
+							}
 						} // assistant cannot send tool_result messages
 						return acc
 					},
@@ -489,15 +553,10 @@ export function convertToOpenAiMessages(
 					},
 				}))
 
-				// Check if the message has reasoning_details (used by Gemini 3, xAI, etc.)
-				const messageWithDetails = anthropicMessage as any
-
 				// Build message with reasoning_details BEFORE tool_calls to preserve
 				// the order expected by providers like Roo. Property order matters
 				// when sending messages back to some APIs.
-				const baseMessage: OpenAI.Chat.ChatCompletionAssistantMessageParam & {
-					reasoning_details?: any[]
-				} = {
+				const baseMessage: OpenAI.Chat.ChatCompletionAssistantMessageParam & ReasoningPassthroughFields = {
 					role: "assistant",
 					// Use empty string instead of undefined for providers like Gemini (via OpenRouter)
 					// that require every message to have content in the "parts" field
@@ -509,6 +568,18 @@ export function convertToOpenAiMessages(
 				const mapped = mapReasoningDetails(messageWithDetails.reasoning_details)
 				if (mapped) {
 					baseMessage.reasoning_details = mapped
+				}
+
+				// Pass through reasoning_content for providers that require it in history
+				// (e.g. DeepSeek thinking mode: "reasoning_content must be passed back to the API").
+				// Prefer top-level field (already round-tripped); fall back to reasoning from content blocks.
+				const outgoingReasoningContent: string | undefined =
+					(typeof messageWithDetails.reasoning_content === "string" &&
+					messageWithDetails.reasoning_content.length > 0
+						? messageWithDetails.reasoning_content
+						: undefined) ?? extractedReasoning
+				if (outgoingReasoningContent) {
+					baseMessage.reasoning_content = outgoingReasoningContent
 				}
 
 				// Add tool_calls after reasoning_details

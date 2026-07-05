@@ -805,6 +805,45 @@ describe("OpenAiHandler", () => {
 				])
 			})
 		})
+
+		it("should include reasoning_content on assistant history messages when preserveReasoning is set", async () => {
+			// Regression guard for issue #201: OpenAI-compatible providers (e.g. DeepSeek via custom
+			// base URL) must pass reasoning_content back in history when thinking mode is active.
+			// This exercises OpenAiHandler -> convertToOpenAiMessages directly.
+			const thinkingHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					preserveReasoning: true,
+				},
+			})
+
+			const messagesWithReasoning: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "What files are in the project?" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "reasoning", text: "I should use the read_file tool.", summary: [] } as any,
+						{ type: "tool_use", id: "call_001", name: "read_file", input: { path: "README.md" } },
+					],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "call_001", content: "# Project\nHello." }],
+				},
+			]
+
+			const stream = thinkingHandler.createMessage(systemPrompt, messagesWithReasoning)
+			for await (const _chunk of stream) {
+			}
+
+			expect(mockCreate).toHaveBeenCalled()
+			const sentMessages: any[] = mockCreate.mock.calls[0][0].messages
+			const assistantMsg = sentMessages.find((m: any) => m.role === "assistant" && m.tool_calls?.length)
+			expect(assistantMsg).toBeDefined()
+			expect(assistantMsg.reasoning_content).toBe("I should use the read_file tool.")
+		})
 	})
 
 	describe("error handling", () => {

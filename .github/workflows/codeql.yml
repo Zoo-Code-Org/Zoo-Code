@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: '24 19 * * 3'
 
+# Least privilege: the analyze job escalates to security-events: write via its
+# own job-level permissions block.
+permissions:
+  contents: read
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})

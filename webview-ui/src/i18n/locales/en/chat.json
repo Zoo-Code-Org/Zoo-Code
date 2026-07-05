@@ -360,9 +360,9 @@
 		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "What's New:",
-			"highlight1": "Rules Management UI — a new Rules tab in Settings lets you create, delete, and open global and workspace Zoo rules directly from the editor.",
-			"highlight2": "Completion Change Review — after a task completes, new \"See New Changes\" and \"Restore Changes\" buttons let you inspect and undo the changes from the latest prompt.",
-			"highlight3": "Relaxed Diff Thresholds — configurable similarity thresholds reduce \"edit unsuccessful\" errors when applying diffs, with new diagnostics to help tune the settings."
+			"highlight1": "Claude Sonnet 5 support — the latest Claude model is now available across Anthropic, Bedrock, and Vertex providers.",
+			"highlight2": "Semble v0.4.1 upgrade — flattened result parsing and localized status messages.",
+			"highlight3": "Task-lifecycle status transition guard — a new status transition guard and startup delegation reconciliation prevent invalid task state transitions."
 		},
 		"cloudAgents": {
 			"heading": "New in the Cloud:",

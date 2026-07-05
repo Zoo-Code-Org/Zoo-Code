@@ -16,7 +16,7 @@ import { convertToZAiFormat } from "../transform/zai-format"
 
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
-import { handleOpenAIError } from "./utils/openai-error-handler"
+import { handleOpenAIError } from "./utils/error-handler"
 
 // Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
 // Z.ai accepts the standard `reasoning_effort` ladder (none/minimal/low/medium/high/xhigh/max)
