@@ -106,6 +106,25 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 					})
 				}
 			} else if (anthropicMessage.role === "assistant") {
+				// Assistant message conversion: only `text`, `tool_use`, and the
+				// custom `reasoning`/`thinking` blocks are relevant here.
+				//
+				// Note on the removed `image` branch: the previous code checked
+				// `block.type === "image"` and typed `nonToolMessages` as
+				// `(Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]`. This
+				// was removed because:
+				//   1. The Anthropic API only accepts image blocks in *user*
+				//      messages — assistants cannot produce or send images, so
+				//      the branch was dead code (the original comment even said
+				//      "impossible as the assistant cannot send images").
+				//   2. `Anthropic.ContentBlock` (the response/output union) does
+				//      not include an `image` variant, so the comparison
+				//      `block.type === "image"` triggered TS2367 ("this comparison
+				//      appears to be unintentional because the types have no
+				//      overlap").
+				//   3. Image handling for *user* messages (where images are
+				//      actually sent to the model) is preserved unchanged in the
+				//      `anthropicMessage.role === "user"` branch above.
 				const { nonToolMessages, toolMessages, reasoningText } = anthropicMessage.content.reduce<{
 					nonToolMessages: Anthropic.TextBlockParam[]
 					toolMessages: Anthropic.ToolUseBlockParam[]
@@ -122,9 +141,6 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 						if (block.type === "tool_use") {
 							acc.toolMessages.push(block)
 						} else if (block.type === "text") {
-							// Note: assistant messages cannot contain image
-							// blocks (images are input-only in the Anthropic
-							// API), so only text blocks are collected here.
 							acc.nonToolMessages.push(block)
 						} else if (block.type === "reasoning") {
 							// Non-Anthropic protocols store reasoning as a block
