@@ -457,8 +457,8 @@
 		"clean": "rimraf README.md CHANGELOG.md LICENSE dist logs mock .turbo"
 	},
 	"dependencies": {
-		"@anthropic-ai/sdk": "^0.106.0",
-		"@anthropic-ai/vertex-sdk": "^0.18.0",
+		"@anthropic-ai/sdk": "^0.109.0",
+		"@anthropic-ai/vertex-sdk": "^0.19.0",
 		"@aws-sdk/client-bedrock-runtime": "^3.922.0",
 		"@aws-sdk/credential-providers": "^3.922.0",
 		"@google/genai": "^1.29.1",
@@ -524,7 +524,7 @@
 		"zod": "3.25.76"
 	},
 	"devDependencies": {
-		"@ai-sdk/openai-compatible": "2.0.51",
+		"@ai-sdk/openai-compatible": "2.0.56",
 		"@roo-code/build": "workspace:^",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
@@ -540,7 +540,7 @@
 		"@types/vscode": "1.100.0",
 		"@vitest/coverage-v8": "4.1.9",
 		"@vscode/vsce": "3.9.2",
-		"ai": "6.0.209",
+		"ai": "6.0.218",
 		"esbuild-wasm": "0.25.12",
 		"execa": "9.6.1",
 		"mkdirp": "3.0.1",
