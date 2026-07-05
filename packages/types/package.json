@@ -35,6 +35,6 @@
 		"tsup": "8.5.0",
 		"ajv": "8.20.0",
 		"vitest": "4.1.9",
-		"zod-to-json-schema": "3.25.1"
+		"zod-to-json-schema": "3.25.2"
 	}
 }
