@@ -116,8 +116,8 @@ importers:
         specifier: ^2.2.6
         version: 2.2.6
       zustand:
-        specifier: ^5.0.0
-        version: 5.0.9(@types/react@18.3.31)(react@19.2.7)
+        specifier: ^5.0.14
+        version: 5.0.14(@types/react@18.3.31)(react@19.2.7)
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
@@ -8380,8 +8380,8 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
-  zustand@5.0.9:
-    resolution: {integrity: sha512-ALBtUj0AfjJt3uNRQoL1tL2tMvj6Gp/6e39dnfT6uzpelGru8v1tPOGBzayOWbPJvujM8JojDk3E1LxeFisBNg==}
+  zustand@5.0.14:
+    resolution: {integrity: sha512-/8tAspM5LMPr28b3fwLYrtdj77ECpfZviaP75CMTnwO8ISyaE4GDIG/9rDDYq/cH9D2Xw2A2RXglLInmVBQB/g==}
     engines: {node: '>=12.20.0'}
     peerDependencies:
       '@types/react': 18.3.31
@@ -16870,7 +16870,7 @@ snapshots:
 
   zod@3.25.76: {}
 
-  zustand@5.0.9(@types/react@18.3.31)(react@19.2.7):
+  zustand@5.0.14(@types/react@18.3.31)(react@19.2.7):
     optionalDependencies:
       '@types/react': 18.3.31
       react: 19.2.7
