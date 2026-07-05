@@ -1,13 +1,14 @@
 import { describe, it, expect, vi } from "vitest"
 import * as vscode from "vscode"
 
-// Mock Package
+// Mock Package. Use an arbitrary name unrelated to any real product branding
+// so this test doesn't snag on future rebrands.
 vi.mock("../../../shared/package", () => ({
 	Package: {
-		name: "zoo-code",
-		publisher: "ZooCodeOrganization",
+		name: "mock-package-name",
+		publisher: "mock-publisher",
 		version: "1.0.0",
-		outputChannel: "Zoo-Code",
+		outputChannel: "Mock Output Channel",
 	},
 }))
 
@@ -48,7 +49,7 @@ describe("file-search", () => {
 
 			;(vscode.workspace.getConfiguration as any).mockImplementation((section: string) => {
 				if (section === "search") return mockSearchConfig
-				if (section === "zoo-code") return mockRooConfig
+				if (section === "mock-package-name") return mockRooConfig
 				return { get: vi.fn() }
 			})
 

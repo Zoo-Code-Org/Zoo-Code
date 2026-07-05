@@ -2,6 +2,7 @@ import type { Mock } from "vitest"
 import * as vscode from "vscode"
 
 import { EditorUtils } from "../../integrations/editor/EditorUtils"
+import { Package } from "../../shared/package"
 
 import { CodeActionProvider } from "../CodeActionProvider"
 
@@ -122,7 +123,7 @@ describe("CodeActionProvider", () => {
 			const actions = provider.provideCodeActions(mockDocument, mockRange, mockContext)
 
 			expect(actions).toEqual([])
-			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith("zoo-code")
+			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name)
 			expect(mockGet).toHaveBeenCalledWith("enableCodeActions", true)
 		})
 

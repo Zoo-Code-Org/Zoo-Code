@@ -27,14 +27,17 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-vi.mock("fs/promises", () => ({
-	mkdir: vi.fn(),
-	readFile: vi.fn(),
-	writeFile: vi.fn(),
-	stat: vi.fn(),
-	readdir: vi.fn(),
-	rm: vi.fn(),
-}))
+vi.mock("fs/promises", () => {
+	const mocked = {
+		mkdir: vi.fn(),
+		readFile: vi.fn(),
+		writeFile: vi.fn(),
+		stat: vi.fn(),
+		readdir: vi.fn(),
+		rm: vi.fn(),
+	}
+	return { ...mocked, default: mocked }
+})
 
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")
@@ -435,6 +438,90 @@ describe("CustomModesManager", () => {
 				// Restore original Date.now
 				Date.now = originalDateNow
 			}
+		})
+	})
+
+	describe("Boo workspace project modes file", () => {
+		const mockAgentsYaml = path.join(mockWorkspacePath, ".boo", "agents.yaml")
+
+		function mockAsBooWorkspace() {
+			;(fs.stat as Mock).mockImplementation(async (statPath: string) => {
+				if (statPath === path.join(mockWorkspacePath, "workspace.boo.md")) {
+					return { isFile: () => true, isDirectory: () => false }
+				}
+				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+			})
+		}
+
+		it("reads modes from .boo/agents.yaml instead of .roomodes in a Boo workspace", async () => {
+			mockAsBooWorkspace()
+
+			const settingsModes = [{ slug: "mode1", name: "Mode 1", roleDefinition: "Role 1", groups: ["read"] }]
+			const agentsModes = [{ slug: "outline", name: "Outline", roleDefinition: "Role", groups: ["read"] }]
+
+			;(fileExistsAtPath as Mock).mockImplementation(async (p: string) => {
+				return p === mockSettingsPath || p === mockAgentsYaml
+			})
+			;(fs.readFile as Mock).mockImplementation(async (p: string) => {
+				if (p === mockSettingsPath) {
+					return yaml.stringify({ customModes: settingsModes })
+				}
+				if (p === mockAgentsYaml) {
+					return yaml.stringify({ customModes: agentsModes })
+				}
+				throw new Error("File not found")
+			})
+
+			const modes = await manager.getCustomModes()
+
+			expect(modes.map((m) => m.slug)).toEqual(["outline", "mode1"])
+			expect(modes.find((m) => m.slug === "outline")?.source).toBe("project")
+		})
+
+		it("falls back to .roomodes when the workspace is not a Boo workspace", async () => {
+			// Default beforeEach mocks (fs.stat -> isDirectory: true) already simulate a non-Boo workspace.
+			const settingsModes = [{ slug: "mode1", name: "Mode 1", roleDefinition: "Role 1", groups: ["read"] }]
+			const roomodesModes = [{ slug: "mode2", name: "Mode 2", roleDefinition: "Role 2", groups: ["read"] }]
+
+			;(fs.readFile as Mock).mockImplementation(async (p: string) => {
+				if (p === mockSettingsPath) {
+					return yaml.stringify({ customModes: settingsModes })
+				}
+				if (p === mockRoomodes) {
+					return yaml.stringify({ customModes: roomodesModes })
+				}
+				throw new Error("File not found")
+			})
+
+			const modes = await manager.getCustomModes()
+
+			expect(modes.map((m) => m.slug)).toEqual(["mode2", "mode1"])
+		})
+
+		it("creates .boo/agents.yaml (and its directory) when adding a project mode in a Boo workspace", async () => {
+			mockAsBooWorkspace()
+			;(fileExistsAtPath as Mock).mockImplementation(async (p: string) => {
+				return p === mockSettingsPath
+			})
+			;(fs.readFile as Mock).mockImplementation(async (p: string) => {
+				if (p === mockSettingsPath) {
+					return yaml.stringify({ customModes: [] })
+				}
+				throw new Error("File not found")
+			})
+
+			const newMode: ModeConfig = {
+				slug: "outline",
+				name: "Outline",
+				roleDefinition: "Role",
+				groups: ["read"],
+				source: "project",
+			}
+
+			await manager.updateCustomMode("outline", newMode)
+
+			expect(fs.mkdir).toHaveBeenCalledWith(path.join(mockWorkspacePath, ".boo"), { recursive: true })
+			expect(fs.writeFile).toHaveBeenCalledWith(mockAgentsYaml, expect.stringContaining("outline"), "utf-8")
 		})
 	})
 

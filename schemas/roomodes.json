@@ -27,9 +27,24 @@
 					"customInstructions": {
 						"type": "string"
 					},
+					"inputs": {
+						"type": "string",
+						"description": "Prose spec for the handoff brief a concierge mode must compose when delegating to this agent. Injected into the concierge's prompt, not this agent's own."
+					},
+					"doneWhen": {
+						"type": "string",
+						"description": "Prose completion criteria injected into this agent's own system prompt to shape when it proposes attempt_completion."
+					},
 					"source": {
 						"type": "string",
 						"enum": ["global", "project"]
+					},
+					"allowedMcpServers": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						},
+						"description": "Optional list of MCP server names to include. When omitted, all servers are available. When set, only the listed servers are injected."
 					},
 					"groups": {
 						"type": "array",

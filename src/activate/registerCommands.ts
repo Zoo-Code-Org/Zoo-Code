@@ -228,7 +228,7 @@ const getCommandsMap = ({
 		}
 
 		try {
-			await initWorkspace(root, generateDescription)
+			await initWorkspace(root, generateDescription, context.extensionUri.fsPath)
 			vscode.window.showInformationMessage("Boo Code workspace initialized.")
 			await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(root + "/.boo/style.md"))
 		} catch (error) {

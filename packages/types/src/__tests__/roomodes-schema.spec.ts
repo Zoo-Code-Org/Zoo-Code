@@ -66,6 +66,26 @@ describe("roomodes JSON schema", () => {
 		expect(valid).toBe(true)
 	})
 
+	it("should accept a sub-agent mode with inputs and doneWhen", () => {
+		const config = {
+			customModes: [
+				{
+					slug: "outline-agent",
+					name: "Outline Agent",
+					roleDefinition: "You are a story architect.",
+					whenToUse: "Use when the writer wants to plan structure.",
+					inputs: "The handoff brief must include the component being outlined.",
+					doneWhen: "A plan-draft.md exists and the writer has confirmed the structure.",
+					groups: ["read", "edit"],
+				},
+			],
+		}
+
+		const valid = validate(config)
+		expect(validate.errors).toBeNull()
+		expect(valid).toBe(true)
+	})
+
 	it("should accept the built-in architect mode with tuple-style edit group", () => {
 		const config = {
 			customModes: [

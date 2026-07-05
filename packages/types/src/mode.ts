@@ -100,6 +100,18 @@ export const modeConfigSchema = z.object({
 	whenToUse: z.string().optional(),
 	description: z.string().optional(),
 	customInstructions: z.string().optional(),
+	inputs: z
+		.string()
+		.optional()
+		.describe(
+			"Prose spec for the handoff brief a concierge mode must compose when delegating to this agent. Injected into the concierge's prompt, not this agent's own.",
+		),
+	doneWhen: z
+		.string()
+		.optional()
+		.describe(
+			"Prose completion criteria injected into this agent's own system prompt to shape when it proposes attempt_completion.",
+		),
 	groups: groupEntryArraySchema,
 	source: z.enum(["global", "project"]).optional(),
 	allowedMcpServers: z

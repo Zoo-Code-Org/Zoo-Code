@@ -1,10 +1,11 @@
 import * as path from "path"
 import assert from "node:assert"
 
-const { mockWriteFile, mockMkdir, mockStat, mockExec, mockUserInfo } = vi.hoisted(() => ({
+const { mockWriteFile, mockMkdir, mockStat, mockReadFile, mockExec, mockUserInfo } = vi.hoisted(() => ({
 	mockWriteFile: vi.fn(),
 	mockMkdir: vi.fn(),
 	mockStat: vi.fn(),
+	mockReadFile: vi.fn(),
 	mockExec: vi.fn(),
 	mockUserInfo: vi.fn(),
 }))
@@ -14,6 +15,7 @@ vi.mock("fs/promises", () => ({
 		writeFile: mockWriteFile,
 		mkdir: mockMkdir,
 		stat: mockStat,
+		readFile: mockReadFile,
 	},
 }))
 
@@ -51,6 +53,7 @@ describe("initWorkspace", () => {
 			callback(null, { stdout: "Test User\n" })
 		})
 		mockUserInfo.mockReturnValue({ username: "testuser" })
+		mockReadFile.mockResolvedValue("customModes:\n  - slug: outline\n")
 	})
 
 	it("scaffolds all expected files and directories when nothing exists", async () => {
@@ -103,5 +106,48 @@ describe("initWorkspace", () => {
 		const manifestCall = mockWriteFile.mock.calls.find((c: any[]) => c[0] === path.join(ROOT, "workspace.boo.md"))
 		assert(manifestCall !== undefined, "workspace.boo.md should have been written")
 		expect(manifestCall[1]).toContain("A haunting tale of loss.")
+	})
+
+	describe("agents.yaml template", () => {
+		const EXTENSION_PATH = "/extension"
+
+		it("copies the shipped agents.yaml template into .boo/ when an extension path is given", async () => {
+			nothingExists()
+			const generateDescription = vi.fn().mockResolvedValue("A novel about adventures.")
+
+			await initWorkspace(ROOT, generateDescription, EXTENSION_PATH)
+
+			expect(mockReadFile).toHaveBeenCalledWith(
+				path.join(EXTENSION_PATH, "assets", "boo-workspace", "agents.yaml"),
+				"utf-8",
+			)
+			const writeCall = mockWriteFile.mock.calls.find(
+				(c: any[]) => c[0] === path.join(ROOT, ".boo", "agents.yaml"),
+			)
+			assert(writeCall !== undefined, ".boo/agents.yaml should have been written")
+			expect(writeCall[1]).toContain("outline")
+		})
+
+		it("does not touch .boo/agents.yaml when no extension path is given", async () => {
+			nothingExists()
+			const generateDescription = vi.fn().mockResolvedValue("A novel about adventures.")
+
+			await initWorkspace(ROOT, generateDescription)
+
+			expect(mockReadFile).not.toHaveBeenCalled()
+			const writeFilePaths = mockWriteFile.mock.calls.map((c: any[]) => c[0])
+			expect(writeFilePaths).not.toContain(path.join(ROOT, ".boo", "agents.yaml"))
+		})
+
+		it("does not overwrite an existing .boo/agents.yaml", async () => {
+			fileExistsAt(path.join(ROOT, ".boo", "agents.yaml"))
+			const generateDescription = vi.fn().mockResolvedValue("A novel about adventures.")
+
+			await initWorkspace(ROOT, generateDescription, EXTENSION_PATH)
+
+			expect(mockReadFile).not.toHaveBeenCalled()
+			const writeFilePaths = mockWriteFile.mock.calls.map((c: any[]) => c[0])
+			expect(writeFilePaths).not.toContain(path.join(ROOT, ".boo", "agents.yaml"))
+		})
 	})
 })

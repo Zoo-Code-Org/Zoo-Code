@@ -43,7 +43,20 @@ function toTitleCase(str: string): string {
 	return str.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-export async function initWorkspace(workspaceRoot: string, generateDescription: GenerateDescription): Promise<void> {
+async function copyAgentsTemplate(workspaceRoot: string, extensionPath: string): Promise<void> {
+	const targetPath = path.join(workspaceRoot, ".boo", "agents.yaml")
+	if (await fileExists(targetPath)) return
+
+	const templatePath = path.join(extensionPath, "assets", "boo-workspace", "agents.yaml")
+	const template = await fs.readFile(templatePath, "utf-8")
+	await fs.writeFile(targetPath, template, "utf-8")
+}
+
+export async function initWorkspace(
+	workspaceRoot: string,
+	generateDescription: GenerateDescription,
+	extensionPath?: string,
+): Promise<void> {
 	const folderName = path.basename(workspaceRoot)
 
 	await ensureDir(path.join(workspaceRoot, ".boo"))
@@ -56,6 +69,10 @@ export async function initWorkspace(workspaceRoot: string, generateDescription: 
 		"Describe how you want the AI to behave.\n",
 	)
 	await writeIfAbsent(path.join(workspaceRoot, ".boo", "settings.json"), "{}\n")
+
+	if (extensionPath) {
+		await copyAgentsTemplate(workspaceRoot, extensionPath)
+	}
 
 	await writeIfAbsent(
 		path.join(workspaceRoot, "knowledge", "knowledge.boo.md"),
