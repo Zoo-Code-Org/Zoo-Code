@@ -34,7 +34,7 @@
 		"@roo-code/types": "workspace:^",
 		"@tailwindcss/vite": "^4.0.0",
 		"@tanstack/react-query": "^5.68.0",
-		"@vscode/codicons": "^0.0.36",
+		"@vscode/codicons": "^0.0.45",
 		"@vscode/webview-ui-toolkit": "^1.4.0",
 		"ansi-to-html": "^0.7.2",
 		"axios": "^1.12.0",
