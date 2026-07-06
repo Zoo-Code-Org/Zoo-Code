@@ -353,17 +353,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		}
 	}
 
-	/**
-	 * Best-effort capability lookup for a custom/unrecognized model ID (e.g. a
-	 * custom Anthropic-compatible deployment name that isn't a key in
-	 * `anthropicModels`). Matches known model-family substrings so an
-	 * unrecognized ID still gets an accurate capability profile (e.g.
-	 * `supportsReasoningBinary` for Sonnet 5 / Opus 4.7+ style deployments)
-	 * instead of silently inheriting `anthropicDefaultModelId`'s capabilities,
-	 * which can be from an older model generation with a different API
-	 * contract (see `AnthropicHandler.getModel`). Mirrors the equivalent
-	 * `guessModelInfoFromId` heuristic already used by `BedrockHandler`.
-	 */
+	// Guesses capabilities for an unrecognized model ID via known-family substring match.
 	private guessModelInfoFromId(modelId: string): ModelInfo {
 		const matchedId = (Object.keys(anthropicModels) as AnthropicModelId[])
 			.sort((a, b) => b.length - a.length)
@@ -376,17 +366,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		const modelId = this.options.apiModelId
 		const isKnownModel = modelId !== undefined && modelId in anthropicModels
 
-		// The model ID actually sent to the API must always honor a
-		// user-configured apiModelId - including custom Anthropic-compatible
-		// deployment names that aren't in our static `anthropicModels` table
-		// (e.g. Azure AI Foundry deployment names). Falling back to
-		// `anthropicDefaultModelId` here silently ignores the user's setting
-		// and sends requests for a model they never selected.
+		// Always honor a user-configured apiModelId, even if it's not a known model.
 		const id = isKnownModel ? (modelId as AnthropicModelId) : (modelId ?? anthropicDefaultModelId)
 
-		// Capability/pricing info can only be looked up directly for known
-		// models; for unrecognized custom IDs, best-effort guess instead of
-		// defaulting to `anthropicDefaultModelId`'s (possibly older) info.
 		let info: ModelInfo = isKnownModel
 			? anthropicModels[modelId as AnthropicModelId]
 			: this.guessModelInfoFromId(id)

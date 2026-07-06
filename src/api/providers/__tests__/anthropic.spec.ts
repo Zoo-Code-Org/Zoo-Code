@@ -457,12 +457,6 @@ describe("AnthropicHandler", () => {
 		})
 
 		it("should send the custom model ID as-is and use adaptive thinking for a custom Sonnet-5-family model", async () => {
-			// Regression test for the combined bug: a custom deployment name
-			// (e.g. "claude-sonnet-5-bf") must be sent verbatim as `model`,
-			// and since it matches the Sonnet 5 family it must use
-			// `thinking: {type: "adaptive"}` rather than the legacy
-			// `{type: "enabled", budget_tokens}` shape, which real Sonnet
-			// 5-class deployments reject with a 400.
 			const customHandler = new AnthropicHandler({
 				apiKey: "test-api-key",
 				apiModelId: "claude-sonnet-5-bf",
@@ -687,10 +681,6 @@ describe("AnthropicHandler", () => {
 		})
 
 		it("should honor a custom/unrecognized model ID instead of silently falling back to anthropicDefaultModelId", () => {
-			// Regression test: a custom Anthropic-compatible deployment name
-			// (e.g. Azure AI Foundry) that isn't a key in `anthropicModels` must
-			// still be sent to the API as-is, not replaced with the hardcoded
-			// default (see https://github.com/Zoo-Code-Org/Zoo-Code/issues/418).
 			const handler = new AnthropicHandler({
 				apiKey: "test-api-key",
 				apiModelId: "claude-sonnet-5-bf",
