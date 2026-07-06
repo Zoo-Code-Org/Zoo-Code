@@ -53,7 +53,10 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
 		contextWindow: contextWindow || ollamaDefaultModelInfo.contextWindow,
 		supportsPromptCache: true,
 		supportsImages: rawModel.capabilities?.includes("vision"),
-		maxTokens: contextWindow || ollamaDefaultModelInfo.contextWindow,
+		// maxTokens represents max OUTPUT tokens, not the context window.
+		// Setting it to the full contextWindow causes getModelMaxOutputTokens to
+		// reserve 20% of the window for output, triggering premature condensing.
+		// Inherit the sane default (4096) from ollamaDefaultModelInfo instead.
 	})
 
 	return modelInfo

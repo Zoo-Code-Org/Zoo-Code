@@ -697,5 +697,170 @@ describe("NativeOllamaHandler", () => {
 			const firstEndIndex = results.findIndex((r) => r.type === "tool_call_end")
 			expect(firstEndIndex).toBeGreaterThan(lastPartialIndex)
 		})
+
+		it("should send tool results with role 'tool' and tool_name when preceded by a tool_use", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "tool-abc",
+							name: "apply_diff",
+							input: {
+								path: "foo.ts",
+								diff: "SEARCH_REPLACE_DIFF_CONTENT",
+							},
+						},
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "tool-abc",
+							content: "Diff applied successfully",
+						},
+					],
+				},
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume stream
+			}
+
+			// The tool result should use Ollama's native "tool" role with tool_name
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "tool",
+							tool_name: "apply_diff",
+							content: "Diff applied successfully",
+						}),
+					]),
+				}),
+			)
+		})
+
+		it("should fall back to role 'user' for tool results when no matching tool_use is found", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "unknown-id",
+							content: "orphan result",
+						},
+					],
+				},
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume stream
+			}
+
+			// No preceding tool_use -> fall back to "user" role
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "user",
+							content: "orphan result",
+						}),
+					]),
+				}),
+			)
+		})
+
+		it("should strip additionalProperties from tool schema parameters", async () => {
+			mockGetOllamaModels.mockResolvedValue({
+				"llama3.2": {
+					contextWindow: 128000,
+					maxTokens: 4096,
+					supportsImages: true,
+					supportsPromptCache: false,
+				},
+			})
+
+			const options: ApiHandlerOptions = {
+				apiModelId: "llama3.2",
+				ollamaModelId: "llama3.2",
+				ollamaBaseUrl: "http://localhost:11434",
+			}
+
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const tools = [
+				{
+					type: "function" as const,
+					function: {
+						name: "apply_diff",
+						description: "Apply a diff",
+						parameters: {
+							type: "object",
+							properties: {
+								path: { type: "string", description: "File path" },
+								diff: { type: "string", description: "Diff content" },
+							},
+							required: ["path", "diff"],
+							additionalProperties: false,
+						},
+					},
+				},
+			]
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Edit the file" }], {
+				taskId: "test",
+				tools,
+			})
+
+			for await (const _ of stream) {
+				// consume stream
+			}
+
+			// additionalProperties should be stripped from the parameters
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					tools: [
+						{
+							type: "function",
+							function: {
+								name: "apply_diff",
+								description: "Apply a diff",
+								parameters: {
+									type: "object",
+									properties: {
+										path: { type: "string", description: "File path" },
+										diff: { type: "string", description: "Diff content" },
+									},
+									required: ["path", "diff"],
+								},
+							},
+						},
+					],
+				}),
+			)
+
+			// Explicitly verify additionalProperties is not present
+			const callArgs = mockChat.mock.calls[0][0] as any
+			expect(callArgs.tools[0].function.parameters).not.toHaveProperty("additionalProperties")
+		})
 	})
 })

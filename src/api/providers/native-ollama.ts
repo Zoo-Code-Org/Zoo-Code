@@ -16,6 +16,9 @@ interface OllamaChatOptions {
 
 function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessageParam[]): Message[] {
 	const ollamaMessages: Message[] = []
+	// Track tool use IDs to tool names so tool results can be sent with
+	// Ollama's native "tool" role and tool_name field instead of "user".
+	const toolUseIdToName = new Map<string, string>()
 
 	for (const anthropicMessage of anthropicMessages) {
 		if (typeof anthropicMessage.content === "string") {
@@ -67,8 +70,13 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 								})
 								.join("\n") ?? ""
 					}
+					// Look up the tool name from the corresponding tool_use block.
+					// When found, use Ollama's native "tool" role with tool_name so the
+					// model can distinguish tool results from user messages.
+					const toolName = toolUseIdToName.get(toolMessage.tool_use_id)
 					ollamaMessages.push({
-						role: "user",
+						role: toolName ? "tool" : "user",
+						tool_name: toolName,
 						images: toolResultImages.length > 0 ? toolResultImages : undefined,
 						content: content,
 					})
@@ -128,12 +136,16 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 				// Convert tool_use blocks to Ollama tool_calls format
 				const toolCalls =
 					toolMessages.length > 0
-						? toolMessages.map((tool) => ({
-								function: {
-									name: tool.name,
-									arguments: tool.input as Record<string, unknown>,
-								},
-							}))
+						? toolMessages.map((tool) => {
+								// Track tool use ID → name so tool results can use the "tool" role
+								toolUseIdToName.set(tool.id, tool.name)
+								return {
+									function: {
+										name: tool.name,
+										arguments: tool.input as Record<string, unknown>,
+									},
+								}
+							})
 						: undefined
 
 				ollamaMessages.push({
@@ -193,14 +205,24 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 		return tools
 			.filter((tool): tool is OpenAI.Chat.ChatCompletionTool & { type: "function" } => tool.type === "function")
-			.map((tool) => ({
-				type: tool.type,
-				function: {
-					name: tool.function.name,
-					description: tool.function.description,
-					parameters: tool.function.parameters as OllamaTool["function"]["parameters"],
-				},
-			}))
+			.map((tool) => {
+				// Strip additionalProperties from the parameters schema.
+				// This field is not part of Ollama's tool schema definition and can
+				// cause issues with some models' tool-calling templates.
+				const rawParams = tool.function.parameters as Record<string, unknown> | undefined
+				const parameters = rawParams ? { ...rawParams } : undefined
+				if (parameters) {
+					delete parameters.additionalProperties
+				}
+				return {
+					type: tool.type,
+					function: {
+						name: tool.function.name,
+						description: tool.function.description,
+						parameters: parameters as OllamaTool["function"]["parameters"],
+					},
+				}
+			})
 	}
 
 	override async *createMessage(
