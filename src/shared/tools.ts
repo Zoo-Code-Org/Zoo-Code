@@ -116,6 +116,7 @@ export type NativeToolArgs = {
 	update_todo_list: { todos: string }
 	use_mcp_tool: { server_name: string; tool_name: string; arguments?: Record<string, unknown> }
 	write_to_file: { path: string; content: string }
+	fetch_web_content: { url: string; prompt?: string }
 	// Add more tools as they are migrated to native protocol
 }
 
@@ -290,6 +291,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	skill: "load skill",
 	generate_image: "generate images",
 	custom_tool: "use custom tools",
+	fetch_web_content: "fetch web content",
 } as const
 
 // Define available tool groups.
@@ -310,6 +312,9 @@ export const TOOL_GROUPS: Record<ToolGroup, ToolGroupConfig> = {
 	modes: {
 		tools: ["switch_mode", "new_task"],
 		alwaysAvailable: true,
+	},
+	web: {
+		tools: ["fetch_web_content"],
 	},
 }
 

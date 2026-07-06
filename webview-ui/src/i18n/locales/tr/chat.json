@@ -493,5 +493,9 @@
 		"title": "Sağlayıcı artık desteklenmiyor",
 		"message": "Bu sağlayıcı artık kullanılamıyor. Devam etmek için desteklenen bir sağlayıcı seçin.",
 		"openSettings": "Ayarları aç"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo web içeriği getirmek istiyor",
+		"didFetch": "Zoo web içeriği getirdi"
 	}
 }

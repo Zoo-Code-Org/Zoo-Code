@@ -492,5 +492,9 @@
 		"title": "Provider non più supportato",
 		"message": "Questo provider non è più disponibile. Seleziona un provider supportato per continuare.",
 		"openSettings": "Apri impostazioni"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo vuole recuperare contenuto web",
+		"didFetch": "Zoo ha recuperato contenuto web"
 	}
 }

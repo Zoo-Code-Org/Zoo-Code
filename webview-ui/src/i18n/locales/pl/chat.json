@@ -492,5 +492,9 @@
 		"title": "Dostawca nie jest już obsługiwany",
 		"message": "Ten dostawca nie jest już dostępny. Wybierz obsługiwanego dostawcę, aby kontynuować.",
 		"openSettings": "Otwórz ustawienia"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo chce pobrać treść z sieci",
+		"didFetch": "Zoo pobrał treść z sieci"
 	}
 }

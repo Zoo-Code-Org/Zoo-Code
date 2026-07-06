@@ -492,5 +492,9 @@
 		"title": "Anbieter wird nicht mehr unterstützt",
 		"message": "Dieser Anbieter ist nicht mehr verfügbar. Wähle einen unterstützten Anbieter aus, um fortzufahren.",
 		"openSettings": "Einstellungen öffnen"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo möchte Webinhalte abrufen",
+		"didFetch": "Zoo hat Webinhalte abgerufen"
 	}
 }

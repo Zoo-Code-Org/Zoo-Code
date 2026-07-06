@@ -483,5 +483,9 @@
 		"title": "供應商不再受支援",
 		"message": "此供應商已不可用。請選擇受支援的供應商以繼續。",
 		"openSettings": "開啟設定"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo 想要擷取網頁內容",
+		"didFetch": "Zoo 已擷取網頁內容"
 	}
 }

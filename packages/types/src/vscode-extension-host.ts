@@ -814,6 +814,8 @@ export interface ClineSayTool {
 		| "runSlashCommand"
 		| "updateTodoList"
 		| "skill"
+		| "fetchWebContent"
+	url?: string
 	path?: string
 	// For readCommandOutput
 	readStart?: number

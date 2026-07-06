@@ -493,5 +493,9 @@
 		"title": "供应商不再受支持",
 		"message": "此提供商已不可用。请选择受支持的提供商以继续。",
 		"openSettings": "打开设置"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo 想要获取网页内容",
+		"didFetch": "Zoo 已获取网页内容"
 	}
 }

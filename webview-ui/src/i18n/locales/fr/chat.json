@@ -492,5 +492,9 @@
 		"title": "Fournisseur plus pris en charge",
 		"message": "Ce fournisseur n'est plus disponible. Choisis un fournisseur pris en charge pour continuer.",
 		"openSettings": "Ouvrir les paramètres"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo veut récupérer du contenu web",
+		"didFetch": "Zoo a récupéré du contenu web"
 	}
 }

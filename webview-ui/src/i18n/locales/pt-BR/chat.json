@@ -492,5 +492,9 @@
 		"title": "Provedor não é mais suportado",
 		"message": "Este provedor não está mais disponível. Selecione um provedor compatível para continuar.",
 		"openSettings": "Abrir configurações"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo quer buscar conteúdo web",
+		"didFetch": "Zoo buscou conteúdo web"
 	}
 }
