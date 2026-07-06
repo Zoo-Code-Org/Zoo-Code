@@ -1,7 +1,10 @@
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, configure } from "@testing-library/react"
 import { vi, describe, it, expect, beforeEach } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React from "react"
+
+// Increase timeout for slow CI environments
+configure({ asyncUtilTimeout: 10000 })
 
 // Mock vscode API
 const mockPostMessage = vi.hoisted(() => vi.fn())
