@@ -7,6 +7,7 @@ import {
 	buildSkillResult,
 	resolveSkillContentForMode,
 } from "../../services/skills/skillInvocation"
+import { defaultModeSlug } from "../../shared/modes"
 
 interface SkillParams {
 	skill: string
@@ -45,7 +46,7 @@ export class SkillTool extends BaseTool<"skill"> {
 
 			// Get current mode for skill resolution
 			const state = await provider?.getState()
-			const currentMode = state?.mode ?? "interview"
+			const currentMode = state?.mode ?? defaultModeSlug
 
 			// Fetch skill content
 			const skillContent = await resolveSkillContentForMode(skillsManager, skillName, currentMode)

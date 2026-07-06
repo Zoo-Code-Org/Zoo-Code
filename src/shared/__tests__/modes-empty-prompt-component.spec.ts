@@ -4,10 +4,10 @@ import { getModeSelection, modes } from "../modes"
 
 describe("getModeSelection with empty promptComponent", () => {
 	it("should use built-in mode instructions when promptComponent is undefined", () => {
-		const outlineMode = modes.find((m) => m.slug === "outline")!
+		const outlineMode = modes.find((m) => m.slug === "update")!
 
 		// Test with undefined promptComponent (which is what getPromptComponent returns for empty objects)
-		const result = getModeSelection("outline", undefined, [])
+		const result = getModeSelection("update", undefined, [])
 
 		// Should use built-in mode values
 		expect(result.roleDefinition).toBe(outlineMode.roleDefinition)
@@ -16,15 +16,15 @@ describe("getModeSelection with empty promptComponent", () => {
 	})
 
 	it("should use built-in mode instructions when promptComponent is null", () => {
-		const reviseMode = modes.find((m) => m.slug === "revise")!
+		const reviseMode = modes.find((m) => m.slug === "collaborate")!
 
 		// Test with null promptComponent
-		const result = getModeSelection("revise", null as any, [])
+		const result = getModeSelection("collaborate", null as any, [])
 
 		// Should use built-in mode values
 		expect(result.roleDefinition).toBe(reviseMode.roleDefinition)
 		expect(result.baseInstructions).toBe(reviseMode.customInstructions)
-		expect(result.baseInstructions).toContain("targeted edits")
+		expect(result.baseInstructions).toContain("Concierge Protocol")
 	})
 
 	it("should use promptComponent when it has actual content", () => {
@@ -33,7 +33,7 @@ describe("getModeSelection with empty promptComponent", () => {
 			roleDefinition: "Custom role",
 			customInstructions: "Custom instructions",
 		}
-		const result = getModeSelection("outline", validPromptComponent, [])
+		const result = getModeSelection("update", validPromptComponent, [])
 
 		// Should use promptComponent values
 		expect(result.roleDefinition).toBe("Custom role")
@@ -41,13 +41,13 @@ describe("getModeSelection with empty promptComponent", () => {
 	})
 
 	it("should merge promptComponent with built-in mode when it has partial content", () => {
-		const architectMode = modes.find((m) => m.slug === "outline")!
+		const architectMode = modes.find((m) => m.slug === "update")!
 
 		// Test with promptComponent that only has customInstructions
 		const partialPromptComponent: PromptComponent = {
 			customInstructions: "Only custom instructions",
 		}
-		const result = getModeSelection("outline", partialPromptComponent, [])
+		const result = getModeSelection("update", partialPromptComponent, [])
 
 		// Should merge: use promptComponent's customInstructions but fall back to built-in roleDefinition
 		expect(result.roleDefinition).toBe(architectMode.roleDefinition) // Falls back to built-in
@@ -55,13 +55,13 @@ describe("getModeSelection with empty promptComponent", () => {
 	})
 
 	it("should merge promptComponent with built-in mode when it only has roleDefinition", () => {
-		const debugMode = modes.find((m) => m.slug === "revise")!
+		const debugMode = modes.find((m) => m.slug === "collaborate")!
 
 		// Test with promptComponent that only has roleDefinition
 		const partialPromptComponent: PromptComponent = {
 			roleDefinition: "Custom debug role",
 		}
-		const result = getModeSelection("revise", partialPromptComponent, [])
+		const result = getModeSelection("collaborate", partialPromptComponent, [])
 
 		// Should merge: use promptComponent's roleDefinition but fall back to built-in customInstructions
 		expect(result.roleDefinition).toBe("Custom debug role") // Uses promptComponent
@@ -74,7 +74,7 @@ describe("getModeSelection with empty promptComponent", () => {
 			roleDefinition: "Full custom role",
 			customInstructions: "Full custom instructions",
 		}
-		const result = getModeSelection("outline", fullPromptComponent, [])
+		const result = getModeSelection("update", fullPromptComponent, [])
 
 		// Should use promptComponent values for both
 		expect(result.roleDefinition).toBe("Full custom role")

@@ -107,7 +107,7 @@ describe("isToolAllowedForMode", () => {
 
 			// Should allow path-only for architect mode too
 			expect(
-				isToolAllowedForMode("write_to_file", "outline", [], undefined, {
+				isToolAllowedForMode("write_to_file", "update", [], undefined, {
 					path: "test.js",
 				}),
 			).toBe(true)
@@ -208,14 +208,14 @@ describe("isToolAllowedForMode", () => {
 		it("allows outline mode to edit any file (no file restriction)", () => {
 			// outline mode has unrestricted edit access — it writes plan docs of any name
 			expect(
-				isToolAllowedForMode("write_to_file", "outline", [], undefined, {
+				isToolAllowedForMode("write_to_file", "update", [], undefined, {
 					path: "test.md",
 					content: "# Test",
 				}),
 			).toBe(true)
 
 			expect(
-				isToolAllowedForMode("apply_diff", "outline", [], undefined, {
+				isToolAllowedForMode("apply_diff", "update", [], undefined, {
 					path: "readme.md",
 					diff: "- old\n+ new",
 				}),
@@ -223,15 +223,15 @@ describe("isToolAllowedForMode", () => {
 
 			// Non-markdown files are also allowed
 			expect(
-				isToolAllowedForMode("write_to_file", "outline", [], undefined, {
+				isToolAllowedForMode("write_to_file", "update", [], undefined, {
 					path: "test.js",
 					content: "console.log('test')",
 				}),
 			).toBe(true)
 
 			// Should maintain read and mcp capabilities
-			expect(isToolAllowedForMode("read_file", "outline", [])).toBe(true)
-			expect(isToolAllowedForMode("use_mcp_tool", "outline", [])).toBe(true)
+			expect(isToolAllowedForMode("read_file", "update", [])).toBe(true)
+			expect(isToolAllowedForMode("use_mcp_tool", "update", [])).toBe(true)
 		})
 
 		it("applies restrictions to apply_diff", () => {
@@ -239,14 +239,14 @@ describe("isToolAllowedForMode", () => {
 			// outline mode has no file restriction, so all files are allowed.
 
 			expect(
-				isToolAllowedForMode("apply_diff", "outline", [], undefined, {
+				isToolAllowedForMode("apply_diff", "update", [], undefined, {
 					path: "test.md",
 					diff: "- old content\n+ new content",
 				}),
 			).toBe(true)
 
 			expect(
-				isToolAllowedForMode("apply_diff", "outline", [], undefined, {
+				isToolAllowedForMode("apply_diff", "update", [], undefined, {
 					path: "test.py",
 					diff: "- old content\n+ new content",
 				}),
@@ -404,7 +404,7 @@ describe("isToolAllowedForMode", () => {
 			expect(
 				isToolAllowedForMode(
 					"apply_patch",
-					"outline",
+					"update",
 					[],
 					undefined,
 					{
@@ -418,7 +418,7 @@ describe("isToolAllowedForMode", () => {
 			expect(
 				isToolAllowedForMode(
 					"apply_patch",
-					"outline",
+					"update",
 					[],
 					undefined,
 					{
@@ -432,7 +432,7 @@ describe("isToolAllowedForMode", () => {
 			expect(
 				isToolAllowedForMode(
 					"search_replace",
-					"outline",
+					"update",
 					[],
 					undefined,
 					{
@@ -448,7 +448,7 @@ describe("isToolAllowedForMode", () => {
 			expect(
 				isToolAllowedForMode(
 					"search_replace",
-					"outline",
+					"update",
 					[],
 					undefined,
 					{
@@ -464,7 +464,7 @@ describe("isToolAllowedForMode", () => {
 			expect(
 				isToolAllowedForMode(
 					"edit_file",
-					"outline",
+					"update",
 					[],
 					undefined,
 					{
@@ -480,7 +480,7 @@ describe("isToolAllowedForMode", () => {
 			expect(
 				isToolAllowedForMode(
 					"edit_file",
-					"outline",
+					"update",
 					[],
 					undefined,
 					{
@@ -588,17 +588,17 @@ describe("FileRestrictionError", () => {
 		expect(error.name).toBe("FileRestrictionError")
 	})
 
-	describe("revise mode", () => {
+	describe("knowledge-lookup mode", () => {
 		it("is configured correctly", () => {
-			const reviseMode = modes.find((mode) => mode.slug === "revise")
-			expect(reviseMode).toBeDefined()
-			expect(reviseMode).toMatchObject({
-				slug: "revise",
-				name: "✏️ Revise",
-				groups: ["read", "edit"],
+			const lookupMode = modes.find((mode) => mode.slug === "knowledge-lookup")
+			expect(lookupMode).toBeDefined()
+			expect(lookupMode).toMatchObject({
+				slug: "knowledge-lookup",
+				name: "🔍 Knowledge Lookup",
+				groups: ["read"],
 			})
-			expect(reviseMode?.roleDefinition).toContain("meticulous editor")
-			expect(reviseMode?.customInstructions).toContain("targeted edits")
+			expect(lookupMode?.roleDefinition).toContain("knowledge base researcher")
+			expect(lookupMode?.customInstructions).toContain("read-only researcher")
 		})
 	})
 
@@ -609,28 +609,28 @@ describe("FileRestrictionError", () => {
 		})
 
 		it("returns base mode when no overrides exist", async () => {
-			const result = await getFullModeDetails("revise")
+			const result = await getFullModeDetails("knowledge-lookup")
 			expect(result).toMatchObject({
-				slug: "revise",
-				name: "✏️ Revise",
-				groups: ["read", "edit"],
+				slug: "knowledge-lookup",
+				name: "🔍 Knowledge Lookup",
+				groups: ["read"],
 			})
-			expect(result.roleDefinition).toContain("meticulous editor")
+			expect(result.roleDefinition).toContain("knowledge base researcher")
 		})
 
 		it("applies custom mode overrides", async () => {
 			const customModes: ModeConfig[] = [
 				{
-					slug: "revise",
+					slug: "knowledge-lookup",
 					name: "Custom Debug",
 					roleDefinition: "Custom debug role",
 					groups: ["read"],
 				},
 			]
 
-			const result = await getFullModeDetails("revise", customModes)
+			const result = await getFullModeDetails("knowledge-lookup", customModes)
 			expect(result).toMatchObject({
-				slug: "revise",
+				slug: "knowledge-lookup",
 				name: "Custom Debug",
 				roleDefinition: "Custom debug role",
 				groups: ["read"],
@@ -639,13 +639,13 @@ describe("FileRestrictionError", () => {
 
 		it("applies prompt component overrides", async () => {
 			const customModePrompts = {
-				revise: {
+				"knowledge-lookup": {
 					roleDefinition: "Overridden role",
 					customInstructions: "Overridden instructions",
 				},
 			}
 
-			const result = await getFullModeDetails("revise", undefined, customModePrompts)
+			const result = await getFullModeDetails("knowledge-lookup", undefined, customModePrompts)
 			expect(result.roleDefinition).toBe("Overridden role")
 			expect(result.customInstructions).toBe("Overridden instructions")
 		})
@@ -657,13 +657,13 @@ describe("FileRestrictionError", () => {
 				language: "en",
 			}
 
-			await getFullModeDetails("revise", undefined, undefined, options)
+			await getFullModeDetails("knowledge-lookup", undefined, undefined, options)
 
 			expect(addCustomInstructions).toHaveBeenCalledWith(
 				expect.any(String),
 				"Global instructions",
 				"/test/path",
-				"revise",
+				"knowledge-lookup",
 				{ language: "en" },
 			)
 		})
@@ -716,13 +716,9 @@ describe("collaborate mode", () => {
 		])
 	})
 
-	it("appears after outline and before draft in the mode list", () => {
+	it("is the first built-in mode (the default home base)", () => {
 		const slugs = modes.map((m) => m.slug)
-		const outlineIdx = slugs.indexOf("outline")
-		const collaborateIdx = slugs.indexOf("collaborate")
-		const draftIdx = slugs.indexOf("draft")
-		expect(collaborateIdx).toBeGreaterThan(outlineIdx)
-		expect(collaborateIdx).toBeLessThan(draftIdx)
+		expect(slugs[0]).toBe("collaborate")
 	})
 
 	it("restricts writes to main.md, plans/plan-collaborate-*, and notes/", () => {
@@ -820,10 +816,10 @@ describe("collaborate mode", () => {
 })
 
 describe("getModeSelection", () => {
-	const builtInAskMode = modes.find((m) => m.slug === "interview")!
+	const builtInAskMode = modes.find((m) => m.slug === "collaborate")!
 	const customModesList: ModeConfig[] = [
 		{
-			slug: "draft", // Override
+			slug: "update", // Override
 			name: "Custom Code Mode",
 			roleDefinition: "Custom Code Role",
 			customInstructions: "Custom Code Instructions",
@@ -849,27 +845,27 @@ describe("getModeSelection", () => {
 	}
 
 	test("should return built-in mode details if no overrides", () => {
-		const selection = getModeSelection("interview")
+		const selection = getModeSelection("collaborate")
 		expect(selection.roleDefinition).toBe(builtInAskMode.roleDefinition)
 		expect(selection.baseInstructions).toBe(builtInAskMode.customInstructions || "")
 	})
 
 	test("should prioritize promptComponent for built-in mode if no custom mode exists for that slug", () => {
-		const selection = getModeSelection("interview", promptComponentAsk) // "interview" is not in customModesList
+		const selection = getModeSelection("collaborate", promptComponentAsk) // "collaborate" is not in customModesList
 		expect(selection.roleDefinition).toBe(promptComponentAsk.roleDefinition)
 		expect(selection.baseInstructions).toBe(promptComponentAsk.customInstructions)
 	})
 
 	test("should prioritize customMode over built-in mode", () => {
-		const selection = getModeSelection("draft", undefined, customModesList)
-		const customCode = customModesList.find((m) => m.slug === "draft")!
+		const selection = getModeSelection("update", undefined, customModesList)
+		const customCode = customModesList.find((m) => m.slug === "update")!
 		expect(selection.roleDefinition).toBe(customCode.roleDefinition)
 		expect(selection.baseInstructions).toBe(customCode.customInstructions)
 	})
 
 	test("should prioritize customMode over promptComponent and built-in mode", () => {
-		const selection = getModeSelection("draft", promptComponentCode, customModesList)
-		const customCode = customModesList.find((m) => m.slug === "draft")!
+		const selection = getModeSelection("update", promptComponentCode, customModesList)
+		const customCode = customModesList.find((m) => m.slug === "update")!
 		expect(selection.roleDefinition).toBe(customCode.roleDefinition)
 		expect(selection.baseInstructions).toBe(customCode.customInstructions)
 	})
@@ -901,11 +897,11 @@ describe("getModeSelection", () => {
 
 	test("customMode's properties are used if customMode exists, ignoring promptComponent's properties", () => {
 		const selection = getModeSelection(
-			"draft",
+			"update",
 			{ roleDefinition: "Prompt Role Only", customInstructions: "Prompt Instructions Only" },
 			customModesList,
 		)
-		const customCodeMode = customModesList.find((m) => m.slug === "draft")!
+		const customCodeMode = customModesList.find((m) => m.slug === "update")!
 		expect(selection.roleDefinition).toBe(customCodeMode.roleDefinition) // Takes from customCodeMode
 		expect(selection.baseInstructions).toBe(customCodeMode.customInstructions) // Takes from customCodeMode
 	})
@@ -992,14 +988,14 @@ describe("getModeSelection", () => {
 
 	test("customMode with empty/undefined fields takes precedence over promptComponent and builtInMode", () => {
 		const customModeMinimal: ModeConfig[] = [
-			{ slug: "interview", name: "Custom Ask Minimal", roleDefinition: "", groups: ["read"] }, // roleDef empty, customInstr undefined
+			{ slug: "collaborate", name: "Custom Ask Minimal", roleDefinition: "", groups: ["read"] }, // roleDef empty, customInstr undefined
 		]
 		const promptComponentMinimal: PromptComponent = {
 			roleDefinition: "Prompt Min Role",
 			customInstructions: "Prompt Min Instr",
 		}
-		// "interview" is in customModeMinimal
-		const selection = getModeSelection("interview", promptComponentMinimal, customModeMinimal)
+		// "collaborate" is in customModeMinimal
+		const selection = getModeSelection("collaborate", promptComponentMinimal, customModeMinimal)
 		// customMode is chosen
 		expect(selection.roleDefinition).toBe("") // From customModeMinimal
 		expect(selection.baseInstructions).toBe("") // From customModeMinimal
@@ -1007,20 +1003,20 @@ describe("getModeSelection", () => {
 
 	test("promptComponent is used if customMode for slug does not exist, even if customModesList is provided", () => {
 		// 'ask' is not in customModesList, but 'code' and 'new-custom' are.
-		const selection = getModeSelection("interview", promptComponentAsk, customModesList)
+		const selection = getModeSelection("collaborate", promptComponentAsk, customModesList)
 		expect(selection.roleDefinition).toBe(promptComponentAsk.roleDefinition)
 		expect(selection.baseInstructions).toBe(promptComponentAsk.customInstructions)
 	})
 
 	test("builtInMode is used if customMode for slug does not exist and promptComponent is not provided", () => {
 		// 'ask' is not in customModesList
-		const selection = getModeSelection("interview", undefined, customModesList)
+		const selection = getModeSelection("collaborate", undefined, customModesList)
 		expect(selection.roleDefinition).toBe(builtInAskMode.roleDefinition)
 		expect(selection.baseInstructions).toBe(builtInAskMode.customInstructions || "")
 	})
 
 	test("promptComponent is used if customMode is not provided (undefined customModesList)", () => {
-		const selection = getModeSelection("interview", promptComponentAsk, undefined)
+		const selection = getModeSelection("collaborate", promptComponentAsk, undefined)
 		expect(selection.roleDefinition).toBe(promptComponentAsk.roleDefinition)
 		expect(selection.baseInstructions).toBe(promptComponentAsk.customInstructions)
 	})

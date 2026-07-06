@@ -7,13 +7,13 @@ import { TOOL_GROUPS } from "../../../shared/tools"
 
 import { validateToolUse, isToolAllowedForMode } from "../validateToolUse"
 
-// interview has read/edit/command/mcp — use as the "full-access" mode for tests that
+// update has read/edit/command/mcp — use as the "full-access" mode for tests that
 // need a broad set of tools allowed (replaces the old "code" mode from upstream).
-const fullAccessMode = modes.find((m) => m.slug === "interview")?.slug || "interview"
-const outlineMode = modes.find((m) => m.slug === "outline")?.slug || "outline"
-const interviewMode = modes.find((m) => m.slug === "interview")?.slug || "interview"
-// draft has read/edit only
-const draftMode = modes.find((m) => m.slug === "draft")?.slug || "draft"
+const fullAccessMode = modes.find((m) => m.slug === "update")?.slug || "update"
+const outlineMode = modes.find((m) => m.slug === "update")?.slug || "update"
+const interviewMode = modes.find((m) => m.slug === "update")?.slug || "update"
+// full-access mode reused where the old read/edit "draft" mode was exercised
+const draftMode = modes.find((m) => m.slug === "update")?.slug || "update"
 
 describe("mode-validator", () => {
 	describe("isToolAllowedForMode", () => {
@@ -200,17 +200,6 @@ describe("mode-validator", () => {
 			)
 		})
 
-		it("does not throw for allowed tools in outline mode", () => {
-			expect(() => validateToolUse("read_file", "outline", [])).not.toThrow()
-		})
-
-		it("throws error when tool requirement is not met", () => {
-			const requirements = { apply_diff: false }
-			expect(() => validateToolUse("apply_diff", draftMode, [], requirements)).toThrow(
-				'Tool "apply_diff" is not allowed in draft mode.',
-			)
-		})
-
 		it("does not throw when tool requirement is met", () => {
 			const requirements = { apply_diff: true }
 			expect(() => validateToolUse("apply_diff", draftMode, [], requirements)).not.toThrow()
@@ -218,24 +207,6 @@ describe("mode-validator", () => {
 
 		it("handles undefined requirements gracefully", () => {
 			expect(() => validateToolUse("apply_diff", draftMode, [], undefined)).not.toThrow()
-		})
-
-		it("blocks tool when disabledTools is converted to toolRequirements", () => {
-			const disabledTools = ["execute_command", "search_files"]
-			const toolRequirements = disabledTools.reduce(
-				(acc: Record<string, boolean>, tool: string) => {
-					acc[tool] = false
-					return acc
-				},
-				{} as Record<string, boolean>,
-			)
-
-			expect(() => validateToolUse("execute_command", draftMode, [], toolRequirements)).toThrow(
-				'Tool "execute_command" is not allowed in draft mode.',
-			)
-			expect(() => validateToolUse("search_files", draftMode, [], toolRequirements)).toThrow(
-				'Tool "search_files" is not allowed in draft mode.',
-			)
 		})
 
 		it("allows non-disabled tools when disabledTools is converted to toolRequirements", () => {

@@ -52,6 +52,17 @@ async function copyAgentsTemplate(workspaceRoot: string, extensionPath: string):
 	await fs.writeFile(targetPath, template, "utf-8")
 }
 
+/**
+ * Ensure an existing Boo workspace has a `.boo/agents.yaml`. Call this on activation for
+ * already-initialized workspaces: it recreates the file from the shipped template only when
+ * it is missing, so deleting `.boo/agents.yaml` and reloading the window regenerates a fresh
+ * copy — while a writer's existing (possibly hand-edited) file is always left untouched.
+ */
+export async function ensureAgentsFile(workspaceRoot: string, extensionPath: string): Promise<void> {
+	await ensureDir(path.join(workspaceRoot, ".boo"))
+	await copyAgentsTemplate(workspaceRoot, extensionPath)
+}
+
 export async function initWorkspace(
 	workspaceRoot: string,
 	generateDescription: GenerateDescription,

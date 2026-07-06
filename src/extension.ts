@@ -50,7 +50,7 @@ import {
 import { initializeI18n } from "./i18n"
 import { initializeModelCacheRefresh } from "./api/providers/fetchers/modelCache"
 import { initZooCodeAuth } from "./services/zoo-code-auth"
-import { detectWorkspace } from "./services/boo-workspace"
+import { detectWorkspace, ensureAgentsFile } from "./services/boo-workspace"
 
 /**
  * Built using https://github.com/microsoft/vscode-webview-ui-toolkit
@@ -360,6 +360,16 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Detect and surface Boo Code workspace state.
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? null
 	const workspaceState = await detectWorkspace(workspaceRoot)
+
+	// For already-initialized Boo workspaces, regenerate .boo/agents.yaml if it is missing
+	// (e.g. the writer deleted it to get a fresh copy). Existing files are left untouched.
+	if (workspaceState === "boo-workspace" && workspaceRoot) {
+		try {
+			await ensureAgentsFile(workspaceRoot, context.extensionUri.fsPath)
+		} catch (error) {
+			outputChannel.appendLine(`[BooWorkspace] Failed to ensure agents.yaml: ${error}`)
+		}
+	}
 
 	if (workspaceState === "non-workspace") {
 		const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0)

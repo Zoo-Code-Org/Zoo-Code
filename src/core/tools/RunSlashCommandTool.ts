@@ -4,7 +4,7 @@ import { getCommand, getCommandNames } from "../../services/command/commands"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
-import { getModeBySlug } from "../../shared/modes"
+import { getModeBySlug, defaultModeSlug } from "../../shared/modes"
 import {
 	buildSkillApprovalMessage,
 	buildSkillResult,
@@ -55,7 +55,7 @@ export class RunSlashCommandTool extends BaseTool<"run_slash_command"> {
 			const command = await getCommand(task.cwd, commandName)
 
 			if (!command) {
-				const currentMode = state?.mode ?? "interview"
+				const currentMode = state?.mode ?? defaultModeSlug
 				const skillsManager = provider?.getSkillsManager()
 				const skillContent = await resolveSkillContentForMode(skillsManager, commandName, currentMode)
 
