@@ -56,7 +56,7 @@ export const moonshotModels = {
 	"kimi-k2.5": {
 		maxTokens: 16_384,
 		contextWindow: 262_144,
-		supportsImages: false,
+		supportsImages: true, // Supports text, image, and video input
 		supportsPromptCache: true,
 		inputPrice: 0.6, // $0.60 per million tokens (cache miss)
 		outputPrice: 3.0, // $3.00 per million tokens
@@ -64,7 +64,43 @@ export const moonshotModels = {
 		supportsTemperature: true,
 		defaultTemperature: 1.0,
 		description:
-			"Kimi K2.5 is the latest generation of Moonshot AI's Kimi series, featuring improved reasoning capabilities and enhanced performance across diverse tasks.",
+			"Kimi K2.5 supports text, image, and video input, thinking and non-thinking modes, and dialogue and agent tasks. Context length 256k.",
+	},
+	"kimi-k2.6": {
+		maxTokens: 16_384,
+		contextWindow: 262_144,
+		supportsImages: true, // Native multimodal: text, image, video
+		supportsPromptCache: true,
+		inputPrice: 0.95, // $0.95 per million tokens (cache miss)
+		outputPrice: 4.0, // $4.00 per million tokens
+		cacheWritesPrice: 0, // $0 per million tokens (cache writes)
+		cacheReadsPrice: 0.16, // $0.16 per million tokens (cache hit)
+		description:
+			"Kimi K2.6 is Kimi's latest and most intelligent model with stronger long-term code writing capabilities, improved instruction compliance, and self-correction. Native multimodal architecture supporting text, image, and video input. Context length 256k.",
+	},
+	"kimi-k2.7-code": {
+		maxTokens: 16_384,
+		contextWindow: 262_144,
+		supportsImages: true, // Native multimodal: text, image, video
+		supportsPromptCache: true,
+		inputPrice: 0.95, // $0.95 per million tokens (cache miss)
+		outputPrice: 4.0, // $4.00 per million tokens
+		cacheWritesPrice: 0, // $0 per million tokens (cache writes)
+		cacheReadsPrice: 0.19, // $0.19 per million tokens (cache hit)
+		description:
+			"Kimi K2.7 Code is Kimi's most intelligent Coding model for higher success rates in long context programming tasks. Native multimodal architecture supporting text, image, and video input. Context length 256k.",
+	},
+	"kimi-k2.7-code-highspeed": {
+		maxTokens: 16_384,
+		contextWindow: 262_144,
+		supportsImages: true, // Native multimodal: text, image, video
+		supportsPromptCache: true,
+		inputPrice: 1.9, // $1.90 per million tokens (cache miss)
+		outputPrice: 8.0, // $8.00 per million tokens
+		cacheWritesPrice: 0, // $0 per million tokens (cache writes)
+		cacheReadsPrice: 0.38, // $0.38 per million tokens (cache hit)
+		description:
+			"Kimi K2.7 Code HighSpeed is the high-speed version of Kimi K2.7 Code with output speed of approximately 180 Tokens/s (up to 260 Tokens/s in short context). Same model architecture, faster output. Context length 256k.",
 	},
 } as const satisfies Record<string, ModelInfo>
 
