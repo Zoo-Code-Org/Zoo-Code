@@ -43,7 +43,11 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 					{ nonToolMessages: [], toolMessages: [] },
 				)
 
-				// Process tool result messages FIRST since they must follow the tool use messages
+				// Process tool result messages FIRST since they must follow the tool use messages.
+				// Images extracted from tool results are collected here and attached to the
+				// adjacent user message, because Ollama's "tool" role only supports text
+				// content (content + tool_name); attaching images there can invalidate the
+				// request.
 				const toolResultImages: string[] = []
 				toolMessages.forEach((toolMessage) => {
 					// The Anthropic SDK allows tool results to be a string or an array of text and image blocks, enabling rich and structured content. In contrast, the Ollama SDK only supports tool results as a single string, so we map the Anthropic tool result parts into one concatenated string to maintain compatibility.
@@ -52,6 +56,10 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 					if (typeof toolMessage.content === "string") {
 						content = toolMessage.content
 					} else {
+						// Collect this result's images in a local accumulator so they
+						// cannot leak into sibling tool results, then fold them into
+						// the shared accumulator for the adjacent user message.
+						const resultImages: string[] = []
 						content =
 							toolMessage.content
 								?.map((part) => {
@@ -59,7 +67,7 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 										// Handle base64 images only (Anthropic SDK uses base64)
 										// Ollama expects raw base64 strings, not data URLs
 										if ("source" in part && part.source.type === "base64") {
-											toolResultImages.push(part.source.data)
+											resultImages.push(part.source.data)
 										}
 										return "(see following user message for image)"
 									}
@@ -69,15 +77,16 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 									return ""
 								})
 								.join("\n") ?? ""
+						toolResultImages.push(...resultImages)
 					}
 					// Look up the tool name from the corresponding tool_use block.
 					// When found, use Ollama's native "tool" role with tool_name so the
-					// model can distinguish tool results from user messages.
+					// model can distinguish tool results from user messages. Tool messages
+					// stay text-only; images are delivered via the adjacent user message.
 					const toolName = toolUseIdToName.get(toolMessage.tool_use_id)
 					ollamaMessages.push({
 						role: toolName ? "tool" : "user",
 						tool_name: toolName,
-						images: toolResultImages.length > 0 ? toolResultImages : undefined,
 						content: content,
 					})
 				})
@@ -97,11 +106,22 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 							imageData.push(part.source.data)
 						}
 					})
+					// Attach images extracted from tool results to the adjacent user
+					// message, the only role that supports images in Ollama's chat API.
+					imageData.push(...toolResultImages)
 
 					ollamaMessages.push({
 						role: "user",
 						content: textContent,
 						images: imageData.length > 0 ? imageData : undefined,
+					})
+				} else if (toolResultImages.length > 0) {
+					// No adjacent user message exists to carry tool-result images, so
+					// emit a dedicated user message to ensure they still reach the model.
+					ollamaMessages.push({
+						role: "user",
+						content: "",
+						images: toolResultImages,
 					})
 				}
 			} else if (anthropicMessage.role === "assistant") {
@@ -194,6 +214,29 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	}
 
 	/**
+	 * Recursively strips `additionalProperties` from a JSON schema (including
+	 * nested `properties` objects and `items` arrays). `additionalProperties`
+	 * is not part of Ollama's tool schema definition and can break tool-calling
+	 * templates on some models, so it must be removed at every nesting level.
+	 */
+	private stripAdditionalProperties(schema: unknown): unknown {
+		if (!schema || typeof schema !== "object") {
+			return schema
+		}
+		if (Array.isArray(schema)) {
+			return schema.map((item) => this.stripAdditionalProperties(item))
+		}
+		const result: Record<string, unknown> = {}
+		for (const [key, value] of Object.entries(schema)) {
+			if (key === "additionalProperties") {
+				continue
+			}
+			result[key] = this.stripAdditionalProperties(value)
+		}
+		return result
+	}
+
+	/**
 	 * Converts OpenAI-format tools to Ollama's native tool format.
 	 * This allows NativeOllamaHandler to use the same tool definitions
 	 * that are passed to OpenAI-compatible providers.
@@ -206,14 +249,12 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		return tools
 			.filter((tool): tool is OpenAI.Chat.ChatCompletionTool & { type: "function" } => tool.type === "function")
 			.map((tool) => {
-				// Strip additionalProperties from the parameters schema.
-				// This field is not part of Ollama's tool schema definition and can
-				// cause issues with some models' tool-calling templates.
+				// Recursively strip additionalProperties from the parameters schema
+				// (top-level and nested). This field is not part of Ollama's tool
+				// schema definition and can cause issues with some models'
+				// tool-calling templates.
 				const rawParams = tool.function.parameters as Record<string, unknown> | undefined
-				const parameters = rawParams ? { ...rawParams } : undefined
-				if (parameters) {
-					delete parameters.additionalProperties
-				}
+				const parameters = rawParams ? this.stripAdditionalProperties(rawParams) : undefined
 				return {
 					type: tool.type,
 					function: {

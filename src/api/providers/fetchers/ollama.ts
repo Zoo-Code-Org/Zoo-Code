@@ -103,6 +103,13 @@ export async function getOllamaModels(
 							if (modelInfo) {
 								models[ollamaModel.name] = modelInfo
 							}
+						})
+						// A single failing /api/show request (corrupt model, timeout,
+						// server overload, etc.) must not reject the whole Promise.all
+						// and wipe out all otherwise healthy models. Log and swallow
+						// the individual failure so the remaining models still load.
+						.catch((error) => {
+							console.error(`Error fetching details for model ${ollamaModel.model}:`, error)
 						}),
 				)
 			}

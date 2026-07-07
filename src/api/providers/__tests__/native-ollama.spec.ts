@@ -117,19 +117,31 @@ describe("NativeOllamaHandler", () => {
 				// consume stream
 			}
 
-			// Text blocks are joined with "\n"; the image emits a placeholder and is
-			// flushed separately via the `images` field rather than inlined.
+			// Text blocks are joined with "\n"; the image emits a placeholder.
+			// Tool results are text-only in Ollama, so the image is flushed onto a
+			// separate adjacent user message via the `images` field rather than
+			// inlined into the tool result.
 			expect(mockChat).toHaveBeenCalledWith(
 				expect.objectContaining({
 					messages: expect.arrayContaining([
 						expect.objectContaining({
 							role: "user",
 							content: "line one\n(see following user message for image)\nline two",
+						}),
+						expect.objectContaining({
+							role: "user",
 							images: ["imgdata"],
 						}),
 					]),
 				}),
 			)
+
+			// The tool result message itself must not carry an images field.
+			const callArgs = mockChat.mock.calls[0][0] as any
+			const toolResultMessage = callArgs.messages.find(
+				(m: any) => typeof m.content === "string" && m.content.includes("line one"),
+			)
+			expect(toolResultMessage.images).toBeUndefined()
 		})
 
 		it("should drop unknown block types in tool_result content (empty string contribution)", async () => {
@@ -861,6 +873,191 @@ describe("NativeOllamaHandler", () => {
 			// Explicitly verify additionalProperties is not present
 			const callArgs = mockChat.mock.calls[0][0] as any
 			expect(callArgs.tools[0].function.parameters).not.toHaveProperty("additionalProperties")
+		})
+
+		it("should recursively strip additionalProperties from nested tool schema parameters", async () => {
+			mockGetOllamaModels.mockResolvedValue({
+				"llama3.2": {
+					contextWindow: 128000,
+					maxTokens: 4096,
+					supportsImages: true,
+					supportsPromptCache: false,
+				},
+			})
+
+			const options: ApiHandlerOptions = {
+				apiModelId: "llama3.2",
+				ollamaModelId: "llama3.2",
+				ollamaBaseUrl: "http://localhost:11434",
+			}
+
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const tools = [
+				{
+					type: "function" as const,
+					function: {
+						name: "apply_diff",
+						description: "Apply a diff",
+						parameters: {
+							type: "object",
+							properties: {
+								path: { type: "string", description: "File path" },
+								options: {
+									type: "object",
+									properties: {
+										dry_run: { type: "boolean" },
+										backup: { type: "boolean" },
+									},
+									required: ["dry_run"],
+									additionalProperties: false,
+								},
+							},
+							required: ["path", "options"],
+							additionalProperties: false,
+						},
+					},
+				},
+			]
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Edit the file" }], {
+				taskId: "test",
+				tools,
+			})
+
+			for await (const _ of stream) {
+				// consume stream
+			}
+
+			const callArgs = mockChat.mock.calls[0][0] as any
+			const params = callArgs.tools[0].function.parameters
+
+			// Top-level additionalProperties stripped
+			expect(params).not.toHaveProperty("additionalProperties")
+
+			// Nested additionalProperties also stripped
+			expect(params.properties.options).not.toHaveProperty("additionalProperties")
+			expect(params.properties.options.properties.dry_run).toEqual({ type: "boolean" })
+		})
+
+		it("should keep tool results text-only and move images onto the adjacent user message", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "tool-img",
+							name: "read_file",
+							input: { path: "foo.ts" },
+						},
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "tool-img",
+							content: [
+								{ type: "text", text: "screenshot" },
+								{
+									type: "image",
+									source: {
+										type: "base64",
+										media_type: "image/png",
+										data: "imgdata",
+									},
+								},
+							],
+						},
+						{ type: "text", text: "please continue" },
+					],
+				},
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume stream
+			}
+
+			const callArgs = mockChat.mock.calls[0][0] as any
+
+			// The tool result uses the native "tool" role and is text-only.
+			const toolMessage = callArgs.messages.find((m: any) => m.role === "tool")
+			expect(toolMessage).toBeDefined()
+			expect(toolMessage.tool_name).toBe("read_file")
+			expect(toolMessage.images).toBeUndefined()
+
+			// The image is carried by the adjacent user message.
+			const userMessage = callArgs.messages.find(
+				(m: any) => m.role === "user" && Array.isArray(m.images) && m.images.includes("imgdata"),
+			)
+			expect(userMessage).toBeDefined()
+		})
+
+		it("should not leak images from one tool result into another", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "tool-a", name: "read_file", input: { path: "a.ts" } },
+						{ type: "tool_use", id: "tool-b", name: "read_file", input: { path: "b.ts" } },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "tool-a",
+							content: [
+								{ type: "text", text: "a" },
+								{
+									type: "image",
+									source: { type: "base64", media_type: "image/png", data: "img-a" },
+								},
+							],
+						},
+						{
+							type: "tool_result",
+							tool_use_id: "tool-b",
+							content: [{ type: "text", text: "b" }],
+						},
+					],
+				},
+			]
+
+			const stream = handler.createMessage("System", messages)
+			for await (const _ of stream) {
+				// consume stream
+			}
+
+			const callArgs = mockChat.mock.calls[0][0] as any
+			const toolMessages = callArgs.messages.filter((m: any) => m.role === "tool")
+
+			// Neither tool result should carry an images field.
+			expect(toolMessages).toHaveLength(2)
+			for (const m of toolMessages) {
+				expect(m.images).toBeUndefined()
+			}
+
+			// The single image is delivered once via the adjacent user message.
+			const userImageMessages = callArgs.messages.filter((m: any) => m.role === "user" && Array.isArray(m.images))
+			expect(userImageMessages).toHaveLength(1)
+			expect(userImageMessages[0].images).toEqual(["img-a"])
 		})
 	})
 })

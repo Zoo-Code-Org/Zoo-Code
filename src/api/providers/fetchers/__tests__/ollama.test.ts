@@ -18,7 +18,7 @@ describe("Ollama Fetcher", () => {
 			const parsedModel = parseOllamaModel(modelData)
 
 			expect(parsedModel).toEqual({
-				maxTokens: 40960,
+				maxTokens: 4096,
 				contextWindow: 40960,
 				supportsImages: false,
 				supportsPromptCache: true,
@@ -42,7 +42,7 @@ describe("Ollama Fetcher", () => {
 			const parsedModel = parseOllamaModel(modelDataWithNullFamilies as any)
 
 			expect(parsedModel).toEqual({
-				maxTokens: 40960,
+				maxTokens: 4096,
 				contextWindow: 40960,
 				supportsImages: false,
 				supportsPromptCache: true,
@@ -397,6 +397,93 @@ describe("Ollama Fetcher", () => {
 			expect(result).not.toBeInstanceOf(Array)
 			expect(Object.keys(result).length).toBe(1)
 			expect(result[modelName]).toBeDefined()
+		})
+
+		it("should still list healthy models when a single /api/show request fails", async () => {
+			const baseUrl = "http://localhost:11434"
+			const healthyModel = "healthy-model:latest"
+			const failingModel = "failing-model:latest"
+
+			const mockApiTagsResponse = {
+				models: [
+					{
+						name: healthyModel,
+						model: healthyModel,
+						modified_at: "2025-06-03T09:23:22.610222878-04:00",
+						size: 14333928010,
+						digest: "6a5f0c01d2c96c687d79e32fdd25b87087feb376bf9838f854d10be8cf3c10a5",
+						details: {
+							family: "llama",
+							families: ["llama"],
+							format: "gguf",
+							parameter_size: "23.6B",
+							parent_model: "",
+							quantization_level: "Q4_K_M",
+						},
+					},
+					{
+						name: failingModel,
+						model: failingModel,
+						modified_at: "2025-06-03T09:23:22.610222878-04:00",
+						size: 14333928010,
+						digest: "6a5f0c01d2c96c687d79e32fdd25b87087feb376bf9838f854d10be8cf3c10a5",
+						details: {
+							family: "llama",
+							families: ["llama"],
+							format: "gguf",
+							parameter_size: "23.6B",
+							parent_model: "",
+							quantization_level: "Q4_K_M",
+						},
+					},
+				],
+			}
+			const mockApiShowResponse = {
+				license: "Mock License",
+				modelfile: "FROM /path/to/blob\nTEMPLATE {{ .Prompt }}",
+				parameters: "num_ctx 4096\nstop_token <eos>",
+				template: "{{ .System }}USER: {{ .Prompt }}ASSISTANT:",
+				modified_at: "2025-06-03T09:23:22.610222878-04:00",
+				details: {
+					parent_model: "",
+					format: "gguf",
+					family: "llama",
+					families: ["llama"],
+					parameter_size: "23.6B",
+					quantization_level: "Q4_K_M",
+				},
+				model_info: {
+					"ollama.context_length": 4096,
+					"some.other.info": "value",
+				},
+				capabilities: ["completion", "tools"], // Has tools capability
+			}
+
+			mockedAxios.get.mockResolvedValueOnce({ data: mockApiTagsResponse })
+			// First /api/show succeeds (healthy model), second rejects (failing model)
+			mockedAxios.post
+				.mockResolvedValueOnce({ data: mockApiShowResponse })
+				.mockRejectedValueOnce(new Error("model not found"))
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
+
+			const result = await getOllamaModels(baseUrl)
+
+			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
+			expect(mockedAxios.post).toHaveBeenCalledTimes(2)
+
+			// The healthy model should still be present despite the sibling failure
+			expect(Object.keys(result).length).toBe(1)
+			expect(result[healthyModel]).toBeDefined()
+			expect(result[failingModel]).toBeUndefined()
+
+			// The individual failure should be logged, not swallowed silently
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				`Error fetching details for model ${failingModel}:`,
+				expect.any(Error),
+			)
+
+			consoleErrorSpy.mockRestore()
 		})
 	})
 })
