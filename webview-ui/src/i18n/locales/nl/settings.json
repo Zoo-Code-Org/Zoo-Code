@@ -450,6 +450,8 @@
 		"poeBaseUrl": "Poe Basis-URL",
 		"fireworksApiKey": "Fireworks API-sleutel",
 		"getFireworksApiKey": "Fireworks API-sleutel ophalen",
+		"friendliApiKey": "Friendli API-sleutel",
+		"getFriendliApiKey": "Friendli API-sleutel ophalen",
 		"deepSeekApiKey": "DeepSeek API-sleutel",
 		"getDeepSeekApiKey": "DeepSeek API-sleutel ophalen",
 		"moonshotApiKey": "Moonshot API-sleutel",
@@ -541,6 +543,8 @@
 			"apiKeyHelp": "Optionele API-sleutel voor geauthenticeerde Ollama-instanties of cloudservices. Laat leeg voor lokale installaties.",
 			"numCtx": "Contextvenstergrootte (num_ctx)",
 			"numCtxHelp": "Overschrijft de standaard contextvenstergrootte van het model. Laat leeg om de Modelfile-configuratie van het model te gebruiken. De minimumwaarde is 128.",
+			"thinking": "Redeneren inschakelen",
+			"thinkingHelp": "Schakel Ollama's native redeneren in voor redeneringsmodellen (bijv. qwen3, deepseek-r1). Indien ingeschakeld, wordt de redenering van het model apart gestreamd en weergegeven. Niet-ondersteunde modellen negeren deze instelling.",
 			"description": "Ollama laat je modellen lokaal op je computer draaien. Zie hun quickstart-gids voor instructies.",
 			"warning": "Let op: Zoo Code gebruikt complexe prompts en werkt het beste met Claude-modellen. Minder krachtige modellen werken mogelijk niet zoals verwacht."
 		},

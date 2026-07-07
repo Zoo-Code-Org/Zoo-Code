@@ -450,6 +450,8 @@
 		"poeBaseUrl": "Poe Temel URL",
 		"fireworksApiKey": "Fireworks API Anahtarı",
 		"getFireworksApiKey": "Fireworks API Anahtarı Al",
+		"friendliApiKey": "Friendli API Anahtarı",
+		"getFriendliApiKey": "Friendli API Anahtarı Al",
 		"deepSeekApiKey": "DeepSeek API Anahtarı",
 		"getDeepSeekApiKey": "DeepSeek API Anahtarı Al",
 		"moonshotApiKey": "Moonshot API Anahtarı",
@@ -541,6 +543,8 @@
 			"apiKeyHelp": "Kimlik doğrulamalı Ollama örnekleri veya bulut hizmetleri için isteğe bağlı API anahtarı. Yerel kurulumlar için boş bırakın.",
 			"numCtx": "Bağlam Penceresi Boyutu (num_ctx)",
 			"numCtxHelp": "Modelin varsayılan bağlam penceresi boyutunu geçersiz kılar. Modelin Modelfile yapılandırmasını kullanmak için boş bırakın. Minimum değer 128'dir.",
+			"thinking": "Akıl yürütmeyi etkinleştir",
+			"thinkingHelp": "Akıl yürütme modelleri (örn. qwen3, deepseek-r1) için Ollama'nın yerel akıl yürütmesini etkinleştirir. Etkinleştirildiğinde, modelin akıl yürütmesi ayrı olarak akışla aktarılır ve görüntülenir. Desteklenmeyen modeller bu ayarı yok sayar.",
 			"description": "Ollama, modelleri bilgisayarınızda yerel olarak çalıştırmanıza olanak tanır. Başlamak için hızlı başlangıç kılavuzlarına bakın.",
 			"warning": "Not: Zoo Code karmaşık istemler kullanır ve Claude modelleriyle en iyi şekilde çalışır. Daha az yetenekli modeller beklendiği gibi çalışmayabilir."
 		},

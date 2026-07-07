@@ -14,6 +14,15 @@ interface OllamaChatOptions {
 	num_ctx?: number
 }
 
+// Narrow local types for non-Anthropic content blocks that may be carried in
+// the conversation history. The Anthropic SDK union does not include the
+// custom `reasoning` block (used by non-Anthropic protocols) or the
+// Anthropic-protocol `thinking` block, so we declare them here to keep type
+// checking intact for the rest of the union instead of falling back to `any`.
+type ReasoningContentBlock = { type: "reasoning"; text: string }
+type ThinkingContentBlock = { type: "thinking"; thinking: string }
+type AssistantContentBlock = Anthropic.ContentBlock | ReasoningContentBlock | ThinkingContentBlock
+
 function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessageParam[]): Message[] {
 	const ollamaMessages: Message[] = []
 	// Track tool use IDs to tool names so tool results can be sent with
@@ -125,32 +134,64 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 					})
 				}
 			} else if (anthropicMessage.role === "assistant") {
-				const { nonToolMessages, toolMessages } = anthropicMessage.content.reduce<{
-					nonToolMessages: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]
+				// Assistant message conversion: only `text`, `tool_use`, and the
+				// custom `reasoning`/`thinking` blocks are relevant here.
+				//
+				// Note on the removed `image` branch: the previous code checked
+				// `block.type === "image"` and typed `nonToolMessages` as
+				// `(Anthropic.TextBlockParam | Anthropic.ImageBlockParam)[]`. This
+				// was removed because:
+				//   1. The Anthropic API only accepts image blocks in *user*
+				//      messages — assistants cannot produce or send images, so
+				//      the branch was dead code (the original comment even said
+				//      "impossible as the assistant cannot send images").
+				//   2. `Anthropic.ContentBlock` (the response/output union) does
+				//      not include an `image` variant, so the comparison
+				//      `block.type === "image"` triggered TS2367 ("this comparison
+				//      appears to be unintentional because the types have no
+				//      overlap").
+				//   3. Image handling for *user* messages (where images are
+				//      actually sent to the model) is preserved unchanged in the
+				//      `anthropicMessage.role === "user"` branch above.
+				const { nonToolMessages, toolMessages, reasoningText } = anthropicMessage.content.reduce<{
+					nonToolMessages: Anthropic.TextBlockParam[]
 					toolMessages: Anthropic.ToolUseBlockParam[]
+					reasoningText: string
 				}>(
 					(acc, part) => {
-						if (part.type === "tool_use") {
-							acc.toolMessages.push(part)
-						} else if (part.type === "text" || part.type === "image") {
-							acc.nonToolMessages.push(part)
+						// `part` is typed as an Anthropic content block, but the
+						// conversation history may also carry custom `reasoning`
+						// blocks (used by non-Anthropic protocols) or Anthropic
+						// `thinking` blocks that are not part of the SDK union.
+						// Cast to the augmented union to access them while
+						// preserving type safety for the rest of the block.
+						const block = part as AssistantContentBlock
+						if (block.type === "tool_use") {
+							acc.toolMessages.push(block)
+						} else if (block.type === "text") {
+							acc.nonToolMessages.push(block)
+						} else if (block.type === "reasoning") {
+							// Non-Anthropic protocols store reasoning as a block
+							// with a `text` field. Pass it back so Ollama can
+							// preserve thinking context across turns.
+							if (block.text.length > 0) {
+								acc.reasoningText += (acc.reasoningText ? "\n" : "") + block.text
+							}
+						} else if (block.type === "thinking") {
+							// Anthropic-protocol thinking blocks carry `thinking`.
+							if (block.thinking.length > 0) {
+								acc.reasoningText += (acc.reasoningText ? "\n" : "") + block.thinking
+							}
 						} // assistant cannot send tool_result messages
 						return acc
 					},
-					{ nonToolMessages: [], toolMessages: [] },
+					{ nonToolMessages: [], toolMessages: [], reasoningText: "" },
 				)
 
 				// Process non-tool messages
 				let content: string = ""
 				if (nonToolMessages.length > 0) {
-					content = nonToolMessages
-						.map((part) => {
-							if (part.type === "image") {
-								return "" // impossible as the assistant cannot send images
-							}
-							return part.text
-						})
-						.join("\n")
+					content = nonToolMessages.map((part) => part.text).join("\n")
 				}
 
 				// Convert tool_use blocks to Ollama tool_calls format
@@ -172,6 +213,8 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 					role: "assistant",
 					content,
 					tool_calls: toolCalls,
+					// Round-trip prior reasoning so multi-turn thinking is preserved.
+					thinking: reasoningText || undefined,
 				})
 			}
 		}
@@ -266,6 +309,90 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			})
 	}
 
+	/**
+	 * Maps the configured reasoning effort setting to Ollama's native `think`
+	 * request parameter (boolean | "high" | "medium" | "low").
+	 *
+	 * Requires an explicit Ollama opt-in (`enableReasoningEffort === true`)
+	 * before translating `reasoningEffort`. This prevents inherited
+	 * `apiConfiguration.reasoningEffort` values (left over from another
+	 * provider) from silently emitting a `think` param when the Ollama UI
+	 * checkbox is unchecked.
+	 *
+	 * Returns undefined when reasoning is not explicitly enabled, leaving
+	 * the model/Modelfile in control (preserving prior behavior where models
+	 * that emit think/thought tags in content are still handled by TagMatcher).
+	 *
+	 * Note: The Ollama API itself also accepts `"max"` (see
+	 * https://docs.ollama.com/capabilities/thinking), but the installed
+	 * `ollama` SDK (v0.6.x) only types `think` as
+	 * `boolean | "high" | "medium" | "low"`. Until the SDK types catch up,
+	 * "xhigh"/"max" efforts are clamped to "high".
+	 *
+	 * - enableReasoningEffort !== true -> undefined (no think param sent)
+	 * - "disable" -> false (thinking off)
+	 * - "none" / "minimal" -> true (enable thinking with default budget)
+	 * - "low" / "medium" / "high" -> the matching effort level
+	 * - "xhigh" / "max" -> "high" (highest level the SDK currently supports)
+	 */
+	private getOllamaThinkParam(): boolean | "high" | "medium" | "low" | undefined {
+		// Require an explicit Ollama opt-in before mapping reasoningEffort.
+		// Without this guard, a stale reasoningEffort inherited from another
+		// provider config could still emit a think param when the UI checkbox
+		// is unchecked.
+		if (this.options.enableReasoningEffort !== true) {
+			return undefined
+		}
+
+		const effort = this.options.reasoningEffort
+		if (effort === undefined) {
+			return undefined
+		}
+
+		switch (effort) {
+			case "disable":
+				return false
+			case "none":
+			case "minimal":
+				return true
+			case "low":
+				return "low"
+			case "medium":
+				return "medium"
+			case "high":
+			case "xhigh":
+			case "max":
+				return "high"
+			default:
+				return undefined
+		}
+	}
+
+	/**
+	 * Builds the shared chat request options (temperature, num_ctx) and the
+	 * conditional `think` parameter used by both `createMessage` and
+	 * `completePrompt`. Centralizing this avoids drift between the streaming
+	 * and single-shot request paths.
+	 *
+	 * Returns a tuple of `[chatOptions, thinkParam]` where `thinkParam` is
+	 * `undefined` when no `think` field should be sent to Ollama.
+	 */
+	private buildChatRequestOptions(
+		useR1Format: boolean,
+	): [OllamaChatOptions, boolean | "high" | "medium" | "low" | undefined] {
+		const chatOptions: OllamaChatOptions = {
+			temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
+		}
+
+		// Only include num_ctx if explicitly set via ollamaNumCtx
+		if (this.options.ollamaNumCtx !== undefined) {
+			chatOptions.num_ctx = this.options.ollamaNumCtx
+		}
+
+		const thinkParam = this.getOllamaThinkParam()
+		return [chatOptions, thinkParam]
+	}
+
 	override async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
@@ -290,23 +417,24 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		)
 
 		try {
-			// Build options object conditionally
-			const chatOptions: OllamaChatOptions = {
-				temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
-			}
+			// Build the shared chat options and conditional think parameter.
+			// Conditionally enabling Ollama's native think parameter lets
+			// reasoning models (qwen3, deepseek-r1, etc.) emit thinking via
+			// the dedicated message.thinking field instead of (or in addition
+			// to) think/thought tags embedded in content.
+			const [chatOptions, thinkParam] = this.buildChatRequestOptions(useR1Format)
 
-			// Only include num_ctx if explicitly set via ollamaNumCtx
-			if (this.options.ollamaNumCtx !== undefined) {
-				chatOptions.num_ctx = this.options.ollamaNumCtx
-			}
-
-			// Create the actual API request promise
+			// Create the actual API request promise. The `stream: true` literal
+			// is kept inline so TypeScript selects the streaming overload of
+			// client.chat. The `think` parameter is spread conditionally to
+			// avoid sending an explicit `think: undefined` to the runtime.
 			const stream = await client.chat({
 				model: modelId,
 				messages: ollamaMessages,
 				stream: true,
 				options: chatOptions,
 				tools: this.convertToolsToOllama(metadata?.tools),
+				...(thinkParam !== undefined ? { think: thinkParam } : {}),
 			})
 
 			let totalInputTokens = 0
@@ -318,6 +446,18 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 			try {
 				for await (const chunk of stream) {
+					// Process Ollama's native thinking field. When the think
+					// parameter is enabled (or the model thinks by default),
+					// Ollama streams reasoning via message.thinking separately
+					// from message.content. Surface it as a reasoning chunk so
+					// it is rendered and preserved like other providers.
+					if (typeof chunk.message.thinking === "string" && chunk.message.thinking.length > 0) {
+						yield {
+							type: "reasoning",
+							text: chunk.message.thinking,
+						}
+					}
+
 					if (typeof chunk.message.content === "string" && chunk.message.content.length > 0) {
 						// Process content through matcher for reasoning detection
 						for (const matcherChunk of matcher.update(chunk.message.content)) {
@@ -416,21 +556,17 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			const { id: modelId } = await this.fetchModel()
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
-			// Build options object conditionally
-			const chatOptions: OllamaChatOptions = {
-				temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
-			}
-
-			// Only include num_ctx if explicitly set via ollamaNumCtx
-			if (this.options.ollamaNumCtx !== undefined) {
-				chatOptions.num_ctx = this.options.ollamaNumCtx
-			}
+			// Reuse the shared request-option builder so single-shot
+			// completions respect the same reasoning configuration as the
+			// streaming path.
+			const [chatOptions, thinkParam] = this.buildChatRequestOptions(useR1Format)
 
 			const response = await client.chat({
 				model: modelId,
 				messages: [{ role: "user", content: prompt }],
 				stream: false,
 				options: chatOptions,
+				...(thinkParam !== undefined ? { think: thinkParam } : {}),
 			})
 
 			return response.message?.content || ""

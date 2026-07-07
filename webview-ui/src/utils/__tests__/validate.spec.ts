@@ -217,6 +217,30 @@ describe("Model Validation Functions", () => {
 		})
 	})
 
+	describe("Friendli validation", () => {
+		it("returns an apiKey error when the Friendli API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: "friendli",
+				apiModelId: "zai-org/GLM-5.2",
+				// Missing friendliApiKey
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined for a valid Friendli configuration", () => {
+			const config: ProviderSettings = {
+				apiProvider: "friendli",
+				friendliApiKey: "valid-key",
+				apiModelId: "zai-org/GLM-5.2",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+	})
+
 	describe("Zoo Gateway validation", () => {
 		describe("validateApiConfiguration (welcome-view entry point)", () => {
 			it("returns a sign-in error when neither profile token nor Zoo auth is present", () => {

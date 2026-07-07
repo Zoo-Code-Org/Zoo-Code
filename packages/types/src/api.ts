@@ -46,6 +46,12 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	getTaskHistoryItem(taskId: string): Promise<HistoryItem | undefined>
 	/**
+	 * Returns the persisted API conversation history length for a task. Intended for use in tests only.
+	 * @param taskId The ID of the task.
+	 * @returns The number of persisted API conversation history entries, or 0 if unavailable.
+	 */
+	getTaskApiConversationHistoryLength(taskId: string): Promise<number>
+	/**
 	 * Returns the current task stack.
 	 * @returns An array of task IDs.
 	 */

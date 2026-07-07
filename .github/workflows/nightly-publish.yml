@@ -43,25 +43,13 @@ jobs:
 
       - name: Skip if this push is a release merge
         id: release-check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          package_version=$(node -p "require('./src/package.json').version")
           commit_subject=$(git log -1 --format=%s)
           skip=false
 
           if [[ "$commit_subject" =~ ^chore:\ prepare\ v[0-9]+\.[0-9]+\.[0-9]+\ release ]]; then
             echo "Commit '${commit_subject}' looks like a release-prep merge; skipping nightly pre-release."
             skip=true
-          else
-            release_error=$(gh release view "v${package_version}" 2>&1 >/dev/null) && release_found=true || release_found=false
-            if [ "$release_found" = "true" ]; then
-              echo "v${package_version} is already published as a stable release; skipping nightly pre-release."
-              skip=true
-            elif [[ "$release_error" != *"release not found"* ]]; then
-              echo "::error::gh release view failed unexpectedly: ${release_error}"
-              exit 1
-            fi
           fi
 
           echo "skip=${skip}" >> "$GITHUB_OUTPUT"

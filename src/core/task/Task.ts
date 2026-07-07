@@ -158,7 +158,7 @@ export interface TaskOptions extends CreateTaskOptions {
 	initialTodos?: TodoItem[]
 	workspacePath?: string
 	/** Initial status for the task's history item (e.g., "active" for child tasks) */
-	initialStatus?: "active" | "delegated" | "completed"
+	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
 	rateLimitClock?: RateLimitClock
 	diffFuzzyThreshold?: number
 }
@@ -431,7 +431,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private cloudSyncedMessageTimestamps: Set<number> = new Set()
 
 	// Initial status for the task's history item (set at creation time to avoid race conditions)
-	private readonly initialStatus?: "active" | "delegated" | "completed"
+	private readonly initialStatus?: "active" | "delegated" | "completed" | "interrupted"
 
 	// MessageManager for high-level message operations (lazy initialized)
 	private _messageManager?: MessageManager
@@ -1127,7 +1127,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// - Final state is emitted when updates stop (trailing: true)
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 
-			await this.providerRef.deref()?.updateTaskHistory(historyItem)
+			const provider = this.providerRef.deref()
+			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
+			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
 			return true
 		} catch (error) {
 			console.error("Failed to save Roo messages:", error)
@@ -1853,13 +1855,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	/**
 	 * Manually start a **new** task when it was created with `startTask: false`.
 	 *
-	 * This fires `startTask` as a background async operation for the
-	 * `task/images` code-path only.  It does **not** handle the
-	 * `historyItem` resume path (use the constructor with `startTask: true`
-	 * for that).  The primary use-case is in the delegation flow where the
-	 * parent's metadata must be persisted to globalState **before** the
-	 * child task begins writing its own history (avoiding a read-modify-write
-	 * race on globalState).
+	 * This fires task startup as a background async operation after the provider
+	 * has installed the task in the stack and wired listeners. The primary
+	 * use-case is delegation/rehydration flow where metadata and stack state
+	 * must be in place before the task begins writing history or emitting asks.
 	 */
 	public start(): void {
 		if (this._started) {

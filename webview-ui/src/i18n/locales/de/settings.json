@@ -450,6 +450,8 @@
 		"poeBaseUrl": "Poe Basis-URL",
 		"fireworksApiKey": "Fireworks API-Schlüssel",
 		"getFireworksApiKey": "Fireworks API-Schlüssel erhalten",
+		"friendliApiKey": "Friendli API-Schlüssel",
+		"getFriendliApiKey": "Friendli API-Schlüssel erhalten",
 		"deepSeekApiKey": "DeepSeek API-Schlüssel",
 		"getDeepSeekApiKey": "DeepSeek API-Schlüssel erhalten",
 		"moonshotApiKey": "Moonshot API-Schlüssel",
@@ -541,6 +543,8 @@
 			"apiKeyHelp": "Optionaler API-Schlüssel für authentifizierte Ollama-Instanzen oder Cloud-Services. Leer lassen für lokale Installationen.",
 			"numCtx": "Kontextfenstergröße (num_ctx)",
 			"numCtxHelp": "Überschreibt die Standard-Kontextfenstergröße des Modells. Lassen Sie das Feld leer, um die Modelfile-Konfiguration des Modells zu verwenden. Der Mindestwert ist 128.",
+			"thinking": "Denken aktivieren",
+			"thinkingHelp": "Aktiviere das native Denken von Ollama für Reasoning-Modelle (z. B. qwen3, deepseek-r1). Wenn aktiviert, wird das Reasoning des Modells separat gestreamt und angezeigt. Nicht unterstützte Modelle ignorieren diese Einstellung.",
 			"description": "Ollama ermöglicht es dir, Modelle lokal auf deinem Computer auszuführen. Eine Anleitung zum Einstieg findest du im Schnellstart-Guide.",
 			"warning": "Hinweis: Zoo Code verwendet komplexe Prompts und funktioniert am besten mit Claude-Modellen. Weniger leistungsfähige Modelle funktionieren möglicherweise nicht wie erwartet."
 		},
