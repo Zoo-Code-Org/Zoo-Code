@@ -1041,6 +1041,7 @@ export const webviewMessageHandler = async (
 						lmstudio: {},
 						poe: {},
 						deepseek: {},
+						moonshot: {},
 						"opencode-go": {},
 						kenari: {},
 					}
@@ -1133,6 +1134,21 @@ export const webviewMessageHandler = async (
 				candidates.push({
 					key: "deepseek",
 					options: { provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+				})
+			}
+
+			// Moonshot is conditional on apiKey
+			const moonshotApiKey = message?.values?.moonshotApiKey ?? apiConfiguration.moonshotApiKey
+			const moonshotBaseUrl = message?.values?.moonshotBaseUrl ?? apiConfiguration.moonshotBaseUrl
+
+			if (moonshotApiKey) {
+				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
+					await flushModels({ provider: "moonshot", apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl }, true)
+				}
+
+				candidates.push({
+					key: "moonshot",
+					options: { provider: "moonshot", apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
 				})
 			}
 

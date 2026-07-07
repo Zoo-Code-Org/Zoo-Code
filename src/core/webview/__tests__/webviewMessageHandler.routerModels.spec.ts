@@ -111,8 +111,11 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(routerModels).toHaveProperty("openrouter")
 		expect(routerModels).toHaveProperty("requesty")
 		expect(routerModels).toHaveProperty("deepseek")
+		expect(routerModels).toHaveProperty("moonshot")
 		expect(routerModels.deepseek).toEqual({})
+		expect(routerModels.moonshot).toEqual({})
 		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "deepseek" }))
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "moonshot" }))
 	})
 
 	it("fetches DeepSeek models when stored DeepSeek credentials exist", async () => {

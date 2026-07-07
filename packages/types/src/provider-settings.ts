@@ -46,6 +46,7 @@ export const dynamicProviders = [
 	"unbound",
 	"poe",
 	"deepseek",
+	"moonshot",
 	"opencode-go",
 	"kenari",
 ] as const

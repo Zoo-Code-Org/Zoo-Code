@@ -29,6 +29,7 @@ import { getOllamaModels } from "./ollama"
 import { getLMStudioModels } from "./lmstudio"
 import { getPoeModels } from "./poe"
 import { getDeepSeekModels } from "./deepseek"
+import { getMoonshotModels } from "./moonshot"
 import { getZooGatewayModels } from "./zoo-gateway"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
@@ -54,6 +55,7 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	"litellm",
 	"poe",
 	"deepseek",
+	"moonshot",
 	"ollama",
 	"lmstudio",
 	"requesty",
@@ -66,6 +68,7 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	"litellm", // Per-key model allowlists are a first-class LiteLLM proxy feature
 	"poe", // Per-account model availability
 	"requesty", // Per-account custom model policies
+	"moonshot", // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
 ])
 
 function isAuthScopedProvider(provider: RouterName): boolean {
@@ -220,6 +223,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 			break
 		case "deepseek":
 			models = await getDeepSeekModels(options.baseUrl, options.apiKey)
+			break
+		case "moonshot":
+			models = await getMoonshotModels(options.baseUrl, options.apiKey)
 			break
 		case "zoo-gateway":
 			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
