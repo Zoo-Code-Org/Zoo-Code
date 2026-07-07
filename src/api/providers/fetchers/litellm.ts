@@ -28,40 +28,83 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 		urlObj.pathname = urlObj.pathname.replace(/\/+$/, "").replace(/\/+/g, "/") + "/v1/model/info"
 		const url = urlObj.href
 		// Added timeout to prevent indefinite hanging
-		const response = await axios.get(url, { headers, timeout: 5000 })
+		let response
+		let isFallback = false
+		try {
+			response = await axios.get(url, { headers, timeout: 5000 })
+		} catch (infoError: any) {
+			console.warn(
+				`[getLiteLLMModels] Failed to fetch /v1/model/info, attempting fallback to /v1/models:`,
+				infoError.message,
+			)
+			const fallbackUrlObj = new URL(baseUrl)
+			fallbackUrlObj.pathname = fallbackUrlObj.pathname.replace(/\/+$/, "").replace(/\/+/g, "/") + "/v1/models"
+			const fallbackUrl = fallbackUrlObj.href
+			try {
+				response = await axios.get(fallbackUrl, { headers, timeout: 5000 })
+				isFallback = true
+			} catch (fallbackError: any) {
+				throw infoError
+			}
+		}
 		const models: ModelRecord = {}
 
-		// Process the model info from the response
-		if (response.data && response.data.data && Array.isArray(response.data.data)) {
-			for (const model of response.data.data) {
-				const modelName = model.model_name
-				const modelInfo = model.model_info
-				const litellmModelName = model?.litellm_params?.model as string | undefined
+		if (isFallback) {
+			if (response.data && response.data.data && Array.isArray(response.data.data)) {
+				for (const model of response.data.data) {
+					const modelName = model.id
+					if (!modelName) continue
 
-				if (!modelName || !modelInfo || !litellmModelName) continue
-
-				models[modelName] = {
-					maxTokens: modelInfo.max_output_tokens || modelInfo.max_tokens || 8192,
-					contextWindow: modelInfo.max_input_tokens || 200000,
-					supportsImages: Boolean(modelInfo.supports_vision),
-					supportsPromptCache: Boolean(modelInfo.supports_prompt_caching),
-					inputPrice: modelInfo.input_cost_per_token ? modelInfo.input_cost_per_token * 1000000 : undefined,
-					outputPrice: modelInfo.output_cost_per_token
-						? modelInfo.output_cost_per_token * 1000000
-						: undefined,
-					cacheWritesPrice: modelInfo.cache_creation_input_token_cost
-						? modelInfo.cache_creation_input_token_cost * 1000000
-						: undefined,
-					cacheReadsPrice: modelInfo.cache_read_input_token_cost
-						? modelInfo.cache_read_input_token_cost * 1000000
-						: undefined,
-					description: `${modelName} via LiteLLM proxy`,
+					models[modelName] = {
+						maxTokens: 8192,
+						contextWindow: 128000,
+						supportsImages: false,
+						supportsPromptCache: false,
+						description: `${modelName} via LiteLLM proxy`,
+					}
 				}
+			} else {
+				console.error(
+					"Error fetching LiteLLM models: Unexpected response format from /v1/models",
+					response.data,
+				)
+				throw new Error("Failed to fetch LiteLLM models: Unexpected response format.")
 			}
 		} else {
-			// If response.data.data is not in the expected format, consider it an error.
-			console.error("Error fetching LiteLLM models: Unexpected response format", response.data)
-			throw new Error("Failed to fetch LiteLLM models: Unexpected response format.")
+			// Process the model info from the response
+			if (response.data && response.data.data && Array.isArray(response.data.data)) {
+				for (const model of response.data.data) {
+					const modelName = model.model_name
+					const modelInfo = model.model_info
+					const litellmModelName = model?.litellm_params?.model as string | undefined
+
+					if (!modelName || !modelInfo || !litellmModelName) continue
+
+					models[modelName] = {
+						maxTokens: modelInfo.max_output_tokens || modelInfo.max_tokens || 8192,
+						contextWindow: modelInfo.max_input_tokens || 200000,
+						supportsImages: Boolean(modelInfo.supports_vision),
+						supportsPromptCache: Boolean(modelInfo.supports_prompt_caching),
+						inputPrice: modelInfo.input_cost_per_token
+							? modelInfo.input_cost_per_token * 1000000
+							: undefined,
+						outputPrice: modelInfo.output_cost_per_token
+							? modelInfo.output_cost_per_token * 1000000
+							: undefined,
+						cacheWritesPrice: modelInfo.cache_creation_input_token_cost
+							? modelInfo.cache_creation_input_token_cost * 1000000
+							: undefined,
+						cacheReadsPrice: modelInfo.cache_read_input_token_cost
+							? modelInfo.cache_read_input_token_cost * 1000000
+							: undefined,
+						description: `${modelName} via LiteLLM proxy`,
+					}
+				}
+			} else {
+				// If response.data.data is not in the expected format, consider it an error.
+				console.error("Error fetching LiteLLM models: Unexpected response format", response.data)
+				throw new Error("Failed to fetch LiteLLM models: Unexpected response format.")
+			}
 		}
 
 		return models

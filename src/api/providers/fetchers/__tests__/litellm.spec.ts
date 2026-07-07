@@ -697,4 +697,52 @@ describe("getLiteLLMModels", () => {
 			description: "model-with-only-max-output-tokens via LiteLLM proxy",
 		})
 	})
+
+	it("falls back to /v1/models when /v1/model/info returns 403 Forbidden", async () => {
+		const infoError = {
+			message: "Request failed with status code 403",
+			response: { status: 403, statusText: "Forbidden" },
+			isAxiosError: true,
+		}
+		const mockFallbackResponse = {
+			data: {
+				data: [{ id: "fallback-model-1" }, { id: "fallback-model-2" }],
+			},
+		}
+
+		mockedAxios.get.mockRejectedValueOnce(infoError).mockResolvedValueOnce(mockFallbackResponse)
+
+		const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+
+		expect(mockedAxios.get).toHaveBeenNthCalledWith(1, "http://localhost:4000/v1/model/info", expect.any(Object))
+		expect(mockedAxios.get).toHaveBeenNthCalledWith(2, "http://localhost:4000/v1/models", expect.any(Object))
+
+		expect(result).toEqual({
+			"fallback-model-1": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsImages: false,
+				supportsPromptCache: false,
+				description: "fallback-model-1 via LiteLLM proxy",
+			},
+			"fallback-model-2": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsImages: false,
+				supportsPromptCache: false,
+				description: "fallback-model-2 via LiteLLM proxy",
+			},
+		})
+	})
+
+	it("throws original error when both /v1/model/info and fallback /v1/models fail", async () => {
+		const infoError = new Error("Info endpoint 403")
+		const fallbackError = new Error("Models endpoint 404")
+
+		mockedAxios.get.mockRejectedValueOnce(infoError).mockRejectedValueOnce(fallbackError)
+
+		await expect(getLiteLLMModels("test-api-key", "http://localhost:4000")).rejects.toThrow(
+			"Failed to fetch LiteLLM models: Info endpoint 403",
+		)
+	})
 })
