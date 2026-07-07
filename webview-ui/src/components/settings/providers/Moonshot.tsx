@@ -37,7 +37,7 @@ export const Moonshot = ({ apiConfiguration, setApiConfigurationField, simplifyS
 			const message = event.data
 			if (message.type === "singleRouterModelFetchResponse" && !message.success) {
 				const providerName = message.values?.provider as RouterName
-				if (providerName === "moonshot") {
+				if (providerName === "moonshot" && refreshStatus === "loading") {
 					moonshotErrorJustReceived.current = true
 					setRefreshStatus("error")
 					setRefreshError(message.error)
