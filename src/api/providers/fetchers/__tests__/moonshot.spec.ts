@@ -25,7 +25,7 @@ describe("getMoonshotModels", () => {
 		expect(models["kimi-k2-thinking"]).toEqual(moonshotModels["kimi-k2-thinking"])
 	})
 
-	it("provides sane defaults for unknown model IDs", async () => {
+	it("provides sane defaults for unknown model IDs without pricing", async () => {
 		globalThis.fetch = vi.fn().mockResolvedValue({
 			ok: true,
 			json: vi.fn().mockResolvedValue({
@@ -40,10 +40,6 @@ describe("getMoonshotModels", () => {
 			contextWindow: 262_144,
 			supportsImages: false,
 			supportsPromptCache: true,
-			inputPrice: 0.6,
-			outputPrice: 2.5,
-			cacheWritesPrice: 0,
-			cacheReadsPrice: 0.15,
 			description: "Moonshot model: unknown-model-id",
 		})
 	})

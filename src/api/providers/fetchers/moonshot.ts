@@ -77,10 +77,6 @@ export async function getMoonshotModels(baseUrl?: string, apiKey?: string): Prom
 					contextWindow: 262_144,
 					supportsImages: false,
 					supportsPromptCache: true,
-					inputPrice: 0.6,
-					outputPrice: 2.5,
-					cacheWritesPrice: 0,
-					cacheReadsPrice: 0.15,
 					description: `Moonshot model: ${modelId}`,
 				}
 			}
