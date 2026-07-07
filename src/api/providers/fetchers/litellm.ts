@@ -33,8 +33,12 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 		try {
 			response = await axios.get(url, { headers, timeout: 5000 })
 		} catch (infoError: any) {
+			const status = infoError?.response?.status || infoError?.status
+			if (status !== 403) {
+				throw infoError
+			}
 			console.warn(
-				`[getLiteLLMModels] Failed to fetch /v1/model/info, attempting fallback to /v1/models:`,
+				`[getLiteLLMModels] Failed to fetch /v1/model/info (status 403), attempting fallback to /v1/models:`,
 				infoError.message,
 			)
 			const fallbackUrlObj = new URL(baseUrl)
@@ -44,6 +48,7 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 				response = await axios.get(fallbackUrl, { headers, timeout: 5000 })
 				isFallback = true
 			} catch (fallbackError: any) {
+				console.warn(`[getLiteLLMModels] Fallback to /v1/models also failed:`, fallbackError.message)
 				throw infoError
 			}
 		}

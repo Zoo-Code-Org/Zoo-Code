@@ -736,7 +736,11 @@ describe("getLiteLLMModels", () => {
 	})
 
 	it("throws original error when both /v1/model/info and fallback /v1/models fail", async () => {
-		const infoError = new Error("Info endpoint 403")
+		const infoError = {
+			message: "Info endpoint 403",
+			response: { status: 403, statusText: "Forbidden" },
+			isAxiosError: true,
+		}
 		const fallbackError = new Error("Models endpoint 404")
 
 		mockedAxios.get.mockRejectedValueOnce(infoError).mockRejectedValueOnce(fallbackError)
@@ -744,5 +748,22 @@ describe("getLiteLLMModels", () => {
 		await expect(getLiteLLMModels("test-api-key", "http://localhost:4000")).rejects.toThrow(
 			"Failed to fetch LiteLLM models: Info endpoint 403",
 		)
+	})
+
+	it("does not attempt fallback and throws immediately when /v1/model/info returns non-403 error", async () => {
+		const infoError = {
+			message: "Internal Server Error",
+			response: { status: 500, statusText: "Internal Server Error" },
+			isAxiosError: true,
+		}
+
+		mockedAxios.get.mockRejectedValueOnce(infoError)
+
+		await expect(getLiteLLMModels("test-api-key", "http://localhost:4000")).rejects.toThrow(
+			"Failed to fetch LiteLLM models: Internal Server Error",
+		)
+
+		expect(mockedAxios.get).toHaveBeenCalledTimes(1)
+		expect(mockedAxios.get).toHaveBeenNthCalledWith(1, "http://localhost:4000/v1/model/info", expect.any(Object))
 	})
 })
