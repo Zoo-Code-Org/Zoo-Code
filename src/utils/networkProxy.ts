@@ -347,6 +347,30 @@ export function isDebugMode(): boolean {
 }
 
 /**
+ * Get the proxy URL from environment variables or VS Code settings.
+ * Works in all extension modes (production and debug).
+ */
+export function getSystemProxyUrl(): string | undefined {
+	// Standard proxy environment variables (HTTPS takes precedence over HTTP)
+	const fromEnv =
+		process.env.HTTPS_PROXY ||
+		process.env.https_proxy ||
+		process.env.HTTP_PROXY ||
+		process.env.http_proxy
+	if (fromEnv) return fromEnv
+
+	// Fall back to VS Code's http.proxy setting
+	try {
+		const vsCodeProxy = vscode.workspace.getConfiguration("http").get<string>("proxy")
+		if (vsCodeProxy?.trim()) return vsCodeProxy.trim()
+	} catch {
+		// VS Code API may be unavailable in test environments
+	}
+
+	return undefined
+}
+
+/**
  * Log a message to the output channel if available.
  */
 function log(message: string): void {

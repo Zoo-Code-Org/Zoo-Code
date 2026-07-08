@@ -463,6 +463,9 @@ importers:
       '@roo-code/types':
         specifier: workspace:^
         version: link:../packages/types
+      '@smithy/node-http-handler':
+        specifier: ^4.0.0
+        version: 4.8.2
       ai-sdk-provider-poe:
         specifier: 2.0.18
         version: 2.0.18(ai@6.0.209(zod@3.25.76))(zod@3.25.76)
@@ -508,6 +511,9 @@ importers:
       gray-matter:
         specifier: ^4.0.3
         version: 4.0.3
+      https-proxy-agent:
+        specifier: ^7.0.0
+        version: 7.0.6
       i18next:
         specifier: ^25.0.0
         version: 25.2.1(typescript@5.9.3)

@@ -10,9 +10,11 @@ import {
 	ToolConfiguration,
 	ToolChoice,
 } from "@aws-sdk/client-bedrock-runtime"
+import { NodeHttpHandler } from "@smithy/node-http-handler"
 import OpenAI from "openai"
 import { fromIni } from "@aws-sdk/credential-providers"
 import { Anthropic } from "@anthropic-ai/sdk"
+import { HttpsProxyAgent } from "https-proxy-agent"
 
 import {
 	type ModelInfo,
@@ -44,6 +46,7 @@ import { convertToBedrockConverseMessages as sharedConverter } from "../transfor
 import { getModelParams } from "../transform/model-params"
 import { shouldUseReasoningBudget } from "../../shared/api"
 import { normalizeToolSchema } from "../../utils/json-schema"
+import { getSystemProxyUrl } from "../../utils/networkProxy"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 
 /************************************************************************************
@@ -292,6 +295,17 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				secretAccessKey: this.options.awsSecretKey,
 				...(this.options.awsSessionToken ? { sessionToken: this.options.awsSessionToken } : {}),
 			}
+		}
+
+		// When a corporate proxy is configured, Node resolves DNS locally before tunneling,
+		// causing ENOTFOUND for endpoints that only the proxy can reach. HttpsProxyAgent
+		// uses CONNECT tunneling so the proxy handles DNS resolution instead.
+		const proxyUrl = getSystemProxyUrl()
+		if (proxyUrl) {
+			clientConfig.requestHandler = new NodeHttpHandler({
+				httpsAgent: new HttpsProxyAgent(proxyUrl),
+				requestTimeout: 0,
+			})
 		}
 
 		this.client = new BedrockRuntimeClient(clientConfig)
