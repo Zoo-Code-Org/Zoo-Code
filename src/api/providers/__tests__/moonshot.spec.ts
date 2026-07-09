@@ -285,6 +285,42 @@ describe("MoonshotHandler", () => {
 			expect(result.cacheWriteTokens).toBe(0)
 			expect(result.cacheReadTokens).toBeUndefined()
 		})
+
+		it("should handle cached_tokens at top level (not in prompt_tokens_details)", () => {
+			class TestMoonshotHandler extends MoonshotHandler {
+				public testProcessUsageMetrics(usage: any) {
+					return this.processUsageMetrics(usage)
+				}
+			}
+
+			const testHandler = new TestMoonshotHandler(mockOptions)
+
+			const usage = {
+				prompt_tokens: 100,
+				completion_tokens: 50,
+				cached_tokens: 15,
+			}
+
+			const result = testHandler.testProcessUsageMetrics(usage)
+
+			expect(result.cacheReadTokens).toBe(15)
+		})
+
+		it("should handle null usage gracefully", () => {
+			class TestMoonshotHandler extends MoonshotHandler {
+				public testProcessUsageMetrics(usage: any) {
+					return this.processUsageMetrics(usage)
+				}
+			}
+
+			const testHandler = new TestMoonshotHandler(mockOptions)
+
+			const result = testHandler.testProcessUsageMetrics(null)
+
+			expect(result.inputTokens).toBe(0)
+			expect(result.outputTokens).toBe(0)
+			expect(result.cacheReadTokens).toBeUndefined()
+		})
 	})
 
 	describe("addMaxTokensIfNeeded", () => {
