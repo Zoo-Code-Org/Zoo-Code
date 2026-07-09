@@ -29,6 +29,16 @@ import {
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
 
+// Pre-sorted list of known Anthropic model IDs (lowercased) by length (descending) for case-insensitive substring matching.
+const ANTHROPIC_MODEL_IDS_SORTED_LOWER = (Object.keys(anthropicModels) as AnthropicModelId[])
+	.map((id) => id.toLowerCase())
+	.sort((a, b) => b.length - a.length) as string[]
+
+// Original-case mapping: lowercase key → original AnthropicModelId for lookup.
+const ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL = Object.fromEntries(
+	(Object.keys(anthropicModels) as AnthropicModelId[]).map((id) => [id.toLowerCase(), id]),
+)
+
 export class AnthropicHandler extends BaseProvider implements SingleCompletionHandler {
 	private options: ApiHandlerOptions
 	private client: Anthropic
@@ -355,11 +365,15 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 
 	// Guesses capabilities for an unrecognized model ID via known-family substring match.
 	private guessModelInfoFromId(modelId: string): ModelInfo {
-		const matchedId = (Object.keys(anthropicModels) as AnthropicModelId[])
-			.sort((a, b) => b.length - a.length)
-			.find((knownId) => modelId.includes(knownId))
+		const lowerModelId = modelId.toLowerCase()
+		const matchedLower = ANTHROPIC_MODEL_IDS_SORTED_LOWER.find((knownId) => lowerModelId.includes(knownId))
 
-		return matchedId ? anthropicModels[matchedId] : anthropicModels[anthropicDefaultModelId]
+		if (!matchedLower) {
+			return anthropicModels[anthropicDefaultModelId]
+		}
+
+		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower] as AnthropicModelId
+		return anthropicModels[originalId]
 	}
 
 	getModel() {
