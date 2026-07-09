@@ -39,6 +39,7 @@ export const DEFAULT_CONSECUTIVE_MISTAKE_LIMIT = 3
 
 export const dynamicProviders = [
 	"openrouter",
+	"umans",
 	"vercel-ai-gateway",
 	"zoo-gateway",
 	"litellm",
@@ -86,7 +87,7 @@ export const isInternalProvider = (key: string): key is InternalProvider =>
  * Custom providers are completely configurable within Roo Code settings.
  */
 
-export const customProviders = ["openai"] as const
+export const customProviders = ["openai", "anthropic-custom"] as const
 
 export type CustomProvider = (typeof customProviders)[number]
 
@@ -223,6 +224,11 @@ const openRouterSchema = baseProviderSettingsSchema.extend({
 	openRouterSpecificProvider: z.string().optional(),
 })
 
+const umansSchema = baseProviderSettingsSchema.extend({
+	umansApiKey: z.string().optional(),
+	umansModelId: z.string().optional(),
+})
+
 const bedrockSchema = apiModelIdProviderModelSchema.extend({
 	awsAccessKey: z.string().optional(),
 	awsSecretKey: z.string().optional(),
@@ -262,6 +268,15 @@ const openAiSchema = baseProviderSettingsSchema.extend({
 	openAiStreamingEnabled: z.boolean().optional(),
 	openAiHostHeader: z.string().optional(), // Keep temporarily for backward compatibility during migration.
 	openAiHeaders: z.record(z.string(), z.string()).optional(),
+})
+
+const anthropicCustomSchema = baseProviderSettingsSchema.extend({
+	anthropicCustomBaseUrl: z.string().optional(),
+	anthropicCustomApiKey: z.string().optional(),
+	anthropicCustomModelId: z.string().optional(),
+	anthropicCustomModelInfo: modelInfoSchema.nullish(),
+	anthropicCustomStreamingEnabled: z.boolean().optional(),
+	anthropicCustomHeaders: z.record(z.string(), z.string()).optional(),
 })
 
 const ollamaSchema = baseProviderSettingsSchema.extend({
@@ -430,9 +445,11 @@ const defaultSchema = z.object({
 export const providerSettingsSchemaDiscriminated = z.discriminatedUnion("apiProvider", [
 	anthropicSchema.merge(z.object({ apiProvider: z.literal("anthropic") })),
 	openRouterSchema.merge(z.object({ apiProvider: z.literal("openrouter") })),
+	umansSchema.merge(z.object({ apiProvider: z.literal("umans") })),
 	bedrockSchema.merge(z.object({ apiProvider: z.literal("bedrock") })),
 	vertexSchema.merge(z.object({ apiProvider: z.literal("vertex") })),
 	openAiSchema.merge(z.object({ apiProvider: z.literal("openai") })),
+	anthropicCustomSchema.merge(z.object({ apiProvider: z.literal("anthropic-custom") })),
 	ollamaSchema.merge(z.object({ apiProvider: z.literal("ollama") })),
 	vsCodeLmSchema.merge(z.object({ apiProvider: z.literal("vscode-lm") })),
 	lmStudioSchema.merge(z.object({ apiProvider: z.literal("lmstudio") })),
@@ -467,9 +484,11 @@ export const providerSettingsSchema = z.object({
 	apiProvider: providerNamesWithRetiredSchema.optional(),
 	...anthropicSchema.shape,
 	...openRouterSchema.shape,
+	...umansSchema.shape,
 	...bedrockSchema.shape,
 	...vertexSchema.shape,
 	...openAiSchema.shape,
+	...anthropicCustomSchema.shape,
 	...ollamaSchema.shape,
 	...vsCodeLmSchema.shape,
 	...lmStudioSchema.shape,
@@ -519,7 +538,9 @@ export const PROVIDER_SETTINGS_KEYS = providerSettingsSchema.keyof().options
 export const modelIdKeys = [
 	"apiModelId",
 	"openRouterModelId",
+	"umansModelId",
 	"openAiModelId",
+	"anthropicCustomModelId",
 	"ollamaModelId",
 	"lmStudioModelId",
 	"lmStudioDraftModelId",
@@ -550,6 +571,7 @@ export const isTypicalProvider = (key: unknown): key is TypicalProvider =>
 export const modelIdKeysByProvider: Record<TypicalProvider, ModelIdKey> = {
 	anthropic: "apiModelId",
 	openrouter: "openRouterModelId",
+	umans: "umansModelId",
 	bedrock: "apiModelId",
 	vertex: "apiModelId",
 	"openai-codex": "apiModelId",
@@ -584,7 +606,7 @@ export const modelIdKeysByProvider: Record<TypicalProvider, ModelIdKey> = {
  */
 
 // Providers that use Anthropic-style API protocol.
-export const ANTHROPIC_STYLE_PROVIDERS: ProviderName[] = ["anthropic", "bedrock", "minimax"]
+export const ANTHROPIC_STYLE_PROVIDERS: ProviderName[] = ["anthropic", "anthropic-custom", "bedrock", "minimax"]
 
 export const getApiProtocol = (provider: ProviderName | undefined, modelId?: string): "anthropic" | "openai" => {
 	if (provider && ANTHROPIC_STYLE_PROVIDERS.includes(provider)) {
@@ -624,7 +646,7 @@ export const getApiProtocol = (provider: ProviderName | undefined, modelId?: str
  */
 
 export const MODELS_BY_PROVIDER: Record<
-	Exclude<ProviderName, "fake-ai" | "gemini-cli" | "openai">,
+	Exclude<ProviderName, "fake-ai" | "gemini-cli" | "openai" | "anthropic-custom">,
 	{ id: ProviderName; label: string; models: string[] }
 > = {
 	anthropic: {
@@ -711,6 +733,7 @@ export const MODELS_BY_PROVIDER: Record<
 	poe: { id: "poe", label: "Poe", models: [] },
 	litellm: { id: "litellm", label: "LiteLLM", models: [] },
 	openrouter: { id: "openrouter", label: "OpenRouter", models: [] },
+	umans: { id: "umans", label: "Umans", models: [] },
 	requesty: { id: "requesty", label: "Requesty", models: [] },
 	unbound: { id: "unbound", label: "Unbound", models: [] },
 	"vercel-ai-gateway": { id: "vercel-ai-gateway", label: "Vercel AI Gateway", models: [] },

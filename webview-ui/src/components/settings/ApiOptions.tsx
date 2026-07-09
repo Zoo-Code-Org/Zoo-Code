@@ -48,6 +48,7 @@ import {
 
 import {
 	Anthropic,
+	AnthropicCustom,
 	Baseten,
 	Bedrock,
 	DeepSeek,
@@ -64,6 +65,7 @@ import {
 	Poe,
 	QwenCode,
 	Requesty,
+	Umans,
 	SambaNova,
 	Unbound,
 	Vertex,
@@ -457,6 +459,17 @@ const ApiOptions = ({
 						/>
 					)}
 
+					{selectedProvider === "umans" && (
+						<Umans
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
 					{selectedProvider === "unbound" && (
 						<Unbound
 							apiConfiguration={apiConfiguration}
@@ -473,6 +486,16 @@ const ApiOptions = ({
 						<Anthropic
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === "anthropic-custom" && (
+						<AnthropicCustom
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
 							simplifySettings={fromWelcomeView}
 						/>
 					)}

@@ -15,6 +15,10 @@ describe("GLOBAL_STATE_KEYS", () => {
 		expect(GLOBAL_STATE_KEYS).not.toContain("openRouterApiKey")
 	})
 
+	it("should not contain Umans API key (secret)", () => {
+		expect(GLOBAL_STATE_KEYS).not.toContain("umansApiKey")
+	})
+
 	it("should contain OpenAI Compatible base URL setting", () => {
 		expect(GLOBAL_STATE_KEYS).toContain("codebaseIndexOpenAiCompatibleBaseUrl")
 	})

@@ -2676,6 +2676,7 @@ describe("ClineProvider - Router Models", () => {
 
 		// Verify getModels was called for each provider with correct options
 		expect(getModels).toHaveBeenCalledWith({ provider: "openrouter" })
+		expect(getModels).toHaveBeenCalledWith({ provider: "umans" })
 		expect(getModels).toHaveBeenCalledWith({ provider: "requesty", apiKey: "requesty-key" })
 		expect(getModels).toHaveBeenCalledWith({ provider: "unbound" })
 		expect(getModels).toHaveBeenCalledWith({ provider: "vercel-ai-gateway" })
@@ -2692,6 +2693,7 @@ describe("ClineProvider - Router Models", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				umans: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,
@@ -2728,6 +2730,7 @@ describe("ClineProvider - Router Models", () => {
 		// Mock some providers to succeed and others to fail
 		vi.mocked(getModels)
 			.mockResolvedValueOnce(mockModels) // openrouter success
+			.mockResolvedValueOnce(mockModels) // umans success
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty fail
 			.mockResolvedValueOnce(mockModels) // unbound success
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway success
@@ -2742,6 +2745,7 @@ describe("ClineProvider - Router Models", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				umans: mockModels,
 				requesty: {},
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,
@@ -2839,6 +2843,7 @@ describe("ClineProvider - Router Models", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				umans: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,

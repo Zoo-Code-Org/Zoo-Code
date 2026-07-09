@@ -109,6 +109,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		// Aggregate handler initializes many known routers - ensure a few expected keys exist
 		expect(routerModels).toHaveProperty("openrouter")
+		expect(routerModels).toHaveProperty("umans")
 		expect(routerModels).toHaveProperty("requesty")
 		expect(routerModels).toHaveProperty("deepseek")
 		expect(routerModels.deepseek).toEqual({})

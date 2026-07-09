@@ -1032,6 +1032,7 @@ export const webviewMessageHandler = async (
 				? ({} as Record<RouterName, ModelRecord>)
 				: {
 						openrouter: {},
+						umans: {},
 						"vercel-ai-gateway": {},
 						"zoo-gateway": {},
 						litellm: {},
@@ -1060,6 +1061,7 @@ export const webviewMessageHandler = async (
 			// Base candidates (only those handled by this aggregate fetcher)
 			const candidates: { key: RouterName; options: GetModelsOptions }[] = [
 				{ key: "openrouter", options: { provider: "openrouter" } },
+				{ key: "umans", options: { provider: "umans" } },
 				{
 					key: "requesty",
 					options: {

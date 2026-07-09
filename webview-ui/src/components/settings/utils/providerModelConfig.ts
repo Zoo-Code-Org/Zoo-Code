@@ -22,6 +22,7 @@ import {
 	mimoDefaultModelId,
 	poeDefaultModelId,
 	requestyDefaultModelId,
+	umansDefaultModelId,
 	unboundDefaultModelId,
 	litellmDefaultModelId,
 	vercelAiGatewayDefaultModelId,
@@ -38,6 +39,7 @@ export interface ProviderServiceConfig {
 
 export const PROVIDER_SERVICE_CONFIG: Partial<Record<ProviderName, ProviderServiceConfig>> = {
 	anthropic: { serviceName: "Anthropic", serviceUrl: "https://console.anthropic.com" },
+	umans: { serviceName: "Umans", serviceUrl: "https://api.code.umans.ai/v1/models/info" },
 	bedrock: { serviceName: "Amazon Bedrock", serviceUrl: "https://aws.amazon.com/bedrock" },
 	deepseek: { serviceName: "DeepSeek", serviceUrl: "https://platform.deepseek.com" },
 	moonshot: { serviceName: "Moonshot", serviceUrl: "https://platform.moonshot.cn" },
@@ -64,6 +66,7 @@ export const PROVIDER_SERVICE_CONFIG: Partial<Record<ProviderName, ProviderServi
 
 export const PROVIDER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> = {
 	anthropic: anthropicDefaultModelId,
+	umans: umansDefaultModelId,
 	bedrock: bedrockDefaultModelId,
 	deepseek: deepSeekDefaultModelId,
 	moonshot: moonshotDefaultModelId,
@@ -106,6 +109,7 @@ export type ProviderModelConfig = {
 // Kept in this file to keep ApiOptions.tsx from growing a second registry.
 const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> = {
 	openrouter: { field: "openRouterModelId", default: openRouterDefaultModelId },
+	umans: { field: "umansModelId", default: umansDefaultModelId },
 	requesty: { field: "requestyModelId", default: requestyDefaultModelId },
 	unbound: { field: "unboundModelId", default: unboundDefaultModelId },
 	litellm: { field: "litellmModelId", default: litellmDefaultModelId },
@@ -154,6 +158,7 @@ export function getProviderModelConfig(provider: string, apiConfiguration?: Prov
 const PROVIDER_DOCS_SLUGS: Partial<Record<ProviderName, string>> = {
 	"openai-native": "openai",
 	openai: "openai-compatible",
+	umans: "openai-compatible",
 }
 
 export function getProviderDocsSlug(provider: string) {
@@ -195,6 +200,7 @@ export const isStaticModelProvider = (provider: ProviderName): boolean => {
  */
 export const PROVIDERS_WITH_CUSTOM_MODEL_UI: ProviderName[] = [
 	"openrouter",
+	"umans",
 	"requesty",
 	"unbound",
 	"openai", // OpenAI Compatible

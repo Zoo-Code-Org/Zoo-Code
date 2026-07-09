@@ -43,6 +43,7 @@ describe("Model Validation Functions", () => {
 				outputPrice: 5.0,
 			},
 		},
+		umans: {},
 		requesty: {},
 		unbound: {},
 		litellm: {},
@@ -149,6 +150,16 @@ describe("Model Validation Functions", () => {
 				apiProvider: "openrouter",
 				openRouterModelId: "valid-model",
 				// Missing openRouterApiKey
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns an apiKey error for Umans when the API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: "umans",
+				umansModelId: "umans-coder",
 			}
 
 			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)

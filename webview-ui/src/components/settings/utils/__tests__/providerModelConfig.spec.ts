@@ -25,6 +25,13 @@ describe("providerModelConfig", () => {
 			})
 		})
 
+		it("contains service config for umans", () => {
+			expect(PROVIDER_SERVICE_CONFIG.umans).toEqual({
+				serviceName: "Umans",
+				serviceUrl: "https://api.code.umans.ai/v1/models/info",
+			})
+		})
+
 		it("contains service config for ollama", () => {
 			expect(PROVIDER_SERVICE_CONFIG.ollama).toEqual({
 				serviceName: "Ollama",
@@ -64,6 +71,7 @@ describe("providerModelConfig", () => {
 	describe("PROVIDER_DEFAULT_MODEL_IDS", () => {
 		it("contains default model IDs for static providers", () => {
 			expect(PROVIDER_DEFAULT_MODEL_IDS.anthropic).toBeDefined()
+			expect(PROVIDER_DEFAULT_MODEL_IDS.umans).toBe("umans-coder")
 			expect(PROVIDER_DEFAULT_MODEL_IDS.bedrock).toBeDefined()
 			expect(PROVIDER_DEFAULT_MODEL_IDS.gemini).toBeDefined()
 			expect(PROVIDER_DEFAULT_MODEL_IDS["openai-native"]).toBeDefined()
@@ -187,6 +195,7 @@ describe("providerModelConfig", () => {
 
 		it("returns false for providers with custom model UI", () => {
 			expect(shouldUseGenericModelPicker("openrouter")).toBe(false)
+			expect(shouldUseGenericModelPicker("umans")).toBe(false)
 			expect(shouldUseGenericModelPicker("ollama")).toBe(false)
 			expect(shouldUseGenericModelPicker("lmstudio")).toBe(false)
 			expect(shouldUseGenericModelPicker("vscode-lm")).toBe(false)

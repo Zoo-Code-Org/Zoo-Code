@@ -18,6 +18,7 @@ import type { RouterName } from "../../../shared/api"
 import { fileExistsAtPath } from "../../../utils/fs"
 
 import { getOpenRouterModels } from "./openrouter"
+import { getUmansModels } from "./umans"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
 import { getOpencodeGoModels } from "./opencode-go"
 import { getRequestyModels } from "./requesty"
@@ -188,6 +189,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 	switch (provider) {
 		case "openrouter":
 			models = await getOpenRouterModels()
+			break
+		case "umans":
+			models = await getUmansModels()
 			break
 		case "requesty":
 			// Requesty models endpoint requires an API key for per-user custom policies.
@@ -386,6 +390,7 @@ export async function initializeModelCacheRefresh(): Promise<void> {
 		// Providers that work without API keys
 		const publicProviders: Array<{ provider: RouterName; options: GetModelsOptions }> = [
 			{ provider: "openrouter", options: { provider: "openrouter" } },
+			{ provider: "umans", options: { provider: "umans" } },
 			{ provider: "vercel-ai-gateway", options: { provider: "vercel-ai-gateway" } },
 		]
 

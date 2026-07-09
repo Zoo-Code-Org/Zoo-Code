@@ -370,6 +370,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		// Verify getModels was called for each provider
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: "openrouter" })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "umans" })
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: "requesty", apiKey: "requesty-key" })
 		expect(mockGetModels).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -390,6 +391,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				umans: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,
@@ -541,6 +543,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				umans: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,
@@ -569,6 +572,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		// Mock some providers to succeed and others to fail
 		mockGetModels
 			.mockResolvedValueOnce(mockModels) // openrouter
+			.mockResolvedValueOnce(mockModels) // umans
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockResolvedValueOnce(mockModels) // unbound
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway
@@ -600,6 +604,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				umans: mockModels,
 				requesty: {},
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,
@@ -619,11 +624,13 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		// Mock providers to fail with different error types
 		mockGetModels
 			.mockRejectedValueOnce(new Error("Structured error message")) // openrouter
+			.mockRejectedValueOnce(new Error("Umans API error")) // umans
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockRejectedValueOnce(new Error("Unbound error")) // unbound
 			.mockRejectedValueOnce(new Error("Vercel AI Gateway error")) // vercel-ai-gateway
 			.mockRejectedValueOnce(new Error("Zoo Gateway error")) // zoo-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
+			.mockResolvedValueOnce({}) // opencode-go
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
@@ -635,6 +642,13 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			success: false,
 			error: "Structured error message",
 			values: { provider: "openrouter" },
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "singleRouterModelFetchResponse",
+			success: false,
+			error: "Umans API error",
+			values: { provider: "umans" },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({

@@ -52,6 +52,11 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
+		case "umans":
+			if (!apiConfiguration.umansApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
 		case "unbound":
 			if (!apiConfiguration.unboundApiKey) {
 				return i18next.t("settings:validation.apiKey")
@@ -95,6 +100,14 @@ function validateModelsAndKeysProvided(
 		case "openai":
 			if (!apiConfiguration.openAiBaseUrl || !apiConfiguration.openAiApiKey || !apiConfiguration.openAiModelId) {
 				return i18next.t("settings:validation.openAi")
+			}
+			break
+		case "anthropic-custom":
+			if (!apiConfiguration.anthropicCustomApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			if (!apiConfiguration.anthropicCustomModelId) {
+				return i18next.t("settings:validation.modelId")
 			}
 			break
 		case "ollama":
@@ -198,6 +211,10 @@ function validateProviderAgainstOrganizationSettings(
 function getModelIdForProvider(apiConfiguration: ProviderSettings, provider: ProviderName): string | undefined {
 	if (provider === "vscode-lm") {
 		return apiConfiguration.vsCodeLmModelSelector?.id
+	}
+
+	if (provider === "anthropic-custom") {
+		return apiConfiguration.anthropicCustomModelId
 	}
 
 	if (isCustomProvider(provider) || isFauxProvider(provider)) {

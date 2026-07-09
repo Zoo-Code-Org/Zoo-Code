@@ -274,6 +274,21 @@ describe("ProfileValidator", () => {
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
 		})
 
+		it("should extract umansModelId for umans provider", () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					umans: { allowAll: false, models: ["umans-coder"] },
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: "umans",
+				umansModelId: "umans-coder",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+		})
+
 		it("should handle providers with undefined models list gracefully", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,

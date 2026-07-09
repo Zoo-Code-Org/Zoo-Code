@@ -53,6 +53,8 @@ export class ProfileValidator {
 		switch (profile.apiProvider) {
 			case "openai":
 				return profile.openAiModelId
+			case "anthropic-custom":
+				return profile.anthropicCustomModelId
 			case "anthropic":
 			case "openai-native":
 			case "bedrock":
@@ -74,6 +76,8 @@ export class ProfileValidator {
 				return profile.vsCodeLmModelSelector?.id
 			case "openrouter":
 				return profile.openRouterModelId
+			case "umans":
+				return profile.umansModelId
 			case "ollama":
 				return profile.ollamaModelId
 			case "requesty":

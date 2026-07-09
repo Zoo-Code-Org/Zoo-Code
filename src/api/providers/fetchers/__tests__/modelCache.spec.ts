@@ -43,6 +43,7 @@ vi.mock("fs", () => ({
 vi.mock("../litellm")
 vi.mock("../openrouter")
 vi.mock("../requesty")
+vi.mock("../umans")
 
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
@@ -63,10 +64,12 @@ import { getModels, getModelsFromCache } from "../modelCache"
 import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
+import { getUmansModels } from "../umans"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
 const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
 const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels>
+const mockGetUmansModels = getUmansModels as Mock<typeof getUmansModels>
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
 
@@ -127,6 +130,23 @@ describe("getModels with new GetModelsOptions", () => {
 		const result = await getModels({ provider: "requesty", apiKey: DUMMY_REQUESTY_KEY })
 
 		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY)
+		expect(result).toEqual(mockModels)
+	})
+
+	it("calls getUmansModels for umans provider", async () => {
+		const mockModels = {
+			"umans-coder": {
+				maxTokens: 32768,
+				contextWindow: 262144,
+				supportsPromptCache: false,
+				description: "Umans Coder",
+			},
+		}
+		mockGetUmansModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({ provider: "umans" })
+
+		expect(mockGetUmansModels).toHaveBeenCalled()
 		expect(result).toEqual(mockModels)
 	})
 

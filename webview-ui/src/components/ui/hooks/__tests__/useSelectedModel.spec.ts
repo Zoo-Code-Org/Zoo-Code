@@ -722,6 +722,82 @@ describe("useSelectedModel", () => {
 		})
 	})
 
+	describe("umans provider", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("returns router model info when a Umans model exists", () => {
+			const umansModelInfo: ModelInfo = {
+				maxTokens: 32768,
+				contextWindow: 262144,
+				supportsImages: true,
+				supportsPromptCache: false,
+				description: "Umans Coder",
+			}
+
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					umans: {
+						"umans-coder": umansModelInfo,
+					},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "umans",
+				umansModelId: "umans-coder",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("umans")
+			expect(result.current.id).toBe("umans-coder")
+			expect(result.current.info).toEqual(umansModelInfo)
+		})
+
+		it("falls back to the Umans default when the selected model is unavailable", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					umans: {
+						"umans-coder": {
+							maxTokens: 32768,
+							contextWindow: 262144,
+							supportsImages: true,
+							supportsPromptCache: false,
+						},
+					},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "umans",
+				umansModelId: "missing-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("umans")
+			expect(result.current.id).toBe("umans-coder")
+		})
+	})
+
 	describe("openai provider", () => {
 		beforeEach(() => {
 			mockUseRouterModels.mockReturnValue({

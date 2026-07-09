@@ -24,6 +24,7 @@ import {
 	VsCodeLmHandler,
 	RequestyHandler,
 	UnboundHandler,
+	UmansHandler,
 	FakeAIHandler,
 	XAIHandler,
 	LiteLLMHandler,
@@ -141,9 +142,12 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 
 	switch (apiProvider) {
 		case "anthropic":
+		case "anthropic-custom":
 			return new AnthropicHandler(options)
 		case "openrouter":
 			return new OpenRouterHandler(options)
+		case "umans":
+			return new UmansHandler(options)
 		case "bedrock":
 			return new AwsBedrockHandler(options)
 		case "vertex":

@@ -8,6 +8,7 @@ import {
 	type AnthropicModelId,
 	anthropicDefaultModelId,
 	anthropicModels,
+	openAiModelInfoSaneDefaults,
 	ANTHROPIC_DEFAULT_MAX_TOKENS,
 	ApiProviderError,
 } from "@roo-code/types"
@@ -38,12 +39,17 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		super()
 		this.options = options
 
+		const baseURL = this.options.anthropicCustomBaseUrl || this.options.anthropicBaseUrl || undefined
+		const apiKey = this.options.anthropicCustomApiKey || this.options.apiKey
 		const apiKeyFieldName =
-			this.options.anthropicBaseUrl && this.options.anthropicUseAuthToken ? "authToken" : "apiKey"
+			baseURL && this.options.anthropicUseAuthToken && !this.options.anthropicCustomApiKey
+				? "authToken"
+				: "apiKey"
 
 		this.client = new Anthropic({
-			baseURL: this.options.anthropicBaseUrl || undefined,
-			[apiKeyFieldName]: this.options.apiKey,
+			baseURL,
+			[apiKeyFieldName]: apiKey,
+			defaultHeaders: this.options.anthropicCustomHeaders,
 			timeout: this.timeoutMs,
 		})
 	}
@@ -354,9 +360,14 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 	}
 
 	getModel() {
-		const modelId = this.options.apiModelId
-		const id = modelId && modelId in anthropicModels ? (modelId as AnthropicModelId) : anthropicDefaultModelId
-		let info: ModelInfo = anthropicModels[id]
+		const customModelId = this.options.anthropicCustomModelId
+		const modelId = customModelId || this.options.apiModelId
+		const id =
+			customModelId ||
+			(modelId && modelId in anthropicModels ? (modelId as AnthropicModelId) : anthropicDefaultModelId)
+		let info: ModelInfo = customModelId
+			? this.options.anthropicCustomModelInfo || openAiModelInfoSaneDefaults
+			: anthropicModels[id as AnthropicModelId]
 
 		// If 1M context beta is enabled for supported models, update the model info
 		if (
