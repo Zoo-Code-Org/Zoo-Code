@@ -477,6 +477,8 @@
 		"poeBaseUrl": "Poe 基礎 URL",
 		"fireworksApiKey": "Fireworks API 金鑰",
 		"getFireworksApiKey": "取得 Fireworks API 金鑰",
+		"friendliApiKey": "Friendli API 金鑰",
+		"getFriendliApiKey": "取得 Friendli API 金鑰",
 		"deepSeekApiKey": "DeepSeek API 金鑰",
 		"getDeepSeekApiKey": "取得 DeepSeek API 金鑰",
 		"moonshotApiKey": "Moonshot API 金鑰",
@@ -568,6 +570,8 @@
 			"apiKeyHelp": "用於已驗證 Ollama 執行個體或雲端服務的選用 API 金鑰。本機安裝請留空。",
 			"numCtx": "上下文視窗大小（num_ctx）",
 			"numCtxHelp": "覆寫模型的預設上下文視窗大小。留空以使用模型的 Modelfile 設定。最小值為 128。",
+			"thinking": "啟用思考",
+			"thinkingHelp": "為推理模型（例如 qwen3、deepseek-r1）啟用 Ollama 的原生思考。啟用後，模型的推理將單獨串流和顯示。不支援的模型將忽略此設定。",
 			"description": "Ollama 允許您在本機電腦執行模型。請參閱快速入門指南。",
 			"warning": "注意：Zoo Code 使用複雜提示詞，與 Claude 模型搭配最佳。功能較弱的模型可能無法正常運作。"
 		},

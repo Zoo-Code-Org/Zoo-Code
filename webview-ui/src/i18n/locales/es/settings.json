@@ -450,6 +450,8 @@
 		"poeBaseUrl": "URL base de Poe",
 		"fireworksApiKey": "Clave API de Fireworks",
 		"getFireworksApiKey": "Obtener clave API de Fireworks",
+		"friendliApiKey": "Clave API de Friendli",
+		"getFriendliApiKey": "Obtener clave API de Friendli",
 		"deepSeekApiKey": "Clave API de DeepSeek",
 		"getDeepSeekApiKey": "Obtener clave API de DeepSeek",
 		"moonshotApiKey": "Clave API de Moonshot",
@@ -541,6 +543,8 @@
 			"apiKeyHelp": "Clave API opcional para instancias de Ollama autenticadas o servicios en la nube. Deja vacío para instalaciones locales.",
 			"numCtx": "Tamaño de la ventana de contexto (num_ctx)",
 			"numCtxHelp": "Sobrescribe el tamaño de la ventana de contexto predeterminado del modelo. Déjelo vacío para usar la configuración del Modelfile del modelo. El valor mínimo es 128.",
+			"thinking": "Activar razonamiento",
+			"thinkingHelp": "Activa el razonamiento nativo de Ollama para modelos de razonamiento (p. ej. qwen3, deepseek-r1). Cuando está activado, el razonamiento del modelo se transmite y se muestra por separado. Los modelos no compatibles ignorarán esta configuración.",
 			"description": "Ollama le permite ejecutar modelos localmente en su computadora. Para obtener instrucciones sobre cómo comenzar, consulte la guía de inicio rápido.",
 			"warning": "Nota: Zoo Code utiliza prompts complejos y funciona mejor con modelos Claude. Los modelos menos capaces pueden no funcionar como se espera."
 		},

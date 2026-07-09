@@ -178,6 +178,7 @@ describe("ProfileValidator", () => {
 			"xai",
 			"sambanova",
 			"fireworks",
+			"friendli",
 		]
 
 		apiModelProviders.forEach((provider) => {

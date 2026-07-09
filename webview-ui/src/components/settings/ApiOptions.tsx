@@ -71,6 +71,7 @@ import {
 	XAI,
 	ZAi,
 	Fireworks,
+	Friendli,
 	VercelAiGateway,
 	OpenCodeGo,
 	ZooGateway,
@@ -658,6 +659,13 @@ const ApiOptions = ({
 
 					{selectedProvider === "fireworks" && (
 						<Fireworks
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+						/>
+					)}
+
+					{selectedProvider === "friendli" && (
+						<Friendli
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>

@@ -3,6 +3,7 @@ export * from "./baseten.js"
 export * from "./bedrock.js"
 export * from "./deepseek.js"
 export * from "./fireworks.js"
+export * from "./friendli.js"
 export * from "./gemini.js"
 export * from "./lite-llm.js"
 export * from "./lm-studio.js"
@@ -33,6 +34,7 @@ import { basetenDefaultModelId } from "./baseten.js"
 import { bedrockDefaultModelId } from "./bedrock.js"
 import { deepSeekDefaultModelId } from "./deepseek.js"
 import { fireworksDefaultModelId } from "./fireworks.js"
+import { friendliDefaultModelId } from "./friendli.js"
 import { geminiDefaultModelId } from "./gemini.js"
 import { litellmDefaultModelId } from "./lite-llm.js"
 import { mistralDefaultModelId } from "./mistral.js"
@@ -111,6 +113,8 @@ export function getProviderDefaultModelId(
 			return sambaNovaDefaultModelId
 		case "fireworks":
 			return fireworksDefaultModelId
+		case "friendli":
+			return friendliDefaultModelId
 		case "qwen-code":
 			return qwenCodeDefaultModelId
 		case "poe":
