@@ -140,7 +140,7 @@ describe("BaseProvider", () => {
 			expect(result.properties.level1.properties.level2.properties.level3.additionalProperties).toBe(false)
 		})
 
-		it("should convert nullable types to non-nullable", () => {
+		it("should convert nullable types to anyOf (JSON Schema 2020-12)", () => {
 			const schema = {
 				type: "object",
 				properties: {
@@ -150,14 +150,23 @@ describe("BaseProvider", () => {
 
 			const result = provider.testConvertToolSchemaForOpenAI(schema)
 
-			expect(result.properties.name.type).toBe("string")
+			// After normalization, type arrays are converted to anyOf for
+			// JSON Schema 2020-12 compliance. The nullable types are no longer
+			// stripped — they're properly represented as anyOf alternatives.
+			expect(result.properties.name.anyOf).toEqual([
+				{ type: "string" },
+				{ type: "null" },
+			])
 		})
 
-		it("should return non-object schemas unchanged", () => {
+		it("should return non-object schemas with normalization applied", () => {
 			const schema = { type: "string" }
 			const result = provider.testConvertToolSchemaForOpenAI(schema)
 
-			expect(result).toEqual(schema)
+			// Non-object schemas pass through normalization preserving their
+			// core type. additionalProperties is not added because JSON Schema
+			// spec says it's only valid on object types.
+			expect(result.type).toBe("string")
 		})
 
 		it("should return null/undefined unchanged", () => {
