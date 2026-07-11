@@ -130,7 +130,7 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 				}
 			}
 
-			this.emit("shell_execution_complete", { exitCode: 0 })
+			this.emit("shell_execution_complete", { exitCode: 0, aborted: this.aborted })
 		} catch (error) {
 			if (error instanceof ExecaError) {
 				console.error(`[ExecaTerminalProcess#run] shell execution error: ${error.message}`)

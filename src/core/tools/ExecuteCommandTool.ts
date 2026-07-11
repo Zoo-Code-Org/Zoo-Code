@@ -571,6 +571,10 @@ function formatExitStatus(exitDetails: ExitCodeDetails | undefined): string {
 		return "Exit code: <undefined, notify user>"
 	}
 
+	if (exitDetails.aborted) {
+		return "Command was aborted by the user."
+	}
+
 	if (exitDetails.signalName) {
 		let status = `Process terminated by signal ${exitDetails.signalName}`
 		if (exitDetails.coreDumpPossible) {
