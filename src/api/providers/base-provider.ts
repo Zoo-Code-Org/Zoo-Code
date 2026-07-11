@@ -81,7 +81,7 @@ export abstract class BaseProvider implements ApiHandler {
 			return normalized
 		}
 
-		const result = { ...normalized }
+		const result: Record<string, any> = { ...normalized }
 
 		// OpenAI Responses API requires additionalProperties: false on all object schemas
 		// Only add if not already set to false (to avoid unnecessary mutations)
