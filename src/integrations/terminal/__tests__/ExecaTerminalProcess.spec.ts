@@ -129,7 +129,7 @@ describe("ExecaTerminalProcess", () => {
 			const spy = vitest.fn()
 			terminalProcess.on("shell_execution_complete", spy)
 			await terminalProcess.run("echo test")
-			expect(spy).toHaveBeenCalledWith({ exitCode: 0 })
+			expect(spy).toHaveBeenCalledWith({ exitCode: 0, aborted: false })
 		})
 
 		it("should emit completed event with full output", async () => {
