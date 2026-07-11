@@ -6,6 +6,7 @@ import type { ApiHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { ApiStream } from "../transform/stream"
 import { countTokens } from "../../utils/countTokens"
 import { isMcpTool } from "../../utils/mcp-name"
+import { normalizeToolSchema } from "../../utils/json-schema"
 import { getApiRequestTimeout } from "./utils/timeout-config"
 
 /**
@@ -56,6 +57,8 @@ export abstract class BaseProvider implements ApiHandler {
 
 	/**
 	 * Converts tool schemas to be compatible with OpenAI's strict mode by:
+	 * - Normalizing for JSON Schema 2020-12 compliance (strips unsupported
+	 *   keywords like maxItems that backends like Bedrock reject)
 	 * - Ensuring all properties are in the required array (strict mode requirement)
 	 * - Converting nullable types (["type", "null"]) to non-nullable ("type")
 	 * - Adding additionalProperties: false to all object schemas (required by OpenAI Responses API)
@@ -64,11 +67,21 @@ export abstract class BaseProvider implements ApiHandler {
 	 * This matches the behavior of ensureAllRequired in openai-native.ts
 	 */
 	protected convertToolSchemaForOpenAI(schema: any): any {
-		if (!schema || typeof schema !== "object" || schema.type !== "object") {
+		if (!schema || typeof schema !== "object") {
 			return schema
 		}
 
-		const result = { ...schema }
+		// Normalize for JSON Schema 2020-12 compliance first: converts
+		// deprecated type arrays to anyOf, strips unsupported format
+		// values, and adds additionalProperties: false. Required for
+		// backends like Bedrock that enforce strict 2020-12 compliance.
+		const normalized = normalizeToolSchema(schema as Record<string, unknown>)
+
+		if (!normalized || typeof normalized !== "object" || normalized.type !== "object") {
+			return normalized
+		}
+
+		const result = { ...normalized }
 
 		// OpenAI Responses API requires additionalProperties: false on all object schemas
 		// Only add if not already set to false (to avoid unnecessary mutations)
