@@ -26,7 +26,7 @@ export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.6-sol"
 export const openAiCodexModels = {
 	"gpt-5.6-sol": {
 		maxTokens: 128000,
-		contextWindow: 400000,
+		contextWindow: 372000,
 		includedTools: ["apply_patch"],
 		excludedTools: ["apply_diff", "write_to_file"],
 		supportsImages: true,
@@ -43,7 +43,7 @@ export const openAiCodexModels = {
 	},
 	"gpt-5.6-terra": {
 		maxTokens: 128000,
-		contextWindow: 400000,
+		contextWindow: 372000,
 		includedTools: ["apply_patch"],
 		excludedTools: ["apply_diff", "write_to_file"],
 		supportsImages: true,
@@ -60,7 +60,7 @@ export const openAiCodexModels = {
 	},
 	"gpt-5.6-luna": {
 		maxTokens: 128000,
-		contextWindow: 400000,
+		contextWindow: 372000,
 		includedTools: ["apply_patch"],
 		excludedTools: ["apply_diff", "write_to_file"],
 		supportsImages: true,
