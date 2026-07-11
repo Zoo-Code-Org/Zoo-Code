@@ -14,14 +14,19 @@ interface ReasoningBlockProps {
 	metadata?: any
 }
 
-export const ReasoningBlock = ({ content, isStreaming, isLast }: ReasoningBlockProps) => {
+export const ReasoningBlock = ({ content, isStreaming, isLast, ts }: ReasoningBlockProps) => {
 	const { t } = useTranslation()
 	const { reasoningBlockCollapsed } = useExtensionState()
 
 	const [isCollapsed, setIsCollapsed] = useState(reasoningBlockCollapsed)
 
-	const startTimeRef = useRef<number>(Date.now())
-	const [elapsed, setElapsed] = useState<number>(0)
+	// Anchor the elapsed timer to the message creation timestamp (ts)
+	// rather than component mount time. When Virtuoso recycles or
+	// remounts this component (e.g. during expand/collapse in a
+	// virtualized list), the timer survives because ts is a stable
+	// prop from the message data rather than a fresh Date.now().
+	const startTimeRef = useRef<number>(ts)
+	const [elapsed, setElapsed] = useState<number>(() => (isStreaming ? 0 : Math.max(0, Date.now() - ts)))
 	const contentRef = useRef<HTMLDivElement>(null)
 
 	useEffect(() => {
