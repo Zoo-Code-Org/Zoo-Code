@@ -228,18 +228,21 @@ async function testTerminalCommand(
 			})
 		}
 
-		// Wait for some output to be processed
-		await new Promise<void>((resolve) => {
-			terminalProcess.once("line", () => resolve())
-		})
-
-		// Then trigger the end event, referencing the SAME execution object as above.
+		// Trigger the end event after microtask-based stream consumption completes.
+		// The stream yields chunks as microtasks (async generator); setTimeout(0)
+		// fires after all pending microtasks, so the D marker will be consumed and
+		// the loop will have broken on sawEndMarker before this fires. Firing before
+		// that (e.g. after the first 'line' event) would cause DONE_SENTINEL to win
+		// the Promise.race and skip unconsumed chunks.
 		if (eventHandlers.endTerminalShellExecution) {
-			eventHandlers.endTerminalShellExecution({
-				terminal: mockTerminal,
-				execution: mockExecution,
-				exitCode: exitCode,
-			})
+			const _exitCode = exitCode
+			setTimeout(() => {
+				eventHandlers.endTerminalShellExecution({
+					terminal: mockTerminal,
+					execution: mockExecution,
+					exitCode: _exitCode,
+				})
+			}, 0)
 		}
 
 		// Store exit details for return

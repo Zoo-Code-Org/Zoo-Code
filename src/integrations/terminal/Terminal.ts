@@ -158,15 +158,16 @@ export class Terminal extends BaseTerminal {
 		}
 
 		return new Promise<void>((resolve, reject) => {
+			const ref = { disposable: null as vscode.Disposable | null }
 			const timer = setTimeout(() => {
-				disposable.dispose()
+				ref.disposable?.dispose()
 				reject(new Error(`Shell integration did not activate within ${timeoutMs / 1000}s`))
 			}, timeoutMs)
 
-			const disposable = vscode.window.onDidChangeTerminalShellIntegration((e) => {
+			ref.disposable = vscode.window.onDidChangeTerminalShellIntegration((e) => {
 				if (e.terminal === this.terminal) {
 					clearTimeout(timer)
-					disposable.dispose()
+					ref.disposable?.dispose()
 					resolve()
 				}
 			})

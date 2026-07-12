@@ -118,7 +118,9 @@ describe("TerminalProcess", () => {
 			// onDidEndTerminalShellExecution is a separate global VSCode event, not
 			// something coupled to the stream iterator being pulled again -- emit it
 			// independently of stream consumption, matching real-world timing.
-			terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+			// Use setTimeout(0) so it fires after microtask-based stream processing
+			// (async generator iterations) has consumed all chunks including the D marker.
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
 
 			await runPromise
 
@@ -363,10 +365,12 @@ describe("TerminalProcess", () => {
 			terminalProcess.once("no_shell_integration", noShellIntegrationSpy)
 
 			const runPromise = terminalProcess.run("test command")
+			// stream_available is now emitted by TerminalRegistry (onDidStartTerminalShellExecution).
+			// Simulate that here so run() can proceed to consume the stream.
+			terminalProcess.emit("stream_available", mockStream)
 			await runPromise
 			await eventPromises
 
-			expect(mockExecution.read).toHaveBeenCalledTimes(1)
 			expect(completedOutput).toBe("")
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 		})
@@ -396,10 +400,12 @@ describe("TerminalProcess", () => {
 			terminalProcess.once("no_shell_integration", noShellIntegrationSpy)
 
 			const runPromise = terminalProcess.run("test command")
+			// stream_available is now emitted by TerminalRegistry (onDidStartTerminalShellExecution).
+			// Simulate that here so run() can proceed to consume the stream.
+			terminalProcess.emit("stream_available", mockStream)
 			await runPromise
 			await eventPromises
 
-			expect(mockExecution.read).toHaveBeenCalledTimes(1)
 			expect(completedOutput).toBe("some output without marker\n")
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 		})
@@ -437,7 +443,9 @@ describe("TerminalProcess", () => {
 			// onDidEndTerminalShellExecution is a separate global VSCode event, not
 			// something coupled to the stream iterator being pulled again -- emit it
 			// independently of stream consumption, matching real-world timing.
-			terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+			// Use setTimeout(0) so it fires after microtask-based stream processing
+			// has consumed all chunks including the D marker.
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
 
 			await runPromise
 

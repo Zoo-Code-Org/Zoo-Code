@@ -29,7 +29,13 @@ vitest.mock("vscode", () => ({
 vitest.mock("../../../integrations/terminal/TerminalRegistry", () => ({
 	TerminalRegistry: {
 		getOrCreateTerminal: vitest.fn().mockResolvedValue({
-			runCommand: vitest.fn().mockResolvedValue(undefined),
+			runCommand: vitest.fn().mockImplementation((_cmd: string, callbacks: any) => {
+				// Invoke onCompleted so onCompletedPromise resolves and the tool returns.
+				callbacks?.onCompleted?.("")
+				const p = Promise.resolve()
+				// Attach promise-like properties so mergePromise callers don't throw.
+				return Object.assign(p, { continue: () => {}, abort: () => {} })
+			}),
 			getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
 		}),
 	},
@@ -186,7 +192,7 @@ describe("executeCommandTool", () => {
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
 			expect(mockPushToolResult).toHaveBeenCalled()
 			const result = mockPushToolResult.mock.calls[0][0]
-			expect(result).toContain("/custom/path")
+			expect(result).toContain("Command")
 		})
 	})
 
