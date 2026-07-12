@@ -185,13 +185,20 @@ async function testCmdCommand(
 			}, 500)
 		})
 
-		// Then trigger the end event, referencing the SAME execution object as above.
+		// Trigger the end event after microtask-based stream consumption completes.
+		// The stream yields chunks as microtasks (async generator); setTimeout(0)
+		// fires after all pending microtasks, so all chunks (including the D marker)
+		// will be consumed before this fires. Firing synchronously would let
+		// DONE_SENTINEL win the Promise.race and skip unconsumed chunks.
 		if (eventHandlers.endTerminalShellExecution) {
-			eventHandlers.endTerminalShellExecution({
-				terminal: mockTerminal,
-				execution: mockExecution,
-				exitCode: exitCode,
-			})
+			const _exitCode = exitCode
+			setTimeout(() => {
+				eventHandlers.endTerminalShellExecution({
+					terminal: mockTerminal,
+					execution: mockExecution,
+					exitCode: _exitCode,
+				})
+			}, 0)
 		}
 
 		// Store exit details for return
