@@ -1,0 +1,18 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "LONG_RUNNING_SILENT_COMMAND_E2E"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"sleep 5\"}",
+						"id": "call_long_running_silent_001"
+					}
+				]
+			}
+		}
+	]
+}

@@ -56,11 +56,28 @@ export class TerminalRegistry {
 					})
 
 					if (terminal instanceof Terminal) {
-						if (terminal.activeShellExecution === e.execution) {
+						// Always call read() from this event — it fires when VSCode's shell
+						// integration confirms the command has actually started, which is the
+						// earliest point at which read() will reliably capture output. Calling
+						// read() earlier (e.g. immediately after executeCommand()) creates a
+						// stream window that misses data on cold terminals where the shell
+						// hasn't started yet: VSCode doesn't buffer retroactively.
+						//
+						// Guard: only set the stream for the execution we own. Stale start
+						// events for a previous execution on the same reused terminal must
+						// not overwrite the current command's stream.
+						const process = terminal.process
+						const isOwnExecution =
+							!(process instanceof TerminalProcess) ||
+							process.ownExecution === undefined ||
+							process.ownExecution === e.execution
+						if (!isOwnExecution) {
+							console.info(
+								"[TerminalRegistry] Ignoring onDidStartTerminalShellExecution for a different execution",
+								{ terminalId: terminal.id },
+							)
 							return
 						}
-
-						// Get a handle to the stream as early as possible.
 						const stream = e.execution.read()
 						terminal.setActiveStream(stream)
 						terminal.busy = true // Mark terminal as busy when shell execution starts
