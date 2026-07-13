@@ -153,9 +153,28 @@ jobs:
                   }),
                 ]);
 
+                // listForRef returns every check run ever recorded on the ref, including
+                // stale superseded ones (e.g. a failed run later re-run green). Branch
+                // protection and the PR UI only consider the latest run per check name, so
+                // reduce to that before evaluating — otherwise a single stale failure makes
+                // ciFailed true forever and state labels never come back. See issue #884.
+                //
+                // Unlike listReviews (which documents oldest-first order), listForRef's
+                // ordering is unspecified, so we pick the latest by run.id — GitHub assigns
+                // monotonically increasing IDs, and id is never null (a freshly re-queued
+                // run can have started_at: null, which would lose a string comparison
+                // against an older completed run's timestamp).
+                const latestByName = new Map();
+                for (const run of checkRuns) {
+                  const prev = latestByName.get(run.name);
+                  if (!prev || run.id > prev.id) {
+                    latestByName.set(run.name, run);
+                  }
+                }
+
                 // Filter to required checks only (or all checks if rules unavailable).
                 // Always exclude this workflow's own run to avoid self-referential loops.
-                const relevantRuns = checkRuns.filter(run => {
+                const relevantRuns = [...latestByName.values()].filter(run => {
                   if (run.name === 'Reconcile PR review state labels') return false;
                   return requiredCheckNames ? requiredCheckNames.has(run.name) : true;
                 });
