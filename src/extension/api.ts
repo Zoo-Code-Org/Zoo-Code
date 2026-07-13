@@ -12,6 +12,7 @@ import {
 	type RooCodeTestOnlyApi,
 	type GlobalState,
 	type RooCodeSettings,
+	type ModeConfig,
 	type RooCodeEvents,
 	type ProviderSettings,
 	type ProviderSettingsEntry,
@@ -1021,6 +1022,27 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			}
 		}
 
+		// A payload may carry mode definitions next to the slug it selects. The slug travels into
+		// the profile record and the shared write below, but a definition becomes real only through
+		// the modes manager, and both the task path and the view validate the slug against that
+		// store: reporting success with an unknown slug is the gap this closes. The prior
+		// definition of every slug this call writes is captured here, next to the mode mappings
+		// above, so the compensation below puts back what this call overwrote rather than what it
+		// assumed. The read joins the fail-closed reads above - a rejection here aborts the call
+		// before the profile record is created or overwritten, which is the state the compensation
+		// cannot reconstruct.
+		const suppliedModeDefinitions = values.customModes ?? []
+		const priorModeDefinitions: Array<{ slug: string; definition: ModeConfig | undefined }> = []
+		if (suppliedModeDefinitions.length > 0) {
+			const existingModeDefinitions = await this.sidebarProvider.customModesManager.getCustomModes()
+			for (const definition of suppliedModeDefinitions) {
+				priorModeDefinitions.push({
+					slug: definition.slug,
+					definition: existingModeDefinitions.find((existing) => existing.slug === definition.slug),
+				})
+			}
+		}
+
 		// The existence check, the prior-record read and the save run as one critical section of the
 		// manager cross-instance lock - the same lock the profile rename, the persist path and the
 		// handler deletions already join. Left unserialised the sequence is: we read the name as absent,
@@ -1156,6 +1178,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				await Promise.all(
 					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
 						manager.setModeConfig(mode as Mode, configId),
+					),
+				)
+			}
+			// Register the definitions the payload carried, after the writes above and before this
+			// call reports success: a caller that selects a new custom mode gets a mode the task
+			// path can resolve as soon as the call returns, and a definition the manager rejects
+			// fails the call here, inside the same try, so the rollback under this catch undoes the
+			// whole mutation rather than leaving a half-adopted mode.
+			if (suppliedModeDefinitions.length > 0) {
+				await Promise.all(
+					suppliedModeDefinitions.map((definition) =>
+						this.sidebarProvider.customModesManager.updateCustomMode(definition.slug, definition),
 					),
 				)
 			}
@@ -1323,6 +1357,30 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
 			}
+			// Definitions this call registered are the one domain outside the profile record and the
+			// settings round trip, so undo them here too: a slug that had no definition before this
+			// call loses the one it gained, and a slug this call overwrote goes back to the definition
+			// captured above. Logged like every other restore, because the failure the caller sees is
+			// the original one.
+			if (suppliedModeDefinitions.length > 0) {
+				try {
+					await Promise.all(
+						priorModeDefinitions.map(async ({ slug, definition }) => {
+							if (definition) {
+								await this.sidebarProvider.customModesManager.updateCustomMode(slug, definition)
+								return
+							}
+							await this.sidebarProvider.customModesManager.deleteCustomMode(slug)
+						}),
+					)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to restore the mode definitions this call wrote: " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			}
+
 			throw error
 		}
 		await this.sidebarProvider.postStateToWebview()
