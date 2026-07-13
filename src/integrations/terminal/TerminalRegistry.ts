@@ -69,7 +69,11 @@ export class TerminalRegistry {
 						const process = terminal.process
 						const isOwnExecution =
 							!(process instanceof TerminalProcess) ||
-							process.ownExecution === undefined ||
+							// Allow undefined only when the process hasn't started yet (cold
+							// terminal: process is assigned but run() hasn't called executeCommand).
+							// Once isHot is true, ownExecution is always set — a stale start
+							// event on a reused terminal must match exactly.
+							(!process.isHot && process.ownExecution === undefined) ||
 							process.ownExecution === e.execution
 						if (!isOwnExecution) {
 							console.info(

@@ -187,12 +187,12 @@ describe("executeCommandTool", () => {
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
 			})
 
-			// Verify - confirm the command was approved and result was pushed
-			// The custom path handling is tested in integration tests
+			// Verify - command approved, result pushed, and custom cwd passed to terminal
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
 			expect(mockPushToolResult).toHaveBeenCalled()
-			const result = mockPushToolResult.mock.calls[0][0]
-			expect(result).toContain("Command")
+			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
+			const firstArg = (TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+			expect(firstArg).toBe("/custom/path")
 		})
 	})
 

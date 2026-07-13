@@ -90,7 +90,7 @@ suite("Fast-exit shell integration race", function () {
 						},
 						text: "FAST_EXIT_SHELL_RACE_E2E",
 					}),
-				timeout: 100_000, // TEMP: diagnostic probe, see if the marker ever arrives given patience
+				timeout: 60_000,
 			})
 
 			const elapsedMs = Date.now() - startedAt

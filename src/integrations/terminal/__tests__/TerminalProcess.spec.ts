@@ -282,6 +282,36 @@ describe("TerminalProcess", () => {
 			expect(completedFired).toBe(true)
 		})
 
+		it("does not drop the final chunk when shellExecutionComplete fires concurrently with the last data chunk", async () => {
+			// Regression for the doneSignal.done race: if shell_execution_complete fires
+			// while Promise.race is resolving with a real chunk, doneSignal.done flips to
+			// true before the continuation resumes. The loop must NOT break on doneSignal.done
+			// after a chunk wins — only DONE_SENTINEL triggers the early break.
+			let completedOutput: string | undefined
+			terminalProcess.once("completed", (output?: string) => {
+				completedOutput = output
+			})
+
+			const runPromise = terminalProcess.run("echo hello")
+
+			// Emit the stream; the final chunk and shell_execution_complete arrive together.
+			terminalProcess.emit(
+				"stream_available",
+				(async function* () {
+					yield "\x1b]633;C\x07"
+					yield "hello\n"
+					// Emit completion concurrently with the D marker chunk so doneSignal.done
+					// is true when Promise.race resolves with the D marker result.
+					terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+					yield "\x1b]633;D\x07"
+				})(),
+			)
+
+			await runPromise
+
+			expect(completedOutput).toBe("hello\n")
+		})
+
 		it("wraps multiline POSIX scripts so VS Code tracks them as one shell execution", async () => {
 			const command = 'PR_SHA=abc123\nfor f in one two; do\n  echo "$f @ $PR_SHA"\ndone'
 
