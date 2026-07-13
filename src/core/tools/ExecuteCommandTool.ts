@@ -518,10 +518,12 @@ export async function executeCommandInTerminal(
 
 	// Wait for onCompleted callback to finish. onCompleted is async and sets
 	// `completed` and `persistedResult`; we must not read them until it resolves.
-	// Previously this only waited when exitDetails was set (i.e. the normal event
-	// path), but onCompleted also fires on the D-marker and zero-chunk grace-timer
-	// paths where exitDetails is undefined — those paths need the same wait.
-	await onCompletedPromise
+	// Skip when returning a background result: the command is still running and
+	// onCompleted will fire later — awaiting it here would block until real completion,
+	// defeating the purpose of the agent-timeout background transition.
+	if (!runInBackground) {
+		await onCompletedPromise
+	}
 
 	if (message) {
 		const { text, images } = message

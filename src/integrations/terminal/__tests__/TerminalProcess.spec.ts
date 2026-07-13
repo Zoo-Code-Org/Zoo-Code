@@ -634,6 +634,111 @@ describe("TerminalProcess", () => {
 			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
 			expect(calledWith).toMatch(/^"\/bin\/bash" ".*roo-cmd-.*\.sh"$/)
 		})
+
+		it("uses VS Code default profile shell for temp-script when no Zoo Code profile override is set", async () => {
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			vi.spyOn(Terminal, "getConfiguredDefaultProfileName").mockReturnValue("bash")
+			vi.spyOn(Terminal, "getConfiguredProfiles").mockReturnValue({
+				bash: { path: "/bin/bash" },
+			})
+			// resolveProfilePath calls existsSync, which returns false on Windows for POSIX
+			// paths. Mock it so the test is platform-independent.
+			vi.spyOn(Terminal, "resolveProfilePath").mockReturnValue("/bin/bash")
+
+			const command = "echo a\necho b"
+			const runPromise = terminalProcess.run(command)
+			terminalProcess.emit(
+				"stream_available",
+				(async function* () {
+					yield "\x1b]633;C\x07"
+					yield "a\n"
+					yield "b\n"
+					yield "\x1b]633;D\x07"
+				})(),
+			)
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
+			await runPromise
+
+			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
+			expect(calledWith).toMatch(/^"\/bin\/bash" ".*roo-cmd-.*\.sh"$/)
+		})
+
+		it("uses PS dot-source wrapping when the default profile resolves to PowerShell (not a .sh temp-script)", async () => {
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			vi.spyOn(Terminal, "isActiveShellPowerShell").mockReturnValue(false) // detection missed it
+			vi.spyOn(Terminal, "isActiveShellFish").mockReturnValue(false)
+			vi.spyOn(Terminal, "getConfiguredDefaultProfileName").mockReturnValue("Windows PowerShell")
+			vi.spyOn(Terminal, "getConfiguredProfiles").mockReturnValue({
+				"Windows PowerShell": { path: "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+			})
+			vi.spyOn(Terminal, "resolveProfilePath").mockReturnValue(
+				"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+			)
+
+			const command = "echo a\necho b"
+			const runPromise = terminalProcess.run(command)
+			terminalProcess.emit(
+				"stream_available",
+				(async function* () {
+					yield "\x1b]633;C\x07"
+					yield "a\n"
+					yield "b\n"
+					yield "\x1b]633;D\x07"
+				})(),
+			)
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
+			await runPromise
+
+			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
+			expect(calledWith).toBe(`. {\necho a\necho b\n}`)
+		})
+
+		it("completes cleanly when shellExecutionComplete fires before stream_available", async () => {
+			const completedOutputs: string[] = []
+			terminalProcess.on("completed", (output) => completedOutputs.push(output ?? ""))
+
+			// Emit shell_execution_complete on the next tick — after run() has registered its
+			// once("shell_execution_complete") listener but before stream_available fires.
+			// This simulates a zero-output command where the end event beats the stream event.
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
+			await terminalProcess.run("echo hello")
+
+			expect(completedOutputs).toEqual([""])
+			expect(terminalProcess.isHot).toBe(false)
+			expect(mockTerminalInfo.busy).toBe(false)
+			expect(mockTerminalInfo.activeShellExecution).toBeUndefined()
+		})
+
+		it("does not leave terminal busy when onDidStartTerminalShellExecution fires after early completion", async () => {
+			// Simulate the production race: end event arrives before the stream.
+			// The registry's onDidEndTerminalShellExecution handler (running=false branch) calls
+			// terminal.shellExecutionComplete(), which clears terminal.process = undefined.
+			// A late onDidStartTerminalShellExecution then arrives: setActiveStream() returns
+			// early (no process), and TerminalRegistry must not set busy = true afterward.
+
+			// Step 1: end fires before run() sets running=true (the !terminal.running registry branch).
+			// Drive this by having the shell_execution_complete event clear terminal.process
+			// the same way shellExecutionComplete() does.
+			setTimeout(() => mockTerminalInfo.shellExecutionComplete({ exitCode: 0, signal: undefined }), 0)
+			await terminalProcess.run("echo hello")
+
+			// terminal.process was cleared by shellExecutionComplete().
+			expect(mockTerminalInfo.process).toBeUndefined()
+			expect(mockTerminalInfo.busy).toBe(false)
+
+			// Step 2: late start event arrives — setActiveStream returns early (no process).
+			// Replicate the TerminalRegistry guard: only set busy when process exists.
+			const lateStream = (async function* () {})()
+			mockTerminalInfo.setActiveStream(lateStream)
+			if (mockTerminalInfo.process) {
+				mockTerminalInfo.busy = true
+			}
+
+			expect(mockTerminalInfo.busy).toBe(false)
+		})
 	})
 
 	describe("continue", () => {

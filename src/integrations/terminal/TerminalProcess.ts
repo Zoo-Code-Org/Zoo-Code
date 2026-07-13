@@ -86,7 +86,10 @@ export class TerminalProcess extends BaseTerminalProcess {
 			return
 		}
 
-		// Create a promise that resolves when the stream becomes available
+		// Create a promise that resolves when the stream becomes available.
+		// cancelStreamWait() lets the early-completion race path abort the pending
+		// timeout so it doesn't fire (and reject) after we've already returned.
+		let cancelStreamWait: () => void = () => {}
 		const streamAvailable = new Promise<AsyncIterable<string>>((resolve, reject) => {
 			const timeoutId = setTimeout(() => {
 				// Remove event listener to prevent memory leaks
@@ -105,6 +108,11 @@ export class TerminalProcess extends BaseTerminalProcess {
 					),
 				)
 			}, Terminal.getShellIntegrationTimeout())
+
+			cancelStreamWait = () => {
+				clearTimeout(timeoutId)
+				this.removeAllListeners("stream_available")
+			}
 
 			// Clean up timeout if stream becomes available
 			this.once("stream_available", (stream: AsyncIterable<string>) => {
@@ -125,6 +133,16 @@ export class TerminalProcess extends BaseTerminalProcess {
 				doneSignal.done = true
 				resolve(details)
 			})
+		})
+
+		// Register shell_execution_started listener BEFORE awaiting streamAvailable.
+		// BaseTerminal.setActiveStream emits shell_execution_started and stream_available
+		// on the same synchronous tick (in that order). If we register after the await,
+		// we miss the event and shellExecutionStarted stays false, causing the idle-timeout
+		// guard to incorrectly treat a running-but-silent command as stalled.
+		let shellExecutionStarted = false
+		this.once("shell_execution_started", () => {
+			shellExecutionStarted = true
 		})
 
 		// Execute command.
@@ -167,16 +185,39 @@ export class TerminalProcess extends BaseTerminalProcess {
 			// VSCode doesn't buffer retroactively, and zero chunks arrive.
 		} catch (error) {
 			this.terminal.activeShellExecution = undefined
+			this.cleanupScriptFile()
 			throw error
 		}
 
 		this.isHot = true
 
-		// Wait for stream to be available
+		// Wait for stream to be available, but also race against shellExecutionComplete.
+		// If the end event fires before the stream arrives (e.g. a zero-output command
+		// where onDidEndTerminalShellExecution beats onDidStartTerminalShellExecution),
+		// we would otherwise block until the stream timeout fires. Resolving early on
+		// completion produces a clean empty-output result instead.
 		let stream: AsyncIterable<string>
 
 		try {
-			stream = await streamAvailable
+			const COMPLETED_BEFORE_STREAM = Symbol("completed_before_stream")
+			const result = await Promise.race([
+				streamAvailable,
+				shellExecutionComplete.then(() => COMPLETED_BEFORE_STREAM as typeof COMPLETED_BEFORE_STREAM),
+			])
+
+			if (result === COMPLETED_BEFORE_STREAM) {
+				console.info("[Terminal Process] shell execution completed before stream arrived — finishing cleanly")
+				cancelStreamWait()
+				this.terminal.activeShellExecution = undefined
+				this.terminal.busy = false
+				this.isHot = false
+				this.cleanupScriptFile()
+				this.emit("completed", "")
+				this.emit("continue")
+				return
+			}
+
+			stream = result as AsyncIterable<string>
 		} catch (error) {
 			// Stream timeout or other error occurred
 			console.error("[Terminal Process] Stream error:", error.message)
@@ -188,6 +229,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 			)
 
 			this.terminal.busy = false
+			this.cleanupScriptFile()
 
 			// Emit continue event to allow execution to proceed
 			this.emit("continue")
@@ -230,19 +272,6 @@ export class TerminalProcess extends BaseTerminalProcess {
 		let streamEndedByEvent = false
 		let idleTimedOut = false
 		const streamStartedAt = Date.now()
-
-		// Guard against the idle timeout misfiring during shell initialization.
-		// On cold shells (e.g. zsh with a heavy .zshrc), waitForShellIntegration
-		// resolves when ]633;A is emitted, but the shell may still be loading by
-		// the time executeCommand() is called. onDidStartTerminalShellExecution
-		// (→ "shell_execution_started") fires only once the command actually starts
-		// running. If it hasn't arrived yet when the 3s idle timer fires, the shell
-		// is still initializing — self-finalizing would silently drop the command's
-		// output, so we wait.
-		let shellExecutionStarted = false
-		this.once("shell_execution_started", () => {
-			shellExecutionStarted = true
-		})
 
 		// VSCode's execution.read() AsyncIterable can stay open indefinitely even after
 		// the command finishes — it has no built-in cancellation. We need to be able to
@@ -291,31 +320,33 @@ export class TerminalProcess extends BaseTerminalProcess {
 			}
 
 			if (raceResult === IDLE_SENTINEL) {
-				if (!shellExecutionStarted) {
-					const elapsedMs = Date.now() - streamStartedAt
-					const shellInitTimeout = Terminal.getShellIntegrationTimeout()
-
-					if (elapsedMs < shellInitTimeout) {
-						// onDidStartTerminalShellExecution hasn't fired yet — the shell is
-						// still initializing. Don't self-finalize; re-arm the idle timer
-						// and keep waiting (the DONE_SENTINEL or a real chunk will break
-						// us out once the command actually starts running).
-						console.info(
-							`[Terminal Process] idle timeout fired but shell execution not started yet — waiting for shell init (${elapsedMs}ms elapsed)`,
-						)
-						continue
-					}
-
-					// Shell integration timeout exceeded and onDidStartTerminalShellExecution
-					// never fired — something went wrong during shell init. Fall through to
-					// self-finalize so we don't wait forever.
+				if (shellExecutionStarted) {
+					// The command is confirmed running (shell_execution_started fired). A
+					// silent command like `sleep 5` can legitimately produce zero output —
+					// elapsed time alone is not proof of completion. Re-arm the idle timer
+					// and keep waiting for a real chunk, the D marker, or the end event.
 					console.info(
-						`[Terminal Process] shell execution never started after ${elapsedMs}ms — self-finalizing`,
+						`[Terminal Process] idle timeout fired but shell execution is running — re-arming (${chunkCount} chunks so far)`,
 					)
+					continue
 				}
 
-				// No data arrived within the idle window and onDidEndTerminalShellExecution
-				// hasn't fired either — VSCode is not going to tell us. Self-finalize.
+				const elapsedMs = Date.now() - streamStartedAt
+				const shellInitTimeout = Terminal.getShellIntegrationTimeout()
+
+				if (elapsedMs < shellInitTimeout) {
+					// onDidStartTerminalShellExecution hasn't fired yet — the shell is
+					// still initializing. Don't self-finalize; re-arm the idle timer
+					// and keep waiting.
+					console.info(
+						`[Terminal Process] idle timeout fired but shell execution not started yet — waiting for shell init (${elapsedMs}ms elapsed)`,
+					)
+					continue
+				}
+
+				// Shell integration timeout exceeded and onDidStartTerminalShellExecution
+				// never fired — something went wrong during shell init. Self-finalize.
+				console.info(`[Terminal Process] shell execution never started after ${elapsedMs}ms — self-finalizing`)
 				idleTimedOut = true
 				console.info(
 					`[Terminal Process] idle timeout (${IDLE_TIMEOUT_MS}ms) after ${chunkCount} chunk(s) — self-finalizing`,
@@ -421,15 +452,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 		this.terminal.activeShellExecution = undefined
 
-		// Clean up the temp script file if one was written for this command.
-		if (this.scriptPath) {
-			try {
-				fs.unlinkSync(this.scriptPath)
-			} catch {
-				// Best-effort: if it's already gone, that's fine.
-			}
-			this.scriptPath = undefined
-		}
+		this.cleanupScriptFile()
 
 		this.isHot = false
 
@@ -493,9 +516,34 @@ export class TerminalProcess extends BaseTerminalProcess {
 		// We need a known shell executable to run it — if we can't determine one,
 		// fall back to { ... } wrapping (accepts the VSCode zero-chunk bug as a
 		// lesser evil than invoking a non-existent "sh" on Windows).
-		const shellExe = Terminal.getProfileShell()?.shellPath
+		//
+		// Try the Zoo Code profile first; if unset, fall back to the VS Code default
+		// profile so users who haven't configured a Zoo Code profile override still
+		// get the temp-file path instead of { ... } wrapping.
+		let shellExe = Terminal.getProfileShell()?.shellPath
+		if (!shellExe) {
+			const defaultProfileName = Terminal.getConfiguredDefaultProfileName()
+			if (defaultProfileName) {
+				const profiles = Terminal.getConfiguredProfiles()
+				const profile = profiles?.[defaultProfileName] as { path?: string | string[] } | null | undefined
+				if (profile) {
+					shellExe = Terminal.resolveProfilePath(profile.path)
+				}
+			}
+		}
 		if (!shellExe) {
 			return `{\n${command}\n}`
+		}
+
+		// If the resolved shell is PowerShell or fish, the branches above should have
+		// caught it — but if shell-kind detection missed it (e.g. no explicit default
+		// profile configured), fall back to the appropriate wrapper rather than passing
+		// a .sh script to a shell that cannot execute it.
+		if (Terminal.isPowerShell(shellExe)) {
+			return `. {\n${command}\n}`
+		}
+		if (Terminal.isFish(shellExe)) {
+			return `begin\n${command}\nend`
 		}
 
 		const scriptPath = path.join(os.tmpdir(), `roo-cmd-${Date.now()}-${Math.random().toString(36).slice(2)}.sh`)
@@ -508,6 +556,17 @@ export class TerminalProcess extends BaseTerminalProcess {
 	}
 
 	private scriptPath: string | undefined
+
+	private cleanupScriptFile() {
+		if (this.scriptPath) {
+			try {
+				fs.unlinkSync(this.scriptPath)
+			} catch {
+				// Best-effort: if it's already gone, that's fine.
+			}
+			this.scriptPath = undefined
+		}
+	}
 
 	public override continue() {
 		this.emitRemainingBufferIfListening()

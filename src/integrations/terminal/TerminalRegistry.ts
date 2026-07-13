@@ -80,7 +80,13 @@ export class TerminalRegistry {
 						}
 						const stream = e.execution.read()
 						terminal.setActiveStream(stream)
-						terminal.busy = true // Mark terminal as busy when shell execution starts
+						// Only mark busy when there is a live process to clear it later.
+						// If the end event already fired (early-completion race), process is
+						// undefined and setActiveStream returned early — setting busy here would
+						// leave the terminal stuck busy with nothing to clear it.
+						if (terminal.process) {
+							terminal.busy = true
+						}
 					} else {
 						console.error(
 							"[onDidStartTerminalShellExecution] Shell execution started, but not from a Roo-registered terminal:",
