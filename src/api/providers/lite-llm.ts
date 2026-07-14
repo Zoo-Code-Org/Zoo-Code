@@ -9,6 +9,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
+import { convertToR1Format } from "../transform/r1-format"
 import { GEMINI_THOUGHT_SIGNATURE_BYPASS } from "../transform/gemini-format"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
@@ -117,9 +118,14 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	): ApiStream {
 		const { id: modelId, info } = await this.fetchModel()
 
-		const openAiMessages = convertToOpenAiMessages(messages, {
-			normalizeToolCallId: sanitizeOpenAiCallId,
-		})
+		const openAiMessages = info.preserveReasoning
+			? convertToR1Format(messages, {
+					normalizeToolCallId: sanitizeOpenAiCallId,
+					mergeToolResultText: true,
+				})
+			: convertToOpenAiMessages(messages, {
+					normalizeToolCallId: sanitizeOpenAiCallId,
+				})
 
 		// Prepare messages with cache control if enabled and supported
 		let systemMessage: OpenAI.Chat.ChatCompletionMessageParam
@@ -210,6 +216,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			},
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
+			...(info.reasoningEffort && { reasoning_effort: info.reasoningEffort as "low" | "medium" | "high" }),
 		}
 
 		// GPT-5 models require max_completion_tokens instead of the deprecated max_tokens parameter

@@ -848,6 +848,72 @@ describe("LiteLLMHandler", () => {
 			expect(reasoningChunks).toHaveLength(0)
 		})
 
+		it("should use convertToR1Format and preserve reasoning when preserveReasoning is true", async () => {
+			const optionsWithReasoning: ApiHandlerOptions = {
+				...mockOptions,
+				litellmModelId: "deepseek-reasoner",
+			}
+			handler = new LiteLLMHandler(optionsWithReasoning)
+
+			vi.spyOn(handler as any, "fetchModel").mockResolvedValue({
+				id: "deepseek-reasoner",
+				info: { ...litellmDefaultModelInfo, preserveReasoning: true },
+			})
+
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "reasoning", text: "Thinking process" } as any,
+						{ type: "tool_use", id: "toolu_123", name: "test", input: {} },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_123", content: "success" },
+						{ type: "text", text: "Please continue." },
+					],
+				},
+			]
+
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						choices: [{ delta: { content: "Good!" } }],
+						usage: { prompt_tokens: 10, completion_tokens: 5 },
+					}
+				},
+			}
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of generator) {
+				// consume
+			}
+
+			const createCall = mockCreate.mock.calls[0][0]
+
+			// Verify reasoning_content is preserved
+			const assistantMessage = createCall.messages.find((m: any) => m.role === "assistant")
+			expect(assistantMessage).toBeDefined()
+			expect(assistantMessage.reasoning_content).toBe("Thinking process")
+
+			// Verify tool result and subsequent text are merged into a single tool message (R1 format behavior)
+			const toolMessage = createCall.messages.find((m: any) => m.role === "tool")
+			expect(toolMessage).toBeDefined()
+			expect(toolMessage.content).toBe("success\n\nPlease continue.")
+
+			// Verify there is no trailing user message (since it was merged)
+			const lastMessage = createCall.messages[createCall.messages.length - 1]
+			expect(lastMessage.role).toBe("tool")
+		})
+
 		it("should preserve whitespace-only reasoning chunks so streamed boundaries survive concatenation", async () => {
 			const mockStream = {
 				async *[Symbol.asyncIterator]() {

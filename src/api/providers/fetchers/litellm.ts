@@ -55,6 +55,8 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 					cacheReadsPrice: modelInfo.cache_read_input_token_cost
 						? modelInfo.cache_read_input_token_cost * 1000000
 						: undefined,
+					...(modelInfo.preserveReasoning && { preserveReasoning: modelInfo.preserveReasoning }),
+					...(modelInfo.reasoningEffort && { reasoningEffort: modelInfo.reasoningEffort }),
 					description: `${modelName} via LiteLLM proxy`,
 				}
 			}
