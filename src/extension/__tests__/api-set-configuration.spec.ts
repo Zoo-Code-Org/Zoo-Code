@@ -89,7 +89,12 @@ describe("API.setConfiguration", () => {
 	})
 
 	function setConfigurationHarness(
-		overrides: { provider?: Record<string, unknown>; manager?: Record<string, unknown> } = {},
+		overrides: {
+			provider?: Record<string, unknown>
+			manager?: Record<string, unknown>
+			channel?: Record<string, unknown>
+			enableLogging?: boolean
+		} = {},
 	) {
 		const provider = Object.assign({} as ClineProvider, {
 			context: {},
@@ -126,12 +131,11 @@ describe("API.setConfiguration", () => {
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 			...(overrides.provider ?? {}),
 		})
-		const api = new API(
-			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
-			provider,
-			makeClineProviderFactory(),
-		)
-		return { provider, api }
+		const channel = Object.assign({} as OutputChannel, { appendLine: vi.fn() }, overrides.channel ?? {})
+		// Logging stays off unless a test asks for it: with it on, this.log reaches the channel,
+		// which is the only way a test can see a restore-failure line.
+		const api = new API(channel, provider, makeClineProviderFactory(), undefined, overrides.enableLogging ?? false)
+		return { provider, api, channel }
 	}
 
 	const reviewerMode = {
@@ -254,6 +258,80 @@ describe("API.setConfiguration", () => {
 		// rather than deleting the slug out from under the view that still lists it.
 		expect(restoreCalls).toEqual([priorDefinition])
 		expect(deleteCustomMode).not.toHaveBeenCalled()
+		expect(provider.postStateToWebview).not.toHaveBeenCalled()
+	})
+
+	it("keeps the modes manager out of a call that carried no definitions", async () => {
+		const { provider, api } = setConfigurationHarness()
+
+		await api.setConfiguration({
+			apiProvider: providerIdentifiers.bedrock,
+			currentApiConfigName: "default",
+		})
+
+		// Nothing was supplied, so the prior read is skipped and nothing is registered:
+		// a payload without definitions must not spend a store read or a store write.
+		expect(provider.customModesManager.getCustomModes).not.toHaveBeenCalled()
+		expect(provider.customModesManager.updateCustomMode).not.toHaveBeenCalled()
+		expect(provider.customModesManager.deleteCustomMode).not.toHaveBeenCalled()
+		expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("rolls back a failed call with no definitions without touching the modes manager", async () => {
+		const { provider, api } = setConfigurationHarness({
+			provider: {
+				setValues: vi.fn().mockRejectedValue(new Error("Settings write refused")),
+			},
+		})
+
+		await expect(
+			api.setConfiguration({
+				apiProvider: providerIdentifiers.bedrock,
+				currentApiConfigName: "default",
+			}),
+		).rejects.toThrow("Settings write refused")
+
+		expect(provider.customModesManager.updateCustomMode).not.toHaveBeenCalled()
+		expect(provider.customModesManager.deleteCustomMode).not.toHaveBeenCalled()
+		expect(provider.postStateToWebview).not.toHaveBeenCalled()
+	})
+
+	it("logs a mode restore that failed and still throws the error the caller caused", async () => {
+		const appendLine = vi.fn()
+		const { provider, api } = setConfigurationHarness({
+			channel: { appendLine },
+			enableLogging: true,
+			provider: {
+				customModesManager: {
+					getCustomModes: vi.fn().mockResolvedValue([]),
+					updateCustomMode: vi.fn().mockRejectedValue(new Error("Store refused the definition")),
+					deleteCustomMode: vi.fn().mockRejectedValue(new Error("Store refused the undo")),
+				},
+			},
+			manager: {
+				// Absent before the save, present when the rollback re-reads, so the undo runs.
+				hasConfig: vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true),
+			},
+		})
+
+		await expect(
+			api.setConfiguration({
+				apiProvider: providerIdentifiers.bedrock,
+				currentApiConfigName: "default",
+				mode: reviewerMode.slug,
+				customModes: [reviewerMode],
+			}),
+		).rejects.toThrow("Store refused the definition")
+
+		// The undo failed as well as the write, so the caller sees both halves: the original
+		// error rethrows and the failed restore is logged like every other restore here.
+		const logged = appendLine.mock.calls.map((call: unknown[]) => String(call[0]))
+		const restoreLines = logged.filter((line: string) =>
+			line.startsWith("[setConfiguration] failed to restore the mode definitions this call wrote: "),
+		)
+		expect(restoreLines).toHaveLength(1)
+		expect(restoreLines[0]).toContain("Store refused the undo")
+		expect(provider.customModesManager.deleteCustomMode).toHaveBeenCalledWith(reviewerMode.slug)
 		expect(provider.postStateToWebview).not.toHaveBeenCalled()
 	})
 })
