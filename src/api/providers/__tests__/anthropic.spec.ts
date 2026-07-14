@@ -455,6 +455,29 @@ describe("AnthropicHandler", () => {
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 		})
+
+		it("should send the custom model ID as-is and use adaptive thinking for a custom Sonnet-5-family model", async () => {
+			const customHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+				enableReasoningEffort: true,
+			})
+
+			const stream = customHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			expect(requestBody?.model).toBe("claude-sonnet-5-bf")
+			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -655,6 +678,38 @@ describe("AnthropicHandler", () => {
 			expect(model.info.contextWindow).toBe(1000000)
 			expect(model.info.inputPrice).toBe(6.0)
 			expect(model.info.outputPrice).toBe(22.5)
+		})
+
+		it("should honor a custom/unrecognized model ID instead of silently falling back to anthropicDefaultModelId", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-sonnet-5-bf")
+		})
+
+		it("should guess capabilities for a custom/unrecognized model ID from known model-family substrings", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-sonnet-5-bf",
+			})
+			const model = handler.getModel()
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.maxTokens).toBe(128000)
+			expect(model.info.contextWindow).toBe(1000000)
+		})
+
+		it("should fall back to anthropicDefaultModelId's info when a custom model ID matches no known family", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "totally-unknown-custom-model",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("totally-unknown-custom-model")
+			expect(model.info.maxTokens).toBe(64000)
+			expect(model.info.contextWindow).toBe(200000)
+			expect(model.info.supportsReasoningBinary).toBeUndefined()
 		})
 	})
 

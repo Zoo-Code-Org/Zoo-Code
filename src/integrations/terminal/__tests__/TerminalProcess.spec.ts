@@ -88,6 +88,50 @@ describe("TerminalProcess", () => {
 			}
 		})
 
+		it("runs command after shell integration activates via onDidChangeTerminalShellIntegration event", async () => {
+			// Cover Terminal.runCommand's waitForShellIntegration resolve path: shell
+			// integration is initially absent but arrives via the VSCode event before timeout.
+			let shellIntegrationHandler: ((e: any) => void) | undefined
+			vi.spyOn(vscode.window, "onDidChangeTerminalShellIntegration" as any).mockImplementation((handler: any) => {
+				shellIntegrationHandler = handler
+				return { dispose: vi.fn() }
+			})
+
+			mockTerminal.shellIntegration = undefined
+			const runPromise = mockTerminalInfo.runCommand("test command", {
+				onLine: vi.fn(),
+				onCompleted: vi.fn(),
+				onShellExecutionStarted: vi.fn(),
+				onShellExecutionComplete: vi.fn(),
+			})
+
+			// Fire the shell integration activation event — simulates VSCode telling us the
+			// shell is ready. waitForShellIntegration should resolve, then process.run() fires.
+			expect(shellIntegrationHandler).toBeDefined()
+			mockTerminal.shellIntegration = {
+				executeCommand: vi.fn().mockReturnValue({ read: vi.fn().mockReturnValue((async function* () {})()) }),
+			}
+			shellIntegrationHandler!({ terminal: mockTerminal })
+
+			// Give the .then() callback a chance to run process.run()
+			await Promise.resolve()
+			await Promise.resolve()
+
+			// process.run() should have been called (shell integration is now present, so
+			// run() won't take the !isShellIntegrationAvailable path)
+			await Promise.resolve()
+			terminalProcess.emit(
+				"stream_available",
+				(async function* () {
+					yield "\x1b]633;C\x07"
+					yield "\x1b]633;D\x07"
+				})(),
+			)
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
+			await runPromise
+		})
+
 		it("handles shell integration commands correctly", async () => {
 			let lines: string[] = []
 
@@ -104,7 +148,6 @@ describe("TerminalProcess", () => {
 				yield "More output\n"
 				yield "Final output"
 				yield "\x1b]633;D\x07" // The last chunk contains the command end sequence with bell character.
-				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
 			})()
 
 			mockExecution = {
@@ -115,10 +158,158 @@ describe("TerminalProcess", () => {
 
 			const runPromise = terminalProcess.run("test command")
 			terminalProcess.emit("stream_available", mockStream)
+
+			// onDidEndTerminalShellExecution is a separate global VSCode event, not
+			// something coupled to the stream iterator being pulled again -- emit it
+			// independently of stream consumption, matching real-world timing.
+			// Use setTimeout(0) so it fires after microtask-based stream processing
+			// (async generator iterations) has consumed all chunks including the D marker.
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
 			await runPromise
 
 			expect(lines).toEqual(["Initial output", "More output", "Final output"])
 			expect(terminalProcess.isHot).toBe(false)
+		})
+
+		it(
+			"completes promptly when the D marker arrives but the stream never closes and " +
+				"onDidEndTerminalShellExecution never fires (VSCode #316556 / #250764)",
+			async () => {
+				let lines: string[] = []
+				let completedOutput: string | undefined
+
+				terminalProcess.on("completed", (output) => {
+					completedOutput = output
+					if (output) {
+						lines = output.split("\n")
+					}
+				})
+
+				// Simulate the confirmed real-world hang: the shell writes the D marker
+				// (command output is fully visible), but the stream's async iterator never
+				// signals `done: true` afterward, and the global onDidEndTerminalShellExecution
+				// event never fires. Model this with a stream that yields the D marker and
+				// then never resolves any further -- exactly what "never closes" looks like.
+				let hangForever: () => void = () => {}
+				mockStream = (async function* () {
+					yield "\x1b]633;C\x07"
+					yield "some output\n"
+					yield "\x1b]633;D\x07"
+					// The generator never returns past this point -- the next `.next()` call
+					// (which would happen if the loop kept consuming) hangs forever, and no
+					// `shell_execution_complete` event is ever emitted.
+					await new Promise<void>((resolve) => {
+						hangForever = resolve
+					})
+				})()
+
+				mockExecution = {
+					read: vi.fn().mockReturnValue(mockStream),
+				}
+
+				mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+
+				const runPromise = terminalProcess.run("test command")
+				terminalProcess.emit("stream_available", mockStream)
+
+				// No shell_execution_complete is ever emitted here -- the fix must not
+				// depend on it to unblock once the D marker has been seen.
+				await runPromise
+
+				expect(lines).toEqual(["some output", ""])
+				expect(completedOutput).toBe("some output\n")
+				expect(terminalProcess.isHot).toBe(false)
+
+				// Clean up the still-pending generator await so it doesn't leak between tests.
+				hangForever()
+			},
+		)
+
+		it("does not complete a long-running, silent command until it actually produces the D marker or closes", async () => {
+			// A bare `sleep 60`-style command: prints the start marker and then genuinely
+			// nothing else for a long time because it is still running, not because VSCode
+			// lost the signal. There is no idle-timeout guessing -- run() simply keeps
+			// waiting on the stream, exactly like a real long-running command should.
+			let completedFired = false
+
+			terminalProcess.on("completed", () => {
+				completedFired = true
+			})
+
+			// Signals once the generator has actually reached its suspension point (i.e.
+			// once run()'s `for await` loop has consumed the first chunk and is genuinely
+			// waiting on the stream for the next one), so the test can assert "not yet
+			// completed" and then resume deterministically, instead of guessing how many
+			// microtask turns run()'s internal await chain (streamAvailable, etc.) needs.
+			let releaseStream: () => void = () => {}
+			let notifySuspended: () => void = () => {}
+			const suspended = new Promise<void>((resolve) => {
+				notifySuspended = resolve
+			})
+
+			mockStream = (async function* () {
+				yield "\x1b]633;C\x07"
+				notifySuspended()
+				await new Promise<void>((resolve) => {
+					releaseStream = resolve
+				})
+				yield "finally done\n"
+				yield "\x1b]633;D\x07"
+			})()
+
+			mockExecution = {
+				read: vi.fn().mockReturnValue(mockStream),
+			}
+
+			mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+
+			const runPromise = terminalProcess.run("sleep 60")
+			terminalProcess.emit("stream_available", mockStream)
+
+			// Wait until the generator has genuinely suspended waiting for more input;
+			// it must still be waiting on the stream at this point, not completed.
+			await suspended
+			expect(completedFired).toBe(false)
+
+			// The command finally finishes. Emit shell_execution_complete directly (as
+			// onDidEndTerminalShellExecution normally would) so run() doesn't need to wait
+			// out its 1s D-marker grace period for this assertion to be deterministic.
+			releaseStream()
+			terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+			await runPromise
+
+			expect(completedFired).toBe(true)
+		})
+
+		it("does not drop the final chunk when shellExecutionComplete fires concurrently with the last data chunk", async () => {
+			// Regression for the doneSignal.done race: if shell_execution_complete fires
+			// while Promise.race is resolving with a real chunk, doneSignal.done flips to
+			// true before the continuation resumes. The loop must NOT break on doneSignal.done
+			// after a chunk wins — only DONE_SENTINEL triggers the early break.
+			let completedOutput: string | undefined
+			terminalProcess.once("completed", (output?: string) => {
+				completedOutput = output
+			})
+
+			const runPromise = terminalProcess.run("echo hello")
+
+			// Emit the stream; the final chunk and shell_execution_complete arrive together.
+			terminalProcess.emit(
+				"stream_available",
+				(async function* () {
+					yield "\x1b]633;C\x07"
+					yield "hello\n"
+					// Emit completion concurrently with the D marker chunk so doneSignal.done
+					// is true when Promise.race resolves with the D marker result.
+					terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
+					yield "\x1b]633;D\x07"
+				})(),
+			)
+
+			await runPromise
+
+			expect(completedOutput).toBe("hello\n")
 		})
 
 		it("wraps multiline POSIX scripts so VS Code tracks them as one shell execution", async () => {
@@ -221,6 +412,46 @@ describe("TerminalProcess", () => {
 			consoleWarnSpy.mockRestore()
 		})
 
+		it("emits no_shell_integration with commandSubmitted=true when stream never arrives after command submission", async () => {
+			vi.useFakeTimers()
+			const prevTimeout = Terminal.getShellIntegrationTimeout()
+			Terminal.setShellIntegrationTimeout(50)
+
+			try {
+				let commandSubmitted: boolean | undefined
+				let completedOutput: string | undefined
+
+				const done = Promise.all([
+					new Promise<void>((resolve) =>
+						terminalProcess.once("no_shell_integration", (details) => {
+							commandSubmitted = details.commandSubmitted
+							resolve()
+						}),
+					),
+					new Promise<void>((resolve) =>
+						terminalProcess.once("completed", (output?: string) => {
+							completedOutput = output
+							resolve()
+						}),
+					),
+					new Promise<void>((resolve) => terminalProcess.once("continue", resolve)),
+				])
+
+				// run() submits the command (shell integration IS present) but stream_available
+				// is never emitted, so the streamAvailable timeout fires.
+				const runPromise = terminalProcess.run("test command")
+				await vi.advanceTimersByTimeAsync(100)
+				await runPromise
+				await done
+
+				expect(commandSubmitted).toBe(true)
+				expect(completedOutput).toContain("stream did not start")
+			} finally {
+				Terminal.setShellIntegrationTimeout(prevTimeout)
+				vi.useRealTimers()
+			}
+		})
+
 		it("completes without warning when the execution stream is empty after submission", async () => {
 			const noShellIntegrationSpy = vi.fn()
 			let completedOutput: string | undefined
@@ -248,10 +479,12 @@ describe("TerminalProcess", () => {
 			terminalProcess.once("no_shell_integration", noShellIntegrationSpy)
 
 			const runPromise = terminalProcess.run("test command")
+			// stream_available is now emitted by TerminalRegistry (onDidStartTerminalShellExecution).
+			// Simulate that here so run() can proceed to consume the stream.
+			terminalProcess.emit("stream_available", mockStream)
 			await runPromise
 			await eventPromises
 
-			expect(mockExecution.read).toHaveBeenCalledTimes(1)
 			expect(completedOutput).toBe("")
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 		})
@@ -281,10 +514,12 @@ describe("TerminalProcess", () => {
 			terminalProcess.once("no_shell_integration", noShellIntegrationSpy)
 
 			const runPromise = terminalProcess.run("test command")
+			// stream_available is now emitted by TerminalRegistry (onDidStartTerminalShellExecution).
+			// Simulate that here so run() can proceed to consume the stream.
+			terminalProcess.emit("stream_available", mockStream)
 			await runPromise
 			await eventPromises
 
-			expect(mockExecution.read).toHaveBeenCalledTimes(1)
 			expect(completedOutput).toBe("some output without marker\n")
 			expect(noShellIntegrationSpy).not.toHaveBeenCalled()
 		})
@@ -308,7 +543,6 @@ describe("TerminalProcess", () => {
 				yield "still compiling...\n"
 				yield "done"
 				yield "\x1b]633;D\x07" // The last chunk contains the command end sequence with bell character.
-				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
 			})()
 
 			mockTerminal.shellIntegration.executeCommand.mockReturnValue({
@@ -319,12 +553,221 @@ describe("TerminalProcess", () => {
 			terminalProcess.emit("stream_available", mockStream)
 
 			expect(terminalProcess.isHot).toBe(true)
+
+			// onDidEndTerminalShellExecution is a separate global VSCode event, not
+			// something coupled to the stream iterator being pulled again -- emit it
+			// independently of stream consumption, matching real-world timing.
+			// Use setTimeout(0) so it fires after microtask-based stream processing
+			// has consumed all chunks including the D marker.
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
 			await runPromise
 
 			expect(lines).toEqual(["compiling...", "still compiling...", "done"])
 
 			await completePromise
 			expect(terminalProcess.isHot).toBe(false)
+		})
+
+		it("resolves waitForShellIntegration immediately when shell integration is already active", async () => {
+			// Cover waitForShellIntegration fast path: shellIntegration already present → resolves synchronously.
+			// Access the private method via bracket notation so we can call it directly.
+			mockTerminal.shellIntegration = { executeCommand: vi.fn() }
+			const result = (mockTerminalInfo as any).waitForShellIntegration(5000)
+			// Should resolve immediately (synchronously resolved Promise) without touching timers.
+			await expect(result).resolves.toBeUndefined()
+		})
+
+		it("handles executeCommand throwing by propagating the error", async () => {
+			mockTerminal.shellIntegration.executeCommand.mockImplementation(() => {
+				throw new Error("execution failed")
+			})
+
+			await expect(terminalProcess.run("bad command")).rejects.toThrow("execution failed")
+		})
+
+		it("self-finalizes via idle timeout when no stream data arrives and no event fires", async () => {
+			vi.useFakeTimers()
+			const prevTimeout = Terminal.getShellIntegrationTimeout()
+			Terminal.setShellIntegrationTimeout(50)
+
+			try {
+				const events: string[] = []
+				const done = Promise.all([
+					new Promise<void>((resolve) =>
+						terminalProcess.once("completed", () => {
+							events.push("completed")
+							resolve()
+						}),
+					),
+					new Promise<void>((resolve) =>
+						terminalProcess.once("continue", () => {
+							events.push("continue")
+							resolve()
+						}),
+					),
+				])
+
+				// An empty stream that never yields anything and never closes.
+				// shellExecutionComplete never fires either — simulates a completely
+				// silent command with no events (the idle-timeout self-finalize path).
+				const neverEndingStream: AsyncIterable<string> = {
+					[Symbol.asyncIterator]() {
+						return {
+							next(): Promise<IteratorResult<string>> {
+								return new Promise(() => {}) // hangs forever
+							},
+						}
+					},
+				}
+
+				const runPromise = terminalProcess.run("silent command")
+				terminalProcess.emit("stream_available", neverEndingStream)
+				// Let the first idle timeout (3s) fire without shellExecutionStarted.
+				// That keeps looping. Advance past getShellIntegrationTimeout (50ms) so
+				// the "shell init timeout exceeded" branch fires and we fall through to break.
+				await vi.advanceTimersByTimeAsync(3100)
+
+				await runPromise
+				await done
+
+				expect(events).toContain("completed")
+			} finally {
+				Terminal.setShellIntegrationTimeout(prevTimeout)
+				vi.useRealTimers()
+			}
+		})
+
+		it("passes a temp-script invocation to executeCommand for multiline POSIX commands when profile shell is set", async () => {
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue({
+				shellPath: "/bin/bash",
+				shellArgs: undefined,
+			})
+
+			const command = "echo a\necho b"
+			const runPromise = terminalProcess.run(command)
+			terminalProcess.emit(
+				"stream_available",
+				(async function* () {
+					yield "\x1b]633;C\x07"
+					yield "a\n"
+					yield "b\n"
+					yield "\x1b]633;D\x07"
+				})(),
+			)
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
+			await runPromise
+
+			// executeCommand should be called with a shell + temp-script invocation, not the
+			// raw multiline command string.
+			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
+			expect(calledWith).toMatch(/^"\/bin\/bash" ".*roo-cmd-.*\.sh"$/)
+		})
+
+		it("uses VS Code default profile shell for temp-script when no Zoo Code profile override is set", async () => {
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			vi.spyOn(Terminal, "getConfiguredDefaultProfileName").mockReturnValue("bash")
+			vi.spyOn(Terminal, "getConfiguredProfiles").mockReturnValue({
+				bash: { path: "/bin/bash" },
+			})
+			// resolveProfilePath calls existsSync, which returns false on Windows for POSIX
+			// paths. Mock it so the test is platform-independent.
+			vi.spyOn(Terminal, "resolveProfilePath").mockReturnValue("/bin/bash")
+
+			const command = "echo a\necho b"
+			const runPromise = terminalProcess.run(command)
+			terminalProcess.emit(
+				"stream_available",
+				(async function* () {
+					yield "\x1b]633;C\x07"
+					yield "a\n"
+					yield "b\n"
+					yield "\x1b]633;D\x07"
+				})(),
+			)
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
+			await runPromise
+
+			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
+			expect(calledWith).toMatch(/^"\/bin\/bash" ".*roo-cmd-.*\.sh"$/)
+		})
+
+		it("uses PS dot-source wrapping when the default profile resolves to PowerShell (not a .sh temp-script)", async () => {
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			vi.spyOn(Terminal, "isActiveShellPowerShell").mockReturnValue(false) // detection missed it
+			vi.spyOn(Terminal, "isActiveShellFish").mockReturnValue(false)
+			vi.spyOn(Terminal, "getConfiguredDefaultProfileName").mockReturnValue("Windows PowerShell")
+			vi.spyOn(Terminal, "getConfiguredProfiles").mockReturnValue({
+				"Windows PowerShell": { path: "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
+			})
+			vi.spyOn(Terminal, "resolveProfilePath").mockReturnValue(
+				"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+			)
+
+			const command = "echo a\necho b"
+			const runPromise = terminalProcess.run(command)
+			terminalProcess.emit(
+				"stream_available",
+				(async function* () {
+					yield "\x1b]633;C\x07"
+					yield "a\n"
+					yield "b\n"
+					yield "\x1b]633;D\x07"
+				})(),
+			)
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
+			await runPromise
+
+			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
+			expect(calledWith).toBe(`. {\necho a\necho b\n}`)
+		})
+
+		it("completes cleanly when shellExecutionComplete fires before stream_available", async () => {
+			const completedOutputs: string[] = []
+			terminalProcess.on("completed", (output) => completedOutputs.push(output ?? ""))
+
+			// Emit shell_execution_complete on the next tick — after run() has registered its
+			// once("shell_execution_complete") listener but before stream_available fires.
+			// This simulates a zero-output command where the end event beats the stream event.
+			setTimeout(() => terminalProcess.emit("shell_execution_complete", { exitCode: 0 }), 0)
+
+			await terminalProcess.run("echo hello")
+
+			expect(completedOutputs).toEqual([""])
+			expect(terminalProcess.isHot).toBe(false)
+			expect(mockTerminalInfo.busy).toBe(false)
+			expect(mockTerminalInfo.activeShellExecution).toBeUndefined()
+		})
+
+		it("does not leave terminal busy when onDidStartTerminalShellExecution fires after early completion", async () => {
+			// Simulate the production race: end event arrives before the stream.
+			// The registry's onDidEndTerminalShellExecution handler (running=false branch) calls
+			// terminal.shellExecutionComplete(), which clears terminal.process = undefined.
+			// A late onDidStartTerminalShellExecution then arrives: setActiveStream() returns
+			// early (no process), and TerminalRegistry must not set busy = true afterward.
+
+			// Step 1: end fires before run() sets running=true (the !terminal.running registry branch).
+			// Drive this by having the shell_execution_complete event clear terminal.process
+			// the same way shellExecutionComplete() does.
+			setTimeout(() => mockTerminalInfo.shellExecutionComplete({ exitCode: 0, signal: undefined }), 0)
+			await terminalProcess.run("echo hello")
+
+			// terminal.process was cleared by shellExecutionComplete().
+			expect(mockTerminalInfo.process).toBeUndefined()
+			expect(mockTerminalInfo.busy).toBe(false)
+
+			// Step 2: late start event arrives — setActiveStream returns early (no process).
+			// Replicate the TerminalRegistry guard: only set busy when process exists.
+			const lateStream = (async function* () {})()
+			mockTerminalInfo.setActiveStream(lateStream)
+			if (mockTerminalInfo.process) {
+				mockTerminalInfo.busy = true
+			}
+
+			expect(mockTerminalInfo.busy).toBe(false)
 		})
 	})
 
@@ -465,6 +908,15 @@ describe("TerminalProcess", () => {
 			expect(unretrieved).toBe("new output")
 
 			expect(terminalProcess["lastRetrievedIndex"]).toBe(terminalProcess["fullOutput"].length - "previous".length)
+		})
+
+		it("trims at OSC 133;D when only a 133 end marker is present (no 633 marker)", () => {
+			// Line 598: endIndex = index133 branch — only the 133 end marker exists.
+			terminalProcess["fullOutput"] = "hello\x1b]133;D\x07world"
+			terminalProcess["lastRetrievedIndex"] = 0
+
+			const unretrieved = terminalProcess.getUnretrievedOutput()
+			expect(unretrieved).toBe("hello")
 		})
 	})
 

@@ -53,7 +53,10 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
 		contextWindow: contextWindow || ollamaDefaultModelInfo.contextWindow,
 		supportsPromptCache: true,
 		supportsImages: rawModel.capabilities?.includes("vision"),
-		maxTokens: contextWindow || ollamaDefaultModelInfo.contextWindow,
+		// maxTokens represents max OUTPUT tokens, not the context window.
+		// Setting it to the full contextWindow causes getModelMaxOutputTokens to
+		// reserve 20% of the window for output, triggering premature condensing.
+		// Inherit the sane default (4096) from ollamaDefaultModelInfo instead.
 	})
 
 	return modelInfo
@@ -100,6 +103,13 @@ export async function getOllamaModels(
 							if (modelInfo) {
 								models[ollamaModel.name] = modelInfo
 							}
+						})
+						// A single failing /api/show request (corrupt model, timeout,
+						// server overload, etc.) must not reject the whole Promise.all
+						// and wipe out all otherwise healthy models. Log and swallow
+						// the individual failure so the remaining models still load.
+						.catch((error) => {
+							console.error(`Error fetching details for model ${ollamaModel.model}:`, error)
 						}),
 				)
 			}

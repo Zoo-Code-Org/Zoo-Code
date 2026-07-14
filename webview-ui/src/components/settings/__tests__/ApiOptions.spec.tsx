@@ -244,6 +244,13 @@ vi.mock("../providers/Kenari", () => ({
 	),
 }))
 
+// Mock Friendli provider for tests
+vi.mock("../providers/Friendli", () => ({
+	Friendli: ({ apiConfiguration }: any) => (
+		<div data-testid="friendli-provider" data-key={apiConfiguration?.friendliApiKey || ""} />
+	),
+}))
+
 vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: vi.fn((apiConfiguration: ProviderSettings) => {
 		if (apiConfiguration.apiModelId?.includes("thinking")) {
@@ -335,6 +342,18 @@ describe("ApiOptions", () => {
 
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "zoo-gateway")
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("zooGatewayModelId", zooGatewayDefaultModelId, false)
+	})
+
+	it("renders the Friendli provider form when friendli is selected", () => {
+		renderApiOptions({
+			apiConfiguration: {
+				apiProvider: "friendli" as const,
+				friendliApiKey: "k",
+			},
+		})
+
+		expect(screen.getByTestId("friendli-provider")).toBeInTheDocument()
+		expect(screen.getByTestId("friendli-provider")).toHaveAttribute("data-key", "k")
 	})
 
 	it("shows temperature and rate limit controls by default", () => {

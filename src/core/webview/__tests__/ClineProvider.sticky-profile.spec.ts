@@ -526,6 +526,36 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			)
 		})
 
+		it("should not restore an empty task apiConfigName profile from history", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				number: 1,
+				ts: Date.now(),
+				task: "Test task",
+				tokensIn: 100,
+				tokensOut: 200,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0.001,
+				mode: "ask",
+				apiConfigName: "default",
+			}
+
+			const activateProviderProfileSpy = vi
+				.spyOn(provider, "activateProviderProfile")
+				.mockResolvedValue(undefined)
+
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "default", id: "default-id" },
+			])
+
+			await provider.createTaskWithHistoryItem(historyItem)
+
+			expect(activateProviderProfileSpy).not.toHaveBeenCalled()
+		})
+
 		it("should skip restoring task apiConfigName from history in CLI runtime", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			process.env.ROO_CLI_RUNTIME = "1"

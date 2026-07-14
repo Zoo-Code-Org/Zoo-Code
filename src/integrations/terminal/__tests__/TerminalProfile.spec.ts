@@ -367,6 +367,73 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 				expect(Terminal.isActiveShellPowerShell("win32")).toBe(true)
 			})
 		})
+
+		describe("isActiveShellFish", () => {
+			it("returns false when a custom profile resolves to a non-fish shell", () => {
+				stubProfiles({ linux: { "My Bash": { path: "/bin/bash" } } })
+				Terminal.setTerminalProfile("My Bash")
+				expect(Terminal.isActiveShellFish("linux")).toBe(false)
+			})
+
+			it("returns true when a custom profile resolves to fish", () => {
+				stubProfiles({ linux: { "Fish Shell": { path: "/usr/bin/fish" } } })
+				Terminal.setTerminalProfile("Fish Shell")
+				expect(Terminal.isActiveShellFish("linux")).toBe(true)
+			})
+
+			it("returns false when no override and no default profile name is configured", () => {
+				Terminal.setTerminalProfile(undefined)
+				getConfigurationSpy = vi.spyOn(vscode.workspace, "getConfiguration").mockReturnValue({
+					get: (_key: string, defaultValue?: unknown) => defaultValue,
+					inspect: () => undefined,
+				} as any)
+				expect(Terminal.isActiveShellFish("linux")).toBe(false)
+			})
+
+			it("returns false when the default profile entry is null", () => {
+				Terminal.setTerminalProfile(undefined)
+				getConfigurationSpy = vi
+					.spyOn(vscode.workspace, "getConfiguration")
+					.mockImplementation((section?: string) => {
+						if (section === "terminal.integrated.profiles") {
+							return {
+								inspect: (_key: string) => ({ defaultValue: { "Fish Shell": null } }),
+							} as any
+						}
+						if (section === "terminal.integrated") {
+							return {
+								inspect: (key: string) =>
+									key === "defaultProfile.linux" ? { defaultValue: "Fish Shell" } : undefined,
+							} as any
+						}
+						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+					})
+				expect(Terminal.isActiveShellFish("linux")).toBe(false)
+			})
+
+			it("returns true when the default profile resolves to fish", () => {
+				Terminal.setTerminalProfile(undefined)
+				getConfigurationSpy = vi
+					.spyOn(vscode.workspace, "getConfiguration")
+					.mockImplementation((section?: string) => {
+						if (section === "terminal.integrated.profiles") {
+							return {
+								inspect: (_key: string) => ({
+									defaultValue: { "Fish Shell": { path: "/usr/local/bin/fish" } },
+								}),
+							} as any
+						}
+						if (section === "terminal.integrated") {
+							return {
+								inspect: (key: string) =>
+									key === "defaultProfile.linux" ? { defaultValue: "Fish Shell" } : undefined,
+							} as any
+						}
+						return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
+					})
+				expect(Terminal.isActiveShellFish("linux")).toBe(true)
+			})
+		})
 	})
 
 	describe("getProfileShell", () => {

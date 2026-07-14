@@ -341,9 +341,9 @@
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "Claude Sonnet 5 サポート — 最新の Claude モデルが Anthropic、Bedrock、Vertex の各プロバイダーで利用可能になりました。",
-			"highlight2": "Semble v0.4.1 へのアップグレード — 平坦な結果解析とローカライズされたステータスメッセージ。",
-			"highlight3": "タスクライフサイクル状態遷移ガード — 新しい状態遷移ガードと起動時の委任調整により、無効なタスク状態遷移を防ぎます。"
+			"highlight1": "GLM-5.2 をサポートした Friendli プロバイダー — Friendli 経由で最新の GLM モデルを使えます。",
+			"highlight2": "Ollama のネイティブ thinking/reasoning サポート — Ollama モデル使用時に reasoning 出力をエンドツーエンドで保持します。",
+			"highlight3": "Anthropic のカスタム `apiModelId` 修正 — カスタム Anthropic モデル ID が `claude-sonnet-4-5` に黙ってフォールバックせず、そのまま選択された状態を維持します。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

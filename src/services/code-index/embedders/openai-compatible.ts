@@ -12,7 +12,7 @@ import { withValidationErrorHandling, HttpError, formatEmbeddingError } from "..
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { Mutex } from "async-mutex"
-import { handleOpenAIError } from "../../../api/providers/utils/openai-error-handler"
+import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
 
 interface EmbeddingItem {
 	embedding: string | number[]

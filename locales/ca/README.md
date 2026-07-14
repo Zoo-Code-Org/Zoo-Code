@@ -30,11 +30,15 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o alguna pregunta, entra i pregunta.
 
-## Novetats a la v3.66.0
+## Novetats a la v3.68.0
 
-- **Suport per a Claude Sonnet 5** — el model de Claude més recent ja està disponible als proveïdors Anthropic, Bedrock i Vertex
-- **Actualització a Semble v0.4.1** — anàlisi de resultats aplanada i missatges d'estat localitzats
-- **Guàrdia de transició d'estat del cicle de vida de tasques** — una nova guàrdia de transició d'estat i la reconciliació de delegació a l'inici eviten transicions d'estat de tasques no vàlides
+- **Proveïdor Friendli amb suport per a GLM-5.2** — utilitza el model GLM més recent a través de Friendli.
+- **Suport natiu de thinking/reasoning per a Ollama** — conserva la sortida de raonament d'extrem a extrem quan fas servir models d'Ollama.
+- **Correcció del `apiModelId` personalitzat d'Anthropic** — els identificadors de model personalitzats d'Anthropic ara es mantenen seleccionats en lloc de tornar en silenci a `claude-sonnet-4-5`.
+- Correcció: gestió dels resultats d'eines del proveïdor Ollama i condensació prematura del context.
+- Correcció: conserva l'enllaç pare-fill de la tasca quan s'interromp una subtasca delegada.
+- Millora la gestió dels blocs de contingut de Claude a Anthropic Vertex per obtenir respostes més fiables.
+- Actualitzacions de CI, publicació nightly i dependències/eines.
 
 ## Què pot fer Zoo Code per TU?
 

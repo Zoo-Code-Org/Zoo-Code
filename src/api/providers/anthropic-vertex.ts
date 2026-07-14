@@ -297,13 +297,9 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			} as Anthropic.Messages.MessageCreateParamsNonStreaming
 
 			const response = await this.client.messages.create(params)
-			const content = response.content[0]
+			const content = response.content.find(({ type }) => type === "text")
 
-			if (content.type === "text") {
-				return content.text
-			}
-
-			return ""
+			return content?.type === "text" ? content.text : ""
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new Error(`Vertex completion error: ${error.message}`)

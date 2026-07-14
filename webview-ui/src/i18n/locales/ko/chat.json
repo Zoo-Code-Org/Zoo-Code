@@ -341,9 +341,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "Claude Sonnet 5 지원 — 최신 Claude 모델이 이제 Anthropic, Bedrock, Vertex 프로바이더에서 사용 가능합니다.",
-			"highlight2": "Semble v0.4.1 업그레이드 — 평면화된 결과 파싱과 현지화된 상태 메시지.",
-			"highlight3": "태스크 수명주기 상태 전환 가드 — 새로운 상태 전환 가드와 시작 시 위임 조정으로 잘못된 태스크 상태 전환을 방지합니다."
+			"highlight1": "GLM-5.2를 지원하는 Friendli 프로바이더 — Friendli를 통해 최신 GLM 모델을 사용할 수 있습니다.",
+			"highlight2": "Ollama용 네이티브 thinking/reasoning 지원 — Ollama 모델을 사용할 때 reasoning 출력을 처음부터 끝까지 유지합니다.",
+			"highlight3": "Anthropic 사용자 지정 `apiModelId` 수정 — 사용자 지정 Anthropic 모델 ID가 이제 조용히 `claude-sonnet-4-5`로 되돌아가지 않고 선택된 상태로 유지됩니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

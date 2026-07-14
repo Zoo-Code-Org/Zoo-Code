@@ -8,6 +8,11 @@ import { LLMock } from "@copilotkit/aimock"
 
 import { addApplyDiffResultFixtures } from "./fixtures/apply-diff"
 import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
+import { addFastExitShellRaceResultFixtures } from "./fixtures/fast-exit-shell-race"
+import { addZeroChunkShellRaceResultFixtures } from "./fixtures/zero-chunk-shell-race"
+import { addTerminalReuseShellRaceFixtures } from "./fixtures/terminal-reuse-shell-race"
+import { addLongRuningSilentCommandFixtures } from "./fixtures/long-running-silent-command"
+import { addColdShellInitFixtures } from "./fixtures/cold-shell-init"
 import { addTerminalProfileResultFixtures } from "./fixtures/terminal-profile"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
@@ -110,6 +115,11 @@ async function main() {
 			if (!isRecord) {
 				addApplyDiffResultFixtures(mock)
 				addExecuteCommandResultFixtures(mock)
+				addFastExitShellRaceResultFixtures(mock)
+				addZeroChunkShellRaceResultFixtures(mock)
+				addTerminalReuseShellRaceFixtures(mock)
+				addLongRuningSilentCommandFixtures(mock)
+				addColdShellInitFixtures(mock)
 				addTerminalProfileResultFixtures(mock)
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)

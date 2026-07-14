@@ -5,6 +5,8 @@ import { toolResultContains } from "./tool-result"
 
 const SUBTASK_PARENT_MARKER = "SUBTASK_PARENT_CANCELLATION_SMOKE"
 const SUBTASK_CHILD_MARKER = "SUBTASK_CHILD_CALCULATOR_SMOKE"
+const SUBTASK_INTERRUPT_PARENT_MARKER = "SUBTASK_PARENT_INTERRUPT_RESUME"
+const SUBTASK_INTERRUPT_CHILD_MARKER = "SUBTASK_CHILD_INTERRUPT_RESUME"
 const SUBTASK_FAST_PARENT_MARKER = "SUBTASK_PARENT_IMMEDIATE_COMPLETION"
 const SUBTASK_FAST_CHILD_MARKER = "SUBTASK_CHILD_IMMEDIATE_COMPLETION"
 const SUBTASK_XPROFILE_PARENT_MARKER = "SUBTASK_PARENT_CROSS_PROFILE"
@@ -16,6 +18,11 @@ export const SUBTASK_PARENT_PROMPT = `${SUBTASK_PARENT_MARKER}: Use the new_task
 export const SUBTASK_CHILD_FOLLOWUP_ANSWER = "9"
 const SUBTASK_FAST_CHILD_PROMPT = `${SUBTASK_FAST_CHILD_MARKER}: Complete immediately with the exact result "Fast child completed".`
 export const SUBTASK_FAST_PARENT_PROMPT = `${SUBTASK_FAST_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_FAST_CHILD_PROMPT}" Do not answer directly.`
+
+const SUBTASK_INTERRUPT_CHILD_PROMPT = `${SUBTASK_INTERRUPT_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
+export const SUBTASK_INTERRUPT_PARENT_PROMPT = `${SUBTASK_INTERRUPT_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_INTERRUPT_CHILD_PROMPT}" Do not answer directly. When the subtask returns, complete with the exact result "Interrupted parent resumed".`
+export const SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER = "9"
+export const SUBTASK_INTERRUPT_PARENT_RESULT = "Interrupted parent resumed"
 
 const SUBTASK_XPROFILE_SAME_CHILD_PROMPT = `${SUBTASK_XPROFILE_SAME_CHILD_MARKER}: Complete immediately with the exact result "Same-profile child completed".`
 const SUBTASK_XPROFILE_DIFFERENT_CHILD_PROMPT = `${SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER}: Complete immediately with the exact result "Different-profile child completed".`
@@ -32,15 +39,17 @@ const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
 const completionAfterAnswer = (followupId: string, completionId: string) => ({
 	match: {
 		predicate: (req: ChatCompletionRequest) =>
+			!requestContains(req, [SUBTASK_INTERRUPT_CHILD_MARKER]) &&
+			!requestContains(req, [SUBTASK_INTERRUPT_PARENT_MARKER]) &&
 			// Preferred: structured tool-result message carries the followup answer.
-			toolResultContains(req, followupId, [SUBTASK_CHILD_FOLLOWUP_ANSWER]) ||
-			// Fallback 1: answer present alongside the tool-call ID but not in a role:tool message.
-			requestContains(req, [followupId, SUBTASK_CHILD_FOLLOWUP_ANSWER]) ||
-			// Fallback 2: answer arrives as a bare user message after task resume (no tool-call ID context).
-			requestContains(req, [
-				SUBTASK_CHILD_MARKER,
-				`<user_message>\\n${SUBTASK_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`,
-			]),
+			(toolResultContains(req, followupId, [SUBTASK_CHILD_FOLLOWUP_ANSWER]) ||
+				// Fallback 1: answer present alongside the tool-call ID but not in a role:tool message.
+				requestContains(req, [followupId, SUBTASK_CHILD_FOLLOWUP_ANSWER]) ||
+				// Fallback 2: answer arrives as a bare user message after task resume (no tool-call ID context).
+				requestContains(req, [
+					SUBTASK_CHILD_MARKER,
+					`<user_message>\\n${SUBTASK_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`,
+				])),
 	},
 	response: {
 		toolCalls: [
@@ -90,7 +99,8 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 
 	mock.addFixture({
 		match: {
-			toolCallId: "call_subtasks_fast_parent_new_task_001",
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SUBTASK_FAST_PARENT_MARKER, "call_subtasks_fast_parent_new_task_001"]),
 		},
 		response: {
 			toolCalls: [
@@ -143,7 +153,8 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 
 	mock.addFixture({
 		match: {
-			toolCallId: "call_subtasks_parent_new_task_001",
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SUBTASK_PARENT_MARKER, "call_subtasks_parent_new_task_001"]),
 		},
 		response: {
 			toolCalls: [
@@ -248,6 +259,97 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 					name: "attempt_completion",
 					arguments: JSON.stringify({ result: SUBTASK_XPROFILE_PARENT_RESULT }),
 					id: "call_subtasks_xprofile_parent_completion_005",
+				},
+			],
+		},
+	})
+
+	// Interrupted-child-resumes-and-reports-back scenario (#560)
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(SUBTASK_INTERRUPT_PARENT_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: SUBTASK_INTERRUPT_CHILD_PROMPT,
+					}),
+					id: "call_interrupt_parent_new_task_001",
+				},
+			],
+		},
+	})
+
+	// The parent prompt embeds SUBTASK_INTERRUPT_CHILD_MARKER verbatim, so parent-resume turns
+	// also match a bare substring check. Exclude the parent marker so they fall through.
+	// The answer exclusion must use the <user_message> wrapping: the bare answer is a single
+	// digit that can appear anywhere in the serialized request (timestamps in environment
+	// details, token counts), which would make this fixture unmatchable.
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SUBTASK_INTERRUPT_CHILD_MARKER]) &&
+				!requestContains(req, [SUBTASK_INTERRUPT_PARENT_MARKER]) &&
+				!requestContains(req, ["call_interrupt_child_followup_001"]) &&
+				!requestContains(req, [
+					`<user_message>\\n${SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`,
+				]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "ask_followup_question",
+					arguments: JSON.stringify({
+						question: "What is the square root of 81?",
+						follow_up: [{ text: SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER }],
+					}),
+					id: "call_interrupt_child_followup_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				// Preferred: structured tool-result message carries the followup answer.
+				toolResultContains(req, "call_interrupt_child_followup_001", [
+					SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER,
+				]) ||
+				// Fallback 1: answer present alongside the tool-call ID.
+				requestContains(req, ["call_interrupt_child_followup_001", SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER]) ||
+				// Fallback 2: answer arrives as a bare user message after task resume.
+				requestContains(req, [
+					SUBTASK_INTERRUPT_CHILD_MARKER,
+					`<user_message>\\n${SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`,
+				]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER }),
+					id: "call_interrupt_child_completion_002",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SUBTASK_INTERRUPT_PARENT_MARKER, "call_interrupt_parent_new_task_001"]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_INTERRUPT_PARENT_RESULT }),
+					id: "call_interrupt_parent_completion_003",
 				},
 			],
 		},

@@ -636,6 +636,57 @@ describe("attemptCompletionTool", () => {
 				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith("child-1")
 			})
 
+			it("delegates an interrupted subtask completion when the parent is still delegated and awaiting that child", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "9" },
+					nativeArgs: { result: "9" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) => {
+						if (id === "child-1") {
+							return Promise.resolve({ historyItem: { id, status: "interrupted" } })
+						}
+						if (id === "parent-1") {
+							return Promise.resolve({
+								historyItem: { id, status: "delegated", awaitingChildId: "child-1" },
+							})
+						}
+						throw new Error(`unexpected task id ${id}`)
+					}),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+				}
+
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+				})
+				mockAskFinishSubTaskApproval.mockResolvedValue(true)
+
+				const callbacks: AttemptCompletionCallbacks = {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				}
+
+				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
+
+				expect(mockAskFinishSubTaskApproval).toHaveBeenCalled()
+				expect(mockProvider.reopenParentFromDelegation).toHaveBeenCalledWith({
+					parentTaskId: "parent-1",
+					childTaskId: "child-1",
+					completionResultSummary: "9",
+				})
+				expect(mockTask.ask).not.toHaveBeenCalled()
+				expect(mockPushToolResult).toHaveBeenCalledWith("")
+			})
+
 			it("does not resume the parent when the parent is active but awaiting a different child", async () => {
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",

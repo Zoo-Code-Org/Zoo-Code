@@ -13,7 +13,7 @@ import { t } from "../../../i18n"
 import { withValidationErrorHandling, formatEmbeddingError, HttpError } from "../shared/validation-helpers"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
-import { handleOpenAIError } from "../../../api/providers/utils/openai-error-handler"
+import { handleOpenAIError } from "../../../api/providers/utils/error-handler"
 
 /**
  * OpenAI implementation of the embedder interface with batching and rate limiting
