@@ -848,7 +848,7 @@ describe("LiteLLMHandler", () => {
 			expect(reasoningChunks).toHaveLength(0)
 		})
 
-		it("should use convertToR1Format and preserve reasoning when preserveReasoning is true", async () => {
+		it("should use convertToR1Format, preserve reasoning, and pass reasoning_effort when preserveReasoning is true", async () => {
 			const optionsWithReasoning: ApiHandlerOptions = {
 				...mockOptions,
 				litellmModelId: "deepseek-reasoner",
@@ -857,7 +857,7 @@ describe("LiteLLMHandler", () => {
 
 			vi.spyOn(handler as any, "fetchModel").mockResolvedValue({
 				id: "deepseek-reasoner",
-				info: { ...litellmDefaultModelInfo, preserveReasoning: true },
+				info: { ...litellmDefaultModelInfo, preserveReasoning: true, reasoningEffort: "high" },
 			})
 
 			const systemPrompt = "You are a helpful assistant"
@@ -898,6 +898,9 @@ describe("LiteLLMHandler", () => {
 			}
 
 			const createCall = mockCreate.mock.calls[0][0]
+
+			// Verify reasoning_effort is passed
+			expect(createCall.reasoning_effort).toBe("high")
 
 			// Verify reasoning_content is preserved
 			const assistantMessage = createCall.messages.find((m: any) => m.role === "assistant")

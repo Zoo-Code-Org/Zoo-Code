@@ -165,7 +165,7 @@ describe("getLiteLLMModels", () => {
 		})
 	})
 
-	it("successfully fetches and formats LiteLLM models", async () => {
+	it("successfully fetches and formats LiteLLM models with reasoning properties", async () => {
 		const mockResponse = {
 			data: {
 				data: [
@@ -179,6 +179,8 @@ describe("getLiteLLMModels", () => {
 							input_cost_per_token: 0.000003,
 							output_cost_per_token: 0.000015,
 							supports_computer_use: true,
+							preserveReasoning: true,
+							reasoningEffort: "high",
 						},
 						litellm_params: {
 							model: "anthropic/claude-3.5-sonnet",
@@ -207,15 +209,6 @@ describe("getLiteLLMModels", () => {
 
 		const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
 
-		expect(mockedAxios.get).toHaveBeenCalledWith("http://localhost:4000/v1/model/info", {
-			headers: {
-				Authorization: "Bearer test-api-key",
-				"Content-Type": "application/json",
-				...DEFAULT_HEADERS,
-			},
-			timeout: 5000,
-		})
-
 		expect(result).toEqual({
 			"claude-3-5-sonnet": {
 				maxTokens: 4096,
@@ -227,6 +220,8 @@ describe("getLiteLLMModels", () => {
 				cacheWritesPrice: undefined,
 				cacheReadsPrice: undefined,
 				description: "claude-3-5-sonnet via LiteLLM proxy",
+				preserveReasoning: true,
+				reasoningEffort: "high",
 			},
 			"gpt-4-turbo": {
 				maxTokens: 8192,

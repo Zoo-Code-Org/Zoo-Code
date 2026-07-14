@@ -216,7 +216,17 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			},
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
-			...(info.reasoningEffort && { reasoning_effort: info.reasoningEffort as "low" | "medium" | "high" }),
+			...(info.reasoningEffort && {
+				reasoning_effort: info.reasoningEffort as
+					| "none"
+					| "minimal"
+					| "low"
+					| "medium"
+					| "high"
+					| "xhigh"
+					| "max"
+					| any,
+			}),
 		}
 
 		// GPT-5 models require max_completion_tokens instead of the deprecated max_tokens parameter
