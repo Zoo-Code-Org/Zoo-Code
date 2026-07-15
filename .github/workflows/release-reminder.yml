@@ -1,5 +1,8 @@
 name: Post weekly release reminder
 
+# Requires repo secret DISCORD_RELEASE_WEBHOOK_URL — Discord webhook for the
+# release-reminders channel. The reminder job fails (noisily) if it is unset.
+
 on:
     schedule:
         # Friday at 09:00 UTC
@@ -7,6 +10,12 @@ on:
     workflow_dispatch:
 
 permissions: {}
+
+concurrency:
+    group: release-reminder
+    # A re-run produces an identical message, so cancel a stale/duplicate run
+    # rather than risk posting twice.
+    cancel-in-progress: true
 
 jobs:
     remind:
@@ -16,6 +25,7 @@ jobs:
               env:
                   DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
               run: |
+                  set -euo pipefail
                   owners=("Elliott" "Navad" "Toray")
                   anchor_date="2026-07-17"
                   seconds_since_anchor=$(($(date -u +%s) - $(date -u -d "$anchor_date" +%s)))
@@ -44,3 +54,15 @@ jobs:
                     --header 'Content-Type: application/json' \
                     --data "$payload" \
                     "$DISCORD_RELEASE_WEBHOOK_URL"
+
+            - name: Notify on failure
+              if: failure()
+              env:
+                  DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+              run: |
+                  set -euo pipefail
+                  payload=$(jq -nc --arg content "⚠️ release-reminder workflow failed — see the Actions runs." '{content: $content}')
+                  curl --fail-with-body --silent --show-error \
+                    --header 'Content-Type: application/json' \
+                    --data "$payload" \
+                    "$DISCORD_RELEASE_WEBHOOK_URL" || true
