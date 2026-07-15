@@ -7,7 +7,6 @@ export function addTerminalReuseShellRaceFixtures(mock: InstanceType<typeof LLMo
 	// With the temp-script fix, both commands now deliver real output.
 	mock.addFixture({
 		match: {
-			toolCallId: "call_terminal_reuse_001",
 			predicate: (req) => toolResultContains(req, "call_terminal_reuse_001", ["first", "Exit code: 0"]),
 		},
 		response: {
@@ -26,7 +25,6 @@ export function addTerminalReuseShellRaceFixtures(mock: InstanceType<typeof LLMo
 	// Second command on the reused terminal also completes.
 	mock.addFixture({
 		match: {
-			toolCallId: "call_terminal_reuse_002",
 			predicate: (req) => toolResultContains(req, "call_terminal_reuse_002", ["second", "Exit code: 0"]),
 		},
 		response: {
