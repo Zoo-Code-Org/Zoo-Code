@@ -34,7 +34,6 @@ const vercelAiGatewayModelSchema = z.object({
 	context_window: z.number(),
 	max_tokens: z.number(),
 	type: z.string(),
-	// Vercel AI Gateway / Zoo Gateway capability tags (e.g. "vision", "tool-use").
 	tags: z.array(z.string()).optional(),
 	pricing: vercelAiGatewayPricingSchema,
 })
@@ -101,8 +100,6 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 	const cacheReadsPrice = model.pricing?.input_cache_read ? parseApiPrice(model.pricing?.input_cache_read) : undefined
 
 	const supportsPromptCache = typeof cacheWritesPrice !== "undefined" && typeof cacheReadsPrice !== "undefined"
-	// Prefer live capability tags from the models API; fall back to static allowlists when
-	// tags are absent (older Zoo Gateway catalog rows, or partial/offline fixtures).
 	const supportsImages = Array.isArray(model.tags)
 		? model.tags.includes("vision")
 		: VERCEL_AI_GATEWAY_VISION_ONLY_MODELS.has(id) || VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS.has(id)
