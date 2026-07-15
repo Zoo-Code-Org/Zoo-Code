@@ -697,4 +697,92 @@ describe("getLiteLLMModels", () => {
 			description: "model-with-only-max-output-tokens via LiteLLM proxy",
 		})
 	})
+
+	describe("preserveReasoning inference", () => {
+		it("sets preserveReasoning: true when the routed model matches a known reasoning family", async () => {
+			const mockResponse = {
+				data: {
+					data: [
+						{
+							model_name: "deepseek-reasoner-alias",
+							model_info: {
+								max_tokens: 8192,
+								max_input_tokens: 128000,
+							},
+							litellm_params: {
+								model: "deepseek/deepseek-reasoner",
+							},
+						},
+						{
+							model_name: "kimi-k2-thinking",
+							model_info: {
+								max_tokens: 8192,
+								max_input_tokens: 128000,
+							},
+							litellm_params: {
+								model: "bedrock/moonshot.kimi-k2-thinking",
+							},
+						},
+					],
+				},
+			}
+
+			mockedAxios.get.mockResolvedValue(mockResponse)
+
+			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+
+			expect(result["deepseek-reasoner-alias"]).toMatchObject({ preserveReasoning: true })
+			expect(result["kimi-k2-thinking"]).toMatchObject({ preserveReasoning: true })
+		})
+
+		it("omits preserveReasoning when the routed model does not match a known reasoning family", async () => {
+			const mockResponse = {
+				data: {
+					data: [
+						{
+							model_name: "gpt-4-turbo",
+							model_info: {
+								max_tokens: 8192,
+								max_input_tokens: 128000,
+							},
+							litellm_params: {
+								model: "openai/gpt-4-turbo",
+							},
+						},
+					],
+				},
+			}
+
+			mockedAxios.get.mockResolvedValue(mockResponse)
+
+			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+
+			expect(result["gpt-4-turbo"]).not.toHaveProperty("preserveReasoning")
+		})
+
+		it("matches against the model alias even when the routed model name does not match", async () => {
+			const mockResponse = {
+				data: {
+					data: [
+						{
+							model_name: "glm-5.1-turbo",
+							model_info: {
+								max_tokens: 8192,
+								max_input_tokens: 128000,
+							},
+							litellm_params: {
+								model: "zai/some-custom-deployment",
+							},
+						},
+					],
+				},
+			}
+
+			mockedAxios.get.mockResolvedValue(mockResponse)
+
+			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+
+			expect(result["glm-5.1-turbo"]).toMatchObject({ preserveReasoning: true })
+		})
+	})
 })
