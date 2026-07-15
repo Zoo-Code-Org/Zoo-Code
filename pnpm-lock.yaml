@@ -470,8 +470,8 @@ importers:
         specifier: ^0.5.0
         version: 0.5.0
       axios:
-        specifier: ^1.12.0
-        version: 1.18.0
+        specifier: ^1.18.1
+        version: 1.18.1
       chokidar:
         specifier: ^4.0.1
         version: 4.0.3
@@ -518,8 +518,8 @@ importers:
         specifier: ^5.0.7
         version: 5.0.7
       json-stream-stringify:
-        specifier: ^3.1.6
-        version: 3.1.6
+        specifier: ^3.1.7
+        version: 3.1.7
       lodash.debounce:
         specifier: ^4.0.8
         version: 4.0.8
@@ -563,14 +563,14 @@ importers:
         specifier: ^1.2.0
         version: 1.2.0
       reconnecting-eventsource:
-        specifier: ^1.6.4
-        version: 1.6.4
+        specifier: ^1.6.5
+        version: 1.6.5
       safe-stable-stringify:
         specifier: ^2.5.0
         version: 2.5.0
       sanitize-filename:
-        specifier: ^1.6.3
-        version: 1.6.3
+        specifier: ^1.6.4
+        version: 1.6.4
       say:
         specifier: ^0.16.0
         version: 0.16.0
@@ -593,8 +593,8 @@ importers:
         specifier: ^1.0.21
         version: 1.0.22
       tree-sitter-wasms:
-        specifier: ^0.1.12
-        version: 0.1.12
+        specifier: ^0.1.13
+        version: 0.1.13
       undici:
         specifier: 6.27.0
         version: 6.27.0
@@ -756,8 +756,8 @@ importers:
         specifier: ^0.7.2
         version: 0.7.2
       axios:
-        specifier: ^1.12.0
-        version: 1.18.0
+        specifier: ^1.18.1
+        version: 1.18.1
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -846,8 +846,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       remove-markdown:
-        specifier: ^0.6.0
-        version: 0.6.2
+        specifier: ^0.6.4
+        version: 0.6.4
       shell-quote:
         specifier: ^1.8.2
         version: 1.8.4
@@ -3636,8 +3636,8 @@ packages:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
 
-  axios@1.18.0:
-    resolution: {integrity: sha512-E32NzpYKp++W7XRe52rHiXV2ehxmh3wbdgO7MHeFM+vqxLBYHzt0ElkiImtOBxtOmyp0yoC8C6uESVV84Y2/hw==}
+  axios@1.18.1:
+    resolution: {integrity: sha512-3nTvFlvpn9Zu/RkHUqtc7/+al4UpRW5az71ap5zccp6e8RAYEzhMTecX8Dz1wWDYrPpUoB1HAQEGEAEvUr7S9g==}
 
   azure-devops-node-api@12.5.0:
     resolution: {integrity: sha512-R5eFskGvOm3U/GzeAuxRkUsAl0hrAwGgWn6zAd2KrZmrEhWZVqLew4OOupbQlXUuojUzpGtq62SmdhJ06N88og==}
@@ -5673,8 +5673,8 @@ packages:
   json-stable-stringify-without-jsonify@1.0.1:
     resolution: {integrity: sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==}
 
-  json-stream-stringify@3.1.6:
-    resolution: {integrity: sha512-x7fpwxOkbhFCaJDJ8vb1fBY3DdSa4AlITaz+HHILQJzdPMnHEFjxPwVUi1ALIbcIxDE0PNe/0i7frnY8QnBQog==}
+  json-stream-stringify@3.1.7:
+    resolution: {integrity: sha512-F4MWetLtY42YMaAKw5cV4e47zMD5aOT+tjjQWjX18ACtdkQ5Y/vrcfbcQ107Rh+MXjOCIx4KhW0wPmOvG8iQ5w==}
     engines: {node: '>=7.10.1'}
 
   json-stringify-safe@5.0.1:
@@ -7042,8 +7042,8 @@ packages:
     resolution: {integrity: sha512-GDhwkLfywWL2s6vEjyhri+eXmfH6j1L7JE27WhqLeYzoh/A3DBaYGEj2H/HFZCn/kMfim73FXxEJTw06WtxQwg==}
     engines: {node: '>= 14.18.0'}
 
-  reconnecting-eventsource@1.6.4:
-    resolution: {integrity: sha512-0L3IS3wxcNFApTPPHkcbY8Aya7XZIpYDzhxa8j6QSufVkUN018XJKfh2ZaThLBGP/iN5UTz2yweMhkqr0PKa7A==}
+  reconnecting-eventsource@1.6.5:
+    resolution: {integrity: sha512-L7ADnbp7yA42vvjwx7cZFNmiyHNBu/UldL1NCEvB23xBkZhESF83s2cnD9sLfvcX9wMIzW1UpIS7EOq/iu3E2g==}
     engines: {node: '>=12.0.0'}
 
   redent@3.0.0:
@@ -7094,8 +7094,8 @@ packages:
   remark-stringify@11.0.0:
     resolution: {integrity: sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw==}
 
-  remove-markdown@0.6.2:
-    resolution: {integrity: sha512-EijDXJZbzpGbQBd852ViUzcqgpMujthM+SAEHiWCMcZonRbZ+xViWKLJA/vrwbDwYdxrs1aFDjpBhcGrZoJRGA==}
+  remove-markdown@0.6.4:
+    resolution: {integrity: sha512-BompiLClzjfh46irZmzv+1Q61jZYlKN3iq/hzae9EOUwf7ctr/5wpD4qwgn/FWDAYE18RORO7z/yr+HXZJCY8Q==}
 
   require-directory@2.1.1:
     resolution: {integrity: sha512-fGxEI7+wsG9xrvdjsrlmL22OMTTiHRwAMroiEeMgq8gzoLC/PQr7RsRDSTLUg/bZAZtF+TVIkHc6/4RIKrui+Q==}
@@ -7218,8 +7218,8 @@ packages:
   safer-buffer@2.1.2:
     resolution: {integrity: sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg==}
 
-  sanitize-filename@1.6.3:
-    resolution: {integrity: sha512-y/52Mcy7aw3gRm7IrcGDFx/bCk4AhRh2eI9luHOQM86nZsqwiRkkq2GekHXBBD+SmPidc8i2PqtYZl+pWJ8Oeg==}
+  sanitize-filename@1.6.4:
+    resolution: {integrity: sha512-9ZyI08PsvdQl2r/bBIGubpVdR3RR9sY6RDiWFPreA21C/EFlQhmgo20UZlNjZMMZNubusLhAQozkA0Od5J21Eg==}
 
   sax@1.4.1:
     resolution: {integrity: sha512-+aWOz7yVScEGoKNd4PA10LZ8sk0A/z5+nXQG5giUO5rprX9jgYsTdov9qCchZiPIZezbZH+jRut8nPodFAX4Jg==}
@@ -7788,8 +7788,8 @@ packages:
     resolution: {integrity: sha512-L0Orpi8qGpRG//Nd+H90vFB+3iHnue1zSSGmNOOCh1GLJ7rUKVwV2HvijphGQS2UmhUZewS9VgvxYIdgr+fG1A==}
     hasBin: true
 
-  tree-sitter-wasms@0.1.12:
-    resolution: {integrity: sha512-N9Jp+dkB23Ul5Gw0utm+3pvG4km4Fxsi2jmtMFg7ivzwqWPlSyrYQIrOmcX+79taVfcHEA+NzP0hl7vXL8DNUQ==}
+  tree-sitter-wasms@0.1.13:
+    resolution: {integrity: sha512-wT+cR6DwaIz80/vho3AvSF0N4txuNx/5bcRKoXouOfClpxh/qqrF4URNLQXbbt8MaAxeksZcZd1j8gcGjc+QxQ==}
 
   trim-lines@3.0.1:
     resolution: {integrity: sha512-kRj8B+YHZCc9kQYdWfJB2/oUl9rA99qbowYYBtr4ui4mZyAQ2JpvVBd/6U2YloATfqBhBTSMhTpgBHtU0Mf3Rg==}
@@ -11531,7 +11531,7 @@ snapshots:
     dependencies:
       possible-typed-array-names: 1.1.0
 
-  axios@1.18.0:
+  axios@1.18.1:
     dependencies:
       follow-redirects: 1.16.0
       form-data: 4.0.6
@@ -13821,7 +13821,7 @@ snapshots:
 
   json-stable-stringify-without-jsonify@1.0.1: {}
 
-  json-stream-stringify@3.1.6: {}
+  json-stream-stringify@3.1.7: {}
 
   json-stringify-safe@5.0.1: {}
 
@@ -15523,7 +15523,7 @@ snapshots:
 
   readdirp@4.1.2: {}
 
-  reconnecting-eventsource@1.6.4: {}
+  reconnecting-eventsource@1.6.5: {}
 
   redent@3.0.0:
     dependencies:
@@ -15628,7 +15628,7 @@ snapshots:
       mdast-util-to-markdown: 2.1.2
       unified: 11.0.5
 
-  remove-markdown@0.6.2: {}
+  remove-markdown@0.6.4: {}
 
   require-directory@2.1.1: {}
 
@@ -15794,7 +15794,7 @@ snapshots:
 
   safer-buffer@2.1.2: {}
 
-  sanitize-filename@1.6.3:
+  sanitize-filename@1.6.4:
     dependencies:
       truncate-utf8-bytes: 1.0.2
 
@@ -16410,7 +16410,7 @@ snapshots:
 
   tree-kill@1.2.2: {}
 
-  tree-sitter-wasms@0.1.12: {}
+  tree-sitter-wasms@0.1.13: {}
 
   trim-lines@3.0.1: {}
 
