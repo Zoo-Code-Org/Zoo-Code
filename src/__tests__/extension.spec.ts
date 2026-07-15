@@ -42,7 +42,7 @@ vi.mock("vscode", () => ({
 	},
 }))
 
-vi.mock("@dotenvx/dotenvx", () => ({
+vi.mock("dotenv", () => ({
 	config: vi.fn(),
 }))
 
@@ -237,34 +237,34 @@ describe("extension.ts", () => {
 		authStateChangedHandler = undefined
 	})
 
-	test("does not call dotenvx.config when optional .env does not exist", async () => {
+	test("does not call dotenv.config when optional .env does not exist", async () => {
 		vi.resetModules()
 		vi.clearAllMocks()
 
 		const fs = await import("fs")
 		vi.mocked(fs.existsSync).mockReturnValue(false)
 
-		const dotenvx = await import("@dotenvx/dotenvx")
+		const dotenv = await import("dotenv")
 
 		const { activate } = await import("../extension")
 		await activate(mockContext)
 
-		expect(dotenvx.config).not.toHaveBeenCalled()
+		expect(dotenv.config).not.toHaveBeenCalled()
 	})
 
-	test("calls dotenvx.config when optional .env exists", async () => {
+	test("calls dotenv.config when optional .env exists", async () => {
 		vi.resetModules()
 		vi.clearAllMocks()
 
 		const fs = await import("fs")
 		vi.mocked(fs.existsSync).mockReturnValue(true)
 
-		const dotenvx = await import("@dotenvx/dotenvx")
+		const dotenv = await import("dotenv")
 
 		const { activate } = await import("../extension")
 		await activate(mockContext)
 
-		expect(dotenvx.config).toHaveBeenCalledTimes(1)
+		expect(dotenv.config).toHaveBeenCalledTimes(1)
 	})
 
 	describe("cloud auth state handling", () => {

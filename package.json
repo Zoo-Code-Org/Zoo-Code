@@ -29,7 +29,6 @@
 	},
 	"devDependencies": {
 		"@changesets/cli": "2.31.0",
-		"@dotenvx/dotenvx": "1.75.1",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "20.19.43",
 		"@vscode/vsce": "3.9.2",

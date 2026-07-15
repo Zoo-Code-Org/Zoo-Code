@@ -8,7 +8,7 @@
 		"test:ci": "pnpm -w bundle && pnpm --filter @roo-code/vscode-webview build && pnpm test:run",
 		"test:ci:mock": "pnpm -w bundle && pnpm --filter @roo-code/vscode-webview build && USE_MOCK=true pnpm test:run",
 		"test:record": "AIMOCK_RECORD=true pnpm test:ci",
-		"test:run": "rimraf out && tsc -p tsconfig.json && npx dotenvx run -f .env.local -- node ./out/runTest.js",
+		"test:run": "rimraf out && tsc -p tsconfig.json && dotenv -e .env.local -- node ./out/runTest.js",
 		"clean": "rimraf out .turbo"
 	},
 	"devDependencies": {
@@ -20,6 +20,7 @@
 		"@types/node": "20.19.43",
 		"@types/vscode": "1.100.0",
 		"@vscode/test-electron": "2.5.2",
+		"dotenv-cli": "11.0.0",
 		"glob": "11.1.0",
 		"mocha": "11.2.2",
 		"rimraf": "6.0.1"
