@@ -1833,6 +1833,102 @@ describe("Cline", () => {
 					expect("abortSignal" in (options.metadata ?? {})).toBe(false)
 				})
 
+				it("should resolve and pass the selected provider profile for manual condensing", async () => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+					const condensingProfile = {
+						apiProvider: "anthropic" as const,
+						apiModelId: "claude-3-5-haiku-20241022",
+						apiKey: "condensing-api-key",
+					}
+					const providerState = await mockProvider.getState()
+
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						condensingApiConfigOverride: true,
+						condensingApiConfigId: "condensing-profile",
+						listApiConfigMeta: [{ id: "condensing-profile", name: "Condensing Profile" }],
+					})
+					vi.spyOn(mockProvider.providerSettingsManager, "getProfile").mockResolvedValue(
+						condensingProfile as any,
+					)
+					vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+					await task.condenseContext()
+
+					const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
+					expect(mockProvider.providerSettingsManager.getProfile).toHaveBeenCalledWith({
+						id: "condensing-profile",
+					})
+					expect(options.condensingApiHandler).toBeDefined()
+					expect(options.condensingApiHandler).not.toBe(task.api)
+					expect(options.condensingApiHandler?.getModel().id).toBe("claude-3-5-haiku-20241022")
+				})
+
+				it.each([
+					[
+						"the override is disabled",
+						{
+							condensingApiConfigOverride: false,
+							condensingApiConfigId: "condensing-profile",
+							listApiConfigMeta: [{ id: "condensing-profile" }],
+						},
+						"skip",
+					],
+					[
+						"the selected profile no longer exists",
+						{
+							condensingApiConfigOverride: true,
+							condensingApiConfigId: "missing-profile",
+							listApiConfigMeta: [],
+						},
+						"skip",
+					],
+					[
+						"the selected profile has no provider",
+						{
+							condensingApiConfigOverride: true,
+							condensingApiConfigId: "condensing-profile",
+							listApiConfigMeta: [{ id: "condensing-profile" }],
+						},
+						{},
+					],
+					[
+						"the selected profile cannot be loaded",
+						{
+							condensingApiConfigOverride: true,
+							condensingApiConfigId: "condensing-profile",
+							listApiConfigMeta: [{ id: "condensing-profile" }],
+						},
+						new Error("profile load failed"),
+					],
+				])("should use the current mode when %s", async (_name, state, profileResult) => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "test task",
+						startTask: false,
+					})
+					const getProfileSpy = vi.spyOn(mockProvider.providerSettingsManager, "getProfile")
+					const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+					if (profileResult instanceof Error) {
+						getProfileSpy.mockRejectedValue(profileResult)
+					} else if (profileResult !== "skip") {
+						getProfileSpy.mockResolvedValue(profileResult as any)
+					}
+
+					try {
+						await expect((task as any).getCondensingApiHandler(state)).resolves.toBeUndefined()
+					} finally {
+						warnSpy.mockRestore()
+					}
+				})
+
 				it("should pass AbortController signal to createMessage metadata", async () => {
 					const task = new Task({
 						provider: mockProvider,
@@ -2229,6 +2325,11 @@ describe("Cline", () => {
 					} as ModelInfo,
 				})
 				const providerState = await mockProvider.getState()
+				const condensingProfile = {
+					apiProvider: "anthropic" as const,
+					apiModelId: "claude-3-5-haiku-20241022",
+					apiKey: "condensing-api-key",
+				}
 				vi.spyOn(mockProvider, "getState").mockResolvedValue({
 					...providerState,
 					apiConfiguration: mockApiConfig,
@@ -2243,7 +2344,11 @@ describe("Cline", () => {
 					autoApprovalEnabled: true,
 					profileThresholds: {},
 					currentApiConfigName: "default",
+					condensingApiConfigOverride: true,
+					condensingApiConfigId: "condensing-profile",
+					listApiConfigMeta: [{ id: "condensing-profile", name: "Condensing Profile" }],
 				})
+				vi.spyOn(mockProvider.providerSettingsManager, "getProfile").mockResolvedValue(condensingProfile as any)
 
 				task.apiConversationHistory = [
 					{
@@ -2305,6 +2410,57 @@ describe("Cline", () => {
 				expect(options.metadata?.taskId).toBe(task.taskId)
 				expect(options.metadata?.abortSignal).toBeInstanceOf(AbortSignal)
 				expect(options.metadata?.abortSignal?.aborted).toBe(false)
+				expect(options.condensingApiHandler).toBeDefined()
+				expect(options.condensingApiHandler).not.toBe(task.api)
+				expect(options.condensingApiHandler?.getModel().id).toBe("claude-3-5-haiku-20241022")
+			})
+
+			it("should use the selected provider profile during forced context-window recovery", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const condensingProfile = {
+					apiProvider: "anthropic" as const,
+					apiModelId: "claude-3-5-haiku-20241022",
+					apiKey: "condensing-api-key",
+				}
+				const providerState = await mockProvider.getState()
+
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
+					mode: "code",
+					profileThresholds: {},
+					customSupportPrompts: {},
+					condensingApiConfigOverride: true,
+					condensingApiConfigId: "condensing-profile",
+					listApiConfigMeta: [{ id: "condensing-profile", name: "Condensing Profile" }],
+				})
+				vi.spyOn(mockProvider.providerSettingsManager, "getProfile").mockResolvedValue(condensingProfile as any)
+				vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(task, "getTokenUsage").mockReturnValue({
+					totalCost: 0,
+					totalTokensIn: 0,
+					totalTokensOut: 0,
+					contextTokens: 120000,
+				})
+				task.apiConversationHistory = [
+					{ role: "user", content: "test message", ts: Date.now() },
+					{ role: "assistant", content: "test response", ts: Date.now() + 1 },
+				]
+
+				await (task as any).handleContextWindowExceededError()
+
+				const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
+				expect(mockProvider.providerSettingsManager.getProfile).toHaveBeenCalledWith({
+					id: "condensing-profile",
+				})
+				expect(options.condensingApiHandler).toBeDefined()
+				expect(options.condensingApiHandler).not.toBe(task.api)
+				expect(options.condensingApiHandler?.getModel().id).toBe("claude-3-5-haiku-20241022")
 			})
 		})
 	})
