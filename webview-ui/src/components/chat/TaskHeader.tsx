@@ -324,7 +324,7 @@ const TaskHeader = ({
 													<ContextWindowProgress
 														contextWindow={contextWindow}
 														contextTokens={contextTokens || 0}
-														maxTokens={maxTokens || undefined}
+														maxTokens={maxTokens ?? undefined}
 													/>
 													{condenseButton}
 												</div>
