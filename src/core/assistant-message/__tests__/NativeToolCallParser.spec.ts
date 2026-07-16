@@ -302,8 +302,9 @@ describe("NativeToolCallParser", () => {
 				// Simulate streaming chunks
 				const fullArgs = JSON.stringify({ path: "src/test.ts" })
 
-				// Process the complete args as a single chunk for simplicity
-				const result = NativeToolCallParser.processStreamingChunk(id, fullArgs)
+				// Process the complete args as a single chunk for simplicity using compound key
+				const key = NativeToolCallParser.makeStreamingKey(id, "read_file")
+				const result = NativeToolCallParser.processStreamingChunk(key, fullArgs)
 
 				expect(result).not.toBeNull()
 				expect(result?.nativeArgs).toBeDefined()
@@ -319,9 +320,10 @@ describe("NativeToolCallParser", () => {
 				const id = "toolu_finalize_123"
 				NativeToolCallParser.startStreamingToolCall(id, "read_file")
 
-				// Add the complete arguments
+				// Add the complete arguments using compound key
+				const key = NativeToolCallParser.makeStreamingKey(id, "read_file")
 				NativeToolCallParser.processStreamingChunk(
-					id,
+					key,
 					JSON.stringify({
 						path: "finalized.ts",
 						mode: "slice",
@@ -330,7 +332,7 @@ describe("NativeToolCallParser", () => {
 					}),
 				)
 
-				const result = NativeToolCallParser.finalizeStreamingToolCall(id)
+				const result = NativeToolCallParser.finalizeStreamingToolCall(key)
 
 				expect(result).not.toBeNull()
 				expect(result?.type).toBe("tool_use")
@@ -341,6 +343,112 @@ describe("NativeToolCallParser", () => {
 					expect(nativeArgs.limit).toBe(10)
 				}
 			})
+		})
+	})
+
+	describe("streamingToolCalls collision", () => {
+		it("should keep separate accumulated arguments for tools with same id but different names", () => {
+			NativeToolCallParser.clearAllStreamingToolCalls()
+			NativeToolCallParser.clearRawChunkState()
+
+			const id = "toolu_collision_123"
+
+			// Start two tool calls with the same id but different names
+			NativeToolCallParser.startStreamingToolCall(id, "read_file")
+			NativeToolCallParser.startStreamingToolCall(id, "write_to_file")
+
+			// Accumulate arguments for each using compound keys
+			const key1 = NativeToolCallParser.makeStreamingKey(id, "read_file")
+			const key2 = NativeToolCallParser.makeStreamingKey(id, "write_to_file")
+
+			NativeToolCallParser.processStreamingChunk(key1, JSON.stringify({ path: "file_a.ts" }))
+			NativeToolCallParser.processStreamingChunk(key2, JSON.stringify({ path: "file_b.ts", content: "hello" }))
+
+			// Finalize both and verify they have distinct arguments
+			const result1 = NativeToolCallParser.finalizeStreamingToolCall(key1)
+			const result2 = NativeToolCallParser.finalizeStreamingToolCall(key2)
+
+			expect(result1).not.toBeNull()
+			expect(result2).not.toBeNull()
+			expect(result1?.type).toBe("tool_use")
+			expect(result2?.type).toBe("tool_use")
+
+			if (result1?.type === "tool_use" && result2?.type === "tool_use") {
+				const nativeArgs1 = result1.nativeArgs as { path: string }
+				const nativeArgs2 = result2.nativeArgs as { path: string; content: string }
+				expect(nativeArgs1.path).toBe("file_a.ts")
+				expect(nativeArgs2.path).toBe("file_b.ts")
+				expect(nativeArgs2.content).toBe("hello")
+			}
+
+			// Verify streaming state is cleaned up for both
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls()).toBe(false)
+		})
+	})
+
+	describe("finalizeRawChunks", () => {
+		it("should include name field in events for compound-key deduplication", () => {
+			NativeToolCallParser.clearAllStreamingToolCalls()
+			NativeToolCallParser.clearRawChunkState()
+
+			// Simulate two different tools with the same toolCallId via raw chunk tracking.
+			// processRawChunk returns [start, delta] when arguments are provided alongside name.
+			const result1 = NativeToolCallParser.processRawChunk({
+				index: 1,
+				id: "toolu_sameid",
+				name: "read_file",
+				arguments: '{"path":"a.ts"}',
+			})
+			// First call for index 1 returns start + delta events
+			expect(result1.some((e) => e.type === "tool_call_start")).toBe(true)
+
+			const result2 = NativeToolCallParser.processRawChunk({
+				index: 2,
+				id: "toolu_sameid",
+				name: "write_to_file",
+				arguments: '{"path":"b.ts","content":"hello"}',
+			})
+			// Second call for index 2 also returns start + delta events
+			expect(result2.some((e) => e.type === "tool_call_start")).toBe(true)
+
+			// Finalize raw chunks — both should be included with their names
+			const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
+
+			expect(finalizeEvents).toHaveLength(2)
+			expect(finalizeEvents.every((e) => e.type === "tool_call_end")).toBe(true)
+
+			// Each event must carry its name for compound-key deduplication
+			const names = finalizeEvents.map((e) => (e as any).name)
+			expect(names).toContain("read_file")
+			expect(names).toContain("write_to_file")
+		})
+
+		it("should emit separate end events when two tools share the same toolCallId", () => {
+			NativeToolCallParser.clearAllStreamingToolCalls()
+			NativeToolCallParser.clearRawChunkState()
+
+			// Both tools use the exact same call ID but different names
+			NativeToolCallParser.processRawChunk({
+				index: 10,
+				id: "toolu_dup",
+				name: "codebase_search",
+				arguments: '{"query":"foo"}',
+			})
+			NativeToolCallParser.processRawChunk({
+				index: 11,
+				id: "toolu_dup",
+				name: "search_files",
+				arguments: '{"path":".","regex":"bar"}',
+			})
+
+			const events = NativeToolCallParser.finalizeRawChunks()
+
+			// Should produce two distinct end events
+			expect(events).toHaveLength(2)
+
+			// Verify compound keys would be unique
+			const dedupKeys = new Set(events.map((e) => `${e.id}::${(e as any).name}`))
+			expect(dedupKeys.size).toBe(2)
 		})
 	})
 })

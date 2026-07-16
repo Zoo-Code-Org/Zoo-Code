@@ -16,6 +16,7 @@ import { convertToAiSdkMessages, convertToolsForAiSdk, processAiSdkStreamPart } 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 
 import { DEFAULT_HEADERS } from "./constants"
+import { handleOpenAIError } from "./utils/error-handler"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 
@@ -177,20 +178,24 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 		}
 
 		// Use streamText for streaming responses
-		const result = streamText(requestOptions)
+		try {
+			const result = streamText(requestOptions)
 
-		// Process the full stream to get all events
-		for await (const part of result.fullStream) {
-			// Use the processAiSdkStreamPart utility to convert stream parts
-			for (const chunk of processAiSdkStreamPart(part)) {
-				yield chunk
+			// Process the full stream to get all events
+			for await (const part of result.fullStream) {
+				// Use the processAiSdkStreamPart utility to convert stream parts
+				for (const chunk of processAiSdkStreamPart(part)) {
+					yield chunk
+				}
 			}
-		}
 
-		// Yield usage metrics at the end
-		const usage = await result.usage
-		if (usage) {
-			yield this.processUsageMetrics(usage)
+			// Yield usage metrics at the end
+			const usage = await result.usage
+			if (usage) {
+				yield this.processUsageMetrics(usage)
+			}
+		} catch (error) {
+			throw handleOpenAIError(error, this.config.providerName)
 		}
 	}
 
@@ -198,15 +203,19 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	 * Complete a prompt using the AI SDK generateText.
 	 */
 	async completePrompt(prompt: string): Promise<string> {
-		const languageModel = this.getLanguageModel()
+		try {
+			const languageModel = this.getLanguageModel()
 
-		const { text } = await generateText({
-			model: languageModel,
-			prompt,
-			maxOutputTokens: this.getMaxOutputTokens(),
-			temperature: this.config.temperature ?? 0,
-		})
+			const { text } = await generateText({
+				model: languageModel,
+				prompt,
+				maxOutputTokens: this.getMaxOutputTokens(),
+				temperature: this.config.temperature ?? 0,
+			})
 
-		return text
+			return text
+		} catch (error) {
+			throw handleOpenAIError(error, this.config.providerName)
+		}
 	}
 }

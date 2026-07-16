@@ -496,11 +496,14 @@ describe("AskFollowupQuestionTool", () => {
 
 		it("should build nativeArgs with question and follow_up during streaming", () => {
 			// Start a streaming tool call
-			NativeToolCallParser.startStreamingToolCall("call_123", "ask_followup_question")
+			const id1 = "call_123"
+			const name1 = "ask_followup_question"
+			NativeToolCallParser.startStreamingToolCall(id1, name1)
+			const key1 = NativeToolCallParser.makeStreamingKey(id1, name1)
 
 			// Simulate streaming JSON chunks
 			const chunk1 = '{"question":"What would you like?","follow_up":[{"text":"Option 1","mode":"code"}'
-			const result1 = NativeToolCallParser.processStreamingChunk("call_123", chunk1)
+			const result1 = NativeToolCallParser.processStreamingChunk(key1, chunk1)
 
 			expect(result1).not.toBeNull()
 			expect(result1?.name).toBe("ask_followup_question")
@@ -517,14 +520,17 @@ describe("AskFollowupQuestionTool", () => {
 		})
 
 		it("should finalize with complete nativeArgs", () => {
-			NativeToolCallParser.startStreamingToolCall("call_456", "ask_followup_question")
+			const id2 = "call_456"
+			const name2 = "ask_followup_question"
+			NativeToolCallParser.startStreamingToolCall(id2, name2)
+			const key2 = NativeToolCallParser.makeStreamingKey(id2, name2)
 
 			// Add complete JSON
 			const completeJson =
 				'{"question":"Choose an option","follow_up":[{"text":"Yes","mode":"code"},{"text":"No","mode":null}]}'
-			NativeToolCallParser.processStreamingChunk("call_456", completeJson)
+			NativeToolCallParser.processStreamingChunk(key2, completeJson)
 
-			const result = NativeToolCallParser.finalizeStreamingToolCall("call_456")
+			const result = NativeToolCallParser.finalizeStreamingToolCall(key2)
 
 			expect(result).not.toBeNull()
 			expect(result?.type).toBe("tool_use")
@@ -543,14 +549,17 @@ describe("AskFollowupQuestionTool", () => {
 		})
 
 		it("should finalize and forward a non-array follow_up so the tool can report it", () => {
-			NativeToolCallParser.startStreamingToolCall("call_789", "ask_followup_question")
+			const id3 = "call_789"
+			const name3 = "ask_followup_question"
+			NativeToolCallParser.startStreamingToolCall(id3, name3)
+			const key3 = NativeToolCallParser.makeStreamingKey(id3, name3)
 
 			// follow_up arrives as a keyed object instead of an array (the bug repro).
 			const completeJson =
 				'{"question":"How should I proceed?","follow_up":{"0":{"mode":null,"text":"Keep"},"1":{"mode":null,"text":"Remove"}}}'
-			NativeToolCallParser.processStreamingChunk("call_789", completeJson)
+			NativeToolCallParser.processStreamingChunk(key3, completeJson)
 
-			const result = NativeToolCallParser.finalizeStreamingToolCall("call_789")
+			const result = NativeToolCallParser.finalizeStreamingToolCall(key3)
 
 			// The call must NOT be dropped (null) - it should reach the tool with the raw
 			// value so the tool can emit a precise "must be an array" error.

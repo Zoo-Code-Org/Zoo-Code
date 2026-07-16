@@ -60,7 +60,7 @@ import { CloudService } from "@roo-code/cloud"
 
 // api
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
-import { ApiStream, GroundingSource } from "../../api/transform/stream"
+import { ApiStream, ApiStreamToolCallEndChunk, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 
 // shared
@@ -2827,7 +2827,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// Without this check, duplicate tool_use blocks with the same ID would
 										// be added to assistantMessageContent, causing API 400 errors:
 										// "tool_use ids must be unique"
-										if (this.streamingToolCallIndices.has(event.id)) {
+										// Use compound key (id, name) to distinguish different tools with the same call ID.
+										const dedupKey = `${event.id}::${event.name}`
+										if (this.streamingToolCallIndices.has(dedupKey)) {
 											console.warn(
 												`[Task#${this.taskId}] Ignoring duplicate tool_call_start for ID: ${event.id} (tool: ${event.name})`,
 											)
@@ -2847,7 +2849,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 										// Track the index where this tool will be stored
 										const toolUseIndex = this.assistantMessageContent.length
-										this.streamingToolCallIndices.set(event.id, toolUseIndex)
+										this.streamingToolCallIndices.set(dedupKey, toolUseIndex)
 
 										// Create initial partial tool use
 										const partialToolUse: ToolUse = {
@@ -2866,15 +2868,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
 										this.presentAssistantMessageSafe()
 									} else if (event.type === "tool_call_delta") {
-										// Process chunk using streaming JSON parser
+										// Look up the streaming entry by id to get its compound key
+										// (delta events don't carry name, but we stored it during startStreamingToolCall)
+										const existingEntry = NativeToolCallParser.getStreamingToolCallById(event.id)
+										const streamingKey = existingEntry
+											? NativeToolCallParser.makeStreamingKey(
+													existingEntry.id,
+													existingEntry.name,
+												)
+											: undefined
+
 										const partialToolUse = NativeToolCallParser.processStreamingChunk(
-											event.id,
+											streamingKey ?? event.id,
 											event.delta,
 										)
 
 										if (partialToolUse) {
-											// Get the index for this tool call
-											const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+											// Retrieve name from NativeToolCallParser's streaming state
+											const name = NativeToolCallParser.getStreamingToolName(
+												streamingKey ?? event.id,
+											)
+											const dedupKey = `${event.id}::${name}`
+											const toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
 											if (toolUseIndex !== undefined) {
 												// Store the ID for native protocol
 												;(partialToolUse as any).id = event.id
@@ -2889,10 +2904,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 									} else if (event.type === "tool_call_end") {
 										// Finalize the streaming tool call
-										const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(event.id)
+										// Build compound key from event to match the key used in startStreamingToolCall
+										// Use event.name or fallback to id for events that don't carry name
+										const eventName = (event as ApiStreamToolCallEndChunk).name ?? event.id
+										const streamingKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
-										// Get the index for this tool call
-										const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+										// Finalize the streaming tool call
+										const finalToolUse =
+											NativeToolCallParser.finalizeStreamingToolCall(streamingKey)
+
+										// Retrieve name from NativeToolCallParser's streaming state
+										const name = NativeToolCallParser.getStreamingToolName(streamingKey)
+										const dedupKey = `${event.id}::${name}`
+										const toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
 
 										if (finalToolUse) {
 											// Store the tool call ID
@@ -2904,7 +2928,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											}
 
 											// Clean up tracking
-											this.streamingToolCallIndices.delete(event.id)
+											this.streamingToolCallIndices.delete(dedupKey)
 
 											// Mark that we have new content to process
 											this.userMessageContentReady = false
@@ -2923,8 +2947,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												;(existingToolUse as any).id = event.id
 											}
 
-											// Clean up tracking
-											this.streamingToolCallIndices.delete(event.id)
+											// Clean up tracking (use compound key to match the if branch above)
+											this.streamingToolCallIndices.delete(dedupKey)
 
 											// Mark that we have new content to process
 											this.userMessageContentReady = false
@@ -3290,11 +3314,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
 				for (const event of finalizeEvents) {
 					if (event.type === "tool_call_end") {
+						// Create compound key for deduplication (same pattern as streaming handler)
+						const dedupKey = `${event.id}::${event.name}`
+
 						// Finalize the streaming tool call
 						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(event.id)
 
-						// Get the index for this tool call
-						const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+						// Get the index for this tool call using compound key
+						const toolUseIndex = this.streamingToolCallIndices.get(dedupKey)
 
 						if (finalToolUse) {
 							// Store the tool call ID
@@ -3305,8 +3332,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								this.assistantMessageContent[toolUseIndex] = finalToolUse
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false
@@ -3325,8 +3352,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								;(existingToolUse as any).id = event.id
 							}
 
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
+							// Clean up tracking using compound key
+							this.streamingToolCallIndices.delete(dedupKey)
 
 							// Mark that we have new content to process
 							this.userMessageContentReady = false

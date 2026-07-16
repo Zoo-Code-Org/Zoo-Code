@@ -92,6 +92,8 @@ export interface ApiStreamToolCallDeltaChunk {
 export interface ApiStreamToolCallEndChunk {
 	type: "tool_call_end"
 	id: string
+	/** Tool name for compound-key deduplication (present when emitted by finalizeRawChunks) */
+	name?: string
 }
 
 /**

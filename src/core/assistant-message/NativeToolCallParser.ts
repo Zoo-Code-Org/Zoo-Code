@@ -51,7 +51,8 @@ export type ToolCallStreamEvent = ApiStreamToolCallStartChunk | ApiStreamToolCal
  * provider-level raw chunks into start/delta/end events.
  */
 export class NativeToolCallParser {
-	// Streaming state management for argument accumulation (keyed by tool call id)
+	// Streaming state management for argument accumulation (keyed by compound id+name)
+	// Using compound key to distinguish different tools that may share the same backend id
 	// Note: name is string to accommodate dynamic MCP tools (mcp--serverName--toolName)
 	private static streamingToolCalls = new Map<
 		string,
@@ -61,6 +62,13 @@ export class NativeToolCallParser {
 			argumentsAccumulator: string
 		}
 	>()
+
+	/**
+	 * Generate a compound key from id and name for streaming tool call tracking.
+	 */
+	public static makeStreamingKey(id: string, name: string): string {
+		return `${id}::${name}`
+	}
 
 	// Raw chunk tracking state (keyed by index from API stream)
 	private static rawChunkTracker = new Map<
@@ -175,6 +183,7 @@ export class NativeToolCallParser {
 				events.push({
 					type: "tool_call_end",
 					id: tracked.id,
+					name: tracked.name,
 				})
 			}
 		}
@@ -195,6 +204,7 @@ export class NativeToolCallParser {
 					events.push({
 						type: "tool_call_end",
 						id: tracked.id,
+						name: tracked.name,
 					})
 				}
 			}
@@ -218,7 +228,8 @@ export class NativeToolCallParser {
 	 * Accepts string to support both ToolName and dynamic MCP tools (mcp--serverName--toolName).
 	 */
 	public static startStreamingToolCall(id: string, name: string): void {
-		this.streamingToolCalls.set(id, {
+		const key = this.makeStreamingKey(id, name)
+		this.streamingToolCalls.set(key, {
 			id,
 			name,
 			argumentsAccumulator: "",
@@ -243,12 +254,36 @@ export class NativeToolCallParser {
 	}
 
 	/**
+	 * Get the name of a streaming tool call by its compound key (id + name).
+	 * Returns undefined if the tool call is not found.
+	 */
+	public static getStreamingToolName(key: string): string | undefined {
+		return this.streamingToolCalls.get(key)?.name
+	}
+
+	/**
+	 * Get a streaming tool call entry by its id (legacy lookup for backward compatibility).
+	 * Returns the first matching entry if multiple tools share the same id.
+	 * @deprecated Use getStreamingToolName with compound key instead.
+	 */
+	public static getStreamingToolCallById(
+		id: string,
+	): { id: string; name: string; argumentsAccumulator: string } | null {
+		for (const entry of this.streamingToolCalls.values()) {
+			if (entry.id === id) {
+				return entry
+			}
+		}
+		return null
+	}
+
+	/**
 	 * Process a chunk of JSON arguments for a streaming tool call.
 	 * Uses partial-json-parser to extract values from incomplete JSON immediately.
 	 * Returns a partial ToolUse with currently parsed parameters.
 	 */
-	public static processStreamingChunk(id: string, chunk: string): ToolUse | null {
-		const toolCall = this.streamingToolCalls.get(id)
+	public static processStreamingChunk(key: string, chunk: string): ToolUse | null {
+		const toolCall = this.streamingToolCalls.get(key)
 		if (!toolCall) {
 			return null
 		}
@@ -291,8 +326,8 @@ export class NativeToolCallParser {
 	 * Finalize a streaming tool call.
 	 * Parses the complete JSON and returns the final ToolUse or McpToolUse.
 	 */
-	public static finalizeStreamingToolCall(id: string): ToolUse | McpToolUse | null {
-		const toolCall = this.streamingToolCalls.get(id)
+	public static finalizeStreamingToolCall(key: string): ToolUse | McpToolUse | null {
+		const toolCall = this.streamingToolCalls.get(key)
 		if (!toolCall) {
 			return null
 		}
@@ -306,7 +341,7 @@ export class NativeToolCallParser {
 		})
 
 		// Clean up streaming state
-		this.streamingToolCalls.delete(id)
+		this.streamingToolCalls.delete(key)
 
 		return finalToolUse
 	}

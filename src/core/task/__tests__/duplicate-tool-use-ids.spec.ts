@@ -259,4 +259,138 @@ describe("Duplicate tool_use ID Prevention", () => {
 			expect(ids).toEqual(uniqueIds) // All IDs are unique
 		})
 	})
+
+	describe("Compound key deduplication (id + name)", () => {
+		/**
+		 * Tests the compound key fix: when two different tools share the same toolCallId,
+		 * they should both be processed because their (id, name) keys differ.
+		 *
+		 * The streamingToolCallIndices map now uses `${event.id}::${event.name}` as the key
+		 * instead of just `event.id`, allowing different tools with the same call ID to coexist.
+		 */
+
+		it("should allow two different tools with same toolCallId but different names", () => {
+			const streamingToolCallIndices = new Map<string, number>()
+			const processedEvents: Array<{ id: string; name: string }> = []
+
+			const processToolCallStart = (id: string, name: string): boolean => {
+				// Compound key deduplication (new behavior)
+				const dedupKey = `${id}::${name}`
+				if (streamingToolCallIndices.has(dedupKey)) {
+					return false // Skipped as duplicate
+				}
+				streamingToolCallIndices.set(dedupKey, processedEvents.length)
+				processedEvents.push({ id, name })
+				return true
+			}
+
+			// First tool with shared ID
+			expect(processToolCallStart("toolu_123", "read_file")).toBe(true)
+			expect(processedEvents).toEqual([{ id: "toolu_123", name: "read_file" }])
+
+			// Second DIFFERENT tool with same ID should succeed (not dropped)
+			expect(processToolCallStart("toolu_123", "write_to_file")).toBe(true)
+			expect(processedEvents).toEqual([
+				{ id: "toolu_123", name: "read_file" },
+				{ id: "toolu_123", name: "write_to_file" },
+			])
+
+			// True duplicate (same ID AND same name) should be rejected
+			expect(processToolCallStart("toolu_123", "read_file")).toBe(false)
+			expect(processedEvents).toHaveLength(2) // No change
+		})
+
+		it("should reject true duplicates but allow different tools with same callId", () => {
+			const streamingToolCallIndices = new Map<string, number>()
+			const processedEvents: Array<{ id: string; name: string }> = []
+
+			const processToolCallStart = (id: string, name: string): boolean => {
+				const dedupKey = `${id}::${name}`
+				if (streamingToolCallIndices.has(dedupKey)) {
+					return false
+				}
+				streamingToolCallIndices.set(dedupKey, processedEvents.length)
+				processedEvents.push({ id, name })
+				return true
+			}
+
+			// First call: read_file with toolu_abc
+			expect(processToolCallStart("toolu_abc", "read_file")).toBe(true)
+
+			// Stream retry of the SAME event should be rejected
+			expect(processToolCallStart("toolu_abc", "read_file")).toBe(false)
+
+			// Different tool with same callId should succeed
+			expect(processToolCallStart("toolu_abc", "get_status")).toBe(true)
+
+			// Retry of get_status should also be rejected
+			expect(processToolCallStart("toolu_abc", "get_status")).toBe(false)
+
+			// Both tools processed
+			expect(processedEvents).toHaveLength(2)
+			expect(processedEvents[0].name).toBe("read_file")
+			expect(processedEvents[1].name).toBe("get_status")
+		})
+
+		it("should track correct indices for compound key lookups", () => {
+			const streamingToolCallIndices = new Map<string, number>()
+			let currentIndex = 0
+
+			const processToolCallStart = (id: string, name: string): number | null => {
+				const dedupKey = `${id}::${name}`
+				if (streamingToolCallIndices.has(dedupKey)) {
+					return null
+				}
+				const index = currentIndex
+				streamingToolCallIndices.set(dedupKey, index)
+				currentIndex++
+				return index
+			}
+
+			expect(processToolCallStart("toolu_1", "tool_a")).toBe(0)
+			expect(processToolCallStart("toolu_1", "tool_b")).toBe(1)
+			expect(processToolCallStart("toolu_2", "tool_a")).toBe(2)
+
+			// Verify compound key lookups return correct indices
+			expect(streamingToolCallIndices.get("toolu_1::tool_a")).toBe(0)
+			expect(streamingToolCallIndices.get("toolu_1::tool_b")).toBe(1)
+			expect(streamingToolCallIndices.get("toolu_2::tool_a")).toBe(2)
+
+			// Old single-key lookup would return wrong index or conflict
+			// With compound keys, each (id, name) pair has its own entry
+			expect(streamingToolCallIndices.has("toolu_1")).toBe(false) // No bare key
+			expect(streamingToolCallIndices.has("toolu_2")).toBe(false)
+		})
+
+		it("should clean up after tool_call_end using compound key", () => {
+			const streamingToolCallIndices = new Map<string, number>()
+
+			const addTool = (id: string, name: string): void => {
+				const dedupKey = `${id}::${name}`
+				streamingToolCallIndices.set(dedupKey, streamingToolCallIndices.size)
+			}
+
+			const removeTool = (id: string, name: string): boolean => {
+				const dedupKey = `${id}::${name}`
+				return streamingToolCallIndices.delete(dedupKey)
+			}
+
+			addTool("toolu_1", "read_file")
+			addTool("toolu_1", "write_to_file")
+
+			expect(streamingToolCallIndices.size).toBe(2)
+			expect(streamingToolCallIndices.has("toolu_1::read_file")).toBe(true)
+			expect(streamingToolCallIndices.has("toolu_1::write_to_file")).toBe(true)
+
+			// Finalize first tool - should only remove that specific entry
+			expect(removeTool("toolu_1", "read_file")).toBe(true)
+			expect(streamingToolCallIndices.size).toBe(1)
+			expect(streamingToolCallIndices.has("toolu_1::read_file")).toBe(false)
+			expect(streamingToolCallIndices.has("toolu_1::write_to_file")).toBe(true)
+
+			// Finalize second tool
+			expect(removeTool("toolu_1", "write_to_file")).toBe(true)
+			expect(streamingToolCallIndices.size).toBe(0)
+		})
+	})
 })
