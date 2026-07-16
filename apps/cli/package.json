@@ -26,7 +26,7 @@
 		"@roo-code/core": "workspace:^",
 		"@roo-code/types": "workspace:^",
 		"@roo-code/vscode-shim": "workspace:^",
-		"@trpc/client": "^11.8.1",
+		"@trpc/client": "^11.18.0",
 		"@vscode/ripgrep": "^1.15.9",
 		"commander": "^12.1.0",
 		"execa": "^9.5.2",
@@ -39,6 +39,7 @@
 	},
 	"devDependencies": {
 		"@roo-code/config-eslint": "workspace:^",
+		"@trpc/server": "^11.18.0",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "20.19.43",
 		"@types/react": "18.3.23",
