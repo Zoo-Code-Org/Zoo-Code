@@ -10,9 +10,13 @@ import {
 	ModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	litellmDefaultModelInfo,
+	kenariDefaultModelId,
+	kenariDefaultModelInfo,
 	openAiModelInfoSaneDefaults,
 	minimaxDefaultModelId,
 	minimaxModels,
+	friendliDefaultModelId,
+	friendliModels,
 	openRouterDefaultModelId,
 	vscodeLlmModels,
 	vscodeLlmDefaultModelId,
@@ -720,6 +724,78 @@ describe("useSelectedModel", () => {
 		})
 	})
 
+	describe("kenari provider", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return routerModels info for the configured kenari model", () => {
+			const customModelInfo: ModelInfo = {
+				maxTokens: 32768,
+				contextWindow: 1048576,
+				supportsImages: false,
+				supportsPromptCache: false,
+				description: "GLM 5.2 via Kenari",
+			}
+
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					kenari: {
+						"glm-5-2": customModelInfo,
+					},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariModelId: "glm-5-2",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("kenari")
+			expect(result.current.id).toBe("glm-5-2")
+			expect(result.current.info).toEqual(customModelInfo)
+		})
+
+		it("should use kenariDefaultModelInfo as fallback when routerModels.kenari is empty", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					kenari: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariModelId: "some-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("kenari")
+			// Falls back to the kenari default model ID when the router list is empty
+			expect(result.current.id).toBe(kenariDefaultModelId)
+			// Should use kenariDefaultModelInfo as fallback
+			expect(result.current.info).toEqual(kenariDefaultModelInfo)
+		})
+	})
+
 	describe("openai provider", () => {
 		beforeEach(() => {
 			mockUseRouterModels.mockReturnValue({
@@ -916,6 +992,53 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.contextWindow).not.toBe(128000)
 			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
 			expect(result.current.info?.supportsImages).toBe(false)
+		})
+	})
+
+	describe("friendli provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return default Friendli model when no custom model is specified", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "friendli",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("friendli")
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
+		it("should use custom model ID and info when model exists in friendliModels", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "friendli",
+				apiModelId: "zai-org/GLM-5.1",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("friendli")
+			expect(result.current.id).toBe("zai-org/GLM-5.1")
+			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
 		})
 	})
 })

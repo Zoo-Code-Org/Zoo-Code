@@ -8,6 +8,7 @@ import {
 	bedrockModels,
 	deepSeekModels,
 	fireworksModels,
+	friendliModels,
 	geminiModels,
 	mistralModels,
 	moonshotModels,
@@ -46,6 +47,7 @@ export const dynamicProviders = [
 	"poe",
 	"deepseek",
 	"opencode-go",
+	"kenari",
 ] as const
 
 export type DynamicProvider = (typeof dynamicProviders)[number]
@@ -119,6 +121,7 @@ export const providerNames = [
 	"baseten",
 	"deepseek",
 	"fireworks",
+	"friendli",
 	"gemini",
 	"gemini-cli",
 	"mistral",
@@ -393,6 +396,10 @@ const fireworksSchema = apiModelIdProviderModelSchema.extend({
 	fireworksApiKey: z.string().optional(),
 })
 
+const friendliSchema = apiModelIdProviderModelSchema.extend({
+	friendliApiKey: z.string().optional(),
+})
+
 const qwenCodeSchema = apiModelIdProviderModelSchema.extend({
 	qwenCodeOauthPath: z.string().optional(),
 })
@@ -405,6 +412,11 @@ const vercelAiGatewaySchema = baseProviderSettingsSchema.extend({
 const opencodeGoSchema = baseProviderSettingsSchema.extend({
 	opencodeGoApiKey: z.string().optional(),
 	opencodeGoModelId: z.string().optional(),
+})
+
+const kenariSchema = baseProviderSettingsSchema.extend({
+	kenariApiKey: z.string().optional(),
+	kenariModelId: z.string().optional(),
 })
 
 const zooGatewaySchema = baseProviderSettingsSchema.extend({
@@ -449,9 +461,11 @@ export const providerSettingsSchemaDiscriminated = z.discriminatedUnion("apiProv
 	sambaNovaSchema.merge(z.object({ apiProvider: z.literal("sambanova") })),
 	zaiSchema.merge(z.object({ apiProvider: z.literal("zai") })),
 	fireworksSchema.merge(z.object({ apiProvider: z.literal("fireworks") })),
+	friendliSchema.merge(z.object({ apiProvider: z.literal("friendli") })),
 	qwenCodeSchema.merge(z.object({ apiProvider: z.literal("qwen-code") })),
 	vercelAiGatewaySchema.merge(z.object({ apiProvider: z.literal("vercel-ai-gateway") })),
 	opencodeGoSchema.merge(z.object({ apiProvider: z.literal("opencode-go") })),
+	kenariSchema.merge(z.object({ apiProvider: z.literal("kenari") })),
 	zooGatewaySchema.merge(z.object({ apiProvider: z.literal("zoo-gateway") })),
 	defaultSchema,
 ])
@@ -485,9 +499,11 @@ export const providerSettingsSchema = z.object({
 	...sambaNovaSchema.shape,
 	...zaiSchema.shape,
 	...fireworksSchema.shape,
+	...friendliSchema.shape,
 	...qwenCodeSchema.shape,
 	...vercelAiGatewaySchema.shape,
 	...opencodeGoSchema.shape,
+	...kenariSchema.shape,
 	...zooGatewaySchema.shape,
 	...codebaseIndexProviderSchema.shape,
 })
@@ -520,6 +536,7 @@ export const modelIdKeys = [
 	"litellmModelId",
 	"vercelAiGatewayModelId",
 	"opencodeGoModelId",
+	"kenariModelId",
 	"zooGatewayModelId",
 ] as const satisfies readonly (keyof ProviderSettings)[]
 
@@ -565,8 +582,10 @@ export const modelIdKeysByProvider: Record<TypicalProvider, ModelIdKey> = {
 	sambanova: "apiModelId",
 	zai: "apiModelId",
 	fireworks: "apiModelId",
+	friendli: "apiModelId",
 	"vercel-ai-gateway": "vercelAiGatewayModelId",
 	"opencode-go": "opencodeGoModelId",
+	kenari: "kenariModelId",
 	"zoo-gateway": "zooGatewayModelId",
 }
 
@@ -638,6 +657,11 @@ export const MODELS_BY_PROVIDER: Record<
 		label: "Fireworks",
 		models: Object.keys(fireworksModels),
 	},
+	friendli: {
+		id: "friendli",
+		label: "Friendli",
+		models: Object.keys(friendliModels),
+	},
 	gemini: {
 		id: "gemini",
 		label: "Google Gemini",
@@ -701,6 +725,7 @@ export const MODELS_BY_PROVIDER: Record<
 	unbound: { id: "unbound", label: "Unbound", models: [] },
 	"vercel-ai-gateway": { id: "vercel-ai-gateway", label: "Vercel AI Gateway", models: [] },
 	"opencode-go": { id: "opencode-go", label: "Opencode Go", models: [] },
+	kenari: { id: "kenari", label: "Kenari", models: [] },
 	"zoo-gateway": { id: "zoo-gateway", label: "Zoo Gateway", models: [] },
 
 	// Local providers; models discovered from localhost endpoints.

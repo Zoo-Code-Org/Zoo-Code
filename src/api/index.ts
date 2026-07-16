@@ -31,8 +31,10 @@ import {
 	SambaNovaHandler,
 	ZAiHandler,
 	FireworksHandler,
+	FriendliHandler,
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
+	KenariHandler,
 	ZooGatewayHandler,
 	MiniMaxHandler,
 	MimoHandler,
@@ -189,10 +191,14 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new ZAiHandler(options)
 		case "fireworks":
 			return new FireworksHandler(options)
+		case "friendli":
+			return new FriendliHandler(options)
 		case "vercel-ai-gateway":
 			return new VercelAiGatewayHandler(options)
 		case "opencode-go":
 			return new OpencodeGoHandler(options)
+		case "kenari":
+			return new KenariHandler(options)
 		case "zoo-gateway":
 			return new ZooGatewayHandler(options)
 		case "minimax":

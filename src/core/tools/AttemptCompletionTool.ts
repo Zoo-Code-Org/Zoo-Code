@@ -97,7 +97,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 							// Fall through to normal completion ask flow below (outside this if block)
 							// This shows the user the completion result and waits for acceptance
 							// without injecting another tool_result to the parent
-						} else if (status === "active") {
+						} else if (status === "active" || status === "interrupted") {
 							historyLookupTaskId = task.parentTaskId
 							const { historyItem: parentHistory } = await provider.getTaskWithId(task.parentTaskId)
 
@@ -132,7 +132,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 							// "delegated" would mean this child has its own grandchild pending (shouldn't reach attempt_completion)
 							provider.log(
 								`[AttemptCompletionTool] Unexpected child task status "${status}" for task ${task.taskId}. ` +
-									`Expected "active" or "completed". Skipping delegation to prevent data corruption.`,
+									`Expected "active", "interrupted", or "completed". Skipping delegation to prevent data corruption.`,
 							)
 							// Fall through to normal completion ask flow
 						}

@@ -23,11 +23,13 @@ import {
 	internationalZAiModels,
 	mainlandZAiModels,
 	fireworksModels,
+	friendliModels,
 	basetenModels,
 	qwenCodeModels,
 	litellmDefaultModelInfo,
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
+	kenariDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
@@ -343,6 +345,11 @@ function getSelectedModel({
 			const info = fireworksModels[id as keyof typeof fireworksModels]
 			return { id, info }
 		}
+		case "friendli": {
+			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const info = friendliModels[id as keyof typeof friendliModels]
+			return { id, info }
+		}
 		case "poe": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = routerModels.poe?.[id]
@@ -376,6 +383,13 @@ function getSelectedModel({
 			// Fall back to the provider's default ModelInfo so capability-driven UI
 			// keeps working when the /models list is empty or unavailable.
 			const info = routerModels["opencode-go"]?.[id] ?? opencodeGoDefaultModelInfo
+			return { id, info }
+		}
+		case "kenari": {
+			const id = getValidatedModelId(apiConfiguration.kenariModelId, routerModels["kenari"], defaultModelId)
+			// Fall back to the provider's default ModelInfo so capability-driven UI
+			// keeps working when the /models list is empty or unavailable.
+			const info = routerModels["kenari"]?.[id] ?? kenariDefaultModelInfo
 			return { id, info }
 		}
 		case "zoo-gateway": {

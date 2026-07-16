@@ -20,6 +20,7 @@ import { fileExistsAtPath } from "../../../utils/fs"
 import { getOpenRouterModels } from "./openrouter"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
 import { getOpencodeGoModels } from "./opencode-go"
+import { getKenariModels } from "./kenari"
 import { getRequestyModels } from "./requesty"
 import { getUnboundModels } from "./unbound"
 import { getLiteLLMModels } from "./litellm"
@@ -210,6 +211,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 			break
 		case "opencode-go":
 			models = await getOpencodeGoModels(options.apiKey)
+			break
+		case "kenari":
+			models = await getKenariModels(options.apiKey)
 			break
 		case "poe":
 			models = await getPoeModels(options.apiKey, options.baseUrl)
@@ -430,9 +434,7 @@ export const flushModels = async (options: GetModelsOptions, refresh: boolean = 
  * @param provider - The provider to get models for.
  * @returns Models from memory cache, disk cache, or undefined if not cached.
  */
-export function getModelsFromCache(
-	options: GetModelsOptions | ProviderName,
-): ModelRecord | undefined {
+export function getModelsFromCache(options: GetModelsOptions | ProviderName): ModelRecord | undefined {
 	// Auth-scoped providers (e.g. zoo-gateway) must never be served from cache --
 	// their model lists are user-specific and a stale file left over from a previous
 	// session could leak another user's list. Mirror the guards in getModels/refreshModels.

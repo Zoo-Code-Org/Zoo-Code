@@ -1084,6 +1084,157 @@ describe("convertToOpenAiMessages", () => {
 			expect(assistantMessage.reasoning_details[2].data).toBe("encrypted_data")
 		})
 	})
+
+	describe("reasoning_content round-trip for DeepSeek / Z.ai thinking mode", () => {
+		it("should pass through top-level reasoning_content on assistant messages", () => {
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: "Here is my answer.",
+					reasoning_content: "Let me think about this carefully...",
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			expect((result[0] as any).reasoning_content).toBe("Let me think about this carefully...")
+		})
+
+		it("should extract reasoning_content from reasoning content block", () => {
+			// buildCleanConversationHistory stores reasoning as a content block when preserveReasoning=true
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "Let me think...", summary: [] },
+						{ type: "text", text: "My answer." },
+					],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.reasoning_content).toBe("Let me think...")
+			expect(msg.content).toBe("My answer.")
+		})
+
+		it("should extract reasoning_content from reasoning block alongside tool calls", () => {
+			// The critical case: DeepSeek thinking + tool call in the same turn.
+			// Without reasoning_content on the second request, DeepSeek returns 400:
+			// "The reasoning_content in the thinking mode must be passed back to the API."
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "I need to read a file.", summary: [] },
+						{
+							type: "tool_use",
+							id: "call_abc",
+							name: "read_file",
+							input: { path: "foo.txt" },
+						},
+					],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.reasoning_content).toBe("I need to read a file.")
+			expect(msg.tool_calls).toHaveLength(1)
+			expect(msg.tool_calls[0].id).toBe("call_abc")
+		})
+
+		it("should accumulate multiple reasoning blocks in order, separated by a tool call", () => {
+			// DeepSeek / Z.ai interleaved thinking can emit more than one reasoning block per
+			// turn. A regression that overwrites (instead of accumulates) would silently drop
+			// all but the last block.
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "First, I should check the file.", summary: [] },
+						{
+							type: "tool_use",
+							id: "call_abc",
+							name: "read_file",
+							input: { path: "foo.txt" },
+						},
+						{ type: "reasoning", text: "Now I know what to do next.", summary: [] },
+					],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.reasoning_content).toBe("First, I should check the file.Now I know what to do next.")
+			expect(msg.tool_calls).toHaveLength(1)
+			expect(msg.tool_calls[0].id).toBe("call_abc")
+		})
+
+		it("should prefer top-level reasoning_content over content block", () => {
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "block reasoning", summary: [] },
+						{ type: "text", text: "answer" },
+					],
+					reasoning_content: "top-level reasoning",
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect((result[0] as any).reasoning_content).toBe("top-level reasoning")
+		})
+
+		it("should not set reasoning_content when there is none", () => {
+			const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "call_abc",
+							name: "read_file",
+							input: { path: "foo.txt" },
+						},
+					],
+				},
+			]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			expect((result[0] as any).reasoning_content).toBeUndefined()
+		})
+
+		it("should ignore non-object content parts without crashing (defensive guard)", () => {
+			// getReasoningBlockText guards against non-object parts (e.g. a stray
+			// string in the content array). Such parts are not reasoning blocks and
+			// must be skipped rather than crashing or being misread as reasoning.
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: ["not-a-block" as any, { type: "text", text: "answer" }],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.content).toBe("answer")
+			expect(msg.reasoning_content).toBeUndefined()
+		})
+	})
 })
 
 describe("consolidateReasoningDetails", () => {

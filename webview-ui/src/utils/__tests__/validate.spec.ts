@@ -52,6 +52,7 @@ describe("Model Validation Functions", () => {
 		poe: {},
 		deepseek: {},
 		"opencode-go": {},
+		kenari: {},
 		"zoo-gateway": {},
 	}
 
@@ -214,6 +215,64 @@ describe("Model Validation Functions", () => {
 
 			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
 			expect(result).toBe("settings:validation.modelId")
+		})
+	})
+	describe("Kenari validation", () => {
+		it("returns an apiKey error when the Kenari API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariModelId: "glm-5.1",
+				// Missing kenariApiKey
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined for a valid Kenari configuration", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariApiKey: "valid-key",
+				kenariModelId: "glm-5.1",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+
+		it("returns a modelId error when no Kenari model id is set", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariApiKey: "valid-key",
+				// Missing kenariModelId
+			}
+
+			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.modelId")
+		})
+	})
+
+	describe("Friendli validation", () => {
+		it("returns an apiKey error when the Friendli API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: "friendli",
+				apiModelId: "zai-org/GLM-5.2",
+				// Missing friendliApiKey
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined for a valid Friendli configuration", () => {
+			const config: ProviderSettings = {
+				apiProvider: "friendli",
+				friendliApiKey: "valid-key",
+				apiModelId: "zai-org/GLM-5.2",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
 		})
 	})
 

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
-import { AlertTriangle } from "lucide-react"
+import { TriangleAlert } from "lucide-react"
 
 import type { ProviderSettingsEntry, OrganizationAllowList } from "@roo-code/types"
 
@@ -246,7 +246,7 @@ const ApiConfigManager = ({
 									icon: !valid ? (
 										<StandardTooltip content={t("settings:validation.profileInvalid")}>
 											<span>
-												<AlertTriangle size={16} className="mr-2 text-vscode-errorForeground" />
+												<TriangleAlert size={16} className="mr-2 text-vscode-errorForeground" />
 											</span>
 										</StandardTooltip>
 									) : undefined,

@@ -30,11 +30,15 @@
 
 Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida alla migrazione Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Vogliamo aiutare gli utenti il più possibile durante la transizione, e per questo abbiamo il nostro [Reddit](https://www.reddit.com/r/ZooCode) e il nostro [Discord](https://discord.gg/VxfP4Vx3gX). Se hai problemi o domande, passa pure e chiedi.
 
-## Novità in v3.64.0
+## Novità in v3.68.0
 
-- **Interfaccia di gestione delle regole** — una nuova scheda Regole nelle Impostazioni consente di creare, eliminare e aprire regole Zoo globali e dell'area di lavoro direttamente dall'editor
-- **Revisione delle modifiche di completamento** — dopo il completamento di un'attività, i nuovi pulsanti "Visualizza nuove modifiche" e "Ripristina modifiche" consentono di ispezionare e annullare le modifiche dell'ultimo prompt
-- **Soglie diff ridotte** — soglie di somiglianza configurabili riducono gli errori "modifica non riuscita" nell'applicazione dei diff, con nuovi diagnostici per ottimizzare le impostazioni
+- **Provider Friendli con supporto GLM-5.2** — usa il modello GLM più recente tramite Friendli.
+- **Supporto nativo thinking/reasoning per Ollama** — conserva l'output di ragionamento end-to-end quando usi i modelli Ollama.
+- **Correzione del `apiModelId` personalizzato di Anthropic** — gli ID modello Anthropic personalizzati ora restano selezionati invece di tornare silenziosamente a `claude-sonnet-4-5`.
+- Correzione: gestione dei risultati degli strumenti del provider Ollama e condensazione prematura del contesto.
+- Correzione: mantieni il collegamento padre-figlio dell'attività quando una sottoattività delegata viene interrotta.
+- Migliora la gestione dei blocchi di contenuto Claude in Anthropic Vertex per risposte più affidabili.
+- Aggiornamenti a CI, pubblicazione nightly e dipendenze/tooling.
 
 ## Cosa può fare Zoo Code per TE?
 

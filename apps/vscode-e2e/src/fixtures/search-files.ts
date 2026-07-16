@@ -127,7 +127,6 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 
 		mock.addFixture({
 			match: {
-				toolCallId: fixture.toolCallId,
 				predicate: (req) => toolResultContains(req, fixture.toolCallId, fixture.expected),
 			},
 			response: {

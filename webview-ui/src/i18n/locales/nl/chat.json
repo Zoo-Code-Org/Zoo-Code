@@ -314,9 +314,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Regelbeheer-UI — een nieuw tabblad Regels in Instellingen maakt het mogelijk om globale en werkruimte Zoo-regels rechtstreeks vanuit de editor aan te maken, te verwijderen en te openen.",
-			"highlight2": "Beoordeling van voltooiingswijzigingen — na het voltooien van een taak kunt u met nieuwe knoppen \"Nieuwe wijzigingen bekijken\" en \"Wijzigingen herstellen\" de wijzigingen van de laatste prompt inspecteren en ongedaan maken.",
-			"highlight3": "Versoepelde diff-drempelwaarden — configureerbare gelijkheidsdrempels verminderen \"bewerking mislukt\"-fouten bij het toepassen van diffs, met nieuwe diagnostiek om de instellingen af te stemmen."
+			"highlight1": "Friendli-provider met GLM-5.2-ondersteuning — gebruik het nieuwste GLM-model via Friendli.",
+			"highlight2": "Native thinking/reasoning-ondersteuning voor Ollama — behoud reasoning-uitvoer van begin tot eind wanneer je Ollama-modellen gebruikt.",
+			"highlight3": "Fix voor aangepaste Anthropic-`apiModelId` — aangepaste Anthropic-model-ID's blijven nu geselecteerd in plaats van stilletjes terug te vallen op `claude-sonnet-4-5`."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

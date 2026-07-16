@@ -280,4 +280,61 @@ describe("ClineProvider.removeClineFromStack() delegation awareness", () => {
 		// Grandparent A's metadata remains intact (delegated, awaitingChildId: task-B)
 		// The caller (delegateParentAndOpenChild) will update A to point to C separately.
 	})
+
+	it("does NOT repair parent when child has 'interrupted' status (cancel already persisted it)", async () => {
+		// cancelTask() writes child status: "interrupted" and leaves parent "delegated".
+		// When rehydrate then calls removeClineFromStack, parent must stay delegated.
+		const childTaskId = "child-1"
+		const parentTaskId = "parent-1"
+
+		const childTask = {
+			taskId: childTaskId,
+			instanceId: "inst-child",
+			parentTaskId,
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+		}
+
+		const updateTaskHistory = vi.fn().mockResolvedValue([])
+		const getTaskWithId = vi.fn().mockImplementation(async (id: string) => {
+			if (id === parentTaskId) {
+				return {
+					historyItem: {
+						id: parentTaskId,
+						task: "Parent task",
+						ts: 1000,
+						number: 1,
+						tokensIn: 0,
+						tokensOut: 0,
+						totalCost: 0,
+						status: "delegated",
+						awaitingChildId: childTaskId,
+					},
+				}
+			}
+			throw new Error("Task not found")
+		})
+
+		const provider = makeProviderStub({
+			clineStack: [childTask] as any[],
+			taskEventListeners: new Map(),
+			log: vi.fn(),
+			getTaskWithId,
+			updateTaskHistory,
+			// Seed the in-memory store with the interrupted child — mirrors what cancelTask
+			// writes before rehydrating, and is what removeClineFromStack now reads directly.
+			taskHistoryStore: { get: (id: string) => (id === childTaskId ? { status: "interrupted" } : undefined) },
+		})
+
+		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
+
+		// Stack is emptied
+		expect(provider.clineStack).toHaveLength(0)
+
+		// Parent must NOT be transitioned to active — it stays "delegated"
+		// so the interrupted child can resume and report back later
+		expect(updateTaskHistory).not.toHaveBeenCalledWith(
+			expect.objectContaining({ id: parentTaskId, status: "active" }),
+		)
+	})
 })

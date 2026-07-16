@@ -187,6 +187,7 @@ const dynamicProviderExtras = {
 	poe: {} as { apiKey?: string; baseUrl?: string },
 	deepseek: {} as { apiKey?: string; baseUrl?: string },
 	"opencode-go": {} as { apiKey?: string },
+	kenari: {} as { apiKey?: string },
 } as const satisfies Record<RouterName, object>
 
 // Build the dynamic options union from the map, intersected with CommonFetchParams

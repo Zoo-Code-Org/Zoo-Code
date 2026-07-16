@@ -9,7 +9,56 @@ on:
     merge_group:
         types: [checks_requested]
 
+# Least privilege: every job below escalates only where it needs to.
+permissions:
+    contents: read
+
 jobs:
+    dependency-review:
+        runs-on: ubuntu-latest
+        # Only meaningful for PRs — validates the dependency diff of the pull
+        # request against GitHub's advisory database before merge.
+        if: github.event_name == 'pull_request'
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  # This job never pushes — don't persist the GITHUB_TOKEN.
+                  persist-credentials: false
+            - name: Dependency review
+              uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+
+    invisible-chars:
+        runs-on: ubuntu-latest
+        # Reject invisible / homoglyph Unicode that GitHub's diff UI renders
+        # invisibly and most editors hide. These compile fine, which is the
+        # risk: identifier-splitting, string-literal injection, and the
+        # "Trojan Source" bidi-override attack (U+202A-U+202E). Scanning raw
+        # bytes catches them in strings, identifiers, and comments alike.
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  # This job never pushes — don't persist the GITHUB_TOKEN.
+                  persist-credentials: false
+            - name: Reject invisible / homoglyph Unicode
+              run: |
+                  # zero-width (U+200B-200F), word joiner (U+2060), BOM (U+FEFF),
+                  # bidi overrides (U+202A-202E), soft hyphen (U+00AD).
+                  # Covers source, release-adjacent executable scripts
+                  # (*.sh / *.cjs / *.cts / *.mts), and the executable shell
+                  # blocks inside GitHub workflow/action YAML.
+                  if grep -rnP '[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}\x{FEFF}\x{00AD}]' \
+                      --include='*.ts' --include='*.tsx' --include='*.js' --include='*.mjs' \
+                      --include='*.cjs' --include='*.cts' --include='*.mts' --include='*.sh' \
+                      --include='*.yml' --include='*.yaml' \
+                      --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=out \
+                      --exclude-dir=coverage --exclude-dir=.turbo --exclude-dir=.vinxi \
+                      src webview-ui packages apps .github; then
+                      echo "::error::Found invisible or homoglyph Unicode characters (zero-width / bidi-override / BOM / soft hyphen)"
+                      exit 1
+                  fi
+
     check-translations:
         runs-on: ubuntu-latest
         steps:

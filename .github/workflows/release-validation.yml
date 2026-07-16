@@ -16,6 +16,9 @@ on:
             - "releases/**"
             - ".github/workflows/release-validation.yml"
 
+permissions:
+    contents: read
+
 jobs:
     validate-release:
         runs-on: ubuntu-latest

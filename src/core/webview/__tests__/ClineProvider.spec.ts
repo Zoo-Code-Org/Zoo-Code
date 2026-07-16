@@ -2686,6 +2686,8 @@ describe("ClineProvider - Router Models", () => {
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
 		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
+		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
 
 		// Verify response was sent
 		expect(mockPostMessage).toHaveBeenCalledWith({
@@ -2702,6 +2704,7 @@ describe("ClineProvider - Router Models", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -2734,6 +2737,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockResolvedValueOnce(mockModels) // zoo-gateway success
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
 			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
+			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
 
@@ -2752,6 +2756,7 @@ describe("ClineProvider - Router Models", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -2849,6 +2854,7 @@ describe("ClineProvider - Router Models", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})

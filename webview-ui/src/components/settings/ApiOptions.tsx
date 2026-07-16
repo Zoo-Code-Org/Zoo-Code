@@ -71,8 +71,10 @@ import {
 	XAI,
 	ZAi,
 	Fireworks,
+	Friendli,
 	VercelAiGateway,
 	OpenCodeGo,
+	Kenari,
 	ZooGateway,
 	MiniMax,
 	Mimo,
@@ -645,6 +647,17 @@ const ApiOptions = ({
 						/>
 					)}
 
+					{selectedProvider === "kenari" && (
+						<Kenari
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
 					{selectedProvider === "zoo-gateway" && (
 						<ZooGateway
 							apiConfiguration={apiConfiguration}
@@ -658,6 +671,13 @@ const ApiOptions = ({
 
 					{selectedProvider === "fireworks" && (
 						<Fireworks
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+						/>
+					)}
+
+					{selectedProvider === "friendli" && (
+						<Friendli
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>

@@ -46,8 +46,16 @@ describe("assertValidTransition", () => {
 			expect(() => assertValidTransition("active", "completed")).not.toThrow()
 		})
 
+		it("active → interrupted", () => {
+			expect(() => assertValidTransition("active", "interrupted")).not.toThrow()
+		})
+
 		it("delegated → active", () => {
 			expect(() => assertValidTransition("delegated", "active")).not.toThrow()
+		})
+
+		it("interrupted → completed", () => {
+			expect(() => assertValidTransition("interrupted", "completed")).not.toThrow()
 		})
 
 		it("undefined (implicit active) → delegated", () => {
@@ -81,6 +89,12 @@ describe("assertValidTransition", () => {
 		it("completed → delegated", () => {
 			expect(() => assertValidTransition("completed", "delegated")).toThrow(
 				"Invalid task status transition: completed → delegated",
+			)
+		})
+
+		it("interrupted → active", () => {
+			expect(() => assertValidTransition("interrupted", "active")).toThrow(
+				"Invalid task status transition: interrupted → active",
 			)
 		})
 
@@ -419,6 +433,30 @@ describe("TaskHistoryStore upsert transition guard", () => {
 
 		await expect(store.upsert({ ...item, status: "completed" })).resolves.toBeDefined()
 		expect(store.get("task-guard-3")?.status).toBe("completed")
+	})
+
+	it("rejects interrupted → active transition, preserving the interrupted status", async () => {
+		const item = makeItem({ id: "task-guard-interrupted", status: "interrupted" })
+		await seedItems([item])
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+
+		await expect(store.upsert({ ...item, status: "active" })).rejects.toThrow(
+			"Invalid task status transition: interrupted → active",
+		)
+		expect(store.get("task-guard-interrupted")?.status).toBe("interrupted")
+	})
+
+	it("allows valid interrupted → completed transition", async () => {
+		const item = makeItem({ id: "task-guard-interrupted-complete", status: "interrupted" })
+		await seedItems([item])
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir)
+		await store.initialize()
+
+		await expect(store.upsert({ ...item, status: "completed" })).resolves.toBeDefined()
+		expect(store.get("task-guard-interrupted-complete")?.status).toBe("completed")
 	})
 
 	it("allows first insert with status: active (no prior record to transition from)", async () => {

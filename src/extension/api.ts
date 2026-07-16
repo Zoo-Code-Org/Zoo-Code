@@ -240,6 +240,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return item ? structuredClone(item) : undefined
 	}
 
+	public async getTaskApiConversationHistoryLength(taskId: string): Promise<number> {
+		try {
+			const { apiConversationHistory } = await this.sidebarProvider.getTaskWithId(taskId)
+			return apiConversationHistory.length
+		} catch {
+			return 0
+		}
+	}
+
 	public getCurrentTaskStack() {
 		return this.sidebarProvider.getCurrentTaskStack()
 	}
