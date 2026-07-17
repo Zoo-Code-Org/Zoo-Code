@@ -2,7 +2,6 @@ import { existsSync } from "fs"
 import * as path from "path"
 
 import * as vscode from "vscode"
-import pWaitFor from "p-wait-for"
 
 import type { RooTerminalCallbacks, RooTerminalProcessResultPromise } from "./types"
 import { BaseTerminal } from "./BaseTerminal"
@@ -117,10 +116,12 @@ export class Terminal extends BaseTerminal {
 					commandSubmitted: false,
 				})
 			} else {
-				// Wait for shell integration before executing the command
-				pWaitFor(() => this.terminal.shellIntegration !== undefined, {
-					timeout: Terminal.getShellIntegrationTimeout(),
-				})
+				// Wait for shell integration to activate before executing the command.
+				// Use the onDidChangeTerminalShellIntegration event rather than polling
+				// so we react immediately when the shell is ready. The timeout is kept as
+				// a safety net for shells that never activate integration (e.g. heavily
+				// customised startup that suppresses the OSC 633;A marker).
+				this.waitForShellIntegration(Terminal.getShellIntegrationTimeout())
 					.then(() => {
 						// Clean up temporary directory if shell integration is available, zsh did its job:
 						ShellIntegrationManager.zshCleanupTmpDir(this.id)
@@ -143,6 +144,34 @@ export class Terminal extends BaseTerminal {
 		})
 
 		return mergePromise(process, promise)
+	}
+
+	/**
+	 * Resolves when this terminal's shell integration becomes active, or rejects
+	 * after timeoutMs if the shell never signals readiness. Uses the
+	 * onDidChangeTerminalShellIntegration event so we react immediately rather
+	 * than polling — important for slow-starting shells (heavy .zshrc, nvm, etc.).
+	 */
+	private waitForShellIntegration(timeoutMs: number): Promise<void> {
+		if (this.terminal.shellIntegration) {
+			return Promise.resolve()
+		}
+
+		return new Promise<void>((resolve, reject) => {
+			const ref = { disposable: null as vscode.Disposable | null }
+			const timer = setTimeout(() => {
+				ref.disposable?.dispose()
+				reject(new Error(`Shell integration did not activate within ${timeoutMs / 1000}s`))
+			}, timeoutMs)
+
+			ref.disposable = vscode.window.onDidChangeTerminalShellIntegration((e) => {
+				if (e.terminal === this.terminal) {
+					clearTimeout(timer)
+					ref.disposable?.dispose()
+					resolve()
+				}
+			})
+		})
 	}
 
 	/**

@@ -436,21 +436,24 @@ describe("SettingsView - Change Detection Fix", () => {
 		fireEvent.click(screen.getByTestId("set-provider-deepseek"))
 		expect(screen.getByTestId("provider-value")).toHaveTextContent("deepseek")
 
-		extensionState = createExtensionState({
-			settingsImportedAt: 123,
-			soundEnabled: true,
-			apiConfiguration: {
-				apiProvider: "baseten",
-				apiModelId: "zai-org/GLM-4.6",
-				basetenApiKey: "test-baseten-key",
-			},
-		})
+		await act(async () => {
+			extensionState = createExtensionState({
+				settingsImportedAt: 123,
+				soundEnabled: true,
+				apiConfiguration: {
+					apiProvider: "baseten",
+					apiModelId: "zai-org/GLM-4.6",
+					basetenApiKey: "test-baseten-key",
+				},
+			})
+			;(useExtensionState as any).mockImplementation(() => extensionState)
 
-		rerender(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+			rerender(
+				<QueryClientProvider client={queryClient}>
+					<SettingsView onDone={onDone} />
+				</QueryClientProvider>,
+			)
+		})
 
 		// Let the import cache-busting effect run. With the old implementation,
 		// this would reset cachedState back to the replayed Baseten config.
@@ -497,20 +500,23 @@ describe("SettingsView - Change Detection Fix", () => {
 		fireEvent.click(screen.getByTestId("set-provider-deepseek"))
 		expect(screen.getByTestId("provider-value")).toHaveTextContent("deepseek")
 
-		extensionState = createExtensionState({
-			settingsImportedAt: 101,
-			apiConfiguration: {
-				apiProvider: "baseten",
-				apiModelId: "zai-org/GLM-4.6",
-				basetenApiKey: "imported-baseten-key",
-			},
-		})
+		await act(async () => {
+			extensionState = createExtensionState({
+				settingsImportedAt: 101,
+				apiConfiguration: {
+					apiProvider: "baseten",
+					apiModelId: "zai-org/GLM-4.6",
+					basetenApiKey: "imported-baseten-key",
+				},
+			})
+			;(useExtensionState as any).mockImplementation(() => extensionState)
 
-		rerender(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+			rerender(
+				<QueryClientProvider client={queryClient}>
+					<SettingsView onDone={onDone} />
+				</QueryClientProvider>,
+			)
+		})
 
 		await waitFor(() => {
 			expect(screen.getByTestId("provider-value")).toHaveTextContent("baseten")

@@ -241,10 +241,17 @@ suite("Roo Code Subtasks", function () {
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
 			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
-			if (api.getCurrentTaskStack().length > 0) {
-				await api.clearCurrentTask()
+			// TaskDelegationCompleted fires before createTaskWithHistoryItem completes,
+			// so the reopened parent may not be on the stack yet. Wait for it to appear
+			// before draining, otherwise the next test sees a late-rehydrated stray task.
+			if (delegationCompletedParentId) {
+				await waitFor(
+					() =>
+						api.getCurrentTaskStack().length > 0 ||
+						api.getCurrentTaskStack().includes(delegationCompletedParentId!),
+				).catch(() => {})
 			}
-			if (api.getCurrentTaskStack().length > 0) {
+			while (api.getCurrentTaskStack().length > 0) {
 				await api.clearCurrentTask()
 			}
 			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})

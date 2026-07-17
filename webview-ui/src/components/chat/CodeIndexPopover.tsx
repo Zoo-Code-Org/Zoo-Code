@@ -10,7 +10,7 @@ import {
 	VSCodeCheckbox,
 } from "@vscode/webview-ui-toolkit/react"
 import * as ProgressPrimitive from "@radix-ui/react-progress"
-import { AlertTriangle } from "lucide-react"
+import { TriangleAlert } from "lucide-react"
 
 import { type IndexingStatus, type EmbedderProvider, CODEBASE_INDEX_DEFAULTS } from "@roo-code/types"
 
@@ -1748,7 +1748,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle className="flex items-center gap-2">
-							<AlertTriangle className="w-5 h-5 text-yellow-500" />
+							<TriangleAlert className="w-5 h-5 text-yellow-500" />
 							{t("settings:unsavedChangesDialog.title")}
 						</AlertDialogTitle>
 						<AlertDialogDescription>

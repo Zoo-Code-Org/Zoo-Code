@@ -379,30 +379,38 @@ export async function executeCommandInTerminal(
 			}
 		},
 		onCompleted: async (output: string | undefined) => {
-			try {
-				clearTimeout(pendingCommandOutputEmitTimer)
-				pendingCommandOutputEmitTimer = undefined
+			clearTimeout(pendingCommandOutputEmitTimer)
+			pendingCommandOutputEmitTimer = undefined
 
+			try {
 				// Finalize interceptor and get persisted result.
 				// We await finalize() to ensure the artifact file is fully flushed
 				// before we advertise the artifact_id to the LLM.
 				if (interceptor) {
 					persistedResult = await interceptor.finalize()
 				}
-
-				// Continue using compressed output for UI display
-				result = Terminal.compressTerminalOutput(output ?? "")
-				latestCompressedOutput = result
-
-				// Preserve order: wait for queued partial updates, then emit the final
-				// non-partial command_output update.
-				await commandOutputSayChain
-				await queueCommandOutputMessage(result, false, true)
-				completed = true
-			} finally {
-				// Signal that onCompleted has finished, so the main code can safely use persistedResult
-				resolveOnCompleted?.()
+			} catch (error) {
+				console.error("[ExecuteCommandTool] interceptor.finalize() failed:", error)
 			}
+
+			// Continue using compressed output for UI display
+			result = Terminal.compressTerminalOutput(output ?? "")
+			latestCompressedOutput = result
+			completed = true
+
+			// Unblock the main code path: persistedResult, result, and completed are
+			// all set now. Resolve before draining the UI say chain so that a stalled
+			// or slow webview update cannot prevent the tool result from being returned.
+			resolveOnCompleted?.()
+
+			// Preserve order: wait for queued partial updates, then emit the final
+			// non-partial command_output update. Fire-and-forget from the main path —
+			// errors here are UI-only and must not surface to the tool result.
+			commandOutputSayChain
+				.then(() => queueCommandOutputMessage(result, false, true))
+				.catch((error) => {
+					console.error("[ExecuteCommandTool] Failed to flush final command_output:", error)
+				})
 		},
 		onShellExecutionStarted: (pid: number | undefined) => {
 			const status: CommandExecutionStatus = { executionId, status: "started", pid, command }
@@ -508,10 +516,12 @@ export async function executeCommandInTerminal(
 	// grouping command_output messages despite any gaps anyways).
 	await delay(50)
 
-	// Wait for onCompleted callback to finish if shell execution completed.
-	// This ensures persistedResult is set before we try to use it, fixing the race
-	// condition where exitDetails is set (sync) before the async onCompleted finishes.
-	if (exitDetails && onCompletedPromise) {
+	// Wait for onCompleted callback to finish. onCompleted is async and sets
+	// `completed` and `persistedResult`; we must not read them until it resolves.
+	// Skip when returning a background result: the command is still running and
+	// onCompleted will fire later — awaiting it here would block until real completion,
+	// defeating the purpose of the agent-timeout background transition.
+	if (!runInBackground) {
 		await onCompletedPromise
 	}
 

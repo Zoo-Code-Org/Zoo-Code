@@ -1,6 +1,6 @@
 import { memo, useRef, useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronUp, ChevronDown, HardDriveDownload, HardDriveUpload, FoldVertical, ArrowLeft } from "lucide-react"
+import { ChevronUp, ChevronDown, HardDriveDownload, HardDriveUpload, ListChevronsDownUp, ArrowLeft } from "lucide-react"
 import prettyBytes from "pretty-bytes"
 
 import type { ClineMessage } from "@roo-code/types"
@@ -82,7 +82,7 @@ const TaskHeader = ({
 	const condenseButton = (
 		<LucideIconButton
 			title={t("chat:task.condenseContext")}
-			icon={FoldVertical}
+			icon={ListChevronsDownUp}
 			disabled={buttonsDisabled}
 			onClick={() => currentTaskItem && handleCondenseContext(currentTaskItem.id)}
 		/>
@@ -275,6 +275,16 @@ const TaskHeader = ({
 								</>
 							)}
 						</div>
+						<div
+							className="flex items-center gap-1 ml-8 w-60 min-w-[120px] shrink"
+							onClick={(e) => e.stopPropagation()}>
+							<ContextWindowProgress
+								contextWindow={contextWindow}
+								contextTokens={contextTokens || 0}
+								maxTokens={maxTokens ?? undefined}
+							/>
+							{condenseButton}
+						</div>
 					</div>
 				)}
 				{/* Expanded state: Show task text and images */}
@@ -315,7 +325,7 @@ const TaskHeader = ({
 													<ContextWindowProgress
 														contextWindow={contextWindow}
 														contextTokens={contextTokens || 0}
-														maxTokens={maxTokens || undefined}
+														maxTokens={maxTokens ?? undefined}
 													/>
 													{condenseButton}
 												</div>

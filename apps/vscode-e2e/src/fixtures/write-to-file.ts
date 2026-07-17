@@ -31,7 +31,6 @@ export function addWriteToFileResultFixtures(mock: InstanceType<typeof LLMock>) 
 	for (const fixture of fixtures) {
 		mock.addFixture({
 			match: {
-				toolCallId: fixture.toolCallId,
 				predicate: (req) => toolResultContains(req, fixture.toolCallId, fixture.expected),
 			},
 			response: {

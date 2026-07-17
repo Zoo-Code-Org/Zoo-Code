@@ -1,0 +1,18 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "TERMINAL_REUSE_SHELL_RACE_E2E"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"python3 -c \\\"\\nimport sys\\nprint('first', file=sys.stderr)\\nsys.exit(0)\\n\\\"\"}",
+						"id": "call_terminal_reuse_001"
+					}
+				]
+			}
+		}
+	]
+}

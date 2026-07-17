@@ -8,8 +8,8 @@
 		"./next-js": "./next.js"
 	},
 	"devDependencies": {
-		"@eslint/js": "9.27.0",
-		"@next/eslint-plugin-next": "15.3.2",
+		"@eslint/js": "9.39.4",
+		"@next/eslint-plugin-next": "15.5.20",
 		"eslint": "9.39.4",
 		"eslint-config-prettier": "10.1.8",
 		"eslint-plugin-only-warn": "1.2.1",
