@@ -61,7 +61,7 @@ export const ReasoningBlock = ({ content, isStreaming, isLast, ts }: ReasoningBl
 			const id = setInterval(tick, 1000)
 			return () => clearInterval(id)
 		}
-	}, [isLast, isStreaming])
+		}, [isLast, isStreaming, ts])
 
 	// Cache the final elapsed value when streaming stops so it survives
 	// future remounts even if the component unmounts before the timer
