@@ -196,9 +196,10 @@ describe("ExecaTerminalProcess", () => {
 			execaMock.mockImplementation((options: any) => {
 				return (_template: TemplateStringsArray, ...args: any[]) => ({
 					pid: mockPid,
-					iterable: (_opts: any) =>
-						(async function* () {
-							throw Object.assign(new ExecaError("exec failed"), {
+										iterable: (_opts: any) =>
+											// eslint-disable-next-line require-yield
+											(async function* () {
+												throw Object.assign(new ExecaError("exec failed"), {
 								exitCode: 1,
 								signal: "SIGTERM",
 							})
@@ -222,9 +223,10 @@ describe("ExecaTerminalProcess", () => {
 			execaMock.mockImplementation((options: any) => {
 				return (_template: TemplateStringsArray, ...args: any[]) => ({
 					pid: mockPid,
-					iterable: (_opts: any) =>
-						(async function* () {
-							throw new Error("generic error")
+										iterable: (_opts: any) =>
+											// eslint-disable-next-line require-yield
+											(async function* () {
+												throw new Error("generic error")
 						})(),
 					kill: vitest.fn(),
 				})
