@@ -1,6 +1,5 @@
 import React, {
 	forwardRef,
-	memo,
 	useCallback,
 	useEffect,
 	useImperativeHandle,
@@ -16,7 +15,7 @@ import {
 	Database,
 	SquareTerminal,
 	FlaskConical,
-	AlertTriangle,
+	TriangleAlert,
 	Globe,
 	Info,
 	MessageSquare,
@@ -25,7 +24,7 @@ import {
 	Glasses,
 	Plug,
 	Server,
-	Users2,
+	UsersRound,
 	ArrowLeft,
 	GitCommitVertical,
 	GraduationCap,
@@ -532,7 +531,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const sections: { id: SectionName; icon: LucideIcon }[] = useMemo(
 		() => [
 			{ id: "providers", icon: Plug },
-			{ id: "modes", icon: Users2 },
+			{ id: "modes", icon: UsersRound },
 			{ id: "skills", icon: GraduationCap },
 			{ id: "slashCommands", icon: SquareSlash },
 			{ id: "rules", icon: ScrollText },
@@ -970,7 +969,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>
-							<AlertTriangle className="w-5 h-5 text-yellow-500" />
+							<TriangleAlert className="w-5 h-5 text-yellow-500" />
 							{t("settings:unsavedChangesDialog.title")}
 						</AlertDialogTitle>
 						<AlertDialogDescription>
@@ -991,4 +990,4 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	)
 })
 
-export default memo(SettingsView)
+export default SettingsView

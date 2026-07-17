@@ -1,0 +1,68 @@
+name: Post weekly release reminder
+
+# Requires repo secret DISCORD_RELEASE_WEBHOOK_URL — Discord webhook for the
+# release-reminders channel. The reminder job fails (noisily) if it is unset.
+
+on:
+    schedule:
+        # Friday at 09:00 UTC
+        - cron: "0 9 * * 5"
+    workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+    group: release-reminder
+    # A re-run produces an identical message, so cancel a stale/duplicate run
+    # rather than risk posting twice.
+    cancel-in-progress: true
+
+jobs:
+    remind:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Post release reminder to Discord
+              env:
+                  DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+              run: |
+                  set -euo pipefail
+                  owners=("Elliott" "Navad" "Toray")
+                  anchor_date="2026-07-17"
+                  seconds_since_anchor=$(($(date -u +%s) - $(date -u -d "$anchor_date" +%s)))
+                  weeks_since_anchor=$((seconds_since_anchor / 604800))
+                  owner="${owners[$((weeks_since_anchor % ${#owners[@]}))]}"
+
+                  message=$(cat <<EOF
+                  **Weekly release reminder**
+
+                  **${owner}** is on deck for this week's Zoo Code release.
+
+                  1. Create the release branch and prepare the release with \`.roo/commands/release.md\`.
+                  2. Get the release PR approved.
+                  3. Tag the release branch to trigger the Marketplace publish workflow.
+                  4. Approve the deployment when the \`marketplace-production\` environment requests it.
+                  5. After publishing succeeds, add the release PR to the merge queue.
+
+                  Avoid merging or rebasing the release branch before publishing, so the approved tag keeps the intended commit SHA.
+
+                  More detail: https://discord.com/channels/1497384592494297201/1498024845945081999/1512914847124291667
+                  EOF
+                  )
+
+                  payload=$(jq -n --arg content "$message" '{content: $content}')
+                  curl --fail-with-body --silent --show-error \
+                    --header 'Content-Type: application/json' \
+                    --data "$payload" \
+                    "$DISCORD_RELEASE_WEBHOOK_URL"
+
+            - name: Notify on failure
+              if: failure()
+              env:
+                  DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+              run: |
+                  set -euo pipefail
+                  payload=$(jq -nc --arg content "⚠️ release-reminder workflow failed — see the Actions runs." '{content: $content}')
+                  curl --fail-with-body --silent --show-error \
+                    --header 'Content-Type: application/json' \
+                    --data "$payload" \
+                    "$DISCORD_RELEASE_WEBHOOK_URL" || true

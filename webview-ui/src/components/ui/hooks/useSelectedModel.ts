@@ -29,6 +29,7 @@ import {
 	litellmDefaultModelInfo,
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
+	kenariDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
@@ -382,6 +383,13 @@ function getSelectedModel({
 			// Fall back to the provider's default ModelInfo so capability-driven UI
 			// keeps working when the /models list is empty or unavailable.
 			const info = routerModels["opencode-go"]?.[id] ?? opencodeGoDefaultModelInfo
+			return { id, info }
+		}
+		case "kenari": {
+			const id = getValidatedModelId(apiConfiguration.kenariModelId, routerModels["kenari"], defaultModelId)
+			// Fall back to the provider's default ModelInfo so capability-driven UI
+			// keeps working when the /models list is empty or unavailable.
+			const info = routerModels["kenari"]?.[id] ?? kenariDefaultModelInfo
 			return { id, info }
 		}
 		case "zoo-gateway": {
