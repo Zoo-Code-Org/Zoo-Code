@@ -173,7 +173,7 @@ create_tarball() {
 
     # Find and copy ripgrep binary
     info "Looking for ripgrep binary..."
-    RIPGREP_PATH=$(find "$REPO_ROOT/node_modules" -path "*/@vscode/ripgrep/bin/rg" -type f 2>/dev/null | head -1)
+    RIPGREP_PATH=$(find "$REPO_ROOT/node_modules" -path "*/@vscode/ripgrep*/bin/rg" -type f 2>/dev/null | head -1)
     if [ -n "$RIPGREP_PATH" ] && [ -f "$RIPGREP_PATH" ]; then
         info "Found ripgrep at: $RIPGREP_PATH"
         mkdir -p "$RELEASE_DIR/node_modules/@vscode/ripgrep/bin"

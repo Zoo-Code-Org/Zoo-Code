@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "Для индексации требуется открытая папка рабочего пространства",
 		"indexingStopped": "Индексация остановлена пользователем.",
 		"indexingStoppedPartial": "Индексация остановлена. Частичные данные индекса сохранены."
+	},
+	"semble": {
+		"downloadingBinary": "Загрузка бинарного файла semble...",
+		"ready": "Semble {{version}} готов. Поиск индексируется на лету.",
+		"unsupportedPlatform": "Semble не поддерживается на этой платформе ({{platform}}-{{arch}}).",
+		"downloadFailed": "Не удалось загрузить semble: {{errorMessage}}",
+		"checkFailed": "Проверка semble не удалась: {{errorMessage}}",
+		"providerReset": "Провайдер Semble сброшен. Дисковый кеш сохраняется до следующей пересборки."
 	}
 }

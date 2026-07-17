@@ -30,11 +30,15 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.64.0
+## Điểm mới trong v3.68.0
 
-- **Giao diện Quản lý Quy tắc** — tab Quy tắc mới trong Cài đặt cho phép bạn tạo, xóa và mở các quy tắc Zoo toàn cục và không gian làm việc trực tiếp từ trình soạn thảo
-- **Xem xét Thay đổi Hoàn thành** — sau khi nhiệm vụ hoàn thành, các nút mới "Xem thay đổi mới" và "Khôi phục thay đổi" cho phép bạn kiểm tra và hoàn tác các thay đổi từ lệnh nhắc cuối cùng
-- **Ngưỡng Diff được nới lỏng** — các ngưỡng tương đồng có thể cấu hình giúp giảm lỗi "chỉnh sửa không thành công" khi áp dụng diff, kèm theo chẩn đoán mới để tinh chỉnh cài đặt
+- **Nhà cung cấp Friendli với hỗ trợ GLM-5.2** — dùng mẫu GLM mới nhất qua Friendli.
+- **Hỗ trợ thinking/reasoning gốc cho Ollama** — giữ đầu ra suy luận xuyên suốt khi bạn dùng các mẫu Ollama.
+- **Sửa lỗi `apiModelId` tùy chỉnh của Anthropic** — ID mẫu Anthropic tùy chỉnh giờ sẽ tiếp tục được chọn thay vì âm thầm rơi về `claude-sonnet-4-5`.
+- Sửa lỗi: xử lý kết quả công cụ của nhà cung cấp Ollama và cô đọng ngữ cảnh quá sớm.
+- Sửa lỗi: giữ liên kết cha-con của tác vụ khi một tác vụ con được ủy quyền bị gián đoạn.
+- Cải thiện xử lý khối nội dung Claude trên Anthropic Vertex để có phản hồi đáng tin cậy hơn.
+- Cập nhật CI, phát hành nightly và phụ thuộc/công cụ.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

@@ -36,7 +36,7 @@ import { getModelEndpoints } from "./fetchers/modelEndpointCache"
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerCreateMessageMetadata, SingleCompletionHandler } from "../index"
-import { handleOpenAIError } from "./utils/openai-error-handler"
+import { handleOpenAIError } from "./utils/error-handler"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 

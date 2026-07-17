@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "인덱싱에는 열린 워크스페이스 폴더가 필요합니다",
 		"indexingStopped": "사용자에 의해 인덱싱이 중지되었습니다.",
 		"indexingStoppedPartial": "인덱싱이 중지되었습니다. 부분 인덱스 데이터가 보존되었습니다."
+	},
+	"semble": {
+		"downloadingBinary": "semble 바이너리 다운로드 중...",
+		"ready": "Semble {{version}}가 준비되었습니다. 검색은 즉시 인덱싱됩니다.",
+		"unsupportedPlatform": "이 플랫폼에서는 Semble가 지원되지 않습니다 ({{platform}}-{{arch}}).",
+		"downloadFailed": "semble 다운로드 실패: {{errorMessage}}",
+		"checkFailed": "Semble 확인 실패: {{errorMessage}}",
+		"providerReset": "Semble 공급자가 재설정되었습니다. 디스크 캐시는 다음 재구축까지 유지됩니다."
 	}
 }

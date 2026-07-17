@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "Indexierung erfordert einen offenen Workspace-Ordner",
 		"indexingStopped": "Indexierung vom Benutzer gestoppt.",
 		"indexingStoppedPartial": "Indexierung gestoppt. Teilweise Indexdaten beibehalten."
+	},
+	"semble": {
+		"downloadingBinary": "Semble-Binary wird heruntergeladen...",
+		"ready": "Semble {{version}} ist bereit. Suchen erfolgen spontan.",
+		"unsupportedPlatform": "Semble wird auf dieser Plattform nicht unterstützt ({{platform}}-{{arch}}).",
+		"downloadFailed": "Fehler beim Herunterladen von Semble: {{errorMessage}}",
+		"checkFailed": "Semble-Überprüfung fehlgeschlagen: {{errorMessage}}",
+		"providerReset": "Semble-Anbieter zurückgesetzt. Der Cache auf der Festplatte bleibt bis zum nächsten Neuaufbau erhalten."
 	}
 }

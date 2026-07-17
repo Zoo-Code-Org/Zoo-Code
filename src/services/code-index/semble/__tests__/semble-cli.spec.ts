@@ -219,14 +219,10 @@ describe("SembleCLI", () => {
 				query: "related",
 				results: [
 					{
-						chunk: {
-							content: "related code",
-							file_path: "src/related.ts",
-							start_line: 1,
-							end_line: 10,
-							language: "typescript",
-							location: "src/related.ts:1-10",
-						},
+						content: "related code",
+						file_path: "src/related.ts",
+						start_line: 1,
+						end_line: 10,
 						score: 0.85,
 					},
 				],
@@ -236,36 +232,28 @@ describe("SembleCLI", () => {
 			const results = await cli.findRelated("src/auth.ts", 42, "/repo")
 
 			expect(results).toHaveLength(1)
-			expect(results[0].chunk.file_path).toBe("src/related.ts")
+			expect(results[0].file_path).toBe("src/related.ts")
 			expect(results[0].score).toBe(0.85)
 		})
 	})
 
 	describe("_parseOutput (via search)", () => {
-		it("should parse v0.3.0+ JSON format with nested chunk", async () => {
+		it("should parse v0.4.0+ flat JSON format (no chunk wrapper)", async () => {
 			const jsonResponse = {
 				query: "authentication",
 				results: [
 					{
-						chunk: {
-							content: "function authenticate() {}",
-							file_path: "src/auth.ts",
-							start_line: 10,
-							end_line: 25,
-							language: "typescript",
-							location: "src/auth.ts:10-25",
-						},
+						content: "function authenticate() {}",
+						file_path: "src/auth.ts",
+						start_line: 10,
+						end_line: 25,
 						score: 0.92,
 					},
 					{
-						chunk: {
-							content: "export function login() {}",
-							file_path: "src/login.ts",
-							start_line: 5,
-							end_line: 15,
-							language: "typescript",
-							location: "src/login.ts:5-15",
-						},
+						content: "export function login() {}",
+						file_path: "src/login.ts",
+						start_line: 5,
+						end_line: 15,
 						score: 0.78,
 					},
 				],
@@ -276,12 +264,12 @@ describe("SembleCLI", () => {
 			const results = await cli.search("authentication", "/repo")
 
 			expect(results).toHaveLength(2)
-			expect(results[0].chunk.file_path).toBe("src/auth.ts")
-			expect(results[0].chunk.start_line).toBe(10)
-			expect(results[0].chunk.end_line).toBe(25)
-			expect(results[0].chunk.content).toBe("function authenticate() {}")
+			expect(results[0].file_path).toBe("src/auth.ts")
+			expect(results[0].start_line).toBe(10)
+			expect(results[0].end_line).toBe(25)
+			expect(results[0].content).toBe("function authenticate() {}")
 			expect(results[0].score).toBe(0.92)
-			expect(results[1].chunk.file_path).toBe("src/login.ts")
+			expect(results[1].file_path).toBe("src/login.ts")
 			expect(results[1].score).toBe(0.78)
 		})
 
@@ -325,17 +313,13 @@ describe("SembleCLI", () => {
 			expect(results).toEqual([])
 		})
 
-		it("should handle flat array format (older semble format)", async () => {
+		it("should handle flat array format (bare array of result entries)", async () => {
 			const flatArray = [
 				{
-					chunk: {
-						content: "old format result",
-						file_path: "src/old.ts",
-						start_line: 1,
-						end_line: 5,
-						language: "typescript",
-						location: "src/old.ts:1-5",
-					},
+					content: "flat array result",
+					file_path: "src/old.ts",
+					start_line: 1,
+					end_line: 5,
 					score: 0.7,
 				},
 			]
@@ -344,7 +328,7 @@ describe("SembleCLI", () => {
 			const results = await cli.search("test", "/repo")
 
 			expect(results).toHaveLength(1)
-			expect(results[0].chunk.file_path).toBe("src/old.ts")
+			expect(results[0].file_path).toBe("src/old.ts")
 			expect(results[0].score).toBe(0.7)
 		})
 

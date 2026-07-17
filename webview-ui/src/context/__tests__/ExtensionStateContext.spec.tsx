@@ -1,4 +1,5 @@
 import { render, screen, act } from "@/utils/test-utils"
+import React from "react"
 
 import {
 	type ProviderSettings,
@@ -246,15 +247,15 @@ describe("ExtensionStateContext", () => {
 	})
 
 	it("throws error when used outside provider", () => {
-		// Suppress console.error for this test since we expect an error
-		const consoleSpy = vi.spyOn(console, "error")
-		consoleSpy.mockImplementation(() => {})
+		const useContextSpy = vi.spyOn(React, "useContext").mockReturnValue(undefined)
 
-		expect(() => {
-			render(<TestComponent />)
-		}).toThrow("useExtensionState must be used within an ExtensionStateContextProvider")
-
-		consoleSpy.mockRestore()
+		try {
+			expect(() => useExtensionState()).toThrow(
+				"useExtensionState must be used within an ExtensionStateContextProvider",
+			)
+		} finally {
+			useContextSpy.mockRestore()
+		}
 	})
 
 	it("updates apiConfiguration through setApiConfiguration", () => {

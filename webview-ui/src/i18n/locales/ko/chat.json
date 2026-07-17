@@ -341,9 +341,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "규칙 관리 UI — 설정의 새 규칙 탭에서 전역 및 작업 공간 Zoo 규칙을 편집기에서 직접 만들고, 삭제하고, 열 수 있습니다.",
-			"highlight2": "완료 변경 사항 검토 — 작업이 완료되면 새 \"새 변경 사항 보기\" 및 \"변경 사항 복원\" 버튼으로 마지막 프롬프트의 변경 사항을 검사하고 취소할 수 있습니다.",
-			"highlight3": "완화된 Diff 임계값 — 구성 가능한 유사도 임계값으로 diff 적용 시 \"편집 실패\" 오류가 줄어들며, 설정 조정을 돕는 새 진단 기능이 추가되었습니다."
+			"highlight1": "GLM-5.2를 지원하는 Friendli 프로바이더 — Friendli를 통해 최신 GLM 모델을 사용할 수 있습니다.",
+			"highlight2": "Ollama용 네이티브 thinking/reasoning 지원 — Ollama 모델을 사용할 때 reasoning 출력을 처음부터 끝까지 유지합니다.",
+			"highlight3": "Anthropic 사용자 지정 `apiModelId` 수정 — 사용자 지정 Anthropic 모델 ID가 이제 조용히 `claude-sonnet-4-5`로 되돌아가지 않고 선택된 상태로 유지됩니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

@@ -235,6 +235,20 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 	}
 
+	public async getTaskHistoryItem(taskId: string) {
+		const item = this.sidebarProvider.taskHistoryStore.get(taskId)
+		return item ? structuredClone(item) : undefined
+	}
+
+	public async getTaskApiConversationHistoryLength(taskId: string): Promise<number> {
+		try {
+			const { apiConversationHistory } = await this.sidebarProvider.getTaskWithId(taskId)
+			return apiConversationHistory.length
+		} catch {
+			return 0
+		}
+	}
+
 	public getCurrentTaskStack() {
 		return this.sidebarProvider.getCurrentTaskStack()
 	}
@@ -417,6 +431,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			// Let's go!
 
 			this.emit(RooCodeEventName.TaskCreated, task.taskId)
+		})
+
+		// Delegation events are emitted by the provider, not by individual task instances.
+		provider.on(RooCodeEventName.TaskDelegated, (parentTaskId, childTaskId) => {
+			;(this.emit as any)(RooCodeEventName.TaskDelegated, parentTaskId, childTaskId)
+		})
+		provider.on(RooCodeEventName.TaskDelegationCompleted, (parentTaskId, childTaskId, summary) => {
+			;(this.emit as any)(RooCodeEventName.TaskDelegationCompleted, parentTaskId, childTaskId, summary)
+		})
+		provider.on(RooCodeEventName.TaskDelegationResumed, (parentTaskId, childTaskId) => {
+			;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
 		})
 	}
 

@@ -31,8 +31,10 @@ import {
 	SambaNovaHandler,
 	ZAiHandler,
 	FireworksHandler,
+	FriendliHandler,
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
+	KenariHandler,
 	ZooGatewayHandler,
 	MiniMaxHandler,
 	MimoHandler,
@@ -106,6 +108,13 @@ export interface ApiHandler {
 	): ApiStream
 
 	getModel(): { id: string; info: ModelInfo }
+
+	/**
+	 * Optional context window for context-management / auto-condense when it must differ from
+	 * getModel().info.contextWindow. Only VS Code LM overrides it (static `maxInputTokens` vs its
+	 * inflated live window); others leave it undefined and callers fall back.
+	 */
+	getCondenseContextWindow?(): number
 
 	/**
 	 * Counts tokens for content blocks
@@ -182,10 +191,14 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new ZAiHandler(options)
 		case "fireworks":
 			return new FireworksHandler(options)
+		case "friendli":
+			return new FriendliHandler(options)
 		case "vercel-ai-gateway":
 			return new VercelAiGatewayHandler(options)
 		case "opencode-go":
 			return new OpencodeGoHandler(options)
+		case "kenari":
+			return new KenariHandler(options)
 		case "zoo-gateway":
 			return new ZooGatewayHandler(options)
 		case "minimax":

@@ -810,9 +810,9 @@ describe("Context Management", () => {
 			const summarizeSpy = vi.spyOn(condenseModule, "summarizeConversation")
 
 			const modelInfo = createModelInfo(100000, 30000)
-			// Set tokens to be below both the allowedTokens threshold and the percentage threshold
+			// Usage measured against available input space stays below the threshold.
 			const contextWindow = modelInfo.contextWindow
-			const totalTokens = 40000 // 40% of context window
+			const totalTokens = 30000
 			const messagesWithSmallContent = [
 				...messages.slice(0, -1),
 				{ ...messages[messages.length - 1], content: "" },
@@ -825,7 +825,7 @@ describe("Context Management", () => {
 				maxTokens: modelInfo.maxTokens,
 				apiHandler: mockApiHandler,
 				autoCondenseContext: true,
-				autoCondenseContextPercent: 50, // Set threshold to 50% - our tokens are at 40%
+				autoCondenseContextPercent: 50, // Set threshold to 50% - usage is ~43% of available input
 				systemPrompt: "System prompt",
 				taskId,
 				profileThresholds: {},
@@ -1507,17 +1507,34 @@ describe("Context Management", () => {
 		})
 
 		it("should return false when context percent is below threshold", () => {
+			// Opt-in available-input denominator: usage stays below threshold.
 			const result = willManageContext({
-				totalTokens: 40000,
-				contextWindow: 100000, // 40% of context window
+				totalTokens: 30000,
+				contextWindow: 100000,
 				maxTokens: 30000,
 				autoCondenseContext: true,
-				autoCondenseContextPercent: 50, // 50% threshold
+				autoCondenseContextPercent: 50, // 50% threshold; usage is ~43% of available input
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+				useAvailableInputForContextPercent: true,
+			})
+			expect(result).toBe(false)
+		})
+
+		it("should treat a negative maxTokens (vscode-lm reports -1) as the default reserve, not -1", () => {
+			// A -1 reserve must be treated as unknown (default reserve), not kept as -1.
+			const result = willManageContext({
+				totalTokens: 85000,
+				contextWindow: 100000,
+				maxTokens: -1,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 50,
 				profileThresholds: {},
 				currentProfileId: "default",
 				lastMessageTokens: 0,
 			})
-			expect(result).toBe(false)
+			expect(result).toBe(true)
 		})
 
 		it("should return true when tokens exceed allowedTokens even if autoCondenseContext is false", () => {
@@ -1581,10 +1598,9 @@ describe("Context Management", () => {
 		})
 
 		it("should include lastMessageTokens in the calculation", () => {
-			// Without lastMessageTokens: 49000 tokens = 49%
-			// With lastMessageTokens: 49000 + 2000 = 51000 tokens = 51%
+			// Adding lastMessageTokens pushes usage over the threshold (opt-in available-input denominator).
 			const resultWithoutLastMessage = willManageContext({
-				totalTokens: 49000,
+				totalTokens: 34000,
 				contextWindow: 100000,
 				maxTokens: 30000,
 				autoCondenseContext: true,
@@ -1592,18 +1608,20 @@ describe("Context Management", () => {
 				profileThresholds: {},
 				currentProfileId: "default",
 				lastMessageTokens: 0,
+				useAvailableInputForContextPercent: true,
 			})
 			expect(resultWithoutLastMessage).toBe(false)
 
 			const resultWithLastMessage = willManageContext({
-				totalTokens: 49000,
+				totalTokens: 34000,
 				contextWindow: 100000,
 				maxTokens: 30000,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: 50, // 50% threshold
 				profileThresholds: {},
 				currentProfileId: "default",
-				lastMessageTokens: 2000, // Pushes total to 51%
+				lastMessageTokens: 2000, // Pushes usage over 50% of available input
+				useAvailableInputForContextPercent: true,
 			})
 			expect(resultWithLastMessage).toBe(true)
 		})
@@ -1699,6 +1717,331 @@ describe("Context Management", () => {
 			// a significant fraction of prevContextTokens after 50% truncation
 			// With system prompt included, we expect roughly 50% of the messages remaining
 			expect(result.newContextTokensAfterTruncation).toBeGreaterThan(0)
+		})
+	})
+
+	/**
+	 * Regression: with the opt-in flag on, the gate measures usage against available input space
+	 * (contextWindow - reserved output) so it stays in lockstep with the UI gauge and fires for vscode-lm.
+	 */
+	describe("contextPercent uses available input space (opt-in, regression)", () => {
+		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
+			contextWindow,
+			supportsPromptCache: true,
+			maxTokens,
+		})
+
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "First message" },
+			{ role: "assistant", content: "Second message" },
+			{ role: "user", content: "Third message" },
+			{ role: "assistant", content: "Fourth message" },
+			{ role: "user", content: "Fifth message" },
+		]
+
+		it("willManageContext measures the percentage against available input, not the full window", () => {
+			// Dividing by available input clears the threshold; the full window would keep the gate closed.
+			const result = willManageContext({
+				totalTokens: 100000,
+				contextWindow: 200000,
+				maxTokens: 64000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+				useAvailableInputForContextPercent: true,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("willManageContext stays below threshold when usage is under available input", () => {
+			// Usage under available input stays below threshold.
+			const result = willManageContext({
+				totalTokens: 90000,
+				contextWindow: 200000,
+				maxTokens: 64000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+				useAvailableInputForContextPercent: true,
+			})
+			expect(result).toBe(false)
+		})
+
+		it("willManageContext treats a negative (unlimited) reserve as zero reserve for the percentage", () => {
+			// A strongly-negative reserve must clamp to zero, not be subtracted into a larger denominator:
+			// guard on → availableInput 200000 → 75% ≥ 70 (fires); without the > 0 guard → availableInput
+			// 400000 → 37.5% < 70 (would not fire). A small -1 can't tell the paths apart; -200000 can.
+			const result = willManageContext({
+				totalTokens: 150000,
+				contextWindow: 200000,
+				maxTokens: -200000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+				useAvailableInputForContextPercent: true,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("willManageContext falls back to 100% when the reserve is >= the window (availableInput <= 0)", () => {
+			// Non-positive available input must short-circuit contextPercent to 100 rather than divide.
+			const result = willManageContext({
+				totalTokens: 1,
+				contextWindow: 50000,
+				maxTokens: 60000, // reserve > window → availableInput = -10000
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 80,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+				useAvailableInputForContextPercent: true,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("willManageContext falls back to 100% when the reserve exactly equals the window (availableInput === 0)", () => {
+			// Boundary: reserve === window → available input 0, still the non-positive guard.
+			const result = willManageContext({
+				totalTokens: 1,
+				contextWindow: 50000,
+				maxTokens: 50000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 90,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+				useAvailableInputForContextPercent: true,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("manageContext summarizes via the 100% fallback when the reserve >= the window (availableInput <= 0)", async () => {
+			// reserve >= window forces contextPercent to 100, so summarization triggers.
+			const mockSummary = "Reserve-exceeds-window summary"
+			const mockSummarizeResponse: condenseModule.SummarizeResponse = {
+				messages: [
+					{ role: "user", content: "First message" },
+					{ role: "user", content: mockSummary, isSummary: true },
+					{ role: "assistant", content: "Last message" },
+				],
+				summary: mockSummary,
+				cost: 0.05,
+				newContextTokens: 100,
+			}
+			const summarizeSpy = vi
+				.spyOn(condenseModule, "summarizeConversation")
+				.mockResolvedValue(mockSummarizeResponse)
+
+			const messagesWithSmallContent = [
+				...messages.slice(0, -1),
+				{ ...messages[messages.length - 1], content: "" },
+			]
+
+			const result = await manageContext({
+				messages: messagesWithSmallContent,
+				totalTokens: 1,
+				contextWindow: 50000,
+				maxTokens: 60000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 80,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+				useAvailableInputForContextPercent: true,
+			})
+
+			expect(summarizeSpy).toHaveBeenCalled()
+			expect(result).toMatchObject({
+				summary: mockSummary,
+				prevContextTokens: 1,
+			})
+
+			summarizeSpy.mockRestore()
+		})
+
+		it("manageContext summarizes based on available input space, end-to-end", async () => {
+			const mockSummary = "Available-input summary"
+			const mockSummarizeResponse: condenseModule.SummarizeResponse = {
+				messages: [
+					{ role: "user", content: "First message" },
+					{ role: "user", content: mockSummary, isSummary: true },
+					{ role: "assistant", content: "Last message" },
+				],
+				summary: mockSummary,
+				cost: 0.05,
+				newContextTokens: 100,
+			}
+			const summarizeSpy = vi
+				.spyOn(condenseModule, "summarizeConversation")
+				.mockResolvedValue(mockSummarizeResponse)
+
+			const modelInfo = createModelInfo(200000, 64000)
+			// Clears the threshold against available input but not the raw window; end-to-end must summarize.
+			const totalTokens = 100000
+			const messagesWithSmallContent = [
+				...messages.slice(0, -1),
+				{ ...messages[messages.length - 1], content: "" },
+			]
+
+			const result = await manageContext({
+				messages: messagesWithSmallContent,
+				totalTokens,
+				contextWindow: modelInfo.contextWindow,
+				maxTokens: modelInfo.maxTokens,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+				useAvailableInputForContextPercent: true,
+			})
+
+			expect(summarizeSpy).toHaveBeenCalled()
+			expect(result).toMatchObject({
+				summary: mockSummary,
+				prevContextTokens: totalTokens,
+			})
+
+			summarizeSpy.mockRestore()
+		})
+	})
+
+	/**
+	 * Scoping: the available-input denominator is opt-in; default divides by the full window.
+	 * The maxTokens: -1 reserve guard stays global on the default path.
+	 */
+	describe("contextPercent denominator is opt-in (default = full window)", () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "First message" },
+			{ role: "assistant", content: "Second message" },
+			{ role: "user", content: "Third message" },
+			{ role: "assistant", content: "Fourth message" },
+			{ role: "user", content: "Fifth message" },
+		]
+
+		it("willManageContext divides by the full window when the flag is omitted (default)", () => {
+			// Default divides by the full window, staying below threshold where the opt-in math would fire.
+			const result = willManageContext({
+				totalTokens: 100000,
+				contextWindow: 200000,
+				maxTokens: 64000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+			expect(result).toBe(false)
+		})
+
+		it("willManageContext fires on the same inputs when the opt-in flag is true", () => {
+			// Same inputs, flag on: dividing by available input clears the threshold.
+			const result = willManageContext({
+				totalTokens: 100000,
+				contextWindow: 200000,
+				maxTokens: 64000,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+				useAvailableInputForContextPercent: true,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("keeps the maxTokens:-1 reserve guard on the default (full-window) path", () => {
+			// The -1 reserve guard is global, independent of the percent denominator.
+			const result = willManageContext({
+				totalTokens: 85000,
+				contextWindow: 100000,
+				maxTokens: -1,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 50,
+				profileThresholds: {},
+				currentProfileId: "default",
+				lastMessageTokens: 0,
+			})
+			expect(result).toBe(true)
+		})
+
+		it("manageContext treats an unlimited (-1) reserve as default reserve on the truncation path", async () => {
+			// manageContext duplicates willManageContext's reserve guard, so both must live or die together.
+			// maxTokens -1 → reserve ANTHROPIC_DEFAULT_MAX_TOKENS (8192): allowedTokens = 100000*0.9 − 8192 =
+			// 81808; empty last message keeps prevContextTokens = 81809 > 81808 → truncation runs. A mutant
+			// that left -1 unclamped would give allowedTokens 90001, and 81809 > 90001 is false → no truncation.
+			const summarizeSpy = vi.spyOn(condenseModule, "summarizeConversation")
+
+			const messagesWithSmallContent = [
+				...messages.slice(0, -1),
+				{ ...messages[messages.length - 1], content: "" },
+			]
+
+			const result = await manageContext({
+				messages: messagesWithSmallContent,
+				totalTokens: 81809,
+				contextWindow: 100000,
+				maxTokens: -1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 70,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(summarizeSpy).not.toHaveBeenCalled()
+			expect(result.truncationId).toBeDefined()
+			expect(result.messagesRemoved).toBe(2)
+			expect(result.summary).toBe("")
+			expect(result.prevContextTokens).toBe(81809)
+
+			summarizeSpy.mockRestore()
+		})
+
+		it("manageContext does NOT summarize on the default path where the opt-in math would have", async () => {
+			// Default full-window math leaves this case below threshold; the opt-in flag would summarize it.
+			const summarizeSpy = vi.spyOn(condenseModule, "summarizeConversation")
+
+			const messagesWithSmallContent = [
+				...messages.slice(0, -1),
+				{ ...messages[messages.length - 1], content: "" },
+			]
+
+			const result = await manageContext({
+				messages: messagesWithSmallContent,
+				totalTokens: 100000,
+				contextWindow: 200000,
+				maxTokens: 64000,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 70,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(summarizeSpy).not.toHaveBeenCalled()
+			expect(result).toEqual({
+				messages: messagesWithSmallContent,
+				summary: "",
+				cost: 0,
+				prevContextTokens: 100000,
+			})
+
+			summarizeSpy.mockRestore()
 		})
 	})
 })

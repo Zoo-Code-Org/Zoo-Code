@@ -5,7 +5,8 @@ import { ClineProvider } from "../ClineProvider"
 import { MessageManager } from "../../message-manager"
 
 // Mock the saveTaskMessages function
-vi.mock("../../task-persistence", () => ({
+vi.mock("../../task-persistence", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../task-persistence")>()),
 	saveTaskMessages: vi.fn(),
 }))
 

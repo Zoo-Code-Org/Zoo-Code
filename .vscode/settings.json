@@ -9,6 +9,9 @@
 		"dist": true // set this to false to include "dist" folder in search results
 	},
 	// Turn off tsc task auto detection since we have the necessary tasks as npm scripts
-	"typescript.tsc.autoDetect": "off",
-	"vitest.disableWorkspaceWarning": true
+	"js/ts.tsc.autoDetect": "off",
+	// Surface invisible (zero-width) and ambiguous/homoglyph Unicode in the
+	// editor. Pairs with the code-qa.yml invisible-chars CI check.
+	"editor.unicodeHighlight.invisibleCharacters": true,
+	"editor.unicodeHighlight.ambiguousCharacters": true
 }

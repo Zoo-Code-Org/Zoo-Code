@@ -30,11 +30,15 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.64.0 新增内容
+## v3.68.0 新增内容
 
-- **规则管理界面** — 设置中新增的规则标签页，可直接在编辑器中创建、删除和打开全局及工作区 Zoo 规则
-- **完成变更审查** — 任务完成后，新的「查看新变更」和「恢复变更」按钮让您检查和撤销最新提示带来的更改
-- **宽松的 Diff 阈值** — 可配置的相似度阈值减少了应用 diff 时的「编辑失败」错误，并提供新的诊断工具帮助调整设置
+- **支持 GLM-5.2 的 Friendli 提供商** — 通过 Friendli 使用最新的 GLM 模型。
+- **Ollama 原生 thinking/reasoning 支持** — 使用 Ollama 模型时可端到端保留 reasoning 输出。
+- **Anthropic 自定义 `apiModelId` 修复** — 自定义 Anthropic 模型 ID 现在会保持选中，不再静默回退到 `claude-sonnet-4-5`。
+- 修复：Ollama 提供商的工具结果处理和过早的上下文压缩。
+- 修复：委派子任务被中断时保留父子任务链接。
+- 改进 Anthropic Vertex 中 Claude 内容块的处理，以获得更可靠的响应。
+- CI、nightly 发布以及依赖/工具更新。
 
 ## Zoo Code 能为您做什么？
 

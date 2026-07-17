@@ -10,10 +10,16 @@ import {
 	ModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	litellmDefaultModelInfo,
+	kenariDefaultModelId,
+	kenariDefaultModelInfo,
 	openAiModelInfoSaneDefaults,
 	minimaxDefaultModelId,
 	minimaxModels,
+	friendliDefaultModelId,
+	friendliModels,
 	openRouterDefaultModelId,
+	vscodeLlmModels,
+	vscodeLlmDefaultModelId,
 } from "@roo-code/types"
 
 import { useSelectedModel } from "../useSelectedModel"
@@ -571,10 +577,83 @@ describe("useSelectedModel", () => {
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
 			expect(result.current.provider).toBe("litellm")
-			// Should fall back to default model ID since "some-model" doesn't exist in empty litellm models
-			expect(result.current.id).toBe("claude-3-7-sonnet-20250219")
+			// Should preserve configured model ID since "some-model" doesn't exist in empty litellm models
+			expect(result.current.id).toBe("some-model")
 			// Should use litellmDefaultModelInfo as fallback
 			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+		})
+
+		it("should return an empty model ID when the list is empty and no model is configured", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "litellm",
+				// litellmModelId intentionally omitted
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("litellm")
+			// LiteLLM has no inherent default; with nothing configured the ID is empty rather than a phantom model
+			expect(result.current.id).toBe("")
+			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+		})
+
+		it("preserves the selected model when the list transitions from populated to empty", () => {
+			// Primary user-visible scenario: a "Sync Models" click momentarily empties the
+			// router-models list before the refreshed list arrives. The selection must be held
+			// across that transition rather than reset.
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {
+						"my-custom-model": {
+							maxTokens: 4096,
+							contextWindow: 8192,
+							supportsImages: false,
+							supportsPromptCache: false,
+						},
+					},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "litellm",
+				litellmModelId: "my-custom-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result, rerender } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// Initially the configured model resolves from the populated list.
+			expect(result.current.id).toBe("my-custom-model")
+
+			// Simulate the list emptying mid-sync.
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+			rerender()
+
+			// Selection is preserved through the empty window.
+			expect(result.current.id).toBe("my-custom-model")
 		})
 
 		it("should use litellmDefaultModelInfo when selected model not found in routerModels", () => {
@@ -642,6 +721,78 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe("litellm")
 			expect(result.current.id).toBe("custom-model")
 			expect(result.current.info).toEqual(customModelInfo)
+		})
+	})
+
+	describe("kenari provider", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return routerModels info for the configured kenari model", () => {
+			const customModelInfo: ModelInfo = {
+				maxTokens: 32768,
+				contextWindow: 1048576,
+				supportsImages: false,
+				supportsPromptCache: false,
+				description: "GLM 5.2 via Kenari",
+			}
+
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					kenari: {
+						"glm-5-2": customModelInfo,
+					},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariModelId: "glm-5-2",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("kenari")
+			expect(result.current.id).toBe("glm-5-2")
+			expect(result.current.info).toEqual(customModelInfo)
+		})
+
+		it("should use kenariDefaultModelInfo as fallback when routerModels.kenari is empty", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					kenari: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariModelId: "some-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("kenari")
+			// Falls back to the kenari default model ID when the router list is empty
+			expect(result.current.id).toBe(kenariDefaultModelId)
+			// Should use kenariDefaultModelInfo as fallback
+			expect(result.current.info).toEqual(kenariDefaultModelInfo)
 		})
 	})
 
@@ -770,6 +921,124 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe("minimax")
 			expect(result.current.id).toBe("MiniMax-M2.7")
 			expect(result.current.info).toEqual(minimaxModels["MiniMax-M2.7"])
+		})
+	})
+
+	describe("vscode-lm provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("resolves a listed family's contextWindow to its maxInputTokens", () => {
+			const family = vscodeLlmDefaultModelId
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("vscode-lm")
+			expect(result.current.id).toBe(`copilot/${family}`)
+			// The bar and the condense gate share one source of truth: contextWindow === maxInputTokens.
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
+			expect(result.current.info?.supportsImages).toBe(false)
+		})
+
+		it("pins a divergent family's contextWindow to maxInputTokens, not its advertised window", () => {
+			// claude-opus-4.8 is the row where contextWindow and maxInputTokens differ; a field swap to
+			// the advertised window would be caught here.
+			const family = "claude-opus-4.8"
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("vscode-lm")
+			expect(result.current.id).toBe(`copilot/${family}`)
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens) // 197897
+			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow) // NOT 679560
+			expect(result.current.info?.supportsImages).toBe(false)
+		})
+
+		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "vscode-lm",
+				vsCodeLmModelSelector: { vendor: "copilot", family: "totally-unknown-family" },
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// A family miss must not use the 128000 sane-defaults window; use the default model's instead.
+			expect(result.current.info?.contextWindow).not.toBe(128000)
+			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens)
+			expect(result.current.info?.supportsImages).toBe(false)
+		})
+	})
+
+	describe("friendli provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return default Friendli model when no custom model is specified", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "friendli",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("friendli")
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
+		it("should use custom model ID and info when model exists in friendliModels", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "friendli",
+				apiModelId: "zai-org/GLM-5.1",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("friendli")
+			expect(result.current.id).toBe("zai-org/GLM-5.1")
+			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
 		})
 	})
 })

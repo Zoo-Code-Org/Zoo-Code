@@ -229,6 +229,28 @@ vi.mock("../providers/LiteLLM", () => ({
 	),
 }))
 
+// Mock Kenari provider for tests
+vi.mock("../providers/Kenari", () => ({
+	Kenari: ({ apiConfiguration, setApiConfigurationField }: any) => (
+		<div data-testid="kenari-provider">
+			<input
+				data-testid="kenari-api-key"
+				type="password"
+				value={apiConfiguration.kenariApiKey || ""}
+				onChange={(e) => setApiConfigurationField("kenariApiKey", e.target.value)}
+				placeholder="API Key"
+			/>
+		</div>
+	),
+}))
+
+// Mock Friendli provider for tests
+vi.mock("../providers/Friendli", () => ({
+	Friendli: ({ apiConfiguration }: any) => (
+		<div data-testid="friendli-provider" data-key={apiConfiguration?.friendliApiKey || ""} />
+	),
+}))
+
 vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: vi.fn((apiConfiguration: ProviderSettings) => {
 		if (apiConfiguration.apiModelId?.includes("thinking")) {
@@ -320,6 +342,18 @@ describe("ApiOptions", () => {
 
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("apiProvider", "zoo-gateway")
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("zooGatewayModelId", zooGatewayDefaultModelId, false)
+	})
+
+	it("renders the Friendli provider form when friendli is selected", () => {
+		renderApiOptions({
+			apiConfiguration: {
+				apiProvider: "friendli" as const,
+				friendliApiKey: "k",
+			},
+		})
+
+		expect(screen.getByTestId("friendli-provider")).toBeInTheDocument()
+		expect(screen.getByTestId("friendli-provider")).toHaveAttribute("data-key", "k")
 	})
 
 	it("shows temperature and rate limit controls by default", () => {
@@ -593,6 +627,30 @@ describe("ApiOptions", () => {
 			})
 
 			expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
+		})
+	})
+
+	describe("Kenari provider tests", () => {
+		it("renders Kenari component when provider is selected", () => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider: "kenari",
+					kenariApiKey: "kn-test-key",
+				},
+			})
+
+			expect(screen.getByTestId("kenari-provider")).toBeInTheDocument()
+			expect(screen.getByTestId("kenari-api-key")).toHaveValue("kn-test-key")
+		})
+
+		it("does not render Kenari component when other provider is selected", () => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider: "anthropic",
+				},
+			})
+
+			expect(screen.queryByTestId("kenari-provider")).not.toBeInTheDocument()
 		})
 	})
 

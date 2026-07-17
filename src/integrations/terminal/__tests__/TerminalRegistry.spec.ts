@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 import { ExecaTerminal } from "../ExecaTerminal"
 import { ShellIntegrationManager } from "../ShellIntegrationManager"
 import { Terminal } from "../Terminal"
+import { TerminalProcess } from "../TerminalProcess"
 import { TerminalRegistry } from "../TerminalRegistry"
 
 const PAGER = process.platform === "win32" ? "" : "cat"
@@ -206,6 +207,7 @@ describe("TerminalRegistry", () => {
 	})
 
 	describe("onDidEndTerminalShellExecution race condition (#489, #622)", () => {
+		let startHandler: (e: any) => Promise<void>
 		let endHandler: (e: any) => Promise<void>
 
 		beforeEach(() => {
@@ -217,9 +219,10 @@ describe("TerminalRegistry", () => {
 			;(vscode.window as any).onDidStartTerminalShellExecution ??= () => ({ dispose: () => {} })
 			;(vscode.window as any).onDidEndTerminalShellExecution ??= () => ({ dispose: () => {} })
 
-			vi.spyOn(vscode.window, "onDidStartTerminalShellExecution" as any).mockImplementation((_handler: any) => ({
-				dispose: vi.fn(),
-			}))
+			vi.spyOn(vscode.window, "onDidStartTerminalShellExecution" as any).mockImplementation((handler: any) => {
+				startHandler = handler
+				return { dispose: vi.fn() }
+			})
 
 			vi.spyOn(vscode.window, "onDidEndTerminalShellExecution" as any).mockImplementation((handler: any) => {
 				endHandler = handler
@@ -284,6 +287,103 @@ describe("TerminalRegistry", () => {
 
 			expect(terminal.busy).toBe(false)
 			expect(completeSpy).not.toHaveBeenCalled()
+		})
+
+		it(
+			"ignores a late end event for a superseded execution instead of completing " +
+				"the next command on the same reused terminal",
+			async () => {
+				const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+
+				// Command A: started, then self-finalized (e.g. TerminalProcess's own D-marker
+				// grace period elapsed without ever seeing onDidEndTerminalShellExecution --
+				// see TerminalProcess.ts's finalize()). Its own execution reference is what the
+				// registry must compare against, since terminal.activeShellExecution may
+				// already be pointing at a different (or no) execution by the time A's stale
+				// event finally arrives.
+				const processA = new TerminalProcess(terminal)
+				const executionA = { commandLine: { value: "command A" } } as any
+				processA.ownExecution = executionA
+				const emitA = vi.spyOn(processA, "emit")
+
+				// Command B has since started on the SAME reused terminal -- this is the
+				// state TerminalRegistry sees by the time A's late event arrives: a live
+				// process with its own, different execution.
+				const processB = new TerminalProcess(terminal)
+				const executionB = { commandLine: { value: "command B" } } as any
+				processB.ownExecution = executionB
+				terminal.process = processB
+				terminal.running = true
+				const emitB = vi.spyOn(processB, "emit")
+
+				// A's end event finally arrives, referencing A's (now superseded) execution.
+				await endHandler({
+					terminal: terminal.terminal,
+					execution: executionA,
+					exitCode: 1,
+				})
+
+				// B must be completely unaffected: no shell_execution_complete delivered to
+				// either process, and B is still the terminal's live process.
+				expect(emitA).not.toHaveBeenCalled()
+				expect(emitB).not.toHaveBeenCalled()
+				expect(terminal.process).toBe(processB)
+				expect(terminal.running).toBe(true)
+
+				// B's own end event, referencing B's execution, must still work normally.
+				await endHandler({
+					terminal: terminal.terminal,
+					execution: executionB,
+					exitCode: 0,
+				})
+
+				expect(emitB).toHaveBeenCalledWith("shell_execution_complete", expect.objectContaining({ exitCode: 0 }))
+			},
+		)
+
+		it("ignores a start event for a different (stale) execution and does not overwrite the stream", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+
+			// processA owns executionA — this is the current, live command.
+			const processA = new TerminalProcess(terminal)
+			const executionA = { commandLine: { value: "command A" }, read: vi.fn() } as any
+			processA.ownExecution = executionA
+			terminal.process = processA
+			const setStreamSpy = vi.spyOn(terminal, "setActiveStream")
+
+			// A stale start event arrives referencing a *different* execution (executionB).
+			// This can happen when VSCode fires a delayed start event for a prior terminal
+			// session on the same reused terminal object.
+			const executionB = { commandLine: { value: "stale command" }, read: vi.fn() } as any
+			await startHandler({
+				terminal: terminal.terminal,
+				execution: executionB,
+			})
+
+			// The stale event must be ignored: read() must not be called on it and the
+			// terminal's active stream must not be replaced.
+			expect(executionB.read).not.toHaveBeenCalled()
+			expect(setStreamSpy).not.toHaveBeenCalled()
+		})
+
+		it("sets the stream when the start event matches the process's own execution", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+
+			const process = new TerminalProcess(terminal)
+			const mockStream = (async function* () {})()
+			const execution = { commandLine: { value: "echo hi" }, read: vi.fn().mockReturnValue(mockStream) } as any
+			process.ownExecution = execution
+			terminal.process = process
+			const setStreamSpy = vi.spyOn(terminal, "setActiveStream")
+
+			await startHandler({
+				terminal: terminal.terminal,
+				execution,
+			})
+
+			expect(execution.read).toHaveBeenCalledTimes(1)
+			expect(setStreamSpy).toHaveBeenCalledWith(mockStream)
+			expect(terminal.busy).toBe(true)
 		})
 	})
 

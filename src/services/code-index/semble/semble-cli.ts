@@ -10,15 +10,17 @@ import { SembleSearchResult, SembleCheckResult, SembleContentType, SEMBLE_DEFAUL
  * All methods spawn the semble process via child_process.spawn with array
  * arguments (no shell) to prevent shell injection.
  *
- * Semble CLI (v0.3.0+) subcommands:
+ * Semble CLI (v0.4.0+) subcommands:
  *   search <query> [path]             — search a codebase
  *   find-related <file> <line> [path] — find similar code
- *   init                               — write sub-agent file
+ *   clear [all|index|savings]         — clear cached indexes/savings
+ *   install / uninstall               — configure coding-agent integrations
  *   savings                            — show token stats
  *
  * Common flags:
  *   -k, --top-k N                      — number of results (default: 5)
  *   --content TYPE [TYPE ...]          — content types: code, docs, config, all
+ *   --max-snippet-lines N              — lines of source per result (default: full chunk)
  */
 export class SembleCLI {
 	private readonly semblePath: string
@@ -167,8 +169,9 @@ export class SembleCLI {
 	/**
 	 * Parses semble CLI JSON output into structured results.
 	 *
-	 * Semble v0.3.0+ outputs JSON by default with format:
-	 *   { "query": "...", "results": [{ "chunk": { "content": "...", "file_path": "...", "start_line": N, "end_line": M, "language": "...", "location": "..." }, "score": X }] }
+	 * Semble v0.4.0+ outputs JSON by default with a flat format (no `chunk`
+	 * wrapper — the chunk fields are top-level on each result entry):
+	 *   { "query": "...", "results": [{ "file_path": "...", "start_line": N, "end_line": M, "score": X, "content": "..." }] }
 	 *
 	 * If the query returns no results, semble outputs:
 	 *   { "error": "No results found." }
@@ -187,19 +190,19 @@ export class SembleCLI {
 				return []
 			}
 
-			// Handle successful response: {query, results: [{chunk, score}]}
+			// Handle successful response: {query, results: [{file_path, start_line, end_line, score, content}]}
 			if (parsed.results && Array.isArray(parsed.results)) {
 				return parsed.results as SembleSearchResult[]
 			}
 
-			// Fallback: if it's a flat array (older format)
+			// Fallback: if it's a flat array of result entries
 			if (Array.isArray(parsed)) {
 				return parsed as SembleSearchResult[]
 			}
 
 			return []
 		} catch {
-			// Not JSON — this shouldn't happen with v0.3.0+ but handle gracefully
+			// Not JSON — this shouldn't happen with v0.4.0+ but handle gracefully
 			console.warn("[SembleCLI] Unexpected non-JSON output from semble")
 			return []
 		}

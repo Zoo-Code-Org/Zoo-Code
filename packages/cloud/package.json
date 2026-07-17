@@ -13,9 +13,7 @@
 	},
 	"dependencies": {
 		"@roo-code/types": "workspace:^",
-		"ioredis": "^5.6.1",
 		"jwt-decode": "^4.0.0",
-		"p-wait-for": "^5.0.2",
 		"zod": "^3.25.76"
 	},
 	"devDependencies": {
@@ -24,7 +22,7 @@
 		"@types/node": "20.19.43",
 		"@types/vscode": "1.100.0",
 		"globals": "16.3.0",
-		"@vitest/coverage-v8": "4.1.0",
-		"vitest": "4.1.0"
+		"@vitest/coverage-v8": "4.1.9",
+		"vitest": "4.1.9"
 	}
 }

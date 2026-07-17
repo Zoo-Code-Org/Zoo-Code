@@ -76,7 +76,8 @@ const TaskHeader = ({
 				: 0,
 		[model, modelId, apiConfiguration],
 	)
-	const reservedForOutput = maxTokens || 0
+	// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
+	const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
 
 	const condenseButton = (
 		<LucideIconButton

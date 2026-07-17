@@ -73,26 +73,30 @@ vi.mock("p-wait-for", () => ({
 	default: mockPWaitFor,
 }))
 
-vi.mock("../../task-persistence", () => ({
-	saveApiMessages: mockSaveApiMessages,
-	saveTaskMessages: mockSaveTaskMessages,
-	readApiMessages: mockReadApiMessages,
-	readTaskMessages: mockReadTaskMessages,
-	taskMetadata: mockTaskMetadata,
-	TaskHistoryStore: vi.fn().mockImplementation(function () {
-		return {
-			initialize: vi.fn().mockResolvedValue(undefined),
-			dispose: vi.fn(),
-			get: vi.fn(),
-			getAll: vi.fn().mockReturnValue([]),
-			upsert: vi.fn().mockResolvedValue([]),
-			delete: vi.fn().mockResolvedValue(undefined),
-			deleteMany: vi.fn().mockResolvedValue(undefined),
-			reconcile: vi.fn().mockResolvedValue(undefined),
-			initialized: Promise.resolve(),
-		}
-	}),
-}))
+vi.mock("../../task-persistence", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../../task-persistence")>()
+	return {
+		...mod,
+		saveApiMessages: mockSaveApiMessages,
+		saveTaskMessages: mockSaveTaskMessages,
+		readApiMessages: mockReadApiMessages,
+		readTaskMessages: mockReadTaskMessages,
+		taskMetadata: mockTaskMetadata,
+		TaskHistoryStore: vi.fn().mockImplementation(function () {
+			return {
+				initialize: vi.fn().mockResolvedValue(undefined),
+				dispose: vi.fn(),
+				get: vi.fn(),
+				getAll: vi.fn().mockReturnValue([]),
+				upsert: vi.fn().mockResolvedValue([]),
+				delete: vi.fn().mockResolvedValue(undefined),
+				deleteMany: vi.fn().mockResolvedValue(undefined),
+				reconcile: vi.fn().mockResolvedValue(undefined),
+				initialized: Promise.resolve(),
+			}
+		}),
+	}
+})
 
 vi.mock("vscode", () => {
 	const mockDisposable = { dispose: vi.fn() }
@@ -260,6 +264,7 @@ describe("Task persistence", () => {
 		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		mockProvider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
 		mockProvider.updateTaskHistory = vi.fn().mockResolvedValue(undefined)
+		mockProvider.log = vi.fn()
 	})
 
 	// ── saveApiConversationHistory (via retrySaveApiConversationHistory) ──
@@ -417,6 +422,51 @@ describe("Task persistence", () => {
 			expect(callArgs.messages).not.toBe(task.clineMessages)
 			// But the content should be the same
 			expect(callArgs.messages).toEqual(task.clineMessages)
+		})
+
+		it("preserves an existing lifecycle status during metadata saves", async () => {
+			mockSaveTaskMessages.mockResolvedValueOnce(undefined)
+			mockTaskMetadata.mockResolvedValueOnce({
+				historyItem: {
+					id: "task-with-advanced-status",
+					ts: Date.now(),
+					task: "test",
+					status: "interrupted",
+					tokensIn: 10,
+				},
+				tokenUsage: {
+					totalTokensIn: 10,
+					totalTokensOut: 0,
+					totalCacheWrites: 0,
+					totalCacheReads: 0,
+					totalCost: 0,
+					contextTokens: 0,
+				},
+			})
+
+			const updateTaskHistory = vi.fn().mockResolvedValue([])
+			const taskHistoryStore = {
+				get: vi.fn().mockReturnValue({ id: "task-with-advanced-status", status: "completed" }),
+			}
+			const provider = { ...mockProvider, updateTaskHistory, taskHistoryStore }
+			const task = new Task({
+				provider: provider as any,
+				apiConfiguration: mockApiConfig,
+				taskId: "task-with-advanced-status",
+				task: "test task",
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+
+			await (task as Record<string, any>).saveClineMessages()
+
+			expect(updateTaskHistory).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: "task-with-advanced-status",
+					status: "completed",
+					tokensIn: 10,
+				}),
+			)
 		})
 	})
 

@@ -31,7 +31,7 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "20.19.43",
-		"@vitest/coverage-v8": "4.1.0",
-		"vitest": "4.1.0"
+		"@vitest/coverage-v8": "4.1.9",
+		"vitest": "4.1.9"
 	}
 }

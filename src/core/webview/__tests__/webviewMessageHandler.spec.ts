@@ -384,6 +384,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
 		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
+		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
 
 		// Verify response was sent
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -400,6 +402,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -465,6 +468,40 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				},
 			},
 			values: { provider: "opencode-go" },
+		})
+	})
+
+	it("flushes and fetches Kenari models when an explicit API key is supplied", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: {},
+		})
+		mockGetModels.mockResolvedValue({
+			"glm-5-2": {
+				maxTokens: 32768,
+				contextWindow: 1048576,
+				supportsPromptCache: false,
+				description: "Kenari model",
+			},
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: {
+				provider: "kenari",
+				kenariApiKey: "fresh-kenari-key",
+			},
+		})
+
+		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" }, true)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" })
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: {
+				kenari: {
+					"glm-5-2": expect.objectContaining({ description: "Kenari model" }),
+				},
+			},
+			values: { provider: "kenari" },
 		})
 	})
 
@@ -551,6 +588,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -610,6 +648,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				poe: {},
 				deepseek: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -679,7 +718,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 	})
 
-	it("prefers config values over message values for LiteLLM", async () => {
+	it("prefers message values over config values for LiteLLM", async () => {
 		const mockModels: ModelRecord = {}
 		mockGetModels.mockResolvedValue(mockModels)
 
@@ -691,11 +730,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			},
 		})
 
-		// Verify config values are used over message values
+		// Verify message values take precedence over saved config (current unsaved field state wins)
 		expect(mockGetModels).toHaveBeenCalledWith({
 			provider: "litellm",
-			apiKey: "litellm-key", // From config
-			baseUrl: "http://localhost:4000", // From config
+			apiKey: "message-key", // From message.values
+			baseUrl: "http://message-url", // From message.values
 		})
 	})
 })

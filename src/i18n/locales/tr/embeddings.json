@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "İndeksleme açık bir workspace klasörü gerektirir",
 		"indexingStopped": "İndeksleme kullanıcı tarafından durduruldu.",
 		"indexingStoppedPartial": "İndeksleme durduruldu. Kısmi indeks verileri korundu."
+	},
+	"semble": {
+		"downloadingBinary": "semble ikili dosyası indiriliyor...",
+		"ready": "Semble {{version}} hazır. Aramalar anında indekslenir.",
+		"unsupportedPlatform": "Semble bu platformda desteklenmiyor ({{platform}}-{{arch}}).",
+		"downloadFailed": "semble indirilemedi: {{errorMessage}}",
+		"checkFailed": "Semble kontrolü başarısız: {{errorMessage}}",
+		"providerReset": "Semble sağlayıcısı sıfırlandı. Diskteki önbellek bir sonraki yeniden yapılandırmaya kadar korunur."
 	}
 }

@@ -61,10 +61,12 @@ export function convertToR1Format(
 					if (part.type === "text") {
 						textParts.push(part.text)
 					} else if (part.type === "image") {
-						imageParts.push({
-							type: "image_url",
-							image_url: { url: `data:${part.source.media_type};base64,${part.source.data}` },
-						})
+						if (part.source.type === "base64") {
+							imageParts.push({
+								type: "image_url",
+								image_url: { url: `data:${part.source.media_type};base64,${part.source.data}` },
+							})
+						}
 					} else if (part.type === "tool_result") {
 						// Convert tool_result to OpenAI tool message format
 						let content: string

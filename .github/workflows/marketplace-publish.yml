@@ -6,6 +6,11 @@ on:
       - "v*.*.*"
   workflow_dispatch:
 
+# Least privilege: publish-stable escalates to contents: write via its own
+# job-level permissions block.
+permissions:
+  contents: read
+
 jobs:
   check-pr-approval:
     runs-on: ubuntu-latest

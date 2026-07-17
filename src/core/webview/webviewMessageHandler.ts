@@ -1018,7 +1018,7 @@ export const webviewMessageHandler = async (
 			// For providers that need credentials, use their specific handlers
 			await flushModels({ provider: routerNameFlush } as GetModelsOptions, true)
 			break
-		case "requestRouterModels":
+		case "requestRouterModels": {
 			const { apiConfiguration } = await provider.getState()
 
 			// Optional single provider filter from webview
@@ -1042,6 +1042,7 @@ export const webviewMessageHandler = async (
 						poe: {},
 						deepseek: {},
 						"opencode-go": {},
+						kenari: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -1086,9 +1087,11 @@ export const webviewMessageHandler = async (
 				},
 			]
 
-			// LiteLLM is conditional on baseUrl+apiKey
-			const litellmApiKey = apiConfiguration.litellmApiKey || message?.values?.litellmApiKey
-			const litellmBaseUrl = apiConfiguration.litellmBaseUrl || message?.values?.litellmBaseUrl
+			// LiteLLM is conditional on baseUrl+apiKey.
+			// Prefer explicit values from message (current unsaved field state) over saved config,
+			// matching the pattern used for DeepSeek and other credential-carrying providers.
+			const litellmApiKey = message?.values?.litellmApiKey ?? apiConfiguration.litellmApiKey
+			const litellmBaseUrl = message?.values?.litellmBaseUrl ?? apiConfiguration.litellmBaseUrl
 
 			if (litellmApiKey && litellmBaseUrl) {
 				// If explicit credentials are provided in message.values (from Refresh Models button),
@@ -1150,6 +1153,23 @@ export const webviewMessageHandler = async (
 				options: { provider: "opencode-go", apiKey: opencodeGoApiKey },
 			})
 
+			// Kenari's /models endpoint is public — it returns the full model list with no
+			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
+			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
+			// model) whenever the key wasn't yet in apiConfiguration at fetch time. The key is still
+			// forwarded when present.
+			const kenariApiKey = message?.values?.kenariApiKey ?? apiConfiguration.kenariApiKey
+
+			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
+			if (message?.values?.kenariApiKey) {
+				await flushModels({ provider: "kenari", apiKey: kenariApiKey }, true)
+			}
+
+			candidates.push({
+				key: "kenari",
+				options: { provider: "kenari", apiKey: kenariApiKey },
+			})
+
 			// Apply single provider filter if specified
 			const modelFetchPromises = providerFilter
 				? candidates.filter(({ key }) => key === providerFilter)
@@ -1197,6 +1217,7 @@ export const webviewMessageHandler = async (
 				values: providerFilter ? { provider: requestedProvider } : undefined,
 			})
 			break
+		}
 		case "requestOllamaModels": {
 			// Specific handler for Ollama models only.
 			const { apiConfiguration: ollamaApiConfig } = await provider.getState()

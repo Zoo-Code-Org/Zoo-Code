@@ -341,9 +341,9 @@
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
 			"heading": "Was ist neu:",
-			"highlight1": "Regelverwaltungs-UI — ein neuer Reiter „Regeln“ in den Einstellungen ermöglicht es, globale und arbeitsbereichsspezifische Zoo-Regeln direkt im Editor zu erstellen, zu löschen und zu öffnen.",
-			"highlight2": "Überprüfung von Abschlussänderungen — nach Abschluss einer Aufgabe ermöglichen neue Schaltflächen „Neue Änderungen anzeigen“ und „Änderungen wiederherstellen“, die Änderungen der letzten Eingabe zu prüfen und rückgängig zu machen.",
-			"highlight3": "Entspannte Diff-Schwellenwerte — konfigurierbare Ähnlichkeitsschwellen reduzieren „Bearbeitung fehlgeschlagen“-Fehler beim Anwenden von Diffs, mit neuen Diagnosen zur Feinabstimmung."
+			"highlight1": "Friendli-Anbieter mit GLM-5.2-Unterstützung — nutze das neueste GLM-Modell über Friendli.",
+			"highlight2": "Native Ollama-Unterstützung für thinking/reasoning — behalte die Reasoning-Ausgabe durchgängig bei, wenn du Ollama-Modelle verwendest.",
+			"highlight3": "Fix für benutzerdefinierte `apiModelId` bei Anthropic — benutzerdefinierte Anthropic-Modell-IDs bleiben jetzt ausgewählt, statt stillschweigend auf `claude-sonnet-4-5` zurückzufallen."
 		},
 		"cloudAgents": {
 			"heading": "Neu in der Cloud:",

@@ -1,4 +1,4 @@
-// npx vitest run api/transform/__tests__/openai-format.spec.ts
+// pnpm exec vitest run api/transform/__tests__/openai-format.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
@@ -74,6 +74,123 @@ describe("convertToOpenAiMessages", () => {
 			type: "image_url",
 			image_url: { url: "data:image/jpeg;base64,base64data" },
 		})
+	})
+
+	it("should handle messages with URL image content", () => {
+		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "What is in this image?" },
+					{
+						type: "image",
+						source: { type: "url", url: "https://example.com/image.png" } as any,
+					},
+				],
+			},
+		]
+
+		const openAiMessages = convertToOpenAiMessages(anthropicMessages)
+		const content = openAiMessages[0].content as Array<{ type: string; text?: string; image_url?: { url: string } }>
+
+		expect(content[1]).toEqual({
+			type: "image_url",
+			image_url: { url: "https://example.com/image.png" },
+		})
+	})
+
+	it("should fall back to [Image] placeholder for unsupported image source types", () => {
+		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "image",
+						source: { type: "file" } as any,
+					},
+				],
+			},
+		]
+
+		const openAiMessages = convertToOpenAiMessages(anthropicMessages)
+		const content = openAiMessages[0].content as Array<{ type: string; text?: string }>
+
+		expect(content[0]).toEqual({ type: "text", text: "[Image]" })
+	})
+
+	it("should handle non-text/non-image blocks in tool results as empty string", () => {
+		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-1",
+						content: [
+							{ type: "text", text: "some text" },
+							{
+								type: "document",
+								source: { type: "base64", media_type: "application/pdf", data: "abc" },
+							} as any,
+						],
+					},
+				],
+			},
+		]
+
+		const openAiMessages = convertToOpenAiMessages(anthropicMessages)
+		expect(openAiMessages[0].role).toBe("tool")
+		expect((openAiMessages[0] as any).content).toBe("some text\n")
+	})
+
+	it("should handle base64 image in tool result with placeholder", () => {
+		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-1",
+						content: [
+							{
+								type: "image",
+								source: { type: "base64", media_type: "image/png", data: "base64data" },
+							},
+						],
+					},
+				],
+			},
+		]
+
+		const openAiMessages = convertToOpenAiMessages(anthropicMessages)
+		expect(openAiMessages[0].role).toBe("tool")
+		// base64 images in tool results emit a placeholder; the image itself is
+		// flushed in a separate user message (see comment block in openai-format.ts)
+		expect((openAiMessages[0] as any).content).toBe("(see following user message for image)")
+	})
+
+	it("should render [Image] placeholder for URL image in tool result", () => {
+		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "tool-1",
+						content: [
+							{
+								type: "image",
+								source: { type: "url", url: "https://example.com/img.png" } as any,
+							},
+						],
+					},
+				],
+			},
+		]
+
+		const openAiMessages = convertToOpenAiMessages(anthropicMessages)
+		expect(openAiMessages[0].role).toBe("tool")
+		expect((openAiMessages[0] as any).content).toBe("[Image]")
 	})
 
 	it("should handle assistant messages with tool use (no normalization without normalizeToolCallId)", () => {
@@ -965,6 +1082,157 @@ describe("convertToOpenAiMessages", () => {
 			expect(assistantMessage.reasoning_details[0].summary).toBe("First part of thinking. ")
 			expect(assistantMessage.reasoning_details[1].summary).toBe("Second part of thinking.")
 			expect(assistantMessage.reasoning_details[2].data).toBe("encrypted_data")
+		})
+	})
+
+	describe("reasoning_content round-trip for DeepSeek / Z.ai thinking mode", () => {
+		it("should pass through top-level reasoning_content on assistant messages", () => {
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: "Here is my answer.",
+					reasoning_content: "Let me think about this carefully...",
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			expect((result[0] as any).reasoning_content).toBe("Let me think about this carefully...")
+		})
+
+		it("should extract reasoning_content from reasoning content block", () => {
+			// buildCleanConversationHistory stores reasoning as a content block when preserveReasoning=true
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "Let me think...", summary: [] },
+						{ type: "text", text: "My answer." },
+					],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.reasoning_content).toBe("Let me think...")
+			expect(msg.content).toBe("My answer.")
+		})
+
+		it("should extract reasoning_content from reasoning block alongside tool calls", () => {
+			// The critical case: DeepSeek thinking + tool call in the same turn.
+			// Without reasoning_content on the second request, DeepSeek returns 400:
+			// "The reasoning_content in the thinking mode must be passed back to the API."
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "I need to read a file.", summary: [] },
+						{
+							type: "tool_use",
+							id: "call_abc",
+							name: "read_file",
+							input: { path: "foo.txt" },
+						},
+					],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.reasoning_content).toBe("I need to read a file.")
+			expect(msg.tool_calls).toHaveLength(1)
+			expect(msg.tool_calls[0].id).toBe("call_abc")
+		})
+
+		it("should accumulate multiple reasoning blocks in order, separated by a tool call", () => {
+			// DeepSeek / Z.ai interleaved thinking can emit more than one reasoning block per
+			// turn. A regression that overwrites (instead of accumulates) would silently drop
+			// all but the last block.
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "First, I should check the file.", summary: [] },
+						{
+							type: "tool_use",
+							id: "call_abc",
+							name: "read_file",
+							input: { path: "foo.txt" },
+						},
+						{ type: "reasoning", text: "Now I know what to do next.", summary: [] },
+					],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.reasoning_content).toBe("First, I should check the file.Now I know what to do next.")
+			expect(msg.tool_calls).toHaveLength(1)
+			expect(msg.tool_calls[0].id).toBe("call_abc")
+		})
+
+		it("should prefer top-level reasoning_content over content block", () => {
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: [
+						{ type: "reasoning", text: "block reasoning", summary: [] },
+						{ type: "text", text: "answer" },
+					],
+					reasoning_content: "top-level reasoning",
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect((result[0] as any).reasoning_content).toBe("top-level reasoning")
+		})
+
+		it("should not set reasoning_content when there is none", () => {
+			const anthropicMessages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "call_abc",
+							name: "read_file",
+							input: { path: "foo.txt" },
+						},
+					],
+				},
+			]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			expect((result[0] as any).reasoning_content).toBeUndefined()
+		})
+
+		it("should ignore non-object content parts without crashing (defensive guard)", () => {
+			// getReasoningBlockText guards against non-object parts (e.g. a stray
+			// string in the content array). Such parts are not reasoning blocks and
+			// must be skipped rather than crashing or being misread as reasoning.
+			const anthropicMessages = [
+				{
+					role: "assistant" as const,
+					content: ["not-a-block" as any, { type: "text", text: "answer" }],
+				},
+			] as any as Anthropic.Messages.MessageParam[]
+
+			const result = convertToOpenAiMessages(anthropicMessages)
+
+			expect(result).toHaveLength(1)
+			const msg = result[0] as any
+			expect(msg.content).toBe("answer")
+			expect(msg.reasoning_content).toBeUndefined()
 		})
 	})
 })

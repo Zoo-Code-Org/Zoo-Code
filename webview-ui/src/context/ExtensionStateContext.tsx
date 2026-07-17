@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react"
+import React, { createContext, useCallback, useEffect, useState } from "react"
 
 import {
 	type ProviderSettings,
@@ -638,7 +638,7 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 }
 
 export const useExtensionState = () => {
-	const context = useContext(ExtensionStateContext)
+	const context = React.useContext(ExtensionStateContext)
 
 	if (context === undefined) {
 		throw new Error("useExtensionState must be used within an ExtensionStateContextProvider")

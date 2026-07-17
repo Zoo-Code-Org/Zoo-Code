@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "A indexação requer uma pasta de workspace aberta",
 		"indexingStopped": "Indexação interrompida pelo usuário.",
 		"indexingStoppedPartial": "Indexação interrompida. Dados de índice parciais preservados."
+	},
+	"semble": {
+		"downloadingBinary": "Baixando o binário do semble...",
+		"ready": "Semble {{version}} está pronto. As buscas são indexadas em tempo real.",
+		"unsupportedPlatform": "Semble não é suportado nesta plataforma ({{platform}}-{{arch}}).",
+		"downloadFailed": "Falha ao baixar semble: {{errorMessage}}",
+		"checkFailed": "Verificação do semble falhou: {{errorMessage}}",
+		"providerReset": "Provedor Semble redefinido. O cache em disco permanece até a próxima reconstrução."
 	}
 }

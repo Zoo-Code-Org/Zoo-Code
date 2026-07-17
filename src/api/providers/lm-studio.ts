@@ -15,7 +15,7 @@ import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
-import { handleOpenAIError } from "./utils/openai-error-handler"
+import { handleOpenAIError } from "./utils/error-handler"
 
 export class LmStudioHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -170,7 +170,10 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {
-		const models = getModelsFromCache("lmstudio")
+		const models = getModelsFromCache({
+			provider: "lmstudio",
+			baseUrl: this.options.lmStudioBaseUrl,
+		})
 		if (models && this.options.lmStudioModelId && models[this.options.lmStudioModelId]) {
 			return {
 				id: this.options.lmStudioModelId,

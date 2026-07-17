@@ -41,6 +41,32 @@ export async function estimateTokenCount(
 }
 
 /**
+ * Computes the percentage of the context budget consumed by the prior context.
+ *
+ * Default: divide by the full context window. Opt-in (vscode-lm) divides by available input
+ * (window minus reserved output); an unknown/unlimited reserve (maxTokens -1) falls back to the
+ * full window. Shared by `willManageContext` and `manageContext` so the two stay in lockstep.
+ */
+function computeContextPercent({
+	prevContextTokens,
+	contextWindow,
+	maxTokens,
+	useAvailableInputForContextPercent,
+}: {
+	prevContextTokens: number
+	contextWindow: number
+	maxTokens?: number | null
+	useAvailableInputForContextPercent?: boolean
+}): number {
+	if (!useAvailableInputForContextPercent) {
+		return (100 * prevContextTokens) / contextWindow
+	}
+	const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
+	const availableInputTokens = contextWindow - reservedForOutput
+	return availableInputTokens > 0 ? (100 * prevContextTokens) / availableInputTokens : 100
+}
+
+/**
  * Result of truncation operation, includes the truncation ID for UI events.
  */
 export type TruncationResult = {
@@ -147,6 +173,11 @@ export type WillManageContextOptions = {
 	profileThresholds: Record<string, number>
 	currentProfileId: string
 	lastMessageTokens: number
+	/**
+	 * Opt-in (vscode-lm): measure the condense percentage against available input space
+	 * (contextWindow - reserved output) instead of the full window. Others leave it undefined.
+	 */
+	useAvailableInputForContextPercent?: boolean
 }
 
 /**
@@ -167,16 +198,19 @@ export function willManageContext({
 	profileThresholds,
 	currentProfileId,
 	lastMessageTokens,
+	useAvailableInputForContextPercent,
 }: WillManageContextOptions): boolean {
 	if (!autoCondenseContext) {
 		// When auto-condense is disabled, only truncation can occur
-		const reservedTokens = maxTokens || ANTHROPIC_DEFAULT_MAX_TOKENS
+		// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
+		const reservedTokens = maxTokens && maxTokens > 0 ? maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS
 		const prevContextTokens = totalTokens + lastMessageTokens
 		const allowedTokens = contextWindow * (1 - TOKEN_BUFFER_PERCENTAGE) - reservedTokens
 		return prevContextTokens > allowedTokens
 	}
 
-	const reservedTokens = maxTokens || ANTHROPIC_DEFAULT_MAX_TOKENS
+	// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
+	const reservedTokens = maxTokens && maxTokens > 0 ? maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS
 	const prevContextTokens = totalTokens + lastMessageTokens
 	const allowedTokens = contextWindow * (1 - TOKEN_BUFFER_PERCENTAGE) - reservedTokens
 
@@ -192,7 +226,12 @@ export function willManageContext({
 		// Invalid values fall back to global setting (effectiveThreshold already set)
 	}
 
-	const contextPercent = (100 * prevContextTokens) / contextWindow
+	const contextPercent = computeContextPercent({
+		prevContextTokens,
+		contextWindow,
+		maxTokens,
+		useAvailableInputForContextPercent,
+	})
 	return contextPercent >= effectiveThreshold || prevContextTokens > allowedTokens
 }
 
@@ -229,6 +268,11 @@ export type ContextManagementOptions = {
 	cwd?: string
 	/** Optional controller for file access validation */
 	rooIgnoreController?: RooIgnoreController
+	/**
+	 * Opt-in (vscode-lm): measure the condense percentage against available input space
+	 * (contextWindow - reserved output) instead of the full window. Others leave it undefined.
+	 */
+	useAvailableInputForContextPercent?: boolean
 }
 
 export type ContextManagementResult = SummarizeResponse & {
@@ -262,12 +306,14 @@ export async function manageContext({
 	filesReadByRoo,
 	cwd,
 	rooIgnoreController,
+	useAvailableInputForContextPercent,
 }: ContextManagementOptions): Promise<ContextManagementResult> {
 	let error: string | undefined
 	let errorDetails: string | undefined
 	let cost = 0
 	// Calculate the maximum tokens reserved for response
-	const reservedTokens = maxTokens || ANTHROPIC_DEFAULT_MAX_TOKENS
+	// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
+	const reservedTokens = maxTokens && maxTokens > 0 ? maxTokens : ANTHROPIC_DEFAULT_MAX_TOKENS
 
 	// Estimate tokens for the last message (which is always a user message)
 	const lastMessage = messages[messages.length - 1]
@@ -304,7 +350,12 @@ export async function manageContext({
 	// If no specific threshold is found for the profile, fall back to global setting
 
 	if (autoCondenseContext) {
-		const contextPercent = (100 * prevContextTokens) / contextWindow
+		const contextPercent = computeContextPercent({
+			prevContextTokens,
+			contextWindow,
+			maxTokens,
+			useAvailableInputForContextPercent,
+		})
 		if (contextPercent >= effectiveThreshold || prevContextTokens > allowedTokens) {
 			// Attempt to intelligently condense the context
 			const result = await summarizeConversation({

@@ -895,6 +895,41 @@ describe("VertexHandler", () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
 		})
+
+		it("should handle empty content array for Claude", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest.fn().mockResolvedValue({
+				content: [],
+			})
+			;(handler["client"].messages as any).create = mockCreate
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe("")
+		})
+
+		it("should return text from first text block when mixed content for Claude", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest.fn().mockResolvedValue({
+				content: [
+					{ type: "thinking", thinking: "internal reasoning" },
+					{ type: "text", text: "visible response" },
+				],
+			})
+			;(handler["client"].messages as any).create = mockCreate
+
+			const result = await handler.completePrompt("Test prompt")
+			expect(result).toBe("visible response")
+		})
 	})
 
 	describe("getModel", () => {
@@ -1025,6 +1060,23 @@ describe("VertexHandler", () => {
 
 			const model = handler.getModel()
 			expect(model.id).toBe("claude-fable-5")
+			expect(model.info.maxTokens).toBe(8192)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+		})
+
+		it("should return Claude Sonnet 5 model info", () => {
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-sonnet-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-sonnet-5")
 			expect(model.info.maxTokens).toBe(8192)
 			expect(model.info.contextWindow).toBe(1_000_000)
 			expect(model.info.supportsReasoningBinary).toBe(true)
@@ -1297,6 +1349,37 @@ describe("VertexHandler", () => {
 			;(fableHandler["client"].messages as any).create = mockCreate
 
 			await fableHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					thinking: { type: "adaptive" },
+				}),
+				undefined,
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).not.toHaveProperty("budget_tokens")
+			expect(request.temperature).toBeUndefined()
+		})
+
+		it("should use adaptive thinking for Claude Sonnet 5", async () => {
+			const sonnetHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-sonnet-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest.fn().mockImplementation(async () => ({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } }
+				},
+			}))
+			;(sonnetHandler["client"].messages as any).create = mockCreate
+
+			await sonnetHandler
+				.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }])
+				.next()
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({

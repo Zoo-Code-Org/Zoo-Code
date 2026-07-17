@@ -342,9 +342,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Kural Yönetimi Arayüzü — Ayarlar'daki yeni Kurallar sekmesi, genel ve çalışma alanı Zoo kurallarını doğrudan editörden oluşturmanıza, silmenize ve açmanıza olanak tanır.",
-			"highlight2": "Tamamlama Değişikliği İncelemesi — bir görev tamamlandığında, yeni \"Yeni Değişiklikleri Gör\" ve \"Değişiklikleri Geri Yükle\" düğmeleri, son istemdeki değişiklikleri incelemenize ve geri almanıza olanak tanır.",
-			"highlight3": "Gevşetilmiş Diff Eşikleri — yapılandırılabilir benzerlik eşikleri, diff uygularken \"düzenleme başarısız\" hatalarını azaltır; ayarları ince ayar yapmak için yeni tanı araçları da eklenmiştir."
+			"highlight1": "GLM-5.2 destekli Friendli sağlayıcısı — en yeni GLM modelini Friendli üzerinden kullan.",
+			"highlight2": "Ollama için yerel thinking/reasoning desteği — Ollama modellerini kullanırken reasoning çıktısını uçtan uca koru.",
+			"highlight3": "Anthropic özel `apiModelId` düzeltmesi — özel Anthropic model kimlikleri artık sessizce `claude-sonnet-4-5` modeline geri dönmek yerine seçili kalıyor."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

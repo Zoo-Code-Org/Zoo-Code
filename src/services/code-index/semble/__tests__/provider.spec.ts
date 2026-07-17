@@ -21,6 +21,7 @@ vi.mock("../semble-cli", () => ({
 vi.mock("../semble-downloader", () => ({
 	isSembleSupportedPlatform: vi.fn().mockReturnValue(true),
 	downloadSemble: vi.fn().mockResolvedValue("/mock/storage/semble/semble"),
+	SEMBLE_VERSION: "v0.4.1",
 }))
 
 // Mock TelemetryService
@@ -35,6 +36,29 @@ vi.mock("@roo-code/telemetry", () => ({
 // Mock vscode
 vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
+}))
+
+// Mock i18n — semble provider state messages are internationalized via t().
+// Return the English strings so existing message-content assertions stay stable.
+vi.mock("../../../../i18n", () => ({
+	t: (key: string, params?: any) => {
+		switch (key) {
+			case "embeddings:semble.downloadingBinary":
+				return "Downloading semble binary..."
+			case "embeddings:semble.ready":
+				return `Semble ${params?.version ?? ""} is ready. Searches index on-the-fly.`
+			case "embeddings:semble.unsupportedPlatform":
+				return `Semble is not supported on this platform (${params?.platform ?? ""}-${params?.arch ?? ""}).`
+			case "embeddings:semble.downloadFailed":
+				return `Failed to download semble: ${params?.errorMessage ?? ""}`
+			case "embeddings:semble.checkFailed":
+				return `Semble check failed: ${params?.errorMessage ?? ""}`
+			case "embeddings:semble.providerReset":
+				return "Semble provider reset. On-disk cache remains until next rebuild."
+			default:
+				return key
+		}
+	},
 }))
 
 import { TelemetryService } from "@roo-code/telemetry"
@@ -90,7 +114,7 @@ describe("SembleProvider", () => {
 			expect(provider.state).toBe("Indexed")
 			expect(mockStateManager.setSystemState).toHaveBeenCalledWith(
 				"Indexed",
-				"Semble is ready. Searches index on-the-fly.",
+				"Semble v0.4.1 is ready. Searches index on-the-fly.",
 			)
 		})
 
@@ -140,6 +164,16 @@ describe("SembleProvider", () => {
 			await provider.initialize()
 
 			expect(mockCli.checkInstalled).toHaveBeenCalledTimes(1)
+		})
+
+		it("should include the semble version in the ready status message", async () => {
+			mockCli.checkInstalled.mockResolvedValue({ installed: true })
+
+			await provider.initialize()
+
+			// The ready message interpolates the active SEMBLE_VERSION so the UI
+			// (CodeIndexPopover) surfaces which release is installed.
+			expect(mockStateManager.setSystemState).toHaveBeenCalledWith("Indexed", expect.stringContaining("v0.4.1"))
 		})
 	})
 
@@ -194,25 +228,17 @@ describe("SembleProvider", () => {
 		it("should search using CLI and convert results", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: "function authenticate() {}",
-						file_path: "src/auth.ts",
-						start_line: 10,
-						end_line: 25,
-						language: "typescript",
-						location: "src/auth.ts:10-25",
-					},
+					content: "function authenticate() {}",
+					file_path: "src/auth.ts",
+					start_line: 10,
+					end_line: 25,
 					score: 0.92,
 				},
 				{
-					chunk: {
-						content: "export function login() {}",
-						file_path: "src/login.ts",
-						start_line: 5,
-						end_line: 15,
-						language: "typescript",
-						location: "src/login.ts:5-15",
-					},
+					content: "export function login() {}",
+					file_path: "src/login.ts",
+					start_line: 5,
+					end_line: 15,
 					score: 0.78,
 				},
 			]
@@ -252,36 +278,24 @@ describe("SembleProvider", () => {
 		it("should filter out results with missing file_path", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: "good result",
-						file_path: "src/good.ts",
-						start_line: 1,
-						end_line: 10,
-						language: "typescript",
-						location: "src/good.ts:1-10",
-					},
+					content: "good result",
+					file_path: "src/good.ts",
+					start_line: 1,
+					end_line: 10,
 					score: 0.8,
 				},
 				{
-					chunk: {
-						content: "no file path result",
-						file_path: "",
-						start_line: 1,
-						end_line: 5,
-						language: "typescript",
-						location: "",
-					},
+					content: "no file path result",
+					file_path: "",
+					start_line: 1,
+					end_line: 5,
 					score: 0.5,
 				},
 				{
-					chunk: {
-						content: "null file path result",
-						file_path: null,
-						start_line: 1,
-						end_line: 5,
-						language: null,
-						location: "",
-					},
+					content: "null file path result",
+					file_path: null,
+					start_line: 1,
+					end_line: 5,
 					score: 0.3,
 				},
 			]
@@ -321,36 +335,24 @@ describe("SembleProvider", () => {
 		it("should filter results by directoryPrefix when provided", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: "code in src/auth",
-						file_path: "src/auth/login.ts",
-						start_line: 1,
-						end_line: 10,
-						language: "typescript",
-						location: "src/auth/login.ts:1-10",
-					},
+					content: "code in src/auth",
+					file_path: "src/auth/login.ts",
+					start_line: 1,
+					end_line: 10,
 					score: 0.95,
 				},
 				{
-					chunk: {
-						content: "code in src/utils",
-						file_path: "src/utils/helper.ts",
-						start_line: 5,
-						end_line: 15,
-						language: "typescript",
-						location: "src/utils/helper.ts:5-15",
-					},
+					content: "code in src/utils",
+					file_path: "src/utils/helper.ts",
+					start_line: 5,
+					end_line: 15,
 					score: 0.8,
 				},
 				{
-					chunk: {
-						content: "code in root",
-						file_path: "README.md",
-						start_line: 1,
-						end_line: 5,
-						language: "markdown",
-						location: "README.md:1-5",
-					},
+					content: "code in root",
+					file_path: "README.md",
+					start_line: 1,
+					end_line: 5,
 					score: 0.6,
 				},
 			]
@@ -367,25 +369,17 @@ describe("SembleProvider", () => {
 		it("should not filter results when no directoryPrefix is provided", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: "code in src/auth",
-						file_path: "src/auth/login.ts",
-						start_line: 1,
-						end_line: 10,
-						language: "typescript",
-						location: "src/auth/login.ts:1-10",
-					},
+					content: "code in src/auth",
+					file_path: "src/auth/login.ts",
+					start_line: 1,
+					end_line: 10,
 					score: 0.95,
 				},
 				{
-					chunk: {
-						content: "code in src/utils",
-						file_path: "src/utils/helper.ts",
-						start_line: 5,
-						end_line: 15,
-						language: "typescript",
-						location: "src/utils/helper.ts:5-15",
-					},
+					content: "code in src/utils",
+					file_path: "src/utils/helper.ts",
+					start_line: 5,
+					end_line: 15,
 					score: 0.8,
 				},
 			]
@@ -407,6 +401,24 @@ describe("SembleProvider", () => {
 			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
 				TelemetryEventName.CODE_INDEX_ERROR,
 				expect.objectContaining({
+					location: "SembleProvider.searchIndex",
+				}),
+			)
+		})
+
+		it("should capture stack only when error is an Error instance", async () => {
+			// A non-Error rejection exercises the `error instanceof Error` false
+			// branch of the telemetry payload (stack: undefined).
+			mockCli.search.mockRejectedValue("string error")
+
+			const results = await provider.searchIndex("test")
+
+			expect(results).toEqual([])
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+				TelemetryEventName.CODE_INDEX_ERROR,
+				expect.objectContaining({
+					error: "string error",
+					stack: undefined,
 					location: "SembleProvider.searchIndex",
 				}),
 			)
@@ -459,14 +471,15 @@ describe("SembleProvider", () => {
 		it("should handle results with null content using empty string fallback", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: null,
-						file_path: "src/file.ts",
-						start_line: null,
-						end_line: null,
-						language: null,
-						location: "",
-					},
+					content: null,
+					file_path: "src/file.ts",
+					// Non-null line numbers exercise the flat-field access path
+					// (r.start_line / r.end_line). With null/undefined values the old
+					// nested `r.chunk?.start_line ?? 0` shape would coalesce to 0
+					// identically, so a regression to the wrapped schema would slip
+					// past unnoticed. Real values must round-trip through unchanged.
+					start_line: 5,
+					end_line: 20,
 					score: 0.6,
 				},
 			]
@@ -477,21 +490,17 @@ describe("SembleProvider", () => {
 
 			expect(results).toHaveLength(1)
 			expect(results[0].payload?.codeChunk).toBe("")
-			expect(results[0].payload?.startLine).toBe(0)
-			expect(results[0].payload?.endLine).toBe(0)
+			expect(results[0].payload?.startLine).toBe(5)
+			expect(results[0].payload?.endLine).toBe(20)
 		})
 
 		it("should handle results with undefined content fields", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: undefined,
-						file_path: "src/file.ts",
-						start_line: undefined,
-						end_line: undefined,
-						language: undefined,
-						location: "",
-					},
+					content: undefined,
+					file_path: "src/file.ts",
+					start_line: undefined,
+					end_line: undefined,
 					score: 0.5,
 				},
 			]
@@ -509,14 +518,10 @@ describe("SembleProvider", () => {
 		it("should normalize backslashes in file paths", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: "code",
-						file_path: "src\\nested\\file.ts",
-						start_line: 1,
-						end_line: 10,
-						language: "typescript",
-						location: "",
-					},
+					content: "code",
+					file_path: "src\\nested\\file.ts",
+					start_line: 1,
+					end_line: 10,
 					score: 0.8,
 				},
 			]
@@ -530,17 +535,43 @@ describe("SembleProvider", () => {
 			expect(results[0].payload?.filePath).toContain("/")
 		})
 
+		it("should reject file paths that escape the workspace via traversal", async () => {
+			// A path-traversal payload (../../etc/passwd) resolves outside the
+			// workspace base. The guard at provider.ts must exclude it so semble
+			// results can never surface files outside the indexed workspace.
+			const mockResults = [
+				{
+					content: "secret",
+					file_path: "../../etc/passwd",
+					start_line: 1,
+					end_line: 10,
+					score: 0.9,
+				},
+				{
+					content: "safe",
+					file_path: "src/file.ts",
+					start_line: 1,
+					end_line: 10,
+					score: 0.8,
+				},
+			]
+
+			mockCli.search.mockResolvedValue(mockResults)
+
+			const results = await provider.searchIndex("test")
+
+			// Only the in-workspace result survives; the traversal entry is dropped.
+			expect(results).toHaveLength(1)
+			expect(results[0].payload?.filePath).toBe("/workspace/src/file.ts")
+		})
+
 		it("should always join file paths against workspace root, even with directoryPrefix", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: "code",
-						file_path: "src/file.ts",
-						start_line: 1,
-						end_line: 5,
-						language: "typescript",
-						location: "",
-					},
+					content: "code",
+					file_path: "src/file.ts",
+					start_line: 1,
+					end_line: 5,
 					score: 0.9,
 				},
 			]
@@ -556,36 +587,24 @@ describe("SembleProvider", () => {
 		it("should assign sequential semble-N IDs to results", async () => {
 			const mockResults = [
 				{
-					chunk: {
-						content: "a",
-						file_path: "a.ts",
-						start_line: 1,
-						end_line: 2,
-						language: "ts",
-						location: "",
-					},
+					content: "a",
+					file_path: "a.ts",
+					start_line: 1,
+					end_line: 2,
 					score: 0.9,
 				},
 				{
-					chunk: {
-						content: "b",
-						file_path: "b.ts",
-						start_line: 1,
-						end_line: 2,
-						language: "ts",
-						location: "",
-					},
+					content: "b",
+					file_path: "b.ts",
+					start_line: 1,
+					end_line: 2,
 					score: 0.8,
 				},
 				{
-					chunk: {
-						content: "c",
-						file_path: "c.ts",
-						start_line: 1,
-						end_line: 2,
-						language: "ts",
-						location: "",
-					},
+					content: "c",
+					file_path: "c.ts",
+					start_line: 1,
+					end_line: 2,
 					score: 0.7,
 				},
 			]

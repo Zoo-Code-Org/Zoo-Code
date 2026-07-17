@@ -39,6 +39,15 @@ export const config = [
 					caughtErrorsIgnorePattern: "^_",
 				},
 			],
+			// Reject irregular whitespace (incl. zero-width space U+200B and
+			// BOM U+FEFF) in identifiers and between tokens. This rule does NOT
+			// catch bidi-override, ZWJ/ZWNJ, or word-joiner characters; the CI
+			// invisible-chars job in code-qa.yml is the authoritative defense
+			// for the full Trojan Source character set across all files.
+			"no-irregular-whitespace": [
+				"error",
+				{ skipStrings: true, skipComments: false, skipRegExps: true, skipTemplates: false },
+			],
 		},
 	},
 ]

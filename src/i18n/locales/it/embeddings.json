@@ -72,5 +72,13 @@
 		"indexingRequiresWorkspace": "L'indicizzazione richiede una cartella di workspace aperta",
 		"indexingStopped": "Indicizzazione interrotta dall'utente.",
 		"indexingStoppedPartial": "Indicizzazione interrotta. Dati di indice parziali conservati."
+	},
+	"semble": {
+		"downloadingBinary": "Download del binario semble in corso...",
+		"ready": "Semble {{version}} è pronto. Le ricerche vengono indicizzate al volo.",
+		"unsupportedPlatform": "Semble non è supportato su questa piattaforma ({{platform}}-{{arch}}).",
+		"downloadFailed": "Download di semble fallito: {{errorMessage}}",
+		"checkFailed": "Verifica di semble fallita: {{errorMessage}}",
+		"providerReset": "Provider Semble ripristinato. La cache su disco rimane fino alla prossima ricostruzione."
 	}
 }

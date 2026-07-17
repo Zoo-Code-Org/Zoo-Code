@@ -8,25 +8,23 @@ import { VectorStoreSearchResult } from "../interfaces/vector-store"
 export type SembleContentType = "code" | "docs" | "config" | "all"
 
 /**
- * A single chunk returned by semble search results.
- * Matches the `chunk` field in semble's JSON output format.
+ * A single search result returned by semble v0.4.0+.
+ *
+ * As of v0.4.0, semble flattened its JSON output — the fields that were
+ * previously nested under a `chunk` object are now top-level on each result
+ * entry. The `language` and `location` fields are no longer emitted.
+ *
+ * Output format:
+ *   { "query": "...", "results": [{ "file_path": "...", "start_line": N, "end_line": M, "score": X, "content": "..." }] }
+ *
+ * `content` is omitted when semble is invoked with `--max-snippet-lines 0`.
  */
-export interface SembleChunk {
-	content: string
+export interface SembleSearchResult {
 	file_path: string
 	start_line: number
 	end_line: number
-	language: string | null
-	location: string
-}
-
-/**
- * Result from a semble CLI search invocation.
- * Matches the JSON output format: `{ query, results: [{ chunk, score }] }`.
- */
-export interface SembleSearchResult {
-	chunk: SembleChunk
 	score: number
+	content?: string
 }
 
 /**

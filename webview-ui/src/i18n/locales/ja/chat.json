@@ -341,9 +341,9 @@
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "ルール管理UI — 設定の新しい「ルール」タブで、グローバルおよびワークスペースのZooルールをエディターから直接作成、削除、開くことができます。",
-			"highlight2": "完了変更レビュー — タスクが完了すると、新しい「新しい変更を表示」「変更を復元」ボタンで最後のプロンプトの変更を確認・取り消しできます。",
-			"highlight3": "緩和されたDiff閾値 — 設定可能な類似度閾値により、diff適用時の「編集失敗」エラーが減少し、設定の調整に役立つ新しい診断機能が追加されました。"
+			"highlight1": "GLM-5.2 をサポートした Friendli プロバイダー — Friendli 経由で最新の GLM モデルを使えます。",
+			"highlight2": "Ollama のネイティブ thinking/reasoning サポート — Ollama モデル使用時に reasoning 出力をエンドツーエンドで保持します。",
+			"highlight3": "Anthropic のカスタム `apiModelId` 修正 — カスタム Anthropic モデル ID が `claude-sonnet-4-5` に黙ってフォールバックせず、そのまま選択された状態を維持します。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

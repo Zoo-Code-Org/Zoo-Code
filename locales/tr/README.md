@@ -30,11 +30,15 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da sorunun olursa gel ve sor.
 
-## v3.64.0'daki Yenilikler
+## v3.68.0'daki Yenilikler
 
-- **Kural Yönetimi Arayüzü** — Ayarlar'daki yeni Kurallar sekmesi, genel ve çalışma alanı Zoo kurallarını doğrudan editörden oluşturmanıza, silmenize ve açmanıza olanak tanır
-- **Tamamlama Değişikliği İncelemesi** — bir görev tamamlandığında, yeni "Yeni Değişiklikleri Gör" ve "Değişiklikleri Geri Yükle" düğmeleri, son istemdeki değişiklikleri incelemenize ve geri almanıza olanak tanır
-- **Gevşetilmiş Diff Eşikleri** — yapılandırılabilir benzerlik eşikleri, diff uygularken "düzenleme başarısız" hatalarını azaltır; ayarları ince ayar yapmak için yeni tanı araçları da eklenmiştir
+- **GLM-5.2 destekli Friendli sağlayıcısı** — en yeni GLM modelini Friendli üzerinden kullan.
+- **Ollama için yerel thinking/reasoning desteği** — Ollama modellerini kullanırken reasoning çıktısını uçtan uca koru.
+- **Anthropic özel `apiModelId` düzeltmesi** — özel Anthropic model kimlikleri artık sessizce `claude-sonnet-4-5` modeline geri dönmek yerine seçili kalıyor.
+- Düzeltme: Ollama sağlayıcısında araç sonucu işleme ve erken bağlam yoğunlaştırma.
+- Düzeltme: yetkilendirilen bir alt görev kesintiye uğradığında görev üst-alt bağlantısını koru.
+- Daha güvenilir yanıtlar için Anthropic Vertex Claude içerik bloğu işleme iyileştirildi.
+- CI, nightly yayınlama ve bağımlılık/araç güncellemeleri.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

@@ -5,10 +5,11 @@ import { IndexingState } from "../interfaces/manager"
 import { VectorStoreSearchResult } from "../interfaces/vector-store"
 import { CodeIndexStateManager } from "../state-manager"
 import { SembleCLI } from "./semble-cli"
-import { downloadSemble, isSembleSupportedPlatform } from "./semble-downloader"
+import { downloadSemble, isSembleSupportedPlatform, SEMBLE_VERSION } from "./semble-downloader"
 import { ISembleProvider, SembleConfig, SembleContentType, SembleSearchResult, SEMBLE_DEFAULTS } from "./types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
+import { t } from "../../../i18n"
 
 /**
  * Orchestrates code search via the semble CLI.
@@ -82,7 +83,7 @@ export class SembleProvider implements ISembleProvider {
 			this._state = "Error"
 			this.stateManager.setSystemState(
 				"Error",
-				`Semble is not supported on this platform (${process.platform}-${process.arch}).`,
+				t("embeddings:semble.unsupportedPlatform", { platform: process.platform, arch: process.arch }),
 			)
 			console.error(`[SembleProvider] Unsupported platform: ${process.platform}-${process.arch}`)
 			return
@@ -90,7 +91,7 @@ export class SembleProvider implements ISembleProvider {
 
 		// Download semble binary
 		try {
-			this.stateManager.setSystemState("Indexing", "Downloading semble binary...")
+			this.stateManager.setSystemState("Indexing", t("embeddings:semble.downloadingBinary"))
 			const storageDir = this.context.globalStorageUri.fsPath
 			const binaryPath = await downloadSemble(storageDir)
 			if (!binaryPath) {
@@ -99,7 +100,10 @@ export class SembleProvider implements ISembleProvider {
 			this.cli = new SembleCLI(binaryPath)
 		} catch (error: any) {
 			this._state = "Error"
-			this.stateManager.setSystemState("Error", `Failed to download semble: ${error?.message || error}`)
+			this.stateManager.setSystemState(
+				"Error",
+				t("embeddings:semble.downloadFailed", { errorMessage: error?.message || error }),
+			)
 			console.error("[SembleProvider] Download failed:", error?.message || error)
 			return
 		}
@@ -110,16 +114,18 @@ export class SembleProvider implements ISembleProvider {
 		if (!checkResult.installed) {
 			const errorMsg = checkResult.error || "Semble binary is not functional"
 			this._state = "Error"
-			this.stateManager.setSystemState("Error", `Semble check failed: ${errorMsg}`)
+			this.stateManager.setSystemState("Error", t("embeddings:semble.checkFailed", { errorMessage: errorMsg }))
 			console.error("[SembleProvider] Semble check failed:", errorMsg)
 			return
 		}
 
 		console.log("[SembleProvider] Semble found and ready.")
 
-		// Semble indexes on-the-fly, so we mark as "Indexed" (ready for search)
+		// Semble indexes on-the-fly, so we mark as "Indexed" (ready for search).
+		// The version is included in the status message so the UI (CodeIndexPopover)
+		// surfaces which semble release is active.
 		this._state = "Indexed"
-		this.stateManager.setSystemState("Indexed", "Semble is ready. Searches index on-the-fly.")
+		this.stateManager.setSystemState("Indexed", t("embeddings:semble.ready", { version: SEMBLE_VERSION }))
 
 		this._isInitialized = true
 	}
@@ -140,7 +146,7 @@ export class SembleProvider implements ISembleProvider {
 		// Semble indexes on-the-fly — no separate indexing step needed.
 		// Mark as indexed/ready.
 		this._state = "Indexed"
-		this.stateManager.setSystemState("Indexed", "Semble is ready. Searches index on-the-fly.")
+		this.stateManager.setSystemState("Indexed", t("embeddings:semble.ready", { version: SEMBLE_VERSION }))
 	}
 
 	/**
@@ -220,7 +226,7 @@ export class SembleProvider implements ISembleProvider {
 	 */
 	async clearIndexData(): Promise<void> {
 		this._state = "Standby"
-		this.stateManager.setSystemState("Standby", "Semble provider reset. On-disk cache remains until next rebuild.")
+		this.stateManager.setSystemState("Standby", t("embeddings:semble.providerReset"))
 	}
 
 	/**
@@ -235,8 +241,8 @@ export class SembleProvider implements ISembleProvider {
 	/**
 	 * Converts Semble CLI results to Zoo's VectorStoreSearchResult format.
 	 *
-	 * Semble v0.3.0+ returns results in the format:
-	 *   { chunk: { content, file_path, start_line, end_line, language, location }, score }
+	 * Semble v0.4.0+ returns results in a flat format (no `chunk` wrapper):
+	 *   { file_path, start_line, end_line, score, content }
 	 *
 	 * Note: semble returns file paths relative to the path it was invoked with.
 	 * We join against `basePath` (the actual path passed to semble) to produce
@@ -250,15 +256,15 @@ export class SembleProvider implements ISembleProvider {
 		const converted: VectorStoreSearchResult[] = []
 
 		for (const [index, r] of results.entries()) {
-			if (!r.chunk?.file_path) {
+			if (!r.file_path) {
 				continue
 			}
 
 			// Use path.join for the displayed path (preserves basePath format).
-			const filePath = path.join(basePath, r.chunk.file_path).replace(/\\/g, "/")
+			const filePath = path.join(basePath, r.file_path).replace(/\\/g, "/")
 
 			// Use path.resolve to normalize any ../ for the security check.
-			const resolvedFilePath = path.resolve(basePath, r.chunk.file_path).replace(/\\/g, "/")
+			const resolvedFilePath = path.resolve(basePath, r.file_path).replace(/\\/g, "/")
 
 			// Guard against path traversal: reject file paths that resolve outside the workspace
 			if (!resolvedFilePath.startsWith(resolvedBase + "/") && resolvedFilePath !== resolvedBase) {
@@ -270,9 +276,9 @@ export class SembleProvider implements ISembleProvider {
 				score: r.score,
 				payload: {
 					filePath,
-					codeChunk: r.chunk?.content ?? "",
-					startLine: r.chunk?.start_line ?? 0,
-					endLine: r.chunk?.end_line ?? 0,
+					codeChunk: r.content ?? "",
+					startLine: r.start_line ?? 0,
+					endLine: r.end_line ?? 0,
 				},
 			})
 		}
