@@ -1,5 +1,24 @@
 # Zoo Code Changelog
 
+## [3.68.0]
+
+### Minor Changes
+
+- Add Friendli provider with GLM-5.2 support for another hosted way to use the latest GLM model (#722 by @Lee-Si-Yoon, PR #721 by @Lee-Si-Yoon)
+- Add native thinking/reasoning support for Ollama models to preserve reasoning output end-to-end (#831 by @navedmerchant, PR #832 by @navedmerchant)
+- Fix(anthropic): honor custom `apiModelId` selections instead of silently defaulting to `claude-sonnet-4-5` (#418 by @tatianadenel-devops, #843 by @grizmin, PR #842 by @grizmin)
+- Fix(ollama): correctly handle tool results and prevent premature context condensing (#847 by @navedmerchant, PR #848 by @navedmerchant)
+- Improve Anthropic Vertex Claude content block handling for more reliable responses (#788 by @daewoongoh, PR #789 by @daewoongoh)
+- Fix(task-lifecycle): preserve the parent-child link when a delegated subtask is interrupted (#560 by @edelauna, PR #787 by @edelauna)
+- Refactor: remove the deprecated `openai-error-handler` shim and use the shared `error-handler` directly (#766 by @daewoongoh, PR #767 by @daewoongoh)
+- Feat(nightly-publish): publish Open VSX pre-releases and skip nightly publish on release merges (#784 by @edelauna, PR #790 by @edelauna)
+- Fix(ci): don't skip fork-PR label reconciliation on scheduled and manual runs (PR #234 by @app/roomote)
+- Fix(label-pr-review-state): detect merge conflicts and label PRs with `has-conflicts` (PR #269 by @app/roomote)
+- Chore(deps): update the `github/codeql-action` digest to `411c4c9` (PR #803 by @app/renovate)
+- Chore(deps): update `@types/react` to `v18.3.31` (PR #805 by @app/renovate)
+- Chore(deps): update `axios` to `v1.18.1` (PR #806 by @app/renovate)
+- Chore: merge the v3.66.0 release preparation branch into `main` (PR #795 by @navedmerchant)
+
 ## [3.66.0]
 
 ### Minor Changes

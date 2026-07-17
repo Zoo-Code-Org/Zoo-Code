@@ -382,6 +382,8 @@
 		"getVercelAiGatewayApiKey": "Vercel AI Gateway API-sleutel ophalen",
 		"opencodeGoApiKey": "Opencode Go API-sleutel",
 		"getOpencodeGoApiKey": "Opencode Go API-sleutel ophalen",
+		"kenariApiKey": "Kenari API-sleutel",
+		"getKenariApiKey": "Kenari API-sleutel ophalen",
 		"apiKeyStorageNotice": "API-sleutels worden veilig opgeslagen in de geheime opslag van VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

@@ -34,6 +34,7 @@ import {
 	FriendliHandler,
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
+	KenariHandler,
 	ZooGatewayHandler,
 	MiniMaxHandler,
 	MimoHandler,
@@ -196,6 +197,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new VercelAiGatewayHandler(options)
 		case "opencode-go":
 			return new OpencodeGoHandler(options)
+		case "kenari":
+			return new KenariHandler(options)
 		case "zoo-gateway":
 			return new ZooGatewayHandler(options)
 		case "minimax":

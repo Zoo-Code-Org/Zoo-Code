@@ -409,6 +409,8 @@
 		"getVercelAiGatewayApiKey": "取得 Vercel AI Gateway API 金鑰",
 		"opencodeGoApiKey": "Opencode Go API 金鑰",
 		"getOpencodeGoApiKey": "取得 Opencode Go API 金鑰",
+		"kenariApiKey": "Kenari API 金鑰",
+		"getKenariApiKey": "取得 Kenari API 金鑰",
 		"apiKeyStorageNotice": "API 金鑰會安全地儲存在 VS Code 的 Secret Storage 中",
 		"openAiCodexRateLimits": {
 			"title": "Codex 用量限制{{planLabel}}",

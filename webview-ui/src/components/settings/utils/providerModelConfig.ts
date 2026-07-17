@@ -26,6 +26,7 @@ import {
 	litellmDefaultModelId,
 	vercelAiGatewayDefaultModelId,
 	opencodeGoDefaultModelId,
+	kenariDefaultModelId,
 	zooGatewayDefaultModelId,
 } from "@roo-code/types"
 
@@ -130,6 +131,7 @@ const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> 
 	poe: { field: "apiModelId", default: poeDefaultModelId },
 	"vercel-ai-gateway": { field: "vercelAiGatewayModelId", default: vercelAiGatewayDefaultModelId },
 	"opencode-go": { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
+	kenari: { field: "kenariModelId", default: kenariDefaultModelId },
 	"zoo-gateway": { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
 	openai: { field: "openAiModelId" },
 	ollama: { field: "ollamaModelId" },

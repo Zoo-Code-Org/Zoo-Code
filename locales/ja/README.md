@@ -30,11 +30,15 @@
 
 Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
-## v3.66.0 の新機能
+## v3.68.0 の新機能
 
-- **Claude Sonnet 5 サポート** — 最新の Claude モデルが Anthropic、Bedrock、Vertex の各プロバイダーで利用可能になりました
-- **Semble v0.4.1 へのアップグレード** — 平坦な結果解析とローカライズされたステータスメッセージ
-- **タスクライフサイクル状態遷移ガード** — 新しい状態遷移ガードと起動時の委任調整により、無効なタスク状態遷移を防ぎます
+- **GLM-5.2 をサポートした Friendli プロバイダー** — Friendli 経由で最新の GLM モデルを使えます。
+- **Ollama のネイティブ thinking/reasoning サポート** — Ollama モデル使用時に reasoning 出力をエンドツーエンドで保持します。
+- **Anthropic のカスタム `apiModelId` 修正** — カスタム Anthropic モデル ID が `claude-sonnet-4-5` に黙ってフォールバックせず、そのまま選択された状態を維持します。
+- 修正: Ollama プロバイダーのツール結果処理と早すぎるコンテキスト圧縮。
+- 修正: 委譲されたサブタスクが中断されたときに親子タスクのリンクを維持。
+- Anthropic Vertex での Claude コンテンツブロック処理を改善し、応答の信頼性を向上。
+- CI、nightly 公開、依存関係/ツール更新。
 
 ## Zoo Codeがあなたのためにできること
 

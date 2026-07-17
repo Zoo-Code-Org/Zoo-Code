@@ -342,9 +342,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Claude Sonnet 5 desteği — en yeni Claude modeli artık Anthropic, Bedrock ve Vertex sağlayıcılarında kullanılabilir.",
-			"highlight2": "Semble v0.4.1 yükseltmesi — düzleştirilmiş sonuç ayrıştırma ve yerelleştirilmiş durum mesajları.",
-			"highlight3": "Görev yaşam döngüsü durum geçiş koruması — yeni bir durum geçiş koruması ve başlangıç yetkilendirme uzlaştırması geçersiz görev durum geçişlerini önler."
+			"highlight1": "GLM-5.2 destekli Friendli sağlayıcısı — en yeni GLM modelini Friendli üzerinden kullan.",
+			"highlight2": "Ollama için yerel thinking/reasoning desteği — Ollama modellerini kullanırken reasoning çıktısını uçtan uca koru.",
+			"highlight3": "Anthropic özel `apiModelId` düzeltmesi — özel Anthropic model kimlikleri artık sessizce `claude-sonnet-4-5` modeline geri dönmek yerine seçili kalıyor."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

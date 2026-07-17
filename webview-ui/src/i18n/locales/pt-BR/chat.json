@@ -341,9 +341,9 @@
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novidades:",
-			"highlight1": "Suporte ao Claude Sonnet 5 — o modelo mais recente do Claude agora está disponível nos provedores Anthropic, Bedrock e Vertex.",
-			"highlight2": "Atualização para Semble v0.4.1 — análise de resultados achatada e mensagens de status localizadas.",
-			"highlight3": "Guarda de transição de estado do ciclo de vida das tarefas — uma nova guarda de transição de estado e a reconciliação de delegação na inicialização evitam transições de estado de tarefa inválidas."
+			"highlight1": "Provedor Friendli com suporte a GLM-5.2 — use o modelo GLM mais recente pelo Friendli.",
+			"highlight2": "Suporte nativo de thinking/reasoning para Ollama — preserve a saída de raciocínio de ponta a ponta ao usar modelos do Ollama.",
+			"highlight3": "Correção de `apiModelId` personalizado da Anthropic — os IDs de modelo personalizados da Anthropic agora permanecem selecionados em vez de voltar silenciosamente para `claude-sonnet-4-5`."
 		},
 		"cloudAgents": {
 			"heading": "Novidades na Nuvem:",

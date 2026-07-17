@@ -213,7 +213,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "jul-2026-v3.66.0-claude-sonnet-5-semble-task-lifecycle" // v3.66.0 Claude Sonnet 5 support, Semble v0.4.1 upgrade, task-lifecycle status transition guard
+	public readonly latestAnnouncementId = "jul-2026-v3.68.0-friendli-ollama-anthropic-apimodelid" // v3.68.0 Friendli GLM-5.2 support, native Ollama thinking/reasoning, Anthropic custom apiModelId fix
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 

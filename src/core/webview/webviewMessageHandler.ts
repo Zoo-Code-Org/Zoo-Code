@@ -1042,6 +1042,7 @@ export const webviewMessageHandler = async (
 						poe: {},
 						deepseek: {},
 						"opencode-go": {},
+						kenari: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -1150,6 +1151,23 @@ export const webviewMessageHandler = async (
 			candidates.push({
 				key: "opencode-go",
 				options: { provider: "opencode-go", apiKey: opencodeGoApiKey },
+			})
+
+			// Kenari's /models endpoint is public — it returns the full model list with no
+			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
+			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
+			// model) whenever the key wasn't yet in apiConfiguration at fetch time. The key is still
+			// forwarded when present.
+			const kenariApiKey = message?.values?.kenariApiKey ?? apiConfiguration.kenariApiKey
+
+			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
+			if (message?.values?.kenariApiKey) {
+				await flushModels({ provider: "kenari", apiKey: kenariApiKey }, true)
+			}
+
+			candidates.push({
+				key: "kenari",
+				options: { provider: "kenari", apiKey: kenariApiKey },
 			})
 
 			// Apply single provider filter if specified

@@ -53,22 +53,15 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.66.0
+## What's New in v3.68.0
 
-- **Claude Sonnet 5 support** — the latest Claude model is now available across Anthropic, Bedrock, and Vertex providers
-- **Semble v0.4.1 upgrade** — flattened result parsing and localized status messages
-- **Task-lifecycle status transition guard** — a new status transition guard and startup delegation reconciliation prevent invalid task state transitions
-- Fix: LiteLLM cache key collision and silent fallback to a non-existent default model
-- Fix: reliable auto context condensing for the VS Code Language Model API
-- Fix: ThinkingBudget now supports `xhigh` and all extended reasoning effort values
-- Fix: round-trip DeepSeek `reasoning_content` in thinking mode to prevent 400 errors
-- Fix: base64-encode Gemini `thoughtSignature` bypass token to fix the Vertex AI empty-response loop
-- Fix: provider cache reset after settings import
-- Fix: atomically serialize `reopenParentFromDelegation`
-- Fix: shell default profile name type guard
-- Security: dependency-review, invisible-char detection, and least-privilege workflow permissions
-- Upgrade `@anthropic-ai/sdk` to 0.104.1 and `@anthropic-ai/vertex-sdk` to 0.17.1
-- Dependency and tooling updates
+- **Friendli provider with GLM-5.2 support** — use the latest GLM model through Friendli.
+- **Native Ollama thinking/reasoning support** — preserve reasoning output end-to-end when you use Ollama models.
+- **Anthropic custom `apiModelId` fix** — custom Anthropic model IDs now stay selected instead of silently falling back to `claude-sonnet-4-5`.
+- Fix: Ollama provider tool result handling and premature context condensing.
+- Fix: preserve the parent-child task link when a delegated subtask is interrupted.
+- Improve Anthropic Vertex Claude content block handling for more reliable responses.
+- CI, nightly publishing, and dependency/tooling updates.
 
 <details>
   <summary>🌐 Available languages</summary>

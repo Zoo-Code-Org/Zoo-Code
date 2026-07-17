@@ -30,11 +30,15 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.66.0 新增内容
+## v3.68.0 新增内容
 
-- **Claude Sonnet 5 支持** — 最新 Claude 模型现已在 Anthropic、Bedrock 和 Vertex 提供商上可用
-- **Semble v0.4.1 升级** — 扁平化的结果解析和本地化的状态消息
-- **任务生命周期状态转换守卫** — 新的状态转换守卫和启动时的委派对账可防止无效的任务状态转换
+- **支持 GLM-5.2 的 Friendli 提供商** — 通过 Friendli 使用最新的 GLM 模型。
+- **Ollama 原生 thinking/reasoning 支持** — 使用 Ollama 模型时可端到端保留 reasoning 输出。
+- **Anthropic 自定义 `apiModelId` 修复** — 自定义 Anthropic 模型 ID 现在会保持选中，不再静默回退到 `claude-sonnet-4-5`。
+- 修复：Ollama 提供商的工具结果处理和过早的上下文压缩。
+- 修复：委派子任务被中断时保留父子任务链接。
+- 改进 Anthropic Vertex 中 Claude 内容块的处理，以获得更可靠的响应。
+- CI、nightly 发布以及依赖/工具更新。
 
 ## Zoo Code 能为您做什么？
 
