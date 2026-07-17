@@ -77,7 +77,16 @@ export abstract class BaseProvider implements ApiHandler {
 		// backends like Bedrock that enforce strict 2020-12 compliance.
 		const normalized = normalizeToolSchema(schema as Record<string, unknown>)
 
-		if (!normalized || typeof normalized !== "object" || normalized.type !== "object") {
+		if (!normalized || typeof normalized !== "object") {
+			return normalized
+		}
+
+		// Check if the schema represents an object type:
+		// - Direct type: "object" (standard case)
+		// - Has "properties" (handles nullable objects that were converted to
+		//   anyOf by normalization — type is no longer "object" but properties
+		//   are preserved at the top level so strict-mode processing still applies)
+		if (normalized.type !== "object" && !normalized.properties) {
 			return normalized
 		}
 
