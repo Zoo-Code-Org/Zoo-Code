@@ -154,7 +154,7 @@ describe("ExecaTerminalProcess", () => {
 					resolveBlock = resolve
 				})
 
-				execaMock.mockImplementation((options: any) => {
+				execaMock.mockImplementation(((options: any) => {
 					return (_template: TemplateStringsArray, ...args: any[]) => ({
 						pid: mockPid,
 						iterable: (_opts: any) =>
@@ -165,7 +165,7 @@ describe("ExecaTerminalProcess", () => {
 							})(),
 						kill: vitest.fn(),
 					})
-				})
+				}) as any)
 
 				const spy = vitest.fn()
 				terminalProcess.on("shell_execution_complete", spy)
@@ -193,20 +193,20 @@ describe("ExecaTerminalProcess", () => {
 
 			it("should emit aborted: false in ExecaError catch path", async () => {
 			const execaMock = vitest.mocked(execa)
-			execaMock.mockImplementation((options: any) => {
+			execaMock.mockImplementation(((options: any) => {
 				return (_template: TemplateStringsArray, ...args: any[]) => ({
 					pid: mockPid,
 										iterable: (_opts: any) =>
 											// eslint-disable-next-line require-yield
 											(async function* () {
-												throw Object.assign(new ExecaError("exec failed"), {
+												throw Object.assign(new (ExecaError as any)("exec failed"), {
 								exitCode: 1,
 								signal: "SIGTERM",
 							})
 						})(),
 					kill: vitest.fn(),
 				})
-			})
+			}) as any)
 
 			const spy = vitest.fn()
 			terminalProcess.on("shell_execution_complete", spy)
@@ -220,7 +220,7 @@ describe("ExecaTerminalProcess", () => {
 
 		it("should emit aborted: false in generic error catch path", async () => {
 			const execaMock = vitest.mocked(execa)
-			execaMock.mockImplementation((options: any) => {
+			execaMock.mockImplementation(((options: any) => {
 				return (_template: TemplateStringsArray, ...args: any[]) => ({
 					pid: mockPid,
 										iterable: (_opts: any) =>
@@ -230,7 +230,7 @@ describe("ExecaTerminalProcess", () => {
 						})(),
 					kill: vitest.fn(),
 				})
-			})
+			}) as any)
 
 			const spy = vitest.fn()
 			terminalProcess.on("shell_execution_complete", spy)
