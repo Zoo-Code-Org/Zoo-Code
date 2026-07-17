@@ -566,7 +566,7 @@ export async function executeCommandInTerminal(
 /**
  * Format exit status from ExitCodeDetails
  */
-function formatExitStatus(exitDetails: ExitCodeDetails | undefined): string {
+export function formatExitStatus(exitDetails: ExitCodeDetails | undefined): string {
 	if (exitDetails === undefined) {
 		return "Exit code: <undefined, notify user>"
 	}

@@ -327,4 +327,34 @@ describe("executeCommandTool", () => {
 			expect(executeCommandModule.resolveAgentTimeoutMs(30)).toBe(30_000)
 		})
 	})
+
+	describe("formatExitStatus", () => {
+		it('should return "Command was aborted by the user." when aborted is true', () => {
+			expect(executeCommandModule.formatExitStatus({ exitCode: 0, aborted: true })).toBe(
+				"Command was aborted by the user.",
+			)
+		})
+
+		it("should return exit code message when aborted is false", () => {
+			expect(executeCommandModule.formatExitStatus({ exitCode: 0, aborted: false })).toBe("Exit code: 0")
+		})
+
+		it("should return exit code message when aborted is undefined", () => {
+			expect(executeCommandModule.formatExitStatus({ exitCode: 0 })).toBe("Exit code: 0")
+		})
+
+		it("should return signal message when signalName is present and not aborted", () => {
+			expect(
+				executeCommandModule.formatExitStatus({
+					exitCode: undefined,
+					signalName: "SIGKILL",
+					aborted: false,
+				}),
+			).toBe("Process terminated by signal SIGKILL")
+		})
+
+		it("should handle undefined exitDetails", () => {
+			expect(executeCommandModule.formatExitStatus(undefined)).toBe("Exit code: <undefined, notify user>")
+		})
+	})
 })

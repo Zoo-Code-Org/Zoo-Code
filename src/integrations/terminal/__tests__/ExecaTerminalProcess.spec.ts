@@ -23,7 +23,7 @@ vitest.mock("ps-tree", () => ({
 	}),
 }))
 
-import { execa } from "execa"
+import { execa, ExecaError } from "execa"
 import { ExecaTerminalProcess } from "../ExecaTerminalProcess"
 import { BaseTerminal } from "../BaseTerminal"
 import type { RooTerminal } from "../types"
@@ -125,7 +125,7 @@ describe("ExecaTerminalProcess", () => {
 			expect(terminalProcess.terminal).toBe(mockTerminal)
 		})
 
-		it("should emit shell_execution_complete with exitCode 0", async () => {
+		it("should emit shell_execution_complete with exitCode 0 and aborted: false", async () => {
 			const spy = vitest.fn()
 			terminalProcess.on("shell_execution_complete", spy)
 			await terminalProcess.run("echo test")
@@ -143,6 +143,56 @@ describe("ExecaTerminalProcess", () => {
 			await terminalProcess.run("echo test")
 			expect(mockTerminal.setActiveStream).toHaveBeenCalledWith(expect.any(Object), mockPid)
 			expect(mockTerminal.setActiveStream).toHaveBeenLastCalledWith(undefined)
+		})
+	})
+
+	describe("error-path abort emission", () => {
+		it("should emit aborted: false in ExecaError catch path", async () => {
+			const execaMock = vitest.mocked(execa)
+			execaMock.mockImplementation((options: any) => {
+				return (_template: TemplateStringsArray, ...args: any[]) => ({
+					pid: mockPid,
+					iterable: (_opts: any) =>
+						(async function* () {
+							throw Object.assign(new ExecaError("exec failed"), {
+								exitCode: 1,
+								signal: "SIGTERM",
+							})
+						})(),
+					kill: vitest.fn(),
+				})
+			})
+
+			const spy = vitest.fn()
+			terminalProcess.on("shell_execution_complete", spy)
+			await terminalProcess.run("echo test")
+			expect(spy).toHaveBeenCalledWith({
+				exitCode: 1,
+				signalName: "SIGTERM",
+				aborted: false,
+			})
+		})
+
+		it("should emit aborted: false in generic error catch path", async () => {
+			const execaMock = vitest.mocked(execa)
+			execaMock.mockImplementation((options: any) => {
+				return (_template: TemplateStringsArray, ...args: any[]) => ({
+					pid: mockPid,
+					iterable: (_opts: any) =>
+						(async function* () {
+							throw new Error("generic error")
+						})(),
+					kill: vitest.fn(),
+				})
+			})
+
+			const spy = vitest.fn()
+			terminalProcess.on("shell_execution_complete", spy)
+			await terminalProcess.run("echo test")
+			expect(spy).toHaveBeenCalledWith({
+				exitCode: 1,
+				aborted: false,
+			})
 		})
 	})
 
