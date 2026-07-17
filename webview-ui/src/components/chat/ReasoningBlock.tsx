@@ -14,6 +14,16 @@ interface ReasoningBlockProps {
 	metadata?: any
 }
 
+/**
+ * Module-level cache that persists elapsed reasoning durations across
+ * React component remounts. When Virtuoso recycles a ReasoningBlock
+ * (e.g., during expand/collapse or scroll), the cache provides the
+ * final elapsed value from the previous mount cycle instead of
+ * recomputing from Date.now() - ts, which would be wrong if minutes
+ * have passed since the message was created.
+ */
+const elapsedCache = new Map<number, number>()
+
 export const ReasoningBlock = ({ content, isStreaming, isLast, ts }: ReasoningBlockProps) => {
 	const { t } = useTranslation()
 	const { reasoningBlockCollapsed } = useExtensionState()
@@ -26,7 +36,14 @@ export const ReasoningBlock = ({ content, isStreaming, isLast, ts }: ReasoningBl
 	// virtualized list), the timer survives because ts is a stable
 	// prop from the message data rather than a fresh Date.now().
 	const startTimeRef = useRef<number>(ts)
-	const [elapsed, setElapsed] = useState<number>(() => (isStreaming ? 0 : Math.max(0, Date.now() - ts)))
+	// On init, prefer cached elapsed (survives remounts). If not cached,
+	// use Date.now() - ts for a reasonable initial estimate. This handles
+	// the first mount where no cached value exists yet.
+	const [elapsed, setElapsed] = useState<number>(() => {
+		const cached = elapsedCache.get(ts)
+		if (cached !== undefined) return cached
+		return isStreaming ? 0 : Math.max(0, Date.now() - ts)
+	})
 	const contentRef = useRef<HTMLDivElement>(null)
 
 	useEffect(() => {
@@ -35,12 +52,25 @@ export const ReasoningBlock = ({ content, isStreaming, isLast, ts }: ReasoningBl
 
 	useEffect(() => {
 		if (isLast && isStreaming) {
-			const tick = () => setElapsed(Date.now() - startTimeRef.current)
+			const tick = () => {
+				const current = Date.now() - startTimeRef.current
+				setElapsed(current)
+				elapsedCache.set(ts, current)
+			}
 			tick()
 			const id = setInterval(tick, 1000)
 			return () => clearInterval(id)
 		}
 	}, [isLast, isStreaming])
+
+	// Cache the final elapsed value when streaming stops so it survives
+	// future remounts even if the component unmounts before the timer
+	// effect cleanup runs.
+	useEffect(() => {
+		if (!isStreaming && elapsed > 0) {
+			elapsedCache.set(ts, elapsed)
+		}
+	}, [isStreaming, ts, elapsed])
 
 	const seconds = Math.floor(elapsed / 1000)
 	const secondsLabel = t("chat:reasoning.seconds", { count: seconds })

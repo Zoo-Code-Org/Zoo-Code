@@ -75,30 +75,31 @@ describe("ReasoningBlock", () => {
 		expect(screen.getByText("5s")).toBeInTheDocument()
 	})
 
-	it("preserves elapsed time on remount with same ts (Virtuoso recycle)", () => {
-		// ts is 1 second in the past so elapsed starts at 1s (not 0, since 0 hides the label)
-		const ts = Date.now() - 1000
+		it("preserves elapsed time on remount with same ts (Virtuoso recycle)", () => {
+			// ts is 1 second in the past so elapsed starts at 1s (not 0, since 0 hides the label)
+			const ts = Date.now() - 1000
 
-		const { unmount } = render(<ReasoningBlock {...defaultProps} ts={ts} isStreaming={false} isLast={false} />)
+			const { unmount } = render(<ReasoningBlock {...defaultProps} ts={ts} isStreaming={false} isLast={false} />)
 
-		// Initially 1s since ts is 1s ago
-		expect(screen.getByText("1s")).toBeInTheDocument()
+			// Initially 1s since ts is 1s ago
+			expect(screen.getByText("1s")).toBeInTheDocument()
 
-		// Advance time by 10 seconds
-		act(() => {
-			vi.advanceTimersByTime(10_000)
+			// Advance time by 10 seconds
+			act(() => {
+				vi.advanceTimersByTime(10_000)
+			})
+
+			// Unmount (simulating Virtuoso recycling the component)
+			unmount()
+
+			// Remount with the same ts
+			render(<ReasoningBlock {...defaultProps} ts={ts} isStreaming={false} isLast={false} />)
+
+			// Should still show 1s — the elapsed value was cached at module level
+			// and survived the remount, instead of recomputing from Date.now() - ts
+			// (which would give 11s and inflate the timer after a scroll away)
+			expect(screen.getByText("1s")).toBeInTheDocument()
 		})
-
-		// Unmount (simulating Virtuoso recycling the component)
-		unmount()
-
-		// Remount with the same ts
-		render(<ReasoningBlock {...defaultProps} ts={ts} isStreaming={false} isLast={false} />)
-
-		// Should still show ~11s, not 1 — timer survived the remount
-		// (elapsed is computed from Date.now() - ts on each mount, and fake timers keep advancing)
-		expect(screen.getByText("11s")).toBeInTheDocument()
-	})
 
 	it("stops timer when streaming ends", () => {
 		const ts = Date.now() - 5000
