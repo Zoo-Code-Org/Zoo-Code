@@ -45,7 +45,7 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 
 // Mock the ModelPicker
 vi.mock("../../ModelPicker", () => ({
-	ModelPicker: () => <div data-testid="model-picker">Model Picker</div>,
+	ModelPicker: ({ models }: any) => <div data-testid="model-picker">{Object.keys(models ?? {}).join(",")}</div>,
 }))
 
 // Mock the ThinkingBudget
@@ -72,13 +72,17 @@ vi.mock("@src/utils/vscode", () => ({
 }))
 
 // Stub the shared Button so we can assert onClick/disabled without its styling deps.
-vi.mock("@src/components/ui", () => ({
-	Button: ({ children, onClick, disabled, className }: any) => (
-		<button onClick={onClick} disabled={disabled} className={className} data-testid="refresh-button">
-			{children}
-		</button>
-	),
-}))
+vi.mock("@src/components/ui", async () => {
+	const actual = await vi.importActual<typeof import("@src/components/ui")>("@src/components/ui")
+	return {
+		...actual,
+		Button: ({ children, onClick, disabled, className }: any) => (
+			<button onClick={onClick} disabled={disabled} className={className} data-testid="refresh-button">
+				{children}
+			</button>
+		),
+	}
+})
 
 describe("Ollama Component - thinking setting", () => {
 	const mockSetApiConfigurationField = vi.fn()
@@ -296,6 +300,27 @@ describe("Ollama Component - refresh models", () => {
 		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
 	})
 
+	it("handles a response dispatched synchronously while posting the refresh request", () => {
+		render(
+			<Ollama
+				apiConfiguration={{} as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		// Ignore the mount request and respond synchronously to the explicit refresh.
+		postMessageMock.mockClear()
+		postMessageMock.mockImplementationOnce(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "ollamaModels", ollamaModels: { "llama3:latest": {} } } }),
+			)
+		})
+		fireEvent.click(screen.getByTestId("refresh-button"))
+
+		expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument()
+		expect(screen.getByTestId("model-picker")).toHaveTextContent("llama3:latest")
+	})
+
 	it("shows success state when ollamaModels arrives with models while loading", () => {
 		render(
 			<Ollama
@@ -310,7 +335,7 @@ describe("Ollama Component - refresh models", () => {
 		expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument()
 	})
 
-	it("shows error state when ollamaModels arrives with empty models while loading", () => {
+	it("shows success state when Ollama is reachable but has no installed models", () => {
 		render(
 			<Ollama
 				apiConfiguration={{} as ProviderSettings}
@@ -321,7 +346,7 @@ describe("Ollama Component - refresh models", () => {
 		fireEvent.click(screen.getByTestId("refresh-button"))
 		dispatchMessage({ type: "ollamaModels", ollamaModels: {} })
 
-		expect(screen.getByText("settings:providers.refreshModels.error")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument()
 	})
 
 	it("displays the backend error message when ollamaModels arrives with an error", () => {
@@ -336,6 +361,25 @@ describe("Ollama Component - refresh models", () => {
 		dispatchMessage({ type: "ollamaModels", ollamaModels: {}, error: "Connection refused" })
 
 		expect(screen.getByText("Connection refused")).toBeInTheDocument()
+	})
+
+	it("preserves previously loaded models when a later refresh fails", () => {
+		render(
+			<Ollama
+				apiConfiguration={{} as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("refresh-button"))
+		dispatchMessage({ type: "ollamaModels", ollamaModels: { "llama3:latest": {} } })
+		expect(screen.getByTestId("model-picker")).toHaveTextContent("llama3:latest")
+
+		fireEvent.click(screen.getByTestId("refresh-button"))
+		dispatchMessage({ type: "ollamaModels", ollamaModels: {}, error: "Connection refused" })
+
+		expect(screen.getByText("Connection refused")).toBeInTheDocument()
+		expect(screen.getByTestId("model-picker")).toHaveTextContent("llama3:latest")
 	})
 
 	it("ignores ollamaModels messages when not in loading state", () => {

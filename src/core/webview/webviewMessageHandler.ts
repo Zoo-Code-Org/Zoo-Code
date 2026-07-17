@@ -1227,27 +1227,37 @@ export const webviewMessageHandler = async (
 			// at — not the stale one from before they started editing.
 			const baseUrl = message.values?.baseUrl ?? ollamaApiConfig.ollamaBaseUrl
 			const apiKey = message.values?.apiKey ?? ollamaApiConfig.ollamaApiKey
+			const logBaseUrl = baseUrl || "http://localhost:11434"
+			const ollamaOptions = {
+				provider: "ollama" as const,
+				baseUrl,
+				apiKey,
+			}
 			try {
-				const ollamaOptions = {
-					provider: "ollama" as const,
-					baseUrl,
-					apiKey,
-				}
-				// Flush cache and refresh to ensure fresh models.
+				// Refresh the cache before reading the models. Keep this error
+				// separate from the read below so diagnostics identify which
+				// cache operation failed.
 				await flushModels(ollamaOptions, true)
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				provider.log(`[requestOllamaModels] Failed to refresh model cache for ${logBaseUrl}: ${errorMsg}`)
+				provider.postMessageToWebview({
+					type: "ollamaModels",
+					ollamaModels: {},
+					error: errorMsg,
+				})
+				break
+			}
 
+			try {
 				const ollamaModels = await getModels(ollamaOptions)
 
 				// Always post a response so the webview refresh status can
 				// transition out of "loading" — even when no models are found.
-				provider.postMessageToWebview({ type: "ollamaModels", ollamaModels: ollamaModels })
+				provider.postMessageToWebview({ type: "ollamaModels", ollamaModels })
 			} catch (error) {
-				// Log the error to the output channel for debugging, but still
-				// post an empty response so the webview doesn't stay stuck in
-				// the loading state. Include the error message so the webview
-				// can display it directly in the settings panel.
 				const errorMsg = error instanceof Error ? error.message : String(error)
-				provider.log(`[requestOllamaModels] Failed to fetch models: ${errorMsg}`)
+				provider.log(`[requestOllamaModels] Failed to read models for ${logBaseUrl}: ${errorMsg}`)
 				provider.postMessageToWebview({
 					type: "ollamaModels",
 					ollamaModels: {},

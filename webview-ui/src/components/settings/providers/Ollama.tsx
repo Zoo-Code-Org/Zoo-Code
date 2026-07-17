@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { Checkbox } from "vscrui"
 
@@ -24,6 +24,7 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 	const [ollamaModels, setOllamaModels] = useState<ModelRecord>({})
 	const [refreshStatus, setRefreshStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
 	const [refreshError, setRefreshError] = useState<string | undefined>()
+	const refreshStatusRef = useRef(refreshStatus)
 	const routerModels = useRouterModels()
 
 	const handleInputChange = useCallback(
@@ -42,16 +43,15 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 			const message: ExtensionMessage = event.data
 
 			if (message.type === "ollamaModels") {
-				const newModels = message.ollamaModels ?? {}
-				setOllamaModels(newModels)
+				if (!message.error) {
+					setOllamaModels(message.ollamaModels ?? {})
+				}
 
-				if (refreshStatus === "loading") {
-					if (Object.keys(newModels).length > 0) {
-						setRefreshStatus("success")
-					} else {
-						setRefreshStatus("error")
-						setRefreshError(message.error)
-					}
+				if (refreshStatusRef.current === "loading") {
+					const nextStatus = message.error ? "error" : "success"
+					refreshStatusRef.current = nextStatus
+					setRefreshStatus(nextStatus)
+					setRefreshError(message.error)
 				}
 			}
 		}
@@ -60,9 +60,10 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 		return () => {
 			window.removeEventListener("message", handleMessage)
 		}
-	}, [refreshStatus])
+	}, [])
 
 	const handleRefreshModels = useCallback(() => {
+		refreshStatusRef.current = "loading"
 		setRefreshStatus("loading")
 		setRefreshError(undefined)
 		vscode.postMessage({

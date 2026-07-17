@@ -249,6 +249,7 @@ const ApiOptions = ({
 			apiConfiguration?.openAiBaseUrl,
 			apiConfiguration?.openAiApiKey,
 			apiConfiguration?.ollamaBaseUrl,
+			apiConfiguration?.ollamaApiKey,
 			apiConfiguration?.lmStudioBaseUrl,
 			apiConfiguration?.litellmBaseUrl,
 			apiConfiguration?.litellmApiKey,
