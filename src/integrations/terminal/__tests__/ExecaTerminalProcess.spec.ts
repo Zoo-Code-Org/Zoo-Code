@@ -146,8 +146,52 @@ describe("ExecaTerminalProcess", () => {
 		})
 	})
 
-	describe("error-path abort emission", () => {
-		it("should emit aborted: false in ExecaError catch path", async () => {
+		describe("error-path abort emission", () => {
+			it("should emit aborted: true when abort() is called during execution", async () => {
+				const execaMock = vitest.mocked(execa)
+				let resolveBlock: () => void
+				const blockPromise = new Promise<void>((resolve) => {
+					resolveBlock = resolve
+				})
+
+				execaMock.mockImplementation((options: any) => {
+					return (_template: TemplateStringsArray, ...args: any[]) => ({
+						pid: mockPid,
+						iterable: (_opts: any) =>
+							(async function* () {
+								yield "test output\\n"
+								// Block the second yield so we can call abort() from outside
+								await blockPromise
+							})(),
+						kill: vitest.fn(),
+					})
+				})
+
+				const spy = vitest.fn()
+				terminalProcess.on("shell_execution_complete", spy)
+
+				// Start running - will yield once then block on blockPromise
+				const runPromise = terminalProcess.run("echo test")
+
+				// Let the first yield process
+				await new Promise((r) => setTimeout(r, 50))
+
+				// Now abort while the command is "running"
+				terminalProcess.abort()
+
+				// Resolve the block so the generator returns,
+				// then the for-await loop checks this.aborted and breaks
+				resolveBlock!()
+
+				await runPromise
+
+				expect(spy).toHaveBeenCalledWith({
+					exitCode: 0,
+					aborted: true,
+				})
+			})
+
+			it("should emit aborted: false in ExecaError catch path", async () => {
 			const execaMock = vitest.mocked(execa)
 			execaMock.mockImplementation((options: any) => {
 				return (_template: TemplateStringsArray, ...args: any[]) => ({

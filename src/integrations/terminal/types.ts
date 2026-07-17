@@ -73,9 +73,9 @@ export interface ExitCodeDetails {
 	signalName?: string
 	coreDumpPossible?: boolean
 	/**
-	 * Set to true when the user explicitly pressed the Abort button
-	 * to terminate the command, as opposed to the process exiting on its own
-	 * or being killed by the OS (e.g., OOM-killer).
+	 * Set to true when the process was intentionally aborted (via abort(),
+	 * timeout, or task teardown), as opposed to the process exiting on its
+	 * own or being killed by the OS (e.g., OOM-killer).
 	 */
 	aborted?: boolean
 }
