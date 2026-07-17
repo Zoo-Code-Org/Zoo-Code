@@ -26,6 +26,15 @@ vi.mock("vscode", () => {
 	return { window, workspace, env, Uri, commands, ExtensionMode, version }
 })
 
+// Mock TelemetryService (needed by attemptCompletionTool's emitTaskCompleted)
+vi.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			captureTaskCompleted: vi.fn(),
+		},
+	},
+}))
+
 // Mock persistence BEFORE importing provider
 vi.mock("../core/task-persistence/taskMessages", () => ({
 	readTaskMessages: vi.fn().mockResolvedValue([]),
@@ -1133,6 +1142,142 @@ describe("History resume delegation - parent metadata transitions", () => {
 			expect(capturedParentResult?.status).toBe("active")
 			expect(capturedParentResult?.awaitingChildId).toBeUndefined()
 			expect(capturedParentResult?.completedByChildId).toBe("c-handoff")
+		})
+	})
+
+	describe("Issue #566 — manual stop/resume of a delegated subtask", () => {
+		it("reopens the parent after a subtask is cancelled mid-stream, resumed, and completes (interrupted → attempt_completion)", async () => {
+			// Step 1: simulate cancelTask()'s persisted transition — child "active" → "interrupted",
+			// parent stays "delegated" with awaitingChildId intact (ClineProvider.ts cancelTaskInternal).
+			const childItem: Record<string, any> = {
+				id: "child-566",
+				status: "interrupted",
+				parentTaskId: "parent-566",
+				ts: 1,
+				task: "Child task",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				mode: "code",
+				workspace: "/tmp",
+			}
+			const parentItem: Record<string, any> = {
+				id: "parent-566",
+				status: "delegated",
+				delegatedToId: "child-566",
+				awaitingChildId: "child-566",
+				childIds: ["child-566"],
+				ts: 0,
+				task: "Parent task",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				mode: "code",
+				workspace: "/tmp",
+			}
+
+			// Step 2: user clicks "Resume" — the extension rehydrates the child from its persisted
+			// history item (createTaskWithHistoryItem passes historyItem.status through as
+			// initialStatus), so the resumed task instance still reports "interrupted".
+			let currentActiveId: string | undefined = "child-566"
+			const emitSpy = vi.fn()
+			const removeClineFromStack = vi.fn().mockImplementation(async () => {
+				currentActiveId = undefined
+			})
+			const createTaskWithHistoryItem = vi.fn().mockImplementation(async (historyItem: any) => {
+				currentActiveId = historyItem.id
+				return {
+					taskId: historyItem.id,
+					resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
+					overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
+					overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
+				}
+			})
+			const getTaskWithId = vi.fn(async (id: string) => {
+				const item = id === "child-566" ? childItem : id === "parent-566" ? parentItem : undefined
+				if (!item) throw new Error("Task not found")
+				return { historyItem: item }
+			})
+			const taskHistoryStore = {
+				atomicUpdatePair: vi.fn(
+					async (
+						firstId: string,
+						secondId: string,
+						firstUpdater: (h: any) => any,
+						secondUpdater: (h: any) => any,
+					) => {
+						Object.assign(childItem, firstUpdater(childItem))
+						Object.assign(parentItem, secondUpdater(parentItem))
+						return []
+					},
+				),
+				get: vi.fn((id: string) =>
+					id === "child-566" ? childItem : id === "parent-566" ? parentItem : undefined,
+				),
+			}
+
+			const provider = makeProviderStub({
+				contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+				getTaskWithId,
+				emit: emitSpy,
+				getCurrentTask: vi.fn(() => (currentActiveId ? ({ taskId: currentActiveId } as any) : undefined)),
+				removeClineFromStack,
+				createTaskWithHistoryItem,
+				taskHistoryStore,
+				reopenParentFromDelegation: vi.fn(async (params: any) => {
+					// Intentional self-reference: the provider variable is initialized before this stub is invoked.
+					return await (ClineProvider.prototype as any).reopenParentFromDelegation.call(provider, params)
+				}),
+			} as unknown as ClineProvider)
+
+			vi.mocked(readTaskMessages).mockResolvedValue([])
+			vi.mocked(readApiMessages).mockResolvedValue([])
+
+			// Step 3: the resumed subtask finishes its work and calls attempt_completion.
+			const { attemptCompletionTool } = await import("../core/tools/AttemptCompletionTool")
+			const resumedChildTask = {
+				taskId: "child-566",
+				parentTask: undefined, // live parent reference is gone after resume; only parentTaskId survives
+				parentTaskId: "parent-566",
+				historyItem: { parentTaskId: "parent-566" },
+				providerRef: { deref: () => provider },
+				say: vi.fn().mockResolvedValue(undefined),
+				emit: vi.fn(),
+				getTokenUsage: vi.fn(() => ({})),
+				toolUsage: {},
+				clineMessages: [],
+				userMessageContent: [],
+				consecutiveMistakeCount: 0,
+				emitFinalTokenUsageUpdate: vi.fn(),
+			} as unknown as import("../core/task/Task").Task
+
+			const block = {
+				type: "tool_use",
+				name: "attempt_completion",
+				params: { result: "Child finished after resume" },
+				nativeArgs: { result: "Child finished after resume" },
+				partial: false,
+			} as any
+
+			await attemptCompletionTool.handle(resumedChildTask, block, {
+				askApproval: vi.fn(),
+				handleError: vi.fn(async (_action: string, err: Error) => {
+					throw err
+				}),
+				pushToolResult: vi.fn(),
+				askFinishSubTaskApproval: vi.fn(async () => true),
+				toolDescription: () => "desc",
+			} as any)
+
+			// The parent must regain control — this is the exact behavior issue #566 reported as broken.
+			expect(currentActiveId).toBe("parent-566")
+			expect(childItem.status).toBe("completed")
+			expect(parentItem.status).toBe("active")
+			expect(parentItem.awaitingChildId).toBeUndefined()
+
+			const eventNames = emitSpy.mock.calls.map((c: any[]) => c[0])
+			expect(eventNames).toContain(RooCodeEventName.TaskDelegationCompleted)
+			expect(eventNames).toContain(RooCodeEventName.TaskDelegationResumed)
 		})
 	})
 })
