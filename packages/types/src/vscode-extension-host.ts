@@ -460,6 +460,7 @@ export interface WebviewMessage {
 		| "shareCurrentTask"
 		| "showTaskWithId"
 		| "deleteTaskWithId"
+		| "abandonSubtaskWithId"
 		| "exportTaskWithId"
 		| "importSettings"
 		| "exportSettings"

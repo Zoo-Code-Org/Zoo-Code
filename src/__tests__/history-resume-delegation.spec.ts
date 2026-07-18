@@ -168,7 +168,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		// Verify child closed and parent reopened with updated metadata
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
-		expect(removeClineFromStack).toHaveBeenCalledWith({ skipDelegationRepair: true })
+		expect(removeClineFromStack).toHaveBeenCalledWith()
 		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(
 			expect.objectContaining({
 				status: "active",
