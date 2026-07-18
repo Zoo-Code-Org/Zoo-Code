@@ -79,6 +79,8 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
+import { UsageEventStore, UsageRecorder } from "../../services/stats"
+import type { UsageRecordingContext } from "../../services/stats"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
@@ -271,6 +273,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
+	
+	/**
+	 * Usage 이벤트 기록기. API attempt의 terminal finalize에서만 호출된다.
+	 * store 초기화 실패 시 null이며, 이 경우 기록을 조용히 건너뛴다.
+	 * (아키텍처 보고서 섹션 5.5-5.8, rollback: writer를 optional service로 주입)
+	 */
+	private readonly usageRecorder: UsageRecorder | null = null
+	
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
@@ -538,6 +548,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
 		this.enableCheckpoints = enableCheckpoints
 		this.checkpointTimeout = checkpointTimeout
+
+		// Initialize usage recorder (best-effort: failure results in null recorder)
+		// Store initialization is deferred to first append; here we only construct the recorder.
+		// If the store fails at runtime, UsageRecorder catches errors internally.
+		try {
+			const store = new UsageEventStore(this.globalStoragePath)
+			this.usageRecorder = new UsageRecorder(store)
+		} catch (err) {
+			console.warn(`[Task#${this.taskId}] Failed to initialize UsageRecorder, stats will be skipped:`, err)
+		}
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
@@ -3150,7 +3170,44 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cacheReadTokens: tokens.cacheRead,
 									cost: tokens.total ?? costResult.totalCost,
 								})
+
+							// ── Usage Stats: terminal finalize ──────────────────────────
+							// captureUsageData is the single terminal boundary for completed/cancelled
+							// API attempts. We record the final usage event here.
+							// (Architecture report section 5.5-5.8: terminal finalize only, no chunk-level append)
+							if (this.usageRecorder) {
+								const requestKey = `${this.taskId}:${currentItem.retryAttempt ?? 0}`
+								const ctx: UsageRecordingContext = {
+									taskId: this.taskId,
+									parentTaskId: this.parentTaskId,
+									provider: String(
+										this.apiConfiguration.apiProvider && !isRetiredProvider(this.apiConfiguration.apiProvider)
+											? this.apiConfiguration.apiProvider
+											: "unknown",
+									),
+									model: getModelId(this.apiConfiguration) || "unknown",
+									mode: this._taskMode || defaultModeSlug,
+									attempt: currentItem.retryAttempt ?? 0,
+									inputTokens: tokens.input,
+									outputTokens: tokens.output,
+									cacheWriteTokens: tokens.cacheWrite,
+									cacheReadTokens: tokens.cacheRead,
+									totalCost: tokens.total,
+									// V1 semantics: provider-reported values, inclusion unknown
+									// (aggregator handles double-counting via inclusion metadata)
+									cacheReadInInput: "unknown",
+									cacheWriteInInput: "unknown",
+									reasoningInOutput: "unknown",
+									costSource: "provider",
+									tokenSource: "provider",
+								}
+								// Fire-and-forget: store error must not block task
+								this.usageRecorder
+									.finalizeUsageEvent(requestKey, status, ctx)
+									.catch(() => {})
 							}
+							// ── End Usage Stats ──────────────────────────────────────────
+						}
 						}
 
 						try {
@@ -3257,6 +3314,43 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						// Clean up partial state
 						await abortStream(cancelReason, streamingFailedMessage)
+
+						// ── Usage Stats: terminal finalize for failed/cancelled ───────
+						// This catch block is the terminal path for streaming failures and
+						// user cancellations. Record the partial usage with the appropriate status.
+						// (Architecture report section 5.5-5.8: terminal finalize only)
+						if (this.usageRecorder) {
+							const requestKey = `${this.taskId}:${currentItem.retryAttempt ?? 0}`
+							const failedStatus: "failed" | "cancelled" = this.abort ? "cancelled" : "failed"
+							const ctx: UsageRecordingContext = {
+								taskId: this.taskId,
+								parentTaskId: this.parentTaskId,
+								provider: String(
+									this.apiConfiguration.apiProvider &&
+										!isRetiredProvider(this.apiConfiguration.apiProvider)
+										? this.apiConfiguration.apiProvider
+										: "unknown",
+								),
+								model: getModelId(this.apiConfiguration) || "unknown",
+								mode: this._taskMode || defaultModeSlug,
+								attempt: currentItem.retryAttempt ?? 0,
+								inputTokens: inputTokens,
+								outputTokens: outputTokens,
+								cacheWriteTokens: cacheWriteTokens,
+								cacheReadTokens: cacheReadTokens,
+								totalCost: totalCost,
+								cacheReadInInput: "unknown",
+								cacheWriteInInput: "unknown",
+								reasoningInOutput: "unknown",
+								costSource: "provider",
+								tokenSource: "provider",
+							}
+							// Fire-and-forget: store error must not block task
+							this.usageRecorder
+								.finalizeUsageEvent(requestKey, failedStatus, ctx)
+								.catch(() => {})
+						}
+						// ── End Usage Stats ──────────────────────────────────────────
 
 						if (this.abort) {
 							// User cancelled - abort the entire task
