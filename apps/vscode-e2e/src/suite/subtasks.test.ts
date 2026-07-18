@@ -5,8 +5,10 @@ import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 import { setDefaultSuiteTimeout } from "./test-utils"
 import { sleep, waitFor, waitUntilCompleted } from "./utils"
 import {
-	SUBTASK_API_HANG_CHILD_RESULT,
+	SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER,
+	SUBTASK_ABANDON_PARENT_PROMPT,
 	SUBTASK_API_HANG_CHILD_MARKER,
+	SUBTASK_API_HANG_CHILD_RESULT,
 	SUBTASK_API_HANG_PARENT_MARKER,
 	SUBTASK_API_HANG_PARENT_PROMPT,
 	SUBTASK_API_HANG_PARENT_RESULT,
@@ -801,7 +803,7 @@ suite("Roo Code Subtasks", function () {
 					autoApprovalEnabled: true,
 					enableCheckpoints: false,
 				},
-				text: SUBTASK_INTERRUPT_PARENT_PROMPT,
+				text: SUBTASK_ABANDON_PARENT_PROMPT,
 			})
 
 			let childTaskId: string | undefined
@@ -887,7 +889,7 @@ suite("Roo Code Subtasks", function () {
 			const completedChildTaskId = await waitUntilCompleted({
 				api,
 				start: async () => {
-					await api.sendMessage(SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER)
+					await api.sendMessage(SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER)
 					return childTaskId!
 				},
 			})

@@ -17,7 +17,9 @@
 		"condenseContext": "संदर्भ को बुद्धिमानी से संघनित करें",
 		"openApiHistory": "API इतिहास खोलें",
 		"openUiHistory": "UI इतिहास खोलें",
-		"backToParentTask": "मूल कार्य"
+		"backToParentTask": "मूल कार्य",
+		"waitingOnSubtask": "Waiting on subtask",
+		"goToSubtask": "Go to subtask"
 	},
 	"unpin": "पिन करें",
 	"pin": "अवपिन करें",

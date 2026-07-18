@@ -17,7 +17,9 @@
 		"condenseContext": "Cô đọng ngữ cảnh thông minh",
 		"openApiHistory": "Mở lịch sử API",
 		"openUiHistory": "Mở lịch sử UI",
-		"backToParentTask": "Nhiệm vụ cha"
+		"backToParentTask": "Nhiệm vụ cha",
+		"waitingOnSubtask": "Waiting on subtask",
+		"goToSubtask": "Go to subtask"
 	},
 	"unpin": "Bỏ ghim khỏi đầu",
 	"pin": "Ghim lên đầu",
