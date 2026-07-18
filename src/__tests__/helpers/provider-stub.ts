@@ -15,6 +15,7 @@ export function makeProviderStub<T extends object>(stub: T): T {
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
 	s.runDelegationTransition = proto.runDelegationTransition.bind(s)
+	s.removeClineFromStack ??= proto.removeClineFromStack.bind(s)
 	s.evictCurrentTask ??= proto.evictCurrentTask.bind(s)
 	return s
 }
