@@ -1,0 +1,204 @@
+import React, { memo, useMemo, useState } from "react"
+
+import { useAppTranslation } from "@/i18n/TranslationContext"
+import type { StatsBucket } from "@roo-code/types"
+
+import { Button, StandardTooltip } from "@/components/ui"
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+interface DailyActivity {
+	date: string // YYYY-MM-DD
+	totalTokens: number
+	events: number
+}
+
+interface UsageHeatmapProps {
+	buckets: StatsBucket[]
+}
+
+// ── Heatmap color levels ────────────────────────────────────────────────────
+
+/**
+ * Map a token value to a 0-4 intensity level based on the max value.
+ * Level 0 = no data, 1-4 = increasing intensity.
+ */
+function getIntensityLevel(value: number, maxValue: number): number {
+	if (value === 0 || maxValue === 0) return 0
+	const ratio = value / maxValue
+	if (ratio < 0.25) return 1
+	if (ratio < 0.5) return 2
+	if (ratio < 0.75) return 3
+	return 4
+}
+
+const HEATMAP_COLORS: Record<number, string> = {
+	0: "bg-vscode-editor-inactiveSelectionBackground",
+	1: "bg-vscode-textBlockQuote-background",
+	2: "bg-vscode-inputOption-activeBackground",
+	3: "bg-vscode-button-background",
+	4: "bg-vscode-button-hoverBackground",
+}
+
+// ── Date helpers ────────────────────────────────────────────────────────────
+
+function formatDateKey(date: Date): string {
+	const year = date.getFullYear()
+	const month = String(date.getMonth() + 1).padStart(2, "0")
+	const day = String(date.getDate()).padStart(2, "0")
+	return `${year}-${month}-${day}`
+}
+
+function formatDisplayDate(dateKey: string): string {
+	try {
+		const date = new Date(dateKey + "T00:00:00")
+		return date.toLocaleDateString(undefined, {
+			year: "numeric",
+			month: "short",
+			day: "numeric",
+		})
+	} catch {
+		return dateKey
+	}
+}
+
+// ── UsageHeatmap ────────────────────────────────────────────────────────────
+
+const UsageHeatmap = memo(({ buckets }: UsageHeatmapProps) => {
+	const { t } = useAppTranslation()
+	const [range, setRange] = useState<"30d" | "90d">("30d")
+
+	// Extract daily activity from buckets that have a "day" key
+	const dailyMap = useMemo(() => {
+		const map = new Map<string, DailyActivity>()
+
+		for (const bucket of buckets) {
+			const dayKey = bucket.key?.day
+			if (!dayKey) continue
+
+			const existing = map.get(dayKey)
+			if (existing) {
+				existing.totalTokens += bucket.totalTokens
+				existing.events += bucket.events
+			} else {
+				map.set(dayKey, {
+					date: dayKey,
+					totalTokens: bucket.totalTokens,
+					events: bucket.events,
+				})
+			}
+		}
+
+		return map
+	}, [buckets])
+
+	// Generate the date range for display
+	const days = useMemo(() => {
+		const count = range === "30d" ? 30 : 90
+		const today = new Date()
+		today.setHours(0, 0, 0, 0)
+		const result: DailyActivity[] = []
+
+		for (let i = count - 1; i >= 0; i--) {
+			const date = new Date(today)
+			date.setDate(date.getDate() - i)
+			const key = formatDateKey(date)
+			const activity = dailyMap.get(key)
+			result.push(
+				activity || {
+					date: key,
+					totalTokens: 0,
+					events: 0,
+				},
+			)
+		}
+
+		return result
+	}, [dailyMap, range])
+
+	const maxTokens = useMemo(() => {
+		let max = 0
+		for (const day of days) {
+			if (day.totalTokens > max) max = day.totalTokens
+		}
+		return max
+	}, [days])
+
+	const hasData = maxTokens > 0
+
+	// Grid columns: 7 for 30d (compact), 7 for 90d but smaller cells
+	const cellSize = range === "30d" ? "w-4 h-4" : "w-2.5 h-2.5"
+	const gap = range === "30d" ? "gap-1" : "gap-0.5"
+
+	return (
+		<div className="flex flex-col gap-2" data-testid="usage-heatmap">
+			<div className="flex items-center justify-between">
+				<h4 className="text-sm font-medium text-vscode-foreground m-0">
+					{t("stats:heatmap.title")}
+				</h4>
+				<div className="flex gap-1">
+					<Button
+						variant={range === "30d" ? "primary" : "ghost"}
+						size="sm"
+						onClick={() => setRange("30d")}
+						data-testid="heatmap-range-30d">
+						{t("stats:heatmap.30d")}
+					</Button>
+					<Button
+						variant={range === "90d" ? "primary" : "ghost"}
+						size="sm"
+						onClick={() => setRange("90d")}
+						data-testid="heatmap-range-90d">
+						{t("stats:heatmap.90d")}
+					</Button>
+				</div>
+			</div>
+
+			{!hasData ? (
+				<div className="text-xs text-vscode-descriptionForeground py-4">
+					{t("stats:heatmap.noData")}
+				</div>
+			) : (
+				<>
+					<div
+						className={`grid grid-flow-col grid-rows-7 ${gap} overflow-x-auto`}
+						style={{ gridTemplateColumns: `repeat(${Math.ceil(days.length / 7)}, minmax(0, 1fr))` }}
+						role="img"
+						aria-label={t("stats:heatmap.title")}>
+						{days.map((day) => {
+							const level = getIntensityLevel(day.totalTokens, maxTokens)
+							return (
+								<StandardTooltip
+									key={day.date}
+									content={
+										day.totalTokens > 0
+											? `${formatDisplayDate(day.date)}: ${day.totalTokens.toLocaleString()} tokens (${day.events} events)`
+											: `${formatDisplayDate(day.date)}: ${t("stats:heatmap.noData")}`
+									}>
+									<div
+										className={`${cellSize} rounded-sm ${HEATMAP_COLORS[level]} transition-colors`}
+										aria-label={`${day.date}: ${day.totalTokens} tokens`}
+									/>
+								</StandardTooltip>
+							)
+						})}
+					</div>
+
+					{/* Legend */}
+					<div className="flex items-center gap-1 text-xs text-vscode-descriptionForeground">
+						<span>{t("stats:heatmap.less")}</span>
+						{[1, 2, 3, 4].map((level) => (
+							<div
+								key={level}
+								className={`w-3 h-3 rounded-sm ${HEATMAP_COLORS[level]}`}
+							/>
+						))}
+						<span>{t("stats:heatmap.more")}</span>
+					</div>
+				</>
+			)}
+		</div>
+	)
+})
+
+export default UsageHeatmap
