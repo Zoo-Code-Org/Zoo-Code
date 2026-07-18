@@ -122,6 +122,7 @@ export const modelInfoSchema = z.object({
 		})
 		.optional(),
 	description: z.string().optional(),
+	displayName: z.string().optional(),
 	// Default effort value for models that support reasoning effort
 	reasoningEffort: reasoningEffortExtendedSchema.optional(),
 	minTokensPerCachePoint: z.number().optional(),

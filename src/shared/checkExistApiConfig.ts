@@ -10,6 +10,10 @@ export function checkExistKey(config: ProviderSettings | undefined) {
 		return true
 	}
 
+	if (config.apiProvider === "kimi-code" && (config.kimiCodeAuthMethod ?? "oauth") === "oauth") {
+		return true
+	}
+
 	// Check all secret keys from the centralized SECRET_STATE_KEYS array.
 	// Filter out keys that are not part of ProviderSettings (global secrets are stored separately)
 	const providerSecretKeys = SECRET_STATE_KEYS.filter((key) => !GLOBAL_SECRET_KEYS.includes(key as any))

@@ -48,6 +48,7 @@ export const dynamicProviders = [
 	"deepseek",
 	"opencode-go",
 	"kenari",
+	"kimi-code",
 ] as const
 
 export type DynamicProvider = (typeof dynamicProviders)[number]
@@ -126,6 +127,7 @@ export const providerNames = [
 	"gemini-cli",
 	"mistral",
 	"moonshot",
+	"kimi-code",
 	"minimax",
 	"mimo",
 	"openai-codex",
@@ -334,6 +336,14 @@ const moonshotSchema = apiModelIdProviderModelSchema.extend({
 	moonshotApiKey: z.string().optional(),
 })
 
+export const kimiCodeAuthMethodSchema = z.enum(["oauth", "api-key"])
+export type KimiCodeAuthMethod = z.infer<typeof kimiCodeAuthMethodSchema>
+
+const kimiCodeSchema = apiModelIdProviderModelSchema.extend({
+	kimiCodeAuthMethod: kimiCodeAuthMethodSchema.optional(),
+	kimiCodeApiKey: z.string().optional(),
+})
+
 const minimaxSchema = apiModelIdProviderModelSchema.extend({
 	minimaxBaseUrl: z
 		.union([z.literal("https://api.minimax.io/v1"), z.literal("https://api.minimaxi.com/v1")])
@@ -450,6 +460,7 @@ export const providerSettingsSchemaDiscriminated = z.discriminatedUnion("apiProv
 	deepSeekSchema.merge(z.object({ apiProvider: z.literal("deepseek") })),
 	poeSchema.merge(z.object({ apiProvider: z.literal("poe") })),
 	moonshotSchema.merge(z.object({ apiProvider: z.literal("moonshot") })),
+	kimiCodeSchema.merge(z.object({ apiProvider: z.literal("kimi-code") })),
 	minimaxSchema.merge(z.object({ apiProvider: z.literal("minimax") })),
 	mimoSchema.merge(z.object({ apiProvider: z.literal("mimo") })),
 	requestySchema.merge(z.object({ apiProvider: z.literal("requesty") })),
@@ -488,6 +499,7 @@ export const providerSettingsSchema = z.object({
 	...deepSeekSchema.shape,
 	...poeSchema.shape,
 	...moonshotSchema.shape,
+	...kimiCodeSchema.shape,
 	...minimaxSchema.shape,
 	...mimoSchema.shape,
 	...requestySchema.shape,
@@ -569,6 +581,7 @@ export const modelIdKeysByProvider: Record<TypicalProvider, ModelIdKey> = {
 	"gemini-cli": "apiModelId",
 	mistral: "apiModelId",
 	moonshot: "apiModelId",
+	"kimi-code": "apiModelId",
 	minimax: "apiModelId",
 	mimo: "apiModelId",
 	deepseek: "apiModelId",
@@ -676,6 +689,11 @@ export const MODELS_BY_PROVIDER: Record<
 		id: "moonshot",
 		label: "Moonshot",
 		models: Object.keys(moonshotModels),
+	},
+	"kimi-code": {
+		id: "kimi-code",
+		label: "Kimi Code",
+		models: [],
 	},
 	minimax: {
 		id: "minimax",
