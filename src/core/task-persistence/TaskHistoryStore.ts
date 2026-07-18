@@ -445,7 +445,7 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Clear all in-memory cache and reload from index.
+	 * Clear all in-memory cache entries; a subsequent `reconcile()` repopulates them from task files.
 	 */
 	async invalidateAll(): Promise<void> {
 		return this.withLock(async () => {

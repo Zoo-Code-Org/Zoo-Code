@@ -963,7 +963,7 @@ export const webviewMessageHandler = async (
 
 				// Refresh history whenever Roo tasks were found — even if all already existed —
 				// so a retry after a partial-copy failure still reconciles the store.
-				provider.taskHistoryStore.invalidateAll()
+				await provider.taskHistoryStore.invalidateAll()
 				await provider.taskHistoryStore.reconcile()
 				await provider.taskHistoryStore.flushIndex()
 				await provider.postStateToWebview()
