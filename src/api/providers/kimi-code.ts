@@ -83,7 +83,11 @@ export class KimiCodeHandler extends OpenAiHandler {
 		} catch (error) {
 			if (getHttpStatus(error) !== 401 || !this.canRefreshOAuth()) throw error
 			await this.prepareRequest(true)
-			yield* super.createMessage(systemPrompt, messages, metadata)
+			try {
+				yield* super.createMessage(systemPrompt, messages, metadata)
+			} catch (retryError) {
+				throw retryError
+			}
 		}
 	}
 
