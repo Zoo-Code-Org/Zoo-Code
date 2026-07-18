@@ -16,6 +16,7 @@ import HistoryView from "./components/history/HistoryView"
 import SettingsView, { SettingsViewRef } from "./components/settings/SettingsView"
 import WelcomeView from "./components/welcome/WelcomeViewProvider"
 import { MarketplaceView } from "./components/marketplace/MarketplaceView"
+import StatsView from "./components/stats/StatsView"
 import { CheckpointRestoreDialog } from "./components/chat/CheckpointRestoreDialog"
 import { DeleteMessageDialog, EditMessageDialog } from "./components/chat/MessageModificationConfirmationDialog"
 import ErrorBoundary from "./components/ErrorBoundary"
@@ -23,7 +24,7 @@ import { useAddNonInteractiveClickListener } from "./components/ui/hooks/useNonI
 import { TooltipProvider } from "./components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "./components/ui/standard-tooltip"
 
-type Tab = "settings" | "history" | "chat" | "marketplace"
+type Tab = "settings" | "history" | "chat" | "marketplace" | "stats"
 
 interface DeleteMessageDialogState {
 	isOpen: boolean
@@ -246,6 +247,7 @@ const App = () => {
 					targetTab={currentMarketplaceTab as "mcp" | "mode" | undefined}
 				/>
 			)}
+			{tab === "stats" && <StatsView onDone={() => switchTab("chat")} />}
 			<ChatView
 				ref={chatViewRef}
 				isHidden={tab !== "chat"}
