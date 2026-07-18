@@ -350,14 +350,6 @@ export class ClineProvider
 				this.log(`Failed to initialize Usage Stats Service: ${error}`)
 				this.usageStatsService = undefined
 			})
-
-			// Subscribe to cross-window file changes so this window's dashboard
-			// refreshes when another VS Code window records new usage events.
-			this.usageStatsService.onDidChange(() => {
-				this.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
-					// View disposed, drop message silently
-				})
-			})
 		} catch (error) {
 			this.log(`Failed to create Usage Stats Service: ${error}`)
 			this.usageStatsService = undefined
@@ -819,8 +811,6 @@ export class ClineProvider
 		this.mcpHub = undefined
 		await this.skillsManager?.dispose()
 		this.skillsManager = undefined
-		await this.usageStatsService?.dispose()
-		this.usageStatsService = undefined
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
 		this.taskHistoryStore.dispose()
@@ -3116,6 +3106,7 @@ export class ClineProvider
 
 	/**
 	 * Returns the UsageStatsService instance, or undefined if initialization failed.
+	 * The service provides local token usage statistics: query, export, clear.
 	 */
 	public getUsageStatsService(): UsageStatsService | undefined {
 		return this.usageStatsService

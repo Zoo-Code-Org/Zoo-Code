@@ -50,6 +50,7 @@ import {
 	handleOpenRuleFile,
 	handleOpenRulesDirectory,
 } from "./rulesMessageHandler"
+import { handleGetUsageStats, handleClearUsageStats, handleExportUsageStats } from "./usageStatsMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
@@ -4059,6 +4060,21 @@ export const webviewMessageHandler = async (
 				provider.log(`Error opening folder picker: ${errorMessage}`)
 			}
 
+			break
+		}
+
+		case "getUsageStats": {
+			await handleGetUsageStats(provider, message)
+			break
+		}
+
+		case "clearUsageStats": {
+			await handleClearUsageStats(provider, message)
+			break
+		}
+
+		case "exportUsageStats": {
+			await handleExportUsageStats(provider, message)
 			break
 		}
 

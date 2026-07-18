@@ -48,6 +48,8 @@ export const commandIds = [
 	"toggleAutoApprove",
 
 	"showRipgrepDiagnostic",
+
+	"openUsageStats",
 ] as const
 
 export type CommandId = (typeof commandIds)[number]

@@ -219,6 +219,23 @@ const getCommandsMap = ({
 			outputChannel.appendLine(`[toggleAutoApprove] postMessageToWebview failed: ${error}`)
 		}
 	},
+	openUsageStats: async () => {
+		const visibleProvider = getVisibleProviderOrLog(outputChannel)
+
+		if (!visibleProvider) {
+			return
+		}
+
+		try {
+			await visibleProvider.postMessageToWebview({
+				type: "action",
+				action: "switchTab",
+				tab: "stats",
+			})
+		} catch (error) {
+			outputChannel.appendLine(`[openUsageStats] postMessageToWebview failed: ${error}`)
+		}
+	},
 })
 
 export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
