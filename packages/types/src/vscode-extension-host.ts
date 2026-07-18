@@ -18,6 +18,7 @@ import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
+import type { StatsQuery, StatsSnapshot } from "./usage-stats.js"
 
 /**
  * ExtensionMessage
@@ -103,6 +104,11 @@ export interface ExtensionMessage {
 		| "rules"
 		| "fileContent"
 		| "rooHistoryImportProgress"
+		// Usage stats response types
+		| "getUsageStatsResponse"
+		| "clearUsageStatsResponse"
+		| "exportUsageStatsResponse"
+		| "usageStatsChanged"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -248,6 +254,10 @@ export interface ExtensionMessage {
 	copyProgressItemName?: string
 	// folderSelected
 	path?: string
+	// Usage stats response payloads
+	usageStatsSnapshot?: StatsSnapshot
+	clearUsageStatsResult?: { success: boolean; error?: string }
+	exportUsageStatsResult?: { format: "json" | "csv"; data: string; error?: string }
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -632,6 +642,10 @@ export interface WebviewMessage {
 		| "deleteRule"
 		| "openRuleFile"
 		| "openRulesDirectory"
+		// Usage stats request types
+		| "getUsageStats"
+		| "clearUsageStats"
+		| "exportUsageStats"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
@@ -742,6 +756,10 @@ export interface WebviewMessage {
 	worktreeForce?: boolean
 	worktreeNewWindow?: boolean
 	worktreeIncludeContent?: string
+	// Usage stats request payloads
+	usageStatsQuery?: StatsQuery
+	clearUsageStatsNonce?: string
+	exportUsageStatsFormat?: "json" | "csv"
 }
 
 export interface RequestOpenAiCodexRateLimitsMessage {
