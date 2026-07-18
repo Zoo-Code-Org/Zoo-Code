@@ -17,7 +17,9 @@
 		"delete": "Delete Task (Shift + Click to skip confirmation)",
 		"openApiHistory": "Open API History",
 		"openUiHistory": "Open UI History",
-		"backToParentTask": "Parent task"
+		"backToParentTask": "Parent task",
+		"waitingOnSubtask": "Waiting on subtask",
+		"goToSubtask": "Go to subtask"
 	},
 	"unpin": "Unpin",
 	"pin": "Pin",

@@ -94,4 +94,24 @@ describe("TaskItemFooter", () => {
 
 		expect(screen.queryByText("history:subtaskTag")).not.toBeInTheDocument()
 	})
+
+	it("shows a delegated status badge when status is delegated", () => {
+		render(
+			<TaskItemFooter item={{ ...mockItem, status: "delegated", awaitingChildId: "child-1" }} variant="full" />,
+		)
+
+		expect(screen.getByTestId("task-status-badge-delegated")).toBeInTheDocument()
+	})
+
+	it("shows an interrupted status badge when status is interrupted", () => {
+		render(<TaskItemFooter item={{ ...mockItem, status: "interrupted" }} variant="full" />)
+
+		expect(screen.getByTestId("task-status-badge-interrupted")).toBeInTheDocument()
+	})
+
+	it("does not show a status badge for a completed task", () => {
+		render(<TaskItemFooter item={{ ...mockItem, status: "completed" }} variant="full" />)
+
+		expect(screen.queryByTestId(/task-status-badge-/)).not.toBeInTheDocument()
+	})
 })
