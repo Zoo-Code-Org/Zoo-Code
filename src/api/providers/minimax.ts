@@ -3,7 +3,7 @@ import { Stream as AnthropicStream } from "@anthropic-ai/sdk/streaming"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
 import OpenAI from "openai"
 
-import { type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
+import { MINIMAX_DEFAULT_MAX_TOKENS, type MinimaxModelId, minimaxDefaultModelId, minimaxModels } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 
@@ -83,7 +83,7 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
-		const { id: modelId, info, maxTokens, temperature } = this.getModel()
+		const { id: modelId, info, maxTokens } = this.getModel()
 
 		// MiniMax M2 models support prompt caching
 		const supportsPromptCache = info.supportsPromptCache ?? false
@@ -101,16 +101,18 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 				: { text: systemPrompt, type: "text" },
 		]
 
-		// Prepare request parameters
+		// Prepare request parameters. `MINIMAX_DEFAULT_MAX_TOKENS` is the named
+		// fallback; using the constant keeps the `??` branch exercised in
+		// coverage and self-documenting at the call site.
 		const requestParams: Anthropic.Messages.MessageCreateParams = {
 			model: modelId,
-			max_tokens: maxTokens ?? 16_384,
-			temperature: temperature ?? 1.0,
+			max_tokens: maxTokens ?? MINIMAX_DEFAULT_MAX_TOKENS,
 			system: systemBlocks,
 			messages: supportsPromptCache ? this.addCacheControl(processedMessages, cacheControl) : processedMessages,
 			stream: true,
 			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
 			tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
+			...this.getMSeriesRequestParams(modelId),
 		}
 
 		const stream = await this.client.messages.create(requestParams)
@@ -289,15 +291,44 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		}
 	}
 
-	async completePrompt(prompt: string) {
-		const { id: model, temperature } = this.getModel()
+	/**
+	 * Build the M-series-specific request params shared by `createMessage` and
+	 * `completePrompt`. The MiniMax Anthropic endpoint defaults `thinking` OFF,
+	 * which makes M3 fall back to a single non-thinking turn and then re-think
+	 * from scratch on the next turn — the "double-think" symptom. We hard-code
+	 * `temperature: 1.0` (the regression-guarded default that the hang-fix
+	 * depends on), per-family `top_p`/`top_k` matching kilo-code's opencode
+	 * provider, and (for M3 only) enable adaptive thinking. We intentionally
+	 * never set `budget_tokens` — M-series is a binary on/off toggle, not
+	 * effort levels.
+	 *
+	 * The user-supplied temperature is intentionally ignored for the M-series
+	 * path: the hang/double-think fix depends on the exact M-series defaults.
+	 */
+	private getMSeriesRequestParams(modelId: string): {
+		temperature: number
+		top_p: number
+		top_k?: number
+		thinking?: { type: "adaptive" }
+	} {
+		const isM3 = modelId.startsWith("MiniMax-M3")
+		return isM3
+			? { temperature: 1.0, top_p: 0.95, thinking: { type: "adaptive" } }
+			: { temperature: 1.0, top_p: 0.95, top_k: 40 }
+	}
 
+	async completePrompt(prompt: string) {
+		const { id: model, maxTokens } = this.getModel()
+
+		// Honor the selected model's `maxTokens` registry value (e.g. M3-1M
+		// advertises 131_072). `MINIMAX_DEFAULT_MAX_TOKENS` is the named
+		// fallback for any future model entry that omits one.
 		const message = await this.client.messages.create({
 			model,
-			max_tokens: 16_384,
-			temperature: temperature ?? 1.0,
+			max_tokens: maxTokens ?? MINIMAX_DEFAULT_MAX_TOKENS,
 			messages: [{ role: "user", content: prompt }],
 			stream: false,
+			...this.getMSeriesRequestParams(model),
 		})
 
 		const content = message.content.find(({ type }) => type === "text")

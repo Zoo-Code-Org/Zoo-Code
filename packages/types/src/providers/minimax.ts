@@ -5,7 +5,7 @@ import type { ModelInfo } from "../model.js"
 // https://platform.minimax.io/docs/guides/pricing-paygo
 // https://platform.minimax.io/docs/guides/pricing-tokenplan
 export type MinimaxModelId = keyof typeof minimaxModels
-export const minimaxDefaultModelId: MinimaxModelId = "MiniMax-M2.7"
+export const minimaxDefaultModelId: MinimaxModelId = "MiniMax-M3-1M"
 
 export const minimaxModels = {
 	"MiniMax-M2.5": {
@@ -67,6 +67,44 @@ export const minimaxModels = {
 		cacheReadsPrice: 0.06,
 		description:
 			"MiniMax M2.7 highspeed: same performance as M2.7 but with faster response (approximately 100 tps vs 60 tps). See pricing at https://platform.minimax.io/docs/guides/pricing-paygo. Requires TokenPlan High-Speed subscription for use with TokenPlan keys. Note: When using TokenPlan, usage is billed per request, not per token.",
+	},
+	"MiniMax-M3-512k": {
+		maxTokens: 65_536,
+		contextWindow: 524_288,
+		supportsImages: true,
+		supportsPromptCache: true,
+		includedTools: ["search_and_replace"],
+		excludedTools: ["apply_diff"],
+		preserveReasoning: true,
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		// M3 routes through the Anthropic Messages path on api.minimax.io/anthropic
+		// with client-side cache_control injection active, so cache_creation_input_tokens
+		// are reported and billed. Matches the MiniMax write price shared by the M2
+		// family (same vendor/pricing tier: $0.3 in / $1.2 out / $0.06 cache read).
+		cacheWritesPrice: 0.375,
+		cacheReadsPrice: 0.06,
+		description:
+			"MiniMax M3 (512K context) — the latest MiniMax model with multimodal input, stronger agentic reasoning and tool use, exposed via a 512K-token context window. See pricing at https://platform.minimax.io/docs/guides/pricing-paygo. Note: When using TokenPlan, usage is billed per request, not per token.",
+	},
+	"MiniMax-M3-1M": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		includedTools: ["search_and_replace"],
+		excludedTools: ["apply_diff"],
+		preserveReasoning: true,
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		// M3 routes through the Anthropic Messages path on api.minimax.io/anthropic
+		// with client-side cache_control injection active, so cache_creation_input_tokens
+		// are reported and billed. Matches the MiniMax write price shared by the M2
+		// family (same vendor/pricing tier: $0.3 in / $1.2 out / $0.06 cache read).
+		cacheWritesPrice: 0.375,
+		cacheReadsPrice: 0.06,
+		description:
+			"MiniMax M3 (1M context) — the latest MiniMax model with multimodal input, stronger agentic reasoning and tool use, exposed via a 1M-token context window. See pricing at https://platform.minimax.io/docs/guides/pricing-paygo. Note: When using TokenPlan, usage is billed per request, not per token.",
 	},
 	"MiniMax-M2": {
 		maxTokens: 16_384,
