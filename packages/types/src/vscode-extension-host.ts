@@ -108,6 +108,7 @@ export interface ExtensionMessage {
 		| "getUsageStatsResponse"
 		| "clearUsageStatsResponse"
 		| "exportUsageStatsResponse"
+		| "requestClearNonceResponse"
 		| "usageStatsChanged"
 	text?: string
 	/** For fileContent: { path, content, error? } */
@@ -258,6 +259,9 @@ export interface ExtensionMessage {
 	usageStatsSnapshot?: StatsSnapshot
 	clearUsageStatsResult?: { success: boolean; error?: string }
 	exportUsageStatsResult?: { format: "json" | "csv"; data: string; error?: string }
+	// B2 fix: host-issued clear nonce returned in `requestClearNonceResponse`.
+	// null when the service is unavailable or an error occurred (see `error`).
+	clearNonce?: string | null
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -646,6 +650,7 @@ export interface WebviewMessage {
 		| "getUsageStats"
 		| "clearUsageStats"
 		| "exportUsageStats"
+		| "requestClearNonce"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
@@ -760,6 +765,11 @@ export interface WebviewMessage {
 	usageStatsQuery?: StatsQuery
 	clearUsageStatsNonce?: string
 	exportUsageStatsFormat?: "json" | "csv"
+	// B2 fix: host-issued clear nonce returned to webview in response to
+	// `requestClearNonce`. The webview must use this nonce (not a self-generated
+	// one) when sending the subsequent `clearUsageStats` message, so the host's
+	// nonce validation actually passes.
+	clearNonce?: string
 }
 
 export interface RequestOpenAiCodexRateLimitsMessage {

@@ -34,9 +34,7 @@ vi.mock("lucide-react", () => ({
 	ArrowLeft: () => <span data-testid="arrow-left" />,
 	Download: () => <span data-testid="download" />,
 	Trash2: () => <span data-testid="trash2" />,
-	RefreshCw: ({ className }: { className?: string }) => (
-		<span data-testid="refresh-cw" className={className} />
-	),
+	RefreshCw: ({ className }: { className?: string }) => <span data-testid="refresh-cw" className={className} />,
 }))
 
 // ── Test fixtures ────────────────────────────────────────────────────────────
@@ -220,9 +218,8 @@ async function sendErrorResponse() {
 
 /** Count only getUsageStats calls */
 const getStatsCallCount = () => {
-	return (vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.filter(
-		(c) => c[0]?.type === "getUsageStats",
-	).length
+	return (vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.filter((c) => c[0]?.type === "getUsageStats")
+		.length
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -326,9 +323,7 @@ describe("StatsView", () => {
 			expect(document.querySelector('[data-testid="stats-groupby-provider"]')).toBeTruthy()
 		})
 
-		const groupByProvider = document.querySelector(
-			'[data-testid="stats-groupby-provider"]',
-		) as HTMLButtonElement
+		const groupByProvider = document.querySelector('[data-testid="stats-groupby-provider"]') as HTMLButtonElement
 		fireEvent.click(groupByProvider)
 
 		expect(vscode.postMessage).toHaveBeenLastCalledWith(
@@ -350,9 +345,7 @@ describe("StatsView", () => {
 			expect(document.querySelector('[data-testid="stats-export-json"]')).toBeTruthy()
 		})
 
-		const exportButton = document.querySelector(
-			'[data-testid="stats-export-json"]',
-		) as HTMLButtonElement
+		const exportButton = document.querySelector('[data-testid="stats-export-json"]') as HTMLButtonElement
 		fireEvent.click(exportButton)
 
 		expect(vscode.postMessage).toHaveBeenLastCalledWith(
@@ -372,9 +365,7 @@ describe("StatsView", () => {
 			expect(document.querySelector('[data-testid="stats-export-csv"]')).toBeTruthy()
 		})
 
-		const exportButton = document.querySelector(
-			'[data-testid="stats-export-csv"]',
-		) as HTMLButtonElement
+		const exportButton = document.querySelector('[data-testid="stats-export-csv"]') as HTMLButtonElement
 		fireEvent.click(exportButton)
 
 		expect(vscode.postMessage).toHaveBeenLastCalledWith(
@@ -385,7 +376,7 @@ describe("StatsView", () => {
 		)
 	})
 
-	it("opens clear confirmation dialog when clear button is clicked", async () => {
+	it("opens clear confirmation dialog when clear button is clicked and host issues nonce", async () => {
 		renderStatsView()
 
 		await sendUsageStatsResponse(mockSnapshotWithData)
@@ -394,15 +385,35 @@ describe("StatsView", () => {
 			expect(document.querySelector('[data-testid="stats-clear-button"]')).toBeTruthy()
 		})
 
-		const clearButton = document.querySelector(
-			'[data-testid="stats-clear-button"]',
-		) as HTMLButtonElement
+		const clearButton = document.querySelector('[data-testid="stats-clear-button"]') as HTMLButtonElement
 		fireEvent.click(clearButton)
 
-		expect(document.querySelector('[data-testid="stats-clear-dialog"]')).toBeTruthy()
+		// B2 fix: webview requests a nonce from the host; the dialog opens only
+		// after the host responds with `requestClearNonceResponse`.
+		expect(vscode.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				type: "requestClearNonce",
+			}),
+		)
+
+		// Simulate host issuing a nonce
+		await act(async () => {
+			window.postMessage(
+				{
+					type: "requestClearNonceResponse",
+					requestId: "clear-nonce-test",
+					clearNonce: "host-issued-nonce-123",
+				},
+				"*",
+			)
+		})
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-testid="stats-clear-dialog"]')).toBeTruthy()
+		})
 	})
 
-	it("sends clearUsageStats message when clear is confirmed", async () => {
+	it("sends clearUsageStats message with host-issued nonce when clear is confirmed", async () => {
 		renderStatsView()
 
 		await sendUsageStatsResponse(mockSnapshotWithData)
@@ -411,20 +422,33 @@ describe("StatsView", () => {
 			expect(document.querySelector('[data-testid="stats-clear-button"]')).toBeTruthy()
 		})
 
-		const clearButton = document.querySelector(
-			'[data-testid="stats-clear-button"]',
-		) as HTMLButtonElement
+		const clearButton = document.querySelector('[data-testid="stats-clear-button"]') as HTMLButtonElement
 		fireEvent.click(clearButton)
 
-		const confirmButton = document.querySelector(
-			'[data-testid="stats-clear-confirm"]',
-		) as HTMLButtonElement
+		// Simulate host issuing a nonce
+		await act(async () => {
+			window.postMessage(
+				{
+					type: "requestClearNonceResponse",
+					requestId: "clear-nonce-test",
+					clearNonce: "host-issued-nonce-123",
+				},
+				"*",
+			)
+		})
+
+		// Wait for the confirm button to appear after the dialog opens
+		const confirmButton = await waitFor(() => {
+			const el = document.querySelector('[data-testid="stats-clear-confirm"]') as HTMLButtonElement
+			expect(el).toBeTruthy()
+			return el
+		})
 		fireEvent.click(confirmButton)
 
 		expect(vscode.postMessage).toHaveBeenLastCalledWith(
 			expect.objectContaining({
 				type: "clearUsageStats",
-				clearUsageStatsNonce: expect.any(String),
+				clearUsageStatsNonce: "host-issued-nonce-123",
 			}),
 		)
 	})

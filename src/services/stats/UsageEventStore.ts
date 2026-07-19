@@ -228,9 +228,7 @@ export class UsageEventStore {
 		let segmentFiles: string[]
 		try {
 			const allFiles = await fs.readdir(this.statsDir)
-			segmentFiles = allFiles
-				.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
-				.sort()
+			segmentFiles = allFiles.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT)).sort()
 		} catch (err) {
 			throw new StatsStoreError(
 				"STATS_STORE/readAll/001",
@@ -309,16 +307,12 @@ export class UsageEventStore {
 	async clear(): Promise<void> {
 		await this.ensureInitialized()
 
-		let releaseLock: (() => Promise<void>) = async () => {}
+		let releaseLock: () => Promise<void> = async () => {}
 
 		try {
 			releaseLock = await this.acquireManifestLock()
 		} catch (err) {
-			throw new StatsStoreError(
-				"STATS_STORE/clear/001",
-				"Failed to acquire manifest lock for clear",
-				err,
-			)
+			throw new StatsStoreError("STATS_STORE/clear/001", "Failed to acquire manifest lock for clear", err)
 		}
 
 		try {
@@ -341,9 +335,7 @@ export class UsageEventStore {
 			await fs.mkdir(oldGenDir, { recursive: true })
 
 			const allFiles = await fs.readdir(this.statsDir)
-			const segmentFiles = allFiles.filter(
-				(f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT),
-			)
+			const segmentFiles = allFiles.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
 
 			for (const file of segmentFiles) {
 				const oldPath = path.join(this.statsDir, file)
@@ -364,11 +356,7 @@ export class UsageEventStore {
 			this.capped = false
 		} catch (err) {
 			// 실패 시 기존 manifest 유지 (이미 이동된 파일은 복구하지 않음 - 데이터 손실 위험)
-			throw new StatsStoreError(
-				"STATS_STORE/clear/002",
-				"Failed to replace manifest during clear",
-				err,
-			)
+			throw new StatsStoreError("STATS_STORE/clear/002", "Failed to replace manifest during clear", err)
 		} finally {
 			try {
 				await releaseLock()
@@ -414,16 +402,12 @@ export class UsageEventStore {
 			return false
 		}
 
-		let releaseLock: (() => Promise<void>) = async () => {}
+		let releaseLock: () => Promise<void> = async () => {}
 
 		try {
 			releaseLock = await this.acquireManifestLock()
 		} catch (err) {
-			throw new StatsStoreError(
-				"STATS_STORE/append/002",
-				"Failed to acquire manifest lock for append",
-				err,
-			)
+			throw new StatsStoreError("STATS_STORE/append/002", "Failed to acquire manifest lock for append", err)
 		}
 
 		try {
@@ -449,12 +433,17 @@ export class UsageEventStore {
 				await this.writeManifestAtomic(manifest)
 			}
 
+			// B3 fix: segmentPath를 회전 후의 currentSegment 기준으로 재계산한다.
+			// 이전에는 회전 전 구 segmentPath를 그대로 사용해 계속 구 segment에 append하여
+			// 5MiB 회전 설계가 무효화되고 단일 segment가 무한정 커졌음.
+			const activeSegmentPath = this.getSegmentPath(manifest.currentSegment)
+
 			// 이벤트를 compact JSON + \n으로 append
 			const line = JSON.stringify(event) + "\n"
 
 			try {
 				// append mode로 열어서 write
-				const handle = await fs.open(segmentPath, "a")
+				const handle = await fs.open(activeSegmentPath, "a")
 				try {
 					await handle.writeFile(line, "utf-8")
 					// file handle sync 후 성공으로 반환
@@ -537,11 +526,7 @@ export class UsageEventStore {
 			} catch {
 				// ignore
 			}
-			throw new StatsStoreError(
-				"STATS_STORE/append/005",
-				"Failed to write manifest atomically",
-				err,
-			)
+			throw new StatsStoreError("STATS_STORE/append/005", "Failed to write manifest atomically", err)
 		}
 	}
 
@@ -623,9 +608,7 @@ export class UsageEventStore {
 	private async checkTotalSize(): Promise<boolean> {
 		try {
 			const allFiles = await fs.readdir(this.statsDir)
-			const segmentFiles = allFiles.filter(
-				(f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT),
-			)
+			const segmentFiles = allFiles.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
 
 			let totalSize = 0
 			for (const file of segmentFiles) {

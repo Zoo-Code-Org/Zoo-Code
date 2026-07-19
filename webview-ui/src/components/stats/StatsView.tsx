@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw } from "lucide-react"
 
-import type { ExtensionMessage, StatsQuery, StatsSnapshot, StatsBucket } from "@roo-code/types"
+import type { ExtensionMessage, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -179,6 +179,19 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 				return () => clearTimeout(timer)
 			}
 
+			if (message.type === "requestClearNonceResponse") {
+				// B2 fix: host issues the nonce; store it and open the confirm dialog.
+				// If the host returned null/error, surface it without opening the dialog.
+				if (message.clearNonce) {
+					setClearNonce(message.clearNonce)
+					setShowClearDialog(true)
+				} else {
+					setError(message.error || t("stats:states.error"))
+					setShowClearDialog(false)
+					setClearNonce(null)
+				}
+			}
+
 			if (message.type === "clearUsageStatsResponse") {
 				if (message.clearUsageStatsResult?.success) {
 					setShowClearDialog(false)
@@ -223,10 +236,15 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 	// ── Clear ────────────────────────────────────────────────────────────────
 
 	const handleClearRequest = useCallback(() => {
-		// Request a confirmation nonce from the host
-		const nonce = `clear-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-		setClearNonce(nonce)
-		setShowClearDialog(true)
+		// B2 fix: ask the host to issue a clear nonce. The host-generated nonce
+		// is returned via `requestClearNonceResponse` and stored in `clearNonce`.
+		// Previously the webview generated its own nonce, which the host never
+		// stored, so `clearStats` always failed with "nonce mismatch".
+		const requestId = `clear-nonce-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+		vscode.postMessage({
+			type: "requestClearNonce",
+			requestId,
+		})
 	}, [])
 
 	const handleClearConfirm = useCallback(() => {
@@ -356,9 +374,7 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 
 				{/* Error state */}
 				{!loading && error && (
-					<div
-						className="flex flex-col items-center justify-center gap-2 py-8"
-						data-testid="stats-error">
+					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="stats-error">
 						<span className="text-sm text-vscode-errorForeground">{error}</span>
 						<Button variant="secondary" size="sm" onClick={handleRefresh}>
 							{t("stats:actions.refresh")}
@@ -368,15 +384,9 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 
 				{/* Empty state */}
 				{!loading && !error && !hasData && (
-					<div
-						className="flex flex-col items-center justify-center gap-2 py-8"
-						data-testid="stats-empty">
-						<span className="text-sm text-vscode-descriptionForeground">
-							{t("stats:states.empty")}
-						</span>
-						<span className="text-xs text-vscode-descriptionForeground">
-							{t("stats:states.emptyHint")}
-						</span>
+					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="stats-empty">
+						<span className="text-sm text-vscode-descriptionForeground">{t("stats:states.empty")}</span>
+						<span className="text-xs text-vscode-descriptionForeground">{t("stats:states.emptyHint")}</span>
 					</div>
 				)}
 
@@ -491,9 +501,7 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 							<div
 								className="flex flex-col gap-1 rounded-md border border-vscode-panel-border p-3 text-xs text-vscode-descriptionForeground"
 								data-testid="stats-coverage">
-								<span className="font-medium text-vscode-foreground">
-									{t("stats:coverage.title")}
-								</span>
+								<span className="font-medium text-vscode-foreground">{t("stats:coverage.title")}</span>
 								{snapshot.coverage.firstEventAt && (
 									<span>
 										{t("stats:coverage.liveFrom")}:{" "}
@@ -502,14 +510,11 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 								)}
 								{snapshot.coverage.backfilledEventCount > 0 && (
 									<span>
-										{t("stats:coverage.backfilledEvents")}:{" "}
-										{snapshot.coverage.backfilledEventCount}
+										{t("stats:coverage.backfilledEvents")}: {snapshot.coverage.backfilledEventCount}
 									</span>
 								)}
 								{snapshot.coverage.recordingPaused && (
-									<span className="text-vscode-errorForeground">
-										{t("stats:coverage.paused")}
-									</span>
+									<span className="text-vscode-errorForeground">{t("stats:coverage.paused")}</span>
 								)}
 							</div>
 						)}

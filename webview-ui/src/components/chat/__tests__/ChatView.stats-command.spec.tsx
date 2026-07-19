@@ -1,7 +1,7 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/ChatView.stats-command.spec.tsx
 
 import React from "react"
-import { render, waitFor, act, fireEvent } from "@/utils/test-utils"
+import { render, waitFor, fireEvent } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
@@ -125,6 +125,7 @@ interface ChatTextAreaProps {
 const mockInputRef = React.createRef<HTMLInputElement>()
 
 vi.mock("../ChatTextArea", () => {
+	// eslint-disable-next-line @typescript-eslint/no-require-imports
 	const mockReact = require("react")
 
 	const ChatTextAreaComponent = mockReact.forwardRef(function MockChatTextArea(
@@ -173,9 +174,7 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 		children: React.ReactNode
 		onClick?: () => void
 	}) {
-		return (
-			<button onClick={onClick}>{children}</button>
-		)
+		return <button onClick={onClick}>{children}</button>
 	},
 	VSCodeTextField: function MockVSCodeTextField({
 		value,
@@ -184,13 +183,7 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 		value?: string
 		onInput?: (e: { target: { value: string } }) => void
 	}) {
-		return (
-			<input
-				type="text"
-				value={value}
-				onChange={(e) => onInput?.({ target: { value: e.target.value } })}
-			/>
-		)
+		return <input type="text" value={value} onChange={(e) => onInput?.({ target: { value: e.target.value } })} />
 	},
 	VSCodeLink: function MockVSCodeLink({ children }: { children: React.ReactNode }) {
 		return <a>{children}</a>
@@ -294,9 +287,7 @@ describe("ChatView - /stats command interception", () => {
 
 		// Verify no newTask or askResponse was sent
 		const calls = (vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls
-		const llmCalls = calls.filter(
-			([msg]) => msg?.type === "newTask" || msg?.type === "askResponse",
-		)
+		const llmCalls = calls.filter(([msg]) => msg?.type === "newTask" || msg?.type === "askResponse")
 		expect(llmCalls).toHaveLength(0)
 	})
 
@@ -315,9 +306,7 @@ describe("ChatView - /stats command interception", () => {
 
 		// Should NOT send switchTab to stats
 		const calls = (vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls
-		const statsTabCalls = calls.filter(
-			([msg]) => msg?.type === "switchTab" && msg?.tab === "stats",
-		)
+		const statsTabCalls = calls.filter(([msg]) => msg?.type === "switchTab" && msg?.tab === "stats")
 		expect(statsTabCalls).toHaveLength(0)
 
 		// Should send as normal message (newTask since no messages)
@@ -418,9 +407,7 @@ describe("ChatView - /stats command interception", () => {
 
 		// Should NOT send switchTab to stats
 		const calls = (vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls
-		const statsTabCalls = calls.filter(
-			([msg]) => msg?.type === "switchTab" && msg?.tab === "stats",
-		)
+		const statsTabCalls = calls.filter(([msg]) => msg?.type === "switchTab" && msg?.tab === "stats")
 		expect(statsTabCalls).toHaveLength(0)
 	})
 
@@ -443,9 +430,7 @@ describe("ChatView - /stats command interception", () => {
 
 		// Should NOT send switchTab to stats — it's a regular message
 		const calls = (vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls
-		const statsTabCalls = calls.filter(
-			([msg]) => msg?.type === "switchTab" && msg?.tab === "stats",
-		)
+		const statsTabCalls = calls.filter(([msg]) => msg?.type === "switchTab" && msg?.tab === "stats")
 		expect(statsTabCalls).toHaveLength(0)
 
 		// Should be sent as newTask (wait for it since state update is async)

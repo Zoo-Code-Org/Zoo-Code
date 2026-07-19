@@ -50,7 +50,12 @@ import {
 	handleOpenRuleFile,
 	handleOpenRulesDirectory,
 } from "./rulesMessageHandler"
-import { handleGetUsageStats, handleClearUsageStats, handleExportUsageStats } from "./usageStatsMessageHandler"
+import {
+	handleGetUsageStats,
+	handleClearUsageStats,
+	handleExportUsageStats,
+	handleRequestClearNonce,
+} from "./usageStatsMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
@@ -4070,6 +4075,11 @@ export const webviewMessageHandler = async (
 
 		case "clearUsageStats": {
 			await handleClearUsageStats(provider, message)
+			break
+		}
+
+		case "requestClearNonce": {
+			await handleRequestClearNonce(provider, message)
 			break
 		}
 
