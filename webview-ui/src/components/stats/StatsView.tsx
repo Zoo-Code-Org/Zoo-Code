@@ -25,7 +25,7 @@ import UsageHeatmap from "./UsageHeatmap"
 // ── Types ───────────────────────────────────────────────────────────────────
 
 type StatsPreset = "today" | "7d" | "30d" | "all"
-type GroupByOption = "model" | "provider" | "mode" | "status"
+type GroupByOption = "model" | "provider" | "mode" | "status" | "day" | "week" | "month"
 
 interface StatsViewProps {
 	onDone: () => void
@@ -413,8 +413,18 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 								<h4 className="text-sm font-medium text-vscode-foreground m-0">
 									{t("stats:breakdown.title")}
 								</h4>
-								<div className="flex gap-1">
-									{(["model", "provider", "mode", "status"] as GroupByOption[]).map((g) => (
+								<div className="flex flex-wrap gap-1">
+									{(
+										[
+											"model",
+											"provider",
+											"mode",
+											"status",
+											"day",
+											"week",
+											"month",
+										] as GroupByOption[]
+									).map((g) => (
 										<Button
 											key={g}
 											variant={groupBy === g ? "primary" : "ghost"}
