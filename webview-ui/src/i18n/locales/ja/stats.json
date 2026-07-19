@@ -1,0 +1,79 @@
+{
+  "title": "使用量統計",
+  "done": "チャットに戻る",
+  "range": {
+    "today": "今日",
+    "7d": "過去7日間",
+    "30d": "過去30日間",
+    "all": "全期間"
+  },
+  "summary": {
+    "totalTokens": "合計トークン",
+    "inputTokens": "入力トークン",
+    "outputTokens": "出力トークン",
+    "cacheTokens": "キャッシュトークン",
+    "costUsd": "合計コスト"
+  },
+  "breakdown": {
+    "title": "内訳",
+    "groupBy": "グループ化",
+    "model": "モデル",
+    "provider": "プロバイダー",
+    "mode": "モード",
+    "status": "ステータス",
+    "day": "日",
+    "week": "週",
+    "month": "月",
+    "events": "イベント",
+    "completed": "完了",
+    "failed": "失敗",
+    "cancelled": "キャンセル",
+    "inputTokens": "入力",
+    "outputTokens": "出力",
+    "cacheReadTokens": "キャッシュ読み取り",
+    "cacheWriteTokens": "キャッシュ書き込み",
+    "reasoningTokens": "推論",
+    "totalTokens": "合計",
+    "costUsd": "コスト (USD)",
+    "unknown": "不明",
+    "empty": "この範囲の使用量データはありません。"
+  },
+  "heatmap": {
+    "title": "日次アクティビティ",
+    "90d": "90日間",
+    "30d": "30日間",
+    "less": "少ない",
+    "more": "多い",
+    "noData": "データなし"
+  },
+  "coverage": {
+    "title": "データカバレッジ",
+    "liveFrom": "記録開始",
+    "backfilledEvents": "遡及されたイベント",
+    "paused": "記録は一時停止されています",
+    "notAvailable": "利用不可"
+  },
+  "actions": {
+    "exportJson": "JSONエクスポート",
+    "exportCsv": "CSVエクスポート",
+    "clear": "すべてのデータを削除",
+    "refresh": "更新"
+  },
+  "clearDialog": {
+    "title": "すべての使用量統計を削除しますか？",
+    "description": "ローカルストレージに記録されたすべての使用量イベントが完全に削除されます。この操作は元に戻せません。",
+    "confirm": "削除",
+    "cancel": "キャンセル"
+  },
+  "states": {
+    "loading": "統計を読み込んでいます...",
+    "error": "統計の読み込みに失敗しました",
+    "empty": "まだ使用量データがありません。LLM API呼び出し後に統計がここに表示されます。",
+    "emptyHint": "AIアシスタントにメッセージを送信して使用量データの収集を開始してください。"
+  },
+  "source": {
+    "provider": "プロバイダー報告",
+    "estimated": "推定",
+    "backfilled": "遡及"
+  }
+}

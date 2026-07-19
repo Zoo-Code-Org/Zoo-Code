@@ -1,0 +1,79 @@
+{
+  "title": "Estadísticas de uso",
+  "done": "Volver al chat",
+  "range": {
+    "today": "Hoy",
+    "7d": "Últimos 7 días",
+    "30d": "Últimos 30 días",
+    "all": "Todo el periodo"
+  },
+  "summary": {
+    "totalTokens": "Tokens totales",
+    "inputTokens": "Tokens de entrada",
+    "outputTokens": "Tokens de salida",
+    "cacheTokens": "Tokens de caché",
+    "costUsd": "Coste total"
+  },
+  "breakdown": {
+    "title": "Desglose",
+    "groupBy": "Agrupar por",
+    "model": "Modelo",
+    "provider": "Proveedor",
+    "mode": "Modo",
+    "status": "Estado",
+    "day": "Día",
+    "week": "Semana",
+    "month": "Mes",
+    "events": "Eventos",
+    "completed": "Completados",
+    "failed": "Fallidos",
+    "cancelled": "Cancelados",
+    "inputTokens": "Entrada",
+    "outputTokens": "Salida",
+    "cacheReadTokens": "Lectura de caché",
+    "cacheWriteTokens": "Escritura de caché",
+    "reasoningTokens": "Razonamiento",
+    "totalTokens": "Total",
+    "costUsd": "Coste (USD)",
+    "unknown": "Desconocido",
+    "empty": "Sin datos de uso para este rango."
+  },
+  "heatmap": {
+    "title": "Actividad diaria",
+    "90d": "90 días",
+    "30d": "30 días",
+    "less": "Menos",
+    "more": "Más",
+    "noData": "Sin datos"
+  },
+  "coverage": {
+    "title": "Cobertura de datos",
+    "liveFrom": "Grabando desde",
+    "backfilledEvents": "Eventos retroactivos",
+    "paused": "La grabación está pausada",
+    "notAvailable": "No disponible"
+  },
+  "actions": {
+    "exportJson": "Exportar JSON",
+    "exportCsv": "Exportar CSV",
+    "clear": "Borrar todos los datos",
+    "refresh": "Actualizar"
+  },
+  "clearDialog": {
+    "title": "¿Borrar todas las estadísticas de uso?",
+    "description": "Esto eliminará permanentemente todos los eventos de uso registrados del almacenamiento local. Esta acción no se puede deshacer.",
+    "confirm": "Eliminar",
+    "cancel": "Cancelar"
+  },
+  "states": {
+    "loading": "Cargando estadísticas...",
+    "error": "Error al cargar las estadísticas",
+    "empty": "Aún no hay datos de uso. Las estadísticas aparecerán aquí después de realizar llamadas a la API de LLM.",
+    "emptyHint": "Intente enviar un mensaje a su asistente de IA para comenzar a recopilar datos de uso."
+  },
+  "source": {
+    "provider": "Reportado por el proveedor",
+    "estimated": "Estimado",
+    "backfilled": "Retroactivo"
+  }
+}
