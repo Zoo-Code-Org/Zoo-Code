@@ -112,3 +112,49 @@ export const StatsSnapshot = z.object({
 	}),
 })
 export type StatsSnapshot = z.infer<typeof StatsSnapshot>
+
+// ── SessionSummary / SessionDetail / APICallRecord ──────────────────────────
+
+/**
+ * A summary of a single task session, aggregated from all usage events that
+ * share the same `taskId`. Used by the Dashboard "Sessions" list.
+ *
+ * Security: does not include prompt bodies, response bodies, API keys, or
+ * workspace paths. The `title` is derived from the first user message text
+ * (truncated); if unavailable, falls back to the taskId.
+ */
+export interface SessionSummary {
+	taskId: string
+	title: string // First line of user input (truncated); falls back to taskId
+	timestamp: number // Last activity (epoch ms)
+	model: string
+	provider: string
+	mode: string
+	totalTokens: number
+	totalCost: number
+	callCount: number
+}
+
+/**
+ * Detailed view of a single session, including the per-API-call records.
+ * Used by the Dashboard session detail expansion (Commit 4).
+ */
+export interface SessionDetail extends SessionSummary {
+	apiCalls: APICallRecord[]
+}
+
+/**
+ * A single API call record within a session, used in `SessionDetail.apiCalls`.
+ */
+export interface APICallRecord {
+	index: number
+	timestamp: number
+	inputTokens: number
+	outputTokens: number
+	cacheReadTokens: number
+	cacheWriteTokens: number
+	reasoningTokens: number
+	costUsd: number
+	status: "completed" | "failed" | "cancelled"
+	model: string
+}

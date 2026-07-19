@@ -57,5 +57,12 @@
   "customRange": {
     "from": "From",
     "to": "To"
+  },
+  "sessions": {
+    "title": "Sessions",
+    "noSessions": "No sessions in this time range",
+    "filterModel": "All Models",
+    "filterProvider": "All Providers",
+    "callCount": "{{count}} calls"
   }
 }

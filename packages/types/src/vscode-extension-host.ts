@@ -18,7 +18,7 @@ import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
-import type { StatsQuery, StatsSnapshot } from "./usage-stats.js"
+import type { StatsQuery, StatsSnapshot, SessionSummary } from "./usage-stats.js"
 
 /**
  * ExtensionMessage
@@ -112,8 +112,9 @@ export interface ExtensionMessage {
 		| "usageStatsChanged"
 		// Dashboard response types
 		| "dashboardStatsResponse"
+		| "dashboardSessionsResponse"
 		| "dashboardSessionDetailResponse"
-	text?: string
+		text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
 	payload?: any // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -266,6 +267,10 @@ export interface ExtensionMessage {
 	// B2 fix: host-issued clear nonce returned in `requestClearNonceResponse`.
 	// null when the service is unavailable or an error occurred (see `error`).
 	clearNonce?: string | null
+	// Dashboard sessions response payload (Commit 3).
+	// `dashboardSessions` is null when the service is unavailable or an error
+	// occurred (see `error`). On success it is an array (possibly empty).
+	dashboardSessions?: SessionSummary[] | null
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -777,6 +782,13 @@ export interface WebviewMessage {
 	// one) when sending the subsequent `clearUsageStats` message, so the host's
 	// nonce validation actually passes.
 	clearNonce?: string
+	// Dashboard sessions request payload (Commit 3).
+	// `usageStatsQuery` carries the time range; `dashboardSessionFilters`
+	// carries optional model/provider filters applied after grouping.
+	dashboardSessionFilters?: {
+		model?: string
+		provider?: string
+	}
 }
 
 export interface RequestOpenAiCodexRateLimitsMessage {
