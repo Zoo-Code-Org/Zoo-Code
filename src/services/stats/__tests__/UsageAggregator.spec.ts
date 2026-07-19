@@ -560,7 +560,12 @@ describe("UsageAggregator", () => {
 			expect(result.totals.cacheWriteTokens).toBe(0)
 			expect(result.totals.reasoningTokens).toBe(0)
 			expect(result.totals.totalTokens).toBe(0)
-			expect(result.totals.costUsd).toBe(0)
+			// Feature 1: When costUsd is missing, the aggregator now computes
+			// the cost on-the-fly from the model's pricing info. The default
+			// test event uses provider "anthropic" + model "claude-sonnet-4-20250514"
+			// with 1000 input tokens. Anthropic pricing: $3/1M input tokens →
+			// 1000 × 3 / 1_000_000 = 0.003.
+			expect(result.totals.costUsd).toBeCloseTo(0.003, 5)
 		})
 	})
 

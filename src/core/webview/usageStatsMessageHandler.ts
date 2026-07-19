@@ -16,6 +16,7 @@ import { StatsQuery as StatsQuerySchema } from "@roo-code/types"
 import type { ClineProvider } from "./ClineProvider"
 import type { UsageStatsService, JsonExport } from "../../services/stats"
 import { StatsServiceError } from "../../services/stats"
+import { getEffectiveCost } from "../../services/stats/costRecalculation"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 
@@ -433,24 +434,81 @@ async function deriveSessionTitle(taskId: string, globalStoragePath: string): Pr
 }
 
 /**
- * Groups usage events by `taskId` and produces a {@link SessionSummary} for
- * each group. The summary uses the first event's model/provider/mode as
- * representative values (a session may span multiple models, but the first
- * event is a reasonable proxy for display purposes).
+ * Resolves the root task ID for a usage event.
+ *
+ * Feature 2: Sessions should be grouped by conversation session (root task),
+ * not by individual subtask. A subtask has a `parentTaskId` pointing to its
+ * parent. By following the parent chain, we can group all subtasks under
+ * their root conversation session.
+ *
+ * Since the event only carries its immediate `parentTaskId` (not the full
+ * chain), we build a parent→children map from the event set and walk up
+ * the chain. If an event has no `parentTaskId`, it IS the root.
+ *
+ * @param event The usage event to resolve.
+ * @param parentMap Map of taskId → parentTaskId (built from the event set).
+ * @returns The root task ID for grouping.
+ */
+function resolveRootTaskId(event: UsageEventV1, parentMap: Map<string, string | undefined>): string {
+	let current = event.taskId
+	const visited = new Set<string>() // Guard against cycles
+
+	while (!visited.has(current)) {
+		visited.add(current)
+		const parent = parentMap.get(current)
+		if (!parent) break // No parent → this is the root
+		current = parent
+	}
+
+	return current
+}
+
+/**
+ * Builds a map of taskId → parentTaskId from a set of usage events.
+ * This allows resolving the root task for any event in the set.
+ */
+function buildParentMap(events: UsageEventV1[]): Map<string, string | undefined> {
+	const parentMap = new Map<string, string | undefined>()
+	for (const event of events) {
+		if (!parentMap.has(event.taskId)) {
+			parentMap.set(event.taskId, event.parentTaskId)
+		}
+	}
+	return parentMap
+}
+
+/**
+ * Groups usage events by their root conversation session and produces a
+ * {@link SessionSummary} for each group.
+ *
+ * Feature 2: Events are grouped by root task ID (following `parentTaskId`
+ * chains) so that subtasks appear under their parent conversation session.
+ * If an event has no `parentTaskId`, it is its own root.
+ *
+ * Feature 1: Missing `costUsd` values are computed on-the-fly using the
+ * model's pricing info. The NDJSON store is never modified.
+ *
+ * The summary uses the first event's model/provider/mode as representative
+ * values (a session may span multiple models, but the first event is a
+ * reasonable proxy for display purposes).
  *
  * @param events Filtered usage events (already scoped to the requested time
  *   range and `includeCancelled` policy).
  * @param globalStoragePath Used to read task messages for title extraction.
  */
 async function buildSessionSummaries(events: UsageEventV1[], globalStoragePath: string): Promise<SessionSummary[]> {
-	// Group events by taskId, preserving insertion order for determinism.
+	// Feature 2: Build parent map and group by root task ID.
+	const parentMap = buildParentMap(events)
+
+	// Group events by root taskId, preserving insertion order for determinism.
 	const groups = new Map<string, UsageEventV1[]>()
 	for (const event of events) {
-		const list = groups.get(event.taskId)
+		const rootTaskId = resolveRootTaskId(event, parentMap)
+		const list = groups.get(rootTaskId)
 		if (list) {
 			list.push(event)
 		} else {
-			groups.set(event.taskId, [event])
+			groups.set(rootTaskId, [event])
 		}
 	}
 
@@ -468,11 +526,12 @@ async function buildSessionSummaries(events: UsageEventV1[], globalStoragePath: 
 		const last = sorted[sorted.length - 1]
 
 		// Aggregate totals across all events in the task.
+		// Feature 1: Use getEffectiveCost to compute missing costs on-the-fly.
 		let totalTokens = 0
 		let totalCost = 0
 		for (const ev of sorted) {
 			totalTokens += ev.usage.totalTokens?.value ?? 0
-			totalCost += ev.usage.costUsd?.value ?? 0
+			totalCost += getEffectiveCost(ev)
 		}
 
 		const title = await deriveSessionTitle(taskId, globalStoragePath)
@@ -607,7 +666,8 @@ function mapEventToApiCall(event: UsageEventV1, index: number): APICallRecord {
 		cacheReadTokens: event.usage.cacheReadTokens?.value ?? 0,
 		cacheWriteTokens: event.usage.cacheWriteTokens?.value ?? 0,
 		reasoningTokens: event.usage.reasoningTokens?.value ?? 0,
-		costUsd: event.usage.costUsd?.value ?? 0,
+		// Feature 1: Compute missing cost on-the-fly from model pricing.
+		costUsd: getEffectiveCost(event),
 		status: event.status,
 		model: event.model,
 	}
@@ -637,11 +697,12 @@ async function buildSessionDetail(
 	const last = sorted[sorted.length - 1]
 
 	// Aggregate totals across all events in the task.
+	// Feature 1: Use getEffectiveCost to compute missing costs on-the-fly.
 	let totalTokens = 0
 	let totalCost = 0
 	for (const ev of sorted) {
 		totalTokens += ev.usage.totalTokens?.value ?? 0
-		totalCost += ev.usage.costUsd?.value ?? 0
+		totalCost += getEffectiveCost(ev)
 	}
 
 	const title = await deriveSessionTitle(taskId, globalStoragePath)
@@ -727,8 +788,12 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 		const exportData = await service.exportStats(allQuery, "json")
 		const allEvents: UsageEventV1[] = (exportData as JsonExport).events ?? []
 
-		// Filter to the requested task.
-		const taskEvents = allEvents.filter((ev) => ev.taskId === taskId)
+		// Feature 2: Filter to the requested root task AND its subtasks.
+		// The session list groups events by root task ID, so clicking a
+		// session row passes the root task ID. We need to include events
+		// from all subtasks whose root resolves to this taskId.
+		const parentMap = buildParentMap(allEvents)
+		const taskEvents = allEvents.filter((ev) => resolveRootTaskId(ev, parentMap) === taskId)
 
 		if (taskEvents.length === 0) {
 			// No events for this task — return an empty detail rather than an

@@ -7,6 +7,8 @@ import type {
 	UsageValueSource,
 } from "@roo-code/types"
 
+import { getEffectiveCost, computeEventCost } from "./costRecalculation"
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /** Internal event representation used for aggregation (UsageEventV1 + derived fields) */
@@ -386,11 +388,20 @@ export class UsageAggregator {
 			case "status":
 				return [event.status]
 			case "source": {
-				// Separate by the source of costUsd
-				// If the event has costUsd, use its source; otherwise "unknown"
+				// Separate by the source of costUsd.
+				// Feature 1: If the event has no costUsd but the cost can be
+				// computed on-the-fly from model pricing, treat the source as
+				// "estimated" (since it is derived, not provider-reported).
 				const sources = new Set<string>()
 				if (event.usage.costUsd) {
 					sources.add(event.usage.costUsd.source)
+				} else {
+					// Check if cost can be computed; if so, mark as "estimated".
+					// Otherwise the source remains "unknown".
+					const computedCost = computeEventCost(event)
+					if (computedCost > 0) {
+						sources.add("estimated")
+					}
 				}
 				// Also consider the source of input/output tokens
 				if (event.usage.inputTokens) {
@@ -442,7 +453,9 @@ export class UsageAggregator {
 		const cacheWriteTokens = this.extractValue(event.usage.cacheWriteTokens)
 		const reasoningTokens = this.extractValue(event.usage.reasoningTokens)
 		const totalTokens = this.extractValue(event.usage.totalTokens)
-		const costUsd = this.extractValue(event.usage.costUsd)
+		// Feature 1: If costUsd is missing on old events, compute it on-the-fly
+		// from the model's pricing info. Never modifies the stored event.
+		const costUsd = getEffectiveCost(event)
 
 		// Inclusion semantics check
 		const hasUnknownInclusion =
