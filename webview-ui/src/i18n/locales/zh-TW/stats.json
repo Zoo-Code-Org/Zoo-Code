@@ -8,10 +8,10 @@
     "all": "全部時間"
   },
   "summary": {
-    "totalTokens": "總權杖數",
-    "inputTokens": "輸入權杖",
-    "outputTokens": "輸出權杖",
-    "cacheTokens": "快取權杖",
+    "totalTokens": "總詞元數",
+    "inputTokens": "輸入詞元",
+    "outputTokens": "輸出詞元",
+    "cacheTokens": "快取詞元",
     "costUsd": "總費用"
   },
   "breakdown": {
