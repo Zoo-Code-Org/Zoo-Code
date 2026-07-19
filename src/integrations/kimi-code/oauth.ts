@@ -6,7 +6,7 @@ export const KIMI_CODE_OAUTH_CONFIG = {
 	deviceAuthorizationEndpoint: "https://auth.kimi.com/api/oauth/device_authorization",
 	tokenEndpoint: "https://auth.kimi.com/api/oauth/token",
 	deviceGrantType: "urn:ietf:params:oauth:grant-type:device_code",
-	// Moonshot's official public client ID for the Kimi Code OAuth device flow.
+	// Kimi Code's official public client ID for the OAuth device flow.
 	// Source: Kimi Code CLI's published OAuth integration.
 	clientId: "17e5f671-d194-4dfb-9706-5516cb48c098",
 } as const
