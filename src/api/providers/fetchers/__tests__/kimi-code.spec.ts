@@ -2,6 +2,7 @@ import { getKimiCodeModels, mapKimiCodeModel } from "../kimi-code"
 
 describe("Kimi Code model discovery", () => {
 	beforeEach(() => vi.restoreAllMocks())
+	afterEach(() => vi.useRealTimers())
 
 	it("maps official model fields", () => {
 		expect(
@@ -76,5 +77,20 @@ describe("Kimi Code model discovery", () => {
 		expect(Object.keys(models)).toHaveLength(2)
 		expect(models["model-a"].contextWindow).toBe(100000)
 		expect(models["model-b"].supportsReasoningBinary).toBe(true)
+	})
+
+	it("aborts model discovery after its deadline", async () => {
+		vi.useFakeTimers()
+		vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+			return new Promise((_resolve, reject) => {
+				init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+			})
+		})
+		const result = expect(getKimiCodeModels("token")).rejects.toThrow("timed out")
+
+		await vi.advanceTimersByTimeAsync(10_000)
+		await result
+		expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true)
+		expect(vi.getTimerCount()).toBe(0)
 	})
 })

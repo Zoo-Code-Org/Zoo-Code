@@ -13,6 +13,7 @@ export const KIMI_CODE_OAUTH_CONFIG = {
 
 const KIMI_CODE_CREDENTIALS_KEY = "kimi-code-oauth-credentials"
 const TOKEN_EXPIRY_BUFFER_MS = 60_000
+const OAUTH_REQUEST_TIMEOUT_MS = 30_000
 
 const credentialsSchema = z.object({
 	type: z.literal("kimi-code"),
@@ -71,15 +72,28 @@ class KimiCodeOAuthError extends Error {
 }
 
 async function postForm(endpoint: string, values: Record<string, string>, signal?: AbortSignal): Promise<Response> {
-	return fetch(endpoint, {
-		method: "POST",
-		headers: {
-			Accept: "application/json",
-			"Content-Type": "application/x-www-form-urlencoded",
-		},
-		body: new URLSearchParams(values).toString(),
-		signal,
-	})
+	const controller = new AbortController()
+	const forwardAbort = () => controller.abort(signal?.reason)
+	if (signal?.aborted) forwardAbort()
+	else signal?.addEventListener("abort", forwardAbort, { once: true })
+	const timeout = setTimeout(
+		() => controller.abort(new Error("Kimi Code OAuth request timed out")),
+		OAUTH_REQUEST_TIMEOUT_MS,
+	)
+	try {
+		return await fetch(endpoint, {
+			method: "POST",
+			headers: {
+				Accept: "application/json",
+				"Content-Type": "application/x-www-form-urlencoded",
+			},
+			body: new URLSearchParams(values).toString(),
+			signal: controller.signal,
+		})
+	} finally {
+		clearTimeout(timeout)
+		signal?.removeEventListener("abort", forwardAbort)
+	}
 }
 
 async function readOAuthError(response: Response): Promise<KimiCodeOAuthError> {
@@ -143,15 +157,21 @@ export async function refreshKimiCodeAccessToken(credentials: KimiCodeCredential
 
 const delay = (milliseconds: number, signal: AbortSignal) =>
 	new Promise<void>((resolve, reject) => {
-		const timeout = setTimeout(resolve, milliseconds)
-		signal.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timeout)
-				reject(new Error("Kimi Code authorization was cancelled"))
-			},
-			{ once: true },
-		)
+		const timeout = signal.aborted
+			? undefined
+			: setTimeout(() => {
+					signal.removeEventListener("abort", onAbort)
+					resolve()
+				}, milliseconds)
+		const onAbort = () => {
+			if (timeout) clearTimeout(timeout)
+			reject(new Error("Kimi Code authorization was cancelled"))
+		}
+		if (signal.aborted) {
+			onAbort()
+			return
+		}
+		signal.addEventListener("abort", onAbort, { once: true })
 	})
 
 export class KimiCodeOAuthManager {
@@ -161,6 +181,8 @@ export class KimiCodeOAuthManager {
 	private refreshPromise: Promise<KimiCodeCredentials | null> | null = null
 	private pollingPromise: Promise<KimiCodeCredentials> | null = null
 	private pollingController: AbortController | null = null
+	private credentialsGeneration = 0
+	private authorizationGeneration = 0
 
 	initialize(context: ExtensionContext): void {
 		this.context = context
@@ -183,15 +205,30 @@ export class KimiCodeOAuthManager {
 		}
 	}
 
-	private async saveCredentials(credentials: KimiCodeCredentials): Promise<void> {
+	private async saveCredentials(
+		credentials: KimiCodeCredentials,
+		isCurrent: () => boolean = () => true,
+	): Promise<boolean> {
 		if (!this.context) throw new Error("Kimi Code OAuth manager is not initialized")
-		await this.context.secrets.store(KIMI_CODE_CREDENTIALS_KEY, JSON.stringify(credentials))
+		if (!isCurrent()) return false
+		const serialized = JSON.stringify(credentials)
+		await this.context.secrets.store(KIMI_CODE_CREDENTIALS_KEY, serialized)
+		if (!isCurrent()) {
+			if ((await this.context.secrets.get(KIMI_CODE_CREDENTIALS_KEY)) === serialized) {
+				await this.context.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
+			}
+			return false
+		}
 		this.credentials = credentials
 		this.state = { status: "authenticated" }
+		return true
 	}
 
 	async clearCredentials(): Promise<void> {
+		this.credentialsGeneration++
 		this.cancelAuthorization()
+		const refreshPromise = this.refreshPromise
+		if (refreshPromise) await refreshPromise.catch(() => null)
 		await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
 		this.credentials = null
 		this.state = { status: "idle" }
@@ -208,14 +245,19 @@ export class KimiCodeOAuthManager {
 			return credentials.accessToken
 		}
 		if (!this.refreshPromise) {
+			const generation = this.credentialsGeneration
 			this.refreshPromise = refreshKimiCodeAccessToken(credentials)
 				.then(async (next) => {
-					await this.saveCredentials(next)
+					if (!(await this.saveCredentials(next, () => generation === this.credentialsGeneration)))
+						return null
 					return next
 				})
 				.catch(async (error) => {
 					if (error instanceof KimiCodeOAuthError && error.code === "invalid_grant") {
-						await this.clearCredentials()
+						this.credentialsGeneration++
+						await this.context?.secrets.delete(KIMI_CODE_CREDENTIALS_KEY)
+						this.credentials = null
+						this.state = { status: "idle" }
 					}
 					return null
 				})
@@ -232,11 +274,15 @@ export class KimiCodeOAuthManager {
 
 	async startAuthorization(): Promise<KimiCodeDeviceAuthorization> {
 		this.cancelAuthorization()
+		const generation = ++this.authorizationGeneration
 		this.state = { status: "authorizing" }
 		const controller = new AbortController()
 		this.pollingController = controller
 		try {
 			const device = await requestDeviceAuthorization(controller.signal)
+			if (generation !== this.authorizationGeneration || this.pollingController !== controller) {
+				throw new Error("Kimi Code authorization was cancelled")
+			}
 			const expiresAt = Date.now() + device.expires_in * 1000
 			const verificationUri = device.verification_uri_complete ?? device.verification_uri
 			this.state = {
@@ -245,7 +291,13 @@ export class KimiCodeOAuthManager {
 				verificationUri,
 				expiresAt,
 			}
-			this.pollingPromise = this.pollForToken(device.device_code, expiresAt, device.interval ?? 5, controller)
+			this.pollingPromise = this.pollForToken(
+				device.device_code,
+				expiresAt,
+				device.interval ?? 5,
+				controller,
+				generation,
+			)
 			return {
 				userCode: device.user_code,
 				verificationUri: device.verification_uri,
@@ -253,7 +305,10 @@ export class KimiCodeOAuthManager {
 				expiresAt,
 			}
 		} catch (error) {
-			this.state = { status: "error", error: error instanceof Error ? error.message : String(error) }
+			if (generation === this.authorizationGeneration && this.pollingController === controller) {
+				this.state = { status: "error", error: error instanceof Error ? error.message : String(error) }
+				this.pollingController = null
+			}
 			throw error
 		}
 	}
@@ -264,6 +319,7 @@ export class KimiCodeOAuthManager {
 	}
 
 	cancelAuthorization(): void {
+		this.authorizationGeneration++
 		this.pollingController?.abort()
 		this.pollingController = null
 		this.pollingPromise = null
@@ -275,6 +331,7 @@ export class KimiCodeOAuthManager {
 		expiresAt: number,
 		initialIntervalSeconds: number,
 		controller: AbortController,
+		generation: number,
 	): Promise<KimiCodeCredentials> {
 		let intervalSeconds = initialIntervalSeconds
 		try {
@@ -282,7 +339,14 @@ export class KimiCodeOAuthManager {
 				await delay(intervalSeconds * 1000, controller.signal)
 				try {
 					const credentials = await requestDeviceToken(deviceCode, controller.signal)
-					await this.saveCredentials(credentials)
+					if (generation !== this.authorizationGeneration || this.pollingController !== controller) {
+						throw new Error("Kimi Code authorization was cancelled")
+					}
+					const saved = await this.saveCredentials(
+						credentials,
+						() => generation === this.authorizationGeneration && this.pollingController === controller,
+					)
+					if (!saved) throw new Error("Kimi Code authorization was cancelled")
 					return credentials
 				} catch (error) {
 					if (error instanceof KimiCodeOAuthError && error.code === "authorization_pending") continue
@@ -295,13 +359,19 @@ export class KimiCodeOAuthManager {
 			}
 			throw new Error("Kimi Code authorization expired")
 		} catch (error) {
-			if (!controller.signal.aborted) {
+			if (
+				!controller.signal.aborted &&
+				generation === this.authorizationGeneration &&
+				this.pollingController === controller
+			) {
 				this.state = { status: "error", error: error instanceof Error ? error.message : String(error) }
 			}
 			throw error
 		} finally {
-			if (this.pollingController === controller) this.pollingController = null
-			this.pollingPromise = null
+			if (generation === this.authorizationGeneration && this.pollingController === controller) {
+				this.pollingController = null
+				this.pollingPromise = null
+			}
 		}
 	}
 }

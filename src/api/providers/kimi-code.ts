@@ -31,6 +31,7 @@ function getHttpStatus(error: unknown): number | undefined {
 export class KimiCodeHandler extends OpenAiHandler {
 	private readonly kimiOptions: ApiHandlerOptions
 	private models: ModelRecord = {}
+	private modelDiscoveryAttempted = false
 
 	constructor(options: ApiHandlerOptions) {
 		super({
@@ -59,11 +60,15 @@ export class KimiCodeHandler extends OpenAiHandler {
 	private async prepareRequest(forceRefresh = false): Promise<void> {
 		const accessToken = await this.resolveAccessToken(forceRefresh)
 		this.client.apiKey = accessToken
-		if (Object.keys(this.models).length === 0) {
+		if (!this.modelDiscoveryAttempted) {
+			this.modelDiscoveryAttempted = true
 			try {
 				this.models = await getModels({ provider: "kimi-code", apiKey: accessToken })
-			} catch {
+			} catch (error) {
 				// Model discovery is best-effort; preserve the configured ID and fallback metadata.
+				console.debug("[KimiCode] Model discovery failed; using fallback model metadata", {
+					message: error instanceof Error ? error.message : String(error),
+				})
 			}
 		}
 	}

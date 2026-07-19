@@ -16,6 +16,7 @@ const createContext = () => {
 
 describe("KimiCodeOAuthManager", () => {
 	beforeEach(() => vi.restoreAllMocks())
+	afterEach(() => vi.useRealTimers())
 
 	it("uses the official public client ID and form-encoded device request", async () => {
 		const { context } = createContext()
@@ -79,7 +80,12 @@ describe("KimiCodeOAuthManager", () => {
 		const futureExpiry = Date.now() + 3600_000
 		values.set(
 			"kimi-code-oauth-credentials",
-			JSON.stringify({ type: "kimi-code", accessToken: "valid", refreshToken: "refresh", expiresAt: futureExpiry }),
+			JSON.stringify({
+				type: "kimi-code",
+				accessToken: "valid",
+				refreshToken: "refresh",
+				expiresAt: futureExpiry,
+			}),
 		)
 		const manager = new KimiCodeOAuthManager()
 		manager.initialize(context)
@@ -99,6 +105,138 @@ describe("KimiCodeOAuthManager", () => {
 		await manager.clearCredentials()
 		expect(values.has("kimi-code-oauth-credentials")).toBe(false)
 		expect(await manager.isAuthenticated()).toBe(false)
+	})
+
+	it("does not restore credentials when sign-out races an in-flight refresh", async () => {
+		const { context, values } = createContext()
+		values.set(
+			"kimi-code-oauth-credentials",
+			JSON.stringify({ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 }),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		let resolveRefresh!: (response: Response) => void
+		vi.spyOn(globalThis, "fetch").mockReturnValueOnce(
+			new Promise<Response>((resolve) => {
+				resolveRefresh = resolve
+			}),
+		)
+
+		const tokenPromise = manager.getAccessToken()
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+		const clearPromise = manager.clearCredentials()
+		resolveRefresh(
+			new Response(JSON.stringify({ access_token: "new", refresh_token: "rotated", expires_in: 3600 }), {
+				status: 200,
+			}),
+		)
+
+		await expect(tokenPromise).resolves.toBeNull()
+		await clearPromise
+		expect(context.secrets.store).not.toHaveBeenCalled()
+		expect(values.has("kimi-code-oauth-credentials")).toBe(false)
+	})
+
+	it("bounds token refresh requests with a deadline", async () => {
+		vi.useFakeTimers()
+		const { context, values } = createContext()
+		values.set(
+			"kimi-code-oauth-credentials",
+			JSON.stringify({ type: "kimi-code", accessToken: "old", refreshToken: "refresh", expiresAt: 0 }),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+			return new Promise((_resolve, reject) => {
+				init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+			})
+		})
+		const tokenPromise = manager.getAccessToken()
+
+		await vi.advanceTimersByTimeAsync(30_000)
+		await expect(tokenPromise).resolves.toBeNull()
+		expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true)
+		expect(values.has("kimi-code-oauth-credentials")).toBe(true)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("keeps the newer polling lifecycle when a prior poll finishes cancellation", async () => {
+		const { context } = createContext()
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		vi.spyOn(globalThis, "fetch")
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						device_code: "first",
+						user_code: "FIRST",
+						verification_uri: "https://auth.kimi.com/device",
+						expires_in: 600,
+						interval: 60,
+					}),
+					{ status: 200 },
+				),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						device_code: "second",
+						user_code: "SECOND",
+						verification_uri: "https://auth.kimi.com/device",
+						expires_in: 600,
+						interval: 60,
+					}),
+					{ status: 200 },
+				),
+			)
+
+		await manager.startAuthorization()
+		const firstPolling = manager.waitForAuthorization().catch((error) => error)
+		await manager.startAuthorization()
+		const secondPolling = manager.waitForAuthorization().catch((error) => error)
+		await expect(firstPolling).resolves.toMatchObject({ message: "Kimi Code authorization was cancelled" })
+
+		expect(manager.getState()).toMatchObject({ status: "polling", userCode: "SECOND" })
+		expect(() => manager.waitForAuthorization()).not.toThrow()
+		manager.cancelAuthorization()
+		await secondPolling
+	})
+
+	it("ignores a superseded device request failure", async () => {
+		const { context } = createContext()
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		let rejectFirst!: (error: Error) => void
+		vi.spyOn(globalThis, "fetch")
+			.mockReturnValueOnce(
+				new Promise<Response>((_resolve, reject) => {
+					rejectFirst = reject
+				}),
+			)
+			.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify({
+						device_code: "second",
+						user_code: "SECOND",
+						verification_uri: "https://auth.kimi.com/device",
+						expires_in: 600,
+						interval: 60,
+					}),
+					{ status: 200 },
+				),
+			)
+
+		const first = manager.startAuthorization()
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce())
+		await manager.startAuthorization()
+		rejectFirst(new Error("stale request failed"))
+		await expect(first).rejects.toThrow("stale request failed")
+
+		expect(manager.getState()).toMatchObject({ status: "polling", userCode: "SECOND" })
+		expect(() => manager.waitForAuthorization()).not.toThrow()
+		const secondPolling = manager.waitForAuthorization().catch((error) => error)
+		manager.cancelAuthorization()
+		await secondPolling
 	})
 
 	it("handles polling completion successfully", async () => {
@@ -122,10 +260,9 @@ describe("KimiCodeOAuthManager", () => {
 			new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 }),
 		)
 		fetchSpy.mockResolvedValueOnce(
-			new Response(
-				JSON.stringify({ access_token: "new", refresh_token: "refresh", expires_in: 3600 }),
-				{ status: 200 },
-			),
+			new Response(JSON.stringify({ access_token: "new", refresh_token: "refresh", expires_in: 3600 }), {
+				status: 200,
+			}),
 		)
 
 		await manager.startAuthorization()
@@ -151,14 +288,11 @@ describe("KimiCodeOAuthManager", () => {
 				{ status: 200 },
 			),
 		)
+		fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ error: "slow_down" }), { status: 400 }))
 		fetchSpy.mockResolvedValueOnce(
-			new Response(JSON.stringify({ error: "slow_down" }), { status: 400 }),
-		)
-		fetchSpy.mockResolvedValueOnce(
-			new Response(
-				JSON.stringify({ access_token: "new", refresh_token: "refresh", expires_in: 3600 }),
-				{ status: 200 },
-			),
+			new Response(JSON.stringify({ access_token: "new", refresh_token: "refresh", expires_in: 3600 }), {
+				status: 200,
+			}),
 		)
 
 		await manager.startAuthorization()
@@ -183,9 +317,7 @@ describe("KimiCodeOAuthManager", () => {
 				{ status: 200 },
 			),
 		)
-		fetchSpy.mockResolvedValue(
-			new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 }),
-		)
+		fetchSpy.mockResolvedValue(new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 }))
 
 		vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(2000)
 
@@ -198,7 +330,9 @@ describe("KimiCodeOAuthManager", () => {
 		const manager = new KimiCodeOAuthManager()
 		manager.initialize(context)
 		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-			new Response(JSON.stringify({ error: "invalid_request", error_description: "Bad request" }), { status: 400 }),
+			new Response(JSON.stringify({ error: "invalid_request", error_description: "Bad request" }), {
+				status: 400,
+			}),
 		)
 
 		await expect(manager.startAuthorization()).rejects.toThrow("Bad request")
@@ -261,9 +395,7 @@ describe("KimiCodeOAuthManager", () => {
 		const { context } = createContext()
 		const manager = new KimiCodeOAuthManager()
 		manager.initialize(context)
-		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-			new Response("not json", { status: 400 }),
-		)
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("not json", { status: 400 }))
 
 		await expect(manager.startAuthorization()).rejects.toThrow("OAuth request failed")
 	})

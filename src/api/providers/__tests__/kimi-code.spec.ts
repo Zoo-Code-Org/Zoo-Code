@@ -1,37 +1,27 @@
 import { buildApiHandler } from "../../index"
 import { KimiCodeHandler } from "../kimi-code"
-import type { Mock } from "vitest"
 
-vi.mock("../../../integrations/kimi-code/oauth", () => {
-	const mockGetAccessToken = vi.fn().mockResolvedValue("oauth-token")
-	const mockForceRefreshAccessToken = vi.fn().mockResolvedValue("refreshed-token")
-	return {
-		kimiCodeOAuthManager: {
-			getAccessToken: mockGetAccessToken,
-			forceRefreshAccessToken: mockForceRefreshAccessToken,
-		},
-		mockGetAccessToken,
-		mockForceRefreshAccessToken,
-	}
-})
+const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.hoisted(() => ({
+	mockGetAccessToken: vi.fn(),
+	mockForceRefreshAccessToken: vi.fn(),
+	mockGetModels: vi.fn(),
+}))
 
-vi.mock("../fetchers/modelCache", () => {
-	const mockGetModels = vi.fn().mockRejectedValue(new Error("offline"))
-	return {
-		getModels: mockGetModels,
-		mockGetModels,
-	}
-})
+vi.mock("../../../integrations/kimi-code/oauth", () => ({
+	kimiCodeOAuthManager: {
+		getAccessToken: mockGetAccessToken,
+		forceRefreshAccessToken: mockForceRefreshAccessToken,
+	},
+}))
 
-const { mockGetAccessToken, mockForceRefreshAccessToken } = await import("../../../integrations/kimi-code/oauth")
-const { mockGetModels } = await import("../fetchers/modelCache")
+vi.mock("../fetchers/modelCache", () => ({ getModels: mockGetModels }))
 
 describe("KimiCodeHandler", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		;(mockGetAccessToken as any).mockResolvedValue("oauth-token")
-		;(mockForceRefreshAccessToken as any).mockResolvedValue("refreshed-token")
-		;(mockGetModels as any).mockRejectedValue(new Error("offline"))
+		mockGetAccessToken.mockResolvedValue("oauth-token")
+		mockForceRefreshAccessToken.mockResolvedValue("refreshed-token")
+		mockGetModels.mockRejectedValue(new Error("offline"))
 	})
 
 	it("is dispatched separately from Moonshot and preserves an unknown selected model", () => {
@@ -65,7 +55,7 @@ describe("KimiCodeHandler", () => {
 		} catch {
 			// expected - mock is incomplete
 		}
-		expect(mockGetAccessToken as any).not.toHaveBeenCalled()
+		expect(mockGetAccessToken).not.toHaveBeenCalled()
 	})
 
 	it("uses OAuth token when auth method is oauth or not specified", async () => {
@@ -78,11 +68,11 @@ describe("KimiCodeHandler", () => {
 		} catch {
 			// expected - mock will fail
 		}
-		expect(mockGetAccessToken as any).toHaveBeenCalled()
+		expect(mockGetAccessToken).toHaveBeenCalled()
 	})
 
 	it("throws error when OAuth is required but no token available", async () => {
-		;(mockGetAccessToken as any).mockResolvedValueOnce(null)
+		mockGetAccessToken.mockResolvedValueOnce(null)
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		await expect(async () => {
@@ -105,9 +95,7 @@ describe("KimiCodeHandler", () => {
 	it("retries with forced refresh on 401 when using OAuth", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const fetchSpy = vi.spyOn(globalThis, "fetch")
-		fetchSpy.mockResolvedValueOnce(
-			new Response(null, { status: 401 }),
-		)
+		fetchSpy.mockResolvedValueOnce(new Response(null, { status: 401 }))
 		fetchSpy.mockResolvedValueOnce(
 			new Response(JSON.stringify({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] }), {
 				status: 200,
@@ -121,25 +109,36 @@ describe("KimiCodeHandler", () => {
 		} catch {
 			// expected - mock is incomplete
 		}
-		expect(mockForceRefreshAccessToken as any).toHaveBeenCalled()
+		expect(mockForceRefreshAccessToken).toHaveBeenCalledOnce()
+	})
+
+	it("force-refreshes and retries exactly once after a non-streaming OAuth 401", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		const unauthorized = Object.assign(new Error("Unauthorized"), { status: 401 })
+		const createCompletion = vi
+			.spyOn((handler as any).client.chat.completions, "create")
+			.mockRejectedValueOnce(unauthorized)
+			.mockResolvedValueOnce({ choices: [{ message: { content: "retried" } }] })
+
+		await expect(handler.completePrompt("test")).resolves.toBe("retried")
+		expect(mockForceRefreshAccessToken).toHaveBeenCalledOnce()
+		expect(createCompletion).toHaveBeenCalledTimes(2)
 	})
 
 	it("does not retry on 401 when using API key auth", async () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-			new Response(null, { status: 401 }),
-		)
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 401 }))
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		await expect(async () => {
 			for await (const chunk of gen) {
 				// consume
 			}
 		}).rejects.toThrow()
-		expect(mockForceRefreshAccessToken as any).not.toHaveBeenCalled()
+		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
 	})
 
 	it("fetches models during prepareRequest", async () => {
-		;(mockGetModels as any).mockResolvedValueOnce({ "test-model": { maxTokens: 1000 } })
+		mockGetModels.mockResolvedValueOnce({ "test-model": { maxTokens: 1000 } })
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {
@@ -149,11 +148,11 @@ describe("KimiCodeHandler", () => {
 		} catch {
 			// expected
 		}
-		expect(mockGetModels as any).toHaveBeenCalled()
+		expect(mockGetModels).toHaveBeenCalled()
 	})
 
 	it("continues when model discovery fails", async () => {
-		;(mockGetModels as any).mockRejectedValueOnce(new Error("discovery failed"))
+		mockGetModels.mockRejectedValueOnce(new Error("discovery failed"))
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {
@@ -163,11 +162,27 @@ describe("KimiCodeHandler", () => {
 		} catch {
 			// expected - different error
 		}
-		expect(mockGetModels as any).toHaveBeenCalled()
+		expect(mockGetModels).toHaveBeenCalled()
+	})
+
+	it.each([
+		["failure", () => Promise.reject(new Error("offline"))],
+		["empty response", () => Promise.resolve({})],
+	])("does not repeatedly block requests after model discovery %s", async (_case, discovery) => {
+		mockGetModels.mockImplementationOnce(discovery)
+		vi.spyOn(globalThis, "fetch").mockImplementation(
+			async () => new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 }),
+		)
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+
+		await handler.completePrompt("first")
+		await handler.completePrompt("second")
+
+		expect(mockGetModels).toHaveBeenCalledOnce()
 	})
 
 	it("uses discovered model info when available", async () => {
-		;(mockGetModels as any).mockResolvedValueOnce({ "kimi-for-coding": { maxTokens: 8000, contextWindow: 128000 } })
+		mockGetModels.mockResolvedValueOnce({ "kimi-for-coding": { maxTokens: 8000, contextWindow: 128000 } })
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
 		try {

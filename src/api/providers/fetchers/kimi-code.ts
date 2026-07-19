@@ -12,6 +12,8 @@ const kimiCodeModelSchema = z.object({
 
 const kimiCodeModelsResponseSchema = z.object({ data: z.array(kimiCodeModelSchema) })
 
+const KIMI_CODE_MODELS_TIMEOUT_MS = 10_000
+
 export function mapKimiCodeModel(model: z.infer<typeof kimiCodeModelSchema>): ModelInfo {
 	return {
 		...kimiCodeDefaultModelInfo,
@@ -24,14 +26,24 @@ export function mapKimiCodeModel(model: z.infer<typeof kimiCodeModelSchema>): Mo
 
 export async function getKimiCodeModels(apiKey?: string): Promise<ModelRecord> {
 	if (!apiKey) throw new Error("Kimi Code authentication is required to fetch models")
-	const response = await fetch(`${KIMI_CODE_BASE_URL}/models`, {
-		headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}` },
-	})
-	if (!response.ok) {
-		const error = new Error(`Kimi Code models request failed: ${response.status} ${response.statusText}`)
-		;(error as Error & { status?: number }).status = response.status
-		throw error
+	const controller = new AbortController()
+	const timeout = setTimeout(
+		() => controller.abort(new Error("Kimi Code models request timed out")),
+		KIMI_CODE_MODELS_TIMEOUT_MS,
+	)
+	try {
+		const response = await fetch(`${KIMI_CODE_BASE_URL}/models`, {
+			headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}` },
+			signal: controller.signal,
+		})
+		if (!response.ok) {
+			const error = new Error(`Kimi Code models request failed: ${response.status} ${response.statusText}`)
+			;(error as Error & { status?: number }).status = response.status
+			throw error
+		}
+		const parsed = kimiCodeModelsResponseSchema.parse(await response.json())
+		return Object.fromEntries(parsed.data.map((model) => [model.id, mapKimiCodeModel(model)]))
+	} finally {
+		clearTimeout(timeout)
 	}
-	const parsed = kimiCodeModelsResponseSchema.parse(await response.json())
-	return Object.fromEntries(parsed.data.map((model) => [model.id, mapKimiCodeModel(model)]))
 }
