@@ -1,0 +1,80 @@
+{
+  "title": "Bảng điều khiển",
+  "done": "Quay lại",
+  "range": {
+    "today": "Hôm nay",
+    "7d": "7 ngày",
+    "30d": "30 ngày",
+    "custom": "Tùy chỉnh",
+    "all": "Tất cả"
+  },
+  "summary": {
+    "totalTokens": "Tổng token",
+    "inputTokens": "Token đầu vào",
+    "outputTokens": "Token đầu ra",
+    "cacheTokens": "Token bộ nhớ đệm",
+    "cost": "Chi phí"
+  },
+  "states": {
+    "loading": "Đang tải...",
+    "error": "Không thể tải thống kê",
+    "empty": "Chưa có dữ liệu sử dụng",
+    "emptyHint": "Bắt đầu cuộc trò chuyện để xem thống kê"
+  },
+  "actions": {
+    "refresh": "Làm mới",
+    "exportJson": "Xuất JSON",
+    "exportCsv": "Xuất CSV",
+    "clear": "Xóa thống kê"
+  },
+  "breakdown": {
+    "title": "Phân tích",
+    "model": "Mô hình",
+    "provider": "Nhà cung cấp",
+    "mode": "Chế độ",
+    "events": "Sự kiện",
+    "inputTokens": "Đầu vào",
+    "outputTokens": "Đầu ra",
+    "cacheReadTokens": "Đọc bộ nhớ đệm",
+    "cacheWriteTokens": "Ghi bộ nhớ đệm",
+    "reasoningTokens": "Suy luận",
+    "totalTokens": "Tổng",
+    "costUsd": "Chi phí",
+    "unknown": "Không xác định"
+  },
+  "coverage": {
+    "title": "Phạm vi dữ liệu",
+    "liveFrom": "Trực tiếp từ",
+    "backfilledEvents": "Sự kiện bổ sung hồi tố",
+    "paused": "Đã tạm dừng ghi (đã đạt giới hạn lưu trữ)"
+  },
+  "clearDialog": {
+    "title": "Xóa thống kê",
+    "description": "Bạn có chắc chắn muốn xóa tất cả thống kê sử dụng không? Hành động này không thể hoàn tác.",
+    "cancel": "Hủy",
+    "confirm": "Xóa"
+  },
+  "customRange": {
+    "from": "Từ",
+    "to": "Đến"
+  },
+  "sessions": {
+    "title": "Phiên",
+    "noSessions": "Không có phiên trong khoảng thời gian này",
+    "filterModel": "Tất cả mô hình",
+    "filterProvider": "Tất cả nhà cung cấp",
+    "callCount": "{{count}} lượt gọi"
+  },
+  "sessionDetail": {
+    "summary": "Tóm tắt phiên",
+    "apiCalls": "Lời gọi API",
+    "noApiCalls": "Không có lời gọi API nào được ghi lại",
+    "input": "Đầu vào",
+    "output": "Đầu ra",
+    "cost": "Chi phí",
+    "model": "Mô hình",
+    "mode": "Chế độ",
+    "time": "Thời gian",
+    "status": "Trạng thái"
+  }
+}

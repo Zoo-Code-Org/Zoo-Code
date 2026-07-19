@@ -1,0 +1,80 @@
+{
+  "title": "Панель",
+  "done": "Назад",
+  "range": {
+    "today": "Сегодня",
+    "7d": "7 дней",
+    "30d": "30 дней",
+    "custom": "Другой",
+    "all": "Всё"
+  },
+  "summary": {
+    "totalTokens": "Всего токенов",
+    "inputTokens": "Входные токены",
+    "outputTokens": "Выходные токены",
+    "cacheTokens": "Токены кэша",
+    "cost": "Стоимость"
+  },
+  "states": {
+    "loading": "Загрузка...",
+    "error": "Не удалось загрузить статистику",
+    "empty": "Данные об использовании пока отсутствуют",
+    "emptyHint": "Начните диалог, чтобы увидеть статистику"
+  },
+  "actions": {
+    "refresh": "Обновить",
+    "exportJson": "Экспорт JSON",
+    "exportCsv": "Экспорт CSV",
+    "clear": "Очистить статистику"
+  },
+  "breakdown": {
+    "title": "Детализация",
+    "model": "Модель",
+    "provider": "Поставщик",
+    "mode": "Режим",
+    "events": "События",
+    "inputTokens": "Вход",
+    "outputTokens": "Выход",
+    "cacheReadTokens": "Чтение кэша",
+    "cacheWriteTokens": "Запись кэша",
+    "reasoningTokens": "Рассуждение",
+    "totalTokens": "Всего",
+    "costUsd": "Стоимость",
+    "unknown": "Неизвестно"
+  },
+  "coverage": {
+    "title": "Покрытие данных",
+    "liveFrom": "Запись с",
+    "backfilledEvents": "Ретроспективные события",
+    "paused": "Запись приостановлена (достигнут лимит хранилища)"
+  },
+  "clearDialog": {
+    "title": "Очистить статистику",
+    "description": "Вы уверены, что хотите очистить всю статистику использования? Это действие нельзя отменить.",
+    "cancel": "Отмена",
+    "confirm": "Очистить"
+  },
+  "customRange": {
+    "from": "С",
+    "to": "По"
+  },
+  "sessions": {
+    "title": "Сессии",
+    "noSessions": "В этом периоде нет сессий",
+    "filterModel": "Все модели",
+    "filterProvider": "Все поставщики",
+    "callCount": "{{count}} вызовов"
+  },
+  "sessionDetail": {
+    "summary": "Сводка по сессии",
+    "apiCalls": "Вызовы API",
+    "noApiCalls": "Зарегистрированных вызовов API нет",
+    "input": "Вход",
+    "output": "Выход",
+    "cost": "Стоимость",
+    "model": "Модель",
+    "mode": "Режим",
+    "time": "Время",
+    "status": "Статус"
+  }
+}

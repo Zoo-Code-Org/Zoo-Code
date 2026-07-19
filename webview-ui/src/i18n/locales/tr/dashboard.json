@@ -1,0 +1,80 @@
+{
+  "title": "Panel",
+  "done": "Geri",
+  "range": {
+    "today": "Bugün",
+    "7d": "7 Gün",
+    "30d": "30 Gün",
+    "custom": "Özel",
+    "all": "Tümü"
+  },
+  "summary": {
+    "totalTokens": "Toplam Token",
+    "inputTokens": "Giriş Token'ları",
+    "outputTokens": "Çıkış Token'ları",
+    "cacheTokens": "Önbellek Token'ları",
+    "cost": "Maliyet"
+  },
+  "states": {
+    "loading": "Yükleniyor...",
+    "error": "İstatistikler yüklenemedi",
+    "empty": "Henüz kullanım verisi yok",
+    "emptyHint": "İstatistikleri görmek için bir konuşma başlatın"
+  },
+  "actions": {
+    "refresh": "Yenile",
+    "exportJson": "JSON Dışa Aktar",
+    "exportCsv": "CSV Dışa Aktar",
+    "clear": "İstatistikleri Temizle"
+  },
+  "breakdown": {
+    "title": "Döküm",
+    "model": "Model",
+    "provider": "Sağlayıcı",
+    "mode": "Mod",
+    "events": "Olaylar",
+    "inputTokens": "Giriş",
+    "outputTokens": "Çıkış",
+    "cacheReadTokens": "Önbellek Okuma",
+    "cacheWriteTokens": "Önbellek Yazma",
+    "reasoningTokens": "Çıkarım",
+    "totalTokens": "Toplam",
+    "costUsd": "Maliyet",
+    "unknown": "Bilinmiyor"
+  },
+  "coverage": {
+    "title": "Veri Kapsamı",
+    "liveFrom": "Şu tarihten beri canlı",
+    "backfilledEvents": "Geriye dönük doldurulan olaylar",
+    "paused": "Kayıt duraklatıldı (depolama sınırına ulaşıldı)"
+  },
+  "clearDialog": {
+    "title": "İstatistikleri Temizle",
+    "description": "Tüm kullanım istatistiklerini temizlemek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
+    "cancel": "İptal",
+    "confirm": "Temizle"
+  },
+  "customRange": {
+    "from": "Başlangıç",
+    "to": "Bitiş"
+  },
+  "sessions": {
+    "title": "Oturumlar",
+    "noSessions": "Bu zaman aralığında oturum yok",
+    "filterModel": "Tüm Modeller",
+    "filterProvider": "Tüm Sağlayıcılar",
+    "callCount": "{{count}} çağrı"
+  },
+  "sessionDetail": {
+    "summary": "Oturum Özeti",
+    "apiCalls": "API Çağrıları",
+    "noApiCalls": "Kayıtlı API çağrısı yok",
+    "input": "Giriş",
+    "output": "Çıkış",
+    "cost": "Maliyet",
+    "model": "Model",
+    "mode": "Mod",
+    "time": "Zaman",
+    "status": "Durum"
+  }
+}
