@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw } from "lucide-react"
 
-import type { ExtensionMessage, StatsQuery, StatsSnapshot } from "@roo-code/types"
+import type { ExtensionMessage, StatsQuery, StatsSnapshot, SessionSummary } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -20,6 +20,7 @@ import {
 
 import { Tab, TabHeader, TabContent } from "../common/Tab"
 import DashboardSummary from "./DashboardSummary"
+import SessionList from "./SessionList"
 import UsageHeatmap from "../stats/UsageHeatmap"
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -70,6 +71,18 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	// Track the latest request to ignore stale responses
 	const latestRequestIdRef = useRef<string>("")
+
+	// ── Sessions state (Commit 3) ──────────────────────────────────────────
+	// Sessions are fetched independently from the stats snapshot so that the
+	// session list can update without re-fetching the full aggregation. The
+	// session request reuses the same `buildQuery()` time range so the two
+	// views stay consistent.
+	const [sessions, setSessions] = useState<SessionSummary[]>([])
+	const [sessionsLoading, setSessionsLoading] = useState(false)
+	const [sessionsError, setSessionsError] = useState<string | null>(null)
+	const [modelFilter, setModelFilter] = useState<string | undefined>(undefined)
+	const [providerFilter, setProviderFilter] = useState<string | undefined>(undefined)
+	const latestSessionsRequestIdRef = useRef<string>("")
 
 	// ── Query construction ──────────────────────────────────────────────────
 
@@ -165,9 +178,42 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		[buildQuery],
 	)
 
+	// ── Fetch sessions (Commit 3) ──────────────────────────────────────────
+	// Sends `getDashboardSessions` with the same time-range query as the
+	// stats fetch, plus optional model/provider filters. The response is
+	// correlated via `latestSessionsRequestIdRef` to ignore stale results.
+	const fetchSessions = useCallback(
+		(
+			currentPreset: DashboardPreset,
+			currentGroupBy: DashboardGroupBy,
+			fromOverride?: string,
+			toOverride?: string,
+			modelFilterOverride?: string | undefined,
+			providerFilterOverride?: string | undefined,
+		) => {
+			const requestId = `dashboard-sessions-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+			latestSessionsRequestIdRef.current = requestId
+			setSessionsLoading(true)
+			setSessionsError(null)
+
+			const query = buildQuery(currentPreset, currentGroupBy, fromOverride, toOverride)
+			vscode.postMessage({
+				type: "getDashboardSessions",
+				requestId,
+				usageStatsQuery: query,
+				dashboardSessionFilters: {
+					model: modelFilterOverride,
+					provider: providerFilterOverride,
+				},
+			})
+		},
+		[buildQuery],
+	)
+
 	// Initial fetch on mount
 	useEffect(() => {
 		fetchStats(preset, groupBy)
+		fetchSessions(preset, groupBy)
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [])
 
@@ -180,28 +226,51 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				return
 			}
 			fetchStats(newPreset, groupBy)
+			fetchSessions(newPreset, groupBy, undefined, undefined, modelFilter, providerFilter)
 		},
-		[groupBy, fetchStats, customFrom, customTo],
+		[groupBy, fetchStats, fetchSessions, customFrom, customTo, modelFilter, providerFilter],
 	)
 
 	const handleGroupByChange = useCallback(
 		(newGroupBy: DashboardGroupBy) => {
 			setGroupBy(newGroupBy)
 			fetchStats(preset, newGroupBy)
+			fetchSessions(preset, newGroupBy, undefined, undefined, modelFilter, providerFilter)
 		},
-		[preset, fetchStats],
+		[preset, fetchStats, fetchSessions, modelFilter, providerFilter],
 	)
 
 	const handleRefresh = useCallback(() => {
 		fetchStats(preset, groupBy)
-	}, [preset, groupBy, fetchStats])
+		fetchSessions(preset, groupBy, undefined, undefined, modelFilter, providerFilter)
+	}, [preset, groupBy, fetchStats, fetchSessions, modelFilter, providerFilter])
 
 	// Apply a custom date range: triggered when both inputs are filled and
 	// the user wants to run the query (e.g. on "To" date change, or explicitly).
 	const handleApplyCustomRange = useCallback(() => {
 		if (!customFrom || !customTo) return
 		fetchStats("custom", groupBy, customFrom, customTo)
-	}, [customFrom, customTo, groupBy, fetchStats])
+		fetchSessions("custom", groupBy, customFrom, customTo, modelFilter, providerFilter)
+	}, [customFrom, customTo, groupBy, fetchStats, fetchSessions, modelFilter, providerFilter])
+
+	// ── Session filter handlers (Commit 3) ────────────────────────────────
+	// When a filter changes, re-fetch sessions with the new filter. The
+	// stats snapshot is unaffected by model/provider filters.
+	const handleModelFilterChange = useCallback(
+		(value: string | undefined) => {
+			setModelFilter(value)
+			fetchSessions(preset, groupBy, undefined, undefined, value, providerFilter)
+		},
+		[preset, groupBy, providerFilter, fetchSessions],
+	)
+
+	const handleProviderFilterChange = useCallback(
+		(value: string | undefined) => {
+			setProviderFilter(value)
+			fetchSessions(preset, groupBy, undefined, undefined, modelFilter, value)
+		},
+		[preset, groupBy, modelFilter, fetchSessions],
+	)
 
 	// ── Listen for responses ────────────────────────────────────────────────
 
@@ -224,9 +293,26 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			}
 
 			if (message.type === "usageStatsChanged") {
-				// Data changed externally — refetch with debounce
-				const timer = setTimeout(() => fetchStats(preset, groupBy), 300)
+				// Data changed externally — refetch both stats and sessions with debounce
+				const timer = setTimeout(() => {
+					fetchStats(preset, groupBy)
+					fetchSessions(preset, groupBy, undefined, undefined, modelFilter, providerFilter)
+				}, 300)
 				return () => clearTimeout(timer)
+			}
+
+			if (message.type === "dashboardSessionsResponse") {
+				// Only accept the latest sessions request's response
+				if (message.requestId !== latestSessionsRequestIdRef.current) return
+
+				if (message.dashboardSessions) {
+					setSessions(message.dashboardSessions)
+					setSessionsLoading(false)
+					setSessionsError(null)
+				} else {
+					setSessionsError(message.error || t("dashboard:states.error"))
+					setSessionsLoading(false)
+				}
 			}
 
 			if (message.type === "requestClearNonceResponse") {
@@ -247,6 +333,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					setShowClearDialog(false)
 					setClearNonce(null)
 					fetchStats(preset, groupBy)
+					fetchSessions(preset, groupBy, undefined, undefined, modelFilter, providerFilter)
 				} else {
 					setError(message.clearUsageStatsResult?.error || t("dashboard:states.error"))
 					setShowClearDialog(false)
@@ -265,7 +352,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 		window.addEventListener("message", handleMessage)
 		return () => window.removeEventListener("message", handleMessage)
-	}, [t, preset, groupBy, fetchStats])
+	}, [t, preset, groupBy, fetchStats, fetchSessions, modelFilter, providerFilter])
 
 	// ── Export ───────────────────────────────────────────────────────────────
 
@@ -462,9 +549,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 				{/* Error state */}
 				{!loading && error && (
-					<div
-						className="flex flex-col items-center justify-center gap-2 py-8"
-						data-testid="dashboard-error">
+					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="dashboard-error">
 						<span className="text-sm text-vscode-errorForeground">{error}</span>
 						<Button variant="secondary" size="sm" onClick={handleRefresh}>
 							{t("dashboard:actions.refresh")}
@@ -474,12 +559,8 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 				{/* Empty state */}
 				{!loading && !error && !hasData && (
-					<div
-						className="flex flex-col items-center justify-center gap-2 py-8"
-						data-testid="dashboard-empty">
-						<span className="text-sm text-vscode-descriptionForeground">
-							{t("dashboard:states.empty")}
-						</span>
+					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="dashboard-empty">
+						<span className="text-sm text-vscode-descriptionForeground">{t("dashboard:states.empty")}</span>
 						<span className="text-xs text-vscode-descriptionForeground">
 							{t("dashboard:states.emptyHint")}
 						</span>
@@ -551,8 +632,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 									</thead>
 									<tbody>
 										{buckets.map((bucket, index) => {
-											const keyValue =
-												bucket.key?.[groupBy] ?? t("dashboard:breakdown.unknown")
+											const keyValue = bucket.key?.[groupBy] ?? t("dashboard:breakdown.unknown")
 											return (
 												<tr
 													key={`${groupBy}-${index}`}
@@ -591,6 +671,32 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 								</table>
 							</div>
 						</div>
+
+						{/* Sessions list (Commit 3) */}
+						{sessionsLoading ? (
+							<div
+								className="flex items-center justify-center py-4"
+								data-testid="dashboard-sessions-loading">
+								<RefreshCw className="size-4 animate-spin text-vscode-descriptionForeground" />
+								<span className="ml-2 text-xs text-vscode-descriptionForeground">
+									{t("dashboard:states.loading")}
+								</span>
+							</div>
+						) : sessionsError ? (
+							<div
+								className="flex items-center justify-center py-4 text-xs text-vscode-errorForeground"
+								data-testid="dashboard-sessions-error">
+								{sessionsError}
+							</div>
+						) : (
+							<SessionList
+								sessions={sessions}
+								modelFilter={modelFilter}
+								providerFilter={providerFilter}
+								onModelFilterChange={handleModelFilterChange}
+								onProviderFilterChange={handleProviderFilterChange}
+							/>
+						)}
 
 						{/* Data coverage */}
 						{snapshot?.coverage && (

@@ -1,61 +1,68 @@
 {
-  "title": "Dashboard",
-  "done": "Back",
-  "range": {
-    "today": "Today",
-    "7d": "7 Days",
-    "30d": "30 Days",
-    "custom": "Custom",
-    "all": "All"
-  },
-  "summary": {
-    "totalTokens": "Total Tokens",
-    "inputTokens": "Input Tokens",
-    "outputTokens": "Output Tokens",
-    "cacheTokens": "Cache Tokens",
-    "cost": "Cost"
-  },
-  "states": {
-    "loading": "Loading...",
-    "error": "Failed to load statistics",
-    "empty": "No usage data yet",
-    "emptyHint": "Start a conversation to see statistics"
-  },
-  "actions": {
-    "refresh": "Refresh",
-    "exportJson": "Export JSON",
-    "exportCsv": "Export CSV",
-    "clear": "Clear Statistics"
-  },
-  "breakdown": {
-    "title": "Breakdown",
-    "model": "Model",
-    "provider": "Provider",
-    "mode": "Mode",
-    "events": "Events",
-    "inputTokens": "Input",
-    "outputTokens": "Output",
-    "cacheReadTokens": "Cache Read",
-    "cacheWriteTokens": "Cache Write",
-    "reasoningTokens": "Reasoning",
-    "totalTokens": "Total",
-    "costUsd": "Cost",
-    "unknown": "Unknown"
-  },
-  "coverage": {
-    "title": "Data Coverage",
-    "liveFrom": "Live from",
-    "backfilledEvents": "Backfilled events",
-    "paused": "Recording paused (storage limit reached)"
-  },
-  "clearDialog": {
-    "title": "Clear Statistics",
-    "description": "Are you sure you want to clear all usage statistics? This action cannot be undone.",
-    "cancel": "Cancel",
-    "confirm": "Clear"
-  },
-  "customRange": {
-    "from": "From",
-    "to": "To"
-  }
+	"title": "Dashboard",
+	"done": "Back",
+	"range": {
+		"today": "Today",
+		"7d": "7 Days",
+		"30d": "30 Days",
+		"custom": "Custom",
+		"all": "All"
+	},
+	"summary": {
+		"totalTokens": "Total Tokens",
+		"inputTokens": "Input Tokens",
+		"outputTokens": "Output Tokens",
+		"cacheTokens": "Cache Tokens",
+		"cost": "Cost"
+	},
+	"states": {
+		"loading": "Loading...",
+		"error": "Failed to load statistics",
+		"empty": "No usage data yet",
+		"emptyHint": "Start a conversation to see statistics"
+	},
+	"actions": {
+		"refresh": "Refresh",
+		"exportJson": "Export JSON",
+		"exportCsv": "Export CSV",
+		"clear": "Clear Statistics"
+	},
+	"breakdown": {
+		"title": "Breakdown",
+		"model": "Model",
+		"provider": "Provider",
+		"mode": "Mode",
+		"events": "Events",
+		"inputTokens": "Input",
+		"outputTokens": "Output",
+		"cacheReadTokens": "Cache Read",
+		"cacheWriteTokens": "Cache Write",
+		"reasoningTokens": "Reasoning",
+		"totalTokens": "Total",
+		"costUsd": "Cost",
+		"unknown": "Unknown"
+	},
+	"coverage": {
+		"title": "Data Coverage",
+		"liveFrom": "Live from",
+		"backfilledEvents": "Backfilled events",
+		"paused": "Recording paused (storage limit reached)"
+	},
+	"clearDialog": {
+		"title": "Clear Statistics",
+		"description": "Are you sure you want to clear all usage statistics? This action cannot be undone.",
+		"cancel": "Cancel",
+		"confirm": "Clear"
+	},
+	"customRange": {
+		"from": "From",
+		"to": "To"
+	},
+	"sessions": {
+		"title": "Sessions",
+		"noSessions": "No sessions in this time range",
+		"filterModel": "All Models",
+		"filterProvider": "All Providers",
+		"callCount": "{{count}} calls"
+	}
 }
