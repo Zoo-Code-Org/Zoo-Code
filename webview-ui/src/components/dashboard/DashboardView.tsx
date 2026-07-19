@@ -56,8 +56,23 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	const [clearNonce, setClearNonce] = useState<string | null>(null)
 
 	// Custom range date inputs (YYYY-MM-DD). Only used when preset === "custom".
-	const [customFrom, setCustomFrom] = useState<string>("")
-	const [customTo, setCustomTo] = useState<string>("")
+	// Default to yesterday~today so the inputs are never empty on first selection.
+	const toLocalDateString = useCallback((d: Date) => {
+		const year = d.getFullYear()
+		const month = String(d.getMonth() + 1).padStart(2, "0")
+		const day = String(d.getDate()).padStart(2, "0")
+		return `${year}-${month}-${day}`
+	}, [])
+
+	const defaultDateRange = useMemo(() => {
+		const now = new Date()
+		const yesterday = new Date(now)
+		yesterday.setDate(now.getDate() - 1)
+		return { from: toLocalDateString(yesterday), to: toLocalDateString(now) }
+	}, [toLocalDateString])
+
+	const [customFrom, setCustomFrom] = useState<string>(defaultDateRange.from)
+	const [customTo, setCustomTo] = useState<string>(defaultDateRange.to)
 
 	// Track the latest request to ignore stale responses
 	const latestRequestIdRef = useRef<string>("")
