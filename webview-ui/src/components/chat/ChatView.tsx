@@ -615,18 +615,6 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		(text: string, images: string[]) => {
 			text = text.trim()
 
-			// Intercept exact "/stats" command before sending to the LLM.
-			// This opens the statistics tab without consuming tokens or
-			// interfering with the task lifecycle. Only exact "/stats"
-			// (no arguments, no images) is intercepted — "/stats foo" or
-			// "/stats" with attached images falls through to normal send.
-			if (text === "/stats" && images.length === 0) {
-				vscode.postMessage({ type: "switchTab", tab: "stats" })
-				setInputValue("")
-				setSelectedImages([])
-				return
-			}
-
 			if (text || images.length > 0) {
 				// Intercept when the active provider is retired — show a
 				// WarningRow instead of sending anything to the backend.

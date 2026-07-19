@@ -24,7 +24,7 @@ import { useAddNonInteractiveClickListener } from "./components/ui/hooks/useNonI
 import { TooltipProvider } from "./components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "./components/ui/standard-tooltip"
 
-type Tab = "settings" | "history" | "chat" | "marketplace" | "stats"
+type Tab = "settings" | "history" | "chat" | "marketplace" | "dashboard"
 
 interface DeleteMessageDialogState {
 	isOpen: boolean
@@ -49,6 +49,7 @@ const tabsByMessageAction: Partial<Record<NonNullable<ExtensionMessage["action"]
 	settingsButtonClicked: "settings",
 	historyButtonClicked: "history",
 	marketplaceButtonClicked: "marketplace",
+	dashboardButtonClicked: "dashboard",
 }
 
 const App = () => {
@@ -247,7 +248,7 @@ const App = () => {
 					targetTab={currentMarketplaceTab as "mcp" | "mode" | undefined}
 				/>
 			)}
-			{tab === "stats" && <StatsView onDone={() => switchTab("chat")} />}
+			{tab === "dashboard" && <StatsView onDone={() => switchTab("chat")} />}
 			<ChatView
 				ref={chatViewRef}
 				isHidden={tab !== "chat"}

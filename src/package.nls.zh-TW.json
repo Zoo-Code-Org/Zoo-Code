@@ -1,4 +1,4 @@
-{
+﻿{
 	"extension.displayName": "Zoo Code",
 	"extension.description": "在你的編輯器中提供完整的 AI 代理開發團隊。",
 	"command.newTask.title": "新建任務",
@@ -16,7 +16,7 @@
 	"command.acceptInput.title": "接受輸入/建議",
 	"command.showRipgrepDiagnostic.title": "顯示 Ripgrep 診斷",
 	"command.toggleAutoApprove.title": "切換自動批准",
-	"command.openUsageStats.title": "Open Usage Statistics",
+	"command.dashboard.title": "Dashboard",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",

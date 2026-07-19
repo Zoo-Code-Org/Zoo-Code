@@ -110,6 +110,9 @@ export interface ExtensionMessage {
 		| "exportUsageStatsResponse"
 		| "requestClearNonceResponse"
 		| "usageStatsChanged"
+		// Dashboard response types
+		| "dashboardStatsResponse"
+		| "dashboardSessionDetailResponse"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -123,6 +126,7 @@ export interface ExtensionMessage {
 		| "settingsButtonClicked"
 		| "historyButtonClicked"
 		| "marketplaceButtonClicked"
+		| "dashboardButtonClicked"
 		| "didBecomeVisible"
 		| "focusInput"
 		| "switchTab"
@@ -650,10 +654,14 @@ export interface WebviewMessage {
 		| "clearUsageStats"
 		| "exportUsageStats"
 		| "requestClearNonce"
+		// Dashboard request types
+		| "getDashboardStats"
+		| "getDashboardSessionDetail"
+		| "getDashboardSessions"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
-	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud" | "stats"
+	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud" | "stats" | "dashboard"
 	disabled?: boolean
 	context?: string
 	dataUri?: string

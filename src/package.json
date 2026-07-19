@@ -96,6 +96,11 @@
 				"icon": "$(settings-gear)"
 			},
 			{
+				"command": "zoo-code.dashboardButtonClicked",
+				"title": "%command.dashboard.title%",
+				"icon": "$(graph)"
+			},
+			{
 				"command": "zoo-code.openInNewTab",
 				"title": "%command.openInNewTab.title%",
 				"category": "%configuration.title%"
@@ -169,11 +174,6 @@
 				"command": "zoo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"
-			},
-			{
-				"command": "zoo-code.openUsageStats",
-				"title": "%command.openUsageStats.title%",
-				"category": "%configuration.title%"
 			}
 		],
 		"menus": {
@@ -234,6 +234,11 @@
 					"when": "view == zoo-code.SidebarProvider"
 				},
 				{
+					"command": "zoo-code.dashboardButtonClicked",
+					"group": "navigation@4",
+					"when": "view == zoo-code.SidebarProvider"
+				},
+				{
 					"command": "zoo-code.historyButtonClicked",
 					"group": "overflow@1",
 					"when": "view == zoo-code.SidebarProvider"
@@ -258,6 +263,11 @@
 				{
 					"command": "zoo-code.marketplaceButtonClicked",
 					"group": "navigation@3",
+					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+				},
+				{
+					"command": "zoo-code.dashboardButtonClicked",
+					"group": "navigation@4",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
 				},
 				{
