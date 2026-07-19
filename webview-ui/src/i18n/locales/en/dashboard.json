@@ -64,5 +64,17 @@
     "filterModel": "All Models",
     "filterProvider": "All Providers",
     "callCount": "{{count}} calls"
+  },
+  "sessionDetail": {
+    "summary": "Session Summary",
+    "apiCalls": "API Calls",
+    "noApiCalls": "No API calls recorded",
+    "input": "Input",
+    "output": "Output",
+    "cost": "Cost",
+    "model": "Model",
+    "mode": "Mode",
+    "time": "Time",
+    "status": "Status"
   }
 }

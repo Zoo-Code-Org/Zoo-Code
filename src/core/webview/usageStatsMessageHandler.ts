@@ -2,7 +2,15 @@ import * as vscode from "vscode"
 import * as path from "path"
 import * as os from "os"
 
-import type { WebviewMessage, StatsQuery, StatsSnapshot, SessionSummary, UsageEventV1 } from "@roo-code/types"
+import type {
+	WebviewMessage,
+	StatsQuery,
+	StatsSnapshot,
+	SessionSummary,
+	SessionDetail,
+	APICallRecord,
+	UsageEventV1,
+} from "@roo-code/types"
 import { StatsQuery as StatsQuerySchema } from "@roo-code/types"
 
 import type { ClineProvider } from "./ClineProvider"
@@ -27,6 +35,9 @@ export type UsageStatsHandlerErrorCode =
 	| "STATS_HANDLER/sessions/001" // invalid payload (invalid stats query)
 	| "STATS_HANDLER/sessions/002" // service unavailable
 	| "STATS_HANDLER/sessions/003" // service error
+	| "STATS_HANDLER/sessionDetail/001" // invalid payload (missing taskId)
+	| "STATS_HANDLER/sessionDetail/002" // service unavailable
+	| "STATS_HANDLER/sessionDetail/003" // service error
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -600,6 +611,203 @@ export async function handleGetDashboardSessions(
 			requestId,
 			dashboardSessions: null,
 			error: `[STATS_HANDLER/sessions/003] Failed to query dashboard sessions: ${errorMessage}`,
+		})
+	}
+}
+
+// ── Dashboard Session Detail ─────────────────────────────────────────────────
+
+/**
+	* Maps a single {@link UsageEventV1} to an {@link APICallRecord} for display
+	* in the session detail expansion. Only the fields needed by the UI are
+	* projected; prompt bodies, response bodies, API keys, and workspace paths
+	* are never included.
+	*
+	* @param event The raw usage event.
+	* @param index The 1-based index of the event within its task (for display).
+	*/
+function mapEventToApiCall(event: UsageEventV1, index: number): APICallRecord {
+	return {
+		index,
+		timestamp: new Date(event.occurredAt).getTime(),
+		inputTokens: event.usage.inputTokens?.value ?? 0,
+		outputTokens: event.usage.outputTokens?.value ?? 0,
+		cacheReadTokens: event.usage.cacheReadTokens?.value ?? 0,
+		cacheWriteTokens: event.usage.cacheWriteTokens?.value ?? 0,
+		reasoningTokens: event.usage.reasoningTokens?.value ?? 0,
+		costUsd: event.usage.costUsd?.value ?? 0,
+		status: event.status,
+		model: event.model,
+	}
+}
+
+/**
+	* Builds a {@link SessionDetail} from the raw usage events for a single task.
+	*
+	* The summary fields mirror {@link buildSessionSummaries} so the expanded
+	* detail header matches the row summary the user clicked. The `apiCalls` array
+	* is sorted by `occurredAt` ascending (oldest first) so the index column
+	* reflects chronological order within the session.
+	*
+	* @param taskId The task identifier to build the detail for.
+	* @param events The raw usage events filtered to this task.
+	* @param globalStoragePath Used to read task messages for title extraction.
+	*/
+async function buildSessionDetail(
+	taskId: string,
+	events: UsageEventV1[],
+	globalStoragePath: string,
+): Promise<SessionDetail> {
+	// Sort events by occurredAt ascending so index reflects chronological order.
+	const sorted = [...events].sort(
+		(a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
+	)
+
+	const first = sorted[0]
+	const last = sorted[sorted.length - 1]
+
+	// Aggregate totals across all events in the task.
+	let totalTokens = 0
+	let totalCost = 0
+	for (const ev of sorted) {
+		totalTokens += ev.usage.totalTokens?.value ?? 0
+		totalCost += ev.usage.costUsd?.value ?? 0
+	}
+
+	const title = await deriveSessionTitle(taskId, globalStoragePath)
+
+	const apiCalls: APICallRecord[] = sorted.map((event, i) => mapEventToApiCall(event, i + 1))
+
+	return {
+		taskId,
+		title,
+		timestamp: new Date(last.occurredAt).getTime(),
+		model: first.model,
+		provider: first.provider,
+		mode: first.mode,
+		totalTokens,
+		totalCost,
+		callCount: sorted.length,
+		apiCalls,
+	}
+}
+
+/**
+	* Handles the `getDashboardSessionDetail` message (Commit 4).
+	*
+	* Reads the `taskId` from the message, queries the `UsageStatsService` for all
+	* raw events (using a permissive time-range query so every event for the task
+	* is returned), filters to the requested `taskId`, builds a {@link SessionDetail}
+	* with per-API-call records, and posts the result back to the webview as
+	* `dashboardSessionDetailResponse`.
+	*
+	* The query reuses `exportStats` with the "all" preset (no from/to bounds) so
+	* the detail is not clipped by the dashboard's current time-range selection.
+	* This matches user expectations: clicking a session row shows the full
+	* session, not just the portion within the current range.
+	*
+	* Security: only `taskId`, model/provider/mode, token totals, cost, status,
+	* timestamps, and the first user message text (truncated) are sent to the
+	* webview. No prompt bodies, response bodies, or API keys are transmitted.
+	*/
+export async function handleGetDashboardSessionDetail(
+	provider: ClineProvider,
+	message: WebviewMessage,
+): Promise<void> {
+	const requestId = message.requestId
+
+	try {
+		const service = provider.getUsageStatsService()
+
+		if (!service) {
+			await provider.postMessageToWebview({
+				type: "dashboardSessionDetailResponse",
+				requestId,
+				dashboardSessionDetail: null,
+				error: "[STATS_HANDLER/sessionDetail/002] Usage stats service is unavailable",
+			})
+			return
+		}
+
+		// The taskId is carried in `message.text` (the conventional field for
+		// single-string payloads in WebviewMessage). It is also accepted via
+		// `message.taskId` for explicitness.
+		const taskId = message.taskId ?? message.text
+
+		if (!taskId || typeof taskId !== "string") {
+			await provider.postMessageToWebview({
+				type: "dashboardSessionDetailResponse",
+				requestId,
+				dashboardSessionDetail: null,
+				error: "[STATS_HANDLER/sessionDetail/001] Missing or invalid taskId",
+			})
+			return
+		}
+
+		// Query all events (no time-range bounds) so the session detail is
+		// not clipped by the dashboard's current range selection. The
+		// `includeCancelled` flag is true so failed/cancelled calls appear in
+		// the per-call list (the summary already excludes them from totals
+		// when the dashboard range filters them out, but the detail view
+		// should show every call that happened in the session).
+		const allQuery: StatsQuery = {
+			preset: "all",
+			timezone: "UTC",
+			groupBy: ["model"],
+			includeCancelled: true,
+		}
+
+		const exportData = await service.exportStats(allQuery, "json")
+		const allEvents: UsageEventV1[] = (exportData as JsonExport).events ?? []
+
+		// Filter to the requested task.
+		const taskEvents = allEvents.filter((ev) => ev.taskId === taskId)
+
+		if (taskEvents.length === 0) {
+			// No events for this task — return an empty detail rather than an
+			// error so the UI can render the "no API calls" empty state.
+			const globalStoragePath = provider.contextProxy.globalStorageUri.fsPath
+			const title = await deriveSessionTitle(taskId, globalStoragePath)
+
+			await provider.postMessageToWebview({
+				type: "dashboardSessionDetailResponse",
+				requestId,
+				dashboardSessionDetail: {
+					taskId,
+					title,
+					timestamp: 0,
+					model: "",
+					provider: "",
+					mode: "",
+					totalTokens: 0,
+					totalCost: 0,
+					callCount: 0,
+					apiCalls: [],
+				},
+			})
+			return
+		}
+
+		const globalStoragePath = provider.contextProxy.globalStorageUri.fsPath
+		const detail = await buildSessionDetail(taskId, taskEvents, globalStoragePath)
+
+		await provider.postMessageToWebview({
+			type: "dashboardSessionDetailResponse",
+			requestId,
+			dashboardSessionDetail: detail,
+		})
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+
+		provider.log(
+			`[STATS_HANDLER/sessionDetail/003] Error querying dashboard session detail: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+		)
+
+		await provider.postMessageToWebview({
+			type: "dashboardSessionDetailResponse",
+			requestId,
+			dashboardSessionDetail: null,
+			error: `[STATS_HANDLER/sessionDetail/003] Failed to query dashboard session detail: ${errorMessage}`,
 		})
 	}
 }

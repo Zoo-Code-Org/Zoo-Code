@@ -53,8 +53,9 @@ import {
 	handleGetUsageStats,
 	handleClearUsageStats,
 	handleExportUsageStats,
-handleRequestClearNonce,
+	handleRequestClearNonce,
 	handleGetDashboardSessions,
+	handleGetDashboardSessionDetail,
 } from "./usageStatsMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
@@ -4043,6 +4044,11 @@ export const webviewMessageHandler = async (
 
 		case "getDashboardSessions": {
 			await handleGetDashboardSessions(provider, message)
+			break
+		}
+
+		case "getDashboardSessionDetail": {
+			await handleGetDashboardSessionDetail(provider, message)
 			break
 		}
 
