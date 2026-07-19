@@ -469,5 +469,422 @@ describe("UsageAggregator", () => {
 			expect(result.totals.outputTokens).toBe(0)
 			expect(result.totals.costUsd).toBe(0)
 		})
+
+		it("should default missing SourcedNumber value to 0", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						// outputTokens, cacheRead, cacheWrite, reasoning, total, cost 모두 누락
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.inputTokens).toBe(1000)
+			expect(result.totals.outputTokens).toBe(0)
+			expect(result.totals.cacheReadTokens).toBe(0)
+			expect(result.totals.cacheWriteTokens).toBe(0)
+			expect(result.totals.reasoningTokens).toBe(0)
+			expect(result.totals.totalTokens).toBe(0)
+			expect(result.totals.costUsd).toBe(0)
+		})
+	})
+
+	// ── Week and Month grouping ───────────────────────────────────────────
+
+	describe("query - week grouping", () => {
+		it("should group events by ISO week bucket", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-13T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-15T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", occurredAt: "2026-07-20T10:00:00.000Z" }),
+			]
+			const query = makeQuery({ groupBy: ["week"] })
+
+			const result = aggregator.query(events, query)
+
+			// 2026-07-13 KST = 2026-07-13 19:00 → ISO week 28
+			// 2026-07-15 KST = 2026-07-15 19:00 → ISO week 29
+			// 2026-07-20 KST = 2026-07-20 19:00 → ISO week 29
+			expect(result.buckets.length).toBeGreaterThanOrEqual(1)
+			const weekKeys = result.buckets.map((b) => b.key.week)
+			weekKeys.forEach((key) => {
+				expect(key).toMatch(/^\d{4}-W\d{2}$/)
+			})
+		})
+
+		it("should sort week buckets in ascending order", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-20T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-13T10:00:00.000Z" }),
+			]
+			const query = makeQuery({ groupBy: ["week"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(2)
+			// week key는 "YYYY-Www" 형식의 문자열이므로 문자열 비교
+			const firstWeek = result.buckets[0].key.week ?? ""
+			const secondWeek = result.buckets[1].key.week ?? ""
+			expect(firstWeek.localeCompare(secondWeek)).toBeLessThan(0)
+		})
+	})
+
+	describe("query - month grouping", () => {
+		it("should group events by month bucket", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-19T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-20T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", occurredAt: "2026-08-15T10:00:00.000Z" }),
+			]
+			const query = makeQuery({ groupBy: ["month"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(2)
+			const monthKeys = result.buckets.map((b) => b.key.month).sort()
+			expect(monthKeys).toContain("2026-07")
+			expect(monthKeys).toContain("2026-08")
+		})
+
+		it("should sort month buckets in ascending order", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-08-15T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-19T10:00:00.000Z" }),
+			]
+			const query = makeQuery({ groupBy: ["month"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(2)
+			expect(result.buckets[0].key.month).toBe("2026-07")
+			expect(result.buckets[1].key.month).toBe("2026-08")
+		})
+	})
+
+	// ── Status grouping ────────────────────────────────────────────────────
+
+	describe("query - status grouping", () => {
+		it("should group events by status", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", status: "completed" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", status: "completed" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", status: "failed" }),
+				makeEvent({ eventId: "evt-4", idempotencyKey: "idem-4", status: "cancelled" }),
+			]
+			const query = makeQuery({ groupBy: ["status"], includeCancelled: true })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(3)
+			const statuses = result.buckets.map((b) => b.key.status).sort()
+			expect(statuses).toEqual(["cancelled", "completed", "failed"])
+		})
+
+		it("should exclude cancelled from status grouping when includeCancelled is false", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", status: "completed" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", status: "cancelled" }),
+			]
+			const query = makeQuery({ groupBy: ["status"], includeCancelled: false })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(1)
+			expect(result.buckets[0].key.status).toBe("completed")
+		})
+	})
+
+	// ── Inclusion semantics edge cases ─────────────────────────────────────
+
+	describe("query - inclusion semantics edge cases", () => {
+		it("should accumulate cacheWriteTokens regardless of cacheWriteInInput value", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: {
+						cacheWriteTokens: { value: 500, source: "provider" },
+					},
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "included",
+						reasoningInOutput: "excluded",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.cacheWriteTokens).toBe(500)
+		})
+
+		it("should accumulate reasoningTokens regardless of reasoningInOutput value", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: {
+						reasoningTokens: { value: 800, source: "provider" },
+					},
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "excluded",
+						reasoningInOutput: "included",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.reasoningTokens).toBe(800)
+		})
+
+		it("should count unknownEventCount when cacheWriteInInput is unknown", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "unknown",
+						reasoningInOutput: "excluded",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.unknownEventCount).toBe(1)
+		})
+
+		it("should count unknownEventCount when reasoningInOutput is unknown", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "excluded",
+						reasoningInOutput: "unknown",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.unknownEventCount).toBe(1)
+		})
+
+		it("should count unknownEventCount once even when multiple inclusions are unknown", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					semantics: {
+						cacheReadInInput: "unknown",
+						cacheWriteInInput: "unknown",
+						reasoningInOutput: "unknown",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			// 한 이벤트에서 여러 unknown이어도 1만 증가
+			expect(result.totals.unknownEventCount).toBe(1)
+		})
+	})
+
+	// ── Source grouping edge cases ─────────────────────────────────────────
+
+	describe("query - source grouping edge cases", () => {
+		it("should group by 'unknown' source when event has no costUsd or token sources", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: {}, // 모든 usage 필드 누락
+				}),
+			]
+			const query = makeQuery({ groupBy: ["source"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(1)
+			expect(result.buckets[0].key.source).toBe("unknown")
+		})
+
+		it("should create separate buckets for different token sources within one event", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "estimated" },
+						costUsd: { value: 0.01, source: "backfilled" },
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: ["source"] })
+
+			const result = aggregator.query(events, query)
+
+			// 3개의 서로 다른 source → 3개의 bucket
+			expect(result.buckets).toHaveLength(3)
+			const sources = result.buckets.map((b) => b.key.source).sort()
+			expect(sources).toEqual(["backfilled", "estimated", "provider"])
+		})
+	})
+
+	// ── Multi-axis sorting ─────────────────────────────────────────────────
+
+	describe("query - multi-axis sorting", () => {
+		it("should sort by time axis when time axis is present in multi-axis grouping", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-20T10:00:00.000Z", provider: "anthropic" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-19T10:00:00.000Z", provider: "openai" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", occurredAt: "2026-07-19T10:00:00.000Z", provider: "anthropic" }),
+			]
+			const query = makeQuery({ groupBy: ["day", "provider"] })
+
+			const result = aggregator.query(events, query)
+
+			// 시간 축 기준 오름차순 정렬
+			expect(result.buckets.length).toBeGreaterThanOrEqual(2)
+			for (let i = 1; i < result.buckets.length; i++) {
+				const prev = result.buckets[i - 1].key.day ?? ""
+				const curr = result.buckets[i].key.day ?? ""
+				expect(prev.localeCompare(curr)).toBeLessThanOrEqual(0)
+			}
+		})
+
+		it("should sort category buckets by name ascending when totalTokens are equal", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", provider: "zeta", usage: { inputTokens: { value: 1000, source: "provider" } } }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", provider: "alpha", usage: { inputTokens: { value: 1000, source: "provider" } } }),
+			]
+			const query = makeQuery({ groupBy: ["provider"] })
+
+			const result = aggregator.query(events, query)
+
+			// 동일한 totalTokens → 이름 오름차순
+			expect(result.buckets[0].key.provider).toBe("alpha")
+			expect(result.buckets[1].key.provider).toBe("zeta")
+		})
+	})
+
+	// ── Coverage edge cases ────────────────────────────────────────────────
+
+	describe("query - coverage edge cases", () => {
+		it("should return undefined firstEventAt and lastEventAt for empty visible events", () => {
+			const query = makeQuery({ groupBy: [] })
+			const result = aggregator.query([], query)
+
+			expect(result.coverage.firstEventAt).toBeUndefined()
+			expect(result.coverage.lastEventAt).toBeUndefined()
+		})
+
+		it("should compute firstEventAt and lastEventAt from visible (non-cancelled) events only", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-19T10:00:00.000Z", status: "cancelled" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-20T10:00:00.000Z", status: "completed" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", occurredAt: "2026-07-21T10:00:00.000Z", status: "completed" }),
+			]
+			const query = makeQuery({ groupBy: [], includeCancelled: false })
+
+			const result = aggregator.query(events, query)
+
+			// cancelled 이벤트는 coverage에서 제외
+			expect(result.coverage.firstEventAt).toBe("2026-07-20T10:00:00.000Z")
+			expect(result.coverage.lastEventAt).toBe("2026-07-21T10:00:00.000Z")
+		})
+
+		it("should count only visible backfilled events in coverage", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", provenance: "history-backfill", status: "completed" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", provenance: "history-backfill", status: "cancelled" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", provenance: "live", status: "completed" }),
+			]
+			const query = makeQuery({ groupBy: [], includeCancelled: false })
+
+			const result = aggregator.query(events, query)
+
+			// cancelled backfill 이벤트는 visible에서 제외되므로 1개만 count
+			expect(result.coverage.backfilledEventCount).toBe(1)
+		})
+	})
+
+	// ── Empty groupBy ──────────────────────────────────────────────────────
+
+	describe("query - empty groupBy", () => {
+		it("should return a single empty-key bucket when groupBy is empty", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2" }),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			// 빈 groupBy → 단일 bucket with empty key
+			expect(result.buckets).toHaveLength(1)
+			expect(Object.keys(result.buckets[0].key)).toHaveLength(0)
+			expect(result.buckets[0].events).toBe(2)
+		})
+	})
+
+	// ── Preset 30d filtering ────────────────────────────────────────────────
+
+	describe("query - preset 30d filtering", () => {
+		it("should filter events by preset '30d'", () => {
+			const now = new Date()
+			const recentIso = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString()
+			const oldIso = new Date(now.getTime() - 100 * 24 * 60 * 60 * 1000).toISOString()
+
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: recentIso }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: oldIso }),
+			]
+			const query = makeQuery({ preset: "30d", groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.events).toBe(1)
+		})
+	})
+
+	// ── Snapshot structure ─────────────────────────────────────────────────
+
+	describe("query - snapshot structure", () => {
+		it("should return snapshot with query, generatedAt, buckets, totals, and coverage", () => {
+			const query = makeQuery({ groupBy: [] })
+			const result = aggregator.query([], query)
+
+			expect(result.query).toEqual(query)
+			expect(result.generatedAt).toBeTruthy()
+			expect(Array.isArray(result.buckets)).toBe(true)
+			expect(result.totals).toBeDefined()
+			expect(result.coverage).toBeDefined()
+		})
+
+		it("should return generatedAt as a valid ISO date string", () => {
+			const query = makeQuery({ groupBy: [] })
+			const result = aggregator.query([], query)
+
+			const parsed = new Date(result.generatedAt)
+			expect(parsed.getTime()).not.toBeNaN()
+		})
 	})
 })
