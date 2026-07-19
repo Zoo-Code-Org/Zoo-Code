@@ -38,6 +38,7 @@ import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import { logger } from "../../utils/logging"
 import { Package } from "../../shared/package"
+import { calculateApiCostAnthropic } from "../../shared/cost"
 import { MultiPointStrategy } from "../transform/cache-strategy/multi-point-strategy"
 import { ModelInfo as CacheModelInfo } from "../transform/cache-strategy/types"
 import { convertToBedrockConverseMessages as sharedConverter } from "../transform/bedrock-converse-format"
@@ -576,14 +577,24 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 					// Check both field naming conventions for cache tokens
 					const cacheReadTokens = usage.cacheReadInputTokens || usage.cacheReadInputTokenCount || 0
 					const cacheWriteTokens = usage.cacheWriteInputTokens || usage.cacheWriteInputTokenCount || 0
+					const inputTokens = usage.inputTokens || 0
+					const outputTokens = usage.outputTokens || 0
+
+					// Compute cost using user-configured pricing from model info.
+					// Bedrock's inputTokens does NOT include cached tokens (Anthropic semantics).
+					const costModelInfo = this.costModelConfig?.info
+					const { totalCost } = costModelInfo
+						? calculateApiCostAnthropic(costModelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+						: { totalCost: 0 }
 
 					// Always include all available token information
 					yield {
 						type: "usage",
-						inputTokens: usage.inputTokens || 0,
-						outputTokens: usage.outputTokens || 0,
-						cacheReadTokens: cacheReadTokens,
-						cacheWriteTokens: cacheWriteTokens,
+						inputTokens,
+						outputTokens,
+						cacheReadTokens,
+						cacheWriteTokens,
+						totalCost,
 					}
 					continue
 				}
@@ -613,13 +624,22 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 								routerUsage.cacheReadTokens || routerUsage.cacheReadInputTokenCount || 0
 							const cacheWriteTokens =
 								routerUsage.cacheWriteTokens || routerUsage.cacheWriteInputTokenCount || 0
+							const inputTokens = routerUsage.inputTokens || 0
+							const outputTokens = routerUsage.outputTokens || 0
+
+							// Compute cost using user-configured pricing from model info.
+							const costModelInfo = this.costModelConfig?.info
+							const { totalCost } = costModelInfo
+								? calculateApiCostAnthropic(costModelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+								: { totalCost: 0 }
 
 							yield {
 								type: "usage",
-								inputTokens: routerUsage.inputTokens || 0,
-								outputTokens: routerUsage.outputTokens || 0,
-								cacheReadTokens: cacheReadTokens,
-								cacheWriteTokens: cacheWriteTokens,
+								inputTokens,
+								outputTokens,
+								cacheReadTokens,
+								cacheWriteTokens,
+								totalCost,
 							}
 						}
 					} catch (error) {

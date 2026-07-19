@@ -7,6 +7,7 @@ import * as path from "path"
 import { type ModelInfo, type QwenCodeModelId, qwenCodeModels, qwenCodeDefaultModelId } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { NativeToolCallParser } from "../../core/assistant-message/NativeToolCallParser"
 
@@ -312,10 +313,20 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			}
 
 			if (apiChunk.usage) {
+				const inputTokens = apiChunk.usage.prompt_tokens || 0
+				const outputTokens = apiChunk.usage.completion_tokens || 0
+
+				// Compute cost using user-configured pricing from model info.
+				const modelInfo = model.info
+				const { totalCost } = modelInfo
+					? calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, 0, 0)
+					: { totalCost: 0 }
+
 				yield {
 					type: "usage",
-					inputTokens: apiChunk.usage.prompt_tokens || 0,
-					outputTokens: apiChunk.usage.completion_tokens || 0,
+					inputTokens,
+					outputTokens,
+					totalCost,
 				}
 			}
 		}

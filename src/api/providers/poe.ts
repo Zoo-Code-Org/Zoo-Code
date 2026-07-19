@@ -13,6 +13,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { shouldUseReasoningBudget, shouldUseReasoningEffort, type ApiHandlerOptions } from "../../shared/api"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { convertToAiSdkMessages, convertToolsForAiSdk, processAiSdkStreamPart } from "../transform/ai-sdk"
 import { ApiStream } from "../transform/stream"
@@ -122,6 +123,19 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			const usage = await result.usage
 			if (usage) {
 				const metrics = extractUsageMetrics(usage as any)
+
+				// Compute cost using user-configured pricing from model info.
+				const modelInfo = info
+				const { totalCost } = modelInfo
+					? calculateApiCostOpenAI(
+							modelInfo,
+							metrics.inputTokens,
+							metrics.outputTokens,
+							metrics.cacheWriteTokens || 0,
+							metrics.cacheReadTokens || 0,
+						)
+					: { totalCost: 0 }
+
 				yield {
 					type: "usage" as const,
 					inputTokens: metrics.inputTokens,
@@ -129,6 +143,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 					cacheReadTokens: metrics.cacheReadTokens,
 					cacheWriteTokens: metrics.cacheWriteTokens,
 					reasoningTokens: metrics.reasoningTokens,
+					totalCost,
 				}
 			}
 		} catch (error) {

@@ -11,6 +11,7 @@ import {
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { TagMatcher } from "../../utils/tag-matcher"
 
@@ -274,12 +275,23 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	protected processUsageMetrics(usage: any, _modelInfo?: ModelInfo): ApiStreamUsageChunk {
+		const inputTokens = usage?.prompt_tokens || 0
+		const outputTokens = usage?.completion_tokens || 0
+		const cacheWriteTokens = usage?.cache_creation_input_tokens || 0
+		const cacheReadTokens = usage?.cache_read_input_tokens || 0
+
+		const modelInfo = _modelInfo ?? this.getModel().info
+		const { totalCost } = modelInfo
+			? calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+			: { totalCost: 0 }
+
 		return {
 			type: "usage",
-			inputTokens: usage?.prompt_tokens || 0,
-			outputTokens: usage?.completion_tokens || 0,
-			cacheWriteTokens: usage?.cache_creation_input_tokens || undefined,
-			cacheReadTokens: usage?.cache_read_input_tokens || undefined,
+			inputTokens,
+			outputTokens,
+			cacheWriteTokens: cacheWriteTokens || undefined,
+			cacheReadTokens: cacheReadTokens || undefined,
+			totalCost,
 		}
 	}
 

@@ -5,6 +5,7 @@ import { type XAIModelId, xaiDefaultModelId, xaiModels, ApiProviderError } from 
 import { TelemetryService } from "@roo-code/telemetry"
 
 import type { ApiHandlerOptions } from "../../shared/api"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { ApiStream } from "../transform/stream"
 import { convertToResponsesApiInput } from "../transform/responses-api-input"
@@ -140,7 +141,11 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			throw handleOpenAIError(error, this.providerName)
 		}
 
-		const normalizeUsage = createUsageNormalizer()
+		const modelInfo = model.info
+		const normalizeUsage = createUsageNormalizer((inputTokens, outputTokens, cacheReadTokens) => {
+			const { totalCost } = calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, 0, cacheReadTokens)
+			return totalCost
+		})
 		yield* processResponsesApiStream(stream, normalizeUsage)
 	}
 

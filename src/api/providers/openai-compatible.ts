@@ -11,6 +11,7 @@ import { streamText, generateText, LanguageModel, ToolSet } from "ai"
 import type { ModelInfo } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { convertToAiSdkMessages, convertToolsForAiSdk, processAiSdkStreamPart } from "../transform/ai-sdk"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
@@ -94,12 +95,22 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 		}
 		raw?: Record<string, unknown>
 	}): ApiStreamUsageChunk {
+		const inputTokens = usage.inputTokens || 0
+		const outputTokens = usage.outputTokens || 0
+		const cacheReadTokens = usage.details?.cachedInputTokens || 0
+
+		const modelInfo = this.getModel().info
+		const { totalCost } = modelInfo
+			? calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, 0, cacheReadTokens)
+			: { totalCost: 0 }
+
 		return {
 			type: "usage",
-			inputTokens: usage.inputTokens || 0,
-			outputTokens: usage.outputTokens || 0,
+			inputTokens,
+			outputTokens,
 			cacheReadTokens: usage.details?.cachedInputTokens,
 			reasoningTokens: usage.details?.reasoningTokens,
+			totalCost,
 		}
 	}
 

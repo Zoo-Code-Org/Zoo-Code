@@ -12,6 +12,7 @@ import {
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
+import { calculateApiCostAnthropic } from "../../shared/cost"
 
 import { ApiStream } from "../transform/stream"
 import { addCacheBreakpoints } from "../transform/caching/vertex"
@@ -120,18 +121,31 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		for await (const chunk of stream) {
 			switch (chunk.type) {
 				case "message_start": {
-					const usage = chunk.message!.usage
-
-					yield {
-						type: "usage",
-						inputTokens: usage.input_tokens || 0,
-						outputTokens: usage.output_tokens || 0,
-						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-						cacheReadTokens: usage.cache_read_input_tokens || undefined,
+						const usage = chunk.message!.usage
+	
+						const inputTokens = usage.input_tokens || 0
+						const outputTokens = usage.output_tokens || 0
+						const cacheWriteTokens = usage.cache_creation_input_tokens || 0
+						const cacheReadTokens = usage.cache_read_input_tokens || 0
+	
+						// Compute cost using user-configured pricing from model info.
+						// Anthropic semantics: inputTokens does NOT include cached tokens.
+						const modelInfo = this.getModel().info
+						const { totalCost } = modelInfo
+							? calculateApiCostAnthropic(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+							: { totalCost: 0 }
+	
+						yield {
+							type: "usage",
+							inputTokens,
+							outputTokens,
+							cacheWriteTokens: cacheWriteTokens || undefined,
+							cacheReadTokens: cacheReadTokens || undefined,
+							totalCost,
+						}
+	
+						break
 					}
-
-					break
-				}
 				case "message_delta": {
 					yield {
 						type: "usage",

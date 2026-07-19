@@ -10,6 +10,7 @@ import {
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
@@ -186,12 +187,23 @@ export class DeepSeekHandler extends OpenAiHandler {
 
 	// Override to handle DeepSeek's usage metrics, including caching.
 	protected override processUsageMetrics(usage: any, _modelInfo?: any): ApiStreamUsageChunk {
+		const inputTokens = usage?.prompt_tokens || 0
+		const outputTokens = usage?.completion_tokens || 0
+		const cacheWriteTokens = usage?.prompt_tokens_details?.cache_miss_tokens || 0
+		const cacheReadTokens = usage?.prompt_tokens_details?.cached_tokens || 0
+
+		const modelInfo = _modelInfo ?? this.getModel().info
+		const { totalCost } = modelInfo
+			? calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+			: { totalCost: 0 }
+
 		return {
 			type: "usage",
-			inputTokens: usage?.prompt_tokens || 0,
-			outputTokens: usage?.completion_tokens || 0,
-			cacheWriteTokens: usage?.prompt_tokens_details?.cache_miss_tokens,
-			cacheReadTokens: usage?.prompt_tokens_details?.cached_tokens,
+			inputTokens,
+			outputTokens,
+			cacheWriteTokens: cacheWriteTokens || undefined,
+			cacheReadTokens: cacheReadTokens || undefined,
+			totalCost,
 		}
 	}
 }
