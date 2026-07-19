@@ -18,7 +18,7 @@ import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
-import type { StatsQuery, StatsSnapshot, SessionSummary } from "./usage-stats.js"
+import type { StatsQuery, StatsSnapshot, SessionSummary, SessionDetail } from "./usage-stats.js"
 
 /**
  * ExtensionMessage
@@ -271,6 +271,11 @@ export interface ExtensionMessage {
 	// `dashboardSessions` is null when the service is unavailable or an error
 	// occurred (see `error`). On success it is an array (possibly empty).
 	dashboardSessions?: SessionSummary[] | null
+	// Dashboard session detail response payload (Commit 4).
+	// `dashboardSessionDetail` is null when the service is unavailable, the
+	// taskId is not found, or an error occurred (see `error`). On success it
+	// contains the full session summary plus the per-API-call records.
+	dashboardSessionDetail?: SessionDetail | null
 }
 
 export interface OpenAiCodexRateLimitsMessage {

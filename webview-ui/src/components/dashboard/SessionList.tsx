@@ -1,9 +1,12 @@
 import React, { memo, useCallback, useMemo } from "react"
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
 
-import type { SessionSummary } from "@roo-code/types"
+import type { SessionSummary, SessionDetail as SessionDetailType } from "@roo-code/types"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+
+import SessionDetail from "./SessionDetail"
 
 // ── Number formatting ───────────────────────────────────────────────────────
 
@@ -109,48 +112,124 @@ FilterDropdown.displayName = "FilterDropdown"
 
 // ── Session row ──────────────────────────────────────────────────────────────
 
-interface SessionRowProps {
-	session: SessionSummary
-}
-
-const SessionRow = memo(({ session }: SessionRowProps) => {
+/**
+ * The loading state for a session row whose detail is being fetched.
+ * Rendered in place of {@link SessionDetail} while the IPC request is in
+ * flight so the user gets immediate feedback that their click was registered.
+ */
+const SessionDetailLoading = memo(() => {
 	const { t } = useAppTranslation()
-
 	return (
 		<div
-			className="flex items-center justify-between gap-2 border-b border-vscode-panel-border px-2 py-1.5 last:border-b-0 hover:bg-vscode-list-hoverBackground cursor-pointer"
-			data-testid="dashboard-session-row"
-			role="button"
-			tabIndex={0}
-			// Click handling is deferred to Commit 4 (expandable detail).
-			onClick={() => undefined}
-			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					e.preventDefault()
-				}
-			}}>
-			<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-				<span className="truncate text-xs font-medium text-vscode-foreground" title={session.title}>
-					{session.title}
-				</span>
-				<span className="text-[10px] text-vscode-descriptionForeground">
-					{formatRelativeTime(session.timestamp)}
-					{" \u00b7 "}
-					{session.model}
-					{" \u00b7 "}
-					{session.provider}
-				</span>
+			className="flex items-center justify-center gap-2 border-t border-vscode-panel-border bg-vscode-editor-background px-2 py-3"
+			data-testid="dashboard-session-detail-loading">
+			<RefreshCw className="size-3.5 animate-spin text-vscode-descriptionForeground" />
+			<span className="text-xs text-vscode-descriptionForeground">{t("dashboard:states.loading")}</span>
+		</div>
+	)
+})
+
+SessionDetailLoading.displayName = "SessionDetailLoading"
+
+/**
+ * The error state for a session row whose detail fetch failed. Rendered in
+ * place of {@link SessionDetail} so the user can see the error inline and
+ * try expanding another row.
+ */
+const SessionDetailError = memo(({ error }: { error: string }) => {
+	return (
+		<div
+			className="flex items-center justify-center border-t border-vscode-panel-border bg-vscode-editor-background px-2 py-3 text-xs text-vscode-errorForeground"
+			data-testid="dashboard-session-detail-error">
+			{error}
+		</div>
+	)
+})
+
+SessionDetailError.displayName = "SessionDetailError"
+
+interface SessionRowProps {
+	session: SessionSummary
+	/** Whether this row is currently expanded. */
+	isExpanded: boolean
+	/** The loaded detail for this session, or undefined if not loaded/failed. */
+	detail?: SessionDetailType | null
+	/** The error message if the detail fetch failed, or undefined. */
+	detailError?: string | null
+	/** Whether the detail fetch is currently in flight. */
+	detailLoading: boolean
+	/** Called when the user clicks the row to toggle expansion. */
+	onToggle: (taskId: string) => void
+}
+
+const SessionRow = memo(({ session, isExpanded, detail, detailError, detailLoading, onToggle }: SessionRowProps) => {
+	const { t } = useAppTranslation()
+
+	const handleClick = useCallback(() => {
+		onToggle(session.taskId)
+	}, [onToggle, session.taskId])
+
+	const handleKeyDown = useCallback(
+		(e: React.KeyboardEvent) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault()
+				onToggle(session.taskId)
+			}
+		},
+		[onToggle, session.taskId],
+	)
+
+	return (
+		<div data-testid="dashboard-session-row-container">
+			<div
+				className="flex items-center justify-between gap-2 border-b border-vscode-panel-border px-2 py-1.5 last:border-b-0 hover:bg-vscode-list-hoverBackground cursor-pointer"
+				data-testid="dashboard-session-row"
+				role="button"
+				tabIndex={0}
+				aria-expanded={isExpanded}
+				onClick={handleClick}
+				onKeyDown={handleKeyDown}>
+				<div className="flex min-w-0 flex-1 items-center gap-1">
+					{isExpanded ? (
+						<ChevronDown className="size-3.5 shrink-0 text-vscode-descriptionForeground" />
+					) : (
+						<ChevronRight className="size-3.5 shrink-0 text-vscode-descriptionForeground" />
+					)}
+					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+						<span className="truncate text-xs font-medium text-vscode-foreground" title={session.title}>
+							{session.title}
+						</span>
+						<span className="text-[10px] text-vscode-descriptionForeground">
+							{formatRelativeTime(session.timestamp)}
+							{" \u00b7 "}
+							{session.model}
+							{" \u00b7 "}
+							{session.provider}
+						</span>
+					</div>
+				</div>
+				<div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
+					<span className="text-xs font-medium text-vscode-foreground tabular-nums">
+						{formatCompact(session.totalTokens)}
+					</span>
+					<span className="text-[10px] text-vscode-descriptionForeground tabular-nums">
+						{formatCost(session.totalCost)}
+						{" \u00b7 "}
+						{t("dashboard:sessions.callCount", { count: session.callCount })}
+					</span>
+				</div>
 			</div>
-			<div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
-				<span className="text-xs font-medium text-vscode-foreground tabular-nums">
-					{formatCompact(session.totalTokens)}
-				</span>
-				<span className="text-[10px] text-vscode-descriptionForeground tabular-nums">
-					{formatCost(session.totalCost)}
-					{" \u00b7 "}
-					{t("dashboard:sessions.callCount", { count: session.callCount })}
-				</span>
-			</div>
+			{isExpanded && (
+				<>
+					{detailLoading ? (
+						<SessionDetailLoading />
+					) : detailError ? (
+						<SessionDetailError error={detailError} />
+					) : detail ? (
+						<SessionDetail detail={detail} />
+					) : null}
+				</>
+			)}
 		</div>
 	)
 })
@@ -169,10 +248,31 @@ interface SessionListProps {
 	onModelFilterChange: (value: string | undefined) => void
 	/** Called when the provider filter changes. */
 	onProviderFilterChange: (value: string | undefined) => void
+	/** The taskId of the currently expanded session, or undefined if none. */
+	expandedTaskId?: string
+	/** Map of taskId -> loaded session detail (only populated for expanded rows). */
+	sessionDetails: Record<string, SessionDetailType | null>
+	/** Map of taskId -> detail fetch error message (only populated for failed fetches). */
+	sessionDetailErrors: Record<string, string | null>
+	/** Set of taskIds whose detail is currently being fetched. */
+	sessionDetailLoading: Set<string>
+	/** Called when the user clicks a session row to toggle its expansion. */
+	onToggleSession: (taskId: string) => void
 }
 
 const SessionList = memo(
-	({ sessions, modelFilter, providerFilter, onModelFilterChange, onProviderFilterChange }: SessionListProps) => {
+	({
+		sessions,
+		modelFilter,
+		providerFilter,
+		onModelFilterChange,
+		onProviderFilterChange,
+		expandedTaskId,
+		sessionDetails,
+		sessionDetailErrors,
+		sessionDetailLoading,
+		onToggleSession,
+	}: SessionListProps) => {
 		const { t } = useAppTranslation()
 
 		// Extract unique models and providers from the session list for the
@@ -219,9 +319,22 @@ const SessionList = memo(
 					</div>
 				) : (
 					<div className="overflow-hidden rounded-md border border-vscode-panel-border">
-						{sessions.map((session) => (
-							<SessionRow key={session.taskId} session={session} />
-						))}
+						{sessions.map((session) => {
+							const isExpanded = expandedTaskId === session.taskId
+							return (
+								<SessionRow
+									key={session.taskId}
+									session={session}
+									isExpanded={isExpanded}
+									detail={isExpanded ? sessionDetails[session.taskId] : undefined}
+									detailError={
+										isExpanded ? (sessionDetailErrors[session.taskId] ?? undefined) : undefined
+									}
+									detailLoading={isExpanded && sessionDetailLoading.has(session.taskId)}
+									onToggle={onToggleSession}
+								/>
+							)
+						})}
 					</div>
 				)}
 			</div>

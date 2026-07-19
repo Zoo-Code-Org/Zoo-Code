@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw } from "lucide-react"
 
-import type { ExtensionMessage, StatsQuery, StatsSnapshot, SessionSummary } from "@roo-code/types"
+import type { ExtensionMessage, StatsQuery, StatsSnapshot, SessionSummary, SessionDetail } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -83,6 +83,29 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	const [modelFilter, setModelFilter] = useState<string | undefined>(undefined)
 	const [providerFilter, setProviderFilter] = useState<string | undefined>(undefined)
 	const latestSessionsRequestIdRef = useRef<string>("")
+
+	// ── Session detail state (Commit 4) ────────────────────────────────────
+	// Only one session is expanded at a time (accordion pattern). The detail
+	// is fetched on first expansion via `getDashboardSessionDetail` and cached
+	// in `sessionDetails` so re-expanding does not refetch. The
+	// `latestSessionDetailRequestIdRef` correlates the IPC response so stale
+	// responses (e.g. from a previous expansion) are ignored.
+	const [expandedTaskId, setExpandedTaskId] = useState<string | undefined>(undefined)
+	const [sessionDetails, setSessionDetails] = useState<Record<string, SessionDetail | null>>({})
+	const [sessionDetailErrors, setSessionDetailErrors] = useState<Record<string, string | null>>({})
+	const [sessionDetailLoading, setSessionDetailLoading] = useState<Set<string>>(new Set())
+	const latestSessionDetailRequestIdRef = useRef<string>("")
+
+	// ── Auto-refresh debounce timer (Commit 4) ─────────────────────────────
+	// The `usageStatsChanged` listener uses a ref-based timer so the cleanup
+	// function returned from the event handler does not get mistaken for a
+	// React effect cleanup. The previous implementation returned
+	// `clearTimeout` from inside the `MessageEvent` handler, which React's
+	// synthetic event system treated as an effect cleanup — causing the timer
+	// to be cleared immediately on the next render cycle. The ref-based
+	// approach decouples the debounce lifecycle from the event handler return
+	// value.
+	const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	// ── Query construction ──────────────────────────────────────────────────
 
@@ -210,6 +233,59 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		[buildQuery],
 	)
 
+	// ── Fetch session detail (Commit 4) ───────────────────────────────────
+	// Sends `getDashboardSessionDetail` with the taskId. The response is
+	// correlated via `latestSessionDetailRequestIdRef` to ignore stale
+	// results. The detail is cached in `sessionDetails` so re-expanding a
+	// row does not trigger a refetch.
+	const fetchSessionDetail = useCallback((taskId: string) => {
+		const requestId = `dashboard-session-detail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+		latestSessionDetailRequestIdRef.current = requestId
+
+		// Mark this task as loading. Using a new Set instance so React
+		// detects the state change.
+		setSessionDetailLoading((prev) => {
+			const next = new Set(prev)
+			next.add(taskId)
+			return next
+		})
+		// Clear any previous error for this task.
+		setSessionDetailErrors((prev) => {
+			if (prev[taskId] === undefined) return prev
+			const next = { ...prev }
+			next[taskId] = null
+			return next
+		})
+
+		vscode.postMessage({
+			type: "getDashboardSessionDetail",
+			requestId,
+			taskId,
+		})
+	}, [])
+
+	// ── Toggle session expansion (Commit 4) ───────────────────────────────
+	// Accordion pattern: clicking a row toggles its expansion. Clicking
+	// another row closes the previous one. The detail is fetched on first
+	// expansion; if already cached, the cached value is shown immediately.
+	const handleToggleSession = useCallback(
+		(taskId: string) => {
+			setExpandedTaskId((current) => {
+				// Toggling the already-expanded row collapses it.
+				if (current === taskId) return undefined
+
+				// Expanding a new row: fetch detail if not already cached.
+				// We check the cache outside the state setter to avoid
+				// stale-closure issues with `sessionDetails`.
+				if (sessionDetails[taskId] === undefined && !sessionDetailLoading.has(taskId)) {
+					fetchSessionDetail(taskId)
+				}
+				return taskId
+			})
+		},
+		[sessionDetails, sessionDetailLoading, fetchSessionDetail],
+	)
+
 	// Initial fetch on mount
 	useEffect(() => {
 		fetchStats(preset, groupBy)
@@ -293,12 +369,22 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			}
 
 			if (message.type === "usageStatsChanged") {
-				// Data changed externally — refetch both stats and sessions with debounce
-				const timer = setTimeout(() => {
+				// Data changed externally — refetch both stats and sessions with
+				// a 250ms debounce. The timer is stored in a ref (not returned as
+				// a cleanup) so React's synthetic event system does not mistake it
+				// for an effect cleanup and clear it on the next render cycle.
+				// Multiple `usageStatsChanged` events within the debounce window
+				// coalesce into a single refetch.
+				if (refreshTimerRef.current) {
+					clearTimeout(refreshTimerRef.current)
+				}
+				refreshTimerRef.current = setTimeout(() => {
 					fetchStats(preset, groupBy)
 					fetchSessions(preset, groupBy, undefined, undefined, modelFilter, providerFilter)
-				}, 300)
-				return () => clearTimeout(timer)
+					refreshTimerRef.current = null
+				}, 250)
+				// Do NOT return a cleanup here — the ref-based timer is cleared
+				// above on the next event and in the effect cleanup below.
 			}
 
 			if (message.type === "dashboardSessionsResponse") {
@@ -313,6 +399,44 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					setSessionsError(message.error || t("dashboard:states.error"))
 					setSessionsLoading(false)
 				}
+			}
+
+			if (message.type === "dashboardSessionDetailResponse") {
+				// Only accept the latest session detail request's response
+				if (message.requestId !== latestSessionDetailRequestIdRef.current) return
+
+				// ExtensionMessage does not carry `taskId` for this response type,
+				// so we correlate via the currently expanded task. Because only
+				// one session is expanded at a time (accordion pattern) and the
+				// request is only sent when expanding, the expanded task is the
+				// one whose detail we are receiving.
+				const taskId = expandedTaskId
+				if (!taskId) return
+
+				// Clear loading state for this task
+				setSessionDetailLoading((prev) => {
+					if (!prev.has(taskId)) return prev
+					const next = new Set(prev)
+					next.delete(taskId)
+					return next
+				})
+
+				// Capture the detail and error into locals so TypeScript can
+				// narrow the type before the deferred setState callbacks. Without
+				// this, `message.dashboardSessionDetail` would be
+				// `SessionDetail | null | undefined` inside the closure, which is
+				// not assignable to `Record<string, SessionDetail | null>`.
+				const detail = message.dashboardSessionDetail ?? null
+				const detailError = message.error || t("dashboard:states.error")
+
+				setSessionDetails((prev) => ({
+					...prev,
+					[taskId]: detail,
+				}))
+				setSessionDetailErrors((prev) => ({
+					...prev,
+					[taskId]: detail ? null : detailError,
+				}))
 			}
 
 			if (message.type === "requestClearNonceResponse") {
@@ -351,8 +475,16 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		}
 
 		window.addEventListener("message", handleMessage)
-		return () => window.removeEventListener("message", handleMessage)
-	}, [t, preset, groupBy, fetchStats, fetchSessions, modelFilter, providerFilter])
+		return () => {
+			window.removeEventListener("message", handleMessage)
+			// Clear any pending debounce timer so a refetch does not fire
+			// after the component unmounts or the effect re-runs.
+			if (refreshTimerRef.current) {
+				clearTimeout(refreshTimerRef.current)
+				refreshTimerRef.current = null
+			}
+		}
+	}, [t, preset, groupBy, fetchStats, fetchSessions, fetchSessionDetail, expandedTaskId, modelFilter, providerFilter])
 
 	// ── Export ───────────────────────────────────────────────────────────────
 
@@ -695,6 +827,11 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 								providerFilter={providerFilter}
 								onModelFilterChange={handleModelFilterChange}
 								onProviderFilterChange={handleProviderFilterChange}
+								expandedTaskId={expandedTaskId}
+								sessionDetails={sessionDetails}
+								sessionDetailErrors={sessionDetailErrors}
+								sessionDetailLoading={sessionDetailLoading}
+								onToggleSession={handleToggleSession}
 							/>
 						)}
 
