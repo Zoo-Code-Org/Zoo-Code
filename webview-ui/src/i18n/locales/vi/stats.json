@@ -48,8 +48,8 @@
   },
   "coverage": {
     "title": "Phạm vi dữ liệu",
-    "liveFrom": "Ghi từ",
-    "backfilledEvents": "Sự kiện bổ sung ngược",
+    "liveFrom": "Bắt đầu ghi từ",
+    "backfilledEvents": "Sự kiện được bổ sung hồi tố",
     "paused": "Ghi đang tạm dừng",
     "notAvailable": "Không khả dụng"
   },
@@ -74,6 +74,6 @@
   "source": {
     "provider": "Được báo cáo bởi nhà cung cấp",
     "estimated": "Ước tính",
-    "backfilled": "Bổ sung ngược"
+    "backfilled": "Được bổ sung hồi tố"
   }
 }
