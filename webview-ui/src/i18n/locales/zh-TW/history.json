@@ -48,6 +48,6 @@
 	"deleteWithSubtasks": "這也將刪除 {{count}} 個子工作。您確定嗎？",
 	"expandSubtasks": "展開子工作",
 	"collapseSubtasks": "收起子工作",
-	"delegatedTag": "Waiting on subtask",
-	"interruptedTag": "Interrupted"
+	"delegatedTag": "等待子任務",
+	"interruptedTag": "已中斷"
 }

@@ -18,8 +18,8 @@
 		"openApiHistory": "API-Verlauf öffnen",
 		"openUiHistory": "UI-Verlauf öffnen",
 		"backToParentTask": "Übergeordnete Aufgabe",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Wartet auf Unteraufgabe",
+		"goToSubtask": "Zur Unteraufgabe"
 	},
 	"unpin": "Lösen von oben",
 	"pin": "Anheften",

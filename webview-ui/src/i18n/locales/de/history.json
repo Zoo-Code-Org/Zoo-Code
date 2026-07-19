@@ -55,6 +55,6 @@
 	"deleteWithSubtasks": "Dies löscht auch {{count}} Teilaufgabe(n). Bist du sicher?",
 	"expandSubtasks": "Teilaufgaben erweitern",
 	"collapseSubtasks": "Teilaufgaben einklappen",
-	"delegatedTag": "Waiting on subtask",
-	"interruptedTag": "Interrupted"
+	"delegatedTag": "Wartet auf Unteraufgabe",
+	"interruptedTag": "Unterbrochen"
 }

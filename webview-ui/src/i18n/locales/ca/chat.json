@@ -18,8 +18,8 @@
 		"openApiHistory": "Obrir historial d'API",
 		"openUiHistory": "Obrir historial d'UI",
 		"backToParentTask": "Tasca principal",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Esperant subtasca",
+		"goToSubtask": "Anar a la subtasca"
 	},
 	"unpin": "Desfixar",
 	"pin": "Fixar",

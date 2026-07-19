@@ -18,8 +18,8 @@
 		"openApiHistory": "Abrir histórico da API",
 		"openUiHistory": "Abrir histórico da UI",
 		"backToParentTask": "Tarefa pai",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Aguardando subtarefa",
+		"goToSubtask": "Ir para subtarefa"
 	},
 	"unpin": "Desfixar",
 	"pin": "Fixar",

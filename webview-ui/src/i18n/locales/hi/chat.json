@@ -18,8 +18,8 @@
 		"openApiHistory": "API इतिहास खोलें",
 		"openUiHistory": "UI इतिहास खोलें",
 		"backToParentTask": "मूल कार्य",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "उपकार्य की प्रतीक्षा",
+		"goToSubtask": "उपकार्य पर जाएं"
 	},
 	"unpin": "पिन करें",
 	"pin": "अवपिन करें",

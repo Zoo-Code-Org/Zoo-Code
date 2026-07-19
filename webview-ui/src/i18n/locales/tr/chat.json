@@ -18,8 +18,8 @@
 		"openApiHistory": "API Geçmişini Aç",
 		"openUiHistory": "UI Geçmişini Aç",
 		"backToParentTask": "Üst görev",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Alt görev bekleniyor",
+		"goToSubtask": "Alt göreve git"
 	},
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",

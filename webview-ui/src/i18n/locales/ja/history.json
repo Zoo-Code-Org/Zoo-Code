@@ -48,6 +48,6 @@
 	"deleteWithSubtasks": "これにより {{count}} サブタスクも削除されます。よろしいですか?",
 	"expandSubtasks": "サブタスクを展開",
 	"collapseSubtasks": "サブタスクを折りたたむ",
-	"delegatedTag": "Waiting on subtask",
-	"interruptedTag": "Interrupted"
+	"delegatedTag": "サブタスク待ち",
+	"interruptedTag": "中断"
 }

@@ -55,6 +55,6 @@
 	"deleteWithSubtasks": "Esto también eliminará {{count}} subtarea(s). ¿Estás seguro?",
 	"expandSubtasks": "Expandir subtareas",
 	"collapseSubtasks": "Contraer subtareas",
-	"delegatedTag": "Waiting on subtask",
-	"interruptedTag": "Interrupted"
+	"delegatedTag": "Esperando subtarea",
+	"interruptedTag": "Interrumpida"
 }

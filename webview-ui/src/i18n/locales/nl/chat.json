@@ -18,8 +18,8 @@
 		"openApiHistory": "API-geschiedenis openen",
 		"openUiHistory": "UI-geschiedenis openen",
 		"backToParentTask": "Bovenliggende taak",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Wacht op subtaak",
+		"goToSubtask": "Ga naar subtaak"
 	},
 	"unpin": "Losmaken",
 	"pin": "Vastmaken",

@@ -48,6 +48,6 @@
 	"deleteWithSubtasks": "이는 {{count}} 부분작업도 삭제합니다. 확실하십니까?",
 	"expandSubtasks": "부분작업 확장",
 	"collapseSubtasks": "부분작업 축소",
-	"delegatedTag": "Waiting on subtask",
-	"interruptedTag": "Interrupted"
+	"delegatedTag": "하위 작업 대기 중",
+	"interruptedTag": "중단됨"
 }

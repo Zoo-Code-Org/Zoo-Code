@@ -48,6 +48,6 @@
 	"deleteWithSubtasks": "Bu, {{count}} alt görev(i) de silecektir. Emin misiniz?",
 	"expandSubtasks": "Alt görevleri genişlet",
 	"collapseSubtasks": "Alt görevleri daralt",
-	"delegatedTag": "Waiting on subtask",
-	"interruptedTag": "Interrupted"
+	"delegatedTag": "Alt görev bekleniyor",
+	"interruptedTag": "Kesintiye uğradı"
 }

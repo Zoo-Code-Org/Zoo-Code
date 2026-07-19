@@ -470,6 +470,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
 				requestContains(req, [SUBTASK_ABANDON_CHILD_MARKER]) &&
+				!requestContains(req, [SUBTASK_ABANDON_PARENT_MARKER]) &&
 				!requestContains(req, ["call_abandon_child_followup_001"]) &&
 				!requestContains(req, [`<user_message>\\n${SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`]),
 		},

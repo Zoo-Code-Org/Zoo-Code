@@ -18,8 +18,8 @@
 		"openApiHistory": "Apri cronologia API",
 		"openUiHistory": "Apri cronologia UI",
 		"backToParentTask": "Attività principale",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "In attesa di sottoattività",
+		"goToSubtask": "Vai alla sottoattività"
 	},
 	"unpin": "Rilascia",
 	"pin": "Fissa",

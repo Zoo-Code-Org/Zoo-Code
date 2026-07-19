@@ -537,7 +537,11 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 		expect(markDelegatedChildInterrupted).not.toHaveBeenCalled()
 	})
 
-	it("swallows markDelegatedChildInterrupted errors and logs them", async () => {
+	it("propagates markDelegatedChildInterrupted errors (method swallows internally, not caller)", async () => {
+		// evictCurrentTask no longer has a caller-level .catch(); errors propagate
+		// from markDelegatedChildInterrupted directly. The real implementation swallows
+		// inside its own try/catch (after the guard reads); a mock that rejects bypasses
+		// that catch and exercises the propagation path.
 		const childTask = {
 			taskId: "child-err",
 			instanceId: "inst-1",
@@ -545,7 +549,6 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 			abortTask: vi.fn().mockResolvedValue(undefined),
 		}
 
-		const log = vi.fn()
 		const markDelegatedChildInterrupted = vi.fn().mockRejectedValue(new Error("lock contention"))
 
 		const provider = makeProviderStub({
@@ -556,12 +559,12 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 				get: vi.fn(() => ({ id: "child-err", status: "active", parentTaskId: "parent-1" })),
 			},
 			markDelegatedChildInterrupted,
-			log,
+			log: vi.fn(),
 		})
 
-		await expect((ClineProvider.prototype as any).evictCurrentTask.call(provider)).resolves.not.toThrow()
-
-		expect(log).toHaveBeenCalledWith(expect.stringContaining("markDelegatedChildInterrupted failed"))
+		await expect((ClineProvider.prototype as any).evictCurrentTask.call(provider)).rejects.toThrow(
+			"lock contention",
+		)
 	})
 })
 

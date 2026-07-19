@@ -18,8 +18,8 @@
 		"openApiHistory": "開啟 API 歷史紀錄",
 		"openUiHistory": "開啟 UI 歷史紀錄",
 		"backToParentTask": "上層工作",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "等待子任務",
+		"goToSubtask": "前往子任務"
 	},
 	"unpin": "取消釘選",
 	"pin": "釘選",

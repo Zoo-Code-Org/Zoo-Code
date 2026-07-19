@@ -48,6 +48,6 @@
 	"deleteWithSubtasks": "Dit zal ook {{count}} subtaak(en) verwijderen. Weet je het zeker?",
 	"expandSubtasks": "Subtaken uitvouwen",
 	"collapseSubtasks": "Subtaken samenvouwen",
-	"delegatedTag": "Waiting on subtask",
-	"interruptedTag": "Interrupted"
+	"delegatedTag": "Wacht op subtaak",
+	"interruptedTag": "Onderbroken"
 }

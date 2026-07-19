@@ -57,6 +57,6 @@
 	"deleteWithSubtasks": "Ini juga akan menghapus {{count}} subtask. Apakah Anda yakin?",
 	"expandSubtasks": "Perluas subtask",
 	"collapseSubtasks": "Tutup subtask",
-	"delegatedTag": "Waiting on subtask",
-	"interruptedTag": "Interrupted"
+	"delegatedTag": "Menunggu subtugas",
+	"interruptedTag": "Terganggu"
 }

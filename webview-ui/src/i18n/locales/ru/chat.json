@@ -18,8 +18,8 @@
 		"openApiHistory": "Открыть историю API",
 		"openUiHistory": "Открыть историю UI",
 		"backToParentTask": "Родительская задача",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Ожидание подзадачи",
+		"goToSubtask": "Перейти к подзадаче"
 	},
 	"unpin": "Открепить",
 	"pin": "Закрепить",

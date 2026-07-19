@@ -18,8 +18,8 @@
 		"openApiHistory": "Buka Riwayat API",
 		"openUiHistory": "Buka Riwayat UI",
 		"backToParentTask": "Tugas Induk",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Menunggu subtugas",
+		"goToSubtask": "Pergi ke subtugas"
 	},
 	"history": {
 		"title": "Riwayat"

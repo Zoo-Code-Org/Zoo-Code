@@ -18,8 +18,8 @@
 		"openApiHistory": "Otwórz historię API",
 		"openUiHistory": "Otwórz historię UI",
 		"backToParentTask": "Zadanie nadrzędne",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Oczekuje na podzadanie",
+		"goToSubtask": "Przejdź do podzadania"
 	},
 	"unpin": "Odepnij",
 	"pin": "Przypnij",

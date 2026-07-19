@@ -546,11 +546,7 @@ export class ClineProvider
 			await this.markDelegatedChildInterrupted({
 				childTaskId: storedHistory.id,
 				parentTaskId: storedHistory.parentTaskId,
-			}).catch((err) =>
-				this.log(
-					`[evictCurrentTask] markDelegatedChildInterrupted failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
-				),
-			)
+			})
 		}
 	}
 
@@ -597,10 +593,12 @@ export class ClineProvider
 				const childHistory =
 					this.taskHistoryStore.get(childTaskId) ?? (await this.getTaskWithId(childTaskId)).historyItem
 
-				// Re-check inside the lock to close the TOCTOU window with cancelTask().
-				if (childHistory?.status === "interrupted") {
+				// Re-check inside the lock to close the TOCTOU window with cancelTask() or
+				// a concurrent completion. Only proceed when the child is still "active";
+				// any other terminal status (interrupted, completed) must not be overwritten.
+				if (childHistory?.status !== "active") {
 					this.log(
-						`[markDelegatedChildInterrupted] Child ${childTaskId} already interrupted (in-lock check) — skipping`,
+						`[markDelegatedChildInterrupted] Child ${childTaskId} is no longer active (status=${childHistory?.status}) — skipping`,
 					)
 					return
 				}
@@ -680,7 +678,12 @@ export class ClineProvider
 		this._disposed = true
 		this.log("Disposing ClineProvider...")
 
-		// Clear all tasks from the stack.
+		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
+		// so an active delegated child is marked interrupted before the extension shuts down,
+		// rather than being left persisted as "active" across the reload.
+		if (this.clineStack.length > 0) {
+			await this.evictCurrentTask()
+		}
 		while (this.clineStack.length > 0) {
 			await this.removeClineFromStack()
 		}
@@ -3596,23 +3599,24 @@ export class ClineProvider
 		//    If the parent is already "delegated" to a previous interrupted child (the user
 		//    navigated back to the parent and continued working), we implicitly sever the old
 		//    link here (delegated → active → delegated) so no explicit Abandon step is needed.
-		//    We snapshot the old awaited child's status BEFORE entering the updater (which is
-		//    synchronous) so the guard can verify the child is actually interrupted before
-		//    severing. An active child must never be silently detached.
-		const existingParent = this.taskHistoryStore.get(parentTaskId)
-		const existingAwaitedChildStatus = existingParent?.awaitingChildId
-			? this.taskHistoryStore.get(existingParent.awaitingChildId)?.status
-			: undefined
+		//    The old awaited child's status is re-read INSIDE the updater (which runs
+		//    synchronously under the store lock) so a concurrent abandon or completion cannot
+		//    slip between the status snapshot and the write. An active child must never be
+		//    silently detached.
 		try {
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
 				let base = historyItem
 				if (historyItem.status === "delegated") {
+					// Re-read the awaited child's current status under the store lock.
+					const awaitedChildStatus = historyItem.awaitingChildId
+						? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
+						: undefined
 					// Only sever the stale link when the old child is confirmed interrupted.
 					// If it is still active, throw so the rollback path cleans up the new child
 					// rather than silently detaching a live task.
-					if (existingAwaitedChildStatus !== "interrupted") {
+					if (awaitedChildStatus !== "interrupted") {
 						throw new Error(
-							`[delegateParentAndOpenChild] Cannot re-delegate: existing child ${historyItem.awaitingChildId} is ${existingAwaitedChildStatus}, not interrupted`,
+							`[delegateParentAndOpenChild] Cannot re-delegate: existing child ${historyItem.awaitingChildId} is ${awaitedChildStatus}, not interrupted`,
 						)
 					}
 					// Implicit sever of the stale interrupted-child link.

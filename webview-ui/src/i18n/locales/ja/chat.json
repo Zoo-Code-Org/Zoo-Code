@@ -18,8 +18,8 @@
 		"openApiHistory": "API履歴を開く",
 		"openUiHistory": "UI履歴を開く",
 		"backToParentTask": "親タスク",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "サブタスク待ち",
+		"goToSubtask": "サブタスクへ"
 	},
 	"unpin": "ピン留めを解除",
 	"pin": "ピン留め",

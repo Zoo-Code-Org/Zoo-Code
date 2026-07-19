@@ -791,10 +791,9 @@ describe("ClineProvider Task History Synchronization", () => {
 					listeners[event] = listeners[event] ?? []
 					listeners[event].push(fn)
 				},
-				emit: (event: string, ...args: unknown[]) => {
-					for (const fn of listeners[event] ?? []) {
-						fn(...args)
-					}
+				// Returns a promise that resolves when all async listeners have settled.
+				emit: async (event: string, ...args: unknown[]) => {
+					await Promise.all((listeners[event] ?? []).map((fn) => Promise.resolve(fn(...args))))
 				},
 			}
 		}
@@ -806,8 +805,7 @@ describe("ClineProvider Task History Synchronization", () => {
 			const fakeTask = makeFakeTask("task-cb-1")
 			;(provider as any).taskCreationCallback(fakeTask)
 
-			fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-1", {}, {})
-			await new Promise((r) => setTimeout(r, 10))
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-1", {}, {})
 
 			const stored = provider.taskHistoryStore.get("task-cb-1")
 			expect(stored?.status).toBe("completed")
@@ -822,8 +820,7 @@ describe("ClineProvider Task History Synchronization", () => {
 			const fakeTask = makeFakeTask("task-cb-2")
 			;(provider as any).taskCreationCallback(fakeTask)
 
-			fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-2", {}, {})
-			await new Promise((r) => setTimeout(r, 10))
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-2", {}, {})
 
 			// updateTaskHistory is called initially to store the item, but should NOT be
 			// called again by onTaskCompleted since it's already completed.
@@ -845,8 +842,7 @@ describe("ClineProvider Task History Synchronization", () => {
 			const fakeTask = makeFakeTask("task-cb-3")
 			;(provider as any).taskCreationCallback(fakeTask)
 
-			fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-3", {}, {})
-			await new Promise((r) => setTimeout(r, 10))
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-3", {}, {})
 
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
 		})
