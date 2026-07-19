@@ -1,80 +1,87 @@
 {
-  "title": "Dasbor",
-  "done": "Kembali",
-  "range": {
-    "today": "Hari ini",
-    "7d": "7 Hari",
-    "30d": "30 Hari",
-    "custom": "Kustom",
-    "all": "Semua"
-  },
-  "summary": {
-    "totalTokens": "Total Token",
-    "inputTokens": "Token Input",
-    "outputTokens": "Token Output",
-    "cacheTokens": "Token Cache",
-    "cost": "Biaya"
-  },
-  "states": {
-    "loading": "Memuat...",
-    "error": "Gagal memuat statistik",
-    "empty": "Belum ada data penggunaan",
-    "emptyHint": "Mulai percakapan untuk melihat statistik"
-  },
-  "actions": {
-    "refresh": "Segarkan",
-    "exportJson": "Ekspor JSON",
-    "exportCsv": "Ekspor CSV",
-    "clear": "Hapus Statistik"
-  },
-  "breakdown": {
-    "title": "Rincian",
-    "model": "Model",
-    "provider": "Penyedia",
-    "mode": "Mode",
-    "events": "Peristiwa",
-    "inputTokens": "Input",
-    "outputTokens": "Output",
-    "cacheReadTokens": "Baca Cache",
-    "cacheWriteTokens": "Tulis Cache",
-    "reasoningTokens": "Penalaran",
-    "totalTokens": "Total",
-    "costUsd": "Biaya",
-    "unknown": "Tidak diketahui"
-  },
-  "coverage": {
-    "title": "Cakupan Data",
-    "liveFrom": "Langsung sejak",
-    "backfilledEvents": "Peristiwa backfill",
-    "paused": "Perekaman dijeda (batas penyimpanan tercapai)"
-  },
-  "clearDialog": {
-    "title": "Hapus Statistik",
-    "description": "Apakah Anda yakin ingin menghapus semua statistik penggunaan? Tindakan ini tidak dapat dibatalkan.",
-    "cancel": "Batal",
-    "confirm": "Hapus"
-  },
-  "customRange": {
-    "from": "Dari",
-    "to": "Sampai"
-  },
-  "sessions": {
-    "title": "Sesi",
-    "noSessions": "Tidak ada sesi dalam rentang waktu ini",
-    "filterModel": "Semua Model",
-    "filterProvider": "Semua Penyedia",
-    "callCount": "{{count}} panggilan"
-  },
-  "sessionDetail": {
-    "summary": "Ringkasan Sesi",
-    "apiCalls": "Panggilan API",
-    "noApiCalls": "Tidak ada panggilan API yang tercatat",
-    "input": "Input",
-    "output": "Output",
-    "cost": "Biaya",
-    "model": "Model",
-    "mode": "Mode",
-    "time": "Waktu",
-    "status": "Status"
-  }
+	"title": "Dasbor",
+	"done": "Kembali",
+	"range": {
+		"today": "Hari ini",
+		"7d": "7 Hari",
+		"30d": "30 Hari",
+		"custom": "Kustom",
+		"all": "Semua"
+	},
+	"summary": {
+		"totalTokens": "Total Token",
+		"inputTokens": "Token Input",
+		"outputTokens": "Token Output",
+		"cacheTokens": "Token Cache",
+		"cost": "Biaya"
+	},
+	"states": {
+		"loading": "Memuat...",
+		"error": "Gagal memuat statistik",
+		"empty": "Belum ada data penggunaan",
+		"emptyHint": "Mulai percakapan untuk melihat statistik"
+	},
+	"actions": {
+		"refresh": "Segarkan",
+		"exportJson": "Ekspor JSON",
+		"exportCsv": "Ekspor CSV",
+		"clear": "Hapus Statistik"
+	},
+	"breakdown": {
+		"title": "Rincian",
+		"model": "Model",
+		"provider": "Penyedia",
+		"mode": "Mode",
+		"events": "Peristiwa",
+		"inputTokens": "Input",
+		"outputTokens": "Output",
+		"cacheReadTokens": "Baca Cache",
+		"cacheWriteTokens": "Tulis Cache",
+		"reasoningTokens": "Penalaran",
+		"totalTokens": "Total",
+		"costUsd": "Biaya",
+		"unknown": "Tidak diketahui"
+	},
+	"coverage": {
+		"title": "Cakupan Data",
+		"liveFrom": "Langsung sejak",
+		"backfilledEvents": "Peristiwa backfill",
+		"paused": "Perekaman dijeda (batas penyimpanan tercapai)"
+	},
+	"clearDialog": {
+		"title": "Hapus Statistik",
+		"description": "Apakah Anda yakin ingin menghapus semua statistik penggunaan? Tindakan ini tidak dapat dibatalkan.",
+		"cancel": "Batal",
+		"confirm": "Hapus"
+	},
+	"customRange": {
+		"from": "Dari",
+		"to": "Sampai"
+	},
+	"sessions": {
+		"title": "Sesi",
+		"noSessions": "Tidak ada sesi dalam rentang waktu ini",
+		"filterModel": "Semua Model",
+		"filterProvider": "Semua Penyedia",
+		"callCount": "{{count}} panggilan"
+	},
+	"sessionDetail": {
+		"summary": "Ringkasan Sesi",
+		"apiCalls": "Panggilan API",
+		"noApiCalls": "Tidak ada panggilan API yang tercatat",
+		"input": "Input",
+		"output": "Output",
+		"cost": "Biaya",
+		"model": "Model",
+		"mode": "Mode",
+		"time": "Waktu",
+		"status": "Status"
+	},
+	"time": {
+		"justNow": "baru saja",
+		"minutesAgo": "{{count}} mnt lalu",
+		"hoursAgo": "{{count}} jam lalu",
+		"yesterday": "kemarin",
+		"daysAgo": "{{count}} hari lalu"
+	}
 }

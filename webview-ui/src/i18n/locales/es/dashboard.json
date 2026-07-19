@@ -1,80 +1,87 @@
 {
-  "title": "Panel",
-  "done": "Atrás",
-  "range": {
-    "today": "Hoy",
-    "7d": "7 días",
-    "30d": "30 días",
-    "custom": "Personalizado",
-    "all": "Todo"
-  },
-  "summary": {
-    "totalTokens": "Tokens totales",
-    "inputTokens": "Tokens de entrada",
-    "outputTokens": "Tokens de salida",
-    "cacheTokens": "Tokens de caché",
-    "cost": "Costo"
-  },
-  "states": {
-    "loading": "Cargando...",
-    "error": "Error al cargar las estadísticas",
-    "empty": "Aún no hay datos de uso",
-    "emptyHint": "Inicie una conversación para ver las estadísticas"
-  },
-  "actions": {
-    "refresh": "Actualizar",
-    "exportJson": "Exportar JSON",
-    "exportCsv": "Exportar CSV",
-    "clear": "Borrar estadísticas"
-  },
-  "breakdown": {
-    "title": "Desglose",
-    "model": "Modelo",
-    "provider": "Proveedor",
-    "mode": "Modo",
-    "events": "Eventos",
-    "inputTokens": "Entrada",
-    "outputTokens": "Salida",
-    "cacheReadTokens": "Lectura caché",
-    "cacheWriteTokens": "Escritura caché",
-    "reasoningTokens": "Razonamiento",
-    "totalTokens": "Total",
-    "costUsd": "Costo",
-    "unknown": "Desconocido"
-  },
-  "coverage": {
-    "title": "Cobertura de datos",
-    "liveFrom": "En vivo desde",
-    "backfilledEvents": "Eventos retroactivos",
-    "paused": "Grabación en pausa (límite de almacenamiento alcanzado)"
-  },
-  "clearDialog": {
-    "title": "Borrar estadísticas",
-    "description": "¿Está seguro de que desea borrar todas las estadísticas de uso? Esta acción no se puede deshacer.",
-    "cancel": "Cancelar",
-    "confirm": "Borrar"
-  },
-  "customRange": {
-    "from": "Desde",
-    "to": "Hasta"
-  },
-  "sessions": {
-    "title": "Sesiones",
-    "noSessions": "No hay sesiones en este rango de tiempo",
-    "filterModel": "Todos los modelos",
-    "filterProvider": "Todos los proveedores",
-    "callCount": "{{count}} llamadas"
-  },
-  "sessionDetail": {
-    "summary": "Resumen de sesión",
-    "apiCalls": "Llamadas API",
-    "noApiCalls": "No hay llamadas API registradas",
-    "input": "Entrada",
-    "output": "Salida",
-    "cost": "Costo",
-    "model": "Modelo",
-    "mode": "Modo",
-    "time": "Hora",
-    "status": "Estado"
-  }
+	"title": "Panel",
+	"done": "Atrás",
+	"range": {
+		"today": "Hoy",
+		"7d": "7 días",
+		"30d": "30 días",
+		"custom": "Personalizado",
+		"all": "Todo"
+	},
+	"summary": {
+		"totalTokens": "Tokens totales",
+		"inputTokens": "Tokens de entrada",
+		"outputTokens": "Tokens de salida",
+		"cacheTokens": "Tokens de caché",
+		"cost": "Costo"
+	},
+	"states": {
+		"loading": "Cargando...",
+		"error": "Error al cargar las estadísticas",
+		"empty": "Aún no hay datos de uso",
+		"emptyHint": "Inicie una conversación para ver las estadísticas"
+	},
+	"actions": {
+		"refresh": "Actualizar",
+		"exportJson": "Exportar JSON",
+		"exportCsv": "Exportar CSV",
+		"clear": "Borrar estadísticas"
+	},
+	"breakdown": {
+		"title": "Desglose",
+		"model": "Modelo",
+		"provider": "Proveedor",
+		"mode": "Modo",
+		"events": "Eventos",
+		"inputTokens": "Entrada",
+		"outputTokens": "Salida",
+		"cacheReadTokens": "Lectura caché",
+		"cacheWriteTokens": "Escritura caché",
+		"reasoningTokens": "Razonamiento",
+		"totalTokens": "Total",
+		"costUsd": "Costo",
+		"unknown": "Desconocido"
+	},
+	"coverage": {
+		"title": "Cobertura de datos",
+		"liveFrom": "En vivo desde",
+		"backfilledEvents": "Eventos retroactivos",
+		"paused": "Grabación en pausa (límite de almacenamiento alcanzado)"
+	},
+	"clearDialog": {
+		"title": "Borrar estadísticas",
+		"description": "¿Está seguro de que desea borrar todas las estadísticas de uso? Esta acción no se puede deshacer.",
+		"cancel": "Cancelar",
+		"confirm": "Borrar"
+	},
+	"customRange": {
+		"from": "Desde",
+		"to": "Hasta"
+	},
+	"sessions": {
+		"title": "Sesiones",
+		"noSessions": "No hay sesiones en este rango de tiempo",
+		"filterModel": "Todos los modelos",
+		"filterProvider": "Todos los proveedores",
+		"callCount": "{{count}} llamadas"
+	},
+	"sessionDetail": {
+		"summary": "Resumen de sesión",
+		"apiCalls": "Llamadas API",
+		"noApiCalls": "No hay llamadas API registradas",
+		"input": "Entrada",
+		"output": "Salida",
+		"cost": "Costo",
+		"model": "Modelo",
+		"mode": "Modo",
+		"time": "Hora",
+		"status": "Estado"
+	},
+	"time": {
+		"justNow": "justo ahora",
+		"minutesAgo": "hace {{count}} min",
+		"hoursAgo": "hace {{count}} h",
+		"yesterday": "ayer",
+		"daysAgo": "hace {{count}} dias"
+	}
 }

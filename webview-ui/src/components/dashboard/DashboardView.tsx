@@ -5,6 +5,7 @@ import type { ExtensionMessage, StatsQuery, StatsSnapshot, SessionSummary, Sessi
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
+import { formatCompact, formatCost } from "@/utils/formatNumber"
 
 import { Button, StandardTooltip } from "@/components/ui"
 import {
@@ -33,23 +34,6 @@ type DashboardGroupBy = "model" | "provider" | "mode"
 
 interface DashboardViewProps {
 	onDone: () => void
-}
-
-// ── Number formatting ───────────────────────────────────────────────────────
-
-function formatCompact(value: number): string {
-	if (value === 0) return "0"
-	const abs = Math.abs(value)
-	if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
-	if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
-	if (abs >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-	return value.toLocaleString()
-}
-
-function formatCost(value: number): string {
-	if (value === 0) return "$0.00"
-	if (value < 0.01) return `$${value.toFixed(4)}`
-	return `$${value.toFixed(2)}`
 }
 
 // ── DashboardView ───────────────────────────────────────────────────────────

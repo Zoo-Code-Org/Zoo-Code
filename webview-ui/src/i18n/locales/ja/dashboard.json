@@ -1,80 +1,87 @@
 {
-  "title": "ダッシュボード",
-  "done": "戻る",
-  "range": {
-    "today": "今日",
-    "7d": "過去7日間",
-    "30d": "過去30日間",
-    "custom": "カスタム",
-    "all": "全期間"
-  },
-  "summary": {
-    "totalTokens": "合計トークン",
-    "inputTokens": "入力トークン",
-    "outputTokens": "出力トークン",
-    "cacheTokens": "キャッシュトークン",
-    "cost": "コスト"
-  },
-  "states": {
-    "loading": "読み込んでいます...",
-    "error": "統計の読み込みに失敗しました",
-    "empty": "まだ使用量データがありません",
-    "emptyHint": "統計を表示するには会話を開始してください"
-  },
-  "actions": {
-    "refresh": "更新",
-    "exportJson": "JSONエクスポート",
-    "exportCsv": "CSVエクスポート",
-    "clear": "統計を削除"
-  },
-  "breakdown": {
-    "title": "内訳",
-    "model": "モデル",
-    "provider": "プロバイダー",
-    "mode": "モード",
-    "events": "イベント",
-    "inputTokens": "入力",
-    "outputTokens": "出力",
-    "cacheReadTokens": "キャッシュ読み取り",
-    "cacheWriteTokens": "キャッシュ書き込み",
-    "reasoningTokens": "推論",
-    "totalTokens": "合計",
-    "costUsd": "コスト",
-    "unknown": "不明"
-  },
-  "coverage": {
-    "title": "データカバレッジ",
-    "liveFrom": "記録開始",
-    "backfilledEvents": "遡及されたイベント",
-    "paused": "記録は一時停止されています (ストレージ上限に達しました)"
-  },
-  "clearDialog": {
-    "title": "統計を削除",
-    "description": "すべての使用量統計を削除してもよろしいですか？この操作は元に戻せません。",
-    "cancel": "キャンセル",
-    "confirm": "削除"
-  },
-  "customRange": {
-    "from": "開始",
-    "to": "終了"
-  },
-  "sessions": {
-    "title": "セッション",
-    "noSessions": "この期間にはセッションがありません",
-    "filterModel": "すべてのモデル",
-    "filterProvider": "すべてのプロバイダー",
-    "callCount": "{{count}} 回の呼び出し"
-  },
-  "sessionDetail": {
-    "summary": "セッションサマリー",
-    "apiCalls": "API呼び出し",
-    "noApiCalls": "API呼び出しの記録がありません",
-    "input": "入力",
-    "output": "出力",
-    "cost": "コスト",
-    "model": "モデル",
-    "mode": "モード",
-    "time": "時刻",
-    "status": "ステータス"
-  }
+	"title": "ダッシュボード",
+	"done": "戻る",
+	"range": {
+		"today": "今日",
+		"7d": "過去7日間",
+		"30d": "過去30日間",
+		"custom": "カスタム",
+		"all": "全期間"
+	},
+	"summary": {
+		"totalTokens": "合計トークン",
+		"inputTokens": "入力トークン",
+		"outputTokens": "出力トークン",
+		"cacheTokens": "キャッシュトークン",
+		"cost": "コスト"
+	},
+	"states": {
+		"loading": "読み込んでいます...",
+		"error": "統計の読み込みに失敗しました",
+		"empty": "まだ使用量データがありません",
+		"emptyHint": "統計を表示するには会話を開始してください"
+	},
+	"actions": {
+		"refresh": "更新",
+		"exportJson": "JSONエクスポート",
+		"exportCsv": "CSVエクスポート",
+		"clear": "統計を削除"
+	},
+	"breakdown": {
+		"title": "内訳",
+		"model": "モデル",
+		"provider": "プロバイダー",
+		"mode": "モード",
+		"events": "イベント",
+		"inputTokens": "入力",
+		"outputTokens": "出力",
+		"cacheReadTokens": "キャッシュ読み取り",
+		"cacheWriteTokens": "キャッシュ書き込み",
+		"reasoningTokens": "推論",
+		"totalTokens": "合計",
+		"costUsd": "コスト",
+		"unknown": "不明"
+	},
+	"coverage": {
+		"title": "データカバレッジ",
+		"liveFrom": "記録開始",
+		"backfilledEvents": "遡及されたイベント",
+		"paused": "記録は一時停止されています (ストレージ上限に達しました)"
+	},
+	"clearDialog": {
+		"title": "統計を削除",
+		"description": "すべての使用量統計を削除してもよろしいですか？この操作は元に戻せません。",
+		"cancel": "キャンセル",
+		"confirm": "削除"
+	},
+	"customRange": {
+		"from": "開始",
+		"to": "終了"
+	},
+	"sessions": {
+		"title": "セッション",
+		"noSessions": "この期間にはセッションがありません",
+		"filterModel": "すべてのモデル",
+		"filterProvider": "すべてのプロバイダー",
+		"callCount": "{{count}} 回の呼び出し"
+	},
+	"sessionDetail": {
+		"summary": "セッションサマリー",
+		"apiCalls": "API呼び出し",
+		"noApiCalls": "API呼び出しの記録がありません",
+		"input": "入力",
+		"output": "出力",
+		"cost": "コスト",
+		"model": "モデル",
+		"mode": "モード",
+		"time": "時刻",
+		"status": "ステータス"
+	},
+	"time": {
+		"justNow": "たった今",
+		"minutesAgo": "{{count}}分前",
+		"hoursAgo": "{{count}}時間前",
+		"yesterday": "昨日",
+		"daysAgo": "{{count}}日前"
+	}
 }

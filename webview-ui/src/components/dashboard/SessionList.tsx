@@ -1,45 +1,25 @@
 import React, { memo, useCallback, useMemo } from "react"
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
+import i18next from "i18next"
 
 import type { SessionSummary, SessionDetail as SessionDetailType } from "@roo-code/types"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { formatCompact, formatCost } from "@/utils/formatNumber"
 
 import SessionDetail from "./SessionDetail"
-
-// ── Number formatting ───────────────────────────────────────────────────────
-
-/**
- * Format a large number with K/M/B suffixes for display.
- * Mirrors the helper used in DashboardSummary/DashboardView.
- */
-function formatCompact(value: number): string {
-	if (value === 0) return "0"
-	const abs = Math.abs(value)
-	if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
-	if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
-	if (abs >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-	return value.toLocaleString()
-}
-
-function formatCost(value: number): string {
-	if (value === 0) return "$0.00"
-	if (value < 0.01) return `$${value.toFixed(4)}`
-	return `$${value.toFixed(2)}`
-}
 
 // ── Relative time formatting ────────────────────────────────────────────────
 
 /**
  * Formats a timestamp as a relative time string (e.g. "3 min ago",
- * "1 hr ago", "today"). Falls back to a localized absolute date for
- * timestamps older than 24 hours.
+ * "1 hr ago", "yesterday"). Falls back to a localized absolute date for
+ * timestamps older than a week.
  *
- * The strings are intentionally short to fit the session row layout.
- * The i18n keys are not used here because the relative-time phrasing is
- * tightly coupled to the formatting logic; the absolute-date fallback
- * uses `toLocaleString()` which respects the user's locale.
+ * Uses i18n keys from the `dashboard:time.*` namespace so the phrasing
+ * is translated for each locale. The absolute-date fallback uses
+ * `toLocaleDateString()` which respects the user's locale.
  */
 function formatRelativeTime(timestamp: number): string {
 	const now = Date.now()
@@ -49,11 +29,11 @@ function formatRelativeTime(timestamp: number): string {
 	const diffHr = Math.floor(diffMin / 60)
 	const diffDay = Math.floor(diffHr / 24)
 
-	if (diffSec < 60) return "just now"
-	if (diffMin < 60) return `${diffMin} min ago`
-	if (diffHr < 24) return `${diffHr} hr ago`
-	if (diffDay === 1) return "yesterday"
-	if (diffDay < 7) return `${diffDay} days ago`
+	if (diffSec < 60) return i18next.t("dashboard:time.justNow")
+	if (diffMin < 60) return i18next.t("dashboard:time.minutesAgo", { count: diffMin })
+	if (diffHr < 24) return i18next.t("dashboard:time.hoursAgo", { count: diffHr })
+	if (diffDay === 1) return i18next.t("dashboard:time.yesterday")
+	if (diffDay < 7) return i18next.t("dashboard:time.daysAgo", { count: diffDay })
 
 	// Older than a week: show absolute date.
 	return new Date(timestamp).toLocaleDateString()
