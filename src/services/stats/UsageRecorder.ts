@@ -63,7 +63,8 @@ export class UsageRecorder {
 	/**
 	 * API attempt의 terminal finalize에서 호출한다.
 	 *
-	 * @param requestKey 요청 식별자 (taskId:attempt 형태)
+	 * @param requestKey 요청 식별자 (taskId:apiReqIndex:attempt 형태 — B1 fix:
+	 *   apiReqIndex를 포함해 한 task의 여러 tool-use turn이 서로 다른 키를 갖도록 함)
 	 * @param status "completed" | "failed" | "cancelled"
 	 * @param ctx 사용량 기록 컨텍스트
 	 *
@@ -109,7 +110,21 @@ export class UsageRecorder {
 				reasoningTokens: ctx.reasoningTokens
 					? { value: ctx.reasoningTokens, source: ctx.tokenSource }
 					: undefined,
-				totalTokens: undefined, // calculated by aggregator
+				// H3 fix: compute totalTokens at record time so aggregators/UI can rely on it.
+				// Sum all token buckets. Inclusion semantics (whether cache/reasoning are already
+				// counted inside input/output) are recorded in `semantics` below; the aggregator
+				// is responsible for adjusting double-counting when semantics != "unknown".
+				// Until provider-specific semantics are determined, we record the raw sum so the
+				// total is never 0 (which previously broke heatmap/sort).
+				totalTokens: {
+					value:
+						ctx.inputTokens +
+						ctx.outputTokens +
+						(ctx.cacheReadTokens ?? 0) +
+						(ctx.cacheWriteTokens ?? 0) +
+						(ctx.reasoningTokens ?? 0),
+					source: ctx.tokenSource,
+				},
 				costUsd: ctx.totalCost ? { value: ctx.totalCost, source: ctx.costSource } : undefined,
 			},
 			semantics: {

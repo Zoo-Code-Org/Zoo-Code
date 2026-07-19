@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw } from "lucide-react"
 
-import type { ExtensionMessage, StatsQuery, StatsSnapshot, StatsBucket } from "@roo-code/types"
+import type { ExtensionMessage, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -179,6 +179,19 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 				return () => clearTimeout(timer)
 			}
 
+			if (message.type === "requestClearNonceResponse") {
+				// B2 fix: host issues the nonce; store it and open the confirm dialog.
+				// If the host returned null/error, surface it without opening the dialog.
+				if (message.clearNonce) {
+					setClearNonce(message.clearNonce)
+					setShowClearDialog(true)
+				} else {
+					setError(message.error || t("stats:states.error"))
+					setShowClearDialog(false)
+					setClearNonce(null)
+				}
+			}
+
 			if (message.type === "clearUsageStatsResponse") {
 				if (message.clearUsageStatsResult?.success) {
 					setShowClearDialog(false)
@@ -223,10 +236,15 @@ const StatsView = memo(({ onDone }: StatsViewProps) => {
 	// ── Clear ────────────────────────────────────────────────────────────────
 
 	const handleClearRequest = useCallback(() => {
-		// Request a confirmation nonce from the host
-		const nonce = `clear-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-		setClearNonce(nonce)
-		setShowClearDialog(true)
+		// B2 fix: ask the host to issue a clear nonce. The host-generated nonce
+		// is returned via `requestClearNonceResponse` and stored in `clearNonce`.
+		// Previously the webview generated its own nonce, which the host never
+		// stored, so `clearStats` always failed with "nonce mismatch".
+		const requestId = `clear-nonce-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+		vscode.postMessage({
+			type: "requestClearNonce",
+			requestId,
+		})
 	}, [])
 
 	const handleClearConfirm = useCallback(() => {

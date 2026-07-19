@@ -3140,7 +3140,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// API attempts. We record the final usage event here.
 							// (Architecture report section 5.5-5.8: terminal finalize only, no chunk-level append)
 							if (this.usageRecorder) {
-								const requestKey = `${this.taskId}:${currentItem.retryAttempt ?? 0}`
+								// B1 fix: include apiReqIndex so each tool-use turn produces a unique
+								// requestKey. Previously requestKey = taskId:retryAttempt, which was
+								// identical for every turn of a task (retryAttempt resets to 0 per turn),
+								// causing the idempotency dedupe to drop all but the first turn's usage.
+								const requestKey = `${this.taskId}:${apiReqIndex}:${currentItem.retryAttempt ?? 0}`
 								const ctx: UsageRecordingContext = {
 									taskId: this.taskId,
 									parentTaskId: this.parentTaskId,
@@ -3284,7 +3288,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// user cancellations. Record the partial usage with the appropriate status.
 						// (Architecture report section 5.5-5.8: terminal finalize only)
 						if (this.usageRecorder) {
-							const requestKey = `${this.taskId}:${currentItem.retryAttempt ?? 0}`
+							// B1 fix: include apiReqIndex so each tool-use turn produces a unique
+							// requestKey (see completed-path comment above).
+							const requestKey = `${this.taskId}:${lastApiReqIndex}:${currentItem.retryAttempt ?? 0}`
 							const failedStatus: "failed" | "cancelled" = this.abort ? "cancelled" : "failed"
 							const ctx: UsageRecordingContext = {
 								taskId: this.taskId,

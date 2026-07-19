@@ -1,4 +1,4 @@
-{
+﻿{
 	"extension.displayName": "Zoo Code",
 	"extension.description": "Uma equipe completa de desenvolvimento de agentes de IA no seu editor.",
 	"command.newTask.title": "Nova Tarefa",
@@ -16,6 +16,7 @@
 	"command.acceptInput.title": "Aceitar Entrada/Sugestão",
 	"command.showRipgrepDiagnostic.title": "Mostrar diagnóstico do Ripgrep",
 	"command.toggleAutoApprove.title": "Alternar Auto-Aprovação",
+	"command.openUsageStats.title": "Open Usage Statistics",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",

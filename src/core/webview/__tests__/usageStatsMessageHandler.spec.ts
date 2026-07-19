@@ -538,22 +538,41 @@ describe("usageStatsMessageHandler", () => {
 	// ── handleRequestClearNonce ──────────────────────────────────────────────
 
 	describe("handleRequestClearNonce", () => {
-		it("returns nonce from service", async () => {
+		it("posts requestClearNonceResponse with nonce from service", async () => {
 			const issueClearNonce = vi.fn(() => "test-nonce-abc")
 			const provider = createMockProvider({ issueClearNonce })
 
-			const result = await handleRequestClearNonce(provider)
+			const message: WebviewMessage = {
+				type: "requestClearNonce",
+				requestId: "req-nonce-1",
+			}
+
+			await handleRequestClearNonce(provider, message)
 
 			expect(issueClearNonce).toHaveBeenCalled()
-			expect(result).toBe("test-nonce-abc")
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "requestClearNonceResponse",
+				requestId: "req-nonce-1",
+				clearNonce: "test-nonce-abc",
+			})
 		})
 
-		it("returns null when service is unavailable", async () => {
+		it("posts error response when service is unavailable", async () => {
 			const provider = createMockProvider(undefined)
 
-			const result = await handleRequestClearNonce(provider)
+			const message: WebviewMessage = {
+				type: "requestClearNonce",
+				requestId: "req-nonce-2",
+			}
 
-			expect(result).toBeNull()
+			await handleRequestClearNonce(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "requestClearNonceResponse",
+				requestId: "req-nonce-2",
+				clearNonce: null,
+				error: expect.stringContaining("[STATS_HANDLER/clear/002]"),
+			})
 		})
 	})
 })

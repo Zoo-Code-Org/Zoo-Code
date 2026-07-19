@@ -385,7 +385,7 @@ describe("StatsView", () => {
 		)
 	})
 
-	it("opens clear confirmation dialog when clear button is clicked", async () => {
+	it("opens clear confirmation dialog when clear button is clicked and host issues nonce", async () => {
 		renderStatsView()
 
 		await sendUsageStatsResponse(mockSnapshotWithData)
@@ -399,10 +399,32 @@ describe("StatsView", () => {
 		) as HTMLButtonElement
 		fireEvent.click(clearButton)
 
-		expect(document.querySelector('[data-testid="stats-clear-dialog"]')).toBeTruthy()
+		// B2 fix: webview requests a nonce from the host; the dialog opens only
+		// after the host responds with `requestClearNonceResponse`.
+		expect(vscode.postMessage).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				type: "requestClearNonce",
+			}),
+		)
+
+		// Simulate host issuing a nonce
+		await act(async () => {
+			window.postMessage(
+				{
+					type: "requestClearNonceResponse",
+					requestId: "clear-nonce-test",
+					clearNonce: "host-issued-nonce-123",
+				},
+				"*",
+			)
+		})
+
+		await waitFor(() => {
+			expect(document.querySelector('[data-testid="stats-clear-dialog"]')).toBeTruthy()
+		})
 	})
 
-	it("sends clearUsageStats message when clear is confirmed", async () => {
+	it("sends clearUsageStats message with host-issued nonce when clear is confirmed", async () => {
 		renderStatsView()
 
 		await sendUsageStatsResponse(mockSnapshotWithData)
@@ -416,15 +438,32 @@ describe("StatsView", () => {
 		) as HTMLButtonElement
 		fireEvent.click(clearButton)
 
-		const confirmButton = document.querySelector(
-			'[data-testid="stats-clear-confirm"]',
-		) as HTMLButtonElement
+		// Simulate host issuing a nonce
+		await act(async () => {
+			window.postMessage(
+				{
+					type: "requestClearNonceResponse",
+					requestId: "clear-nonce-test",
+					clearNonce: "host-issued-nonce-123",
+				},
+				"*",
+			)
+		})
+
+		// Wait for the confirm button to appear after the dialog opens
+		const confirmButton = await waitFor(() => {
+			const el = document.querySelector(
+				'[data-testid="stats-clear-confirm"]',
+			) as HTMLButtonElement
+			expect(el).toBeTruthy()
+			return el
+		})
 		fireEvent.click(confirmButton)
 
 		expect(vscode.postMessage).toHaveBeenLastCalledWith(
 			expect.objectContaining({
 				type: "clearUsageStats",
-				clearUsageStatsNonce: expect.any(String),
+				clearUsageStatsNonce: "host-issued-nonce-123",
 			}),
 		)
 	})

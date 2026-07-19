@@ -53,6 +53,7 @@ import {
 	handleGetUsageStats,
 	handleClearUsageStats,
 	handleExportUsageStats,
+	handleRequestClearNonce,
 } from "./usageStatsMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
@@ -4026,6 +4027,11 @@ export const webviewMessageHandler = async (
 
 		case "clearUsageStats": {
 			await handleClearUsageStats(provider, message)
+			break
+		}
+
+		case "requestClearNonce": {
+			await handleRequestClearNonce(provider, message)
 			break
 		}
 

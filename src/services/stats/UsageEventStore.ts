@@ -449,12 +449,17 @@ export class UsageEventStore {
 				await this.writeManifestAtomic(manifest)
 			}
 
+			// B3 fix: segmentPath를 회전 후의 currentSegment 기준으로 재계산한다.
+			// 이전에는 회전 전 구 segmentPath를 그대로 사용해 계속 구 segment에 append하여
+			// 5MiB 회전 설계가 무효화되고 단일 segment가 무한정 커졌음.
+			const activeSegmentPath = this.getSegmentPath(manifest.currentSegment)
+
 			// 이벤트를 compact JSON + \n으로 append
 			const line = JSON.stringify(event) + "\n"
 
 			try {
 				// append mode로 열어서 write
-				const handle = await fs.open(segmentPath, "a")
+				const handle = await fs.open(activeSegmentPath, "a")
 				try {
 					await handle.writeFile(line, "utf-8")
 					// file handle sync 후 성공으로 반환

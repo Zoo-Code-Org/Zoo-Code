@@ -322,20 +322,54 @@ export async function handleExportUsageStats(
 }
 
 /**
- * Issues a clear confirmation nonce and returns it to the webview.
- * The webview must include this nonce in the subsequent `clearUsageStats` message.
+ * Handles the `requestClearNonce` message (B2 fix).
  *
- * This is called from the webview's confirmation dialog flow.
- * The nonce is short-lived (5 minutes) and single-use.
+ * Issues a host-generated clear confirmation nonce and posts it back to the
+ * webview as `requestClearNonceResponse`. The webview must include this nonce
+ * in the subsequent `clearUsageStats` message.
+ *
+ * Previously the webview generated its own nonce, which the host never stored,
+ * so `clearStats` always failed with "nonce mismatch". The nonce is now
+ * host-issued, short-lived (5 minutes), and single-use — matching the security
+ * design intent.
  */
-export async function handleRequestClearNonce(provider: ClineProvider): Promise<string | null> {
-	const service = provider.getUsageStatsService()
+export async function handleRequestClearNonce(provider: ClineProvider, message: WebviewMessage): Promise<void> {
+	const requestId = message.requestId
 
-	if (!service) {
-		return null
+	try {
+		const service = provider.getUsageStatsService()
+
+		if (!service) {
+			await provider.postMessageToWebview({
+				type: "requestClearNonceResponse",
+				requestId,
+				clearNonce: null,
+				error: "[STATS_HANDLER/clear/002] Usage stats service is unavailable",
+			})
+			return
+		}
+
+		const nonce = service.issueClearNonce()
+
+		await provider.postMessageToWebview({
+			type: "requestClearNonceResponse",
+			requestId,
+			clearNonce: nonce,
+		})
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+
+		provider.log(
+			`[STATS_HANDLER/clear/003] Error issuing clear nonce: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+		)
+
+		await provider.postMessageToWebview({
+			type: "requestClearNonceResponse",
+			requestId,
+			clearNonce: null,
+			error: `[STATS_HANDLER/clear/003] Failed to issue clear nonce: ${errorMessage}`,
+		})
 	}
-
-	return service.issueClearNonce()
 }
 
 // Re-export StatsServiceError for convenience in tests
