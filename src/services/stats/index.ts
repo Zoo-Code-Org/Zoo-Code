@@ -1,7 +1,7 @@
 // ── Stats Service Barrel Export ─────────────────────────────────────────────
 //
-// UsageEventStore, UsageAggregator, UsageStatsService, UsageRecorder의 public API를 re-export.
-// Commit 3의 Task 계측과 Commit 4의 handler에서 이 모듈을 import한다.
+// Re-exports the public APIs of UsageEventStore, UsageAggregator, UsageStatsService, and UsageRecorder.
+// Task instrumentation in Commit 3 and handlers in Commit 4 import this module.
 
 export { UsageEventStore, StatsStoreError } from "./UsageEventStore"
 export type {

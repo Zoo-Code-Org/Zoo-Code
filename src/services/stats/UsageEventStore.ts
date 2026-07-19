@@ -8,44 +8,44 @@ import { UsageEventV1 as UsageEventV1Schema } from "@roo-code/types"
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-/** 단일 segment 파일이 이 크기에 도달하면 다음 segment로 회전한다. */
+/** When a single segment file reaches this size, it rotates to the next segment. */
 const SEGMENT_MAX_BYTES = 5 * 1024 * 1024 // 5 MiB
 
-/** 전체 event 파일의 hard cap. 도달 시 신규 기록을 일시 중단한다. */
+/** Hard cap for the total event files. When reached, new writes are suspended. */
 const TOTAL_MAX_BYTES = 100 * 1024 * 1024 // 100 MiB
 
-/** segment 파일명 prefix */
+/** Segment file name prefix */
 const SEGMENT_PREFIX = "events-"
 
-/** segment 파일 확장자 */
+/** Segment file extension */
 const SEGMENT_EXT = ".ndjson"
 
-/** manifest 파일명 */
+/** Manifest file name */
 const MANIFEST_FILENAME = "manifest.json"
 
-/** quarantine 디렉터리명 */
+/** Quarantine directory name */
 const QUARANTINE_DIRNAME = "quarantine"
 
-/** quarantine report 파일명 */
+/** Quarantine report file name */
 const QUARANTINE_REPORT_FILENAME = "corrupt-lines.jsonl"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
 /**
- * 저장소 오류 코드. LLM task를 실패시키지 않는다.
- * 형식: STATS_STORE/function/NNN
+ * Storage error codes. Does not fail the LLM task.
+ * Format: STATS_STORE/function/NNN
  */
 export type StatsStoreErrorCode =
-	| "STATS_STORE/append/001" // 디렉터리 생성 실패
-	| "STATS_STORE/append/002" // lock 획득 실패
-	| "STATS_STORE/append/003" // hard cap 도달
-	| "STATS_STORE/append/004" // 파일 쓰기 실패
-	| "STATS_STORE/append/005" // manifest 갱신 실패
-	| "STATS_STORE/readAll/001" // 디렉터리 읽기 실패
-	| "STATS_STORE/readAll/002" // segment 파일 읽기 실패
-	| "STATS_STORE/clear/001" // lock 획득 실패
-	| "STATS_STORE/clear/002" // manifest 교체 실패
-	| "STATS_STORE/scan/001" // 재시작 시 segment scan 실패
+	| "STATS_STORE/append/001" // Directory creation failed
+	| "STATS_STORE/append/002" // Lock acquisition failed
+	| "STATS_STORE/append/003" // Hard cap reached
+	| "STATS_STORE/append/004" // File write failed
+	| "STATS_STORE/append/005" // Manifest update failed
+	| "STATS_STORE/readAll/001" // Directory read failed
+	| "STATS_STORE/readAll/002" // Segment file read failed
+	| "STATS_STORE/clear/001" // Lock acquisition failed
+	| "STATS_STORE/clear/002" // Manifest replacement failed
+	| "STATS_STORE/scan/001" // Segment scan failed on restart
 
 export class StatsStoreError extends Error {
 	constructor(
@@ -61,17 +61,17 @@ export class StatsStoreError extends Error {
 // ── Manifest ────────────────────────────────────────────────────────────────
 
 /**
- * 저장소 manifest. generation과 현재 segment 번호를 관리한다.
- * cross-process lock은 이 파일에 대해 잡힌다.
+ * Storage manifest. Manages generation and the current segment number.
+ * The cross-process lock is held on this file.
  */
 export interface UsageStatsManifest {
-	/** manifest 스키마 버전 */
+	/** Manifest schema version */
 	manifestVersion: 1
-	/** 현재 generation. clear 시 증가한다. */
+	/** Current generation. Incremented on clear. */
 	generation: number
-	/** 현재 활성 segment 번호 (1-based) */
+	/** Current active segment number (1-based) */
 	currentSegment: number
-	/** 마지막 갱신 시각 (ISO 8601 UTC) */
+	/** Last updated time (ISO 8601 UTC) */
 	updatedAt: string
 }
 
@@ -85,37 +85,37 @@ const DEFAULT_MANIFEST: UsageStatsManifest = {
 // ── Quarantine Report ───────────────────────────────────────────────────────
 
 /**
- * corrupt line에 대한 quarantine 보고서 항목.
- * 원문을 복사하지 않고 line number와 hash만 기록한다.
+ * Quarantine report entry for a corrupt line.
+ * Records only the line number and hash, not the original content.
  */
 export interface QuarantineReportEntry {
-	/** segment 파일명 */
+	/** Segment file name */
 	segment: string
 	/** 1-based line number */
 	line: number
-	/** corrupt line 내용의 SHA-256 hash (앞 16자) */
+	/** SHA-256 hash of the corrupt line content (first 16 chars) */
 	hash: string
-	/** 발견 시각 (ISO 8601 UTC) */
+	/** Discovery time (ISO 8601 UTC) */
 	at: string
 }
 
 // ── UsageEventStore ─────────────────────────────────────────────────────────
 
 /**
- * NDJSON append-only 파일 기반 사용량 이벤트 저장소.
+ * NDJSON append-only file based usage event store.
  *
- * 설계 원칙 (아키텍처 보고서 섹션 5.12-5.14):
- * - `globalStorageUri.fsPath/usage-stats/` 디렉터리 사용
- * - manifest.json으로 generation/segment 관리
- * - process 내부 promise queue로 직렬화
- * - cross-process는 proper-lockfile로 manifest.json에 advisory lock
- * - 5 MiB segment 회전, 100 MiB hard cap
- * - idempotency: in-memory set + 재시작 시 segment scan
- * - corrupt line은 quarantine에 기록하고 건너뛰기
- * - storage 오류는 STATS_STORE_* code로 분류, LLM task를 실패시키지 않음
+ * Design principles (architecture report section 5.12-5.14):
+ * - Uses the `globalStorageUri.fsPath/usage-stats/` directory
+ * - Manages generation/segment via manifest.json
+ * - Serializes via in-process promise queue
+ * - Cross-process uses advisory lock on manifest.json via proper-lockfile
+ * - 5 MiB segment rotation, 100 MiB hard cap
+ * - Idempotency: in-memory set + segment scan on restart
+ * - Corrupt lines are recorded to quarantine and skipped
+ * - Storage errors are classified with STATS_STORE_* codes, do not fail the LLM task
  *
- * 보안: prompt, response, API key, workspace path를 저장하지 않는다.
- * (UsageEventV1 스키마에 이 필드들이 포함되어 있지 않으므로 구조적으로 보장됨)
+ * Security: does not store prompt, response, API key, or workspace path.
+ * (Structurally guaranteed because these fields are not included in the UsageEventV1 schema)
  */
 export class UsageEventStore {
 	private readonly statsDir: string
@@ -123,16 +123,16 @@ export class UsageEventStore {
 	private readonly quarantineDir: string
 	private readonly quarantineReportPath: string
 
-	/** process 내부 직렬화용 promise queue */
+	/** In-process promise queue for serialization */
 	private queue: Promise<void> = Promise.resolve()
 
-	/** idempotency: 현재 segment의 idempotencyKey set */
+	/** Idempotency: idempotencyKey set for the current segment */
 	private idempotencyKeys: Set<string> = new Set()
 
-	/** 초기화 완료 여부 */
+	/** Whether initialization is complete */
 	private initialized = false
 
-	/** hard cap 도달 여부 */
+	/** Whether the hard cap has been reached */
 	private capped = false
 
 	/**
@@ -148,9 +148,9 @@ export class UsageEventStore {
 	// ── Public API ──────────────────────────────────────────────────────────
 
 	/**
-	 * 저장소를 초기화한다.
-	 * 디렉터리 생성, manifest 로드/생성, idempotency set 복원을 수행한다.
-	 * 첫 append 전에 반드시 호출해야 한다.
+	 * Initializes the store.
+	 * Creates directories, loads/creates the manifest, and restores the idempotency set.
+	 * Must be called before the first append.
 	 */
 	async initialize(): Promise<void> {
 		if (this.initialized) {
@@ -168,33 +168,33 @@ export class UsageEventStore {
 			)
 		}
 
-		// manifest 로드 또는 생성
+		// Load or create manifest
 		const manifest = await this.loadOrCreateManifest()
 
-		// idempotency set 복원: 현재 generation의 모든 segment에서 scan
+		// Restore idempotency set: scan all segments of the current generation
 		try {
 			await this.rebuildIdempotencySet(manifest)
 		} catch (err) {
-			// scan 실패는 치명적이지 않음: dedupe가 느슨해질 뿐
+			// Scan failure is not fatal: dedupe just becomes looser
 			console.warn(`[UsageEventStore] idempotency scan failed, continuing with empty set:`, err)
 		}
 
-		// hard cap 확인
+		// Check hard cap
 		this.capped = await this.checkTotalSize()
 
 		this.initialized = true
 	}
 
 	/**
-	 * 이벤트를 append한다.
-	 * lock 안에서 dedupe 확인 후 append한다.
-	 * 동일 idempotencyKey가 이미 존재하면 무시한다 (idempotent).
+	 * Appends an event.
+	 * Checks for duplicates within the lock, then appends.
+	 * If the same idempotencyKey already exists, it is ignored (idempotent).
 	 *
 	 * @returns true if appended, false if deduplicated (already exists)
-	 * @throws StatsStoreError 저장소 오류 (LLM task를 실패시키지 않음 - 호출자가 catch)
+	 * @throws StatsStoreError Storage error (does not fail the LLM task - caller catches)
 	 */
 	async append(event: UsageEventV1): Promise<boolean> {
-		// process 내부 promise queue로 직렬화
+		// Serialize via in-process promise queue
 		let resolveFn!: (value: boolean) => void
 		let rejectFn!: (reason: unknown) => void
 		const pending = new Promise<boolean>((resolve, reject) => {
@@ -215,9 +215,9 @@ export class UsageEventStore {
 	}
 
 	/**
-	 * 모든 유효한 이벤트를 읽는다.
-	 * corrupt line은 quarantine에 기록하고 건너뛴다.
-	 * 마지막 비종결/잘린 line은 crash tail로 간주해 무시한다.
+	 * Reads all valid events.
+	 * Corrupt lines are recorded to quarantine and skipped.
+	 * The last unterminated/truncated line is treated as a crash tail and ignored.
 	 */
 	async readAll(): Promise<UsageEventV1[]> {
 		await this.ensureInitialized()
@@ -246,7 +246,7 @@ export class UsageEventStore {
 			try {
 				content = await fs.readFile(segmentPath, "utf-8")
 			} catch (err) {
-				// 파일 읽기 실패는 skip (ENOENT 등)
+				// Skip file read failures (ENOENT etc.)
 				if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
 					console.warn(`[UsageEventStore] failed to read segment ${segmentFile}:`, err)
 				}
@@ -254,13 +254,13 @@ export class UsageEventStore {
 			}
 
 			const lines = content.split("\n")
-			// 마지막 빈 line 제거 (trailing newline)
+			// Remove the last empty line (trailing newline)
 			if (lines.length > 0 && lines[lines.length - 1] === "") {
 				lines.pop()
 			}
 
-			// 마지막 line이 비종결/잘린 경우 crash tail로 간주해 무시
-			// (마지막 line이 유효한 JSON이면 parse되고, 아니면 quarantine)
+			// If the last line is unterminated/truncated, treat it as a crash tail and ignore
+			// (If the last line is valid JSON, it is parsed; otherwise it goes to quarantine)
 			for (let i = 0; i < lines.length; i++) {
 				const lineNum = i + 1
 				const line = lines[i]
@@ -276,16 +276,16 @@ export class UsageEventStore {
 					if (result.success) {
 						events.push(result.data)
 					} else {
-						// zod 검증 실패: corrupt line
+						// zod validation failed: corrupt line
 						quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
-						// 마지막 line의 검증 실패는 crash tail일 수 있으므로 quarantine에서 제외
+						// Validation failure of the last line may be a crash tail, so exclude from quarantine
 						if (isLastLine) {
 							quarantineEntries.pop()
 						}
 					}
 				} catch {
-					// JSON parse 실패
-					// 마지막 line의 parse 실패는 crash tail로 간주해 무시
+					// JSON parse failed
+					// Parse failure of the last line is treated as a crash tail and ignored
 					if (!isLastLine) {
 						quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
 					}
@@ -293,7 +293,7 @@ export class UsageEventStore {
 			}
 		}
 
-		// quarantine report 기록
+		// Write quarantine report
 		if (quarantineEntries.length > 0) {
 			await this.writeQuarantineReport(quarantineEntries)
 		}
@@ -302,9 +302,9 @@ export class UsageEventStore {
 	}
 
 	/**
-	 * 모든 통계 데이터를 삭제한다.
-	 * 새 빈 generation으로 교체한다.
-	 * 실패 시 기존 manifest를 유지한다.
+	 * Deletes all statistics data.
+	 * Replaces with a new empty generation.
+	 * On failure, the existing manifest is preserved.
 	 */
 	async clear(): Promise<void> {
 		await this.ensureInitialized()
@@ -324,7 +324,7 @@ export class UsageEventStore {
 		try {
 			const manifest = await this.loadOrCreateManifest()
 
-			// 새 generation 번호
+			// New generation number
 			const newGeneration = manifest.generation + 1
 			const newManifest: UsageStatsManifest = {
 				...DEFAULT_MANIFEST,
@@ -333,10 +333,10 @@ export class UsageEventStore {
 				updatedAt: new Date().toISOString(),
 			}
 
-			// 기존 segment 파일들을 새 generation 디렉터리로 이동 (백업)
-			// 또는 단순히 새 manifest로 교체하고 기존 파일은 무시
-			// 설계: "기존 segment를 새 빈 generation으로 교체"
-			// 구현: 기존 segment 파일들을 old-generation-{N} 하위로 이동
+			// Move existing segment files to a new generation directory (backup)
+			// Or simply replace with a new manifest and ignore existing files
+			// Design: "Replace existing segments with a new empty generation"
+			// Implementation: Move existing segment files under old-generation-{N}
 			const oldGenDir = path.join(this.statsDir, `old-generation-${manifest.generation}`)
 			await fs.mkdir(oldGenDir, { recursive: true })
 
@@ -351,19 +351,19 @@ export class UsageEventStore {
 				try {
 					await fs.rename(oldPath, newPath)
 				} catch (err) {
-					// 이동 실패는 로그만 남기고 계속
+					// Log move failures and continue
 					console.warn(`[UsageEventStore] failed to move old segment ${file}:`, err)
 				}
 			}
 
-			// 새 manifest 저장 (safeWriteJson 패턴: temp → rename)
+			// Save new manifest (safeWriteJson pattern: temp → rename)
 			await this.writeManifestAtomic(newManifest)
 
-			// idempotency set 초기화
+			// Reset idempotency set
 			this.idempotencyKeys.clear()
 			this.capped = false
 		} catch (err) {
-			// 실패 시 기존 manifest 유지 (이미 이동된 파일은 복구하지 않음 - 데이터 손실 위험)
+			// On failure, preserve the existing manifest (already moved files are not restored - data loss risk)
 			throw new StatsStoreError(
 				"STATS_STORE/clear/002",
 				"Failed to replace manifest during clear",
@@ -379,14 +379,14 @@ export class UsageEventStore {
 	}
 
 	/**
-	 * hard cap 도달 여부를 반환한다.
+	 * Returns whether the hard cap has been reached.
 	 */
 	isCapped(): boolean {
 		return this.capped
 	}
 
 	/**
-	 * 현재 manifest를 반환한다.
+	 * Returns the current manifest.
 	 */
 	async getManifest(): Promise<UsageStatsManifest> {
 		await this.ensureInitialized()
@@ -396,12 +396,12 @@ export class UsageEventStore {
 	// ── Internal: Append ─────────────────────────────────────────────────────
 
 	/**
-	 * 실제 append 로직. promise queue 내부에서 실행된다.
+	 * Actual append logic. Runs inside the promise queue.
 	 */
 	private async appendInternal(event: UsageEventV1): Promise<boolean> {
 		await this.ensureInitialized()
 
-		// hard cap 확인
+		// Check hard cap
 		if (this.capped) {
 			throw new StatsStoreError(
 				"STATS_STORE/append/003",
@@ -409,7 +409,7 @@ export class UsageEventStore {
 			)
 		}
 
-		// idempotency 확인
+		// Idempotency check
 		if (this.idempotencyKeys.has(event.idempotencyKey)) {
 			return false
 		}
@@ -430,7 +430,7 @@ export class UsageEventStore {
 			const manifest = await this.loadOrCreateManifest()
 			const segmentPath = this.getSegmentPath(manifest.currentSegment)
 
-			// segment 파일이 존재하는지 확인하고 크기 체크
+			// Check if the segment file exists and its size
 			let segmentSize = 0
 			try {
 				const stat = await fs.stat(segmentPath)
@@ -439,30 +439,31 @@ export class UsageEventStore {
 				if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
 					throw err
 				}
-				// 파일이 없으면 새로 생성
+				// If the file does not exist, create a new one
 			}
 
-			// segment 회전 확인
+			// Check segment rotation
 			if (segmentSize >= SEGMENT_MAX_BYTES) {
 				manifest.currentSegment += 1
 				manifest.updatedAt = new Date().toISOString()
 				await this.writeManifestAtomic(manifest)
 			}
 
-			// B3 fix: segmentPath를 회전 후의 currentSegment 기준으로 재계산한다.
-			// 이전에는 회전 전 구 segmentPath를 그대로 사용해 계속 구 segment에 append하여
-			// 5MiB 회전 설계가 무효화되고 단일 segment가 무한정 커졌음.
+			// B3 fix: Recalculate segmentPath based on currentSegment after rotation.
+			// Previously, the pre-rotation old segmentPath was used as-is, causing appends to
+			// continue going to the old segment, invalidating the 5MiB rotation design and
+			// allowing a single segment to grow indefinitely.
 			const activeSegmentPath = this.getSegmentPath(manifest.currentSegment)
 
-			// 이벤트를 compact JSON + \n으로 append
+			// Append event as compact JSON + \n
 			const line = JSON.stringify(event) + "\n"
 
 			try {
-				// append mode로 열어서 write
+				// Open in append mode and write
 				const handle = await fs.open(activeSegmentPath, "a")
 				try {
 					await handle.writeFile(line, "utf-8")
-					// file handle sync 후 성공으로 반환
+					// Return success after syncing the file handle
 					await handle.sync()
 				} finally {
 					await handle.close()
@@ -475,10 +476,10 @@ export class UsageEventStore {
 				)
 			}
 
-			// idempotency set에 추가
+			// Add to idempotency set
 			this.idempotencyKeys.add(event.idempotencyKey)
 
-			// total size 확인하여 cap 업데이트
+			// Check total size and update cap
 			this.capped = await this.checkTotalSize()
 
 			return true
@@ -494,13 +495,13 @@ export class UsageEventStore {
 	// ── Internal: Manifest ──────────────────────────────────────────────────
 
 	/**
-	 * manifest를 로드하거나 기본값으로 생성한다.
+	 * Loads the manifest or creates it with default values.
 	 */
 	private async loadOrCreateManifest(): Promise<UsageStatsManifest> {
 		try {
 			const content = await fs.readFile(this.manifestPath, "utf-8")
 			const parsed = JSON.parse(content)
-			// 기본 필드 검증
+			// Basic field validation
 			if (
 				typeof parsed.manifestVersion === "number" &&
 				typeof parsed.generation === "number" &&
@@ -508,25 +509,25 @@ export class UsageEventStore {
 			) {
 				return parsed as UsageStatsManifest
 			}
-			// 검증 실패 시 기본값으로 덮어쓰기
+			// On validation failure, overwrite with default values
 			const defaultManifest = { ...DEFAULT_MANIFEST, updatedAt: new Date().toISOString() }
 			await this.writeManifestAtomic(defaultManifest)
 			return defaultManifest
 		} catch (err) {
 			if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-				// manifest가 없으면 생성
+				// If manifest does not exist, create it
 				const defaultManifest = { ...DEFAULT_MANIFEST, updatedAt: new Date().toISOString() }
 				await this.writeManifestAtomic(defaultManifest)
 				return defaultManifest
 			}
-			// 다른 오류는 기본값 반환
+			// Other errors return default values
 			console.warn(`[UsageEventStore] failed to load manifest, using default:`, err)
 			return { ...DEFAULT_MANIFEST, updatedAt: new Date().toISOString() }
 		}
 	}
 
 	/**
-	 * manifest를 atomic하게 저장한다 (temp → rename 패턴).
+	 * Stores the manifest atomically (temp → rename pattern).
 	 */
 	private async writeManifestAtomic(manifest: UsageStatsManifest): Promise<void> {
 		const tempPath = `${this.manifestPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`
@@ -536,7 +537,7 @@ export class UsageEventStore {
 			await fs.writeFile(tempPath, content, "utf-8")
 			await fs.rename(tempPath, this.manifestPath)
 		} catch (err) {
-			// temp 파일 정리
+			// Clean up temp file
 			try {
 				await fs.unlink(tempPath)
 			} catch {
@@ -553,10 +554,10 @@ export class UsageEventStore {
 	// ── Internal: Lock ───────────────────────────────────────────────────────
 
 	/**
-	 * manifest.json에 cross-process advisory lock을 잡는다.
+	 * Acquires a cross-process advisory lock on manifest.json.
 	 */
 	private async acquireManifestLock(): Promise<() => Promise<void>> {
-		// manifest 파일이 없으면 생성 (lockfile.lock이 파일을 요구할 수 있음)
+		// Create manifest file if it does not exist (lockfile.lock may require a file)
 		try {
 			await fs.access(this.manifestPath)
 		} catch {
@@ -583,7 +584,7 @@ export class UsageEventStore {
 	// ── Internal: Idempotency ────────────────────────────────────────────────
 
 	/**
-	 * 현재 generation의 모든 segment에서 idempotencyKey를 scan하여 set을 복원한다.
+	 * Scans idempotencyKeys from all segments of the current generation to restore the set.
 	 */
 	private async rebuildIdempotencySet(manifest: UsageStatsManifest): Promise<void> {
 		this.idempotencyKeys.clear()
@@ -614,7 +615,7 @@ export class UsageEventStore {
 						this.idempotencyKeys.add(parsed.idempotencyKey)
 					}
 				} catch {
-					// corrupt line은 scan 시 skip
+					// Skip corrupt lines during scan
 				}
 			}
 		}
@@ -623,7 +624,7 @@ export class UsageEventStore {
 	// ── Internal: Size Management ────────────────────────────────────────────
 
 	/**
-	 * 전체 event 파일 크기를 확인하여 hard cap 도달 여부를 반환한다.
+	 * Checks the total event file size and returns whether the hard cap has been reached.
 	 */
 	private async checkTotalSize(): Promise<boolean> {
 		try {
@@ -651,18 +652,18 @@ export class UsageEventStore {
 	// ── Internal: Quarantine ────────────────────────────────────────────────
 
 	/**
-	 * corrupt line에 대한 quarantine entry를 생성한다.
-	 * 원문을 복사하지 않고 line number와 hash만 기록한다.
+	 * Creates a quarantine entry for a corrupt line.
+	 * Records only the line number and hash, not the original content.
 	 */
 	private makeQuarantineEntry(segment: string, line: number, content: string): QuarantineReportEntry {
-		// 간단한 hash (crypto 없이, content 기반)
-		// 실제 환경에서는 crypto.createHash를 사용할 수 있으나,
-		// 여기서는 의존성 최소화를 위해 간단한 hash를 사용한다.
+		// Simple hash (without crypto, content-based)
+		// In a production environment, crypto.createHash could be used,
+		// but here a simple hash is used to minimize dependencies.
 		let hash = 0
 		for (let i = 0; i < content.length; i++) {
 			const char = content.charCodeAt(i)
 			hash = (hash << 5) - hash + char
-			hash = hash & hash // 32bit 정수로 유지
+			hash = hash & hash // Keep as 32-bit integer
 		}
 		const hashHex = (hash >>> 0).toString(16).padStart(8, "0")
 
@@ -675,7 +676,7 @@ export class UsageEventStore {
 	}
 
 	/**
-	 * quarantine report를 append 모드로 기록한다.
+	 * Writes the quarantine report in append mode.
 	 */
 	private async writeQuarantineReport(entries: QuarantineReportEntry[]): Promise<void> {
 		try {
@@ -687,7 +688,7 @@ export class UsageEventStore {
 				await handle.close()
 			}
 		} catch (err) {
-			// quarantine 기록 실패는 치명적이지 않음
+			// Quarantine write failure is not fatal
 			console.warn(`[UsageEventStore] failed to write quarantine report:`, err)
 		}
 	}
@@ -695,7 +696,7 @@ export class UsageEventStore {
 	// ── Internal: Utilities ──────────────────────────────────────────────────
 
 	/**
-	 * segment 번호에서 파일 경로를 생성한다.
+	 * Generates a file path from a segment number.
 	 */
 	private getSegmentPath(segmentNumber: number): string {
 		const padded = String(segmentNumber).padStart(6, "0")
@@ -703,7 +704,7 @@ export class UsageEventStore {
 	}
 
 	/**
-	 * 초기화가 완료되었는지 확인하고, 아니면 초기화한다.
+	 * Checks whether initialization is complete; if not, initializes.
 	 */
 	private async ensureInitialized(): Promise<void> {
 		if (!this.initialized) {
@@ -712,14 +713,14 @@ export class UsageEventStore {
 	}
 
 	/**
-	 * 테스트용: idempotency set 크기 반환
+	 * For testing: returns the size of the idempotency set
 	 */
 	_getIdempotencyKeyCount(): number {
 		return this.idempotencyKeys.size
 	}
 
 	/**
-	 * 테스트용: stats 디렉터리 경로 반환
+	 * For testing: returns the stats directory path
 	 */
 	_getStatsDir(): string {
 		return this.statsDir

@@ -273,9 +273,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private readonly globalStoragePath: string
 	
 	/**
-	 * Usage 이벤트 기록기. API attempt의 terminal finalize에서만 호출된다.
-	 * store 초기화 실패 시 null이며, 이 경우 기록을 조용히 건너뛴다.
-	 * (아키텍처 보고서 섹션 5.5-5.8, rollback: writer를 optional service로 주입)
+	 * Usage event recorder. Called only at terminal finalize of API attempts.
+	 * Null if store initialization failed; in that case recording is silently skipped.
+	 * (Architecture report section 5.5-5.8, rollback: writer injected as optional service)
 	 */
 	private readonly usageRecorder: UsageRecorder | null = null
 	

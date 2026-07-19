@@ -22,7 +22,7 @@ vi.mock("react-i18next", () => ({
 // ── Test fixtures ────────────────────────────────────────────────────────────
 
 /**
- * 오늘 날짜 기준으로 N일 전의 YYYY-MM-DD 키를 반환한다.
+ * Returns a YYYY-MM-DD key for N days ago relative to today.
  */
 function daysAgoKey(daysAgo: number): string {
 	const date = new Date()
@@ -91,11 +91,11 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// noData 메시지가 표시되지 않아야 함
+		// noData message should not be displayed
 		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
 		expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
 
-		// grid role 속성 확인
+		// Verify grid role attribute
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeTruthy()
 	})
@@ -119,9 +119,9 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// 30d 모드에서는 30개의 날짜 셀이 생성됨
+		// In 30d mode, 30 date cells are generated
 		const cells = container.querySelectorAll('[role="img"] [aria-label]')
-		// 각 셀은 aria-label을 가짐
+		// Each cell has an aria-label
 		expect(cells.length).toBe(30)
 	})
 
@@ -135,7 +135,7 @@ describe("UsageHeatmap", () => {
 		const btn90d = container.querySelector('[data-testid="heatmap-range-90d"]') as HTMLButtonElement
 		fireEvent.click(btn90d)
 
-		// 90d 모드에서는 90개의 날짜 셀이 생성됨
+		// In 90d mode, 90 date cells are generated
 		const cells = container.querySelectorAll('[role="img"] [aria-label]')
 		expect(cells.length).toBe(90)
 	})
@@ -147,12 +147,12 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// 90d로 전환
+		// Switch to 90d
 		const btn90d = container.querySelector('[data-testid="heatmap-range-90d"]') as HTMLButtonElement
 		fireEvent.click(btn90d)
 		expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(90)
 
-		// 30d로 되돌림
+		// Switch back to 30d
 		const btn30d = container.querySelector('[data-testid="heatmap-range-30d"]') as HTMLButtonElement
 		fireEvent.click(btn30d)
 		expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(30)
@@ -174,7 +174,7 @@ describe("UsageHeatmap", () => {
 		const { container } = render(<UsageHeatmap buckets={[]} />)
 
 		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-		// noData 메시지만 있고 legend는 없음
+		// Only noData message present, no legend
 		expect(heatmap?.textContent).toContain("stats:heatmap.noData")
 		expect(heatmap?.textContent).not.toContain("stats:heatmap.less")
 		expect(heatmap?.textContent).not.toContain("stats:heatmap.more")
@@ -189,8 +189,8 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// 동일 day key의 토큰이 합산되어 3000이 되어야 함
-		// 오늘 날짜 셀의 aria-label 확인
+		// Tokens for the same day key should be summed to 3000
+		// Verify the aria-label of today's cell
 		const cells = container.querySelectorAll('[role="img"] [aria-label]')
 		const todayCell = Array.from(cells).find((cell) => {
 			const aria = cell.getAttribute("aria-label") ?? ""
@@ -209,8 +209,8 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// day key가 없는 bucket은 무시되므로, 유효한 데이터는 1개
-		// 하지만 2000 > 0이므로 hasData = true
+		// Buckets without a day key are ignored, so there is 1 valid entry
+		// However 2000 > 0, so hasData = true
 		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
 		expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
 	})
@@ -237,7 +237,7 @@ describe("UsageHeatmap", () => {
 	it("renders aria-label with no-data for zero-token days", () => {
 		const { container } = render(<UsageHeatmap buckets={[]} />)
 
-		// noData 상태에서는 grid가 렌더링되지 않음
+		// In noData state, the grid is not rendered
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeFalsy()
 	})
@@ -249,14 +249,14 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// 30d 모드의 셀 크기
+		// Cell size in 30d mode
 		const btn90d = container.querySelector('[data-testid="heatmap-range-90d"]') as HTMLButtonElement
 		fireEvent.click(btn90d)
 
-		// 90d 모드에서는 더 작은 셀 클래스가 적용됨
+		// In 90d mode, smaller cell class is applied
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeTruthy()
-		// 90d 모드에서는 gap-0.5 클래스가 적용됨
+		// In 90d mode, gap-0.5 class is applied
 		expect(grid?.className).toContain("gap-0.5")
 	})
 
@@ -267,10 +267,10 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// 기본 30d 모드
+		// Default 30d mode
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeTruthy()
-		// 30d 모드에서는 gap-1 클래스가 적용됨
+		// In 30d mode, gap-1 class is applied
 		expect(grid?.className).toContain("gap-1")
 	})
 
@@ -282,11 +282,11 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// 데이터가 렌더링되어야 함
+		// Data should be rendered
 		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
 		expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
 
-		// legend가 렌더링되어야 함 (4개의 level 색상)
+		// Legend should be rendered (4 level colors)
 		const legendCells = container.querySelectorAll(".w-3.h-3.rounded-sm")
 		expect(legendCells.length).toBe(4)
 	})
@@ -298,7 +298,7 @@ describe("UsageHeatmap", () => {
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// totalTokens가 0이므로 hasData = false
+		// totalTokens is 0, so hasData = false
 		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
 		expect(heatmap?.textContent).toContain("stats:heatmap.noData")
 	})
@@ -312,8 +312,8 @@ describe("UsageHeatmap", () => {
 
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeTruthy()
-		// 30d 모드: 30 cells / 7 rows = 5 columns (ceil(30/7) = 5)
-		// CSS property는 kebab-case로 렌더링됨
+		// 30d mode: 30 cells / 7 rows = 5 columns (ceil(30/7) = 5)
+		// CSS property is rendered in kebab-case
 		const style = grid?.getAttribute("style") ?? ""
 		expect(style.toLowerCase()).toContain("grid-template-columns")
 		expect(style).toContain("repeat(5")
@@ -331,7 +331,7 @@ describe("UsageHeatmap", () => {
 
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeTruthy()
-		// 90d 모드: 90 cells / 7 rows = 13 columns (ceil(90/7) = 13)
+		// 90d mode: 90 cells / 7 rows = 13 columns (ceil(90/7) = 13)
 		const style = grid?.getAttribute("style") ?? ""
 		expect(style.toLowerCase()).toContain("grid-template-columns")
 		expect(style).toContain("repeat(13")

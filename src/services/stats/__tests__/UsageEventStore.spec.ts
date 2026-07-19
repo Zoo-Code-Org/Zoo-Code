@@ -11,8 +11,8 @@ import { UsageEventStore, StatsStoreError } from "../UsageEventStore"
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
 /**
- * 테스트용 임시 디렉터리를 생성한다.
- * 실제 global storage를 건드리지 않는다.
+ * Creates a temporary directory for testing.
+ * Does not touch the actual global storage.
  */
 async function createTempDir(): Promise<string> {
 	const prefix = path.join(os.tmpdir(), "usage-stats-test-")
@@ -20,7 +20,7 @@ async function createTempDir(): Promise<string> {
 }
 
 /**
- * 테스트용 UsageEventV1 이벤트를 생성한다.
+ * Creates a UsageEventV1 event for testing.
  */
 function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 	return {
@@ -63,7 +63,7 @@ describe("UsageEventStore", () => {
 	})
 
 	afterEach(async () => {
-		// 임시 디렉터리 정리 (테스트 격리)
+		// Clean up temp directory (test isolation)
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true })
 		} catch {
@@ -183,31 +183,31 @@ describe("UsageEventStore", () => {
 			const event = makeEvent()
 			await store.append(event)
 
-			// corrupt line을 수동으로 추가
+			// Manually add a corrupt line
 			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
 			await fs.appendFile(segmentPath, "{invalid json line\n")
 
 			const events = await store.readAll()
-			expect(events).toHaveLength(1) // corrupt line은 skip
+			expect(events).toHaveLength(1) // corrupt line is skipped
 		})
 
 		it("should ignore truncated last line (crash tail)", async () => {
 			const event = makeEvent()
 			await store.append(event)
 
-			// 잘린 line을 수동으로 추가 (마지막 line)
+			// Manually add a truncated line (last line)
 			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
-			await fs.appendFile(segmentPath, '{"partial": tru') // 잘린 JSON
+			await fs.appendFile(segmentPath, '{"partial": tru') // Truncated JSON
 
 			const events = await store.readAll()
-			expect(events).toHaveLength(1) // crash tail은 무시
+			expect(events).toHaveLength(1) // crash tail is ignored
 		})
 
 		it("should write quarantine report for corrupt lines", async () => {
 			const event = makeEvent()
 			await store.append(event)
 
-			// corrupt line을 중간에 추가 (마지막이 아닌 위치)
+			// Add a corrupt line in the middle (not the last position)
 			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
 			const validLine = JSON.stringify(makeEvent({ eventId: "evt-valid", idempotencyKey: "idem-valid" })) + "\n"
 			await fs.appendFile(segmentPath, "{corrupt\n")
@@ -242,7 +242,7 @@ describe("UsageEventStore", () => {
 
 			await store.clear()
 
-			// clear 후 동일 idempotencyKey로 다시 append 가능
+			// After clear, the same idempotencyKey can be appended again
 			const result = await store.append(event)
 			expect(result).toBe(true)
 		})
@@ -263,11 +263,11 @@ describe("UsageEventStore", () => {
 			const event = makeEvent({ idempotencyKey: "idem-persist" })
 			await store.append(event)
 
-			// 새 store 인스턴스 생성 (재시작 시뮬레이션)
+			// Create a new store instance (simulate restart)
 			const newStore = new UsageEventStore(tempDir)
 			await newStore.initialize()
 
-			// 동일 idempotencyKey로 append 시도 → dedupe되어야 함
+			// Attempt to append with the same idempotencyKey → should be deduped
 			const result = await newStore.append(event)
 			expect(result).toBe(false)
 		})
@@ -275,7 +275,7 @@ describe("UsageEventStore", () => {
 
 	describe("error handling", () => {
 		it("should throw StatsStoreError with correct code on cap reached", async () => {
-			// 이 테스트는 cap을 강제로 설정하기 어려우므로, isCapped() 메서드 동작만 확인
+			// This test is difficult to force the cap, so only verify isCapped() method behavior
 			expect(store.isCapped()).toBe(false)
 		})
 
@@ -283,7 +283,7 @@ describe("UsageEventStore", () => {
 			const event = makeEvent()
 			await store.append(event)
 
-			// 동일 이벤트 재append는 에러가 아님
+			// Re-appending the same event is not an error
 			await expect(store.append(event)).resolves.toBe(false)
 		})
 	})

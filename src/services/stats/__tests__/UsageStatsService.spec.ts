@@ -12,8 +12,8 @@ import { StatsStoreError } from "../UsageEventStore"
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
 /**
- * 테스트용 임시 디렉터리를 생성한다.
- * 실제 global storage를 건드리지 않는다.
+ * Creates a temporary directory for testing.
+ * Does not touch the actual global storage.
  */
 async function createTempDir(): Promise<string> {
 	const prefix = path.join(os.tmpdir(), "usage-stats-svc-test-")
@@ -21,7 +21,7 @@ async function createTempDir(): Promise<string> {
 }
 
 /**
- * 테스트용 UsageEventV1 이벤트를 생성한다.
+ * Creates a UsageEventV1 event for testing.
  */
 function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 	return {
@@ -52,7 +52,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 }
 
 /**
- * 기본 StatsQuery를 생성한다.
+ * Creates a default StatsQuery.
  */
 function makeQuery(overrides: Partial<StatsQuery> = {}): StatsQuery {
 	return {
@@ -76,7 +76,7 @@ describe("UsageStatsService", () => {
 	})
 
 	afterEach(async () => {
-		// 임시 디렉터리 정리 (테스트 격리)
+		// Clean up temp directory (test isolation)
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true })
 		} catch {
@@ -94,7 +94,7 @@ describe("UsageStatsService", () => {
 		})
 
 		it("should be idempotent (calling initialize twice does not throw)", async () => {
-			// 두 번째 호출은 no-op
+			// Second call is a no-op
 			await expect(service.initialize()).resolves.toBeUndefined()
 		})
 	})
@@ -113,7 +113,7 @@ describe("UsageStatsService", () => {
 		})
 
 		it("should aggregate events stored via the underlying store", async () => {
-			// 서비스 내부 store에 직접 접근할 수 없으므로, backfill을 통해 이벤트를 주입한다.
+			// Cannot directly access the internal store of the service, so inject events via backfill.
 			const events = [
 				makeEvent({
 					eventId: "evt-1",
@@ -204,7 +204,7 @@ describe("UsageStatsService", () => {
 			const result = await service.exportStats(query, "json")
 			const jsonExport = result as { events: UsageEventV1[] }
 
-			// oldIso는 today 범위 밖이므로 1개만 남음
+			// oldIso is outside the today range, so only 1 remains
 			expect(jsonExport.events).toHaveLength(1)
 			expect(jsonExport.events[0].eventId).toBe("evt-1")
 		})
@@ -327,7 +327,7 @@ describe("UsageStatsService", () => {
 			const lines = (result as string).split("\n")
 			const dataRow = lines[1]
 
-			// formula injection 방지: ' 접두사
+			// Prevent formula injection: ' prefix
 			expect(dataRow).toContain("'=evt-injection")
 			expect(dataRow).toContain("'+provider")
 			expect(dataRow).toContain("'@model")
@@ -347,7 +347,7 @@ describe("UsageStatsService", () => {
 			const lines = (result as string).split("\n")
 			const dataRow = lines[1]
 
-			// comma 포함 시 quoting
+			// Quoting when comma is included
 			expect(dataRow).toContain('"evt,with,commas"')
 		})
 
@@ -365,7 +365,7 @@ describe("UsageStatsService", () => {
 			const lines = (result as string).split("\n")
 			const dataRow = lines[1]
 
-			// " 포함 시 quoting + "" escape
+			// Quoting + "" escape when " is included
 			expect(dataRow).toContain('"evt""with""quotes"')
 		})
 
@@ -374,7 +374,7 @@ describe("UsageStatsService", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					usage: {}, // 모든 usage 필드 누락
+					usage: {}, // all usage fields missing
 				}),
 			]
 			await service.backfillFromHistory(events)
@@ -583,22 +583,22 @@ describe("UsageStatsService", () => {
 
 	describe("clearStats", () => {
 		it("should clear stats when valid nonce is provided", async () => {
-			// 데이터 주입
+			// Inject data
 			const events = [
 				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }),
 				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2" }),
 			]
 			await service.backfillFromHistory(events)
 
-			// 삭제 전 확인
+			// Verify before deletion
 			const before = await service.queryStats(makeQuery({ preset: "all" }))
 			expect(before.totals.events).toBe(2)
 
-			// nonce 발급 후 clear
+			// Issue nonce then clear
 			const nonce = service.issueClearNonce()
 			await service.clearStats(nonce)
 
-			// 삭제 후 확인
+			// Verify after deletion
 			const after = await service.queryStats(makeQuery({ preset: "all" }))
 			expect(after.totals.events).toBe(0)
 		})
@@ -630,7 +630,7 @@ describe("UsageStatsService", () => {
 
 			const nonce = service.issueClearNonce()
 
-			// 6분 후 (nonce는 5분 유효)
+			// After 6 minutes (nonce is valid for 5 minutes)
 			vi.advanceTimersByTime(6 * 60 * 1000)
 
 			await expect(service.clearStats(nonce)).rejects.toThrow(StatsServiceError)
@@ -662,7 +662,7 @@ describe("UsageStatsService", () => {
 			const nonce = service.issueClearNonce()
 			await service.clearStats(nonce)
 
-			// 동일 nonce로 재시도 → 실패해야 함
+			// Retry with the same nonce → should fail
 			await expect(service.clearStats(nonce)).rejects.toThrow(StatsServiceError)
 		})
 	})
@@ -703,7 +703,7 @@ describe("UsageStatsService", () => {
 		it("should deduplicate events with same idempotencyKey", async () => {
 			const events = [
 				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-1" }), // 동일 idempotencyKey
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-1" }), // Same idempotencyKey
 			]
 
 			const count = await service.backfillFromHistory(events)
@@ -711,8 +711,8 @@ describe("UsageStatsService", () => {
 		})
 
 		it("should swallow StatsStoreError and continue processing remaining events", async () => {
-			// 첫 이벤트는 정상, 두 번째는 동일 idempotencyKey로 dedupe (false 반환),
-			// 세 번째는 정상
+			// First event is normal, second is deduped with the same idempotencyKey (returns false),
+			// third is normal
 			const events = [
 				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }),
 				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-1" }), // dedupe → false
@@ -720,7 +720,7 @@ describe("UsageStatsService", () => {
 			]
 
 			const count = await service.backfillFromHistory(events)
-			// dedupe된 것은 false 반환 → count 증가 안 함
+			// Deduped ones return false → count does not increment
 			expect(count).toBe(2)
 		})
 	})

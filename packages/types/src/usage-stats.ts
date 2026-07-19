@@ -2,21 +2,21 @@ import { z } from "zod"
 
 // ── Enums ──────────────────────────────────────────────────────────────────
 
-/** LLM API 호출의 최종 상태 */
+/** Final status of an LLM API call */
 export const UsageEventStatus = z.enum(["completed", "failed", "cancelled"])
 export type UsageEventStatus = z.infer<typeof UsageEventStatus>
 
-/** 토큰 사용량 값의 출처 */
+/** Source of a token usage value */
 export const UsageValueSource = z.enum(["provider", "estimated", "backfilled"])
 export type UsageValueSource = z.infer<typeof UsageValueSource>
 
-/** 토큰 중복 계산 여부 (예: cacheRead이 inputTokens에 포함되어 있는지) */
+/** Whether a token field is double-counted (e.g. cacheRead included in inputTokens) */
 export const InclusionRule = z.enum(["included", "excluded", "unknown"])
 export type InclusionRule = z.infer<typeof InclusionRule>
 
 // ── SourcedNumber ──────────────────────────────────────────────────────────
 
-/** 값과 그 출처를 함께 표현 */
+/** A numeric value paired with its source */
 export const SourcedNumber = z.object({
 	value: z.number(),
 	source: UsageValueSource,
@@ -26,11 +26,11 @@ export type SourcedNumber = z.infer<typeof SourcedNumber>
 // ── UsageEventV1 ────────────────────────────────────────────────────────────
 
 /**
- * 단일 LLM API 호출의 사용량 이벤트.
- * schemaVersion 1 — 향후 스키마 변경 시 버전을 올립니다.
+ * A usage event for a single LLM API call.
+ * schemaVersion 1 — bump when the schema changes.
  *
- * 보안: prompt 본문, response 본문, API key, workspace path는
- * 이 스키마에 절대 포함하지 않습니다.
+ * Security: prompt bodies, response bodies, API keys, and workspace paths
+ * must never be included in this schema.
  */
 export const UsageEventV1 = z.object({
 	schemaVersion: z.literal(1),
@@ -65,7 +65,7 @@ export type UsageEventV1 = z.infer<typeof UsageEventV1>
 
 // ── StatsQuery ──────────────────────────────────────────────────────────────
 
-/** 통계 조회 쿼리 */
+/** Statistics query */
 export const StatsQuery = z.object({
 	from: z.string().optional(), // ISO 8601
 	to: z.string().optional(),
@@ -78,7 +78,7 @@ export type StatsQuery = z.infer<typeof StatsQuery>
 
 // ── StatsBucket ──────────────────────────────────────────────────────────────
 
-/** 그룹화된 통계 버킷 */
+/** Grouped statistics bucket */
 export const StatsBucket = z.object({
 	key: z.record(z.string()),
 	events: z.number(),
@@ -98,7 +98,7 @@ export type StatsBucket = z.infer<typeof StatsBucket>
 
 // ── StatsSnapshot ────────────────────────────────────────────────────────────
 
-/** 통계 조회 결과 스냅샷 */
+/** Statistics query result snapshot */
 export const StatsSnapshot = z.object({
 	query: StatsQuery,
 	generatedAt: z.string(),
