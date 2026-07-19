@@ -76,5 +76,12 @@
     "mode": "Mode",
     "time": "Waktu",
     "status": "Status"
+  },
+  "time": {
+    "justNow": "baru saja",
+    "minutesAgo": "{{count}} mnt lalu",
+    "hoursAgo": "{{count}} jam lalu",
+    "yesterday": "kemarin",
+    "daysAgo": "{{count}} hari lalu"
   }
 }

@@ -76,5 +76,12 @@
     "mode": "Режим",
     "time": "Время",
     "status": "Статус"
+  },
+  "time": {
+    "justNow": "только что",
+    "minutesAgo": "{{count}} мин назад",
+    "hoursAgo": "{{count}} ч назад",
+    "yesterday": "вчера",
+    "daysAgo": "{{count}} дн. назад"
   }
 }

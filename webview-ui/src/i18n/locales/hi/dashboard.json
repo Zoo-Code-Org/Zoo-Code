@@ -76,5 +76,12 @@
     "mode": "मोड",
     "time": "समय",
     "status": "स्थिति"
+  },
+  "time": {
+    "justNow": "अभी",
+    "minutesAgo": "{{count}} मिनट पहले",
+    "hoursAgo": "{{count}} घंटे पहले",
+    "yesterday": "कल",
+    "daysAgo": "{{count}} दिन पहले"
   }
 }

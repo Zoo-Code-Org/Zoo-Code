@@ -76,5 +76,12 @@
     "mode": "Modus",
     "time": "Zeit",
     "status": "Status"
+  },
+  "time": {
+    "justNow": "gerade eben",
+    "minutesAgo": "vor {{count}} Min.",
+    "hoursAgo": "vor {{count}} Std.",
+    "yesterday": "gestern",
+    "daysAgo": "vor {{count}} Tagen"
   }
 }

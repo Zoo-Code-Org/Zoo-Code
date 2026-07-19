@@ -76,5 +76,12 @@
     "mode": "Modo",
     "time": "Hora",
     "status": "Estado"
+  },
+  "time": {
+    "justNow": "justo ahora",
+    "minutesAgo": "hace {{count}} min",
+    "hoursAgo": "hace {{count}} h",
+    "yesterday": "ayer",
+    "daysAgo": "hace {{count}} dias"
   }
 }

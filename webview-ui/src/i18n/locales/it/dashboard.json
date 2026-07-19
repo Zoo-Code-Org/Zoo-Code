@@ -76,5 +76,12 @@
     "mode": "Modalità",
     "time": "Ora",
     "status": "Stato"
+  },
+  "time": {
+    "justNow": "adesso",
+    "minutesAgo": "{{count}} min fa",
+    "hoursAgo": "{{count}} ora fa",
+    "yesterday": "ieri",
+    "daysAgo": "{{count}} giorni fa"
   }
 }

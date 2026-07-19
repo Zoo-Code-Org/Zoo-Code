@@ -76,5 +76,12 @@
     "mode": "Modus",
     "time": "Tijd",
     "status": "Status"
+  },
+  "time": {
+    "justNow": "zojuist",
+    "minutesAgo": "{{count}} min geleden",
+    "hoursAgo": "{{count}} uur geleden",
+    "yesterday": "gisteren",
+    "daysAgo": "{{count}} dagen geleden"
   }
 }

@@ -76,5 +76,12 @@
     "mode": "Mode",
     "time": "Hora",
     "status": "Estat"
+  },
+  "time": {
+    "justNow": "ara mateix",
+    "minutesAgo": "fa {{count}} min",
+    "hoursAgo": "fa {{count}} h",
+    "yesterday": "ahir",
+    "daysAgo": "fa {{count}} dies"
   }
 }

@@ -76,5 +76,12 @@
     "mode": "模式",
     "time": "時間",
     "status": "狀態"
+  },
+  "time": {
+    "justNow": "剛剛",
+    "minutesAgo": "{{count}}分鐘前",
+    "hoursAgo": "{{count}}小時前",
+    "yesterday": "昨天",
+    "daysAgo": "{{count}}天前"
   }
 }

@@ -76,5 +76,12 @@
     "mode": "Tryb",
     "time": "Czas",
     "status": "Status"
+  },
+  "time": {
+    "justNow": "przed chwila",
+    "minutesAgo": "{{count}} min temu",
+    "hoursAgo": "{{count}} godz. temu",
+    "yesterday": "wczoraj",
+    "daysAgo": "{{count}} dni temu"
   }
 }

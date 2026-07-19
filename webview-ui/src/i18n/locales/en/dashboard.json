@@ -76,5 +76,12 @@
     "mode": "Mode",
     "time": "Time",
     "status": "Status"
+  },
+  "time": {
+    "justNow": "just now",
+    "minutesAgo": "{{count}} min ago",
+    "hoursAgo": "{{count}} hr ago",
+    "yesterday": "yesterday",
+    "daysAgo": "{{count}} days ago"
   }
 }

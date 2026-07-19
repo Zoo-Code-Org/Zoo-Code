@@ -76,5 +76,12 @@
     "mode": "Chế độ",
     "time": "Thời gian",
     "status": "Trạng thái"
+  },
+  "time": {
+    "justNow": "vua xong",
+    "minutesAgo": "{{count}} phut truoc",
+    "hoursAgo": "{{count}} gio truoc",
+    "yesterday": "hom qua",
+    "daysAgo": "{{count}} ngay truoc"
   }
 }

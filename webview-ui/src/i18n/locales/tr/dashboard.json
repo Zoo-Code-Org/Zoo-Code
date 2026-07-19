@@ -76,5 +76,12 @@
     "mode": "Mod",
     "time": "Zaman",
     "status": "Durum"
+  },
+  "time": {
+    "justNow": "az once",
+    "minutesAgo": "{{count}} dk once",
+    "hoursAgo": "{{count}} saat once",
+    "yesterday": "dun",
+    "daysAgo": "{{count}} gun once"
   }
 }

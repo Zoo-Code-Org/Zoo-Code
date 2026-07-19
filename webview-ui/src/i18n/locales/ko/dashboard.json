@@ -76,5 +76,12 @@
     "mode": "모드",
     "time": "시간",
     "status": "상태"
+  },
+  "time": {
+    "justNow": "방금",
+    "minutesAgo": "{{count}}분 전",
+    "hoursAgo": "{{count}}시간 전",
+    "yesterday": "어제",
+    "daysAgo": "{{count}}일 전"
   }
 }

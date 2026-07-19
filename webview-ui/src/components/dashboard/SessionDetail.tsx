@@ -3,27 +3,7 @@ import React, { memo, useMemo } from "react"
 import type { SessionDetail as SessionDetailType, APICallRecord } from "@roo-code/types"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
-
-// ── Number formatting ───────────────────────────────────────────────────────
-
-/**
- * Format a large number with K/M/B suffixes for display.
- * Mirrors the helper used in DashboardSummary/DashboardView/SessionList.
- */
-function formatCompact(value: number): string {
-	if (value === 0) return "0"
-	const abs = Math.abs(value)
-	if (abs >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
-	if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
-	if (abs >= 1_000) return `${(value / 1_000).toFixed(1)}K`
-	return value.toLocaleString()
-}
-
-function formatCost(value: number): string {
-	if (value === 0) return "$0.00"
-	if (value < 0.01) return `$${value.toFixed(4)}`
-	return `$${value.toFixed(2)}`
-}
+import { formatCompact, formatCost } from "@/utils/formatNumber"
 
 // ── Time formatting ──────────────────────────────────────────────────────────
 
