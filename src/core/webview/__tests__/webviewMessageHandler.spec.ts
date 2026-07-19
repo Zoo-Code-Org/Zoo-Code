@@ -403,6 +403,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				deepseek: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -589,6 +590,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				deepseek: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -649,6 +651,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				deepseek: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})

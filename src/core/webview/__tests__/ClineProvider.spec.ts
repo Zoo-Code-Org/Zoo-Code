@@ -2705,6 +2705,7 @@ describe("ClineProvider - Router Models", () => {
 				deepseek: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -2757,6 +2758,7 @@ describe("ClineProvider - Router Models", () => {
 				deepseek: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -2855,6 +2857,7 @@ describe("ClineProvider - Router Models", () => {
 				deepseek: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})

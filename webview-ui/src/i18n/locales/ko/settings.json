@@ -459,6 +459,17 @@
 		"moonshotApiKey": "Moonshot API 키",
 		"getMoonshotApiKey": "Moonshot API 키 받기",
 		"moonshotBaseUrl": "Moonshot 엔트리포인트",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"zaiApiKey": "Z AI API 키",
 		"getZaiApiKey": "Z AI API 키 받기",
 		"zaiEntrypoint": "Z AI 엔트리포인트",
