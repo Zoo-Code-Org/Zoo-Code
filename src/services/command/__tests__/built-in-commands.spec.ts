@@ -5,8 +5,8 @@ describe("Built-in Commands", () => {
 		it("should return all built-in commands", async () => {
 			const commands = await getBuiltInCommands()
 
-			expect(commands).toHaveLength(1)
-			expect(commands.map((cmd) => cmd.name)).toEqual(expect.arrayContaining(["init"]))
+			expect(commands).toHaveLength(2)
+			expect(commands.map((cmd) => cmd.name)).toEqual(expect.arrayContaining(["init", "stats"]))
 
 			// Verify all commands have required properties
 			commands.forEach((command) => {
@@ -63,10 +63,10 @@ describe("Built-in Commands", () => {
 		it("should return all built-in command names", async () => {
 			const names = await getBuiltInCommandNames()
 
-			expect(names).toHaveLength(1)
-			expect(names).toEqual(expect.arrayContaining(["init"]))
+			expect(names).toHaveLength(2)
+			expect(names).toEqual(expect.arrayContaining(["init", "stats"]))
 			// Order doesn't matter since it's based on filesystem order
-			expect(names.sort()).toEqual(["init"])
+			expect(names.sort()).toEqual(["init", "stats"])
 		})
 
 		it("should return array of strings", async () => {
@@ -98,6 +98,22 @@ describe("Built-in Commands", () => {
 			expect(content).toContain("rules-debug")
 			expect(content).toContain("rules-ask")
 			expect(content).toContain("rules-architect")
+		})
+
+		it("stats command should expose the /stats token for ChatView interception", async () => {
+			const command = await getBuiltInCommand("stats")
+
+			expect(command).toBeDefined()
+			expect(command!.name).toBe("stats")
+			expect(command!.source).toBe("built-in")
+			expect(command!.filePath).toBe("<built-in:stats>")
+			// Content must be the literal "/stats" so that ChatView's
+			// exact-match interception (text === "/stats") fires when the
+			// user picks this autocomplete entry.
+			expect(command!.content).toBe("/stats")
+			expect(command!.description).toBe(
+				"Open the local usage statistics panel (token usage by model, provider, mode, and time range)",
+			)
 		})
 	})
 })

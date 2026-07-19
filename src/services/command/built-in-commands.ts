@@ -8,6 +8,16 @@ interface BuiltInCommandDefinition {
 }
 
 const BUILT_IN_COMMANDS: Record<string, BuiltInCommandDefinition> = {
+	stats: {
+		name: "stats",
+		description: "Open the local usage statistics panel (token usage by model, provider, mode, and time range)",
+		// Content is the literal "/stats" token so that ChatView's exact-match
+		// interception (text === "/stats") fires when the user picks this
+		// autocomplete entry. A non-empty content is required by the Command
+		// type and also prevents the trimmed input from becoming empty, which
+		// would bypass the interception. No prompt body is sent to the LLM.
+		content: "/stats",
+	},
 	init: {
 		name: "init",
 		description: "Analyze codebase and create concise AGENTS.md files for AI assistants",
