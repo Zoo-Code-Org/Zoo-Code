@@ -1,10 +1,10 @@
 // npx vitest core/task/__tests__/Task.usage-stats.spec.ts
 //
-// Commit 3 테스트: API attempt 최종 usage 계측 검증.
-// - chunk별 기록이 없고 terminal finalize에서만 기록
-// - completed/failed/cancelled partial usage 구분
-// - idempotency key가 동일 terminal path 중복 호출 차단
-// - store 오류가 기존 task 결과에 영향을 주지 않음
+// Commit 3 test: verify final usage recording for each API attempt.
+// - No per-chunk recording; only terminal finalize records events
+// - Distinguish completed/failed/cancelled partial usage
+// - Idempotency key blocks duplicate calls on the same terminal path
+// - Store errors do not affect existing task results
 
 import * as os from "os"
 import * as path from "path"

@@ -7,8 +7,6 @@ import type {
 	UsageValueSource,
 } from "@roo-code/types"
 
-import { getEffectiveCost, computeEventCost } from "./costRecalculation"
-
 // ── Types ───────────────────────────────────────────────────────────────────
 
 /** Internal event representation used for aggregation (UsageEventV1 + derived fields) */
@@ -93,7 +91,6 @@ export class UsageAggregator {
 		// 4. Grouping and aggregation
 		const groupBy = query.groupBy
 		const bucketMap = new Map<string, StatsBucket>()
-		const cacheRatio = query.cacheRatio
 
 		for (const item of aggregatable) {
 			const bucketKeys = this.getGroupKeys(item, groupBy)
@@ -104,14 +101,14 @@ export class UsageAggregator {
 					bucket = createEmptyBucket(bucketKey)
 					bucketMap.set(mapKey, bucket)
 				}
-				this.accumulateIntoBucket(bucket, item.event, cacheRatio)
+				this.accumulateIntoBucket(bucket, item.event)
 			}
 		}
 
 		// 5. Compute totals
 		const totals = createEmptyBucket()
 		for (const item of aggregatable) {
-			this.accumulateIntoBucket(totals, item.event, cacheRatio)
+			this.accumulateIntoBucket(totals, item.event)
 		}
 
 		// 6. Sorting
@@ -381,10 +378,7 @@ export class UsageAggregator {
 			case "month":
 				return item.monthBucket ? [item.monthBucket] : []
 			case "provider":
-				// When an endpoint domain is recorded (custom base URL), append it
-				// to the provider key so distinct servers appear as separate rows.
-				// e.g. "openai (kimi.ai)" vs plain "openai" for the default endpoint.
-				return [event.endpoint ? `${event.provider} (${event.endpoint})` : event.provider]
+				return [event.provider]
 			case "model":
 				return [event.model]
 			case "mode":
@@ -392,20 +386,11 @@ export class UsageAggregator {
 			case "status":
 				return [event.status]
 			case "source": {
-				// Separate by the source of costUsd.
-				// Feature 1: If the event has no costUsd but the cost can be
-				// computed on-the-fly from model pricing, treat the source as
-				// "estimated" (since it is derived, not provider-reported).
+				// Separate by the source of costUsd
+				// If the event has costUsd, use its source; otherwise "unknown"
 				const sources = new Set<string>()
 				if (event.usage.costUsd) {
 					sources.add(event.usage.costUsd.source)
-				} else {
-					// Check if cost can be computed; if so, mark as "estimated".
-					// Otherwise the source remains "unknown".
-					const computedCost = computeEventCost(event)
-					if (computedCost > 0) {
-						sources.add("estimated")
-					}
 				}
 				// Also consider the source of input/output tokens
 				if (event.usage.inputTokens) {
@@ -430,7 +415,7 @@ export class UsageAggregator {
 	 * Accumulates the event's values into the bucket.
 	 * Handles inclusion semantics.
 	 */
-	private accumulateIntoBucket(bucket: StatsBucket, event: UsageEventV1, cacheRatio?: number): void {
+	private accumulateIntoBucket(bucket: StatsBucket, event: UsageEventV1): void {
 		bucket.events++
 
 		// Status count
@@ -453,20 +438,11 @@ export class UsageAggregator {
 
 		const inputTokens = this.extractValue(event.usage.inputTokens)
 		const outputTokens = this.extractValue(event.usage.outputTokens)
-		let cacheReadTokens = this.extractValue(event.usage.cacheReadTokens)
+		const cacheReadTokens = this.extractValue(event.usage.cacheReadTokens)
 		const cacheWriteTokens = this.extractValue(event.usage.cacheWriteTokens)
 		const reasoningTokens = this.extractValue(event.usage.reasoningTokens)
 		const totalTokens = this.extractValue(event.usage.totalTokens)
-		// Feature 1: If costUsd is missing on old events, compute it on-the-fly
-		// from the model's pricing info. Never modifies the stored event.
-		const costUsd = getEffectiveCost(event)
-
-		// Cache ratio estimation: if provider doesn't report cacheReadTokens
-		// and cacheRatio is provided, estimate it as inputTokens * cacheRatio
-		const isCacheReadEstimated = cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0
-		if (isCacheReadEstimated) {
-			cacheReadTokens = Math.round(inputTokens * cacheRatio)
-		}
+		const costUsd = this.extractValue(event.usage.costUsd)
 
 		// Inclusion semantics check
 		const hasUnknownInclusion =
@@ -512,9 +488,7 @@ export class UsageAggregator {
 			bucket.reasoningTokens += reasoningTokens
 		}
 
-		// Recompute from input + output (provider-neutral) to repair historical events
-		// that may have been persisted with the old double-counted sum.
-		bucket.totalTokens += inputTokens + outputTokens
+		bucket.totalTokens += totalTokens
 		bucket.costUsd += costUsd
 	}
 

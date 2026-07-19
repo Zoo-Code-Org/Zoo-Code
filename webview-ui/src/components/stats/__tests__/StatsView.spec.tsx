@@ -918,7 +918,7 @@ describe("StatsView", () => {
 		const groupByProvider = document.querySelector('[data-testid="stats-groupby-provider"]') as HTMLButtonElement
 		fireEvent.click(groupByProvider)
 
-		// groupBy 변경 시 refetch가 발생하고, query에 groupBy: ["provider"]가 포함됨
+		// When groupBy changes, a refetch is triggered and query includes groupBy: ["provider"]
 		expect(vscode.postMessage).toHaveBeenLastCalledWith(
 			expect.objectContaining({
 				type: "getUsageStats",
