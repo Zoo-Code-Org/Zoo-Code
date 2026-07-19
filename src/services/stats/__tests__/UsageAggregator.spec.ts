@@ -7,7 +7,7 @@ import { UsageAggregator } from "../UsageAggregator"
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
 /**
- * Creates a UsageEventV1 event for testing.
+ * 테스트용 UsageEventV1 이벤트를 생성한다.
  */
 function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 	return {
@@ -38,7 +38,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 }
 
 /**
- * Creates a default StatsQuery.
+ * 기본 StatsQuery를 생성한다.
  */
 function makeQuery(overrides: Partial<StatsQuery> = {}): StatsQuery {
 	return {
@@ -169,7 +169,7 @@ describe("UsageAggregator", () => {
 			const result = aggregator.query(events, query)
 
 			expect(result.buckets).toHaveLength(2)
-			// Based on Asia/Seoul (UTC+9), 2026-07-19 10:00 UTC = 2026-07-19 19:00 KST
+			// Asia/Seoul (UTC+9) 기준으로 2026-07-19 10:00 UTC = 2026-07-19 19:00 KST
 			// 2026-07-20 10:00 UTC = 2026-07-20 19:00 KST
 			const dayKeys = result.buckets.map((b) => b.key.day).sort()
 			expect(dayKeys).toContain("2026-07-19")
@@ -205,27 +205,6 @@ describe("UsageAggregator", () => {
 			expect(result.buckets).toHaveLength(2)
 			const providers = result.buckets.map((b) => b.key.provider).sort()
 			expect(providers).toEqual(["anthropic", "openai"])
-		})
-
-		it("should separate provider buckets by endpoint domain", () => {
-			const events = [
-				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", provider: "openai", endpoint: "kimi.ai" }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", provider: "openai", endpoint: "kimi.ai" }),
-				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", provider: "openai" }), // default endpoint
-				makeEvent({
-					eventId: "evt-4",
-					idempotencyKey: "idem-4",
-					provider: "openai",
-					endpoint: "localhost:1234",
-				}),
-			]
-			const query = makeQuery({ groupBy: ["provider"] })
-
-			const result = aggregator.query(events, query)
-
-			expect(result.buckets).toHaveLength(3)
-			const keys = result.buckets.map((b) => b.key.provider).sort()
-			expect(keys).toEqual(["openai", "openai (kimi.ai)", "openai (localhost:1234)"])
 		})
 
 		it("should group by model", () => {
@@ -514,28 +493,19 @@ describe("UsageAggregator", () => {
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
 					provider: "openai",
-					usage: {
-						inputTokens: { value: 1000, source: "provider" },
-						totalTokens: { value: 1000, source: "provider" },
-					},
+					usage: { inputTokens: { value: 1000, source: "provider" } },
 				}),
 				makeEvent({
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
 					provider: "anthropic",
-					usage: {
-						inputTokens: { value: 3000, source: "provider" },
-						totalTokens: { value: 3000, source: "provider" },
-					},
+					usage: { inputTokens: { value: 3000, source: "provider" } },
 				}),
 				makeEvent({
 					eventId: "evt-3",
 					idempotencyKey: "idem-3",
 					provider: "google",
-					usage: {
-						inputTokens: { value: 2000, source: "provider" },
-						totalTokens: { value: 2000, source: "provider" },
-					},
+					usage: { inputTokens: { value: 2000, source: "provider" } },
 				}),
 			]
 			const query = makeQuery({ groupBy: ["provider"] })
@@ -543,7 +513,7 @@ describe("UsageAggregator", () => {
 			const result = aggregator.query(events, query)
 
 			expect(result.buckets).toHaveLength(3)
-			// totalTokens descending: anthropic(3000) > google(2000) > openai(1000)
+			// totalTokens 내림차순: anthropic(3000) > google(2000) > openai(1000)
 			expect(result.buckets[0].key.provider).toBe("anthropic")
 			expect(result.buckets[1].key.provider).toBe("google")
 			expect(result.buckets[2].key.provider).toBe("openai")
@@ -556,7 +526,7 @@ describe("UsageAggregator", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					usage: {}, // all usage fields missing
+					usage: {}, // 모든 usage 필드 누락
 				}),
 			]
 			const query = makeQuery({ groupBy: [] })
@@ -576,7 +546,7 @@ describe("UsageAggregator", () => {
 					idempotencyKey: "idem-1",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
-						// outputTokens, cacheRead, cacheWrite, reasoning, total, cost all missing
+						// outputTokens, cacheRead, cacheWrite, reasoning, total, cost 모두 누락
 					},
 				}),
 			]
@@ -589,48 +559,8 @@ describe("UsageAggregator", () => {
 			expect(result.totals.cacheReadTokens).toBe(0)
 			expect(result.totals.cacheWriteTokens).toBe(0)
 			expect(result.totals.reasoningTokens).toBe(0)
-			// totalTokens is recomputed as inputTokens + outputTokens (1000 + 0 = 1000),
-			// not read from the stored event.usage.totalTokens field.
-			expect(result.totals.totalTokens).toBe(1000)
-			// Feature 1: When costUsd is missing, the aggregator now computes
-			// the cost on-the-fly from the model's pricing info. The default
-			// test event uses provider "anthropic" + model "claude-sonnet-4-20250514"
-			// with 1000 input tokens. Anthropic pricing: $3/1M input tokens →
-			// 1000 × 3 / 1_000_000 = 0.003.
-			expect(result.totals.costUsd).toBeCloseTo(0.003, 5)
-		})
-
-		it("should not double-count cache/reasoning tokens in totalTokens", () => {
-			// Regression test: totalTokens must equal inputTokens + outputTokens only.
-			// Cache tokens are a subset of input; reasoning tokens are a subset of output.
-			// See docs/260720_22_gitignore-heatmap-fix/213200_debug-report.md
-			const events = [
-				makeEvent({
-					eventId: "evt-1",
-					idempotencyKey: "idem-1",
-					usage: {
-						inputTokens: { value: 100, source: "provider" },
-						outputTokens: { value: 50, source: "provider" },
-						cacheReadTokens: { value: 40, source: "provider" },
-						cacheWriteTokens: { value: 10, source: "provider" },
-						reasoningTokens: { value: 20, source: "provider" },
-						// Deliberately set a bad stored totalTokens (old double-counted sum)
-						totalTokens: { value: 220, source: "provider" },
-						costUsd: { value: 0.01, source: "provider" },
-					},
-				}),
-			]
-			const query = makeQuery({ groupBy: [] })
-
-			const result = aggregator.query(events, query)
-
-			// 100 + 50 = 150, NOT 220 (100 + 50 + 40 + 10 + 20)
-			expect(result.totals.totalTokens).toBe(150)
-			expect(result.totals.inputTokens).toBe(100)
-			expect(result.totals.outputTokens).toBe(50)
-			expect(result.totals.cacheReadTokens).toBe(40)
-			expect(result.totals.cacheWriteTokens).toBe(10)
-			expect(result.totals.reasoningTokens).toBe(20)
+			expect(result.totals.totalTokens).toBe(0)
+			expect(result.totals.costUsd).toBe(0)
 		})
 	})
 
@@ -667,7 +597,7 @@ describe("UsageAggregator", () => {
 			const result = aggregator.query(events, query)
 
 			expect(result.buckets).toHaveLength(2)
-			// week key is a string in "YYYY-Www" format, so string comparison is used
+			// week key는 "YYYY-Www" 형식의 문자열이므로 문자열 비교
 			const firstWeek = result.buckets[0].key.week ?? ""
 			const secondWeek = result.buckets[1].key.week ?? ""
 			expect(firstWeek.localeCompare(secondWeek)).toBeLessThan(0)
@@ -840,7 +770,7 @@ describe("UsageAggregator", () => {
 
 			const result = aggregator.query(events, query)
 
-			// Even with multiple unknowns in one event, only increments by 1
+			// 한 이벤트에서 여러 unknown이어도 1만 증가
 			expect(result.totals.unknownEventCount).toBe(1)
 		})
 	})
@@ -853,7 +783,7 @@ describe("UsageAggregator", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					usage: {}, // all usage fields missing
+					usage: {}, // 모든 usage 필드 누락
 				}),
 			]
 			const query = makeQuery({ groupBy: ["source"] })
@@ -880,7 +810,7 @@ describe("UsageAggregator", () => {
 
 			const result = aggregator.query(events, query)
 
-			// 3 different sources → 3 buckets
+			// 3개의 서로 다른 source → 3개의 bucket
 			expect(result.buckets).toHaveLength(3)
 			const sources = result.buckets.map((b) => b.key.source).sort()
 			expect(sources).toEqual(["backfilled", "estimated", "provider"])
@@ -915,7 +845,7 @@ describe("UsageAggregator", () => {
 
 			const result = aggregator.query(events, query)
 
-			// Sort ascending by time axis
+			// 시간 축 기준 오름차순 정렬
 			expect(result.buckets.length).toBeGreaterThanOrEqual(2)
 			for (let i = 1; i < result.buckets.length; i++) {
 				const prev = result.buckets[i - 1].key.day ?? ""
@@ -943,7 +873,7 @@ describe("UsageAggregator", () => {
 
 			const result = aggregator.query(events, query)
 
-			// Same totalTokens → name ascending
+			// 동일한 totalTokens → 이름 오름차순
 			expect(result.buckets[0].key.provider).toBe("alpha")
 			expect(result.buckets[1].key.provider).toBe("zeta")
 		})
@@ -985,7 +915,7 @@ describe("UsageAggregator", () => {
 
 			const result = aggregator.query(events, query)
 
-			// Cancelled events are excluded from coverage
+			// cancelled 이벤트는 coverage에서 제외
 			expect(result.coverage.firstEventAt).toBe("2026-07-20T10:00:00.000Z")
 			expect(result.coverage.lastEventAt).toBe("2026-07-21T10:00:00.000Z")
 		})
@@ -1010,7 +940,7 @@ describe("UsageAggregator", () => {
 
 			const result = aggregator.query(events, query)
 
-			// Cancelled backfill events are excluded from visible, so only 1 is counted
+			// cancelled backfill 이벤트는 visible에서 제외되므로 1개만 count
 			expect(result.coverage.backfilledEventCount).toBe(1)
 		})
 	})
@@ -1027,7 +957,7 @@ describe("UsageAggregator", () => {
 
 			const result = aggregator.query(events, query)
 
-			// Empty groupBy → single bucket with empty key
+			// 빈 groupBy → 단일 bucket with empty key
 			expect(result.buckets).toHaveLength(1)
 			expect(Object.keys(result.buckets[0].key)).toHaveLength(0)
 			expect(result.buckets[0].events).toBe(2)

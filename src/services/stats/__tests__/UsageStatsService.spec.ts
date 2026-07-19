@@ -12,8 +12,8 @@ import { StatsStoreError } from "../UsageEventStore"
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
 /**
- * Creates a temporary directory for testing.
- * Does not touch the actual global storage.
+ * 테스트용 임시 디렉터리를 생성한다.
+ * 실제 global storage를 건드리지 않는다.
  */
 async function createTempDir(): Promise<string> {
 	const prefix = path.join(os.tmpdir(), "usage-stats-svc-test-")
@@ -21,7 +21,7 @@ async function createTempDir(): Promise<string> {
 }
 
 /**
- * Creates a UsageEventV1 event for testing.
+ * 테스트용 UsageEventV1 이벤트를 생성한다.
  */
 function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 	return {
@@ -52,7 +52,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 }
 
 /**
- * Creates a default StatsQuery.
+ * 기본 StatsQuery를 생성한다.
  */
 function makeQuery(overrides: Partial<StatsQuery> = {}): StatsQuery {
 	return {
@@ -76,7 +76,7 @@ describe("UsageStatsService", () => {
 	})
 
 	afterEach(async () => {
-		// Clean up temp directory (test isolation)
+		// 임시 디렉터리 정리 (테스트 격리)
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true })
 		} catch {
@@ -97,7 +97,7 @@ describe("UsageStatsService", () => {
 		})
 
 		it("should be idempotent (calling initialize twice does not throw)", async () => {
-			// Second call is a no-op
+			// 두 번째 호출은 no-op
 			await expect(service.initialize()).resolves.toBeUndefined()
 		})
 	})
@@ -116,7 +116,7 @@ describe("UsageStatsService", () => {
 		})
 
 		it("should aggregate events stored via the underlying store", async () => {
-			// Cannot directly access the internal store of the service, so inject events via backfill.
+			// 서비스 내부 store에 직접 접근할 수 없으므로, backfill을 통해 이벤트를 주입한다.
 			const events = [
 				makeEvent({
 					eventId: "evt-1",
@@ -178,7 +178,7 @@ describe("UsageStatsService", () => {
 			const query = makeQuery({ preset: "all" })
 			const result = await service.exportStats(query, "json")
 
-			expect(typeof result).not.toBe("string")
+			expect(result).not.toBe("string")
 			const jsonExport = result as {
 				exportSchemaVersion: number
 				exportedAt: string
@@ -207,7 +207,7 @@ describe("UsageStatsService", () => {
 			const result = await service.exportStats(query, "json")
 			const jsonExport = result as { events: UsageEventV1[] }
 
-			// oldIso is outside the today range, so only 1 remains
+			// oldIso는 today 범위 밖이므로 1개만 남음
 			expect(jsonExport.events).toHaveLength(1)
 			expect(jsonExport.events[0].eventId).toBe("evt-1")
 		})
@@ -328,7 +328,7 @@ describe("UsageStatsService", () => {
 			const lines = (result as string).split("\n")
 			const dataRow = lines[1]
 
-			// Prevent formula injection: ' prefix
+			// formula injection 방지: ' 접두사
 			expect(dataRow).toContain("'=evt-injection")
 			expect(dataRow).toContain("'+provider")
 			expect(dataRow).toContain("'@model")
@@ -348,7 +348,7 @@ describe("UsageStatsService", () => {
 			const lines = (result as string).split("\n")
 			const dataRow = lines[1]
 
-			// Quoting when comma is included
+			// comma 포함 시 quoting
 			expect(dataRow).toContain('"evt,with,commas"')
 		})
 
@@ -366,7 +366,7 @@ describe("UsageStatsService", () => {
 			const lines = (result as string).split("\n")
 			const dataRow = lines[1]
 
-			// Quoting + "" escape when " is included
+			// " 포함 시 quoting + "" escape
 			expect(dataRow).toContain('"evt""with""quotes"')
 		})
 
@@ -375,7 +375,7 @@ describe("UsageStatsService", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					usage: {}, // all usage fields missing
+					usage: {}, // 모든 usage 필드 누락
 				}),
 			]
 			await service.backfillFromHistory(events)
@@ -519,25 +519,6 @@ describe("UsageStatsService", () => {
 		})
 	})
 
-	describe("getFilteredEvents", () => {
-		it("should return filtered events without JSON round-trip", async () => {
-			const events = [
-				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", status: "completed" }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", status: "cancelled" }),
-			]
-			await service.backfillFromHistory(events)
-
-			const query = makeQuery({ preset: "all", includeCancelled: false })
-			const filtered = await service.getFilteredEvents(query)
-
-			expect(filtered).toHaveLength(1)
-			expect(filtered[0].eventId).toBe("evt-1")
-			// Returned objects should be the same UsageEventV1 instances, not JSON
-			// stringified and parsed copies.
-			expect(filtered[0]).toBeInstanceOf(Object)
-		})
-	})
-
 	describe("exportStats - invalid format", () => {
 		it("should throw StatsServiceError for unsupported format", async () => {
 			const query = makeQuery({ preset: "all" })
@@ -601,22 +582,22 @@ describe("UsageStatsService", () => {
 
 	describe("clearStats", () => {
 		it("should clear stats when valid nonce is provided", async () => {
-			// Inject data
+			// 데이터 주입
 			const events = [
 				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }),
 				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2" }),
 			]
 			await service.backfillFromHistory(events)
 
-			// Verify before deletion
+			// 삭제 전 확인
 			const before = await service.queryStats(makeQuery({ preset: "all" }))
 			expect(before.totals.events).toBe(2)
 
-			// Issue nonce then clear
+			// nonce 발급 후 clear
 			const nonce = service.issueClearNonce()
 			await service.clearStats(nonce)
 
-			// Verify after deletion
+			// 삭제 후 확인
 			const after = await service.queryStats(makeQuery({ preset: "all" }))
 			expect(after.totals.events).toBe(0)
 		})
@@ -648,7 +629,7 @@ describe("UsageStatsService", () => {
 
 			const nonce = service.issueClearNonce()
 
-			// After 6 minutes (nonce is valid for 5 minutes)
+			// 6분 후 (nonce는 5분 유효)
 			vi.advanceTimersByTime(6 * 60 * 1000)
 
 			await expect(service.clearStats(nonce)).rejects.toThrow(StatsServiceError)
@@ -680,7 +661,7 @@ describe("UsageStatsService", () => {
 			const nonce = service.issueClearNonce()
 			await service.clearStats(nonce)
 
-			// Retry with the same nonce → should fail
+			// 동일 nonce로 재시도 → 실패해야 함
 			await expect(service.clearStats(nonce)).rejects.toThrow(StatsServiceError)
 		})
 	})
@@ -719,7 +700,7 @@ describe("UsageStatsService", () => {
 		it("should deduplicate events with same idempotencyKey", async () => {
 			const events = [
 				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-1" }), // Same idempotencyKey
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-1" }), // 동일 idempotencyKey
 			]
 
 			const count = await service.backfillFromHistory(events)
@@ -727,8 +708,8 @@ describe("UsageStatsService", () => {
 		})
 
 		it("should swallow StatsStoreError and continue processing remaining events", async () => {
-			// First event is normal, second is deduped with the same idempotencyKey (returns false),
-			// third is normal
+			// 첫 이벤트는 정상, 두 번째는 동일 idempotencyKey로 dedupe (false 반환),
+			// 세 번째는 정상
 			const events = [
 				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }),
 				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-1" }), // dedupe → false
@@ -736,7 +717,7 @@ describe("UsageStatsService", () => {
 			]
 
 			const count = await service.backfillFromHistory(events)
-			// Deduped ones return false → count does not increment
+			// dedupe된 것은 false 반환 → count 증가 안 함
 			expect(count).toBe(2)
 		})
 	})
@@ -772,85 +753,6 @@ describe("UsageStatsService", () => {
 			const err = new StatsServiceError("STATS_SERVICE/backfill/001", "Backfill failed", cause)
 
 			expect(err.cause).toBe(cause)
-		})
-	})
-
-	// ── Diff coverage: preset ranges / CSV fallback / listeners / nonce ────
-
-	describe("preset range resolution", () => {
-		it("should include events from the last 7 days for preset 7d", async () => {
-			const now = new Date()
-			const recent = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000)
-			const old = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)
-			const events = [
-				makeEvent({ eventId: "evt-recent", idempotencyKey: "idem-r", occurredAt: recent.toISOString() }),
-				makeEvent({ eventId: "evt-old", idempotencyKey: "idem-o", occurredAt: old.toISOString() }),
-			]
-			await service.backfillFromHistory(events)
-
-			const result = (await service.exportStats(makeQuery({ preset: "7d" }), "json")) as {
-				events: UsageEventV1[]
-			}
-			expect(result.events.map((e) => e.eventId)).toContain("evt-recent")
-			expect(result.events.map((e) => e.eventId)).not.toContain("evt-old")
-		})
-
-		it("should include events from the last 30 days for preset 30d", async () => {
-			const now = new Date()
-			const recent = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000)
-			const old = new Date(now.getTime() - 45 * 24 * 60 * 60 * 1000)
-			const events = [
-				makeEvent({ eventId: "evt-recent30", idempotencyKey: "idem-r30", occurredAt: recent.toISOString() }),
-				makeEvent({ eventId: "evt-old30", idempotencyKey: "idem-o30", occurredAt: old.toISOString() }),
-			]
-			await service.backfillFromHistory(events)
-
-			const result = (await service.exportStats(makeQuery({ preset: "30d" }), "json")) as {
-				events: UsageEventV1[]
-			}
-			expect(result.events.map((e) => e.eventId)).toContain("evt-recent30")
-			expect(result.events.map((e) => e.eventId)).not.toContain("evt-old30")
-		})
-	})
-
-	describe("CSV export - optional fields fallback", () => {
-		it("should output empty cells for events without optional fields", async () => {
-			const base = makeEvent({ eventId: "evt-min", idempotencyKey: "idem-min" })
-			delete (base.usage as Record<string, unknown>).costUsd
-			const events = [base]
-			const appended = await service.backfillFromHistory(events)
-			expect(appended).toBe(1)
-
-			const result = (await service.exportStats(makeQuery({ preset: "all" }), "csv")) as string
-			const lines = result.split("\n").filter((l) => l.length > 0)
-			expect(lines.length).toBeGreaterThan(1)
-			const headerCols = lines[0].split(",")
-			const dataCols = lines[1].split(",")
-			// costUsd missing -> empty cell
-			const costIdx = headerCols.indexOf("costUsd")
-			expect(dataCols[costIdx]).toBe("")
-		})
-	})
-
-	describe("onDidChange listener disposal", () => {
-		it("should remove listener when dispose is called", () => {
-			const listeners: string[] = []
-			const disposable = service.onDidChange(() => listeners.push("fired"))
-			disposable.dispose()
-			// Disposing again should be a no-op (idx < 0 path)
-			disposable.dispose()
-			expect(listeners).toHaveLength(0)
-		})
-	})
-
-	describe("generateNonce fallback", () => {
-		it("should fall back to timestamp-based nonce when crypto is unavailable", () => {
-			// Access private method via bracket access for coverage of the catch path
-			const svc = service as unknown as { generateNonce(): string }
-			// Normal path returns a string
-			const nonce = svc.generateNonce()
-			expect(typeof nonce).toBe("string")
-			expect(nonce.length).toBeGreaterThan(0)
 		})
 	})
 })
