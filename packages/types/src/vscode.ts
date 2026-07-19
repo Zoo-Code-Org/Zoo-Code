@@ -34,6 +34,7 @@ export const commandIds = [
 	"marketplaceButtonClicked",
 	"popoutButtonClicked",
 	"settingsButtonClicked",
+	"dashboardButtonClicked",
 
 	"openInNewTab",
 
@@ -48,8 +49,6 @@ export const commandIds = [
 	"toggleAutoApprove",
 
 	"showRipgrepDiagnostic",
-
-	"openUsageStats",
 ] as const
 
 export type CommandId = (typeof commandIds)[number]

@@ -1,4 +1,4 @@
-{
+﻿{
 	"extension.displayName": "Zoo Code",
 	"extension.description": "A whole dev team of AI agents in your editor.",
 	"views.contextMenu.label": "Zoo Code",
@@ -25,7 +25,7 @@
 	"command.acceptInput.title": "Accept Input/Suggestion",
 	"command.showRipgrepDiagnostic.title": "Show Ripgrep Diagnostic",
 	"command.toggleAutoApprove.title": "Toggle Auto-Approve",
-	"command.openUsageStats.title": "Open Usage Statistics",
+	"command.dashboard.title": "Dashboard",
 	"configuration.title": "Zoo Code",
 	"commands.allowedCommands.description": "Commands that can be auto-executed when 'Always approve execute operations' is enabled",
 	"commands.deniedCommands.description": "Command prefixes that will be automatically denied without asking for approval. In case of conflicts with allowed commands, the longest prefix match takes precedence. Add * to deny all commands.",
