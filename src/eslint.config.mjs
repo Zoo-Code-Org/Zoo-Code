@@ -33,7 +33,7 @@ export default [
 	{
 		// Ratchet: enforce no-floating-promises directory by directory. Each
 		// directory is added here once its floating promises are resolved.
-		files: ["activate/**/*.ts", "core/task/**/*.ts"],
+		files: ["activate/**/*.ts", "core/task/**/*.ts", "core/webview/**/*.ts"],
 		languageOptions: {
 			parserOptions: {
 				project: true,

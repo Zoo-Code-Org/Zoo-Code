@@ -1149,7 +1149,7 @@ describe("ClineProvider", () => {
 			setModeConfig: vi.fn(),
 		} as any
 
-		provider.setValue("currentApiConfigName", "current-config")
+		await provider.setValue("currentApiConfigName", "current-config")
 
 		// Switch to architect mode
 		await messageHandler({ type: "mode", text: "architect" })
@@ -1247,7 +1247,7 @@ describe("ClineProvider", () => {
 			},
 		}
 
-		provider.setValue("customModePrompts", existingPrompts)
+		await provider.setValue("customModePrompts", existingPrompts)
 
 		// Test updating a prompt
 		await messageHandler({
