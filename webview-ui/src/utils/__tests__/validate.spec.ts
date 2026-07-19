@@ -366,6 +366,48 @@ describe("Model Validation Functions", () => {
 			})
 		})
 	})
+
+	describe("Kimi Code validation", () => {
+		it("returns undefined when using OAuth auth method", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kimi-code",
+				kimiCodeAuthMethod: "oauth",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+
+		it("returns undefined when auth method is not specified (defaults to OAuth)", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kimi-code",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+
+		it("returns apiKey error when using api-key auth method without key", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kimi-code",
+				kimiCodeAuthMethod: "api-key",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined when using api-key auth method with key", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kimi-code",
+				kimiCodeAuthMethod: "api-key",
+				kimiCodeApiKey: "valid-key",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+	})
 })
 
 describe("validateBedrockArn", () => {

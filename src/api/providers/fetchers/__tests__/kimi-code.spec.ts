@@ -33,4 +33,48 @@ describe("Kimi Code model discovery", () => {
 			expect.objectContaining({ headers: expect.objectContaining({ Authorization: "Bearer secret-token" }) }),
 		)
 	})
+
+	it("applies default values when optional fields are missing", () => {
+		const mapped = mapKimiCodeModel({
+			id: "basic-model",
+		})
+		expect(mapped.supportsReasoningBinary).toBe(false)
+		expect(mapped.supportsImages).toBe(false)
+		expect(mapped.contextWindow).toBeGreaterThan(0)
+	})
+
+	it("throws error when apiKey is missing", async () => {
+		await expect(getKimiCodeModels()).rejects.toThrow("Kimi Code authentication is required")
+	})
+
+	it("throws error with status code on failed request", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response("Unauthorized", { status: 401, statusText: "Unauthorized" }),
+		)
+		try {
+			await getKimiCodeModels("bad-token")
+			expect.fail("should have thrown")
+		} catch (error: any) {
+			expect(error.message).toContain("401")
+			expect(error.status).toBe(401)
+		}
+	})
+
+	it("returns multiple models as a record", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					data: [
+						{ id: "model-a", context_length: 100000 },
+						{ id: "model-b", context_length: 200000, supports_reasoning: true },
+					],
+				}),
+				{ status: 200 },
+			),
+		)
+		const models = await getKimiCodeModels("token")
+		expect(Object.keys(models)).toHaveLength(2)
+		expect(models["model-a"].contextWindow).toBe(100000)
+		expect(models["model-b"].supportsReasoningBinary).toBe(true)
+	})
 })

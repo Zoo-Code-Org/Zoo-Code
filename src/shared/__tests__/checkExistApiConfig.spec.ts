@@ -86,4 +86,36 @@ describe("checkExistKey", () => {
 		}
 		expect(checkExistKey(config)).toBe(false)
 	})
+
+	it("should return true for kimi-code provider with OAuth auth method", () => {
+		const config: ProviderSettings = {
+			apiProvider: "kimi-code",
+			kimiCodeAuthMethod: "oauth",
+		}
+		expect(checkExistKey(config)).toBe(true)
+	})
+
+	it("should return true for kimi-code provider without auth method (defaults to OAuth)", () => {
+		const config: ProviderSettings = {
+			apiProvider: "kimi-code",
+		}
+		expect(checkExistKey(config)).toBe(true)
+	})
+
+	it("should return true for kimi-code provider with api-key auth and key present", () => {
+		const config: ProviderSettings = {
+			apiProvider: "kimi-code",
+			kimiCodeAuthMethod: "api-key",
+			kimiCodeApiKey: "test-key",
+		}
+		expect(checkExistKey(config)).toBe(true)
+	})
+
+	it("should return false for kimi-code provider with api-key auth but no key", () => {
+		const config: ProviderSettings = {
+			apiProvider: "kimi-code",
+			kimiCodeAuthMethod: "api-key",
+		}
+		expect(checkExistKey(config)).toBe(false)
+	})
 })
