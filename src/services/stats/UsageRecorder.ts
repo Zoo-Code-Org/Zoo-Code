@@ -37,6 +37,11 @@ export interface UsageRecordingContext {
 	// source
 	costSource: UsageValueSource
 	tokenSource: UsageValueSource
+	/**
+	 * Domain extracted from the provider's custom base URL. Only set when the
+	 * user configured a custom base URL that differs from the provider default.
+	 * Absent for default endpoints. See resolveEndpoint() in Task.ts.
+	 */
 	endpoint?: string
 }
 
@@ -55,12 +60,10 @@ export interface UsageRecordingContext {
  */
 export class UsageRecorder {
 	private readonly store: UsageEventStore
-	private readonly onChanged?: () => void
 	private readonly finalizedKeys: Set<string> = new Set()
 
-	constructor(store: UsageEventStore, onChanged?: () => void) {
+	constructor(store: UsageEventStore) {
 		this.store = store
-		this.onChanged = onChanged
 	}
 
 	/**
@@ -99,6 +102,7 @@ export class UsageRecorder {
 			provider: ctx.provider,
 			model: ctx.model,
 			mode: ctx.mode,
+			endpoint: ctx.endpoint,
 			usage: {
 				inputTokens: ctx.inputTokens > 0 ? { value: ctx.inputTokens, source: ctx.tokenSource } : undefined,
 				outputTokens: ctx.outputTokens > 0 ? { value: ctx.outputTokens, source: ctx.tokenSource } : undefined,
@@ -130,7 +134,6 @@ export class UsageRecorder {
 
 		try {
 			await this.store.append(event)
-			this.onChanged?.()
 		} catch {
 			// store error must not break task
 			// STATS_STORE/append/* errors are classified inside UsageEventStore

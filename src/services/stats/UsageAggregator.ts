@@ -380,7 +380,10 @@ export class UsageAggregator {
 			case "month":
 				return item.monthBucket ? [item.monthBucket] : []
 			case "provider":
-				return [event.provider]
+				// When an endpoint domain is recorded (custom base URL), append it
+				// to the provider key so distinct servers appear as separate rows.
+				// e.g. "openai (kimi.ai)" vs plain "openai" for the default endpoint.
+				return [event.endpoint ? `${event.provider} (${event.endpoint})` : event.provider]
 			case "model":
 				return [event.model]
 			case "mode":

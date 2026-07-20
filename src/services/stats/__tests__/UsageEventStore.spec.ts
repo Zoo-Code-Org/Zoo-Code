@@ -153,6 +153,24 @@ describe("UsageEventStore", () => {
 			expect(parsed.eventId).toBe(event.eventId)
 		})
 
+		it("should persist optional endpoint field when provided", async () => {
+			const event = makeEvent({ endpoint: "kimi.ai" })
+			await store.append(event)
+
+			const events = await store.readAll()
+			expect(events).toHaveLength(1)
+			expect(events[0].endpoint).toBe("kimi.ai")
+		})
+
+		it("should not require endpoint field (backward compatible)", async () => {
+			const event = makeEvent()
+			await store.append(event)
+
+			const events = await store.readAll()
+			expect(events).toHaveLength(1)
+			expect(events[0].endpoint).toBeUndefined()
+		})
+
 		it("should serialize concurrent appends via promise queue", async () => {
 			const events = Array.from({ length: 10 }, (_, i) =>
 				makeEvent({ eventId: `evt-${i}`, idempotencyKey: `idem-${i}` }),
