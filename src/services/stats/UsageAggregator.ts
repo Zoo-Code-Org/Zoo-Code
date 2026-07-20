@@ -70,11 +70,7 @@ export class UsageAggregator {
 	 * @param query Statistics query
 	 * @param options Additional options (e.g. recordingPaused)
 	 */
-	query(
-		events: UsageEventV1[],
-		query: StatsQuery,
-		options: { recordingPaused?: boolean } = {},
-	): StatsSnapshot {
+	query(events: UsageEventV1[], query: StatsQuery, options: { recordingPaused?: boolean } = {}): StatsSnapshot {
 		// 1. Time range filtering
 		const { from, to } = this.resolveTimeRange(query)
 		const filtered = events.filter((event) => {
@@ -86,9 +82,7 @@ export class UsageAggregator {
 
 		// 2. Cancelled event filtering
 		const includeCancelled = query.includeCancelled ?? false
-		const visibleEvents = includeCancelled
-			? filtered
-			: filtered.filter((e) => e.status !== "cancelled")
+		const visibleEvents = includeCancelled ? filtered : filtered.filter((e) => e.status !== "cancelled")
 
 		// 3. Compute bucket keys based on timezone
 		const aggregatable: AggregatableEvent[] = visibleEvents.map((event) => {
@@ -341,10 +335,7 @@ export class UsageAggregator {
 	 * Returns the bucket key combinations for the groupBy axes from the event.
 	 * Up to 3 axes can be combined.
 	 */
-	private getGroupKeys(
-		item: AggregatableEvent,
-		groupBy: StatsQuery["groupBy"],
-	): Record<string, string>[] {
+	private getGroupKeys(item: AggregatableEvent, groupBy: StatsQuery["groupBy"]): Record<string, string>[] {
 		if (groupBy.length === 0) {
 			return [{}]
 		}
@@ -397,33 +388,33 @@ export class UsageAggregator {
 			case "status":
 				return [event.status]
 			case "source": {
-					// Separate by the source of costUsd.
-					// Feature 1: If the event has no costUsd but the cost can be
-					// computed on-the-fly from model pricing, treat the source as
-					// "estimated" (since it is derived, not provider-reported).
-					const sources = new Set<string>()
-					if (event.usage.costUsd) {
-						sources.add(event.usage.costUsd.source)
-					} else {
-						// Check if cost can be computed; if so, mark as "estimated".
-						// Otherwise the source remains "unknown".
-						const computedCost = computeEventCost(event)
-						if (computedCost > 0) {
-							sources.add("estimated")
-						}
+				// Separate by the source of costUsd.
+				// Feature 1: If the event has no costUsd but the cost can be
+				// computed on-the-fly from model pricing, treat the source as
+				// "estimated" (since it is derived, not provider-reported).
+				const sources = new Set<string>()
+				if (event.usage.costUsd) {
+					sources.add(event.usage.costUsd.source)
+				} else {
+					// Check if cost can be computed; if so, mark as "estimated".
+					// Otherwise the source remains "unknown".
+					const computedCost = computeEventCost(event)
+					if (computedCost > 0) {
+						sources.add("estimated")
 					}
-					// Also consider the source of input/output tokens
-					if (event.usage.inputTokens) {
-						sources.add(event.usage.inputTokens.source)
-					}
-					if (event.usage.outputTokens) {
-						sources.add(event.usage.outputTokens.source)
-					}
-					if (sources.size === 0) {
-						sources.add("unknown")
-					}
-					return Array.from(sources)
 				}
+				// Also consider the source of input/output tokens
+				if (event.usage.inputTokens) {
+					sources.add(event.usage.inputTokens.source)
+				}
+				if (event.usage.outputTokens) {
+					sources.add(event.usage.outputTokens.source)
+				}
+				if (sources.size === 0) {
+					sources.add("unknown")
+				}
+				return Array.from(sources)
+			}
 			default:
 				return []
 		}
@@ -510,7 +501,9 @@ export class UsageAggregator {
 			bucket.reasoningTokens += reasoningTokens
 		}
 
-		bucket.totalTokens += totalTokens
+		// Recompute from input + output (provider-neutral) to repair historical events
+		// that may have been persisted with the old double-counted sum.
+		bucket.totalTokens += inputTokens + outputTokens
 		bucket.costUsd += costUsd
 	}
 
@@ -566,9 +559,7 @@ export class UsageAggregator {
 	): StatsSnapshot["coverage"] {
 		const times = visibleEvents.map((e) => new Date(e.event.occurredAt).getTime()).sort((a, b) => a - b)
 
-		const backfilledEventCount = visibleEvents.filter(
-			(e) => e.event.provenance === "history-backfill",
-		).length
+		const backfilledEventCount = visibleEvents.filter((e) => e.event.provenance === "history-backfill").length
 
 		return {
 			firstEventAt: times.length > 0 ? new Date(times[0]).toISOString() : undefined,

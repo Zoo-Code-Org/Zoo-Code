@@ -97,10 +97,8 @@ export class UsageRecorder {
 			model: ctx.model,
 			mode: ctx.mode,
 			usage: {
-				inputTokens:
-					ctx.inputTokens > 0 ? { value: ctx.inputTokens, source: ctx.tokenSource } : undefined,
-				outputTokens:
-					ctx.outputTokens > 0 ? { value: ctx.outputTokens, source: ctx.tokenSource } : undefined,
+				inputTokens: ctx.inputTokens > 0 ? { value: ctx.inputTokens, source: ctx.tokenSource } : undefined,
+				outputTokens: ctx.outputTokens > 0 ? { value: ctx.outputTokens, source: ctx.tokenSource } : undefined,
 				cacheWriteTokens: ctx.cacheWriteTokens
 					? { value: ctx.cacheWriteTokens, source: ctx.tokenSource }
 					: undefined,
@@ -110,19 +108,11 @@ export class UsageRecorder {
 				reasoningTokens: ctx.reasoningTokens
 					? { value: ctx.reasoningTokens, source: ctx.tokenSource }
 					: undefined,
-				// H3 fix: compute totalTokens at record time so aggregators/UI can rely on it.
-				// Sum all token buckets. Inclusion semantics (whether cache/reasoning are already
-				// counted inside input/output) are recorded in `semantics` below; the aggregator
-				// is responsible for adjusting double-counting when semantics != "unknown".
-				// Until provider-specific semantics are determined, we record the raw sum so the
-				// total is never 0 (which previously broke heatmap/sort).
+				// totalTokens = inputTokens + outputTokens (provider-neutral definition).
+				// Cache tokens are a subset/breakdown of input; reasoning tokens are a subset of output.
+				// Adding them separately would double-count. See docs/260720_22_gitignore-heatmap-fix/213200_debug-report.md
 				totalTokens: {
-					value:
-						ctx.inputTokens +
-						ctx.outputTokens +
-						(ctx.cacheReadTokens ?? 0) +
-						(ctx.cacheWriteTokens ?? 0) +
-						(ctx.reasoningTokens ?? 0),
+					value: ctx.inputTokens + ctx.outputTokens,
 					source: ctx.tokenSource,
 				},
 				costUsd: ctx.totalCost ? { value: ctx.totalCost, source: ctx.costSource } : undefined,

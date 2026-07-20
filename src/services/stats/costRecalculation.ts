@@ -26,7 +26,6 @@ import {
 	moonshotModels,
 	minimaxModels,
 	mimoModels,
-	openAiCodexModels,
 	qwenCodeModels,
 	sambaNovaModels,
 	vertexModels,
@@ -53,7 +52,10 @@ const PROVIDER_MODEL_REGISTRIES: Record<string, Record<string, ModelInfo>> = {
 	anthropic: anthropicModels,
 	openai: openAiNativeModels,
 	"openai-native": openAiNativeModels,
-	"openai-codex": openAiCodexModels,
+	// openai-codex uses ChatGPT Plus/Pro subscription (no per-token billing),
+	// but we map to openAiNativeModels so users can see the equivalent API cost
+	// for comparison purposes. The actual charge is covered by the subscription.
+	"openai-codex": openAiNativeModels,
 	bedrock: bedrockModels,
 	deepseek: deepSeekModels,
 	fireworks: fireworksModels,
@@ -161,21 +163,9 @@ export function computeEventCost(event: UsageEventV1): number {
 
 	let result
 	if (isAnthropicSemantic) {
-		result = calculateApiCostAnthropic(
-			modelInfo,
-			inputTokens,
-			outputTokens,
-			cacheWriteTokens,
-			cacheReadTokens,
-		)
+		result = calculateApiCostAnthropic(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
 	} else {
-		result = calculateApiCostOpenAI(
-			modelInfo,
-			inputTokens,
-			outputTokens,
-			cacheWriteTokens,
-			cacheReadTokens,
-		)
+		result = calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
 	}
 
 	return result.totalCost

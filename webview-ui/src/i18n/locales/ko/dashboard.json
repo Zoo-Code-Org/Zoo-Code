@@ -1,87 +1,88 @@
 {
-  "title": "대시보드",
-  "done": "뒤로",
-  "range": {
-    "today": "오늘",
-    "7d": "최근 7일",
-    "30d": "최근 30일",
-    "custom": "사용자 지정",
-    "all": "전체 기간"
-  },
-  "summary": {
-    "totalTokens": "전체 토큰",
-    "inputTokens": "입력 토큰",
-    "outputTokens": "출력 토큰",
-    "cacheTokens": "캐시 토큰",
-    "cost": "비용"
-  },
-  "states": {
-    "loading": "불러오는 중...",
-    "error": "통계를 불러오지 못했습니다",
-    "empty": "아직 사용량 데이터가 없습니다",
-    "emptyHint": "통계를 보려면 대화를 시작하세요"
-  },
-  "actions": {
-    "refresh": "새로 고침",
-    "exportJson": "JSON 내보내기",
-    "exportCsv": "CSV 내보내기",
-    "clear": "통계 삭제"
-  },
-  "breakdown": {
-    "title": "세부 내역",
-    "model": "모델",
-    "provider": "공급자",
-    "mode": "모드",
-    "events": "이벤트",
-    "inputTokens": "입력",
-    "outputTokens": "출력",
-    "cacheReadTokens": "캐시 읽기",
-    "cacheWriteTokens": "캐시 쓰기",
-    "reasoningTokens": "추론",
-    "totalTokens": "전체",
-    "costUsd": "비용",
-    "unknown": "알 수 없음"
-  },
-  "coverage": {
-    "title": "데이터 범위",
-    "liveFrom": "기록 시작",
-    "backfilledEvents": "소급된 이벤트",
-    "paused": "기록이 일시 중지됨 (저장소 한도에 도달함)"
-  },
-  "clearDialog": {
-    "title": "통계 삭제",
-    "description": "모든 사용량 통계를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
-    "cancel": "취소",
-    "confirm": "삭제"
-  },
-  "customRange": {
-    "from": "시작",
-    "to": "종료"
-  },
-  "sessions": {
-    "title": "세션",
-    "noSessions": "이 기간에는 세션이 없습니다",
-    "filterModel": "모든 모델",
-    "filterProvider": "모든 공급자",
-    "callCount": "{{count}}회 호출"
-  },
-  "sessionDetail": {
-    "summary": "세션 요약",
-    "apiCalls": "API 호출",
-    "noApiCalls": "API 호출 기록이 없습니다",
-    "input": "입력",
-    "output": "출력",
-    "cost": "비용",
-    "model": "모델",
-    "mode": "모드",
-    "time": "시간",
-    "status": "상태"
-  },
-  "time": {
-    "justNow": "방금",
-    "minutesAgo": "{{count}}분 전",
-    "hoursAgo": "{{count}}시간 전",
-    "yesterday": "어제",
-    "daysAgo": "{{count}}일 전"
-  }
+	"title": "대시보드",
+	"done": "뒤로",
+	"range": {
+		"today": "오늘",
+		"7d": "최근 7일",
+		"30d": "최근 30일",
+		"custom": "사용자 지정",
+		"all": "전체 기간"
+	},
+	"summary": {
+		"totalTokens": "전체 토큰",
+		"inputTokens": "입력 토큰",
+		"outputTokens": "출력 토큰",
+		"cacheTokens": "캐시 토큰",
+		"cost": "비용"
+	},
+	"states": {
+		"loading": "불러오는 중...",
+		"error": "통계를 불러오지 못했습니다",
+		"empty": "아직 사용량 데이터가 없습니다",
+		"emptyHint": "통계를 보려면 대화를 시작하세요"
+	},
+	"actions": {
+		"refresh": "새로 고침",
+		"exportJson": "JSON 내보내기",
+		"exportCsv": "CSV 내보내기",
+		"clear": "통계 삭제"
+	},
+	"breakdown": {
+		"title": "세부 내역",
+		"model": "모델",
+		"provider": "공급자",
+		"mode": "모드",
+		"events": "이벤트",
+		"inputTokens": "입력",
+		"outputTokens": "출력",
+		"cacheReadTokens": "캐시 읽기",
+		"cacheWriteTokens": "캐시 쓰기",
+		"reasoningTokens": "추론",
+		"totalTokens": "전체",
+		"costUsd": "비용",
+		"unknown": "알 수 없음"
+	},
+	"coverage": {
+		"title": "데이터 범위",
+		"liveFrom": "기록 시작",
+		"lastUpdated": "마지막 업데이트",
+		"backfilledEvents": "소급된 이벤트",
+		"paused": "기록이 일시 중지됨 (저장소 한도에 도달함)"
+	},
+	"clearDialog": {
+		"title": "통계 삭제",
+		"description": "모든 사용량 통계를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+		"cancel": "취소",
+		"confirm": "삭제"
+	},
+	"customRange": {
+		"from": "시작",
+		"to": "종료"
+	},
+	"sessions": {
+		"title": "세션",
+		"noSessions": "이 기간에는 세션이 없습니다",
+		"filterModel": "모든 모델",
+		"filterProvider": "모든 공급자",
+		"callCount": "{{count}}회 호출"
+	},
+	"sessionDetail": {
+		"summary": "세션 요약",
+		"apiCalls": "API 호출",
+		"noApiCalls": "API 호출 기록이 없습니다",
+		"input": "입력",
+		"output": "출력",
+		"cost": "비용",
+		"model": "모델",
+		"mode": "모드",
+		"time": "시간",
+		"status": "상태"
+	},
+	"time": {
+		"justNow": "방금",
+		"minutesAgo": "{{count}}분 전",
+		"hoursAgo": "{{count}}시간 전",
+		"yesterday": "어제",
+		"daysAgo": "{{count}}일 전"
+	}
 }

@@ -54,6 +54,25 @@ describe("costRecalculation", () => {
 			expect(info?.inputPrice).toBe(5.0)
 		})
 
+		it("should resolve openai-codex models to openAiNativeModels pricing (non-zero)", () => {
+			// Regression test for Bug 2: openai-codex was mapped to openAiCodexModels
+			// which has all-zero prices. Now it maps to openAiNativeModels so users
+			// see the equivalent API cost.
+			const info = lookupModelInfo("openai-codex", "gpt-5.6-sol")
+			expect(info).toBeDefined()
+			expect(info?.inputPrice).toBe(5.0)
+			expect(info?.outputPrice).toBe(30.0)
+		})
+
+		it("should resolve qwen-code models to qwenCodeModels pricing (non-zero)", () => {
+			// Regression test for Bug 3: qwen-code models had all-zero prices.
+			// Now qwen3-coder-plus has inputPrice=$1.0/1M, outputPrice=$5.0/1M.
+			const info = lookupModelInfo("qwen-code", "qwen3-coder-plus")
+			expect(info).toBeDefined()
+			expect(info?.inputPrice).toBe(1.0)
+			expect(info?.outputPrice).toBe(5.0)
+		})
+
 		it("should return undefined for an unknown provider", () => {
 			const info = lookupModelInfo("unknown-provider", "some-model")
 			expect(info).toBeUndefined()
@@ -154,6 +173,83 @@ describe("costRecalculation", () => {
 			// 1M cache write × $3.75/1M + 1M cache read × $0.30/1M = $4.05
 			expect(computeEventCost(event)).toBeCloseTo(4.05, 5)
 		})
+
+		it("should compute non-zero cost for openai-codex (ChatGPT Plus/Pro) event with missing costUsd", () => {
+			// Regression test for Bug 2: openai-codex events always showed $0.00
+			// because openAiCodexModels has all-zero prices.
+			// Fix: costRecalculation.ts maps "openai-codex" → openAiNativeModels
+			// so users see the equivalent API cost.
+			const event = makeEvent({
+				provider: "openai-codex",
+				model: "gpt-5.6-sol",
+				usage: {
+					inputTokens: { value: 100_000, source: "provider" },
+					outputTokens: { value: 0, source: "provider" },
+					// costUsd missing — simulates the old totalCost: 0 → falsy → undefined path
+				},
+			})
+			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$5.0/1M
+			// 100K input tokens × $5/1M = $0.5
+			// This must NOT be 0 — that was the bug.
+			const cost = computeEventCost(event)
+			expect(cost).toBeGreaterThan(0)
+			expect(cost).toBeCloseTo(0.5, 5)
+		})
+
+		it("should compute non-zero cost for openai-codex with output tokens", () => {
+			const event = makeEvent({
+				provider: "openai-codex",
+				model: "gpt-5.6-sol",
+				usage: {
+					// Use 100K each (200K total < 272K long-context threshold)
+					inputTokens: { value: 100_000, source: "provider" },
+					outputTokens: { value: 100_000, source: "provider" },
+					// costUsd missing
+				},
+			})
+			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$5.0/1M, outputPrice=$30.0/1M
+			// 100K input × $5/1M + 100K output × $30/1M = $0.5 + $3.0 = $3.5
+			const cost = computeEventCost(event)
+			expect(cost).toBeGreaterThan(0)
+			expect(cost).toBeCloseTo(3.5, 5)
+		})
+
+		it("should compute non-zero cost for qwen-code event with missing costUsd", () => {
+			// Regression test for Bug 3: qwen-code models had all-zero prices.
+			// Now qwen3-coder-plus has inputPrice=$1.0/1M, outputPrice=$5.0/1M.
+			const event = makeEvent({
+				provider: "qwen-code",
+				model: "qwen3-coder-plus",
+				usage: {
+					inputTokens: { value: 100_000, source: "provider" },
+					outputTokens: { value: 0, source: "provider" },
+					// costUsd missing
+				},
+			})
+			// qwenCodeModels["qwen3-coder-plus"]: inputPrice=$1.0/1M
+			// 100K input tokens × $1.0/1M = $0.1
+			// This must NOT be 0 — that was the bug.
+			const cost = computeEventCost(event)
+			expect(cost).toBeGreaterThan(0)
+			expect(cost).toBeCloseTo(0.1, 5)
+		})
+
+		it("should compute non-zero cost for qwen-code with input + output tokens", () => {
+			const event = makeEvent({
+				provider: "qwen-code",
+				model: "qwen3-coder-plus",
+				usage: {
+					inputTokens: { value: 100_000, source: "provider" },
+					outputTokens: { value: 100_000, source: "provider" },
+					// costUsd missing
+				},
+			})
+			// qwenCodeModels["qwen3-coder-plus"]: inputPrice=$1.0/1M, outputPrice=$5.0/1M
+			// 100K input × $1/1M + 100K output × $5/1M = $0.1 + $0.5 = $0.6
+			const cost = computeEventCost(event)
+			expect(cost).toBeGreaterThan(0)
+			expect(cost).toBeCloseTo(0.6, 5)
+		})
 	})
 
 	describe("getEffectiveCost", () => {
@@ -203,6 +299,28 @@ describe("costRecalculation", () => {
 			})
 			// Should compute from pricing: 1000 × $3/1M = $0.003
 			expect(getEffectiveCost(event)).toBeCloseTo(0.003, 5)
+		})
+
+		it("should compute non-zero cost for openai-codex event when costUsd is undefined", () => {
+			// Regression test for Bug 2: openai-codex provider hardcoded totalCost: 0,
+			// which UsageRecorder stored as costUsd: undefined (0 is falsy).
+			// getEffectiveCost must fall through to computeEventCost and return
+			// a non-zero value from openAiNativeModels pricing.
+			const event = makeEvent({
+				provider: "openai-codex",
+				model: "gpt-5.6-sol",
+				usage: {
+					inputTokens: { value: 100_000, source: "provider" },
+					outputTokens: { value: 0, source: "provider" },
+					// costUsd is undefined — simulates the old totalCost: 0 → falsy → undefined path
+				},
+			})
+			// openAiNativeModels["gpt-5.6-sol"]: inputPrice=$5.0/1M
+			// 100K input tokens × $5/1M = $0.5
+			// Must NOT be 0 — that was the bug.
+			const cost = getEffectiveCost(event)
+			expect(cost).toBeGreaterThan(0)
+			expect(cost).toBeCloseTo(0.5, 5)
 		})
 	})
 })

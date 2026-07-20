@@ -51,15 +51,9 @@ vi.mock("../../stats/UsageHeatmap", () => ({
 // TabContent calls useExtensionState() which requires a provider.
 
 vi.mock("@/components/common/Tab", () => ({
-	Tab: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-		<div {...props}>{children}</div>
-	),
-	TabHeader: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-		<div {...props}>{children}</div>
-	),
-	TabContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-		<div {...props}>{children}</div>
-	),
+	Tab: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>,
+	TabHeader: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>,
+	TabContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => <div {...props}>{children}</div>,
 }))
 
 // ── Mock AlertDialog to avoid Radix portal issues in tests ──────────────────
@@ -210,11 +204,7 @@ function simulateStatsResponse(snapshot: Partial<StatsSnapshot> | null, requestI
 /**
  * Simulates the extension host responding to a getDashboardSessions request.
  */
-function simulateSessionsResponse(
-	sessions: SessionSummary[] | null,
-	error?: string,
-	requestId?: string,
-) {
+function simulateSessionsResponse(sessions: SessionSummary[] | null, error?: string, requestId?: string) {
 	const rid = requestId ?? getLatestRequestIdByType("getDashboardSessions")
 	const data: Record<string, unknown> = {
 		type: "dashboardSessionsResponse",
@@ -306,7 +296,10 @@ describe("DashboardView", () => {
 				(c) => (c[0] as { type: string }).type === "getUsageStats",
 			)
 			expect(statsCall).toBeTruthy()
-			const statsMsg = statsCall![0] as { requestId: string; usageStatsQuery: { preset: string; groupBy: string[] } }
+			const statsMsg = statsCall![0] as {
+				requestId: string
+				usageStatsQuery: { preset: string; groupBy: string[] }
+			}
 			expect(statsMsg.requestId).toMatch(/^dashboard-/)
 			expect(statsMsg.usageStatsQuery.preset).toBe("today")
 			expect(statsMsg.usageStatsQuery.groupBy).toContain("model")
@@ -453,7 +446,9 @@ describe("DashboardView", () => {
 
 			postMessageMock.mockClear()
 
-			const btnProvider = container.querySelector('[data-testid="dashboard-groupby-provider"]') as HTMLButtonElement
+			const btnProvider = container.querySelector(
+				'[data-testid="dashboard-groupby-provider"]',
+			) as HTMLButtonElement
 			fireEvent.click(btnProvider)
 
 			await waitFor(() => {
@@ -621,7 +616,9 @@ describe("DashboardView", () => {
 			fireEvent.click(clearBtn)
 
 			await waitFor(() => {
-				expect(postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "requestClearNonce")).toBe(true)
+				expect(
+					postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "requestClearNonce"),
+				).toBe(true)
 			})
 
 			// Simulate nonce response
@@ -646,7 +643,9 @@ describe("DashboardView", () => {
 			fireEvent.click(clearBtn)
 
 			await waitFor(() => {
-				expect(postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "requestClearNonce")).toBe(true)
+				expect(
+					postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "requestClearNonce"),
+				).toBe(true)
 			})
 
 			simulateClearNonceResponse(null, "Nonce error")
@@ -680,7 +679,9 @@ describe("DashboardView", () => {
 			fireEvent.click(confirmBtn)
 
 			await waitFor(() => {
-				expect(postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "clearUsageStats")).toBe(true)
+				expect(
+					postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "clearUsageStats"),
+				).toBe(true)
 			})
 
 			postMessageMock.mockClear()
@@ -734,12 +735,14 @@ describe("DashboardView", () => {
 				expect(container.querySelector('[data-testid="dashboard-loading"]')).toBeFalsy()
 			})
 
-			// Click export JSON
-			const exportBtn = container.querySelector('[data-testid="dashboard-export-json"]') as HTMLButtonElement
+			// Click export CSV
+			const exportBtn = container.querySelector('[data-testid="dashboard-export-csv"]') as HTMLButtonElement
 			fireEvent.click(exportBtn)
 
 			await waitFor(() => {
-				expect(postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "exportUsageStats")).toBe(true)
+				expect(
+					postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "exportUsageStats"),
+				).toBe(true)
 			})
 
 			simulateExportResponse("Export failed")
@@ -759,7 +762,7 @@ describe("DashboardView", () => {
 				expect(container.querySelector('[data-testid="dashboard-loading"]')).toBeFalsy()
 			})
 
-			const exportBtn = container.querySelector('[data-testid="dashboard-export-json"]') as HTMLButtonElement
+			const exportBtn = container.querySelector('[data-testid="dashboard-export-csv"]') as HTMLButtonElement
 			fireEvent.click(exportBtn)
 
 			simulateExportResponse()
@@ -814,27 +817,6 @@ describe("DashboardView", () => {
 	// ── 6. handleExport ────────────────────────────────────────────────────
 
 	describe("handleExport", () => {
-		it("sends exportUsageStats message with json format", async () => {
-			const { container } = render(<DashboardView onDone={() => {}} />)
-
-			simulateStatsResponse(makeSnapshot())
-			simulateSessionsResponse([])
-
-			await waitFor(() => {
-				expect(container.querySelector('[data-testid="dashboard-loading"]')).toBeFalsy()
-			})
-
-			postMessageMock.mockClear()
-
-			const exportBtn = container.querySelector('[data-testid="dashboard-export-json"]') as HTMLButtonElement
-			fireEvent.click(exportBtn)
-
-			expect(postMessageMock).toHaveBeenCalledTimes(1)
-			const msg = postMessageMock.mock.calls[0][0] as { type: string; exportUsageStatsFormat: string }
-			expect(msg.type).toBe("exportUsageStats")
-			expect(msg.exportUsageStatsFormat).toBe("json")
-		})
-
 		it("sends exportUsageStats message with csv format", async () => {
 			const { container } = render(<DashboardView onDone={() => {}} />)
 
@@ -860,16 +842,18 @@ describe("DashboardView", () => {
 			const { container } = render(<DashboardView onDone={() => {}} />)
 
 			// Simulate empty stats response (no data)
-			simulateStatsResponse(makeSnapshot({
-				totals: makeBucket({ events: 0, totalTokens: 0 }),
-				buckets: [],
-			}))
+			simulateStatsResponse(
+				makeSnapshot({
+					totals: makeBucket({ events: 0, totalTokens: 0 }),
+					buckets: [],
+				}),
+			)
 			simulateSessionsResponse([])
 
 			// Wait for loading to clear
 			return waitFor(() => {
-				const exportJson = container.querySelector('[data-testid="dashboard-export-json"]') as HTMLButtonElement
-				expect(exportJson.disabled).toBe(true)
+				const exportCsv = container.querySelector('[data-testid="dashboard-export-csv"]') as HTMLButtonElement
+				expect(exportCsv.disabled).toBe(true)
 			})
 		})
 	})
@@ -1161,10 +1145,12 @@ describe("DashboardView", () => {
 		it("renders empty state when no data", async () => {
 			const { container } = render(<DashboardView onDone={() => {}} />)
 
-			simulateStatsResponse(makeSnapshot({
-				totals: makeBucket({ events: 0, totalTokens: 0 }),
-				buckets: [],
-			}))
+			simulateStatsResponse(
+				makeSnapshot({
+					totals: makeBucket({ events: 0, totalTokens: 0 }),
+					buckets: [],
+				}),
+			)
 			simulateSessionsResponse([])
 
 			await waitFor(() => {
@@ -1190,13 +1176,15 @@ describe("DashboardView", () => {
 		it("renders data state with breakdown table when data exists", async () => {
 			const { container } = render(<DashboardView onDone={() => {}} />)
 
-			simulateStatsResponse(makeSnapshot({
-				buckets: [
-					makeBucket({ key: { model: "gpt-4" }, totalTokens: 5000, events: 5 }),
-					makeBucket({ key: { model: "claude-3" }, totalTokens: 3000, events: 3 }),
-				],
-				totals: makeBucket({ events: 8, totalTokens: 8000 }),
-			}))
+			simulateStatsResponse(
+				makeSnapshot({
+					buckets: [
+						makeBucket({ key: { model: "gpt-4" }, totalTokens: 5000, events: 5 }),
+						makeBucket({ key: { model: "claude-3" }, totalTokens: 3000, events: 3 }),
+					],
+					totals: makeBucket({ events: 8, totalTokens: 8000 }),
+				}),
+			)
 			simulateSessionsResponse([])
 
 			await waitFor(() => {
@@ -1211,14 +1199,16 @@ describe("DashboardView", () => {
 		it("renders coverage section when snapshot has coverage", async () => {
 			const { container } = render(<DashboardView onDone={() => {}} />)
 
-			simulateStatsResponse(makeSnapshot({
-				coverage: {
-					firstEventAt: "2026-01-01T00:00:00Z",
-					lastEventAt: "2026-07-01T00:00:00Z",
-					recordingPaused: false,
-					backfilledEventCount: 5,
-				},
-			}))
+			simulateStatsResponse(
+				makeSnapshot({
+					coverage: {
+						firstEventAt: "2026-01-01T00:00:00Z",
+						lastEventAt: "2026-07-01T00:00:00Z",
+						recordingPaused: false,
+						backfilledEventCount: 5,
+					},
+				}),
+			)
 			simulateSessionsResponse([])
 
 			await waitFor(() => {
@@ -1229,12 +1219,14 @@ describe("DashboardView", () => {
 		it("renders coverage with recordingPaused indicator", async () => {
 			const { container } = render(<DashboardView onDone={() => {}} />)
 
-			simulateStatsResponse(makeSnapshot({
-				coverage: {
-					recordingPaused: true,
-					backfilledEventCount: 0,
-				},
-			}))
+			simulateStatsResponse(
+				makeSnapshot({
+					coverage: {
+						recordingPaused: true,
+						backfilledEventCount: 0,
+					},
+				}),
+			)
 			simulateSessionsResponse([])
 
 			await waitFor(() => {

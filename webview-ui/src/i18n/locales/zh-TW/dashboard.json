@@ -1,87 +1,88 @@
 {
-  "title": "儀表板",
-  "done": "返回",
-  "range": {
-    "today": "今天",
-    "7d": "7 天",
-    "30d": "30 天",
-    "custom": "自訂",
-    "all": "全部"
-  },
-  "summary": {
-    "totalTokens": "總 Token",
-    "inputTokens": "輸入 Token",
-    "outputTokens": "輸出 Token",
-    "cacheTokens": "快取 Token",
-    "cost": "費用"
-  },
-  "states": {
-    "loading": "載入中...",
-    "error": "載入統計資料失敗",
-    "empty": "尚無使用資料",
-    "emptyHint": "開始對話即可查看統計資料"
-  },
-  "actions": {
-    "refresh": "重新整理",
-    "exportJson": "匯出 JSON",
-    "exportCsv": "匯出 CSV",
-    "clear": "清除統計"
-  },
-  "breakdown": {
-    "title": "明細",
-    "model": "模型",
-    "provider": "供應商",
-    "mode": "模式",
-    "events": "事件",
-    "inputTokens": "輸入",
-    "outputTokens": "輸出",
-    "cacheReadTokens": "快取讀取",
-    "cacheWriteTokens": "快取寫入",
-    "reasoningTokens": "推理",
-    "totalTokens": "總計",
-    "costUsd": "費用",
-    "unknown": "未知"
-  },
-  "coverage": {
-    "title": "資料涵蓋範圍",
-    "liveFrom": "即時記錄自",
-    "backfilledEvents": "回填事件",
-    "paused": "記錄已暫停（已達儲存上限）"
-  },
-  "clearDialog": {
-    "title": "清除統計",
-    "description": "確定要清除所有使用統計嗎？此動作無法復原。",
-    "cancel": "取消",
-    "confirm": "清除"
-  },
-  "customRange": {
-    "from": "從",
-    "to": "到"
-  },
-  "sessions": {
-    "title": "工作階段",
-    "noSessions": "此時間範圍內沒有工作階段",
-    "filterModel": "所有模型",
-    "filterProvider": "所有供應商",
-    "callCount": "{{count}} 次呼叫"
-  },
-  "sessionDetail": {
-    "summary": "工作階段摘要",
-    "apiCalls": "API 呼叫",
-    "noApiCalls": "沒有記錄的 API 呼叫",
-    "input": "輸入",
-    "output": "輸出",
-    "cost": "費用",
-    "model": "模型",
-    "mode": "模式",
-    "time": "時間",
-    "status": "狀態"
-  },
-  "time": {
-    "justNow": "剛剛",
-    "minutesAgo": "{{count}}分鐘前",
-    "hoursAgo": "{{count}}小時前",
-    "yesterday": "昨天",
-    "daysAgo": "{{count}}天前"
-  }
+	"title": "儀表板",
+	"done": "返回",
+	"range": {
+		"today": "今天",
+		"7d": "7 天",
+		"30d": "30 天",
+		"custom": "自訂",
+		"all": "全部"
+	},
+	"summary": {
+		"totalTokens": "總 Token",
+		"inputTokens": "輸入 Token",
+		"outputTokens": "輸出 Token",
+		"cacheTokens": "快取 Token",
+		"cost": "費用"
+	},
+	"states": {
+		"loading": "載入中...",
+		"error": "載入統計資料失敗",
+		"empty": "尚無使用資料",
+		"emptyHint": "開始對話即可查看統計資料"
+	},
+	"actions": {
+		"refresh": "重新整理",
+		"exportJson": "匯出 JSON",
+		"exportCsv": "匯出 CSV",
+		"clear": "清除統計"
+	},
+	"breakdown": {
+		"title": "明細",
+		"model": "模型",
+		"provider": "供應商",
+		"mode": "模式",
+		"events": "事件",
+		"inputTokens": "輸入",
+		"outputTokens": "輸出",
+		"cacheReadTokens": "快取讀取",
+		"cacheWriteTokens": "快取寫入",
+		"reasoningTokens": "推理",
+		"totalTokens": "總計",
+		"costUsd": "費用",
+		"unknown": "未知"
+	},
+	"coverage": {
+		"title": "資料涵蓋範圍",
+		"liveFrom": "即時記錄自",
+		"lastUpdated": "最後更新",
+		"backfilledEvents": "回填事件",
+		"paused": "記錄已暫停（已達儲存上限）"
+	},
+	"clearDialog": {
+		"title": "清除統計",
+		"description": "確定要清除所有使用統計嗎？此動作無法復原。",
+		"cancel": "取消",
+		"confirm": "清除"
+	},
+	"customRange": {
+		"from": "從",
+		"to": "到"
+	},
+	"sessions": {
+		"title": "工作階段",
+		"noSessions": "此時間範圍內沒有工作階段",
+		"filterModel": "所有模型",
+		"filterProvider": "所有供應商",
+		"callCount": "{{count}} 次呼叫"
+	},
+	"sessionDetail": {
+		"summary": "工作階段摘要",
+		"apiCalls": "API 呼叫",
+		"noApiCalls": "沒有記錄的 API 呼叫",
+		"input": "輸入",
+		"output": "輸出",
+		"cost": "費用",
+		"model": "模型",
+		"mode": "模式",
+		"time": "時間",
+		"status": "狀態"
+	},
+	"time": {
+		"justNow": "剛剛",
+		"minutesAgo": "{{count}}分鐘前",
+		"hoursAgo": "{{count}}小時前",
+		"yesterday": "昨天",
+		"daysAgo": "{{count}}天前"
+	}
 }

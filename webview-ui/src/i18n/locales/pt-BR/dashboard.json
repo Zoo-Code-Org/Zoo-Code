@@ -1,87 +1,88 @@
 {
-  "title": "Painel",
-  "done": "Voltar",
-  "range": {
-    "today": "Hoje",
-    "7d": "7 dias",
-    "30d": "30 dias",
-    "custom": "Personalizado",
-    "all": "Tudo"
-  },
-  "summary": {
-    "totalTokens": "Tokens totais",
-    "inputTokens": "Tokens de entrada",
-    "outputTokens": "Tokens de saída",
-    "cacheTokens": "Tokens de cache",
-    "cost": "Custo"
-  },
-  "states": {
-    "loading": "Carregando...",
-    "error": "Falha ao carregar as estatísticas",
-    "empty": "Ainda não há dados de uso",
-    "emptyHint": "Inicie uma conversa para ver as estatísticas"
-  },
-  "actions": {
-    "refresh": "Atualizar",
-    "exportJson": "Exportar JSON",
-    "exportCsv": "Exportar CSV",
-    "clear": "Limpar estatísticas"
-  },
-  "breakdown": {
-    "title": "Detalhamento",
-    "model": "Modelo",
-    "provider": "Provedor",
-    "mode": "Modo",
-    "events": "Eventos",
-    "inputTokens": "Entrada",
-    "outputTokens": "Saída",
-    "cacheReadTokens": "Leitura cache",
-    "cacheWriteTokens": "Escrita cache",
-    "reasoningTokens": "Raciocínio",
-    "totalTokens": "Total",
-    "costUsd": "Custo",
-    "unknown": "Desconhecido"
-  },
-  "coverage": {
-    "title": "Cobertura de dados",
-    "liveFrom": "Ao vivo desde",
-    "backfilledEvents": "Eventos retroativos",
-    "paused": "Gravação pausada (limite de armazenamento atingido)"
-  },
-  "clearDialog": {
-    "title": "Limpar estatísticas",
-    "description": "Tem certeza de que deseja limpar todas as estatísticas de uso? Esta ação não pode ser desfeita.",
-    "cancel": "Cancelar",
-    "confirm": "Limpar"
-  },
-  "customRange": {
-    "from": "De",
-    "to": "Até"
-  },
-  "sessions": {
-    "title": "Sessões",
-    "noSessions": "Nenhuma sessão neste período",
-    "filterModel": "Todos os modelos",
-    "filterProvider": "Todos os provedores",
-    "callCount": "{{count}} chamadas"
-  },
-  "sessionDetail": {
-    "summary": "Resumo da sessão",
-    "apiCalls": "Chamadas de API",
-    "noApiCalls": "Nenhuma chamada de API registrada",
-    "input": "Entrada",
-    "output": "Saída",
-    "cost": "Custo",
-    "model": "Modelo",
-    "mode": "Modo",
-    "time": "Hora",
-    "status": "Status"
-  },
-  "time": {
-    "justNow": "agora mesmo",
-    "minutesAgo": "há {{count}} min",
-    "hoursAgo": "há {{count}} h",
-    "yesterday": "ontem",
-    "daysAgo": "há {{count}} dias"
-  }
+	"title": "Painel",
+	"done": "Voltar",
+	"range": {
+		"today": "Hoje",
+		"7d": "7 dias",
+		"30d": "30 dias",
+		"custom": "Personalizado",
+		"all": "Tudo"
+	},
+	"summary": {
+		"totalTokens": "Tokens totais",
+		"inputTokens": "Tokens de entrada",
+		"outputTokens": "Tokens de saída",
+		"cacheTokens": "Tokens de cache",
+		"cost": "Custo"
+	},
+	"states": {
+		"loading": "Carregando...",
+		"error": "Falha ao carregar as estatísticas",
+		"empty": "Ainda não há dados de uso",
+		"emptyHint": "Inicie uma conversa para ver as estatísticas"
+	},
+	"actions": {
+		"refresh": "Atualizar",
+		"exportJson": "Exportar JSON",
+		"exportCsv": "Exportar CSV",
+		"clear": "Limpar estatísticas"
+	},
+	"breakdown": {
+		"title": "Detalhamento",
+		"model": "Modelo",
+		"provider": "Provedor",
+		"mode": "Modo",
+		"events": "Eventos",
+		"inputTokens": "Entrada",
+		"outputTokens": "Saída",
+		"cacheReadTokens": "Leitura cache",
+		"cacheWriteTokens": "Escrita cache",
+		"reasoningTokens": "Raciocínio",
+		"totalTokens": "Total",
+		"costUsd": "Custo",
+		"unknown": "Desconhecido"
+	},
+	"coverage": {
+		"title": "Cobertura de dados",
+		"liveFrom": "Ao vivo desde",
+		"lastUpdated": "Última atualização",
+		"backfilledEvents": "Eventos retroativos",
+		"paused": "Gravação pausada (limite de armazenamento atingido)"
+	},
+	"clearDialog": {
+		"title": "Limpar estatísticas",
+		"description": "Tem certeza de que deseja limpar todas as estatísticas de uso? Esta ação não pode ser desfeita.",
+		"cancel": "Cancelar",
+		"confirm": "Limpar"
+	},
+	"customRange": {
+		"from": "De",
+		"to": "Até"
+	},
+	"sessions": {
+		"title": "Sessões",
+		"noSessions": "Nenhuma sessão neste período",
+		"filterModel": "Todos os modelos",
+		"filterProvider": "Todos os provedores",
+		"callCount": "{{count}} chamadas"
+	},
+	"sessionDetail": {
+		"summary": "Resumo da sessão",
+		"apiCalls": "Chamadas de API",
+		"noApiCalls": "Nenhuma chamada de API registrada",
+		"input": "Entrada",
+		"output": "Saída",
+		"cost": "Custo",
+		"model": "Modelo",
+		"mode": "Modo",
+		"time": "Hora",
+		"status": "Status"
+	},
+	"time": {
+		"justNow": "agora mesmo",
+		"minutesAgo": "há {{count}} min",
+		"hoursAgo": "há {{count}} h",
+		"yesterday": "ontem",
+		"daysAgo": "há {{count}} dias"
+	}
 }
