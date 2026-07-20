@@ -207,6 +207,22 @@ describe("UsageAggregator", () => {
 			expect(providers).toEqual(["anthropic", "openai"])
 		})
 
+		it("should separate provider buckets by endpoint domain", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", provider: "openai", endpoint: "kimi.ai" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", provider: "openai", endpoint: "kimi.ai" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", provider: "openai" }), // default endpoint
+				makeEvent({ eventId: "evt-4", idempotencyKey: "idem-4", provider: "openai", endpoint: "localhost:1234" }),
+			]
+			const query = makeQuery({ groupBy: ["provider"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(3)
+			const keys = result.buckets.map((b) => b.key.provider).sort()
+			expect(keys).toEqual(["openai", "openai (kimi.ai)", "openai (localhost:1234)"])
+		})
+
 		it("should group by model", () => {
 			const events = [
 				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", model: "claude-sonnet-4-20250514" }),

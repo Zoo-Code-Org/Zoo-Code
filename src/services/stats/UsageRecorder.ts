@@ -37,6 +37,12 @@ export interface UsageRecordingContext {
 	// source
 	costSource: UsageValueSource
 	tokenSource: UsageValueSource
+	/**
+	 * Domain extracted from the provider's custom base URL. Only set when the
+	 * user configured a custom base URL that differs from the provider default.
+	 * Absent for default endpoints. See resolveEndpoint() in Task.ts.
+	 */
+	endpoint?: string
 }
 
 // ── UsageRecorder ────────────────────────────────────────────────────────────
@@ -96,6 +102,7 @@ export class UsageRecorder {
 			provider: ctx.provider,
 			model: ctx.model,
 			mode: ctx.mode,
+			endpoint: ctx.endpoint,
 			usage: {
 				inputTokens: ctx.inputTokens > 0 ? { value: ctx.inputTokens, source: ctx.tokenSource } : undefined,
 				outputTokens: ctx.outputTokens > 0 ? { value: ctx.outputTokens, source: ctx.tokenSource } : undefined,

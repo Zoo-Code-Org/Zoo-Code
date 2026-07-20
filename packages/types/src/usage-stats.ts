@@ -45,6 +45,14 @@ export const UsageEventV1 = z.object({
 	provider: z.string(),
 	model: z.string(),
 	mode: z.string(),
+	/**
+	 * Domain extracted from the provider's custom base URL (e.g. "kimi.ai",
+	 * "localhost:1234"). Only set when the user configured a custom base URL
+	 * that differs from the provider's default. Absent for default endpoints
+	 * and for providers without a base URL field. Backward compatible:
+	 * events recorded before this field was introduced remain valid.
+	 */
+	endpoint: z.string().optional(),
 	usage: z.object({
 		inputTokens: SourcedNumber.optional(),
 		outputTokens: SourcedNumber.optional(),
