@@ -95,18 +95,22 @@ export class TerminalProcess extends BaseTerminalProcess {
 				// Remove event listener to prevent memory leaks
 				this.removeAllListeners("stream_available")
 
-				// Emit no_shell_integration event with descriptive message
-				this.emit("no_shell_integration", {
-					message: `VSCE shell integration stream did not start within ${Terminal.getShellIntegrationTimeout() / 1000} seconds. Terminal problem?`,
-					commandSubmitted: true,
-				})
-
-				// Reject with descriptive error
-				reject(
-					new Error(
-						`VSCE shell integration stream did not start within ${Terminal.getShellIntegrationTimeout() / 1000} seconds.`,
-					),
-				)
+				// Emit no_shell_integration event with commandSubmitted: true so the
+					// ExecuteCommandTool catch block retries via execa fallback. The command
+					// was already submitted to the terminal (executeCommand() returned),
+					// so the original may still be running — the retried execa output may
+					// duplicate or differ, but a result is always better than a dead-end.
+					this.emit("no_shell_integration", {
+						message: `VSCE shell integration stream did not start within ${Terminal.getShellIntegrationTimeout() / 1000} seconds. The command was submitted but output tracking was lost; retrying with fallback executor.`,
+						commandSubmitted: true,
+					})
+	
+					// Reject with descriptive error
+					reject(
+						new Error(
+							`VSCE shell integration stream did not start within ${Terminal.getShellIntegrationTimeout() / 1000} seconds.`,
+						),
+					)
 			}, Terminal.getShellIntegrationTimeout())
 
 			cancelStreamWait = () => {

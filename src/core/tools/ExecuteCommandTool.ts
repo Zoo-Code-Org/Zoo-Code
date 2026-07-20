@@ -175,17 +175,28 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					}
 
 					pushToolResult(result)
-				} else {
-					// Command was submitted but shell integration lost track of it — show warning.
-					await task.say("shell_integration_warning")
-
-					if (error instanceof ShellIntegrationError) {
-						pushToolResult(
-							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
-						)
-					} else {
-						pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
+				} else if (error instanceof ShellIntegrationError) {
+					// Command WAS submitted but shell integration lost track of output.
+					// Retry with execa so the user always gets a result. The original
+					// command may have already executed in the terminal, so the retried
+					// output could duplicate or differ — but a result is always better UX
+					// than a dead-end warning.
+					const status: CommandExecutionStatus = { executionId, status: "fallback" }
+					provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+	
+					const [rejected, result] = await executeCommandInTerminal(task, {
+						...options,
+						terminalShellIntegrationDisabled: true,
+					})
+	
+					if (rejected) {
+						task.didRejectTool = true
 					}
+	
+					pushToolResult(result)
+				} else {
+					// Completely unexpected error — not a ShellIntegrationError at all.
+					pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
 				}
 			}
 

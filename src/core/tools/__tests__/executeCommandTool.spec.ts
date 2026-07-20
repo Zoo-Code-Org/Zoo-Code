@@ -70,6 +70,7 @@ describe("executeCommandTool", () => {
 			ask: vitest.fn().mockResolvedValue(undefined),
 			say: vitest.fn().mockResolvedValue(undefined),
 			sayAndCreateMissingParamError: vitest.fn().mockResolvedValue("Missing parameter error"),
+			supersedePendingAsk: vitest.fn(),
 			consecutiveMistakeCount: 0,
 			didRejectTool: false,
 			rooIgnoreController: {
@@ -277,7 +278,78 @@ describe("executeCommandTool", () => {
 
 			expect(executeCommandModule.canRetryShellIntegrationError(error)).toBe(false)
 		})
-
+	
+		it("retries with execa fallback when ShellIntegrationError has commandSubmitted=true", async () => {
+			// The TerminalRegistry mock's runCommand invokes onNoShellIntegration with
+			// commandSubmitted: true on the first call, which causes executeCommandInTerminal
+			// to throw a ShellIntegrationError. The catch block should retry with execa
+			// fallback. On the retry, no shell integration error is triggered.
+			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
+			let callCount = 0
+			const mockRunCommand = vitest.fn().mockImplementation((_cmd: string, callbacks: any) => {
+				callCount++
+				if (callCount === 1) {
+					// First call: simulate shell integration error with commandSubmitted: true
+					callbacks?.onNoShellIntegration?.({
+						message: "stream did not start",
+						commandSubmitted: true,
+					})
+				}
+				// Both calls: complete so the process promise resolves
+				callbacks?.onCompleted?.("")
+				const p = Promise.resolve()
+				return Object.assign(p, { continue: () => {}, abort: () => {} })
+			})
+			;(TerminalRegistry.getOrCreateTerminal as any).mockResolvedValue({
+				runCommand: mockRunCommand,
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			})
+	
+			mockToolUse.params.command = "echo test"
+			mockToolUse.nativeArgs = { command: "echo test" }
+	
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+	
+			// Verify: handleError was NOT called (inner catch handled it)
+			expect(mockHandleError).not.toHaveBeenCalled()
+			// Verify: no shell_integration_warning was shown (old behavior removed)
+			expect(mockCline.say).not.toHaveBeenCalledWith("shell_integration_warning")
+			// Verify: pushToolResult was called (got a result, not a dead-end error)
+			expect(mockPushToolResult).toHaveBeenCalled()
+			// Verify: the result is NOT the old dead-end warning message
+			const resultArg = mockPushToolResult.mock.calls[0]?.[0] as string
+			expect(resultArg).not.toContain("shell integration did not report its output")
+			expect(resultArg).not.toContain("Do not run the command again automatically")
+		})
+	
+		it("shows error for non-ShellIntegrationError exceptions in the catch block", async () => {
+			// Simulate a generic error (not ShellIntegrationError) by making
+			// TerminalRegistry.getOrCreateTerminal throw.
+			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
+			;(TerminalRegistry.getOrCreateTerminal as any).mockRejectedValue(new Error("Unexpected terminal failure"))
+	
+			mockToolUse.params.command = "echo test"
+			mockToolUse.nativeArgs = { command: "echo test" }
+	
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+	
+			// Verify: handleError was NOT called — the inner catch handles non-ShellIntegrationError
+			// by pushing a generic error message, not by calling handleError.
+			expect(mockHandleError).not.toHaveBeenCalled()
+			// Verify: the generic error message was pushed
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				"Command failed to execute in terminal due to a shell integration error.",
+			)
+		})
+	
 		it("selects the Execa fallback provider for cmd.exe shell integration", () => {
 			vitest.spyOn(Terminal, "isActiveShellCmdExe").mockReturnValue(true)
 
