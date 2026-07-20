@@ -303,7 +303,7 @@ describe("DashboardView", () => {
 			expect(statsMsg.requestId).toMatch(/^dashboard-/)
 			expect(statsMsg.usageStatsQuery.preset).toBe("today")
 			expect(statsMsg.usageStatsQuery.groupBy).toContain("model")
-			expect(statsMsg.usageStatsQuery.groupBy).toContain("day")
+			expect(statsMsg.usageStatsQuery.groupBy).not.toContain("day")
 
 			const sessionsCall = postMessageMock.mock.calls.find(
 				(c) => (c[0] as { type: string }).type === "getDashboardSessions",
