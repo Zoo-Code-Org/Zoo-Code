@@ -44,6 +44,7 @@ vi.mock("../litellm")
 vi.mock("../openrouter")
 vi.mock("../requesty")
 vi.mock("../kenari")
+vi.mock("../moonshot")
 
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
@@ -65,11 +66,13 @@ import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
 import { getKenariModels } from "../kenari"
+import { getMoonshotModels } from "../moonshot"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
 const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
 const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels>
 const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
+const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
 
@@ -161,6 +164,27 @@ describe("getModels with new GetModelsOptions", () => {
 				baseUrl: "http://localhost:4000",
 			}),
 		).rejects.toThrow("LiteLLM connection failed")
+	})
+
+	it("calls getMoonshotModels with correct parameters", async () => {
+		const mockModels = {
+			"kimi-k2-0905-preview": {
+				maxTokens: 16384,
+				contextWindow: 262144,
+				supportsPromptCache: true,
+				description: "Moonshot Kimi K2",
+			},
+		}
+		mockGetMoonshotModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({
+			provider: "moonshot",
+			apiKey: "test-key",
+			baseUrl: "https://api.moonshot.ai/v1",
+		})
+
+		expect(mockGetMoonshotModels).toHaveBeenCalledWith("https://api.moonshot.ai/v1", "test-key")
+		expect(result).toEqual(mockModels)
 	})
 
 	it("validates exhaustive provider checking with unknown provider", async () => {
