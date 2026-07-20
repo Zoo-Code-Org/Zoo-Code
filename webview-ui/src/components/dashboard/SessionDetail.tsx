@@ -57,7 +57,7 @@ interface APICallListProps {
 /**
  * Renders the per-API-call table for an expanded session.
  *
- * Columns: # (index), Time, Input Tokens, Output Tokens, Cost, Status, Model.
+ * Columns: # (index), Mode, Time, Input Tokens, Output Tokens, Cost, Status, Model.
  * The table is wrapped in an `overflow-x-auto` container so it remains usable
  * on narrow viewports without breaking the dashboard layout.
  */
@@ -83,6 +83,9 @@ const APICallList = memo(({ apiCalls }: APICallListProps) => {
 					<tr>
 						<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
 							#
+						</th>
+						<th className="px-2 py-1.5 text-left font-medium text-vscode-foreground whitespace-nowrap">
+							{t("dashboard:sessionDetail.mode")}
 						</th>
 						<th className="px-2 py-1.5 text-left font-medium text-vscode-foreground whitespace-nowrap">
 							{t("dashboard:sessionDetail.time")}
@@ -112,6 +115,9 @@ const APICallList = memo(({ apiCalls }: APICallListProps) => {
 							data-testid={`dashboard-session-detail-call-${call.index}`}>
 							<td className="px-2 py-1.5 text-right text-vscode-descriptionForeground tabular-nums">
 								{call.index}
+							</td>
+							<td className="px-2 py-1.5 text-left text-vscode-foreground whitespace-nowrap">
+								{call.mode || "—"}
 							</td>
 							<td className="px-2 py-1.5 text-left text-vscode-foreground tabular-nums whitespace-nowrap">
 								{formatTime(call.timestamp)}
@@ -172,15 +178,22 @@ const SessionDetail = memo(({ detail }: SessionDetailProps) => {
 		return { totalInputTokens: input, totalOutputTokens: output }
 	}, [detail.apiCalls])
 
+	// A session may use multiple models/modes (e.g. orchestrator-crow
+	// delegating to code, debug, ask). Prefer the full `models`/`modes`
+	// arrays when present and non-empty, falling back to the legacy
+	// single-value fields for older payloads.
+	const modelDisplay = detail.models && detail.models.length > 0 ? detail.models.join(", ") : detail.model || "—"
+	const modeDisplay = detail.modes && detail.modes.length > 0 ? detail.modes.join(", ") : detail.mode || "—"
+
 	const summaryItems = useMemo(
 		() => [
 			{ label: t("dashboard:sessionDetail.input"), value: formatCompact(totalInputTokens) },
 			{ label: t("dashboard:sessionDetail.output"), value: formatCompact(totalOutputTokens) },
 			{ label: t("dashboard:sessionDetail.cost"), value: formatCost(detail.totalCost) },
-			{ label: t("dashboard:sessionDetail.model"), value: detail.model || "—" },
-			{ label: t("dashboard:sessionDetail.mode"), value: detail.mode || "—" },
+			{ label: t("dashboard:sessionDetail.model"), value: modelDisplay },
+			{ label: t("dashboard:sessionDetail.mode"), value: modeDisplay },
 		],
-		[detail, t, totalInputTokens, totalOutputTokens],
+		[detail, t, totalInputTokens, totalOutputTokens, modelDisplay, modeDisplay],
 	)
 
 	return (

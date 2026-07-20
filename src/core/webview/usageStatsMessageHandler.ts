@@ -543,6 +543,12 @@ async function buildSessionSummaries(events: UsageEventV1[], globalStoragePath: 
 			model: first.model,
 			provider: first.provider,
 			mode: first.mode,
+			// Preserve first-seen order across the session's events so that
+			// multi-model/multi-mode sessions (e.g. orchestrator delegations)
+			// are fully represented. `model`/`mode` above keep the earliest
+			// value for backward compatibility.
+			models: [...new Set(sorted.map((e) => e.model))],
+			modes: [...new Set(sorted.map((e) => e.mode))],
 			totalTokens,
 			totalCost,
 			callCount: sorted.length,
@@ -617,9 +623,12 @@ export async function handleGetDashboardSessions(provider: ClineProvider, messag
 		let summaries = await buildSessionSummaries(events, globalStoragePath)
 
 		// Apply optional model/provider filters (post-grouping).
+		// The model filter checks `models` (the full set used in the session)
+		// so that sessions which switched models are still matched; it falls
+		// back to the legacy `model` field when `models` is absent.
 		const filters = message.dashboardSessionFilters
 		if (filters?.model) {
-			summaries = summaries.filter((s) => s.model === filters.model)
+			summaries = summaries.filter((s) => s.models?.includes(filters.model!) ?? s.model === filters.model)
 		}
 		if (filters?.provider) {
 			summaries = summaries.filter((s) => s.provider === filters.provider)
@@ -660,6 +669,7 @@ export async function handleGetDashboardSessions(provider: ClineProvider, messag
 function mapEventToApiCall(event: UsageEventV1, index: number): APICallRecord {
 	return {
 		index,
+		mode: event.mode,
 		timestamp: new Date(event.occurredAt).getTime(),
 		inputTokens: event.usage.inputTokens?.value ?? 0,
 		outputTokens: event.usage.outputTokens?.value ?? 0,
@@ -716,6 +726,10 @@ async function buildSessionDetail(
 		model: first.model,
 		provider: first.provider,
 		mode: first.mode,
+		// Mirror buildSessionSummaries: capture every unique model/mode in
+		// first-seen order so the detail view can show the full set.
+		models: [...new Set(sorted.map((e) => e.model))],
+		modes: [...new Set(sorted.map((e) => e.mode))],
 		totalTokens,
 		totalCost,
 		callCount: sorted.length,
@@ -811,6 +825,8 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 					model: "",
 					provider: "",
 					mode: "",
+					models: [],
+					modes: [],
 					totalTokens: 0,
 					totalCost: 0,
 					callCount: 0,

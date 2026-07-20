@@ -169,7 +169,11 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				from,
 				to,
 				timezone,
-				groupBy: [currentGroupBy],
+				groupBy: (
+					[currentGroupBy, "day"] as Array<
+						"day" | "week" | "month" | "provider" | "model" | "mode" | "status" | "source"
+					>
+				).filter((v, i, a) => a.indexOf(v) === i),
 				includeCancelled: false,
 			}
 		},

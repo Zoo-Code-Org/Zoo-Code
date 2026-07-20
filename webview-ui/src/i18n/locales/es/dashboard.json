@@ -82,6 +82,6 @@
 		"minutesAgo": "hace {{count}} min",
 		"hoursAgo": "hace {{count}} h",
 		"yesterday": "ayer",
-		"daysAgo": "hace {{count}} dias"
+		"daysAgo": "hace {{count}} días"
 	}
 }
