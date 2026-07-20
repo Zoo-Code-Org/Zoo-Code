@@ -20,24 +20,26 @@ interface UsageHeatmapProps {
 // ── Heatmap color levels ────────────────────────────────────────────────────
 
 /**
- * Map a token value to a 0-4 intensity level based on the max value.
- * Level 0 = no data, 1-4 = increasing intensity.
+ * Map a token value to a 0-5 intensity level based on the max value.
+ * Level 0 = no data, 1-5 = increasing intensity.
  */
 function getIntensityLevel(value: number, maxValue: number): number {
 	if (value === 0 || maxValue === 0) return 0
 	const ratio = value / maxValue
-	if (ratio < 0.25) return 1
-	if (ratio < 0.5) return 2
-	if (ratio < 0.75) return 3
-	return 4
+	if (ratio < 0.2) return 1
+	if (ratio < 0.4) return 2
+	if (ratio < 0.6) return 3
+	if (ratio < 0.8) return 4
+	return 5
 }
 
 const HEATMAP_COLORS: Record<number, string> = {
-	0: "bg-vscode-editor-inactiveSelectionBackground",
-	1: "bg-vscode-textBlockQuote-background",
-	2: "bg-vscode-inputOption-activeBackground",
-	3: "bg-vscode-button-background",
-	4: "bg-vscode-button-hoverBackground",
+	0: "transparent", // No data — white border only
+	1: "#c6dbef", // Lightest blue
+	2: "#9ecae1", // Light blue
+	3: "#6baed6", // Medium blue
+	4: "#3182bd", // Dark blue
+	5: "#08519c", // Darkest blue
 }
 
 // ── Date helpers ────────────────────────────────────────────────────────────
@@ -176,7 +178,11 @@ const UsageHeatmap = memo(({ buckets }: UsageHeatmapProps) => {
 											: `${formatDisplayDate(day.date)}: ${t("stats:heatmap.noData")}`
 									}>
 									<div
-										className={`${cellSize} rounded-sm ${HEATMAP_COLORS[level]} transition-colors`}
+										className={`${cellSize} rounded-sm transition-colors`}
+										style={{
+											backgroundColor: HEATMAP_COLORS[level],
+											border: "1px solid rgba(255, 255, 255, 0.3)",
+										}}
 										aria-label={`${day.date}: ${day.totalTokens} tokens`}
 									/>
 								</StandardTooltip>
@@ -187,10 +193,14 @@ const UsageHeatmap = memo(({ buckets }: UsageHeatmapProps) => {
 					{/* Legend */}
 					<div className="flex items-center gap-1 text-xs text-vscode-descriptionForeground">
 						<span>{t("stats:heatmap.less")}</span>
-						{[1, 2, 3, 4].map((level) => (
+						{[0, 1, 2, 3, 4, 5].map((level) => (
 							<div
 								key={level}
-								className={`w-3 h-3 rounded-sm ${HEATMAP_COLORS[level]}`}
+								className="w-3 h-3 rounded-sm"
+								style={{
+									backgroundColor: HEATMAP_COLORS[level],
+									border: "1px solid rgba(255, 255, 255, 0.3)",
+								}}
 							/>
 						))}
 						<span>{t("stats:heatmap.more")}</span>

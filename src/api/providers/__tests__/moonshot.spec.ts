@@ -172,6 +172,8 @@ describe("MoonshotHandler", () => {
 			expect(usageChunks.length).toBeGreaterThan(0)
 			expect(usageChunks[0].inputTokens).toBe(10)
 			expect(usageChunks[0].outputTokens).toBe(5)
+			expect(usageChunks[0].totalCost).toBeDefined()
+			expect(typeof usageChunks[0].totalCost).toBe("number")
 		})
 
 		it("should include cache metrics in usage information", async () => {
@@ -261,6 +263,8 @@ describe("MoonshotHandler", () => {
 			expect(result.outputTokens).toBe(50)
 			expect(result.cacheWriteTokens).toBe(0)
 			expect(result.cacheReadTokens).toBe(20)
+			expect(result.totalCost).toBeDefined()
+			expect(typeof result.totalCost).toBe("number")
 		})
 
 		it("should handle missing cache metrics gracefully", () => {
