@@ -46,7 +46,8 @@
 		"360d": "360 Tage",
 		"less": "Weniger",
 		"more": "Mehr",
-		"noData": "Keine Daten"
+		"noData": "Keine Daten",
+		"loading": "Wird geladen..."
 	},
 	"coverage": {
 		"title": "Datenabdeckung",

@@ -46,7 +46,8 @@
 		"360d": "360 hari",
 		"less": "Lebih sedikit",
 		"more": "Lebih banyak",
-		"noData": "Tidak ada data"
+		"noData": "Tidak ada data",
+		"loading": "Memuat..."
 	},
 	"coverage": {
 		"title": "Cakupan data",

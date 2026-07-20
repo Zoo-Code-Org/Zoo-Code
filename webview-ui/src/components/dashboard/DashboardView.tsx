@@ -709,7 +709,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 						<DashboardSummary totals={totals} />
 
 						{/* Heatmap */}
-						<UsageHeatmap buckets={buckets} />
+						<UsageHeatmap />
 
 						{/* Breakdown table */}
 						<div className="flex flex-col gap-2" data-testid="dashboard-breakdown">

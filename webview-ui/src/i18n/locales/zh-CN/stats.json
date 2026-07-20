@@ -46,7 +46,8 @@
 		"360d": "360天",
 		"less": "较少",
 		"more": "较多",
-		"noData": "无数据"
+		"noData": "无数据",
+		"loading": "加载中..."
 	},
 	"coverage": {
 		"title": "数据覆盖范围",

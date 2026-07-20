@@ -46,7 +46,8 @@
 		"360d": "360 dagen",
 		"less": "Minder",
 		"more": "Meer",
-		"noData": "Geen gegevens"
+		"noData": "Geen gegevens",
+		"loading": "Laden..."
 	},
 	"coverage": {
 		"title": "Gegevensdekking",

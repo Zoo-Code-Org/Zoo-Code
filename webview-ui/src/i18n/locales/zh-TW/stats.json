@@ -46,7 +46,8 @@
 		"360d": "360天",
 		"less": "較少",
 		"more": "較多",
-		"noData": "無資料"
+		"noData": "無資料",
+		"loading": "載入中..."
 	},
 	"coverage": {
 		"title": "資料涵蓋範圍",

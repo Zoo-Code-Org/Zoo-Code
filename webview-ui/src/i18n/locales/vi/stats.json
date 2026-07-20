@@ -46,7 +46,8 @@
 		"360d": "360 ngày",
 		"less": "Ít hơn",
 		"more": "Nhiều hơn",
-		"noData": "Không có dữ liệu"
+		"noData": "Không có dữ liệu",
+		"loading": "Đang tải..."
 	},
 	"coverage": {
 		"title": "Phạm vi dữ liệu",

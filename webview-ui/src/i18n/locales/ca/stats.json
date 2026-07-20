@@ -46,7 +46,8 @@
 		"360d": "360 dies",
 		"less": "Menys",
 		"more": "Més",
-		"noData": "Sense dades"
+		"noData": "Sense dades",
+		"loading": "Carregant..."
 	},
 	"coverage": {
 		"title": "Cobertura de dades",

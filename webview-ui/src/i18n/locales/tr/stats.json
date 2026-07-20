@@ -46,7 +46,8 @@
 		"360d": "360 gün",
 		"less": "Az",
 		"more": "Çok",
-		"noData": "Veri yok"
+		"noData": "Veri yok",
+		"loading": "Yükleniyor..."
 	},
 	"coverage": {
 		"title": "Veri kapsamı",
