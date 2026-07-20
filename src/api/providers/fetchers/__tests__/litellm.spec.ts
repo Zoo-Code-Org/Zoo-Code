@@ -699,12 +699,12 @@ describe("getLiteLLMModels", () => {
 	})
 
 	describe("preserveReasoning inference", () => {
-		it("sets preserveReasoning: true when the routed model matches a known reasoning family", async () => {
+		it("sets preserveReasoning: true when only the routed model (not the alias) matches a known reasoning model id", async () => {
 			const mockResponse = {
 				data: {
 					data: [
 						{
-							model_name: "deepseek-reasoner-alias",
+							model_name: "my-deepseek-alias",
 							model_info: {
 								max_tokens: 8192,
 								max_input_tokens: 128000,
@@ -714,7 +714,7 @@ describe("getLiteLLMModels", () => {
 							},
 						},
 						{
-							model_name: "kimi-k2-thinking",
+							model_name: "my-kimi-alias",
 							model_info: {
 								max_tokens: 8192,
 								max_input_tokens: 128000,
@@ -731,11 +731,11 @@ describe("getLiteLLMModels", () => {
 
 			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
 
-			expect(result["deepseek-reasoner-alias"]).toMatchObject({ preserveReasoning: true })
-			expect(result["kimi-k2-thinking"]).toMatchObject({ preserveReasoning: true })
+			expect(result["my-deepseek-alias"]).toMatchObject({ preserveReasoning: true })
+			expect(result["my-kimi-alias"]).toMatchObject({ preserveReasoning: true })
 		})
 
-		it("omits preserveReasoning when the routed model does not match a known reasoning family", async () => {
+		it("omits preserveReasoning when the routed model does not match a known reasoning model id", async () => {
 			const mockResponse = {
 				data: {
 					data: [
@@ -765,7 +765,7 @@ describe("getLiteLLMModels", () => {
 				data: {
 					data: [
 						{
-							model_name: "glm-5.1-turbo",
+							model_name: "glm-5.2",
 							model_info: {
 								max_tokens: 8192,
 								max_input_tokens: 128000,
@@ -782,7 +782,32 @@ describe("getLiteLLMModels", () => {
 
 			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
 
-			expect(result["glm-5.1-turbo"]).toMatchObject({ preserveReasoning: true })
+			expect(result["glm-5.2"]).toMatchObject({ preserveReasoning: true })
+		})
+
+		it("does not match a model id that merely contains a known family as a substring", async () => {
+			const mockResponse = {
+				data: {
+					data: [
+						{
+							model_name: "glm-5-flash",
+							model_info: {
+								max_tokens: 8192,
+								max_input_tokens: 128000,
+							},
+							litellm_params: {
+								model: "zai/glm-5-flash",
+							},
+						},
+					],
+				},
+			}
+
+			mockedAxios.get.mockResolvedValue(mockResponse)
+
+			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+
+			expect(result["glm-5-flash"]).not.toHaveProperty("preserveReasoning")
 		})
 	})
 })

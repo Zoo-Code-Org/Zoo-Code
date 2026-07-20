@@ -1,7 +1,7 @@
 import axios from "axios"
 
 import type { ModelRecord } from "@roo-code/types"
-import { LITELLM_PRESERVE_REASONING_PATTERN } from "@roo-code/types"
+import { isLiteLLMPreserveReasoningModel } from "@roo-code/types"
 
 import { DEFAULT_HEADERS } from "../constants"
 /**
@@ -42,8 +42,9 @@ export async function getLiteLLMModels(apiKey: string, baseUrl: string): Promise
 				if (!modelName || !modelInfo || !litellmModelName) continue
 
 				// LiteLLM's /v1/model/info never reports reasoning capability flags, so infer
-				// preserveReasoning from the alias/routed-model name against known model families.
-				const preservesReasoning = LITELLM_PRESERVE_REASONING_PATTERN.test(`${modelName} ${litellmModelName}`)
+				// preserveReasoning from explicit model ids in either the alias or routed model name.
+				const preservesReasoning =
+					isLiteLLMPreserveReasoningModel(modelName) || isLiteLLMPreserveReasoningModel(litellmModelName)
 
 				models[modelName] = {
 					maxTokens: modelInfo.max_output_tokens || modelInfo.max_tokens || 8192,

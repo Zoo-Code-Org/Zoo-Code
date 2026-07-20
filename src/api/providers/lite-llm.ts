@@ -119,7 +119,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		const { id: modelId, info } = await this.fetchModel()
 
 		// Models that require reasoning_content to be echoed back during tool-call
-		// continuations (see LITELLM_PRESERVE_REASONING_PATTERN) need convertToR1Format:
+		// continuations (see LITELLM_PRESERVE_REASONING_MODEL_IDS) need convertToR1Format:
 		// it merges consecutive same-role messages and, via mergeToolResultText, folds
 		// text following tool_results into the last tool message so a user message
 		// never gets inserted mid-turn and causes the model to drop prior reasoning_content.
