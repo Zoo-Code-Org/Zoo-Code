@@ -64,11 +64,24 @@ function formatDisplayDate(dateKey: string): string {
 	}
 }
 
+// ── Range configuration ─────────────────────────────────────────────────────
+
+type HeatmapRange = "30d" | "60d" | "120d" | "360d"
+
+const RANGE_DAYS: Record<HeatmapRange, number> = {
+	"30d": 30,
+	"60d": 60,
+	"120d": 120,
+	"360d": 360,
+}
+
+const RANGE_OPTIONS: HeatmapRange[] = ["30d", "60d", "120d", "360d"]
+
 // ── UsageHeatmap ────────────────────────────────────────────────────────────
 
 const UsageHeatmap = memo(({ buckets }: UsageHeatmapProps) => {
 	const { t } = useAppTranslation()
-	const [range, setRange] = useState<"30d" | "90d">("30d")
+	const [range, setRange] = useState<HeatmapRange>("30d")
 
 	// Extract daily activity from buckets that have a "day" key
 	const dailyMap = useMemo(() => {
@@ -96,7 +109,7 @@ const UsageHeatmap = memo(({ buckets }: UsageHeatmapProps) => {
 
 	// Generate the date range for display
 	const days = useMemo(() => {
-		const count = range === "30d" ? 30 : 90
+		const count = RANGE_DAYS[range]
 		const today = new Date()
 		today.setHours(0, 0, 0, 0)
 		const result: DailyActivity[] = []
@@ -128,43 +141,36 @@ const UsageHeatmap = memo(({ buckets }: UsageHeatmapProps) => {
 
 	const hasData = maxTokens > 0
 
-	// Grid columns: 7 for 30d (compact), 7 for 90d but smaller cells
-	const cellSize = range === "30d" ? "w-4 h-4" : "w-2.5 h-2.5"
-	const gap = range === "30d" ? "gap-1" : "gap-0.5"
+	// Gap between cells: tighter for longer ranges
+	const gap = range === "30d" ? "gap-0.5" : "gap-px"
 
 	return (
 		<div className="flex flex-col gap-2" data-testid="usage-heatmap">
 			<div className="flex items-center justify-between">
-				<h4 className="text-sm font-medium text-vscode-foreground m-0">
-					{t("stats:heatmap.title")}
-				</h4>
+				<h4 className="text-sm font-medium text-vscode-foreground m-0">{t("stats:heatmap.title")}</h4>
 				<div className="flex gap-1">
-					<Button
-						variant={range === "30d" ? "primary" : "ghost"}
-						size="sm"
-						onClick={() => setRange("30d")}
-						data-testid="heatmap-range-30d">
-						{t("stats:heatmap.30d")}
-					</Button>
-					<Button
-						variant={range === "90d" ? "primary" : "ghost"}
-						size="sm"
-						onClick={() => setRange("90d")}
-						data-testid="heatmap-range-90d">
-						{t("stats:heatmap.90d")}
-					</Button>
+					{RANGE_OPTIONS.map((option) => (
+						<Button
+							key={option}
+							variant={range === option ? "primary" : "ghost"}
+							size="sm"
+							onClick={() => setRange(option)}
+							data-testid={`heatmap-range-${option}`}>
+							{t(`stats:heatmap.${option}`)}
+						</Button>
+					))}
 				</div>
 			</div>
 
 			{!hasData ? (
-				<div className="text-xs text-vscode-descriptionForeground py-4">
-					{t("stats:heatmap.noData")}
-				</div>
+				<div className="text-xs text-vscode-descriptionForeground py-4">{t("stats:heatmap.noData")}</div>
 			) : (
 				<>
 					<div
 						className={`grid grid-flow-col grid-rows-7 ${gap} overflow-x-auto`}
-						style={{ gridTemplateColumns: `repeat(${Math.ceil(days.length / 7)}, minmax(0, 1fr))` }}
+						style={{
+							gridTemplateColumns: `repeat(${Math.ceil(days.length / 7)}, minmax(14px, 1fr))`,
+						}}
 						role="img"
 						aria-label={t("stats:heatmap.title")}>
 						{days.map((day) => {
@@ -178,7 +184,7 @@ const UsageHeatmap = memo(({ buckets }: UsageHeatmapProps) => {
 											: `${formatDisplayDate(day.date)}: ${t("stats:heatmap.noData")}`
 									}>
 									<div
-										className={`${cellSize} rounded-sm transition-colors`}
+										className="rounded-sm transition-colors min-w-[14px] min-h-[14px]"
 										style={{
 											backgroundColor: HEATMAP_COLORS[level],
 											border: "1px solid rgba(255, 255, 255, 0.3)",

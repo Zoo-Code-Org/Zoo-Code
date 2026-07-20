@@ -1,79 +1,81 @@
 {
-  "title": "Thống kê sử dụng",
-  "done": "Quay lại trò chuyện",
-  "range": {
-    "today": "Hôm nay",
-    "7d": "7 ngày qua",
-    "30d": "30 ngày qua",
-    "all": "Tất cả thời gian"
-  },
-  "summary": {
-    "totalTokens": "Tổng số token",
-    "inputTokens": "Token đầu vào",
-    "outputTokens": "Token đầu ra",
-    "cacheTokens": "Token bộ nhớ đệm",
-    "costUsd": "Tổng chi phí"
-  },
-  "breakdown": {
-    "title": "Phân tích chi tiết",
-    "groupBy": "Nhóm theo",
-    "model": "Mô hình",
-    "provider": "Nhà cung cấp",
-    "mode": "Chế độ",
-    "status": "Trạng thái",
-    "day": "Ngày",
-    "week": "Tuần",
-    "month": "Tháng",
-    "events": "Sự kiện",
-    "completed": "Hoàn thành",
-    "failed": "Thất bại",
-    "cancelled": "Đã hủy",
-    "inputTokens": "Đầu vào",
-    "outputTokens": "Đầu ra",
-    "cacheReadTokens": "Đọc bộ nhớ đệm",
-    "cacheWriteTokens": "Ghi bộ nhớ đệm",
-    "reasoningTokens": "Suy luận",
-    "totalTokens": "Tổng",
-    "costUsd": "Chi phí (USD)",
-    "unknown": "Không xác định",
-    "empty": "Không có dữ liệu sử dụng cho phạm vi này."
-  },
-  "heatmap": {
-    "title": "Hoạt động hàng ngày",
-    "90d": "90 ngày",
-    "30d": "30 ngày",
-    "less": "Ít hơn",
-    "more": "Nhiều hơn",
-    "noData": "Không có dữ liệu"
-  },
-  "coverage": {
-    "title": "Phạm vi dữ liệu",
-    "liveFrom": "Bắt đầu ghi từ",
-    "backfilledEvents": "Sự kiện được bổ sung hồi tố",
-    "paused": "Ghi đang tạm dừng",
-    "notAvailable": "Không khả dụng"
-  },
-  "actions": {
-    "exportJson": "Xuất JSON",
-    "exportCsv": "Xuất CSV",
-    "clear": "Xóa tất cả dữ liệu",
-    "refresh": "Làm mới"
-  },
-  "clearDialog": {
-    "title": "Xóa tất cả thống kê sử dụng?",
-    "description": "Thao tác này sẽ xóa vĩnh viễn tất cả sự kiện sử dụng đã ghi khỏi bộ nhớ cục bộ. Hành động này không thể hoàn tác.",
-    "confirm": "Xóa",
-    "cancel": "Hủy"
-  },
-  "states": {
-    "loading": "Đang tải thống kê...",
-    "error": "Không thể tải thống kê",
-    "empty": "Chưa có dữ liệu sử dụng. Thống kê sẽ xuất hiện ở đây sau khi bạn thực hiện các lệnh gọi API LLM.",
-    "emptyHint": "Hãy thử gửi tin nhắn cho trợ lý AI của bạn để bắt đầu thu thập dữ liệu sử dụng."
-  },
-  "source": {
-    "provider": "Được báo cáo bởi nhà cung cấp",
-    "estimated": "Ước tính",
-    "backfilled": "Được bổ sung hồi tố"
-  }
+	"title": "Thống kê sử dụng",
+	"done": "Quay lại trò chuyện",
+	"range": {
+		"today": "Hôm nay",
+		"7d": "7 ngày qua",
+		"30d": "30 ngày qua",
+		"all": "Tất cả thời gian"
+	},
+	"summary": {
+		"totalTokens": "Tổng số token",
+		"inputTokens": "Token đầu vào",
+		"outputTokens": "Token đầu ra",
+		"cacheTokens": "Token bộ nhớ đệm",
+		"costUsd": "Tổng chi phí"
+	},
+	"breakdown": {
+		"title": "Phân tích chi tiết",
+		"groupBy": "Nhóm theo",
+		"model": "Mô hình",
+		"provider": "Nhà cung cấp",
+		"mode": "Chế độ",
+		"status": "Trạng thái",
+		"day": "Ngày",
+		"week": "Tuần",
+		"month": "Tháng",
+		"events": "Sự kiện",
+		"completed": "Hoàn thành",
+		"failed": "Thất bại",
+		"cancelled": "Đã hủy",
+		"inputTokens": "Đầu vào",
+		"outputTokens": "Đầu ra",
+		"cacheReadTokens": "Đọc bộ nhớ đệm",
+		"cacheWriteTokens": "Ghi bộ nhớ đệm",
+		"reasoningTokens": "Suy luận",
+		"totalTokens": "Tổng",
+		"costUsd": "Chi phí (USD)",
+		"unknown": "Không xác định",
+		"empty": "Không có dữ liệu sử dụng cho phạm vi này."
+	},
+	"heatmap": {
+		"title": "Hoạt động hàng ngày",
+		"30d": "30 ngày",
+		"60d": "60 ngày",
+		"120d": "120 ngày",
+		"360d": "360 ngày",
+		"less": "Ít hơn",
+		"more": "Nhiều hơn",
+		"noData": "Không có dữ liệu"
+	},
+	"coverage": {
+		"title": "Phạm vi dữ liệu",
+		"liveFrom": "Bắt đầu ghi từ",
+		"backfilledEvents": "Sự kiện được bổ sung hồi tố",
+		"paused": "Ghi đang tạm dừng",
+		"notAvailable": "Không khả dụng"
+	},
+	"actions": {
+		"exportJson": "Xuất JSON",
+		"exportCsv": "Xuất CSV",
+		"clear": "Xóa tất cả dữ liệu",
+		"refresh": "Làm mới"
+	},
+	"clearDialog": {
+		"title": "Xóa tất cả thống kê sử dụng?",
+		"description": "Thao tác này sẽ xóa vĩnh viễn tất cả sự kiện sử dụng đã ghi khỏi bộ nhớ cục bộ. Hành động này không thể hoàn tác.",
+		"confirm": "Xóa",
+		"cancel": "Hủy"
+	},
+	"states": {
+		"loading": "Đang tải thống kê...",
+		"error": "Không thể tải thống kê",
+		"empty": "Chưa có dữ liệu sử dụng. Thống kê sẽ xuất hiện ở đây sau khi bạn thực hiện các lệnh gọi API LLM.",
+		"emptyHint": "Hãy thử gửi tin nhắn cho trợ lý AI của bạn để bắt đầu thu thập dữ liệu sử dụng."
+	},
+	"source": {
+		"provider": "Được báo cáo bởi nhà cung cấp",
+		"estimated": "Ước tính",
+		"backfilled": "Được bổ sung hồi tố"
+	}
 }

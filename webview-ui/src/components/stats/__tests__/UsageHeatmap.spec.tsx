@@ -100,16 +100,22 @@ describe("UsageHeatmap", () => {
 		expect(grid).toBeTruthy()
 	})
 
-	it("renders 30d and 90d range toggle buttons", () => {
+	it("renders 30d, 60d, 120d, and 360d range toggle buttons", () => {
 		const { container } = render(<UsageHeatmap buckets={[]} />)
 
 		const btn30d = container.querySelector('[data-testid="heatmap-range-30d"]')
-		const btn90d = container.querySelector('[data-testid="heatmap-range-90d"]')
+		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]')
+		const btn120d = container.querySelector('[data-testid="heatmap-range-120d"]')
+		const btn360d = container.querySelector('[data-testid="heatmap-range-360d"]')
 
 		expect(btn30d).toBeTruthy()
-		expect(btn90d).toBeTruthy()
+		expect(btn60d).toBeTruthy()
+		expect(btn120d).toBeTruthy()
+		expect(btn360d).toBeTruthy()
 		expect(btn30d?.textContent).toContain("stats:heatmap.30d")
-		expect(btn90d?.textContent).toContain("stats:heatmap.90d")
+		expect(btn60d?.textContent).toContain("stats:heatmap.60d")
+		expect(btn120d?.textContent).toContain("stats:heatmap.120d")
+		expect(btn360d?.textContent).toContain("stats:heatmap.360d")
 	})
 
 	it("defaults to 30d range", () => {
@@ -123,28 +129,28 @@ describe("UsageHeatmap", () => {
 		expect(cells.length).toBe(30)
 	})
 
-	it("switches to 90d range when 90d button is clicked", () => {
+	it("switches to 60d range when 60d button is clicked", () => {
 		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		const btn90d = container.querySelector('[data-testid="heatmap-range-90d"]') as HTMLButtonElement
-		fireEvent.click(btn90d)
+		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]') as HTMLButtonElement
+		fireEvent.click(btn60d)
 
-		// In 90d mode, 90 date cells are generated
+		// In 60d mode, 60 date cells are generated
 		const cells = container.querySelectorAll('[role="img"] [aria-label]')
-		expect(cells.length).toBe(90)
+		expect(cells.length).toBe(60)
 	})
 
-	it("switches back to 30d range when 30d button is clicked after 90d", () => {
+	it("switches back to 30d range when 30d button is clicked after 60d", () => {
 		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// Switch to 90d
-		const btn90d = container.querySelector('[data-testid="heatmap-range-90d"]') as HTMLButtonElement
-		fireEvent.click(btn90d)
-		expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(90)
+		// Switch to 60d
+		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]') as HTMLButtonElement
+		fireEvent.click(btn60d)
+		expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(60)
 
 		// Switch back to 30d
 		const btn30d = container.querySelector('[data-testid="heatmap-range-30d"]') as HTMLButtonElement
@@ -232,23 +238,22 @@ describe("UsageHeatmap", () => {
 		expect(grid).toBeFalsy()
 	})
 
-	it("uses smaller cell size in 90d mode", () => {
+	it("uses tighter gap in 360d mode", () => {
 		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		// Cell size in 30d mode
-		const btn90d = container.querySelector('[data-testid="heatmap-range-90d"]') as HTMLButtonElement
-		fireEvent.click(btn90d)
+		// Switch to 360d mode
+		const btn360d = container.querySelector('[data-testid="heatmap-range-360d"]') as HTMLButtonElement
+		fireEvent.click(btn360d)
 
-		// In 90d mode, smaller cell class is applied
+		// In 360d mode, gap-px class is applied
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeTruthy()
-		// In 90d mode, gap-0.5 class is applied
-		expect(grid?.className).toContain("gap-0.5")
+		expect(grid?.className).toContain("gap-px")
 	})
 
-	it("uses larger cell size in 30d mode", () => {
+	it("uses gap-0.5 in 30d mode", () => {
 		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
@@ -256,13 +261,13 @@ describe("UsageHeatmap", () => {
 		// Default 30d mode
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeTruthy()
-		// In 30d mode, gap-1 class is applied
-		expect(grid?.className).toContain("gap-1")
+		// In 30d mode, gap-0.5 class is applied
+		expect(grid?.className).toContain("gap-0.5")
 	})
 
 	it("computes intensity levels based on max token value", () => {
 		const buckets = [
-			makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 4000, events: 4 }), // 100% → level 4
+			makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 4000, events: 4 }), // 100% → level 5
 			makeBucket({ key: { day: daysAgoKey(1) }, totalTokens: 1000, events: 1 }), // 25% → level 1
 		]
 
@@ -272,9 +277,9 @@ describe("UsageHeatmap", () => {
 		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
 		expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
 
-		// Legend should be rendered (4 level colors)
+		// Legend should be rendered (6 level colors: 0-5)
 		const legendCells = container.querySelectorAll(".w-3.h-3.rounded-sm")
-		expect(legendCells.length).toBe(4)
+		expect(legendCells.length).toBe(6)
 	})
 
 	it("handles buckets with day key but zero events", () => {
@@ -301,19 +306,19 @@ describe("UsageHeatmap", () => {
 		expect(style).toContain("repeat(5")
 	})
 
-	it("renders grid with correct column count for 90d mode", () => {
+	it("renders grid with correct column count for 60d mode", () => {
 		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
 
 		const { container } = render(<UsageHeatmap buckets={buckets} />)
 
-		const btn90d = container.querySelector('[data-testid="heatmap-range-90d"]') as HTMLButtonElement
-		fireEvent.click(btn90d)
+		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]') as HTMLButtonElement
+		fireEvent.click(btn60d)
 
 		const grid = container.querySelector('[role="img"]')
 		expect(grid).toBeTruthy()
-		// 90d mode: 90 cells / 7 rows = 13 columns (ceil(90/7) = 13)
+		// 60d mode: 60 cells / 7 rows = 9 columns (ceil(60/7) = 9)
 		const style = grid?.getAttribute("style") ?? ""
 		expect(style.toLowerCase()).toContain("grid-template-columns")
-		expect(style).toContain("repeat(13")
+		expect(style).toContain("repeat(9")
 	})
 })

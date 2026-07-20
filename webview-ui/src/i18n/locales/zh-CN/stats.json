@@ -1,79 +1,81 @@
 {
-  "title": "使用量统计",
-  "done": "返回聊天",
-  "range": {
-    "today": "今天",
-    "7d": "最近7天",
-    "30d": "最近30天",
-    "all": "全部时间"
-  },
-  "summary": {
-    "totalTokens": "总令牌数",
-    "inputTokens": "输入令牌",
-    "outputTokens": "输出令牌",
-    "cacheTokens": "缓存令牌",
-    "costUsd": "总费用"
-  },
-  "breakdown": {
-    "title": "明细",
-    "groupBy": "分组依据",
-    "model": "模型",
-    "provider": "提供商",
-    "mode": "模式",
-    "status": "状态",
-    "day": "日",
-    "week": "周",
-    "month": "月",
-    "events": "事件",
-    "completed": "已完成",
-    "failed": "失败",
-    "cancelled": "已取消",
-    "inputTokens": "输入",
-    "outputTokens": "输出",
-    "cacheReadTokens": "缓存读取",
-    "cacheWriteTokens": "缓存写入",
-    "reasoningTokens": "推理",
-    "totalTokens": "总计",
-    "costUsd": "费用 (USD)",
-    "unknown": "未知",
-    "empty": "此范围内没有使用量数据。"
-  },
-  "heatmap": {
-    "title": "每日活动",
-    "90d": "90天",
-    "30d": "30天",
-    "less": "较少",
-    "more": "较多",
-    "noData": "无数据"
-  },
-  "coverage": {
-    "title": "数据覆盖范围",
-    "liveFrom": "记录开始",
-    "backfilledEvents": "回填事件",
-    "paused": "记录已暂停",
-    "notAvailable": "不可用"
-  },
-  "actions": {
-    "exportJson": "导出 JSON",
-    "exportCsv": "导出 CSV",
-    "clear": "清除所有数据",
-    "refresh": "刷新"
-  },
-  "clearDialog": {
-    "title": "清除所有使用量统计？",
-    "description": "这将永久删除本地存储中记录的所有使用量事件。此操作无法撤销。",
-    "confirm": "删除",
-    "cancel": "取消"
-  },
-  "states": {
-    "loading": "正在加载统计信息...",
-    "error": "加载统计信息失败",
-    "empty": "暂无使用量数据。LLM API 调用后统计信息将显示在此处。",
-    "emptyHint": "尝试向您的 AI 助手发送消息以开始收集使用量数据。"
-  },
-  "source": {
-    "provider": "提供商报告",
-    "estimated": "估算",
-    "backfilled": "回填"
-  }
+	"title": "使用量统计",
+	"done": "返回聊天",
+	"range": {
+		"today": "今天",
+		"7d": "最近7天",
+		"30d": "最近30天",
+		"all": "全部时间"
+	},
+	"summary": {
+		"totalTokens": "总令牌数",
+		"inputTokens": "输入令牌",
+		"outputTokens": "输出令牌",
+		"cacheTokens": "缓存令牌",
+		"costUsd": "总费用"
+	},
+	"breakdown": {
+		"title": "明细",
+		"groupBy": "分组依据",
+		"model": "模型",
+		"provider": "提供商",
+		"mode": "模式",
+		"status": "状态",
+		"day": "日",
+		"week": "周",
+		"month": "月",
+		"events": "事件",
+		"completed": "已完成",
+		"failed": "失败",
+		"cancelled": "已取消",
+		"inputTokens": "输入",
+		"outputTokens": "输出",
+		"cacheReadTokens": "缓存读取",
+		"cacheWriteTokens": "缓存写入",
+		"reasoningTokens": "推理",
+		"totalTokens": "总计",
+		"costUsd": "费用 (USD)",
+		"unknown": "未知",
+		"empty": "此范围内没有使用量数据。"
+	},
+	"heatmap": {
+		"title": "每日活动",
+		"30d": "30天",
+		"60d": "60天",
+		"120d": "120天",
+		"360d": "360天",
+		"less": "较少",
+		"more": "较多",
+		"noData": "无数据"
+	},
+	"coverage": {
+		"title": "数据覆盖范围",
+		"liveFrom": "记录开始",
+		"backfilledEvents": "回填事件",
+		"paused": "记录已暂停",
+		"notAvailable": "不可用"
+	},
+	"actions": {
+		"exportJson": "导出 JSON",
+		"exportCsv": "导出 CSV",
+		"clear": "清除所有数据",
+		"refresh": "刷新"
+	},
+	"clearDialog": {
+		"title": "清除所有使用量统计？",
+		"description": "这将永久删除本地存储中记录的所有使用量事件。此操作无法撤销。",
+		"confirm": "删除",
+		"cancel": "取消"
+	},
+	"states": {
+		"loading": "正在加载统计信息...",
+		"error": "加载统计信息失败",
+		"empty": "暂无使用量数据。LLM API 调用后统计信息将显示在此处。",
+		"emptyHint": "尝试向您的 AI 助手发送消息以开始收集使用量数据。"
+	},
+	"source": {
+		"provider": "提供商报告",
+		"estimated": "估算",
+		"backfilled": "回填"
+	}
 }

@@ -1,79 +1,81 @@
 {
-  "title": "Usage Statistics",
-  "done": "Back to Chat",
-  "range": {
-    "today": "Today",
-    "7d": "Last 7 Days",
-    "30d": "Last 30 Days",
-    "all": "All Time"
-  },
-  "summary": {
-    "totalTokens": "Total Tokens",
-    "inputTokens": "Input Tokens",
-    "outputTokens": "Output Tokens",
-    "cacheTokens": "Cache Tokens",
-    "costUsd": "Total Cost"
-  },
-  "breakdown": {
-    "title": "Breakdown",
-    "groupBy": "Group by",
-    "model": "Model",
-    "provider": "Provider",
-    "mode": "Mode",
-    "status": "Status",
-    "day": "Day",
-    "week": "Week",
-    "month": "Month",
-    "events": "Events",
-    "completed": "Completed",
-    "failed": "Failed",
-    "cancelled": "Cancelled",
-    "inputTokens": "Input",
-    "outputTokens": "Output",
-    "cacheReadTokens": "Cache Read",
-    "cacheWriteTokens": "Cache Write",
-    "reasoningTokens": "Reasoning",
-    "totalTokens": "Total",
-    "costUsd": "Cost (USD)",
-    "unknown": "Unknown",
-    "empty": "No usage data for this range."
-  },
-  "heatmap": {
-    "title": "Daily Activity",
-    "90d": "90 Days",
-    "30d": "30 Days",
-    "less": "Less",
-    "more": "More",
-    "noData": "No data"
-  },
-  "coverage": {
-    "title": "Data Coverage",
-    "liveFrom": "Recording since",
-    "backfilledEvents": "Backfilled events",
-    "paused": "Recording is paused",
-    "notAvailable": "Not available"
-  },
-  "actions": {
-    "exportJson": "Export JSON",
-    "exportCsv": "Export CSV",
-    "clear": "Clear All Data",
-    "refresh": "Refresh"
-  },
-  "clearDialog": {
-    "title": "Clear All Usage Statistics?",
-    "description": "This will permanently delete all recorded usage events from local storage. This action cannot be undone.",
-    "confirm": "Delete",
-    "cancel": "Cancel"
-  },
-  "states": {
-    "loading": "Loading statistics...",
-    "error": "Failed to load statistics",
-    "empty": "No usage data yet. Statistics will appear here after you make LLM API calls.",
-    "emptyHint": "Try sending a message to your AI assistant to start collecting usage data."
-  },
-  "source": {
-    "provider": "Provider-reported",
-    "estimated": "Estimated",
-    "backfilled": "Backfilled"
-  }
+	"title": "Usage Statistics",
+	"done": "Back to Chat",
+	"range": {
+		"today": "Today",
+		"7d": "Last 7 Days",
+		"30d": "Last 30 Days",
+		"all": "All Time"
+	},
+	"summary": {
+		"totalTokens": "Total Tokens",
+		"inputTokens": "Input Tokens",
+		"outputTokens": "Output Tokens",
+		"cacheTokens": "Cache Tokens",
+		"costUsd": "Total Cost"
+	},
+	"breakdown": {
+		"title": "Breakdown",
+		"groupBy": "Group by",
+		"model": "Model",
+		"provider": "Provider",
+		"mode": "Mode",
+		"status": "Status",
+		"day": "Day",
+		"week": "Week",
+		"month": "Month",
+		"events": "Events",
+		"completed": "Completed",
+		"failed": "Failed",
+		"cancelled": "Cancelled",
+		"inputTokens": "Input",
+		"outputTokens": "Output",
+		"cacheReadTokens": "Cache Read",
+		"cacheWriteTokens": "Cache Write",
+		"reasoningTokens": "Reasoning",
+		"totalTokens": "Total",
+		"costUsd": "Cost (USD)",
+		"unknown": "Unknown",
+		"empty": "No usage data for this range."
+	},
+	"heatmap": {
+		"title": "Daily Activity",
+		"30d": "30 Days",
+		"60d": "60 Days",
+		"120d": "120 Days",
+		"360d": "360 Days",
+		"less": "Less",
+		"more": "More",
+		"noData": "No data"
+	},
+	"coverage": {
+		"title": "Data Coverage",
+		"liveFrom": "Recording since",
+		"backfilledEvents": "Backfilled events",
+		"paused": "Recording is paused",
+		"notAvailable": "Not available"
+	},
+	"actions": {
+		"exportJson": "Export JSON",
+		"exportCsv": "Export CSV",
+		"clear": "Clear All Data",
+		"refresh": "Refresh"
+	},
+	"clearDialog": {
+		"title": "Clear All Usage Statistics?",
+		"description": "This will permanently delete all recorded usage events from local storage. This action cannot be undone.",
+		"confirm": "Delete",
+		"cancel": "Cancel"
+	},
+	"states": {
+		"loading": "Loading statistics...",
+		"error": "Failed to load statistics",
+		"empty": "No usage data yet. Statistics will appear here after you make LLM API calls.",
+		"emptyHint": "Try sending a message to your AI assistant to start collecting usage data."
+	},
+	"source": {
+		"provider": "Provider-reported",
+		"estimated": "Estimated",
+		"backfilled": "Backfilled"
+	}
 }

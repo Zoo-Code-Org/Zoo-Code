@@ -53,7 +53,12 @@ import type OpenAI from "openai"
 import { MistralHandler } from "../mistral"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
-import type { ApiStreamTextChunk, ApiStreamReasoningChunk, ApiStreamToolCallPartialChunk } from "../../transform/stream"
+import type {
+	ApiStreamTextChunk,
+	ApiStreamReasoningChunk,
+	ApiStreamToolCallPartialChunk,
+	ApiStreamChunk,
+} from "../../transform/stream"
 
 describe("MistralHandler", () => {
 	let handler: MistralHandler
@@ -179,7 +184,7 @@ describe("MistralHandler", () => {
 			})
 
 			const iterator = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
+			const chunks: ApiStreamChunk[] = []
 			for await (const chunk of iterator) {
 				chunks.push(chunk)
 			}

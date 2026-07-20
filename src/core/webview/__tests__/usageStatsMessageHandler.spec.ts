@@ -20,7 +20,7 @@ vi.mock("../../../utils/export", () => ({
 	saveLastExportPath: vi.fn(),
 }))
 
-vi.mock("../task-persistence/taskMessages", () => ({
+vi.mock("../../task-persistence/taskMessages", () => ({
 	readTaskMessages: vi.fn().mockResolvedValue([]),
 }))
 
@@ -30,7 +30,6 @@ vi.mock("../../../services/stats/costRecalculation", () => ({
 
 import * as vscode from "vscode"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../../utils/export"
-import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getEffectiveCost } from "../../../services/stats/costRecalculation"
 import {
 	handleGetUsageStats,
@@ -662,7 +661,7 @@ describe("usageStatsMessageHandler", () => {
 						inputTokens: { value: 200, source: "provider" },
 						outputTokens: { value: 100, source: "provider" },
 						totalTokens: { value: 300, source: "provider" },
-						costUsd: { value: 0.10, source: "provider" },
+						costUsd: { value: 0.1, source: "provider" },
 					},
 				}),
 			]
@@ -682,9 +681,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessions(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionsResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionsResponse")
 
 			expect(response).toBeDefined()
 			expect(response?.[0].dashboardSessions).toHaveLength(2)
@@ -703,7 +702,7 @@ describe("usageStatsMessageHandler", () => {
 				models: ["claude-3"],
 				modes: ["architect"],
 				totalTokens: 300,
-				totalCost: 0.10,
+				totalCost: 0.1,
 				callCount: 1,
 			})
 		})
@@ -739,9 +738,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessions(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionsResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionsResponse")
 
 			expect(response?.[0].dashboardSessions).toHaveLength(1)
 			expect(response?.[0].dashboardSessions?.[0].taskId).toBe("task-root")
@@ -775,9 +774,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessions(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionsResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionsResponse")
 
 			expect(response?.[0].dashboardSessions).toHaveLength(1)
 			expect(response?.[0].dashboardSessions?.[0].taskId).toBe("task-A")
@@ -810,9 +809,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessions(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionsResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionsResponse")
 
 			expect(response?.[0].dashboardSessions).toHaveLength(1)
 			expect(response?.[0].dashboardSessions?.[0].taskId).toBe("task-B")
@@ -908,15 +907,13 @@ describe("usageStatsMessageHandler", () => {
 			await handleGetDashboardSessions(provider, message)
 
 			expect(getEffectiveCost).toHaveBeenCalled()
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionsResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionsResponse")
 			expect(response?.[0].dashboardSessions?.[0].totalCost).toBe(0.15)
 
 			// Reset mock to default
-			vi.mocked(getEffectiveCost).mockImplementation(
-				(event: UsageEventV1) => event.usage.costUsd?.value ?? 0,
-			)
+			vi.mocked(getEffectiveCost).mockImplementation((event: UsageEventV1) => event.usage.costUsd?.value ?? 0)
 		})
 	})
 
@@ -969,7 +966,7 @@ describe("usageStatsMessageHandler", () => {
 						inputTokens: { value: 200, source: "provider" },
 						outputTokens: { value: 100, source: "provider" },
 						totalTokens: { value: 300, source: "provider" },
-						costUsd: { value: 0.10, source: "provider" },
+						costUsd: { value: 0.1, source: "provider" },
 					},
 				}),
 			]
@@ -986,9 +983,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessionDetail(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionDetailResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionDetailResponse")
 
 			expect(response).toBeDefined()
 			const detail = response?.[0].dashboardSessionDetail
@@ -1011,7 +1008,7 @@ describe("usageStatsMessageHandler", () => {
 				index: 2,
 				inputTokens: 200,
 				outputTokens: 100,
-				costUsd: 0.10,
+				costUsd: 0.1,
 			})
 		})
 
@@ -1045,9 +1042,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessionDetail(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionDetailResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionDetailResponse")
 
 			expect(response?.[0].dashboardSessionDetail?.callCount).toBe(2)
 			expect(response?.[0].dashboardSessionDetail?.apiCalls).toHaveLength(2)
@@ -1066,9 +1063,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessionDetail(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionDetailResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionDetailResponse")
 
 			expect(response?.[0].dashboardSessionDetail).toMatchObject({
 				taskId: "nonexistent-task",
@@ -1086,9 +1083,7 @@ describe("usageStatsMessageHandler", () => {
 		})
 
 		it("accepts taskId via message.text field", async () => {
-			const events: UsageEventV1[] = [
-				makeEvent({ taskId: "task-from-text" }),
-			]
+			const events: UsageEventV1[] = [makeEvent({ taskId: "task-from-text" })]
 			const exportData: JsonExport = { ...mockJsonExport, events }
 			const exportStats = vi.fn().mockResolvedValue(exportData)
 			const provider = createMockProvider({ exportStats })
@@ -1101,9 +1096,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessionDetail(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionDetailResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionDetailResponse")
 
 			expect(response?.[0].dashboardSessionDetail?.taskId).toBe("task-from-text")
 		})
@@ -1199,9 +1194,9 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetDashboardSessionDetail(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionDetailResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionDetailResponse")
 
 			const apiCalls = response?.[0].dashboardSessionDetail?.apiCalls
 			expect(apiCalls?.[0].status).toBe("completed")
