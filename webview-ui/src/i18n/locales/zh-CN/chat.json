@@ -342,9 +342,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "支持 GLM-5.2 的 Friendli 提供商 — 通过 Friendli 使用最新的 GLM 模型。",
-			"highlight2": "Ollama 原生 thinking/reasoning 支持 — 使用 Ollama 模型时可端到端保留 reasoning 输出。",
-			"highlight3": "Anthropic 自定义 `apiModelId` 修复 — 自定义 Anthropic 模型 ID 现在会保持选中，不再静默回退到 `claude-sonnet-4-5`。"
+			"highlight1": "OpenAI GPT-5.6 系列（Sol、Terra、Luna）— 已在 OpenAI Codex 与 OpenAI Native 中同时提供。",
+			"highlight2": "支持 Grok 4.5 — xAI 全新旗舰模型，同时修复了 reasoning effort 问题，Grok 4 Mini 也因此受益。",
+			"highlight3": "Kenari 提供商 — 以卢比计费的一流 OpenAI 兼容 AI 网关，支持 Claude、GPT、DeepSeek、GLM、Kimi 等。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

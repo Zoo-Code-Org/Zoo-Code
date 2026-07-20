@@ -16,13 +16,19 @@
 
         ## Wir sind Zoo Code
 
-> Du hast vielleicht die [neuliche Ankündigung](https://x.com/mattrubens/status/2046636598859559114) des Roo-Teams 🦘🦘🦘 gesehen. Die Kurzfassung ist, dass das Team die aktive Entwicklung von Roo Code zurückfährt, während es sich auf [Roomote](https://roomote.dev/) konzentriert. Diese Nachricht war für viele Roo-Nutzer schwer; dieses Plugin bedeutet dieser Community sehr viel.
+> Zoo Code führt die Entwicklung dieses Projekts fort, nachdem das Roo-Team
+> die aktive Arbeit an Roo Code eingestellt hat, um sich auf
+> [Roomote](https://roomote.dev/) zu konzentrieren. Danke an das Roo-Team für
+> alles, was sie aufgebaut haben.
 >
-> Wir möchten dem gesamten Roo-Team für die Arbeit danken, die sie in dieses Plugin gesteckt haben. Wir nennen hier nicht jeden Einzelnen beim Namen, aber wir sind uns sicher alle einig, dass sie außergewöhnliche Entwickler und, genauso wichtig, unglaubliche Menschen sind. Danke an das Roo-Team.
->
-> Roo-Coder gibt es in allen Formen und Größen. Manche nutzen es professionell im Arbeitsalltag, andere tüfteln damit an unvorstellbar komplexen Workflows. Einige verbessern Roo selbst, während andere die Modelle verbessern, die Roo verwendet (super meta). Der Punkt ist: Die Community ist vielfältig, und obwohl ein Känguru 🦘🦘🦘 ein edles Tier ist, fanden wir, dass ein „Zoo“ 🐘🦡🦒🦓🦛🦧🦭🦦 diese Vielfalt der Plugin-Nutzer besser widerspiegelt.
->
-> Deshalb möchten wir ankündigen, dass **Zoo Code** die Entwicklung dieses wichtigen Projekts fortsetzen wird. Das Kernteam besteht aus Entwicklern, die zuvor zu Roo beigetragen haben und dieses Plugin sehr schätzen. Wir werden weiterhin Modelle aktualisieren, Fehler beheben und neue Funktionen veröffentlichen. Vor allem aber wollen wir auf euch hören, die Community, die dieses Plugin so besonders gemacht hat. Schließ dich also unserem [Discord](https://discord.gg/VxfP4Vx3gX), unserem [Reddit](https://www.reddit.com/r/ZooCode) an oder [eröffne einen PR oder ein Issue](https://github.com/Zoo-Code-Org/Zoo-Code) – vor allem bitten wir dich aber, als Community engagiert, vernetzt und aktiv zu bleiben.
+> Das Kernteam besteht aus Entwicklern, die zuvor zu Roo beigetragen haben und
+> dieses Plugin sehr schätzen. Wir werden weiterhin Modelle aktualisieren,
+> Fehler beheben und neue Funktionen veröffentlichen, und wir haben vor,
+> genau auf die Community zu hören, die dieses Plugin so besonders gemacht
+> hat. Schließ dich uns an auf
+> [Discord](https://discord.gg/VxfP4Vx3gX),
+> [Reddit](https://www.reddit.com/r/ZooCode), oder
+> [eröffne eine PR oder ein Issue](https://github.com/Zoo-Code-Org/Zoo-Code).
 >
 > _-Zoo Code Team_
 
@@ -30,15 +36,15 @@
 
 Eine kurze Anleitung für den Wechsel von Roo Code zu Zoo Code findest du im [Roo→Zoo-Migrationsleitfaden](https://docs.zoocode.dev/roo-to-zoo-migration). Wir wollen Nutzer beim Umstieg so gut wie möglich unterstützen, und genau dafür sind unser [Reddit](https://www.reddit.com/r/ZooCode) und [Discord](https://discord.gg/VxfP4Vx3gX) da. Wenn du Probleme hast oder Fragen auftauchen, komm vorbei und frag nach.
 
-## Neu in v3.68.0
+## Neu in v3.70.0
 
-- **Friendli-Anbieter mit GLM-5.2-Unterstützung** — nutze das neueste GLM-Modell über Friendli.
-- **Native Ollama-Unterstützung für thinking/reasoning** — behalte die Reasoning-Ausgabe durchgängig bei, wenn du Ollama-Modelle verwendest.
-- **Fix für benutzerdefinierte `apiModelId` bei Anthropic** — benutzerdefinierte Anthropic-Modell-IDs bleiben jetzt ausgewählt, statt stillschweigend auf `claude-sonnet-4-5` zurückzufallen.
-- Fix: Behandlung von Tool-Ergebnissen im Ollama-Anbieter und verfrühte Kontextkondensierung.
-- Fix: Behalte die Eltern-Kind-Verknüpfung bei, wenn ein delegierter Untertask unterbrochen wird.
-- Verbessere die Verarbeitung von Claude-Content-Blöcken in Anthropic Vertex für zuverlässigere Antworten.
-- Updates für CI, Nightly-Publishing und Abhängigkeiten/Tooling.
+- **OpenAI GPT-5.6-Familie** — `Sol`, `Terra` und `Luna` sind jetzt sowohl über OpenAI Codex als auch über OpenAI Native verfügbar.
+- **Grok 4.5-Unterstützung** — xAIs neues Flaggschiff-Modell, plus ein Fix für das Reasoning-Effort-Format, von dem auch Grok 4 Mini profitiert.
+- **Kenari-Anbieter-Unterstützung** — ein erstklassiges, OpenAI-kompatibles KI-Gateway mit Abrechnung in Rupiah, das Claude, GPT, DeepSeek, GLM, Kimi und mehr abdeckt.
+- Zeige den Kontext-Kondensierungs-Button und den Fortschrittsbalken für das Kontextfenster im eingeklappten Task-Header an.
+- Fix: Verlust von Terminal-Ausgaben und verfrühter Task-Abschluss bei kalten Terminals.
+- Fix: Bild-Anhänge für Zoo Gateway und Vercel AI Gateway folgen jetzt den aktuellen Vision-Fähigkeits-Tags statt einer statischen Positivliste.
+- Updates für Abhängigkeiten und Tooling.
 
 ## Was kann Zoo Code für DICH tun?
 

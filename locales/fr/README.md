@@ -16,13 +16,19 @@
 
         ## Nous sommes Zoo Code
 
-> Tu as peut-être vu la [récente annonce](https://x.com/mattrubens/status/2046636598859559114) de l'équipe Roo 🦘🦘🦘. En résumé, l'équipe réduit progressivement le développement actif de Roo Code pendant qu'elle se concentre sur [Roomote](https://roomote.dev/). La nouvelle a été difficile pour beaucoup d'utilisateurs de Roo ; cette extension compte énormément pour cette communauté.
+> Zoo Code poursuit le développement de ce projet après que l'équipe Roo a
+> arrêté le développement actif de Roo Code pour se concentrer sur
+> [Roomote](https://roomote.dev/). Merci à l'équipe Roo pour tout ce qu'elle
+> a construit.
 >
-> Nous voulons remercier toute l'équipe Roo pour le travail qu'elle a consacré à cette extension. Nous n'allons pas citer chaque personne ici, mais on peut tous s'accorder à dire que ce sont des développeurs exceptionnels et, tout aussi important, des personnes incroyables. Merci à l'équipe Roo.
->
-> Les utilisateurs de Roo viennent d'horizons très différents. Certains l'utilisent au quotidien dans un cadre professionnel, d'autres s'en servent pour imaginer des workflows incroyablement complexes. Certains l'utilisent pour améliorer Roo lui-même, tandis que d'autres l'utilisent pour améliorer les modèles mêmes que Roo exploite (super méta). En bref, la communauté est diverse, et même si un kangourou 🦘🦘🦘 est un animal noble et distingué, nous avons trouvé qu'un « Zoo » 🐘🦡🦒🦓🦛🦧🦭🦦 reflétait mieux cette diversité des utilisateurs de l'extension.
->
-> Nous voulons donc annoncer que **Zoo Code** poursuivra le développement de cet important projet. L'équipe principale est composée de développeurs qui ont déjà contribué à Roo et qui tiennent profondément à cette extension. Nous continuerons à mettre à jour les modèles, corriger les bugs et livrer de nouvelles fonctionnalités. Mais surtout, nous voulons vous écouter, vous, la communauté, qui avez rendu cette extension si spéciale. N'hésite donc pas à rejoindre notre [Discord](https://discord.gg/VxfP4Vx3gX), notre [Reddit](https://www.reddit.com/r/ZooCode), ou à [ouvrir une PR ou une issue](https://github.com/Zoo-Code-Org/Zoo-Code) ; plus que tout, nous te demandons de rester impliqué, connecté et actif au sein de la communauté.
+> L'équipe principale est composée de développeurs qui ont déjà contribué à
+> Roo et qui tiennent profondément à cette extension. Nous continuerons à
+> mettre à jour les modèles, corriger les bugs et livrer de nouvelles
+> fonctionnalités, et nous comptons bien écouter attentivement la communauté
+> qui a rendu cette extension si spéciale. Rejoins-nous sur
+> [Discord](https://discord.gg/VxfP4Vx3gX),
+> [Reddit](https://www.reddit.com/r/ZooCode), ou
+> [ouvre une PR ou une issue](https://github.com/Zoo-Code-Org/Zoo-Code).
 >
 > _-Zoo Code Team_
 
@@ -30,15 +36,15 @@
 
 Tu peux trouver un guide rapide pour passer de Roo Code à Zoo Code dans le [guide de migration Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). On veut aider au maximum pendant la transition, et notre [Reddit](https://www.reddit.com/r/ZooCode) et notre [Discord](https://discord.gg/VxfP4Vx3gX) sont là pour ça. Si tu rencontres un problème ou si tu as une question, viens demander.
 
-## Nouveautés de la v3.68.0
+## Nouveautés de la v3.70.0
 
-- **Provider Friendli avec prise en charge de GLM-5.2** — utilise le dernier modèle GLM via Friendli.
-- **Prise en charge native du thinking/reasoning pour Ollama** — préserve la sortie de raisonnement de bout en bout quand tu utilises des modèles Ollama.
-- **Correction du `apiModelId` personnalisé d'Anthropic** — les identifiants de modèle Anthropic personnalisés restent désormais sélectionnés au lieu de revenir silencieusement à `claude-sonnet-4-5`.
-- Correctif : gestion des résultats d'outils du fournisseur Ollama et condensation prématurée du contexte.
-- Correctif : préserve le lien parent-enfant de la tâche lorsqu'une sous-tâche déléguée est interrompue.
-- Améliore la gestion des blocs de contenu Claude dans Anthropic Vertex pour des réponses plus fiables.
-- Mises à jour de la CI, de la publication nightly et des dépendances/outils.
+- **Famille OpenAI GPT-5.6** — `Sol`, `Terra` et `Luna` sont désormais disponibles à la fois via OpenAI Codex et OpenAI Native.
+- **Prise en charge de Grok 4.5** — le nouveau modèle phare de xAI, ainsi qu'une correction du format de l'effort de raisonnement qui profite aussi à Grok 4 Mini.
+- **Prise en charge du fournisseur Kenari** — une passerelle IA de premier ordre, compatible OpenAI, facturée en roupies, couvrant Claude, GPT, DeepSeek, GLM, Kimi et plus encore.
+- Affiche le bouton de condensation du contexte et la barre de progression de la fenêtre de contexte dans l'en-tête de tâche réduit.
+- Correctif : perte de sortie du terminal et fin de tâche prématurée sur des terminaux froids.
+- Correctif : l'ajout d'images pour Zoo Gateway et Vercel AI Gateway suit désormais les balises de capacité de vision en direct au lieu d'une liste blanche statique.
+- Mises à jour des dépendances et des outils.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

@@ -5,7 +5,6 @@ import { toolResultContains } from "./tool-result"
 export function addZeroChunkShellRaceResultFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
-			toolCallId: "call_zero_chunk_shell_race_001",
 			// The multiline command is now written to a temp script file and executed
 			// via `sh /tmp/roo-cmd-*.sh` to avoid the VSCode { ... }-wrapping bug that
 			// caused the stream to be closed before read() arrived (zero chunks).

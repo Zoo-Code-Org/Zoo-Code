@@ -12,7 +12,6 @@ export function addLongRuningSilentCommandFixtures(mock: InstanceType<typeof LLM
 	// which breaks the loop via DONE_SENTINEL before the 3s idle timer fires.
 	mock.addFixture({
 		match: {
-			toolCallId: "call_long_running_silent_001",
 			predicate: (req) =>
 				toolResultContains(req, "call_long_running_silent_001", [
 					// sleep exits with code 0 — the normal exit status path

@@ -86,8 +86,14 @@ export function addExecuteCommandResultFixtures(mock: InstanceType<typeof LLMock
 	for (const fixture of fixtures) {
 		mock.addFixture({
 			match: {
-				toolCallId: fixture.toolCallId,
-				predicate: (req) => toolResultContains(req, fixture.toolCallId, fixture.expected),
+				predicate: (req) => {
+					const messages = Array.isArray(req?.messages) ? req.messages : []
+					const lastToolMsg = messages.filter((m) => m?.role === "tool").at(-1)
+					return (
+						lastToolMsg?.tool_call_id === fixture.toolCallId &&
+						toolResultContains(req, fixture.toolCallId, fixture.expected)
+					)
+				},
 			},
 			response: {
 				toolCalls: fixture.toolCalls.map((toolCall) => ({

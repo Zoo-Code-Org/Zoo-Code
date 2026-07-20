@@ -315,9 +315,9 @@
 		"support": "Поддержите Zoo Code, поставив нам звезду на <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Что нового:",
-			"highlight1": "Провайдер Friendli с поддержкой GLM-5.2 — используй новейшую модель GLM через Friendli.",
-			"highlight2": "Нативная поддержка thinking/reasoning для Ollama — сохраняй вывод рассуждений от начала до конца при использовании моделей Ollama.",
-			"highlight3": "Исправление пользовательского `apiModelId` Anthropic — пользовательские идентификаторы моделей Anthropic теперь остаются выбранными вместо тихого возврата к `claude-sonnet-4-5`."
+			"highlight1": "Семейство OpenAI GPT-5.6 (Sol, Terra, Luna) — доступно как в OpenAI Codex, так и в OpenAI Native.",
+			"highlight2": "Поддержка Grok 4.5 — новая флагманская модель xAI, а также исправление reasoning effort, от которого выигрывает и Grok 4 Mini.",
+			"highlight3": "Провайдер Kenari — первоклассный AI-шлюз, совместимый с OpenAI, с выставлением счётов в рупиях, поддерживающий Claude, GPT, DeepSeek, GLM, Kimi и другие модели."
 		},
 		"cloudAgents": {
 			"heading": "Новое в облаке:",

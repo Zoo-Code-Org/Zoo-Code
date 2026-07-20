@@ -19,10 +19,17 @@ export function addColdShellInitFixtures(mock: InstanceType<typeof LLMock>) {
 	// second attempt (on the now-warm terminal) captures real output.
 	mock.addFixture({
 		match: {
-			toolCallId: "call_cold_shell_init_001",
-			predicate: (req: ChatCompletionRequest) =>
-				// First attempt returned empty — retry the command
-				!anyToolResultContains(req, "cold-init-ok"),
+			// Only retry when the FIRST call (call_cold_shell_init_001) produced an empty result.
+			// If the retry call (call_cold_shell_init_003) also came back empty, don't loop —
+			// the tool result message says "Do not run the command again automatically."
+			predicate: (req: ChatCompletionRequest) => {
+				const messages: ChatMessage[] = Array.isArray(req?.messages) ? req.messages : []
+				const lastToolMsg = messages.filter((m) => m?.role === "tool").at(-1)
+				return (
+					lastToolMsg?.tool_call_id === "call_cold_shell_init_001" &&
+					!anyToolResultContains(req, "cold-init-ok")
+				)
+			},
 		},
 		response: {
 			toolCalls: [

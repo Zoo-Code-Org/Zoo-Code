@@ -16,13 +16,15 @@
 
         ## 我們是 Zoo Code
 
-> 你可能已經看到 Roo 團隊 🦘🦘🦘 的[最近公告](https://x.com/mattrubens/status/2046636598859559114)。簡單來說，團隊在把重心放到 [Roomote](https://roomote.dev/) 的同時，正在逐步減少 Roo Code 的活躍開發。這個消息讓很多 Roo 使用者都很難受；這個外掛對這個社群意義重大。
+> 在 Roo 團隊停止 Roo Code 的積極開發、轉而專注於 [Roomote](https://roomote.dev/)
+> 之後，Zoo Code 將繼續開發這個專案。感謝 Roo 團隊所建立的一切。
 >
-> 我們想感謝整個 Roo 團隊為這個外掛投入的努力。這裡不會逐一點名，但大家都能認同，他們既是卓越的開發者，也是同樣令人敬佩的優秀的人。感謝 Roo 團隊。
->
-> Roo 使用者來自各種不同背景。有人在日常工作中專業使用它，也有人用它來構思難以想像的複雜 workflow。有人用它來改進 Roo 本身，也有人用它來改進 Roo 所使用的模型（超級 meta）。我們想表達的是，這個社群非常多元。雖然袋鼠 🦘🦘🦘 是高貴又有代表性的動物，但我們覺得由不同物種組成的「Zoo」🐘🦡🦒🦓🦛🦧🦭🦦 更能反映這個外掛使用者的多樣性。
->
-> 因此我們想宣布，**Zoo Code** 將繼續開發這個重要專案。核心團隊由先前曾為 Roo 做出貢獻、並且非常在乎這個外掛的開發者所組成。我們會持續更新模型、修正 bug，並推出新功能。但最重要的是，我們想傾聽你們——讓這個外掛如此特別的社群。歡迎加入我們的 [Discord](https://discord.gg/VxfP4Vx3gX)、[Reddit](https://www.reddit.com/r/ZooCode)，或是[建立 PR 或 issue](https://github.com/Zoo-Code-Org/Zoo-Code)；但更重要的是，我們希望你能繼續作為社群的一分子，保持參與、保持連結、保持活躍。
+> 核心團隊由先前曾為 Roo 做出貢獻、並且非常在乎這個外掛的開發者所組成。
+> 我們會持續更新模型、修正 bug，並推出新功能，也計劃仔細傾聽讓這個外掛
+> 如此特別的社群。歡迎加入我們，一起在
+> [Discord](https://discord.gg/VxfP4Vx3gX)、
+> [Reddit](https://www.reddit.com/r/ZooCode)，或是
+> [建立 PR 或 issue](https://github.com/Zoo-Code-Org/Zoo-Code)。
 >
 > _-Zoo Code Team_
 
@@ -30,15 +32,15 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.68.0 新功能
+## v3.70.0 新功能
 
-- **支援 GLM-5.2 的 Friendli 供應商** — 透過 Friendli 使用最新的 GLM 模型。
-- **Ollama 原生 thinking/reasoning 支援** — 使用 Ollama 模型時可端對端保留 reasoning 輸出。
-- **Anthropic 自訂 `apiModelId` 修正** — 自訂 Anthropic 模型 ID 現在會保持選取，不再靜默回退到 `claude-sonnet-4-5`。
-- 修正：Ollama 供應商的工具結果處理與過早的內容壓縮。
-- 修正：委派子任務被中斷時保留父子任務連結。
-- 改進 Anthropic Vertex 中 Claude 內容區塊的處理，以獲得更可靠的回應。
-- CI、nightly 發布以及相依套件/工具更新。
+- **OpenAI GPT-5.6 系列** — `Sol`、`Terra` 和 `Luna` 現已在 OpenAI Codex 與 OpenAI Native 兩條供應商路徑上提供。
+- **Grok 4.5 支援** — xAI 全新的旗艦模型，以及一項同樣使 Grok 4 Mini 受惠的 reasoning-effort 格式修正。
+- **Kenari 供應商支援** — 一個一流的、相容 OpenAI 的 AI 閘道，以印尼盾計費，涵蓋 Claude、GPT、DeepSeek、GLM、Kimi 等更多模型。
+- 在摺疊的任務標頭中顯示內容壓縮按鈕與內容視窗進度條。
+- 修正：冷終端機上發生的終端機輸出遺失與任務過早完成問題。
+- 修正：Zoo Gateway 與 Vercel AI Gateway 模型的圖片附加功能現在會依循即時的 vision 能力標籤，而非靜態的白名單。
+- 相依套件與工具更新。
 
 ## Zoo Code 能為您做什麼？
 

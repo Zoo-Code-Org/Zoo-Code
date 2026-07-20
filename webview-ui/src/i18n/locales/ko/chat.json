@@ -341,9 +341,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "GLM-5.2를 지원하는 Friendli 프로바이더 — Friendli를 통해 최신 GLM 모델을 사용할 수 있습니다.",
-			"highlight2": "Ollama용 네이티브 thinking/reasoning 지원 — Ollama 모델을 사용할 때 reasoning 출력을 처음부터 끝까지 유지합니다.",
-			"highlight3": "Anthropic 사용자 지정 `apiModelId` 수정 — 사용자 지정 Anthropic 모델 ID가 이제 조용히 `claude-sonnet-4-5`로 되돌아가지 않고 선택된 상태로 유지됩니다."
+			"highlight1": "OpenAI GPT-5.6 패밀리(Sol, Terra, Luna) — OpenAI Codex와 OpenAI Native 양쪽에서 사용 가능합니다.",
+			"highlight2": "Grok 4.5 지원 — xAI의 새로운 플래그십 모델이며, Grok 4 Mini에도 도움이 되는 reasoning effort 수정도 포함됩니다.",
+			"highlight3": "Kenari 프로바이더 — 루피아로 청구되며 Claude, GPT, DeepSeek, GLM, Kimi 등을 지원하는 OpenAI 호환 퍼스트클래스 AI 게이트웨이."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

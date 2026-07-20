@@ -5,7 +5,6 @@ import { toolResultContains } from "./tool-result"
 export function addFastExitShellRaceResultFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
-			toolCallId: "call_fast_exit_shell_race_001",
 			// VSCode drops onDidEndTerminalShellExecution for this command (the race under
 			// test), so TerminalProcess.run() only has the D marker itself as proof of
 			// completion, never a real exit code (see ExecuteCommandTool.ts's

@@ -1812,7 +1812,7 @@ describe("Cline", () => {
 
 					expect(summarizeConversation).toHaveBeenCalled()
 					const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
-					expect(options.metadata?.abortSignal).toBeInstanceOf(AbortSignal)
+					expect(options.metadata?.abortSignal).toBe(task.currentRequestAbortController!.signal)
 				})
 
 				it("should omit abortSignal from condenseContext metadata when no current request exists", async () => {
@@ -1899,7 +1899,7 @@ describe("Cline", () => {
 					const [, , metadata] = createMessageSpy.mock.calls[0]!
 
 					expect(metadata).toBeDefined()
-					expect(metadata!.abortSignal).toBeInstanceOf(AbortSignal)
+					expect(metadata!.abortSignal).toBe(task.currentRequestAbortController!.signal)
 				})
 
 				it("should invoke abort on currentRequestAbortController during first-chunk wait", async () => {
@@ -2136,7 +2136,7 @@ describe("Cline", () => {
 					const [, , metadata] = createMessageSpy.mock.calls[0]!
 					expect(metadata).toBeDefined()
 					expect("abortSignal" in metadata!).toBe(true)
-					expect(metadata!.abortSignal).toBeInstanceOf(AbortSignal)
+					expect(metadata!.abortSignal).toBe(task.currentRequestAbortController!.signal)
 				})
 
 				it("should keep createMessage abortSignal metadata unaborted before cancellation", async () => {
@@ -2197,9 +2197,83 @@ describe("Cline", () => {
 					await iterator.next()
 
 					const [, , metadata] = createMessageSpy.mock.calls[0]!
-					expect(metadata?.abortSignal).toBeInstanceOf(AbortSignal)
+					expect(metadata?.abortSignal).toBe(task.currentRequestAbortController!.signal)
 					expect(metadata?.abortSignal?.aborted).toBe(false)
 				})
+			})
+
+			it("should create a fresh AbortController for each sequential request", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+
+				vi.spyOn(task as any, "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: mockApiConfig.apiModelId!,
+					info: {
+						supportsImages: false,
+						supportsPromptCache: true,
+						contextWindow: 200000,
+						maxTokens: 4096,
+						inputPrice: 0.3,
+						outputPrice: 1.5,
+					} as ModelInfo,
+				})
+
+				const providerState = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...providerState,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: true,
+					requestDelaySeconds: 0,
+				})
+
+				let callCount = 0
+				const mockStreamFactory = async function* (): AsyncGenerator<ApiStreamChunk> {
+					yield { type: "text", text: `response ${callCount}` }
+					callCount++
+				}
+				const createMessageSpy = vi
+					.spyOn(task.api, "createMessage")
+					.mockImplementation(() => mockStreamFactory())
+
+				task.apiConversationHistory = [
+					{
+						role: "user" as const,
+						content: [{ type: "text" as const, text: "test message" }],
+						ts: Date.now(),
+					},
+				] as any
+
+				// First request
+				const iterator1 = task.attemptApiRequest(0)
+				await iterator1.next()
+
+				expect(createMessageSpy).toHaveBeenCalledTimes(1)
+				const [, , metadata1] = createMessageSpy.mock.calls[0]!
+				const signal1 = metadata1!.abortSignal
+				expect(signal1).toBeDefined()
+				expect(signal1!.aborted).toBe(false)
+
+				// Simulate request completion and cancellation to clear the controller
+				task.cancelCurrentRequest()
+
+				// Second request should create a fresh AbortController with a new signal
+				callCount = 0
+				const iterator2 = task.attemptApiRequest(0)
+				await iterator2.next()
+
+				expect(createMessageSpy).toHaveBeenCalledTimes(2)
+				const [, , metadata2] = createMessageSpy.mock.calls[1]!
+				const signal2 = metadata2!.abortSignal
+
+				// Signals should be different instances (fresh controller per request)
+				expect(signal2).not.toBe(signal1)
+				expect(signal2).toBe(task.currentRequestAbortController!.signal)
+				expect(signal2!.aborted).toBe(false)
 			})
 
 			it("should propagate AbortController signal through attemptApiRequest context-window retry path", async () => {
