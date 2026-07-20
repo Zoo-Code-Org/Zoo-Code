@@ -217,6 +217,7 @@ describe("VertexHandler", () => {
 				type: "usage",
 				inputTokens: 10,
 				outputTokens: 0,
+				totalCost: 0.00003,
 			})
 			expect(chunks[1]).toEqual({
 				type: "text",
@@ -431,6 +432,7 @@ describe("VertexHandler", () => {
 				outputTokens: 0,
 				cacheWriteTokens: 3,
 				cacheReadTokens: 2,
+				totalCost: 0.00004185,
 			})
 			expect(usageChunks[1]).toEqual({
 				type: "usage",

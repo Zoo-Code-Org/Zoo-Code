@@ -192,7 +192,9 @@ const SessionRow = memo(
 							<span className="text-[10px] text-vscode-descriptionForeground">
 								{formatRelativeTime(session.timestamp)}
 								{" \u00b7 "}
-								{session.model}
+								{session.models && session.models.length > 0
+									? session.models.join(", ")
+									: session.model}
 								{" \u00b7 "}
 								{session.provider}
 							</span>

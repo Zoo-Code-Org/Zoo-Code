@@ -79,9 +79,9 @@
   },
   "time": {
     "justNow": "agora mesmo",
-    "minutesAgo": "ha {{count}} min",
-    "hoursAgo": "ha {{count}} h",
+    "minutesAgo": "há {{count}} min",
+    "hoursAgo": "há {{count}} h",
     "yesterday": "ontem",
-    "daysAgo": "ha {{count}} dias"
+    "daysAgo": "há {{count}} dias"
   }
 }

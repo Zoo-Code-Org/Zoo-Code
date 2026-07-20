@@ -78,7 +78,7 @@
     "status": "Status"
   },
   "time": {
-    "justNow": "przed chwila",
+    "justNow": "przed chwilą",
     "minutesAgo": "{{count}} min temu",
     "hoursAgo": "{{count}} godz. temu",
     "yesterday": "wczoraj",

@@ -127,9 +127,23 @@ export interface SessionSummary {
 	taskId: string
 	title: string // First line of user input (truncated); falls back to taskId
 	timestamp: number // Last activity (epoch ms)
-	model: string
+	model: string // First-seen model (kept for backward compatibility)
 	provider: string
-	mode: string
+	mode: string // First-seen mode (kept for backward compatibility)
+	/**
+	 * All unique models used in the session, in first-seen order.
+	 * A session may switch models (e.g. orchestrator delegating to a
+	 * different provider), so this array captures the full set while
+	 * `model` retains the earliest value for backward compatibility.
+	 */
+	models: string[]
+	/**
+	 * All unique modes used in the session, in first-seen order.
+	 * A session may span multiple modes (e.g. orchestrator-crow
+	 * delegating to code, debug, ask), so this array captures the full
+	 * set while `mode` retains the earliest value for backward compat.
+	 */
+	modes: string[]
 	totalTokens: number
 	totalCost: number
 	callCount: number
@@ -148,6 +162,7 @@ export interface SessionDetail extends SessionSummary {
  */
 export interface APICallRecord {
 	index: number
+	mode: string
 	timestamp: number
 	inputTokens: number
 	outputTokens: number

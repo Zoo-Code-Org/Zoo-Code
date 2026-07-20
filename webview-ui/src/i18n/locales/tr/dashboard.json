@@ -78,10 +78,10 @@
     "status": "Durum"
   },
   "time": {
-    "justNow": "az once",
-    "minutesAgo": "{{count}} dk once",
-    "hoursAgo": "{{count}} saat once",
-    "yesterday": "dun",
-    "daysAgo": "{{count}} gun once"
+    "justNow": "az önce",
+    "minutesAgo": "{{count}} dk önce",
+    "hoursAgo": "{{count}} saat önce",
+    "yesterday": "dün",
+    "daysAgo": "{{count}} gün önce"
   }
 }
