@@ -675,8 +675,8 @@ importers:
         specifier: 6.0.218
         version: 6.0.218(zod@3.25.76)
       esbuild-wasm:
-        specifier: 0.25.12
-        version: 0.25.12
+        specifier: 0.28.1
+        version: 0.28.1
       execa:
         specifier: 9.6.1
         version: 9.6.1
@@ -862,7 +862,7 @@ importers:
         version: 3.4.1
       source-map:
         specifier: ^0.7.4
-        version: 0.7.4
+        version: 0.7.6
       stacktrace-js:
         specifier: ^2.0.2
         version: 2.0.2
@@ -4555,8 +4555,8 @@ packages:
   es6-error@4.1.1:
     resolution: {integrity: sha512-Um/+FxMr9CISWh0bi5Zv0iOD+4cFh5qLeks1qhAopKVAJw3drgKbKySikp7wGhDL0HPeaja0P5ULZrxLkniUVg==}
 
-  esbuild-wasm@0.25.12:
-    resolution: {integrity: sha512-rZqkjL3Y6FwLpSHzLnaEy8Ps6veCNo1kZa9EOfJvmWtBq5dJH4iVjfmOO6Mlkv9B0tt9WFPFmb/VxlgJOnueNg==}
+  esbuild-wasm@0.28.1:
+    resolution: {integrity: sha512-p/GD4E8oYRjg3kjdKrnMb0s4PzXgJF42e0MF4H0+ACyK/kIlFRp3e0fzOleIG+wBBm6MM3XQrbpe7soEA+vJIA==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -7359,10 +7359,6 @@ packages:
   source-map@0.6.1:
     resolution: {integrity: sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g==}
     engines: {node: '>=0.10.0'}
-
-  source-map@0.7.4:
-    resolution: {integrity: sha512-l3BikUxvPOcn5E74dZiq5BGsTb5yEwhaTSzccU6t4sDOH8NWJCstKO5QT2CvtFoK6F0saL7p9xHAqHOlCPJygA==}
-    engines: {node: '>= 8'}
 
   source-map@0.7.6:
     resolution: {integrity: sha512-i5uvt8C3ikiWeNZSVZNWcfZPItFQOsYTUAOkcUPGd8DqDy1uOUikjt5dG+uRlwyvR108Fb9DOd4GvXfT0N2/uQ==}
@@ -12374,7 +12370,7 @@ snapshots:
 
   es6-error@4.1.1: {}
 
-  esbuild-wasm@0.25.12: {}
+  esbuild-wasm@0.28.1: {}
 
   esbuild@0.28.1:
     optionalDependencies:
@@ -15825,8 +15821,6 @@ snapshots:
   source-map@0.5.6: {}
 
   source-map@0.6.1: {}
-
-  source-map@0.7.4: {}
 
   source-map@0.7.6: {}
 
