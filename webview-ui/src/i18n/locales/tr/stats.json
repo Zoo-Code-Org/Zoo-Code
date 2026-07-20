@@ -1,81 +1,82 @@
 {
-  "title": "Kullanım istatistikleri",
-  "done": "Sohbete dön",
-  "range": {
-    "today": "Bugün",
-    "7d": "Son 7 gün",
-    "30d": "Son 30 gün",
-    "all": "Tüm zamanlar"
-  },
-  "summary": {
-    "totalTokens": "Toplam token",
-    "inputTokens": "Giriş token'ları",
-    "outputTokens": "Çıkış token'ları",
-    "cacheTokens": "Önbellek token'ları",
-    "costUsd": "Toplam maliyet"
-  },
-  "breakdown": {
-    "title": "Döküm",
-    "groupBy": "Gruplandırma ölçütü",
-    "model": "Model",
-    "provider": "Sağlayıcı",
-    "mode": "Mod",
-    "status": "Durum",
-    "day": "Gün",
-    "week": "Hafta",
-    "month": "Ay",
-    "events": "Olaylar",
-    "completed": "Tamamlandı",
-    "failed": "Başarısız",
-    "cancelled": "İptal edildi",
-    "inputTokens": "Giriş",
-    "outputTokens": "Çıkış",
-    "cacheReadTokens": "Önbellek okuma",
-    "cacheWriteTokens": "Önbellek yazma",
-    "reasoningTokens": "Akıl yürütme",
-    "totalTokens": "Toplam",
-    "costUsd": "Maliyet (USD)",
-    "unknown": "Bilinmiyor",
-    "empty": "Bu aralık için kullanım verisi yok."
-  },
-  "heatmap": {
-    "title": "Günlük aktivite",
-    "30d": "30 gün",
-    "60d": "60 gün",
-    "120d": "120 gün",
-    "360d": "360 gün",
-    "less": "Az",
-    "more": "Çok",
-    "noData": "Veri yok"
-  },
-  "coverage": {
-    "title": "Veri kapsamı",
-    "liveFrom": "Kayıt başlangıcı",
-    "backfilledEvents": "Geriye dönük olaylar",
-    "paused": "Kayıt duraklatıldı",
-    "notAvailable": "Kullanılamıyor"
-  },
-  "actions": {
-    "exportJson": "JSON dışa aktar",
-    "exportCsv": "CSV dışa aktar",
-    "clear": "Tüm verileri sil",
-    "refresh": "Yenile"
-  },
-  "clearDialog": {
-    "title": "Tüm kullanım istatistikleri silinsin mi?",
-    "description": "Bu, yerel depolamadaki tüm kayıtlı kullanım olaylarını kalıcı olarak siler. Bu işlem geri alınamaz.",
-    "confirm": "Sil",
-    "cancel": "İptal"
-  },
-  "states": {
-    "loading": "İstatistikler yükleniyor...",
-    "error": "İstatistikler yüklenemedi",
-    "empty": "Henüz kullanım verisi yok. LLM API çağrıları yaptıktan sonra istatistikler burada görünecek.",
-    "emptyHint": "Kullanım verisi toplamaya başlamak için yapay zeka asistanınıza bir mesaj göndermeyi deneyin."
-  },
-  "source": {
-    "provider": "Sağlayıcı tarafından bildirildi",
-    "estimated": "Tahmini",
-    "backfilled": "Geriye dönük"
-  }
+	"title": "Kullanım istatistikleri",
+	"done": "Sohbete dön",
+	"range": {
+		"today": "Bugün",
+		"7d": "Son 7 gün",
+		"30d": "Son 30 gün",
+		"all": "Tüm zamanlar"
+	},
+	"summary": {
+		"totalTokens": "Toplam token",
+		"inputTokens": "Giriş token'ları",
+		"outputTokens": "Çıkış token'ları",
+		"cacheTokens": "Önbellek token'ları",
+		"costUsd": "Toplam maliyet"
+	},
+	"breakdown": {
+		"title": "Döküm",
+		"groupBy": "Gruplandırma ölçütü",
+		"model": "Model",
+		"provider": "Sağlayıcı",
+		"mode": "Mod",
+		"status": "Durum",
+		"day": "Gün",
+		"week": "Hafta",
+		"month": "Ay",
+		"events": "Olaylar",
+		"completed": "Tamamlandı",
+		"failed": "Başarısız",
+		"cancelled": "İptal edildi",
+		"inputTokens": "Giriş",
+		"outputTokens": "Çıkış",
+		"cacheReadTokens": "Önbellek okuma",
+		"cacheWriteTokens": "Önbellek yazma",
+		"reasoningTokens": "Akıl yürütme",
+		"totalTokens": "Toplam",
+		"costUsd": "Maliyet (USD)",
+		"unknown": "Bilinmiyor",
+		"empty": "Bu aralık için kullanım verisi yok."
+	},
+	"heatmap": {
+		"title": "Günlük aktivite",
+		"30d": "30 gün",
+		"60d": "60 gün",
+		"120d": "120 gün",
+		"360d": "360 gün",
+		"less": "Az",
+		"more": "Çok",
+		"noData": "Veri yok",
+		"loading": "Yükleniyor..."
+	},
+	"coverage": {
+		"title": "Veri kapsamı",
+		"liveFrom": "Kayıt başlangıcı",
+		"backfilledEvents": "Geriye dönük olaylar",
+		"paused": "Kayıt duraklatıldı",
+		"notAvailable": "Kullanılamıyor"
+	},
+	"actions": {
+		"exportJson": "JSON dışa aktar",
+		"exportCsv": "CSV dışa aktar",
+		"clear": "Tüm verileri sil",
+		"refresh": "Yenile"
+	},
+	"clearDialog": {
+		"title": "Tüm kullanım istatistikleri silinsin mi?",
+		"description": "Bu, yerel depolamadaki tüm kayıtlı kullanım olaylarını kalıcı olarak siler. Bu işlem geri alınamaz.",
+		"confirm": "Sil",
+		"cancel": "İptal"
+	},
+	"states": {
+		"loading": "İstatistikler yükleniyor...",
+		"error": "İstatistikler yüklenemedi",
+		"empty": "Henüz kullanım verisi yok. LLM API çağrıları yaptıktan sonra istatistikler burada görünecek.",
+		"emptyHint": "Kullanım verisi toplamaya başlamak için yapay zeka asistanınıza bir mesaj göndermeyi deneyin."
+	},
+	"source": {
+		"provider": "Sağlayıcı tarafından bildirildi",
+		"estimated": "Tahmini",
+		"backfilled": "Geriye dönük"
+	}
 }

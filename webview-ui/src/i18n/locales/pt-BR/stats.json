@@ -1,81 +1,82 @@
 {
-  "title": "Estatísticas de uso",
-  "done": "Voltar ao chat",
-  "range": {
-    "today": "Hoje",
-    "7d": "Últimos 7 dias",
-    "30d": "Últimos 30 dias",
-    "all": "Todo o período"
-  },
-  "summary": {
-    "totalTokens": "Total de tokens",
-    "inputTokens": "Tokens de entrada",
-    "outputTokens": "Tokens de saída",
-    "cacheTokens": "Tokens de cache",
-    "costUsd": "Custo total"
-  },
-  "breakdown": {
-    "title": "Detalhamento",
-    "groupBy": "Agrupar por",
-    "model": "Modelo",
-    "provider": "Provedor",
-    "mode": "Modo",
-    "status": "Status",
-    "day": "Dia",
-    "week": "Semana",
-    "month": "Mês",
-    "events": "Eventos",
-    "completed": "Concluídos",
-    "failed": "Falhados",
-    "cancelled": "Cancelados",
-    "inputTokens": "Entrada",
-    "outputTokens": "Saída",
-    "cacheReadTokens": "Leitura de cache",
-    "cacheWriteTokens": "Escrita de cache",
-    "reasoningTokens": "Raciocínio",
-    "totalTokens": "Total",
-    "costUsd": "Custo (USD)",
-    "unknown": "Desconhecido",
-    "empty": "Sem dados de uso para este intervalo."
-  },
-  "heatmap": {
-    "title": "Atividade diária",
-    "30d": "30 dias",
-    "60d": "60 dias",
-    "120d": "120 dias",
-    "360d": "360 dias",
-    "less": "Menos",
-    "more": "Mais",
-    "noData": "Sem dados"
-  },
-  "coverage": {
-    "title": "Cobertura de dados",
-    "liveFrom": "Gravando desde",
-    "backfilledEvents": "Eventos retroativos",
-    "paused": "A gravação está pausada",
-    "notAvailable": "Indisponível"
-  },
-  "actions": {
-    "exportJson": "Exportar JSON",
-    "exportCsv": "Exportar CSV",
-    "clear": "Limpar todos os dados",
-    "refresh": "Atualizar"
-  },
-  "clearDialog": {
-    "title": "Limpar todas as estatísticas de uso?",
-    "description": "Isso excluirá permanentemente todos os eventos de uso registrados do armazenamento local. Esta ação não pode ser desfeita.",
-    "confirm": "Excluir",
-    "cancel": "Cancelar"
-  },
-  "states": {
-    "loading": "Carregando estatísticas...",
-    "error": "Falha ao carregar estatísticas",
-    "empty": "Ainda não há dados de uso. As estatísticas aparecerão aqui após você fazer chamadas de API LLM.",
-    "emptyHint": "Tente enviar uma mensagem ao seu assistente de IA para começar a coletar dados de uso."
-  },
-  "source": {
-    "provider": "Reportado pelo provedor",
-    "estimated": "Estimado",
-    "backfilled": "Retroativo"
-  }
+	"title": "Estatísticas de uso",
+	"done": "Voltar ao chat",
+	"range": {
+		"today": "Hoje",
+		"7d": "Últimos 7 dias",
+		"30d": "Últimos 30 dias",
+		"all": "Todo o período"
+	},
+	"summary": {
+		"totalTokens": "Total de tokens",
+		"inputTokens": "Tokens de entrada",
+		"outputTokens": "Tokens de saída",
+		"cacheTokens": "Tokens de cache",
+		"costUsd": "Custo total"
+	},
+	"breakdown": {
+		"title": "Detalhamento",
+		"groupBy": "Agrupar por",
+		"model": "Modelo",
+		"provider": "Provedor",
+		"mode": "Modo",
+		"status": "Status",
+		"day": "Dia",
+		"week": "Semana",
+		"month": "Mês",
+		"events": "Eventos",
+		"completed": "Concluídos",
+		"failed": "Falhados",
+		"cancelled": "Cancelados",
+		"inputTokens": "Entrada",
+		"outputTokens": "Saída",
+		"cacheReadTokens": "Leitura de cache",
+		"cacheWriteTokens": "Escrita de cache",
+		"reasoningTokens": "Raciocínio",
+		"totalTokens": "Total",
+		"costUsd": "Custo (USD)",
+		"unknown": "Desconhecido",
+		"empty": "Sem dados de uso para este intervalo."
+	},
+	"heatmap": {
+		"title": "Atividade diária",
+		"30d": "30 dias",
+		"60d": "60 dias",
+		"120d": "120 dias",
+		"360d": "360 dias",
+		"less": "Menos",
+		"more": "Mais",
+		"noData": "Sem dados",
+		"loading": "Carregando..."
+	},
+	"coverage": {
+		"title": "Cobertura de dados",
+		"liveFrom": "Gravando desde",
+		"backfilledEvents": "Eventos retroativos",
+		"paused": "A gravação está pausada",
+		"notAvailable": "Indisponível"
+	},
+	"actions": {
+		"exportJson": "Exportar JSON",
+		"exportCsv": "Exportar CSV",
+		"clear": "Limpar todos os dados",
+		"refresh": "Atualizar"
+	},
+	"clearDialog": {
+		"title": "Limpar todas as estatísticas de uso?",
+		"description": "Isso excluirá permanentemente todos os eventos de uso registrados do armazenamento local. Esta ação não pode ser desfeita.",
+		"confirm": "Excluir",
+		"cancel": "Cancelar"
+	},
+	"states": {
+		"loading": "Carregando estatísticas...",
+		"error": "Falha ao carregar estatísticas",
+		"empty": "Ainda não há dados de uso. As estatísticas aparecerão aqui após você fazer chamadas de API LLM.",
+		"emptyHint": "Tente enviar uma mensagem ao seu assistente de IA para começar a coletar dados de uso."
+	},
+	"source": {
+		"provider": "Reportado pelo provedor",
+		"estimated": "Estimado",
+		"backfilled": "Retroativo"
+	}
 }

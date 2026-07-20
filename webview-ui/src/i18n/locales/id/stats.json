@@ -1,81 +1,82 @@
 {
-  "title": "Statistik penggunaan",
-  "done": "Kembali ke obrolan",
-  "range": {
-    "today": "Hari ini",
-    "7d": "7 hari terakhir",
-    "30d": "30 hari terakhir",
-    "all": "Sepanjang waktu"
-  },
-  "summary": {
-    "totalTokens": "Total token",
-    "inputTokens": "Token masukan",
-    "outputTokens": "Token keluaran",
-    "cacheTokens": "Token cache",
-    "costUsd": "Total biaya"
-  },
-  "breakdown": {
-    "title": "Rincian",
-    "groupBy": "Kelompokkan berdasarkan",
-    "model": "Model",
-    "provider": "Penyedia",
-    "mode": "Mode",
-    "status": "Status",
-    "day": "Hari",
-    "week": "Minggu",
-    "month": "Bulan",
-    "events": "Peristiwa",
-    "completed": "Selesai",
-    "failed": "Gagal",
-    "cancelled": "Dibatalkan",
-    "inputTokens": "Masukan",
-    "outputTokens": "Keluaran",
-    "cacheReadTokens": "Baca cache",
-    "cacheWriteTokens": "Tulis cache",
-    "reasoningTokens": "Penalaran",
-    "totalTokens": "Total",
-    "costUsd": "Biaya (USD)",
-    "unknown": "Tidak diketahui",
-    "empty": "Tidak ada data penggunaan untuk rentang ini."
-  },
-  "heatmap": {
-    "title": "Aktivitas harian",
-    "30d": "30 hari",
-    "60d": "60 hari",
-    "120d": "120 hari",
-    "360d": "360 hari",
-    "less": "Lebih sedikit",
-    "more": "Lebih banyak",
-    "noData": "Tidak ada data"
-  },
-  "coverage": {
-    "title": "Cakupan data",
-    "liveFrom": "Merekam sejak",
-    "backfilledEvents": "Peristiwa retroaktif",
-    "paused": "Perekaman dijeda",
-    "notAvailable": "Tidak tersedia"
-  },
-  "actions": {
-    "exportJson": "Ekspor JSON",
-    "exportCsv": "Ekspor CSV",
-    "clear": "Hapus semua data",
-    "refresh": "Segarkan"
-  },
-  "clearDialog": {
-    "title": "Hapus semua statistik penggunaan?",
-    "description": "Tindakan ini akan menghapus permanen semua peristiwa penggunaan yang tercatat dari penyimpanan lokal. Tindakan ini tidak dapat dibatalkan.",
-    "confirm": "Hapus",
-    "cancel": "Batal"
-  },
-  "states": {
-    "loading": "Memuat statistik...",
-    "error": "Gagal memuat statistik",
-    "empty": "Belum ada data penggunaan. Statistik akan muncul di sini setelah Anda melakukan panggilan API LLM.",
-    "emptyHint": "Coba kirim pesan ke asisten AI Anda untuk mulai mengumpulkan data penggunaan."
-  },
-  "source": {
-    "provider": "Dilaporkan penyedia",
-    "estimated": "Perkiraan",
-    "backfilled": "Retroaktif"
-  }
+	"title": "Statistik penggunaan",
+	"done": "Kembali ke obrolan",
+	"range": {
+		"today": "Hari ini",
+		"7d": "7 hari terakhir",
+		"30d": "30 hari terakhir",
+		"all": "Sepanjang waktu"
+	},
+	"summary": {
+		"totalTokens": "Total token",
+		"inputTokens": "Token masukan",
+		"outputTokens": "Token keluaran",
+		"cacheTokens": "Token cache",
+		"costUsd": "Total biaya"
+	},
+	"breakdown": {
+		"title": "Rincian",
+		"groupBy": "Kelompokkan berdasarkan",
+		"model": "Model",
+		"provider": "Penyedia",
+		"mode": "Mode",
+		"status": "Status",
+		"day": "Hari",
+		"week": "Minggu",
+		"month": "Bulan",
+		"events": "Peristiwa",
+		"completed": "Selesai",
+		"failed": "Gagal",
+		"cancelled": "Dibatalkan",
+		"inputTokens": "Masukan",
+		"outputTokens": "Keluaran",
+		"cacheReadTokens": "Baca cache",
+		"cacheWriteTokens": "Tulis cache",
+		"reasoningTokens": "Penalaran",
+		"totalTokens": "Total",
+		"costUsd": "Biaya (USD)",
+		"unknown": "Tidak diketahui",
+		"empty": "Tidak ada data penggunaan untuk rentang ini."
+	},
+	"heatmap": {
+		"title": "Aktivitas harian",
+		"30d": "30 hari",
+		"60d": "60 hari",
+		"120d": "120 hari",
+		"360d": "360 hari",
+		"less": "Lebih sedikit",
+		"more": "Lebih banyak",
+		"noData": "Tidak ada data",
+		"loading": "Memuat..."
+	},
+	"coverage": {
+		"title": "Cakupan data",
+		"liveFrom": "Merekam sejak",
+		"backfilledEvents": "Peristiwa retroaktif",
+		"paused": "Perekaman dijeda",
+		"notAvailable": "Tidak tersedia"
+	},
+	"actions": {
+		"exportJson": "Ekspor JSON",
+		"exportCsv": "Ekspor CSV",
+		"clear": "Hapus semua data",
+		"refresh": "Segarkan"
+	},
+	"clearDialog": {
+		"title": "Hapus semua statistik penggunaan?",
+		"description": "Tindakan ini akan menghapus permanen semua peristiwa penggunaan yang tercatat dari penyimpanan lokal. Tindakan ini tidak dapat dibatalkan.",
+		"confirm": "Hapus",
+		"cancel": "Batal"
+	},
+	"states": {
+		"loading": "Memuat statistik...",
+		"error": "Gagal memuat statistik",
+		"empty": "Belum ada data penggunaan. Statistik akan muncul di sini setelah Anda melakukan panggilan API LLM.",
+		"emptyHint": "Coba kirim pesan ke asisten AI Anda untuk mulai mengumpulkan data penggunaan."
+	},
+	"source": {
+		"provider": "Dilaporkan penyedia",
+		"estimated": "Perkiraan",
+		"backfilled": "Retroaktif"
+	}
 }

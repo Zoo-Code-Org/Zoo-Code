@@ -1,13 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw } from "lucide-react"
 
-import type {
-	ExtensionMessage,
-	StatsQuery,
-	StatsSnapshot,
-	SessionSummary,
-	SessionDetail,
-} from "@roo-code/types"
+import type { ExtensionMessage, StatsQuery, StatsSnapshot, SessionSummary, SessionDetail } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -175,7 +169,11 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				from,
 				to,
 				timezone,
-				groupBy: ([currentGroupBy, "day"] as Array<"day" | "week" | "month" | "provider" | "model" | "mode" | "status" | "source">).filter((v, i, a) => a.indexOf(v) === i),
+				groupBy: (
+					[currentGroupBy, "day"] as Array<
+						"day" | "week" | "month" | "provider" | "model" | "mode" | "status" | "source"
+					>
+				).filter((v, i, a) => a.indexOf(v) === i),
 				includeCancelled: false,
 			}
 		},
@@ -197,106 +195,106 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			setError(null)
 
 			const query = buildQuery(currentPreset, currentGroupBy, fromOverride, toOverride)
-				vscode.postMessage({
-					type: "getUsageStats",
-					requestId,
-					usageStatsQuery: query,
-				})
-			},
-			[buildQuery],
-		)
-	
-		// ── Fetch sessions (Commit 3) ──────────────────────────────────────────
-		// Sends `getDashboardSessions` with the same time-range query as the
-		// stats fetch, plus optional model/provider filters. The response is
-		// correlated via `latestSessionsRequestIdRef` to ignore stale results.
-		const fetchSessions = useCallback(
-			(
-				currentPreset: DashboardPreset,
-				currentGroupBy: DashboardGroupBy,
-				fromOverride?: string,
-				toOverride?: string,
-				modelFilterOverride?: string | undefined,
-				providerFilterOverride?: string | undefined,
-			) => {
-				const requestId = `dashboard-sessions-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-				latestSessionsRequestIdRef.current = requestId
-				setSessionsLoading(true)
-				setSessionsError(null)
-	
-				const query = buildQuery(currentPreset, currentGroupBy, fromOverride, toOverride)
-				vscode.postMessage({
-					type: "getDashboardSessions",
-					requestId,
-					usageStatsQuery: query,
-					dashboardSessionFilters: {
-						model: modelFilterOverride,
-						provider: providerFilterOverride,
-					},
-				})
-			},
-			[buildQuery],
-		)
-	
-		// ── Fetch session detail (Commit 4) ───────────────────────────────────
-		// Sends `getDashboardSessionDetail` with the taskId. The response is
-		// correlated via `latestSessionDetailRequestIdRef` to ignore stale
-		// results. The detail is cached in `sessionDetails` so re-expanding a
-		// row does not trigger a refetch.
-		const fetchSessionDetail = useCallback((taskId: string) => {
-			const requestId = `dashboard-session-detail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-			latestSessionDetailRequestIdRef.current = requestId
-	
-			// Mark this task as loading. Using a new Set instance so React
-			// detects the state change.
-			setSessionDetailLoading((prev) => {
-				const next = new Set(prev)
-				next.add(taskId)
-				return next
-			})
-			// Clear any previous error for this task.
-			setSessionDetailErrors((prev) => {
-				if (prev[taskId] === undefined) return prev
-				const next = { ...prev }
-				next[taskId] = null
-				return next
-			})
-	
 			vscode.postMessage({
-				type: "getDashboardSessionDetail",
+				type: "getUsageStats",
 				requestId,
-				taskId,
+				usageStatsQuery: query,
 			})
-		}, [])
-	
-		// ── Toggle session expansion (Commit 4) ───────────────────────────────
-		// Accordion pattern: clicking a row toggles its expansion. Clicking
-		// another row closes the previous one. The detail is fetched on first
-		// expansion; if already cached, the cached value is shown immediately.
-		const handleToggleSession = useCallback(
-			(taskId: string) => {
-				setExpandedTaskId((current) => {
-					// Toggling the already-expanded row collapses it.
-					if (current === taskId) return undefined
-	
-					// Expanding a new row: fetch detail if not already cached.
-					// We check the cache outside the state setter to avoid
-					// stale-closure issues with `sessionDetails`.
-					if (sessionDetails[taskId] === undefined && !sessionDetailLoading.has(taskId)) {
-						fetchSessionDetail(taskId)
-					}
-					return taskId
-				})
-			},
-			[sessionDetails, sessionDetailLoading, fetchSessionDetail],
-		)
-	
-		// Initial fetch on mount
-		useEffect(() => {
-			fetchStats(preset, groupBy)
-			fetchSessions(preset, groupBy)
-			// eslint-disable-next-line react-hooks/exhaustive-deps
-		}, [])
+		},
+		[buildQuery],
+	)
+
+	// ── Fetch sessions (Commit 3) ──────────────────────────────────────────
+	// Sends `getDashboardSessions` with the same time-range query as the
+	// stats fetch, plus optional model/provider filters. The response is
+	// correlated via `latestSessionsRequestIdRef` to ignore stale results.
+	const fetchSessions = useCallback(
+		(
+			currentPreset: DashboardPreset,
+			currentGroupBy: DashboardGroupBy,
+			fromOverride?: string,
+			toOverride?: string,
+			modelFilterOverride?: string | undefined,
+			providerFilterOverride?: string | undefined,
+		) => {
+			const requestId = `dashboard-sessions-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+			latestSessionsRequestIdRef.current = requestId
+			setSessionsLoading(true)
+			setSessionsError(null)
+
+			const query = buildQuery(currentPreset, currentGroupBy, fromOverride, toOverride)
+			vscode.postMessage({
+				type: "getDashboardSessions",
+				requestId,
+				usageStatsQuery: query,
+				dashboardSessionFilters: {
+					model: modelFilterOverride,
+					provider: providerFilterOverride,
+				},
+			})
+		},
+		[buildQuery],
+	)
+
+	// ── Fetch session detail (Commit 4) ───────────────────────────────────
+	// Sends `getDashboardSessionDetail` with the taskId. The response is
+	// correlated via `latestSessionDetailRequestIdRef` to ignore stale
+	// results. The detail is cached in `sessionDetails` so re-expanding a
+	// row does not trigger a refetch.
+	const fetchSessionDetail = useCallback((taskId: string) => {
+		const requestId = `dashboard-session-detail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+		latestSessionDetailRequestIdRef.current = requestId
+
+		// Mark this task as loading. Using a new Set instance so React
+		// detects the state change.
+		setSessionDetailLoading((prev) => {
+			const next = new Set(prev)
+			next.add(taskId)
+			return next
+		})
+		// Clear any previous error for this task.
+		setSessionDetailErrors((prev) => {
+			if (prev[taskId] === undefined) return prev
+			const next = { ...prev }
+			next[taskId] = null
+			return next
+		})
+
+		vscode.postMessage({
+			type: "getDashboardSessionDetail",
+			requestId,
+			taskId,
+		})
+	}, [])
+
+	// ── Toggle session expansion (Commit 4) ───────────────────────────────
+	// Accordion pattern: clicking a row toggles its expansion. Clicking
+	// another row closes the previous one. The detail is fetched on first
+	// expansion; if already cached, the cached value is shown immediately.
+	const handleToggleSession = useCallback(
+		(taskId: string) => {
+			setExpandedTaskId((current) => {
+				// Toggling the already-expanded row collapses it.
+				if (current === taskId) return undefined
+
+				// Expanding a new row: fetch detail if not already cached.
+				// We check the cache outside the state setter to avoid
+				// stale-closure issues with `sessionDetails`.
+				if (sessionDetails[taskId] === undefined && !sessionDetailLoading.has(taskId)) {
+					fetchSessionDetail(taskId)
+				}
+				return taskId
+			})
+		},
+		[sessionDetails, sessionDetailLoading, fetchSessionDetail],
+	)
+
+	// Initial fetch on mount
+	useEffect(() => {
+		fetchStats(preset, groupBy)
+		fetchSessions(preset, groupBy)
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [])
 
 	// Refetch when preset or groupBy changes
 	const handlePresetChange = useCallback(
@@ -391,11 +389,11 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				// Do NOT return a cleanup here — the ref-based timer is cleared
 				// above on the next event and in the effect cleanup below.
 			}
-	
+
 			if (message.type === "dashboardSessionsResponse") {
 				// Only accept the latest sessions request's response
 				if (message.requestId !== latestSessionsRequestIdRef.current) return
-	
+
 				if (message.dashboardSessions) {
 					setSessions(message.dashboardSessions)
 					setSessionsLoading(false)
@@ -405,11 +403,11 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					setSessionsLoading(false)
 				}
 			}
-	
+
 			if (message.type === "dashboardSessionDetailResponse") {
 				// Only accept the latest session detail request's response
 				if (message.requestId !== latestSessionDetailRequestIdRef.current) return
-	
+
 				// ExtensionMessage does not carry `taskId` for this response type,
 				// so we correlate via the currently expanded task. Because only
 				// one session is expanded at a time (accordion pattern) and the
@@ -417,7 +415,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				// one whose detail we are receiving.
 				const taskId = expandedTaskId
 				if (!taskId) return
-	
+
 				// Clear loading state for this task
 				setSessionDetailLoading((prev) => {
 					if (!prev.has(taskId)) return prev
@@ -425,7 +423,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					next.delete(taskId)
 					return next
 				})
-	
+
 				// Capture the detail and error into locals so TypeScript can
 				// narrow the type before the deferred setState callbacks. Without
 				// this, `message.dashboardSessionDetail` would be
@@ -433,7 +431,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				// not assignable to `Record<string, SessionDetail | null>`.
 				const detail = message.dashboardSessionDetail ?? null
 				const detailError = message.error || t("dashboard:states.error")
-	
+
 				setSessionDetails((prev) => ({
 					...prev,
 					[taskId]: detail,
@@ -443,7 +441,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					[taskId]: detail ? null : detailError,
 				}))
 			}
-	
+
 			if (message.type === "requestClearNonceResponse") {
 				// Host issues the nonce; store it and open the confirm dialog.
 				// If the host returned null/error, surface it without opening the dialog.
@@ -456,7 +454,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					setClearNonce(null)
 				}
 			}
-	
+
 			if (message.type === "clearUsageStatsResponse") {
 				if (message.clearUsageStatsResult?.success) {
 					setShowClearDialog(false)
@@ -469,7 +467,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					setClearNonce(null)
 				}
 			}
-	
+
 			if (message.type === "exportUsageStatsResponse") {
 				// Host handles the save dialog; nothing to do in webview
 				// unless there's an error
@@ -478,18 +476,18 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				}
 			}
 		}
-	
-			window.addEventListener("message", handleMessage)
-			return () => {
-				window.removeEventListener("message", handleMessage)
-				// Clear any pending debounce timer so a refetch does not fire
-				// after the component unmounts or the effect re-runs.
-				if (refreshTimerRef.current) {
-					clearTimeout(refreshTimerRef.current)
-					refreshTimerRef.current = null
-				}
+
+		window.addEventListener("message", handleMessage)
+		return () => {
+			window.removeEventListener("message", handleMessage)
+			// Clear any pending debounce timer so a refetch does not fire
+			// after the component unmounts or the effect re-runs.
+			if (refreshTimerRef.current) {
+				clearTimeout(refreshTimerRef.current)
+				refreshTimerRef.current = null
 			}
-		}, [t, preset, groupBy, fetchStats, fetchSessions, fetchSessionDetail, expandedTaskId, modelFilter, providerFilter])
+		}
+	}, [t, preset, groupBy, fetchStats, fetchSessions, fetchSessionDetail, expandedTaskId, modelFilter, providerFilter])
 
 	// ── Export ───────────────────────────────────────────────────────────────
 
@@ -686,9 +684,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 				{/* Error state */}
 				{!loading && error && (
-					<div
-						className="flex flex-col items-center justify-center gap-2 py-8"
-						data-testid="dashboard-error">
+					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="dashboard-error">
 						<span className="text-sm text-vscode-errorForeground">{error}</span>
 						<Button variant="secondary" size="sm" onClick={handleRefresh}>
 							{t("dashboard:actions.refresh")}
@@ -698,12 +694,8 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 				{/* Empty state */}
 				{!loading && !error && !hasData && (
-					<div
-						className="flex flex-col items-center justify-center gap-2 py-8"
-						data-testid="dashboard-empty">
-						<span className="text-sm text-vscode-descriptionForeground">
-							{t("dashboard:states.empty")}
-						</span>
+					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="dashboard-empty">
+						<span className="text-sm text-vscode-descriptionForeground">{t("dashboard:states.empty")}</span>
 						<span className="text-xs text-vscode-descriptionForeground">
 							{t("dashboard:states.emptyHint")}
 						</span>
@@ -717,7 +709,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 						<DashboardSummary totals={totals} />
 
 						{/* Heatmap */}
-						<UsageHeatmap buckets={buckets} />
+						<UsageHeatmap />
 
 						{/* Breakdown table */}
 						<div className="flex flex-col gap-2" data-testid="dashboard-breakdown">
@@ -775,8 +767,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 									</thead>
 									<tbody>
 										{buckets.map((bucket, index) => {
-											const keyValue =
-												bucket.key?.[groupBy] ?? t("dashboard:breakdown.unknown")
+											const keyValue = bucket.key?.[groupBy] ?? t("dashboard:breakdown.unknown")
 											return (
 												<tr
 													key={`${groupBy}-${index}`}
@@ -815,7 +806,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 								</table>
 							</div>
 						</div>
-	
+
 						{/* Sessions list (Commit 3) */}
 						{sessionsLoading ? (
 							<div
@@ -846,7 +837,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 								onToggleSession={handleToggleSession}
 							/>
 						)}
-	
+
 						{/* Data coverage */}
 						{snapshot?.coverage && (
 							<div

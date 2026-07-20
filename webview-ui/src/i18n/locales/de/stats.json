@@ -1,81 +1,82 @@
 {
-  "title": "Nutzungsstatistiken",
-  "done": "Zurück zum Chat",
-  "range": {
-    "today": "Heute",
-    "7d": "Letzte 7 Tage",
-    "30d": "Letzte 30 Tage",
-    "all": "Gesamter Zeitraum"
-  },
-  "summary": {
-    "totalTokens": "Token gesamt",
-    "inputTokens": "Eingabe-Token",
-    "outputTokens": "Ausgabe-Token",
-    "cacheTokens": "Cache-Token",
-    "costUsd": "Gesamtkosten"
-  },
-  "breakdown": {
-    "title": "Aufschlüsselung",
-    "groupBy": "Gruppieren nach",
-    "model": "Modell",
-    "provider": "Anbieter",
-    "mode": "Modus",
-    "status": "Status",
-    "day": "Tag",
-    "week": "Woche",
-    "month": "Monat",
-    "events": "Ereignisse",
-    "completed": "Abgeschlossen",
-    "failed": "Fehlgeschlagen",
-    "cancelled": "Abgebrochen",
-    "inputTokens": "Eingabe",
-    "outputTokens": "Ausgabe",
-    "cacheReadTokens": "Cache-Lesevorgänge",
-    "cacheWriteTokens": "Cache-Schreibvorgänge",
-    "reasoningTokens": "Reasoning",
-    "totalTokens": "Gesamt",
-    "costUsd": "Kosten (USD)",
-    "unknown": "Unbekannt",
-    "empty": "Keine Nutzungsdaten für diesen Bereich."
-  },
-  "heatmap": {
-    "title": "Tägliche Aktivität",
-    "30d": "30 Tage",
-    "60d": "60 Tage",
-    "120d": "120 Tage",
-    "360d": "360 Tage",
-    "less": "Weniger",
-    "more": "Mehr",
-    "noData": "Keine Daten"
-  },
-  "coverage": {
-    "title": "Datenabdeckung",
-    "liveFrom": "Aufzeichnung seit",
-    "backfilledEvents": "Rückwirkend erfasste Ereignisse",
-    "paused": "Aufzeichnung ist pausiert",
-    "notAvailable": "Nicht verfügbar"
-  },
-  "actions": {
-    "exportJson": "JSON exportieren",
-    "exportCsv": "CSV exportieren",
-    "clear": "Alle Daten löschen",
-    "refresh": "Aktualisieren"
-  },
-  "clearDialog": {
-    "title": "Alle Nutzungsstatistiken löschen?",
-    "description": "Dadurch werden alle aufgezeichneten Nutzungsereignisse aus dem lokalen Speicher dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.",
-    "confirm": "Löschen",
-    "cancel": "Abbrechen"
-  },
-  "states": {
-    "loading": "Statistiken werden geladen...",
-    "error": "Statistiken konnten nicht geladen werden",
-    "empty": "Noch keine Nutzungsdaten. Statistiken werden hier angezeigt, nachdem Sie LLM-API-Aufrufe getätigt haben.",
-    "emptyHint": "Senden Sie eine Nachricht an Ihren KI-Assistenten, um mit der Erfassung von Nutzungsdaten zu beginnen."
-  },
-  "source": {
-    "provider": "Vom Anbieter gemeldet",
-    "estimated": "Geschätzt",
-    "backfilled": "Rückwirkend"
-  }
+	"title": "Nutzungsstatistiken",
+	"done": "Zurück zum Chat",
+	"range": {
+		"today": "Heute",
+		"7d": "Letzte 7 Tage",
+		"30d": "Letzte 30 Tage",
+		"all": "Gesamter Zeitraum"
+	},
+	"summary": {
+		"totalTokens": "Token gesamt",
+		"inputTokens": "Eingabe-Token",
+		"outputTokens": "Ausgabe-Token",
+		"cacheTokens": "Cache-Token",
+		"costUsd": "Gesamtkosten"
+	},
+	"breakdown": {
+		"title": "Aufschlüsselung",
+		"groupBy": "Gruppieren nach",
+		"model": "Modell",
+		"provider": "Anbieter",
+		"mode": "Modus",
+		"status": "Status",
+		"day": "Tag",
+		"week": "Woche",
+		"month": "Monat",
+		"events": "Ereignisse",
+		"completed": "Abgeschlossen",
+		"failed": "Fehlgeschlagen",
+		"cancelled": "Abgebrochen",
+		"inputTokens": "Eingabe",
+		"outputTokens": "Ausgabe",
+		"cacheReadTokens": "Cache-Lesevorgänge",
+		"cacheWriteTokens": "Cache-Schreibvorgänge",
+		"reasoningTokens": "Reasoning",
+		"totalTokens": "Gesamt",
+		"costUsd": "Kosten (USD)",
+		"unknown": "Unbekannt",
+		"empty": "Keine Nutzungsdaten für diesen Bereich."
+	},
+	"heatmap": {
+		"title": "Tägliche Aktivität",
+		"30d": "30 Tage",
+		"60d": "60 Tage",
+		"120d": "120 Tage",
+		"360d": "360 Tage",
+		"less": "Weniger",
+		"more": "Mehr",
+		"noData": "Keine Daten",
+		"loading": "Wird geladen..."
+	},
+	"coverage": {
+		"title": "Datenabdeckung",
+		"liveFrom": "Aufzeichnung seit",
+		"backfilledEvents": "Rückwirkend erfasste Ereignisse",
+		"paused": "Aufzeichnung ist pausiert",
+		"notAvailable": "Nicht verfügbar"
+	},
+	"actions": {
+		"exportJson": "JSON exportieren",
+		"exportCsv": "CSV exportieren",
+		"clear": "Alle Daten löschen",
+		"refresh": "Aktualisieren"
+	},
+	"clearDialog": {
+		"title": "Alle Nutzungsstatistiken löschen?",
+		"description": "Dadurch werden alle aufgezeichneten Nutzungsereignisse aus dem lokalen Speicher dauerhaft gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.",
+		"confirm": "Löschen",
+		"cancel": "Abbrechen"
+	},
+	"states": {
+		"loading": "Statistiken werden geladen...",
+		"error": "Statistiken konnten nicht geladen werden",
+		"empty": "Noch keine Nutzungsdaten. Statistiken werden hier angezeigt, nachdem Sie LLM-API-Aufrufe getätigt haben.",
+		"emptyHint": "Senden Sie eine Nachricht an Ihren KI-Assistenten, um mit der Erfassung von Nutzungsdaten zu beginnen."
+	},
+	"source": {
+		"provider": "Vom Anbieter gemeldet",
+		"estimated": "Geschätzt",
+		"backfilled": "Rückwirkend"
+	}
 }
