@@ -3,7 +3,7 @@
 import React from "react"
 import { render, fireEvent, waitFor, act } from "@/utils/test-utils"
 
-import type { StatsBucket, StatsSnapshot, SessionSummary, SessionDetail } from "@roo-code/types"
+import type { StatsBucket, StatsSnapshot, SessionSummary } from "@roo-code/types"
 
 import DashboardView from "../DashboardView"
 
@@ -172,14 +172,6 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
 	}
 }
 
-function makeSessionDetail(overrides: Partial<SessionDetail> = {}): SessionDetail {
-	return {
-		...makeSession(),
-		apiCalls: [],
-		...overrides,
-	}
-}
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -232,28 +224,6 @@ function simulateSessionsResponse(
 		data.dashboardSessions = sessions
 	} else {
 		data.dashboardSessions = null
-		if (error) data.error = error
-	}
-	window.dispatchEvent(new MessageEvent("message", { data }))
-}
-
-/**
- * Simulates the extension host responding to a getDashboardSessionDetail request.
- */
-function simulateSessionDetailResponse(
-	detail: SessionDetail | null,
-	error?: string,
-	requestId?: string,
-) {
-	const rid = requestId ?? getLatestRequestIdByType("getDashboardSessionDetail")
-	const data: Record<string, unknown> = {
-		type: "dashboardSessionDetailResponse",
-		requestId: rid,
-	}
-	if (detail !== null) {
-		data.dashboardSessionDetail = detail
-	} else {
-		data.dashboardSessionDetail = null
 		if (error) data.error = error
 	}
 	window.dispatchEvent(new MessageEvent("message", { data }))
