@@ -20,7 +20,7 @@ vi.mock("../../../utils/export", () => ({
 	saveLastExportPath: vi.fn(),
 }))
 
-vi.mock("../task-persistence/taskMessages", () => ({
+vi.mock("../../task-persistence/taskMessages", () => ({
 	readTaskMessages: vi.fn().mockResolvedValue([]),
 }))
 
@@ -30,7 +30,6 @@ vi.mock("../../../services/stats/costRecalculation", () => ({
 
 import * as vscode from "vscode"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../../utils/export"
-import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getEffectiveCost } from "../../../services/stats/costRecalculation"
 import {
 	handleGetUsageStats,

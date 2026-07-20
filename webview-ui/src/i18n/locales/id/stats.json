@@ -40,8 +40,10 @@
   },
   "heatmap": {
     "title": "Aktivitas harian",
-    "90d": "90 hari",
     "30d": "30 hari",
+    "60d": "60 hari",
+    "120d": "120 hari",
+    "360d": "360 hari",
     "less": "Lebih sedikit",
     "more": "Lebih banyak",
     "noData": "Tidak ada data"

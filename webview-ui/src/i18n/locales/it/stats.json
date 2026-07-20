@@ -40,8 +40,10 @@
   },
   "heatmap": {
     "title": "Attività giornaliera",
-    "90d": "90 giorni",
     "30d": "30 giorni",
+    "60d": "60 giorni",
+    "120d": "120 giorni",
+    "360d": "360 giorni",
     "less": "Meno",
     "more": "Più",
     "noData": "Nessun dato"

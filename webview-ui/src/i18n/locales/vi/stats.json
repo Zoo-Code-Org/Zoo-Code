@@ -40,8 +40,10 @@
   },
   "heatmap": {
     "title": "Hoạt động hàng ngày",
-    "90d": "90 ngày",
     "30d": "30 ngày",
+    "60d": "60 ngày",
+    "120d": "120 ngày",
+    "360d": "360 ngày",
     "less": "Ít hơn",
     "more": "Nhiều hơn",
     "noData": "Không có dữ liệu"

@@ -40,8 +40,10 @@
   },
   "heatmap": {
     "title": "Codzienna aktywność",
-    "90d": "90 dni",
     "30d": "30 dni",
+    "60d": "60 dni",
+    "120d": "120 dni",
+    "360d": "360 dni",
     "less": "Mniej",
     "more": "Więcej",
     "noData": "Brak danych"
