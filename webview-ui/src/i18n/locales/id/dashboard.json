@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Cakupan Data",
 		"liveFrom": "Langsung sejak",
+		"lastUpdated": "Terakhir diperbarui",
 		"backfilledEvents": "Peristiwa backfill",
 		"paused": "Perekaman dijeda (batas penyimpanan tercapai)"
 	},

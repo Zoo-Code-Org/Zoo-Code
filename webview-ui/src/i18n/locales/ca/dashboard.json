@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Cobertura de dades",
 		"liveFrom": "En directe des de",
+		"lastUpdated": "Última actualització",
 		"backfilledEvents": "Esdeveniments retroactius",
 		"paused": "Enregistrament en pausa (s'ha assolit el límit d'emmagatzematge)"
 	},

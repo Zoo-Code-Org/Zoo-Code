@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "数据覆盖范围",
 		"liveFrom": "实时记录自",
+		"lastUpdated": "最后更新",
 		"backfilledEvents": "回填事件",
 		"paused": "记录已暂停（已达到存储上限）"
 	},

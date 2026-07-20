@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Dekking van gegevens",
 		"liveFrom": "Live sinds",
+		"lastUpdated": "Laatst bijgewerkt",
 		"backfilledEvents": "Aangevulde gebeurtenissen",
 		"paused": "Opname gepauzeerd (opslaglimiet bereikt)"
 	},

@@ -501,7 +501,9 @@ export class UsageAggregator {
 			bucket.reasoningTokens += reasoningTokens
 		}
 
-		bucket.totalTokens += totalTokens
+		// Recompute from input + output (provider-neutral) to repair historical events
+		// that may have been persisted with the old double-counted sum.
+		bucket.totalTokens += inputTokens + outputTokens
 		bucket.costUsd += costUsd
 	}
 

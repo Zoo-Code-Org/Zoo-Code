@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "データカバレッジ",
 		"liveFrom": "記録開始",
+		"lastUpdated": "最終更新",
 		"backfilledEvents": "遡及されたイベント",
 		"paused": "記録は一時停止されています (ストレージ上限に達しました)"
 	},

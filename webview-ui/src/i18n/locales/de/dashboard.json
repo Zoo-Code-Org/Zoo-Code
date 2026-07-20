@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Datenabdeckung",
 		"liveFrom": "Live seit",
+		"lastUpdated": "Zuletzt aktualisiert",
 		"backfilledEvents": "Zurückgefüllte Ereignisse",
 		"paused": "Aufzeichnung pausiert (Speicherlimit erreicht)"
 	},

@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Zakres danych",
 		"liveFrom": "Na żywo od",
+		"lastUpdated": "Ostatnia aktualizacja",
 		"backfilledEvents": "Zdarzenia uzupełnione wstecz",
 		"paused": "Nagrywanie wstrzymane (osiągnięto limit pamięci)"
 	},

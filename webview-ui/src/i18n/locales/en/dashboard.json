@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Data Coverage",
 		"liveFrom": "Live from",
+		"lastUpdated": "Last Updated",
 		"backfilledEvents": "Backfilled events",
 		"paused": "Recording paused (storage limit reached)"
 	},

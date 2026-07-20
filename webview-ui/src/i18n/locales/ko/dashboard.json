@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "데이터 범위",
 		"liveFrom": "기록 시작",
+		"lastUpdated": "마지막 업데이트",
 		"backfilledEvents": "소급된 이벤트",
 		"paused": "기록이 일시 중지됨 (저장소 한도에 도달함)"
 	},

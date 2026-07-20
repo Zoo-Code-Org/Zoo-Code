@@ -492,7 +492,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	// ── Export ───────────────────────────────────────────────────────────────
 
 	const handleExport = useCallback(
-		(format: "json" | "csv") => {
+		(format: "csv") => {
 			const requestId = `dashboard-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 			const query = buildQuery(preset, groupBy)
 			vscode.postMessage({
@@ -578,17 +578,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 								data-testid="dashboard-refresh-button"
 								aria-label={t("dashboard:actions.refresh")}>
 								<RefreshCw className={loading ? "animate-spin" : ""} />
-							</Button>
-						</StandardTooltip>
-						<StandardTooltip content={t("dashboard:actions.exportJson")}>
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={() => handleExport("json")}
-								data-testid="dashboard-export-json"
-								disabled={!hasData}>
-								<Download className="size-3.5" />
-								<span className="hidden sm:inline">{t("dashboard:actions.exportJson")}</span>
 							</Button>
 						</StandardTooltip>
 						<StandardTooltip content={t("dashboard:actions.exportCsv")}>
@@ -850,6 +839,12 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 									<span>
 										{t("dashboard:coverage.liveFrom")}:{" "}
 										{new Date(snapshot.coverage.firstEventAt).toLocaleString()}
+									</span>
+								)}
+								{snapshot.coverage.lastEventAt && (
+									<span>
+										{t("dashboard:coverage.lastUpdated")}:{" "}
+										{new Date(snapshot.coverage.lastEventAt).toLocaleString()}
 									</span>
 								)}
 								{snapshot.coverage.backfilledEventCount > 0 && (

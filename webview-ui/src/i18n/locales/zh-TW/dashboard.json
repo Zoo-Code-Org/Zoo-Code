@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "資料涵蓋範圍",
 		"liveFrom": "即時記錄自",
+		"lastUpdated": "最後更新",
 		"backfilledEvents": "回填事件",
 		"paused": "記錄已暫停（已達儲存上限）"
 	},

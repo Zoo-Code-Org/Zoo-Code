@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Phạm vi dữ liệu",
 		"liveFrom": "Trực tiếp từ",
+		"lastUpdated": "Cập nhật lần cuối",
 		"backfilledEvents": "Sự kiện bổ sung hồi tố",
 		"paused": "Đã tạm dừng ghi (đã đạt giới hạn lưu trữ)"
 	},

@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Cobertura de datos",
 		"liveFrom": "En vivo desde",
+		"lastUpdated": "Última actualización",
 		"backfilledEvents": "Eventos retroactivos",
 		"paused": "Grabación en pausa (límite de almacenamiento alcanzado)"
 	},

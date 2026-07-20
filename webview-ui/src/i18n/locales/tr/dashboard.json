@@ -45,6 +45,7 @@
 	"coverage": {
 		"title": "Veri Kapsamı",
 		"liveFrom": "Şu tarihten beri canlı",
+		"lastUpdated": "Son güncelleme",
 		"backfilledEvents": "Geriye dönük doldurulan olaylar",
 		"paused": "Kayıt duraklatıldı (depolama sınırına ulaşıldı)"
 	},
