@@ -1845,6 +1845,8 @@ export class ClineProvider
 					this.updateGlobalState("currentApiConfigName", name),
 					this.providerSettingsManager.setModeConfig(mode, id),
 					this.contextProxy.setProviderSettings(providerSettings),
+					this.saveViewState("currentApiConfigName", name),
+					this.saveViewState("apiConfiguration", providerSettings),
 				])
 
 				this._updateViewLocalStateFromMutation({
@@ -1947,6 +1949,8 @@ export class ClineProvider
 			this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
 			this.contextProxy.setValue("currentApiConfigName", name),
 			this.contextProxy.setProviderSettings(providerSettings),
+			this.saveViewState("currentApiConfigName", name),
+			this.saveViewState("apiConfiguration", providerSettings),
 		])
 
 		this._updateViewLocalStateFromMutation({
