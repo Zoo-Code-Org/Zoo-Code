@@ -616,6 +616,22 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			dispose: vi.fn(),
 		} as unknown as vscode.OutputChannel
 	})
+
+	const createMockWebviewView = (postMessage = vi.fn()) =>
+		({
+			webview: {
+				postMessage,
+				html: "",
+				options: {},
+				onDidReceiveMessage: vi.fn(),
+				asWebviewUri: vi.fn(),
+				cspSource: "vscode-webview://test-csp-source",
+			},
+			visible: true,
+			onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+			onDidDispose: vi.fn(() => ({ dispose: vi.fn() })),
+		}) as any
+
 	describe("viewId uniqueness", () => {
 		it("should assign unique viewId to each instance", async () => {
 			const provider1 = new ClineProvider(
@@ -1019,6 +1035,155 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect((provider as any).viewLocalState.apiConfiguration.apiProvider).toBe("bedrock")
 
 			await provider.dispose()
+		})
+	})
+
+	describe("handleModeSwitch integration", () => {
+		it("should update viewLocalState.mode when handleModeSwitch is called", async () => {
+			const postMessage = vi.fn()
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await (provider as any).resolveWebviewView(createMockWebviewView(postMessage))
+
+			const saveViewStateSpy = vi.spyOn(provider as any, "saveViewState")
+
+			await provider.handleModeSwitch("architect" as any)
+
+			expect((provider as any).viewLocalState.mode).toBe("architect")
+			expect(saveViewStateSpy).toHaveBeenCalledWith("mode", "architect")
+
+			await provider.dispose()
+		})
+
+		it("should post state and skip mode config lookup when API config locking is enabled", async () => {
+			const postMessage = vi.fn()
+			mockContext.workspaceState.get = vi.fn().mockImplementation((key: string, fallback?: unknown) => {
+				return key === "lockApiConfigAcrossModes" ? true : fallback
+			})
+
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const getModeConfigIdSpy = vi.spyOn(provider.providerSettingsManager, "getModeConfigId")
+
+			await (provider as any).resolveWebviewView(createMockWebviewView(postMessage))
+			postMessage.mockClear()
+
+			await provider.handleModeSwitch("architect" as any)
+
+			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
+			expect(postMessage).toHaveBeenCalled()
+
+			await provider.dispose()
+		})
+
+		it("should activate configured mode profile when switching modes", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("profile-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([
+				{ id: "profile-id", name: "mode-profile", apiProvider: "openrouter" },
+			] as any)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({
+				apiProvider: "openrouter",
+			} as any)
+			const activateProviderProfileSpy = vi.spyOn(provider, "activateProviderProfile")
+
+			await provider.handleModeSwitch("architect" as any)
+
+			expect(activateProviderProfileSpy).toHaveBeenCalledWith({ name: "mode-profile" })
+
+			await provider.dispose()
+		})
+
+		it("should leave current configuration unchanged for empty mode profiles", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("empty-profile-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([
+				{ id: "empty-profile-id", name: "empty-profile" },
+			] as any)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({} as any)
+			const activateProviderProfileSpy = vi.spyOn(provider, "activateProviderProfile")
+
+			await provider.handleModeSwitch("architect" as any)
+
+			expect(activateProviderProfileSpy).not.toHaveBeenCalled()
+
+			await provider.dispose()
+		})
+
+		it("should emit ModeChanged event after handleModeSwitch", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const modeChangedSpy = vi.fn()
+
+			provider.on(RooCodeEventName.ModeChanged, modeChangedSpy)
+
+			await provider.handleModeSwitch("architect" as any)
+
+			expect(modeChangedSpy).toHaveBeenCalledWith("architect")
+
+			await provider.dispose()
+		})
+	})
+
+	describe("multi-instance isolation", () => {
+		it("should maintain independent state across three instances", async () => {
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const provider3 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			await (provider1 as any).saveViewState("mode", "code")
+			await (provider1 as any).saveViewState("currentApiConfigName", "profile-1")
+			await (provider2 as any).saveViewState("mode", "architect")
+			await (provider2 as any).saveViewState("currentApiConfigName", "profile-2")
+			await (provider3 as any).saveViewState("mode", "debugger")
+			await (provider3 as any).saveViewState("currentApiConfigName", "profile-3")
+
+			const state1 = await provider1.getState()
+			const state2 = await provider2.getState()
+			const state3 = await provider3.getState()
+
+			expect(state1.mode).toBe("code")
+			expect(state1.currentApiConfigName).toBe("profile-1")
+			expect(state2.mode).toBe("architect")
+			expect(state2.currentApiConfigName).toBe("profile-2")
+			expect(state3.mode).toBe("debugger")
+			expect(state3.currentApiConfigName).toBe("profile-3")
+
+			await provider1.dispose()
+			await provider2.dispose()
+			await provider3.dispose()
+		})
+
+		it("should handle mode switch in one instance without affecting others", async () => {
+			const postMessage1 = vi.fn()
+			const postMessage2 = vi.fn()
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			await (provider1 as any).resolveWebviewView(createMockWebviewView(postMessage1))
+			await (provider2 as any).resolveWebviewView(createMockWebviewView(postMessage2))
+			await (provider1 as any).saveViewState("mode", "code")
+			await (provider2 as any).saveViewState("mode", "debugger")
+
+			await provider1.handleModeSwitch("architect" as any)
+
+			const state1 = await provider1.getState()
+			const state2 = await provider2.getState()
+
+			expect(state1.mode).toBe("architect")
+			expect(state2.mode).toBe("debugger")
+			expect((provider2 as any).viewLocalState.mode).toBe("debugger")
+
+			await provider1.dispose()
+			await provider2.dispose()
 		})
 	})
 
