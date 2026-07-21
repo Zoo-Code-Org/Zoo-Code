@@ -1,4 +1,4 @@
-﻿// pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.parallelMode.spec.ts
+// pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.parallelMode.spec.ts
 
 import * as vscode from "vscode"
 
