@@ -51,6 +51,7 @@ import {
 	getModelId,
 	isRetiredProvider,
 	providerIdentifiers,
+	PROVIDER_SETTINGS_KEYS,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -170,6 +171,7 @@ export class ClineProvider
 	public static readonly sideBarId = `${Package.name}.SidebarProvider`
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
+	private static nextViewId = 0
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
 	private view?: vscode.WebviewView | vscode.WebviewPanel
@@ -213,6 +215,25 @@ export class ClineProvider
 	 */
 	private clineMessagesSeq = 0
 
+	/**
+	 * Unique identifier for this provider instance's view.
+	 * Based on renderContext and a monotonically increasing counter to ensure uniqueness across multiple instances.
+	 */
+	public readonly viewId: string
+
+	/**
+	 * Stable identifier for persisted per-view state keys.
+	 * Defaults to viewId until the webview reports its VS Code-persisted id.
+	 */
+	private viewStateId: string
+
+	/**
+	 * Local state buffer for this specific view instance.
+	 * Used to isolate mode, apiConfiguration, and other fields from the shared ContextProxy singleton
+	 * when running in parallel (multi-tab) mode.
+	 */
+	private viewLocalState: Partial<ExtensionState> = {}
+
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "jul-2026-v3.74.0-openai-provider-workflows" // v3.74.0 OpenAI controls, provider reliability, and smoother workflows
@@ -227,13 +248,16 @@ export class ClineProvider
 		mdmService?: MdmService,
 	) {
 		super()
+		// Initialize viewId based on renderContext and monotonically increasing instance identifier for uniqueness.
+		// activeInstances is used for visibility/iteration checks, so we keep tracking instances separately.
+		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
+		this.viewStateId = this.viewId
+		ClineProvider.activeInstances.add(this)
 		this.currentWorkspacePath = getWorkspacePath()
 		this.pendingEditOperations = new PendingEditOperationStore(
 			ClineProvider.PENDING_OPERATION_TIMEOUT_MS,
 			(message) => this.log(message),
 		)
-
-		ClineProvider.activeInstances.add(this)
 
 		this.mdmService = mdmService
 		void this.updateGlobalState("codebaseIndexModels", EMBEDDING_MODEL_PROFILES)
@@ -264,6 +288,9 @@ export class ClineProvider
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebviewWithoutClineMessages()
 		})
+
+		// Load initial state from global state into viewLocalState buffer after dependencies used by getState are ready.
+		void this.loadViewState()
 
 		// Initialize MCP Hub through the singleton manager
 		McpServerManager.getInstance(this.context, this)
@@ -413,6 +440,73 @@ export class ClineProvider
 		} catch (error) {
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
 		}
+	}
+
+	/**
+	 * Derive a view-specific ContextProxy key for persisting view-local state.
+	 * Uses a stable per-view id so each restored tab reads and writes its own values
+	 * independent of provider construction order.
+	 */
+	private viewStateKeyFor(key: "mode" | "currentApiConfigName" | "apiConfiguration"): string {
+		return `__view_state_${this.viewStateId}_${key}`
+	}
+
+	public async setViewStateId(viewStateId: string | undefined): Promise<void> {
+		const normalizedViewStateId = viewStateId?.trim()
+
+		if (!normalizedViewStateId || normalizedViewStateId === this.viewStateId) {
+			return
+		}
+
+		this.viewStateId = normalizedViewStateId.replace(/[^A-Za-z0-9_-]/g, "_")
+		await this.loadViewState()
+	}
+
+	/**
+	 * Loads persisted values from stable per-view keys into the view-local state buffer.
+	 * Missing keys are intentionally left unset so getState() falls back to shared ContextProxy values.
+	 */
+	private async loadViewState(): Promise<void> {
+		try {
+			const loadedState: Partial<ExtensionState> = {}
+
+			for (const key of ["mode", "currentApiConfigName", "apiConfiguration"] as const) {
+				const value = this.contextProxy.getValue(this.viewStateKeyFor(key) as any)
+
+				if (value !== undefined && value !== null) {
+					loadedState[key] = value as any
+				}
+			}
+
+			this.viewLocalState = loadedState
+			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
+		} catch (error) {
+			this.log(
+				`[loadViewState] Error loading state for viewId ${this.viewId}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+	}
+
+	/**
+	 * Save a single view-local state value and sync to global state using a view-specific key.
+	 * This allows each Provider instance to have its own mode/apiConfig for parallel mode support.
+	 */
+	private async saveViewState(key: keyof ExtensionState, value: any): Promise<void> {
+		// Update local cache first. Undefined/null clears should not leave a local override behind.
+		if (value === undefined || value === null) {
+			delete this.viewLocalState[key]
+		} else {
+			this.viewLocalState[key] = value
+		}
+
+		// Persist to view-specific ContextProxy key for mode/currentApiConfigName/apiConfiguration,
+		// so recreated views restore their own values instead of the last writer's shared state.
+		if (key === "mode" || key === "currentApiConfigName" || key === "apiConfiguration") {
+			const viewKey = this.viewStateKeyFor(key as "mode" | "currentApiConfigName" | "apiConfiguration")
+			await this.contextProxy.setValue(viewKey as any, value)
+		}
+
+		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
 	}
 
 	/**
@@ -1089,6 +1183,7 @@ export class ClineProvider
 			}
 
 			await this.updateGlobalState("mode", historyItem.mode)
+			this.viewLocalState.mode = historyItem.mode
 
 			// Load the saved API config for the restored mode if it exists.
 			// Skip mode-based profile activation if historyItem.apiConfigName exists,
@@ -1539,6 +1634,7 @@ export class ClineProvider
 		}
 
 		await this.updateGlobalState("mode", newMode)
+		this._updateViewLocalStateFromMutation({ mode: newMode })
 
 		this.emit(RooCodeEventName.ModeChanged, newMode)
 
@@ -2614,12 +2710,18 @@ export class ClineProvider
 		>
 	> {
 		const stateValues = this.contextProxy.getValues()
+
+		// Merge viewLocalState on top of global state so a provider can serve
+		// state values scoped to its own view while preserving ContextProxy defaults.
+		const mergedStateValues = { ...stateValues, ...this.viewLocalState }
+
 		const customModes = await this.customModesManager.getCustomModes()
 
 		// Determine apiProvider with the same logic as before, while filtering retired providers.
+		// Use mergedStateValues to prioritize viewLocalState for parallel mode support
 		const apiProvider: ProviderName =
-			stateValues.apiProvider && !isRetiredProvider(stateValues.apiProvider)
-				? stateValues.apiProvider
+			mergedStateValues.apiProvider && !isRetiredProvider(mergedStateValues.apiProvider)
+				? (mergedStateValues.apiProvider as ProviderName)
 				: "anthropic"
 
 		// Build the apiConfiguration object combining state values and secrets.
@@ -2681,115 +2783,118 @@ export class ClineProvider
 
 		// Return the same structure as before.
 		return {
-			apiConfiguration: providerSettings,
-			lastShownAnnouncementId: stateValues.lastShownAnnouncementId,
-			customInstructions: stateValues.customInstructions,
-			apiModelId: stateValues.apiModelId,
-			alwaysAllowReadOnly: stateValues.alwaysAllowReadOnly ?? false,
-			alwaysAllowReadOnlyOutsideWorkspace: stateValues.alwaysAllowReadOnlyOutsideWorkspace ?? false,
-			alwaysAllowWrite: stateValues.alwaysAllowWrite ?? false,
-			alwaysAllowWriteOutsideWorkspace: stateValues.alwaysAllowWriteOutsideWorkspace ?? false,
-			alwaysAllowWriteProtected: stateValues.alwaysAllowWriteProtected ?? false,
-			alwaysAllowExecute: stateValues.alwaysAllowExecute ?? false,
-			alwaysAllowMcp: stateValues.alwaysAllowMcp ?? false,
-			alwaysAllowModeSwitch: stateValues.alwaysAllowModeSwitch ?? false,
-			alwaysAllowSubtasks: stateValues.alwaysAllowSubtasks ?? false,
-			alwaysAllowFollowupQuestions: stateValues.alwaysAllowFollowupQuestions ?? false,
-			followupAutoApproveTimeoutMs: stateValues.followupAutoApproveTimeoutMs ?? 60000,
-			diagnosticsEnabled: stateValues.diagnosticsEnabled ?? true,
-			allowedMaxRequests: stateValues.allowedMaxRequests,
-			allowedMaxCost: stateValues.allowedMaxCost,
-			autoCondenseContext: stateValues.autoCondenseContext ?? true,
-			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
+			apiConfiguration: {
+				...providerSettings,
+				...mergedStateValues.apiConfiguration,
+			},
+			lastShownAnnouncementId: mergedStateValues.lastShownAnnouncementId,
+			customInstructions: mergedStateValues.customInstructions,
+			apiModelId: mergedStateValues.apiModelId,
+			alwaysAllowReadOnly: mergedStateValues.alwaysAllowReadOnly ?? false,
+			alwaysAllowReadOnlyOutsideWorkspace: mergedStateValues.alwaysAllowReadOnlyOutsideWorkspace ?? false,
+			alwaysAllowWrite: mergedStateValues.alwaysAllowWrite ?? false,
+			alwaysAllowWriteOutsideWorkspace: mergedStateValues.alwaysAllowWriteOutsideWorkspace ?? false,
+			alwaysAllowWriteProtected: mergedStateValues.alwaysAllowWriteProtected ?? false,
+			alwaysAllowExecute: mergedStateValues.alwaysAllowExecute ?? false,
+			alwaysAllowMcp: mergedStateValues.alwaysAllowMcp ?? false,
+			alwaysAllowModeSwitch: mergedStateValues.alwaysAllowModeSwitch ?? false,
+			alwaysAllowSubtasks: mergedStateValues.alwaysAllowSubtasks ?? false,
+			alwaysAllowFollowupQuestions: mergedStateValues.alwaysAllowFollowupQuestions ?? false,
+			followupAutoApproveTimeoutMs: mergedStateValues.followupAutoApproveTimeoutMs ?? 60000,
+			diagnosticsEnabled: mergedStateValues.diagnosticsEnabled ?? true,
+			allowedMaxRequests: mergedStateValues.allowedMaxRequests,
+			allowedMaxCost: mergedStateValues.allowedMaxCost,
+			autoCondenseContext: mergedStateValues.autoCondenseContext ?? true,
+			autoCondenseContextPercent: mergedStateValues.autoCondenseContextPercent ?? 100,
 			taskHistory: this.taskHistoryStore.getAll(),
-			allowedCommands: stateValues.allowedCommands,
-			deniedCommands: stateValues.deniedCommands,
-			soundEnabled: stateValues.soundEnabled ?? false,
-			ttsEnabled: stateValues.ttsEnabled ?? false,
-			ttsSpeed: stateValues.ttsSpeed ?? 1.0,
-			enableCheckpoints: stateValues.enableCheckpoints ?? true,
-			checkpointTimeout: stateValues.checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
-			soundVolume: stateValues.soundVolume,
-			writeDelayMs: stateValues.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
-			diffFuzzyThreshold: stateValues.diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
+			allowedCommands: mergedStateValues.allowedCommands,
+			deniedCommands: mergedStateValues.deniedCommands,
+			soundEnabled: mergedStateValues.soundEnabled ?? false,
+			ttsEnabled: mergedStateValues.ttsEnabled ?? false,
+			ttsSpeed: mergedStateValues.ttsSpeed ?? 1.0,
+			enableCheckpoints: mergedStateValues.enableCheckpoints ?? true,
+			checkpointTimeout: mergedStateValues.checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+			soundVolume: mergedStateValues.soundVolume,
+			writeDelayMs: mergedStateValues.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
+			diffFuzzyThreshold: mergedStateValues.diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
 			terminalShellIntegrationTimeout:
-				stateValues.terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
-			terminalShellIntegrationDisabled: stateValues.terminalShellIntegrationDisabled ?? true,
-			terminalCommandDelay: stateValues.terminalCommandDelay ?? 0,
-			terminalPowershellCounter: stateValues.terminalPowershellCounter ?? false,
-			terminalZshClearEolMark: stateValues.terminalZshClearEolMark ?? true,
-			terminalZshOhMy: stateValues.terminalZshOhMy ?? false,
-			terminalZshP10k: stateValues.terminalZshP10k ?? false,
-			terminalZdotdir: stateValues.terminalZdotdir ?? false,
-			terminalProfile: stateValues.terminalProfile,
-			mode: stateValues.mode ?? defaultModeSlug,
-			language: stateValues.language ?? formatLanguage(vscode.env.language),
-			mcpEnabled: stateValues.mcpEnabled ?? true,
+				mergedStateValues.terminalShellIntegrationTimeout ?? Terminal.defaultShellIntegrationTimeout,
+			terminalShellIntegrationDisabled: mergedStateValues.terminalShellIntegrationDisabled ?? true,
+			terminalCommandDelay: mergedStateValues.terminalCommandDelay ?? 0,
+			terminalPowershellCounter: mergedStateValues.terminalPowershellCounter ?? false,
+			terminalZshClearEolMark: mergedStateValues.terminalZshClearEolMark ?? true,
+			terminalZshOhMy: mergedStateValues.terminalZshOhMy ?? false,
+			terminalZshP10k: mergedStateValues.terminalZshP10k ?? false,
+			terminalZdotdir: mergedStateValues.terminalZdotdir ?? false,
+			terminalProfile: mergedStateValues.terminalProfile,
+			mode: (mergedStateValues.mode as Mode) ?? defaultModeSlug,
+			language: mergedStateValues.language ?? formatLanguage(vscode.env.language),
+			mcpEnabled: mergedStateValues.mcpEnabled ?? true,
 			mcpServers: this.mcpHub?.getAllServers() ?? [],
-			currentApiConfigName: stateValues.currentApiConfigName ?? "default",
-			listApiConfigMeta: stateValues.listApiConfigMeta ?? [],
-			pinnedApiConfigs: stateValues.pinnedApiConfigs ?? {},
-			modeApiConfigs: stateValues.modeApiConfigs ?? ({} as Record<Mode, string>),
-			customModePrompts: stateValues.customModePrompts ?? {},
-			customSupportPrompts: stateValues.customSupportPrompts ?? {},
-			enhancementApiConfigId: stateValues.enhancementApiConfigId,
-			experiments: stateValues.experiments ?? experimentDefault,
-			autoApprovalEnabled: stateValues.autoApprovalEnabled ?? false,
+			currentApiConfigName: mergedStateValues.currentApiConfigName ?? "default",
+			listApiConfigMeta: mergedStateValues.listApiConfigMeta ?? [],
+			pinnedApiConfigs: mergedStateValues.pinnedApiConfigs ?? {},
+			modeApiConfigs: (mergedStateValues.modeApiConfigs as Record<Mode, string>) ?? ({} as Record<Mode, string>),
+			customModePrompts: mergedStateValues.customModePrompts ?? {},
+			customSupportPrompts: mergedStateValues.customSupportPrompts ?? {},
+			enhancementApiConfigId: mergedStateValues.enhancementApiConfigId,
+			experiments: mergedStateValues.experiments ?? experimentDefault,
+			autoApprovalEnabled: mergedStateValues.autoApprovalEnabled ?? false,
 			customModes,
-			maxOpenTabsContext: stateValues.maxOpenTabsContext ?? 20,
-			maxWorkspaceFiles: stateValues.maxWorkspaceFiles ?? 200,
-			disabledTools: stateValues.disabledTools,
-			telemetrySetting: stateValues.telemetrySetting || "unset",
-			showRooIgnoredFiles: stateValues.showRooIgnoredFiles ?? false,
-			enableSubfolderRules: stateValues.enableSubfolderRules ?? false,
-			maxImageFileSize: stateValues.maxImageFileSize ?? 5,
-			maxTotalImageSize: stateValues.maxTotalImageSize ?? 20,
-			historyPreviewCollapsed: stateValues.historyPreviewCollapsed ?? false,
-			reasoningBlockCollapsed: stateValues.reasoningBlockCollapsed ?? true,
-			chatFontSize: stateValues.chatFontSize,
-			enterBehavior: stateValues.enterBehavior ?? "send",
+			maxOpenTabsContext: mergedStateValues.maxOpenTabsContext ?? 20,
+			maxWorkspaceFiles: mergedStateValues.maxWorkspaceFiles ?? 200,
+			disabledTools: mergedStateValues.disabledTools,
+			telemetrySetting: mergedStateValues.telemetrySetting || "unset",
+			showRooIgnoredFiles: mergedStateValues.showRooIgnoredFiles ?? false,
+			enableSubfolderRules: mergedStateValues.enableSubfolderRules ?? false,
+			maxImageFileSize: mergedStateValues.maxImageFileSize ?? 5,
+			maxTotalImageSize: mergedStateValues.maxTotalImageSize ?? 20,
+			historyPreviewCollapsed: mergedStateValues.historyPreviewCollapsed ?? false,
+			reasoningBlockCollapsed: mergedStateValues.reasoningBlockCollapsed ?? true,
+			chatFontSize: mergedStateValues.chatFontSize,
+			enterBehavior: mergedStateValues.enterBehavior ?? "send",
 			cloudUserInfo,
 			cloudIsAuthenticated,
 			sharingEnabled,
 			publicSharingEnabled,
 			organizationAllowList,
 			organizationSettingsVersion,
-			customCondensingPrompt: stateValues.customCondensingPrompt,
-			codebaseIndexModels: stateValues.codebaseIndexModels ?? EMBEDDING_MODEL_PROFILES,
+			customCondensingPrompt: mergedStateValues.customCondensingPrompt,
+			codebaseIndexModels: mergedStateValues.codebaseIndexModels ?? EMBEDDING_MODEL_PROFILES,
 			codebaseIndexConfig: {
-				codebaseIndexEnabled: stateValues.codebaseIndexConfig?.codebaseIndexEnabled ?? false,
+				codebaseIndexEnabled: mergedStateValues.codebaseIndexConfig?.codebaseIndexEnabled ?? false,
 				codebaseIndexQdrantUrl:
-					stateValues.codebaseIndexConfig?.codebaseIndexQdrantUrl ?? "http://localhost:6333",
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexQdrantUrl ?? "http://localhost:6333",
 				codebaseIndexEmbedderProvider:
-					stateValues.codebaseIndexConfig?.codebaseIndexEmbedderProvider ?? "openai",
-				codebaseIndexEmbedderBaseUrl: stateValues.codebaseIndexConfig?.codebaseIndexEmbedderBaseUrl ?? "",
-				codebaseIndexEmbedderModelId: stateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelId ?? "",
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexEmbedderProvider ?? "openai",
+				codebaseIndexEmbedderBaseUrl: mergedStateValues.codebaseIndexConfig?.codebaseIndexEmbedderBaseUrl ?? "",
+				codebaseIndexEmbedderModelId: mergedStateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelId ?? "",
 				codebaseIndexEmbedderModelDimension:
-					stateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelDimension,
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelDimension,
 				codebaseIndexOpenAiCompatibleBaseUrl:
-					stateValues.codebaseIndexConfig?.codebaseIndexOpenAiCompatibleBaseUrl,
-				codebaseIndexSearchMaxResults: stateValues.codebaseIndexConfig?.codebaseIndexSearchMaxResults,
-				codebaseIndexSearchMinScore: stateValues.codebaseIndexConfig?.codebaseIndexSearchMinScore,
-				codebaseIndexBedrockRegion: stateValues.codebaseIndexConfig?.codebaseIndexBedrockRegion,
-				codebaseIndexBedrockProfile: stateValues.codebaseIndexConfig?.codebaseIndexBedrockProfile,
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexOpenAiCompatibleBaseUrl,
+				codebaseIndexSearchMaxResults: mergedStateValues.codebaseIndexConfig?.codebaseIndexSearchMaxResults,
+				codebaseIndexSearchMinScore: mergedStateValues.codebaseIndexConfig?.codebaseIndexSearchMinScore,
+				codebaseIndexBedrockRegion: mergedStateValues.codebaseIndexConfig?.codebaseIndexBedrockRegion,
+				codebaseIndexBedrockProfile: mergedStateValues.codebaseIndexConfig?.codebaseIndexBedrockProfile,
 				codebaseIndexOpenRouterSpecificProvider:
-					stateValues.codebaseIndexConfig?.codebaseIndexOpenRouterSpecificProvider,
+					mergedStateValues.codebaseIndexConfig?.codebaseIndexOpenRouterSpecificProvider,
 			},
-			profileThresholds: stateValues.profileThresholds ?? {},
+			profileThresholds: mergedStateValues.profileThresholds ?? {},
 			lockApiConfigAcrossModes: this.context.workspaceState.get("lockApiConfigAcrossModes", false),
-			includeDiagnosticMessages: stateValues.includeDiagnosticMessages ?? true,
-			maxDiagnosticMessages: stateValues.maxDiagnosticMessages ?? 50,
-			includeTaskHistoryInEnhance: stateValues.includeTaskHistoryInEnhance ?? true,
-			includeCurrentTime: stateValues.includeCurrentTime ?? true,
-			includeCurrentCost: stateValues.includeCurrentCost ?? true,
-			maxGitStatusFiles: stateValues.maxGitStatusFiles ?? 0,
+			includeDiagnosticMessages: mergedStateValues.includeDiagnosticMessages ?? true,
+			maxDiagnosticMessages: mergedStateValues.maxDiagnosticMessages ?? 50,
+			includeTaskHistoryInEnhance: mergedStateValues.includeTaskHistoryInEnhance ?? true,
+			includeCurrentTime: mergedStateValues.includeCurrentTime ?? true,
+			includeCurrentCost: mergedStateValues.includeCurrentCost ?? true,
+			maxGitStatusFiles: mergedStateValues.maxGitStatusFiles ?? 0,
 			taskSyncEnabled,
-			imageGenerationProvider: stateValues.imageGenerationProvider,
-			openRouterImageApiKey: stateValues.openRouterImageApiKey,
-			openRouterImageGenerationSelectedModel: stateValues.openRouterImageGenerationSelectedModel,
-			autoCloseZooOpenedFiles: stateValues.autoCloseZooOpenedFiles,
-			autoCloseZooOpenedFilesAfterUserEdited: stateValues.autoCloseZooOpenedFilesAfterUserEdited,
-			autoCloseZooOpenedNewFiles: stateValues.autoCloseZooOpenedNewFiles,
+			imageGenerationProvider: mergedStateValues.imageGenerationProvider,
+			openRouterImageApiKey: mergedStateValues.openRouterImageApiKey,
+			openRouterImageGenerationSelectedModel: mergedStateValues.openRouterImageGenerationSelectedModel,
+			autoCloseZooOpenedFiles: mergedStateValues.autoCloseZooOpenedFiles,
+			autoCloseZooOpenedFilesAfterUserEdited: mergedStateValues.autoCloseZooOpenedFilesAfterUserEdited,
+			autoCloseZooOpenedNewFiles: mergedStateValues.autoCloseZooOpenedNewFiles,
 		}
 	}
 
@@ -2892,6 +2997,7 @@ export class ClineProvider
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
 		await this.contextProxy.setValue(key, value)
+		this._updateViewLocalStateFromMutation({ [key]: value })
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -2904,6 +3010,61 @@ export class ClineProvider
 
 	public async setValues(values: RooCodeSettings) {
 		await this.contextProxy.setValues(values)
+		this._updateViewLocalStateFromMutation(values)
+	}
+
+	/**
+	 * Update or invalidate viewLocalState when ContextProxy is mutated via setValues, setValue,
+	 * profile upsert/activation/deletion, or resetState. This ensures the local cache stays in
+	 * sync with global state changes that would otherwise be invisible behind mergedStateValues.
+	 */
+	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings>): void {
+		if ("mode" in values) {
+			const val = values.mode
+			if (val === undefined || val === null) {
+				delete this.viewLocalState.mode
+			} else {
+				this.viewLocalState.mode = val as any
+			}
+		}
+
+		if ("currentApiConfigName" in values) {
+			const val = values.currentApiConfigName
+			if (val === undefined || val === null) {
+				delete this.viewLocalState.currentApiConfigName
+			} else {
+				this.viewLocalState.currentApiConfigName = val as any
+			}
+		}
+
+		if ("apiConfiguration" in values) {
+			const val = (values as any).apiConfiguration
+			if (val === undefined || val === null) {
+				delete this.viewLocalState.apiConfiguration
+			} else {
+				this.viewLocalState.apiConfiguration = val
+			}
+		} else if (PROVIDER_SETTINGS_KEYS.some((key) => key in values)) {
+			const providerSettingsUpdate = PROVIDER_SETTINGS_KEYS.reduce((acc, key) => {
+				if (key in values) {
+					return { ...acc, [key]: values[key as keyof RooCodeSettings] }
+				}
+
+				return acc
+			}, {} as ProviderSettings)
+
+			this.viewLocalState.apiConfiguration = {
+				...(this.viewLocalState.apiConfiguration ?? {}),
+				...providerSettingsUpdate,
+			}
+		}
+	}
+
+	/**
+	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
+	 */
+	private _clearViewLocalState(): void {
+		this.viewLocalState = {}
 	}
 
 	// dev
@@ -2932,6 +3093,7 @@ export class ClineProvider
 		}
 
 		await this.contextProxy.resetAllState()
+
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()

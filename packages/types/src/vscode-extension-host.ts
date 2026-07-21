@@ -632,6 +632,7 @@ export interface WebviewMessage {
 		| "openRuleFile"
 		| "openRulesDirectory"
 	text?: string
+	viewStateId?: string
 	taskId?: string
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"

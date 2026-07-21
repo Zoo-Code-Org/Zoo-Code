@@ -559,6 +559,8 @@ export const webviewMessageHandler = async (
 
 	switch (message.type) {
 		case "webviewDidLaunch":
+			await provider.setViewStateId(message.viewStateId)
+
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
@@ -607,7 +609,8 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					const currentConfigName = getGlobalState("currentApiConfigName")
+					const currentState = await provider.getState()
+					const currentConfigName = currentState.currentApiConfigName
 
 					if (currentConfigName) {
 						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {

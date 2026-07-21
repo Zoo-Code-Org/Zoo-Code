@@ -22,6 +22,31 @@ class VSCodeAPIWrapper {
 		}
 	}
 
+	private createViewStateId(): string {
+		if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+			return crypto.randomUUID()
+		}
+
+		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+	}
+
+	public getViewStateId(): string {
+		const currentState = this.getState()
+		const stateObject =
+			currentState && typeof currentState === "object" && !Array.isArray(currentState)
+				? (currentState as Record<string, unknown>)
+				: {}
+		const existingViewStateId = stateObject.viewStateId
+
+		if (typeof existingViewStateId === "string" && existingViewStateId.length > 0) {
+			return existingViewStateId
+		}
+
+		const viewStateId = this.createViewStateId()
+		this.setState({ ...stateObject, viewStateId })
+		return viewStateId
+	}
+
 	/**
 	 * Post a message (i.e. send arbitrary data) to the owner of the webview.
 	 *
@@ -49,9 +74,11 @@ class VSCodeAPIWrapper {
 	public getState(): unknown | undefined {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.getState()
-		} else {
+		} else if (typeof localStorage?.getItem === "function") {
 			const state = localStorage.getItem("vscodeState")
 			return state ? JSON.parse(state) : undefined
+		} else {
+			return undefined
 		}
 	}
 
@@ -70,7 +97,9 @@ class VSCodeAPIWrapper {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.setState(newState)
 		} else {
-			localStorage.setItem("vscodeState", JSON.stringify(newState))
+			if (typeof localStorage?.setItem === "function") {
+				localStorage.setItem("vscodeState", JSON.stringify(newState))
+			}
 			return newState
 		}
 	}
