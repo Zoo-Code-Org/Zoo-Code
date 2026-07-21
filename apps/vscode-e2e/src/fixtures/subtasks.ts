@@ -7,6 +7,8 @@ const SUBTASK_PARENT_MARKER = "SUBTASK_PARENT_CANCELLATION_SMOKE"
 const SUBTASK_CHILD_MARKER = "SUBTASK_CHILD_CALCULATOR_SMOKE"
 const SUBTASK_INTERRUPT_PARENT_MARKER = "SUBTASK_PARENT_INTERRUPT_RESUME"
 const SUBTASK_INTERRUPT_CHILD_MARKER = "SUBTASK_CHILD_INTERRUPT_RESUME"
+export const SUBTASK_API_HANG_PARENT_MARKER = "SUBTASK_PARENT_API_HANG_INTERRUPT_RESUME"
+export const SUBTASK_API_HANG_CHILD_MARKER = "SUBTASK_CHILD_API_HANG_INTERRUPT_RESUME"
 const SUBTASK_FAST_PARENT_MARKER = "SUBTASK_PARENT_IMMEDIATE_COMPLETION"
 const SUBTASK_FAST_CHILD_MARKER = "SUBTASK_CHILD_IMMEDIATE_COMPLETION"
 const SUBTASK_XPROFILE_PARENT_MARKER = "SUBTASK_PARENT_CROSS_PROFILE"
@@ -24,12 +26,20 @@ export const SUBTASK_INTERRUPT_PARENT_PROMPT = `${SUBTASK_INTERRUPT_PARENT_MARKE
 export const SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER = "9"
 export const SUBTASK_INTERRUPT_PARENT_RESULT = "Interrupted parent resumed"
 
+const SUBTASK_API_HANG_CHILD_PROMPT = `${SUBTASK_API_HANG_CHILD_MARKER}: Complete with the exact result "Hung child completed".`
+export const SUBTASK_API_HANG_PARENT_PROMPT = `${SUBTASK_API_HANG_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_API_HANG_CHILD_PROMPT}" Do not answer directly. When the subtask returns, complete with the exact result "API hang parent resumed".`
+export const SUBTASK_API_HANG_RESUME_MESSAGE = "Continue after provider hang."
+export const SUBTASK_API_HANG_CHILD_RESULT = "Hung child completed"
+export const SUBTASK_API_HANG_PARENT_RESULT = "API hang parent resumed"
+
 const SUBTASK_XPROFILE_SAME_CHILD_PROMPT = `${SUBTASK_XPROFILE_SAME_CHILD_MARKER}: Complete immediately with the exact result "Same-profile child completed".`
 const SUBTASK_XPROFILE_DIFFERENT_CHILD_PROMPT = `${SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER}: Complete immediately with the exact result "Different-profile child completed".`
 export const SUBTASK_XPROFILE_PARENT_PROMPT = `${SUBTASK_XPROFILE_PARENT_MARKER}: First use new_task to create a code-mode subtask with this exact message: "${SUBTASK_XPROFILE_SAME_CHILD_PROMPT}" After it returns, create an ask-mode subtask with the next instructions you receive.`
 export const SUBTASK_XPROFILE_SAME_CHILD_RESULT = "Same-profile child completed"
 export const SUBTASK_XPROFILE_DIFFERENT_CHILD_RESULT = "Different-profile child completed"
 export const SUBTASK_XPROFILE_PARENT_RESULT = "Sequential cross-profile parent resumed"
+
+const apiHangChildMatch = new RegExp(SUBTASK_API_HANG_CHILD_MARKER)
 
 const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
 	const rawRequest = JSON.stringify(req)
@@ -162,6 +172,79 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 					name: "attempt_completion",
 					arguments: JSON.stringify({ result: "Parent task resumed" }),
 					id: "call_subtasks_parent_completion_003",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(SUBTASK_API_HANG_PARENT_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: SUBTASK_API_HANG_CHILD_PROMPT,
+					}),
+					id: "call_api_hang_parent_new_task_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			userMessage: apiHangChildMatch,
+			sequenceIndex: 0,
+		},
+		// Keep the first child response pending long enough for the e2e test to cancel an in-flight API request.
+		latency: 15_000,
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_API_HANG_CHILD_RESULT }),
+					id: "call_api_hang_child_completion_002",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			userMessage: apiHangChildMatch,
+			sequenceIndex: 1,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_API_HANG_CHILD_RESULT }),
+					id: "call_api_hang_child_completion_003",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [
+					SUBTASK_API_HANG_PARENT_MARKER,
+					"call_api_hang_parent_new_task_001",
+					SUBTASK_API_HANG_CHILD_RESULT,
+				]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_API_HANG_PARENT_RESULT }),
+					id: "call_api_hang_parent_completion_004",
 				},
 			],
 		},
