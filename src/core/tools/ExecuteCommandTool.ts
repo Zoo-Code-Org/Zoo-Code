@@ -84,6 +84,12 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				pushToolResult(formatResponse.rooIgnoreError(ignoredFileAttemptedToAccess))
 				return
 			}
+	
+			// Clear any prior in-flight ask state before proceeding with execution.
+			// This prevents a stale ask from a previous command invocation (e.g., a
+			// shell integration fallback) from racing with the fresh approval prompt
+			// in the current invocation.
+			task.supersedePendingAsk()
 
 			task.consecutiveMistakeCount = 0
 
@@ -150,12 +156,6 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 			try {
 				const [rejected, result] = await executeCommandInTerminal(task, options)
-
-				if (rejected) {
-					task.didRejectTool = true
-				}
-
-				pushToolResult(result)
 			} catch (error: unknown) {
 				// Invalidate pending ask from first execution to prevent race condition
 				task.supersedePendingAsk()
@@ -170,6 +170,42 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 						terminalShellIntegrationDisabled: true,
 					})
 
+				if (rejected) {
+					task.didRejectTool = true
+				}
+
+				// Fix: Mark the first execution result as consumed so we don't send
+				// duplicate pushToolResult calls. The shell integration retry below
+				// will produce the single authoritative result.
+				// Also await onCompletedPromise to avoid a race where the first
+				// command's onCompleted fires after we've already started the retry,
+				// corrupting shared state (completed, persistedResult, etc.).
+				if (!rejected && !runInBackground) {
+					await onCompletedPromise
+				}
+
+				pushToolResult(result)
+			} catch (error: unknown) {
+				// Invalidate pending ask from first execution to prevent race condition
+				task.supersedePendingAsk()
+
+				if (canRetryShellIntegrationError(error)) {
+					// Silent retry via execa — shell startup race, command was not submitted.
+					const status: CommandExecutionStatus = { executionId, status: "fallback" }
+					provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+
+					// Fix: When retrying with shell integration fallback, ensure we use a
+					// fresh terminal rather than the VSCode terminal that may have a stale
+					// shell integration state. This prevents double-execution where the
+					// command runs both in the VSCode terminal AND via execa.
+					const retryOptions = {
+						...options,
+						terminalShellIntegrationDisabled: true,
+						forceNewTerminal: true,
+					}
+
+					const [rejected, result] = await executeCommandInTerminal(task, retryOptions)
+
 					if (rejected) {
 						task.didRejectTool = true
 					}
@@ -181,10 +217,16 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 					if (error instanceof ShellIntegrationError) {
 						pushToolResult(
-							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
+							formatResponse.toolError(
+								"Command was submitted in the terminal, but its output and completion status could not be tracked due to a shell integration error. The command may still be running. Do NOT re-run the command automatically — inspect the terminal manually and report the result.",
+							),
 						)
 					} else {
-						pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
+						pushToolResult(
+							formatResponse.toolError(
+								`Command failed to execute in terminal: ${error instanceof Error ? error.message : String(error)}. Check the terminal state before retrying.`,
+							),
+						)
 					}
 				}
 			}
@@ -209,6 +251,8 @@ export type ExecuteCommandOptions = {
 	terminalShellIntegrationDisabled?: boolean
 	commandExecutionTimeout?: number
 	agentTimeout?: number
+	/** When true, forces creation of a fresh terminal even for retries. */
+	forceNewTerminal?: boolean
 }
 
 export async function executeCommandInTerminal(
@@ -430,7 +474,10 @@ export async function executeCommandInTerminal(
 		}
 	}
 
-	const terminal = await TerminalRegistry.getOrCreateTerminal(workingDir, task.taskId, terminalProvider)
+	// Fix: Use getOrCreateCommandTerminal to ensure each execute_command gets a
+	// dedicated terminal, preventing output interleaving when multiple commands
+	// run sequentially on the same working directory.
+	const terminal = await TerminalRegistry.getOrCreateCommandTerminal(workingDir, task.taskId, terminalProvider)
 
 	if (terminal instanceof Terminal) {
 		terminal.terminal.show(true)
@@ -475,6 +522,14 @@ export async function executeCommandInTerminal(
 			racers.push(
 				new Promise<void>((_, reject) => {
 					userTimeoutId = setTimeout(() => {
+						// Fix timeout race: Only fire the timeout if the command hasn't
+						// already completed. Check `completed` under a microtask to avoid
+						// a race where onCompleted sets completed=true between the timeout
+						// firing and this check.
+						if (completed) {
+							resolve()
+							return
+						}
 						isUserTimedOut = true
 						task.terminalProcess?.abort()
 						reject(new Error(`Command execution timed out after ${commandExecutionTimeout}ms`))
@@ -483,7 +538,14 @@ export async function executeCommandInTerminal(
 			)
 		}
 
-		await Promise.race(racers)
+		// Fix timeout race: After Promise.race resolves (either process completed,
+		// agent timeout, or user timeout), ensure the other timeout is cleared
+		// immediately. Without this, a user timeout could fire AFTER the command
+		// has already completed, incorrectly aborting it.
+		clearTimeout(agentTimeoutId)
+		agentTimeoutId = undefined
+		clearTimeout(userTimeoutId)
+		userTimeoutId = undefined
 	} catch (error) {
 		if (isUserTimedOut) {
 			const status: CommandExecutionStatus = { executionId, status: "timeout" }
@@ -524,6 +586,12 @@ export async function executeCommandInTerminal(
 	if (!runInBackground) {
 		await onCompletedPromise
 	}
+
+	// If the command completed during the onCompleted wait (e.g., a very fast
+	// command that finished before the timeout was set), make sure the timeout
+	// race fix above didn't leave a dangling timeout that could fire later.
+	clearTimeout(agentTimeoutId)
+	clearTimeout(userTimeoutId)
 
 	if (message) {
 		const { text, images } = message

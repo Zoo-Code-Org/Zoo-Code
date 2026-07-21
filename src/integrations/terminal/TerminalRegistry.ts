@@ -208,6 +208,27 @@ export class TerminalRegistry {
 	}
 
 	/**
+	 * Creates a new terminal for execute_command, bypassing the reuse logic.
+	 * Each execute_command invocation gets its own dedicated terminal to prevent
+	 * output interleaving when multiple commands run sequentially on the same
+	 * working directory.
+	 *
+	 * @param cwd The working directory path
+	 * @param taskId Optional task ID to associate with the terminal
+	 * @param provider The terminal provider type
+	 * @returns A new RooTerminal instance
+	 */
+	public static createCommandTerminal(
+		cwd: string,
+		taskId?: string,
+		provider: RooTerminalProvider = "vscode",
+	): RooTerminal {
+		const terminal = this.createTerminal(cwd, provider)
+		terminal.taskId = taskId
+		return terminal
+	}
+
+	/**
 	 * Gets an existing terminal or creates a new one for the given working
 	 * directory.
 	 *
@@ -267,6 +288,24 @@ export class TerminalRegistry {
 		terminal.taskId = taskId
 
 		return terminal
+	}
+
+	/**
+		* Gets or creates a terminal for execute_command — always creates a new
+		* terminal to prevent output interleaving when multiple commands run
+		* sequentially on the same working directory.
+		*
+		* @param cwd The working directory path
+		* @param taskId Optional task ID to associate with the terminal
+		* @param provider The terminal provider type
+		* @returns A new RooTerminal instance
+		*/
+	public static async getOrCreateCommandTerminal(
+		cwd: string,
+		taskId?: string,
+		provider: RooTerminalProvider = "vscode",
+	): Promise<RooTerminal> {
+		return this.createCommandTerminal(cwd, taskId, provider)
 	}
 
 	/**

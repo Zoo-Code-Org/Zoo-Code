@@ -71,6 +71,10 @@ export async function presentAssistantMessage(cline: Task) {
 	cline.presentAssistantMessageLocked = true
 	cline.presentAssistantMessageHasPendingUpdates = false
 
+	// Reset batch skip counter at the start of each present cycle.
+	// This ensures the count is fresh for each batch of tool calls.
+	;(cline as any).batchSkipCount = 0
+
 	if (cline.currentStreamingContentIndex >= cline.assistantMessageContent.length) {
 		// This may happen if the last content block was completed before
 		// streaming could finish. If streaming is finished, and we're out of
@@ -111,8 +115,11 @@ export async function presentAssistantMessage(cline: Task) {
 			if (cline.didRejectTool) {
 				// For native protocol, we must send a tool_result for every tool_use to avoid API errors
 				const toolCallId = mcpBlock.id
+				const skipCount = (cline as any).batchSkipCount ?? 0
+				const nextSkipCount = skipCount + 1
+				;(cline as any).batchSkipCount = nextSkipCount
 				const errorMessage = !mcpBlock.partial
-					? `Skipping MCP tool ${mcpBlock.name} due to user rejecting a previous tool.`
+					? `Skipping MCP tool ${mcpBlock.name} due to user rejecting a previous tool. (Skipped ${nextSkipCount} tool${nextSkipCount > 1 ? "s" : ""} in this batch.)`
 					: `MCP tool ${mcpBlock.name} was interrupted and not executed due to user rejecting a previous tool.`
 
 				if (toolCallId) {
@@ -391,8 +398,11 @@ export async function presentAssistantMessage(cline: Task) {
 			if (cline.didRejectTool) {
 				// Ignore any tool content after user has rejected tool once.
 				// For native tool calling, we must send a tool_result for every tool_use to avoid API errors
+				const skipCount = (cline as any).batchSkipCount ?? 0
+				const nextSkipCount = skipCount + 1
+				;(cline as any).batchSkipCount = nextSkipCount
 				const errorMessage = !block.partial
-					? `Skipping tool ${toolDescription()} due to user rejecting a previous tool.`
+					? `Skipping tool ${toolDescription()} due to user rejecting a previous tool. (Skipped ${nextSkipCount} tool${nextSkipCount > 1 ? "s" : ""} in this batch.)`
 					: `Tool ${toolDescription()} was interrupted and not executed due to user rejecting a previous tool.`
 
 				cline.pushToolResultToUserContent({
