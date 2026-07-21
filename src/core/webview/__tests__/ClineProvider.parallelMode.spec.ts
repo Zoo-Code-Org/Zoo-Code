@@ -736,7 +736,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 	})
 
 	describe("saveViewState", () => {
-		it("should update viewLocalState when saveViewState is called", async () => {
+		it("should update viewLocalState and persist mode through registered viewStates", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
 			const contextProxySpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -744,37 +744,52 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await (provider as any).saveViewState("mode", "architect")
 
-			// Verify viewLocalState was updated
 			expect((provider as any).viewLocalState.mode).toBe("architect")
-
-			// saveViewState uses the stable per-view id, not the construction-order viewId suffix.
-			expect(contextProxySpy).toHaveBeenCalledWith("__view_state_stable-sidebar-view_mode", "architect")
-			expect(contextProxySpy).not.toHaveBeenCalledWith(`__view_state_${provider.viewId}_mode`, expect.anything())
+			expect(provider.contextProxy.getValue("viewStates" as any)).toMatchObject({
+				"stable-sidebar-view": { mode: "architect" },
+			})
+			expect(contextProxySpy).toHaveBeenCalledWith(
+				"viewStates",
+				expect.objectContaining({
+					"stable-sidebar-view": expect.objectContaining({
+						mode: "architect",
+						updatedAt: expect.any(Number),
+					}),
+				}),
+			)
+			expect(contextProxySpy).not.toHaveBeenCalledWith("__view_state_stable-sidebar-view_mode", expect.anything())
 
 			await provider.dispose()
 		})
 
-		it("should update viewLocalState for currentApiConfigName", async () => {
+		it("should update viewLocalState and persist currentApiConfigName through registered viewStates", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
+			await (provider as any).setViewStateId("stable-sidebar-view")
 			await (provider as any).saveViewState("currentApiConfigName", "my-profile")
 
 			expect((provider as any).viewLocalState.currentApiConfigName).toBe("my-profile")
+			expect(provider.contextProxy.getValue("viewStates" as any)).toMatchObject({
+				"stable-sidebar-view": { currentApiConfigName: "my-profile" },
+			})
 
 			await provider.dispose()
 		})
 
-		it("should update viewLocalState for apiConfiguration", async () => {
+		it("should update viewLocalState for apiConfiguration without persisting provider settings or secrets", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
 			const testApiConfig = {
 				apiProvider: "openrouter" as const,
 				openRouterModelId: "claude-3.5-sonnet",
+				openRouterApiKey: "secret-key",
 			}
 
+			await (provider as any).setViewStateId("stable-sidebar-view")
 			await (provider as any).saveViewState("apiConfiguration", testApiConfig)
 
 			expect((provider as any).viewLocalState.apiConfiguration).toEqual(testApiConfig)
+			expect(provider.contextProxy.getValue("viewStates" as any)).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -823,15 +838,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
-		it("should update viewLocalState when stable per-view values are loaded manually", async () => {
+		it("should restore mode and currentApiConfigName from hydrated viewStates after extension reload", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const stableViewId = "stable-sidebar-view"
 
-			await provider.contextProxy.setValue(`__view_state_${stableViewId}_mode` as any, "architect")
-			await provider.contextProxy.setValue(
-				`__view_state_${stableViewId}_currentApiConfigName` as any,
-				"new-profile",
-			)
+			await provider.contextProxy.setValue("viewStates" as any, {
+				[stableViewId]: { mode: "architect", currentApiConfigName: "new-profile", updatedAt: 123 },
+			})
 
 			await (provider as any).setViewStateId(stableViewId)
 
@@ -842,23 +855,19 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
-		it("should restore mode, current API config name, and API configuration from stable per-view state", async () => {
+		it("should resolve API configuration from the persisted profile selection", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
 			const stableViewId = "stable-editor-tab-a"
-			const persistedApiConfiguration = {
-				apiProvider: "openrouter" as const,
+			const getProfileSpy = vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "profile-a",
+				id: "profile-a-id",
+				apiProvider: "openrouter",
 				openRouterModelId: "openrouter/anthropic/claude-sonnet-4",
-			}
+			} as any)
 
-			await provider.contextProxy.setValue(`__view_state_${stableViewId}_mode` as any, "architect")
-			await provider.contextProxy.setValue(
-				`__view_state_${stableViewId}_currentApiConfigName` as any,
-				"profile-a",
-			)
-			await provider.contextProxy.setValue(
-				`__view_state_${stableViewId}_apiConfiguration` as any,
-				persistedApiConfiguration,
-			)
+			await provider.contextProxy.setValue("viewStates" as any, {
+				[stableViewId]: { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 123 },
+			})
 			await provider.contextProxy.setValue("mode" as any, "debugger")
 			await provider.contextProxy.setValue("currentApiConfigName" as any, "profile-b")
 			await provider.contextProxy.setValue("apiConfiguration" as any, { apiProvider: "anthropic" })
@@ -866,9 +875,32 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await (provider as any).setViewStateId(stableViewId)
 			const state = await provider.getState()
 
+			expect(getProfileSpy).toHaveBeenCalledWith({ name: "profile-a" })
 			expect(state.mode).toBe("architect")
 			expect(state.currentApiConfigName).toBe("profile-a")
-			expect(state.apiConfiguration).toMatchObject(persistedApiConfiguration)
+			expect(state.apiConfiguration).toMatchObject({
+				apiProvider: "openrouter",
+				openRouterModelId: "openrouter/anthropic/claude-sonnet-4",
+			})
+
+			await provider.dispose()
+		})
+
+		it("should not throw when a persisted profile selection cannot be resolved", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+			const stableViewId = "stable-editor-tab-a"
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockRejectedValue(new Error("missing profile"))
+
+			await provider.contextProxy.setValue("viewStates" as any, {
+				[stableViewId]: { mode: "architect", currentApiConfigName: "deleted-profile", updatedAt: 123 },
+			})
+
+			await expect((provider as any).setViewStateId(stableViewId)).resolves.toBeUndefined()
+			const state = await provider.getState()
+
+			expect(state.mode).toBe("architect")
+			expect(state.currentApiConfigName).toBe("deleted-profile")
+			expect(state.apiConfiguration.apiProvider).toBe("anthropic")
 
 			await provider.dispose()
 		})
@@ -886,6 +918,27 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			expect((provider as any).viewLocalState.mode).toBe("architect")
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Error loading state"))
+
+			await provider.dispose()
+		})
+	})
+
+	describe("persisted view state pruning", () => {
+		it("should keep the newest 50 persisted view states", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const states = Object.fromEntries(
+				Array.from({ length: 55 }, (_, index) => [
+					`view-${index}`,
+					{ mode: `mode-${index}`, updatedAt: index },
+				]),
+			)
+
+			const pruned = (provider as any).prunePersistedViewStates(states)
+
+			expect(Object.keys(pruned)).toHaveLength(50)
+			expect(pruned["view-54"]).toBeDefined()
+			expect(pruned["view-5"]).toBeDefined()
+			expect(pruned["view-4"]).toBeUndefined()
 
 			await provider.dispose()
 		})

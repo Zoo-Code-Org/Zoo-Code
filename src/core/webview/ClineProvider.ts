@@ -120,6 +120,8 @@ import { REQUESTY_BASE_URL } from "../../shared/utils/requesty"
 import { validateAndFixToolResultIds } from "../task/validateToolResultIds"
 import { PendingEditOperationStore, type PendingEditOperationInput } from "./PendingEditOperationStore"
 
+type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
+
 /**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
@@ -172,6 +174,7 @@ export class ClineProvider
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private static nextViewId = 0
+	private static readonly MAX_PERSISTED_VIEW_STATES = 50
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
 	private view?: vscode.WebviewView | vscode.WebviewPanel
@@ -442,13 +445,59 @@ export class ClineProvider
 		}
 	}
 
-	/**
-	 * Derive a view-specific ContextProxy key for persisting view-local state.
-	 * Uses a stable per-view id so each restored tab reads and writes its own values
-	 * independent of provider construction order.
-	 */
-	private viewStateKeyFor(key: "mode" | "currentApiConfigName" | "apiConfiguration"): string {
-		return `__view_state_${this.viewStateId}_${key}`
+	private getPersistedViewStates(): Record<string, PersistedViewState> {
+		const viewStates = this.contextProxy.getValue("viewStates")
+
+		if (!viewStates || typeof viewStates !== "object" || Array.isArray(viewStates)) {
+			return {}
+		}
+
+		return viewStates
+	}
+
+	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
+		const states = this.getPersistedViewStates()
+		const current = states[this.viewStateId] ?? {}
+		const next: PersistedViewState = { ...current }
+
+		if ("mode" in values) {
+			if (values.mode === undefined || values.mode === null) {
+				delete next.mode
+			} else {
+				next.mode = values.mode
+			}
+		}
+
+		if ("currentApiConfigName" in values) {
+			if (values.currentApiConfigName === undefined || values.currentApiConfigName === null) {
+				delete next.currentApiConfigName
+			} else {
+				next.currentApiConfigName = values.currentApiConfigName
+			}
+		}
+
+		if (!next.mode && !next.currentApiConfigName) {
+			delete states[this.viewStateId]
+		} else {
+			next.updatedAt = values.updatedAt ?? Date.now()
+			states[this.viewStateId] = next
+		}
+
+		await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+	}
+
+	private async clearPersistedViewState(viewStateId = this.viewStateId): Promise<void> {
+		const states = this.getPersistedViewStates()
+		delete states[viewStateId]
+		await this.contextProxy.setValue("viewStates", states)
+	}
+
+	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
+		return Object.fromEntries(
+			Object.entries(states)
+				.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+				.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES),
+		)
 	}
 
 	public async setViewStateId(viewStateId: string | undefined): Promise<void> {
@@ -463,18 +512,30 @@ export class ClineProvider
 	}
 
 	/**
-	 * Loads persisted values from stable per-view keys into the view-local state buffer.
-	 * Missing keys are intentionally left unset so getState() falls back to shared ContextProxy values.
+	 * Loads non-secret persisted selections from the registered viewStates map.
+	 * Missing entries are intentionally left unset so getState() falls back to shared ContextProxy values.
 	 */
 	private async loadViewState(): Promise<void> {
 		try {
+			const persisted = this.getPersistedViewStates()[this.viewStateId]
 			const loadedState: Partial<ExtensionState> = {}
 
-			for (const key of ["mode", "currentApiConfigName", "apiConfiguration"] as const) {
-				const value = this.contextProxy.getValue(this.viewStateKeyFor(key) as any)
+			if (persisted?.mode) {
+				loadedState.mode = persisted.mode as Mode
+			}
 
-				if (value !== undefined && value !== null) {
-					loadedState[key] = value as any
+			if (persisted?.currentApiConfigName) {
+				loadedState.currentApiConfigName = persisted.currentApiConfigName
+
+				try {
+					const { name: _name, ...apiConfiguration } = await this.providerSettingsManager.getProfile({
+						name: persisted.currentApiConfigName,
+					})
+					loadedState.apiConfiguration = apiConfiguration as ProviderSettings
+				} catch (error) {
+					this.log(
+						`[loadViewState] Unable to resolve API profile '${persisted.currentApiConfigName}' for viewId ${this.viewId}: ${error instanceof Error ? error.message : String(error)}`,
+					)
 				}
 			}
 
@@ -488,22 +549,19 @@ export class ClineProvider
 	}
 
 	/**
-	 * Save a single view-local state value and sync to global state using a view-specific key.
-	 * This allows each Provider instance to have its own mode/apiConfig for parallel mode support.
+	 * Save a single view-local state value. Only non-secret selections are persisted durably.
 	 */
 	private async saveViewState(key: keyof ExtensionState, value: any): Promise<void> {
-		// Update local cache first. Undefined/null clears should not leave a local override behind.
 		if (value === undefined || value === null) {
 			delete this.viewLocalState[key]
 		} else {
 			this.viewLocalState[key] = value
 		}
 
-		// Persist to view-specific ContextProxy key for mode/currentApiConfigName/apiConfiguration,
-		// so recreated views restore their own values instead of the last writer's shared state.
-		if (key === "mode" || key === "currentApiConfigName" || key === "apiConfiguration") {
-			const viewKey = this.viewStateKeyFor(key as "mode" | "currentApiConfigName" | "apiConfiguration")
-			await this.contextProxy.setValue(viewKey as any, value)
+		if (key === "mode") {
+			await this.savePersistedViewState({ mode: value })
+		} else if (key === "currentApiConfigName") {
+			await this.savePersistedViewState({ currentApiConfigName: value })
 		}
 
 		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
