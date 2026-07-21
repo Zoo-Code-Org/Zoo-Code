@@ -11,6 +11,18 @@ vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
 }))
 
+vi.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			updateTelemetryState: vi.fn(),
+			captureCustomModeCreated: vi.fn(),
+			captureModeSettingChanged: vi.fn(),
+			captureEvent: vi.fn(),
+		},
+		hasInstance: vi.fn(() => false),
+	},
+}))
+
 vi.mock("../../../integrations/theme/getTheme", () => ({
 	getTheme: vi.fn().mockResolvedValue({}),
 }))
@@ -101,6 +113,7 @@ const mockClineProvider = {
 	postMessageToWebview: vi.fn(),
 	customModesManager: {
 		getCustomModes: vi.fn(),
+		updateCustomMode: vi.fn(),
 		deleteCustomMode: vi.fn(),
 	},
 	context: {
@@ -122,6 +135,7 @@ const mockClineProvider = {
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
 	getSkillsManager: vi.fn(),
+	handleModeSwitch: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
 
@@ -244,6 +258,7 @@ import { getWorkspacePath } from "../../../utils/path"
 import { ensureSettingsDirectoryExists } from "../../../utils/globalContext"
 import { generateErrorDiagnostics } from "../diagnosticsHandler"
 import type { ModeConfig } from "@roo-code/types"
+import { defaultModeSlug } from "../../../shared/modes"
 
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")
@@ -260,6 +275,38 @@ import { resolveImageMentions } from "../../mentions/resolveImageMentions"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
+
+describe("webviewMessageHandler - webviewDidLaunch", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(mockClineProvider.getState).mockResolvedValue({
+			apiConfiguration: { apiProvider: "anthropic" },
+			currentApiConfigName: "view-local-profile",
+		} as any)
+		;(mockClineProvider as any).setViewStateId = vi.fn().mockResolvedValue(undefined)
+		;(mockClineProvider as any).workspaceTracker = { initializeFilePaths: vi.fn() }
+		;(mockClineProvider as any).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", apiProvider: "anthropic" }]),
+			hasConfig: vi.fn().mockResolvedValue(false),
+		}
+		;(mockClineProvider as any).activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+		;(mockClineProvider as any).getMcpHub = vi.fn().mockReturnValue(undefined)
+		;(mockClineProvider as any).getStateToPostToWebview = vi
+			.fn()
+			.mockResolvedValue({ telemetrySetting: "disabled" })
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue("shared-profile")
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockResolvedValue(undefined)
+	})
+
+	it("validates the view-local currentApiConfigName on launch", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+
+		expect((mockClineProvider as any).providerSettingsManager.hasConfig).toHaveBeenCalledWith("view-local-profile")
+		expect((mockClineProvider as any).providerSettingsManager.hasConfig).not.toHaveBeenCalledWith("shared-profile")
+	})
+})
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
