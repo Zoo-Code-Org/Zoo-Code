@@ -1,5 +1,5 @@
 import * as vscode from "vscode"
-import { initializeNetworkProxy, getProxyConfig, isProxyEnabled, isDebugMode } from "../networkProxy"
+import { initializeNetworkProxy, getProxyConfig, isProxyEnabled, isDebugMode, getSystemProxyUrl } from "../networkProxy"
 
 // Mock global-agent
 vi.mock("global-agent", () => ({
@@ -303,6 +303,70 @@ describe("networkProxy", () => {
 			void initializeNetworkProxy(context, mockOutputChannel)
 
 			expect(process.env.NODE_TLS_REJECT_UNAUTHORIZED).toBeUndefined()
+		})
+	})
+
+	describe("getSystemProxyUrl", () => {
+		beforeEach(() => {
+			// Clear env vars before each test
+			delete process.env.HTTPS_PROXY
+			delete process.env.https_proxy
+			delete process.env.HTTP_PROXY
+			delete process.env.http_proxy
+		})
+
+		it("should return proxy from HTTPS_PROXY env var", () => {
+			process.env.HTTPS_PROXY = "http://proxy.corp:3128"
+			const result = getSystemProxyUrl()
+			expect(result).toBe("http://proxy.corp:3128")
+		})
+
+		it("should return proxy from https_proxy env var when HTTPS_PROXY not set", () => {
+			process.env.https_proxy = "http://proxy.corp:3128"
+			const result = getSystemProxyUrl()
+			expect(result).toBe("http://proxy.corp:3128")
+		})
+
+		it("should return proxy from HTTP_PROXY env var as fallback", () => {
+			process.env.HTTP_PROXY = "http://proxy.corp:8080"
+			const result = getSystemProxyUrl()
+			expect(result).toBe("http://proxy.corp:8080")
+		})
+
+		it("should return trimmed proxy from VS Code setting", () => {
+			mockConfig.get.mockImplementation((key: string) => {
+				if (key === "proxy") return "  http://proxy.corp:3128  "
+				return ""
+			})
+			const result = getSystemProxyUrl()
+			expect(result).toBe("http://proxy.corp:3128")
+		})
+
+		it("should return undefined when no proxy configured", () => {
+			mockConfig.get.mockReturnValue(undefined)
+			const result = getSystemProxyUrl()
+			expect(result).toBeUndefined()
+		})
+
+		it("should handle VS Code API errors gracefully", () => {
+			vi.mocked(vscode.workspace.getConfiguration).mockImplementation(() => {
+				throw new Error("VS Code API unavailable")
+			})
+			const result = getSystemProxyUrl()
+			expect(result).toBeUndefined()
+		})
+
+		it("should not return empty string proxy", () => {
+			mockConfig.get.mockReturnValue("")
+			const result = getSystemProxyUrl()
+			expect(result).toBeUndefined()
+		})
+
+		it("should prioritize env vars over VS Code settings", () => {
+			process.env.HTTPS_PROXY = "http://env-proxy:3128"
+			mockConfig.get.mockReturnValue("http://vscode-proxy:8080")
+			const result = getSystemProxyUrl()
+			expect(result).toBe("http://env-proxy:3128")
 		})
 	})
 })
