@@ -16,13 +16,15 @@
 
         ## 我们是 Zoo Code
 
-> 你可能已经看到 Roo 团队 🦘🦘🦘 的[最近公告](https://x.com/mattrubens/status/2046636598859559114)。简单来说，团队在把重心放到 [Roomote](https://roomote.dev/) 的同时，正在逐步减少 Roo Code 的活跃开发。这个消息让很多 Roo 用户都很难受；这个插件对这个社区意义重大。
+> 在 Roo 团队停止 Roo Code 的积极开发、转而专注于 [Roomote](https://roomote.dev/)
+> 之后，Zoo Code 将继续开发这个项目。感谢 Roo 团队所构建的一切。
 >
-> 我们想感谢整个 Roo 团队为这个插件投入的努力。这里不会逐一点名，但大家都能认同，他们既是卓越的开发者，也是同样令人敬佩的优秀的人。感谢 Roo 团队。
->
-> Roo 用户来自各种不同背景。有人在日常工作中专业使用它，也有人用它来折腾难以想象的复杂 workflow。有人用它来改进 Roo 本身，也有人用它来改进 Roo 所使用的模型（非常 meta）。我们想表达的是，这个社区非常多元。虽然袋鼠 🦘🦘🦘 是一种高贵又有辨识度的动物，但我们觉得由不同物种组成的“Zoo” 🐘🦡🦒🦓🦛🦧🦭🦦 更能体现插件用户的多样性。
->
-> 所以我们想宣布，**Zoo Code** 将继续开发这个重要项目。核心团队由此前曾为 Roo 做出贡献、并且非常在乎这个插件的开发者组成。我们会继续更新模型、修复 bug，并发布新功能。但最重要的是，我们会认真倾听你们——让这个插件如此特别的社区。欢迎加入我们的 [Discord](https://discord.gg/VxfP4Vx3gX)、[Reddit](https://www.reddit.com/r/ZooCode)，或者[创建一个 PR 或 issue](https://github.com/Zoo-Code-Org/Zoo-Code)；但更重要的是，我们希望你作为社区的一员继续保持参与、保持连接、保持活跃。
+> 核心团队由此前曾为 Roo 做出贡献、并且非常在乎这个插件的开发者组成。我们
+> 会继续更新模型、修复 bug，并发布新功能，也计划认真倾听让这个插件如此特
+> 别的社区。欢迎加入我们，一起在
+> [Discord](https://discord.gg/VxfP4Vx3gX)、
+> [Reddit](https://www.reddit.com/r/ZooCode)，或者
+> [创建 PR 或 issue](https://github.com/Zoo-Code-Org/Zoo-Code)。
 >
 > _-Zoo Code Team_
 
@@ -30,15 +32,15 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.68.0 新增内容
+## v3.70.0 新增内容
 
-- **支持 GLM-5.2 的 Friendli 提供商** — 通过 Friendli 使用最新的 GLM 模型。
-- **Ollama 原生 thinking/reasoning 支持** — 使用 Ollama 模型时可端到端保留 reasoning 输出。
-- **Anthropic 自定义 `apiModelId` 修复** — 自定义 Anthropic 模型 ID 现在会保持选中，不再静默回退到 `claude-sonnet-4-5`。
-- 修复：Ollama 提供商的工具结果处理和过早的上下文压缩。
-- 修复：委派子任务被中断时保留父子任务链接。
-- 改进 Anthropic Vertex 中 Claude 内容块的处理，以获得更可靠的响应。
-- CI、nightly 发布以及依赖/工具更新。
+- **OpenAI GPT-5.6 系列** — `Sol`、`Terra` 和 `Luna` 现已在 OpenAI Codex 和 OpenAI Native 两条提供商路径上可用。
+- **Grok 4.5 支持** — xAI 的全新旗舰模型，以及一项同样惠及 Grok 4 Mini 的 reasoning-effort 格式修复。
+- **Kenari 提供商支持** — 一个一流的、兼容 OpenAI 的 AI 网关，以卢比计费，覆盖 Claude、GPT、DeepSeek、GLM、Kimi 等更多模型。
+- 在折叠的任务标题中显示上下文压缩按钮和上下文窗口进度条。
+- 修复：在冷终端上出现的终端输出丢失和任务过早完成的问题。
+- 修复：Zoo Gateway 和 Vercel AI Gateway 模型的图片附加功能现在会跟随实时的 vision 能力标签，而不是静态的白名单。
+- 依赖和工具更新。
 
 ## Zoo Code 能为您做什么？
 

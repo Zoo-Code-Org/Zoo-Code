@@ -54,6 +54,7 @@ describe("Model Validation Functions", () => {
 		"opencode-go": {},
 		kenari: {},
 		"zoo-gateway": {},
+		moonshot: {},
 	}
 
 	const allowAllOrganization: OrganizationAllowList = {

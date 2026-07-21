@@ -213,7 +213,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "jul-2026-v3.68.0-friendli-ollama-anthropic-apimodelid" // v3.68.0 Friendli GLM-5.2 support, native Ollama thinking/reasoning, Anthropic custom apiModelId fix
+	public readonly latestAnnouncementId = "jul-2026-v3.70.0-gpt5.6-grok4.5-kenari" // v3.70.0 GPT-5.6 family, Grok 4.5 support, Kenari provider
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 

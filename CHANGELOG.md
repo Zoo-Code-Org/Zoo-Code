@@ -1,5 +1,17 @@
 # Zoo Code Changelog
 
+## [3.70.0]
+
+### Minor Changes
+
+- Add Kenari as a first-class provider, an Indonesian OpenAI-compatible AI gateway billed in Rupiah covering Claude, GPT, DeepSeek, GLM, Kimi and more (#792 by @doedja, PR #793 by @doedja)
+- Add OpenAI GPT-5.6 family support (sol, terra, luna) across both OpenAI Codex and OpenAI Native provider paths (#871 by @xRaTcHeT302, PR #876 by @navedmerchant)
+- Add Grok 4.5 support and fix a latent xAI reasoning-effort format bug affecting Grok 4 Mini (#866 by @navedmerchant, PR #867 by @navedmerchant)
+- Surface the context-compaction button and context window progress bar in the collapsed task header so context pressure can be monitored and acted on without expanding it (#606 by @awschmeder, PR #680 by @awschmeder)
+- Fix(terminal): fix output loss and premature task completion on cold terminals by reading command output only after shell execution actually starts (#800 by @juneleung, PR #834 by @edelauna)
+- Fix(zoo-gateway): enable image attach for Zoo Gateway and Vercel AI Gateway models based on live vision-capability tags instead of a static allowlist (PR #897 by @JamesRobert20)
+- Chore(deps): routine dependency updates (PRs #807-#828 by @app/renovate)
+
 ## [3.68.0]
 
 ### Minor Changes

@@ -253,9 +253,13 @@ function getSelectedModel({
 			return { id, info: routerInfo ?? staticInfo }
 		}
 		case "moonshot": {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = moonshotModels[id as keyof typeof moonshotModels]
-			return { id, info }
+			const availableModels = routerModels.moonshot
+				? { ...moonshotModels, ...routerModels.moonshot }
+				: moonshotModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels.moonshot?.[id]
+			const staticInfo = moonshotModels[id as keyof typeof moonshotModels]
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case "minimax": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId

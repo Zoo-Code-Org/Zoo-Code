@@ -42,8 +42,17 @@ import {
 } from "./providers"
 import { NativeOllamaHandler } from "./providers/native-ollama"
 
+/**
+ * Options for completePrompt — unified with ApiHandlerCreateMessageMetadata.
+ * Uses abortSignal (not signal) to match the metadata pattern used in stream path.
+ */
+export interface CompletePromptOptions extends Pick<ApiHandlerCreateMessageMetadata, "abortSignal"> {
+	/** Optional timeout override (ms) — falls back to provider default if omitted */
+	timeoutMs?: number
+}
+
 export interface SingleCompletionHandler {
-	completePrompt(prompt: string): Promise<string>
+	completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string>
 }
 
 export interface ApiHandlerCreateMessageMetadata {

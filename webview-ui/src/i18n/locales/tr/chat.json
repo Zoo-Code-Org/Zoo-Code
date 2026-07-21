@@ -342,9 +342,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "GLM-5.2 destekli Friendli sağlayıcısı — en yeni GLM modelini Friendli üzerinden kullan.",
-			"highlight2": "Ollama için yerel thinking/reasoning desteği — Ollama modellerini kullanırken reasoning çıktısını uçtan uca koru.",
-			"highlight3": "Anthropic özel `apiModelId` düzeltmesi — özel Anthropic model kimlikleri artık sessizce `claude-sonnet-4-5` modeline geri dönmek yerine seçili kalıyor."
+			"highlight1": "OpenAI GPT-5.6 ailesi (Sol, Terra, Luna) — hem OpenAI Codex hem de OpenAI Native üzerinde kullanılabilir.",
+			"highlight2": "Grok 4.5 desteği — xAI'nin yeni amiral gemisi modeli, ayrıca Grok 4 Mini'ye de fayda sağlayan bir reasoning effort düzeltmesi.",
+			"highlight3": "Kenari provider — Rupiah üzerinden faturalandırılan, Claude, GPT, DeepSeek, GLM, Kimi ve daha fazlasını kapsayan, OpenAI uyumlu birinci sınıf bir AI ağ geçidi."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

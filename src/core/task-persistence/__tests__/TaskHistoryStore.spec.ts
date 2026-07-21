@@ -440,6 +440,107 @@ describe("TaskHistoryStore", () => {
 
 			expect(store.get("gone-task")).toBeUndefined()
 		})
+
+		it("waits for an in-flight write before refreshing the cache", async () => {
+			await store.initialize()
+
+			const item = makeHistoryItem({ id: "invalidate-locked", tokensIn: 100 })
+			await store.upsert(item)
+
+			let signalWriteStarted!: () => void
+			const writeStarted = new Promise<void>((resolve) => {
+				signalWriteStarted = resolve
+			})
+			let releaseWrite!: () => void
+			const writeCanFinish = new Promise<void>((resolve) => {
+				releaseWrite = resolve
+			})
+			let releaseStaleRead!: () => void
+			const staleReadCanFinish = new Promise<void>((resolve) => {
+				releaseStaleRead = resolve
+			})
+			let writeReleased = false
+
+			const storeAny = store as any
+			const originalWriteTaskFile = storeAny.writeTaskFile.bind(store)
+			const originalReadTaskFile = storeAny.readTaskFile.bind(store)
+			vi.spyOn(storeAny, "writeTaskFile").mockImplementation(async (...args: unknown[]) => {
+				const next = args[0] as HistoryItem
+				if (next.id === item.id && next.tokensIn === 999) {
+					signalWriteStarted()
+					await writeCanFinish
+				}
+				return originalWriteTaskFile(...args)
+			})
+			vi.spyOn(storeAny, "readTaskFile").mockImplementation(async (...args: unknown[]) => {
+				if (args[0] === item.id && !writeReleased) {
+					await staleReadCanFinish
+					return item
+				}
+				return originalReadTaskFile(...args)
+			})
+
+			const write = store.upsert({ ...item, tokensIn: 999 })
+			await writeStarted
+			const invalidation = store.invalidate(item.id)
+
+			writeReleased = true
+			releaseWrite()
+			await write
+			releaseStaleRead()
+			await invalidation
+
+			expect(store.get(item.id)?.tokensIn).toBe(999)
+		})
+	})
+
+	describe("invalidateAll()", () => {
+		it("waits for an in-flight write before clearing the cache", async () => {
+			const onWrite = vi.fn().mockResolvedValue(undefined)
+			store = new TaskHistoryStore(tmpDir, { onWrite })
+			await store.initialize()
+
+			const first = makeHistoryItem({ id: "invalidate-all-first", ts: 1000, tokensIn: 100 })
+			const second = makeHistoryItem({ id: "invalidate-all-second", ts: 2000 })
+			await store.upsert(first)
+			await store.upsert(second)
+			onWrite.mockClear()
+
+			let signalWriteStarted!: () => void
+			const writeStarted = new Promise<void>((resolve) => {
+				signalWriteStarted = resolve
+			})
+			let releaseWrite!: () => void
+			const writeCanFinish = new Promise<void>((resolve) => {
+				releaseWrite = resolve
+			})
+
+			const storeAny = store as any
+			const originalWriteTaskFile = storeAny.writeTaskFile.bind(store)
+			vi.spyOn(storeAny, "writeTaskFile").mockImplementation(async (...args: unknown[]) => {
+				const item = args[0] as HistoryItem
+				if (item.id === first.id && item.tokensIn === 999) {
+					signalWriteStarted()
+					await writeCanFinish
+				}
+				return originalWriteTaskFile(...args)
+			})
+
+			const write = store.upsert({ ...first, tokensIn: 999 })
+			await writeStarted
+			const invalidation = store.invalidateAll()
+
+			releaseWrite()
+			await write
+			await invalidation
+
+			expect(onWrite).toHaveBeenCalledTimes(1)
+			expect(onWrite.mock.calls[0][0].map((item: HistoryItem) => item.id).sort()).toEqual([
+				"invalidate-all-first",
+				"invalidate-all-second",
+			])
+			expect(store.getAll()).toEqual([])
+		})
 	})
 
 	describe("atomicUpdatePair()", () => {
