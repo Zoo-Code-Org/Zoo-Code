@@ -73,14 +73,18 @@ describe("DashboardSummary", () => {
 	})
 
 	it("displays zero values correctly", () => {
-		const { container } = render(<DashboardSummary totals={makeBucket({
-			totalTokens: 0,
-			inputTokens: 0,
-			outputTokens: 0,
-			cacheReadTokens: 0,
-			cacheWriteTokens: 0,
-			costUsd: 0,
-		})} />)
+		const { container } = render(
+			<DashboardSummary
+				totals={makeBucket({
+					totalTokens: 0,
+					inputTokens: 0,
+					outputTokens: 0,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					costUsd: 0,
+				})}
+			/>,
+		)
 		const summary = container.querySelector('[data-testid="dashboard-summary"]')
 		expect(summary?.textContent).toContain("0")
 		expect(summary?.textContent).toContain("$0.00")
@@ -89,20 +93,24 @@ describe("DashboardSummary", () => {
 	it("shows unknown event count when > 0", () => {
 		const { container } = render(<DashboardSummary totals={makeBucket({ unknownEventCount: 3 })} />)
 		const summary = container.querySelector('[data-testid="dashboard-summary"]')
-		expect(summary?.textContent).toContain("3 unknown")
+		expect(summary?.textContent).toContain("3 uncertain")
 	})
 
 	it("does not show unknown event count when 0", () => {
 		const { container } = render(<DashboardSummary totals={makeBucket({ unknownEventCount: 0 })} />)
 		const summary = container.querySelector('[data-testid="dashboard-summary"]')
-		expect(summary?.textContent).not.toContain("unknown")
+		expect(summary?.textContent).not.toContain("uncertain")
 	})
 
 	it("computes cache total from read + write", () => {
-		const { container } = render(<DashboardSummary totals={makeBucket({
-			cacheReadTokens: 2000,
-			cacheWriteTokens: 3000,
-		})} />)
+		const { container } = render(
+			<DashboardSummary
+				totals={makeBucket({
+					cacheReadTokens: 2000,
+					cacheWriteTokens: 3000,
+				})}
+			/>,
+		)
 		const summary = container.querySelector('[data-testid="dashboard-summary"]')
 		// 2000 + 3000 = 5000 -> "5.0K"
 		expect(summary?.textContent).toContain("5.0K")

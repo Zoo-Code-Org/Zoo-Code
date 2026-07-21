@@ -24,7 +24,7 @@ const SummaryCard = memo(({ label, value, exactValue, unknownCount }: SummaryCar
 			</span>
 		</StandardTooltip>
 		{unknownCount !== undefined && unknownCount > 0 && (
-			<span className="text-xs text-vscode-descriptionForeground">({unknownCount} unknown)</span>
+			<span className="text-xs text-vscode-descriptionForeground">({unknownCount} uncertain)</span>
 		)}
 	</div>
 ))

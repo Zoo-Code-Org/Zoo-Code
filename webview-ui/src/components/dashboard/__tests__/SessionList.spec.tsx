@@ -42,10 +42,6 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
 
 describe("SessionList", () => {
 	const defaultProps = {
-		modelFilter: undefined,
-		providerFilter: undefined,
-		onModelFilterChange: vi.fn(),
-		onProviderFilterChange: vi.fn(),
 		expandedTaskId: undefined,
 		sessionDetails: {} as Record<string, SessionDetailType | null>,
 		sessionDetailErrors: {} as Record<string, string | null>,
@@ -54,17 +50,13 @@ describe("SessionList", () => {
 	}
 
 	it("renders the sessions container", () => {
-		const { container } = render(
-			<SessionList sessions={[]} {...defaultProps} />,
-		)
+		const { container } = render(<SessionList sessions={[]} {...defaultProps} />)
 		const sessions = container.querySelector('[data-testid="dashboard-sessions"]')
 		expect(sessions).toBeTruthy()
 	})
 
 	it("renders empty state when no sessions", () => {
-		const { container } = render(
-			<SessionList sessions={[]} {...defaultProps} />,
-		)
+		const { container } = render(<SessionList sessions={[]} {...defaultProps} />)
 		const empty = container.querySelector('[data-testid="dashboard-sessions-empty"]')
 		expect(empty).toBeTruthy()
 		expect(empty?.textContent).toContain("dashboard:sessions.noSessions")
@@ -75,42 +67,34 @@ describe("SessionList", () => {
 			makeSession({ taskId: "task-A", title: "Session A" }),
 			makeSession({ taskId: "task-B", title: "Session B" }),
 		]
-		const { container } = render(
-			<SessionList sessions={sessions} {...defaultProps} />,
-		)
+		const { container } = render(<SessionList sessions={sessions} {...defaultProps} />)
 		expect(container.textContent).toContain("Session A")
 		expect(container.textContent).toContain("Session B")
 	})
 
 	it("renders the title header", () => {
-		const { container } = render(
-			<SessionList sessions={[]} {...defaultProps} />,
-		)
+		const { container } = render(<SessionList sessions={[]} {...defaultProps} />)
 		expect(container.textContent).toContain("dashboard:sessions.title")
 	})
 
-	it("renders model filter dropdown", () => {
+	it("does not render model filter dropdown", () => {
 		const sessions = [
 			makeSession({ taskId: "task-A", model: "gpt-4" }),
 			makeSession({ taskId: "task-B", model: "claude-3" }),
 		]
-		const { container } = render(
-			<SessionList sessions={sessions} {...defaultProps} />,
-		)
+		const { container } = render(<SessionList sessions={sessions} {...defaultProps} />)
 		const modelFilter = container.querySelector('[data-testid="dashboard-session-filter-model"]')
-		expect(modelFilter).toBeTruthy()
+		expect(modelFilter).toBeFalsy()
 	})
 
-	it("renders provider filter dropdown", () => {
+	it("does not render provider filter dropdown", () => {
 		const sessions = [
 			makeSession({ taskId: "task-A", provider: "openai" }),
 			makeSession({ taskId: "task-B", provider: "anthropic" }),
 		]
-		const { container } = render(
-			<SessionList sessions={sessions} {...defaultProps} />,
-		)
+		const { container } = render(<SessionList sessions={sessions} {...defaultProps} />)
 		const providerFilter = container.querySelector('[data-testid="dashboard-session-filter-provider"]')
-		expect(providerFilter).toBeTruthy()
+		expect(providerFilter).toBeFalsy()
 	})
 
 	it("calls onToggleSession when a session row is clicked", () => {
@@ -183,9 +167,7 @@ describe("SessionList", () => {
 
 	it("displays formatted tokens and cost in session row", () => {
 		const sessions = [makeSession({ taskId: "task-A", totalTokens: 1_500_000, totalCost: 1.23 })]
-		const { container } = render(
-			<SessionList sessions={sessions} {...defaultProps} />,
-		)
+		const { container } = render(<SessionList sessions={sessions} {...defaultProps} />)
 		expect(container.textContent).toContain("1.50M")
 		expect(container.textContent).toContain("$1.23")
 	})

@@ -12,6 +12,6 @@ export { UsageStatsService, StatsServiceError } from "./UsageStatsService"
 export type { ExportFormat, JsonExport, StatsServiceErrorCode } from "./UsageStatsService"
 
 export { UsageRecorder } from "./UsageRecorder"
-export type { UsageRecordingContext } from "./UsageRecorder"
+export type { UsageRecordingContext, UsageEventSink } from "./UsageRecorder"
 
 export { getEffectiveCost, computeEventCost, lookupModelInfo } from "./costRecalculation"

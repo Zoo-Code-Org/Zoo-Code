@@ -612,11 +612,10 @@ export async function handleGetDashboardSessions(provider: ClineProvider, messag
 
 		const query: StatsQuery = queryResult.data
 
-		// Export returns the filtered raw events (JSON format) which we then
-		// group by taskId. This reuses the service's existing time-range and
-		// includeCancelled filtering logic without exposing a new public method.
-		const exportData = await service.exportStats(query, "json")
-		const events: UsageEventV1[] = (exportData as JsonExport).events ?? []
+		// Use the cached events directly instead of export→JSON→parse. This
+		// preserves the same time-range and includeCancelled filtering while
+		// avoiding an unnecessary serialize/parse round-trip.
+		const events = await service.getFilteredEvents(query)
 
 		const globalStoragePath = provider.contextProxy.globalStorageUri.fsPath
 
@@ -799,8 +798,8 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 			includeCancelled: true,
 		}
 
-		const exportData = await service.exportStats(allQuery, "json")
-		const allEvents: UsageEventV1[] = (exportData as JsonExport).events ?? []
+		// Query all events directly to avoid the export→JSON→parse round-trip.
+		const allEvents = await service.getFilteredEvents(allQuery)
 
 		// Feature 2: Filter to the requested root task AND its subtasks.
 		// The session list groups events by root task ID, so clicking a

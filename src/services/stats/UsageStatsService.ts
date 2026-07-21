@@ -110,6 +110,17 @@ export class UsageStatsService {
 	}
 
 	/**
+	 * Appends a usage event to the shared store.
+	 * This is the single in-process write entry for live recordings.
+	 * Delegates to the owned UsageEventStore.
+	 *
+	 * @returns true if appended, false if deduplicated
+	 */
+	append(event: UsageEventV1): Promise<boolean> {
+		return this.store.append(event)
+	}
+
+	/**
 	 * Queries statistics.
 	 *
 	 * @param query Statistics query
@@ -152,6 +163,20 @@ export class UsageStatsService {
 					`Unsupported export format: ${format as string}`,
 				)
 		}
+	}
+
+	/**
+	 * Returns the raw events filtered by the query's time range and
+	 * includeCancelled flag. This avoids the JSON serialize/parse round-trip
+	 * that `exportStats(query, "json")` performs for callers that only need
+	 * in-memory events (e.g., dashboard session grouping).
+	 *
+	 * @param query Statistics query
+	 * @returns Filtered events
+	 */
+	async getFilteredEvents(query: StatsQuery): Promise<UsageEventV1[]> {
+		const events = await this.store.readAll()
+		return this.filterEventsByQuery(events, query)
 	}
 
 	/**

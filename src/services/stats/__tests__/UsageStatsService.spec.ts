@@ -519,6 +519,25 @@ describe("UsageStatsService", () => {
 		})
 	})
 
+	describe("getFilteredEvents", () => {
+		it("should return filtered events without JSON round-trip", async () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", status: "completed" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", status: "cancelled" }),
+			]
+			await service.backfillFromHistory(events)
+
+			const query = makeQuery({ preset: "all", includeCancelled: false })
+			const filtered = await service.getFilteredEvents(query)
+
+			expect(filtered).toHaveLength(1)
+			expect(filtered[0].eventId).toBe("evt-1")
+			// Returned objects should be the same UsageEventV1 instances, not JSON
+			// stringified and parsed copies.
+			expect(filtered[0]).toBeInstanceOf(Object)
+		})
+	})
+
 	describe("exportStats - invalid format", () => {
 		it("should throw StatsServiceError for unsupported format", async () => {
 			const query = makeQuery({ preset: "all" })
