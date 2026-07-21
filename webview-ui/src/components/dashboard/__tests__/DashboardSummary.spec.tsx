@@ -89,13 +89,13 @@ describe("DashboardSummary", () => {
 	it("shows unknown event count when > 0", () => {
 		const { container } = render(<DashboardSummary totals={makeBucket({ unknownEventCount: 3 })} />)
 		const summary = container.querySelector('[data-testid="dashboard-summary"]')
-		expect(summary?.textContent).toContain("3 unknown")
+		expect(summary?.textContent).toContain("3 uncertain")
 	})
 
 	it("does not show unknown event count when 0", () => {
 		const { container } = render(<DashboardSummary totals={makeBucket({ unknownEventCount: 0 })} />)
 		const summary = container.querySelector('[data-testid="dashboard-summary"]')
-		expect(summary?.textContent).not.toContain("unknown")
+		expect(summary?.textContent).not.toContain("uncertain")
 	})
 
 	it("computes cache total from read + write", () => {

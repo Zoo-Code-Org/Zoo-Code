@@ -8,9 +8,15 @@ import * as crypto from "crypto"
 
 import type { UsageEventV1, UsageValueSource, InclusionRule } from "@roo-code/types"
 
-import { UsageEventStore } from "./UsageEventStore"
-
 // ── Types ───────────────────────────────────────────────────────────────────
+
+/**
+ * Narrow append dependency used by UsageRecorder.
+ * Allows a UsageEventStore or a service-owned facade to be injected.
+ */
+export interface UsageEventSink {
+	append(event: UsageEventV1): Promise<boolean>
+}
 
 /**
  * Context required for UsageRecorder to create an event at terminal finalize.
@@ -59,11 +65,11 @@ export interface UsageRecordingContext {
  * and is unaware of the file implementation details (UsageEventStore).
  */
 export class UsageRecorder {
-	private readonly store: UsageEventStore
+	private readonly sink: UsageEventSink
 	private readonly finalizedKeys: Set<string> = new Set()
 
-	constructor(store: UsageEventStore) {
-		this.store = store
+	constructor(sink: UsageEventSink) {
+		this.sink = sink
 	}
 
 	/**
@@ -133,7 +139,7 @@ export class UsageRecorder {
 		}
 
 		try {
-			await this.store.append(event)
+			await this.sink.append(event)
 		} catch {
 			// store error must not break task
 			// STATS_STORE/append/* errors are classified inside UsageEventStore

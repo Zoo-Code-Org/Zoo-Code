@@ -20,6 +20,6 @@ export type {
 } from "./UsageStatsService"
 
 export { UsageRecorder } from "./UsageRecorder"
-export type { UsageRecordingContext } from "./UsageRecorder"
+export type { UsageRecordingContext, UsageEventSink } from "./UsageRecorder"
 
 export { getEffectiveCost, computeEventCost, lookupModelInfo } from "./costRecalculation"

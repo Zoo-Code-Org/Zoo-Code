@@ -21,17 +21,10 @@ export const mimoModels = {
 		supportsImages: false, // Pro series is text-only
 		supportsPromptCache: false,
 		preserveReasoning: true,
-		inputPrice: 1.0, // $1.00/1M tokens (cache miss, ≤256K)
-		outputPrice: 3.0, // $3.00/1M tokens (≤256K)
-		cacheReadsPrice: 0.2, // $0.20/1M tokens (cache hit, ≤256K)
+		inputPrice: 0.435, // $0.435/1M tokens
+		outputPrice: 0.87, // $0.87/1M tokens
+		cacheReadsPrice: 0.0036, // $0.0036/1M tokens
 		cacheWritesPrice: 0, // Free for limited time
-		// MiMo charges 2x above 256K context
-		longContextPricing: {
-			thresholdTokens: 256_000,
-			inputPriceMultiplier: 2,
-			outputPriceMultiplier: 2,
-			cacheReadsPriceMultiplier: 2,
-		},
 		description:
 			"MiMo V2.5 Pro - Xiaomi's flagship reasoning model with 1M context, deep thinking, tool calling, and structured output.",
 	},
@@ -41,17 +34,10 @@ export const mimoModels = {
 		supportsImages: true, // Full-modal: text, image, audio, video input
 		supportsPromptCache: false,
 		preserveReasoning: true,
-		inputPrice: 0.4, // $0.40/1M tokens (cache miss, ≤256K)
-		outputPrice: 2.0, // $2.00/1M tokens (≤256K)
-		cacheReadsPrice: 0.08, // $0.08/1M tokens (cache hit, ≤256K)
+		inputPrice: 0.14, // $0.14/1M tokens
+		outputPrice: 0.28, // $0.28/1M tokens
+		cacheReadsPrice: 0.0028, // $0.0028/1M tokens
 		cacheWritesPrice: 0, // Free for limited time
-		// MiMo charges 2x above 256K context
-		longContextPricing: {
-			thresholdTokens: 256_000,
-			inputPriceMultiplier: 2,
-			outputPriceMultiplier: 2,
-			cacheReadsPriceMultiplier: 2,
-		},
 		description:
 			"MiMo V2.5 - Full-modal understanding model (text, image, audio, video) with 1M context, deep thinking, tool calling, and structured output.",
 	},

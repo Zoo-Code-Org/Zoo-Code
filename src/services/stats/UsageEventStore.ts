@@ -135,6 +135,18 @@ export class UsageEventStore {
 	/** Whether the hard cap has been reached */
 	private capped = false
 
+	/** In-memory cached event snapshot. Null when cold. */
+	private cachedEvents: UsageEventV1[] | null = null
+
+	/** Generation that the cached snapshot corresponds to. */
+	private cachedGeneration = -1
+
+	/** Segment count that the cached snapshot corresponds to. */
+	private cachedSegmentCount = -1
+
+	/** Single-flight promise for concurrent cold loads. */
+	private loadPromise: Promise<UsageEventV1[]> | null = null
+
 	/**
 	 * @param globalStoragePath VS Code globalStorageUri.fsPath
 	 */
@@ -205,8 +217,25 @@ export class UsageEventStore {
 		this.queue = this.queue.then(async () => {
 			try {
 				const result = await this.appendInternal(event)
+				// Incremental cache update: only after durable success.
+				if (result && this.cachedEvents) {
+					// If a segment rotation happened during the append, the cached
+					// segment count no longer matches the manifest. Invalidate so the
+					// next readAll rescans from disk instead of returning stale data.
+					const manifest = await this.loadOrCreateManifest()
+					if (this.cachedSegmentCount !== manifest.currentSegment) {
+						this.invalidateCache()
+					} else {
+						this.cachedEvents.push(event)
+					}
+				}
 				resolveFn(result)
 			} catch (err) {
+				// If durable append failed, we may not know the storage state.
+				// Invalidate the cache to force a fresh scan on the next read.
+				if (err instanceof StatsStoreError) {
+					this.invalidateCache()
+				}
 				rejectFn(err)
 			}
 		})
@@ -222,83 +251,38 @@ export class UsageEventStore {
 	async readAll(): Promise<UsageEventV1[]> {
 		await this.ensureInitialized()
 
-		const events: UsageEventV1[] = []
-		const quarantineEntries: QuarantineReportEntry[] = []
+		const manifest = await this.loadOrCreateManifest()
 
-		let segmentFiles: string[]
+		// Warm hit: cache matches current generation and the number of segment
+		// files on disk. Using the on-disk file count (rather than
+		// manifest.currentSegment) catches external writers that created new
+		// segments without updating the manifest.
+		const currentSegmentFiles = await this.listSegmentFiles()
+		if (
+			this.cachedEvents &&
+			this.cachedGeneration === manifest.generation &&
+			this.cachedSegmentCount === currentSegmentFiles.length
+		) {
+			return this.cachedEvents
+		}
+
+		// Single-flight cold load: concurrent callers share one scan.
+		if (this.loadPromise) {
+			return this.loadPromise
+		}
+
+		this.loadPromise = this.scanAllSegments().then((events) => {
+			this.cachedEvents = events
+			this.cachedGeneration = manifest.generation
+			this.cachedSegmentCount = currentSegmentFiles.length
+			return events
+		})
+
 		try {
-			const allFiles = await fs.readdir(this.statsDir)
-			segmentFiles = allFiles
-				.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
-				.sort()
-		} catch (err) {
-			throw new StatsStoreError(
-				"STATS_STORE/readAll/001",
-				`Failed to read stats directory: ${this.statsDir}`,
-				err,
-			)
+			return await this.loadPromise
+		} finally {
+			this.loadPromise = null
 		}
-
-		for (const segmentFile of segmentFiles) {
-			const segmentPath = path.join(this.statsDir, segmentFile)
-			let content: string
-
-			try {
-				content = await fs.readFile(segmentPath, "utf-8")
-			} catch (err) {
-				// Skip file read failures (ENOENT etc.)
-				if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-					console.warn(`[UsageEventStore] failed to read segment ${segmentFile}:`, err)
-				}
-				continue
-			}
-
-			const lines = content.split("\n")
-			// Remove the last empty line (trailing newline)
-			if (lines.length > 0 && lines[lines.length - 1] === "") {
-				lines.pop()
-			}
-
-			// If the last line is unterminated/truncated, treat it as a crash tail and ignore
-			// (If the last line is valid JSON, it is parsed; otherwise it goes to quarantine)
-			for (let i = 0; i < lines.length; i++) {
-				const lineNum = i + 1
-				const line = lines[i]
-				const isLastLine = i === lines.length - 1
-
-				if (!line.trim()) {
-					continue
-				}
-
-				try {
-					const parsed = JSON.parse(line)
-					const result = UsageEventV1Schema.safeParse(parsed)
-					if (result.success) {
-						events.push(result.data)
-					} else {
-						// zod validation failed: corrupt line
-						quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
-						// Validation failure of the last line may be a crash tail, so exclude from quarantine
-						if (isLastLine) {
-							quarantineEntries.pop()
-						}
-					}
-				} catch {
-					// JSON parse failed
-					// Parse failure of the last line is treated as a crash tail and ignored
-					if (!isLastLine) {
-						quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
-					}
-				}
-			}
-		}
-
-		// Write quarantine report
-		if (quarantineEntries.length > 0) {
-			await this.writeQuarantineReport(quarantineEntries)
-		}
-
-		return events
 	}
 
 	/**
@@ -307,6 +291,10 @@ export class UsageEventStore {
 	 * On failure, the existing manifest is preserved.
 	 */
 	async clear(): Promise<void> {
+		// Invalidate the cache before mutating so no reader keeps the old
+		// generation as authoritative.
+		this.invalidateCache()
+
 		await this.ensureInitialized()
 
 		let releaseLock: (() => Promise<void>) = async () => {}
@@ -398,6 +386,129 @@ export class UsageEventStore {
 	/**
 	 * Actual append logic. Runs inside the promise queue.
 	 */
+	private invalidateCache(): void {
+		this.cachedEvents = null
+		this.cachedGeneration = -1
+		this.cachedSegmentCount = -1
+		this.loadPromise = null
+	}
+
+	/**
+	 * Scans every segment on disk and returns a single validated event array.
+	 * Corrupt lines are recorded to quarantine and skipped.
+	 */
+	private async scanAllSegments(): Promise<UsageEventV1[]> {
+		const events: UsageEventV1[] = []
+		const quarantineEntries: QuarantineReportEntry[] = []
+
+		let segmentFiles: string[]
+		try {
+			const allFiles = await fs.readdir(this.statsDir)
+			segmentFiles = allFiles
+				.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
+				.sort()
+		} catch (err) {
+			throw new StatsStoreError(
+				"STATS_STORE/readAll/001",
+				`Failed to read stats directory: ${this.statsDir}`,
+				err,
+			)
+		}
+
+		// If the number of segments on disk exceeds the current segment count
+		// recorded in the manifest, an external writer (or a previous process that
+		// rotated further) produced files we did not observe. Scan all of them and
+		// let the next readAll re-evaluate cache validity against the freshly
+		// loaded manifest.
+		if (segmentFiles.length > this.getSegmentCount()) {
+			console.warn(
+				`[UsageEventStore] detected ${segmentFiles.length} segments on disk, manifest only tracks ${this.getSegmentCount()}. Scanning all segments.`,
+			)
+		}
+
+		for (const segmentFile of segmentFiles) {
+			const segmentPath = path.join(this.statsDir, segmentFile)
+			let content: string
+
+			try {
+				content = await fs.readFile(segmentPath, "utf-8")
+			} catch (err) {
+				// Skip file read failures (ENOENT etc.)
+				if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+					console.warn(`[UsageEventStore] failed to read segment ${segmentFile}:`, err)
+				}
+				continue
+			}
+
+			const lines = content.split("\n")
+			// Remove the last empty line (trailing newline)
+			if (lines.length > 0 && lines[lines.length - 1] === "") {
+				lines.pop()
+			}
+
+			// If the last line is unterminated/truncated, treat it as a crash tail and ignore
+			// (If the last line is valid JSON, it is parsed; otherwise it goes to quarantine)
+			for (let i = 0; i < lines.length; i++) {
+				const lineNum = i + 1
+				const line = lines[i]
+				const isLastLine = i === lines.length - 1
+
+				if (!line.trim()) {
+					continue
+				}
+
+				try {
+					const parsed = JSON.parse(line)
+					const result = UsageEventV1Schema.safeParse(parsed)
+					if (result.success) {
+						events.push(result.data)
+					} else {
+						// zod validation failed: corrupt line
+						quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
+						// Validation failure of the last line may be a crash tail, so exclude from quarantine
+						if (isLastLine) {
+							quarantineEntries.pop()
+						}
+					}
+				} catch {
+					// JSON parse failed
+					// Parse failure of the last line is treated as a crash tail and ignored
+					if (!isLastLine) {
+						quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
+					}
+				}
+			}
+		}
+
+		// Write quarantine report
+		if (quarantineEntries.length > 0) {
+			await this.writeQuarantineReport(quarantineEntries)
+		}
+
+		return events
+	}
+
+	/**
+	 * Returns the current segment count from the loaded manifest.
+	 */
+	private getSegmentCount(): number {
+		return this.manifest?.currentSegment ?? 1
+	}
+
+	/**
+	 * Lists segment files currently on disk, sorted by name.
+	 */
+	private async listSegmentFiles(): Promise<string[]> {
+		try {
+			const allFiles = await fs.readdir(this.statsDir)
+			return allFiles
+				.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
+				.sort()
+		} catch {
+			return []
+		}
+	}
+
 	private async appendInternal(event: UsageEventV1): Promise<boolean> {
 		await this.ensureInitialized()
 
@@ -494,10 +605,16 @@ export class UsageEventStore {
 
 	// ── Internal: Manifest ──────────────────────────────────────────────────
 
+	private manifest: UsageStatsManifest | null = null
+
 	/**
 	 * Loads the manifest or creates it with default values.
 	 */
 	private async loadOrCreateManifest(): Promise<UsageStatsManifest> {
+		if (this.manifest) {
+			return this.manifest
+		}
+
 		try {
 			const content = await fs.readFile(this.manifestPath, "utf-8")
 			const parsed = JSON.parse(content)
@@ -507,7 +624,8 @@ export class UsageEventStore {
 				typeof parsed.generation === "number" &&
 				typeof parsed.currentSegment === "number"
 			) {
-				return parsed as UsageStatsManifest
+				this.manifest = parsed as UsageStatsManifest
+				return this.manifest
 			}
 			// On validation failure, overwrite with default values
 			const defaultManifest = { ...DEFAULT_MANIFEST, updatedAt: new Date().toISOString() }
@@ -522,7 +640,9 @@ export class UsageEventStore {
 			}
 			// Other errors return default values
 			console.warn(`[UsageEventStore] failed to load manifest, using default:`, err)
-			return { ...DEFAULT_MANIFEST, updatedAt: new Date().toISOString() }
+			const defaultManifest = { ...DEFAULT_MANIFEST, updatedAt: new Date().toISOString() }
+			this.manifest = defaultManifest
+			return defaultManifest
 		}
 	}
 
@@ -530,6 +650,7 @@ export class UsageEventStore {
 	 * Stores the manifest atomically (temp → rename pattern).
 	 */
 	private async writeManifestAtomic(manifest: UsageStatsManifest): Promise<void> {
+		this.manifest = manifest
 		const tempPath = `${this.manifestPath}.tmp.${Date.now()}.${Math.random().toString(36).slice(2)}`
 		const content = JSON.stringify(manifest, null, "\t")
 

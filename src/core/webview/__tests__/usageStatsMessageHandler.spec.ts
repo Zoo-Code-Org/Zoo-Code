@@ -91,9 +91,22 @@ const createMockProvider = (service?: Partial<UsageStatsService>): ClineProvider
 		globalStorageUri: { fsPath: "/tmp/globalStorage" } as vscode.Uri,
 	}
 
-	const mockService = service
-		? (service as UsageStatsService)
-		: undefined
+	// Default getFilteredEvents falls back to an exportStats mock if provided,
+	// so legacy tests that only supply exportStats still work. New tests should
+	// supply getFilteredEvents directly for the optimized path.
+	const legacyService = service ?? {}
+	if (!legacyService.getFilteredEvents && legacyService.exportStats) {
+		legacyService.getFilteredEvents = vi.fn(async (query: StatsQuery) => {
+			const exportData = await legacyService.exportStats!(query, "json")
+			return (exportData as JsonExport).events ?? []
+		})
+	}
+
+	let mockService: UsageStatsService | undefined = legacyService as UsageStatsService | undefined
+	if (Object.keys(legacyService).length === 0) {
+		// caller passed undefined explicitly
+		mockService = undefined
+	}
 
 	return {
 		log: mockLog,
@@ -619,24 +632,41 @@ describe("usageStatsMessageHandler", () => {
 		})
 
 		it("returns empty sessions list when no events", async () => {
-			const exportStats = vi.fn().mockResolvedValue(mockJsonExport)
-			const provider = createMockProvider({ exportStats })
-
-			const message: WebviewMessage = {
-				type: "getDashboardSessions",
-				requestId: "req-sessions-1",
-				usageStatsQuery: validQuery,
-			}
-
-			await handleGetDashboardSessions(provider, message)
-
-			expect(exportStats).toHaveBeenCalledWith(validQuery, "json")
-			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
-				type: "dashboardSessionsResponse",
-				requestId: "req-sessions-1",
-				dashboardSessions: [],
+				const getFilteredEvents = vi.fn().mockResolvedValue(mockJsonExport.events)
+				const provider = createMockProvider({ getFilteredEvents })
+	
+				const message: WebviewMessage = {
+					type: "getDashboardSessions",
+					requestId: "req-sessions-1",
+					usageStatsQuery: validQuery,
+				}
+	
+				await handleGetDashboardSessions(provider, message)
+	
+				expect(getFilteredEvents).toHaveBeenCalledWith(validQuery)
+				expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+					type: "dashboardSessionsResponse",
+					requestId: "req-sessions-1",
+					dashboardSessions: [],
+				})
 			})
-		})
+	
+			it("uses getFilteredEvents directly instead of exportStats", async () => {
+				const getFilteredEvents = vi.fn().mockResolvedValue([])
+				const exportStats = vi.fn()
+				const provider = createMockProvider({ getFilteredEvents, exportStats })
+	
+				const message: WebviewMessage = {
+					type: "getDashboardSessions",
+					requestId: "req-sessions-1b",
+					usageStatsQuery: validQuery,
+				}
+	
+				await handleGetDashboardSessions(provider, message)
+	
+				expect(getFilteredEvents).toHaveBeenCalledWith(validQuery)
+				expect(exportStats).not.toHaveBeenCalled()
+			})
 
 		it("groups events by root taskId and returns summaries", async () => {
 			const events: UsageEventV1[] = [
@@ -668,12 +698,8 @@ describe("usageStatsMessageHandler", () => {
 				}),
 			]
 
-			const exportData: JsonExport = {
-				...mockJsonExport,
-				events,
-			}
-			const exportStats = vi.fn().mockResolvedValue(exportData)
-			const provider = createMockProvider({ exportStats })
+			const getFilteredEvents = vi.fn().mockResolvedValue(events)
+				const provider = createMockProvider({ getFilteredEvents })
 
 			const message: WebviewMessage = {
 				type: "getDashboardSessions",

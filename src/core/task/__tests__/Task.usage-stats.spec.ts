@@ -16,9 +16,8 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
-import { UsageRecorder } from "../../../services/stats/UsageRecorder"
+import { UsageRecorder, type UsageEventSink } from "../../../services/stats/UsageRecorder"
 import type { UsageRecordingContext } from "../../../services/stats/UsageRecorder"
-import { UsageEventStore } from "../../../services/stats/UsageEventStore"
 
 // Mock @roo-code/core
 vi.mock("@roo-code/core", () => ({
@@ -281,7 +280,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext()
@@ -303,7 +302,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext()
@@ -326,7 +325,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx0 = makeRecordingContext({ attempt: 0 })
@@ -347,7 +346,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockRejectedValue(new Error("disk full")),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext()
@@ -361,7 +360,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext({
@@ -386,7 +385,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext({ parentTaskId: "parent-task-001" })
@@ -400,7 +399,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext()
@@ -416,7 +415,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext()
@@ -430,7 +429,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext()
@@ -445,7 +444,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext({
@@ -466,9 +465,9 @@ describe("Usage Stats Recording", () => {
 
 	describe("Task integration", () => {
 		it("should construct usageRecorder as non-null when globalStoragePath is valid", () => {
-			// The Task constructor wraps UsageEventStore/UsageRecorder initialization
-			// in a try-catch. With a valid globalStoragePath, the recorder should be
-			// successfully constructed (store initialization is deferred to first append).
+			// The Task constructor injects the provider's shared UsageStatsService as the
+			// UsageRecorder sink. With a valid globalStoragePath and service, the recorder
+			// should be successfully constructed (store initialization is deferred to first append).
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -493,7 +492,7 @@ describe("Usage Stats Recording", () => {
 			expect((task as any).usageRecorder).toBeDefined()
 		})
 
-		it("should construct UsageRecorder with globalStoragePath from provider context", () => {
+		it("should construct UsageRecorder with the provider's shared append sink", () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -503,8 +502,8 @@ describe("Usage Stats Recording", () => {
 
 			const recorder = (task as any).usageRecorder
 			expect(recorder).toBeInstanceOf(UsageRecorder)
-			// The recorder should have a store that was constructed with the globalStoragePath
-			expect(recorder.store).toBeDefined()
+			// The recorder should be wired to the provider's UsageStatsService append sink.
+			expect(recorder.sink).toBe(mockProvider.getUsageStatsService())
 		})
 	})
 
@@ -515,7 +514,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext({ taskId: "abc-123", attempt: 5 })
@@ -532,7 +531,7 @@ describe("Usage Stats Recording", () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
 				initialize: vi.fn().mockResolvedValue(undefined),
-			} as unknown as UsageEventStore
+			} as unknown as UsageEventSink
 			const recorder = new UsageRecorder(mockStore)
 
 			const ctx = makeRecordingContext()

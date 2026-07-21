@@ -1,11 +1,10 @@
-import React, { memo, useCallback, useMemo } from "react"
+import React, { memo, useCallback } from "react"
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
 import i18next from "i18next"
 
 import type { SessionSummary, SessionDetail as SessionDetailType } from "@roo-code/types"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatCompact, formatCost } from "@/utils/formatNumber"
 
 import SessionDetail from "./SessionDetail"
@@ -38,62 +37,6 @@ function formatRelativeTime(timestamp: number): string {
 	// Older than a week: show absolute date.
 	return new Date(timestamp).toLocaleDateString()
 }
-
-// ── Filter dropdown ─────────────────────────────────────────────────────────
-
-/**
- * A single filter dropdown for model or provider selection.
- * Renders a Radix Select with an "All" option plus one item per unique value.
- */
-interface FilterDropdownProps {
-	/** i18n key for the placeholder / "All" option label. */
-	allOptionLabel: string
-	/** Currently selected value, or undefined for "All". */
-	value: string | undefined
-	/** Called when the user selects a value. `undefined` means "All". */
-	onChange: (value: string | undefined) => void
-	/** Unique values to populate the dropdown. */
-	options: string[]
-	/** Test id for the trigger element. */
-	testId: string
-}
-
-const FilterDropdown = memo(
-	({ allOptionLabel, value, onChange, options, testId }: FilterDropdownProps) => {
-		// Radix Select uses empty string as the "All" sentinel value because
-		// `undefined` is not a valid `value` for SelectItem.
-		const currentValue = value ?? ""
-		const ALL_VALUE = "__all__"
-
-		const handleChange = useCallback(
-			(next: string) => {
-				onChange(next === ALL_VALUE ? undefined : next)
-			},
-			[onChange],
-		)
-
-		return (
-			<Select value={currentValue || ALL_VALUE} onValueChange={handleChange}>
-				<SelectTrigger
-					className="h-7 text-xs"
-					data-testid={testId}
-					aria-label={allOptionLabel}>
-					<SelectValue placeholder={allOptionLabel} />
-				</SelectTrigger>
-				<SelectContent>
-					<SelectItem value={ALL_VALUE}>{allOptionLabel}</SelectItem>
-					{options.map((opt) => (
-						<SelectItem key={opt} value={opt}>
-							{opt}
-						</SelectItem>
-					))}
-				</SelectContent>
-			</Select>
-		)
-	},
-)
-
-FilterDropdown.displayName = "FilterDropdown"
 
 // ── Session row ──────────────────────────────────────────────────────────────
 
@@ -233,14 +176,6 @@ SessionRow.displayName = "SessionRow"
 
 interface SessionListProps {
 	sessions: SessionSummary[]
-	/** Currently selected model filter, or undefined for "All Models". */
-	modelFilter: string | undefined
-	/** Currently selected provider filter, or undefined for "All Providers". */
-	providerFilter: string | undefined
-	/** Called when the model filter changes. */
-	onModelFilterChange: (value: string | undefined) => void
-	/** Called when the provider filter changes. */
-	onProviderFilterChange: (value: string | undefined) => void
 	/** The taskId of the currently expanded session, or undefined if none. */
 	expandedTaskId?: string
 	/** Map of taskId -> loaded session detail (only populated for expanded rows). */
@@ -256,10 +191,6 @@ interface SessionListProps {
 const SessionList = memo(
 	({
 		sessions,
-		modelFilter,
-		providerFilter,
-		onModelFilterChange,
-		onProviderFilterChange,
 		expandedTaskId,
 		sessionDetails,
 		sessionDetailErrors,
@@ -268,42 +199,12 @@ const SessionList = memo(
 	}: SessionListProps) => {
 		const { t } = useAppTranslation()
 
-		// Extract unique models and providers from the session list for the
-		// filter dropdown options. Sorted alphabetically for stable display.
-		const uniqueModels = useMemo(() => {
-			const set = new Set<string>()
-			for (const s of sessions) set.add(s.model)
-			return Array.from(set).sort((a, b) => a.localeCompare(b))
-		}, [sessions])
-
-		const uniqueProviders = useMemo(() => {
-			const set = new Set<string>()
-			for (const s of sessions) set.add(s.provider)
-			return Array.from(set).sort((a, b) => a.localeCompare(b))
-		}, [sessions])
-
 		return (
 			<div className="flex flex-col gap-2" data-testid="dashboard-sessions">
 				<div className="flex items-center justify-between">
 					<h4 className="m-0 text-sm font-medium text-vscode-foreground">
 						{t("dashboard:sessions.title")}
 					</h4>
-					<div className="flex flex-wrap items-center gap-1">
-						<FilterDropdown
-							allOptionLabel={t("dashboard:sessions.filterModel")}
-							value={modelFilter}
-							onChange={onModelFilterChange}
-							options={uniqueModels}
-							testId="dashboard-session-filter-model"
-						/>
-						<FilterDropdown
-							allOptionLabel={t("dashboard:sessions.filterProvider")}
-							value={providerFilter}
-							onChange={onProviderFilterChange}
-							options={uniqueProviders}
-							testId="dashboard-session-filter-provider"
-						/>
-					</div>
 				</div>
 
 				{sessions.length === 0 ? (

@@ -245,7 +245,7 @@ const UsageHeatmap = memo(() => {
 									key={day.date}
 									content={
 										day.totalTokens > 0
-											? `${formatDisplayDate(day.date)}: ${day.totalTokens.toLocaleString()} tokens (${day.events} events)`
+											? `${formatDisplayDate(day.date)}: ${day.totalTokens.toLocaleString()} tokens (${day.events} requests)`
 											: `${formatDisplayDate(day.date)}: ${t("stats:heatmap.noData")}`
 									}>
 									<div

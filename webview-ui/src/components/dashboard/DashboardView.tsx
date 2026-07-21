@@ -79,8 +79,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	const [sessions, setSessions] = useState<SessionSummary[]>([])
 	const [sessionsLoading, setSessionsLoading] = useState(false)
 	const [sessionsError, setSessionsError] = useState<string | null>(null)
-	const [modelFilter, setModelFilter] = useState<string | undefined>(undefined)
-	const [providerFilter, setProviderFilter] = useState<string | undefined>(undefined)
 	const latestSessionsRequestIdRef = useRef<string>("")
 
 	// ── Session detail state (Commit 4) ────────────────────────────────────
@@ -206,16 +204,14 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	// ── Fetch sessions (Commit 3) ──────────────────────────────────────────
 	// Sends `getDashboardSessions` with the same time-range query as the
-	// stats fetch, plus optional model/provider filters. The response is
-	// correlated via `latestSessionsRequestIdRef` to ignore stale results.
+	// stats fetch. The response is correlated via `latestSessionsRequestIdRef`
+	// to ignore stale results.
 	const fetchSessions = useCallback(
 		(
 			currentPreset: DashboardPreset,
 			currentGroupBy: DashboardGroupBy,
 			fromOverride?: string,
 			toOverride?: string,
-			modelFilterOverride?: string | undefined,
-			providerFilterOverride?: string | undefined,
 		) => {
 			const requestId = `dashboard-sessions-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 			latestSessionsRequestIdRef.current = requestId
@@ -227,10 +223,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				type: "getDashboardSessions",
 				requestId,
 				usageStatsQuery: query,
-				dashboardSessionFilters: {
-					model: modelFilterOverride,
-					provider: providerFilterOverride,
-				},
 			})
 		},
 		[buildQuery],
@@ -305,51 +297,33 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				return
 			}
 			fetchStats(newPreset, groupBy)
-			fetchSessions(newPreset, groupBy, undefined, undefined, modelFilter, providerFilter)
+			fetchSessions(newPreset, groupBy)
 		},
-		[groupBy, fetchStats, fetchSessions, customFrom, customTo, modelFilter, providerFilter],
+		[groupBy, fetchStats, fetchSessions, customFrom, customTo],
 	)
 
 	const handleGroupByChange = useCallback(
 		(newGroupBy: DashboardGroupBy) => {
 			setGroupBy(newGroupBy)
 			fetchStats(preset, newGroupBy)
-			fetchSessions(preset, newGroupBy, undefined, undefined, modelFilter, providerFilter)
+			fetchSessions(preset, newGroupBy)
 		},
-		[preset, fetchStats, fetchSessions, modelFilter, providerFilter],
+		[preset, fetchStats, fetchSessions],
 	)
 
 	const handleRefresh = useCallback(() => {
 		fetchStats(preset, groupBy)
-		fetchSessions(preset, groupBy, undefined, undefined, modelFilter, providerFilter)
-	}, [preset, groupBy, fetchStats, fetchSessions, modelFilter, providerFilter])
+		fetchSessions(preset, groupBy)
+	}, [preset, groupBy, fetchStats, fetchSessions])
 
 	// Apply a custom date range: triggered when both inputs are filled and
 	// the user wants to run the query (e.g. on "To" date change, or explicitly).
 	const handleApplyCustomRange = useCallback(() => {
 		if (!customFrom || !customTo) return
 		fetchStats("custom", groupBy, customFrom, customTo)
-		fetchSessions("custom", groupBy, customFrom, customTo, modelFilter, providerFilter)
-	}, [customFrom, customTo, groupBy, fetchStats, fetchSessions, modelFilter, providerFilter])
+		fetchSessions("custom", groupBy, customFrom, customTo)
+	}, [customFrom, customTo, groupBy, fetchStats, fetchSessions])
 
-	// ── Session filter handlers (Commit 3) ────────────────────────────────
-	// When a filter changes, re-fetch sessions with the new filter. The
-	// stats snapshot is unaffected by model/provider filters.
-	const handleModelFilterChange = useCallback(
-		(value: string | undefined) => {
-			setModelFilter(value)
-			fetchSessions(preset, groupBy, undefined, undefined, value, providerFilter)
-		},
-		[preset, groupBy, providerFilter, fetchSessions],
-	)
-
-	const handleProviderFilterChange = useCallback(
-		(value: string | undefined) => {
-			setProviderFilter(value)
-			fetchSessions(preset, groupBy, undefined, undefined, modelFilter, value)
-		},
-		[preset, groupBy, modelFilter, fetchSessions],
-	)
 
 	// ── Listen for responses ────────────────────────────────────────────────
 
@@ -383,7 +357,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				}
 				refreshTimerRef.current = setTimeout(() => {
 					fetchStats(preset, groupBy)
-					fetchSessions(preset, groupBy, undefined, undefined, modelFilter, providerFilter)
+					fetchSessions(preset, groupBy)
 					refreshTimerRef.current = null
 				}, 250)
 				// Do NOT return a cleanup here — the ref-based timer is cleared
@@ -460,7 +434,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					setShowClearDialog(false)
 					setClearNonce(null)
 					fetchStats(preset, groupBy)
-					fetchSessions(preset, groupBy, undefined, undefined, modelFilter, providerFilter)
+					fetchSessions(preset, groupBy)
 				} else {
 					setError(message.clearUsageStatsResult?.error || t("dashboard:states.error"))
 					setShowClearDialog(false)
@@ -487,7 +461,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				refreshTimerRef.current = null
 			}
 		}
-	}, [t, preset, groupBy, fetchStats, fetchSessions, fetchSessionDetail, expandedTaskId, modelFilter, providerFilter])
+	}, [t, preset, groupBy, fetchStats, fetchSessions, fetchSessionDetail, expandedTaskId])
 
 	// ── Export ───────────────────────────────────────────────────────────────
 
@@ -815,10 +789,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 						) : (
 							<SessionList
 								sessions={sessions}
-								modelFilter={modelFilter}
-								providerFilter={providerFilter}
-								onModelFilterChange={handleModelFilterChange}
-								onProviderFilterChange={handleProviderFilterChange}
 								expandedTaskId={expandedTaskId}
 								sessionDetails={sessionDetails}
 								sessionDetailErrors={sessionDetailErrors}

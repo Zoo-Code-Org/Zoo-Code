@@ -41,17 +41,13 @@ function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("SessionList", () => {
-	const defaultProps = {
-		modelFilter: undefined,
-		providerFilter: undefined,
-		onModelFilterChange: vi.fn(),
-		onProviderFilterChange: vi.fn(),
-		expandedTaskId: undefined,
-		sessionDetails: {} as Record<string, SessionDetailType | null>,
-		sessionDetailErrors: {} as Record<string, string | null>,
-		sessionDetailLoading: new Set<string>(),
-		onToggleSession: vi.fn(),
-	}
+const defaultProps = {
+	expandedTaskId: undefined,
+	sessionDetails: {} as Record<string, SessionDetailType | null>,
+	sessionDetailErrors: {} as Record<string, string | null>,
+	sessionDetailLoading: new Set<string>(),
+	onToggleSession: vi.fn(),
+}
 
 	it("renders the sessions container", () => {
 		const { container } = render(
@@ -89,7 +85,7 @@ describe("SessionList", () => {
 		expect(container.textContent).toContain("dashboard:sessions.title")
 	})
 
-	it("renders model filter dropdown", () => {
+	it("does not render model filter dropdown", () => {
 		const sessions = [
 			makeSession({ taskId: "task-A", model: "gpt-4" }),
 			makeSession({ taskId: "task-B", model: "claude-3" }),
@@ -98,10 +94,10 @@ describe("SessionList", () => {
 			<SessionList sessions={sessions} {...defaultProps} />,
 		)
 		const modelFilter = container.querySelector('[data-testid="dashboard-session-filter-model"]')
-		expect(modelFilter).toBeTruthy()
+		expect(modelFilter).toBeFalsy()
 	})
 
-	it("renders provider filter dropdown", () => {
+	it("does not render provider filter dropdown", () => {
 		const sessions = [
 			makeSession({ taskId: "task-A", provider: "openai" }),
 			makeSession({ taskId: "task-B", provider: "anthropic" }),
@@ -110,7 +106,7 @@ describe("SessionList", () => {
 			<SessionList sessions={sessions} {...defaultProps} />,
 		)
 		const providerFilter = container.querySelector('[data-testid="dashboard-session-filter-provider"]')
-		expect(providerFilter).toBeTruthy()
+		expect(providerFilter).toBeFalsy()
 	})
 
 	it("calls onToggleSession when a session row is clicked", () => {

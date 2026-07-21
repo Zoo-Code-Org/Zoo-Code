@@ -78,7 +78,7 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
-import { UsageEventStore, UsageRecorder } from "../../services/stats"
+import { UsageRecorder } from "../../services/stats"
 import type { UsageRecordingContext } from "../../services/stats"
 
 // integrations
@@ -86,6 +86,7 @@ import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
 import { findToolName } from "../../integrations/misc/export-markdown"
 import { RooTerminalProcess } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
+import { CommandScheduler } from "../../integrations/terminal/CommandScheduler"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
 
 // utils
@@ -620,12 +621,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.enableCheckpoints = enableCheckpoints
 		this.checkpointTimeout = checkpointTimeout
 
-		// Initialize usage recorder (best-effort: failure results in null recorder)
-		// Store initialization is deferred to first append; here we only construct the recorder.
-		// If the store fails at runtime, UsageRecorder catches errors internally.
+		// Initialize usage recorder (best-effort: failure results in null recorder).
+		// Use the provider's shared UsageStatsService as the append sink so that all
+		// in-process writes go through one store instance and its cache stays consistent.
+		// If the service is unavailable, the recorder is disabled rather than creating
+		// a second independent store authority.
 		try {
-			const store = new UsageEventStore(this.globalStoragePath)
-			this.usageRecorder = new UsageRecorder(store)
+			const service = provider.getUsageStatsService()
+			if (service) {
+				this.usageRecorder = new UsageRecorder(service)
+			}
 		} catch (err) {
 			console.warn(`[Task#${this.taskId}] Failed to initialize UsageRecorder, stats will be skipped:`, err)
 		}
@@ -2383,6 +2388,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.removeAllListeners()
 		} catch (error) {
 			console.error("Error removing event listeners:", error)
+		}
+
+		// Cancel any queued commands for this task before releasing terminals.
+		// This prevents queued commands from acquiring a terminal after the
+		// task is disposed (architect report Section 1.3, lifecycle ownership).
+		try {
+			CommandScheduler.getInstance().cancelTask(this.taskId)
+		} catch (error) {
+			console.error("Error cancelling queued commands:", error)
 		}
 
 		// Release any terminals associated with this task.

@@ -166,17 +166,42 @@ describe("UsageEventStore", () => {
 		})
 
 		it("should serialize concurrent appends via promise queue", async () => {
-			const events = Array.from({ length: 10 }, (_, i) =>
-				makeEvent({ eventId: `evt-${i}`, idempotencyKey: `idem-${i}` }),
-			)
-
-			const results = await Promise.all(events.map((e) => store.append(e)))
-			expect(results.every((r) => r === true)).toBe(true)
-
-			const stored = await store.readAll()
-			expect(stored).toHaveLength(10)
+				const events = Array.from({ length: 10 }, (_, i) =>
+					makeEvent({ eventId: `evt-${i}`, idempotencyKey: `idem-${i}` }),
+				)
+	
+				const results = await Promise.all(events.map((e) => store.append(e)))
+				expect(results.every((r) => r === true)).toBe(true)
+	
+				const stored = await store.readAll()
+				expect(stored).toHaveLength(10)
+			})
+	
+			it("should invalidate cache when a segment rotation happens during append", async () => {
+				// Force the current segment to be just under the rotation threshold
+				// by writing a large payload to the segment file directly.
+				const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
+				const paddingSize = 5 * 1024 * 1024 // 5 MiB
+				const padding = "{" + "a".repeat(paddingSize) + "}\n"
+				await fs.writeFile(segmentPath, padding, "utf-8")
+	
+				// Prime the cache so the next readAll would return the cached snapshot.
+				await store.readAll()
+	
+				// Append a valid event. The segment is already at the rotation threshold,
+				// so appendInternal will rotate to segment 2. The cache must be
+				// invalidated because the cached snapshot no longer reflects the new
+				// segment layout.
+				const event = makeEvent({ eventId: "evt-rot", idempotencyKey: "idem-rot" })
+				const result = await store.append(event)
+				expect(result).toBe(true)
+	
+				// The next readAll should rescan from disk and include the appended event.
+				const stored = await store.readAll()
+				expect(stored).toHaveLength(1)
+				expect(stored[0].eventId).toBe("evt-rot")
+			})
 		})
-	})
 
 	describe("readAll", () => {
 		it("should return empty array when no events", async () => {
@@ -236,6 +261,52 @@ describe("UsageEventStore", () => {
 			const quarantinePath = path.join(store._getStatsDir(), "quarantine", "corrupt-lines.jsonl")
 			const quarantineExists = await fs.access(quarantinePath).then(() => true).catch(() => false)
 			expect(quarantineExists).toBe(true)
+		})
+
+		it("should not cache corrupt lines from a crash tail on first readAll", async () => {
+			const event = makeEvent({ eventId: "evt-clean", idempotencyKey: "idem-clean" })
+			await store.append(event)
+
+			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
+			// Append a corrupt middle line followed by a valid line, then a truncated
+			// crash tail as the very last line. The crash tail should be ignored and
+			// must not appear in the cached snapshot on subsequent reads.
+			const validLine = JSON.stringify(makeEvent({ eventId: "evt-valid", idempotencyKey: "idem-valid" })) + "\n"
+			await fs.appendFile(segmentPath, "{corrupt middle\n")
+			await fs.appendFile(segmentPath, validLine)
+			await fs.appendFile(segmentPath, '{"partial": tru')
+
+			const firstRead = await store.readAll()
+			expect(firstRead).toHaveLength(2)
+			expect(firstRead.map((e) => e.eventId)).toContain("evt-clean")
+			expect(firstRead.map((e) => e.eventId)).toContain("evt-valid")
+
+			// A second readAll should return the exact same cached snapshot without
+			// reintroducing the crash tail or corrupt middle line.
+			const secondRead = await store.readAll()
+			expect(secondRead).toHaveLength(2)
+			expect(secondRead.map((e) => e.eventId)).toEqual(firstRead.map((e) => e.eventId))
+		})
+
+		it("should rescan when more segments exist on disk than cached segment count", async () => {
+			const event = makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" })
+			await store.append(event)
+
+			// Prime the cache.
+			await store.readAll()
+
+			// Simulate an external writer (or another process) creating segment 2
+			// directly with a valid event.
+			const segment2Path = path.join(store._getStatsDir(), "events-000002.ndjson")
+			const externalEvent = makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2" })
+			await fs.writeFile(segment2Path, JSON.stringify(externalEvent) + "\n", "utf-8")
+
+			// The cached snapshot only knew about segment 1. readAll must detect the
+			// extra segment and invalidate the cache so the external event is included.
+			const events = await store.readAll()
+			expect(events).toHaveLength(2)
+			expect(events.map((e) => e.eventId)).toContain("evt-1")
+			expect(events.map((e) => e.eventId)).toContain("evt-2")
 		})
 	})
 
