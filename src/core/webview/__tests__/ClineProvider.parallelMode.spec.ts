@@ -1195,6 +1195,37 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 	})
 
+	describe("provider profile activation", () => {
+		it("should sync view-local apiConfiguration when activating an upserted profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await (provider as any).saveViewState("apiConfiguration", {
+				apiProvider: "openrouter",
+				openRouterModelId: "openai/gpt-4.1",
+			})
+
+			const providerSettings = {
+				apiProvider: "zai" as const,
+				zaiApiKey: "mock-key",
+				zaiApiLine: "international_api" as const,
+				apiModelId: "glm-5.1",
+			}
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("zai-profile-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "default", id: "zai-profile-id", apiProvider: "zai" },
+			])
+
+			await provider.upsertProviderProfile("default", providerSettings, true)
+
+			const state = await provider.getState()
+			expect(state.currentApiConfigName).toBe("default")
+			expect(state.apiConfiguration).toMatchObject(providerSettings)
+			expect(state.apiConfiguration.apiProvider).toBe("zai")
+			expect((provider as any).viewLocalState.apiConfiguration).toMatchObject(providerSettings)
+
+			await provider.dispose()
+		})
+	})
+
 	describe("handleModeSwitch integration", () => {
 		it("should update viewLocalState.mode when handleModeSwitch is called", async () => {
 			const postMessage = vi.fn()
