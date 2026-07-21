@@ -445,6 +445,7 @@ describe("Cline", () => {
 			expect(withoutPathChannel).toBe("error")
 			expect(withPathNotice).toEqual(expect.stringContaining("read_file"))
 			expect(withPathNotice).toEqual(expect.stringContaining("path"))
+			expect(withPathNotice).toEqual(expect.stringContaining("src/foo.ts"))
 			expect(withoutPathNotice).toEqual(expect.stringContaining("execute_command"))
 			expect(withoutPathNotice).toEqual(expect.stringContaining("command"))
 
