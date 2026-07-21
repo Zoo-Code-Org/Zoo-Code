@@ -1,6 +1,7 @@
 export * from "./anthropic.js"
 export * from "./baseten.js"
 export * from "./bedrock.js"
+export * from "./claude-code.js"
 export * from "./deepseek.js"
 export * from "./fireworks.js"
 export * from "./friendli.js"
@@ -33,6 +34,7 @@ export * from "./zoo-gateway.js"
 import { anthropicDefaultModelId } from "./anthropic.js"
 import { basetenDefaultModelId } from "./baseten.js"
 import { bedrockDefaultModelId } from "./bedrock.js"
+import { claudeCodeDefaultModelId } from "./claude-code.js"
 import { deepSeekDefaultModelId } from "./deepseek.js"
 import { fireworksDefaultModelId } from "./fireworks.js"
 import { friendliDefaultModelId } from "./friendli.js"
@@ -81,6 +83,8 @@ export function getProviderDefaultModelId(
 			return xaiDefaultModelId
 		case "baseten":
 			return basetenDefaultModelId
+		case "claude-code":
+			return claudeCodeDefaultModelId
 		case "bedrock":
 			return bedrockDefaultModelId
 		case "vertex":

@@ -548,7 +548,7 @@ describe("importExport", () => {
 
 		describe("lenient import with invalid providers", () => {
 			it("should sanitize profiles with invalid apiProvider and return warnings", async () => {
-				// Test importing a profile with a removed/invalid provider like "claude-code"
+				// Test importing a profile with a removed/invalid provider like "some-removed-provider"
 				;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
 
 				const mockFileContent = JSON.stringify({
@@ -561,7 +561,7 @@ describe("importExport", () => {
 								id: "valid-id",
 							},
 							"invalid-profile": {
-								apiProvider: "claude-code", // Invalid/removed provider
+								apiProvider: "some-removed-provider", // Invalid/removed provider
 								apiKey: "some-key",
 								id: "invalid-id",
 							},
@@ -595,7 +595,7 @@ describe("importExport", () => {
 				expect((result as { warnings?: string[] }).warnings).toBeDefined()
 				expect((result as { warnings?: string[] }).warnings!.length).toBeGreaterThan(0)
 				expect((result as { warnings?: string[] }).warnings![0]).toContain("invalid-profile")
-				expect((result as { warnings?: string[] }).warnings![0]).toContain("claude-code")
+				expect((result as { warnings?: string[] }).warnings![0]).toContain("some-removed-provider")
 
 				// The valid profile should be imported
 				expect(mockProviderSettingsManager.import).toHaveBeenCalled()
@@ -853,8 +853,8 @@ describe("importExport", () => {
 								apiKey: "key-2",
 								id: "openai-id",
 							},
-							"old-claude-profile": {
-								apiProvider: "claude-code", // Removed provider
+							"old-removed-profile": {
+								apiProvider: "some-old-removed-provider", // Removed provider
 								apiKey: "key-3",
 								id: "claude-id",
 							},
@@ -891,7 +891,7 @@ describe("importExport", () => {
 				// Should have multiple warnings
 				const warnings = (result as { warnings?: string[] }).warnings!
 				expect(warnings.length).toBe(2) // Two profiles had invalid providers
-				expect(warnings.some((w) => w.includes("old-claude-profile"))).toBe(true)
+				expect(warnings.some((w) => w.includes("old-removed-profile"))).toBe(true)
 				expect(warnings.some((w) => w.includes("another-invalid"))).toBe(true)
 
 				// Valid profiles should be imported correctly
@@ -900,7 +900,7 @@ describe("importExport", () => {
 				expect(importedProfiles.apiConfigs["openai-profile"].apiProvider).toBe("openai")
 
 				// Invalid provider profiles should have apiProvider removed
-				expect(importedProfiles.apiConfigs["old-claude-profile"].apiProvider).toBeUndefined()
+				expect(importedProfiles.apiConfigs["old-removed-profile"].apiProvider).toBeUndefined()
 				expect(importedProfiles.apiConfigs["another-invalid"].apiProvider).toBeUndefined()
 			})
 

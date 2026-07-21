@@ -15,6 +15,8 @@ import {
 	openAiModelInfoSaneDefaults,
 	minimaxDefaultModelId,
 	minimaxModels,
+	claudeCodeDefaultModelId,
+	claudeCodeModels,
 	friendliDefaultModelId,
 	friendliModels,
 	openRouterDefaultModelId,
@@ -923,6 +925,53 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe("minimax")
 			expect(result.current.id).toBe("MiniMax-M2.7")
 			expect(result.current.info).toEqual(minimaxModels["MiniMax-M2.7"])
+		})
+	})
+
+	describe("claude-code provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return default claude-code model when no custom model is specified", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "claude-code",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("claude-code")
+			expect(result.current.id).toBe(claudeCodeDefaultModelId)
+			expect(result.current.info).toEqual(claudeCodeModels[claudeCodeDefaultModelId])
+		})
+
+		it("should use custom model ID and info when model exists in claudeCodeModels", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "claude-code",
+				apiModelId: "claude-opus-4-8",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("claude-code")
+			expect(result.current.id).toBe("claude-opus-4-8")
+			expect(result.current.info).toEqual(claudeCodeModels["claude-opus-4-8"])
 		})
 	})
 

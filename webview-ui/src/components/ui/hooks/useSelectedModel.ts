@@ -6,6 +6,7 @@ import {
 	type RouterModels,
 	anthropicModels,
 	bedrockModels,
+	claudeCodeModels,
 	deepSeekModels,
 	moonshotModels,
 	minimaxModels,
@@ -367,6 +368,11 @@ function getSelectedModel({
 		case "openai-codex": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = openAiCodexModels[id as keyof typeof openAiCodexModels]
+			return { id, info }
+		}
+		case "claude-code": {
+			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const info = claudeCodeModels[id as keyof typeof claudeCodeModels]
 			return { id, info }
 		}
 		case "vercel-ai-gateway": {
