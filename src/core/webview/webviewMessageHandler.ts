@@ -563,7 +563,9 @@ export const webviewMessageHandler = async (
 			await updateGlobalState("customModes", customModes)
 
 			await provider.postStateToWebview()
-			void provider.workspaceTracker?.initializeFilePaths() // Don't await.
+			void provider.workspaceTracker
+				?.initializeFilePaths()
+				.catch((err) => provider.log(`Workspace initialization error: ${err}`)) // Don't await.
 
 			await getTheme().then((theme) =>
 				provider.postMessageToWebview({ type: "theme", text: JSON.stringify(theme) }),
@@ -3005,12 +3007,12 @@ export const webviewMessageHandler = async (
 
 					const currentState = manager.state
 					if (currentState === "Standby" || currentState === "Error") {
-						void manager.startIndexing()
+						void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 
 						if (!manager.isInitialized) {
 							await manager.initialize(provider.contextProxy)
 							if (manager.state === "Standby" || manager.state === "Error") {
-								void manager.startIndexing()
+								void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 							}
 						}
 					}
@@ -3048,7 +3050,7 @@ export const webviewMessageHandler = async (
 				await manager.setWorkspaceEnabled(enabled)
 				if (enabled && manager.isFeatureEnabled && manager.isFeatureConfigured) {
 					await manager.initialize(provider.contextProxy)
-					void manager.startIndexing()
+					void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 				} else if (!enabled) {
 					manager.stopIndexing()
 				}
@@ -3082,7 +3084,7 @@ export const webviewMessageHandler = async (
 						m.stopIndexing()
 					} else if (!wasEnabled && isNowEnabled && m.isFeatureEnabled && m.isFeatureConfigured) {
 						await m.initialize(provider.contextProxy)
-						void m.startIndexing()
+						void m.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 					}
 				}
 				await provider.postMessageToWebview({
