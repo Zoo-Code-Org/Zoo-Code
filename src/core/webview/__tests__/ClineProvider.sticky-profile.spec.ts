@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
+import { taskHistoryLock } from "../../task-persistence/TaskHistoryLock"
 import type { HistoryItem } from "@roo-code/types"
 
 vi.mock("vscode", () => ({
@@ -215,6 +216,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
+		vi.spyOn(taskHistoryLock, "withLock").mockImplementation(async (_globalStoragePath, fn) => fn())
 		taskIdCounter = 0
 		originalRooCliRuntimeEnv = process.env.ROO_CLI_RUNTIME
 		delete process.env.ROO_CLI_RUNTIME

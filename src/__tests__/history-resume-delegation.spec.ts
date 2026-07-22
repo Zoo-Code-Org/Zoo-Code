@@ -48,6 +48,12 @@ vi.mock("../core/task-persistence", async (importOriginal) => {
 		saveTaskMessages: vi.fn().mockResolvedValue(undefined),
 	}
 })
+vi.mock("../core/task-persistence/TaskHistoryLock", () => ({
+	taskHistoryLock: {
+		withLock: vi.fn(async (_globalStoragePath: string, fn: () => Promise<unknown>) => fn()),
+		reset: vi.fn(),
+	},
+}))
 
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { readTaskMessages } from "../core/task-persistence/taskMessages"
@@ -930,6 +936,72 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(saveApiMessagesMock).not.toHaveBeenCalled()
 		expect(atomicUpdatePair).not.toHaveBeenCalled()
 		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[reopenParentFromDelegation] Aborting"))
+	})
+
+	it("reopenParentFromDelegation revalidates the locked parent snapshot before committing completion metadata", async () => {
+		const logSpy = vi.fn()
+		const saveTaskMessagesMock = vi.mocked(saveTaskMessages)
+		const saveApiMessagesMock = vi.mocked(saveApiMessages)
+		const createTaskWithHistoryItem = vi.fn()
+		const parentItem = {
+			id: "parent-locked-guard",
+			status: "delegated",
+			awaitingChildId: "child-locked-guard",
+			childIds: ["child-locked-guard"],
+			ts: 100,
+			task: "Parent locked guard",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const childItem = {
+			id: "child-locked-guard",
+			status: "active",
+			ts: 101,
+			task: "Child locked guard",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const atomicUpdatePair = vi.fn(
+			async (
+				_firstId: string,
+				_secondId: string,
+				firstUpdater: (h: HistoryItem) => HistoryItem,
+				secondUpdater: (h: HistoryItem) => HistoryItem,
+			) => {
+				firstUpdater(childItem as HistoryItem)
+				secondUpdater({ ...parentItem, status: "active", awaitingChildId: undefined } as HistoryItem)
+				return []
+			},
+		)
+
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
+			emit: vi.fn(),
+			log: logSpy,
+			getCurrentTask: vi.fn(() => null),
+			removeClineFromStack: vi.fn(),
+			createTaskWithHistoryItem,
+			taskHistoryStore: { atomicUpdatePair, get: vi.fn() },
+		} as any)
+		vi.mocked(readTaskMessages).mockResolvedValue([])
+		vi.mocked(readApiMessages).mockResolvedValue([])
+
+		await expect(
+			(ClineProvider.prototype as any).reopenParentFromDelegation.call(provider, {
+				parentTaskId: "parent-locked-guard",
+				childTaskId: "child-locked-guard",
+				completionResultSummary: "should not commit",
+			}),
+		).resolves.toBe(false)
+
+		expect(atomicUpdatePair).toHaveBeenCalled()
+		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[reopenParentFromDelegation] Aborting"))
+		expect(saveTaskMessagesMock).toHaveBeenCalled()
+		expect(saveApiMessagesMock).toHaveBeenCalled()
 	})
 
 	it("serializes delegation transitions and continues after a rejected predecessor", async () => {

@@ -3,6 +3,13 @@
 import { describe, it, expect, vi } from "vitest"
 import type { HistoryItem } from "@roo-code/types"
 import { RooCodeEventName } from "@roo-code/types"
+vi.mock("../core/task-persistence/TaskHistoryLock", () => ({
+	taskHistoryLock: {
+		withLock: vi.fn(async (_globalStoragePath: string, fn: () => Promise<unknown>) => fn()),
+		reset: vi.fn(),
+	},
+}))
+
 import { ClineProvider } from "../core/webview/ClineProvider"
 
 const parentHistoryItem: HistoryItem = {
@@ -53,6 +60,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		const taskHistoryStore = makeStoreStub()
 
 		const provider = {
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			emit: providerEmit,
 			getCurrentTask: vi.fn(() => parentTask),
 			removeClineFromStack,
@@ -117,6 +125,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 
 		const provider = {
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
 			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
@@ -150,6 +159,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 
 		const provider = {
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
 			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
@@ -191,6 +201,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 
 		const provider = {
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
 			removeClineFromStack,
@@ -236,6 +247,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 
 		const provider = {
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
 			emit: vi.fn(),
 			getCurrentTask,
 			removeClineFromStack,

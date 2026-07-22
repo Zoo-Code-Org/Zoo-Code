@@ -6,6 +6,16 @@ import * as os from "os"
 
 import type { HistoryItem } from "@roo-code/types"
 
+const { taskHistoryLockWithLockMock } = vi.hoisted(() => ({
+	taskHistoryLockWithLockMock: vi.fn(async (_globalStoragePath: string, fn: () => Promise<unknown>) => fn()),
+}))
+
+vi.mock("../TaskHistoryLock", () => ({
+	taskHistoryLock: {
+		withLock: taskHistoryLockWithLockMock,
+	},
+}))
+
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 
@@ -42,6 +52,10 @@ describe("TaskHistoryStore", () => {
 	let store: TaskHistoryStore
 
 	beforeEach(async () => {
+		taskHistoryLockWithLockMock.mockClear()
+		taskHistoryLockWithLockMock.mockImplementation(async (_globalStoragePath: string, fn: () => Promise<unknown>) =>
+			fn(),
+		)
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-test-"))
 		store = new TaskHistoryStore(tmpDir)
 	})
@@ -230,6 +244,51 @@ describe("TaskHistoryStore", () => {
 			await store.deleteMany(["batch-1", "batch-3"])
 			expect(store.getAll()).toHaveLength(1)
 			expect(store.get("batch-2")).toBeDefined()
+		})
+
+		it("acquires the shared storage lock before entering the instance queue", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "shared-lock-delete" }))
+			taskHistoryLockWithLockMock.mockClear()
+
+			await store.deleteMany(["shared-lock-delete"])
+
+			expect(taskHistoryLockWithLockMock).toHaveBeenCalledTimes(1)
+			expect(taskHistoryLockWithLockMock).toHaveBeenCalledWith(tmpDir, expect.any(Function))
+		})
+	})
+
+	describe("locked mutation helpers", () => {
+		it("allows reconcileLocked and deleteManyLocked inside one mutateLocked callback without re-entering the lock", async () => {
+			await store.initialize()
+
+			await store.upsert(makeHistoryItem({ id: "locked-delete" }))
+
+			const tasksDir = path.join(tmpDir, "tasks")
+			const orphanDir = path.join(tasksDir, "locked-orphan")
+			await fs.mkdir(orphanDir, { recursive: true })
+			await fs.writeFile(
+				path.join(orphanDir, GlobalFileNames.historyItem),
+				JSON.stringify(makeHistoryItem({ id: "locked-orphan" })),
+			)
+
+			await store.mutateLocked(async () => {
+				await store.reconcileLocked()
+				expect(store.get("locked-orphan")).toBeDefined()
+				await store.deleteManyLocked(["locked-delete", "locked-orphan"])
+			})
+
+			expect(store.get("locked-delete")).toBeUndefined()
+			expect(store.get("locked-orphan")).toBeUndefined()
+		})
+		it("acquires the shared storage lock before entering the instance queue", async () => {
+			await store.initialize()
+			taskHistoryLockWithLockMock.mockClear()
+
+			await store.mutateLocked(async () => undefined)
+
+			expect(taskHistoryLockWithLockMock).toHaveBeenCalledTimes(1)
+			expect(taskHistoryLockWithLockMock).toHaveBeenCalledWith(tmpDir, expect.any(Function))
 		})
 	})
 
