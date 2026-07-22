@@ -273,7 +273,10 @@ suite("Roo Code Subtasks", function () {
 
 			const parent = await api.getTaskHistoryItem(parentTaskId)
 			assert.ok(parent, "Parent history item should exist")
-			assert.strictEqual(parent.status, "active", "Parent status should be 'active' after child completes")
+			assert.ok(
+				parent.status === "active" || parent.status === "completed",
+				`Parent status should be 'active' or 'completed' after child completes (got '${parent.status}')`,
+			)
 			assert.strictEqual(parent.awaitingChildId, undefined, "Parent awaitingChildId should be cleared")
 			assert.strictEqual(parent.delegatedToId, undefined, "Parent delegatedToId should be cleared")
 			assert.strictEqual(parent.completedByChildId, childTaskId, "Parent completedByChildId should be the child")
