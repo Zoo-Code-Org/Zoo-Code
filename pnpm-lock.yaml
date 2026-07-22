@@ -517,6 +517,9 @@ importers:
       gray-matter:
         specifier: ^4.0.3
         version: 4.0.3
+      http-proxy-agent:
+        specifier: ^7.0.0
+        version: 7.0.2
       https-proxy-agent:
         specifier: ^7.0.0
         version: 7.0.6

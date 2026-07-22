@@ -14,6 +14,7 @@ import { NodeHttpHandler } from "@smithy/node-http-handler"
 import OpenAI from "openai"
 import { fromIni } from "@aws-sdk/credential-providers"
 import { Anthropic } from "@anthropic-ai/sdk"
+import { HttpProxyAgent } from "http-proxy-agent"
 import { HttpsProxyAgent } from "https-proxy-agent"
 
 import {
@@ -298,11 +299,19 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// When a corporate proxy is configured, Node resolves DNS locally before tunneling,
-		// causing ENOTFOUND for endpoints that only the proxy can reach. HttpsProxyAgent
-		// uses CONNECT tunneling so the proxy handles DNS resolution instead.
-		const proxyUrl = getSystemProxyUrl()
+		// causing ENOTFOUND for endpoints that only the proxy can reach. HttpProxyAgent and
+		// HttpsProxyAgent use CONNECT tunneling so the proxy handles DNS resolution instead.
+		//
+		// A custom endpoint (e.g. a VPC endpoint) is passed so NO_PROXY can bypass the proxy
+		// for directly-reachable hosts. For the default managed endpoint we don't reconstruct
+		// the hostname (the AWS SDK resolves it internally, and it varies by partition), so the
+		// proxy always applies there.
+		const proxyUrl = getSystemProxyUrl(
+			typeof clientConfig.endpoint === "string" ? clientConfig.endpoint : undefined,
+		)
 		if (proxyUrl) {
 			clientConfig.requestHandler = new NodeHttpHandler({
+				httpAgent: new HttpProxyAgent(proxyUrl),
 				httpsAgent: new HttpsProxyAgent(proxyUrl),
 				requestTimeout: 0,
 			})
