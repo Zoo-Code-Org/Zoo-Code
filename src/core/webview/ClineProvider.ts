@@ -1825,12 +1825,20 @@ export class ClineProvider
 				// this.contextProxy.setValues({ ...providerSettings, listApiConfigMeta: ..., currentApiConfigName: ... })
 				// We should probably switch to that and verify that it works.
 				// I left the original implementation in just to be safe.
+				const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+
 				await Promise.all([
-					this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+					this.updateGlobalState("listApiConfigMeta", listApiConfigMeta),
 					this.updateGlobalState("currentApiConfigName", name),
 					this.providerSettingsManager.setModeConfig(mode, id),
 					this.contextProxy.setProviderSettings(providerSettings),
 				])
+
+				this._updateViewLocalStateFromMutation({
+					listApiConfigMeta,
+					currentApiConfigName: name,
+					apiConfiguration: providerSettings,
+				})
 
 				// Change the provider for the current task.
 				// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -1870,6 +1878,11 @@ export class ClineProvider
 
 		await this.contextProxy.setValues({
 			...globalSettings,
+			currentApiConfigName: profileToActivate,
+			listApiConfigMeta: entries,
+		})
+
+		this._updateViewLocalStateFromMutation({
 			currentApiConfigName: profileToActivate,
 			listApiConfigMeta: entries,
 		})
@@ -1915,11 +1928,19 @@ export class ClineProvider
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 
 		// See `upsertProviderProfile` for a description of what this is doing.
+		const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+
 		await Promise.all([
-			this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+			this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
 			this.contextProxy.setValue("currentApiConfigName", name),
 			this.contextProxy.setProviderSettings(providerSettings),
 		])
+
+		this._updateViewLocalStateFromMutation({
+			listApiConfigMeta,
+			currentApiConfigName: name,
+			apiConfiguration: providerSettings,
+		})
 
 		const { mode } = await this.getState()
 
@@ -3075,7 +3096,7 @@ export class ClineProvider
 	 * profile upsert/activation/deletion, or resetState. This ensures the local cache stays in
 	 * sync with global state changes that would otherwise be invisible behind mergedStateValues.
 	 */
-	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings>): void {
+	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings> & Partial<ExtensionState>): void {
 		if ("mode" in values) {
 			const val = values.mode
 			if (val === undefined || val === null) {
@@ -3150,6 +3171,9 @@ export class ClineProvider
 		}
 
 		await this.contextProxy.resetAllState()
+
+		// Clear view-local state cache so getState() falls back to ContextProxy defaults.
+		this._clearViewLocalState()
 
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
