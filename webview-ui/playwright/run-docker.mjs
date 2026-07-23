@@ -1,7 +1,12 @@
 import { spawnSync } from "node:child_process"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+
+const dirname = path.dirname(fileURLToPath(import.meta.url))
+const composeFile = path.resolve(dirname, "../docker-compose.visual.yml")
 
 const updateSnapshots = process.argv.includes("--update")
-const composeArgs = ["-f", "docker-compose.visual.yml", "run", "--rm", "visual"]
+const composeArgs = ["-f", composeFile, "run", "--rm", "visual"]
 
 if (updateSnapshots) {
 	composeArgs.push("sh", "-lc", "corepack pnpm --filter @roo-code/vscode-webview test:visual:update")

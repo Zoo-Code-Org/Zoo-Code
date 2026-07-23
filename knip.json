@@ -1,8 +1,10 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
 	"ignore": ["**/__tests__/**", "apps/vscode-e2e/**", "scripts/**", "apps/cli/scripts/**"],
-	"ignoreDependencies": ["lint-staged", "ovsx"],
+	"ignoreDependencies": ["lint-staged"],
 	"ignoreExportsUsedInFile": true,
+	"playwright": false,
+	"playwright-ct": false,
 	"workspaces": {
 		"src": {
 			"entry": ["extension.ts", "extension/api.ts", "workers/countTokens.ts"],
@@ -29,8 +31,7 @@
 				"react-compiler-runtime",
 				"source-map",
 				"tailwindcss",
-				"tailwindcss-animate",
-				"vscode"
+				"tailwindcss-animate"
 			]
 		},
 		"apps/cli": {
