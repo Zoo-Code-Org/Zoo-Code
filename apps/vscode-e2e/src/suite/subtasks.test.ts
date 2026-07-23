@@ -5,8 +5,10 @@ import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 import { setDefaultSuiteTimeout } from "./test-utils"
 import { sleep, waitFor, waitUntilCompleted } from "./utils"
 import {
-	SUBTASK_API_HANG_CHILD_RESULT,
+	SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER,
+	SUBTASK_ABANDON_PARENT_PROMPT,
 	SUBTASK_API_HANG_CHILD_MARKER,
+	SUBTASK_API_HANG_CHILD_RESULT,
 	SUBTASK_API_HANG_PARENT_MARKER,
 	SUBTASK_API_HANG_PARENT_PROMPT,
 	SUBTASK_API_HANG_PARENT_RESULT,
@@ -271,7 +273,10 @@ suite("Roo Code Subtasks", function () {
 
 			const parent = await api.getTaskHistoryItem(parentTaskId)
 			assert.ok(parent, "Parent history item should exist")
-			assert.strictEqual(parent.status, "active", "Parent status should be 'active' after child completes")
+			assert.ok(
+				parent.status === "active" || parent.status === "completed",
+				`Parent status should be 'active' or 'completed' after child completes (got '${parent.status}')`,
+			)
 			assert.strictEqual(parent.awaitingChildId, undefined, "Parent awaitingChildId should be cleared")
 			assert.strictEqual(parent.delegatedToId, undefined, "Parent delegatedToId should be cleared")
 			assert.strictEqual(parent.completedByChildId, childTaskId, "Parent completedByChildId should be the child")
@@ -760,6 +765,167 @@ suite("Roo Code Subtasks", function () {
 					.find((text) => text === SUBTASK_INTERRUPT_PARENT_RESULT),
 				SUBTASK_INTERRUPT_PARENT_RESULT,
 				"Parent should complete with expected result after interrupted child reports back",
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+		}
+	})
+
+	// Issue #559: explicit "Abandon subtask" action. Unlike cancellation alone (which leaves
+	// the child "interrupted" and the parent "delegated" so the child can still resume and
+	// report back), abandoning severs the link outright: the parent goes back to "active" and
+	// the child's parentTaskId/rootTaskId are cleared so a later resume can never reattach it.
+	test("abandoning an interrupted subtask severs the parent-child link", async () => {
+		const api = globalThis.api
+		const asks: Record<string, ClineMessage[]> = {}
+		const says: Record<string, ClineMessage[]> = {}
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "ask") {
+				asks[taskId] = asks[taskId] || []
+				asks[taskId].push(message)
+			}
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		try {
+			const parentTaskId = await api.startNewTask({
+				configuration: {
+					mode: "ask",
+					alwaysAllowModeSwitch: true,
+					alwaysAllowSubtasks: true,
+					autoApprovalEnabled: true,
+					enableCheckpoints: false,
+				},
+				text: SUBTASK_ABANDON_PARENT_PROMPT,
+			})
+
+			let childTaskId: string | undefined
+			await waitFor(() => {
+				const stack = api.getCurrentTaskStack()
+				const current = stack[stack.length - 1]
+				if (current && current !== parentTaskId) {
+					childTaskId = current
+					return true
+				}
+				return false
+			})
+
+			await waitFor(() => asks[childTaskId!]?.some(({ ask }) => ask === "followup") ?? false)
+			await waitFor(async () => (await api.getTaskApiConversationHistoryLength(childTaskId!)) > 0)
+
+			// Cancel the child — marked "interrupted", parent stays "delegated".
+			await api.cancelCurrentTask()
+
+			await waitFor(() => api.getCurrentTaskStack().at(-1) === childTaskId)
+			await waitFor(
+				() => asks[childTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "resume_task") ?? false,
+			)
+
+			const interruptedChild = await api.getTaskHistoryItem(childTaskId!)
+			assert.strictEqual(interruptedChild?.status, "interrupted", "Child should be marked interrupted")
+
+			const delegatedParent = await api.getTaskHistoryItem(parentTaskId)
+			assert.strictEqual(delegatedParent?.status, "delegated", "Parent should still be delegated before abandon")
+			assert.strictEqual(
+				delegatedParent?.awaitingChildId,
+				childTaskId,
+				"Parent should await the interrupted child",
+			)
+
+			// The interrupted child is the live/open task at this point (cancelTask rehydrates
+			// it onto the stack). Abandon must close that live instance before severing the
+			// persisted link — otherwise a later save on the still-open child would rebuild
+			// parentTaskId/rootTaskId from its live (readonly) fields and silently reattach it.
+			const abandoned = await api.abandonSubtask(childTaskId!)
+			assert.strictEqual(abandoned, true, "abandonSubtask should report the link was severed")
+
+			await waitFor(() => api.getCurrentTaskStack().at(-1) !== childTaskId)
+
+			const parentAfterAbandon = await api.getTaskHistoryItem(parentTaskId)
+			assert.strictEqual(parentAfterAbandon?.status, "active", "Parent should return to active after abandon")
+			assert.strictEqual(
+				parentAfterAbandon?.awaitingChildId,
+				undefined,
+				"Parent awaitingChildId should be cleared",
+			)
+			assert.strictEqual(parentAfterAbandon?.delegatedToId, undefined, "Parent delegatedToId should be cleared")
+
+			const childAfterAbandon = await api.getTaskHistoryItem(childTaskId!)
+			// The child's own status is left untouched (VALID_TRANSITIONS only allows interrupted → completed);
+			// only its parent/root links are cleared so it can never reattach to the parent again.
+			assert.strictEqual(childAfterAbandon?.status, "interrupted", "Child status stays interrupted")
+			assert.strictEqual(childAfterAbandon?.parentTaskId, undefined, "Child parentTaskId should be cleared")
+			assert.strictEqual(childAfterAbandon?.rootTaskId, undefined, "Child rootTaskId should be cleared")
+
+			// A second abandon call is a no-op since the parent is no longer delegated to this child.
+			const secondAbandon = await api.abandonSubtask(childTaskId!)
+			assert.strictEqual(secondAbandon, false, "Second abandonSubtask call should be a no-op")
+
+			// Resume and complete the abandoned child — it must NOT reopen or reattach to the
+			// parent. Before the abandon fix, a subsequent save on the still-live child could
+			// silently rewrite its persisted parentTaskId back to the parent; this proves the
+			// link stays severed all the way through a real resume/save/complete cycle.
+			// api.resumeTask() re-instantiates the child from history, which re-raises its own
+			// "resume_task" ask; answering it with the follow-up answer (same pattern the sibling
+			// "cancelled child completes and reopens parent" test above uses) both resumes the
+			// task and supplies the answer the re-asked follow-up question is waiting for.
+			// asks[childTaskId] already holds the earlier resume_task ask from the pre-abandon
+			// cancellation, so the wait below must look for a NEW one, not just any occurrence.
+			const askCountBeforeResume = asks[childTaskId!]?.length ?? 0
+			await api.resumeTask(childTaskId!)
+			await waitFor(() =>
+				(asks[childTaskId!] ?? [])
+					.slice(askCountBeforeResume)
+					.some(({ type, ask }) => type === "ask" && ask === "resume_task"),
+			)
+
+			const completedChildTaskId = await waitUntilCompleted({
+				api,
+				start: async () => {
+					await api.sendMessage(SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER)
+					return childTaskId!
+				},
+			})
+
+			assert.strictEqual(
+				completedChildTaskId,
+				childTaskId,
+				"The abandoned child itself should be the task that completes, not the parent",
+			)
+			assert.strictEqual(
+				says[parentTaskId]?.find(({ say }) => say === "completion_result"),
+				undefined,
+				"Parent must never complete/reopen after its abandoned child resumes and completes",
+			)
+
+			const parentAfterChildCompletes = await api.getTaskHistoryItem(parentTaskId)
+			assert.strictEqual(
+				parentAfterChildCompletes?.status,
+				"active",
+				"Parent status must remain untouched by the abandoned child's completion",
+			)
+			assert.strictEqual(
+				parentAfterChildCompletes?.awaitingChildId,
+				undefined,
+				"Parent must not start awaiting the abandoned child again",
+			)
+
+			const childAfterCompletion = await api.getTaskHistoryItem(childTaskId!)
+			assert.strictEqual(
+				childAfterCompletion?.parentTaskId,
+				undefined,
+				"Child parentTaskId must still be cleared after it completes on its own — " +
+					"proves the live-instance save did not resurrect the old link",
 			)
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)

@@ -780,75 +780,9 @@ describe("ClineProvider flicker-free cancel", () => {
 		)
 	})
 
-	it("removeClineFromStack does not repair parent when child is interrupted", async () => {
-		const parentHistory: HistoryItem = {
-			id: "parent-1",
-			number: 1,
-			task: "parent task",
-			ts: Date.now(),
-			tokensIn: 10,
-			tokensOut: 20,
-			totalCost: 0.001,
-			workspace: "/test/workspace",
-			status: "delegated",
-			awaitingChildId: "child-1",
-			delegatedToId: "child-1",
-		}
-
-		const childTask = {
-			taskId: "child-1",
-			instanceId: "inst-child",
-			parentTaskId: "parent-1",
-			emit: vi.fn(),
-			abortTask: vi.fn().mockResolvedValue(undefined),
-		}
-		;(provider as any).clineStack = [childTask]
-		;(provider as any).taskEventListeners = new Map()
-		// Seed the in-memory store so taskHistoryStore.get("child-1") returns interrupted
-		vi.spyOn((provider as any).taskHistoryStore, "get").mockImplementation((id: unknown) =>
-			id === "child-1" ? { status: "interrupted" } : undefined,
-		)
-
-		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
-			if (id === "parent-1") return Promise.resolve({ historyItem: parentHistory })
-			throw new Error(`unexpected task lookup: ${id}`)
-		}) as any
-
-		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
-
-		await (provider as any).removeClineFromStack()
-
-		// Parent must NOT be transitioned to active — it stays delegated
-		expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(
-			expect.objectContaining({ id: "parent-1", status: "active" }),
-		)
-	})
-
-	// Regression test for the race where a user clicks Stop on a freshly-delegated
-	// child and immediately navigates back to the parent (showTaskWithId), before
-	// cancelTask()'s own persistence of childHistory.status = "interrupted" has
-	// landed. Both cancelTask() and removeClineFromStack() serialize their parent
-	// writes through runDelegationTransition(parentTaskId, ...), but removeClineFromStack
-	// only skips its repair when taskHistoryStore.get(childTaskId)?.status === "interrupted".
-	// If removeClineFromStack's transition wins the race and runs while the store still
-	// reports "active" (the write from cancelTask() hasn't landed yet), it incorrectly
-	// repairs the parent to "active" and clears awaitingChildId, permanently severing
-	// the delegation link before the child ever gets a chance to report back.
-	it("removeClineFromStack does not repair parent when a cancellation for the child is in flight", async () => {
-		const parentHistory: HistoryItem = {
-			id: "parent-1",
-			number: 1,
-			task: "parent task",
-			ts: Date.now(),
-			tokensIn: 10,
-			tokensOut: 20,
-			totalCost: 0.001,
-			workspace: "/test/workspace",
-			status: "delegated",
-			awaitingChildId: "child-1",
-			delegatedToId: "child-1",
-		}
-
+	it("removeClineFromStack never mutates delegation metadata (pure lifecycle after refactor)", async () => {
+		// After the refactor, removeClineFromStack() is pure lifecycle: pop, abort, clean up.
+		// Delegation state is owned by reopenParentFromDelegation() and markDelegatedChildInterrupted().
 		const childTask = {
 			taskId: "child-1",
 			instanceId: "inst-child",
@@ -859,31 +793,16 @@ describe("ClineProvider flicker-free cancel", () => {
 		;(provider as any).clineStack = [childTask]
 		;(provider as any).taskEventListeners = new Map()
 
-		// The store still reports "active" — cancelTask()'s write to "interrupted"
-		// has not landed yet. This is the pre-write window of the race.
-		vi.spyOn((provider as any).taskHistoryStore, "get").mockImplementation((id: unknown) =>
-			id === "child-1" ? { status: "active" } : undefined,
-		)
-
-		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
-			if (id === "parent-1") return Promise.resolve({ historyItem: parentHistory })
-			throw new Error(`unexpected task lookup: ${id}`)
-		}) as any
-
+		provider.getTaskWithId = vi.fn() as any
 		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
-
-		// Simulate cancelTask() having already synchronously marked this child as
-		// "being cancelled" before its own await chain reaches the history write.
-		;(provider as any).cancellingDelegationChildIds.add("child-1")
 
 		await (provider as any).removeClineFromStack()
 
-		// Parent must NOT be transitioned to active while the child's cancellation
-		// is still in flight — repairing here would clear awaitingChildId and
-		// permanently sever the delegation link before "interrupted" is persisted.
-		expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(
-			expect.objectContaining({ id: "parent-1", status: "active" }),
-		)
+		expect((provider as any).clineStack).toHaveLength(0)
+		expect(childTask.abortTask).toHaveBeenCalledWith(true)
+		// No history writes — lifecycle only
+		expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+		expect(provider.getTaskWithId).not.toHaveBeenCalled()
 	})
 
 	afterAll(() => {

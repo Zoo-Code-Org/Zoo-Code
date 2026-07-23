@@ -17,7 +17,9 @@
 		"condenseContext": "コンテキストをインテリジェントに圧縮",
 		"openApiHistory": "API履歴を開く",
 		"openUiHistory": "UI履歴を開く",
-		"backToParentTask": "親タスク"
+		"backToParentTask": "親タスク",
+		"waitingOnSubtask": "サブタスク待ち",
+		"goToSubtask": "サブタスクへ"
 	},
 	"unpin": "ピン留めを解除",
 	"pin": "ピン留め",

@@ -32,6 +32,14 @@ export const SUBTASK_API_HANG_RESUME_MESSAGE = "Continue after provider hang."
 export const SUBTASK_API_HANG_CHILD_RESULT = "Hung child completed"
 export const SUBTASK_API_HANG_PARENT_RESULT = "API hang parent resumed"
 
+// Abandon-subtask scenario (#559) — separate markers to avoid sequenceIndex collisions with the
+// interrupted-child-resumes tests above, which exhaust the sequence count for INTERRUPT markers.
+const SUBTASK_ABANDON_PARENT_MARKER = "SUBTASK_PARENT_ABANDON_SEVER"
+const SUBTASK_ABANDON_CHILD_MARKER = "SUBTASK_CHILD_ABANDON_SEVER"
+const SUBTASK_ABANDON_CHILD_PROMPT = `${SUBTASK_ABANDON_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
+export const SUBTASK_ABANDON_PARENT_PROMPT = `${SUBTASK_ABANDON_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_ABANDON_CHILD_PROMPT}" Do not answer directly.`
+export const SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER = "9"
+
 const SUBTASK_XPROFILE_SAME_CHILD_PROMPT = `${SUBTASK_XPROFILE_SAME_CHILD_MARKER}: Complete immediately with the exact result "Same-profile child completed".`
 const SUBTASK_XPROFILE_DIFFERENT_CHILD_PROMPT = `${SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER}: Complete immediately with the exact result "Different-profile child completed".`
 export const SUBTASK_XPROFILE_PARENT_PROMPT = `${SUBTASK_XPROFILE_PARENT_MARKER}: First use new_task to create a code-mode subtask with this exact message: "${SUBTASK_XPROFILE_SAME_CHILD_PROMPT}" After it returns, create an ask-mode subtask with the next instructions you receive.`
@@ -433,6 +441,69 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 					name: "attempt_completion",
 					arguments: JSON.stringify({ result: SUBTASK_INTERRUPT_PARENT_RESULT }),
 					id: "call_interrupt_parent_completion_003",
+				},
+			],
+		},
+	})
+
+	// Abandon-subtask scenario (#559)
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(SUBTASK_ABANDON_PARENT_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: SUBTASK_ABANDON_CHILD_PROMPT,
+					}),
+					id: "call_abandon_parent_new_task_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SUBTASK_ABANDON_CHILD_MARKER]) &&
+				!requestContains(req, [SUBTASK_ABANDON_PARENT_MARKER]) &&
+				!requestContains(req, ["call_abandon_child_followup_001"]) &&
+				!requestContains(req, [`<user_message>\\n${SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "ask_followup_question",
+					arguments: JSON.stringify({
+						question: "What is the square root of 81?",
+						follow_up: [{ text: SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER }],
+					}),
+					id: "call_abandon_child_followup_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				toolResultContains(req, "call_abandon_child_followup_001", [SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER]) ||
+				requestContains(req, ["call_abandon_child_followup_001", SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER]) ||
+				requestContains(req, [
+					SUBTASK_ABANDON_CHILD_MARKER,
+					`<user_message>\\n${SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER}\\n</user_message>`,
+				]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER }),
+					id: "call_abandon_child_completion_002",
 				},
 			],
 		},

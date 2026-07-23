@@ -17,7 +17,9 @@
 		"condenseContext": "Интеллектуально сжать контекст",
 		"openApiHistory": "Открыть историю API",
 		"openUiHistory": "Открыть историю UI",
-		"backToParentTask": "Родительская задача"
+		"backToParentTask": "Родительская задача",
+		"waitingOnSubtask": "Ожидание подзадачи",
+		"goToSubtask": "Перейти к подзадаче"
 	},
 	"unpin": "Открепить",
 	"pin": "Закрепить",

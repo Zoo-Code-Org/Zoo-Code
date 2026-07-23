@@ -12,9 +12,10 @@ export function makeProviderStub<T extends object>(stub: T): T {
 	const proto = ClineProvider.prototype as any
 	s.delegationTransitionLocks ??= new Map()
 	s.cancelledDelegationChildIds ??= new Set()
-	s.cancellingDelegationChildIds ??= new Set()
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
 	s.runDelegationTransition = proto.runDelegationTransition.bind(s)
+	s.removeClineFromStack ??= proto.removeClineFromStack.bind(s)
+	s.evictCurrentTask ??= proto.evictCurrentTask.bind(s)
 	return s
 }

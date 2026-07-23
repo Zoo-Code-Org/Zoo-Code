@@ -833,6 +833,15 @@ export const webviewMessageHandler = async (
 		case "deleteTaskWithId":
 			provider.deleteTaskWithId(message.text!)
 			break
+		case "abandonSubtaskWithId":
+			provider
+				.abandonSubtask(message.text!)
+				.catch((error) =>
+					provider.log(
+						`[abandonSubtaskWithId] Failed: ${error instanceof Error ? error.message : String(error)}`,
+					),
+				)
+			break
 		case "deleteMultipleTasksWithIds": {
 			const ids = message.ids
 

@@ -17,7 +17,9 @@
 		"condenseContext": "Bağlamı akıllıca yoğunlaştır",
 		"openApiHistory": "API Geçmişini Aç",
 		"openUiHistory": "UI Geçmişini Aç",
-		"backToParentTask": "Üst görev"
+		"backToParentTask": "Üst görev",
+		"waitingOnSubtask": "Alt görev bekleniyor",
+		"goToSubtask": "Alt göreve git"
 	},
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",
