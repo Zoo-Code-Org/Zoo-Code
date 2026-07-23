@@ -1,6 +1,16 @@
 import {
+	customProviders,
+	dynamicProviders,
+	fauxProviders,
+	internalProviders,
+	isCustomProvider,
+	isDynamicProvider,
+	isFauxProvider,
+	isInternalProvider,
+	isLocalProvider,
 	isProviderName,
 	isRetiredProvider,
+	localProviders,
 	providerIdentifiers,
 	providerNames,
 	providerNamesSchema,
@@ -79,6 +89,75 @@ describe("provider identifiers", () => {
 
 		expect(providerNames).toEqual(identifiers)
 		expect(retiredProviderNames).toEqual(retiredIdentifiers)
+	})
+
+	it("derives provider category collections from canonical identifiers", () => {
+		expect(dynamicProviders).toEqual([
+			providerIdentifiers.openrouter,
+			providerIdentifiers.vercelAiGateway,
+			providerIdentifiers.zooGateway,
+			providerIdentifiers.litellm,
+			providerIdentifiers.requesty,
+			providerIdentifiers.unbound,
+			providerIdentifiers.poe,
+			providerIdentifiers.deepseek,
+			providerIdentifiers.moonshot,
+			providerIdentifiers.opencodeGo,
+			providerIdentifiers.kenari,
+		])
+		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])
+		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm])
+		expect(customProviders).toEqual([providerIdentifiers.openai])
+		expect(fauxProviders).toEqual([providerIdentifiers.fakeAi])
+	})
+
+	it("preserves provider category type guards", () => {
+		for (const identifier of dynamicProviders) {
+			expect(isDynamicProvider(identifier)).toBe(true)
+		}
+
+		for (const identifier of localProviders) {
+			expect(isLocalProvider(identifier)).toBe(true)
+		}
+
+		for (const identifier of internalProviders) {
+			expect(isInternalProvider(identifier)).toBe(true)
+		}
+
+		for (const identifier of customProviders) {
+			expect(isCustomProvider(identifier)).toBe(true)
+		}
+
+		for (const identifier of fauxProviders) {
+			expect(isFauxProvider(identifier)).toBe(true)
+		}
+
+		expect(isDynamicProvider("unknown-provider")).toBe(false)
+		expect(isLocalProvider("unknown-provider")).toBe(false)
+		expect(isInternalProvider("unknown-provider")).toBe(false)
+		expect(isCustomProvider("unknown-provider")).toBe(false)
+		expect(isFauxProvider("unknown-provider")).toBe(false)
+
+		const categoryRepresentatives = [
+			providerIdentifiers.openrouter,
+			providerIdentifiers.ollama,
+			providerIdentifiers.vscodeLm,
+			providerIdentifiers.openai,
+			providerIdentifiers.fakeAi,
+		]
+		const categoryGuards = [
+			isDynamicProvider,
+			isLocalProvider,
+			isInternalProvider,
+			isCustomProvider,
+			isFauxProvider,
+		]
+
+		for (const [guardIndex, guard] of categoryGuards.entries()) {
+			for (const [identifierIndex, identifier] of categoryRepresentatives.entries()) {
+				expect(guard(identifier)).toBe(guardIndex === identifierIndex)
+			}
+		}
 	})
 
 	it("keeps active and retired providers separate", () => {
