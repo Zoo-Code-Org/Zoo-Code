@@ -1,6 +1,8 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
+import { logger } from "../../utils/logging"
+
 import {
 	deepSeekModels,
 	deepSeekDefaultModelId,
@@ -15,6 +17,8 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { convertToR1Format } from "../transform/r1-format"
+import { historyHasToolCallsWithoutReasoning } from "./utils/reasoning-history-guard"
+import { historyHasToolCallsWithoutReasoning } from "./utils/reasoning-history-guard"
 
 import { OpenAiHandler } from "./openai"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
@@ -130,12 +134,6 @@ export class DeepSeekHandler extends OpenAiHandler {
 		const { info: modelInfo, temperature, reasoningEffort, maxTokens } = this.getModel()
 
 		const isThinkingModel = isDeepSeekThinkingEnabled(modelId, this.options)
-		const thinking = supportsDeepSeekThinkingToggle(modelId)
-			? ({ type: isThinkingModel ? "enabled" : "disabled" } as const)
-			: isThinkingModel
-				? ({ type: "enabled" } as const)
-				: undefined
-		const deepSeekReasoningEffort = normalizeDeepSeekReasoningEffort(modelId, reasoningEffort)
 
 		// Convert messages to R1 format (merges consecutive same-role messages)
 		// This is required for DeepSeek which does not support successive messages with the same role
@@ -147,9 +145,30 @@ export class DeepSeekHandler extends OpenAiHandler {
 			mergeToolResultText: isThinkingModel,
 		})
 
+		// Layer 1 Guard: detect incompatible history (tool_calls without reasoning_content)
+		// and disable thinking mode for this request to prevent a 400 error from the API.
+		const hasIncompatibleHistory = historyHasToolCallsWithoutReasoning(convertedMessages)
+		const effectiveThinkingEnabled = isThinkingModel && !hasIncompatibleHistory
+
+		if (hasIncompatibleHistory) {
+			logger.warn("provider_reasoning_guard_triggered", {
+				ctx: "deepseek",
+				provider: "deepseek",
+				modelId,
+				taskId: metadata?.taskId,
+			})
+		}
+
+		const thinking = supportsDeepSeekThinkingToggle(modelId)
+			? ({ type: effectiveThinkingEnabled ? "enabled" : "disabled" } as const)
+			: effectiveThinkingEnabled
+				? ({ type: "enabled" } as const)
+				: undefined
+		const deepSeekReasoningEffort = effectiveThinkingEnabled ? normalizeDeepSeekReasoningEffort(modelId, reasoningEffort) : undefined
+
 		const requestOptions: DeepSeekChatCompletionParams = {
 			model: modelId,
-			...(!isThinkingModel && { temperature: temperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE }),
+			...(!effectiveThinkingEnabled && { temperature: temperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE }),
 			messages: convertedMessages,
 			stream: true as const,
 			stream_options: { include_usage: true },

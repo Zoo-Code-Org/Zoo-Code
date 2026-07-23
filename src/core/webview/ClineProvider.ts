@@ -98,6 +98,8 @@ import { t } from "../../i18n"
 import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
+import { logger } from "../../utils/logging"
+import { modeSwitchRisksReasoningIncompatibility } from "../../shared/reasoning-mode-compatibility"
 import { ContextProxy } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
@@ -1506,13 +1508,67 @@ export class ClineProvider
 	/**
 	 * Handle switching to a new mode, including updating the associated API configuration
 	 * @param newMode The mode to switch to
+	 * @param via - The origin of the mode switch:
+	 *              "switch_mode" — explicit switch_mode tool call
+	 *              "new_task_delegation" — delegation via new_task
+	 *              "unknown_bypass" — cannot be attributed to explicit tool call (default)
 	 */
-	public async handleModeSwitch(newMode: Mode) {
+	public async handleModeSwitch(newMode: Mode, via: "switch_mode" | "new_task_delegation" | "unknown_bypass" = "unknown_bypass") {
 		const task = this.getCurrentTask()
+		const fromMode = (await this.getState())?.mode ?? "unknown"
 
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
 			task.emit(RooCodeEventName.TaskModeSwitched, task.taskId, newMode)
+
+			// Layer 2 — Orchestration safety: check for reasoning-mode incompatibility
+			// when switching modes without proper delegation (only relevant for bypass switches).
+			if (via !== "new_task_delegation") {
+				try {
+					const fromProviderName = task.apiConfiguration?.apiProvider
+					const toConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+					const listApiConfig = await this.providerSettingsManager.listConfig()
+					const toProfile = toConfigId
+						? listApiConfig.find((c) => c.id === toConfigId)
+						: undefined
+					const toProviderName = toProfile
+						? (await this.providerSettingsManager.getProfile({ name: toProfile.name })).apiProvider
+						: fromProviderName
+
+					if (
+						toProviderName &&
+						modeSwitchRisksReasoningIncompatibility(fromProviderName, toProviderName)
+					) {
+						// Behavior A — always show visible warning in chat
+						await task.say(
+							"mode_switch_compatibility_warning",
+							JSON.stringify({
+								fromMode,
+								toMode: newMode,
+								fromProvider: fromProviderName,
+								toProvider: toProviderName,
+								via,
+							}),
+							undefined,
+							undefined,
+							undefined,
+							undefined,
+							{ isNonInteractive: true },
+						)
+
+						// Behavior B — optional auto-condense when setting is enabled
+						const autoCondense = this.context.workspaceState.get("autoCondenseOnRiskyModeSwitch", false)
+						if (autoCondense) {
+							await task.condenseContext()
+						}
+					}
+				} catch (innerError) {
+					// Non-fatal: log but don't block the mode switch if the check fails.
+					this.log(
+						\`Mode-switch compatibility check failed: ${innerError instanceof Error ? innerError.message : String(innerError)}\`,
+					)
+				}
+			}
 
 			try {
 				// Update the task history with the new mode first.

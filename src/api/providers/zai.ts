@@ -13,10 +13,12 @@ import {
 
 import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/api"
 import { convertToZAiFormat } from "../transform/zai-format"
+import { historyHasToolCallsWithoutReasoning } from "./utils/reasoning-history-guard"
 
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { handleOpenAIError } from "./utils/error-handler"
+import { logger } from "../../utils/logging"
 
 // Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
 // Z.ai accepts the standard `reasoning_effort` ladder (none/minimal/low/medium/high/xhigh/max)
@@ -107,6 +109,22 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		// Use Z.ai format to preserve reasoning_content and merge post-tool text into tool messages
 		const convertedMessages = convertToZAiFormat(messages, { mergeToolResultText: true })
 
+		// Layer 1 Guard: detect incompatible history (tool_calls without reasoning_content)
+		// and disable thinking mode for this request to prevent a 400 error from the API.
+		const hasIncompatibleHistory = historyHasToolCallsWithoutReasoning(convertedMessages)
+
+		if (hasIncompatibleHistory) {
+			logger.warn("provider_reasoning_guard_triggered", {
+				ctx: "zai",
+				provider: "zai",
+				model,
+				taskId: metadata?.taskId,
+			})
+		}
+
+		// When incompatible history is detected, force reasoning off regardless of user settings.
+		const effectiveReasoning = hasIncompatibleHistory ? false : useReasoning
+
 		const params: ZAiChatCompletionParams = {
 			model,
 			max_tokens,
@@ -115,8 +133,8 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			stream: true,
 			stream_options: { include_usage: true },
 			// Thinking is ON by default for these models, so explicitly disable it when needed.
-			thinking: useReasoning ? { type: "enabled" } : { type: "disabled" },
-			reasoning_effort: reasoningEffort,
+			thinking: effectiveReasoning ? { type: "enabled" } : { type: "disabled" },
+			reasoning_effort: effectiveReasoning ? reasoningEffort : undefined,
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,

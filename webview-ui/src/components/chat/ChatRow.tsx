@@ -1577,6 +1577,26 @@ export const ChatRowContent = ({
 						/>
 					)
 				}
+				case "mode_switch_compatibility_warning": {
+					const warningData = safeJsonParse<{
+						fromMode?: string
+						toMode?: string
+						fromProvider?: string
+						toProvider?: string
+						via?: string
+					}>(message.text || "{}")
+					if (!warningData) return null
+					return (
+						<WarningRow
+							title={t("chat:modeSwitchCompatibilityWarning.title")}
+							message={t("chat:modeSwitchCompatibilityWarning.message", {
+								fromMode: warningData.fromMode ?? "?",
+								toMode: warningData.toMode ?? "?",
+								toProvider: warningData.toProvider ?? "?",
+							})}
+						/>
+					)
+				}
 				default:
 					return (
 						<>
