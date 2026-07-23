@@ -1,6 +1,12 @@
 import { z } from "zod"
 
-import { KIMI_CODE_BASE_URL, kimiCodeDefaultModelInfo, type ModelInfo, type ModelRecord } from "@roo-code/types"
+import {
+	KIMI_CODE_BASE_URL,
+	kimiCodeDefaultModelInfo,
+	kimiCodeReasoningEfforts,
+	type ModelInfo,
+	type ModelRecord,
+} from "@roo-code/types"
 
 const kimiCodeModelSchema = z.object({
 	id: z.string().min(1),
@@ -15,10 +21,13 @@ const kimiCodeModelsResponseSchema = z.object({ data: z.array(kimiCodeModelSchem
 const KIMI_CODE_MODELS_TIMEOUT_MS = 10_000
 
 export function mapKimiCodeModel(model: z.infer<typeof kimiCodeModelSchema>): ModelInfo {
+	const supportsReasoning = model.supports_reasoning ?? false
 	return {
 		...kimiCodeDefaultModelInfo,
 		contextWindow: model.context_length ?? kimiCodeDefaultModelInfo.contextWindow,
-		supportsReasoningBinary: model.supports_reasoning ?? false,
+		supportsReasoningEffort: supportsReasoning ? [...kimiCodeReasoningEfforts] : false,
+		requiredReasoningEffort: supportsReasoning,
+		reasoningEffort: supportsReasoning ? "max" : undefined,
 		supportsImages: model.supports_image_in ?? false,
 		displayName: model.display_name,
 	}

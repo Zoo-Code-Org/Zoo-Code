@@ -15,7 +15,9 @@ describe("Kimi Code model discovery", () => {
 			}),
 		).toMatchObject({
 			contextWindow: 131072,
-			supportsReasoningBinary: true,
+			supportsReasoningEffort: ["low", "high", "max"],
+			requiredReasoningEffort: true,
+			reasoningEffort: "max",
 			supportsImages: true,
 			displayName: "Kimi Test",
 		})
@@ -39,7 +41,9 @@ describe("Kimi Code model discovery", () => {
 		const mapped = mapKimiCodeModel({
 			id: "basic-model",
 		})
-		expect(mapped.supportsReasoningBinary).toBe(false)
+		expect(mapped.supportsReasoningEffort).toBe(false)
+		expect(mapped.requiredReasoningEffort).toBe(false)
+		expect(mapped.reasoningEffort).toBeUndefined()
 		expect(mapped.supportsImages).toBe(false)
 		expect(mapped.contextWindow).toBeGreaterThan(0)
 	})
@@ -76,7 +80,7 @@ describe("Kimi Code model discovery", () => {
 		const models = await getKimiCodeModels("token")
 		expect(Object.keys(models)).toHaveLength(2)
 		expect(models["model-a"].contextWindow).toBe(100000)
-		expect(models["model-b"].supportsReasoningBinary).toBe(true)
+		expect(models["model-b"].supportsReasoningEffort).toEqual(["low", "high", "max"])
 	})
 
 	it("aborts model discovery after its deadline", async () => {

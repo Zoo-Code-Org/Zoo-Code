@@ -195,4 +195,30 @@ describe("KimiCodeHandler", () => {
 		const model = handler.getModel()
 		expect(model.info.maxTokens).toBe(8000)
 	})
+
+	it("defaults to max reasoning effort and advertises low/high/max support", () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+		const model = handler.getModel()
+		expect(model.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+		expect(model.info.requiredReasoningEffort).toBe(true)
+		expect(model.reasoning).toEqual({ reasoning_effort: "max" })
+	})
+
+	it("sends the user-selected reasoning effort", () => {
+		const handler = new KimiCodeHandler({
+			kimiCodeAuthMethod: "api-key",
+			kimiCodeApiKey: "key",
+			reasoningEffort: "low",
+		})
+		expect(handler.getModel().reasoning).toEqual({ reasoning_effort: "low" })
+	})
+
+	it("falls back to the model default when a persisted effort from another provider is unsupported", () => {
+		const handler = new KimiCodeHandler({
+			kimiCodeAuthMethod: "api-key",
+			kimiCodeApiKey: "key",
+			reasoningEffort: "medium",
+		})
+		expect(handler.getModel().reasoning).toEqual({ reasoning_effort: "max" })
+	})
 })
