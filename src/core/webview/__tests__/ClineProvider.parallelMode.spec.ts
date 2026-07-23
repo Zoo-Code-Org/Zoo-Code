@@ -691,12 +691,12 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			)
 			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
 
-			// Access viewLocalState via private property for testing
+			await (provider1 as any).saveViewState("mode", "architect")
+
 			const state1 = await provider1.getState()
 			const state2 = await provider2.getState()
 
-			// Both should start with the same default mode from global state
-			expect(state1.mode).toBe("code")
+			expect(state1.mode).toBe("architect")
 			expect(state2.mode).toBe("code")
 
 			await provider1.dispose()
@@ -842,6 +842,31 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			)
 
 			await provider.dispose()
+		})
+		it("should merge concurrent persisted updates from separate provider instances without lost viewStates", async () => {
+			const provider1 = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+			)
+			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			await (provider1 as any).setViewStateId("stable-sidebar-view")
+			await (provider2 as any).setViewStateId("stable-editor-view")
+
+			await Promise.all([
+				(provider1 as any).saveViewState("mode", "architect"),
+				(provider2 as any).saveViewState("currentApiConfigName", "editor-profile"),
+			])
+
+			expect(mockContext.globalState.get("viewStates" as any)).toMatchObject({
+				"stable-sidebar-view": { mode: "architect" },
+				"stable-editor-view": { currentApiConfigName: "editor-profile" },
+			})
+
+			await provider1.dispose()
+			await provider2.dispose()
 		})
 	})
 
@@ -1039,6 +1064,32 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.apiConfiguration.apiProvider).toBe("bedrock")
 			expect(state.apiConfiguration.awsBedrockEndpoint).toBe("http://127.0.0.1:4567")
 			expect((provider as any).viewLocalState.apiConfiguration.apiProvider).toBe("bedrock")
+
+			await provider.dispose()
+		})
+
+		it("should persist setValue mutations for view-local mode", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await (provider as any).setViewStateId("stable-sidebar-view")
+			await provider.setValue("mode" as any, "architect" as any)
+
+			expect(provider.contextProxy.getValue("viewStates" as any)).toMatchObject({
+				"stable-sidebar-view": { mode: "architect" },
+			})
+
+			await provider.dispose()
+		})
+
+		it("should persist setValues mutations for view-local API profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await (provider as any).setViewStateId("stable-sidebar-view")
+			await provider.setValues({ currentApiConfigName: "profile-from-set-values" } as any)
+
+			expect(provider.contextProxy.getValue("viewStates" as any)).toMatchObject({
+				"stable-sidebar-view": { currentApiConfigName: "profile-from-set-values" },
+			})
 
 			await provider.dispose()
 		})

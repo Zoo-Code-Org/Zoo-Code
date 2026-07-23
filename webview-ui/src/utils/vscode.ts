@@ -11,8 +11,9 @@ import { WebviewMessage } from "@roo/WebviewMessage"
  * dev server by using native web browser features that mock the functionality
  * enabled by acquireVsCodeApi.
  */
-class VSCodeAPIWrapper {
+export class VSCodeAPIWrapper {
 	private readonly vsCodeApi: WebviewApi<unknown> | undefined
+	private fallbackState: unknown | undefined
 
 	constructor() {
 		// Check if the acquireVsCodeApi function exists in the current development
@@ -74,12 +75,18 @@ class VSCodeAPIWrapper {
 	public getState(): unknown | undefined {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.getState()
-		} else if (typeof localStorage?.getItem === "function") {
-			const state = localStorage.getItem("vscodeState")
-			return state ? JSON.parse(state) : undefined
-		} else {
-			return undefined
 		}
+
+		try {
+			if (typeof localStorage?.getItem === "function") {
+				const state = localStorage.getItem("vscodeState")
+				return state ? JSON.parse(state) : this.fallbackState
+			}
+		} catch {
+			return this.fallbackState
+		}
+
+		return this.fallbackState
 	}
 
 	/**
@@ -96,12 +103,20 @@ class VSCodeAPIWrapper {
 	public setState<T extends unknown | undefined>(newState: T): T {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.setState(newState)
-		} else {
+		}
+
+		this.fallbackState = newState
+
+		try {
 			if (typeof localStorage?.setItem === "function") {
 				localStorage.setItem("vscodeState", JSON.stringify(newState))
 			}
-			return newState
+		} catch {
+			// Storage can be unavailable in restricted webview/browser contexts.
+			// The in-memory fallback above keeps a stable viewStateId for this session.
 		}
+
+		return newState
 	}
 }
 

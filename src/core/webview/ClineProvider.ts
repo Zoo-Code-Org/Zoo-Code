@@ -175,6 +175,7 @@ export class ClineProvider
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private static nextViewId = 0
 	private static readonly MAX_PERSISTED_VIEW_STATES = 50
+	private static persistedViewStateWriteQueue: Promise<void> = Promise.resolve()
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
 	private view?: vscode.WebviewView | vscode.WebviewPanel
@@ -445,51 +446,63 @@ export class ClineProvider
 		}
 	}
 
-	private getPersistedViewStates(): Record<string, PersistedViewState> {
-		const viewStates = this.contextProxy.getValue("viewStates")
+	private getPersistedViewStates(options: { fresh?: boolean } = {}): Record<string, PersistedViewState> {
+		const viewStates = options.fresh
+			? this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
+			: this.contextProxy.getValue("viewStates")
 
 		if (!viewStates || typeof viewStates !== "object" || Array.isArray(viewStates)) {
 			return {}
 		}
 
-		return viewStates
+		return { ...viewStates }
 	}
 
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
-		const states = this.getPersistedViewStates()
-		const current = states[this.viewStateId] ?? {}
-		const next: PersistedViewState = { ...current }
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			const current = states[this.viewStateId] ?? {}
+			const next: PersistedViewState = { ...current }
 
-		if ("mode" in values) {
-			if (values.mode === undefined || values.mode === null) {
-				delete next.mode
-			} else {
-				next.mode = values.mode
+			if ("mode" in values) {
+				if (values.mode === undefined || values.mode === null) {
+					delete next.mode
+				} else {
+					next.mode = values.mode
+				}
 			}
-		}
 
-		if ("currentApiConfigName" in values) {
-			if (values.currentApiConfigName === undefined || values.currentApiConfigName === null) {
-				delete next.currentApiConfigName
-			} else {
-				next.currentApiConfigName = values.currentApiConfigName
+			if ("currentApiConfigName" in values) {
+				if (values.currentApiConfigName === undefined || values.currentApiConfigName === null) {
+					delete next.currentApiConfigName
+				} else {
+					next.currentApiConfigName = values.currentApiConfigName
+				}
 			}
-		}
 
-		if (!next.mode && !next.currentApiConfigName) {
-			delete states[this.viewStateId]
-		} else {
-			next.updatedAt = values.updatedAt ?? Date.now()
-			states[this.viewStateId] = next
-		}
+			if (!next.mode && !next.currentApiConfigName) {
+				delete states[this.viewStateId]
+			} else {
+				next.updatedAt = values.updatedAt ?? Date.now()
+				states[this.viewStateId] = next
+			}
 
-		await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
 	}
 
 	private async clearPersistedViewState(viewStateId = this.viewStateId): Promise<void> {
-		const states = this.getPersistedViewStates()
-		delete states[viewStateId]
-		await this.contextProxy.setValue("viewStates", states)
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			delete states[viewStateId]
+			await this.contextProxy.setValue("viewStates", states)
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
 	}
 
 	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
@@ -3076,6 +3089,7 @@ export class ClineProvider
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
 		await this.contextProxy.setValue(key, value)
 		this._updateViewLocalStateFromMutation({ [key]: value })
+		await this._persistViewLocalStateFromMutation({ [key]: value })
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -3089,6 +3103,7 @@ export class ClineProvider
 	public async setValues(values: RooCodeSettings) {
 		await this.contextProxy.setValues(values)
 		this._updateViewLocalStateFromMutation(values)
+		await this._persistViewLocalStateFromMutation(values)
 	}
 
 	/**
@@ -3135,6 +3150,24 @@ export class ClineProvider
 				...(this.viewLocalState.apiConfiguration ?? {}),
 				...providerSettingsUpdate,
 			}
+		}
+	}
+
+	private async _persistViewLocalStateFromMutation(
+		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
+	): Promise<void> {
+		const persistedValues: Partial<PersistedViewState> = {}
+
+		if ("mode" in values) {
+			persistedValues.mode = values.mode as PersistedViewState["mode"]
+		}
+
+		if ("currentApiConfigName" in values) {
+			persistedValues.currentApiConfigName = values.currentApiConfigName
+		}
+
+		if ("mode" in persistedValues || "currentApiConfigName" in persistedValues) {
+			await this.savePersistedViewState(persistedValues)
 		}
 	}
 

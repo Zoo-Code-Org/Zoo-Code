@@ -234,6 +234,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
 
+		expect((mockClineProvider as any).setViewStateId).toHaveBeenCalledWith("view-1")
 		expect((mockClineProvider as any).providerSettingsManager.hasConfig).toHaveBeenCalledWith("view-local-profile")
 		expect((mockClineProvider as any).providerSettingsManager.hasConfig).not.toHaveBeenCalledWith("shared-profile")
 	})

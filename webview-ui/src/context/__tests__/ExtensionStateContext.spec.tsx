@@ -11,6 +11,14 @@ import {
 } from "@roo-code/types"
 
 import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
+import { vscode } from "@src/utils/vscode"
+
+vi.mock("@src/utils/vscode", () => ({
+	vscode: {
+		postMessage: vi.fn(),
+		getViewStateId: vi.fn(() => "view-a"),
+	},
+}))
 
 const TestComponent = () => {
 	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
@@ -71,7 +79,80 @@ const ApiConfigTestComponent = () => {
 	)
 }
 
+const ViewLocalStateTestComponent = () => {
+	const { mode, setMode, currentApiConfigName, setCurrentApiConfigName } = useExtensionState()
+
+	return (
+		<div>
+			<div data-testid="view-local-mode">{mode}</div>
+			<div data-testid="view-local-api-config">{currentApiConfigName}</div>
+			<button data-testid="set-local-mode" onClick={() => setMode("ask" as any)}>
+				Set Local Mode
+			</button>
+			<button data-testid="set-local-api-config" onClick={() => setCurrentApiConfigName("local-profile")}>
+				Set Local API Config
+			</button>
+		</div>
+	)
+}
+
 describe("ExtensionStateContext", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("posts webviewDidLaunch with the stable viewStateId from vscode API", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(vscode.getViewStateId).toHaveBeenCalled()
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch", viewStateId: "view-a" })
+	})
+
+	it("reseeds view-local mode and API profile from a new state payload after local edits", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<ViewLocalStateTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "state",
+						state: { mode: "code", currentApiConfigName: "profile-a", apiConfiguration: {} },
+					},
+				}),
+			)
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("code")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("profile-a")
+
+		act(() => {
+			screen.getByTestId("set-local-mode").click()
+			screen.getByTestId("set-local-api-config").click()
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("ask")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("local-profile")
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "state",
+						state: { mode: "architect", currentApiConfigName: "profile-b", apiConfiguration: {} },
+					},
+				}),
+			)
+		})
+		expect(screen.getByTestId("view-local-mode")).toHaveTextContent("architect")
+		expect(screen.getByTestId("view-local-api-config")).toHaveTextContent("profile-b")
+	})
+
 	it("initializes with empty allowedCommands array", () => {
 		render(
 			<ExtensionStateContextProvider>
