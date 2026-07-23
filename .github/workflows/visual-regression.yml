@@ -32,6 +32,14 @@ jobs:
                   install-args: "--frozen-lockfile"
             - name: Run webview visual tests
               run: pnpm --filter @roo-code/vscode-webview test:visual
+            - name: Upload visual test coverage to Codecov
+              if: always()
+              uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+              with:
+                  files: webview-ui/coverage-ct/lcov.info
+                  disable_search: true
+                  flags: webview-ui-ct
+                  token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload visual test artifacts
               if: failure()
               uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

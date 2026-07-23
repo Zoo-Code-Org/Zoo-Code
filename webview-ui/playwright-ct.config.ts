@@ -44,7 +44,6 @@ export default defineConfig({
 				"process.env.PKG_RELEASE_CHANNEL": JSON.stringify("stable"),
 			},
 			optimizeDeps: {
-				include: ["@vscode/webview-ui-toolkit"],
 				exclude: ["@vscode/codicons"],
 			},
 		},

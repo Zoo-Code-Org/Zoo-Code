@@ -11,6 +11,7 @@ coverage:
         threshold: 0.5%
         flags:
           - webview-ui
+          - webview-ui-ct
     patch:
       default:
         target: 80%       # new lines must be 80% covered
@@ -20,10 +21,15 @@ coverage:
         threshold: 0%
         flags:
           - webview-ui
+          - webview-ui-ct
 
 flag_management:
   individual_flags:
     - name: webview-ui
+      paths:
+        - webview-ui/src/
+      carryforward: true
+    - name: webview-ui-ct
       paths:
         - webview-ui/src/
       carryforward: true

@@ -31,7 +31,8 @@
 				"react-compiler-runtime",
 				"source-map",
 				"tailwindcss",
-				"tailwindcss-animate"
+				"tailwindcss-animate",
+				"monocart-coverage-reports"
 			]
 		},
 		"apps/cli": {

@@ -8,7 +8,6 @@ test("renders a toolkit progress indicator in the VS Code dark theme", async ({ 
 	const progressRing = component.locator("vscode-progress-ring")
 
 	await progressRing.evaluate(async (element) => {
-		await document.fonts.ready
 		await customElements.whenDefined("vscode-progress-ring")
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
