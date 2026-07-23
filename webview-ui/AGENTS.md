@@ -42,7 +42,26 @@ Codecov tracks `webview-ui` coverage under the `webview-ui` flag.
 
 ## Visual Tests (Playwright CT)
 
-- Add Playwright screenshot tests selectively for components where layout, styling, VS Code theme variables, or real web-component rendering are part of the behavior under test.
+### When a UI change needs a snapshot
+
+If your PR changes anything a user would notice at a glance — layout, spacing, theme tokens, brand elements, gradients, mask/blur effects, hover/empty/error states — **add a `*.visual.tsx` snapshot to the same PR**. Do not attach screenshots to the PR description as evidence; commit the baseline instead so future PRs get regression coverage automatically.
+
+Visual regression is screen-based, not line-based — the goal is a small set of durable "pixel receipts" for the surfaces users see first, not blanket coverage. Prefer covering:
+
+- Onboarding / first-run surfaces (welcome view, hero, unconfigured state)
+- Empty and error states (no history, provider misconfig, degraded modes)
+- Theme-critical layouts that rely heavily on `--vscode-*` tokens or CSS masks/gradients
+- One representative snapshot per user-facing screen — not per component
+
+Skip a visual test when the change is behavior-only (state transitions, handler wiring, validation) — those belong in Vitest. Visual tests are for what JSDOM cannot verify.
+
+### Where the two coverage flags fit
+
+- `webview-ui` (Vitest + JSDOM) — broad line coverage over component logic, hooks, and state. This is your main coverage gate.
+- `webview-ui-ct` (Playwright CT) — narrow pixel-regression signal over a small set of critical screens. Low absolute % is expected and fine; the flag is not a coverage-to-hit target, it's a "did the surface still render the same" check.
+
+### Authoring rules
+
 - Keep behavioral assertions in Vitest. A `*.visual.tsx` test should establish a deterministic state and make a focused screenshot assertion.
 - Run visual comparisons with `pnpm test:visual:docker` from `webview-ui/`.
 - Update intentional baselines with `pnpm test:visual:docker:update` and commit the resulting `__screenshots__` files with the UI change.
