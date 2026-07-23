@@ -290,6 +290,10 @@ vi.mock("../../config/ContextProxy", () => {
 			)
 		})
 		setProviderSettings = vi.fn().mockImplementation((settings: Record<string, any>) => this.setValues(settings))
+		resetAllState = vi.fn().mockImplementation(() => {
+			const keys = this.context?.globalState?.keys?.() ?? []
+			return Promise.all(keys.map((key: string) => this.setValue(key, undefined))).then(() => undefined)
+		})
 	}
 	return { ContextProxy: MockContextProxy }
 })
@@ -482,6 +486,7 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 			})),
 			setModeConfig: vi.fn().mockResolvedValue(undefined),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			resetAllConfigs: vi.fn().mockResolvedValue(undefined),
 		}
 	}),
 }))
@@ -492,6 +497,7 @@ vi.mock("../../config/CustomModesManager", () => ({
 		return {
 			updateCustomMode: vi.fn().mockResolvedValue(undefined),
 			getCustomModes: vi.fn().mockResolvedValue([]),
+			resetCustomModes: vi.fn().mockResolvedValue(undefined),
 			dispose: vi.fn(),
 		}
 	}),
@@ -1033,6 +1039,106 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.apiConfiguration.apiProvider).toBe("bedrock")
 			expect(state.apiConfiguration.awsBedrockEndpoint).toBe("http://127.0.0.1:4567")
 			expect((provider as any).viewLocalState.apiConfiguration.apiProvider).toBe("bedrock")
+
+			await provider.dispose()
+		})
+	})
+
+	describe("profile mutations", () => {
+		it("should synchronize viewLocalState when activateProviderProfile mutates ContextProxy", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValueOnce({
+				name: "new-profile",
+				id: "new-profile-id",
+				apiProvider: "openrouter",
+				openRouterModelId: "openrouter/new-model",
+			} as any)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([
+				{ id: "new-profile-id", name: "new-profile", apiProvider: "openrouter" },
+			] as any)
+			;(provider as any).viewLocalState = {
+				currentApiConfigName: "stale-profile",
+				apiConfiguration: { apiProvider: "anthropic" },
+			}
+
+			await provider.activateProviderProfile({ name: "new-profile" })
+			const state = await provider.getState()
+
+			expect(state.currentApiConfigName).toBe("new-profile")
+			expect(state.apiConfiguration).toMatchObject({
+				apiProvider: "openrouter",
+				openRouterModelId: "openrouter/new-model",
+			})
+
+			await provider.dispose()
+		})
+
+		it("should synchronize viewLocalState when upsertProviderProfile activates a saved profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "test-id", name: "saved-profile", apiProvider: "bedrock" },
+			] as any)
+			;(provider as any).viewLocalState = {
+				currentApiConfigName: "stale-profile",
+				apiConfiguration: { apiProvider: "anthropic" },
+			}
+
+			await provider.upsertProviderProfile("saved-profile", {
+				apiProvider: "bedrock",
+				awsRegion: "us-east-1",
+			} as any)
+			const state = await provider.getState()
+
+			expect(state.currentApiConfigName).toBe("saved-profile")
+			expect(state.apiConfiguration).toMatchObject({
+				apiProvider: "bedrock",
+				awsRegion: "us-east-1",
+			})
+
+			await provider.dispose()
+		})
+
+		it("should synchronize viewLocalState when deleteProviderProfile selects a replacement profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider.contextProxy.setValue("currentApiConfigName" as any, "deleted-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta" as any, [
+				{ id: "deleted-id", name: "deleted-profile", apiProvider: "anthropic" },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: "openrouter" },
+			])
+			;(provider as any).viewLocalState = {
+				currentApiConfigName: "deleted-profile",
+				apiConfiguration: { apiProvider: "anthropic" },
+			}
+
+			await provider.deleteProviderProfile({
+				id: "deleted-id",
+				name: "deleted-profile",
+				apiProvider: "anthropic",
+			} as any)
+			const state = await provider.getState()
+
+			expect(state.currentApiConfigName).toBe("replacement-profile")
+			expect(state.listApiConfigMeta).toEqual([
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: "openrouter" },
+			])
+
+			await provider.dispose()
+		})
+
+		it("should clear viewLocalState when resetState resets ContextProxy", async () => {
+			vi.mocked(vscode.window.showInformationMessage).mockImplementationOnce(
+				async (_message: string, _options: unknown, confirm: unknown) => confirm as any,
+			)
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			;(provider as any).viewLocalState = {
+				mode: "architect",
+				currentApiConfigName: "stale-profile",
+				apiConfiguration: { apiProvider: "openrouter" },
+			}
+
+			await provider.resetState()
+
+			expect((provider as any).viewLocalState).toEqual({})
 
 			await provider.dispose()
 		})
