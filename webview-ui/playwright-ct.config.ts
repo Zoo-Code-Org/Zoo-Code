@@ -1,11 +1,27 @@
 import path from "path"
 import { fileURLToPath } from "url"
 
-import { defineConfig } from "@playwright/experimental-ct-react"
+import { defineConfig, type ReporterDescription } from "@playwright/experimental-ct-react"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
+
+const monocartReporter: ReporterDescription = [
+	"monocart-reporter",
+	{
+		name: "Webview Playwright CT",
+		outputFile: path.resolve(dirname, "coverage-ct/index.html"),
+		coverage: {
+			outputDir: path.resolve(dirname, "coverage-ct"),
+			reports: ["lcovonly", "v8"],
+			// Entry URLs are the served asset chunks (`/assets/*.js`); filter kept
+			// permissive so V8 coverage can then source-map back to originals.
+			entryFilter: (entry: { url: string }) => entry.url.includes("/assets/"),
+			sourceFilter: (sourcePath: string) => sourcePath.includes("src/"),
+		},
+	},
+]
 
 export default defineConfig({
 	testDir: "./src",
@@ -14,8 +30,13 @@ export default defineConfig({
 	snapshotPathTemplate: "{testDir}/{testFileDir}/__screenshots__/{arg}{ext}",
 	fullyParallel: true,
 	reporter: process.env.CI
-		? [["html", { open: "never", outputFolder: path.resolve(dirname, "playwright-report") }], ["github"], ["list"]]
-		: [["html", { open: "never", outputFolder: "/tmp/webview-ui-playwright-report" }], ["list"]],
+		? [
+				["html", { open: "never", outputFolder: path.resolve(dirname, "playwright-report") }],
+				["github"],
+				["list"],
+				monocartReporter,
+			]
+		: [["html", { open: "never", outputFolder: "/tmp/webview-ui-playwright-report" }], ["list"], monocartReporter],
 	use: {
 		ctTemplateDir: "./playwright",
 		ctViteConfig: {

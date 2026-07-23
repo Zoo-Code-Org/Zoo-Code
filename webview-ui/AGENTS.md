@@ -50,3 +50,4 @@ Codecov tracks `webview-ui` coverage under the `webview-ui` flag.
 - If Docker is unavailable, `pnpm test:visual` can help diagnose test code, but do not create or update committed baselines from the host rendering environment.
 - Keep visual tests limited to components supported by the current Playwright harness. Add shared extension state, translation, React Query, or other provider support before snapshotting components that require it.
 - The current baseline naming assumes a single Chromium project. Include `{projectName}` in `snapshotPathTemplate` before adding another browser project.
+- Import `test` and `expect` from `webview-ui/playwright/coverage-fixture.ts` (not directly from `@playwright/experimental-ct-react`) so the auto-fixture collects V8 coverage for `monocart-reporter` — that's what produces `coverage-ct/lcov.info` for the Codecov upload.

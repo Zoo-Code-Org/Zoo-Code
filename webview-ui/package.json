@@ -107,7 +107,7 @@
 		"@vitest/ui": "4.1.9",
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
-		"monocart-coverage-reports": "^2.12.12",
+		"monocart-reporter": "^2.9.20",
 		"vite": "8.1.0",
 		"vitest": "4.1.9"
 	}

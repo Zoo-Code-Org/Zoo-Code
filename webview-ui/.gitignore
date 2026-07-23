@@ -7,6 +7,9 @@
 
 # testing
 /coverage
+/coverage-ct
+/monocart-report
+/assets/monocart-coverage-app.js
 /playwright-report
 /test-results
 /playwright/.cache

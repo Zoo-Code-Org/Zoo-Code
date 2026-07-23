@@ -32,7 +32,7 @@
 				"source-map",
 				"tailwindcss",
 				"tailwindcss-animate",
-				"monocart-coverage-reports"
+				"monocart-reporter"
 			]
 		},
 		"apps/cli": {

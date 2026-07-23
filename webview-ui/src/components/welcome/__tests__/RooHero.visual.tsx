@@ -1,6 +1,6 @@
 import React from "react"
-import { expect, test } from "@playwright/experimental-ct-react"
 
+import { expect, test } from "../../../../playwright/coverage-fixture"
 import RooHero from "../RooHero"
 
 test("renders the welcome hero in the VS Code dark theme", async ({ mount }) => {
