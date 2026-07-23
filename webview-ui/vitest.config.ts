@@ -33,6 +33,8 @@ export default defineConfig({
 				"**/*.test.tsx",
 				"**/*.spec.ts",
 				"**/*.spec.tsx",
+				"**/*.visual.ts",
+				"**/*.visual.tsx",
 				"**/vitest.setup.ts",
 				"**/vitest.config.ts",
 				"**/vite.config.ts",
