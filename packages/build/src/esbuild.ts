@@ -197,15 +197,23 @@ function copyEsbuildWasmFiles(nodeModulesDir: string, distDir: string): void {
 	]
 
 	for (const { src, dest } of filesToCopy) {
-		fs.copyFileSync(src, dest)
-
-		// Make CLI executable.
 		if (src.endsWith("esbuild")) {
+			// Read the esbuild binary, patch it to prevent the V8 crash (crbug.com/1201626)
+			// by eagerly initializing process.stdout.fd and process.stderr.fd on line 2
+			// before WebAssembly execution takes place.
+			let content = fs.readFileSync(src, "utf8")
+			content = content.replace(
+				/^(#!.*$)/m,
+				"$1\n// Eagerly initialize stdout/stderr to avoid V8 crash (crbug.com/1201626) inside WASM stack\nconst _ = [process.stdout.fd, process.stderr.fd];",
+			)
+			fs.writeFileSync(dest, content)
 			try {
 				fs.chmodSync(dest, 0o755)
 			} catch {
 				// Ignore chmod errors on Windows.
 			}
+		} else {
+			fs.copyFileSync(src, dest)
 		}
 	}
 
