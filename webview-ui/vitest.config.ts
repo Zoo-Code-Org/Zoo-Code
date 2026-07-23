@@ -15,7 +15,7 @@ export default defineConfig({
 		reporters,
 		silent,
 		environment: "jsdom",
-		include: ["src/**/*.spec.ts", "src/**/*.spec.tsx"],
+		include: ["src/**/*.spec.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
 		onConsoleLog,
 		maxWorkers: isCI ? 1 : undefined,
 		testTimeout: isCI ? 15000 : 5000,

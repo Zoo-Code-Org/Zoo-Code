@@ -1,7 +1,8 @@
 import path from "path"
 import { fileURLToPath } from "url"
 
-import { defineConfig, type ReporterDescription } from "@playwright/experimental-ct-react"
+import { defineConfig } from "@playwright/experimental-ct-react"
+import type { ReporterDescription } from "@playwright/test"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 
@@ -15,10 +16,13 @@ const monocartReporter: ReporterDescription = [
 		coverage: {
 			outputDir: path.resolve(dirname, "coverage-ct"),
 			reports: ["lcovonly", "v8"],
-			// Entry URLs are the served asset chunks (`/assets/*.js`); filter kept
-			// permissive so V8 coverage can then source-map back to originals.
-			entryFilter: (entry: { url: string }) => entry.url.includes("/assets/"),
-			sourceFilter: (sourcePath: string) => sourcePath.includes("src/"),
+			// Entry URLs from Vite CT dev server or built bundle.
+			entryFilter: (entry: { url: string }) => entry.url.includes("/src/") || entry.url.includes("/assets/"),
+			sourceFilter: (sourcePath: string) =>
+				sourcePath.includes("src/") &&
+				!sourcePath.includes(".visual.") &&
+				!sourcePath.includes(".spec.") &&
+				!sourcePath.includes(".test."),
 		},
 	},
 ]
@@ -26,7 +30,7 @@ const monocartReporter: ReporterDescription = [
 export default defineConfig({
 	testDir: "./src",
 	testMatch: "**/*.visual.tsx",
-	outputDir: process.env.CI ? path.resolve(dirname, "test-results") : "/tmp/webview-ui-playwright-test-results",
+	outputDir: path.resolve(dirname, "test-results"),
 	snapshotPathTemplate: "{testDir}/{testFileDir}/__screenshots__/{arg}{ext}",
 	fullyParallel: true,
 	reporter: process.env.CI
@@ -36,7 +40,11 @@ export default defineConfig({
 				["list"],
 				monocartReporter,
 			]
-		: [["html", { open: "never", outputFolder: "/tmp/webview-ui-playwright-report" }], ["list"], monocartReporter],
+		: [
+				["html", { open: "never", outputFolder: path.resolve(dirname, "playwright-report") }],
+				["list"],
+				monocartReporter,
+			],
 	use: {
 		ctTemplateDir: "./playwright",
 		ctViteConfig: {

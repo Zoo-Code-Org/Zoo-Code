@@ -5,7 +5,7 @@ services:
         user: "${UID:-1000}:${GID:-1000}"
         working_dir: /work
         environment:
-            COREPACK_HOME: /tmp/corepack
+            COREPACK_HOME: /work/node_modules/.cache/corepack
             HOME: /tmp/playwright
         volumes:
             - ..:/work

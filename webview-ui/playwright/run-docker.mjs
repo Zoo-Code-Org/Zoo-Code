@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -27,11 +27,27 @@ const spawnEnv = {
 const hasComposePlugin = spawnSync("docker", ["compose", "version"], { stdio: "ignore" }).status === 0
 const command = hasComposePlugin ? "docker" : "docker-compose"
 const args = hasComposePlugin ? ["compose", ...composeArgs] : composeArgs
-const result = spawnSync(command, args, { stdio: "inherit", env: spawnEnv })
 
-if (result.error) {
-	console.error(`Unable to run ${command}: ${result.error.message}`)
-	process.exit(1)
+const child = spawn(command, args, { stdio: "inherit", env: spawnEnv })
+
+const forwardSignal = (signal) => {
+	if (child.pid && !child.killed) {
+		child.kill(signal)
+	}
 }
 
-process.exit(result.status ?? 1)
+process.on("SIGINT", () => forwardSignal("SIGINT"))
+process.on("SIGTERM", () => forwardSignal("SIGTERM"))
+
+child.on("error", (err) => {
+	console.error(`Unable to run ${command}: ${err.message}`)
+	process.exit(1)
+})
+
+child.on("close", (code, signal) => {
+	if (signal) {
+		process.kill(process.pid, signal)
+	} else {
+		process.exit(code ?? 1)
+	}
+})
