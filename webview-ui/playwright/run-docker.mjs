@@ -9,13 +9,25 @@ const updateSnapshots = process.argv.includes("--update")
 const composeArgs = ["-f", composeFile, "run", "--rm", "visual"]
 
 if (updateSnapshots) {
-	composeArgs.push("sh", "-lc", "corepack pnpm --filter @roo-code/vscode-webview test:visual:update")
+	// Inlined so host-rendered baselines aren't reachable via a `pnpm` script.
+	composeArgs.push(
+		"sh",
+		"-lc",
+		"corepack pnpm --filter @roo-code/vscode-webview exec playwright test -c playwright-ct.config.ts --update-snapshots",
+	)
+}
+
+// Compose falls back to UID 1000 if not passed; that mis-owns generated files.
+const spawnEnv = {
+	...process.env,
+	UID: String(process.getuid?.() ?? 1000),
+	GID: String(process.getgid?.() ?? 1000),
 }
 
 const hasComposePlugin = spawnSync("docker", ["compose", "version"], { stdio: "ignore" }).status === 0
 const command = hasComposePlugin ? "docker" : "docker-compose"
 const args = hasComposePlugin ? ["compose", ...composeArgs] : composeArgs
-const result = spawnSync(command, args, { stdio: "inherit" })
+const result = spawnSync(command, args, { stdio: "inherit", env: spawnEnv })
 
 if (result.error) {
 	console.error(`Unable to run ${command}: ${result.error.message}`)

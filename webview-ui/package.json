@@ -9,7 +9,6 @@
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
 		"test:visual": "playwright test -c playwright-ct.config.ts",
-		"test:visual:update": "playwright test -c playwright-ct.config.ts --update-snapshots",
 		"test:visual:docker": "node playwright/run-docker.mjs",
 		"test:visual:docker:update": "node playwright/run-docker.mjs --update",
 		"format": "prettier --write src",
