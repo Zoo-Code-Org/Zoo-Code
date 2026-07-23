@@ -46,6 +46,7 @@ export default defineConfig({
 			optimizeDeps: {
 				exclude: ["@vscode/codicons"],
 			},
+			publicDir: path.resolve(dirname, "../src/assets/images"),
 		},
 		viewport: { width: 520, height: 360 },
 		deviceScaleFactor: 1,
