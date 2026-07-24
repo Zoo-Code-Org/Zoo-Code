@@ -17,7 +17,9 @@
 		"condenseContext": "컨텍스트 지능적으로 압축",
 		"openApiHistory": "API 기록 열기",
 		"openUiHistory": "UI 기록 열기",
-		"backToParentTask": "상위 작업"
+		"backToParentTask": "상위 작업",
+		"waitingOnSubtask": "하위 작업 대기 중",
+		"goToSubtask": "하위 작업으로 이동"
 	},
 	"unpin": "고정 해제하기",
 	"pin": "고정하기",

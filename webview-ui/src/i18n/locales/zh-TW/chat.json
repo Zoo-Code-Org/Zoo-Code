@@ -17,7 +17,9 @@
 		"delete": "刪除工作（按住 Shift 並點選可跳過確認）",
 		"openApiHistory": "開啟 API 歷史紀錄",
 		"openUiHistory": "開啟 UI 歷史紀錄",
-		"backToParentTask": "上層工作"
+		"backToParentTask": "上層工作",
+		"waitingOnSubtask": "等待子任務",
+		"goToSubtask": "前往子任務"
 	},
 	"unpin": "取消釘選",
 	"pin": "釘選",

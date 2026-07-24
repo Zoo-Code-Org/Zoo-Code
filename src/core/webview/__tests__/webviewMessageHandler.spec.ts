@@ -401,6 +401,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"kimi-code": {},
@@ -588,6 +589,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"kimi-code": {},
@@ -649,6 +651,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"kimi-code": {},
@@ -1573,9 +1576,7 @@ describe("webviewMessageHandler - kimiCodeSignIn", () => {
 
 		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
 
-		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-			expect.stringContaining("Kimi Code sign in failed"),
-		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Kimi Code sign in failed"))
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 	})
 })

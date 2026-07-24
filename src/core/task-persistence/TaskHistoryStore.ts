@@ -430,23 +430,27 @@ export class TaskHistoryStore {
 	 * Invalidate a single task's cache entry (re-read from disk on next access).
 	 */
 	async invalidate(taskId: string): Promise<void> {
-		try {
-			const item = await this.readTaskFile(taskId)
-			if (item) {
-				this.cache.set(taskId, item)
-			} else {
+		return this.withLock(async () => {
+			try {
+				const item = await this.readTaskFile(taskId)
+				if (item) {
+					this.cache.set(taskId, item)
+				} else {
+					this.cache.delete(taskId)
+				}
+			} catch {
 				this.cache.delete(taskId)
 			}
-		} catch {
-			this.cache.delete(taskId)
-		}
+		})
 	}
 
 	/**
-	 * Clear all in-memory cache and reload from index.
+	 * Clear all in-memory cache entries; a subsequent `reconcile()` repopulates them from task files.
 	 */
-	invalidateAll(): void {
-		this.cache.clear()
+	async invalidateAll(): Promise<void> {
+		return this.withLock(async () => {
+			this.cache.clear()
+		})
 	}
 
 	// ────────────────────────────── Migration ──────────────────────────────

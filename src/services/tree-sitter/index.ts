@@ -5,6 +5,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 import { parseMarkdown } from "./markdownParser"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { QueryCapture } from "web-tree-sitter"
+import { isNonStructuralExtension } from "../shared/fallback-extensions"
 
 // Private constant
 const DEFAULT_MIN_COMPONENT_LINES_VALUE = 4
@@ -66,6 +67,8 @@ const extensions = [
 	// Markdown
 	"md",
 	"markdown",
+	// Plain text
+	"txt",
 	// JSON
 	"json",
 	// CSS
@@ -108,6 +111,11 @@ export async function parseSourceCodeDefinitionsForFile(
 	const ext = path.extname(filePath).toLowerCase()
 	// Check if the file extension is supported
 	if (!extensions.includes(ext)) {
+		return undefined
+	}
+
+	// Files without a structural parser have no definitions to extract
+	if (isNonStructuralExtension(ext)) {
 		return undefined
 	}
 

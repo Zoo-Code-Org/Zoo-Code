@@ -17,7 +17,9 @@
 		"condenseContext": "Condensar context de forma intel·ligent",
 		"openApiHistory": "Obrir historial d'API",
 		"openUiHistory": "Obrir historial d'UI",
-		"backToParentTask": "Tasca principal"
+		"backToParentTask": "Tasca principal",
+		"waitingOnSubtask": "Esperant subtasca",
+		"goToSubtask": "Anar a la subtasca"
 	},
 	"unpin": "Desfixar",
 	"pin": "Fixar",

@@ -3,6 +3,12 @@ import { z } from "zod"
 import { modelInfoSchema, reasoningEffortSettingSchema, verbosityLevelsSchema, serviceTierSchema } from "./model.js"
 import { codebaseIndexProviderSchema } from "./codebase-index.js"
 import {
+	providerIdentifiers,
+	retiredProviderIdentifiers,
+	type ProviderIdentifier,
+	type RetiredProviderIdentifier,
+} from "./provider-identifiers.js"
+import {
 	anthropicModels,
 	basetenModels,
 	bedrockModels,
@@ -38,17 +44,18 @@ export const DEFAULT_CONSECUTIVE_MISTAKE_LIMIT = 3
  */
 
 export const dynamicProviders = [
-	"openrouter",
-	"vercel-ai-gateway",
-	"zoo-gateway",
-	"litellm",
-	"requesty",
-	"unbound",
-	"poe",
-	"deepseek",
-	"opencode-go",
-	"kenari",
-	"kimi-code",
+	providerIdentifiers.openrouter,
+	providerIdentifiers.vercelAiGateway,
+	providerIdentifiers.zooGateway,
+	providerIdentifiers.litellm,
+	providerIdentifiers.requesty,
+	providerIdentifiers.unbound,
+	providerIdentifiers.poe,
+	providerIdentifiers.deepseek,
+	providerIdentifiers.moonshot,
+	providerIdentifiers.opencodeGo,
+	providerIdentifiers.kenari,
+	providerIdentifiers.kimiCode,
 ] as const
 
 export type DynamicProvider = (typeof dynamicProviders)[number]
@@ -62,7 +69,7 @@ export const isDynamicProvider = (key: string): key is DynamicProvider =>
  * Local providers require localhost API calls in order to get the model list.
  */
 
-export const localProviders = ["ollama", "lmstudio"] as const
+export const localProviders = [providerIdentifiers.ollama, providerIdentifiers.lmstudio] as const
 
 export type LocalProvider = (typeof localProviders)[number]
 
@@ -75,7 +82,7 @@ export const isLocalProvider = (key: string): key is LocalProvider => localProvi
  * model list.
  */
 
-export const internalProviders = ["vscode-lm"] as const
+export const internalProviders = [providerIdentifiers.vscodeLm] as const
 
 export type InternalProvider = (typeof internalProviders)[number]
 
@@ -88,7 +95,7 @@ export const isInternalProvider = (key: string): key is InternalProvider =>
  * Custom providers are completely configurable within Roo Code settings.
  */
 
-export const customProviders = ["openai"] as const
+export const customProviders = [providerIdentifiers.openai] as const
 
 export type CustomProvider = (typeof customProviders)[number]
 
@@ -101,7 +108,7 @@ export const isCustomProvider = (key: string): key is CustomProvider => customPr
  * model lists.
  */
 
-export const fauxProviders = ["fake-ai"] as const
+export const fauxProviders = [providerIdentifiers.fakeAi] as const
 
 export type FauxProvider = (typeof fauxProviders)[number]
 
@@ -111,33 +118,7 @@ export const isFauxProvider = (key: string): key is FauxProvider => fauxProvider
  * ProviderName
  */
 
-export const providerNames = [
-	...dynamicProviders,
-	...localProviders,
-	...internalProviders,
-	...customProviders,
-	...fauxProviders,
-	"anthropic",
-	"bedrock",
-	"baseten",
-	"deepseek",
-	"fireworks",
-	"friendli",
-	"gemini",
-	"gemini-cli",
-	"mistral",
-	"moonshot",
-	"kimi-code",
-	"minimax",
-	"mimo",
-	"openai-codex",
-	"openai-native",
-	"qwen-code",
-	"sambanova",
-	"vertex",
-	"xai",
-	"zai",
-] as const
+export const providerNames = Object.values(providerIdentifiers) as [ProviderIdentifier, ...ProviderIdentifier[]]
 
 export const providerNamesSchema = z.enum(providerNames)
 
@@ -150,17 +131,10 @@ export const isProviderName = (key: unknown): key is ProviderName =>
  * RetiredProviderName
  */
 
-export const retiredProviderNames = [
-	"cerebras",
-	"chutes",
-	"deepinfra",
-	"doubao",
-	"featherless",
-	"groq",
-	"huggingface",
-	"io-intelligence",
-	"roo",
-] as const
+export const retiredProviderNames = Object.values(retiredProviderIdentifiers) as [
+	RetiredProviderIdentifier,
+	...RetiredProviderIdentifier[],
+]
 
 export const retiredProviderNamesSchema = z.enum(retiredProviderNames)
 

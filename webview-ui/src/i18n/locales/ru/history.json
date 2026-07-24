@@ -47,5 +47,7 @@
 	"subtaskTag": "Подзадача",
 	"deleteWithSubtasks": "Это также удалит {{count}} подзадачу(и). Вы уверены?",
 	"expandSubtasks": "Развернуть подзадачи",
-	"collapseSubtasks": "Свернуть подзадачи"
+	"collapseSubtasks": "Свернуть подзадачи",
+	"delegatedTag": "Ожидание подзадачи",
+	"interruptedTag": "Прервано"
 }

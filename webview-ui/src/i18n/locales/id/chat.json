@@ -17,7 +17,9 @@
 		"delete": "Hapus Tugas (Shift + Klik untuk lewati konfirmasi)",
 		"openApiHistory": "Buka Riwayat API",
 		"openUiHistory": "Buka Riwayat UI",
-		"backToParentTask": "Tugas Induk"
+		"backToParentTask": "Tugas Induk",
+		"waitingOnSubtask": "Menunggu subtugas",
+		"goToSubtask": "Pergi ke subtugas"
 	},
 	"history": {
 		"title": "Riwayat"

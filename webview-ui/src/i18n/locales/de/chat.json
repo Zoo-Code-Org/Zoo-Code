@@ -17,7 +17,9 @@
 		"condenseContext": "Kontext intelligent komprimieren",
 		"openApiHistory": "API-Verlauf öffnen",
 		"openUiHistory": "UI-Verlauf öffnen",
-		"backToParentTask": "Übergeordnete Aufgabe"
+		"backToParentTask": "Übergeordnete Aufgabe",
+		"waitingOnSubtask": "Wartet auf Unteraufgabe",
+		"goToSubtask": "Zur Unteraufgabe"
 	},
 	"unpin": "Lösen von oben",
 	"pin": "Anheften",
