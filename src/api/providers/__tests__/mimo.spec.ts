@@ -84,16 +84,16 @@ describe("MimoHandler", () => {
 			expect(model.id).toBe("mimo-v2.5-pro")
 			expect(model.info.contextWindow).toBe(1_048_576)
 			expect(model.info.maxTokens).toBe(131_072)
-			expect(model.info.inputPrice).toBe(1.0)
-			expect(model.info.outputPrice).toBe(3.0)
+			expect(model.info.inputPrice).toBe(0.435)
+			expect(model.info.outputPrice).toBe(0.87)
 		})
 
 		it("should return correct model info for mimo-v2.5", () => {
 			const h = new MimoHandler({ ...mockOptions, apiModelId: "mimo-v2.5" })
 			const model = h.getModel()
 			expect(model.id).toBe("mimo-v2.5")
-			expect(model.info.inputPrice).toBe(0.4)
-			expect(model.info.outputPrice).toBe(2.0)
+			expect(model.info.inputPrice).toBe(0.14)
+			expect(model.info.outputPrice).toBe(0.28)
 		})
 
 		it("should fallback to default model for unknown model ID", () => {
