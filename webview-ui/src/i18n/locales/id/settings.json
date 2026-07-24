@@ -459,6 +459,17 @@
 		"moonshotApiKey": "Kunci API Moonshot",
 		"getMoonshotApiKey": "Dapatkan Kunci API Moonshot",
 		"moonshotBaseUrl": "Titik Masuk Moonshot",
+		"kimiCode": {
+			"authMethod": "Metode autentikasi",
+			"oauth": "Langganan Kimi Code (OAuth)",
+			"apiKey": "Kunci API Kimi Code",
+			"apiKeyLabel": "Kunci API Kimi Code",
+			"signIn": "Masuk ke Kimi Code",
+			"signOut": "Keluar",
+			"authenticated": "Masuk ke Kimi Code",
+			"deviceCodeHelp": "Masukkan kode perangkat ini di halaman otorisasi Kimi:",
+			"docs": "Dokumentasi Kimi Code"
+		},
 		"zaiApiKey": "Kunci API Z AI",
 		"getZaiApiKey": "Dapatkan Kunci API Z AI",
 		"zaiEntrypoint": "Titik Masuk Z AI",

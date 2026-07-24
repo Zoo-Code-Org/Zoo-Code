@@ -45,6 +45,7 @@ const expectedProviderIdentifiers = [
 	"gemini-cli",
 	"mistral",
 	"moonshot",
+	"kimi-code",
 	"minimax",
 	"mimo",
 	"openai-codex",
@@ -104,6 +105,7 @@ describe("provider identifiers", () => {
 			providerIdentifiers.moonshot,
 			providerIdentifiers.opencodeGo,
 			providerIdentifiers.kenari,
+			providerIdentifiers.kimiCode,
 		])
 		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])
 		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm])

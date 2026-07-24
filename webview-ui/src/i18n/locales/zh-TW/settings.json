@@ -486,6 +486,17 @@
 		"moonshotApiKey": "Moonshot API 金鑰",
 		"getMoonshotApiKey": "取得 Moonshot API 金鑰",
 		"moonshotBaseUrl": "Moonshot 服務端點",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"minimaxApiKey": "MiniMax API 金鑰",
 		"getMiniMaxApiKey": "取得 MiniMax API 金鑰",
 		"minimaxBaseUrl": "MiniMax 服務端點",

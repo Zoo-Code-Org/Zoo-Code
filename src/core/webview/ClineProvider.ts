@@ -2559,6 +2559,22 @@ export class ClineProvider
 					return false
 				}
 			})(),
+			kimiCodeIsAuthenticated: await (async () => {
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					return await kimiCodeOAuthManager.isAuthenticated()
+				} catch {
+					return false
+				}
+			})(),
+			kimiCodeOAuthState: await (async () => {
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					return kimiCodeOAuthManager.getState()
+				} catch {
+					return undefined
+				}
+			})(),
 			...zooCodeState,
 			platform: process.platform,
 			arch: process.arch,

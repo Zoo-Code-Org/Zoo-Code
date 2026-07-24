@@ -640,6 +640,57 @@ describe("reasoning.ts", () => {
 
 			expect(result).toBeUndefined()
 		})
+
+		it("should fall back to the model default when the persisted effort is outside the capability array", () => {
+			const modelWithEffortArray: ModelInfo = {
+				...baseModel,
+				supportsReasoningEffort: ["low", "high", "max"],
+				reasoningEffort: "max",
+			}
+
+			const options = {
+				...baseOptions,
+				model: modelWithEffortArray,
+				settings: { reasoningEffort: "medium" } as ProviderSettings,
+				reasoningEffort: undefined,
+			}
+
+			expect(getOpenAiReasoning(options)).toEqual({ reasoning_effort: "max" })
+		})
+
+		it("should not fall back to the model default when reasoning was explicitly disabled", () => {
+			const modelWithEffortArray: ModelInfo = {
+				...baseModel,
+				supportsReasoningEffort: ["low", "high", "max"],
+				reasoningEffort: "max",
+			}
+
+			const options = {
+				...baseOptions,
+				model: modelWithEffortArray,
+				settings: { enableReasoningEffort: false, reasoningEffort: "disable" } as ProviderSettings,
+				reasoningEffort: undefined,
+			}
+
+			expect(getOpenAiReasoning(options)).toBeUndefined()
+		})
+
+		it("should not fall back to the model default when the persisted effort is an explicit none", () => {
+			const modelWithEffortArray: ModelInfo = {
+				...baseModel,
+				supportsReasoningEffort: ["low", "high", "max"],
+				reasoningEffort: "max",
+			}
+
+			const options = {
+				...baseOptions,
+				model: modelWithEffortArray,
+				settings: { reasoningEffort: "none" } as ProviderSettings,
+				reasoningEffort: undefined,
+			}
+
+			expect(getOpenAiReasoning(options)).toBeUndefined()
+		})
 	})
 
 	describe("Gemini reasoning (effort models)", () => {

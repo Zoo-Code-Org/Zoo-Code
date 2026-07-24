@@ -404,6 +404,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -591,6 +592,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -652,6 +654,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -1468,5 +1471,150 @@ describe("zooCodeSignOut", () => {
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
 		)
+	})
+})
+
+describe("webviewMessageHandler - kimiCodeSignIn", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.resetModules()
+	})
+
+	it("starts OAuth authorization and opens browser", async () => {
+		const mockStartAuthorization = vi.fn().mockResolvedValue({
+			userCode: "TEST-CODE",
+			verificationUri: "https://auth.kimi.com/device",
+			expiresAt: Date.now() + 600000,
+		})
+		const mockWaitForAuthorization = vi.fn().mockResolvedValue({
+			type: "kimi-code",
+			accessToken: "token",
+			refreshToken: "refresh",
+			expiresAt: Date.now() + 3600000,
+		})
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				startAuthorization: mockStartAuthorization,
+				waitForAuthorization: mockWaitForAuthorization,
+			},
+		}))
+
+		const mockOpenExternal = vi.fn().mockResolvedValue(true)
+		;(vscode as any).env = { openExternal: mockOpenExternal }
+		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
+
+		expect(mockStartAuthorization).toHaveBeenCalled()
+		expect(mockOpenExternal).toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("shows success message after successful authorization", async () => {
+		const mockStartAuthorization = vi.fn().mockResolvedValue({
+			userCode: "TEST-CODE",
+			verificationUri: "https://auth.kimi.com/device",
+			expiresAt: Date.now() + 600000,
+		})
+		const mockWaitForAuthorization = vi.fn().mockResolvedValue({
+			type: "kimi-code",
+			accessToken: "token",
+			refreshToken: "refresh",
+			expiresAt: Date.now() + 3600000,
+		})
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				startAuthorization: mockStartAuthorization,
+				waitForAuthorization: mockWaitForAuthorization,
+			},
+		}))
+
+		const mockOpenExternal = vi.fn().mockResolvedValue(true)
+		;(vscode as any).env = { openExternal: mockOpenExternal }
+		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
+		await new Promise((resolve) => setTimeout(resolve, 10))
+
+		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("Successfully signed in to Kimi Code")
+	})
+
+	it("handles authorization failure", async () => {
+		const mockStartAuthorization = vi.fn().mockResolvedValue({
+			userCode: "TEST-CODE",
+			verificationUri: "https://auth.kimi.com/device",
+			expiresAt: Date.now() + 600000,
+		})
+		const mockWaitForAuthorization = vi.fn().mockRejectedValue(new Error("Authorization cancelled"))
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				startAuthorization: mockStartAuthorization,
+				waitForAuthorization: mockWaitForAuthorization,
+			},
+		}))
+
+		const mockOpenExternal = vi.fn().mockResolvedValue(true)
+		;(vscode as any).env = { openExternal: mockOpenExternal }
+		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
+		await new Promise((resolve) => setTimeout(resolve, 10))
+
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("handles startAuthorization error", async () => {
+		const mockStartAuthorization = vi.fn().mockRejectedValue(new Error("Network error"))
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				startAuthorization: mockStartAuthorization,
+			},
+		}))
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
+
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Kimi Code sign in failed"))
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - kimiCodeSignOut", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.resetModules()
+	})
+
+	it("clears credentials and shows success message", async () => {
+		const mockClearCredentials = vi.fn().mockResolvedValue(undefined)
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				clearCredentials: mockClearCredentials,
+			},
+		}))
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignOut" })
+
+		expect(mockClearCredentials).toHaveBeenCalled()
+		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("Signed out from Kimi Code")
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("handles sign out error", async () => {
+		const mockClearCredentials = vi.fn().mockRejectedValue(new Error("Clear failed"))
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				clearCredentials: mockClearCredentials,
+			},
+		}))
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignOut" })
+
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Kimi Code sign out failed.")
 	})
 })

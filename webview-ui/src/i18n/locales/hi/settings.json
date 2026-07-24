@@ -459,6 +459,17 @@
 		"moonshotApiKey": "Moonshot API कुंजी",
 		"getMoonshotApiKey": "Moonshot API कुंजी प्राप्त करें",
 		"moonshotBaseUrl": "Moonshot प्रवेश बिंदु",
+		"kimiCode": {
+			"authMethod": "प्रमाणीकरण विधि",
+			"oauth": "Kimi Code सदस्यता (OAuth)",
+			"apiKey": "Kimi Code API कुंजी",
+			"apiKeyLabel": "Kimi Code API कुंजी",
+			"signIn": "Kimi Code में साइन इन करें",
+			"signOut": "साइन आउट करें",
+			"authenticated": "Kimi Code में साइन इन किया गया",
+			"deviceCodeHelp": "Kimi प्राधिकरण पृष्ठ पर यह डिवाइस कोड दर्ज करें:",
+			"docs": "Kimi Code दस्तावेज़ीकरण"
+		},
 		"zaiApiKey": "Z AI API कुंजी",
 		"getZaiApiKey": "Z AI API कुंजी प्राप्त करें",
 		"zaiEntrypoint": "Z AI प्रवेश बिंदु",

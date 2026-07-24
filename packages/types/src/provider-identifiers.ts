@@ -28,6 +28,7 @@ export const providerIdentifiers = {
 	geminiCli: "gemini-cli",
 	mistral: "mistral",
 	moonshot: "moonshot",
+	kimiCode: "kimi-code",
 	minimax: "minimax",
 	mimo: "mimo",
 	openaiCodex: "openai-codex",

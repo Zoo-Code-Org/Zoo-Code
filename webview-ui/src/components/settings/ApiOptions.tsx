@@ -56,6 +56,7 @@ import {
 	LiteLLM,
 	Mistral,
 	Moonshot,
+	KimiCode,
 	Ollama,
 	OpenAI,
 	OpenAICompatible,
@@ -116,7 +117,8 @@ const ApiOptions = ({
 	setErrorMessage,
 }: ApiOptionsProps) => {
 	const { t } = useAppTranslation()
-	const { organizationAllowList, openAiCodexIsAuthenticated } = useExtensionState()
+	const { organizationAllowList, openAiCodexIsAuthenticated, kimiCodeIsAuthenticated, kimiCodeOAuthState } =
+		useExtensionState()
 
 	const [customHeaders, setCustomHeaders] = useState<[string, string][]>(() => {
 		const headers = apiConfiguration?.openAiHeaders || {}
@@ -572,6 +574,15 @@ const ApiOptions = ({
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === "kimi-code" && (
+						<KimiCode
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							kimiCodeIsAuthenticated={kimiCodeIsAuthenticated}
+							kimiCodeOAuthState={kimiCodeOAuthState}
 						/>
 					)}
 
