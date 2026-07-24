@@ -26,8 +26,10 @@ const OPENAI_SUPPORTED_FORMATS = new Set([
 /**
  * Array-specific JSON Schema properties that must be nested inside array type variants
  * when converting to anyOf format (JSON Schema draft 2020-12).
+ * Note: maxItems and minItems are excluded from this list because AWS Bedrock
+ * does not support them in its JSON Schema 2020-12 implementation.
  */
-const ARRAY_SPECIFIC_PROPERTIES = ["items", "minItems", "maxItems", "uniqueItems"] as const
+const ARRAY_SPECIFIC_PROPERTIES = ["items", "uniqueItems"] as const
 
 /**
  * Applies array-specific properties from source to target object.
@@ -165,6 +167,9 @@ const NormalizedToolSchemaInternal: z.ZodType<Record<string, unknown>, z.ZodType
 					minItems,
 					maxItems,
 					uniqueItems,
+					minLength,
+					maxLength,
+					pattern,
 					...rest
 				} = schema
 				const result: Record<string, unknown> = { ...rest }

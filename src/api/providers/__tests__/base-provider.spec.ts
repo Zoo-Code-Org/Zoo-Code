@@ -140,7 +140,29 @@ describe("BaseProvider", () => {
 			expect(result.properties.level1.properties.level2.properties.level3.additionalProperties).toBe(false)
 		})
 
-		it("should convert nullable types to non-nullable", () => {
+		it("should strip maxItems from array schemas for Bedrock compatibility", () => {
+			const schema = {
+				type: "object",
+				properties: {
+					names: {
+						type: "array",
+						items: { type: "string" },
+						maxItems: 4,
+					},
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// maxItems should be stripped by normalizeToolSchema for Bedrock
+			// compatibility (Bedrock doesn't support maxItems in its JSON Schema
+			// 2020-12 subset)
+			expect(result.properties.names.type).toBe("array")
+			expect(result.properties.names.items).toEqual({ type: "string" })
+			expect(result.properties.names.maxItems).toBeUndefined()
+		})
+
+		it("should convert nullable types to anyOf (JSON Schema 2020-12)", () => {
 			const schema = {
 				type: "object",
 				properties: {
@@ -150,14 +172,27 @@ describe("BaseProvider", () => {
 
 			const result = provider.testConvertToolSchemaForOpenAI(schema)
 
-			expect(result.properties.name.type).toBe("string")
+			// After normalization, type arrays are converted to anyOf for
+			// JSON Schema 2020-12 compliance. The nullable types are no longer
+			// stripped — they're properly represented as anyOf alternatives.
+			expect(result.properties.name.anyOf).toEqual([{ type: "string" }, { type: "null" }])
+			// Verify the stale type array field is gone after normalization
+			expect(result.properties.name.type).toBeUndefined()
 		})
 
-		it("should return non-object schemas unchanged", () => {
-			const schema = { type: "string" }
+		it("should flatten type arrays on non-object schemas", () => {
+			// Use type: ["string"] (single-element type array) which normalization
+			// converts to anyOf format (JSON Schema 2020-12 compliance) - proving
+			// non-object schemas are processed through normalizeToolSchema
+			const schema = { type: ["string"] }
 			const result = provider.testConvertToolSchemaForOpenAI(schema)
 
-			expect(result).toEqual(schema)
+			// The type array is normalized to anyOf format, type field is dropped
+			expect(result.type).toBeUndefined()
+			expect(result.anyOf).toBeDefined()
+			expect(result.anyOf).toContainEqual({ type: "string" })
+			// Normalization does not add additionalProperties to non-object schemas
+			expect(result.additionalProperties).toBeUndefined()
 		})
 
 		it("should return null/undefined unchanged", () => {
