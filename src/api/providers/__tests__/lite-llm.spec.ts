@@ -1124,6 +1124,145 @@ describe("LiteLLMHandler", () => {
 		})
 	})
 
+	describe("preserveReasoning message conversion", () => {
+		const mockStream = {
+			async *[Symbol.asyncIterator]() {
+				yield {
+					choices: [{ delta: { content: "ok" } }],
+					usage: { prompt_tokens: 1, completion_tokens: 1 },
+				}
+			},
+		}
+
+		it("uses convertToR1Format (merging tool-result text) when the model info sets preserveReasoning", async () => {
+			const optionsWithReasoning: ApiHandlerOptions = {
+				...mockOptions,
+				litellmModelId: "deepseek-reasoner-alias",
+			}
+			handler = new LiteLLMHandler(optionsWithReasoning)
+
+			vi.spyOn(handler as any, "fetchModel").mockResolvedValue({
+				id: "deepseek-reasoner-alias",
+				info: { ...litellmDefaultModelInfo, preserveReasoning: true },
+			})
+
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "I'll help." },
+						{ type: "tool_use", id: "toolu_123", name: "read_file", input: { path: "test.txt" } },
+					],
+					// DeepSeek-style interleaved thinking: must be echoed back in the next request.
+					reasoning_content: "Let me check the file first.",
+				} as Anthropic.Messages.MessageParam & { reasoning_content: string },
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_123", content: "file contents" },
+						{ type: "text", text: "Thanks, continue." },
+					],
+				},
+			]
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of generator) {
+				// Consume
+			}
+
+			const createCall = mockCreate.mock.calls[0][0]
+
+			// convertToR1Format with mergeToolResultText folds the trailing text into the
+			// tool message instead of appending a separate user message.
+			const toolMessage = createCall.messages.find((msg: any) => msg.role === "tool")
+			expect(toolMessage).toBeDefined()
+			expect(toolMessage.content).toBe("file contents\n\nThanks, continue.")
+
+			const trailingUserMessage = createCall.messages.find(
+				(msg: any) => msg.role === "user" && msg.content === "Thanks, continue.",
+			)
+			expect(trailingUserMessage).toBeUndefined()
+
+			// The whole point of routing through convertToR1Format: reasoning_content
+			// must survive on the assistant message so the model doesn't reject the
+			// follow-up request for missing prior reasoning.
+			const assistantMessage = createCall.messages.find(
+				(msg: any) => msg.role === "assistant" && msg.tool_calls?.length > 0,
+			)
+			expect(assistantMessage).toBeDefined()
+			expect(assistantMessage.reasoning_content).toBe("Let me check the file first.")
+		})
+
+		it("uses convertToOpenAiMessages (no merging) when the model info does not set preserveReasoning", async () => {
+			vi.spyOn(handler as any, "fetchModel").mockResolvedValue({
+				id: litellmDefaultModelId,
+				info: { ...litellmDefaultModelInfo, preserveReasoning: undefined },
+			})
+
+			const systemPrompt = "You are a helpful assistant"
+			// Task.buildCleanConversationHistory() (src/core/task/Task.ts) already strips the
+			// reasoning content block before messages reach this handler when the model's
+			// preserveReasoning is not true, so no reasoning_content/reasoning block is present
+			// on the assistant message here — this input reflects what the handler actually
+			// receives in that case.
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "I'll help." },
+						{ type: "tool_use", id: "toolu_123", name: "read_file", input: { path: "test.txt" } },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_123", content: "file contents" },
+						{ type: "text", text: "Thanks, continue." },
+					],
+				},
+			]
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of generator) {
+				// Consume
+			}
+
+			const createCall = mockCreate.mock.calls[0][0]
+
+			const toolMessage = createCall.messages.find((msg: any) => msg.role === "tool")
+			expect(toolMessage).toBeDefined()
+			expect(toolMessage.content).toBe("file contents")
+
+			const trailingUserMessage = createCall.messages.find(
+				(msg: any) =>
+					msg.role === "user" &&
+					(msg.content === "Thanks, continue." ||
+						(Array.isArray(msg.content) &&
+							msg.content.some((part: any) => part.text === "Thanks, continue."))),
+			)
+			expect(trailingUserMessage).toBeDefined()
+
+			// No reasoning_content is sent to the API in this branch, matching what
+			// buildCleanConversationHistory already stripped upstream.
+			const assistantMessage = createCall.messages.find(
+				(msg: any) => msg.role === "assistant" && msg.tool_calls?.length > 0,
+			)
+			expect(assistantMessage).toBeDefined()
+			expect(assistantMessage.reasoning_content).toBeUndefined()
+		})
+	})
+
 	describe("session ID header", () => {
 		const mockStream = {
 			async *[Symbol.asyncIterator]() {

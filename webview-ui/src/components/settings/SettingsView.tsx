@@ -1,6 +1,5 @@
 import React, {
 	forwardRef,
-	memo,
 	useCallback,
 	useEffect,
 	useImperativeHandle,
@@ -16,7 +15,7 @@ import {
 	Database,
 	SquareTerminal,
 	FlaskConical,
-	AlertTriangle,
+	TriangleAlert,
 	Globe,
 	Info,
 	MessageSquare,
@@ -25,7 +24,7 @@ import {
 	Glasses,
 	Plug,
 	Server,
-	Users2,
+	UsersRound,
 	ArrowLeft,
 	GitCommitVertical,
 	GraduationCap,
@@ -131,7 +130,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { t } = useAppTranslation()
 
 	const extensionState = useExtensionState()
-	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt } = extensionState
+	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, mode } = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	const [isChangeDetected, setChangeDetected] = useState(false)
@@ -148,6 +147,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const contentRef = useRef<HTMLDivElement | null>(null)
 
 	const prevApiConfigName = useRef(currentApiConfigName)
+	const prevMode = useRef(mode)
 	const handledSettingsImportedAt = useRef<number | undefined>(undefined)
 	const confirmDialogHandler = useRef<() => void>()
 
@@ -221,16 +221,17 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
 
 	useEffect(() => {
-		// Update only when currentApiConfigName is changed.
-		// Expected to be triggered by loadApiConfiguration/upsertApiConfiguration.
-		if (prevApiConfigName.current === currentApiConfigName) {
+		// Update when currentApiConfigName or mode changes.
+		// Expected to be triggered by loadApiConfiguration/upsertApiConfiguration or mode switch.
+		if (prevApiConfigName.current === currentApiConfigName && prevMode.current === mode) {
 			return
 		}
 
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
+		prevMode.current = mode
 		setChangeDetected(false)
-	}, [currentApiConfigName, extensionState])
+	}, [currentApiConfigName, mode, extensionState])
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
@@ -532,7 +533,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const sections: { id: SectionName; icon: LucideIcon }[] = useMemo(
 		() => [
 			{ id: "providers", icon: Plug },
-			{ id: "modes", icon: Users2 },
+			{ id: "modes", icon: UsersRound },
 			{ id: "skills", icon: GraduationCap },
 			{ id: "slashCommands", icon: SquareSlash },
 			{ id: "rules", icon: ScrollText },
@@ -970,7 +971,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>
-							<AlertTriangle className="w-5 h-5 text-yellow-500" />
+							<TriangleAlert className="w-5 h-5 text-yellow-500" />
 							{t("settings:unsavedChangesDialog.title")}
 						</AlertDialogTitle>
 						<AlertDialogDescription>
@@ -991,4 +992,4 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	)
 })
 
-export default memo(SettingsView)
+export default SettingsView

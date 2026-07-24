@@ -20,6 +20,7 @@ import { fileExistsAtPath } from "../../../utils/fs"
 import { getOpenRouterModels } from "./openrouter"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
 import { getOpencodeGoModels } from "./opencode-go"
+import { getKenariModels } from "./kenari"
 import { getRequestyModels } from "./requesty"
 import { getUnboundModels } from "./unbound"
 import { getLiteLLMModels } from "./litellm"
@@ -28,6 +29,7 @@ import { getOllamaModels } from "./ollama"
 import { getLMStudioModels } from "./lmstudio"
 import { getPoeModels } from "./poe"
 import { getDeepSeekModels } from "./deepseek"
+import { getMoonshotModels } from "./moonshot"
 import { getZooGatewayModels } from "./zoo-gateway"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
@@ -53,6 +55,7 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	"litellm",
 	"poe",
 	"deepseek",
+	"moonshot",
 	"ollama",
 	"lmstudio",
 	"requesty",
@@ -65,6 +68,7 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	"litellm", // Per-key model allowlists are a first-class LiteLLM proxy feature
 	"poe", // Per-account model availability
 	"requesty", // Per-account custom model policies
+	"moonshot", // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
 ])
 
 function isAuthScopedProvider(provider: RouterName): boolean {
@@ -211,11 +215,17 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 		case "opencode-go":
 			models = await getOpencodeGoModels(options.apiKey)
 			break
+		case "kenari":
+			models = await getKenariModels(options.apiKey)
+			break
 		case "poe":
 			models = await getPoeModels(options.apiKey, options.baseUrl)
 			break
 		case "deepseek":
 			models = await getDeepSeekModels(options.baseUrl, options.apiKey)
+			break
+		case "moonshot":
+			models = await getMoonshotModels(options.baseUrl, options.apiKey)
 			break
 		case "zoo-gateway":
 			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
@@ -430,9 +440,7 @@ export const flushModels = async (options: GetModelsOptions, refresh: boolean = 
  * @param provider - The provider to get models for.
  * @returns Models from memory cache, disk cache, or undefined if not cached.
  */
-export function getModelsFromCache(
-	options: GetModelsOptions | ProviderName,
-): ModelRecord | undefined {
+export function getModelsFromCache(options: GetModelsOptions | ProviderName): ModelRecord | undefined {
 	// Auth-scoped providers (e.g. zoo-gateway) must never be served from cache --
 	// their model lists are user-specific and a stale file left over from a previous
 	// session could leak another user's list. Mirror the guards in getModels/refreshModels.

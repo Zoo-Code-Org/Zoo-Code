@@ -29,6 +29,7 @@ import {
 	litellmDefaultModelInfo,
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
+	kenariDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
@@ -252,9 +253,13 @@ function getSelectedModel({
 			return { id, info: routerInfo ?? staticInfo }
 		}
 		case "moonshot": {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = moonshotModels[id as keyof typeof moonshotModels]
-			return { id, info }
+			const availableModels = routerModels.moonshot
+				? { ...moonshotModels, ...routerModels.moonshot }
+				: moonshotModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels.moonshot?.[id]
+			const staticInfo = moonshotModels[id as keyof typeof moonshotModels]
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case "minimax": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
@@ -382,6 +387,13 @@ function getSelectedModel({
 			// Fall back to the provider's default ModelInfo so capability-driven UI
 			// keeps working when the /models list is empty or unavailable.
 			const info = routerModels["opencode-go"]?.[id] ?? opencodeGoDefaultModelInfo
+			return { id, info }
+		}
+		case "kenari": {
+			const id = getValidatedModelId(apiConfiguration.kenariModelId, routerModels["kenari"], defaultModelId)
+			// Fall back to the provider's default ModelInfo so capability-driven UI
+			// keeps working when the /models list is empty or unavailable.
+			const info = routerModels["kenari"]?.[id] ?? kenariDefaultModelInfo
 			return { id, info }
 		}
 		case "zoo-gateway": {

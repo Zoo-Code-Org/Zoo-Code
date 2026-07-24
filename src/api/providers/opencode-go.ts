@@ -18,7 +18,7 @@ import { convertToR1Format } from "../transform/r1-format"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getModelParams } from "../transform/model-params"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata } from "../index"
+import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { DEFAULT_HEADERS } from "./constants"
@@ -485,7 +485,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	 * @returns The model's reply text, or an empty string if no content is returned.
 	 * @throws Error with an Opencode Go-specific prefix if the request fails.
 	 */
-	async completePrompt(prompt: string): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id: modelId, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
 
 		if (format === "anthropic") {

@@ -833,6 +833,15 @@ export const webviewMessageHandler = async (
 		case "deleteTaskWithId":
 			provider.deleteTaskWithId(message.text!)
 			break
+		case "abandonSubtaskWithId":
+			provider
+				.abandonSubtask(message.text!)
+				.catch((error) =>
+					provider.log(
+						`[abandonSubtaskWithId] Failed: ${error instanceof Error ? error.message : String(error)}`,
+					),
+				)
+			break
 		case "deleteMultipleTasksWithIds": {
 			const ids = message.ids
 
@@ -963,7 +972,7 @@ export const webviewMessageHandler = async (
 
 				// Refresh history whenever Roo tasks were found — even if all already existed —
 				// so a retry after a partial-copy failure still reconciles the store.
-				provider.taskHistoryStore.invalidateAll()
+				await provider.taskHistoryStore.invalidateAll()
 				await provider.taskHistoryStore.reconcile()
 				await provider.taskHistoryStore.flushIndex()
 				await provider.postStateToWebview()
@@ -1041,7 +1050,9 @@ export const webviewMessageHandler = async (
 						lmstudio: {},
 						poe: {},
 						deepseek: {},
+						moonshot: {},
 						"opencode-go": {},
+						kenari: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -1135,6 +1146,21 @@ export const webviewMessageHandler = async (
 				})
 			}
 
+			// Moonshot is conditional on apiKey
+			const moonshotApiKey = message?.values?.moonshotApiKey ?? apiConfiguration.moonshotApiKey
+			const moonshotBaseUrl = message?.values?.moonshotBaseUrl ?? apiConfiguration.moonshotBaseUrl
+
+			if (moonshotApiKey) {
+				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
+					await flushModels({ provider: "moonshot", apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl }, true)
+				}
+
+				candidates.push({
+					key: "moonshot",
+					options: { provider: "moonshot", apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+				})
+			}
+
 			// Opencode Go's /models endpoint is public — it returns the full model list with no
 			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
 			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
@@ -1150,6 +1176,23 @@ export const webviewMessageHandler = async (
 			candidates.push({
 				key: "opencode-go",
 				options: { provider: "opencode-go", apiKey: opencodeGoApiKey },
+			})
+
+			// Kenari's /models endpoint is public — it returns the full model list with no
+			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
+			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
+			// model) whenever the key wasn't yet in apiConfiguration at fetch time. The key is still
+			// forwarded when present.
+			const kenariApiKey = message?.values?.kenariApiKey ?? apiConfiguration.kenariApiKey
+
+			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
+			if (message?.values?.kenariApiKey) {
+				await flushModels({ provider: "kenari", apiKey: kenariApiKey }, true)
+			}
+
+			candidates.push({
+				key: "kenari",
+				options: { provider: "kenari", apiKey: kenariApiKey },
 			})
 
 			// Apply single provider filter if specified

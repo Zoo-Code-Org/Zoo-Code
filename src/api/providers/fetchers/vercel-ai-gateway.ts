@@ -34,6 +34,7 @@ const vercelAiGatewayModelSchema = z.object({
 	context_window: z.number(),
 	max_tokens: z.number(),
 	type: z.string(),
+	tags: z.array(z.string()).optional(),
 	pricing: vercelAiGatewayPricingSchema,
 })
 
@@ -99,8 +100,9 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 	const cacheReadsPrice = model.pricing?.input_cache_read ? parseApiPrice(model.pricing?.input_cache_read) : undefined
 
 	const supportsPromptCache = typeof cacheWritesPrice !== "undefined" && typeof cacheReadsPrice !== "undefined"
-	const supportsImages =
-		VERCEL_AI_GATEWAY_VISION_ONLY_MODELS.has(id) || VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS.has(id)
+	const supportsImages = Array.isArray(model.tags)
+		? model.tags.includes("vision")
+		: VERCEL_AI_GATEWAY_VISION_ONLY_MODELS.has(id) || VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS.has(id)
 
 	const modelInfo: ModelInfo = {
 		maxTokens: model.max_tokens,

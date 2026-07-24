@@ -1,6 +1,14 @@
 import { SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS, ProviderSettings } from "@roo-code/types"
 
-export function checkExistKey(config: ProviderSettings | undefined) {
+/**
+ * Returns whether a provider profile is sufficiently configured to leave the
+ * welcome/setup gate.
+ *
+ * `zooCodeIsAuthenticated` is needed for Zoo Gateway: auth lives in global
+ * secret storage (`zoo-code-auth`), and `zooSessionToken` is not part of
+ * `SECRET_STATE_KEYS`, so session-auth alone would otherwise look unconfigured.
+ */
+export function checkExistKey(config: ProviderSettings | undefined, zooCodeIsAuthenticated?: boolean) {
 	if (!config) {
 		return false
 	}
@@ -8,6 +16,12 @@ export function checkExistKey(config: ProviderSettings | undefined) {
 	// Special case for fake-ai, openai-codex, and qwen-code providers which don't need any configuration.
 	if (config.apiProvider && ["fake-ai", "openai-codex", "qwen-code"].includes(config.apiProvider)) {
 		return true
+	}
+
+	// Zoo Gateway uses session auth (profile token and/or global Zoo Code login),
+	// not a traditional API key listed in SECRET_STATE_KEYS.
+	if (config.apiProvider === "zoo-gateway") {
+		return Boolean(config.zooSessionToken) || Boolean(zooCodeIsAuthenticated)
 	}
 
 	// Check all secret keys from the centralized SECRET_STATE_KEYS array.

@@ -7,7 +7,13 @@ import { runTests } from "@vscode/test-electron"
 import { LLMock } from "@copilotkit/aimock"
 
 import { addApplyDiffResultFixtures } from "./fixtures/apply-diff"
+import { addDeepSeekV4Fixtures } from "./fixtures/deepseek-v4"
 import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
+import { addFastExitShellRaceResultFixtures } from "./fixtures/fast-exit-shell-race"
+import { addZeroChunkShellRaceResultFixtures } from "./fixtures/zero-chunk-shell-race"
+import { addTerminalReuseShellRaceFixtures } from "./fixtures/terminal-reuse-shell-race"
+import { addLongRuningSilentCommandFixtures } from "./fixtures/long-running-silent-command"
+import { addColdShellInitFixtures } from "./fixtures/cold-shell-init"
 import { addTerminalProfileResultFixtures } from "./fixtures/terminal-profile"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
@@ -110,6 +116,11 @@ async function main() {
 			if (!isRecord) {
 				addApplyDiffResultFixtures(mock)
 				addExecuteCommandResultFixtures(mock)
+				addFastExitShellRaceResultFixtures(mock)
+				addZeroChunkShellRaceResultFixtures(mock)
+				addTerminalReuseShellRaceFixtures(mock)
+				addLongRuningSilentCommandFixtures(mock)
+				addColdShellInitFixtures(mock)
 				addTerminalProfileResultFixtures(mock)
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)
@@ -117,6 +128,7 @@ async function main() {
 				addSubtaskFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
+				addDeepSeekV4Fixtures(mock)
 
 				// The modes test (switch_mode → ask) triggers a second API call whose last
 				// user message starts with <environment_details> directly — no <user_message>

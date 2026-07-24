@@ -6,6 +6,7 @@ import type { SubtaskTreeNode } from "./types"
 import { countAllSubtasks } from "./types"
 import { StandardTooltip } from "../ui"
 import SubtaskCollapsibleRow from "./SubtaskCollapsibleRow"
+import { TaskStatusBadge } from "./TaskStatusBadge"
 
 interface SubtaskRowProps {
 	/** The subtask tree node to display */
@@ -52,6 +53,9 @@ const SubtaskRow = ({ node, depth, onToggleExpand, className }: SubtaskRowProps)
 				<StandardTooltip content={item.task} delay={600}>
 					<span className="text-sm line-clamp-1">{item.task}</span>
 				</StandardTooltip>
+				{(item.status === "delegated" || item.status === "interrupted") && (
+					<TaskStatusBadge status={item.status} className="text-xs shrink-0" />
+				)}
 				<ArrowRight className="size-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
 			</div>
 

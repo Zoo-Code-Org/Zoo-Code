@@ -170,3 +170,17 @@ jobs:
                   disable_search: true
                   flags: ${{ matrix.codecov-flag }},core-integration
                   token: ${{ secrets.CODECOV_TOKEN }}
+            - name: Upload coverage reports to GitHub
+              if: matrix.upload-coverage
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: coverage-reports-${{ matrix.name }}
+                  path: |
+                      src/coverage/lcov.info
+                      webview-ui/coverage/lcov.info
+                      packages/cloud/coverage/lcov.info
+                      packages/telemetry/coverage/lcov.info
+                      apps/cli/coverage/lcov.info
+                      packages/core/coverage/unit/lcov.info
+                      packages/core/coverage/integration/lcov.info
+                  retention-days: 7

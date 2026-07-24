@@ -348,4 +348,22 @@ describe("registerCommands handlers", () => {
 			`[toggleAutoApprove] postMessageToWebview failed: ${boom}`,
 		)
 	})
+
+	it("plusButtonClicked calls evictCurrentTask on the visible provider", async () => {
+		const evictCurrentTask = vi.fn().mockResolvedValue(undefined)
+		const refreshWorkspace = vi.fn().mockResolvedValue(undefined)
+		;(mockVisibleProvider as any).evictCurrentTask = evictCurrentTask
+		;(mockVisibleProvider as any).refreshWorkspace = refreshWorkspace
+
+		await handlers["zoo-code.plusButtonClicked"]()
+
+		expect(evictCurrentTask).toHaveBeenCalledTimes(1)
+	})
+
+	it("plusButtonClicked is a no-op when no visible provider", async () => {
+		;(ClineProvider.getVisibleInstance as Mock).mockReturnValue(undefined)
+
+		// Should not throw even with no visible provider
+		await handlers["zoo-code.plusButtonClicked"]()
+	})
 })

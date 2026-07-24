@@ -66,7 +66,7 @@ import {
 	FileCode2,
 	PocketKnife,
 	FolderTree,
-	TerminalSquare,
+	SquareTerminal,
 	MessageCircle,
 	Repeat2,
 	Split,
@@ -294,7 +294,7 @@ export const ChatRowContent = ({
 					isCommandExecuting ? (
 						<ProgressIndicator />
 					) : (
-						<TerminalSquare className="size-4" aria-label="Terminal icon" />
+						<SquareTerminal className="size-4" aria-label="Terminal icon" />
 					),
 					<span style={{ color: normalColor, fontWeight: "bold" }}>
 						{t("chat:commandExecution.running")}

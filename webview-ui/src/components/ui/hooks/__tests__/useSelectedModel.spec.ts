@@ -10,6 +10,8 @@ import {
 	ModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	litellmDefaultModelInfo,
+	kenariDefaultModelId,
+	kenariDefaultModelInfo,
 	openAiModelInfoSaneDefaults,
 	minimaxDefaultModelId,
 	minimaxModels,
@@ -18,6 +20,8 @@ import {
 	openRouterDefaultModelId,
 	vscodeLlmModels,
 	vscodeLlmDefaultModelId,
+	moonshotDefaultModelId,
+	moonshotModels,
 } from "@roo-code/types"
 
 import { useSelectedModel } from "../useSelectedModel"
@@ -722,6 +726,78 @@ describe("useSelectedModel", () => {
 		})
 	})
 
+	describe("kenari provider", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return routerModels info for the configured kenari model", () => {
+			const customModelInfo: ModelInfo = {
+				maxTokens: 32768,
+				contextWindow: 1048576,
+				supportsImages: false,
+				supportsPromptCache: false,
+				description: "GLM 5.2 via Kenari",
+			}
+
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					kenari: {
+						"glm-5-2": customModelInfo,
+					},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariModelId: "glm-5-2",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("kenari")
+			expect(result.current.id).toBe("glm-5-2")
+			expect(result.current.info).toEqual(customModelInfo)
+		})
+
+		it("should use kenariDefaultModelInfo as fallback when routerModels.kenari is empty", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					kenari: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "kenari",
+				kenariModelId: "some-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("kenari")
+			// Falls back to the kenari default model ID when the router list is empty
+			expect(result.current.id).toBe(kenariDefaultModelId)
+			// Should use kenariDefaultModelInfo as fallback
+			expect(result.current.info).toEqual(kenariDefaultModelInfo)
+		})
+	})
+
 	describe("openai provider", () => {
 		beforeEach(() => {
 			mockUseRouterModels.mockReturnValue({
@@ -965,6 +1041,101 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe("friendli")
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
+		})
+	})
+
+	describe("moonshot provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					moonshot: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return default moonshot model when no custom model is specified", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "moonshot",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe("moonshot")
+			expect(result.current.id).toBe(moonshotDefaultModelId)
+			expect(result.current.info).toEqual(moonshotModels[moonshotDefaultModelId])
+		})
+
+		it("should use router model override when routerModels.moonshot has the model", () => {
+			const routerModelInfo: ModelInfo = {
+				maxTokens: 32000,
+				contextWindow: 262144,
+				supportsImages: false,
+				supportsPromptCache: true,
+				inputPrice: 1.0,
+				outputPrice: 5.0,
+			}
+
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+					moonshot: {
+						"kimi-k2-0905-preview": routerModelInfo,
+					},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "moonshot",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe(moonshotDefaultModelId)
+			// Router info takes precedence over static info
+			expect(result.current.info).toEqual(routerModelInfo)
+		})
+
+		it("should fallback to default when model ID is not in static or router models", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "moonshot",
+				apiModelId: "non-existent-model",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe(moonshotDefaultModelId)
+			expect(result.current.info).toEqual(moonshotModels[moonshotDefaultModelId])
+		})
+
+		it("should use getValidatedModelId to return apiModelId when valid", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: "moonshot",
+				apiModelId: "kimi-k2-turbo-preview",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("kimi-k2-turbo-preview")
+			expect(result.current.info).toEqual(moonshotModels["kimi-k2-turbo-preview"])
 		})
 	})
 })

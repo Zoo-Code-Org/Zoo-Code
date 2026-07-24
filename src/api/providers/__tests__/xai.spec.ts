@@ -255,7 +255,7 @@ describe("XAIHandler", () => {
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow(`xAI completion error: ${errorMessage}`)
 	})
 
-	it("should include reasoning_effort for mini models", async () => {
+	it("should include reasoning effort for mini models in Responses API format", async () => {
 		const miniModelHandler = new XAIHandler({
 			apiModelId: "grok-3-mini",
 			reasoningEffort: "high",
@@ -269,7 +269,48 @@ describe("XAIHandler", () => {
 		expect(mockResponsesCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
 				reasoning: expect.objectContaining({
-					reasoning_effort: "high",
+					effort: "high",
+				}),
+			}),
+		)
+	})
+
+	it("should include reasoning effort for grok-4.5 with default high effort", async () => {
+		const grok45Handler = new XAIHandler({
+			apiModelId: "grok-4.5",
+		})
+
+		mockResponsesCreate.mockResolvedValueOnce(mockStream([]))
+
+		const stream = grok45Handler.createMessage("test prompt", [])
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: "grok-4.5",
+				reasoning: expect.objectContaining({
+					effort: "high",
+				}),
+			}),
+		)
+	})
+
+	it("should include reasoning effort for grok-4.5 with custom low effort", async () => {
+		const grok45Handler = new XAIHandler({
+			apiModelId: "grok-4.5",
+			reasoningEffort: "low",
+		})
+
+		mockResponsesCreate.mockResolvedValueOnce(mockStream([]))
+
+		const stream = grok45Handler.createMessage("test prompt", [])
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: "grok-4.5",
+				reasoning: expect.objectContaining({
+					effort: "low",
 				}),
 			}),
 		)

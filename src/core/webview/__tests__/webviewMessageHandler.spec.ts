@@ -384,6 +384,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
 		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
+		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
 
 		// Verify response was sent
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -399,7 +401,9 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -465,6 +469,40 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				},
 			},
 			values: { provider: "opencode-go" },
+		})
+	})
+
+	it("flushes and fetches Kenari models when an explicit API key is supplied", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: {},
+		})
+		mockGetModels.mockResolvedValue({
+			"glm-5-2": {
+				maxTokens: 32768,
+				contextWindow: 1048576,
+				supportsPromptCache: false,
+				description: "Kenari model",
+			},
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: {
+				provider: "kenari",
+				kenariApiKey: "fresh-kenari-key",
+			},
+		})
+
+		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" }, true)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" })
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: {
+				kenari: {
+					"glm-5-2": expect.objectContaining({ description: "Kenari model" }),
+				},
+			},
+			values: { provider: "kenari" },
 		})
 	})
 
@@ -550,7 +588,9 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})
@@ -609,7 +649,9 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
+				kenari: mockModels,
 			},
 			values: undefined,
 		})

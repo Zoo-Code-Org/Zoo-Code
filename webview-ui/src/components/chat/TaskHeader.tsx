@@ -1,6 +1,14 @@
 import { memo, useRef, useState, useMemo } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronUp, ChevronDown, HardDriveDownload, HardDriveUpload, FoldVertical, ArrowLeft } from "lucide-react"
+import {
+	ChevronUp,
+	ChevronDown,
+	HardDriveDownload,
+	HardDriveUpload,
+	ListChevronsDownUp,
+	ArrowLeft,
+	ArrowRight,
+} from "lucide-react"
 import prettyBytes from "pretty-bytes"
 
 import type { ClineMessage } from "@roo-code/types"
@@ -15,7 +23,6 @@ import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { vscode } from "@src/utils/vscode"
 
 import Thumbnails from "../common/Thumbnails"
-
 import { TaskActions } from "./TaskActions"
 import { ContextWindowProgress } from "./ContextWindowProgress"
 import { Mention } from "./Mention"
@@ -82,7 +89,7 @@ const TaskHeader = ({
 	const condenseButton = (
 		<LucideIconButton
 			title={t("chat:task.condenseContext")}
-			icon={FoldVertical}
+			icon={ListChevronsDownUp}
 			disabled={buttonsDisabled}
 			onClick={() => currentTaskItem && handleCondenseContext(currentTaskItem.id)}
 		/>
@@ -99,6 +106,15 @@ const TaskHeader = ({
 		}
 	}
 
+	// Is this task itself a delegated parent still waiting on a subtask? See #559.
+	const awaitingChildId = currentTaskItem?.status === "delegated" ? currentTaskItem.awaitingChildId : undefined
+
+	const handleGoToSubtask = () => {
+		if (awaitingChildId) {
+			vscode.postMessage({ type: "showTaskWithId", text: awaitingChildId })
+		}
+	}
+
 	return (
 		<div className="group pt-2 pb-0 px-3">
 			{isSubtask && (
@@ -110,6 +126,19 @@ const TaskHeader = ({
 						className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-foreground">
 						<ArrowLeft className="size-3" />
 						{t("chat:task.backToParentTask")}
+					</Button>
+				</div>
+			)}
+			{awaitingChildId && (
+				<div className="mb-2" onClick={(e) => e.stopPropagation()}>
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={handleGoToSubtask}
+						className="flex items-center gap-1.5 text-xs text-vscode-descriptionForeground hover:text-vscode-foreground">
+						<span className="codicon codicon-sync text-[11px]" />
+						{t("chat:task.waitingOnSubtask")}
+						<ArrowRight className="size-3" />
 					</Button>
 				</div>
 			)}
@@ -275,6 +304,16 @@ const TaskHeader = ({
 								</>
 							)}
 						</div>
+						<div
+							className="flex items-center gap-1 ml-8 w-60 min-w-[120px] shrink"
+							onClick={(e) => e.stopPropagation()}>
+							<ContextWindowProgress
+								contextWindow={contextWindow}
+								contextTokens={contextTokens || 0}
+								maxTokens={maxTokens ?? undefined}
+							/>
+							{condenseButton}
+						</div>
 					</div>
 				)}
 				{/* Expanded state: Show task text and images */}
@@ -315,7 +354,7 @@ const TaskHeader = ({
 													<ContextWindowProgress
 														contextWindow={contextWindow}
 														contextTokens={contextTokens || 0}
-														maxTokens={maxTokens || undefined}
+														maxTokens={maxTokens ?? undefined}
 													/>
 													{condenseButton}
 												</div>

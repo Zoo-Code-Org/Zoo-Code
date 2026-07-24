@@ -192,7 +192,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			provider = this.sidebarProvider
 		}
 
-		await provider.removeClineFromStack()
+		await provider.evictCurrentTask()
 		await provider.postStateToWebview()
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
@@ -255,12 +255,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	public async clearCurrentTask(_lastMessage?: string) {
 		// Legacy finishSubTask removed; clear current by closing active task instance.
-		await this.sidebarProvider.removeClineFromStack()
+		await this.sidebarProvider.evictCurrentTask()
 		await this.sidebarProvider.postStateToWebview()
 	}
 
 	public async cancelCurrentTask() {
 		await this.sidebarProvider.cancelTask()
+	}
+
+	public async abandonSubtask(childTaskId: string): Promise<boolean> {
+		return this.sidebarProvider.abandonSubtask(childTaskId)
 	}
 
 	public async sendMessage(text?: string, images?: string[]) {

@@ -40,6 +40,7 @@ const mockExtensionState: {
 	apiConfiguration: ProviderSettings
 	currentTaskItem: { id: string } | null
 	clineMessages: any[]
+	taskHistory: any[]
 } = {
 	apiConfiguration: {
 		apiProvider: "anthropic",
@@ -48,6 +49,7 @@ const mockExtensionState: {
 	} as ProviderSettings,
 	currentTaskItem: { id: "test-task-id" },
 	clineMessages: [],
+	taskHistory: [],
 }
 
 // Mock the ExtensionStateContext
@@ -133,15 +135,22 @@ describe("TaskHeader", () => {
 		expect(screen.queryByText(/\$/)).not.toBeInTheDocument()
 	})
 
+	it("should render the condense context button in the collapsed state", () => {
+		renderTaskHeader()
+		// Button is visible without expanding the task header
+		const buttons = screen.getAllByRole("button")
+		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-list-chevrons-down-up"))
+		expect(condenseButton).toBeDefined()
+		expect(condenseButton?.querySelector("svg")).toBeInTheDocument()
+	})
+
 	it("should render the condense context button when expanded", () => {
 		renderTaskHeader()
-		// First click to expand the task header
 		const taskHeader = screen.getByText("Test task")
 		fireEvent.click(taskHeader)
 
-		// Now find the condense button in the expanded state
 		const buttons = screen.getAllByRole("button")
-		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-fold-vertical"))
+		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-list-chevrons-down-up"))
 		expect(condenseButton).toBeDefined()
 		expect(condenseButton?.querySelector("svg")).toBeInTheDocument()
 	})
@@ -150,29 +159,24 @@ describe("TaskHeader", () => {
 		const handleCondenseContext = vi.fn()
 		renderTaskHeader({ handleCondenseContext })
 
-		// First click to expand the task header
-		const taskHeader = screen.getByText("Test task")
-		fireEvent.click(taskHeader)
-
-		// Find the button that contains the FoldVertical icon
+		// Button is clickable in collapsed state without expanding first
 		const buttons = screen.getAllByRole("button")
-		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-fold-vertical"))
+		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-list-chevrons-down-up"))
 		expect(condenseButton).toBeDefined()
 		fireEvent.click(condenseButton!)
 		expect(handleCondenseContext).toHaveBeenCalledWith("test-task-id")
+		// Clicking the condense button must not expand the header (stopPropagation guard).
+		// The expanded state renders the "chat:task.title" label, which stays absent while collapsed.
+		expect(screen.queryByText("chat:task.title")).not.toBeInTheDocument()
 	})
 
 	it("should disable the condense context button when buttonsDisabled is true", () => {
 		const handleCondenseContext = vi.fn()
 		renderTaskHeader({ buttonsDisabled: true, handleCondenseContext })
 
-		// First click to expand the task header
-		const taskHeader = screen.getByText("Test task")
-		fireEvent.click(taskHeader)
-
-		// Find the button that contains the FoldVertical icon
+		// Button is disabled in collapsed state without expanding first
 		const buttons = screen.getAllByRole("button")
-		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-fold-vertical"))
+		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-list-chevrons-down-up"))
 		expect(condenseButton).toBeDefined()
 		expect(condenseButton).toBeDisabled()
 		fireEvent.click(condenseButton!)
@@ -218,6 +222,58 @@ describe("TaskHeader", () => {
 			const backButton = screen.getByText("chat:task.backToParentTask").closest("button")
 			expect(backButton).toBeInTheDocument()
 			expect(backButton?.querySelector("svg.lucide-arrow-left")).toBeInTheDocument()
+		})
+	})
+
+	describe("Delegated parent waiting-on-subtask banner", () => {
+		beforeEach(() => {
+			mockPostMessage.mockClear()
+		})
+
+		afterEach(() => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id" }
+			mockExtensionState.taskHistory = []
+		})
+
+		it("does not show the banner when currentTaskItem is not delegated", () => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id", status: "active" } as any
+			renderTaskHeader()
+			expect(screen.queryByText("chat:task.waitingOnSubtask")).not.toBeInTheDocument()
+		})
+
+		it("shows the banner when currentTaskItem is delegated with an awaitingChildId", () => {
+			mockExtensionState.currentTaskItem = {
+				id: "parent-1",
+				status: "delegated",
+				awaitingChildId: "child-1",
+			} as any
+			renderTaskHeader()
+			expect(screen.getByText("chat:task.waitingOnSubtask")).toBeInTheDocument()
+		})
+
+		it("navigates to the awaited child when the banner is clicked", () => {
+			mockExtensionState.currentTaskItem = {
+				id: "parent-1",
+				status: "delegated",
+				awaitingChildId: "child-1",
+			} as any
+			renderTaskHeader()
+
+			fireEvent.click(screen.getByText("chat:task.waitingOnSubtask"))
+
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "showTaskWithId", text: "child-1" })
+		})
+
+		it("does not show an Abandon button (removed: implicit sever on re-delegation)", () => {
+			mockExtensionState.currentTaskItem = {
+				id: "parent-1",
+				status: "delegated",
+				awaitingChildId: "child-1",
+			} as any
+			renderTaskHeader()
+
+			expect(screen.getByText("chat:task.waitingOnSubtask")).toBeInTheDocument()
+			expect(screen.queryByText("history:abandonSubtask")).not.toBeInTheDocument()
 		})
 	})
 

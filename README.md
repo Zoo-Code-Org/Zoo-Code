@@ -16,35 +16,17 @@
 
 ## We are Zoo Code
 
-> You may have seen the
-> [recent announcement](https://x.com/mattrubens/status/2046636598859559114)
-> from the Roo team 🦘🦘🦘. The TLDR is the team is winding down active Roo
-> Code development as they focus on [Roomote](https://roomote.dev/). That news
-> was difficult for many Roo users, this plugin means a lot to this community.
+> Zoo Code continues development of this project after the Roo team wound down
+> active Roo Code work to focus on [Roomote](https://roomote.dev/). Thank you
+> to the Roo team for everything they built.
 >
-> We want to thank the entire Roo team for the work they put into this plugin.
-> We won't call out each person by name here, but we can all agree they are
-> exceptional developers and, just as importantly, incredible people. Thank you
-> to the Roo team.
->
-> As Roo coders, we come in all kinds of shapes and sizes. Some of us are using
-> it professionally in our day-to-day work, some are using it to tinker and
-> scheme unimaginably complicated workflows. Some are using it to improve Roo
-> itself while others are using it to improve the very models that Roo is using
-> (super meta). The point we are making is that the community is
-> diverse, and although a kangaroo 🦘🦘🦘 is a distinguished and noble animal,
-> we felt a "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 of different species better reflected this
-> diversity of the plugin's users.
->
-> So we would like to announce that **Zoo Code** will continue development on
-> this important project. The core team is a group of developers who contributed
-> to Roo previously and care deeply about this plugin. We will continue to make
-> model updates, fix bugs, and release features. But more than anything, we plan
-> to listen to the community that made this plugin so special. Feel free to join
-> us on [Discord](https://discord.gg/VxfP4Vx3gX),
+> The core team is a group of developers who contributed to Roo previously and
+> care deeply about this plugin. We will continue to make model updates, fix
+> bugs, and release features, and we plan to listen closely to the community
+> that made this plugin so special. Join us on
+> [Discord](https://discord.gg/VxfP4Vx3gX),
 > [Reddit](https://www.reddit.com/r/ZooCode), or
-> [open a PR or issue](https://github.com/Zoo-Code-Org/Zoo-Code), and above all,
-> please stay involved, connected, and active as a community.
+> [open a PR or issue](https://github.com/Zoo-Code-Org/Zoo-Code).
 >
 > _-Zoo Code Team_
 
@@ -53,15 +35,15 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.68.0
+## What's New in v3.70.0
 
-- **Friendli provider with GLM-5.2 support** — use the latest GLM model through Friendli.
-- **Native Ollama thinking/reasoning support** — preserve reasoning output end-to-end when you use Ollama models.
-- **Anthropic custom `apiModelId` fix** — custom Anthropic model IDs now stay selected instead of silently falling back to `claude-sonnet-4-5`.
-- Fix: Ollama provider tool result handling and premature context condensing.
-- Fix: preserve the parent-child task link when a delegated subtask is interrupted.
-- Improve Anthropic Vertex Claude content block handling for more reliable responses.
-- CI, nightly publishing, and dependency/tooling updates.
+- **OpenAI GPT-5.6 family** — `Sol`, `Terra`, and `Luna` are now available across both the OpenAI Codex and OpenAI Native provider paths.
+- **Grok 4.5 support** — xAI's new flagship model, plus a reasoning-effort format fix that also benefits Grok 4 Mini.
+- **Kenari provider support** — a first-class, OpenAI-compatible AI gateway billed in Rupiah covering Claude, GPT, DeepSeek, GLM, Kimi and more.
+- Surface the context-compaction button and context window progress bar in the collapsed task header.
+- Fix: terminal output loss and premature task completion on cold terminals.
+- Fix: image attach for Zoo Gateway and Vercel AI Gateway models now follows live vision-capability tags instead of a static allowlist.
+- Dependency and tooling updates.
 
 <details>
   <summary>🌐 Available languages</summary>

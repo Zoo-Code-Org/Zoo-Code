@@ -269,6 +269,39 @@ describe("Vercel AI Gateway Fetchers", () => {
 			)
 		})
 
+		it("prefers live vision tags over hardcoded allowlists", () => {
+			const taggedVision = parseVercelAiGatewayModel({
+				id: "anthropic/claude-sonnet-4.5",
+				model: {
+					...baseModel,
+					id: "anthropic/claude-sonnet-4.5",
+					tags: ["tool-use", "vision"],
+				},
+			})
+			expect(taggedVision.supportsImages).toBe(true)
+
+			const taggedTextOnly = parseVercelAiGatewayModel({
+				id: "anthropic/claude-sonnet-4",
+				model: {
+					...baseModel,
+					id: "anthropic/claude-sonnet-4",
+					tags: ["tool-use"],
+				},
+			})
+			expect(taggedTextOnly.supportsImages).toBe(false)
+		})
+
+		it("falls back to allowlists when tags are absent", () => {
+			const result = parseVercelAiGatewayModel({
+				id: "anthropic/claude-sonnet-4.5",
+				model: {
+					...baseModel,
+					id: "anthropic/claude-sonnet-4.5",
+				},
+			})
+			expect(result.supportsImages).toBe(true)
+		})
+
 		it("handles missing cache pricing", () => {
 			const modelNoCachePricing = {
 				...baseModel,

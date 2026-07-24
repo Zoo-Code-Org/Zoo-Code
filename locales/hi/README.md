@@ -16,13 +16,18 @@
 
         ## हम हैं Zoo Code
 
-> आपने शायद Roo टीम 🦘🦘🦘 की [हाल की घोषणा](https://x.com/mattrubens/status/2046636598859559114) देखी होगी। TLDR यह है कि टीम [Roomote](https://roomote.dev/) पर focus करते हुए Roo Code का active development धीरे-धीरे बंद कर रही है। यह खबर बहुत से Roo users के लिए मुश्किल थी; यह plugin इस community के लिए बहुत मायने रखता है।
+> Roo टीम के [Roomote](https://roomote.dev/) पर focus करने के लिए Roo Code का
+> active development बंद करने के बाद, Zoo Code इस project का development
+> आगे बढ़ा रहा है। जो कुछ भी उन्होंने बनाया, उसके लिए Roo टीम का धन्यवाद।
 >
-> हम पूरे Roo टीम को इस plugin पर लगाए गए उनके काम के लिए धन्यवाद देना चाहते हैं। हम यहाँ हर व्यक्ति का नाम अलग-अलग नहीं लेंगे, लेकिन हम सब इस बात से सहमत हो सकते हैं कि वे exceptional developers हैं और, उतना ही ज़रूरी, incredible लोग भी हैं। Roo टीम को धन्यवाद।
->
-> Roo users हर तरह के हैं। कुछ लोग इसे अपने day-to-day professional काम में इस्तेमाल करते हैं, कुछ लोग इससे बेहद जटिल workflows बनाते हैं। कुछ लोग खुद Roo को बेहतर बनाते हैं, जबकि कुछ वही models बेहतर बनाते हैं जिन्हें Roo इस्तेमाल करता है (super meta)। हमारी बात बस इतनी है कि community बहुत diverse है, और जबकि kangaroo 🦘🦘🦘 एक शानदार और सम्मानित जानवर है, हमें लगा कि अलग-अलग species वाला "Zoo" 🐘🦡🦒🦓🦛🦧🦭🦦 plugin users की इस diversity को बेहतर दिखाता है।
->
-> इसलिए हम यह घोषणा करना चाहते हैं कि **Zoo Code** इस महत्वपूर्ण project का development जारी रखेगा। Core team ऐसे developers का समूह है जिन्होंने पहले Roo में योगदान दिया है और इस plugin की गहराई से परवाह करते हैं। हम models update करते रहेंगे, bugs fix करते रहेंगे और features release करते रहेंगे। लेकिन सबसे बढ़कर, हम आप community की बात सुनना चाहते हैं, जिसने इस plugin को इतना खास बनाया। इसलिए बेझिझक हमारे [Discord](https://discord.gg/VxfP4Vx3gX), हमारे [Reddit](https://www.reddit.com/r/ZooCode) से जुड़ें, या [PR या issue बनाएं](https://github.com/Zoo-Code-Org/Zoo-Code); लेकिन सबसे ज़्यादा हम आपसे यही कहेंगे कि community के रूप में जुड़े रहें, सक्रिय रहें और शामिल रहें।
+> Core team ऐसे developers का समूह है जिन्होंने पहले Roo में योगदान दिया है
+> और इस plugin की गहराई से परवाह करते हैं। हम models update करते रहेंगे,
+> bugs fix करते रहेंगे और features release करते रहेंगे, और हम उस community
+> की बात ध्यान से सुनने की योजना बना रहे हैं जिसने इस plugin को इतना खास
+> बनाया। हमारे साथ जुड़ो
+> [Discord](https://discord.gg/VxfP4Vx3gX),
+> [Reddit](https://www.reddit.com/r/ZooCode), या
+> [PR या issue खोलें](https://github.com/Zoo-Code-Org/Zoo-Code) पर।
 >
 > _-Zoo Code Team_
 
@@ -30,15 +35,15 @@
 
 Roo Code से Zoo Code में आने के लिए एक quick guide तुम्हें [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration) में मिल जाएगी। We plan to help users as much as possible during the transition, और उसी support के लिए हमारा [Reddit](https://www.reddit.com/r/ZooCode) और [Discord](https://discord.gg/VxfP4Vx3gX) है। अगर तुम्हें कोई problem हो या कोई question हो, आकर पूछो।
 
-## v3.68.0 में नया क्या है
+## v3.70.0 में नया क्या है
 
-- **GLM-5.2 समर्थन के साथ Friendli प्रदाता** — Friendli के जरिए नवीनतम GLM मॉडल का उपयोग करें।
-- **Ollama के लिए नेटिव thinking/reasoning समर्थन** — Ollama मॉडल इस्तेमाल करते समय reasoning आउटपुट को शुरू से अंत तक सुरक्षित रखें।
-- **Anthropic कस्टम `apiModelId` फिक्स** — कस्टम Anthropic मॉडल ID अब चुपचाप `claude-sonnet-4-5` पर वापस जाने के बजाय चुनी हुई रहती हैं।
-- फिक्स: Ollama प्रदाता में tool result हैंडलिंग और समय से पहले context condensing।
-- फिक्स: delegated subtask रुकने पर parent-child task link को बनाए रखें।
-- अधिक विश्वसनीय responses के लिए Anthropic Vertex Claude content block handling में सुधार।
-- CI, nightly publishing, और dependency/tooling अपडेट्स।
+- **OpenAI GPT-5.6 family** — `Sol`, `Terra`, और `Luna` अब OpenAI Codex और OpenAI Native दोनों provider paths पर उपलब्ध हैं।
+- **Grok 4.5 समर्थन** — xAI का नया flagship model, साथ ही एक reasoning-effort format fix जिसका फायदा Grok 4 Mini को भी मिलता है।
+- **Kenari provider समर्थन** — एक first-class, OpenAI-compatible AI gateway जो Rupiah में बिल होता है और Claude, GPT, DeepSeek, GLM, Kimi और अधिक को cover करता है।
+- Collapsed task header में context-compaction button और context window progress bar दिखाएं।
+- फिक्स: cold terminals पर terminal output loss और समय से पहले task completion।
+- फिक्स: Zoo Gateway और Vercel AI Gateway models के लिए image attach अब static allowlist के बजाय live vision-capability tags को follow करता है।
+- Dependency और tooling अपडेट्स।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 
