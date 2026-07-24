@@ -72,4 +72,10 @@ export interface ExitCodeDetails {
 	signal?: number | undefined
 	signalName?: string
 	coreDumpPossible?: boolean
+	/**
+	 * Set to true when the process was intentionally aborted (via abort(),
+	 * timeout, or task teardown), as opposed to the process exiting on its
+	 * own or being killed by the OS (e.g., OOM-killer).
+	 */
+	aborted?: boolean
 }

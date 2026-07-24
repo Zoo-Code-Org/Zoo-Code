@@ -23,7 +23,7 @@ vitest.mock("ps-tree", () => ({
 	}),
 }))
 
-import { execa } from "execa"
+import { execa, ExecaError } from "execa"
 import { ExecaTerminalProcess } from "../ExecaTerminalProcess"
 import { BaseTerminal } from "../BaseTerminal"
 import type { RooTerminal } from "../types"
@@ -125,11 +125,11 @@ describe("ExecaTerminalProcess", () => {
 			expect(terminalProcess.terminal).toBe(mockTerminal)
 		})
 
-		it("should emit shell_execution_complete with exitCode 0", async () => {
+		it("should emit shell_execution_complete with exitCode 0 and aborted: false", async () => {
 			const spy = vitest.fn()
 			terminalProcess.on("shell_execution_complete", spy)
 			await terminalProcess.run("echo test")
-			expect(spy).toHaveBeenCalledWith({ exitCode: 0 })
+			expect(spy).toHaveBeenCalledWith({ exitCode: 0, aborted: false })
 		})
 
 		it("should emit completed event with full output", async () => {
@@ -143,6 +143,102 @@ describe("ExecaTerminalProcess", () => {
 			await terminalProcess.run("echo test")
 			expect(mockTerminal.setActiveStream).toHaveBeenCalledWith(expect.any(Object), mockPid)
 			expect(mockTerminal.setActiveStream).toHaveBeenLastCalledWith(undefined)
+		})
+	})
+
+		describe("error-path abort emission", () => {
+			it("should emit aborted: true when abort() is called during execution", async () => {
+				const execaMock = vitest.mocked(execa)
+				let resolveBlock: () => void
+				const blockPromise = new Promise<void>((resolve) => {
+					resolveBlock = resolve
+				})
+
+				execaMock.mockImplementation(((options: any) => {
+					return (_template: TemplateStringsArray, ...args: any[]) => ({
+						pid: mockPid,
+						iterable: (_opts: any) =>
+							(async function* () {
+								yield "test output\\n"
+								// Block the second yield so we can call abort() from outside
+								await blockPromise
+							})(),
+						kill: vitest.fn(),
+					})
+				}) as any)
+
+				const spy = vitest.fn()
+				terminalProcess.on("shell_execution_complete", spy)
+
+				// Start running - will yield once then block on blockPromise
+				const runPromise = terminalProcess.run("echo test")
+
+				// Let the first yield process
+				await new Promise((r) => setTimeout(r, 50))
+
+				// Now abort while the command is "running"
+				terminalProcess.abort()
+
+				// Resolve the block so the generator returns,
+				// then the for-await loop checks this.aborted and breaks
+				resolveBlock!()
+
+				await runPromise
+
+				expect(spy).toHaveBeenCalledWith({
+					exitCode: 0,
+					aborted: true,
+				})
+			})
+
+			it("should emit aborted: false in ExecaError catch path", async () => {
+			const execaMock = vitest.mocked(execa)
+			execaMock.mockImplementation(((options: any) => {
+				return (_template: TemplateStringsArray, ...args: any[]) => ({
+					pid: mockPid,
+										iterable: (_opts: any) =>
+											// eslint-disable-next-line require-yield
+											(async function* () {
+												throw Object.assign(new (ExecaError as any)("exec failed"), {
+								exitCode: 1,
+								signal: "SIGTERM",
+							})
+						})(),
+					kill: vitest.fn(),
+				})
+			}) as any)
+
+			const spy = vitest.fn()
+			terminalProcess.on("shell_execution_complete", spy)
+			await terminalProcess.run("echo test")
+			expect(spy).toHaveBeenCalledWith({
+				exitCode: 1,
+				signalName: "SIGTERM",
+				aborted: false,
+			})
+		})
+
+		it("should emit aborted: false in generic error catch path", async () => {
+			const execaMock = vitest.mocked(execa)
+			execaMock.mockImplementation(((options: any) => {
+				return (_template: TemplateStringsArray, ...args: any[]) => ({
+					pid: mockPid,
+										iterable: (_opts: any) =>
+											// eslint-disable-next-line require-yield
+											(async function* () {
+												throw new Error("generic error")
+						})(),
+					kill: vitest.fn(),
+				})
+			}) as any)
+
+			const spy = vitest.fn()
+			terminalProcess.on("shell_execution_complete", spy)
+			await terminalProcess.run("echo test")
+			expect(spy).toHaveBeenCalledWith({
+				exitCode: 1,
+				aborted: false,
+			})
 		})
 	})
 
