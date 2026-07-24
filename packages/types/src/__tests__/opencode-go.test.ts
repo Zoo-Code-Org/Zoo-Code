@@ -21,6 +21,7 @@ describe("opencode-go registry", () => {
 		"glm-5",
 		"glm-5.1",
 		"glm-5.2",
+		"kimi-k3",
 		"kimi-k2.5",
 		"kimi-k2.6",
 		"mimo-v2.5",

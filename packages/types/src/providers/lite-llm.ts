@@ -48,6 +48,9 @@ export const LITELLM_PRESERVE_REASONING_MODEL_IDS = [
 	"moonshot.kimi-k2-thinking",
 	"kimi-k2p7-code",
 
+	// moonshot.ts, opencode-go.ts
+	"kimi-k3",
+
 	// zai.ts
 	"glm-4.7",
 	"glm-5",
