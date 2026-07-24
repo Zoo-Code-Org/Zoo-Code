@@ -13,8 +13,7 @@
 		"inputTokens": "Входные токены",
 		"outputTokens": "Выходные токены",
 		"cacheTokens": "Токены кэша",
-		"cost": "Стоимость",
-		"unknownEventCount": "{{count}} вызовов API с неизвестными данными кеша"
+		"cost": "Стоимость"
 	},
 	"states": {
 		"loading": "Загрузка...",

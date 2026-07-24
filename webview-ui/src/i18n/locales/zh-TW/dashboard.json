@@ -13,8 +13,7 @@
 		"inputTokens": "輸入 Token",
 		"outputTokens": "輸出 Token",
 		"cacheTokens": "快取 Token",
-		"cost": "費用",
-		"unknownEventCount": "{{count}} 次 API 呼叫（快取資料未知）"
+		"cost": "費用"
 	},
 	"states": {
 		"loading": "載入中...",

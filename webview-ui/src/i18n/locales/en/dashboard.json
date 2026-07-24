@@ -13,8 +13,7 @@
 		"inputTokens": "Input Tokens",
 		"outputTokens": "Output Tokens",
 		"cacheTokens": "Cache Tokens",
-		"cost": "Cost",
-		"unknownEventCount": "{{count}} API calls with unknown cache data"
+		"cost": "Cost"
 	},
 	"states": {
 		"loading": "Loading...",

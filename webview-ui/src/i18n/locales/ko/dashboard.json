@@ -13,8 +13,7 @@
 		"inputTokens": "입력 토큰",
 		"outputTokens": "출력 토큰",
 		"cacheTokens": "캐시 토큰",
-		"cost": "비용",
-		"unknownEventCount": "{{count}}개의 API 호출 (캐시 데이터 미상)"
+		"cost": "비용"
 	},
 	"states": {
 		"loading": "불러오는 중...",

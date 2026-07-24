@@ -13,8 +13,7 @@
 		"inputTokens": "输入 Token",
 		"outputTokens": "输出 Token",
 		"cacheTokens": "缓存 Token",
-		"cost": "费用",
-		"unknownEventCount": "{{count}} 次 API 调用（缓存数据未知）"
+		"cost": "费用"
 	},
 	"states": {
 		"loading": "加载中...",

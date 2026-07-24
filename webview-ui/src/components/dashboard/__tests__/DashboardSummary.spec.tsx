@@ -9,10 +9,7 @@ import DashboardSummary from "../DashboardSummary"
 
 // Mock i18n — DashboardSummary uses useAppTranslation from TranslationContext,
 // which wraps i18next's t(). We mock the context directly.
-const mockT = (key: string, opts?: Record<string, unknown>) => {
-	if (key === "dashboard:summary.unknownEventCount" && typeof opts?.count === "number") {
-		return `${opts.count} uncertain`
-	}
+const mockT = (key: string) => {
 	return key
 }
 
@@ -93,18 +90,6 @@ describe("DashboardSummary", () => {
 		const summary = container.querySelector('[data-testid="dashboard-summary"]')
 		expect(summary?.textContent).toContain("0")
 		expect(summary?.textContent).toContain("$0.00")
-	})
-
-	it("shows unknown event count when > 0", () => {
-		const { container } = render(<DashboardSummary totals={makeBucket({ unknownEventCount: 3 })} />)
-		const summary = container.querySelector('[data-testid="dashboard-summary"]')
-		expect(summary?.textContent).toContain("3 uncertain")
-	})
-
-	it("does not show unknown event count when 0", () => {
-		const { container } = render(<DashboardSummary totals={makeBucket({ unknownEventCount: 0 })} />)
-		const summary = container.querySelector('[data-testid="dashboard-summary"]')
-		expect(summary?.textContent).not.toContain("uncertain")
 	})
 
 	it("computes cache total from read + write", () => {

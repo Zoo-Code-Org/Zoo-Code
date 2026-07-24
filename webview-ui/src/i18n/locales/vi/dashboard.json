@@ -13,8 +13,7 @@
 		"inputTokens": "Token đầu vào",
 		"outputTokens": "Token đầu ra",
 		"cacheTokens": "Token bộ nhớ đệm",
-		"cost": "Chi phí",
-		"unknownEventCount": "{{count}} cuộc gọi API (dữ liệu bộ nhớ đệm không xác định)"
+		"cost": "Chi phí"
 	},
 	"states": {
 		"loading": "Đang tải...",

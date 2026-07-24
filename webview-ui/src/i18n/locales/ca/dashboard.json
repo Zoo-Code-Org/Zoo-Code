@@ -13,8 +13,7 @@
 		"inputTokens": "Tokens d'entrada",
 		"outputTokens": "Tokens de sortida",
 		"cacheTokens": "Tokens de memòria cau",
-		"cost": "Cost",
-		"unknownEventCount": "{{count}} crides API amb dades de memòria cau desconegudes"
+		"cost": "Cost"
 	},
 	"states": {
 		"loading": "S'està carregant...",
