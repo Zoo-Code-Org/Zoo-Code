@@ -93,6 +93,7 @@ export class UsageAggregator {
 		// 4. Grouping and aggregation
 		const groupBy = query.groupBy
 		const bucketMap = new Map<string, StatsBucket>()
+		const cacheRatio = query.cacheRatio
 
 		for (const item of aggregatable) {
 			const bucketKeys = this.getGroupKeys(item, groupBy)
@@ -103,14 +104,14 @@ export class UsageAggregator {
 					bucket = createEmptyBucket(bucketKey)
 					bucketMap.set(mapKey, bucket)
 				}
-				this.accumulateIntoBucket(bucket, item.event)
+				this.accumulateIntoBucket(bucket, item.event, cacheRatio)
 			}
 		}
 
 		// 5. Compute totals
 		const totals = createEmptyBucket()
 		for (const item of aggregatable) {
-			this.accumulateIntoBucket(totals, item.event)
+			this.accumulateIntoBucket(totals, item.event, cacheRatio)
 		}
 
 		// 6. Sorting
@@ -429,7 +430,7 @@ export class UsageAggregator {
 	 * Accumulates the event's values into the bucket.
 	 * Handles inclusion semantics.
 	 */
-	private accumulateIntoBucket(bucket: StatsBucket, event: UsageEventV1): void {
+	private accumulateIntoBucket(bucket: StatsBucket, event: UsageEventV1, cacheRatio?: number): void {
 		bucket.events++
 
 		// Status count
@@ -452,13 +453,20 @@ export class UsageAggregator {
 
 		const inputTokens = this.extractValue(event.usage.inputTokens)
 		const outputTokens = this.extractValue(event.usage.outputTokens)
-		const cacheReadTokens = this.extractValue(event.usage.cacheReadTokens)
+		let cacheReadTokens = this.extractValue(event.usage.cacheReadTokens)
 		const cacheWriteTokens = this.extractValue(event.usage.cacheWriteTokens)
 		const reasoningTokens = this.extractValue(event.usage.reasoningTokens)
 		const totalTokens = this.extractValue(event.usage.totalTokens)
 		// Feature 1: If costUsd is missing on old events, compute it on-the-fly
 		// from the model's pricing info. Never modifies the stored event.
 		const costUsd = getEffectiveCost(event)
+
+		// Cache ratio estimation: if provider doesn't report cacheReadTokens
+		// and cacheRatio is provided, estimate it as inputTokens * cacheRatio
+		const isCacheReadEstimated = cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0
+		if (isCacheReadEstimated) {
+			cacheReadTokens = Math.round(inputTokens * cacheRatio)
+		}
 
 		// Inclusion semantics check
 		const hasUnknownInclusion =

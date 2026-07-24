@@ -13,7 +13,8 @@
 		"inputTokens": "Tokens de entrada",
 		"outputTokens": "Tokens de salida",
 		"cacheTokens": "Tokens de caché",
-		"cost": "Costo"
+		"cost": "Costo",
+		"unknownEventCount": "{{count}} llamadas API con datos de caché desconocidos"
 	},
 	"states": {
 		"loading": "Cargando...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "Desde",
 		"to": "Hasta"
+	},
+	"cacheRatio": {
+		"label": "Relación de caché para estimación",
+		"hint": "Se aplica cuando el proveedor no informa datos de caché"
 	},
 	"sessions": {
 		"title": "Sesiones",

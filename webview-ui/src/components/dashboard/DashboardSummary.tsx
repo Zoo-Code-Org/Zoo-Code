@@ -15,21 +15,24 @@ interface SummaryCardProps {
 	unknownCount?: number
 }
 
-const SummaryCard = memo(({ label, value, exactValue, unknownCount }: SummaryCardProps) => (
-	<div className="flex flex-col gap-1 rounded-md border border-vscode-panel-border bg-vscode-editor-background p-3">
-		<span className="text-xs text-vscode-descriptionForeground">{label}</span>
-		<StandardTooltip content={exactValue}>
-			<span className="text-lg font-semibold text-vscode-foreground" tabIndex={0}>
-				{value}
-			</span>
-		</StandardTooltip>
-		{unknownCount !== undefined && unknownCount > 0 && (
-			<span className="text-xs text-vscode-descriptionForeground">
-				({unknownCount} uncertain)
-			</span>
-		)}
-	</div>
-))
+const SummaryCard = memo(({ label, value, exactValue, unknownCount }: SummaryCardProps) => {
+	const { t } = useAppTranslation()
+	return (
+		<div className="flex flex-col gap-1 rounded-md border border-vscode-panel-border bg-vscode-editor-background p-3">
+			<span className="text-xs text-vscode-descriptionForeground">{label}</span>
+			<StandardTooltip content={exactValue}>
+				<span className="text-lg font-semibold text-vscode-foreground" tabIndex={0}>
+					{value}
+				</span>
+			</StandardTooltip>
+			{unknownCount !== undefined && unknownCount > 0 && (
+				<span className="text-xs text-vscode-descriptionForeground">
+					({t("dashboard:summary.unknownEventCount", { count: unknownCount })})
+				</span>
+			)}
+		</div>
+	)
+})
 
 // ── DashboardSummary ────────────────────────────────────────────────────────
 

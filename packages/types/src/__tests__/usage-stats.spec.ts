@@ -130,7 +130,7 @@ describe("usage-stats schemas", () => {
 			expect(() => UsageEventV1.parse(withoutEventId)).toThrow()
 		})
 
-		it("should reject negative attempt", () => {
+		it("should accept attempt of 0 (no min constraint in V1)", () => {
 			// z.number() accepts negatives, but attempt should be >= 0 logically
 			// This test confirms the schema accepts any number (no min constraint in V1)
 			const result = UsageEventV1.parse({ ...validEvent, attempt: 0 })

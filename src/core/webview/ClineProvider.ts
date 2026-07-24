@@ -283,6 +283,14 @@ export class ClineProvider
 				this.log(`Failed to initialize Usage Stats Service: ${error}`)
 				this.usageStatsService = undefined
 			})
+
+			// Subscribe to cross-window file changes so this window's dashboard
+			// refreshes when another VS Code window records new usage events.
+			this.usageStatsService.onDidChange(() => {
+				this.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
+					// View disposed, drop message silently
+				})
+			})
 		} catch (error) {
 			this.log(`Failed to create Usage Stats Service: ${error}`)
 			this.usageStatsService = undefined
@@ -739,6 +747,7 @@ export class ClineProvider
 		this.skillsManager = undefined
 		this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
+		this.usageStatsService?.dispose()
 		this.taskHistoryStore.dispose()
 		this.flushGlobalStateWriteThrough()
 		this.log("Disposed all disposables")

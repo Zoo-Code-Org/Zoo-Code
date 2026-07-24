@@ -86,7 +86,6 @@ import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
 import { findToolName } from "../../integrations/misc/export-markdown"
 import { RooTerminalProcess } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
-import { CommandScheduler } from "../../integrations/terminal/CommandScheduler"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
 
 // utils
@@ -629,7 +628,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			const service = provider.getUsageStatsService()
 			if (service) {
-				this.usageRecorder = new UsageRecorder(service)
+				this.usageRecorder = new UsageRecorder(service, () => {
+					provider.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
+						// View disposed, drop message silently
+					})
+				})
 			}
 		} catch (err) {
 			console.warn(`[Task#${this.taskId}] Failed to initialize UsageRecorder, stats will be skipped:`, err)
@@ -2388,15 +2391,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.removeAllListeners()
 		} catch (error) {
 			console.error("Error removing event listeners:", error)
-		}
-
-		// Cancel any queued commands for this task before releasing terminals.
-		// This prevents queued commands from acquiring a terminal after the
-		// task is disposed (architect report Section 1.3, lifecycle ownership).
-		try {
-			CommandScheduler.getInstance().cancelTask(this.taskId)
-		} catch (error) {
-			console.error("Error cancelling queued commands:", error)
 		}
 
 		// Release any terminals associated with this task.

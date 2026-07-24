@@ -13,7 +13,8 @@
 		"inputTokens": "Invoer-tokens",
 		"outputTokens": "Uitvoer-tokens",
 		"cacheTokens": "Cache-tokens",
-		"cost": "Kosten"
+		"cost": "Kosten",
+		"unknownEventCount": "{{count}} API-oproepen met onbekende cachegegevens"
 	},
 	"states": {
 		"loading": "Laden...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "Van",
 		"to": "Tot"
+	},
+	"cacheRatio": {
+		"label": "Cache-verhouding voor schatting",
+		"hint": "Toegepast wanneer de provider geen cachegegevens rapporteert"
 	},
 	"sessions": {
 		"title": "Sessies",

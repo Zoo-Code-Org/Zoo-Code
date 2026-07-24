@@ -13,7 +13,8 @@
 		"inputTokens": "Tokens d'entrada",
 		"outputTokens": "Tokens de sortida",
 		"cacheTokens": "Tokens de memòria cau",
-		"cost": "Cost"
+		"cost": "Cost",
+		"unknownEventCount": "{{count}} crides API amb dades de memòria cau desconegudes"
 	},
 	"states": {
 		"loading": "S'està carregant...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "Des de",
 		"to": "Fins a"
+	},
+	"cacheRatio": {
+		"label": "Relació de memòria cau per a estimació",
+		"hint": "S'aplica quan el proveïdor no informa dades de memòria cau"
 	},
 	"sessions": {
 		"title": "Sessions",

@@ -13,7 +13,8 @@
 		"inputTokens": "Eingabe-Token",
 		"outputTokens": "Ausgabe-Token",
 		"cacheTokens": "Cache-Token",
-		"cost": "Kosten"
+		"cost": "Kosten",
+		"unknownEventCount": "{{count}} API-Aufrufe mit unbekannten Cache-Daten"
 	},
 	"states": {
 		"loading": "Wird geladen...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "Von",
 		"to": "Bis"
+	},
+	"cacheRatio": {
+		"label": "Cache-Verhältnis zur Schätzung",
+		"hint": "Wird angewendet, wenn der Anbieter keine Cache-Daten meldet"
 	},
 	"sessions": {
 		"title": "Sitzungen",

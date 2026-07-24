@@ -48,6 +48,8 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	const [error, setError] = useState<string | null>(null)
 	const [showClearDialog, setShowClearDialog] = useState(false)
 	const [clearNonce, setClearNonce] = useState<string | null>(null)
+	// Cache ratio for estimation when provider doesn't report cacheReadTokens (default 94%)
+	const [cacheRatio, setCacheRatio] = useState<number>(0.94)
 
 	// Custom range date inputs (YYYY-MM-DD). Only used when preset === "custom".
 	// Default to yesterday~today so the inputs are never empty on first selection.
@@ -173,9 +175,10 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					>
 				).filter((v, i, a) => a.indexOf(v) === i),
 				includeCancelled: false,
+				cacheRatio,
 			}
 		},
-		[timezone, customFrom, customTo],
+		[timezone, customFrom, customTo, cacheRatio],
 	)
 
 	// ── Fetch statistics ─────────────────────────────────────────────────────
@@ -324,6 +327,15 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		fetchSessions("custom", groupBy, customFrom, customTo)
 	}, [customFrom, customTo, groupBy, fetchStats, fetchSessions])
 
+	// Refetch when cacheRatio changes
+	useEffect(() => {
+		// Skip initial mount (already fetched in the mount effect)
+		if (snapshot !== null) {
+			fetchStats(preset, groupBy)
+			fetchSessions(preset, groupBy)
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [cacheRatio])
 
 	// ── Listen for responses ────────────────────────────────────────────────
 
@@ -631,6 +643,35 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 							</Button>
 						</div>
 					)}
+				</div>
+
+				{/* Cache ratio estimation input */}
+				<div className="flex items-center gap-2" data-testid="dashboard-cache-ratio">
+					<label
+						htmlFor="dashboard-cache-ratio-input"
+						className="text-xs text-vscode-descriptionForeground whitespace-nowrap">
+						{t("dashboard:cacheRatio.label")}
+					</label>
+					<input
+						id="dashboard-cache-ratio-input"
+						type="number"
+						min="0"
+						max="100"
+						step="1"
+						value={Math.round(cacheRatio * 100)}
+						onChange={(e) => {
+							const value = parseInt(e.target.value, 10)
+							if (!isNaN(value) && value >= 0 && value <= 100) {
+								setCacheRatio(value / 100)
+							}
+						}}
+						className="w-16 rounded border border-vscode-panel-border bg-vscode-input-background px-1.5 py-0.5 text-xs text-vscode-input-foreground"
+						data-testid="dashboard-cache-ratio-input"
+					/>
+					<span className="text-xs text-vscode-descriptionForeground">%</span>
+					<span className="text-xs text-vscode-descriptionForeground">
+						{t("dashboard:cacheRatio.hint")}
+					</span>
 				</div>
 			</TabHeader>
 

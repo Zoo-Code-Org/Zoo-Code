@@ -2,10 +2,10 @@ import { MoonshotModelId, moonshotModels } from "@roo-code/types"
 import { ModelInfo } from "@roo-code/types"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { ApiStreamUsageChunk } from "../transform/stream"
-import { OpenAiCompatibleHandler, OpenAiCompatibleHandlerOptions } from "./openai-compatible"
+import { OpenAICompatibleHandler, OpenAICompatibleHandlerOptions } from "./openai-compatible"
 
-export class MoonshotHandler extends OpenAiCompatibleHandler {
-	constructor(options: OpenAiCompatibleHandlerOptions) {
+export class MoonshotHandler extends OpenAICompatibleHandler {
+	constructor(options: OpenAICompatibleHandlerOptions) {
 		super({
 			...options,
 			providerName: "Moonshot",

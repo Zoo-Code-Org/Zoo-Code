@@ -13,7 +13,8 @@
 		"inputTokens": "Token đầu vào",
 		"outputTokens": "Token đầu ra",
 		"cacheTokens": "Token bộ nhớ đệm",
-		"cost": "Chi phí"
+		"cost": "Chi phí",
+		"unknownEventCount": "{{count}} cuộc gọi API (dữ liệu bộ nhớ đệm không xác định)"
 	},
 	"states": {
 		"loading": "Đang tải...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "Từ",
 		"to": "Đến"
+	},
+	"cacheRatio": {
+		"label": "Tỷ lệ bộ nhớ đệm để ước tính",
+		"hint": "Áp dụng khi nhà cung cấp không báo cáo dữ liệu bộ nhớ đệm"
 	},
 	"sessions": {
 		"title": "Phiên",

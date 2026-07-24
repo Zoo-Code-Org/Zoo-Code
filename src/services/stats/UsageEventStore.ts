@@ -144,6 +144,12 @@ export class UsageEventStore {
 	/** Segment count that the cached snapshot corresponds to. */
 	private cachedSegmentCount = -1
 
+	/** Active segment file size that the cached snapshot corresponds to. */
+	private cachedActiveSegmentSize = -1
+
+	/** Active segment file mtime that the cached snapshot corresponds to. */
+	private cachedActiveSegmentMtimeMs = -1
+
 	/** Single-flight promise for concurrent cold loads. */
 	private loadPromise: Promise<UsageEventV1[]> | null = null
 
@@ -253,15 +259,24 @@ export class UsageEventStore {
 
 		const manifest = await this.loadOrCreateManifest()
 
-		// Warm hit: cache matches current generation and the number of segment
-		// files on disk. Using the on-disk file count (rather than
-		// manifest.currentSegment) catches external writers that created new
-		// segments without updating the manifest.
+		// Warm hit: cache matches current generation, the number of segment
+		// files on disk, and the active segment file's size/mtime. Using the
+		// on-disk file count (rather than manifest.currentSegment) catches
+		// external writers that created new segments without updating the
+		// manifest. The active segment stat catches same-segment appends from
+		// other VS Code windows (multi-window scenario).
 		const currentSegmentFiles = await this.listSegmentFiles()
+		const activeSegmentPath = this.getSegmentPath(manifest.currentSegment)
+		const activeStat = await fs.stat(activeSegmentPath).catch(() => null)
+		const activeSize = activeStat?.size ?? -1
+		const activeMtimeMs = activeStat?.mtimeMs ?? -1
+
 		if (
 			this.cachedEvents &&
 			this.cachedGeneration === manifest.generation &&
-			this.cachedSegmentCount === currentSegmentFiles.length
+			this.cachedSegmentCount === currentSegmentFiles.length &&
+			this.cachedActiveSegmentSize === activeSize &&
+			this.cachedActiveSegmentMtimeMs === activeMtimeMs
 		) {
 			return this.cachedEvents
 		}
@@ -275,6 +290,8 @@ export class UsageEventStore {
 			this.cachedEvents = events
 			this.cachedGeneration = manifest.generation
 			this.cachedSegmentCount = currentSegmentFiles.length
+			this.cachedActiveSegmentSize = activeSize
+			this.cachedActiveSegmentMtimeMs = activeMtimeMs
 			return events
 		})
 
@@ -390,6 +407,8 @@ export class UsageEventStore {
 		this.cachedEvents = null
 		this.cachedGeneration = -1
 		this.cachedSegmentCount = -1
+		this.cachedActiveSegmentSize = -1
+		this.cachedActiveSegmentMtimeMs = -1
 		this.loadPromise = null
 	}
 

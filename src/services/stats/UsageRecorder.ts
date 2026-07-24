@@ -54,6 +54,12 @@ export interface UsageRecordingContext {
 // ── UsageRecorder ────────────────────────────────────────────────────────────
 
 /**
+ * Optional callback invoked after a usage event is successfully appended.
+ * Used to notify the webview that stats have changed (same-window live refresh).
+ */
+export type UsageChangeNotifier = () => void
+
+/**
  * Records usage events at the terminal finalize boundary of an API attempt.
  *
  * Design principles (architecture report section 5.5-5.8):
@@ -66,10 +72,12 @@ export interface UsageRecordingContext {
  */
 export class UsageRecorder {
 	private readonly sink: UsageEventSink
+	private readonly notifyChanged?: UsageChangeNotifier
 	private readonly finalizedKeys: Set<string> = new Set()
 
-	constructor(sink: UsageEventSink) {
+	constructor(sink: UsageEventSink, notifyChanged?: UsageChangeNotifier) {
 		this.sink = sink
+		this.notifyChanged = notifyChanged
 	}
 
 	/**
@@ -139,7 +147,10 @@ export class UsageRecorder {
 		}
 
 		try {
-			await this.sink.append(event)
+			const appended = await this.sink.append(event)
+			if (appended) {
+				this.notifyChanged?.()
+			}
 		} catch {
 			// store error must not break task
 			// STATS_STORE/append/* errors are classified inside UsageEventStore

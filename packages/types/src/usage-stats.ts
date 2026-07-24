@@ -81,6 +81,12 @@ export const StatsQuery = z.object({
 	timezone: z.string(), // IANA
 	groupBy: z.array(z.enum(["day", "week", "month", "provider", "model", "mode", "status", "source"])).max(3),
 	includeCancelled: z.boolean().default(false),
+	/**
+	 * Cache ratio for estimation when provider doesn't report cacheReadTokens.
+	 * Default: 0.94 (94% of input tokens are estimated as cached)
+	 * Range: 0.0 to 1.0
+	 */
+	cacheRatio: z.number().min(0).max(1).optional(),
 })
 export type StatsQuery = z.infer<typeof StatsQuery>
 

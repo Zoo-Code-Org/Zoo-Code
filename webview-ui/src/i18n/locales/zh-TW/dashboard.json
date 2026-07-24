@@ -13,7 +13,8 @@
 		"inputTokens": "輸入 Token",
 		"outputTokens": "輸出 Token",
 		"cacheTokens": "快取 Token",
-		"cost": "費用"
+		"cost": "費用",
+		"unknownEventCount": "{{count}} 次 API 呼叫（快取資料未知）"
 	},
 	"states": {
 		"loading": "載入中...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "從",
 		"to": "到"
+	},
+	"cacheRatio": {
+		"label": "緩存比率估計",
+		"hint": "當提供商未報告緩存數據時應用"
 	},
 	"sessions": {
 		"title": "工作階段",
