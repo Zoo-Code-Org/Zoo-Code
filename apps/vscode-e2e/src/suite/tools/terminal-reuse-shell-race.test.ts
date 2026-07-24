@@ -25,8 +25,6 @@ suite("Terminal reuse after zero-chunk shell race", function () {
 		return
 	}
 
-	this.retries(1)
-
 	setDefaultSuiteTimeout(this)
 
 	setup(async () => {
@@ -75,7 +73,7 @@ suite("Terminal reuse after zero-chunk shell race", function () {
 						},
 						text: "TERMINAL_REUSE_SHELL_RACE_E2E",
 					}),
-				timeout: 120_000,
+				timeout: 60_000,
 			})
 
 			const elapsedMs = Date.now() - startedAt
