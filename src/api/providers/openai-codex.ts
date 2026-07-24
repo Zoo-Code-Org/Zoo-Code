@@ -37,8 +37,6 @@ const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 const LUNA_MODEL_ID = "gpt-5.6-luna"
 const LUNA_CODEX_VERSION = "0.144.0"
 
-type ResponsesRequestBody = Record<string, any>
-
 function stripInputImageDetail(value: any): any {
 	if (Array.isArray(value)) {
 		return value.map(stripInputImageDetail)
@@ -55,10 +53,7 @@ function stripInputImageDetail(value: any): any {
 	)
 }
 
-export function transformLunaResponsesLiteBody(
-	requestBody: ResponsesRequestBody,
-	effectiveSessionId: string,
-): ResponsesRequestBody {
+export function transformLunaResponsesLiteBody(requestBody: any, effectiveSessionId: string): any {
 	if (!Array.isArray(requestBody.input)) {
 		throw new Error("Invalid gpt-5.6-luna Responses Lite request: input must be an array.")
 	}
@@ -91,9 +86,13 @@ export function transformLunaResponsesLiteBody(
 				: []),
 			...transformedInput,
 		],
+		// Luna Responses Lite requires these exact values, so they intentionally
+		// override any caller-supplied tool_choice or parallel_tool_calls.
 		tool_choice: "auto",
 		parallel_tool_calls: false,
 		prompt_cache_key: effectiveSessionId,
+		// Luna Responses Lite requires reasoning context "all_turns"; this intentionally
+		// overwrites any context value already present in the incoming reasoning config.
 		reasoning: { ...reasoning, context: "all_turns" },
 	}
 }
@@ -248,10 +247,19 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		// Notably: max_output_tokens and prompt_cache_retention may be rejected
 		const effectiveSessionId = metadata?.taskId || this.sessionId
 		const baseRequestBody = this.buildRequestBody(model, formattedInput, systemPrompt, reasoningEffort, metadata)
-		const requestBody =
-			model.id === LUNA_MODEL_ID
-				? transformLunaResponsesLiteBody(baseRequestBody, effectiveSessionId)
-				: baseRequestBody
+		let requestBody: any
+		try {
+			requestBody =
+				model.id === LUNA_MODEL_ID
+					? this.buildLunaRequestBody(baseRequestBody, effectiveSessionId)
+					: baseRequestBody
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			TelemetryService.instance.captureException(
+				new ApiProviderError(message, this.providerName, model.id, "createMessage"),
+			)
+			throw error
+		}
 
 		// Make the request with retry on auth failure
 		for (let attempt = 0; attempt < 2; attempt++) {
@@ -279,6 +287,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				throw error
 			}
 		}
+	}
+
+	private buildLunaRequestBody(baseRequestBody: any, effectiveSessionId: string): any {
+		return transformLunaResponsesLiteBody(baseRequestBody, effectiveSessionId)
 	}
 
 	private buildRequestBody(
@@ -1272,7 +1284,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 			const requestBody =
 				model.id === LUNA_MODEL_ID
-					? transformLunaResponsesLiteBody(baseRequestBody, this.sessionId)
+					? this.buildLunaRequestBody(baseRequestBody, this.sessionId)
 					: baseRequestBody
 
 			const url = `${CODEX_API_BASE_URL}/responses`

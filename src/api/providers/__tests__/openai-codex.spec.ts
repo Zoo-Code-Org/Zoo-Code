@@ -275,6 +275,19 @@ describe("transformLunaResponsesLiteBody", () => {
 		})
 	})
 
+	it("overwrites a pre-existing reasoning context with all_turns", () => {
+		const result = transformLunaResponsesLiteBody(
+			{
+				model: "gpt-5.6-luna",
+				input: [{ role: "user", content: [{ type: "input_text", text: "Hello" }] }],
+				reasoning: { effort: "high", context: "current_turn" },
+			},
+			"session-1",
+		)
+
+		expect(result.reasoning).toEqual({ effort: "high", context: "all_turns" })
+	})
+
 	it.each([
 		["input", { input: "invalid" }, "input must be an array"],
 		["tools", { input: [], tools: {} }, "tools must be an array when provided"],
@@ -325,11 +338,16 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		})
 		expect(body).not.toHaveProperty("tools")
 		expect(body).not.toHaveProperty("instructions")
+		expect(body.input).toHaveLength(3)
 		expect(body.input[0]).toMatchObject({ type: "additional_tools", role: "developer" })
 		expect(body.input[1]).toEqual({
 			type: "message",
 			role: "developer",
 			content: [{ type: "input_text", text: "Luna instructions" }],
+		})
+		expect(body.input[2]).toEqual({
+			role: "user",
+			content: [{ type: "input_text", text: "Hello" }],
 		})
 		expect(options.headers).toMatchObject({
 			originator: "zoo-code",
@@ -389,6 +407,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 
 	it("preserves Luna session affinity while retrying with refreshed authentication", async () => {
 		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-luna" })
+		const transformSpy = vitest.spyOn(handler as any, "buildLunaRequestBody")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("expired-token")
 		vitest.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken").mockResolvedValue("refreshed-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
@@ -432,16 +451,21 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		const retryBody = JSON.parse(retryOptions.body)
 
 		expect(retryBody).toEqual(firstBody)
+		expect(transformSpy).toHaveBeenCalledTimes(1)
 		expect(firstBody.prompt_cache_key).toBe("task-retry")
 		expect(firstOptions.headers).toMatchObject({
 			Authorization: "Bearer expired-token",
 			"session-id": "task-retry",
 			"x-session-affinity": "task-retry",
+			version: "0.144.0",
+			"x-openai-internal-codex-responses-lite": "true",
 		})
 		expect(retryOptions.headers).toMatchObject({
 			Authorization: "Bearer refreshed-token",
 			"session-id": "task-retry",
 			"x-session-affinity": "task-retry",
+			version: "0.144.0",
+			"x-openai-internal-codex-responses-lite": "true",
 		})
 	})
 
@@ -499,7 +523,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		const fetchOptions = mockFetch.mock.calls[0][1]
 		const body = JSON.parse(fetchOptions.body)
 		const sessionId = body.prompt_cache_key
-		expect(sessionId).toEqual(expect.any(String))
+		expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
 		expect(body).toMatchObject({
 			model: "gpt-5.6-luna",
 			stream: false,
