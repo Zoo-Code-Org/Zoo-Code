@@ -137,6 +137,18 @@ describe("KimiCodeHandler", () => {
 		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
 	})
 
+	it("does not force-refresh on non-401 OAuth failures", async () => {
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(null, { status: 500 }))
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
+		await expect(async () => {
+			for await (const chunk of gen) {
+				// consume
+			}
+		}).rejects.toThrow()
+		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
+	})
+
 	it("fetches models during prepareRequest", async () => {
 		mockGetModels.mockResolvedValueOnce({ "test-model": { maxTokens: 1000 } })
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })

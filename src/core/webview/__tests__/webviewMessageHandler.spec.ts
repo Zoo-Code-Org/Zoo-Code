@@ -1477,6 +1477,7 @@ describe("zooCodeSignOut", () => {
 describe("webviewMessageHandler - kimiCodeSignIn", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		vi.resetModules()
 	})
 
 	it("starts OAuth authorization and opens browser", async () => {
@@ -1584,6 +1585,7 @@ describe("webviewMessageHandler - kimiCodeSignIn", () => {
 describe("webviewMessageHandler - kimiCodeSignOut", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		vi.resetModules()
 	})
 
 	it("clears credentials and shows success message", async () => {
