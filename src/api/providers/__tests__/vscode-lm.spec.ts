@@ -397,6 +397,52 @@ describe("VsCodeLmHandler", () => {
 
 			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toThrow("API Error")
 		})
+
+		it("should brand the LM authorization justification as Zoo Code", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user" as const,
+					content: "Hello",
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Hi")
+					return
+				})(),
+				text: (async function* () {
+					yield "Hi"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledWith(
+				expect.any(Array),
+				expect.objectContaining({
+					justification:
+						"Zoo Code would like to use 'Test Model' from 'test-vendor', Click 'Allow' to proceed.",
+				}),
+				expect.anything(),
+			)
+		})
+	})
+
+	describe("initializeClient", () => {
+		it("should throw a Zoo Code branded error when client initialization fails", async () => {
+			;(vscode.lm.selectChatModels as Mock).mockRejectedValueOnce(new Error("select failed"))
+			handler["client"] = null
+
+			await expect(handler.initializeClient()).rejects.toThrow(
+				"Zoo Code <Language Model API>: Failed to initialize client: Zoo Code <Language Model API>: Failed to select model: select failed",
+			)
+		})
 	})
 
 	describe("getModel", () => {

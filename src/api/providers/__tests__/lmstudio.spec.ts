@@ -125,7 +125,9 @@ describe("LmStudioHandler", () => {
 				for await (const _chunk of stream) {
 					// Should not reach here
 				}
-			}).rejects.toThrow("Please check the LM Studio developer logs to debug what went wrong")
+			}).rejects.toThrow(
+				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
+			)
 		})
 	})
 
@@ -144,7 +146,7 @@ describe("LmStudioHandler", () => {
 		it("should handle API errors", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
-				"Please check the LM Studio developer logs to debug what went wrong",
+				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
 		})
 
