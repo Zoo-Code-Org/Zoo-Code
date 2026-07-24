@@ -13,6 +13,7 @@ import { mergeAbortSignalAndTimeout, mergeAbortSignals } from "../utils/abort-si
  */
 export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<string, any>> {
 	protected options: TOptions
+	private cleanupFn: () => void = () => {}
 
 	constructor(defaultOptions?: Partial<TOptions>) {
 		this.options = (defaultOptions ? { ...defaultOptions } : {}) as TOptions
@@ -68,8 +69,18 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 		const merged = mergeAbortSignalAndTimeout(metadata?.abortSignal, timeoutMs)
 		const signal = mergeAbortSignals(internalController.signal, merged.signal)
 
-		this.options = { ...this.options, signal, _cleanup: merged.cleanup } as TOptions
+		this.options = { ...this.options, signal } as TOptions
+		this.cleanupFn = merged.cleanup
 		return this
+	}
+
+	/**
+	 * Get the cleanup function for resources created by addMergedSignal.
+	 *
+	 * @returns Cleanup function, or a no-op when no merged signal was added
+	 */
+	getCleanup(): () => void {
+		return this.cleanupFn
 	}
 
 	/**

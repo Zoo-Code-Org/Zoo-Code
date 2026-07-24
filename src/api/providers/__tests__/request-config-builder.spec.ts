@@ -24,6 +24,13 @@ describe("RequestConfigBuilder", () => {
 			const result = builder.build()
 			expect(result?.modelId).toBe("test-model")
 		})
+
+		test("should initialize cleanup as a no-op", () => {
+			const builder = new RequestConfigBuilder()
+
+			expect(builder.getCleanup()).toBeTypeOf("function")
+			expect(() => builder.getCleanup()()).not.toThrow()
+		})
 	})
 
 	describe("addAbortSignal", () => {
@@ -316,7 +323,8 @@ describe("RequestConfigBuilder", () => {
 			expect(result).toBe(builder)
 			const config = builder.build() as { signal?: AbortSignal; _cleanup?: () => void }
 			expect(config.signal).toBe(internalController.signal)
-			expect(config._cleanup).toBeTypeOf("function")
+			expect(config).not.toHaveProperty("_cleanup")
+			expect(builder.getCleanup()).toBeTypeOf("function")
 		})
 
 		test("should merge internal controller signal with metadata abort signal", () => {
@@ -346,12 +354,13 @@ describe("RequestConfigBuilder", () => {
 
 			const config = builder.build() as { signal?: AbortSignal; _cleanup?: () => void }
 			expect(config.signal).not.toBe(internalController.signal)
+			expect(config).not.toHaveProperty("_cleanup")
 			expect(config.signal?.aborted).toBe(false)
 
 			await vi.advanceTimersByTimeAsync(100)
 
 			expect(config.signal?.aborted).toBe(true)
-			config._cleanup?.()
+			builder.getCleanup()()
 			vi.useRealTimers()
 		})
 	})
