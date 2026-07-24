@@ -1220,6 +1220,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.currentApiConfigName).toBe("default")
 			expect(state.apiConfiguration).toMatchObject(providerSettings)
 			expect(state.apiConfiguration.apiProvider).toBe("zai")
+			expect(state.apiConfiguration).not.toHaveProperty("openRouterModelId")
 			expect((provider as any).viewLocalState.apiConfiguration).toMatchObject(providerSettings)
 
 			await provider.dispose()
