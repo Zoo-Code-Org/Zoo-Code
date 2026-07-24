@@ -13,8 +13,7 @@
 		"inputTokens": "Token di input",
 		"outputTokens": "Token di output",
 		"cacheTokens": "Token cache",
-		"cost": "Costo",
-		"unknownEventCount": "{{count}} chiamate API con dati cache sconosciuti"
+		"cost": "Costo"
 	},
 	"states": {
 		"loading": "Caricamento...",

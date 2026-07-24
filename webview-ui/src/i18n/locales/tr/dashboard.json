@@ -13,8 +13,7 @@
 		"inputTokens": "Giriş Token'ları",
 		"outputTokens": "Çıkış Token'ları",
 		"cacheTokens": "Önbellek Token'ları",
-		"cost": "Maliyet",
-		"unknownEventCount": "{{count}} API çağrısı (bilinmeyen önbellek verisi)"
+		"cost": "Maliyet"
 	},
 	"states": {
 		"loading": "Yükleniyor...",

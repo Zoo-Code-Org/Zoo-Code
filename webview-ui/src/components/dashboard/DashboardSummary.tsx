@@ -12,11 +12,9 @@ interface SummaryCardProps {
 	label: string
 	value: string
 	exactValue: string
-	unknownCount?: number
 }
 
-const SummaryCard = memo(({ label, value, exactValue, unknownCount }: SummaryCardProps) => {
-	const { t } = useAppTranslation()
+const SummaryCard = memo(({ label, value, exactValue }: SummaryCardProps) => {
 	return (
 		<div className="flex flex-col gap-1 rounded-md border border-vscode-panel-border bg-vscode-editor-background p-3">
 			<span className="text-xs text-vscode-descriptionForeground">{label}</span>
@@ -25,11 +23,6 @@ const SummaryCard = memo(({ label, value, exactValue, unknownCount }: SummaryCar
 					{value}
 				</span>
 			</StandardTooltip>
-			{unknownCount !== undefined && unknownCount > 0 && (
-				<span className="text-xs text-vscode-descriptionForeground">
-					({t("dashboard:summary.unknownEventCount", { count: unknownCount })})
-				</span>
-			)}
 		</div>
 	)
 })
@@ -53,7 +46,6 @@ const DashboardSummary = memo(({ totals }: DashboardSummaryProps) => {
 				label={t("dashboard:summary.totalTokens")}
 				value={formatCompact(totals.totalTokens)}
 				exactValue={totals.totalTokens.toLocaleString()}
-				unknownCount={totals.unknownEventCount}
 			/>
 			<SummaryCard
 				label={t("dashboard:summary.inputTokens")}

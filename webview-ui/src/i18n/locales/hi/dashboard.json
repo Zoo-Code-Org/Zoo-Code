@@ -13,8 +13,7 @@
 		"inputTokens": "इनपुट टोकन",
 		"outputTokens": "आउटपुट टोकन",
 		"cacheTokens": "कैश टोकन",
-		"cost": "लागत",
-		"unknownEventCount": "{{count}} API कॉल (अज्ञात कैश डेटा)"
+		"cost": "लागत"
 	},
 	"states": {
 		"loading": "लोड हो रहा है...",

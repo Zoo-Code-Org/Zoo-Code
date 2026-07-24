@@ -13,8 +13,7 @@
 		"inputTokens": "入力トークン",
 		"outputTokens": "出力トークン",
 		"cacheTokens": "キャッシュトークン",
-		"cost": "コスト",
-		"unknownEventCount": "{{count}}件のAPI呼び出し（キャッシュデータ不明）"
+		"cost": "コスト"
 	},
 	"states": {
 		"loading": "読み込んでいます...",

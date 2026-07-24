@@ -13,8 +13,7 @@
 		"inputTokens": "Token Input",
 		"outputTokens": "Token Output",
 		"cacheTokens": "Token Cache",
-		"cost": "Biaya",
-		"unknownEventCount": "{{count}} panggilan API dengan data cache tidak diketahui"
+		"cost": "Biaya"
 	},
 	"states": {
 		"loading": "Memuat...",

@@ -13,8 +13,7 @@
 		"inputTokens": "Tokeny wejściowe",
 		"outputTokens": "Tokeny wyjściowe",
 		"cacheTokens": "Tokeny pamięci podręcznej",
-		"cost": "Koszt",
-		"unknownEventCount": "{{count}} wywołań API z nieznanymi danymi pamięci podręcznej"
+		"cost": "Koszt"
 	},
 	"states": {
 		"loading": "Ładowanie...",
