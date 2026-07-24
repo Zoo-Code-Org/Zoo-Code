@@ -1,9 +1,13 @@
+import type { ModelInfo } from "../model.js"
 import { MOONSHOT_DEFAULT_TEMPERATURE, moonshotDefaultModelId, moonshotModels } from "../providers/moonshot.js"
+
+const modelEntries: [string, ModelInfo][] = Object.entries(moonshotModels)
+const modelInfos: ModelInfo[] = Object.values(moonshotModels)
 
 describe("moonshot registry", () => {
 	describe("moonshotModels registry invariants", () => {
 		it("every entry has a positive maxTokens and contextWindow", () => {
-			for (const [id, info] of Object.entries(moonshotModels)) {
+			for (const [id, info] of modelEntries) {
 				expect(info.maxTokens).toBeGreaterThan(0)
 				expect(info.contextWindow).toBeGreaterThan(0)
 				// Sanity: max output must not exceed the context window.
@@ -13,14 +17,14 @@ describe("moonshot registry", () => {
 		})
 
 		it("every entry declares supportsImages and supportsPromptCache", () => {
-			for (const info of Object.values(moonshotModels)) {
+			for (const info of modelInfos) {
 				expect(typeof info.supportsImages).toBe("boolean")
 				expect(typeof info.supportsPromptCache).toBe("boolean")
 			}
 		})
 
 		it("models with an array supportsReasoningEffort expose a non-empty allow-list", () => {
-			for (const info of Object.values(moonshotModels)) {
+			for (const info of modelInfos) {
 				if (Array.isArray(info.supportsReasoningEffort)) {
 					expect(info.supportsReasoningEffort.length).toBeGreaterThan(0)
 				}
@@ -28,7 +32,7 @@ describe("moonshot registry", () => {
 		})
 
 		it("every entry declares a reasoningEffort that is covered by its allow-list", () => {
-			for (const info of Object.values(moonshotModels)) {
+			for (const info of modelInfos) {
 				if (Array.isArray(info.supportsReasoningEffort) && info.reasoningEffort !== undefined) {
 					expect(info.supportsReasoningEffort).toContain(info.reasoningEffort)
 				}
