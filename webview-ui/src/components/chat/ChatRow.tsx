@@ -420,12 +420,13 @@ export const ChatRowContent = ({
 		return (tool.content ?? tool.diff) as string | undefined
 	}, [tool])
 
-	const onJumpToCreatedFile = useMemo(() => {
-		if (!tool || tool.tool !== "newFileCreated" || !tool.path) {
+	const onJumpToFile = useMemo(() => {
+		const path = tool?.path
+		if (!tool || !path) {
 			return undefined
 		}
 
-		return () => vscode.postMessage({ type: "openFile", text: "./" + tool.path })
+		return () => vscode.postMessage({ type: "openFile", text: path.startsWith("./") ? path : "./" + path })
 	}, [tool])
 
 	const followUpData = useMemo(() => {
@@ -497,7 +498,7 @@ export const ChatRowContent = ({
 								isLoading={message.partial}
 								isExpanded={isExpanded}
 								onToggleExpand={handleToggleExpand}
-								onJumpToFile={onJumpToCreatedFile}
+								onJumpToFile={onJumpToFile}
 								diffStats={tool.diffStats}
 							/>
 						</div>
@@ -536,6 +537,7 @@ export const ChatRowContent = ({
 								isLoading={message.partial}
 								isExpanded={isExpanded}
 								onToggleExpand={handleToggleExpand}
+								onJumpToFile={onJumpToFile}
 								diffStats={tool.diffStats}
 							/>
 						</div>

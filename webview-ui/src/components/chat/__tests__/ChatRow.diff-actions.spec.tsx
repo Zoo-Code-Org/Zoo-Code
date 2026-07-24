@@ -141,28 +141,66 @@ describe("ChatRow - inline diff stats and actions", () => {
 		expect(screen.getByText("-0")).toBeInTheDocument()
 	})
 
-	it("preserves jump-to-file affordance for newFileCreated", () => {
+	it.each([
+		["appliedDiff", "@@ -1,1 +1,1 @@\n-old\n+new\n"],
+		["editedExistingFile", "@@ -1,1 +1,1 @@\n-old\n+new\n"],
+		["newFileCreated", "+new file"],
+		["searchAndReplace", "-a\n-b\n+c\n"],
+		["search_and_replace", "-a\n-b\n+c\n"],
+		["search_replace", "-a\n-b\n+c\n"],
+		["edit", "@@ -1,1 +1,1 @@\n-old\n+new\n"],
+		["edit_file", "@@ -1,1 +1,1 @@\n-old\n+new\n"],
+		["apply_patch", "@@ -1,1 +1,1 @@\n-old\n+new\n"],
+		["apply_diff", "@@ -1,1 +1,1 @@\n-old\n+new\n"],
+		["insertContent", "@@ -1,1 +1,1 @@\n-old\n+new\n"],
+	])("shows jump-to-file affordance for %s", (tool, diff) => {
 		const message = createToolAskMessage({
-			tool: "newFileCreated",
-			path: "src/new-file.ts",
-			content: "+new file",
-			diffStats: { added: 1, removed: 0 },
+			tool,
+			path: "src/file.ts",
+			diff,
+			lineNumber: 0,
+			diffStats: { added: 1, removed: 1 },
 		})
 
 		const { container } = renderChatRow(message)
+		mockPostMessage.mockClear()
 		const openFileIcon = container.querySelector(".codicon-link-external") as HTMLElement | null
 
 		expect(openFileIcon).toBeInTheDocument()
 		if (!openFileIcon) {
-			throw new Error("Expected external link icon for newFileCreated")
+			throw new Error(`Expected external link icon for ${tool}`)
 		}
 
 		fireEvent.click(openFileIcon)
 
+		expect(mockPostMessage).toHaveBeenCalledTimes(1)
 		expect(mockPostMessage).toHaveBeenCalledWith({
 			type: "openFile",
-			text: "./src/new-file.ts",
+			text: "./src/file.ts",
 		})
+	})
+
+	it("does not show jump-to-file affordance when path is missing", () => {
+		const message = createToolAskMessage({
+			tool: "appliedDiff",
+			diff: "@@ -1,1 +1,1 @@\n-old\n+new\n",
+			diffStats: { added: 1, removed: 1 },
+		})
+
+		const { container } = renderChatRow(message)
+		expect(container.querySelector(".codicon-link-external")).not.toBeInTheDocument()
+	})
+
+	it("does not show jump-to-file affordance for non-file tools", () => {
+		const message = createToolAskMessage({
+			tool: "executeCommand",
+			path: "src/file.ts",
+			command: "echo hello",
+			content: "hello",
+		})
+
+		const { container } = renderChatRow(message)
+		expect(container.querySelector(".codicon-link-external")).not.toBeInTheDocument()
 	})
 
 	it("preserves protected and outside-workspace messaging in unified branch", () => {
