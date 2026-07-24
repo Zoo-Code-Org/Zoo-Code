@@ -1,4 +1,5 @@
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
+import { mergeAbortSignalAndTimeout, mergeAbortSignals } from "../utils/abort-signal"
 
 /**
  * A generic, SDK-agnostic request configuration builder.
@@ -38,13 +39,36 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 	 * @param headers - Key-value pairs of header names and values
 	 * @returns this for chainable calls
 	 */
-	addHeaders(headers: Record<string, string> = {}): this {
-		if (Object.keys(headers).length === 0) {
+	addHeaders(headers?: Record<string, string>): this {
+		if (!headers || Object.keys(headers).length === 0) {
 			return this
 		}
 
 		const existingHeaders = (this.options as any).headers ?? {}
 		this.options = { ...this.options, headers: { ...existingHeaders, ...headers } } as TOptions
+		return this
+	}
+
+	/**
+	 * Merge an internal controller signal with an external metadata signal and optional timeout.
+	 *
+	 * Use this for providers that already maintain their own AbortController but also need
+	 * to honor the request-level abort signal from metadata and/or a timeout.
+	 *
+	 * @param internalController - Provider-owned AbortController for the current request
+	 * @param metadata - Optional metadata containing an external abortSignal
+	 * @param timeoutMs - Optional positive timeout in milliseconds; <= 0 disables timeout
+	 * @returns this for chainable calls
+	 */
+	addMergedSignal(
+		internalController: AbortController,
+		metadata?: ApiHandlerCreateMessageMetadata,
+		timeoutMs?: number,
+	): this {
+		const merged = mergeAbortSignalAndTimeout(metadata?.abortSignal, timeoutMs)
+		const signal = mergeAbortSignals(internalController.signal, merged.signal)
+
+		this.options = { ...this.options, signal, _cleanup: merged.cleanup } as TOptions
 		return this
 	}
 
@@ -118,10 +142,6 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 	 * @returns A merged AbortSignal that aborts when any input signal aborts
 	 */
 	static mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: AbortSignal): AbortSignal {
-		if (!secondarySignal) {
-			return AbortSignal.any([primarySignal])
-		}
-
-		return AbortSignal.any([primarySignal, secondarySignal])
+		return mergeAbortSignals(primarySignal, secondarySignal)
 	}
 }

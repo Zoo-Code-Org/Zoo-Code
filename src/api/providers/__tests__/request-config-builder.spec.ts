@@ -103,6 +103,15 @@ describe("RequestConfigBuilder", () => {
 			expect(config?.headers).toEqual({ "X-Custom": "value1" })
 		})
 
+		test("should do nothing when headers are undefined", () => {
+			const builder = new RequestConfigBuilder({ initial: "value" })
+			const result = builder.addHeaders()
+
+			expect(result).toBe(builder) // chainable
+			const config = builder.build() as Record<string, any>
+			expect(config.headers).toBeUndefined()
+		})
+
 		test("should do nothing when headers object is empty", () => {
 			const builder = new RequestConfigBuilder({ initial: "value" })
 			const result = builder.addHeaders({})
@@ -297,12 +306,62 @@ describe("RequestConfigBuilder", () => {
 		})
 	})
 
+	describe("addMergedSignal", () => {
+		test("should add internal controller signal when metadata and timeout are absent", () => {
+			const internalController = new AbortController()
+			const builder = new RequestConfigBuilder()
+
+			const result = builder.addMergedSignal(internalController)
+
+			expect(result).toBe(builder)
+			const config = builder.build() as { signal?: AbortSignal; _cleanup?: () => void }
+			expect(config.signal).toBe(internalController.signal)
+			expect(config._cleanup).toBeTypeOf("function")
+		})
+
+		test("should merge internal controller signal with metadata abort signal", () => {
+			const internalController = new AbortController()
+			const externalController = new AbortController()
+			const builder = new RequestConfigBuilder()
+
+			builder.addMergedSignal(internalController, {
+				taskId: "test-task",
+				abortSignal: externalController.signal,
+			})
+
+			const config = builder.build() as { signal?: AbortSignal }
+			expect(config.signal).not.toBe(internalController.signal)
+			expect(config.signal).not.toBe(externalController.signal)
+
+			externalController.abort()
+			expect(config.signal?.aborted).toBe(true)
+		})
+
+		test("should merge internal controller signal with timeout", async () => {
+			vi.useFakeTimers()
+			const internalController = new AbortController()
+			const builder = new RequestConfigBuilder()
+
+			builder.addMergedSignal(internalController, undefined, 100)
+
+			const config = builder.build() as { signal?: AbortSignal; _cleanup?: () => void }
+			expect(config.signal).not.toBe(internalController.signal)
+			expect(config.signal?.aborted).toBe(false)
+
+			await vi.advanceTimersByTimeAsync(100)
+
+			expect(config.signal?.aborted).toBe(true)
+			config._cleanup?.()
+			vi.useRealTimers()
+		})
+	})
+
 	describe("static mergeAbortSignals", () => {
-		test("should return merged signal when secondarySignal is undefined", () => {
+		test("should return primary signal directly when secondarySignal is undefined", () => {
 			const controller = new AbortController()
 			const result = RequestConfigBuilder.mergeAbortSignals(controller.signal)
-			// AbortSignal.any() always returns a new signal
-			expect(result).not.toBe(controller.signal)
+
+			expect(result).toBe(controller.signal)
 			expect(result.aborted).toBe(false)
 		})
 
