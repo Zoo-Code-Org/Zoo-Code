@@ -12,6 +12,7 @@ describe("LiteLLM preserveReasoning model detection", () => {
 	})
 
 	it("matches provider-prefixed routed model names by their final segment", () => {
+		expect(isLiteLLMPreserveReasoningModel("kimi-k3")).toBe(true)
 		expect(isLiteLLMPreserveReasoningModel("deepseek/deepseek-reasoner")).toBe(true)
 		expect(isLiteLLMPreserveReasoningModel("bedrock/moonshot.kimi-k2-thinking")).toBe(true)
 		expect(isLiteLLMPreserveReasoningModel("fireworks_ai/accounts/fireworks/models/kimi-k2p7-code")).toBe(true)
