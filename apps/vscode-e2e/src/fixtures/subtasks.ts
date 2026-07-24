@@ -54,6 +54,25 @@ const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
 	return expected.every((text) => rawRequest.includes(text))
 }
 
+// aimock's `userMessage` matcher only inspects the LAST user message. Fixtures that need
+// whole-request exclusions must replicate that scoping inside a predicate so they keep the
+// same matching semantics as the bare-regex fixtures they replace.
+const lastUserMessageContains = (req: ChatCompletionRequest, text: string) => {
+	const userMessages = req.messages?.filter((message) => message.role === "user") ?? []
+	const last = userMessages.at(-1)
+	if (!last) return false
+	const content = typeof last.content === "string" ? last.content : JSON.stringify(last.content ?? "")
+	return content.includes(text)
+}
+
+// reopenParentFromDelegation injects the child result into the resumed parent's history as
+// `Subtask <childId> completed.\n\nResult:\n<summary>`. Matching on this injected prefix (in
+// its JSON-serialized form) keeps parent-resume fixtures robust when
+// validateAndFixToolResultIds rewrites tool-use ids on resume — matching on the new_task
+// tool-call id directly proved flaky (the id can be rewritten, the fixture then misses, and
+// a looser child fixture wins and serves the child's response to the parent).
+const SUBTASK_RESULT_INJECTION = "completed.\\n\\nResult:"
+
 const completionAfterAnswer = (followupId: string, completionId: string) => ({
 	match: {
 		predicate: (req: ChatCompletionRequest) =>
@@ -100,9 +119,14 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// The parent prompt embeds SUBTASK_FAST_CHILD_MARKER verbatim, so parent-resume turns
+	// can also match a bare substring check (same collision class as #561). Exclude the
+	// parent marker so those turns fall through to the parent-resume fixture below.
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_FAST_CHILD_MARKER),
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, SUBTASK_FAST_CHILD_MARKER) &&
+				!requestContains(req, [SUBTASK_FAST_PARENT_MARKER]),
 		},
 		response: {
 			toolCalls: [
@@ -118,7 +142,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [SUBTASK_FAST_PARENT_MARKER, "call_subtasks_fast_parent_new_task_001"]),
+				requestContains(req, [SUBTASK_FAST_PARENT_MARKER, "Fast child completed"]),
 		},
 		response: {
 			toolCalls: [
@@ -149,9 +173,12 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// Same collision guard as the fast-child fixture above: SUBTASK_PARENT_PROMPT embeds
+	// SUBTASK_CHILD_MARKER verbatim, so parent-resume turns must not match this fixture.
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_CHILD_MARKER),
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, SUBTASK_CHILD_MARKER) && !requestContains(req, [SUBTASK_PARENT_MARKER]),
 		},
 		response: {
 			toolCalls: [
@@ -172,7 +199,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [SUBTASK_PARENT_MARKER, "call_subtasks_parent_new_task_001"]),
+				requestContains(req, [SUBTASK_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
@@ -241,11 +268,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [
-					SUBTASK_API_HANG_PARENT_MARKER,
-					"call_api_hang_parent_new_task_001",
-					SUBTASK_API_HANG_CHILD_RESULT,
-				]),
+				requestContains(req, [SUBTASK_API_HANG_PARENT_MARKER, SUBTASK_API_HANG_CHILD_RESULT]),
 		},
 		response: {
 			toolCalls: [
@@ -433,7 +456,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [SUBTASK_INTERRUPT_PARENT_MARKER, "call_interrupt_parent_new_task_001"]),
+				requestContains(req, [SUBTASK_INTERRUPT_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
