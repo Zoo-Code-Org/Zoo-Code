@@ -2,7 +2,7 @@
 	"name": "roo-code",
 	"packageManager": "pnpm@10.8.1",
 	"engines": {
-		"node": "20.20.2"
+		"node": "24.18.0"
 	},
 	"scripts": {
 		"preinstall": "node scripts/bootstrap.mjs",
@@ -30,7 +30,7 @@
 	"devDependencies": {
 		"@changesets/cli": "2.31.0",
 		"@roo-code/config-typescript": "workspace:^",
-		"@types/node": "20.19.43",
+		"@types/node": "24.13.3",
 		"@vscode/vsce": "3.9.2",
 		"esbuild": "0.28.1",
 		"eslint": "9.39.4",
