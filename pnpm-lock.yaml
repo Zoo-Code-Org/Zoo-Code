@@ -594,7 +594,7 @@ importers:
         version: 12.0.0
       shell-quote:
         specifier: ^1.8.2
-        version: 1.8.4
+        version: 1.9.0
       simple-git:
         specifier: ^3.27.0
         version: 3.36.0
@@ -862,7 +862,7 @@ importers:
         version: 0.6.4
       shell-quote:
         specifier: ^1.8.2
-        version: 1.8.4
+        version: 1.9.0
       shiki:
         specifier: ^3.2.1
         version: 3.4.1
@@ -7277,8 +7277,8 @@ packages:
     resolution: {integrity: sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A==}
     engines: {node: '>=8'}
 
-  shell-quote@1.8.4:
-    resolution: {integrity: sha512-VsC6n6vz1ihYYyZZwX7YZSF5l5x36ca17OC+a69h94YqB7X6XLwf+5MOgynYir2SLFUbl8gIYvBo8K8RoNQ6bQ==}
+  shell-quote@1.9.0:
+    resolution: {integrity: sha512-Iov+JwFv/2HcTpcwNMKd8+IWNb8tboQJNQTkAY/LLVK7gGH9jy+LGkVqPxfekHl+yMmiqXszdGWXgkfml7hjqA==}
     engines: {node: '>= 0.4'}
 
   shiki@3.4.1:
@@ -15720,7 +15720,7 @@ snapshots:
 
   shebang-regex@3.0.0: {}
 
-  shell-quote@1.8.4: {}
+  shell-quote@1.9.0: {}
 
   shiki@3.4.1:
     dependencies:
