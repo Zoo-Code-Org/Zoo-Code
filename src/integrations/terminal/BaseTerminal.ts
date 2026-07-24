@@ -154,7 +154,7 @@ export abstract class BaseTerminal implements RooTerminal {
 		return output
 	}
 
-	public static defaultShellIntegrationTimeout = 5_000
+	public static defaultShellIntegrationTimeout = 15_000
 	private static shellIntegrationTimeout: number = BaseTerminal.defaultShellIntegrationTimeout
 	private static shellIntegrationDisabled: boolean = false
 	private static commandDelay: number = 0

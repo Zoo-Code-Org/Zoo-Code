@@ -1496,6 +1496,122 @@ describe("OpenAiHandler", () => {
 			)
 		})
 	})
+
+	describe("processUsageMetrics totalCost", () => {
+		it("should include totalCost in the usage chunk from streaming response", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Hello" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: {
+							prompt_tokens: 100,
+							completion_tokens: 50,
+							total_tokens: 150,
+						},
+					}
+				},
+			}))
+
+			const stream = handler.createMessage("system", [])
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const usageChunk = chunks.find((c) => c.type === "usage")
+			expect(usageChunk).toBeDefined()
+			expect(typeof usageChunk?.totalCost).toBe("number")
+		})
+
+		it("should return totalCost as 0 when model has no pricing", async () => {
+			const noPricingHandler = new OpenAiHandler({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "custom-model",
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					// No inputPrice or outputPrice set
+				},
+			})
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Hello" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: {
+							prompt_tokens: 1000,
+							completion_tokens: 500,
+							total_tokens: 1500,
+						},
+					}
+				},
+			}))
+
+			const stream = noPricingHandler.createMessage("system", [])
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const usageChunk = chunks.find((c) => c.type === "usage")
+			expect(usageChunk).toBeDefined()
+			expect(usageChunk?.totalCost).toBe(0)
+		})
+
+		it("should factor cache tokens into totalCost calculation", async () => {
+			const cacheHandler = new OpenAiHandler({
+				openAiApiKey: "test-api-key",
+				openAiModelId: "gpt-4",
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: true,
+					inputPrice: 3.0,
+					outputPrice: 15.0,
+					cacheReadsPrice: 0.3,
+				},
+			})
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Hello" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0 }],
+						usage: {
+							prompt_tokens: 1000,
+							completion_tokens: 500,
+							total_tokens: 1500,
+							cache_creation_input_tokens: 100,
+							cache_read_input_tokens: 200,
+						},
+					}
+				},
+			}))
+
+			const stream = cacheHandler.createMessage("system", [])
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const usageChunk = chunks.find((c) => c.type === "usage")
+			expect(usageChunk).toBeDefined()
+			expect(typeof usageChunk?.totalCost).toBe("number")
+			expect(usageChunk?.totalCost).toBeGreaterThan(0)
+			expect(usageChunk?.cacheReadTokens).toBe(200)
+			expect(usageChunk?.cacheWriteTokens).toBe(100)
+		})
+	})
 })
 
 describe("getOpenAiModels", () => {
