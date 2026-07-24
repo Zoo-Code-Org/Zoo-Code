@@ -43,6 +43,7 @@ export function batchNearby<T>(items: T[], options: BatchNearbyOptions<T>): T[] 
 			// Start collecting a batch of targets, skipping ignorable messages in between
 			const batch: T[] = [items[i]]
 			let j = i + 1
+			const pendingIgnorable: T[] = []
 
 			while (j < items.length) {
 				if (isBoundary(items[j])) {
@@ -52,16 +53,22 @@ export function batchNearby<T>(items: T[], options: BatchNearbyOptions<T>): T[] 
 					batch.push(items[j])
 					j++
 				} else if (isIgnorableBetweenTargets(items[j])) {
-					j++ // skip ignorable messages between targets
+					pendingIgnorable.push(items[j]) // track but don't commit yet
+					j++
 				} else {
 					break // non-ignorable, non-target message stops the batch
 				}
 			}
 
 			if (batch.length > 1) {
+				// Bridge succeeded — pending ignorable items are metadata consumed by the batch
 				result.push(synthesize(batch))
 			} else {
+				// Bridge failed — restore pending ignorable items to preserve in-order semantics
 				result.push(batch[0])
+				if (pendingIgnorable.length > 0) {
+					result.push(...pendingIgnorable)
+				}
 			}
 
 			i = j // items[j] was not consumed — re-examine it on next iteration

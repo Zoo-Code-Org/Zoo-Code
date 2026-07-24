@@ -145,10 +145,11 @@ describe("batchNearby", () => {
 			isBoundary,
 			synthesize: synthesizeBatch,
 		})
-		expect(result).toHaveLength(3)
+		expect(result).toHaveLength(4)
 		expect(result[0].text).toBe("match-1")
-		expect(result[1].text).toBe("visible text")
-		expect(result[2].text).toBe("match-2")
+		expect(result[1].text).toBe("") // api_req_started restored after single target
+		expect(result[2].text).toBe("visible text")
+		expect(result[3].text).toBe("match-2")
 	})
 
 	test("multiple batches separated by boundaries", () => {
@@ -186,7 +187,7 @@ describe("batchNearby", () => {
 			isBoundary,
 			synthesize: synthesizeBatch,
 		})
-		expect(result).toHaveLength(2) // api_req_started ignorable → skipped; [BATCH:match-1,match-2, "feedback"]
+		expect(result).toHaveLength(2) // bridge succeeded → pending consumed; [BATCH:match-1,match-2, "feedback"]
 		expect(result[0].text).toBe("BATCH:match-1,match-2")
 		expect(result[1].text).toBe("feedback")
 	})
@@ -204,7 +205,7 @@ describe("batchNearby", () => {
 			isBoundary,
 			synthesize: synthesizeBatch,
 		})
-		expect(result).toHaveLength(2) // api_req_started ignorable → skipped; [BATCH:match-1,match-2, "err"]
+		expect(result).toHaveLength(2) // bridge succeeded → pending consumed; [BATCH:match-1,match-2, "err"]
 		expect(result[0].text).toBe("BATCH:match-1,match-2")
 		expect(result[1].text).toBe("err")
 	})
@@ -222,7 +223,7 @@ describe("batchNearby", () => {
 			isBoundary,
 			synthesize: synthesizeBatch,
 		})
-		expect(result).toHaveLength(2) // api_req_started ignorable → skipped; [BATCH:match-1,match-2, "ck"]
+		expect(result).toHaveLength(2) // bridge succeeded → pending consumed; [BATCH:match-1,match-2, "ck"]
 		expect(result[0].text).toBe("BATCH:match-1,match-2")
 		expect(result[1].text).toBe("ck")
 	})
@@ -240,7 +241,7 @@ describe("batchNearby", () => {
 			isBoundary,
 			synthesize: synthesizeBatch,
 		})
-		expect(result).toHaveLength(2) // api_req_started ignorable → skipped; [BATCH:match-1,match-2, "done"]
+		expect(result).toHaveLength(2) // bridge succeeded → pending consumed; [BATCH:match-1,match-2, "done"]
 		expect(result[0].text).toBe("BATCH:match-1,match-2")
 		expect(result[1].text).toBe("done")
 	})
