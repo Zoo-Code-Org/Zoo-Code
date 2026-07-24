@@ -514,19 +514,28 @@ describe("UsageAggregator", () => {
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
 					provider: "openai",
-					usage: { inputTokens: { value: 1000, source: "provider" } },
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						totalTokens: { value: 1000, source: "provider" },
+					},
 				}),
 				makeEvent({
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
 					provider: "anthropic",
-					usage: { inputTokens: { value: 3000, source: "provider" } },
+					usage: {
+						inputTokens: { value: 3000, source: "provider" },
+						totalTokens: { value: 3000, source: "provider" },
+					},
 				}),
 				makeEvent({
 					eventId: "evt-3",
 					idempotencyKey: "idem-3",
 					provider: "google",
-					usage: { inputTokens: { value: 2000, source: "provider" } },
+					usage: {
+						inputTokens: { value: 2000, source: "provider" },
+						totalTokens: { value: 2000, source: "provider" },
+					},
 				}),
 			]
 			const query = makeQuery({ groupBy: ["provider"] })

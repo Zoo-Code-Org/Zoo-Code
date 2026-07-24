@@ -148,7 +148,10 @@ export async function handleClearUsageStats(provider: ClineProvider, message: We
 
 		await service.clearStats(nonce)
 
-		// Notify all open webviews that stats changed
+		// Notify this window's webview that stats changed.
+		// Other windows are notified via the FileSystemWatcher in
+		// UsageStatsService (cross-window sync) or via their own
+		// UsageRecorder notifyChanged callback (same-window sync).
 		await provider.postMessageToWebview({
 			type: "usageStatsChanged",
 		})

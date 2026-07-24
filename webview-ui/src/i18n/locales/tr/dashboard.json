@@ -13,7 +13,8 @@
 		"inputTokens": "Giriş Token'ları",
 		"outputTokens": "Çıkış Token'ları",
 		"cacheTokens": "Önbellek Token'ları",
-		"cost": "Maliyet"
+		"cost": "Maliyet",
+		"unknownEventCount": "{{count}} API çağrısı (bilinmeyen önbellek verisi)"
 	},
 	"states": {
 		"loading": "Yükleniyor...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "Başlangıç",
 		"to": "Bitiş"
+	},
+	"cacheRatio": {
+		"label": "Tahmin için önbellek oranı",
+		"hint": "Sağlayıcı önbellek verilerini bildirmediğinde uygulanır"
 	},
 	"sessions": {
 		"title": "Oturumlar",

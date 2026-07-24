@@ -7,16 +7,21 @@ import type { StatsBucket } from "@roo-code/types"
 
 import DashboardSummary from "../DashboardSummary"
 
-// Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
-		t: (key: string) => key,
+// Mock i18n — DashboardSummary uses useAppTranslation from TranslationContext,
+// which wraps i18next's t(). We mock the context directly.
+const mockT = (key: string, opts?: Record<string, unknown>) => {
+	if (key === "dashboard:summary.unknownEventCount" && typeof opts?.count === "number") {
+		return `${opts.count} uncertain`
+	}
+	return key
+}
+
+vi.mock("@/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
+		t: mockT,
+		i18n: { language: "en" },
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: () => {},
-	},
-	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+	TranslationProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }))
 
 // ── Test fixtures ────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import * as vscode from "vscode"
 import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
 import { UsageEventStore, StatsStoreError } from "./UsageEventStore"
@@ -89,12 +90,26 @@ const CSV_COLUMNS = [
 export class UsageStatsService {
 	private readonly store: UsageEventStore
 	private readonly aggregator: UsageAggregator
+	private readonly storageDir: string
 
 	/** Nonce for clear verification (short-lived) */
 	private clearNonce: string | null = null
 	private clearNonceExpiresAt: number = 0
 
+	/**
+	 * File system watcher for cross-window change detection.
+	 * Watches events-*.ndjson in the globalStorage usage-stats directory.
+	 */
+	private watcher: vscode.FileSystemWatcher | null = null
+
+	/**
+	 * Listeners registered for external change notifications.
+	 * Fires when another VS Code window writes to the usage stats files.
+	 */
+	private readonly changeListeners: Array<() => void> = []
+
 	constructor(globalStoragePath: string) {
+		this.storageDir = globalStoragePath
 		this.store = new UsageEventStore(globalStoragePath)
 		this.aggregator = new UsageAggregator()
 	}
@@ -103,10 +118,36 @@ export class UsageStatsService {
 
 	/**
 	 * Initializes the service.
-	 * Performs store initialization.
+	 * Performs store initialization and sets up the file system watcher.
 	 */
 	async initialize(): Promise<void> {
 		await this.store.initialize()
+		this.setupFileWatcher()
+	}
+
+	/**
+	 * Disposes the service, releasing the file system watcher.
+	 */
+	dispose(): void {
+		this.watcher?.dispose()
+		this.watcher = null
+		this.changeListeners.length = 0
+	}
+
+	/**
+	 * Registers a listener that fires when the usage stats files change on disk.
+	 * Returns a disposable that unregisters the listener.
+	 */
+	onDidChange(listener: () => void): { dispose(): void } {
+		this.changeListeners.push(listener)
+		return {
+			dispose: () => {
+				const idx = this.changeListeners.indexOf(listener)
+				if (idx >= 0) {
+					this.changeListeners.splice(idx, 1)
+				}
+			},
+		}
 	}
 
 	/**
@@ -261,6 +302,43 @@ export class UsageStatsService {
 	 */
 	isCapped(): boolean {
 		return this.store.isCapped()
+	}
+
+	// ── Internal: File Watcher ──────────────────────────────────────────────
+
+	/**
+	 * Sets up a FileSystemWatcher on the usage-stats directory to detect
+	 * changes made by other VS Code windows. When another window writes to
+	 * events-*.ndjson, this window emits onDidChange so the local webview
+	 * can refresh its dashboard.
+	 */
+	private setupFileWatcher(): void {
+		try {
+			// globalStorageUri is outside the workspace, so RelativePattern
+			// may not match. Use a glob pattern on the absolute path instead.
+			const pattern = new vscode.RelativePattern(this.storageDir, "usage-stats/events-*.ndjson")
+			this.watcher = vscode.workspace.createFileSystemWatcher(pattern)
+
+			let debounceTimer: ReturnType<typeof setTimeout> | null = null
+			const notify = () => {
+				if (debounceTimer) {
+					clearTimeout(debounceTimer)
+				}
+				debounceTimer = setTimeout(() => {
+					for (const listener of this.changeListeners) {
+						listener()
+					}
+					debounceTimer = null
+				}, 300)
+			}
+
+			this.watcher.onDidChange(notify)
+			this.watcher.onDidCreate(notify)
+		} catch {
+			// Watcher setup failure is non-fatal — cross-window refresh
+			// will simply not work, but same-window refresh still does.
+			console.warn("[UsageStatsService] Failed to set up file watcher for cross-window stats sync")
+		}
 	}
 
 	// ── Internal: Event Filtering ───────────────────────────────────────────

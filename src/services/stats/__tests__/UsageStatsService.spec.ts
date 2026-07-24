@@ -178,7 +178,7 @@ describe("UsageStatsService", () => {
 			const query = makeQuery({ preset: "all" })
 			const result = await service.exportStats(query, "json")
 
-			expect(result).not.toBe("string")
+			expect(typeof result).not.toBe("string")
 			const jsonExport = result as {
 				exportSchemaVersion: number
 				exportedAt: string

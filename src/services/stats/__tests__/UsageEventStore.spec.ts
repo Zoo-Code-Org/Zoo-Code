@@ -382,6 +382,44 @@ describe("UsageEventStore", () => {
 		})
 	})
 
+	describe("cache invalidation on same-segment append", () => {
+		it("should detect external writes to the active segment via stat+mtime", async () => {
+			// First append creates segment 1 and warms the cache
+			await store.append(makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }))
+			const events1 = await store.readAll()
+			expect(events1).toHaveLength(1)
+
+			// Simulate another VS Code window appending to the SAME segment file
+			// by writing directly to the file (bypassing this store instance).
+			const statsDir = store._getStatsDir()
+			const segment1Path = path.join(statsDir, "events-000001.ndjson")
+			const externalEvent = makeEvent({ eventId: "evt-external", idempotencyKey: "idem-external" })
+			await fs.appendFile(segment1Path, JSON.stringify(externalEvent) + "\n", "utf-8")
+
+			// Force a different mtime to ensure the stat check detects the change.
+			// Some filesystems have coarse mtime granularity (1s or more).
+			const future = new Date(Date.now() + 10000)
+			await fs.utimes(segment1Path, future, future)
+
+			// The cache must be invalidated by the stat+mtime check so the
+			// external event is included in the next readAll().
+			const events2 = await store.readAll()
+			expect(events2).toHaveLength(2)
+			expect(events2.map((e) => e.eventId)).toContain("evt-1")
+			expect(events2.map((e) => e.eventId)).toContain("evt-external")
+		})
+
+		it("should return cached events when no external modification occurred", async () => {
+			await store.append(makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }))
+			const events1 = await store.readAll()
+			expect(events1).toHaveLength(1)
+
+			// Second readAll should return the same cached array reference
+			const events2 = await store.readAll()
+			expect(events2).toBe(events1)
+		})
+	})
+
 	describe("error handling", () => {
 		it("should throw StatsStoreError with correct code on cap reached", async () => {
 			// This test is difficult to force the cap, so only verify isCapped() method behavior

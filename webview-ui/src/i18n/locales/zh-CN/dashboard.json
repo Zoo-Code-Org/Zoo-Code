@@ -13,7 +13,8 @@
 		"inputTokens": "输入 Token",
 		"outputTokens": "输出 Token",
 		"cacheTokens": "缓存 Token",
-		"cost": "费用"
+		"cost": "费用",
+		"unknownEventCount": "{{count}} 次 API 调用（缓存数据未知）"
 	},
 	"states": {
 		"loading": "加载中...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "从",
 		"to": "到"
+	},
+	"cacheRatio": {
+		"label": "缓存比率估计",
+		"hint": "当提供商未报告缓存数据时应用"
 	},
 	"sessions": {
 		"title": "会话",

@@ -13,7 +13,8 @@
 		"inputTokens": "इनपुट टोकन",
 		"outputTokens": "आउटपुट टोकन",
 		"cacheTokens": "कैश टोकन",
-		"cost": "लागत"
+		"cost": "लागत",
+		"unknownEventCount": "{{count}} API कॉल (अज्ञात कैश डेटा)"
 	},
 	"states": {
 		"loading": "लोड हो रहा है...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "से",
 		"to": "तक"
+	},
+	"cacheRatio": {
+		"label": "अनुमान के लिए कैश अनुपात",
+		"hint": "जब प्रदाता कैश डेटा की रिपोर्ट नहीं करता है तो लागू होता है"
 	},
 	"sessions": {
 		"title": "सत्र",

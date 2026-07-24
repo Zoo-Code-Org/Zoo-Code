@@ -13,7 +13,8 @@
 		"inputTokens": "Token Input",
 		"outputTokens": "Token Output",
 		"cacheTokens": "Token Cache",
-		"cost": "Biaya"
+		"cost": "Biaya",
+		"unknownEventCount": "{{count}} panggilan API dengan data cache tidak diketahui"
 	},
 	"states": {
 		"loading": "Memuat...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "Dari",
 		"to": "Sampai"
+	},
+	"cacheRatio": {
+		"label": "Rasio cache untuk estimasi",
+		"hint": "Diterapkan ketika penyedia tidak melaporkan data cache"
 	},
 	"sessions": {
 		"title": "Sesi",

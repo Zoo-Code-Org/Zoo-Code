@@ -13,7 +13,8 @@
 		"inputTokens": "入力トークン",
 		"outputTokens": "出力トークン",
 		"cacheTokens": "キャッシュトークン",
-		"cost": "コスト"
+		"cost": "コスト",
+		"unknownEventCount": "{{count}}件のAPI呼び出し（キャッシュデータ不明）"
 	},
 	"states": {
 		"loading": "読み込んでいます...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "開始",
 		"to": "終了"
+	},
+	"cacheRatio": {
+		"label": "推定用キャッシュ比率",
+		"hint": "プロバイダーがキャッシュデータを報告しない場合に適用"
 	},
 	"sessions": {
 		"title": "セッション",

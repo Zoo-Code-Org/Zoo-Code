@@ -13,7 +13,8 @@
 		"inputTokens": "Tokeny wejściowe",
 		"outputTokens": "Tokeny wyjściowe",
 		"cacheTokens": "Tokeny pamięci podręcznej",
-		"cost": "Koszt"
+		"cost": "Koszt",
+		"unknownEventCount": "{{count}} wywołań API z nieznanymi danymi pamięci podręcznej"
 	},
 	"states": {
 		"loading": "Ładowanie...",
@@ -58,6 +59,10 @@
 	"customRange": {
 		"from": "Od",
 		"to": "Do"
+	},
+	"cacheRatio": {
+		"label": "Współczynnik pamięci podręcznej do szacowania",
+		"hint": "Stosowany, gdy dostawca nie zgłasza danych pamięci podręcznej"
 	},
 	"sessions": {
 		"title": "Sesje",
