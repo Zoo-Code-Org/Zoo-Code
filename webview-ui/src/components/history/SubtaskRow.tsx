@@ -2,11 +2,11 @@ import { memo } from "react"
 import { ArrowRight } from "lucide-react"
 import { vscode } from "@/utils/vscode"
 import { cn } from "@/lib/utils"
+import { StandardTooltip } from "../ui"
 import type { SubtaskTreeNode } from "./types"
 import { countAllSubtasks } from "./types"
-import { StandardTooltip } from "../ui"
 import SubtaskCollapsibleRow from "./SubtaskCollapsibleRow"
-import { TaskStatusBadge } from "./TaskStatusBadge"
+import { PinButton } from "./PinButton"
 
 interface SubtaskRowProps {
 	/** The subtask tree node to display */
@@ -17,6 +17,14 @@ interface SubtaskRowProps {
 	onToggleExpand: (taskId: string) => void
 	/** Optional className for styling */
 	className?: string
+	/** Whether to show the pin toggle button. */
+	showPin?: boolean
+	/** Whether the automatic group is pinned. */
+	isPinned?: boolean
+	/** Whether pinning is currently allowed. */
+	canPin?: boolean
+	/** Called when the pin button is toggled. */
+	onTogglePin?: () => void
 }
 
 /**
@@ -24,7 +32,16 @@ interface SubtaskRowProps {
  * Leaf nodes render just the task row. Nodes with children show
  * a collapsible section that can be expanded to reveal nested subtasks.
  */
-const SubtaskRow = ({ node, depth, onToggleExpand, className }: SubtaskRowProps) => {
+const SubtaskRow = ({
+	node,
+	depth,
+	onToggleExpand,
+	className,
+	showPin = false,
+	isPinned = false,
+	canPin = false,
+	onTogglePin,
+}: SubtaskRowProps) => {
 	const { item, children, isExpanded } = node
 	const hasChildren = children.length > 0
 
@@ -33,7 +50,7 @@ const SubtaskRow = ({ node, depth, onToggleExpand, className }: SubtaskRowProps)
 	}
 
 	return (
-		<div data-testid={`subtask-row-${item.id}`} className={className}>
+		<div data-testid={`subtask-row-${item.id}`} className={cn(className)}>
 			{/* Task row with depth indentation */}
 			<div
 				className={cn(
@@ -42,7 +59,6 @@ const SubtaskRow = ({ node, depth, onToggleExpand, className }: SubtaskRowProps)
 				)}
 				style={{ paddingLeft: `${depth * 16}px` }}
 				onClick={handleClick}
-				role="button"
 				tabIndex={0}
 				onKeyDown={(e) => {
 					if (e.key === "Enter" || e.key === " ") {
@@ -50,13 +66,23 @@ const SubtaskRow = ({ node, depth, onToggleExpand, className }: SubtaskRowProps)
 						handleClick()
 					}
 				}}>
-				<StandardTooltip content={item.task} delay={600}>
-					<span className="text-sm line-clamp-1">{item.task}</span>
-				</StandardTooltip>
-				{(item.status === "delegated" || item.status === "interrupted") && (
-					<TaskStatusBadge status={item.status} className="text-xs shrink-0" />
-				)}
-				<ArrowRight className="size-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+				<div className="flex items-center gap-1 min-w-0">
+					<StandardTooltip content={item.task} delay={600}>
+						<span className="text-sm line-clamp-1">{item.task}</span>
+					</StandardTooltip>
+				</div>
+				<div className="flex items-center gap-0 shrink-0">
+					{showPin && onTogglePin && (
+						<PinButton
+							isPinned={isPinned}
+							canPin={canPin}
+							onToggle={onTogglePin}
+							size="sm"
+							data-testid="subtask-pin-button"
+						/>
+					)}
+					<ArrowRight className="size-3 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+				</div>
 			</div>
 
 			{/* Nested subtask collapsible section */}
@@ -83,6 +109,10 @@ const SubtaskRow = ({ node, depth, onToggleExpand, className }: SubtaskRowProps)
 							node={child}
 							depth={depth + 1}
 							onToggleExpand={onToggleExpand}
+							showPin={showPin}
+							isPinned={isPinned}
+							canPin={canPin}
+							onTogglePin={onTogglePin}
 						/>
 					))}
 				</div>

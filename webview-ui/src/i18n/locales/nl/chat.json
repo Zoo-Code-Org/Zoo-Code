@@ -17,9 +17,7 @@
 		"condenseContext": "Context intelligent samenvatten",
 		"openApiHistory": "API-geschiedenis openen",
 		"openUiHistory": "UI-geschiedenis openen",
-		"backToParentTask": "Bovenliggende taak",
-		"waitingOnSubtask": "Wacht op subtaak",
-		"goToSubtask": "Ga naar subtaak"
+		"backToParentTask": "Bovenliggende taak"
 	},
 	"unpin": "Losmaken",
 	"pin": "Vastmaken",

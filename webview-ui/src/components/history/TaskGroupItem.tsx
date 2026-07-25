@@ -25,6 +25,14 @@ interface TaskGroupItemProps {
 	onToggleExpand: () => void
 	/** Callback when a nested subtask node expand/collapse is toggled */
 	onToggleSubtaskExpand: (taskId: string) => void
+	/** Whether to show the pin toggle button on the parent task. */
+	showPin?: boolean
+	/** Whether the group is currently pinned. */
+	isPinned?: boolean
+	/** Whether pinning is currently allowed. */
+	canPin?: boolean
+	/** Called when the pin button is toggled on the parent task. */
+	onTogglePin?: () => void
 	/** Optional className for styling */
 	className?: string
 }
@@ -43,6 +51,10 @@ const TaskGroupItem = ({
 	onDelete,
 	onToggleExpand,
 	onToggleSubtaskExpand,
+	showPin = false,
+	isPinned = false,
+	canPin = false,
+	onTogglePin,
 	className,
 }: TaskGroupItemProps) => {
 	const { parent, subtasks, isExpanded } = group
@@ -66,6 +78,10 @@ const TaskGroupItem = ({
 				onToggleSelection={onToggleSelection}
 				onDelete={onDelete}
 				hasSubtasks={hasSubtasks}
+				showPin={showPin}
+				isPinned={isPinned}
+				canPin={canPin}
+				onTogglePin={onTogglePin}
 			/>
 
 			{/* Subtask collapsible row — shows total recursive count */}

@@ -4,10 +4,10 @@ import { formatTimeAgo } from "@/utils/format"
 import { CopyButton } from "./CopyButton"
 import { ExportButton } from "./ExportButton"
 import { DeleteButton } from "./DeleteButton"
+import { PinButton } from "./PinButton"
 import { StandardTooltip } from "../ui/standard-tooltip"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { Split } from "lucide-react"
-import { TaskStatusBadge } from "./TaskStatusBadge"
 
 export interface TaskItemFooterProps {
 	item: HistoryItem
@@ -15,6 +15,14 @@ export interface TaskItemFooterProps {
 	isSelectionMode?: boolean
 	isSubtask?: boolean
 	onDelete?: (taskId: string) => void
+	/** Whether to show the pin toggle button. */
+	showPin?: boolean
+	/** Whether the task is currently pinned. */
+	isPinned?: boolean
+	/** Whether pinning is currently allowed. */
+	canPin?: boolean
+	/** Called when the pin button is toggled. */
+	onTogglePin?: () => void
 }
 
 const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
@@ -23,6 +31,10 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 	isSelectionMode = false,
 	isSubtask = false,
 	onDelete,
+	showPin = false,
+	isPinned = false,
+	canPin = false,
+	onTogglePin,
 }) => {
 	const { t } = useAppTranslation()
 
@@ -34,13 +46,6 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 					<>
 						<Split className="size-3" />
 						<span>{t("history:subtaskTag")}</span>
-						<span>·</span>
-					</>
-				)}
-				{/* Delegation status (delegated parent waiting on a child, or interrupted child) */}
-				{(item.status === "delegated" || item.status === "interrupted") && (
-					<>
-						<TaskStatusBadge status={item.status} />
 						<span>·</span>
 					</>
 				)}
@@ -63,6 +68,15 @@ const TaskItemFooter: React.FC<TaskItemFooterProps> = ({
 			{/* Action Buttons for non-compact view */}
 			{!isSelectionMode && (
 				<div className="flex flex-row gap-0 -mx-1.5 items-center text-vscode-descriptionForeground/60 hover:text-vscode-descriptionForeground opacity-0 group-hover:opacity-100">
+					{showPin && onTogglePin && (
+						<PinButton
+							isPinned={isPinned}
+							canPin={canPin}
+							onToggle={onTogglePin}
+							size="sm"
+							data-testid="task-pin-button"
+						/>
+					)}
 					<CopyButton itemTask={item.task} />
 					{variant === "full" && <ExportButton itemId={item.id} />}
 					{onDelete && <DeleteButton itemId={item.id} onDelete={onDelete} />}
