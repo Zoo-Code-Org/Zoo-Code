@@ -29,14 +29,9 @@
 			"count": 2
 		}
 	},
-	"__tests__/helpers/provider-stub.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"__tests__/history-resume-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 71
+			"count": 72
 		}
 	},
 	"__tests__/migrateSettings.spec.ts": {
@@ -57,16 +52,6 @@
 	"__tests__/provider-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 9
-		}
-	},
-	"__tests__/removeClineFromStack-delegation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 36
-		}
-	},
-	"__tests__/single-open-invariant.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
 		}
 	},
 	"activate/CodeActionProvider.ts": {
@@ -1122,11 +1107,6 @@
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 34
-		}
-	},
-	"core/webview/__tests__/ClineProvider.flicker-free-cancel.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
 		}
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {

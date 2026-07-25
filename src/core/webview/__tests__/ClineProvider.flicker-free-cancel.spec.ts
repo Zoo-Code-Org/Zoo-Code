@@ -7,9 +7,21 @@ import { TaskRegistry } from "../../task/TaskRegistry"
 import { ContextProxy } from "../../config/ContextProxy"
 import type { ProviderSettings, HistoryItem } from "@roo-code/types"
 
-function seedRegistry(provider: ClineProvider, ...tasks: any[]) {
+type MockTask = Partial<Task> &
+	Pick<Task, "taskId" | "instanceId"> & {
+		parentTaskId?: string
+		rootTask?: { taskId: string }
+		parentTask?: { taskId: string }
+		cancelCurrentRequest?: ReturnType<typeof vi.fn>
+		isStreaming?: boolean
+		didFinishAbortingStream?: boolean
+		isWaitingForFirstChunk?: boolean
+	}
+type CreatedHistoryTask = Awaited<ReturnType<ClineProvider["createTaskWithHistoryItem"]>>
+
+function seedRegistry(provider: ClineProvider, ...tasks: unknown[]) {
 	const registry = new TaskRegistry()
-	for (const t of tasks) registry.push(t)
+	for (const t of tasks) registry.push(t as unknown as Task)
 	provider["taskRegistry"] = registry
 }
 
@@ -264,10 +276,10 @@ vi.mock("../../task-persistence", async (importOriginal) => {
 
 describe("ClineProvider flicker-free cancel", () => {
 	let provider: ClineProvider
-	let mockContext: any
-	let mockOutputChannel: any
-	let mockTask1: any
-	let mockTask2: any
+	let mockContext: vscode.ExtensionContext
+	let mockOutputChannel: vscode.OutputChannel
+	let mockTask1: MockTask
+	let mockTask2: MockTask
 	let consoleLogSpy: ReturnType<typeof vi.spyOn>
 	let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
@@ -308,13 +320,13 @@ describe("ClineProvider flicker-free cancel", () => {
 				keys: vi.fn().mockReturnValue([]),
 			},
 			extensionUri: { fsPath: "/test/extension" },
-		}
+		} as unknown as vscode.ExtensionContext
 
 		// Setup mock output channel
 		mockOutputChannel = {
 			appendLine: vi.fn(),
 			dispose: vi.fn(),
-		}
+		} as unknown as vscode.OutputChannel
 
 		// Setup mock context proxy
 		const mockContextProxy = {
@@ -327,7 +339,12 @@ describe("ClineProvider flicker-free cancel", () => {
 		}
 
 		// Create provider instance
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", mockContextProxy as any)
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			mockContextProxy as unknown as ContextProxy,
+		)
 
 		// Mock provider methods
 		provider.getState = vi.fn().mockResolvedValue({
@@ -337,7 +354,7 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		provider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
-		// Mock private method using any cast
+		// Mock private method used by the rehydration path.
 		provider["updateGlobalState"] = vi.fn().mockResolvedValue(undefined)
 		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 		provider.performPreparationTasks = vi.fn().mockResolvedValue(undefined)
@@ -378,7 +395,7 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		// Mock Task constructor
 		vi.mocked(Task).mockImplementation(function () {
-			return mockTask2 as any
+			return mockTask2 as unknown as Task
 		})
 	})
 
@@ -393,7 +410,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		// Mock event listeners for cleanup
 		provider["taskEventListeners"] = new WeakMap()
 		const mockCleanupFunctions = [vi.fn(), vi.fn()]
-		provider["taskEventListeners"].set(mockTask1, mockCleanupFunctions)
+		provider["taskEventListeners"].set(mockTask1 as unknown as Task, mockCleanupFunctions)
 
 		// Spy on removeClineFromStack to verify it's NOT called
 		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack")
@@ -497,7 +514,7 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		seedRegistry(provider, mockParentTask, mockTask1)
 		provider["taskEventListeners"] = new WeakMap()
-		provider["taskEventListeners"].set(mockTask1, [vi.fn()])
+		provider["taskEventListeners"].set(mockTask1 as unknown as Task, [vi.fn()])
 
 		// Act: Rehydrate the current (top) task
 		const historyItem: HistoryItem = {
@@ -535,7 +552,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		seedRegistry(provider, mockTask1, mockTopTask)
 		provider["taskRegistry"].setCurrent("task-1")
 		provider["taskEventListeners"] = new WeakMap()
-		provider["taskEventListeners"].set(mockTask1, [vi.fn()])
+		provider["taskEventListeners"].set(mockTask1 as unknown as Task, [vi.fn()])
 
 		const historyItem: HistoryItem = {
 			id: "task-1",
@@ -611,12 +628,12 @@ describe("ClineProvider flicker-free cancel", () => {
 				return Promise.resolve({ historyItem: parentHistory })
 			}
 			throw new Error(`unexpected task lookup: ${id}`)
-		}) as any
+		}) as unknown as ClineProvider["getTaskWithId"]
 
 		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 		const createTaskWithHistoryItemSpy = vi
 			.spyOn(provider, "createTaskWithHistoryItem")
-			.mockResolvedValue(undefined as any)
+			.mockResolvedValue(undefined as unknown as CreatedHistoryTask)
 
 		await provider.cancelTask()
 
@@ -677,12 +694,12 @@ describe("ClineProvider flicker-free cancel", () => {
 				return Promise.reject(new Error("parent lookup failed"))
 			}
 			throw new Error(`unexpected task lookup: ${id}`)
-		}) as any
+		}) as unknown as ClineProvider["getTaskWithId"]
 
 		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 		const createTaskWithHistoryItemSpy = vi
 			.spyOn(provider, "createTaskWithHistoryItem")
-			.mockResolvedValue(undefined as any)
+			.mockResolvedValue(undefined as unknown as CreatedHistoryTask)
 
 		await provider.cancelTask()
 
@@ -742,12 +759,12 @@ describe("ClineProvider flicker-free cancel", () => {
 				return Promise.reject(new Error("parent lookup failed"))
 			}
 			throw new Error(`unexpected task lookup: ${id}`)
-		}) as any
+		}) as unknown as ClineProvider["getTaskWithId"]
 
 		vi.spyOn(provider, "updateTaskHistory").mockRejectedValue(new Error("standalone persist failed"))
 		const createTaskWithHistoryItemSpy = vi
 			.spyOn(provider, "createTaskWithHistoryItem")
-			.mockResolvedValue(undefined as any)
+			.mockResolvedValue(undefined as unknown as CreatedHistoryTask)
 
 		await expect(provider.cancelTask()).rejects.toThrow("standalone persist failed")
 		expect(createTaskWithHistoryItemSpy).not.toHaveBeenCalled()
@@ -800,12 +817,12 @@ describe("ClineProvider flicker-free cancel", () => {
 			if (id === "child-1") return Promise.resolve({ historyItem: childHistory })
 			if (id === "parent-1") return Promise.resolve({ historyItem: parentHistory })
 			throw new Error(`unexpected task lookup: ${id}`)
-		}) as any
+		}) as unknown as ClineProvider["getTaskWithId"]
 
 		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 		const createTaskWithHistoryItemSpy = vi
 			.spyOn(provider, "createTaskWithHistoryItem")
-			.mockResolvedValue(undefined as any)
+			.mockResolvedValue(undefined as unknown as CreatedHistoryTask)
 
 		await provider.cancelTask()
 
@@ -843,7 +860,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		seedRegistry(provider, childTask)
 		provider["taskEventListeners"] = new Map()
 
-		provider.getTaskWithId = vi.fn() as any
+		provider.getTaskWithId = vi.fn() as unknown as ClineProvider["getTaskWithId"]
 		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 
 		await provider["removeClineFromStack"]()

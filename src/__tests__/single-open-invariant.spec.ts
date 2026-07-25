@@ -1,20 +1,44 @@
 // npx vitest run __tests__/single-open-invariant.spec.ts
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { type OutputChannel } from "vscode"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
+import { type Task } from "../core/task/Task"
 import { API } from "../extension/api"
 import * as ProfileValidatorMod from "../shared/ProfileValidator"
+
+type PrivateClineProviderMethods = {
+	createTask: (
+		this: unknown,
+		text?: string,
+		images?: string[],
+		parentTask?: Task,
+		options?: Parameters<ClineProvider["createTask"]>[3],
+	) => ReturnType<ClineProvider["createTask"]>
+	createTaskWithHistoryItem: (
+		this: unknown,
+		...args: Parameters<ClineProvider["createTaskWithHistoryItem"]>
+	) => ReturnType<ClineProvider["createTaskWithHistoryItem"]>
+	evictCurrentTask: (this: unknown) => ReturnType<ClineProvider["evictCurrentTask"]>
+}
+
+const privateClineProvider = ClineProvider.prototype as unknown as PrivateClineProviderMethods
 
 // Mock Task class used by ClineProvider to avoid heavy startup
 vi.mock("../core/task/Task", () => {
 	class TaskStub {
 		public taskId: string
 		public instanceId = "inst"
-		public parentTask?: any
-		public apiConfiguration: any
-		public rootTask?: any
-		constructor(opts: any) {
+		public parentTask?: unknown
+		public apiConfiguration: unknown
+		public rootTask?: unknown
+		constructor(opts: {
+			historyItem?: { id: string }
+			parentTask?: unknown
+			apiConfiguration?: unknown
+			onCreated?: (t: TaskStub) => void
+		}) {
 			this.taskId = opts.historyItem?.id ?? `task-${Math.random().toString(36).slice(2, 8)}`
 			this.parentTask = opts.parentTask
 			this.apiConfiguration = opts.apiConfiguration ?? { apiProvider: "anthropic" }
@@ -42,14 +66,14 @@ describe("Single-open-task invariant", () => {
 
 		const existingTask = { taskId: "existing-1", abort: false, abandoned: false }
 		const registry = new TaskRegistry()
-		registry.push(existingTask as any)
+		registry.push(existingTask as unknown as Task)
 		const provider = {
 			taskRegistry: registry,
 			getCurrentTask: vi.fn(() => existingTask),
 			taskHistoryStore: { get: vi.fn(() => undefined) },
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
 			get evictCurrentTask() {
-				return (ClineProvider.prototype as any).evictCurrentTask.bind(this)
+				return privateClineProvider.evictCurrentTask.bind(this)
 			},
 			setValues: vi.fn(),
 			getState: vi.fn().mockResolvedValue({
@@ -76,7 +100,7 @@ describe("Single-open-task invariant", () => {
 			},
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).createTask.call(provider, "New task")
+		await privateClineProvider.createTask.call(provider, "New task")
 
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
 		expect(addClineToStack).toHaveBeenCalledTimes(1)
@@ -89,7 +113,7 @@ describe("Single-open-task invariant", () => {
 		const addClineToStack = vi.fn().mockResolvedValue(undefined)
 		const parentTask = { taskId: "parent-1", abort: false, abandoned: false }
 		const registry2 = new TaskRegistry()
-		registry2.push(parentTask as any)
+		registry2.push(parentTask as unknown as Task)
 
 		const provider = {
 			taskRegistry: registry2,
@@ -118,7 +142,7 @@ describe("Single-open-task invariant", () => {
 			},
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).createTask.call(provider, "Subtask", undefined, parentTask as any)
+		await privateClineProvider.createTask.call(provider, "Subtask", undefined, parentTask as unknown as Task)
 
 		expect(removeClineFromStack).not.toHaveBeenCalled()
 		expect(addClineToStack).toHaveBeenCalledTimes(1)
@@ -134,7 +158,7 @@ describe("Single-open-task invariant", () => {
 			taskHistoryStore: { get: vi.fn(() => undefined) },
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
 			get evictCurrentTask() {
-				return (ClineProvider.prototype as any).evictCurrentTask.bind(this)
+				return privateClineProvider.evictCurrentTask.bind(this)
 			},
 			removeClineFromStack,
 			addClineToStack,
@@ -178,7 +202,7 @@ describe("Single-open-task invariant", () => {
 			workspace: "/tmp",
 		}
 
-		const task = await (ClineProvider.prototype as any).createTaskWithHistoryItem.call(provider, historyItem)
+		const task = await privateClineProvider.createTaskWithHistoryItem.call(provider, historyItem)
 		expect(task).toBeTruthy()
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
 		expect(addClineToStack).toHaveBeenCalledTimes(1)
@@ -188,12 +212,12 @@ describe("Single-open-task invariant", () => {
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const createTask = vi.fn().mockResolvedValue({ taskId: "ipc-1" })
 		const provider = {
-			context: {} as any,
+			context: {} as unknown,
 			getCurrentTask: vi.fn(() => undefined),
 			taskHistoryStore: { get: vi.fn(() => undefined) },
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
 			get evictCurrentTask() {
-				return (ClineProvider.prototype as any).evictCurrentTask.bind(this)
+				return privateClineProvider.evictCurrentTask.bind(this)
 			},
 			removeClineFromStack,
 			postStateToWebview: vi.fn(),
@@ -201,7 +225,7 @@ describe("Single-open-task invariant", () => {
 			createTask,
 			getValues: vi.fn(() => ({})),
 			providerSettingsManager: { saveConfig: vi.fn() },
-			on: vi.fn((ev: any, cb: any) => {
+			on: vi.fn((ev: unknown, cb: unknown) => {
 				if (ev === "taskCreated") {
 					// no-op for this test
 				}
@@ -209,7 +233,7 @@ describe("Single-open-task invariant", () => {
 			}),
 		} as unknown as ClineProvider
 
-		const output = { appendLine: vi.fn() } as any
+		const output = { appendLine: vi.fn() } as unknown as OutputChannel
 		const api = new API(output, provider, undefined, false)
 
 		const taskId = await api.startNewTask({

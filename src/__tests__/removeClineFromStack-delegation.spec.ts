@@ -1,9 +1,27 @@
 // npx vitest run __tests__/removeClineFromStack-delegation.spec.ts
 
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, type MockedFunction } from "vitest"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
+import { type Task } from "../core/task/Task"
 import { makeProviderStub } from "./helpers/provider-stub"
+
+type MockTask = Pick<Task, "taskId" | "instanceId"> &
+	Partial<Pick<Task, "parentTaskId" | "abort" | "abandoned">> & {
+		emit: ReturnType<typeof vi.fn>
+		abortTask: ReturnType<typeof vi.fn>
+	}
+
+type PrivateClineProviderMethods = {
+	removeClineFromStack: (this: ClineProvider) => ReturnType<ClineProvider["removeClineFromStack"]>
+	markDelegatedChildInterrupted: (
+		this: ClineProvider,
+		...args: Parameters<ClineProvider["markDelegatedChildInterrupted"]>
+	) => ReturnType<ClineProvider["markDelegatedChildInterrupted"]>
+	evictCurrentTask: (this: ClineProvider) => ReturnType<ClineProvider["evictCurrentTask"]>
+}
+
+const privateClineProvider = ClineProvider.prototype as unknown as PrivateClineProviderMethods
 
 // After the refactor: removeClineFromStack() is pure lifecycle — it removes the focused task, aborts, and
 // cleans up listeners. It does NOT mutate delegation metadata. All delegated→active
@@ -13,7 +31,7 @@ import { makeProviderStub } from "./helpers/provider-stub"
 function buildMockProvider(opts: {
 	childTaskId: string
 	parentTaskId?: string
-	parentHistoryItem?: Record<string, any>
+	parentHistoryItem?: Record<string, unknown>
 	childStatus?: string
 }) {
 	const childTask = {
@@ -32,13 +50,13 @@ function buildMockProvider(opts: {
 		throw new Error("Task not found")
 	})
 
-	const taskHistoryStoreData: Record<string, any> = {}
+	const taskHistoryStoreData: Record<string, unknown> = {}
 	if (opts.childStatus) {
 		taskHistoryStoreData[opts.childTaskId] = { status: opts.childStatus }
 	}
 
 	const provider = makeProviderStub({
-		clineStack: [childTask] as any[],
+		clineStack: [childTask] as unknown as Task[],
 		taskEventListeners: new Map(),
 		log: vi.fn(),
 		getTaskWithId,
@@ -54,7 +72,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 		const { provider, childTask } = buildMockProvider({ childTaskId: "child-1" })
 		expect(provider["taskRegistry"].length).toBe(1)
 
-		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
+		await privateClineProvider.removeClineFromStack.call(provider)
 
 		expect(provider["taskRegistry"].length).toBe(0)
 		expect(childTask.abortTask).toHaveBeenCalledWith(true)
@@ -75,7 +93,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 			abortTask: vi.fn().mockResolvedValue(undefined),
 		}
 		const provider = makeProviderStub({
-			tasks: [focusedTask, topTask] as any[],
+			tasks: [focusedTask, topTask] as unknown as Task[],
 			taskEventListeners: new Map(),
 			log: vi.fn(),
 			getTaskWithId: vi.fn(),
@@ -83,7 +101,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 		})
 		provider["taskRegistry"].setCurrent("focused-1")
 
-		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
+		await privateClineProvider.removeClineFromStack.call(provider)
 
 		expect(provider["taskRegistry"].taskIds).toEqual(["top-1"])
 		expect(provider["taskRegistry"].current).toBe(topTask)
@@ -103,7 +121,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 			},
 		})
 
-		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
+		await privateClineProvider.removeClineFromStack.call(provider)
 
 		expect(provider["taskRegistry"].length).toBe(0)
 		// Navigation/disposal must never silently flip the parent to active
@@ -123,7 +141,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 			childStatus: "interrupted",
 		})
 
-		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
+		await privateClineProvider.removeClineFromStack.call(provider)
 
 		expect(provider["taskRegistry"].length).toBe(0)
 		expect(getTaskWithId).not.toHaveBeenCalled()
@@ -135,7 +153,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 			childTaskId: "standalone-1",
 		})
 
-		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
+		await privateClineProvider.removeClineFromStack.call(provider)
 
 		expect(provider["taskRegistry"].length).toBe(0)
 		expect(getTaskWithId).not.toHaveBeenCalled()
@@ -144,14 +162,14 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 	it("handles empty stack gracefully", async () => {
 		const provider = makeProviderStub({
-			clineStack: [] as any[],
+			clineStack: [] as Task[],
 			taskEventListeners: new Map(),
 			log: vi.fn(),
 			getTaskWithId: vi.fn(),
 			updateTaskHistory: vi.fn(),
 		})
 
-		await expect((ClineProvider.prototype as any).removeClineFromStack.call(provider)).resolves.not.toThrow()
+		await expect(privateClineProvider.removeClineFromStack.call(provider)).resolves.not.toThrow()
 
 		expect(provider["getTaskWithId"]).not.toHaveBeenCalled()
 		expect(provider["updateTaskHistory"]).not.toHaveBeenCalled()
@@ -190,7 +208,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 
 		const provider = makeProviderStub({
-			clineStack: [] as any[],
+			clineStack: [] as Task[],
 			taskEventListeners: new Map(),
 			log: vi.fn(),
 			getTaskWithId,
@@ -201,7 +219,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 			},
 		})
 
-		await (ClineProvider.prototype as any).markDelegatedChildInterrupted.call(provider, {
+		await privateClineProvider.markDelegatedChildInterrupted.call(provider, {
 			childTaskId,
 			parentTaskId,
 		})
@@ -234,7 +252,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 		const updateTaskHistory = vi.fn().mockResolvedValue([])
 
 		const provider = makeProviderStub({
-			clineStack: [] as any[],
+			clineStack: [] as Task[],
 			taskEventListeners: new Map(),
 			log: vi.fn(),
 			getTaskWithId: vi.fn(),
@@ -244,7 +262,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 			},
 		})
 
-		await (ClineProvider.prototype as any).markDelegatedChildInterrupted.call(provider, {
+		await privateClineProvider.markDelegatedChildInterrupted.call(provider, {
 			childTaskId,
 			parentTaskId,
 		})
@@ -266,7 +284,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 		})
 
 		const provider = makeProviderStub({
-			clineStack: [] as any[],
+			clineStack: [] as Task[],
 			taskEventListeners: new Map(),
 			log: vi.fn(),
 			getTaskWithId,
@@ -276,7 +294,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 			},
 		})
 
-		await (ClineProvider.prototype as any).markDelegatedChildInterrupted.call(provider, {
+		await privateClineProvider.markDelegatedChildInterrupted.call(provider, {
 			childTaskId,
 			parentTaskId,
 		})
@@ -305,7 +323,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 			delegationTransitionLocks: new Map(),
 		})
 		const provider = makeProviderStub({
-			clineStack: [] as any[],
+			clineStack: [] as Task[],
 			taskEventListeners: new Map(),
 			log: vi.fn(),
 			getTaskWithId,
@@ -330,7 +348,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 			},
 		})
 
-		await (ClineProvider.prototype as any).markDelegatedChildInterrupted.call(provider, {
+		await privateClineProvider.markDelegatedChildInterrupted.call(provider, {
 			childTaskId,
 			parentTaskId,
 		})
@@ -347,7 +365,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 		const getTaskWithId = vi.fn().mockRejectedValue(new Error("store unavailable"))
 
 		const provider = makeProviderStub({
-			clineStack: [] as any[],
+			clineStack: [] as Task[],
 			taskEventListeners: new Map(),
 			log,
 			getTaskWithId,
@@ -358,7 +376,7 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 		})
 
 		await expect(
-			(ClineProvider.prototype as any).markDelegatedChildInterrupted.call(provider, {
+			privateClineProvider.markDelegatedChildInterrupted.call(provider, {
 				childTaskId,
 				parentTaskId,
 			}),
@@ -406,7 +424,7 @@ describe("createTaskWithHistoryItem() navigation — does not mutate delegation 
 		const markDelegatedChildInterrupted = vi.fn().mockResolvedValue(undefined)
 
 		const provider = makeProviderStub({
-			clineStack: [childTask] as any[],
+			clineStack: [childTask] as unknown as Task[],
 			taskEventListeners: new Map(),
 			log: vi.fn(),
 			getTaskWithId,
@@ -425,7 +443,7 @@ describe("createTaskWithHistoryItem() navigation — does not mutate delegation 
 		// Simulate the navigation logic from createTaskWithHistoryItem:
 		// when the target is a delegated parent and current task is its interrupted child,
 		// removeClineFromStack must NOT repair parent to active.
-		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
+		await privateClineProvider.removeClineFromStack.call(provider)
 
 		// Parent must stay delegated — no write at all
 		expect(updateTaskHistory).not.toHaveBeenCalledWith(expect.objectContaining({ id: parentTaskId }))
@@ -460,7 +478,7 @@ describe("createTaskWithHistoryItem() navigation — does not mutate delegation 
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 
 		const provider = makeProviderStub({
-			clineStack: [] as any[],
+			clineStack: [] as Task[],
 			taskEventListeners: new Map(),
 			log: vi.fn(),
 			getTaskWithId,
@@ -476,7 +494,7 @@ describe("createTaskWithHistoryItem() navigation — does not mutate delegation 
 			},
 		})
 
-		await (ClineProvider.prototype as any).markDelegatedChildInterrupted.call(provider, {
+		await privateClineProvider.markDelegatedChildInterrupted.call(provider, {
 			childTaskId,
 			parentTaskId,
 		})
@@ -512,7 +530,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 		const markDelegatedChildInterrupted = vi.fn().mockResolvedValue(undefined)
 
 		const provider = makeProviderStub({
-			clineStack: [childTask] as any[],
+			clineStack: [childTask] as unknown as Task[],
 			taskEventListeners: new Map(),
 			getCurrentTask: vi.fn(() => childTask),
 			taskHistoryStore: { get: vi.fn((id: string) => (id === childTaskId ? childHistoryItem : undefined)) },
@@ -520,7 +538,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 			log: vi.fn(),
 		})
 
-		await (ClineProvider.prototype as any).evictCurrentTask.call(provider)
+		await privateClineProvider.evictCurrentTask.call(provider)
 
 		expect(provider["taskRegistry"].length).toBe(0)
 		expect(markDelegatedChildInterrupted).toHaveBeenCalledWith({ childTaskId, parentTaskId })
@@ -530,7 +548,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 		const markDelegatedChildInterrupted = vi.fn()
 
 		const provider = makeProviderStub({
-			clineStack: [] as any[],
+			clineStack: [] as Task[],
 			taskEventListeners: new Map(),
 			getCurrentTask: vi.fn(() => undefined),
 			taskHistoryStore: { get: vi.fn(() => undefined) },
@@ -538,7 +556,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 			log: vi.fn(),
 		})
 
-		await (ClineProvider.prototype as any).evictCurrentTask.call(provider)
+		await privateClineProvider.evictCurrentTask.call(provider)
 
 		expect(markDelegatedChildInterrupted).not.toHaveBeenCalled()
 	})
@@ -554,7 +572,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 		const markDelegatedChildInterrupted = vi.fn()
 
 		const provider = makeProviderStub({
-			clineStack: [childTask] as any[],
+			clineStack: [childTask] as unknown as Task[],
 			taskEventListeners: new Map(),
 			getCurrentTask: vi.fn(() => childTask),
 			taskHistoryStore: {
@@ -564,7 +582,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 			log: vi.fn(),
 		})
 
-		await (ClineProvider.prototype as any).evictCurrentTask.call(provider)
+		await privateClineProvider.evictCurrentTask.call(provider)
 
 		expect(markDelegatedChildInterrupted).not.toHaveBeenCalled()
 	})
@@ -584,7 +602,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 		const markDelegatedChildInterrupted = vi.fn().mockRejectedValue(new Error("lock contention"))
 
 		const provider = makeProviderStub({
-			clineStack: [childTask] as any[],
+			clineStack: [childTask] as unknown as Task[],
 			taskEventListeners: new Map(),
 			getCurrentTask: vi.fn(() => childTask),
 			taskHistoryStore: {
@@ -594,14 +612,14 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 			log: vi.fn(),
 		})
 
-		await expect((ClineProvider.prototype as any).evictCurrentTask.call(provider)).rejects.toThrow(
-			"lock contention",
-		)
+		await expect(privateClineProvider.evictCurrentTask.call(provider)).rejects.toThrow("lock contention")
 	})
 })
 
 describe("onTaskCompleted callback — writes completed status before re-emitting", () => {
-	function buildCallbackProvider(taskHistoryStoreGet: (id: string) => any) {
+	type CallbackHistoryItem = { id: string; status?: string; [key: string]: unknown }
+
+	function buildCallbackProvider(taskHistoryStoreGet: (id: string) => CallbackHistoryItem | undefined) {
 		const updateTaskHistory = vi.fn().mockResolvedValue([])
 		const emit = vi.fn()
 		const log = vi.fn()
@@ -616,7 +634,7 @@ describe("onTaskCompleted callback — writes completed status before re-emittin
 				listeners[event] = listeners[event] || []
 				listeners[event].push(fn)
 			}),
-			emit: vi.fn((event: string, ...args: any[]) => {
+			emit: vi.fn((event: string, ...args: unknown[]) => {
 				listeners[event]?.forEach((fn) => fn(...args))
 			}),
 		}
@@ -692,7 +710,7 @@ describe("onTaskCompleted callback — writes completed status before re-emittin
 		const { onTaskCompleted, updateTaskHistory, log } = buildCallbackProvider((id) =>
 			id === "task-1" ? existingItem : undefined,
 		)
-		;(updateTaskHistory as any).mockRejectedValue(new Error("disk full"))
+		vi.mocked(updateTaskHistory).mockRejectedValue(new Error("disk full"))
 
 		await expect(onTaskCompleted("task-1")).resolves.not.toThrow()
 
