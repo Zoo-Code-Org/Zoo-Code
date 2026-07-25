@@ -3,8 +3,15 @@ import * as vscode from "vscode"
 
 import { ClineProvider } from "../ClineProvider"
 import { Task } from "../../task/Task"
+import { TaskRegistry } from "../../task/TaskRegistry"
 import { ContextProxy } from "../../config/ContextProxy"
 import type { ProviderSettings, HistoryItem } from "@roo-code/types"
+
+function seedRegistry(provider: ClineProvider, ...tasks: any[]) {
+	const registry = new TaskRegistry()
+	for (const t of tasks) registry.push(t)
+	;(provider as any).taskRegistry = registry
+}
 
 // Mock dependencies
 vi.mock("vscode", () => {
@@ -380,8 +387,8 @@ describe("ClineProvider flicker-free cancel", () => {
 	})
 
 	it("should not remove current task from stack when rehydrating same taskId", async () => {
-		// Setup: Add a task to the stack first
-		;(provider as any).clineStack = [mockTask1]
+		// Setup: Add a task to the registry first
+		seedRegistry(provider, mockTask1)
 
 		// Mock event listeners for cleanup
 		;(provider as any).taskEventListeners = new WeakMap()
@@ -410,8 +417,9 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect(removeClineFromStackSpy).not.toHaveBeenCalled()
 
 		// Verify the task was replaced in-place
-		expect((provider as any).clineStack).toHaveLength(1)
-		expect((provider as any).clineStack[0]).toBe(mockTask2)
+		const registry = (provider as any).taskRegistry as TaskRegistry
+		expect(registry.length).toBe(1)
+		expect(registry.current).toBe(mockTask2)
 
 		// Verify old event listeners were cleaned up
 		expect(mockCleanupFunctions[0]).toHaveBeenCalled()
@@ -422,12 +430,12 @@ describe("ClineProvider flicker-free cancel", () => {
 	})
 
 	it("should remove task from stack when creating different task", async () => {
-		// Setup: Add a task to the stack first
-		;(provider as any).clineStack = [mockTask1]
+		// Setup: Add a task to the registry first
+		seedRegistry(provider, mockTask1)
 
 		// Spy on removeClineFromStack to verify it IS called
 		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockImplementation(async () => {
-			;(provider as any).clineStack.pop()
+			;(provider as any).taskRegistry.pop()
 		})
 
 		// Create history item with different taskId
@@ -450,12 +458,12 @@ describe("ClineProvider flicker-free cancel", () => {
 	})
 
 	it("should handle empty stack gracefully during rehydration attempt", async () => {
-		// Setup: Empty stack
-		;(provider as any).clineStack = []
+		// Setup: Empty registry (default)
+		seedRegistry(provider)
 
 		// Spy on removeClineFromStack
 		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockImplementation(async () => {
-			;(provider as any).clineStack.pop()
+			;(provider as any).taskRegistry.pop()
 		})
 
 		// Create history item
@@ -478,14 +486,16 @@ describe("ClineProvider flicker-free cancel", () => {
 	})
 
 	it("should maintain task stack integrity during flicker-free replacement", async () => {
-		// Setup: Stack with multiple tasks
+		// Setup: Registry with parent task then current task
 		const mockParentTask = {
 			taskId: "parent-task",
 			instanceId: "parent-instance",
+			abort: false,
+			abandoned: false,
 			emit: vi.fn(),
 		}
 
-		;(provider as any).clineStack = [mockParentTask, mockTask1]
+		seedRegistry(provider, mockParentTask, mockTask1)
 		;(provider as any).taskEventListeners = new WeakMap()
 		;(provider as any).taskEventListeners.set(mockTask1, [vi.fn()])
 
@@ -503,10 +513,50 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		await provider.createTaskWithHistoryItem(historyItem)
 
-		// Assert: Stack should maintain parent task and replace current task
-		expect((provider as any).clineStack).toHaveLength(2)
-		expect((provider as any).clineStack[0]).toBe(mockParentTask)
-		expect((provider as any).clineStack[1]).toBe(mockTask2)
+		// Assert: Registry should maintain parent task and replace current task
+		const registry = (provider as any).taskRegistry as TaskRegistry
+		expect(registry.length).toBe(2)
+		expect(registry.getAll()[0]).toBe(mockParentTask)
+		expect(registry.getAll()[1]).toBe(mockTask2)
+	})
+
+	it("should preserve stack order when rehydrating a focused non-top task", async () => {
+		// Regression test for issue #1: if setCurrent() has focused a non-top task,
+		// rehydrating it must not move it to the top of the stack.
+		const mockTopTask = {
+			taskId: "top-task",
+			instanceId: "top-instance",
+			abort: false,
+			abandoned: false,
+			emit: vi.fn(),
+		}
+
+		// Seed: [mockTask1 (focused), mockTopTask (top-of-stack)]
+		seedRegistry(provider, mockTask1, mockTopTask)
+		;(provider as any).taskRegistry.setCurrent("task-1")
+		;(provider as any).taskEventListeners = new WeakMap()
+		;(provider as any).taskEventListeners.set(mockTask1, [vi.fn()])
+
+		const historyItem: HistoryItem = {
+			id: "task-1",
+			number: 1,
+			task: "test task",
+			ts: Date.now(),
+			tokensIn: 100,
+			tokensOut: 200,
+			totalCost: 0.001,
+			workspace: "/test/workspace",
+		}
+
+		await provider.createTaskWithHistoryItem(historyItem)
+
+		const registry = (provider as any).taskRegistry as TaskRegistry
+		// Stack order must be unchanged: replacement stays at index 0, top-task stays at index 1
+		expect(registry.length).toBe(2)
+		expect(registry.getAll()[0]).toBe(mockTask2)
+		expect(registry.getAll()[1]).toBe(mockTopTask)
+		// Focus follows the replacement
+		expect(registry.current).toBe(mockTask2)
 	})
 
 	it("marks a cancelled delegated child as interrupted and keeps parent delegated (preserving resume path)", async () => {
@@ -552,7 +602,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,
 		})
-		;(provider as any).clineStack = [mockTask1]
+		seedRegistry(provider, mockTask1)
 		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
 			if (id === "child-1") {
 				return Promise.resolve({ historyItem: childHistory })
@@ -618,7 +668,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,
 		})
-		;(provider as any).clineStack = [mockTask1]
+		seedRegistry(provider, mockTask1)
 		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
 			if (id === "child-1") {
 				return Promise.resolve({ historyItem: childHistory })
@@ -683,7 +733,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,
 		})
-		;(provider as any).clineStack = [mockTask1]
+		seedRegistry(provider, mockTask1)
 		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
 			if (id === "child-1") {
 				return Promise.resolve({ historyItem: childHistory })
@@ -745,7 +795,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			didFinishAbortingStream: true,
 			isWaitingForFirstChunk: false,
 		})
-		;(provider as any).clineStack = [mockTask1]
+		seedRegistry(provider, mockTask1)
 		provider.getTaskWithId = vi.fn().mockImplementation((id) => {
 			if (id === "child-1") return Promise.resolve({ historyItem: childHistory })
 			if (id === "parent-1") return Promise.resolve({ historyItem: parentHistory })
@@ -790,7 +840,7 @@ describe("ClineProvider flicker-free cancel", () => {
 			emit: vi.fn(),
 			abortTask: vi.fn().mockResolvedValue(undefined),
 		}
-		;(provider as any).clineStack = [childTask]
+		seedRegistry(provider, childTask)
 		;(provider as any).taskEventListeners = new Map()
 
 		provider.getTaskWithId = vi.fn() as any
@@ -798,7 +848,7 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		await (provider as any).removeClineFromStack()
 
-		expect((provider as any).clineStack).toHaveLength(0)
+		expect((provider as any).taskRegistry.length).toBe(0)
 		expect(childTask.abortTask).toHaveBeenCalledWith(true)
 		// No history writes — lifecycle only
 		expect(updateTaskHistorySpy).not.toHaveBeenCalled()

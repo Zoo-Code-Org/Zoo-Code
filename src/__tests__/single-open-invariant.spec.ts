@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import { TaskRegistry } from "../core/task/TaskRegistry"
 import { API } from "../extension/api"
 import * as ProfileValidatorMod from "../shared/ProfileValidator"
 
@@ -39,10 +40,11 @@ describe("Single-open-task invariant", () => {
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const addClineToStack = vi.fn().mockResolvedValue(undefined)
 
-		const existingTask = { taskId: "existing-1" }
+		const existingTask = { taskId: "existing-1", abort: false, abandoned: false }
+		const registry = new TaskRegistry()
+		registry.push(existingTask as any)
 		const provider = {
-			// Simulate an existing task present in stack
-			clineStack: [existingTask],
+			taskRegistry: registry,
 			getCurrentTask: vi.fn(() => existingTask),
 			taskHistoryStore: { get: vi.fn(() => undefined) },
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
@@ -85,10 +87,12 @@ describe("Single-open-task invariant", () => {
 
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const addClineToStack = vi.fn().mockResolvedValue(undefined)
-		const parentTask = { taskId: "parent-1" }
+		const parentTask = { taskId: "parent-1", abort: false, abandoned: false }
+		const registry2 = new TaskRegistry()
+		registry2.push(parentTask as any)
 
 		const provider = {
-			clineStack: [parentTask],
+			taskRegistry: registry2,
 			setValues: vi.fn(),
 			getState: vi.fn().mockResolvedValue({
 				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },

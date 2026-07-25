@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { makeProviderStub } from "./helpers/provider-stub"
 
-// After the refactor: removeClineFromStack() is pure lifecycle — it pops, aborts, and
+// After the refactor: removeClineFromStack() is pure lifecycle — it removes the focused task, aborts, and
 // cleans up listeners. It does NOT mutate delegation metadata. All delegated→active
 // transitions are owned by reopenParentFromDelegation() (normal child completion) or
 // markDelegatedChildInterrupted() (live eviction via navigation / new-task / clear).
@@ -49,15 +49,45 @@ function buildMockProvider(opts: {
 }
 
 describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation side effects", () => {
-	it("pops the task, aborts it, and clears listeners", async () => {
+	it("removes the focused task, aborts it, and clears listeners", async () => {
 		const { provider, childTask } = buildMockProvider({ childTaskId: "child-1" })
-		expect(provider.clineStack).toHaveLength(1)
+		expect((provider as any).taskRegistry.length).toBe(1)
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect(provider.clineStack).toHaveLength(0)
+		expect((provider as any).taskRegistry.length).toBe(0)
 		expect(childTask.abortTask).toHaveBeenCalledWith(true)
 		expect(childTask.emit).toHaveBeenCalledWith(expect.stringContaining("taskUnfocused"))
+	})
+
+	it("removes the focused task even when it is not the top stack entry", async () => {
+		const focusedTask = {
+			taskId: "focused-1",
+			instanceId: "focused-inst",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+		}
+		const topTask = {
+			taskId: "top-1",
+			instanceId: "top-inst",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+		}
+		const provider = makeProviderStub({
+			tasks: [focusedTask, topTask] as any[],
+			taskEventListeners: new Map(),
+			log: vi.fn(),
+			getTaskWithId: vi.fn(),
+			updateTaskHistory: vi.fn(),
+		})
+		;(provider as any).taskRegistry.setCurrent("focused-1")
+
+		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
+
+		expect((provider as any).taskRegistry.taskIds).toEqual(["top-1"])
+		expect((provider as any).taskRegistry.current).toBe(topTask)
+		expect(focusedTask.abortTask).toHaveBeenCalledWith(true)
+		expect(topTask.abortTask).not.toHaveBeenCalled()
 	})
 
 	it("does NOT mutate parent metadata when a delegated child is popped (repair removed)", async () => {
@@ -74,7 +104,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect(provider.clineStack).toHaveLength(0)
+		expect((provider as any).taskRegistry.length).toBe(0)
 		// Navigation/disposal must never silently flip the parent to active
 		expect(getTaskWithId).not.toHaveBeenCalled()
 		expect(updateTaskHistory).not.toHaveBeenCalled()
@@ -94,7 +124,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect(provider.clineStack).toHaveLength(0)
+		expect((provider as any).taskRegistry.length).toBe(0)
 		expect(getTaskWithId).not.toHaveBeenCalled()
 		expect(updateTaskHistory).not.toHaveBeenCalled()
 	})
@@ -106,7 +136,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect(provider.clineStack).toHaveLength(0)
+		expect((provider as any).taskRegistry.length).toBe(0)
 		expect(getTaskWithId).not.toHaveBeenCalled()
 		expect(updateTaskHistory).not.toHaveBeenCalled()
 	})
@@ -490,7 +520,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 
 		await (ClineProvider.prototype as any).evictCurrentTask.call(provider)
 
-		expect(provider.clineStack).toHaveLength(0)
+		expect((provider as any).taskRegistry.length).toBe(0)
 		expect(markDelegatedChildInterrupted).toHaveBeenCalledWith({ childTaskId, parentTaskId })
 	})
 
