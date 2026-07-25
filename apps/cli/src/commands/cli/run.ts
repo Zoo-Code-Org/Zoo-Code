@@ -20,7 +20,7 @@ import { JsonEventEmitter } from "@/agent/json-event-emitter.js"
 
 import { loadSettings } from "@/lib/storage/index.js"
 import { readWorkspaceTaskSessions, resolveWorkspaceResumeSessionId } from "@/lib/task-history/index.js"
-import { getEnvVarName, getApiKeyFromEnv } from "@/lib/utils/provider.js"
+import { getEnvVarName, getApiKeyFromEnv, providerRequiresApiKey } from "@/lib/utils/provider.js"
 import { validateTerminalShellPath } from "@/lib/utils/shell.js"
 import { getDefaultExtensionPath } from "@/lib/utils/extension.js"
 import { isValidSessionId } from "@/lib/utils/session-id.js"
@@ -189,29 +189,18 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 
 	extensionHostOptions.apiKey = flagOptions.apiKey || getApiKeyFromEnv(extensionHostOptions.provider)
 
-	if (!extensionHostOptions.apiKey) {
-		if (extensionHostOptions.provider === "bedrock") {
-			// Bedrock can authenticate via AWS credential chain without an explicit API key.
-			// Validate that at least one credential source is available.
-			const hasProfile = !!process.env.AWS_PROFILE
-			const hasDirectCreds = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
-			if (!hasProfile && !hasDirectCreds) {
-				console.error(`[CLI] Error: No credentials found for Bedrock. Provide one of:`)
-				console.error(`  --api-key or AWS_BEDROCK_API_KEY (bearer token / API key mode)`)
-				console.error(`  AWS_PROFILE (profile-based auth)`)
-				console.error(`  AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (direct credentials)`)
-				console.error(`  Or ensure a default credential chain is available (IMDS, ECS task role, etc.)`)
-				process.exit(1)
-			}
-		} else {
-			console.error(
-				`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`,
-			)
-			console.error(
-				`[CLI] For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`,
-			)
-			process.exit(1)
-		}
+	// Every provider except Bedrock requires an explicit API key up front. Bedrock
+	// is intentionally exempt: beyond a bearer token / API key, it can authenticate
+	// via AWS_PROFILE, direct AWS access/secret keys, or the AWS SDK default
+	// credential chain (IMDS / EC2 instance profile, ECS task role, IRSA, SSO,
+	// shared-config default). Those chain-based sources set none of our recognised
+	// environment variables, so we must not hard-fail here — we let execution
+	// continue and allow the downstream AwsBedrockHandler to resolve credentials and
+	// surface a real error only if resolution actually fails.
+	if (!extensionHostOptions.apiKey && providerRequiresApiKey(extensionHostOptions.provider)) {
+		console.error(`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`)
+		console.error(`[CLI] For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`)
+		process.exit(1)
 	}
 
 	if (!fs.existsSync(extensionHostOptions.workspacePath)) {

@@ -20,6 +20,40 @@ export function getApiKeyFromEnv(provider: SupportedProvider): string | undefine
 	return process.env[envVar]
 }
 
+/**
+ * Whether a provider requires an explicit API key before a task can run.
+ *
+ * Every provider except Bedrock authenticates solely via an API key
+ * (`--api-key` or its provider-specific environment variable). Bedrock is the
+ * exception: in addition to a bearer token / API key, it can authenticate via
+ * an AWS profile, direct AWS access/secret keys, OR the AWS SDK default
+ * credential chain (IMDS / EC2 instance profile, ECS task role, IRSA /
+ * web-identity, SSO, shared-config default). Those chain-based sources set none
+ * of our recognised environment variables, so Bedrock must never be hard-failed
+ * for a "missing" API key — the downstream `AwsBedrockHandler` resolves the
+ * credentials and surfaces a real error only if resolution actually fails.
+ */
+export function providerRequiresApiKey(provider: SupportedProvider): boolean {
+	return provider !== "bedrock"
+}
+
+/**
+ * Build the provider-specific `RooCodeSettings` used to configure the extension
+ * host for a CLI run.
+ *
+ * The Bedrock case supports four authentication modes, resolved in priority
+ * order:
+ *   1. Bearer token / API key — `--api-key` or `AWS_BEDROCK_API_KEY`
+ *      (`awsUseApiKey` + `awsApiKey`).
+ *   2. AWS profile — `AWS_PROFILE` (`awsUseProfile` + `awsProfile`).
+ *   3. Direct credentials — `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`
+ *      (+ optional `AWS_SESSION_TOKEN`).
+ *   4. Default credential chain — none of the above set; the AWS SDK resolves
+ *      credentials (IMDS, ECS task role, IRSA, SSO, shared-config default).
+ * The region is resolved from `AWS_REGION` / `AWS_DEFAULT_REGION` (defaulting to
+ * `us-east-1`), and cross-region inference is auto-enabled for model IDs that
+ * carry a regional prefix (`us.` / `eu.` / `apac.`).
+ */
 export function getProviderSettings(
 	provider: SupportedProvider,
 	apiKey: string | undefined,
