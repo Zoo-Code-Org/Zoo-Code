@@ -213,6 +213,117 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(callOrder).toEqual(["createTask", "atomicReadAndUpdate", "child.start"])
 	})
 
+	it("implicitly severs interrupted awaited child and re-delegates when parent is already delegated", async () => {
+		const oldChildId = "old-child"
+		const oldChild = { id: oldChildId, status: "interrupted" } as unknown as HistoryItem
+		const alreadyDelegatedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "delegated",
+			awaitingChildId: oldChildId,
+			delegatedToId: oldChildId,
+			childIds: [oldChildId],
+		} as unknown as HistoryItem
+
+		const taskHistoryStore = makeStoreStub({
+			// store returns: parent (delegated), old child (interrupted)
+			get: vi.fn((id: string) =>
+				id === "parent-1" ? alreadyDelegatedParent : id === oldChildId ? oldChild : undefined,
+			),
+			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (h: HistoryItem) => HistoryItem) => {
+				updater(alreadyDelegatedParent)
+				return []
+			}),
+		})
+
+		const provider = {
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => makeParentTask()),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue({ taskId: "child-2", start: vi.fn() }),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Continue",
+			initialTodos: [],
+			mode: "code",
+		})
+
+		// The updater must sever the old link and apply the new delegation
+		const [, updater] = taskHistoryStore.atomicReadAndUpdate.mock.calls[0]
+		const result = updater(alreadyDelegatedParent)
+		expect(result).toMatchObject({
+			status: "delegated",
+			awaitingChildId: "child-2",
+			delegatedToId: "child-2",
+		})
+		// Old child ID preserved in childIds (audit trail)
+		expect(result.childIds).toContain(oldChildId)
+		expect(result.childIds).toContain("child-2")
+	})
+
+	it("rejects with 'Cannot re-delegate' when the existing awaited child is still active", async () => {
+		const oldChildId = "old-child"
+		const activeChild = { id: oldChildId, status: "active" } as unknown as HistoryItem
+		const alreadyDelegatedParent: HistoryItem = {
+			...parentHistoryItem,
+			status: "delegated",
+			awaitingChildId: oldChildId,
+			delegatedToId: oldChildId,
+		} as unknown as HistoryItem
+
+		const child = { taskId: "child-2", start: vi.fn() }
+		const getCurrentTask = vi.fn().mockReturnValue(makeParentTask())
+		const createTask = vi.fn().mockImplementation(async () => {
+			getCurrentTask.mockReturnValue(child)
+			return child
+		})
+
+		const taskHistoryStore = makeStoreStub({
+			get: vi.fn((id: string) =>
+				id === "parent-1" ? alreadyDelegatedParent : id === oldChildId ? activeChild : undefined,
+			),
+			// Real atomicReadAndUpdate behaviour: call the updater and propagate any throw
+			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (h: HistoryItem) => HistoryItem) => {
+				updater(alreadyDelegatedParent)
+				return []
+			}),
+		})
+
+		const provider = {
+			emit: vi.fn(),
+			getCurrentTask,
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			deleteTaskWithId: vi.fn().mockResolvedValue(undefined),
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: alreadyDelegatedParent }),
+			createTaskWithHistoryItem: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await expect(
+			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Continue",
+				initialTodos: [],
+				mode: "code",
+			}),
+		).rejects.toThrow("Cannot re-delegate")
+
+		// Rollback: child must not have started, and must be cleaned up
+		expect(child.start).not.toHaveBeenCalled()
+		expect((provider as any).deleteTaskWithId).toHaveBeenCalledWith("child-2", false)
+	})
+
 	it("rolls back the paused child and restores the parent when atomicReadAndUpdate fails", async () => {
 		const persistError = new Error("parent metadata persist failed")
 		const parentTask = makeParentTask()
@@ -260,8 +371,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		).rejects.toThrow(persistError)
 
 		expect(childStart).not.toHaveBeenCalled()
-		expect(removeClineFromStack).toHaveBeenNthCalledWith(1, { skipDelegationRepair: true })
-		expect(removeClineFromStack).toHaveBeenNthCalledWith(2, { skipDelegationRepair: true })
+		expect(removeClineFromStack).toHaveBeenNthCalledWith(1)
+		expect(removeClineFromStack).toHaveBeenNthCalledWith(2)
 		expect(deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
 		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(parentHistoryItem)
 	})

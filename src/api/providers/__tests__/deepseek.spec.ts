@@ -225,6 +225,7 @@ describe("DeepSeekHandler", () => {
 			expect(model.id).toBe("deepseek-v4-flash")
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsImages).toBe(true)
 			expect((model.info as ModelInfo).supportsReasoningEffort).toContain("xhigh")
 		})
 
@@ -252,6 +253,7 @@ describe("DeepSeekHandler", () => {
 			expect(model.info).toBeDefined()
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsImages).toBe(true)
 			expect(model.info.supportsPromptCache).toBe(true)
 			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
 			expect((model.info as ModelInfo).reasoningEffort).toBe("high")

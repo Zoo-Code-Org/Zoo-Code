@@ -65,6 +65,14 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	cancelCurrentTask(): Promise<void>
 	/**
+	 * Severs the delegated parent-child link for an interrupted (cancelled, not running)
+	 * subtask, so the parent stops waiting on it and returns to "active". No-op (returns
+	 * false) unless the child is interrupted and its parent is still delegated to it.
+	 * @param childTaskId The ID of the child (subtask) to abandon.
+	 * @returns True if the link was severed, false if there was nothing to abandon.
+	 */
+	abandonSubtask(childTaskId: string): Promise<boolean>
+	/**
 	 * Sends a message to the current task.
 	 * @param message Optional message to send.
 	 * @param images Optional array of image data URIs (e.g., "data:image/webp;base64,...").

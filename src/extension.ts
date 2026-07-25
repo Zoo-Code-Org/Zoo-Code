@@ -32,6 +32,7 @@ import { DIFF_VIEW_URI_SCHEME } from "./integrations/editor/DiffViewProvider"
 import { Terminal } from "./integrations/terminal/Terminal"
 import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
 import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
+import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
 import { CodeIndexManager } from "./services/code-index/manager"
 import { MdmService } from "./services/mdm/MdmService"
@@ -157,6 +158,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize OpenAI Codex OAuth manager for ChatGPT subscription-based access.
 	openAiCodexOAuthManager.initialize(context, (message) => outputChannel.appendLine(message))
+	// Kimi Code OAuth tokens live only in VS Code SecretStorage, outside provider profile JSON/cloud sync.
+	kimiCodeOAuthManager.initialize(context)
 
 	// Initialize Zoo Code auth service for extension session token management.
 	await initZooCodeAuth(context)

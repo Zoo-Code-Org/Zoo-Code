@@ -833,6 +833,15 @@ export const webviewMessageHandler = async (
 		case "deleteTaskWithId":
 			provider.deleteTaskWithId(message.text!)
 			break
+		case "abandonSubtaskWithId":
+			provider
+				.abandonSubtask(message.text!)
+				.catch((error) =>
+					provider.log(
+						`[abandonSubtaskWithId] Failed: ${error instanceof Error ? error.message : String(error)}`,
+					),
+				)
+			break
 		case "deleteMultipleTasksWithIds": {
 			const ids = message.ids
 
@@ -1041,8 +1050,10 @@ export const webviewMessageHandler = async (
 						lmstudio: {},
 						poe: {},
 						deepseek: {},
+						moonshot: {},
 						"opencode-go": {},
 						kenari: {},
+						"kimi-code": {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -1136,6 +1147,21 @@ export const webviewMessageHandler = async (
 				})
 			}
 
+			// Moonshot is conditional on apiKey
+			const moonshotApiKey = message?.values?.moonshotApiKey ?? apiConfiguration.moonshotApiKey
+			const moonshotBaseUrl = message?.values?.moonshotBaseUrl ?? apiConfiguration.moonshotBaseUrl
+
+			if (moonshotApiKey) {
+				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
+					await flushModels({ provider: "moonshot", apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl }, true)
+				}
+
+				candidates.push({
+					key: "moonshot",
+					options: { provider: "moonshot", apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+				})
+			}
+
 			// Opencode Go's /models endpoint is public — it returns the full model list with no
 			// Authorization header — so it's fetched unconditionally like openrouter/vercel-ai-gateway
 			// above. Gating it behind a key meant the picker stayed empty (and fell back to the default
@@ -1169,6 +1195,22 @@ export const webviewMessageHandler = async (
 				key: "kenari",
 				options: { provider: "kenari", apiKey: kenariApiKey },
 			})
+
+			if (!providerFilter || providerFilter === "kimi-code") {
+				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+				const kimiCodeAuthMethod =
+					message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
+				const kimiCodeApiKey =
+					kimiCodeAuthMethod === "api-key"
+						? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
+						: await kimiCodeOAuthManager.getAccessToken()
+				if (kimiCodeApiKey) {
+					candidates.push({
+						key: "kimi-code",
+						options: { provider: "kimi-code", apiKey: kimiCodeApiKey },
+					})
+				}
+			}
 
 			// Apply single provider filter if specified
 			const modelFetchPromises = providerFilter
@@ -1221,23 +1263,48 @@ export const webviewMessageHandler = async (
 		case "requestOllamaModels": {
 			// Specific handler for Ollama models only.
 			const { apiConfiguration: ollamaApiConfig } = await provider.getState()
+			// Prefer the baseUrl/apiKey from the message values (which reflect
+			// the user's unsaved edits in the settings form) over the saved
+			// state, so the refresh uses the URL the user is actually looking
+			// at — not the stale one from before they started editing.
+			const baseUrl = message.values?.baseUrl ?? ollamaApiConfig.ollamaBaseUrl
+			const apiKey = message.values?.apiKey ?? ollamaApiConfig.ollamaApiKey
+			const logBaseUrl = baseUrl || "http://localhost:11434"
+			const ollamaOptions = {
+				provider: "ollama" as const,
+				baseUrl,
+				apiKey,
+			}
 			try {
-				const ollamaOptions = {
-					provider: "ollama" as const,
-					baseUrl: ollamaApiConfig.ollamaBaseUrl,
-					apiKey: ollamaApiConfig.ollamaApiKey,
-				}
-				// Flush cache and refresh to ensure fresh models.
+				// Refresh the cache before reading the models. Keep this error
+				// separate from the read below so diagnostics identify which
+				// cache operation failed.
 				await flushModels(ollamaOptions, true)
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				provider.log(`[requestOllamaModels] Failed to refresh model cache for ${logBaseUrl}: ${errorMsg}`)
+				provider.postMessageToWebview({
+					type: "ollamaModels",
+					ollamaModels: {},
+					error: errorMsg,
+				})
+				break
+			}
 
+			try {
 				const ollamaModels = await getModels(ollamaOptions)
 
-				if (Object.keys(ollamaModels).length > 0) {
-					provider.postMessageToWebview({ type: "ollamaModels", ollamaModels: ollamaModels })
-				}
+				// Always post a response so the webview refresh status can
+				// transition out of "loading" — even when no models are found.
+				provider.postMessageToWebview({ type: "ollamaModels", ollamaModels })
 			} catch (error) {
-				// Silently fail - user hasn't configured Ollama yet
-				console.debug("Ollama models fetch failed:", error)
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				provider.log(`[requestOllamaModels] Failed to read models for ${logBaseUrl}: ${errorMsg}`)
+				provider.postMessageToWebview({
+					type: "ollamaModels",
+					ollamaModels: {},
+					error: errorMsg,
+				})
 			}
 			break
 		}
@@ -2598,6 +2665,45 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				provider.log(`OpenAI Codex sign out failed: ${error}`)
 				vscode.window.showErrorMessage("OpenAI Codex sign out failed.")
+			}
+			break
+		}
+		case "kimiCodeSignIn": {
+			try {
+				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+				const device = await kimiCodeOAuthManager.startAuthorization()
+				await provider.postStateToWebview()
+				await vscode.env.openExternal(
+					vscode.Uri.parse(device.verificationUriComplete ?? device.verificationUri),
+				)
+				void kimiCodeOAuthManager
+					.waitForAuthorization()
+					.then(async () => {
+						vscode.window.showInformationMessage("Successfully signed in to Kimi Code")
+						await provider.postStateToWebview()
+					})
+					.catch(async (error) => {
+						provider.log(`Kimi Code OAuth failed: ${error}`)
+						await provider.postStateToWebview()
+					})
+			} catch (error) {
+				provider.log(`Kimi Code OAuth failed: ${error}`)
+				vscode.window.showErrorMessage(
+					`Kimi Code sign in failed: ${error instanceof Error ? error.message : error}`,
+				)
+				await provider.postStateToWebview()
+			}
+			break
+		}
+		case "kimiCodeSignOut": {
+			try {
+				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+				await kimiCodeOAuthManager.clearCredentials()
+				vscode.window.showInformationMessage("Signed out from Kimi Code")
+				await provider.postStateToWebview()
+			} catch (error) {
+				provider.log(`Kimi Code sign out failed: ${error}`)
+				vscode.window.showErrorMessage("Kimi Code sign out failed.")
 			}
 			break
 		}

@@ -36,15 +36,15 @@
 
 Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida alla migrazione Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Vogliamo aiutare gli utenti il più possibile durante la transizione, e per questo abbiamo il nostro [Reddit](https://www.reddit.com/r/ZooCode) e il nostro [Discord](https://discord.gg/VxfP4Vx3gX). Se hai problemi o domande, passa pure e chiedi.
 
-## Novità in v3.70.0
+## Novità in v3.72.0
 
-- **Famiglia OpenAI GPT-5.6** — `Sol`, `Terra` e `Luna` sono ora disponibili sia tramite OpenAI Codex sia tramite OpenAI Native.
-- **Supporto Grok 4.5** — il nuovo modello di punta di xAI, oltre a una correzione del formato reasoning-effort che avvantaggia anche Grok 4 Mini.
-- **Supporto provider Kenari** — un AI gateway di prim'ordine, compatibile con OpenAI, fatturato in Rupie, che copre Claude, GPT, DeepSeek, GLM, Kimi e altro ancora.
-- Mostra il pulsante di condensazione del contesto e la barra di avanzamento della finestra di contesto nell'intestazione dell'attività compressa.
-- Correzione: perdita di output del terminale e completamento prematuro delle attività su terminali freddi.
-- Correzione: l'allegato di immagini per i modelli Zoo Gateway e Vercel AI Gateway ora segue i tag di capacità di visione in tempo reale invece di una allowlist statica.
-- Aggiornamenti di dipendenze e tooling.
+- **Provider Moonshot e Kimi Code** — rileva dinamicamente i modelli Moonshot oppure accedi a Kimi Code tramite il flusso dispositivo OAuth.
+- **Supporto per i modelli più recenti** — usa Claude Opus 5 con tutti i provider, oltre a Kimi K3, Gemini 3.6 Flash e MiniMax-M3.
+- **Workflow delle sottoattività migliorati** — abbandona in modo pulito le sottoattività interrotte, con un'invalidazione più sicura della cronologia e una migliore copertura della ripresa.
+- **Indicizzazione della codebase ampliata** — indicizza i file Dart e di testo semplice.
+- **Affidabilità dei provider** — correzioni per GPT-5.6 Luna con ChatGPT OAuth, il reasoning content di LiteLLM e l'input di immagini di DeepSeek V4.
+- **Configurazione e impostazioni più fluide** — accesso a Zoo Gateway e cambio modalità migliorati.
+- Miglioramenti ad API, tipi di provider, dipendenze, localizzazione e CI.
 
 ## Cosa può fare Zoo Code per TE?
 

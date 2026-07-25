@@ -61,6 +61,18 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 0.3,
 				description: "Claude Sonnet 5",
 			},
+			"anthropic/claude-opus-5": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsTemperature: false,
+				inputPrice: 5,
+				outputPrice: 25,
+				cacheWritesPrice: 6.25,
+				cacheReadsPrice: 0.5,
+				description: "Claude Opus 5",
+			},
 			"anthropic/claude-3.5-haiku": {
 				maxTokens: 32000,
 				contextWindow: 200000,
@@ -331,6 +343,24 @@ describe("VercelAiGatewayHandler", () => {
 			// handler stops consulting supportsTemperature.
 			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
 			expect(call.model).toBe("anthropic/claude-sonnet-5")
+			expect(call.temperature).toBeUndefined()
+			expect(call.max_completion_tokens).toBe(128000)
+		})
+
+		it("omits temperature for Claude Opus 5", async () => {
+			const handler = new VercelAiGatewayHandler({
+				...mockOptions,
+				vercelAiGatewayModelId: "anthropic/claude-opus-5",
+			})
+
+			await handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }]).next()
+
+			// Assert directly on the extracted call arg. `objectContaining({
+			// temperature: undefined })` passes whether temperature is explicitly
+			// undefined or simply absent, so it wouldn't catch a regression where the
+			// handler stops consulting supportsTemperature.
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(call.model).toBe("anthropic/claude-opus-5")
 			expect(call.temperature).toBeUndefined()
 			expect(call.max_completion_tokens).toBe(128000)
 		})

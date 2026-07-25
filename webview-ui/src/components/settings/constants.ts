@@ -48,6 +48,7 @@ export const PROVIDERS = [
 	{ value: "gemini", label: "Google Gemini", proxy: false },
 	{ value: "deepseek", label: "DeepSeek", proxy: false },
 	{ value: "moonshot", label: "Moonshot", proxy: false },
+	{ value: "kimi-code", label: "Kimi Code", proxy: false },
 	{ value: "openai-native", label: "OpenAI", proxy: false },
 	{ value: "openai-codex", label: "OpenAI - ChatGPT Plus/Pro", proxy: false },
 	{ value: "openai", label: "OpenAI Compatible", proxy: true },

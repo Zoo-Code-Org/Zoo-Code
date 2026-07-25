@@ -39,9 +39,16 @@ describe("Single-open-task invariant", () => {
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const addClineToStack = vi.fn().mockResolvedValue(undefined)
 
+		const existingTask = { taskId: "existing-1" }
 		const provider = {
 			// Simulate an existing task present in stack
-			clineStack: [{ taskId: "existing-1" }],
+			clineStack: [existingTask],
+			getCurrentTask: vi.fn(() => existingTask),
+			taskHistoryStore: { get: vi.fn(() => undefined) },
+			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
+			get evictCurrentTask() {
+				return (ClineProvider.prototype as any).evictCurrentTask.bind(this)
+			},
 			setValues: vi.fn(),
 			getState: vi.fn().mockResolvedValue({
 				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
@@ -120,6 +127,11 @@ describe("Single-open-task invariant", () => {
 
 		const provider = {
 			getCurrentTask: vi.fn(() => undefined), // ensure not rehydrating
+			taskHistoryStore: { get: vi.fn(() => undefined) },
+			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
+			get evictCurrentTask() {
+				return (ClineProvider.prototype as any).evictCurrentTask.bind(this)
+			},
 			removeClineFromStack,
 			addClineToStack,
 			updateGlobalState,
@@ -173,6 +185,12 @@ describe("Single-open-task invariant", () => {
 		const createTask = vi.fn().mockResolvedValue({ taskId: "ipc-1" })
 		const provider = {
 			context: {} as any,
+			getCurrentTask: vi.fn(() => undefined),
+			taskHistoryStore: { get: vi.fn(() => undefined) },
+			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
+			get evictCurrentTask() {
+				return (ClineProvider.prototype as any).evictCurrentTask.bind(this)
+			},
 			removeClineFromStack,
 			postStateToWebview: vi.fn(),
 			postMessageToWebview: vi.fn(),

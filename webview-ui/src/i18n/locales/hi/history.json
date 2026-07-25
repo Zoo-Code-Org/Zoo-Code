@@ -47,5 +47,7 @@
 	"subtaskTag": "उप-कार्य",
 	"deleteWithSubtasks": "यह {{count}} उप-कार्य(कों) को भी हटा देगा। क्या आप निश्चित हैं?",
 	"expandSubtasks": "उप-कार्य विस्तारित करें",
-	"collapseSubtasks": "उप-कार्य संपीड़ित करें"
+	"collapseSubtasks": "उप-कार्य संपीड़ित करें",
+	"delegatedTag": "उपकार्य की प्रतीक्षा",
+	"interruptedTag": "बाधित"
 }

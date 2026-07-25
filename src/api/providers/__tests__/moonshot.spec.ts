@@ -1,28 +1,3 @@
-// Use vi.hoisted to define mock functions that can be referenced in hoisted vi.mock() calls
-const { mockStreamText, mockGenerateText } = vi.hoisted(() => ({
-	mockStreamText: vi.fn(),
-	mockGenerateText: vi.fn(),
-}))
-
-vi.mock("ai", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("ai")>()
-	return {
-		...actual,
-		streamText: mockStreamText,
-		generateText: mockGenerateText,
-	}
-})
-
-vi.mock("@ai-sdk/openai-compatible", () => ({
-	createOpenAICompatible: vi.fn(function () {
-		// Return a function that returns a mock language model
-		return vi.fn(() => ({
-			modelId: "moonshot-chat",
-			provider: "moonshot",
-		}))
-	}),
-}))
-
 import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { moonshotDefaultModelId } from "@roo-code/types"
@@ -38,7 +13,7 @@ describe("MoonshotHandler", () => {
 	beforeEach(() => {
 		mockOptions = {
 			moonshotApiKey: "test-api-key",
-			apiModelId: "moonshot-chat",
+			apiModelId: "kimi-k2-0905-preview",
 			moonshotBaseUrl: "https://api.moonshot.ai/v1",
 		}
 		handler = new MoonshotHandler(mockOptions)
@@ -96,9 +71,16 @@ describe("MoonshotHandler", () => {
 			const model = handlerWithInvalidModel.getModel()
 			expect(model.id).toBe("invalid-model") // Returns provided ID
 			expect(model.info).toBeDefined()
-			// Should have the same base properties as default model
+			// Should have the same structural properties as default model
 			expect(model.info.contextWindow).toBe(handler.getModel().info.contextWindow)
 			expect(model.info.supportsPromptCache).toBe(true)
+			// Unknown models should not send a guessed maxTokens to the API
+			expect(model.info.maxTokens).toBeUndefined()
+			// Pricing should be unknown for unrecognized models
+			expect(model.info.inputPrice).toBeUndefined()
+			expect(model.info.outputPrice).toBeUndefined()
+			expect(model.info.cacheReadsPrice).toBeUndefined()
+			expect(model.info.cacheWritesPrice).toBeUndefined()
 		})
 
 		it("should return default model if no model ID is provided", () => {
@@ -134,23 +116,22 @@ describe("MoonshotHandler", () => {
 		]
 
 		it("should handle streaming responses", async () => {
-			// Mock the fullStream async generator
-			async function* mockFullStream() {
-				yield { type: "text-delta", text: "Test response" }
+			async function* mockStream() {
+				yield {
+					choices: [{ delta: { content: "Test response" }, finish_reason: null }],
+					usage: null,
+				}
 			}
 
-			// Mock usage promise
-			const mockUsage = Promise.resolve({
-				inputTokens: 10,
-				outputTokens: 5,
-				details: { cachedInputTokens: undefined },
-				raw: { cached_tokens: 2 },
-			})
+			const mockClient = {
+				chat: {
+					completions: {
+						create: vi.fn().mockResolvedValue(mockStream()),
+					},
+				},
+			}
 
-			mockStreamText.mockReturnValue({
-				fullStream: mockFullStream(),
-				usage: mockUsage,
-			})
+			;(handler as any).client = mockClient
 
 			const stream = handler.createMessage(systemPrompt, messages)
 			const chunks: any[] = []
@@ -158,28 +139,28 @@ describe("MoonshotHandler", () => {
 				chunks.push(chunk)
 			}
 
-			expect(chunks.length).toBeGreaterThan(0)
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
 		it("should include usage information", async () => {
-			async function* mockFullStream() {
-				yield { type: "text-delta", text: "Test response" }
+			async function* mockStream() {
+				yield {
+					choices: [{ delta: { content: "Test response" }, finish_reason: "stop" }],
+					usage: { prompt_tokens: 10, completion_tokens: 5 },
+				}
 			}
 
-			const mockUsage = Promise.resolve({
-				inputTokens: 10,
-				outputTokens: 5,
-				details: {},
-				raw: { cached_tokens: 2 },
-			})
+			const mockClient = {
+				chat: {
+					completions: {
+						create: vi.fn().mockResolvedValue(mockStream()),
+					},
+				},
+			}
 
-			mockStreamText.mockReturnValue({
-				fullStream: mockFullStream(),
-				usage: mockUsage,
-			})
+			;(handler as any).client = mockClient
 
 			const stream = handler.createMessage(systemPrompt, messages)
 			const chunks: any[] = []
@@ -194,21 +175,26 @@ describe("MoonshotHandler", () => {
 		})
 
 		it("should include cache metrics in usage information", async () => {
-			async function* mockFullStream() {
-				yield { type: "text-delta", text: "Test response" }
+			async function* mockStream() {
+				yield {
+					choices: [{ delta: { content: "Test response" }, finish_reason: "stop" }],
+					usage: {
+						prompt_tokens: 10,
+						completion_tokens: 5,
+						prompt_tokens_details: { cached_tokens: 2 },
+					},
+				}
 			}
 
-			const mockUsage = Promise.resolve({
-				inputTokens: 10,
-				outputTokens: 5,
-				details: {},
-				raw: { cached_tokens: 2 },
-			})
+			const mockClient = {
+				chat: {
+					completions: {
+						create: vi.fn().mockResolvedValue(mockStream()),
+					},
+				},
+			}
 
-			mockStreamText.mockReturnValue({
-				fullStream: mockFullStream(),
-				usage: mockUsage,
-			})
+			;(handler as any).client = mockClient
 
 			const stream = handler.createMessage(systemPrompt, messages)
 			const chunks: any[] = []
@@ -224,25 +210,34 @@ describe("MoonshotHandler", () => {
 	})
 
 	describe("completePrompt", () => {
-		it("should complete a prompt using generateText", async () => {
-			mockGenerateText.mockResolvedValue({
-				text: "Test completion",
-			})
+		it("should complete a prompt using the OpenAI client", async () => {
+			const mockClient = {
+				chat: {
+					completions: {
+						create: vi.fn().mockResolvedValue({
+							choices: [{ message: { content: "Test completion" } }],
+						}),
+					},
+				},
+			}
+
+			;(handler as any).client = mockClient
 
 			const result = await handler.completePrompt("Test prompt")
 
 			expect(result).toBe("Test completion")
-			expect(mockGenerateText).toHaveBeenCalledWith(
+			expect(mockClient.chat.completions.create).toHaveBeenCalledWith(
 				expect.objectContaining({
-					prompt: "Test prompt",
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: "Test prompt" }],
 				}),
+				{},
 			)
 		})
 	})
 
 	describe("processUsageMetrics", () => {
 		it("should correctly process usage metrics including cache information", () => {
-			// We need to access the protected method, so we'll create a test subclass
 			class TestMoonshotHandler extends MoonshotHandler {
 				public testProcessUsageMetrics(usage: any) {
 					return this.processUsageMetrics(usage)
@@ -252,10 +247,9 @@ describe("MoonshotHandler", () => {
 			const testHandler = new TestMoonshotHandler(mockOptions)
 
 			const usage = {
-				inputTokens: 100,
-				outputTokens: 50,
-				details: {},
-				raw: {
+				prompt_tokens: 100,
+				completion_tokens: 50,
+				prompt_tokens_details: {
 					cached_tokens: 20,
 				},
 			}
@@ -279,10 +273,8 @@ describe("MoonshotHandler", () => {
 			const testHandler = new TestMoonshotHandler(mockOptions)
 
 			const usage = {
-				inputTokens: 100,
-				outputTokens: 50,
-				details: {},
-				raw: {},
+				prompt_tokens: 100,
+				completion_tokens: 50,
 			}
 
 			const result = testHandler.testProcessUsageMetrics(usage)
@@ -293,27 +285,64 @@ describe("MoonshotHandler", () => {
 			expect(result.cacheWriteTokens).toBe(0)
 			expect(result.cacheReadTokens).toBeUndefined()
 		})
-	})
 
-	describe("getMaxOutputTokens", () => {
-		it("should return maxTokens from model info", () => {
+		it("should handle cached_tokens at top level (not in prompt_tokens_details)", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testGetMaxOutputTokens() {
-					return this.getMaxOutputTokens()
+				public testProcessUsageMetrics(usage: any) {
+					return this.processUsageMetrics(usage)
 				}
 			}
 
 			const testHandler = new TestMoonshotHandler(mockOptions)
-			const result = testHandler.testGetMaxOutputTokens()
 
-			// Default model maxTokens is 16384
-			expect(result).toBe(16384)
+			const usage = {
+				prompt_tokens: 100,
+				completion_tokens: 50,
+				cached_tokens: 15,
+			}
+
+			const result = testHandler.testProcessUsageMetrics(usage)
+
+			expect(result.cacheReadTokens).toBe(15)
 		})
 
-		it("should use modelMaxTokens when provided", () => {
+		it("should handle null usage gracefully", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testGetMaxOutputTokens() {
-					return this.getMaxOutputTokens()
+				public testProcessUsageMetrics(usage: any) {
+					return this.processUsageMetrics(usage)
+				}
+			}
+
+			const testHandler = new TestMoonshotHandler(mockOptions)
+
+			const result = testHandler.testProcessUsageMetrics(null)
+
+			expect(result.inputTokens).toBe(0)
+			expect(result.outputTokens).toBe(0)
+			expect(result.cacheReadTokens).toBeUndefined()
+		})
+	})
+
+	describe("addMaxTokensIfNeeded", () => {
+		it("should use max_tokens (not max_completion_tokens) for Moonshot", () => {
+			class TestMoonshotHandler extends MoonshotHandler {
+				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
+					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+				}
+			}
+
+			const testHandler = new TestMoonshotHandler(mockOptions)
+			const requestOptions: any = {}
+			testHandler.testAddMaxTokensIfNeeded(requestOptions, handler.getModel().info)
+
+			expect(requestOptions.max_tokens).toBe(16384)
+			expect(requestOptions.max_completion_tokens).toBeUndefined()
+		})
+
+		it("should use modelMaxTokens override when provided", () => {
+			class TestMoonshotHandler extends MoonshotHandler {
+				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
+					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
 				}
 			}
 
@@ -322,23 +351,27 @@ describe("MoonshotHandler", () => {
 				...mockOptions,
 				modelMaxTokens: customMaxTokens,
 			})
+			const requestOptions: any = {}
+			testHandler.testAddMaxTokensIfNeeded(requestOptions, handler.getModel().info)
 
-			const result = testHandler.testGetMaxOutputTokens()
-			expect(result).toBe(customMaxTokens)
+			expect(requestOptions.max_tokens).toBe(customMaxTokens)
 		})
 
-		it("should fall back to modelInfo.maxTokens when modelMaxTokens is not provided", () => {
+		it("should not send maxTokens for unknown model IDs", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testGetMaxOutputTokens() {
-					return this.getMaxOutputTokens()
+				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
+					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
 				}
 			}
 
-			const testHandler = new TestMoonshotHandler(mockOptions)
-			const result = testHandler.testGetMaxOutputTokens()
+			const testHandler = new TestMoonshotHandler({
+				...mockOptions,
+				apiModelId: "future-moonshot-model",
+			})
+			const requestOptions: any = {}
+			testHandler.testAddMaxTokensIfNeeded(requestOptions, testHandler.getModel().info)
 
-			// moonshot-chat has maxTokens of 16384
-			expect(result).toBe(16384)
+			expect(requestOptions.max_tokens).toBeUndefined()
 		})
 	})
 
@@ -352,34 +385,39 @@ describe("MoonshotHandler", () => {
 		]
 
 		it("should handle tool calls in streaming", async () => {
-			async function* mockFullStream() {
+			async function* mockStream() {
 				yield {
-					type: "tool-input-start",
-					id: "tool-call-1",
-					toolName: "read_file",
-				}
-				yield {
-					type: "tool-input-delta",
-					id: "tool-call-1",
-					delta: '{"path":"test.ts"}',
-				}
-				yield {
-					type: "tool-input-end",
-					id: "tool-call-1",
+					choices: [
+						{
+							delta: {
+								content: null,
+								tool_calls: [
+									{
+										index: 0,
+										id: "tool-call-1",
+										function: {
+											name: "read_file",
+											arguments: '{"path":"test.ts"}',
+										},
+									},
+								],
+							},
+							finish_reason: "tool_calls",
+						},
+					],
+					usage: null,
 				}
 			}
 
-			const mockUsage = Promise.resolve({
-				inputTokens: 10,
-				outputTokens: 5,
-				details: {},
-				raw: {},
-			})
+			const mockClient = {
+				chat: {
+					completions: {
+						create: vi.fn().mockResolvedValue(mockStream()),
+					},
+				},
+			}
 
-			mockStreamText.mockReturnValue({
-				fullStream: mockFullStream(),
-				usage: mockUsage,
-			})
+			;(handler as any).client = mockClient
 
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
@@ -404,71 +442,16 @@ describe("MoonshotHandler", () => {
 				chunks.push(chunk)
 			}
 
-			const toolCallStartChunks = chunks.filter((c) => c.type === "tool_call_start")
-			const toolCallDeltaChunks = chunks.filter((c) => c.type === "tool_call_delta")
-			const toolCallEndChunks = chunks.filter((c) => c.type === "tool_call_end")
+			const partialChunks = chunks.filter((c) => c.type === "tool_call_partial")
+			const endChunks = chunks.filter((c) => c.type === "tool_call_end")
 
-			expect(toolCallStartChunks.length).toBe(1)
-			expect(toolCallStartChunks[0].id).toBe("tool-call-1")
-			expect(toolCallStartChunks[0].name).toBe("read_file")
+			expect(partialChunks.length).toBe(1)
+			expect(partialChunks[0].id).toBe("tool-call-1")
+			expect(partialChunks[0].name).toBe("read_file")
+			expect(partialChunks[0].arguments).toBe('{"path":"test.ts"}')
 
-			expect(toolCallDeltaChunks.length).toBe(1)
-			expect(toolCallDeltaChunks[0].delta).toBe('{"path":"test.ts"}')
-
-			expect(toolCallEndChunks.length).toBe(1)
-			expect(toolCallEndChunks[0].id).toBe("tool-call-1")
-		})
-
-		it("should handle complete tool calls", async () => {
-			async function* mockFullStream() {
-				yield {
-					type: "tool-call",
-					toolCallId: "tool-call-1",
-					toolName: "read_file",
-					input: { path: "test.ts" },
-				}
-			}
-
-			const mockUsage = Promise.resolve({
-				inputTokens: 10,
-				outputTokens: 5,
-				details: {},
-				raw: {},
-			})
-
-			mockStreamText.mockReturnValue({
-				fullStream: mockFullStream(),
-				usage: mockUsage,
-			})
-
-			const stream = handler.createMessage(systemPrompt, messages, {
-				taskId: "test-task",
-				tools: [
-					{
-						type: "function",
-						function: {
-							name: "read_file",
-							description: "Read a file",
-							parameters: {
-								type: "object",
-								properties: { path: { type: "string" } },
-								required: ["path"],
-							},
-						},
-					},
-				],
-			})
-
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
-
-			const toolCallChunks = chunks.filter((c) => c.type === "tool_call")
-			expect(toolCallChunks.length).toBe(1)
-			expect(toolCallChunks[0].id).toBe("tool-call-1")
-			expect(toolCallChunks[0].name).toBe("read_file")
-			expect(toolCallChunks[0].arguments).toBe('{"path":"test.ts"}')
+			expect(endChunks.length).toBe(1)
+			expect(endChunks[0].id).toBe("tool-call-1")
 		})
 	})
 })

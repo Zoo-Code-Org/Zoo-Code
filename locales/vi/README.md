@@ -35,15 +35,15 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.70.0
+## Điểm mới trong v3.72.0
 
-- **Dòng OpenAI GPT-5.6** — `Sol`, `Terra`, và `Luna` hiện đã có sẵn trên cả hai đường nhà cung cấp OpenAI Codex và OpenAI Native.
-- **Hỗ trợ Grok 4.5** — model chủ lực mới của xAI, cùng với bản sửa lỗi định dạng reasoning-effort cũng mang lại lợi ích cho Grok 4 Mini.
-- **Hỗ trợ nhà cung cấp Kenari** — một cổng AI hạng nhất, tương thích OpenAI, tính phí bằng Rupiah, bao phủ Claude, GPT, DeepSeek, GLM, Kimi và nhiều hơn nữa.
-- Hiển thị nút cô đọng ngữ cảnh và thanh tiến trình cửa sổ ngữ cảnh trong tiêu đề tác vụ đã thu gọn.
-- Sửa lỗi: mất đầu ra terminal và hoàn thành tác vụ quá sớm trên các terminal nguội.
-- Sửa lỗi: đính kèm hình ảnh cho các model Zoo Gateway và Vercel AI Gateway giờ đây tuân theo các thẻ khả năng vision trực tiếp thay vì danh sách cho phép tĩnh.
-- Cập nhật phụ thuộc và công cụ.
+- **Provider Moonshot và Kimi Code** — khám phá động các model Moonshot hoặc đăng nhập Kimi Code qua luồng thiết bị OAuth.
+- **Hỗ trợ model mới nhất** — dùng Claude Opus 5 trên tất cả provider, cùng với Kimi K3, Gemini 3.6 Flash và MiniMax-M3.
+- **Workflow tác vụ con được cải thiện** — từ bỏ gọn gàng các tác vụ con bị gián đoạn, với cơ chế vô hiệu hóa lịch sử an toàn hơn và phạm vi kiểm thử tiếp tục tốt hơn.
+- **Mở rộng lập chỉ mục codebase** — lập chỉ mục file Dart và file văn bản thuần.
+- **Độ tin cậy của provider** — sửa lỗi GPT-5.6 Luna với ChatGPT OAuth, reasoning content của LiteLLM và đầu vào hình ảnh DeepSeek V4.
+- **Thiết lập và cài đặt mượt mà hơn** — cải thiện đăng nhập Zoo Gateway và hành vi chuyển chế độ.
+- Cải tiến API, kiểu provider, phụ thuộc, bản địa hóa và CI.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

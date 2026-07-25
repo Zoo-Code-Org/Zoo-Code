@@ -8,11 +8,6 @@
 		"title": "Aktifkan Server MCP",
 		"description": "Nyalakan ini untuk membiarkan Zoo menggunakan tools dari server MCP yang terhubung. Ini memberikan Zoo lebih banyak kemampuan. Jika Anda tidak berencana menggunakan tools tambahan ini, matikan untuk membantu mengurangi biaya token API."
 	},
-	"enableServerCreation": {
-		"title": "Aktifkan Pembuatan Server MCP",
-		"description": "Aktifkan ini agar Zoo membantu Anda membangun server MCP kustom <1>baru</1>. <0>Pelajari tentang pembuatan server</0>",
-		"hint": "Petunjuk: Untuk mengurangi biaya token API, nonaktifkan pengaturan ini ketika Anda tidak secara aktif meminta Zoo untuk membuat server MCP baru."
-	},
 	"editGlobalMCP": "Edit MCP Global",
 	"editProjectMCP": "Edit MCP Proyek",
 	"refreshMCP": "Refresh Server MCP",

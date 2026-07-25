@@ -104,6 +104,23 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 	},
 
 	// --- Moonshot Kimi ---
+	"kimi-k3": {
+		maxTokens: 131_072, // Default max_completion_tokens (configurable up to 1,048,576)
+		contextWindow: 1_048_576,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "high", "max"], // Always reasons; default "max"
+		reasoningEffort: "max",
+		preserveReasoning: true,
+		defaultTemperature: 1.0,
+		// Go pricing matches Moonshot direct ($3 in / $0.30 cache / $15 out per 1M tokens).
+		inputPrice: 3.0,
+		outputPrice: 15.0,
+		cacheReadsPrice: 0.3,
+		description:
+			"Kimi K3 is Moonshot AI's flagship model with 2.8 trillion parameters, a 1M context window, and always-on reasoning with configurable effort (low/high/max). Available via the Opencode Go plan.",
+	},
 	"kimi-k2.5": {
 		maxTokens: 16_384,
 		contextWindow: 262_144,

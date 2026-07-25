@@ -168,7 +168,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		// Verify child closed and parent reopened with updated metadata
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
-		expect(removeClineFromStack).toHaveBeenCalledWith({ skipDelegationRepair: true })
+		expect(removeClineFromStack).toHaveBeenCalledWith()
 		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(
 			expect.objectContaining({
 				status: "active",
@@ -345,6 +345,12 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(injectedMsg.role).toBe("user")
 		expect((injectedMsg.content[0] as any).type).toBe("tool_result")
 		expect((injectedMsg.content[0] as any).tool_use_id).toBe("toolu_abc123")
+
+		// Format contract with the e2e mock fixtures: the parent-resume fixtures in
+		// apps/vscode-e2e/src/fixtures/subtasks.ts match on this injected
+		// "completed.\n\nResult:" prefix (SUBTASK_RESULT_INJECTION). If this template
+		// changes, update the fixtures in the same PR or they silently never fire.
+		expect((injectedMsg.content[0] as any).content).toMatch(/^Subtask .+ completed\.\n\nResult:\n/)
 	})
 
 	it("reopenParentFromDelegation injects plain text when no new_task tool_use exists in API history", async () => {

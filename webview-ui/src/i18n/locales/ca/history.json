@@ -54,5 +54,7 @@
 	"subtaskTag": "Subtasca",
 	"deleteWithSubtasks": "Això també eliminarà {{count}} subtasca(s). Estàs segur?",
 	"expandSubtasks": "Expandir subtasques",
-	"collapseSubtasks": "Contreure subtasques"
+	"collapseSubtasks": "Contreure subtasques",
+	"delegatedTag": "Esperant subtasca",
+	"interruptedTag": "Interrompuda"
 }

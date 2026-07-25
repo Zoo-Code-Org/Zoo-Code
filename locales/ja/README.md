@@ -35,15 +35,15 @@
 
 Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
-## v3.70.0 の新機能
+## v3.72.0 の新機能
 
-- **OpenAI GPT-5.6 ファミリー** — `Sol`、`Terra`、`Luna` が OpenAI Codex と OpenAI Native の両方のプロバイダーパスで利用可能になりました。
-- **Grok 4.5 サポート** — xAI の新しいフラッグシップモデルに加え、Grok 4 Mini にも恩恵のある reasoning-effort フォーマット修正。
-- **Kenari プロバイダーサポート** — Claude、GPT、DeepSeek、GLM、Kimi などをカバーする、ルピア建てのファーストクラスの OpenAI 互換 AI ゲートウェイ。
-- 折りたたまれたタスクヘッダーにコンテキスト圧縮ボタンとコンテキストウィンドウの進捗バーを表示。
-- 修正: コールドターミナルでのターミナル出力の消失と早すぎるタスク完了。
-- 修正: Zoo Gateway と Vercel AI Gateway モデルの画像添付が、静的な許可リストではなくライブの vision 対応タグに従うように。
-- 依存関係とツールの更新。
+- **Moonshot と Kimi Code プロバイダー** — Moonshot モデルを動的に検出するか、OAuth デバイスフローで Kimi Code にサインインできます。
+- **最新モデルのサポート** — 各プロバイダーで Claude Opus 5 を利用できるほか、Kimi K3、Gemini 3.6 Flash、MiniMax-M3 にも対応しました。
+- **サブタスクワークフローの改善** — タスク履歴をより安全に無効化し、再開時のテスト範囲を強化しながら、中断されたサブタスクを安全に破棄できます。
+- **コードベースインデックスの拡張** — Dart ファイルとプレーンテキストファイルをインデックスできます。
+- **プロバイダーの信頼性向上** — ChatGPT OAuth での GPT-5.6 Luna、LiteLLM の reasoning content、DeepSeek V4 の画像入力を修正しました。
+- **よりスムーズなセットアップと設定** — Zoo Gateway のサインインとモード切り替えを改善しました。
+- API、プロバイダー型、依存関係、ローカライズ、CI を改善しました。
 
 ## Zoo Codeがあなたのためにできること
 

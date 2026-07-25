@@ -47,5 +47,7 @@
 	"subtaskTag": "子任务",
 	"deleteWithSubtasks": "这也将删除 {{count}} 个子任务。您确定吗？",
 	"expandSubtasks": "展开子任务",
-	"collapseSubtasks": "收起子任务"
+	"collapseSubtasks": "收起子任务",
+	"delegatedTag": "等待子任务",
+	"interruptedTag": "已中断"
 }

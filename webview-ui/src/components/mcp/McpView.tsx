@@ -28,8 +28,17 @@ import McpResourceRow from "./McpResourceRow"
 import McpEnabledToggle from "./McpEnabledToggle"
 import { McpErrorRow } from "./McpErrorRow"
 
-const McpView = () => {
-	const { mcpServers: servers, alwaysAllowMcp, mcpEnabled } = useExtensionState()
+interface McpViewProps {
+	mcpEnabled?: boolean
+	setMcpEnabled?: (value: boolean) => void
+}
+
+const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = {}) => {
+	const { mcpServers: servers, alwaysAllowMcp, mcpEnabled: contextMcpEnabled } = useExtensionState()
+
+	// When rendered inside SettingsView the value is buffered in `cachedState` and
+	// only persisted on Save. Fall back to live extension state when used uncontrolled.
+	const mcpEnabled = propsMcpEnabled ?? contextMcpEnabled
 
 	const { t } = useAppTranslation()
 	const { isOverThreshold, title, message } = useTooManyTools()
@@ -55,7 +64,7 @@ const McpView = () => {
 					</Trans>
 				</div>
 
-				<McpEnabledToggle />
+				<McpEnabledToggle mcpEnabled={mcpEnabled} setMcpEnabled={setMcpEnabled} />
 
 				{mcpEnabled && (
 					<>

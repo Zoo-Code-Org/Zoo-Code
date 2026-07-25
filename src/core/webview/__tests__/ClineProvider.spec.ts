@@ -2703,8 +2703,10 @@ describe("ClineProvider - Router Models", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -2755,8 +2757,10 @@ describe("ClineProvider - Router Models", () => {
 				litellm: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -2853,8 +2857,10 @@ describe("ClineProvider - Router Models", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})

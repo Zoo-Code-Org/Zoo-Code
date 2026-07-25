@@ -36,15 +36,15 @@
 
 Eine kurze Anleitung für den Wechsel von Roo Code zu Zoo Code findest du im [Roo→Zoo-Migrationsleitfaden](https://docs.zoocode.dev/roo-to-zoo-migration). Wir wollen Nutzer beim Umstieg so gut wie möglich unterstützen, und genau dafür sind unser [Reddit](https://www.reddit.com/r/ZooCode) und [Discord](https://discord.gg/VxfP4Vx3gX) da. Wenn du Probleme hast oder Fragen auftauchen, komm vorbei und frag nach.
 
-## Neu in v3.70.0
+## Neu in v3.72.0
 
-- **OpenAI GPT-5.6-Familie** — `Sol`, `Terra` und `Luna` sind jetzt sowohl über OpenAI Codex als auch über OpenAI Native verfügbar.
-- **Grok 4.5-Unterstützung** — xAIs neues Flaggschiff-Modell, plus ein Fix für das Reasoning-Effort-Format, von dem auch Grok 4 Mini profitiert.
-- **Kenari-Anbieter-Unterstützung** — ein erstklassiges, OpenAI-kompatibles KI-Gateway mit Abrechnung in Rupiah, das Claude, GPT, DeepSeek, GLM, Kimi und mehr abdeckt.
-- Zeige den Kontext-Kondensierungs-Button und den Fortschrittsbalken für das Kontextfenster im eingeklappten Task-Header an.
-- Fix: Verlust von Terminal-Ausgaben und verfrühter Task-Abschluss bei kalten Terminals.
-- Fix: Bild-Anhänge für Zoo Gateway und Vercel AI Gateway folgen jetzt den aktuellen Vision-Fähigkeits-Tags statt einer statischen Positivliste.
-- Updates für Abhängigkeiten und Tooling.
+- **Moonshot- und Kimi-Code-Anbieter** — erkenne Moonshot-Modelle dynamisch oder melde dich über den OAuth-Gerätefluss bei Kimi Code an.
+- **Unterstützung für die neuesten Modelle** — nutze Claude Opus 5 anbieterübergreifend sowie Kimi K3, Gemini 3.6 Flash und MiniMax-M3.
+- **Verbesserte Unteraufgaben-Workflows** — brich unterbrochene Unteraufgaben sauber ab, mit sichererer Invalidierung des Aufgabenverlaufs und besserer Abdeckung beim Fortsetzen.
+- **Erweiterte Codebasis-Indizierung** — indiziere Dart- und Klartextdateien.
+- **Zuverlässigere Anbieter** — Korrekturen für GPT-5.6 Luna mit ChatGPT OAuth, LiteLLM-Reasoning-Inhalte und Bildeingaben für DeepSeek V4.
+- **Reibungslosere Einrichtung und Einstellungen** — verbessertes Zoo-Gateway-Login und Moduswechselverhalten.
+- Verbesserungen an API, Anbietertypen, Abhängigkeiten, Lokalisierung und CI.
 
 ## Was kann Zoo Code für DICH tun?
 

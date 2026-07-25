@@ -459,6 +459,17 @@
 		"moonshotApiKey": "Chiave API Moonshot",
 		"getMoonshotApiKey": "Ottieni chiave API Moonshot",
 		"moonshotBaseUrl": "Punto di ingresso Moonshot",
+		"kimiCode": {
+			"authMethod": "Metodo di autenticazione",
+			"oauth": "Abbonamento Kimi Code (OAuth)",
+			"apiKey": "Chiave API Kimi Code",
+			"apiKeyLabel": "Chiave API Kimi Code",
+			"signIn": "Accedi a Kimi Code",
+			"signOut": "Esci",
+			"authenticated": "Accesso a Kimi Code effettuato",
+			"deviceCodeHelp": "Inserisci questo codice dispositivo nella pagina di autorizzazione Kimi:",
+			"docs": "Documentazione Kimi Code"
+		},
 		"zaiApiKey": "Chiave API Z AI",
 		"getZaiApiKey": "Ottieni chiave API Z AI",
 		"zaiEntrypoint": "Punto di ingresso Z AI",

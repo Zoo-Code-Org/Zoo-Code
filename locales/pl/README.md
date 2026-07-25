@@ -34,15 +34,15 @@
 
 Szybki przewodnik po przejściu z Roo Code do Zoo Code znajdziesz w [przewodniku migracji Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chcemy jak najlepiej pomagać użytkownikom w czasie przejścia i właśnie do tego służą nasze [Reddit](https://www.reddit.com/r/ZooCode) oraz [Discord](https://discord.gg/VxfP4Vx3gX). Jeśli masz problem albo pytanie, wpadaj i pytaj.
 
-## Nowości w v3.70.0
+## Nowości w v3.72.0
 
-- **Rodzina OpenAI GPT-5.6** — `Sol`, `Terra` i `Luna` są teraz dostępne zarówno w ścieżce providera OpenAI Codex, jak i OpenAI Native.
-- **Obsługa Grok 4.5** — nowy flagowy model xAI, plus poprawka formatu reasoning-effort, z której korzysta też Grok 4 Mini.
-- **Obsługa providera Kenari** — pierwszorzędna, kompatybilna z OpenAI bramka AI rozliczana w rupiach, obejmująca Claude, GPT, DeepSeek, GLM, Kimi i inne.
-- Wyświetlanie przycisku kondensacji kontekstu i paska postępu okna kontekstu w zwiniętym nagłówku zadania.
-- Poprawka: utrata danych wyjściowych terminala i przedwczesne kończenie zadań na zimnych terminalach.
-- Poprawka: dołączanie obrazów dla modeli Zoo Gateway i Vercel AI Gateway korzysta teraz z bieżących tagów możliwości vision zamiast statycznej listy dozwolonych.
-- Aktualizacje zależności i narzędzi.
+- **Providerzy Moonshot i Kimi Code** — dynamicznie wykrywaj modele Moonshot lub zaloguj się do Kimi Code przez przepływ urządzenia OAuth.
+- **Obsługa najnowszych modeli** — korzystaj z Claude Opus 5 u różnych providerów, a także z Kimi K3, Gemini 3.6 Flash i MiniMax-M3.
+- **Ulepszone workflow podzadań** — bezpiecznie porzucaj przerwane podzadania dzięki bezpieczniejszej invalidacji historii i lepszemu pokryciu wznawiania.
+- **Rozszerzone indeksowanie bazy kodu** — indeksuj pliki Dart i pliki tekstowe.
+- **Niezawodność providerów** — poprawki dla GPT-5.6 Luna z ChatGPT OAuth, reasoning content LiteLLM i obrazów DeepSeek V4.
+- **Płynniejsza konfiguracja i ustawienia** — ulepszone logowanie do Zoo Gateway i przełączanie trybów.
+- Ulepszenia API, typów providerów, zależności, lokalizacji i CI.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 

@@ -456,6 +456,33 @@ describe("AnthropicHandler", () => {
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 		})
 
+		it("should use adaptive thinking for Claude Opus 5 when reasoning is enabled", async () => {
+			const opusHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-5",
+				enableReasoningEffort: true,
+				modelMaxTokens: 32768,
+			})
+
+			const stream = opusHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			for await (const _chunk of stream) {
+				// Consume stream
+			}
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.temperature).toBeUndefined()
+			expect(requestBody?.max_tokens).toBe(32768)
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+		})
+
 		it("should send the custom model ID as-is and use adaptive thinking for a custom Sonnet-5-family model", async () => {
 			const customHandler = new AnthropicHandler({
 				apiKey: "test-api-key",
@@ -646,6 +673,23 @@ describe("AnthropicHandler", () => {
 			})
 			const model = handler.getModel()
 			expect(model.id).toBe("claude-sonnet-5")
+			expect(model.info.maxTokens).toBe(128000)
+			expect(model.info.contextWindow).toBe(1000000)
+			expect(model.maxTokens).toBe(8192)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.reasoningBudget).toBeUndefined()
+		})
+
+		it("should handle Claude Opus 5 model correctly", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-5",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-opus-5")
 			expect(model.info.maxTokens).toBe(128000)
 			expect(model.info.contextWindow).toBe(1000000)
 			expect(model.maxTokens).toBe(8192)

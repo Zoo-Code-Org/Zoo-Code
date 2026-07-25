@@ -1,5 +1,32 @@
 # Zoo Code Changelog
 
+## [3.72.0]
+
+### Minor Changes
+
+- Add the Moonshot provider with live model discovery, streaming, model metadata, and a model picker (PR #857 by @grizmin)
+- Add the Kimi Code provider with OAuth device-flow authentication (PR #945 by @taltas)
+- Add Claude Opus 5 support across all providers (PR #1010 by @app/zoomote)
+- Add Kimi K3 to the Moonshot and OpenCode Go providers (#932 by @navedmerchant, PR #996 by @app/zoomote)
+- Add Gemini 3.6 Flash model support (PR #975 by @app/zoomote)
+- Add MiniMax-M3 model support (#888 by @RayWinter0816, PR #946 by @app/zoomote)
+- Add a safe way to abandon interrupted subtasks by severing stale parent-child links and surfacing delegation status (#559 by @edelauna, PR #935 by @edelauna)
+- Add Dart support to codebase indexing (#940 by @WebMad, PR #941 by @WebMad)
+- Fix codebase indexing for plain-text files (#931 by @tool-buddy, PR #938 by @WebMad)
+- Enable image input for DeepSeek V4 models (#964 by @grizmin, PR #963 by @grizmin)
+- Fix ChatGPT OAuth requests for GPT-5.6 Luna being rejected by the Codex backend (PR #889 by @taltas)
+- Preserve `reasoning_content` for known reasoning model families when using LiteLLM (#891 by @daewoongoh, PR #899 by @daewoongoh)
+- Fix task-history cache invalidation races by routing `invalidate()` and `invalidateAll()` through the task-history lock (#698 by @edelauna, PR #912 by @morgan-coded)
+- Fix Settings mode changes by synchronizing the local `cachedState` editing buffer (#914 by @easonLiangWorldedtech, PR #925 by @easonLiangWorldedtech)
+- Dismiss the welcome screen after successful Zoo Gateway sign-in (#961 by @JohnCanty, PR #962 by @JamesRobert20)
+- Add `CompletePromptOptions` to the `completePrompt` API so callers can configure prompt completion (#615 by @edelauna, PR #901 by @easonLiangWorldedtech)
+- Centralize provider identifiers into canonical shared types (#951 by @WebMad, PR #952 by @WebMad)
+- Refactor provider categories to use canonical provider identifiers (PR #989 by @WebMad)
+- Remove obsolete MCP server-creation translations (#895 by @edelauna, PR #943 by @WebMad)
+- Add regression coverage for resuming interrupted subtasks (#566 by @myk1yt, PR #911 by @edelauna)
+- Upload coverage reports as GitHub Actions artifacts to simplify CI debugging (PR #939 by @app/zoomote)
+- Update `esbuild-wasm` to v0.28.1 (PR #829 by @app/renovate)
+
 ## [3.70.0]
 
 ### Minor Changes
