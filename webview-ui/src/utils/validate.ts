@@ -127,6 +127,11 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.qwenCodeOauthPath")
 			}
 			break
+		case "kimi-code":
+			if ((apiConfiguration.kimiCodeAuthMethod ?? "oauth") === "api-key" && !apiConfiguration.kimiCodeApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
 		case "vercel-ai-gateway":
 			if (!apiConfiguration.vercelAiGatewayApiKey) {
 				return i18next.t("settings:validation.apiKey")

@@ -31,6 +31,7 @@ import { getPoeModels } from "./poe"
 import { getDeepSeekModels } from "./deepseek"
 import { getMoonshotModels } from "./moonshot"
 import { getZooGatewayModels } from "./zoo-gateway"
+import { getKimiCodeModels } from "./kimi-code"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
 
@@ -46,7 +47,7 @@ const inFlightRefresh = new Map<string, Promise<ModelRecord>>()
 // allowlists or org policies). For these we MUST NOT cache results on disk or
 // in memory: a sign-in/out cycle could otherwise serve a previous user's model
 // list to the next user, and stale data could mask backend allowlist updates.
-const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set(["zoo-gateway"])
+const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set(["zoo-gateway", "kimi-code"])
 
 // Providers whose model list is determined by the server URL, not just by the provider name.
 // Each unique baseUrl must be cached independently so that switching endpoints never serves
@@ -229,6 +230,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 			break
 		case "zoo-gateway":
 			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
+			break
+		case "kimi-code":
+			models = await getKimiCodeModels(options.apiKey)
 			break
 		default: {
 			// Ensures router is exhaustively checked if RouterName is a strict union.

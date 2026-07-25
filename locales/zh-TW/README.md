@@ -32,15 +32,15 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.70.0 新功能
+## v3.72.0 新功能
 
-- **OpenAI GPT-5.6 系列** — `Sol`、`Terra` 和 `Luna` 現已在 OpenAI Codex 與 OpenAI Native 兩條供應商路徑上提供。
-- **Grok 4.5 支援** — xAI 全新的旗艦模型，以及一項同樣使 Grok 4 Mini 受惠的 reasoning-effort 格式修正。
-- **Kenari 供應商支援** — 一個一流的、相容 OpenAI 的 AI 閘道，以印尼盾計費，涵蓋 Claude、GPT、DeepSeek、GLM、Kimi 等更多模型。
-- 在摺疊的任務標頭中顯示內容壓縮按鈕與內容視窗進度條。
-- 修正：冷終端機上發生的終端機輸出遺失與任務過早完成問題。
-- 修正：Zoo Gateway 與 Vercel AI Gateway 模型的圖片附加功能現在會依循即時的 vision 能力標籤，而非靜態的白名單。
-- 相依套件與工具更新。
+- **Moonshot 與 Kimi Code 供應商** — 動態探索 Moonshot 模型，或使用 OAuth 裝置流程登入 Kimi Code。
+- **最新模型支援** — 跨供應商使用 Claude Opus 5，以及 Kimi K3、Gemini 3.6 Flash 與 MiniMax-M3。
+- **改善的子任務工作流程** — 乾淨地放棄中斷的子任務，並透過更安全的任務歷史失效機制與更完整的恢復測試提升可靠性。
+- **擴充程式碼庫索引** — 為 Dart 與純文字檔案建立索引。
+- **供應商可靠性** — 修正 ChatGPT OAuth 下的 GPT-5.6 Luna、LiteLLM reasoning content 與 DeepSeek V4 圖片輸入問題。
+- **更順暢的設定體驗** — 改善 Zoo Gateway 登入與模式切換行為。
+- API、供應商類型、相依套件、本地化與 CI 改善。
 
 ## Zoo Code 能為您做什麼？
 

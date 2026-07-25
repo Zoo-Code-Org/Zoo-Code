@@ -14,6 +14,7 @@ import {
 	SUBTASK_API_HANG_PARENT_RESULT,
 	SUBTASK_API_HANG_RESUME_MESSAGE,
 	SUBTASK_CHILD_FOLLOWUP_ANSWER,
+	SUBTASK_FAST_CHILD_RESULT,
 	SUBTASK_FAST_PARENT_PROMPT,
 	SUBTASK_INTERRUPT_CHILD_FOLLOWUP_ANSWER,
 	SUBTASK_INTERRUPT_PARENT_PROMPT,
@@ -101,7 +102,8 @@ suite("Roo Code Subtasks", function () {
 					([taskId, messages]) =>
 						taskId !== parentTaskId &&
 						messages.some(
-							({ say, text }) => say === "completion_result" && text?.trim() === "Fast child completed",
+							({ say, text }) =>
+								say === "completion_result" && text?.trim() === SUBTASK_FAST_CHILD_RESULT,
 						),
 				),
 				"Immediately-completing child should emit its expected result",
@@ -357,15 +359,23 @@ suite("Roo Code Subtasks", function () {
 
 			await api.cancelCurrentTask()
 
+			// Gate on the async settle before asserting the parent never resumed: a spurious
+			// resume would be an async downstream effect of the cancellation, so a synchronous
+			// check right after cancelCurrentTask() proves nothing.
+			await waitFor(() => api.getCurrentTaskStack().at(-1) === spawnedTaskId)
+			await waitFor(
+				() => asks[spawnedTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "resume_task") ?? false,
+			)
+
 			assert.ok(
 				messages[parentTaskId]?.find(({ type, text }) => type === "say" && text === "Parent task resumed") ===
 					undefined,
 				"Parent task should not have resumed after subtask cancellation",
 			)
-
-			await waitFor(() => api.getCurrentTaskStack().at(-1) === spawnedTaskId)
-			await waitFor(
-				() => asks[spawnedTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "resume_task") ?? false,
+			assert.strictEqual(
+				messages[parentTaskId]?.find(({ say }) => say === "completion_result"),
+				undefined,
+				"Parent must not have completed after subtask cancellation",
 			)
 
 			await api.clearCurrentTask()
@@ -539,7 +549,7 @@ suite("Roo Code Subtasks", function () {
 				says[childTaskId!]
 					?.filter(({ say }) => say === "completion_result")
 					.map(({ text }) => text?.trim())
-					.find((text) => text === SUBTASK_API_HANG_CHILD_RESULT),
+					.find((text): text is string => !!text),
 				SUBTASK_API_HANG_CHILD_RESULT,
 				"Child should complete with its expected result after resume",
 			)
@@ -547,7 +557,7 @@ suite("Roo Code Subtasks", function () {
 				says[parentTaskId]
 					?.filter(({ say }) => say === "completion_result")
 					.map(({ text }) => text?.trim())
-					.find((text) => text === SUBTASK_API_HANG_PARENT_RESULT),
+					.find((text): text is string => !!text),
 				SUBTASK_API_HANG_PARENT_RESULT,
 				"Parent should resume and complete with its expected result",
 			)

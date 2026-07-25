@@ -277,6 +277,13 @@ export const parseOpenRouterModel = ({
 		modelInfo.supportsTemperature = false
 	}
 
+	// Set claude-opus-5 model to use the correct Anthropic configuration
+	if (id === "anthropic/claude-opus-5") {
+		modelInfo.maxTokens = anthropicModels["claude-opus-5"].maxTokens
+		modelInfo.supportsReasoningBinary = true
+		modelInfo.supportsTemperature = false
+	}
+
 	// Ensure correct reasoning handling for Claude Haiku 4.5 on OpenRouter
 	// Use budget control and disable effort-based reasoning fallback
 	if (id === "anthropic/claude-haiku-4.5") {

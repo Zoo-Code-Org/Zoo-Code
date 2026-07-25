@@ -343,9 +343,9 @@
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "OpenAI GPT-5.6 ファミリー（Sol、Terra、Luna）— OpenAI Codex と OpenAI Native の両方で利用可能。",
-			"highlight2": "Grok 4.5 サポート — xAI の新しいフラッグシップモデル。あわせて reasoning effort の修正も行われ、Grok 4 Mini にも恩恵があります。",
-			"highlight3": "Kenari プロバイダー — ルピー建てで請求される、Claude・GPT・DeepSeek・GLM・Kimi などに対応した OpenAI 互換のファーストクラス AI ゲートウェイ。"
+			"highlight1": "Moonshot と Kimi Code プロバイダー — ライブモデル検出で Moonshot モデルに接続するか、OAuth デバイスフローで Kimi Code にサインインできます。",
+			"highlight2": "最新モデルのサポート — 各プロバイダーで Claude Opus 5 を利用できるほか、Kimi K3、Gemini 3.6 Flash、MiniMax-M3 にも対応しました。",
+			"highlight3": "より信頼性の高いワークフロー — 中断されたサブタスクを安全に破棄し、コードベース内の Dart ファイルとプレーンテキストファイルをインデックスできます。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

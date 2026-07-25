@@ -205,7 +205,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "jul-2026-v3.70.0-gpt5.6-grok4.5-kenari" // v3.70.0 GPT-5.6 family, Grok 4.5 support, Kenari provider
+	public readonly latestAnnouncementId = "jul-2026-v3.72.0-moonshot-kimi-models-workflows" // v3.72.0 Moonshot/Kimi providers, new models, subtask/indexing improvements
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -2557,6 +2557,22 @@ export class ClineProvider
 					return await openAiCodexOAuthManager.isAuthenticated()
 				} catch {
 					return false
+				}
+			})(),
+			kimiCodeIsAuthenticated: await (async () => {
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					return await kimiCodeOAuthManager.isAuthenticated()
+				} catch {
+					return false
+				}
+			})(),
+			kimiCodeOAuthState: await (async () => {
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					return kimiCodeOAuthManager.getState()
+				} catch {
+					return undefined
 				}
 			})(),
 			...zooCodeState,

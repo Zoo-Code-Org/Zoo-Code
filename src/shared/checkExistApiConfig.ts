@@ -18,6 +18,10 @@ export function checkExistKey(config: ProviderSettings | undefined, zooCodeIsAut
 		return true
 	}
 
+	if (config.apiProvider === "kimi-code" && (config.kimiCodeAuthMethod ?? "oauth") === "oauth") {
+		return true
+	}
+
 	// Zoo Gateway uses session auth (profile token and/or global Zoo Code login),
 	// not a traditional API key listed in SECRET_STATE_KEYS.
 	if (config.apiProvider === "zoo-gateway") {

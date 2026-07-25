@@ -36,15 +36,15 @@
 
 Você encontra um guia rápido para migrar do Roo Code para o Zoo Code no [guia de migração Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Queremos ajudar os usuários durante essa transição da melhor forma possível, e é exatamente para isso que temos nosso [Reddit](https://www.reddit.com/r/ZooCode) e nosso [Discord](https://discord.gg/VxfP4Vx3gX). Se você tiver algum problema ou dúvida, apareça por lá e pergunte.
 
-## Novidades na v3.70.0
+## Novidades na v3.72.0
 
-- **Família OpenAI GPT-5.6** — `Sol`, `Terra` e `Luna` já estão disponíveis tanto pelo OpenAI Codex quanto pelo OpenAI Native.
-- **Suporte a Grok 4.5** — o novo modelo principal da xAI, além de uma correção no formato de reasoning-effort que também beneficia o Grok 4 Mini.
-- **Suporte ao provedor Kenari** — um gateway de IA de primeira linha, compatível com OpenAI, cobrado em rupias, cobrindo Claude, GPT, DeepSeek, GLM, Kimi e mais.
-- Exibe o botão de condensação de contexto e a barra de progresso da janela de contexto no cabeçalho de tarefa recolhido.
-- Correção: perda de saída do terminal e conclusão prematura de tarefas em terminais frios.
-- Correção: o anexo de imagens para os modelos Zoo Gateway e Vercel AI Gateway agora segue as tags de capacidade de visão em tempo real, em vez de uma allowlist estática.
-- Atualizações de dependências e ferramentas.
+- **Providers Moonshot e Kimi Code** — descubra dinamicamente os modelos Moonshot ou entre no Kimi Code pelo fluxo de dispositivo OAuth.
+- **Suporte aos modelos mais recentes** — use Claude Opus 5 em todos os providers, além de Kimi K3, Gemini 3.6 Flash e MiniMax-M3.
+- **Workflows de subtarefas aprimorados** — abandone subtarefas interrompidas de forma limpa, com invalidação mais segura do histórico e melhor cobertura de retomada.
+- **Indexação ampliada da base de código** — indexe arquivos Dart e de texto simples.
+- **Confiabilidade dos providers** — correções para GPT-5.6 Luna com ChatGPT OAuth, reasoning content do LiteLLM e entrada de imagens do DeepSeek V4.
+- **Configuração e ajustes mais fluidos** — melhorias no login do Zoo Gateway e na troca de modo.
+- Melhorias em API, tipos de provider, dependências, localização e CI.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

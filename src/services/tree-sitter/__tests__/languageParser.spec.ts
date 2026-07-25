@@ -49,6 +49,12 @@ describe("loadRequiredLanguageParsers", () => {
 		expect(parsers.kts.query).toBeDefined()
 	})
 
+	it("should load Dart parser for .dart files", async () => {
+		const parsers = await loadRequiredLanguageParsers(["test.dart"], WASM_DIR)
+		expect(parsers.dart).toBeDefined()
+		expect(parsers.dart.query).toBeDefined()
+	})
+
 	it("should throw error for unsupported file extensions", async () => {
 		const files = ["test.unsupported"]
 		await expect(loadRequiredLanguageParsers(files, WASM_DIR)).rejects.toThrow("Unsupported language: unsupported")

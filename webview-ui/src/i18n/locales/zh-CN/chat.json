@@ -344,9 +344,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "OpenAI GPT-5.6 系列（Sol、Terra、Luna）— 已在 OpenAI Codex 与 OpenAI Native 中同时提供。",
-			"highlight2": "支持 Grok 4.5 — xAI 全新旗舰模型，同时修复了 reasoning effort 问题，Grok 4 Mini 也因此受益。",
-			"highlight3": "Kenari 提供商 — 以卢比计费的一流 OpenAI 兼容 AI 网关，支持 Claude、GPT、DeepSeek、GLM、Kimi 等。"
+			"highlight1": "Moonshot 和 Kimi Code 提供商 — 通过实时模型发现连接 Moonshot 模型，或使用 OAuth 设备流程登录 Kimi Code。",
+			"highlight2": "最新模型支持 — 跨提供商使用 Claude Opus 5，以及 Kimi K3、Gemini 3.6 Flash 和 MiniMax-M3。",
+			"highlight3": "更可靠的工作流 — 干净地放弃中断的子任务，并为代码库中的 Dart 和纯文本文件建立索引。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

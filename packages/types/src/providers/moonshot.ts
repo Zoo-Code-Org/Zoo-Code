@@ -6,6 +6,21 @@ export type MoonshotModelId = keyof typeof moonshotModels
 export const moonshotDefaultModelId: MoonshotModelId = "kimi-k2-0905-preview"
 
 export const moonshotModels = {
+	"kimi-k3": {
+		maxTokens: 131_072, // Default max_completion_tokens (configurable up to 1,048,576)
+		contextWindow: 1_048_576, // 1M tokens
+		supportsImages: true, // Native visual understanding (text, image, video)
+		supportsPromptCache: true, // Automatic context caching
+		supportsReasoningEffort: ["low", "high", "max"], // Always reasons; default "max"
+		reasoningEffort: "max",
+		preserveReasoning: true,
+		inputPrice: 3.0, // $3.00 per million tokens (cache miss)
+		outputPrice: 15.0, // $15.00 per million tokens
+		cacheWritesPrice: 0, // $0 per million tokens (cache miss)
+		cacheReadsPrice: 0.3, // $0.30 per million tokens (cache hit)
+		defaultTemperature: 1.0, // temperature is fixed at 1.0
+		description: `Kimi K3 is Kimi's most capable flagship model with 2.8 trillion parameters, native visual understanding, and a 1M-token context window, designed for long-horizon coding, knowledge work, and deep reasoning. Thinking is always enabled with configurable reasoning effort (low/high/max, default max).`,
+	},
 	"kimi-k2-0711-preview": {
 		maxTokens: 32_000,
 		contextWindow: 131_072,

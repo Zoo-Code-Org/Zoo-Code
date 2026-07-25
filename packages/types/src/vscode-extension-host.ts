@@ -389,6 +389,14 @@ export type ExtensionState = Pick<
 	mdmCompliant?: boolean
 	taskSyncEnabled: boolean
 	openAiCodexIsAuthenticated?: boolean
+	kimiCodeIsAuthenticated?: boolean
+	kimiCodeOAuthState?: {
+		status: "idle" | "authorizing" | "polling" | "authenticated" | "error"
+		userCode?: string
+		verificationUri?: string
+		expiresAt?: number
+		error?: string
+	}
 	zooCodeIsAuthenticated?: boolean
 	zooCodeUserName?: string
 	zooCodeUserEmail?: string
@@ -538,6 +546,8 @@ export interface WebviewMessage {
 		| "rooCloudManualUrl"
 		| "openAiCodexSignIn"
 		| "openAiCodexSignOut"
+		| "kimiCodeSignIn"
+		| "kimiCodeSignOut"
 		| "zooCodeSignOut"
 		| "switchOrganization"
 		| "condenseTaskContextRequest"

@@ -36,15 +36,15 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da soruların olursa gel ve sor.
 
-## v3.70.0'daki Yenilikler
+## v3.72.0'daki Yenilikler
 
-- **OpenAI GPT-5.6 ailesi** — `Sol`, `Terra` ve `Luna` artık hem OpenAI Codex hem de OpenAI Native sağlayıcı yollarında kullanılabiliyor.
-- **Grok 4.5 desteği** — xAI'nin yeni amiral gemisi modeli, ayrıca Grok 4 Mini'ye de fayda sağlayan bir reasoning-effort format düzeltmesi.
-- **Kenari sağlayıcı desteği** — Claude, GPT, DeepSeek, GLM, Kimi ve daha fazlasını kapsayan, Rupi ile faturalandırılan, OpenAI uyumlu, birinci sınıf bir AI ağ geçidi.
-- Daraltılmış görev başlığında bağlam yoğunlaştırma düğmesi ve bağlam penceresi ilerleme çubuğunu göster.
-- Düzeltme: soğuk terminallerde terminal çıktısı kaybı ve erken görev tamamlanması.
-- Düzeltme: Zoo Gateway ve Vercel AI Gateway modelleri için görsel ekleme artık statik bir izin listesi yerine canlı görme yeteneği etiketlerini takip ediyor.
-- Bağımlılık ve araç güncellemeleri.
+- **Moonshot ve Kimi Code provider'ları** — Moonshot modellerini dinamik olarak keşfet veya OAuth cihaz akışıyla Kimi Code'da oturum aç.
+- **En yeni model desteği** — provider'lar genelinde Claude Opus 5'in yanı sıra Kimi K3, Gemini 3.6 Flash ve MiniMax-M3'ü kullan.
+- **Geliştirilmiş alt görev iş akışları** — daha güvenli görev geçmişi geçersiz kılma ve daha iyi devam ettirme kapsamıyla kesintiye uğramış alt görevleri temiz biçimde bırak.
+- **Genişletilmiş kod tabanı indeksleme** — Dart ve düz metin dosyalarını indeksle.
+- **Provider güvenilirliği** — ChatGPT OAuth ile GPT-5.6 Luna, LiteLLM reasoning content ve DeepSeek V4 görsel girdisi için düzeltmeler.
+- **Daha akıcı kurulum ve ayarlar** — Zoo Gateway oturum açma ve mod değiştirme davranışı iyileştirildi.
+- API, provider türleri, bağımlılıklar, yerelleştirme ve CI iyileştirmeleri.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

@@ -4,13 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React from "react"
 
 import SettingsView from "../SettingsView"
+import { vscode } from "@src/utils/vscode"
 
-// Mock vscode API
-const mockPostMessage = vi.fn()
-const mockVscode = {
-	postMessage: mockPostMessage,
-}
-;(global as any).acquireVsCodeApi = () => mockVscode
+const postMessage = vi.spyOn(vscode, "postMessage").mockImplementation(() => {})
 
 // Mock the extension state context
 vi.mock("@src/context/ExtensionStateContext", () => ({
@@ -170,7 +166,14 @@ vi.mock("@src/components/modes/ModesView", () => ({
 }))
 
 vi.mock("@src/components/mcp/McpView", () => ({
-	default: () => null,
+	default: ({ mcpEnabled, setMcpEnabled }: any) => (
+		<button
+			data-testid="mcp-enabled-toggle"
+			data-mcp-enabled={String(mcpEnabled)}
+			onClick={() => setMcpEnabled(!mcpEnabled)}>
+			Toggle MCP
+		</button>
+	),
 }))
 
 // Mock Tab components
@@ -595,5 +598,34 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		// No dialog should appear
 		expect(screen.queryByText("settings:unsavedChangesDialog.title")).not.toBeInTheDocument()
+	})
+
+	it("buffers MCP enablement until Save", async () => {
+		render(
+			<QueryClientProvider client={queryClient}>
+				<SettingsView onDone={vi.fn()} targetSection="mcp" />
+			</QueryClientProvider>,
+		)
+
+		const toggle = await screen.findByTestId("mcp-enabled-toggle")
+		fireEvent.click(toggle)
+
+		await waitFor(() => expect(toggle).toHaveAttribute("data-mcp-enabled", "true"))
+		expect(postMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ mcpEnabled: true }),
+			}),
+		)
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ mcpEnabled: true }),
+			}),
+		)
 	})
 })

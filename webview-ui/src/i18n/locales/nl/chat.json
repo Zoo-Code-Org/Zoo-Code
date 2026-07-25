@@ -316,9 +316,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "OpenAI GPT-5.6-familie (Sol, Terra, Luna) — beschikbaar via zowel OpenAI Codex als OpenAI Native.",
-			"highlight2": "Ondersteuning voor Grok 4.5 — xAI's nieuwe vlaggenschipmodel, plus een fix voor reasoning effort waar ook Grok 4 Mini baat bij heeft.",
-			"highlight3": "Kenari-provider — een eersteklas OpenAI-compatibele AI-gateway die in Rupiah wordt gefactureerd en Claude, GPT, DeepSeek, GLM, Kimi en meer ondersteunt."
+			"highlight1": "Moonshot- en Kimi Code-providers — maak verbinding met Moonshot-modellen via live modeldetectie of meld je aan bij Kimi Code via de OAuth-apparaatstroom.",
+			"highlight2": "Ondersteuning voor de nieuwste modellen — gebruik Claude Opus 5 bij verschillende providers, plus Kimi K3, Gemini 3.6 Flash en MiniMax-M3.",
+			"highlight3": "Betrouwbaardere workflows — breek onderbroken subtaken netjes af en indexeer Dart- en plattetekstbestanden in je codebase."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",
