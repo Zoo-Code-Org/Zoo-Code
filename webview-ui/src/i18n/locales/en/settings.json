@@ -762,9 +762,9 @@
 			"description": "When the context window reaches this threshold, Zoo will automatically condense it."
 		},
 		"condensingApiConfiguration": {
-			"label": "API Configuration for Context Condensing",
-			"description": "Select which API configuration to use for context condensing operations. Leave unselected to use the current active configuration.",
-			"useCurrentConfig": "Default"
+			"label": "Override API Configuration for Context Condensing",
+			"description": "Select which provider configuration profile to use for context condensing.",
+			"useCurrentConfig": "Use the model running in the current mode"
 		},
 		"customCondensingPrompt": {
 			"label": "Custom Context Condensing Prompt",

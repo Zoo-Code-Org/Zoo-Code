@@ -1572,6 +1572,37 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	private async getCondensingApiHandler(
+		state:
+			| {
+					condensingApiConfigOverride?: boolean
+					condensingApiConfigId?: string
+					listApiConfigMeta?: Array<{ id: string }>
+			  }
+			| undefined,
+	): Promise<ApiHandler | undefined> {
+		const configId = state?.condensingApiConfigId
+		if (!state?.condensingApiConfigOverride || !configId) {
+			return undefined
+		}
+
+		if (!state.listApiConfigMeta?.some((config) => config.id === configId)) {
+			console.warn(`[Task] Context condensing profile "${configId}" no longer exists; using the current mode.`)
+			return undefined
+		}
+
+		try {
+			const profile = await this.providerRef.deref()?.providerSettingsManager.getProfile({ id: configId })
+			return profile?.apiProvider ? buildApiHandler(profile) : undefined
+		} catch (error) {
+			console.warn(
+				`[Task] Failed to load context condensing profile "${configId}"; using the current mode.`,
+				error,
+			)
+			return undefined
+		}
+	}
+
 	public async condenseContext(): Promise<void> {
 		// CRITICAL: Flush any pending tool results before condensing
 		// to ensure tool_use/tool_result pairs are complete in history
@@ -1583,6 +1614,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const state = await this.providerRef.deref()?.getState()
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
 		const { mode, apiConfiguration } = state ?? {}
+		const condensingApiHandler = await this.getCondensingApiHandler(state)
 
 		const { contextTokens: prevContextTokens } = this.getTokenUsage()
 
@@ -1638,6 +1670,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} = await summarizeConversation({
 			messages: this.apiConversationHistory,
 			apiHandler: this.api,
+			condensingApiHandler,
 			systemPrompt,
 			taskId: this.taskId,
 			isAutomaticTrigger: false,
@@ -3802,6 +3835,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async handleContextWindowExceededError(): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {}, mode, apiConfiguration } = state ?? {}
+		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
+		const condensingApiHandler = await this.getCondensingApiHandler(state)
 
 		const { contextTokens } = this.getTokenUsage()
 		const modelInfo = this.api.getModel().info
@@ -3876,10 +3911,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				maxTokens,
 				contextWindow,
 				apiHandler: this.api,
+				condensingApiHandler,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
 				systemPrompt: await this.getSystemPrompt(),
 				taskId: this.taskId,
+				customCondensingPrompt,
 				profileThresholds,
 				currentProfileId,
 				metadata,
@@ -4042,11 +4079,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				lastMessageTokens,
 				useAvailableInputForContextPercent,
 			})
+			let condensingApiHandler: ApiHandler | undefined
 
 			// Send condenseTaskContextStarted BEFORE manageContext to show in-progress indicator
 			// This notification must be sent here (not earlier) because the early check uses stale token count
 			// (before user message is added to history), which could incorrectly skip showing the indicator
 			if (contextManagementWillRun && autoCondenseContext) {
+				condensingApiHandler = await this.getCondensingApiHandler(state)
 				await this.providerRef
 					.deref()
 					?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
@@ -4111,6 +4150,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					maxTokens,
 					contextWindow,
 					apiHandler: this.api,
+					condensingApiHandler,
 					autoCondenseContext,
 					autoCondenseContextPercent,
 					systemPrompt,

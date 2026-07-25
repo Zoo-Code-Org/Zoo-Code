@@ -47,8 +47,17 @@ vi.mock("@/components/ui", () => ({
 			{children}
 		</button>
 	),
-	Select: ({ children, ...props }: any) => (
-		<div role="combobox" {...props}>
+	Select: ({ children, onValueChange, "data-testid": dataTestId, ...props }: any) => (
+		<div role="combobox" data-testid={dataTestId} {...props}>
+			{dataTestId && (
+				<>
+					<button
+						data-testid={`${dataTestId}-current-option`}
+						onClick={() => onValueChange?.("current-mode")}
+					/>
+					<button data-testid={`${dataTestId}-profile-option`} onClick={() => onValueChange?.("config-1")} />
+				</>
+			)}
 			{children}
 		</div>
 	),
@@ -88,6 +97,8 @@ describe("ContextManagementSettings", () => {
 	const defaultProps = {
 		autoCondenseContext: false,
 		autoCondenseContextPercent: 80,
+		condensingApiConfigOverride: false,
+		condensingApiConfigId: "",
 		listApiConfigMeta: [],
 		maxOpenTabsContext: 20,
 		maxWorkspaceFiles: 200,
@@ -338,6 +349,71 @@ describe("ContextManagementSettings", () => {
 		expect(selects).toHaveLength(1)
 	})
 
+	describe("Context condensing model override", () => {
+		const profiles = [
+			{ id: "config-1", name: "Fast Condenser" },
+			{ id: "config-2", name: "Accurate Condenser" },
+		]
+
+		it("hides the profile dropdown when the override is disabled", () => {
+			render(
+				<ContextManagementSettings
+					{...defaultProps}
+					condensingApiConfigOverride={false}
+					listApiConfigMeta={profiles}
+				/>,
+			)
+
+			expect(screen.queryByTestId("condensing-profile-select")).not.toBeInTheDocument()
+		})
+
+		it("shows the current-mode option and provider profiles when enabled", () => {
+			render(
+				<ContextManagementSettings
+					{...defaultProps}
+					condensingApiConfigOverride={true}
+					listApiConfigMeta={profiles}
+				/>,
+			)
+
+			expect(screen.getByTestId("condensing-profile-select")).toBeInTheDocument()
+			expect(
+				screen.getByText("settings:contextManagement.condensingApiConfiguration.useCurrentConfig"),
+			).toBeInTheDocument()
+			expect(screen.getByText("Fast Condenser")).toBeInTheDocument()
+			expect(screen.getByText("Accurate Condenser")).toBeInTheDocument()
+		})
+
+		it("updates the cached override setting", () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+
+			const checkbox = screen.getByTestId("condensing-model-override-checkbox").querySelector("input")
+			fireEvent.click(checkbox!)
+
+			expect(setCachedStateField).toHaveBeenCalledWith("condensingApiConfigOverride", true)
+		})
+
+		it("updates the cached provider profile selection", () => {
+			const setCachedStateField = vi.fn()
+			render(
+				<ContextManagementSettings
+					{...defaultProps}
+					condensingApiConfigOverride={true}
+					condensingApiConfigId="config-1"
+					listApiConfigMeta={profiles}
+					setCachedStateField={setCachedStateField}
+				/>,
+			)
+
+			fireEvent.click(screen.getByTestId("condensing-profile-select-profile-option"))
+			expect(setCachedStateField).toHaveBeenCalledWith("condensingApiConfigId", "config-1")
+
+			fireEvent.click(screen.getByTestId("condensing-profile-select-current-option"))
+			expect(setCachedStateField).toHaveBeenCalledWith("condensingApiConfigId", "")
+		})
+	})
+
 	describe("Auto Condense Context functionality", () => {
 		const autoCondenseProps = {
 			...defaultProps,
@@ -368,7 +444,7 @@ describe("ContextManagementSettings", () => {
 
 			// Threshold settings should be visible
 			expect(screen.getByTestId("condense-threshold-slider")).toBeInTheDocument()
-			// One combobox for profile selection
+			// One combobox for threshold profile selection; model override is disabled.
 			expect(screen.getAllByRole("combobox")).toHaveLength(1)
 		})
 

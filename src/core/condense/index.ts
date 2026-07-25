@@ -224,6 +224,8 @@ export type SummarizeResponse = {
 export type SummarizeConversationOptions = {
 	messages: ApiMessage[]
 	apiHandler: ApiHandler
+	/** Optional API handler used only for the summarization request. Token counting still uses apiHandler. */
+	condensingApiHandler?: ApiHandler
 	systemPrompt: string
 	taskId: string
 	isAutomaticTrigger?: boolean
@@ -257,6 +259,7 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	const {
 		messages,
 		apiHandler,
+		condensingApiHandler,
 		systemPrompt,
 		taskId,
 		isAutomaticTrigger,
@@ -311,8 +314,17 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// This is necessary because some providers (like Bedrock via LiteLLM) require the `tools` parameter
 	// when tool blocks are present. By converting them to text, we can send the conversation for
 	// summarization without needing to pass the tools parameter.
+	const handlerToUse =
+		condensingApiHandler && typeof condensingApiHandler.createMessage === "function"
+			? condensingApiHandler
+			: apiHandler
+
+	if (condensingApiHandler && handlerToUse !== condensingApiHandler) {
+		console.warn("Selected API handler for condensing is invalid; using the current mode's API handler.")
+	}
+
 	const messagesWithTextToolBlocks = transformMessagesForCondensing(
-		maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler),
+		maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], handlerToUse),
 	)
 
 	const requestMessages = messagesWithTextToolBlocks.map(({ role, content }) => ({ role, content }))
@@ -321,7 +333,7 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	const promptToUse = SUMMARY_PROMPT
 
 	// Validate that the API handler supports message creation
-	if (!apiHandler || typeof apiHandler.createMessage !== "function") {
+	if (!handlerToUse || typeof handlerToUse.createMessage !== "function") {
 		console.error("API handler is invalid for condensing. Cannot proceed.")
 		const error = t("common:errors.condense_handler_invalid")
 		return { ...response, error }
@@ -332,7 +344,7 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	let outputTokens = 0
 
 	try {
-		const stream = apiHandler.createMessage(promptToUse, requestMessages, metadata)
+		const stream = handlerToUse.createMessage(promptToUse, requestMessages, metadata)
 
 		for await (const chunk of stream) {
 			if (chunk.type === "text") {

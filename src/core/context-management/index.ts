@@ -251,6 +251,7 @@ export type ContextManagementOptions = {
 	contextWindow: number
 	maxTokens?: number | null
 	apiHandler: ApiHandler
+	condensingApiHandler?: ApiHandler
 	autoCondenseContext: boolean
 	autoCondenseContextPercent: number
 	systemPrompt: string
@@ -294,6 +295,7 @@ export async function manageContext({
 	contextWindow,
 	maxTokens,
 	apiHandler,
+	condensingApiHandler,
 	autoCondenseContext,
 	autoCondenseContextPercent,
 	systemPrompt,
@@ -361,6 +363,7 @@ export async function manageContext({
 			const result = await summarizeConversation({
 				messages,
 				apiHandler,
+				condensingApiHandler,
 				systemPrompt,
 				taskId,
 				isAutomaticTrigger: true,

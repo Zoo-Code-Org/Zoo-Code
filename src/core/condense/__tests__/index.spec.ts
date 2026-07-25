@@ -1250,6 +1250,60 @@ describe("summarizeConversation with custom settings", () => {
 		expect(createMessageCalls[0][0]).toContain("CRITICAL: This is a summarization-only request")
 	})
 
+	it("should use the selected condensing handler while counting the resulting context with the current handler", async () => {
+		const condensingApiHandler = {
+			createMessage: vi.fn().mockImplementation(() => {
+				return (async function* () {
+					yield { type: "text" as const, text: "Summary from selected profile" }
+					yield { type: "usage" as const, totalCost: 0.01, outputTokens: 40 }
+				})()
+			}),
+			getModel: vi.fn().mockReturnValue({
+				id: "condensing-model",
+				info: {
+					contextWindow: 4000,
+					supportsImages: false,
+					supportsVision: false,
+					maxTokens: 2000,
+				},
+			}),
+		} as unknown as ApiHandler
+
+		const result = await summarizeConversation({
+			messages: sampleMessages,
+			apiHandler: mockMainApiHandler,
+			condensingApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId: localTaskId,
+		})
+
+		expect(condensingApiHandler.createMessage).toHaveBeenCalledOnce()
+		expect(mockMainApiHandler.createMessage).not.toHaveBeenCalled()
+		expect(mockMainApiHandler.countTokens).toHaveBeenCalled()
+		expect(result.summary).toBe("Summary from selected profile")
+	})
+
+	it("should fall back to the current handler when the selected condensing handler is invalid", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const invalidHandler = {
+			getModel: vi.fn(),
+		} as unknown as ApiHandler
+
+		try {
+			await summarizeConversation({
+				messages: sampleMessages,
+				apiHandler: mockMainApiHandler,
+				condensingApiHandler: invalidHandler,
+				systemPrompt: defaultSystemPrompt,
+				taskId: localTaskId,
+			})
+		} finally {
+			warnSpy.mockRestore()
+		}
+
+		expect(mockMainApiHandler.createMessage).toHaveBeenCalledOnce()
+	})
+
 	/**
 	 * Test that telemetry is called for custom prompt usage
 	 */

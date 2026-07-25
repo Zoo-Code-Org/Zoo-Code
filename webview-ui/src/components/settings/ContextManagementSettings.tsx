@@ -29,6 +29,8 @@ import { vscode } from "@/utils/vscode"
 type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	autoCondenseContext: boolean
 	autoCondenseContextPercent: number
+	condensingApiConfigOverride: boolean
+	condensingApiConfigId?: string
 	listApiConfigMeta: any[]
 	maxOpenTabsContext: number
 	maxWorkspaceFiles: number
@@ -49,6 +51,8 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	setCachedStateField: SetCachedStateField<
 		| "autoCondenseContext"
 		| "autoCondenseContextPercent"
+		| "condensingApiConfigOverride"
+		| "condensingApiConfigId"
 		| "maxOpenTabsContext"
 		| "maxWorkspaceFiles"
 		| "showRooIgnoredFiles"
@@ -69,6 +73,8 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 export const ContextManagementSettings = ({
 	autoCondenseContext,
 	autoCondenseContextPercent,
+	condensingApiConfigOverride,
+	condensingApiConfigId,
 	listApiConfigMeta,
 	maxOpenTabsContext,
 	maxWorkspaceFiles,
@@ -499,6 +505,50 @@ export const ContextManagementSettings = ({
 						className="w-full"
 						data-testid="condense-prompt-textarea"
 					/>
+				</SearchableSetting>
+
+				<SearchableSetting
+					settingId="context-condensing-model-override"
+					section="contextManagement"
+					label={t("settings:contextManagement.condensingApiConfiguration.label")}>
+					<VSCodeCheckbox
+						checked={condensingApiConfigOverride}
+						onChange={(e: any) => setCachedStateField("condensingApiConfigOverride", e.target.checked)}
+						data-testid="condensing-model-override-checkbox">
+						<span className="font-medium">
+							{t("settings:contextManagement.condensingApiConfiguration.label")}
+						</span>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:contextManagement.condensingApiConfiguration.description")}
+					</div>
+					{condensingApiConfigOverride && (
+						<div className="mt-3">
+							<Select
+								value={condensingApiConfigId || "current-mode"}
+								onValueChange={(value) =>
+									setCachedStateField("condensingApiConfigId", value === "current-mode" ? "" : value)
+								}
+								data-testid="condensing-profile-select">
+								<SelectTrigger className="w-full">
+									<SelectValue />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="current-mode">
+										{t("settings:contextManagement.condensingApiConfiguration.useCurrentConfig")}
+									</SelectItem>
+									{listApiConfigMeta.map((config) => (
+										<SelectItem key={config.id} value={config.id}>
+											{config.name}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							<div className="text-vscode-descriptionForeground text-sm mt-1">
+								{t("settings:contextManagement.condensingApiConfiguration.description")}
+							</div>
+						</div>
+					)}
 				</SearchableSetting>
 
 				{/* Auto Condense Context */}

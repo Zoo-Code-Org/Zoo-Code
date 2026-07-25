@@ -116,6 +116,8 @@ export const globalSettingsSchema = z.object({
 	openRouterImageApiKey: z.string().optional(),
 	openRouterImageGenerationSelectedModel: z.string().optional(),
 
+	condensingApiConfigOverride: z.boolean().optional(),
+	condensingApiConfigId: z.string().optional(),
 	customCondensingPrompt: z.string().optional(),
 
 	autoApprovalEnabled: z.boolean().optional(),
