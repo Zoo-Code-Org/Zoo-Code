@@ -1,12 +1,13 @@
 import { render, screen } from "@/utils/test-utils"
 
-import type { HistoryItem } from "@roo-code/types"
+import type { HistoryItem, TaskOrganizationStateV1 } from "@roo-code/types"
 
 import HistoryPreview from "../HistoryPreview"
 import type { TaskGroup } from "../types"
 
 vi.mock("../useTaskSearch")
 vi.mock("../useGroupedTasks")
+vi.mock("@/context/ExtensionStateContext")
 
 vi.mock("../TaskGroupItem", () => {
 	return {
@@ -21,10 +22,22 @@ vi.mock("../TaskGroupItem", () => {
 import { useTaskSearch } from "../useTaskSearch"
 import { useGroupedTasks } from "../useGroupedTasks"
 import TaskGroupItem from "../TaskGroupItem"
+import { useExtensionState } from "@/context/ExtensionStateContext"
 
 const mockUseTaskSearch = useTaskSearch as any
+const mockUseExtensionState = useExtensionState as any
 const mockUseGroupedTasks = useGroupedTasks as any
 const mockTaskGroupItem = TaskGroupItem as any
+
+function createEmptyOrganizationState(): TaskOrganizationStateV1 {
+	return {
+		schemaVersion: 1,
+		revision: 0,
+		folders: [],
+		pins: [],
+		updatedAt: 0,
+	}
+}
 
 const mockTasks: HistoryItem[] = [
 	{
@@ -95,6 +108,15 @@ function createMockGroups(tasks: HistoryItem[]): TaskGroup[] {
 describe("HistoryPreview", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockUseExtensionState.mockReturnValue({
+			taskOrganization: createEmptyOrganizationState(),
+			mutateTaskOrganization: vi.fn().mockResolvedValue({
+				requestId: "",
+				success: true,
+				committedRevision: 1,
+			}),
+			cwd: "/test/workspace",
+		})
 	})
 
 	it("renders nothing when no tasks are available", () => {

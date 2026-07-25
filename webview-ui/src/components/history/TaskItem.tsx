@@ -5,9 +5,10 @@ import type { DisplayHistoryItem } from "./types"
 import { vscode } from "@/utils/vscode"
 import { cn } from "@/lib/utils"
 import { Checkbox } from "@/components/ui/checkbox"
+import { StandardTooltip } from "../ui"
 
 import TaskItemFooter from "./TaskItemFooter"
-import { StandardTooltip } from "../ui"
+import { PinButton } from "./PinButton"
 
 interface TaskItemProps {
 	item: DisplayHistoryItem
@@ -18,6 +19,14 @@ interface TaskItemProps {
 	isSelected?: boolean
 	onToggleSelection?: (taskId: string, isSelected: boolean) => void
 	onDelete?: (taskId: string) => void
+	/** Whether to show the pin toggle button. */
+	showPin?: boolean
+	/** Whether the task is currently pinned. */
+	isPinned?: boolean
+	/** Whether pinning is currently allowed. */
+	canPin?: boolean
+	/** Called when the pin button is toggled. */
+	onTogglePin?: () => void
 	className?: string
 }
 
@@ -30,6 +39,10 @@ const TaskItem = ({
 	isSelected = false,
 	onToggleSelection,
 	onDelete,
+	showPin = false,
+	isPinned = false,
+	canPin = false,
+	onTogglePin,
 	className,
 }: TaskItemProps) => {
 	const handleClick = () => {
@@ -44,7 +57,6 @@ const TaskItem = ({
 
 	return (
 		<div
-			key={item.id}
 			data-testid={`task-item-${item.id}`}
 			className={cn(
 				"cursor-pointer group relative overflow-hidden",
@@ -98,8 +110,20 @@ const TaskItem = ({
 								</StandardTooltip>
 							</div>
 						)}
-						{/* Arrow icon that appears on hover */}
-						<ArrowRight className="size-4 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+						<div className="flex items-center gap-0 shrink-0">
+							{showPin && onTogglePin && (
+								<PinButton
+									isPinned={isPinned}
+									canPin={canPin}
+									onToggle={onTogglePin}
+									size="sm"
+									data-testid="task-pin-button"
+								/>
+							)}
+							{/* Arrow icon that appears on hover */}
+							<ArrowRight className="size-4 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+						</div>
 					</div>
 
 					{showWorkspace && item.workspace && (

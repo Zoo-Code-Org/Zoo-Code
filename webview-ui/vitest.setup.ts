@@ -1,5 +1,12 @@
 import "@testing-library/jest-dom"
 import "@testing-library/jest-dom/vitest"
+import { TransformStream } from "node:stream/web"
+
+// Polyfill TransformStream for JSDOM tests that transitively import modules
+// assuming browser streams at load time (e.g. eventsource-parser).
+if (typeof globalThis.TransformStream === "undefined") {
+	globalThis.TransformStream = TransformStream as unknown as typeof globalThis.TransformStream
+}
 
 // Mock the VSCode webview-ui-toolkit to avoid dual React instance issues caused
 // by FAST Foundation web component registration. Registered here (rather than via

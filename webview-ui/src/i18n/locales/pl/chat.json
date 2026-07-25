@@ -17,9 +17,7 @@
 		"condenseContext": "Inteligentnie skondensuj kontekst",
 		"openApiHistory": "Otwórz historię API",
 		"openUiHistory": "Otwórz historię UI",
-		"backToParentTask": "Zadanie nadrzędne",
-		"waitingOnSubtask": "Oczekuje na podzadanie",
-		"goToSubtask": "Przejdź do podzadania"
+		"backToParentTask": "Zadanie nadrzędne"
 	},
 	"unpin": "Odepnij",
 	"pin": "Przypnij",

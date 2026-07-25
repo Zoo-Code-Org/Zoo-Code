@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useEffect, useState } from "react"
+import React, { createContext, useCallback, useEffect, useRef, useState } from "react"
 
 import {
 	type ProviderSettings,
@@ -17,10 +17,14 @@ import {
 	type RuleMetadata,
 	type Command,
 	type McpServer,
+	type WebviewMessage,
+	type TaskOrganizationMutationRequestV1,
+	type TaskOrganizationMutationResultV1,
 	RouterModels,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	createEmptyTaskOrganizationState,
 } from "@roo-code/types"
 
 import { findLastIndex } from "@roo/array"
@@ -36,6 +40,9 @@ import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
 	didHydrateState: boolean
+	mutateTaskOrganization: (
+		mutation: TaskOrganizationMutationRequestV1["mutation"],
+	) => Promise<TaskOrganizationMutationResultV1>
 	showWelcome: boolean
 	theme: any
 	mcpServers: McpServer[]
@@ -270,6 +277,7 @@ const createInitialExtensionState = (): ExtensionState => ({
 	includeCurrentTime: true,
 	includeCurrentCost: true,
 	lockApiConfigAcrossModes: false,
+	taskOrganization: createEmptyTaskOrganizationState(),
 })
 
 type ExtensionStateProviderInitialState = Partial<ExtensionState> & {
@@ -280,10 +288,10 @@ export const ExtensionStateContextProvider: React.FC<{
 	children: React.ReactNode
 	initialState?: ExtensionStateProviderInitialState
 }> = ({ children, initialState }) => {
+	const pendingTaskOrgMutations = useRef<Map<string, (result: TaskOrganizationMutationResultV1) => void>>(new Map())
 	const [state, setState] = useState<ExtensionState>(() =>
 		mergeExtensionState(createInitialExtensionState(), initialState ?? {}),
 	)
-
 	const [didHydrateState, setDidHydrateState] = useState(false)
 	const [showWelcome, setShowWelcome] = useState(false)
 	const [theme, setTheme] = useState<any>(undefined)
@@ -498,6 +506,33 @@ export const ExtensionStateContextProvider: React.FC<{
 					})
 					break
 				}
+				case "taskOrganizationUpdated": {
+					const snapshot = message.taskOrganization
+					if (!snapshot) {
+						break
+					}
+					setState((prevState) => {
+						const current = prevState.taskOrganization
+						// Ignore stale snapshots that arrive out of order.
+						if (current && snapshot.revision < current.revision) {
+							return prevState
+						}
+						return { ...prevState, taskOrganization: snapshot }
+					})
+					break
+				}
+				case "taskOrganizationMutationResult": {
+					const result = message.taskOrganizationMutationResult
+					if (!result) {
+						break
+					}
+					const resolver = pendingTaskOrgMutations.current.get(result.requestId)
+					if (resolver) {
+						resolver(result)
+						pendingTaskOrgMutations.current.delete(result.requestId)
+					}
+					break
+				}
 			}
 		},
 		[setListApiConfigMeta],
@@ -509,6 +544,27 @@ export const ExtensionStateContextProvider: React.FC<{
 			window.removeEventListener("message", handleMessage)
 		}
 	}, [handleMessage])
+
+	const mutateTaskOrganization = useCallback(
+		async (mutation: TaskOrganizationMutationRequestV1["mutation"]): Promise<TaskOrganizationMutationResultV1> => {
+			const requestId = `task-org-${Date.now()}-${Math.random().toString(36).slice(2)}`
+			const currentRevision = state.taskOrganization?.revision ?? 0
+
+			vscode.postMessage({
+				type: "taskOrganizationMutation",
+				taskOrganizationMutation: {
+					requestId,
+					baseRevision: currentRevision,
+					mutation,
+				},
+			} as WebviewMessage)
+
+			return new Promise((resolve) => {
+				pendingTaskOrgMutations.current.set(requestId, resolve)
+			})
+		},
+		[state.taskOrganization?.revision],
+	)
 
 	useEffect(() => {
 		vscode.postMessage({ type: "webviewDidLaunch" })
@@ -654,6 +710,7 @@ export const ExtensionStateContextProvider: React.FC<{
 		showWorktreesInHomeScreen: state.showWorktreesInHomeScreen ?? true,
 		setShowWorktreesInHomeScreen: (value) =>
 			setState((prevState) => ({ ...prevState, showWorktreesInHomeScreen: value })),
+		mutateTaskOrganization,
 	}
 
 	return <ExtensionStateContext.Provider value={contextValue}>{children}</ExtensionStateContext.Provider>
