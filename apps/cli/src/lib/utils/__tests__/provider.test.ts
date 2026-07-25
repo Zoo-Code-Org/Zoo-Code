@@ -39,6 +39,11 @@ describe("getApiKeyFromEnv", () => {
 		expect(getApiKeyFromEnv("openai-native")).toBe("test-openai-key")
 	})
 
+	it("should return API key from environment variable for bedrock", () => {
+		process.env.AWS_BEDROCK_API_KEY = "test-bedrock-key"
+		expect(getApiKeyFromEnv("bedrock")).toBe("test-bedrock-key")
+	})
+
 	it("should return undefined when API key is not set", () => {
 		delete process.env.ANTHROPIC_API_KEY
 		expect(getApiKeyFromEnv("anthropic")).toBeUndefined()
