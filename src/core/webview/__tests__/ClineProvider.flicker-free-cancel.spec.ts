@@ -10,7 +10,7 @@ import type { ProviderSettings, HistoryItem } from "@roo-code/types"
 function seedRegistry(provider: ClineProvider, ...tasks: any[]) {
 	const registry = new TaskRegistry()
 	for (const t of tasks) registry.push(t)
-	;(provider as any).taskRegistry = registry
+	provider["taskRegistry"] = registry
 }
 
 // Mock dependencies
@@ -338,7 +338,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 		provider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
 		// Mock private method using any cast
-		;(provider as any).updateGlobalState = vi.fn().mockResolvedValue(undefined)
+		provider["updateGlobalState"] = vi.fn().mockResolvedValue(undefined)
 		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
 		provider.performPreparationTasks = vi.fn().mockResolvedValue(undefined)
 		provider.getTaskWithId = vi.fn().mockImplementation((id) =>
@@ -391,9 +391,9 @@ describe("ClineProvider flicker-free cancel", () => {
 		seedRegistry(provider, mockTask1)
 
 		// Mock event listeners for cleanup
-		;(provider as any).taskEventListeners = new WeakMap()
+		provider["taskEventListeners"] = new WeakMap()
 		const mockCleanupFunctions = [vi.fn(), vi.fn()]
-		;(provider as any).taskEventListeners.set(mockTask1, mockCleanupFunctions)
+		provider["taskEventListeners"].set(mockTask1, mockCleanupFunctions)
 
 		// Spy on removeClineFromStack to verify it's NOT called
 		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack")
@@ -417,7 +417,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect(removeClineFromStackSpy).not.toHaveBeenCalled()
 
 		// Verify the task was replaced in-place
-		const registry = (provider as any).taskRegistry as TaskRegistry
+		const registry = provider["taskRegistry"]
 		expect(registry.length).toBe(1)
 		expect(registry.current).toBe(mockTask2)
 
@@ -435,7 +435,7 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		// Spy on removeClineFromStack to verify it IS called
 		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockImplementation(async () => {
-			;(provider as any).taskRegistry.pop()
+			provider["taskRegistry"].pop()
 		})
 
 		// Create history item with different taskId
@@ -463,7 +463,7 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		// Spy on removeClineFromStack
 		const removeClineFromStackSpy = vi.spyOn(provider, "removeClineFromStack").mockImplementation(async () => {
-			;(provider as any).taskRegistry.pop()
+			provider["taskRegistry"].pop()
 		})
 
 		// Create history item
@@ -496,8 +496,8 @@ describe("ClineProvider flicker-free cancel", () => {
 		}
 
 		seedRegistry(provider, mockParentTask, mockTask1)
-		;(provider as any).taskEventListeners = new WeakMap()
-		;(provider as any).taskEventListeners.set(mockTask1, [vi.fn()])
+		provider["taskEventListeners"] = new WeakMap()
+		provider["taskEventListeners"].set(mockTask1, [vi.fn()])
 
 		// Act: Rehydrate the current (top) task
 		const historyItem: HistoryItem = {
@@ -514,7 +514,7 @@ describe("ClineProvider flicker-free cancel", () => {
 		await provider.createTaskWithHistoryItem(historyItem)
 
 		// Assert: Registry should maintain parent task and replace current task
-		const registry = (provider as any).taskRegistry as TaskRegistry
+		const registry = provider["taskRegistry"]
 		expect(registry.length).toBe(2)
 		expect(registry.getAll()[0]).toBe(mockParentTask)
 		expect(registry.getAll()[1]).toBe(mockTask2)
@@ -533,9 +533,9 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		// Seed: [mockTask1 (focused), mockTopTask (top-of-stack)]
 		seedRegistry(provider, mockTask1, mockTopTask)
-		;(provider as any).taskRegistry.setCurrent("task-1")
-		;(provider as any).taskEventListeners = new WeakMap()
-		;(provider as any).taskEventListeners.set(mockTask1, [vi.fn()])
+		provider["taskRegistry"].setCurrent("task-1")
+		provider["taskEventListeners"] = new WeakMap()
+		provider["taskEventListeners"].set(mockTask1, [vi.fn()])
 
 		const historyItem: HistoryItem = {
 			id: "task-1",
@@ -550,7 +550,7 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		await provider.createTaskWithHistoryItem(historyItem)
 
-		const registry = (provider as any).taskRegistry as TaskRegistry
+		const registry = provider["taskRegistry"]
 		// Stack order must be unchanged: replacement stays at index 0, top-task stays at index 1
 		expect(registry.length).toBe(2)
 		expect(registry.getAll()[0]).toBe(mockTask2)
@@ -705,7 +705,7 @@ describe("ClineProvider flicker-free cancel", () => {
 				rootTask: undefined,
 			}),
 		)
-		expect((provider as any).cancelledDelegationChildIds.has("child-1")).toBe(true)
+		expect(provider["cancelledDelegationChildIds"].has("child-1")).toBe(true)
 	})
 
 	it("does not rehydrate a cancelled child when standalone persistence also fails", async () => {
@@ -751,7 +751,7 @@ describe("ClineProvider flicker-free cancel", () => {
 
 		await expect(provider.cancelTask()).rejects.toThrow("standalone persist failed")
 		expect(createTaskWithHistoryItemSpy).not.toHaveBeenCalled()
-		expect((provider as any).cancelledDelegationChildIds.has("child-1")).toBe(true)
+		expect(provider["cancelledDelegationChildIds"].has("child-1")).toBe(true)
 	})
 
 	it("marks a cancelled delegated child as 'interrupted' and keeps parent delegated", async () => {
@@ -841,14 +841,14 @@ describe("ClineProvider flicker-free cancel", () => {
 			abortTask: vi.fn().mockResolvedValue(undefined),
 		}
 		seedRegistry(provider, childTask)
-		;(provider as any).taskEventListeners = new Map()
+		provider["taskEventListeners"] = new Map()
 
 		provider.getTaskWithId = vi.fn() as any
 		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
 
-		await (provider as any).removeClineFromStack()
+		await provider["removeClineFromStack"]()
 
-		expect((provider as any).taskRegistry.length).toBe(0)
+		expect(provider["taskRegistry"].length).toBe(0)
 		expect(childTask.abortTask).toHaveBeenCalledWith(true)
 		// No history writes — lifecycle only
 		expect(updateTaskHistorySpy).not.toHaveBeenCalled()

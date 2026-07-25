@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import { TaskRegistry } from "../core/task/TaskRegistry"
 import { makeProviderStub } from "./helpers/provider-stub"
 
 // After the refactor: removeClineFromStack() is pure lifecycle — it removes the focused task, aborts, and
@@ -51,11 +52,11 @@ function buildMockProvider(opts: {
 describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation side effects", () => {
 	it("removes the focused task, aborts it, and clears listeners", async () => {
 		const { provider, childTask } = buildMockProvider({ childTaskId: "child-1" })
-		expect((provider as any).taskRegistry.length).toBe(1)
+		expect(provider["taskRegistry"].length).toBe(1)
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect((provider as any).taskRegistry.length).toBe(0)
+		expect(provider["taskRegistry"].length).toBe(0)
 		expect(childTask.abortTask).toHaveBeenCalledWith(true)
 		expect(childTask.emit).toHaveBeenCalledWith(expect.stringContaining("taskUnfocused"))
 	})
@@ -80,12 +81,12 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 			getTaskWithId: vi.fn(),
 			updateTaskHistory: vi.fn(),
 		})
-		;(provider as any).taskRegistry.setCurrent("focused-1")
+		provider["taskRegistry"].setCurrent("focused-1")
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect((provider as any).taskRegistry.taskIds).toEqual(["top-1"])
-		expect((provider as any).taskRegistry.current).toBe(topTask)
+		expect(provider["taskRegistry"].taskIds).toEqual(["top-1"])
+		expect(provider["taskRegistry"].current).toBe(topTask)
 		expect(focusedTask.abortTask).toHaveBeenCalledWith(true)
 		expect(topTask.abortTask).not.toHaveBeenCalled()
 	})
@@ -104,7 +105,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect((provider as any).taskRegistry.length).toBe(0)
+		expect(provider["taskRegistry"].length).toBe(0)
 		// Navigation/disposal must never silently flip the parent to active
 		expect(getTaskWithId).not.toHaveBeenCalled()
 		expect(updateTaskHistory).not.toHaveBeenCalled()
@@ -124,7 +125,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect((provider as any).taskRegistry.length).toBe(0)
+		expect(provider["taskRegistry"].length).toBe(0)
 		expect(getTaskWithId).not.toHaveBeenCalled()
 		expect(updateTaskHistory).not.toHaveBeenCalled()
 	})
@@ -136,7 +137,7 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		await (ClineProvider.prototype as any).removeClineFromStack.call(provider)
 
-		expect((provider as any).taskRegistry.length).toBe(0)
+		expect(provider["taskRegistry"].length).toBe(0)
 		expect(getTaskWithId).not.toHaveBeenCalled()
 		expect(updateTaskHistory).not.toHaveBeenCalled()
 	})
@@ -152,8 +153,8 @@ describe("ClineProvider.removeClineFromStack() — pure lifecycle, no delegation
 
 		await expect((ClineProvider.prototype as any).removeClineFromStack.call(provider)).resolves.not.toThrow()
 
-		expect((provider as any).getTaskWithId).not.toHaveBeenCalled()
-		expect((provider as any).updateTaskHistory).not.toHaveBeenCalled()
+		expect(provider["getTaskWithId"]).not.toHaveBeenCalled()
+		expect(provider["updateTaskHistory"]).not.toHaveBeenCalled()
 	})
 })
 
@@ -322,8 +323,8 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 		})
 
 		// Patch runDelegationTransition to set lockAcquired before calling fn
-		const realRunDelegation = (provider as any).runDelegationTransition.bind(provider)
-		;(provider as any).runDelegationTransition = async (_parentId: string, fn: () => Promise<void>) => {
+		const realRunDelegation = provider["runDelegationTransition"].bind(provider)
+		provider["runDelegationTransition"] = async (_parentId: string, fn: () => Promise<void>) => {
 			lockAcquired = true
 			return realRunDelegation(_parentId, fn)
 		}
@@ -520,7 +521,7 @@ describe("ClineProvider.evictCurrentTask() — active delegated child path", () 
 
 		await (ClineProvider.prototype as any).evictCurrentTask.call(provider)
 
-		expect((provider as any).taskRegistry.length).toBe(0)
+		expect(provider["taskRegistry"].length).toBe(0)
 		expect(markDelegatedChildInterrupted).toHaveBeenCalledWith({ childTaskId, parentTaskId })
 	})
 
@@ -632,16 +633,16 @@ describe("onTaskCompleted callback — writes completed status before re-emittin
 		// The real callback is set in the constructor body; we replicate the relevant portion.
 		const onTaskCompleted = async (taskId: string) => {
 			try {
-				const existing = (provider as any).taskHistoryStore.get(taskId)
+				const existing = provider["taskHistoryStore"].get(taskId)
 				if (existing && existing.status !== "completed") {
-					await (provider as any).updateTaskHistory({ ...existing, status: "completed" })
+					await provider["updateTaskHistory"]({ ...existing, status: "completed" })
 				}
 			} catch (err) {
-				;(provider as any).log(
+				provider["log"](
 					`[onTaskCompleted] Failed to write completed status for ${taskId}: ${err instanceof Error ? err.message : String(err)}`,
 				)
 			}
-			;(provider as any).emit("TaskCompleted", taskId, {}, {})
+			provider["emit"]("TaskCompleted", taskId, {}, {})
 		}
 
 		return { onTaskCompleted, updateTaskHistory, emit, log }
