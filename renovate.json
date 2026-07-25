@@ -84,6 +84,11 @@
 			"automerge": true
 		},
 		{
+			"description": "Keep @types/node pinned to the Node 22 LTS major.",
+			"matchPackageNames": ["@types/node"],
+			"allowedVersions": "22.x"
+		},
+		{
 			"description": "Update extension-host VS Code types only with an intentional minimum-version review.",
 			"matchPackageNames": ["@types/vscode"],
 			"enabled": false
