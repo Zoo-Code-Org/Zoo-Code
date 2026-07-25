@@ -190,10 +190,28 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 	extensionHostOptions.apiKey = flagOptions.apiKey || getApiKeyFromEnv(extensionHostOptions.provider)
 
 	if (!extensionHostOptions.apiKey) {
-		console.error(`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`)
-		console.error(`[CLI] For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`)
-
-		process.exit(1)
+		if (extensionHostOptions.provider === "bedrock") {
+			// Bedrock can authenticate via AWS credential chain without an explicit API key.
+			// Validate that at least one credential source is available.
+			const hasProfile = !!process.env.AWS_PROFILE
+			const hasDirectCreds = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
+			if (!hasProfile && !hasDirectCreds) {
+				console.error(`[CLI] Error: No credentials found for Bedrock. Provide one of:`)
+				console.error(`  --api-key or AWS_BEDROCK_API_KEY (bearer token / API key mode)`)
+				console.error(`  AWS_PROFILE (profile-based auth)`)
+				console.error(`  AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (direct credentials)`)
+				console.error(`  Or ensure a default credential chain is available (IMDS, ECS task role, etc.)`)
+				process.exit(1)
+			}
+		} else {
+			console.error(
+				`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`,
+			)
+			console.error(
+				`[CLI] For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`,
+			)
+			process.exit(1)
+		}
 	}
 
 	if (!fs.existsSync(extensionHostOptions.workspacePath)) {

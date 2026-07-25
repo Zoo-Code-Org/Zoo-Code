@@ -3,6 +3,7 @@ import type { OutputFormat } from "./json-events.js"
 
 export const supportedProviders = [
 	"anthropic",
+	"bedrock",
 	"openai-native",
 	"gemini",
 	"openrouter",
