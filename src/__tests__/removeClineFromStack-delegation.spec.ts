@@ -301,6 +301,9 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 			return { historyItem: { id: childTaskId, status: "interrupted", parentTaskId } }
 		})
 
+		const realRunDelegation = ClineProvider.prototype["runDelegationTransition"].bind({
+			delegationTransitionLocks: new Map(),
+		})
 		const provider = makeProviderStub({
 			clineStack: [] as any[],
 			taskEventListeners: new Map(),
@@ -320,14 +323,12 @@ describe("ClineProvider.markDelegatedChildInterrupted() — live eviction path",
 					return undefined
 				}),
 			},
+			// Wrap the real runDelegationTransition to set lockAcquired before the lock fires
+			runDelegationTransition: async (parentId: string, fn: () => Promise<void>) => {
+				lockAcquired = true
+				return realRunDelegation(parentId, fn)
+			},
 		})
-
-		// Patch runDelegationTransition to set lockAcquired before calling fn
-		const realRunDelegation = provider["runDelegationTransition"].bind(provider)
-		provider["runDelegationTransition"] = async (_parentId: string, fn: () => Promise<void>) => {
-			lockAcquired = true
-			return realRunDelegation(_parentId, fn)
-		}
 
 		await (ClineProvider.prototype as any).markDelegatedChildInterrupted.call(provider, {
 			childTaskId,
@@ -642,7 +643,7 @@ describe("onTaskCompleted callback — writes completed status before re-emittin
 					`[onTaskCompleted] Failed to write completed status for ${taskId}: ${err instanceof Error ? err.message : String(err)}`,
 				)
 			}
-			provider["emit"]("TaskCompleted", taskId, {}, {})
+			emit("TaskCompleted", taskId, {}, {})
 		}
 
 		return { onTaskCompleted, updateTaskHistory, emit, log }

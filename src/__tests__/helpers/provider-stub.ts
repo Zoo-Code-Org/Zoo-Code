@@ -12,7 +12,7 @@ import { type Task } from "../../core/task/Task"
  * Pass `tasks` (array of Task mocks) to pre-seed the registry in stack order.
  * The legacy `clineStack` key is accepted and converted automatically.
  */
-export function makeProviderStub<T extends object>(stub: T): T {
+export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	const s = stub as any
 	const proto = ClineProvider.prototype as any
 	s.delegationTransitionLocks ??= new Map()
@@ -29,8 +29,8 @@ export function makeProviderStub<T extends object>(stub: T): T {
 	}
 	delete s.clineStack
 
-	s.runDelegationTransition = proto.runDelegationTransition.bind(s)
+	s.runDelegationTransition ??= proto.runDelegationTransition.bind(s)
 	s.removeClineFromStack ??= proto.removeClineFromStack.bind(s)
 	s.evictCurrentTask ??= proto.evictCurrentTask.bind(s)
-	return s
+	return s as unknown as ClineProvider
 }
