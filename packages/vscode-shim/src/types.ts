@@ -68,17 +68,6 @@ export interface ISelection extends IRange {
 }
 
 /**
- * Represents a line of text in a document
- */
-export interface TextLine {
-	text: string
-	range: IRange
-	rangeIncludingLineBreak: IRange
-	firstNonWhitespaceCharacterIndex: number
-	isEmptyOrWhitespace: boolean
-}
-
-/**
  * Configuration target for settings
  */
 export enum ConfigurationTarget {
