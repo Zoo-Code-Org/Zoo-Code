@@ -18,7 +18,8 @@ const SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER = "SUBTASK_CHILD_DIFFERENT_PROFILE
 const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
 export const SUBTASK_PARENT_PROMPT = `${SUBTASK_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_CHILD_PROMPT}" Do not answer directly.`
 export const SUBTASK_CHILD_FOLLOWUP_ANSWER = "9"
-const SUBTASK_FAST_CHILD_PROMPT = `${SUBTASK_FAST_CHILD_MARKER}: Complete immediately with the exact result "Fast child completed".`
+export const SUBTASK_FAST_CHILD_RESULT = "Fast child completed"
+const SUBTASK_FAST_CHILD_PROMPT = `${SUBTASK_FAST_CHILD_MARKER}: Complete immediately with the exact result "${SUBTASK_FAST_CHILD_RESULT}".`
 export const SUBTASK_FAST_PARENT_PROMPT = `${SUBTASK_FAST_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_FAST_CHILD_PROMPT}" Do not answer directly.`
 
 const SUBTASK_INTERRUPT_CHILD_PROMPT = `${SUBTASK_INTERRUPT_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
@@ -54,14 +55,21 @@ const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
 	return expected.every((text) => rawRequest.includes(text))
 }
 
-// aimock's `userMessage` matcher only inspects the LAST user message. Fixtures that need
+// aimock's `userMessage` matcher only inspects the LAST user message and joins only the
+// `type: "text"` content parts (see getTextContent in aimock's router). Fixtures that need
 // whole-request exclusions must replicate that scoping inside a predicate so they keep the
 // same matching semantics as the bare-regex fixtures they replace.
 const lastUserMessageContains = (req: ChatCompletionRequest, text: string) => {
 	const userMessages = req.messages?.filter((message) => message.role === "user") ?? []
 	const last = userMessages.at(-1)
 	if (!last) return false
-	const content = typeof last.content === "string" ? last.content : JSON.stringify(last.content ?? "")
+	const content =
+		typeof last.content === "string"
+			? last.content
+			: (last.content ?? [])
+					.filter((part): part is { type: "text"; text: string } => part?.type === "text")
+					.map((part) => part.text)
+					.join("")
 	return content.includes(text)
 }
 
@@ -72,7 +80,6 @@ const lastUserMessageContains = (req: ChatCompletionRequest, text: string) => {
 // tool-call id directly proved flaky (the id can be rewritten, the fixture then misses, and
 // a looser child fixture wins and serves the child's response to the parent).
 const SUBTASK_RESULT_INJECTION = "completed.\\n\\nResult:"
-
 const completionAfterAnswer = (followupId: string, completionId: string) => ({
 	match: {
 		predicate: (req: ChatCompletionRequest) =>
@@ -132,17 +139,20 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 			toolCalls: [
 				{
 					name: "attempt_completion",
-					arguments: JSON.stringify({ result: "Fast child completed" }),
+					arguments: JSON.stringify({ result: SUBTASK_FAST_CHILD_RESULT }),
 					id: "call_subtasks_fast_child_completion_002",
 				},
 			],
 		},
 	})
 
+	// Guard on SUBTASK_RESULT_INJECTION (not the child result text): the child result is
+	// embedded verbatim in SUBTASK_FAST_PARENT_PROMPT, so it cannot distinguish the parent's
+	// initial request from its resume turn.
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [SUBTASK_FAST_PARENT_MARKER, "Fast child completed"]),
+				requestContains(req, [SUBTASK_FAST_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
@@ -155,9 +165,15 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// This fixture is shared by several tests, so sequenceIndex cannot guard it. Exclude
+	// resume turns via the injected tool_result prefix instead: when the tool_result is
+	// serialized as role:"tool", the original parent prompt is the last user message again
+	// and would otherwise re-serve new_task on the parent's resume turn.
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_PARENT_MARKER),
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, SUBTASK_PARENT_MARKER) &&
+				!requestContains(req, [SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
@@ -265,10 +281,12 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// Same as the fast parent-resume fixture: the child result is embedded verbatim in
+	// SUBTASK_API_HANG_PARENT_PROMPT, so guard on the injected tool_result prefix instead.
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [SUBTASK_API_HANG_PARENT_MARKER, SUBTASK_API_HANG_CHILD_RESULT]),
+				requestContains(req, [SUBTASK_API_HANG_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
