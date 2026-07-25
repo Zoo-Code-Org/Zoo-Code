@@ -14,6 +14,11 @@ export class TaskRegistry {
 	private stack: string[] = []
 	private _currentTaskId: string | undefined
 
+	/**
+	 * Add a task and focus it. If the task ID already exists, remove the
+	 * existing entry first so this behaves as "move to top" instead of creating
+	 * duplicate stack entries.
+	 */
 	push(task: Task): void {
 		if (this.tasks.has(task.taskId)) {
 			this.remove(task.taskId)
