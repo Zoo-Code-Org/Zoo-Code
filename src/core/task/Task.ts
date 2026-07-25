@@ -365,14 +365,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
-	
+
 	/**
 	 * Usage event recorder. Called only at terminal finalize of API attempts.
 	 * Null if store initialization failed; in that case recording is silently skipped.
 	 * (Architecture report section 5.5-5.8, rollback: writer injected as optional service)
 	 */
 	private readonly usageRecorder: UsageRecorder | null = null
-	
+
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
@@ -1248,6 +1248,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// - At most one emit per interval during rapid updates (maxWait)
 			// - Final state is emitted when updates stop (trailing: true)
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
+
+			// Guard: don't update history item for abandoned tasks — fire-and-forget
+			// saves can arrive after abandonSubtask's atomicUpdatePair has already
+			// cleared parentTaskId/rootTaskId, and writing the live Task's stale
+			// values would silently reattach the severed link.
+			if (this.abandoned) {
+				return false
+			}
 
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
@@ -3237,48 +3245,47 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cost: tokens.total ?? costResult.totalCost,
 								})
 
-							// ── Usage Stats: terminal finalize ──────────────────────────
-							// captureUsageData is the single terminal boundary for completed/cancelled
-							// API attempts. We record the final usage event here.
-							// (Architecture report section 5.5-5.8: terminal finalize only, no chunk-level append)
-							if (this.usageRecorder) {
-								// B1 fix: include apiReqIndex so each tool-use turn produces a unique
-								// requestKey. Previously requestKey = taskId:retryAttempt, which was
-								// identical for every turn of a task (retryAttempt resets to 0 per turn),
-								// causing the idempotency dedupe to drop all but the first turn's usage.
-								const requestKey = `${this.taskId}:${apiReqIndex}:${currentItem.retryAttempt ?? 0}`
-								const ctx: UsageRecordingContext = {
-									taskId: this.taskId,
-									parentTaskId: this.parentTaskId,
-									provider: String(
-										this.apiConfiguration.apiProvider && !isRetiredProvider(this.apiConfiguration.apiProvider)
-											? this.apiConfiguration.apiProvider
-											: "unknown",
-									),
-									model: getModelId(this.apiConfiguration) || "unknown",
-									mode: this._taskMode || defaultModeSlug,
-									attempt: currentItem.retryAttempt ?? 0,
-									inputTokens: tokens.input,
-									outputTokens: tokens.output,
-									cacheWriteTokens: tokens.cacheWrite,
-									cacheReadTokens: tokens.cacheRead,
-									totalCost: tokens.total,
-									// V1 semantics: provider-reported values, inclusion unknown
-									// (aggregator handles double-counting via inclusion metadata)
-									cacheReadInInput: "unknown",
-									cacheWriteInInput: "unknown",
-									reasoningInOutput: "unknown",
-									costSource: "provider",
-									tokenSource: "provider",
-									endpoint: resolveEndpoint(this.apiConfiguration),
+								// ── Usage Stats: terminal finalize ──────────────────────────
+								// captureUsageData is the single terminal boundary for completed/cancelled
+								// API attempts. We record the final usage event here.
+								// (Architecture report section 5.5-5.8: terminal finalize only, no chunk-level append)
+								if (this.usageRecorder) {
+									// B1 fix: include apiReqIndex so each tool-use turn produces a unique
+									// requestKey. Previously requestKey = taskId:retryAttempt, which was
+									// identical for every turn of a task (retryAttempt resets to 0 per turn),
+									// causing the idempotency dedupe to drop all but the first turn's usage.
+									const requestKey = `${this.taskId}:${apiReqIndex}:${currentItem.retryAttempt ?? 0}`
+									const ctx: UsageRecordingContext = {
+										taskId: this.taskId,
+										parentTaskId: this.parentTaskId,
+										provider: String(
+											this.apiConfiguration.apiProvider &&
+												!isRetiredProvider(this.apiConfiguration.apiProvider)
+												? this.apiConfiguration.apiProvider
+												: "unknown",
+										),
+										model: getModelId(this.apiConfiguration) || "unknown",
+										mode: this._taskMode || defaultModeSlug,
+										attempt: currentItem.retryAttempt ?? 0,
+										inputTokens: tokens.input,
+										outputTokens: tokens.output,
+										cacheWriteTokens: tokens.cacheWrite,
+										cacheReadTokens: tokens.cacheRead,
+										totalCost: tokens.total,
+										// V1 semantics: provider-reported values, inclusion unknown
+										// (aggregator handles double-counting via inclusion metadata)
+										cacheReadInInput: "unknown",
+										cacheWriteInInput: "unknown",
+										reasoningInOutput: "unknown",
+										costSource: "provider",
+										tokenSource: "provider",
+										endpoint: resolveEndpoint(this.apiConfiguration),
+									}
+									// Fire-and-forget: store error must not block task
+									this.usageRecorder.finalizeUsageEvent(requestKey, status, ctx).catch(() => {})
 								}
-								// Fire-and-forget: store error must not block task
-								this.usageRecorder
-									.finalizeUsageEvent(requestKey, status, ctx)
-									.catch(() => {})
+								// ── End Usage Stats ──────────────────────────────────────────
 							}
-							// ── End Usage Stats ──────────────────────────────────────────
-						}
 						}
 
 						try {
@@ -3420,9 +3427,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								endpoint: resolveEndpoint(this.apiConfiguration),
 							}
 							// Fire-and-forget: store error must not block task
-							this.usageRecorder
-								.finalizeUsageEvent(requestKey, failedStatus, ctx)
-								.catch(() => {})
+							this.usageRecorder.finalizeUsageEvent(requestKey, failedStatus, ctx).catch(() => {})
 						}
 						// ── End Usage Stats ──────────────────────────────────────────
 
