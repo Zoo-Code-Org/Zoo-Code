@@ -10,24 +10,13 @@
 			"entry": ["extension.ts", "extension/api.ts", "workers/countTokens.ts"],
 			"project": ["**/*.ts", "!**/__tests__/**"],
 			"ignoreDependencies": [
-				"@ai-sdk/amazon-bedrock",
-				"@ai-sdk/baseten",
-				"@ai-sdk/deepseek",
-				"@ai-sdk/fireworks",
-				"@ai-sdk/google",
-				"@ai-sdk/google-vertex",
-				"@ai-sdk/mistral",
-				"@ai-sdk/xai",
 				"@roo-code/config-typescript",
-				"@types/mocha",
 				"@types/node-cache",
 				"@types/vscode",
-				"@vscode/codicons",
+				"@vscode/ripgrep",
 				"esbuild-wasm",
-				"sambanova-ai-provider",
 				"tree-sitter-wasms",
-				"vscode-material-icons",
-				"zhipu-ai-provider"
+				"vscode-material-icons"
 			]
 		},
 		"webview-ui": {
@@ -40,7 +29,6 @@
 				"babel-plugin-react-compiler",
 				"katex",
 				"react-compiler-runtime",
-				"rehype-highlight",
 				"source-map",
 				"tailwindcss",
 				"tailwindcss-animate",
@@ -50,7 +38,7 @@
 		"apps/cli": {
 			"ignore": ["eslint.config.mjs", "scripts/**"],
 			"project": ["src/**/*.ts", "src/**/*.tsx"],
-			"ignoreDependencies": ["@vscode/ripgrep", "cross-spawn"]
+			"ignoreDependencies": ["@vscode/ripgrep"]
 		},
 		"packages/config-typescript": {
 			"ignoreUnresolved": ["vitest/globals"]
@@ -64,7 +52,7 @@
 		},
 		"packages/cloud": {
 			"project": ["src/**/*.ts"],
-			"ignoreDependencies": ["@types/vscode", "ioredis", "p-wait-for"]
+			"ignoreDependencies": ["@types/vscode"]
 		},
 		"packages/telemetry": {
 			"project": ["src/**/*.ts"],

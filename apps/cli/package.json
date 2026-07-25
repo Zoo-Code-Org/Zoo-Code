@@ -37,7 +37,6 @@
 	},
 	"devDependencies": {
 		"@roo-code/config-eslint": "workspace:^",
-		"@trpc/server": "^11.18.0",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "22.20.1",
 		"@types/react": "18.3.31",
