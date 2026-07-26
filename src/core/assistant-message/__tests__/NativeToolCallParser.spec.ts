@@ -291,6 +291,262 @@ describe("NativeToolCallParser", () => {
 				})
 			})
 		})
+
+		describe("execute_command tool", () => {
+			it("should parse execute_command with cwd as string", () => {
+				const toolCall = {
+					id: "toolu_exec_cwd_str",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "ls -la",
+						cwd: "/home/user/projects",
+						timeout: 30,
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					const nativeArgs = result.nativeArgs as {
+						command: string
+						cwd?: string
+						timeout?: number
+					}
+					expect(nativeArgs.command).toBe("ls -la")
+					expect(nativeArgs.cwd).toBe("/home/user/projects")
+					expect(nativeArgs.timeout).toBe(30)
+				}
+			})
+
+			it("should parse execute_command with cwd omitted (uses default)", () => {
+				const toolCall = {
+					id: "toolu_exec_cwd_omitted",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "npm run build",
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					const nativeArgs = result.nativeArgs as {
+						command: string
+						cwd?: string
+						timeout?: number
+					}
+					expect(nativeArgs.command).toBe("npm run build")
+					expect(nativeArgs.cwd).toBeUndefined()
+					expect(nativeArgs.timeout).toBeUndefined()
+				}
+			})
+
+			it("should normalize cwd null to undefined (valid)", () => {
+				const toolCall = {
+					id: "toolu_exec_cwd_null",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "echo hello",
+						cwd: null,
+						timeout: null,
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					const nativeArgs = result.nativeArgs as {
+						command: string
+						cwd?: string
+						timeout?: number
+					}
+					expect(nativeArgs.command).toBe("echo hello")
+					expect(nativeArgs.cwd).toBeUndefined()
+					expect(nativeArgs.timeout).toBeUndefined()
+				}
+			})
+
+			it("should parse execute_command with cwd as empty string (valid)", () => {
+				const toolCall = {
+					id: "toolu_exec_cwd_empty",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "pwd",
+						cwd: "",
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					const nativeArgs = result.nativeArgs as {
+						command: string
+						cwd?: string
+					}
+					expect(nativeArgs.command).toBe("pwd")
+					expect(nativeArgs.cwd).toBe("")
+				}
+			})
+
+			it("should reject cwd as array (parse failure)", () => {
+				const toolCall = {
+					id: "toolu_exec_cwd_array",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "ls",
+						cwd: ["/home/user"],
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).toBeNull()
+				const failure = NativeToolCallParser.consumeParseFailure(toolCall.id)
+				expect(failure).toBeDefined()
+				expect(failure!.kind).toBe("invalid_argument_shape")
+				expect(failure!.toolName).toBe("execute_command")
+			})
+
+			it("should reject cwd as object with command key (parse failure, NOT executed)", () => {
+				const toolCall = {
+					id: "toolu_exec_cwd_obj_command",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "ls",
+						cwd: { command: "rm -rf /" },
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).toBeNull()
+				const failure = NativeToolCallParser.consumeParseFailure(toolCall.id)
+				expect(failure).toBeDefined()
+				expect(failure!.kind).toBe("invalid_argument_shape")
+				expect(failure!.toolName).toBe("execute_command")
+			})
+
+			it("should reject cwd as object with path key (parse failure)", () => {
+				const toolCall = {
+					id: "toolu_exec_cwd_obj_path",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "ls",
+						cwd: { path: "/home/user" },
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).toBeNull()
+				const failure = NativeToolCallParser.consumeParseFailure(toolCall.id)
+				expect(failure).toBeDefined()
+				expect(failure!.kind).toBe("invalid_argument_shape")
+				expect(failure!.toolName).toBe("execute_command")
+			})
+
+			it("should reject cwd as number (parse failure)", () => {
+				const toolCall = {
+					id: "toolu_exec_cwd_number",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "ls",
+						cwd: 42,
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).toBeNull()
+				const failure = NativeToolCallParser.consumeParseFailure(toolCall.id)
+				expect(failure).toBeDefined()
+				expect(failure!.kind).toBe("invalid_argument_shape")
+				expect(failure!.toolName).toBe("execute_command")
+			})
+
+			it("should reject command as empty string (parse failure)", () => {
+				const toolCall = {
+					id: "toolu_exec_cmd_empty",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "",
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).toBeNull()
+				const failure = NativeToolCallParser.consumeParseFailure(toolCall.id)
+				expect(failure).toBeDefined()
+				expect(failure!.kind).toBe("invalid_argument_shape")
+				expect(failure!.toolName).toBe("execute_command")
+			})
+
+			it("should reject command as object (parse failure)", () => {
+				const toolCall = {
+					id: "toolu_exec_cmd_obj",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: { cmd: "ls" },
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).toBeNull()
+				const failure = NativeToolCallParser.consumeParseFailure(toolCall.id)
+				expect(failure).toBeDefined()
+				expect(failure!.kind).toBe("invalid_argument_shape")
+				expect(failure!.toolName).toBe("execute_command")
+			})
+
+			it("should reject timeout as string (parse failure)", () => {
+				const toolCall = {
+					id: "toolu_exec_timeout_str",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "ls",
+						timeout: "30",
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).toBeNull()
+				const failure = NativeToolCallParser.consumeParseFailure(toolCall.id)
+				expect(failure).toBeDefined()
+				expect(failure!.kind).toBe("invalid_argument_shape")
+				expect(failure!.toolName).toBe("execute_command")
+			})
+
+			it("should not leak raw cwd value in failure descriptor", () => {
+				const toolCall = {
+					id: "toolu_exec_no_leak",
+					name: "execute_command" as const,
+					arguments: JSON.stringify({
+						command: "ls",
+						cwd: { secret: "API_KEY=abc123" },
+					}),
+				}
+
+				NativeToolCallParser.parseToolCall(toolCall)
+				const failure = NativeToolCallParser.consumeParseFailure(toolCall.id)
+
+				expect(failure).toBeDefined()
+				expect(failure!.kind).toBe("invalid_argument_shape")
+				const serialized = JSON.stringify(failure)
+				expect(serialized).not.toContain("API_KEY")
+				expect(serialized).not.toContain("abc123")
+			})
+		})
 	})
 
 	describe("processStreamingChunk", () => {

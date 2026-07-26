@@ -47,7 +47,7 @@ export function getTerminalProviderForExecution(terminalShellIntegrationDisabled
 interface ExecuteCommandParams {
 	command: string
 	cwd?: string
-	timeout?: number | null
+	timeout?: number
 }
 
 export function formatDcgBlockedMessage(reason?: string, ruleId?: string): string {
