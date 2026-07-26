@@ -10,7 +10,20 @@ vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn(),
 }))
 
+vi.mock("fs", () => ({
+	existsSync: vi.fn(),
+}))
+
+vi.mock("module", () => ({
+	createRequire: vi.fn(),
+}))
+
+import * as fs from "fs"
+import { createRequire } from "module"
+
 const mockFileExists = vi.mocked(fileExistsAtPath)
+const mockExistsSync = vi.mocked(fs.existsSync)
+const mockCreateRequire = vi.mocked(createRequire)
 
 describe("Ripgrep line truncation", () => {
 	// The default MAX_LINE_LENGTH is 500 in the implementation
@@ -67,6 +80,9 @@ describe("getBinPath", () => {
 	beforeEach(() => {
 		mockFileExists.mockReset()
 		mockFileExists.mockResolvedValue(false)
+		mockExistsSync.mockReset()
+		mockExistsSync.mockReturnValue(false)
+		mockCreateRequire.mockReset()
 	})
 
 	it("resolves ripgrep from the classic @vscode/ripgrep layout", async () => {
@@ -94,5 +110,30 @@ describe("getBinPath", () => {
 		mockFileExists.mockResolvedValue(false)
 
 		expect(await getBinPath(appRoot)).toBeUndefined()
+	})
+
+	// Regression test for https://github.com/Zoo-Code-Org/Zoo-Code/issues/1024
+	// VS Code 1.130+ ships @vscode/ripgrep >=1.18, where the binary lives in a
+	// platform-specific optional package resolved via the wrapper's package.json.
+	// None of the six hardcoded candidate paths match this layout, so getBinPath
+	// returns undefined on affected Windows installs, causing every task to hang.
+	it("resolves ripgrep via the @vscode/ripgrep >=1.18 platform-package layout", async () => {
+		const platformBin = `/vscode/ripgrep-${process.platform}-${process.arch}/bin/${binName}`
+
+		// All static candidates miss.
+		mockFileExists.mockResolvedValue(false)
+
+		// Simulate @vscode/ripgrep wrapper manifest existing and resolving to the platform bin.
+		mockExistsSync.mockReturnValue(true)
+		const mockRequireFromWrapper = { resolve: vi.fn().mockReturnValue(platformBin) }
+		const mockRequireFromApp = { resolve: vi.fn().mockReturnValue("/vscode/ripgrep/index.js") }
+		mockCreateRequire
+			.mockReturnValueOnce(mockRequireFromApp as unknown as NodeRequire)
+			.mockReturnValueOnce(mockRequireFromWrapper as unknown as NodeRequire)
+
+		// The resolved platform bin exists on disk.
+		mockFileExists.mockImplementation(async (p: string) => p === platformBin)
+
+		expect(await getBinPath(appRoot)).toBe(platformBin)
 	})
 })

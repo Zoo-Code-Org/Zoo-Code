@@ -1,6 +1,8 @@
 import * as childProcess from "child_process"
+import * as fs from "fs"
 import * as path from "path"
 import * as readline from "readline"
+import { createRequire } from "module"
 
 import * as vscode from "vscode"
 
@@ -105,11 +107,29 @@ export function ripgrepCandidatePaths(vscodeAppRoot: string): readonly string[] 
 }
 
 /**
+ * Resolves ripgrep for @vscode/ripgrep >=1.18, which ships the binary inside a
+ * platform-specific optional package (e.g. @vscode/ripgrep-win32-x64) rather
+ * than directly in @vscode/ripgrep/bin/. VS Code 1.130+ uses this layout.
+ */
+export function resolvePlatformRipgrepPath(vscodeAppRoot: string): string | undefined {
+	try {
+		const wrapperManifest = path.join(vscodeAppRoot, "node_modules", "@vscode", "ripgrep", "package.json")
+		if (!fs.existsSync(wrapperManifest)) return undefined
+		const requireFromApp = createRequire(path.join(vscodeAppRoot, "package.json"))
+		const wrapperEntry = requireFromApp.resolve("@vscode/ripgrep")
+		const requireFromWrapper = createRequire(wrapperEntry)
+		return requireFromWrapper.resolve(`@vscode/ripgrep-${process.platform}-${process.arch}/bin/${binName}`)
+	} catch {
+		return undefined
+	}
+}
+
+/**
  * Get the path to the ripgrep binary shipped inside the VS Code installation.
  *
- * Both the long-standing `@vscode/ripgrep` layout and the newer
- * `@vscode/ripgrep-universal` layout are checked — the latter is what VS Code
- * Insiders' staged-install builds use (see microsoft/vscode#252063).
+ * Checks the long-standing @vscode/ripgrep and @vscode/ripgrep-universal static
+ * layouts first, then falls back to the @vscode/ripgrep >=1.18 platform-package
+ * layout used by VS Code 1.130+ (see microsoft/vscode#252063).
  *
  * Returns `undefined` when ripgrep cannot be located.
  */
@@ -117,6 +137,10 @@ export async function getBinPath(vscodeAppRoot: string): Promise<string | undefi
 	for (const candidate of ripgrepCandidatePaths(vscodeAppRoot)) {
 		if (await fileExistsAtPath(candidate)) return candidate
 	}
+
+	const platformPackagePath = resolvePlatformRipgrepPath(vscodeAppRoot)
+	if (platformPackagePath && (await fileExistsAtPath(platformPackagePath))) return platformPackagePath
+
 	return undefined
 }
 
