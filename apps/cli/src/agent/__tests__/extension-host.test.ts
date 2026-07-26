@@ -8,6 +8,7 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type RooCodeAPI,
+	type RooCodeSettings,
 	type WebviewMessage,
 } from "@roo-code/types"
 import { setRuntimeConfigValues } from "@roo-code/vscode-shim"
@@ -970,14 +971,14 @@ describe("ExtensionHost", () => {
 
 		it("should force orchestrator mode when autonomous is true", () => {
 			const host = createTestHost({ mode: "code", autonomous: true })
-			const initialSettings = getPrivate(host, "initialSettings")
+			const initialSettings = getPrivate<RooCodeSettings>(host, "initialSettings")
 
 			expect(initialSettings.mode).toBe("orchestrator")
 		})
 
 		it("should enable auto-approval for autonomous mode", () => {
 			const host = createTestHost({ autonomous: true })
-			const initialSettings = getPrivate(host, "initialSettings")
+			const initialSettings = getPrivate<RooCodeSettings>(host, "initialSettings")
 
 			expect(initialSettings.autoApprovalEnabled).toBe(true)
 			expect(initialSettings.alwaysAllowReadOnly).toBe(true)
