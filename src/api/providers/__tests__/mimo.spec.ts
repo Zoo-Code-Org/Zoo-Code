@@ -376,7 +376,7 @@ describe("MimoHandler", () => {
 			)
 		})
 
-		it("should not send parallel_tool_calls or tool_choice", async () => {
+		it("should omit parallel_tool_calls when metadata.parallelToolCalls is undefined", async () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
@@ -387,6 +387,109 @@ describe("MimoHandler", () => {
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.parallel_tool_calls).toBeUndefined()
 			expect(params.tool_choice).toBeUndefined()
+		})
+
+		it("should send parallel_tool_calls: false when metadata.parallelToolCalls is false", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, {
+				taskId: "test-task",
+				parallelToolCalls: false,
+			})
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.parallel_tool_calls).toBe(false)
+		})
+
+		it("should send parallel_tool_calls: true when metadata.parallelToolCalls is true", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, {
+				taskId: "test-task",
+				parallelToolCalls: true,
+			})
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.parallel_tool_calls).toBe(true)
+		})
+
+		it("should pass through tool_choice when provided in metadata", async () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, {
+				taskId: "test-task",
+				tool_choice: "auto",
+			})
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const params = mockCreate.mock.calls[0][0]
+			expect(params.tool_choice).toBe("auto")
+		})
+
+		it("should retry without parallel_tool_calls when endpoint rejects the field", async () => {
+			// First call rejects with a 400 error mentioning parallel_tool_calls
+			const rejectionError = Object.assign(
+				new Error("400 - Unrecognized request parameter: parallel_tool_calls"),
+				{
+					status: 400,
+				},
+			)
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			// Second call (retry) succeeds
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Retried" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, {
+				taskId: "test-task",
+				parallelToolCalls: false,
+			})
+
+			const chunks: any[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			// First call should have had parallel_tool_calls
+			const firstCallParams = mockCreate.mock.calls[0][0]
+			expect(firstCallParams.parallel_tool_calls).toBe(false)
+
+			// Second call (retry) should NOT have parallel_tool_calls
+			const retryCallParams = mockCreate.mock.calls[1][0]
+			expect(retryCallParams.parallel_tool_calls).toBeUndefined()
+
+			// Stream should have produced text from the retry
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks.length).toBeGreaterThan(0)
+			expect(textChunks[0].text).toBe("Retried")
 		})
 
 		it("should send stream_options with include_usage", async () => {

@@ -456,10 +456,23 @@ export class NativeToolCallParser {
 
 			case "execute_command":
 				if (partialArgs.command) {
+					// Normalize null → undefined for partial streaming updates.
+					// Runtime type validation is applied at finalize in parseToolCall;
+					// here we only normalize to avoid passing null to downstream code.
 					nativeArgs = {
 						command: partialArgs.command,
-						cwd: partialArgs.cwd,
-						timeout: partialArgs.timeout,
+						cwd:
+							partialArgs.cwd === null || partialArgs.cwd === undefined
+								? undefined
+								: typeof partialArgs.cwd === "string"
+									? partialArgs.cwd
+									: undefined,
+						timeout:
+							partialArgs.timeout === null || partialArgs.timeout === undefined
+								? undefined
+								: typeof partialArgs.timeout === "number"
+									? partialArgs.timeout
+									: undefined,
 					}
 				}
 				break
@@ -784,11 +797,43 @@ export class NativeToolCallParser {
 					break
 
 				case "execute_command":
-					if (args.command) {
+					if (args.command !== undefined) {
+						// Runtime type validation: command must be a non-empty string.
+						// Models (e.g. MiMo) may emit objects or empty values for command;
+						// these must be rejected at parse time, never passed to execution.
+						if (typeof args.command !== "string" || args.command.length === 0) {
+							throw {
+								__parserFailureKind: "invalid_argument_shape" as const,
+								toolName: resolvedName as string,
+								missingParameters: [],
+								emptyArguments: false,
+							}
+						}
+						// Runtime type validation: cwd must be undefined, null, or a string.
+						// Objects, arrays, and numbers are parse failures — the nested object
+						// must NEVER be interpreted as a path or executed.
+						if (args.cwd !== undefined && args.cwd !== null && typeof args.cwd !== "string") {
+							throw {
+								__parserFailureKind: "invalid_argument_shape" as const,
+								toolName: resolvedName as string,
+								missingParameters: [],
+								emptyArguments: false,
+							}
+						}
+						// Runtime type validation: timeout must be undefined, null, or a number.
+						if (args.timeout !== undefined && args.timeout !== null && typeof args.timeout !== "number") {
+							throw {
+								__parserFailureKind: "invalid_argument_shape" as const,
+								toolName: resolvedName as string,
+								missingParameters: [],
+								emptyArguments: false,
+							}
+						}
+						// Normalize null → undefined so downstream code never sees null.
 						nativeArgs = {
 							command: args.command,
-							cwd: args.cwd,
-							timeout: args.timeout,
+							cwd: args.cwd === null ? undefined : args.cwd,
+							timeout: args.timeout === null ? undefined : args.timeout,
 						} as NativeArgsFor<TName>
 					}
 					break

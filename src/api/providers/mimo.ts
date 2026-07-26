@@ -16,6 +16,24 @@ import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
 /**
+ * Detects whether an API error is specifically caused by the endpoint
+ * rejecting the `parallel_tool_calls` field. Some OpenAI-compatible
+ * endpoints don't support this field and return a 400 Bad Request with
+ * a message referencing the unrecognized parameter.
+ */
+function isParallelToolCallsRejected(error: unknown): boolean {
+	if (error instanceof Error) {
+		const message = error.message.toLowerCase()
+		const status = (error as any).status
+		// OpenAI SDK APIError carries an HTTP status; some endpoints return 400
+		if (message.includes("parallel_tool_calls") || (status === 400 && message.includes("unrecognized"))) {
+			return true
+		}
+	}
+	return false
+}
+
+/**
  * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
  *
  * CRITICAL: Per MiMo's official docs, reasoning_content MUST be passed back
@@ -98,11 +116,31 @@ export class MimoHandler extends OpenAiHandler {
 			params.tools = tools
 		}
 
+		// Honor tool_choice from metadata (OpenAI-compatible passthrough)
+		if (metadata?.tool_choice !== undefined) {
+			params.tool_choice = metadata.tool_choice
+		}
+
+		// Send parallel_tool_calls based on resolved metadata policy.
+		// Sub-task 1's resolver sets parallelToolCalls=false for MiMo to
+		// prevent malformed parallel tool calls from MiMo v2.5 Pro.
+		if (metadata?.parallelToolCalls !== undefined) {
+			params.parallel_tool_calls = metadata.parallelToolCalls
+		}
+
 		let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
 		try {
 			stream = (await this.client.chat.completions.create(params as any)) as any
 		} catch (error) {
-			throw handleProviderError(error, "MiMo")
+			// Fallback: if the endpoint rejects the parallel_tool_calls field,
+			// retry once without it. Some OpenAI-compatible endpoints don't
+			// support this field and return a 400 Bad Request.
+			if (params.parallel_tool_calls !== undefined && isParallelToolCallsRejected(error)) {
+				const { parallel_tool_calls: _omit, ...paramsWithoutParallel } = params
+				stream = (await this.client.chat.completions.create(paramsWithoutParallel as any)) as any
+			} else {
+				throw handleProviderError(error, "MiMo")
+			}
 		}
 
 		let lastUsage: OpenAI.CompletionUsage | undefined
