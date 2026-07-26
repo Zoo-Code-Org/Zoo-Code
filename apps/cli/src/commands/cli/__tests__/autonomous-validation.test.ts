@@ -31,7 +31,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: 300,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--mode cannot be used with --autonomous")
+		expect(errors[0]!.message).toContain("--mode cannot be used with --autonomous")
 	})
 
 	it("returns error when requireApproval is true with autonomous", () => {
@@ -43,7 +43,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: 300,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--require-approval cannot be used with --autonomous")
+		expect(errors[0]!.message).toContain("--require-approval cannot be used with --autonomous")
 	})
 
 	it("returns error when print is false with autonomous", () => {
@@ -54,7 +54,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: 300,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--autonomous requires --print")
+		expect(errors[0]!.message).toContain("--autonomous requires --print")
 	})
 
 	it("returns error when stdinPromptStream is true with autonomous", () => {
@@ -66,7 +66,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: 300,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("cannot use --stdin-prompt-stream")
+		expect(errors[0]!.message).toContain("cannot use --stdin-prompt-stream")
 	})
 
 	it("returns error when workspace is not specified with autonomous", () => {
@@ -76,7 +76,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: 300,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--autonomous requires an explicit --workspace")
+		expect(errors[0]!.message).toContain("--autonomous requires an explicit --workspace")
 	})
 
 	it("returns error when timeout is not specified with autonomous", () => {
@@ -86,7 +86,7 @@ describe("validateAutonomousFlags", () => {
 			workspace: "/path",
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--autonomous requires --timeout")
+		expect(errors[0]!.message).toContain("--autonomous requires --timeout")
 	})
 
 	it("returns error when timeout is zero with autonomous", () => {
@@ -97,7 +97,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: 0,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--autonomous requires --timeout")
+		expect(errors[0]!.message).toContain("--autonomous requires --timeout")
 	})
 
 	it("returns error when timeout is negative with autonomous", () => {
@@ -108,7 +108,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: -10,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--autonomous requires --timeout")
+		expect(errors[0]!.message).toContain("--autonomous requires --timeout")
 	})
 
 	it("returns error when timeout is NaN with autonomous", () => {
@@ -119,7 +119,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: NaN,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--autonomous requires --timeout")
+		expect(errors[0]!.message).toContain("--autonomous requires --timeout")
 	})
 
 	it("returns error when timeout is Infinity with autonomous", () => {
@@ -130,7 +130,7 @@ describe("validateAutonomousFlags", () => {
 			timeout: Infinity,
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--autonomous requires --timeout")
+		expect(errors[0]!.message).toContain("--autonomous requires --timeout")
 	})
 
 	it("accepts valid positive timeout values", () => {
@@ -174,7 +174,7 @@ describe("validateAutonomousFlags", () => {
 			provider: "anthropic",
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0].message).toContain("--provider-base-url is currently supported only with --provider openrouter")
+		expect(errors[0]!.message).toContain("--provider-base-url is currently supported only with --provider openrouter")
 	})
 
 	it("allows providerBaseUrl with openrouter provider in autonomous mode", () => {

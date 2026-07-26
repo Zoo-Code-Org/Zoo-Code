@@ -158,7 +158,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		provider: flagOptions.provider ?? settings.provider ?? "openrouter",
 	})
 	if (autonomousValidationErrors.length > 0) {
-		failConfiguration(autonomousValidationErrors[0].message)
+		failConfiguration(autonomousValidationErrors[0]!.message)
 	}
 
 	const effectiveMode = autonomous ? "orchestrator" : flagOptions.mode || settings.mode || DEFAULT_FLAGS.mode
