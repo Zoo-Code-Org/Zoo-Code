@@ -16,6 +16,8 @@ coverage:
       default:
         target: 80%       # new lines must be 80% covered
         threshold: 0%
+        paths:
+          - "!apps/cli/src/commands/cli/run.ts"  # CLI entry point covered by smoke tests
       webview-patch:
         target: 70%       # new lines in webview must be 70% covered
         threshold: 0%

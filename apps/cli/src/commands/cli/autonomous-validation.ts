@@ -1,5 +1,3 @@
-import type { FlagOptions } from "@/types/index.js"
-
 export interface AutonomousValidationOptions {
 	autonomous: boolean
 	mode?: string
