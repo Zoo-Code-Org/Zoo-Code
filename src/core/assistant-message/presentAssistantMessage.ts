@@ -458,8 +458,7 @@ export async function presentAssistantMessage(cline: Task) {
 			if (!block.partial) {
 				const resolvedPolicy = resolveToolCallPolicy(
 					cline.api.getModel().info,
-					(cline as unknown as { apiConfiguration?: { apiProvider?: string } }).apiConfiguration
-						?.apiProvider,
+					cline.apiConfiguration?.apiProvider,
 				)
 
 				if (resolvedPolicy.maxCallsPerTurn === 1) {
@@ -497,9 +496,7 @@ export async function presentAssistantMessage(cline: Task) {
 						// name, argument values, or command strings.
 						emitMaxOneEnforcementTelemetry({
 							taskId: cline.taskId,
-							provider:
-								(cline as unknown as { apiConfiguration?: { apiProvider?: string } }).apiConfiguration
-									?.apiProvider ?? "unknown",
+							provider: cline.apiConfiguration?.apiProvider ?? "unknown",
 							model: cline.api.getModel().id,
 							policySource: resolvedPolicy.source,
 							maxCallsPerTurn: resolvedPolicy.maxCallsPerTurn,
