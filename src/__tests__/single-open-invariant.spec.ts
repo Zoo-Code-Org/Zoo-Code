@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { type OutputChannel } from "vscode"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskRegistry } from "../core/task/TaskRegistry"
+import { TaskScheduler } from "../core/task/TaskScheduler"
 import { type Task } from "../core/task/Task"
 import { API } from "../extension/api"
 import * as ProfileValidatorMod from "../shared/ProfileValidator"
@@ -45,6 +46,9 @@ vi.mock("../core/task/Task", () => {
 			opts.onCreated?.(this)
 		}
 		start() {}
+		run() {
+			return Promise.resolve()
+		}
 		on() {}
 		off() {}
 		emit() {}
@@ -69,6 +73,7 @@ describe("Single-open-task invariant", () => {
 		registry.push(existingTask as unknown as Task)
 		const provider = {
 			taskRegistry: registry,
+			taskScheduler: new TaskScheduler(),
 			getCurrentTask: vi.fn(() => existingTask),
 			taskHistoryStore: { get: vi.fn(() => undefined) },
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
@@ -117,6 +122,7 @@ describe("Single-open-task invariant", () => {
 
 		const provider = {
 			taskRegistry: registry2,
+			taskScheduler: new TaskScheduler(),
 			setValues: vi.fn(),
 			getState: vi.fn().mockResolvedValue({
 				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },

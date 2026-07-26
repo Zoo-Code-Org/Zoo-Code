@@ -53,6 +53,7 @@ import {
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
+import { TaskScheduler } from "../task/TaskScheduler"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
@@ -166,6 +167,7 @@ export class ClineProvider
 	private webviewDisposables: vscode.Disposable[] = []
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
+	private taskScheduler = new TaskScheduler()
 	private delegationTransitionLocks?: Map<string, Promise<void>>
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
@@ -681,6 +683,10 @@ export class ClineProvider
 
 		this._disposed = true
 		this.log("Disposing ClineProvider...")
+
+		// Reject any tasks still waiting for a scheduler permit so they don't
+		// hold the event loop after the provider is torn down.
+		this.taskScheduler.cancelQueued()
 
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
@@ -3185,7 +3191,11 @@ export class ClineProvider
 
 		await this.addClineToStack(task)
 		if (options.startTask !== false) {
-			task.start()
+			void this.taskScheduler
+				.schedule(task, () => task.run())
+				.catch((error) => {
+					console.error("[createTask] taskScheduler.schedule failed:", error)
+				})
 		}
 
 		this.log(
@@ -3697,7 +3707,11 @@ export class ClineProvider
 		}
 
 		// 6) Start the child task now that parent metadata is safely persisted.
-		child.start()
+		void this.taskScheduler
+			.schedule(child, () => child.run())
+			.catch((error) => {
+				console.error("[delegateParentAndOpenChild] taskScheduler.schedule failed:", error)
+			})
 
 		// 7) Emit TaskDelegated (provider-level)
 		try {
