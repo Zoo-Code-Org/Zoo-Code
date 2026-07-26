@@ -26,6 +26,23 @@ vi.mock("@/lib/utils/shell.js", () => ({
 	validateTerminalShellPath: vi.fn(() => Promise.resolve({ valid: false, reason: "test" })),
 }))
 
+// Helper to create a complete FlagOptions object with defaults
+function createFlagOptions(overrides: Partial<FlagOptions> = {}): FlagOptions {
+	return {
+		continue: false,
+		print: false,
+		stdinPromptStream: false,
+		signalOnlyExit: false,
+		debug: false,
+		requireApproval: false,
+		autonomous: false,
+		exitOnError: false,
+		ephemeral: false,
+		oneshot: false,
+		...overrides,
+	}
+}
+
 vi.mock("@/agent/index.js", () => ({
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	ExtensionHost: vi.fn(function (this: any) {
@@ -50,7 +67,7 @@ describe("run command validation", () => {
 
 	beforeEach(() => {
 		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli-test-"))
-		vi.spyOn(process, "exit").mockImplementation((code?: string | number) => {
+		vi.spyOn(process, "exit").mockImplementation((code?: string | number | null) => {
 			throw new Error(`process.exit: ${code}`)
 		})
 		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
@@ -65,21 +82,21 @@ describe("run command validation", () => {
 
 	describe("session ID validation", () => {
 		it("should reject empty --session-id", async () => {
-			const flags: FlagOptions = { sessionId: "" }
+			const flags = createFlagOptions({ sessionId: "" })
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --session-id requires a non-empty session id")
 		})
 
 		it("should reject invalid --session-id format", async () => {
-			const flags: FlagOptions = { sessionId: "not-a-uuid" }
+			const flags = createFlagOptions({ sessionId: "not-a-uuid" })
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --session-id must be a valid UUID session id")
 		})
 
 		it("should reject empty --create-with-session-id", async () => {
-			const flags: FlagOptions = { createWithSessionId: "" }
+			const flags = createFlagOptions({ createWithSessionId: "" })
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -88,7 +105,7 @@ describe("run command validation", () => {
 		})
 
 		it("should reject invalid --create-with-session-id format", async () => {
-			const flags: FlagOptions = { createWithSessionId: "not-a-uuid" }
+			const flags = createFlagOptions({ createWithSessionId: "not-a-uuid" })
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -98,10 +115,10 @@ describe("run command validation", () => {
 
 		it("should reject --create-with-session-id with --session-id", async () => {
 			const validUuid = "123e4567-e89b-12d3-a456-426614174000"
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				createWithSessionId: validUuid,
 				sessionId: validUuid,
-			}
+			})
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -111,10 +128,10 @@ describe("run command validation", () => {
 
 		it("should reject --session-id with --continue", async () => {
 			const validUuid = "123e4567-e89b-12d3-a456-426614174000"
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				sessionId: validUuid,
 				continue: true,
-			}
+			})
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: cannot use --session-id with --continue")
@@ -122,7 +139,7 @@ describe("run command validation", () => {
 
 		it("should reject prompt with resume flags", async () => {
 			const validUuid = "123e4567-e89b-12d3-a456-426614174000"
-			const flags: FlagOptions = { sessionId: validUuid }
+			const flags = createFlagOptions({ sessionId: validUuid })
 
 			await expect(run("test prompt", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -133,11 +150,11 @@ describe("run command validation", () => {
 
 	describe("provider validation", () => {
 		it("should reject invalid provider", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				provider: "invalid-provider" as any,
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -147,7 +164,7 @@ describe("run command validation", () => {
 
 		it("should reject missing API key", async () => {
 			delete process.env.OPENROUTER_API_KEY
-			const flags: FlagOptions = { print: true }
+			const flags = createFlagOptions({ print: true })
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -159,13 +176,13 @@ describe("run command validation", () => {
 	describe("autonomous mode validation", () => {
 		it("should reject autonomous without workspace in non-cwd scenario", async () => {
 			const nonExistentPath = path.join(tempDir, "nonexistent")
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				autonomous: true,
 				workspace: nonExistentPath,
 				timeout: 60,
 				outputFormat: "json",
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 78")
 		})
@@ -173,19 +190,19 @@ describe("run command validation", () => {
 		it("should reject autonomous with non-directory workspace", async () => {
 			const filePath = path.join(tempDir, "file.txt")
 			fs.writeFileSync(filePath, "content")
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				autonomous: true,
 				workspace: filePath,
 				timeout: 60,
 				outputFormat: "json",
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 78")
 		})
 
 		it("should enforce orchestrator mode in autonomous", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				autonomous: true,
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				mode: "code" as any,
@@ -193,18 +210,18 @@ describe("run command validation", () => {
 				timeout: 60,
 				outputFormat: "json",
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 78")
 		})
 
 		it("should reject autonomous without timeout", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				autonomous: true,
 				workspace: tempDir,
 				outputFormat: "json",
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 78")
 		})
@@ -212,11 +229,11 @@ describe("run command validation", () => {
 
 	describe("output format validation", () => {
 		it("should reject invalid output format", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				outputFormat: "invalid" as any,
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("[CLI] Error: Invalid output format"))
@@ -227,9 +244,9 @@ describe("run command validation", () => {
 			Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true })
 			Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true })
 
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				outputFormat: "json",
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --output-format requires --print mode")
@@ -238,20 +255,20 @@ describe("run command validation", () => {
 
 	describe("stdin stream validation", () => {
 		it("should reject --stdin-prompt-stream without --print", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				stdinPromptStream: true,
-			}
+			})
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --stdin-prompt-stream requires --print mode")
 		})
 
 		it("should reject --stdin-prompt-stream with wrong output format", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				stdinPromptStream: true,
 				print: true,
 				outputFormat: "json",
-			}
+			})
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -260,10 +277,10 @@ describe("run command validation", () => {
 		})
 
 		it("should reject --signal-only-exit without --stdin-prompt-stream", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				signalOnlyExit: true,
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -274,11 +291,11 @@ describe("run command validation", () => {
 		it("should reject --stdin-prompt-stream with TTY stdin", async () => {
 			Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true })
 
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				stdinPromptStream: true,
 				print: true,
 				outputFormat: "stream-json",
-			}
+			})
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --stdin-prompt-stream requires piped stdin")
@@ -287,11 +304,11 @@ describe("run command validation", () => {
 		it("should reject prompt with --stdin-prompt-stream", async () => {
 			Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true })
 
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				stdinPromptStream: true,
 				print: true,
 				outputFormat: "stream-json",
-			}
+			})
 
 			await expect(run("test prompt", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -303,12 +320,12 @@ describe("run command validation", () => {
 			Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true })
 
 			const validUuid = "123e4567-e89b-12d3-a456-426614174000"
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				stdinPromptStream: true,
 				print: true,
 				outputFormat: "stream-json",
 				createWithSessionId: validUuid,
-			}
+			})
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -319,10 +336,10 @@ describe("run command validation", () => {
 
 	describe("consecutive mistake limit validation", () => {
 		it("should reject negative consecutive mistake limit", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				consecutiveMistakeLimit: -1,
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -331,10 +348,10 @@ describe("run command validation", () => {
 		})
 
 		it("should reject non-integer consecutive mistake limit", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				consecutiveMistakeLimit: 1.5,
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -345,11 +362,11 @@ describe("run command validation", () => {
 
 	describe("reasoning effort validation", () => {
 		it("should reject invalid reasoning effort", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				reasoningEffort: "invalid" as any,
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -360,10 +377,10 @@ describe("run command validation", () => {
 
 	describe("workspace validation", () => {
 		it("should reject non-existent workspace path", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				workspace: "/nonexistent/path",
 				print: true,
-			}
+			})
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -374,10 +391,10 @@ describe("run command validation", () => {
 
 	describe("prompt file validation", () => {
 		it("should reject non-existent prompt file", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				promptFile: path.join(tempDir, "nonexistent.txt"),
 				print: true,
-			}
+			})
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -388,9 +405,9 @@ describe("run command validation", () => {
 
 	describe("no prompt validation", () => {
 		it("should reject missing prompt in print mode", async () => {
-			const flags: FlagOptions = {
+			const flags = createFlagOptions({
 				print: true,
-			}
+			})
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: no prompt provided")
