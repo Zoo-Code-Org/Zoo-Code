@@ -106,6 +106,7 @@ describe("provider identifiers", () => {
 			providerIdentifiers.opencodeGo,
 			providerIdentifiers.kenari,
 			providerIdentifiers.kimiCode,
+			providerIdentifiers.friendli,
 		])
 		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])
 		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm])

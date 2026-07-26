@@ -190,6 +190,7 @@ const dynamicProviderExtras = {
 	"opencode-go": {} as { apiKey?: string },
 	kenari: {} as { apiKey?: string },
 	"kimi-code": {} as { apiKey?: string },
+	friendli: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
 } as const satisfies Record<RouterName, object>
 
 // Build the dynamic options union from the map, intersected with CommonFetchParams

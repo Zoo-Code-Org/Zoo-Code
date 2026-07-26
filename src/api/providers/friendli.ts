@@ -1,7 +1,8 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { type FriendliModelId, friendliDefaultModelId, friendliModels } from "@roo-code/types"
+import { type FriendliModelId, friendliDefaultModelId, friendliModels, type ModelInfo } from "@roo-code/types"
+import type { ModelRecord } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 import { shouldUseReasoningEffort, getModelMaxOutputTokens } from "../../shared/api"
@@ -11,6 +12,7 @@ import { getModelParams } from "../transform/model-params"
 
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { handleOpenAIError } from "./utils/error-handler"
+import { getModels } from "./fetchers/modelCache"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -53,10 +55,24 @@ type FriendliChatCompletionNonStreamingParams = Omit<
  * Handler for the Friendli Model APIs (OpenAI-compatible).
  * Routes chat completions to `https://api.friendli.ai/serverless/v1`.
  *
+ * Model list is dynamic: on construction the handler kicks off a fire-and-forget
+ * fetch of the live model list from `https://api.friendli.ai/serverless/v1/models`
+ * (public, no auth) via the shared `getModels` cache. `getModel()` falls back to
+ * the static `friendliModels` map when dynamic models haven't loaded yet or when
+ * the requested model id isn't present in the dynamic set (e.g. the API lags
+ * behind a newly released model). This mirrors the OpenRouterHandler pattern.
+ *
  * Overrides `createStream` and `completePrompt` to inject Friendli-specific
  * reasoning parameters that the base class doesn't know about.
  */
 export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelId> {
+	/**
+	 * Dynamically fetched model list (populated asynchronously after construction).
+	 * Empty until the background load completes; `getModel()` falls back to the
+	 * static `providerModels` (`friendliModels`) in that window.
+	 */
+	private dynamicModels: ModelRecord = {}
+
 	/**
 	 * @param options  Provider settings; `friendliApiKey` is required.
 	 */
@@ -67,18 +83,54 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			baseURL: "https://api.friendli.ai/serverless/v1",
 			apiKey: options.friendliApiKey,
 			defaultProviderModelId: friendliDefaultModelId,
-			providerModels: friendliModels,
+			providerModels: friendliModels as Record<FriendliModelId, ModelInfo>,
 			defaultTemperature: 0.6,
 		})
+
+		// Load dynamic models asynchronously to populate the cache before
+		// getModel() is called. Fire-and-forget; errors are logged by the
+		// cache layer and we gracefully fall back to static models.
+		getModels({ provider: "friendli" })
+			.then((models) => {
+				this.dynamicModels = models
+			})
+			.catch((error) => {
+				console.error("[FriendliHandler] Failed to load dynamic models:", error)
+			})
 	}
 
 	override getModel() {
-		const id =
-			this.options.apiModelId && this.options.apiModelId in this.providerModels
-				? (this.options.apiModelId as FriendliModelId)
-				: this.defaultProviderModelId
+		const requestedId = this.options.apiModelId
 
-		const info = this.providerModels[id]
+		// Prefer dynamic info when available; fall back to static `providerModels`
+		// (the hardcoded `friendliModels` passed to super) for cold-start, network
+		// failure, or models not yet in the dynamic list.
+		const dynamicInfo = requestedId ? this.dynamicModels[requestedId] : undefined
+		const staticId =
+			requestedId && requestedId in this.providerModels
+				? (requestedId as FriendliModelId)
+				: this.defaultProviderModelId
+		const staticInfo = this.providerModels[staticId]
+
+		// Determine which id/info pair to use.
+		let id: FriendliModelId
+		let info: ModelInfo
+		if (dynamicInfo) {
+			id = requestedId as FriendliModelId
+			info = dynamicInfo
+		} else if (requestedId && requestedId in this.providerModels) {
+			id = requestedId as FriendliModelId
+			info = staticInfo
+		} else if (requestedId && this.dynamicModels[requestedId]) {
+			// Edge case: requestedId is dynamic but dynamicModels lookup above
+			// was undefined — shouldn't happen, but keep this branch for safety.
+			id = requestedId as FriendliModelId
+			info = this.dynamicModels[requestedId]
+		} else {
+			id = staticId
+			info = staticInfo
+		}
+
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,

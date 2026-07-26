@@ -32,6 +32,7 @@ import { getDeepSeekModels } from "./deepseek"
 import { getMoonshotModels } from "./moonshot"
 import { getZooGatewayModels } from "./zoo-gateway"
 import { getKimiCodeModels } from "./kimi-code"
+import { getFriendliModels } from "./friendli"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
 
@@ -268,6 +269,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 		case providerIdentifiers.kimiCode:
 			models = await getKimiCodeModels(options.apiKey)
 			break
+		case "friendli":
+			models = await getFriendliModels()
+			break
 		default: {
 			// Ensures router is exhaustively checked if RouterName is a strict union.
 			const exhaustiveCheck: never = provider
@@ -457,6 +461,10 @@ export async function initializeModelCacheRefresh(): Promise<void> {
 			{
 				provider: providerIdentifiers.vercelAiGateway,
 				options: { provider: providerIdentifiers.vercelAiGateway },
+			},
+			{
+				provider: providerIdentifiers.friendli,
+				options: { provider: providerIdentifiers.friendli },
 			},
 		]
 

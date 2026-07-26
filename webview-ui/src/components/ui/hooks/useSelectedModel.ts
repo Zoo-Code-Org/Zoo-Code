@@ -363,9 +363,13 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.friendli: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = friendliModels[id as keyof typeof friendliModels]
-			return { id, info }
+			const availableModels = routerModels.friendli
+				? { ...friendliModels, ...routerModels.friendli }
+				: friendliModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels.friendli?.[id]
+			const staticInfo = friendliModels[id as keyof typeof friendliModels]
+			return { id, info: routerInfo ?? staticInfo }
 		}
 		case providerIdentifiers.poe: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId

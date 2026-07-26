@@ -55,6 +55,7 @@ describe("Model Validation Functions", () => {
 		kenari: {},
 		"zoo-gateway": {},
 		"kimi-code": {},
+		friendli: {},
 		moonshot: {},
 	}
 
