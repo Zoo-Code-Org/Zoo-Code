@@ -31,6 +31,7 @@ import { ExtensionHost, ExtensionHostOptions } from "@/agent/index.js"
 import { AUTONOMOUS_EXIT_CODES, AutonomousRunError, type AutonomousTerminalState } from "@/agent/autonomous-run.js"
 import { isExpectedControlFlowError } from "./cancellation.js"
 import { runStdinStreamMode } from "./stdin-stream.js"
+import { validateAutonomousFlags, validateProviderBaseUrl } from "./autonomous-validation.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SIGNAL_ONLY_EXIT_KEEPALIVE_MS = 60_000
@@ -145,23 +146,19 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 	const isOnboardingEnabled = isTuiEnabled && !flagOptions.provider && !settings.provider
 
 	// Determine effective values: CLI flags > settings file > DEFAULT_FLAGS.
-	if (autonomous && flagOptions.mode) {
-		failConfiguration("--mode cannot be used with --autonomous; root mode is always orchestrator")
-	}
-	if (autonomous && flagOptions.requireApproval) {
-		failConfiguration("--require-approval cannot be used with --autonomous")
-	}
-	if (autonomous && !flagOptions.print) {
-		failConfiguration("--autonomous requires --print")
-	}
-	if (autonomous && flagOptions.stdinPromptStream) {
-		failConfiguration("--autonomous runs exactly one root task and cannot use --stdin-prompt-stream")
-	}
-	if (autonomous && !flagOptions.workspace) {
-		failConfiguration("--autonomous requires an explicit --workspace")
-	}
-	if (autonomous && (!Number.isFinite(flagOptions.timeout) || (flagOptions.timeout ?? 0) <= 0)) {
-		failConfiguration("--autonomous requires --timeout with a positive number of seconds")
+	const autonomousValidationErrors = validateAutonomousFlags({
+		autonomous,
+		mode: flagOptions.mode,
+		requireApproval: flagOptions.requireApproval,
+		print: flagOptions.print,
+		stdinPromptStream: flagOptions.stdinPromptStream,
+		workspace: flagOptions.workspace,
+		timeout: flagOptions.timeout,
+		providerBaseUrl: flagOptions.providerBaseUrl,
+		provider: flagOptions.provider ?? settings.provider ?? "openrouter",
+	})
+	if (autonomousValidationErrors.length > 0) {
+		failConfiguration(autonomousValidationErrors[0].message)
 	}
 
 	const effectiveMode = autonomous ? "orchestrator" : flagOptions.mode || settings.mode || DEFAULT_FLAGS.mode
@@ -197,8 +194,13 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		)
 		exitValidation(`Invalid provider: ${effectiveProvider}`)
 	}
-	if (flagOptions.providerBaseUrl && effectiveProvider !== "openrouter") {
-		failConfiguration("--provider-base-url is currently supported only with --provider openrouter")
+	// Note: providerBaseUrl validation is already handled in autonomousValidationErrors for autonomous mode,
+	// but we need to check it for non-autonomous mode as well
+	if (!autonomous) {
+		const providerBaseUrlError = validateProviderBaseUrl(flagOptions.providerBaseUrl, effectiveProvider)
+		if (providerBaseUrlError) {
+			failConfiguration(providerBaseUrlError.message)
+		}
 	}
 
 	if (!Number.isInteger(effectiveConsecutiveMistakeLimit) || effectiveConsecutiveMistakeLimit < 0) {
