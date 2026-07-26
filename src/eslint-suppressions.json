@@ -871,7 +871,7 @@
 	},
 	"core/task/__tests__/Task.dispose.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 3
 		}
 	},
 	"core/task/__tests__/Task.persistence.spec.ts": {
