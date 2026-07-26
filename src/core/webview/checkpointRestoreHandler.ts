@@ -3,7 +3,6 @@ import { ClineProvider } from "./ClineProvider"
 import { saveTaskMessages } from "../task-persistence"
 import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
-import { t } from "../../i18n"
 
 export interface CheckpointRestoreConfig {
 	provider: ClineProvider

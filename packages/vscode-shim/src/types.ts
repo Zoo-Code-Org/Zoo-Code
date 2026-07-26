@@ -114,6 +114,9 @@ export interface SecretStorageChangeEvent {
 	key: string
 }
 
+export type { TextDocument, TextLine, WorkspaceFolder, CancellationToken } from "./interfaces/document.js"
+export type { WorkspaceConfiguration } from "./interfaces/workspace.js"
+
 /**
  * Represents an extension
  */

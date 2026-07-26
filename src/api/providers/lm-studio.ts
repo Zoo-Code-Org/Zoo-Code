@@ -1,6 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
-import axios from "axios"
 
 import {
 	type ModelInfo,
