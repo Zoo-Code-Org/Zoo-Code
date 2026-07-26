@@ -10,20 +10,7 @@ vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn(),
 }))
 
-vi.mock("fs", () => ({
-	existsSync: vi.fn(),
-}))
-
-vi.mock("module", () => ({
-	createRequire: vi.fn(),
-}))
-
-import * as fs from "fs"
-import { createRequire } from "module"
-
 const mockFileExists = vi.mocked(fileExistsAtPath)
-const mockExistsSync = vi.mocked(fs.existsSync)
-const mockCreateRequire = vi.mocked(createRequire)
 
 describe("Ripgrep line truncation", () => {
 	// The default MAX_LINE_LENGTH is 500 in the implementation
@@ -80,9 +67,6 @@ describe("getBinPath", () => {
 	beforeEach(() => {
 		mockFileExists.mockReset()
 		mockFileExists.mockResolvedValue(false)
-		mockExistsSync.mockReset()
-		mockExistsSync.mockReturnValue(false)
-		mockCreateRequire.mockReset()
 	})
 
 	it("resolves ripgrep from the classic @vscode/ripgrep layout", async () => {
@@ -112,58 +96,43 @@ describe("getBinPath", () => {
 		expect(await getBinPath(appRoot)).toBeUndefined()
 	})
 
-	it("returns undefined when platform-package resolution fails", async () => {
-		mockFileExists.mockResolvedValue(false)
-		mockExistsSync.mockReturnValue(true)
-		mockCreateRequire.mockReturnValue({
-			resolve: vi.fn(() => {
-				throw new Error("module not found")
-			}),
-		} as unknown as NodeRequire)
-
-		await expect(getBinPath(appRoot)).resolves.toBeUndefined()
-	})
-
 	// Regression test for https://github.com/Zoo-Code-Org/Zoo-Code/issues/1024
 	// VS Code 1.130+ ships @vscode/ripgrep >=1.18, where the binary lives in a
-	// platform-specific optional package resolved via the wrapper's package.json.
-	// None of the six hardcoded candidate paths match this layout, so getBinPath
-	// returns undefined on affected Windows installs, causing every task to hang.
-	it("resolves ripgrep via the @vscode/ripgrep >=1.18 platform-package layout", async () => {
-		const platformBin = `/vscode/ripgrep-${process.platform}-${process.arch}/bin/${binName}`
+	// platform-specific optional package (e.g. @vscode/ripgrep-win32-x64).
+	// None of the previous candidate paths matched this layout.
+	it("resolves ripgrep from the @vscode/ripgrep >=1.18 platform-package layout", async () => {
+		const arch = process.env.npm_config_arch || process.arch
+		const rg = path.join(appRoot, `node_modules/@vscode/ripgrep-${process.platform}-${arch}/bin`, binName)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
 
-		mockFileExists.mockResolvedValue(false)
-		mockExistsSync.mockReturnValue(true)
-		const mockRequireFromWrapper = { resolve: vi.fn().mockReturnValue(platformBin) }
-		const mockRequireFromApp = { resolve: vi.fn().mockReturnValue("/vscode/ripgrep/index.js") }
-		mockCreateRequire
-			.mockReturnValueOnce(mockRequireFromApp as unknown as NodeRequire)
-			.mockReturnValueOnce(mockRequireFromWrapper as unknown as NodeRequire)
-		mockFileExists.mockImplementation(async (p: string) => p === platformBin)
-
-		expect(await getBinPath(appRoot)).toBe(platformBin)
+		expect(await getBinPath(appRoot)).toBe(rg)
 	})
 
-	it("respects npm_config_arch override when resolving platform-package", async () => {
-		const overrideArch = "x64"
-		const platformBin = `/vscode/ripgrep-${process.platform}-${overrideArch}/bin/${binName}`
+	it("resolves ripgrep from the unpacked @vscode/ripgrep >=1.18 platform-package layout", async () => {
+		const arch = process.env.npm_config_arch || process.arch
+		const rg = path.join(
+			appRoot,
+			`node_modules.asar.unpacked/@vscode/ripgrep-${process.platform}-${arch}/bin`,
+			binName,
+		)
+		mockFileExists.mockImplementation(async (p: string) => p === rg)
 
+		expect(await getBinPath(appRoot)).toBe(rg)
+	})
+
+	it("respects npm_config_arch when selecting the platform package", async () => {
+		const overrideArch = "x64"
 		const original = process.env.npm_config_arch
 		process.env.npm_config_arch = overrideArch
 		try {
-			mockFileExists.mockResolvedValue(false)
-			mockExistsSync.mockReturnValue(true)
-			const mockRequireFromWrapper = { resolve: vi.fn().mockReturnValue(platformBin) }
-			const mockRequireFromApp = { resolve: vi.fn().mockReturnValue("/vscode/ripgrep/index.js") }
-			mockCreateRequire
-				.mockReturnValueOnce(mockRequireFromApp as unknown as NodeRequire)
-				.mockReturnValueOnce(mockRequireFromWrapper as unknown as NodeRequire)
-			mockFileExists.mockImplementation(async (p: string) => p === platformBin)
-
-			expect(await getBinPath(appRoot)).toBe(platformBin)
-			expect(mockRequireFromWrapper.resolve).toHaveBeenCalledWith(
-				`@vscode/ripgrep-${process.platform}-${overrideArch}/bin/${binName}`,
+			const rg = path.join(
+				appRoot,
+				`node_modules/@vscode/ripgrep-${process.platform}-${overrideArch}/bin`,
+				binName,
 			)
+			mockFileExists.mockImplementation(async (p: string) => p === rg)
+
+			expect(await getBinPath(appRoot)).toBe(rg)
 		} finally {
 			if (original === undefined) {
 				delete process.env.npm_config_arch

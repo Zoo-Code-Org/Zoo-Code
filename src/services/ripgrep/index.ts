@@ -1,8 +1,6 @@
 import * as childProcess from "child_process"
-import * as fs from "fs"
 import * as path from "path"
 import * as readline from "readline"
-import { createRequire } from "module"
 
 import * as vscode from "vscode"
 
@@ -58,6 +56,12 @@ const binName = isWindows ? "rg.exe" : "rg"
 // bin/<platform>-<arch>/ rather than directly in bin/.
 const ripgrepUniversalBinDir = `bin/${process.platform}-${process.arch}`
 
+// @vscode/ripgrep >=1.18 ships the binary in a platform-specific optional
+// package (e.g. @vscode/ripgrep-win32-x64). Matches the wrapper's own arch
+// selection: process.env.npm_config_arch || process.arch.
+const platformPkgArch = process.env.npm_config_arch || process.arch
+const ripgrepPlatformPkg = `@vscode/ripgrep-${process.platform}-${platformPkgArch}`
+
 interface SearchFileResult {
 	file: string
 	searchResults: SearchResult[]
@@ -103,34 +107,18 @@ export function ripgrepCandidatePaths(vscodeAppRoot: string): readonly string[] 
 			`node_modules.asar.unpacked/@vscode/ripgrep-universal/${ripgrepUniversalBinDir}`,
 			binName,
 		),
+		// @vscode/ripgrep >=1.18 (VS Code 1.130+): binary lives in a platform-specific optional package.
+		path.join(vscodeAppRoot, `node_modules/${ripgrepPlatformPkg}/bin`, binName),
+		path.join(vscodeAppRoot, `node_modules.asar.unpacked/${ripgrepPlatformPkg}/bin`, binName),
 	]
-}
-
-/**
- * Resolves ripgrep for @vscode/ripgrep >=1.18, which ships the binary inside a
- * platform-specific optional package (e.g. @vscode/ripgrep-win32-x64) rather
- * than directly in @vscode/ripgrep/bin/. VS Code 1.130+ uses this layout.
- */
-export function resolvePlatformRipgrepPath(vscodeAppRoot: string): string | undefined {
-	try {
-		const wrapperManifest = path.join(vscodeAppRoot, "node_modules", "@vscode", "ripgrep", "package.json")
-		if (!fs.existsSync(wrapperManifest)) return undefined
-		const requireFromApp = createRequire(path.join(vscodeAppRoot, "package.json"))
-		const wrapperEntry = requireFromApp.resolve("@vscode/ripgrep")
-		const requireFromWrapper = createRequire(wrapperEntry)
-		const arch = process.env.npm_config_arch || process.arch
-		return requireFromWrapper.resolve(`@vscode/ripgrep-${process.platform}-${arch}/bin/${binName}`)
-	} catch {
-		return undefined
-	}
 }
 
 /**
  * Get the path to the ripgrep binary shipped inside the VS Code installation.
  *
- * Checks the long-standing @vscode/ripgrep and @vscode/ripgrep-universal static
- * layouts first, then falls back to the @vscode/ripgrep >=1.18 platform-package
- * layout used by VS Code 1.130+ (see microsoft/vscode#252063).
+ * Probes all known layouts: classic @vscode/ripgrep, @vscode/ripgrep-universal
+ * (VS Code Insiders staged-install), and the @vscode/ripgrep >=1.18
+ * platform-package layout used by VS Code 1.130+.
  *
  * Returns `undefined` when ripgrep cannot be located.
  */
@@ -138,10 +126,6 @@ export async function getBinPath(vscodeAppRoot: string): Promise<string | undefi
 	for (const candidate of ripgrepCandidatePaths(vscodeAppRoot)) {
 		if (await fileExistsAtPath(candidate)) return candidate
 	}
-
-	const platformPackagePath = resolvePlatformRipgrepPath(vscodeAppRoot)
-	if (platformPackagePath && (await fileExistsAtPath(platformPackagePath))) return platformPackagePath
-
 	return undefined
 }
 
