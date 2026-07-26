@@ -119,6 +119,7 @@ export function useExtensionHost({
 					debug,
 					exitOnComplete,
 					disableOutput: true,
+					disableAskHandling: true,
 				})
 
 				hostRef.current = host

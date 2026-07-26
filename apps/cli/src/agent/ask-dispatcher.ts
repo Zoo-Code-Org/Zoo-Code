@@ -69,6 +69,9 @@ export interface AskDispatcherOptions {
 	 * In TUI mode, the TUI handles asks directly.
 	 */
 	disabled?: boolean
+
+	/** Fail a headless run when an ask has no defined automatic response. */
+	onInputRequired?: (ask: ClineAsk, text: string) => void
 }
 
 /**
@@ -94,6 +97,7 @@ export class AskDispatcher {
 	private nonInteractive: boolean
 	private exitOnError: boolean
 	private disabled: boolean
+	private onInputRequired?: (ask: ClineAsk, text: string) => void
 
 	/**
 	 * Track which asks have been handled to avoid duplicates.
@@ -108,6 +112,7 @@ export class AskDispatcher {
 		this.nonInteractive = options.nonInteractive ?? false
 		this.exitOnError = options.exitOnError ?? false
 		this.disabled = options.disabled ?? false
+		this.onInputRequired = options.onInputRequired
 	}
 
 	// ===========================================================================
@@ -274,6 +279,7 @@ export class AskDispatcher {
 			if (text) {
 				this.outputManager.output(`\n[${ask}]`, text)
 			}
+			this.onInputRequired?.(ask, text)
 			return { handled: true }
 		}
 
@@ -315,7 +321,12 @@ export class AskDispatcher {
 		const defaultAnswer = firstSuggestion?.answer ?? ""
 
 		if (this.nonInteractive) {
-			// Use timeout prompt in non-interactive mode
+			if (this.onInputRequired) {
+				this.onInputRequired("followup", question)
+				return { handled: true }
+			}
+
+			// Preserve the legacy first-suggestion timeout outside autonomous runs.
 			const timeoutMs = FOLLOWUP_TIMEOUT_SECONDS * 1000
 			const result = await this.promptManager.promptWithTimeout(
 				suggestions.length > 0
@@ -365,7 +376,7 @@ export class AskDispatcher {
 		this.outputManager.markDisplayed(ts, text || "", false)
 
 		if (this.nonInteractive) {
-			// Auto-approved by extension settings
+			// The engine has already auto-approved this ask. Do not enqueue a second response.
 			return { handled: true }
 		}
 
@@ -426,7 +437,7 @@ export class AskDispatcher {
 		this.outputManager.markDisplayed(ts, text || "", false)
 
 		if (this.nonInteractive) {
-			// Auto-approved by extension settings (unless protected)
+			// The engine has already auto-approved this ask. Do not enqueue a second response.
 			return { handled: true }
 		}
 
@@ -473,7 +484,7 @@ export class AskDispatcher {
 		this.outputManager.markDisplayed(ts, text || "", false)
 
 		if (this.nonInteractive) {
-			// Auto-approved by extension settings
+			// The engine has already auto-approved this ask. Do not enqueue a second response.
 			return { handled: true }
 		}
 
@@ -495,6 +506,11 @@ export class AskDispatcher {
 		this.outputManager.output("\n[api request failed]")
 		this.outputManager.output(`  Error: ${text || "Unknown error"}`)
 		this.outputManager.markDisplayed(ts, text || "", false)
+
+		if (this.onInputRequired) {
+			this.onInputRequired("api_req_failed", text)
+			return { handled: true }
+		}
 
 		if (this.exitOnError) {
 			console.error(`[CLI] API request failed: ${text || "Unknown error"}`)

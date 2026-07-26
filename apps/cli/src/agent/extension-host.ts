@@ -13,15 +13,18 @@ import path from "path"
 import { fileURLToPath } from "url"
 import fs from "fs"
 import { EventEmitter } from "events"
+import { randomUUID } from "crypto"
 
 import pWaitFor from "p-wait-for"
 
-import type {
-	ClineMessage,
-	ExtensionMessage,
-	ReasoningEffortExtended,
-	RooCodeSettings,
-	WebviewMessage,
+import {
+	RooCodeEventName,
+	type RooCodeAPI,
+	type RooCodeSettings,
+	type ClineMessage,
+	type ExtensionMessage,
+	type ReasoningEffortExtended,
+	type WebviewMessage,
 } from "@roo-code/types"
 import { createVSCodeAPI, IExtensionHost, ExtensionHostEventMap, setRuntimeConfigValues } from "@roo-code/vscode-shim"
 import { DebugLogger, setDebugLogEnabled } from "@roo-code/core/cli"
@@ -37,6 +40,7 @@ import { ExtensionClient } from "./extension-client.js"
 import { OutputManager } from "./output-manager.js"
 import { PromptManager } from "./prompt-manager.js"
 import { AskDispatcher } from "./ask-dispatcher.js"
+import { AutonomousRunError, type TaskRunResult } from "./autonomous-run.js"
 
 // Pre-configured logger for CLI message activity debugging.
 const cliLogger = new DebugLogger("CLI")
@@ -62,6 +66,7 @@ function findCliPackageRoot(): string {
 }
 
 const CLI_PACKAGE_ROOT = process.env.ROO_CLI_ROOT || findCliPackageRoot()
+const CANCELLATION_SETTLE_TIMEOUT_MS = 5_000
 
 export interface ExtensionHostOptions {
 	mode: string
@@ -71,6 +76,7 @@ export interface ExtensionHostOptions {
 	provider: SupportedProvider
 	apiKey?: string
 	model: string
+	providerBaseUrl?: string
 	workspacePath: string
 	extensionPath: string
 	nonInteractive?: boolean
@@ -85,11 +91,17 @@ export interface ExtensionHostOptions {
 	 * When true, exit the process on API request errors instead of retrying.
 	 */
 	exitOnError?: boolean
+	/** Run the dangerous, unrestricted autonomous Orchestrator profile. */
+	autonomous?: boolean
+	/** Wall-clock deadline for the complete root task tree. */
+	taskTimeoutMs?: number
 	/**
 	 * When true, completely disables all direct stdout/stderr output.
 	 * Use this when running in TUI mode where Ink controls the terminal.
 	 */
 	disableOutput?: boolean
+	/** Disable ask routing because another UI owns it (TUI only). */
+	disableAskHandling?: boolean
 	/**
 	 * When true, don't suppress node warnings and console output since we're
 	 * running in an integration test and we want to see the output.
@@ -111,6 +123,7 @@ export interface ExtensionHostInterface extends IExtensionHost<ExtensionHostEven
 	activate(): Promise<void>
 	runTask(prompt: string, taskId?: string, configuration?: RooCodeSettings, images?: string[]): Promise<void>
 	resumeTask(taskId: string): Promise<void>
+	cancelTask(): Promise<void>
 	sendToExtension(message: WebviewMessage): void
 	dispose(): Promise<void>
 }
@@ -119,7 +132,7 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 	// Extension lifecycle.
 	private vscode: ReturnType<typeof createVSCodeAPI> | null = null
 	private extensionModule: ExtensionModule | null = null
-	private extensionAPI: unknown = null
+	private extensionAPI: RooCodeAPI | null = null
 	private options: ExtensionHostOptions
 	private isReady = false
 	private messageListener: ((message: ExtensionMessage) => void) | null = null
@@ -139,6 +152,10 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 	// Ephemeral storage.
 	private ephemeralStorageDir: string | null = null
 	private previousCliRuntimeEnv: string | undefined
+	private previousCliAutonomousEnv: string | undefined
+	private initializationPromise: Promise<void> = Promise.resolve()
+	private lastTaskResult: TaskRunResult | undefined
+	private rootTaskId: string | undefined
 
 	// ==========================================================================
 	// Managers - These do all the heavy lifting
@@ -180,6 +197,10 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		// CLI-specific behavior without affecting VS Code desktop usage.
 		this.previousCliRuntimeEnv = process.env.ROO_CLI_RUNTIME
 		process.env.ROO_CLI_RUNTIME = "1"
+		this.previousCliAutonomousEnv = process.env.ROO_CLI_AUTONOMOUS
+		if (options.autonomous) {
+			process.env.ROO_CLI_AUTONOMOUS = "1"
+		}
 
 		// Enable file-based debug logging only when --debug is passed.
 		if (options.debug) {
@@ -210,9 +231,20 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 			outputManager: this.outputManager,
 			promptManager: this.promptManager,
 			sendMessage: (msg) => this.sendToExtension(msg),
-			nonInteractive: options.nonInteractive,
+			nonInteractive: options.autonomous || options.nonInteractive,
 			exitOnError: options.exitOnError,
-			disabled: options.disableOutput, // TUI mode handles asks directly.
+			disabled: options.disableAskHandling,
+			onInputRequired: options.autonomous
+				? (ask, text) => {
+						const state = ask === "api_req_failed" ? "provider_failed" : "needs_input"
+						this.client
+							.getEmitter()
+							.emit(
+								"error",
+								new AutonomousRunError(state, `${ask}: ${text || "human input is required"}`),
+							)
+					}
+				: undefined,
 		})
 
 		// Wire up client events.
@@ -220,35 +252,41 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 
 		// Populate initial settings.
 		const baseSettings: RooCodeSettings = {
-			mode: this.options.mode,
+			mode: this.options.autonomous ? "orchestrator" : this.options.mode,
 			consecutiveMistakeLimit: this.options.consecutiveMistakeLimit ?? DEFAULT_FLAGS.consecutiveMistakeLimit,
 			commandExecutionTimeout: 300,
 			enableCheckpoints: false,
 			experiments: {
 				customTools: true,
 			},
-			...getProviderSettings(this.options.provider, this.options.apiKey, this.options.model),
+			...getProviderSettings(
+				this.options.provider,
+				this.options.apiKey,
+				this.options.model,
+				this.options.providerBaseUrl,
+			),
 		}
 
-		this.initialSettings = this.options.nonInteractive
-			? {
-					autoApprovalEnabled: true,
-					alwaysAllowReadOnly: true,
-					alwaysAllowReadOnlyOutsideWorkspace: true,
-					alwaysAllowWrite: true,
-					alwaysAllowWriteOutsideWorkspace: true,
-					alwaysAllowWriteProtected: true,
-					alwaysAllowMcp: true,
-					alwaysAllowModeSwitch: true,
-					alwaysAllowSubtasks: true,
-					alwaysAllowExecute: true,
-					allowedCommands: ["*"],
-					...baseSettings,
-				}
-			: {
-					autoApprovalEnabled: false,
-					...baseSettings,
-				}
+		this.initialSettings =
+			this.options.autonomous || this.options.nonInteractive
+				? {
+						autoApprovalEnabled: true,
+						alwaysAllowReadOnly: true,
+						alwaysAllowReadOnlyOutsideWorkspace: true,
+						alwaysAllowWrite: true,
+						alwaysAllowWriteOutsideWorkspace: true,
+						alwaysAllowWriteProtected: true,
+						alwaysAllowMcp: true,
+						alwaysAllowModeSwitch: true,
+						alwaysAllowSubtasks: true,
+						alwaysAllowExecute: true,
+						allowedCommands: ["*"],
+						...baseSettings,
+					}
+				: {
+						autoApprovalEnabled: false,
+						...baseSettings,
+					}
 
 		if (this.options.reasoningEffort && this.options.reasoningEffort !== "unspecified") {
 			if (this.options.reasoningEffort === "disabled") {
@@ -424,7 +462,7 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		Module._resolveFilename = originalResolve
 
 		try {
-			this.extensionAPI = await this.extensionModule.activate(this.vscode.context)
+			this.extensionAPI = (await this.extensionModule.activate(this.vscode.context)) as RooCodeAPI
 		} catch (error) {
 			throw new Error(`Failed to activate extension: ${error instanceof Error ? error.message : String(error)}`)
 		}
@@ -434,6 +472,7 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		this.on("extensionWebviewMessage", this.messageListener)
 
 		await pWaitFor(() => this.isReady, { interval: 100, timeout: 10_000 })
+		await this.initializationPromise
 	}
 
 	public registerWebviewProvider(_viewId: string, _provider: WebviewViewProvider): void {}
@@ -448,11 +487,12 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		// webviewDidLaunch handler's first-time init sync reads default state
 		// (apiProvider: "anthropic") instead of the CLI-provided settings.
 		setRuntimeConfigValues("zoo-code", this.initialSettings as Record<string, unknown>)
-		this.sendToExtension({ type: "updateSettings", updatedSettings: this.initialSettings })
-
-		// Now trigger extension initialization. The context proxy should already
-		// have CLI-provided values when the webviewDidLaunch handler runs.
-		this.sendToExtension({ type: "webviewDidLaunch" })
+		// Serialize initial settings and launch. In particular, webviewDidLaunch
+		// loads project custom modes before activate() allows the first task.
+		this.initializationPromise = (async () => {
+			await this.dispatchToExtension({ type: "updateSettings", updatedSettings: this.initialSettings })
+			await this.dispatchToExtension({ type: "webviewDidLaunch" })
+		})()
 	}
 
 	public isInInitialSetup(): boolean {
@@ -471,48 +511,121 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		this.emit("webviewMessage", message)
 	}
 
+	private async dispatchToExtension(message: WebviewMessage): Promise<void> {
+		if (!this.isReady) {
+			throw new Error("You cannot send messages to the extension before it is ready")
+		}
+
+		const listeners = this.listeners("webviewMessage") as Array<(message: WebviewMessage) => unknown>
+		if (listeners.length === 0) {
+			this.emit("webviewMessage", message)
+			return
+		}
+		await Promise.all(listeners.map((listener) => listener(message)))
+	}
+
 	// ==========================================================================
 	// Task Management
 	// ==========================================================================
 
-	private waitForTaskCompletion(): Promise<void> {
+	private waitForTaskCompletion(rootTaskId: string): Promise<TaskRunResult> {
+		if (!this.options.autonomous) {
+			return new Promise((resolve, reject) => {
+				const completeHandler = (event: TaskCompletedEvent) => {
+					cleanup()
+					resolve({ rootTaskId, result: event.message?.text })
+				}
+				const errorHandler = (error: Error) => {
+					cleanup()
+					reject(error)
+				}
+				const cleanup = () => {
+					this.client.off("taskCompleted", completeHandler)
+					this.client.off("error", errorHandler)
+				}
+				this.client.once("taskCompleted", completeHandler)
+				this.client.once("error", errorHandler)
+			})
+		}
+
+		const api = this.extensionAPI
+		if (!api) {
+			return Promise.reject(new Error("Extension API is unavailable"))
+		}
+
 		return new Promise((resolve, reject) => {
-			const completeHandler = () => {
-				cleanup()
-				resolve()
+			let result: string | undefined
+			let timeout: NodeJS.Timeout | undefined
+
+			const completeHandler = (
+				taskId: string,
+				_tokenUsage: unknown,
+				_toolUsage: unknown,
+				metadata: { isSubtask: boolean },
+			) => {
+				if (taskId !== rootTaskId || metadata.isSubtask) return
+				void pWaitFor(async () => (await api.getTaskHistoryItem(rootTaskId))?.status === "completed", {
+					interval: 25,
+					timeout: 5_000,
+				})
+					.then(() => {
+						cleanup()
+						resolve({ rootTaskId, result })
+					})
+					.catch(errorHandler)
+			}
+
+			const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+				if (taskId !== rootTaskId || message.partial) return
+
+				if (message.type === "say" && message.say === "completion_result") {
+					result = message.text
+				}
+
+				if (this.options.autonomous && message.type === "ask" && message.ask === "completion_result") {
+					void api.approveCurrentAsk()
+				}
 			}
 
 			const errorHandler = (error: Error) => {
 				cleanup()
 				reject(error)
 			}
+			const retryHandler = (message: ClineMessage) => {
+				if (message.type !== "say" || message.say !== "api_req_retry_delayed") return
+				cleanup()
+				reject(new AutonomousRunError("provider_failed", message.text?.split("\n")[0] || "API request failed"))
+			}
 
 			const cleanup = () => {
-				this.client.off("taskCompleted", completeHandler)
 				this.client.off("error", errorHandler)
-
-				if (messageHandler) {
-					this.client.off("message", messageHandler)
-				}
+				this.client.off("message", retryHandler)
+				api.off(RooCodeEventName.TaskCompleted, completeHandler)
+				api.off(RooCodeEventName.Message, messageHandler)
+				if (timeout) clearTimeout(timeout)
 			}
 
-			// When exitOnError is enabled, listen for api_req_retry_delayed messages
-			// (sent by Task.ts during auto-approval retry backoff) and exit immediately.
-			let messageHandler: ((msg: ClineMessage) => void) | null = null
+			api.on(RooCodeEventName.TaskCompleted, completeHandler)
+			api.on(RooCodeEventName.Message, messageHandler)
+			this.client.on("error", errorHandler)
+			this.client.on("message", retryHandler)
 
-			if (this.options.exitOnError) {
-				messageHandler = (msg: ClineMessage) => {
-					if (msg.type === "say" && msg.say === "api_req_retry_delayed") {
-						cleanup()
-						reject(new Error(msg.text?.split("\n")[0] || "API request failed"))
-					}
-				}
-
-				this.client.on("message", messageHandler)
+			if (this.options.taskTimeoutMs) {
+				timeout = setTimeout(() => {
+					cleanup()
+					const cancellation = api.cancelCurrentTask().catch(() => undefined)
+					let settleTimer: NodeJS.Timeout
+					const settleDeadline = new Promise<void>((resolve) => {
+						settleTimer = setTimeout(resolve, CANCELLATION_SETTLE_TIMEOUT_MS)
+					})
+					void Promise.race([cancellation, settleDeadline]).then(() => {
+						clearTimeout(settleTimer)
+						reject(
+							new AutonomousRunError("timed_out", `Root task exceeded ${this.options.taskTimeoutMs}ms`),
+						)
+					})
+				}, this.options.taskTimeoutMs)
 			}
-
-			this.client.once("taskCompleted", completeHandler)
-			this.client.once("error", errorHandler)
 		})
 	}
 
@@ -522,19 +635,36 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		configuration?: RooCodeSettings,
 		images?: string[],
 	): Promise<void> {
+		const rootTaskId = taskId ?? (this.options.autonomous ? randomUUID() : "unknown")
+		this.rootTaskId = rootTaskId
+		const completion = this.waitForTaskCompletion(rootTaskId)
 		this.sendToExtension({
 			type: "newTask",
 			text: prompt,
-			taskId,
+			...(taskId || this.options.autonomous ? { taskId: rootTaskId } : {}),
 			taskConfiguration: configuration,
 			...(images !== undefined ? { images } : {}),
 		})
-		return this.waitForTaskCompletion()
+		this.lastTaskResult = await completion
 	}
 
 	public async resumeTask(taskId: string): Promise<void> {
+		this.rootTaskId = taskId
+		const completion = this.waitForTaskCompletion(taskId)
 		this.sendToExtension({ type: "showTaskWithId", text: taskId })
-		return this.waitForTaskCompletion()
+		this.lastTaskResult = await completion
+	}
+
+	public getLastTaskResult(): TaskRunResult | undefined {
+		return this.lastTaskResult
+	}
+
+	public getRootTaskId(): string | undefined {
+		return this.rootTaskId
+	}
+
+	public async cancelTask(): Promise<void> {
+		await this.extensionAPI?.cancelCurrentTask()
 	}
 
 	// ==========================================================================
@@ -591,8 +721,11 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		delete (global as Record<string, unknown>).vscode
 		delete (global as Record<string, unknown>).__extensionHost
 
-		// Restore console.
-		this.restoreConsole()
+		// Keep extension logs suppressed until an autonomous machine-readable
+		// process exits; background task disposal can otherwise corrupt NDJSON.
+		if (!(this.options.autonomous && this.options.disableOutput)) {
+			this.restoreConsole()
+		}
 
 		// Clean up ephemeral storage.
 		if (this.ephemeralStorageDir) {
@@ -609,6 +742,12 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 			delete process.env.ROO_CLI_RUNTIME
 		} else {
 			process.env.ROO_CLI_RUNTIME = this.previousCliRuntimeEnv
+		}
+
+		if (this.previousCliAutonomousEnv === undefined) {
+			delete process.env.ROO_CLI_AUTONOMOUS
+		} else {
+			process.env.ROO_CLI_AUTONOMOUS = this.previousCliAutonomousEnv
 		}
 	}
 }

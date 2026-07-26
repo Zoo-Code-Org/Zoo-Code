@@ -23,6 +23,7 @@ export function getProviderSettings(
 	provider: SupportedProvider,
 	apiKey: string | undefined,
 	model: string | undefined,
+	baseUrl?: string,
 ): RooCodeSettings {
 	const config: RooCodeSettings = { apiProvider: provider }
 
@@ -42,6 +43,7 @@ export function getProviderSettings(
 		case "openrouter":
 			if (apiKey) config.openRouterApiKey = apiKey
 			if (model) config.openRouterModelId = model
+			if (baseUrl) config.openRouterBaseUrl = baseUrl
 			break
 		case "vercel-ai-gateway":
 			if (apiKey) config.vercelAiGatewayApiKey = apiKey

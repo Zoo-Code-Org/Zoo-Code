@@ -15,6 +15,7 @@
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
 		"test:integration": "tsx scripts/integration/run.ts",
+		"test:autonomous-process": "tsx scripts/autonomous-smoke.ts",
 		"build": "tsup",
 		"build:extension": "pnpm --filter ./src bundle",
 		"dev": "ROO_AUTH_BASE_URL=https://app.roocode.com ROO_SDK_BASE_URL=https://cloud-api.roocode.com ROO_CODE_PROVIDER_URL=https://api.roocode.com/proxy tsx src/index.ts",

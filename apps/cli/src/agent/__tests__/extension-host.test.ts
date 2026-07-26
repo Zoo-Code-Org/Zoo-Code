@@ -3,7 +3,13 @@
 import { EventEmitter } from "events"
 import fs from "fs"
 
-import type { ExtensionMessage, WebviewMessage } from "@roo-code/types"
+import {
+	RooCodeEventName,
+	type ClineMessage,
+	type ExtensionMessage,
+	type RooCodeAPI,
+	type WebviewMessage,
+} from "@roo-code/types"
 import { setRuntimeConfigValues } from "@roo-code/vscode-shim"
 
 import { DEFAULT_FLAGS } from "@/types/index.js"
@@ -230,11 +236,12 @@ describe("ExtensionHost", () => {
 				expect(getPrivate(host, "isReady")).toBe(true)
 			})
 
-			it("should send webviewDidLaunch message", () => {
+			it("should send webviewDidLaunch message", async () => {
 				const host = createTestHost()
 				const emitSpy = vi.spyOn(host, "emit")
 
 				host.markWebviewReady()
+				await getPrivate<Promise<void>>(host, "initializationPromise")
 
 				expect(emitSpy).toHaveBeenCalledWith("webviewMessage", { type: "webviewDidLaunch" })
 			})
@@ -520,6 +527,15 @@ describe("ExtensionHost", () => {
 	})
 
 	describe("runTask", () => {
+		function attachApi(host: ExtensionHost) {
+			const api = new EventEmitter() as RooCodeAPI
+			api.approveCurrentAsk = vi.fn(async () => {})
+			api.cancelCurrentTask = vi.fn(async () => {})
+			api.getTaskHistoryItem = vi.fn(async () => ({ status: "completed" }) as never)
+			setPrivate(host, "extensionAPI", api)
+			return api
+		}
+
 		it("should send newTask message when called", async () => {
 			const host = createTestHost()
 			host.markWebviewReady()
@@ -630,9 +646,95 @@ describe("ExtensionHost", () => {
 
 			expect(emitSpy).toHaveBeenCalledWith("webviewMessage", { type: "showTaskWithId", text: "task-abc" })
 		})
+
+		it("waits for accepted root completion across mode switches and delegation", async () => {
+			const host = createTestHost({ autonomous: true })
+			const api = attachApi(host)
+			host.markWebviewReady()
+			const messages: WebviewMessage[] = []
+			host.on("webviewMessage", (message) => messages.push(message as WebviewMessage))
+
+			let settled = false
+			const taskPromise = host.runTask("delegate this").then(() => {
+				settled = true
+			})
+			const rootId = (messages.find((message) => message.type === "newTask") as { taskId: string }).taskId
+
+			api.emit(RooCodeEventName.TaskModeSwitched, rootId, "architect")
+			api.emit(RooCodeEventName.TaskDelegated, rootId, "child-1")
+			api.emit(RooCodeEventName.TaskAborted, rootId)
+			api.emit(
+				RooCodeEventName.TaskCompleted,
+				"child-1",
+				{ totalTokensIn: 0, totalTokensOut: 0, totalCost: 0, contextTokens: 0 },
+				{},
+				{ isSubtask: true },
+			)
+			api.emit(RooCodeEventName.TaskDelegationResumed, rootId, "child-1")
+			await Promise.resolve()
+			expect(settled).toBe(false)
+
+			api.emit(RooCodeEventName.Message, {
+				taskId: rootId,
+				action: "created",
+				message: { ts: 1, type: "say", say: "completion_result", text: "root result" } as ClineMessage,
+			})
+			api.emit(RooCodeEventName.Message, {
+				taskId: rootId,
+				action: "created",
+				message: { ts: 2, type: "ask", ask: "completion_result" } as ClineMessage,
+			})
+			expect(api.approveCurrentAsk).toHaveBeenCalledOnce()
+			api.emit(
+				RooCodeEventName.TaskCompleted,
+				rootId,
+				{ totalTokensIn: 0, totalTokensOut: 0, totalCost: 0, contextTokens: 0 },
+				{},
+				{ isSubtask: false },
+			)
+
+			await taskPromise
+			expect(host.getLastTaskResult()).toEqual({ rootTaskId: rootId, result: "root result" })
+		})
+
+		it("cancels and rejects an autonomous run at its root-tree deadline", async () => {
+			const host = createTestHost({ autonomous: true, taskTimeoutMs: 5 })
+			const api = attachApi(host)
+			host.markWebviewReady()
+
+			await expect(host.runTask("never completes")).rejects.toMatchObject({ state: "timed_out" })
+			expect(api.cancelCurrentTask).toHaveBeenCalledOnce()
+		})
+
+		it("fails autonomous followup questions without sending an empty answer", async () => {
+			const host = createTestHost({ autonomous: true })
+			attachApi(host)
+			host.markWebviewReady()
+			const taskPromise = host.runTask("ask something")
+			const dispatcher = getPrivate<{ handleAsk: (message: ClineMessage) => Promise<unknown> }>(
+				host,
+				"askDispatcher",
+			)
+
+			await dispatcher.handleAsk({
+				ts: 1,
+				type: "ask",
+				ask: "followup",
+				text: JSON.stringify({ question: "Need a human?" }),
+			} as ClineMessage)
+
+			await expect(taskPromise).rejects.toMatchObject({ state: "needs_input" })
+		})
 	})
 
 	describe("initial settings", () => {
+		it("forces autonomous roots to effective orchestrator mode", () => {
+			const host = createTestHost({ autonomous: true, mode: "code" })
+			const initialSettings = getPrivate<Record<string, unknown>>(host, "initialSettings")
+
+			expect(initialSettings.mode).toBe("orchestrator")
+		})
+
 		it("should set mode from options", () => {
 			const host = createTestHost({ mode: "architect" })
 
@@ -662,6 +764,13 @@ describe("ExtensionHost", () => {
 			expect(initialSettings.alwaysAllowReadOnly).toBe(true)
 			expect(initialSettings.alwaysAllowWrite).toBe(true)
 			expect(initialSettings.alwaysAllowExecute).toBe(true)
+			expect(initialSettings.alwaysAllowReadOnlyOutsideWorkspace).toBe(true)
+			expect(initialSettings.alwaysAllowWriteOutsideWorkspace).toBe(true)
+			expect(initialSettings.alwaysAllowWriteProtected).toBe(true)
+			expect(initialSettings.alwaysAllowMcp).toBe(true)
+			expect(initialSettings.alwaysAllowModeSwitch).toBe(true)
+			expect(initialSettings.alwaysAllowSubtasks).toBe(true)
+			expect(initialSettings.allowedCommands).toEqual(["*"])
 		})
 
 		it("should disable auto-approval in interactive mode", () => {

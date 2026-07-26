@@ -29,10 +29,13 @@ export type FlagOptions = {
 	extension?: string
 	debug: boolean
 	requireApproval: boolean
+	autonomous: boolean
+	timeout?: number
 	exitOnError: boolean
 	apiKey?: string
 	provider?: SupportedProvider
 	model?: string
+	providerBaseUrl?: string
 	mode?: string
 	terminalShell?: string
 	reasoningEffort?: ReasoningEffortFlagOptions

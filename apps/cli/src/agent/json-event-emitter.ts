@@ -21,6 +21,7 @@ import type { JsonEvent, JsonEventCost, JsonEventQueueItem, JsonFinalOutput } fr
 import type { ExtensionClient } from "./extension-client.js"
 import type { AgentStateChangeEvent, TaskCompletedEvent } from "./events.js"
 import { AgentLoopState } from "./agent-state.js"
+import type { AutonomousTerminalState } from "./autonomous-run.js"
 
 /**
  * Options for JsonEventEmitter.
@@ -38,6 +39,8 @@ export interface JsonEventEmitterOptions {
 	protocol?: string
 	/** Supported stdin protocol capabilities emitted in system:init */
 	capabilities?: string[]
+	/** Root completion will be emitted explicitly from the extension API. */
+	authoritativeCompletion?: boolean
 }
 
 /**
@@ -125,6 +128,8 @@ export class JsonEventEmitter {
 	private lastAssistantText: string | undefined
 	// The first non-partial "say:text" per task is the echoed user prompt.
 	private expectPromptEchoAsUser = true
+	private authoritativeCompletion: boolean
+	private terminalEmitted = false
 
 	constructor(options: JsonEventEmitterOptions) {
 		this.mode = options.mode
@@ -139,6 +144,7 @@ export class JsonEventEmitter {
 			"stdin:ping",
 			"stdin:shutdown",
 		]
+		this.authoritativeCompletion = options.authoritativeCompletion ?? false
 	}
 
 	/**
@@ -149,7 +155,9 @@ export class JsonEventEmitter {
 		const unsubMessage = client.on("message", (msg) => this.handleMessage(msg, false))
 		const unsubMessageUpdated = client.on("messageUpdated", (msg) => this.handleMessage(msg, true))
 		const unsubStateChange = client.on("stateChange", (event) => this.handleStateChange(event))
-		const unsubTaskCompleted = client.on("taskCompleted", (event) => this.handleTaskCompleted(event))
+		const unsubTaskCompleted = this.authoritativeCompletion
+			? () => {}
+			: client.on("taskCompleted", (event) => this.handleTaskCompleted(event))
 		const unsubError = client.on("error", (error) => this.handleError(error))
 
 		this.unsubscribers.push(unsubMessage, unsubMessageUpdated, unsubStateChange, unsubTaskCompleted, unsubError)
@@ -202,6 +210,49 @@ export class JsonEventEmitter {
 			queueDepth: event.queueDepth,
 			queue: event.queue,
 		})
+	}
+
+	emitTerminal(event: {
+		state: AutonomousTerminalState
+		exitCode: number
+		rootTaskId?: string
+		content?: string
+	}): void {
+		if (this.terminalEmitted) return
+		this.terminalEmitted = true
+
+		const terminal: JsonEvent = {
+			type: "result",
+			subtype: "terminal",
+			done: true,
+			success: event.state === "completed",
+			state: event.state,
+			exitCode: event.exitCode,
+			rootTaskId: event.rootTaskId,
+			content: event.content,
+			resumable: false,
+			cost: this.lastCost,
+		}
+
+		if (this.mode === "json") {
+			const output: JsonFinalOutput = {
+				type: "result",
+				subtype: "terminal",
+				done: true,
+				success: terminal.success ?? false,
+				content: terminal.content,
+				cost: terminal.cost,
+				state: terminal.state,
+				exitCode: terminal.exitCode,
+				rootTaskId: terminal.rootTaskId,
+				resumable: terminal.resumable,
+				events: this.events.filter((item) => item.type !== "result"),
+			}
+			this.writeToStdout(JSON.stringify(output, null, 2) + "\n")
+			return
+		}
+
+		this.emitEvent(terminal)
 	}
 
 	private handleStateChange(event: AgentStateChangeEvent): void {

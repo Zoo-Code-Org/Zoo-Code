@@ -9,6 +9,7 @@ import {
 	type RooCliToolResult,
 	type RooCliToolUse,
 } from "@roo-code/types"
+import type { AutonomousTerminalState } from "@/agent/autonomous-run.js"
 
 /**
  * JSON Event Types for Structured CLI Output
@@ -101,6 +102,14 @@ export type JsonEvent = RooCliStreamEvent & {
 	success?: boolean
 	/** Cost and token usage (for result events) */
 	cost?: JsonEventCost
+	/** Autonomous root-run terminal state. */
+	state?: AutonomousTerminalState
+	/** Process exit status associated with the terminal state. */
+	exitCode?: number
+	/** Root task identity for lineage-aware consumers. */
+	rootTaskId?: string
+	/** Whether the terminal run can be resumed safely. */
+	resumable?: boolean
 }
 
 /**
@@ -110,6 +119,8 @@ export type JsonEvent = RooCliStreamEvent & {
 export type JsonFinalOutput = RooCliFinalOutput & {
 	/** Final result type */
 	type: "result"
+	subtype?: string
+	done?: boolean
 	/** Whether the task succeeded */
 	success: boolean
 	/** Result content/message */
@@ -118,4 +129,8 @@ export type JsonFinalOutput = RooCliFinalOutput & {
 	cost?: JsonEventCost
 	/** All events that occurred during the task */
 	events: JsonEvent[]
+	state?: AutonomousTerminalState
+	exitCode?: number
+	rootTaskId?: string
+	resumable?: boolean
 }

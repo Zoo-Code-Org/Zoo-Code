@@ -28,6 +28,7 @@ import { runOnboarding } from "@/lib/utils/onboarding.js"
 import { VERSION } from "@/lib/utils/version.js"
 
 import { ExtensionHost, ExtensionHostOptions } from "@/agent/index.js"
+import { AUTONOMOUS_EXIT_CODES, AutonomousRunError, type AutonomousTerminalState } from "@/agent/autonomous-run.js"
 import { isExpectedControlFlowError } from "./cancellation.js"
 import { runStdinStreamMode } from "./stdin-stream.js"
 
@@ -58,11 +59,37 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 	})
 
 	let prompt = promptArg
+	const autonomous = flagOptions.autonomous
+	const requestedOutputFormat: OutputFormat = (flagOptions.outputFormat as OutputFormat) || "text"
+
+	const failConfiguration = (message: string): never => {
+		if (autonomous && requestedOutputFormat !== "text") {
+			process.stdout.write(
+				JSON.stringify({
+					type: "result",
+					subtype: "terminal",
+					done: true,
+					success: false,
+					state: "configuration_error",
+					exitCode: AUTONOMOUS_EXIT_CODES.configuration_error,
+					content: message,
+					resumable: false,
+				}) + "\n",
+			)
+		} else {
+			console.error(`[CLI] Error: ${message}`)
+		}
+		process.exit(autonomous ? AUTONOMOUS_EXIT_CODES.configuration_error : 1)
+	}
+	const exitValidation = (message: string): never => {
+		if (autonomous) failConfiguration(message)
+		process.exit(1)
+	}
 
 	if (flagOptions.promptFile) {
 		if (!fs.existsSync(flagOptions.promptFile)) {
 			console.error(`[CLI] Error: Prompt file does not exist: ${flagOptions.promptFile}`)
-			process.exit(1)
+			exitValidation(`Prompt file does not exist: ${flagOptions.promptFile}`)
 		}
 
 		prompt = fs.readFileSync(flagOptions.promptFile, "utf-8")
@@ -75,38 +102,38 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 
 	if (flagOptions.createWithSessionId !== undefined && !requestedCreateSessionId) {
 		console.error("[CLI] Error: --create-with-session-id requires a non-empty session id")
-		process.exit(1)
+		exitValidation("--create-with-session-id requires a non-empty session id")
 	}
 
 	if (flagOptions.sessionId !== undefined && !requestedSessionId) {
 		console.error("[CLI] Error: --session-id requires a non-empty session id")
-		process.exit(1)
+		exitValidation("--session-id requires a non-empty session id")
 	}
 
 	if (requestedCreateSessionId && !isValidSessionId(requestedCreateSessionId)) {
 		console.error("[CLI] Error: --create-with-session-id must be a valid UUID session id")
-		process.exit(1)
+		exitValidation("--create-with-session-id must be a valid UUID session id")
 	}
 
 	if (requestedSessionId && !isValidSessionId(requestedSessionId)) {
 		console.error("[CLI] Error: --session-id must be a valid UUID session id")
-		process.exit(1)
+		exitValidation("--session-id must be a valid UUID session id")
 	}
 
 	if (requestedCreateSessionId && isResumeRequested) {
 		console.error("[CLI] Error: cannot use --create-with-session-id with --session-id/--continue")
-		process.exit(1)
+		exitValidation("cannot use --create-with-session-id with --session-id/--continue")
 	}
 
 	if (requestedSessionId && shouldContinueSession) {
 		console.error("[CLI] Error: cannot use --session-id with --continue")
-		process.exit(1)
+		exitValidation("cannot use --session-id with --continue")
 	}
 
 	if (isResumeRequested && prompt) {
 		console.error("[CLI] Error: cannot use prompt or --prompt-file with --session-id/--continue")
 		console.error("[CLI] Usage: roo [--session-id <session-id> | --continue] [options]")
-		process.exit(1)
+		exitValidation("cannot use prompt or --prompt-file with --session-id/--continue")
 	}
 
 	// Options
@@ -118,17 +145,48 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 	const isOnboardingEnabled = isTuiEnabled && !flagOptions.provider && !settings.provider
 
 	// Determine effective values: CLI flags > settings file > DEFAULT_FLAGS.
-	const effectiveMode = flagOptions.mode || settings.mode || DEFAULT_FLAGS.mode
+	if (autonomous && flagOptions.mode) {
+		failConfiguration("--mode cannot be used with --autonomous; root mode is always orchestrator")
+	}
+	if (autonomous && flagOptions.requireApproval) {
+		failConfiguration("--require-approval cannot be used with --autonomous")
+	}
+	if (autonomous && !flagOptions.print) {
+		failConfiguration("--autonomous requires --print")
+	}
+	if (autonomous && flagOptions.stdinPromptStream) {
+		failConfiguration("--autonomous runs exactly one root task and cannot use --stdin-prompt-stream")
+	}
+	if (autonomous && !flagOptions.workspace) {
+		failConfiguration("--autonomous requires an explicit --workspace")
+	}
+	if (autonomous && (!Number.isFinite(flagOptions.timeout) || (flagOptions.timeout ?? 0) <= 0)) {
+		failConfiguration("--autonomous requires --timeout with a positive number of seconds")
+	}
+
+	const effectiveMode = autonomous ? "orchestrator" : flagOptions.mode || settings.mode || DEFAULT_FLAGS.mode
 	const effectiveModel = flagOptions.model || settings.model || DEFAULT_FLAGS.model
 	const effectiveReasoningEffort =
 		flagOptions.reasoningEffort || settings.reasoningEffort || DEFAULT_FLAGS.reasoningEffort
 	const effectiveProvider = flagOptions.provider ?? settings.provider ?? "openrouter"
-	const effectiveWorkspacePath = flagOptions.workspace ? path.resolve(flagOptions.workspace) : process.cwd()
+	let effectiveWorkspacePath = flagOptions.workspace ? path.resolve(flagOptions.workspace) : process.cwd()
+	if (autonomous) {
+		try {
+			effectiveWorkspacePath = fs.realpathSync(effectiveWorkspacePath)
+			if (!fs.statSync(effectiveWorkspacePath).isDirectory()) {
+				failConfiguration(`Workspace path is not a directory: ${effectiveWorkspacePath}`)
+			}
+		} catch {
+			failConfiguration(`Workspace path does not exist or cannot be resolved: ${effectiveWorkspacePath}`)
+		}
+	}
 	const legacyRequireApprovalFromSettings =
 		settings.requireApproval ??
 		(settings.dangerouslySkipPermissions === undefined ? undefined : !settings.dangerouslySkipPermissions)
-	const effectiveRequireApproval = flagOptions.requireApproval || legacyRequireApprovalFromSettings || false
-	const effectiveExitOnComplete = flagOptions.print || flagOptions.oneshot || settings.oneshot || false
+	const effectiveRequireApproval = autonomous
+		? false
+		: flagOptions.requireApproval || legacyRequireApprovalFromSettings || false
+	const effectiveExitOnComplete = autonomous || flagOptions.print || flagOptions.oneshot || settings.oneshot || false
 	const rawConsecutiveMistakeLimit =
 		flagOptions.consecutiveMistakeLimit ?? settings.consecutiveMistakeLimit ?? DEFAULT_FLAGS.consecutiveMistakeLimit
 	const effectiveConsecutiveMistakeLimit = Number(rawConsecutiveMistakeLimit)
@@ -137,14 +195,17 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		console.error(
 			`[CLI] Error: Invalid provider: ${effectiveProvider}; must be one of: ${supportedProviders.join(", ")}`,
 		)
-		process.exit(1)
+		exitValidation(`Invalid provider: ${effectiveProvider}`)
+	}
+	if (flagOptions.providerBaseUrl && effectiveProvider !== "openrouter") {
+		failConfiguration("--provider-base-url is currently supported only with --provider openrouter")
 	}
 
 	if (!Number.isInteger(effectiveConsecutiveMistakeLimit) || effectiveConsecutiveMistakeLimit < 0) {
 		console.error(
 			`[CLI] Error: Invalid consecutive mistake limit: ${rawConsecutiveMistakeLimit}; must be a non-negative integer`,
 		)
-		process.exit(1)
+		exitValidation(`Invalid consecutive mistake limit: ${rawConsecutiveMistakeLimit}`)
 	}
 
 	let terminalShell: string | undefined
@@ -175,6 +236,9 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		debug: flagOptions.debug,
 		exitOnComplete: effectiveExitOnComplete,
 		terminalShell,
+		autonomous,
+		taskTimeoutMs: autonomous ? flagOptions.timeout! * 1000 : undefined,
+		providerBaseUrl: flagOptions.providerBaseUrl,
 	}
 
 	if (isOnboardingEnabled) {
@@ -193,54 +257,54 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		console.error(`[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.`)
 		console.error(`[CLI] For ${extensionHostOptions.provider}, set ${getEnvVarName(extensionHostOptions.provider)}`)
 
-		process.exit(1)
+		exitValidation(`No API key provided for ${extensionHostOptions.provider}`)
 	}
 
 	if (!fs.existsSync(extensionHostOptions.workspacePath)) {
 		console.error(`[CLI] Error: Workspace path does not exist: ${extensionHostOptions.workspacePath}`)
-		process.exit(1)
+		exitValidation(`Workspace path does not exist: ${extensionHostOptions.workspacePath}`)
 	}
 
 	if (extensionHostOptions.reasoningEffort && !REASONING_EFFORTS.includes(extensionHostOptions.reasoningEffort)) {
 		console.error(
 			`[CLI] Error: Invalid reasoning effort: ${extensionHostOptions.reasoningEffort}, must be one of: ${REASONING_EFFORTS.join(", ")}`,
 		)
-		process.exit(1)
+		exitValidation(`Invalid reasoning effort: ${extensionHostOptions.reasoningEffort}`)
 	}
 
 	// Validate output format
-	const outputFormat: OutputFormat = (flagOptions.outputFormat as OutputFormat) || "text"
+	const outputFormat: OutputFormat = requestedOutputFormat
 
 	if (!isValidOutputFormat(outputFormat)) {
 		console.error(
 			`[CLI] Error: Invalid output format: ${flagOptions.outputFormat}; must be one of: text, json, stream-json`,
 		)
-		process.exit(1)
+		exitValidation(`Invalid output format: ${flagOptions.outputFormat}`)
 	}
 
 	// Output format only works with --print mode
 	if (outputFormat !== "text" && !flagOptions.print && isTuiSupported) {
 		console.error("[CLI] Error: --output-format requires --print mode")
 		console.error("[CLI] Usage: roo --print --output-format json")
-		process.exit(1)
+		exitValidation("--output-format requires --print mode")
 	}
 
 	if (flagOptions.stdinPromptStream && !flagOptions.print) {
 		console.error("[CLI] Error: --stdin-prompt-stream requires --print mode")
 		console.error("[CLI] Usage: roo --print --output-format stream-json --stdin-prompt-stream [options]")
-		process.exit(1)
+		exitValidation("--stdin-prompt-stream requires --print mode")
 	}
 
 	if (flagOptions.signalOnlyExit && !flagOptions.stdinPromptStream) {
 		console.error("[CLI] Error: --signal-only-exit requires --stdin-prompt-stream")
 		console.error("[CLI] Usage: roo --print --output-format stream-json --stdin-prompt-stream --signal-only-exit")
-		process.exit(1)
+		exitValidation("--signal-only-exit requires --stdin-prompt-stream")
 	}
 
 	if (flagOptions.stdinPromptStream && outputFormat !== "stream-json") {
 		console.error("[CLI] Error: --stdin-prompt-stream requires --output-format=stream-json")
 		console.error("[CLI] Usage: roo --print --output-format stream-json --stdin-prompt-stream [options]")
-		process.exit(1)
+		exitValidation("--stdin-prompt-stream requires --output-format=stream-json")
 	}
 
 	if (flagOptions.stdinPromptStream && process.stdin.isTTY) {
@@ -248,19 +312,19 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		console.error(
 			'[CLI] Example: printf \'{"command":"start","requestId":"1","prompt":"1+1=?"}\\n\' | roo --print --output-format stream-json --stdin-prompt-stream [options]',
 		)
-		process.exit(1)
+		exitValidation("--stdin-prompt-stream requires piped stdin")
 	}
 
 	if (flagOptions.stdinPromptStream && prompt) {
 		console.error("[CLI] Error: cannot use positional prompt or --prompt-file with --stdin-prompt-stream")
 		console.error("[CLI] Usage: roo --print --output-format stream-json --stdin-prompt-stream [options]")
-		process.exit(1)
+		exitValidation("cannot use a prompt with --stdin-prompt-stream")
 	}
 
 	if (flagOptions.stdinPromptStream && requestedCreateSessionId) {
 		console.error("[CLI] Error: --create-with-session-id is not supported with --stdin-prompt-stream")
 		console.error('[CLI] Use per-request "taskId" in stdin start commands instead.')
-		process.exit(1)
+		exitValidation("--create-with-session-id is not supported with --stdin-prompt-stream")
 	}
 
 	const useStdinPromptStream = flagOptions.stdinPromptStream
@@ -273,7 +337,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
 			console.error(`[CLI] Error: ${message}`)
-			process.exit(1)
+			exitValidation(message)
 		}
 	}
 
@@ -291,7 +355,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 				console.error("[CLI] Run without -p for interactive mode")
 			}
 
-			process.exit(1)
+			exitValidation("no prompt provided")
 		}
 
 		if (!flagOptions.print) {
@@ -326,7 +390,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 				console.error(error.stack)
 			}
 
-			process.exit(1)
+			exitValidation("failed to start TUI")
 		}
 	} else {
 		const useJsonOutput = outputFormat === "json" || outputFormat === "stream-json"
@@ -344,8 +408,24 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 			? new JsonEventEmitter({
 					mode: outputFormat as "json" | "stream-json",
 					requestIdProvider: () => streamRequestId,
+					authoritativeCompletion: autonomous,
 				})
 			: null
+		let terminalEmitted = false
+
+		const emitAutonomousTerminal = (
+			state: AutonomousTerminalState,
+			content?: string,
+			rootTaskId?: string,
+			exitCode = AUTONOMOUS_EXIT_CODES[state],
+		) => {
+			if (!autonomous || terminalEmitted) return
+			terminalEmitted = true
+			jsonEmitter?.emitTerminal({ state, exitCode, content, rootTaskId })
+			if (!useJsonOutput && state !== "completed") {
+				console.error(`[CLI] ${state}: ${content || state}`)
+			}
+		}
 
 		const emitRuntimeError = (error: Error, source?: string) => {
 			const errorMessage = source ? `${source}: ${error.message}` : error.message
@@ -409,10 +489,20 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		}
 
 		const onSigint = () => {
+			if (isShuttingDown) {
+				process.off("SIGINT", onSigint)
+				process.kill(process.pid, "SIGINT")
+				return
+			}
 			void shutdown("SIGINT", 130)
 		}
 
 		const onSigterm = () => {
+			if (isShuttingDown) {
+				process.off("SIGTERM", onSigterm)
+				process.kill(process.pid, "SIGTERM")
+				return
+			}
 			void shutdown("SIGTERM", 143)
 		}
 
@@ -427,13 +517,13 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 				return
 			}
 
-			emitRuntimeError(error, "uncaughtException")
+			if (!autonomous) emitRuntimeError(error, "uncaughtException")
 
 			if (signalOnlyExit) {
 				return
 			}
 
-			void shutdown("uncaughtException", 1)
+			void shutdown("uncaughtException", AUTONOMOUS_EXIT_CODES.crashed, "crashed", error.message)
 		}
 
 		const onUnhandledRejection = (reason: unknown) => {
@@ -448,13 +538,13 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 			}
 
 			const error = normalizeError(reason)
-			emitRuntimeError(error, "unhandledRejection")
+			if (!autonomous) emitRuntimeError(error, "unhandledRejection")
 
 			if (signalOnlyExit) {
 				return
 			}
 
-			void shutdown("unhandledRejection", 1)
+			void shutdown("unhandledRejection", AUTONOMOUS_EXIT_CODES.crashed, "crashed", error.message)
 		}
 
 		const parkUntilSignal = async (reason: string): Promise<never> => {
@@ -468,14 +558,17 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 			throw new Error("unreachable")
 		}
 
-		async function shutdown(signal: string, exitCode: number): Promise<void> {
+		async function shutdown(
+			signal: string,
+			exitCode: number,
+			terminalState: AutonomousTerminalState = "cancelled",
+			terminalContent = `Received ${signal}`,
+		): Promise<void> {
 			if (isShuttingDown) {
 				return
 			}
 
 			isShuttingDown = true
-			process.off("SIGINT", onSigint)
-			process.off("SIGTERM", onSigterm)
 			process.off("uncaughtException", onUncaughtException)
 			process.off("unhandledRejection", onUnhandledRejection)
 			clearKeepAliveInterval()
@@ -484,11 +577,15 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 				console.log(`\n[CLI] Received ${signal}, shutting down...`)
 			}
 
+			await host.cancelTask().catch(() => undefined)
+			emitAutonomousTerminal(terminalState, terminalContent, host.getRootTaskId(), exitCode)
 			await disposeHost()
 			if (jsonEmitter) {
 				await jsonEmitter.flush()
 			}
 			await flushStdout()
+			process.off("SIGINT", onSigint)
+			process.off("SIGTERM", onSigterm)
 			process.exit(exitCode)
 		}
 
@@ -526,6 +623,9 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 				} else {
 					await host.runTask(prompt!, requestedCreateSessionId)
 				}
+				if (isShuttingDown) await new Promise<void>(() => {})
+				const taskResult = host.getLastTaskResult()
+				emitAutonomousTerminal("completed", taskResult?.result, taskResult?.rootTaskId)
 			}
 
 			await disposeHost()
@@ -544,7 +644,12 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 			process.off("unhandledRejection", onUnhandledRejection)
 			process.exit(0)
 		} catch (error) {
-			emitRuntimeError(normalizeError(error))
+			if (isShuttingDown) await new Promise<void>(() => {})
+			const normalizedError = normalizeError(error)
+			const state = error instanceof AutonomousRunError ? error.state : "crashed"
+			emitAutonomousTerminal(state, normalizedError.message, host.getRootTaskId())
+			if (!autonomous) emitRuntimeError(normalizedError)
+			await host.cancelTask().catch(() => undefined)
 			await disposeHost()
 			if (jsonEmitter) {
 				await jsonEmitter.flush()
@@ -559,7 +664,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 			process.off("SIGTERM", onSigterm)
 			process.off("uncaughtException", onUncaughtException)
 			process.off("unhandledRejection", onUnhandledRejection)
-			process.exit(1)
+			process.exit(autonomous ? AUTONOMOUS_EXIT_CODES[state] : 1)
 		}
 	}
 }

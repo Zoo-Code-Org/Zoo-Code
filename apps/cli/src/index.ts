@@ -1,6 +1,5 @@
 import { Command } from "commander"
 
-import { DEFAULT_FLAGS } from "@/types/constants.js"
 import { VERSION } from "@/lib/utils/version.js"
 import { run, logout, status, listCommands, listModes, listModels, listSessions, upgrade } from "@/commands/index.js"
 
@@ -34,15 +33,17 @@ program
 	.option("-e, --extension <path>", "Path to the extension bundle directory")
 	.option("-d, --debug", "Enable debug output (includes detailed debug information)", false)
 	.option("-a, --require-approval", "Require manual approval for actions", false)
+	.option("--autonomous", "DANGEROUS: run an unrestricted headless root task in effective Orchestrator mode", false)
+	.option("--timeout <seconds>", "Autonomous root-tree wall-clock timeout in seconds", (value) => Number(value))
 	.option("-k, --api-key <key>", "API key for the LLM provider")
 	.option("--provider <provider>", "API provider (anthropic, openai-native, gemini, openrouter, etc.)")
-	.option("-m, --model <model>", "Model to use", DEFAULT_FLAGS.model)
-	.option("--mode <mode>", "Mode to start in (code, architect, ask, debug, etc.)", DEFAULT_FLAGS.mode)
+	.option("-m, --model <model>", "Model to use")
+	.option("--mode <mode>", "Mode to start in (code, architect, ask, debug, etc.)")
+	.option("--provider-base-url <url>", "Provider endpoint override (OpenRouter only in this draft)")
 	.option("--terminal-shell <path>", "Absolute path to shell executable for inline terminal commands")
 	.option(
 		"-r, --reasoning-effort <effort>",
 		"Reasoning effort level (unspecified, disabled, none, minimal, low, medium, high, xhigh)",
-		DEFAULT_FLAGS.reasoningEffort,
 	)
 	.option(
 		"--consecutive-mistake-limit <limit>",

@@ -5,7 +5,11 @@ import type { TaskCompletedEvent } from "../events.js"
 import { JsonEventEmitter } from "../json-event-emitter.js"
 import { AgentLoopState, type AgentStateInfo } from "../agent-state.js"
 
-function createMockStdout(): { stdout: NodeJS.WriteStream; lines: () => Record<string, unknown>[] } {
+function createMockStdout(): {
+	stdout: NodeJS.WriteStream
+	lines: () => Record<string, unknown>[]
+	content: () => string
+} {
 	const chunks: string[] = []
 
 	const writable = new Writable({
@@ -22,7 +26,7 @@ function createMockStdout(): { stdout: NodeJS.WriteStream; lines: () => Record<s
 			.filter((line) => line.length > 0)
 			.map((line) => JSON.parse(line) as Record<string, unknown>)
 
-	return { stdout: writable, lines }
+	return { stdout: writable, lines, content: () => chunks.join("") }
 }
 
 function emitMessage(emitter: JsonEventEmitter, message: ClineMessage): void {
@@ -63,6 +67,43 @@ function createCompletedStateInfo(message: ClineMessage): AgentStateInfo {
 }
 
 describe("JsonEventEmitter result emission", () => {
+	it("emits exactly one authoritative autonomous terminal outcome", () => {
+		const { stdout, lines } = createMockStdout()
+		const emitter = new JsonEventEmitter({ mode: "stream-json", stdout, authoritativeCompletion: true })
+
+		emitter.emitTerminal({ state: "needs_input", exitCode: 2, rootTaskId: "root-1", content: "question" })
+		emitter.emitTerminal({ state: "crashed", exitCode: 70, content: "duplicate" })
+
+		expect(lines()).toEqual([
+			expect.objectContaining({
+				type: "result",
+				subtype: "terminal",
+				state: "needs_input",
+				exitCode: 2,
+				rootTaskId: "root-1",
+				done: true,
+				success: false,
+			}),
+		])
+	})
+
+	it("uses the terminal discriminator for aggregate JSON output", () => {
+		const { stdout, content } = createMockStdout()
+		const emitter = new JsonEventEmitter({ mode: "json", stdout, authoritativeCompletion: true })
+
+		emitter.emitTerminal({ state: "completed", exitCode: 0, rootTaskId: "root-1", content: "done" })
+
+		expect(JSON.parse(content())).toEqual(
+			expect.objectContaining({
+				type: "result",
+				subtype: "terminal",
+				done: true,
+				state: "completed",
+				exitCode: 0,
+			}),
+		)
+	})
+
 	it("prefers current completion message content over stale cached completion text", () => {
 		const { stdout, lines } = createMockStdout()
 		const emitter = new JsonEventEmitter({ mode: "stream-json", stdout })

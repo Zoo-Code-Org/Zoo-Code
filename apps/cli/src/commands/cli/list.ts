@@ -122,6 +122,7 @@ async function createListHost(options: BaseListOptions, hostOptions: ListHostOpt
 		exitOnComplete: true,
 		exitOnError: false,
 		disableOutput: true,
+		disableAskHandling: true,
 	}
 
 	const host = new ExtensionHost(extensionHostOptions)
