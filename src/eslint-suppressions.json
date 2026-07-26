@@ -1706,7 +1706,7 @@
 	},
 	"utils/__tests__/shell.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 46
+			"count": 35
 		}
 	},
 	"utils/__tests__/storage.spec.ts": {
