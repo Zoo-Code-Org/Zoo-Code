@@ -2,6 +2,405 @@ import fs from "fs"
 import path from "path"
 import os from "os"
 
+import type { FlagOptions } from "@/types/index.js"
+import { run } from "../run.js"
+
+vi.mock("@roo-code/vscode-shim", () => ({
+	setLogger: vi.fn(),
+}))
+
+vi.mock("@/lib/storage/index.js", () => ({
+	loadSettings: vi.fn(() => Promise.resolve({})),
+}))
+
+vi.mock("@/lib/task-history/index.js", () => ({
+	readWorkspaceTaskSessions: vi.fn(() => Promise.resolve([])),
+	resolveWorkspaceResumeSessionId: vi.fn(() => "test-session-id"),
+}))
+
+vi.mock("@/lib/utils/onboarding.js", () => ({
+	runOnboarding: vi.fn(() => Promise.resolve()),
+}))
+
+vi.mock("@/lib/utils/shell.js", () => ({
+	validateTerminalShellPath: vi.fn(() => Promise.resolve({ valid: false, reason: "test" })),
+}))
+
+vi.mock("@/agent/index.js", () => ({
+	ExtensionHost: vi.fn(function (this: any) {
+		this.activate = vi.fn(() => Promise.resolve())
+		this.client = { hasActiveTask: vi.fn(() => false) }
+		this.dispose = vi.fn(() => Promise.resolve())
+		this.cancelTask = vi.fn(() => Promise.resolve())
+		this.getRootTaskId = vi.fn(() => "test-root-id")
+		this.getLastTaskResult = vi.fn(() => ({ result: "success", rootTaskId: "test-root-id" }))
+		this.sendToExtension = vi.fn(() => Promise.resolve())
+		this.isWaitingForInput = vi.fn(() => false)
+		this.runTask = vi.fn(() => Promise.resolve())
+		this.resumeTask = vi.fn(() => Promise.resolve())
+		return this
+	}),
+}))
+
+describe("run command validation", () => {
+	let tempDir: string
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>
+	const originalEnv = { ...process.env }
+
+	beforeEach(() => {
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli-test-"))
+		vi.spyOn(process, "exit").mockImplementation((code?: string | number) => {
+			throw new Error(`process.exit: ${code}`)
+		})
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		process.env.OPENROUTER_API_KEY = "test-key"
+	})
+
+	afterEach(() => {
+		fs.rmSync(tempDir, { recursive: true, force: true })
+		vi.restoreAllMocks()
+		process.env = { ...originalEnv }
+	})
+
+	describe("session ID validation", () => {
+		it("should reject empty --session-id", async () => {
+			const flags: FlagOptions = { sessionId: "" }
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: --session-id requires a non-empty session id",
+			)
+		})
+
+		it("should reject invalid --session-id format", async () => {
+			const flags: FlagOptions = { sessionId: "not-a-uuid" }
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: --session-id must be a valid UUID session id",
+			)
+		})
+
+		it("should reject empty --create-with-session-id", async () => {
+			const flags: FlagOptions = { createWithSessionId: "" }
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: --create-with-session-id requires a non-empty session id",
+			)
+		})
+
+		it("should reject invalid --create-with-session-id format", async () => {
+			const flags: FlagOptions = { createWithSessionId: "not-a-uuid" }
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: --create-with-session-id must be a valid UUID session id",
+			)
+		})
+
+		it("should reject --create-with-session-id with --session-id", async () => {
+			const validUuid = "123e4567-e89b-12d3-a456-426614174000"
+			const flags: FlagOptions = {
+				createWithSessionId: validUuid,
+				sessionId: validUuid,
+			}
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: cannot use --create-with-session-id with --session-id/--continue",
+			)
+		})
+
+		it("should reject --session-id with --continue", async () => {
+			const validUuid = "123e4567-e89b-12d3-a456-426614174000"
+			const flags: FlagOptions = {
+				sessionId: validUuid,
+				continue: true,
+			}
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: cannot use --session-id with --continue")
+		})
+
+		it("should reject prompt with resume flags", async () => {
+			const validUuid = "123e4567-e89b-12d3-a456-426614174000"
+			const flags: FlagOptions = { sessionId: validUuid }
+
+			await expect(run("test prompt", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: cannot use prompt or --prompt-file with --session-id/--continue",
+			)
+		})
+	})
+
+	describe("provider validation", () => {
+		it("should reject invalid provider", async () => {
+			const flags: FlagOptions = {
+				provider: "invalid-provider" as any,
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[CLI] Error: Invalid provider: invalid-provider"),
+			)
+		})
+
+		it("should reject missing API key", async () => {
+			delete process.env.OPENROUTER_API_KEY
+			const flags: FlagOptions = { print: true }
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: No API key provided. Use --api-key or set the appropriate environment variable.",
+			)
+		})
+	})
+
+	describe("autonomous mode validation", () => {
+		it("should reject autonomous without workspace in non-cwd scenario", async () => {
+			const nonExistentPath = path.join(tempDir, "nonexistent")
+			const flags: FlagOptions = {
+				autonomous: true,
+				workspace: nonExistentPath,
+				timeout: 60,
+				outputFormat: "json",
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 78")
+		})
+
+		it("should reject autonomous with non-directory workspace", async () => {
+			const filePath = path.join(tempDir, "file.txt")
+			fs.writeFileSync(filePath, "content")
+			const flags: FlagOptions = {
+				autonomous: true,
+				workspace: filePath,
+				timeout: 60,
+				outputFormat: "json",
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 78")
+		})
+
+		it("should enforce orchestrator mode in autonomous", async () => {
+			const flags: FlagOptions = {
+				autonomous: true,
+				mode: "code" as any,
+				workspace: tempDir,
+				timeout: 60,
+				outputFormat: "json",
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 78")
+		})
+
+		it("should reject autonomous without timeout", async () => {
+			const flags: FlagOptions = {
+				autonomous: true,
+				workspace: tempDir,
+				outputFormat: "json",
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 78")
+		})
+	})
+
+	describe("output format validation", () => {
+		it("should reject invalid output format", async () => {
+			const flags: FlagOptions = {
+				outputFormat: "invalid" as any,
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[CLI] Error: Invalid output format"),
+			)
+		})
+
+		it("should require --print with non-text output format in TTY", async () => {
+			// Mock TTY
+			Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true })
+			Object.defineProperty(process.stdout, "isTTY", { value: true, configurable: true })
+
+			const flags: FlagOptions = {
+				outputFormat: "json",
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --output-format requires --print mode")
+		})
+	})
+
+	describe("stdin stream validation", () => {
+		it("should reject --stdin-prompt-stream without --print", async () => {
+			const flags: FlagOptions = {
+				stdinPromptStream: true,
+			}
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --stdin-prompt-stream requires --print mode")
+		})
+
+		it("should reject --stdin-prompt-stream with wrong output format", async () => {
+			const flags: FlagOptions = {
+				stdinPromptStream: true,
+				print: true,
+				outputFormat: "json",
+			}
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: --stdin-prompt-stream requires --output-format=stream-json",
+			)
+		})
+
+		it("should reject --signal-only-exit without --stdin-prompt-stream", async () => {
+			const flags: FlagOptions = {
+				signalOnlyExit: true,
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: --signal-only-exit requires --stdin-prompt-stream",
+			)
+		})
+
+		it("should reject --stdin-prompt-stream with TTY stdin", async () => {
+			Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true })
+
+			const flags: FlagOptions = {
+				stdinPromptStream: true,
+				print: true,
+				outputFormat: "stream-json",
+			}
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: --stdin-prompt-stream requires piped stdin",
+			)
+		})
+
+		it("should reject prompt with --stdin-prompt-stream", async () => {
+			Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true })
+
+			const flags: FlagOptions = {
+				stdinPromptStream: true,
+				print: true,
+				outputFormat: "stream-json",
+			}
+
+			await expect(run("test prompt", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: cannot use positional prompt or --prompt-file with --stdin-prompt-stream",
+			)
+		})
+
+		it("should reject --create-with-session-id with --stdin-prompt-stream", async () => {
+			Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true })
+
+			const validUuid = "123e4567-e89b-12d3-a456-426614174000"
+			const flags: FlagOptions = {
+				stdinPromptStream: true,
+				print: true,
+				outputFormat: "stream-json",
+				createWithSessionId: validUuid,
+			}
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CLI] Error: --create-with-session-id is not supported with --stdin-prompt-stream",
+			)
+		})
+	})
+
+	describe("consecutive mistake limit validation", () => {
+		it("should reject negative consecutive mistake limit", async () => {
+			const flags: FlagOptions = {
+				consecutiveMistakeLimit: -1,
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[CLI] Error: Invalid consecutive mistake limit"),
+			)
+		})
+
+		it("should reject non-integer consecutive mistake limit", async () => {
+			const flags: FlagOptions = {
+				consecutiveMistakeLimit: 1.5,
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[CLI] Error: Invalid consecutive mistake limit"),
+			)
+		})
+	})
+
+	describe("reasoning effort validation", () => {
+		it("should reject invalid reasoning effort", async () => {
+			const flags: FlagOptions = {
+				reasoningEffort: "invalid" as any,
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[CLI] Error: Invalid reasoning effort"),
+			)
+		})
+	})
+
+	describe("workspace validation", () => {
+		it("should reject non-existent workspace path", async () => {
+			const flags: FlagOptions = {
+				workspace: "/nonexistent/path",
+				print: true,
+			}
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[CLI] Error: Workspace path does not exist"),
+			)
+		})
+	})
+
+	describe("prompt file validation", () => {
+		it("should reject non-existent prompt file", async () => {
+			const flags: FlagOptions = {
+				promptFile: path.join(tempDir, "nonexistent.txt"),
+				print: true,
+			}
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[CLI] Error: Prompt file does not exist"),
+			)
+		})
+	})
+
+	describe("no prompt validation", () => {
+		it("should reject missing prompt in print mode", async () => {
+			const flags: FlagOptions = {
+				print: true,
+			}
+
+			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: no prompt provided")
+		})
+	})
+})
+
 describe("run command --prompt-file option", () => {
 	let tempDir: string
 	let promptFilePath: string
