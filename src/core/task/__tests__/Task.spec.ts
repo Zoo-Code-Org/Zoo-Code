@@ -187,21 +187,16 @@ vi.mock("../../environment/getEnvironmentDetails", () => ({
 
 vi.mock("../../ignore/RooIgnoreController")
 
-// i18n is not initialized in this suite, so the real t() returns the raw translation key.
-// Interpolate just the missing-parameter keys so tests can assert on the resolved, user-facing
-// copy; every other key is delegated to the real t() to keep the rest of the suite unchanged.
-vi.mock("../../../i18n", async (importOriginal) => {
-	const actual = (await importOriginal()) as typeof import("../../../i18n")
+vi.mock("../../../i18n", () => {
 	return {
-		...actual,
 		t: (key: string, args?: Record<string, unknown>) => {
 			if (key === "tools:missingToolParameterWithPath") {
-				return `Zoo tried to use ${args?.toolName} for '${args?.relPath}' without value for required parameter '${args?.paramName}'. Retrying...`
+				return `${args?.toolName}|${args?.relPath}|${args?.paramName}`
 			}
 			if (key === "tools:missingToolParameter") {
-				return `Zoo tried to use ${args?.toolName} without value for required parameter '${args?.paramName}'. Retrying...`
+				return `${args?.toolName}|${args?.paramName}`
 			}
-			return actual.t(key, args)
+			return key
 		},
 	}
 })
