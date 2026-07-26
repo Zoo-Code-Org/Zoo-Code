@@ -56,12 +56,6 @@ const binName = isWindows ? "rg.exe" : "rg"
 // bin/<platform>-<arch>/ rather than directly in bin/.
 const ripgrepUniversalBinDir = `bin/${process.platform}-${process.arch}`
 
-// @vscode/ripgrep >=1.18 ships the binary in a platform-specific optional
-// package (e.g. @vscode/ripgrep-win32-x64). Matches the wrapper's own arch
-// selection: process.env.npm_config_arch || process.arch.
-const platformPkgArch = process.env.npm_config_arch || process.arch
-const ripgrepPlatformPkg = `@vscode/ripgrep-${process.platform}-${platformPkgArch}`
-
 interface SearchFileResult {
 	file: string
 	searchResults: SearchResult[]
@@ -96,6 +90,9 @@ export function truncateLine(line: string, maxLength: number = MAX_LINE_LENGTH):
  * resolution) and the diagnostic command (existence report for all paths).
  */
 export function ripgrepCandidatePaths(vscodeAppRoot: string): readonly string[] {
+	// Read at call time so process.env.npm_config_arch overrides take effect,
+	// matching @vscode/ripgrep's own arch selection logic.
+	const platformPkg = `@vscode/ripgrep-${process.platform}-${process.env.npm_config_arch || process.arch}`
 	return [
 		path.join(vscodeAppRoot, "node_modules/@vscode/ripgrep/bin/", binName),
 		path.join(vscodeAppRoot, "node_modules/vscode-ripgrep/bin", binName),
@@ -108,8 +105,8 @@ export function ripgrepCandidatePaths(vscodeAppRoot: string): readonly string[] 
 			binName,
 		),
 		// @vscode/ripgrep >=1.18 (VS Code 1.130+): binary lives in a platform-specific optional package.
-		path.join(vscodeAppRoot, `node_modules/${ripgrepPlatformPkg}/bin`, binName),
-		path.join(vscodeAppRoot, `node_modules.asar.unpacked/${ripgrepPlatformPkg}/bin`, binName),
+		path.join(vscodeAppRoot, `node_modules/${platformPkg}/bin`, binName),
+		path.join(vscodeAppRoot, `node_modules.asar.unpacked/${platformPkg}/bin`, binName),
 	]
 }
 

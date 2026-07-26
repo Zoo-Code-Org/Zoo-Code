@@ -451,9 +451,17 @@ describe("getEnvironmentDetails", () => {
 	// When ripgrep cannot be found (e.g. @vscode/ripgrep >=1.18 platform layout on
 	// Windows), listFiles throws "Could not find ripgrep binary". getEnvironmentDetails
 	// must not propagate this — the task should proceed to the API call, not hang at 0%.
-	it("should not throw when listFiles rejects with ripgrep not found", async () => {
+	it("should degrade gracefully when listFiles rejects with an Error", async () => {
 		;(listFiles as Mock).mockRejectedValue(new Error("Could not find ripgrep binary"))
 
-		await expect(getEnvironmentDetails(mockCline as Task, true)).resolves.not.toThrow()
+		const result = await getEnvironmentDetails(mockCline as Task, true)
+		expect(result).toContain("File listing unavailable: Could not find ripgrep binary")
+	})
+
+	it("should degrade gracefully when listFiles rejects with a non-Error value", async () => {
+		;(listFiles as Mock).mockRejectedValue("unexpected string rejection")
+
+		const result = await getEnvironmentDetails(mockCline as Task, true)
+		expect(result).toContain("File listing unavailable: unexpected string rejection")
 	})
 })
