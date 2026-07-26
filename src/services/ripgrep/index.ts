@@ -118,7 +118,8 @@ export function resolvePlatformRipgrepPath(vscodeAppRoot: string): string | unde
 		const requireFromApp = createRequire(path.join(vscodeAppRoot, "package.json"))
 		const wrapperEntry = requireFromApp.resolve("@vscode/ripgrep")
 		const requireFromWrapper = createRequire(wrapperEntry)
-		return requireFromWrapper.resolve(`@vscode/ripgrep-${process.platform}-${process.arch}/bin/${binName}`)
+		const arch = process.env.npm_config_arch || process.arch
+		return requireFromWrapper.resolve(`@vscode/ripgrep-${process.platform}-${arch}/bin/${binName}`)
 	} catch {
 		return undefined
 	}
