@@ -1,6 +1,5 @@
 import type { ClineMessage } from "@roo-code/types"
 import { Writable } from "stream"
-import { vi } from "vitest"
 
 import type { TaskCompletedEvent } from "../events.js"
 import { JsonEventEmitter } from "../json-event-emitter.js"

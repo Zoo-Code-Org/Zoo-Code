@@ -942,7 +942,7 @@ describe("ExtensionHost", () => {
 		it("should set ROO_CLI_AUTONOMOUS environment variable when autonomous is true", () => {
 			const originalValue = process.env.ROO_CLI_AUTONOMOUS
 
-			const host = createTestHost({ autonomous: true })
+			createTestHost({ autonomous: true })
 
 			expect(process.env.ROO_CLI_AUTONOMOUS).toBe("1")
 
@@ -958,7 +958,7 @@ describe("ExtensionHost", () => {
 			const originalValue = process.env.ROO_CLI_AUTONOMOUS
 			delete process.env.ROO_CLI_AUTONOMOUS
 
-			const host = createTestHost({ autonomous: false })
+			createTestHost({ autonomous: false })
 
 			expect(process.env.ROO_CLI_AUTONOMOUS).toBeUndefined()
 
