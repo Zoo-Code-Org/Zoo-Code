@@ -13,6 +13,9 @@ import type { ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../sha
 
 import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
+import { NativeToolCallParser, type NativeToolParseFailure } from "./NativeToolCallParser"
+import { selectExecutableCall } from "./ToolCallRetentionPolicy"
+import { resolveToolCallPolicy } from "../../api"
 
 import { listFilesTool } from "../tools/ListFilesTool"
 import { readFileTool } from "../tools/ReadFileTool"
@@ -439,6 +442,103 @@ export async function presentAssistantMessage(cline: Task) {
 					})
 
 					break
+				}
+			}
+
+			// Max-one enforcement: under a single-call policy, at most one
+			// structurally valid call may execute per assistant turn. If two
+			// or more valid side-effecting calls arrive, neither auto-executes
+			// — both receive error results instructing the model to resubmit
+			// one call. This prevents ambiguous side-effect ordering when a
+			// provider violates the single-call contract.
+			//
+			// This gate runs AFTER the malformed-call check above (which
+			// handles calls without nativeArgs). Only calls that passed
+			// structural validation reach this point.
+			if (!block.partial) {
+				const resolvedPolicy = resolveToolCallPolicy(
+					cline.api.getModel().info,
+					(cline as unknown as { apiConfiguration?: { apiProvider?: string } }).apiConfiguration
+						?.apiProvider,
+				)
+
+				if (resolvedPolicy.maxCallsPerTurn === 1) {
+					// Collect all tool_use blocks in this assistant turn to
+					// evaluate how many valid candidates exist.
+					const allCalls = cline.assistantMessageContent
+						.filter(
+							(b: AssistantMessageContent): b is ToolUse =>
+								b.type === "tool_use",
+						)
+						.map((b: ToolUse) => ({
+							callId: b.id ?? "",
+							toolName: b.name,
+							hasNativeArgs: b.nativeArgs !== undefined,
+							isPartial: b.partial,
+						}))
+
+					const selection = selectExecutableCall({
+						calls: allCalls,
+						maxCallsPerTurn: 1,
+					})
+
+					// If this call is in the rejected list (multiple valid
+					// candidates under single policy), emit an error result
+					// instead of executing.
+					if (selection.rejectedCallIds.includes(toolCallId)) {
+						const maxOneErrorMessage =
+							`Multiple valid tool calls were emitted in a single turn under a single-call policy. ` +
+							`This call was not executed to prevent ambiguous side-effect ordering. ` +
+							`Please resubmit only one tool call per turn. ` +
+							`[POLICY/max-one-enforcement/001]`
+
+						cline.consecutiveMistakeCount++
+						try {
+							cline.recordToolError(block.name as ToolName, maxOneErrorMessage)
+						} catch (recordErr) {
+							console.warn(
+								"[ErrorInterception] Failed to record tool error:",
+								recordErr instanceof Error ? recordErr.message : recordErr,
+							)
+						}
+
+						const maxOneGuided = interceptor.transformError(cline, {
+							source: "parser",
+							stage: "parse",
+							taskId: cline.taskId,
+							toolCallId,
+							toolName: block.name,
+							metadata: {
+								maxOneEnforcement: true,
+								reason: selection.reason,
+								rejectedCallCount: selection.rejectedCallIds.length,
+							},
+						})
+
+						const maxOneBase = maxOneGuided ?? formatResponse.toolError(maxOneErrorMessage)
+						const maxOneUserMessage = maxOneGuided
+							? `${getErrorTitleFromGuided(maxOneGuided)}\n\n${maxOneGuided}`
+							: maxOneErrorMessage
+						await cline.say("error", maxOneUserMessage)
+						cline.pushToolResultToUserContent({
+							type: "tool_result",
+							tool_use_id: sanitizeToolUseId(toolCallId),
+							content: maxOneBase,
+							is_error: true,
+						})
+
+						break
+					}
+
+					// If a different call was selected as the executable one,
+					// this call should not execute. However, since execution is
+					// serial and each call is processed in order, the selected
+					// call will execute when its own block is processed. If
+					// this is NOT the selected call but is valid, it means
+					// another valid call exists — but selectExecutableCall
+					// would have put both in rejectedCallIds. So if we reach
+					// here with an executableCallId that is not ours, it's a
+					// single-candidate scenario where we are that candidate.
 				}
 			}
 

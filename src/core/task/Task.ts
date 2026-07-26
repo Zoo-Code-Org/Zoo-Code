@@ -106,6 +106,7 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
+import { classifyStreamedCall, isProvablyEmptyGhost } from "../assistant-message/ToolCallRetentionPolicy"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -2925,6 +2926,57 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											}
 										}
 									} else if (event.type === "tool_call_end") {
+										// Ghost quarantine: inspect streaming state BEFORE
+										// finalizeStreamingToolCall() (which deletes it).
+										// A "ghost" is a call with no resolved tool name and no
+										// non-whitespace argument bytes at stream completion.
+										// Such calls are transport artifacts, not model intent,
+										// and must be silently dropped BEFORE insertion into
+										// assistantMessageContent or conversation history.
+										//
+										// A named call (even with `{}` args) is NOT a ghost —
+										// it is a malformed named call that must receive a
+										// tool_result. A call with any argument bytes is NOT a
+										// ghost — it carries partial model intent.
+										const preFinalizeState = NativeToolCallParser.getStreamingToolCallState(event.id)
+										const ghostDisposition = preFinalizeState
+											? classifyStreamedCall({
+													callId: event.id,
+													toolName: preFinalizeState.name,
+													argumentsAccumulator: preFinalizeState.argumentsAccumulator,
+													streamEnded: true,
+												})
+											: undefined
+
+										if (ghostDisposition && isProvablyEmptyGhost(ghostDisposition)) {
+											// Silently drop the ghost: remove its partial block
+											// from assistantMessageContent and discard streaming
+											// state. It will NOT receive a tool_result.
+											const ghostIndex = this.streamingToolCallIndices.get(event.id)
+											if (ghostIndex !== undefined) {
+												// Remove the partial tool_use block that was pushed
+												// at tool_call_start. This is safe because the call
+												// never resolved a name or arguments — it carries
+												// no model intent and has not been presented to the
+												// user as a tool call.
+												this.assistantMessageContent.splice(ghostIndex, 1)
+												// Re-index remaining streaming tool call indices
+												// since we removed an element from the array.
+												for (const [cid, idx] of this.streamingToolCallIndices.entries()) {
+													if (idx > ghostIndex) {
+														this.streamingToolCallIndices.set(cid, idx - 1)
+													}
+												}
+												this.streamingToolCallIndices.delete(event.id)
+											}
+											// Discard streaming state (finalizeStreamingToolCall
+											// would also delete it, but we bypass that path).
+											NativeToolCallParser.discardStreamingToolCall(event.id)
+											// Do NOT call presentAssistantMessageSafe — there is
+											// nothing to present for a ghost.
+											continue
+										}
+
 										// Finalize the streaming tool call
 										const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(event.id)
 
@@ -2977,28 +3029,45 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							case "tool_call": {
 								// Legacy: Handle complete tool calls (for backward compatibility)
+								// Ghost quarantine: classify before any history insertion.
+								// A ghost has no name and no argument bytes — it is a transport
+								// artifact and must be silently dropped before becoming a
+								// tool_use block in assistantMessageContent.
+								const legacyDisposition = classifyStreamedCall({
+									callId: chunk.id ?? "",
+									toolName: chunk.name,
+									argumentsAccumulator: chunk.arguments ?? "",
+									streamEnded: true,
+								})
+	
+								if (isProvablyEmptyGhost(legacyDisposition)) {
+									// Silently drop the ghost. Do not push to
+									// assistantMessageContent, do not present.
+									break
+								}
+	
 								// Convert native tool call to ToolUse format
 								const toolUse = NativeToolCallParser.parseToolCall({
 									id: chunk.id,
 									name: chunk.name as ToolName,
 									arguments: chunk.arguments,
 								})
-
+	
 								if (!toolUse) {
 									console.error(`Failed to parse tool call for task ${this.taskId}:`, chunk)
 									break
 								}
-
+	
 								// Store the tool call ID on the ToolUse object for later reference
 								// This is needed to create tool_result blocks that reference the correct tool_use_id
 								toolUse.id = chunk.id
-
+	
 								// Add the tool use to assistant message content
 								this.assistantMessageContent.push(toolUse)
-
+	
 								// Mark that we have new content to process
 								this.userMessageContentReady = false
-
+	
 								// Present the tool call to user - presentAssistantMessage will execute
 								// tools sequentially and accumulate all results in userMessageContent
 								/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
@@ -3325,55 +3394,86 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This is critical for MCP tools which need tool_call_end events to be properly
 				// converted from ToolUse to McpToolUse via finalizeStreamingToolCall()
 				const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
-				for (const event of finalizeEvents) {
-					if (event.type === "tool_call_end") {
-						// Finalize the streaming tool call
-						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(event.id)
-
-						// Get the index for this tool call
-						const toolUseIndex = this.streamingToolCallIndices.get(event.id)
-
-						if (finalToolUse) {
-							// Store the tool call ID
-							;(finalToolUse as any).id = event.id
-
-							// Get the index and replace partial with final
-							if (toolUseIndex !== undefined) {
-								this.assistantMessageContent[toolUseIndex] = finalToolUse
+					for (const event of finalizeEvents) {
+						if (event.type === "tool_call_end") {
+							// Ghost quarantine (same logic as the streaming tool_call_end
+							// handler above): inspect streaming state BEFORE
+							// finalizeStreamingToolCall() deletes it.
+							const preFinalizeState = NativeToolCallParser.getStreamingToolCallState(event.id)
+							const ghostDisposition = preFinalizeState
+								? classifyStreamedCall({
+										callId: event.id,
+										toolName: preFinalizeState.name,
+										argumentsAccumulator: preFinalizeState.argumentsAccumulator,
+										streamEnded: true,
+									})
+								: undefined
+	
+							if (ghostDisposition && isProvablyEmptyGhost(ghostDisposition)) {
+								// Silently drop the ghost: remove its partial block
+								// from assistantMessageContent and discard streaming
+								// state. It will NOT receive a tool_result.
+								const ghostIndex = this.streamingToolCallIndices.get(event.id)
+								if (ghostIndex !== undefined) {
+									this.assistantMessageContent.splice(ghostIndex, 1)
+									for (const [cid, idx] of this.streamingToolCallIndices.entries()) {
+										if (idx > ghostIndex) {
+											this.streamingToolCallIndices.set(cid, idx - 1)
+										}
+									}
+									this.streamingToolCallIndices.delete(event.id)
+								}
+								NativeToolCallParser.discardStreamingToolCall(event.id)
+								continue
 							}
-
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
-
-							// Mark that we have new content to process
-							this.userMessageContentReady = false
-
-							// Present the finalized tool call
-							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
-							this.presentAssistantMessageSafe()
-						} else if (toolUseIndex !== undefined) {
-							// finalizeStreamingToolCall returned null (malformed JSON or missing args)
-							// We still need to mark the tool as non-partial so it gets executed
-							// The tool's validation will catch any missing required parameters
-							const existingToolUse = this.assistantMessageContent[toolUseIndex]
-							if (existingToolUse && existingToolUse.type === "tool_use") {
-								existingToolUse.partial = false
-								// Ensure it has the ID for native protocol
-								;(existingToolUse as any).id = event.id
+	
+							// Finalize the streaming tool call
+							const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(event.id)
+	
+							// Get the index for this tool call
+							const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+	
+							if (finalToolUse) {
+								// Store the tool call ID
+								;(finalToolUse as any).id = event.id
+	
+								// Get the index and replace partial with final
+								if (toolUseIndex !== undefined) {
+									this.assistantMessageContent[toolUseIndex] = finalToolUse
+								}
+	
+								// Clean up tracking
+								this.streamingToolCallIndices.delete(event.id)
+	
+								// Mark that we have new content to process
+								this.userMessageContentReady = false
+	
+								// Present the finalized tool call
+								/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+								this.presentAssistantMessageSafe()
+							} else if (toolUseIndex !== undefined) {
+								// finalizeStreamingToolCall returned null (malformed JSON or missing args)
+								// We still need to mark the tool as non-partial so it gets executed
+								// The tool's validation will catch any missing required parameters
+								const existingToolUse = this.assistantMessageContent[toolUseIndex]
+								if (existingToolUse && existingToolUse.type === "tool_use") {
+									existingToolUse.partial = false
+									// Ensure it has the ID for native protocol
+									;(existingToolUse as any).id = event.id
+								}
+	
+								// Clean up tracking
+								this.streamingToolCallIndices.delete(event.id)
+	
+								// Mark that we have new content to process
+								this.userMessageContentReady = false
+	
+								// Present the tool call - validation will handle missing params
+								/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+								this.presentAssistantMessageSafe()
 							}
-
-							// Clean up tracking
-							this.streamingToolCallIndices.delete(event.id)
-
-							// Mark that we have new content to process
-							this.userMessageContentReady = false
-
-							// Present the tool call - validation will handle missing params
-							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
-							this.presentAssistantMessageSafe()
 						}
 					}
-				}
 
 				// IMPORTANT: Capture partialBlocks AFTER finalizeRawChunks() to avoid double-presentation.
 				// Tools finalized above are already presented, so we only want blocks still partial after finalization.
