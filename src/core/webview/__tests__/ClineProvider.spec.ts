@@ -12,6 +12,7 @@ import {
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type WebviewMessage,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
@@ -788,7 +789,8 @@ describe("ClineProvider", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 
 		// Get the message handler from onDidReceiveMessage
-		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
+		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as ReturnType<typeof vi.fn>).mock
+			.calls[0][0]
 
 		// Simulate webviewDidLaunch message
 		await messageHandler({ type: "webviewDidLaunch" })
@@ -2391,7 +2393,7 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 		}
 		const provider = createProvider({ getCurrentTask: vi.fn().mockReturnValue(task) })
 
-		await webviewMessageHandler(provider, { type: "terminalOperation", terminalOperation: "continue" } as any)
+		await webviewMessageHandler(provider, { type: "terminalOperation", terminalOperation: "continue" })
 		await webviewMessageHandler(provider, { type: "exportCurrentTask" })
 		await webviewMessageHandler(provider, { type: "showTaskWithId", text: "task-2" })
 		await webviewMessageHandler(provider, { type: "condenseTaskContextRequest", text: "task-2" })
@@ -2592,7 +2594,9 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 			startIndexing: vi.fn().mockRejectedValue(new Error("auto-enable failure")),
 		})
 		Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => workspaceEnabled })
-		const getAllInstances = vi.spyOn(CodeIndexManager, "getAllInstances").mockReturnValue([manager] as any)
+		const getAllInstances = vi
+			.spyOn(CodeIndexManager, "getAllInstances")
+			.mockReturnValue([manager] as unknown as ReturnType<typeof CodeIndexManager.getAllInstances>)
 		const provider = createProvider({
 			getCurrentWorkspaceCodeIndexManager: vi.fn().mockReturnValue(manager),
 		})
@@ -2633,8 +2637,14 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 
 	it("covers changed marketplace error and removal responses", async () => {
 		const provider = createProvider()
-		const item = { id: "item-1" }
-		const options = { target: "project" }
+		const item = {
+			id: "item-1",
+			name: "Item 1",
+			description: "Test marketplace item",
+			type: "mode",
+			content: "slug: item-1",
+		} satisfies NonNullable<WebviewMessage["mpItem"]>
+		const options = { target: "project" } satisfies NonNullable<WebviewMessage["mpInstallOptions"]>
 		const marketplaceManager = {
 			installMarketplaceItem: vi.fn().mockRejectedValue(new Error("install failed")),
 			removeInstalledMarketplaceItem: vi
@@ -2642,27 +2652,30 @@ describe("webviewMessageHandler no-floating-promises coverage", () => {
 				.mockResolvedValueOnce(undefined)
 				.mockRejectedValueOnce(new Error("remove failed")),
 		}
+		const managerArgument = marketplaceManager as unknown as NonNullable<
+			Parameters<typeof webviewMessageHandler>[2]
+		>
 
 		await webviewMessageHandler(
 			provider,
-			{ type: "installMarketplaceItem", mpItem: item, mpInstallOptions: options } as any,
-			marketplaceManager as any,
+			{ type: "installMarketplaceItem", mpItem: item, mpInstallOptions: options },
+			managerArgument,
 		)
 		await webviewMessageHandler(
 			provider,
-			{ type: "removeInstalledMarketplaceItem", mpItem: item, mpInstallOptions: options } as any,
-			marketplaceManager as any,
+			{ type: "removeInstalledMarketplaceItem", mpItem: item, mpInstallOptions: options },
+			managerArgument,
 		)
 		await webviewMessageHandler(
 			provider,
-			{ type: "removeInstalledMarketplaceItem", mpItem: item, mpInstallOptions: options } as any,
-			marketplaceManager as any,
+			{ type: "removeInstalledMarketplaceItem", mpItem: item, mpInstallOptions: options },
+			managerArgument,
 		)
 		await webviewMessageHandler(provider, {
 			type: "removeInstalledMarketplaceItem",
 			mpItem: item,
 			mpInstallOptions: options,
-		} as any)
+		})
 
 		expect(provider.postMessageToWebview).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "marketplaceInstallResult", success: false }),

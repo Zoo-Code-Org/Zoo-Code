@@ -1287,7 +1287,7 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to refresh model cache for ${logBaseUrl}: ${errorMsg}`)
-				provider.postMessageToWebview({
+				await provider.postMessageToWebview({
 					type: "ollamaModels",
 					ollamaModels: {},
 					error: errorMsg,
@@ -1304,7 +1304,7 @@ export const webviewMessageHandler = async (
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to read models for ${logBaseUrl}: ${errorMsg}`)
-				provider.postMessageToWebview({
+				await provider.postMessageToWebview({
 					type: "ollamaModels",
 					ollamaModels: {},
 					error: errorMsg,
