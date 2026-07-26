@@ -398,6 +398,8 @@ export async function getAgentsDirectoriesForCwd(cwd: string): Promise<string[]>
  *   merged: "global content\n\n# Project-specific rules (override global):\n\nproject content"
  * }
  * ```
+ *
+ * @internal
  */
 export async function loadConfiguration(
 	relativePath: string,

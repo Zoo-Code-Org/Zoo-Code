@@ -72,7 +72,7 @@ export function filterNativeToolsForMode(
 	customModes: ModeConfig[] | undefined,
 	experiments: Record<string, boolean> | undefined,
 	codeIndexManager?: CodeIndexManager,
-	settings?: Record<string, any>,
+	settings?: { todoListEnabled?: boolean; disabledTools?: string[]; modelInfo?: ModelInfo },
 	mcpHub?: McpHub,
 	allowedMcpServers?: string[],
 ): OpenAI.Chat.ChatCompletionTool[] {
@@ -82,7 +82,7 @@ export function filterNativeToolsForMode(
 	// set — including the protocol-tool rule: a disabledTools entry naming
 	// attempt_completion is ignored, while a model-profile excludedTools entry
 	// keeps it out.
-	const modelInfo = settings?.modelInfo as ModelInfo | undefined
+	const modelInfo = settings?.modelInfo
 
 	const policy = resolveEffectiveToolPolicy({
 		mode: mode ?? defaultModeSlug,

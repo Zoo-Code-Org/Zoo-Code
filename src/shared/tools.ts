@@ -246,6 +246,9 @@ interface AskFollowupQuestionToolUse extends ToolUse<"ask_followup_question"> {
 	params: Partial<Pick<Record<ToolParamName, string>, "question" | "follow_up">>
 }
 
+/**
+ * @public
+ */
 export interface AttemptCompletionToolUse extends ToolUse<"attempt_completion"> {
 	name: "attempt_completion"
 	params: Partial<Pick<Record<ToolParamName, string>, "result">>

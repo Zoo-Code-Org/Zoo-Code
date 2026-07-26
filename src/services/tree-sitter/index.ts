@@ -22,6 +22,8 @@ export function getMinComponentLines(): number {
 
 /**
  * Set the minimum number of lines for a component (for testing)
+ *
+ * @internal
  */
 export function setMinComponentLines(value: number): void {
 	currentMinComponentLines = value

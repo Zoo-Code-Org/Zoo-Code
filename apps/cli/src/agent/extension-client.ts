@@ -542,6 +542,7 @@ export class ExtensionClient {
 /**
  * Create a mock client for testing.
  *
+ * @internal
  * The mock client captures all sent messages for verification.
  *
  * @returns An object with the client and captured messages
