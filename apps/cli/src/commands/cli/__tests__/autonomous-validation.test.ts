@@ -174,7 +174,9 @@ describe("validateAutonomousFlags", () => {
 			provider: "anthropic",
 		})
 		expect(errors).toHaveLength(1)
-		expect(errors[0]!.message).toContain("--provider-base-url is currently supported only with --provider openrouter")
+		expect(errors[0]!.message).toContain(
+			"--provider-base-url is currently supported only with --provider openrouter",
+		)
 	})
 
 	it("allows providerBaseUrl with openrouter provider in autonomous mode", () => {
