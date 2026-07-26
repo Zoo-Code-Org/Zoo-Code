@@ -87,8 +87,6 @@ describe("JsonEventEmitter result emission", () => {
 		])
 	})
 
-
-
 	it("uses the terminal discriminator for aggregate JSON output", () => {
 		const { stdout, content } = createMockStdout()
 		const emitter = new JsonEventEmitter({ mode: "json", stdout, authoritativeCompletion: true })

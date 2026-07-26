@@ -27,6 +27,7 @@ vi.mock("@/lib/utils/shell.js", () => ({
 }))
 
 vi.mock("@/agent/index.js", () => ({
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	ExtensionHost: vi.fn(function (this: any) {
 		this.activate = vi.fn(() => Promise.resolve())
 		this.client = { hasActiveTask: vi.fn(() => false) }
@@ -67,18 +68,14 @@ describe("run command validation", () => {
 			const flags: FlagOptions = { sessionId: "" }
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[CLI] Error: --session-id requires a non-empty session id",
-			)
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --session-id requires a non-empty session id")
 		})
 
 		it("should reject invalid --session-id format", async () => {
 			const flags: FlagOptions = { sessionId: "not-a-uuid" }
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[CLI] Error: --session-id must be a valid UUID session id",
-			)
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --session-id must be a valid UUID session id")
 		})
 
 		it("should reject empty --create-with-session-id", async () => {
@@ -137,6 +134,7 @@ describe("run command validation", () => {
 	describe("provider validation", () => {
 		it("should reject invalid provider", async () => {
 			const flags: FlagOptions = {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				provider: "invalid-provider" as any,
 				print: true,
 			}
@@ -189,6 +187,7 @@ describe("run command validation", () => {
 		it("should enforce orchestrator mode in autonomous", async () => {
 			const flags: FlagOptions = {
 				autonomous: true,
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				mode: "code" as any,
 				workspace: tempDir,
 				timeout: 60,
@@ -214,14 +213,13 @@ describe("run command validation", () => {
 	describe("output format validation", () => {
 		it("should reject invalid output format", async () => {
 			const flags: FlagOptions = {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				outputFormat: "invalid" as any,
 				print: true,
 			}
 
 			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("[CLI] Error: Invalid output format"),
-			)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("[CLI] Error: Invalid output format"))
 		})
 
 		it("should require --print with non-text output format in TTY", async () => {
@@ -283,9 +281,7 @@ describe("run command validation", () => {
 			}
 
 			await expect(run(undefined, flags)).rejects.toThrow("process.exit: 1")
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[CLI] Error: --stdin-prompt-stream requires piped stdin",
-			)
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[CLI] Error: --stdin-prompt-stream requires piped stdin")
 		})
 
 		it("should reject prompt with --stdin-prompt-stream", async () => {
@@ -350,6 +346,7 @@ describe("run command validation", () => {
 	describe("reasoning effort validation", () => {
 		it("should reject invalid reasoning effort", async () => {
 			const flags: FlagOptions = {
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
 				reasoningEffort: "invalid" as any,
 				print: true,
 			}

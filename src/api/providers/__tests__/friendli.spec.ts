@@ -142,7 +142,16 @@ describe("FriendliHandler", () => {
 		},
 	])(
 		"should expose newly added model $modelId",
-		({ modelId, contextWindow, maxTokens, supportsMaxTokens, inputPrice, outputPrice, cacheWritesPrice, cacheReadsPrice }) => {
+		({
+			modelId,
+			contextWindow,
+			maxTokens,
+			supportsMaxTokens,
+			inputPrice,
+			outputPrice,
+			cacheWritesPrice,
+			cacheReadsPrice,
+		}) => {
 			expect(friendliModels[modelId]).toBeDefined()
 			const info = friendliModels[modelId] as import("@roo-code/types").ModelInfo
 			expect(info.maxTokens).toBe(maxTokens)
