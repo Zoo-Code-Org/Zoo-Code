@@ -49,7 +49,7 @@ export async function status(options: StatusOptions = {}): Promise<StatusResult>
 	}
 
 	if (expiringSoon) {
-		console.log("⚠ Legacy Roo auth token expires soon; use `roo auth logout` if you want to clean it up.")
+		console.log("⚠ Legacy Roo auth token expires soon; use `zoo auth logout` if you want to clean it up.")
 	} else {
 		console.log("✓ Legacy Roo auth token still stored")
 	}

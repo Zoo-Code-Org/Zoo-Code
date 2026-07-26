@@ -321,7 +321,7 @@ if (isInteractiveAsk(ask)) {
 Enable with `-d` flag. Logs go to `~/.roo/cli-debug.log`:
 
 ```bash
-roo -d -P "Build something" --no-tui
+zoo -d -P "Build something" --no-tui
 ```
 
 View logs:

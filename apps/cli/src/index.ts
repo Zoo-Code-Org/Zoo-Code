@@ -6,7 +6,7 @@ import { run, logout, status, listCommands, listModes, listModels, listSessions,
 const program = new Command()
 
 program
-	.name("roo")
+	.name("zoo")
 	.description("Roo Code CLI - starts an interactive session by default, use -p/--print for non-interactive output")
 	.version(VERSION)
 	.enablePositionalOptions()

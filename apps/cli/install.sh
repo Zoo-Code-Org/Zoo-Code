@@ -54,7 +54,7 @@ Install Node.js:
 
 Please upgrade Node.js to version $MIN_NODE_VERSION or higher."
     fi
-    
+
     info "Found Node.js $(node -v)"
 }
 
@@ -242,7 +242,7 @@ Available at: https://github.com/$REPO/releases"
     fi
     
     # Make executable
-    chmod +x "$INSTALL_DIR/bin/roo"
+    chmod +x "$INSTALL_DIR/bin/zoo"
     
     # Also make ripgrep executable if it exists
     if [ -f "$INSTALL_DIR/bin/rg" ]; then
@@ -253,14 +253,19 @@ Available at: https://github.com/$REPO/releases"
 # Create symlink in bin directory
 setup_bin() {
     mkdir -p "$BIN_DIR"
-    
-    # Remove old symlink if exists
+
+    # Remove the executable name used by earlier CLI releases.
     if [ -L "$BIN_DIR/roo" ] || [ -f "$BIN_DIR/roo" ]; then
         rm -f "$BIN_DIR/roo"
     fi
-    
-    ln -sf "$INSTALL_DIR/bin/roo" "$BIN_DIR/roo"
-    info "Created symlink: $BIN_DIR/roo"
+
+    # Remove old symlink if exists
+    if [ -L "$BIN_DIR/zoo" ] || [ -f "$BIN_DIR/zoo" ]; then
+        rm -f "$BIN_DIR/zoo"
+    fi
+
+    ln -sf "$INSTALL_DIR/bin/zoo" "$BIN_DIR/zoo"
+    info "Created symlink: $BIN_DIR/zoo"
 }
 
 # Check if bin dir is in PATH and provide instructions
@@ -305,10 +310,10 @@ check_path() {
 
 # Verify installation
 verify_install() {
-    if [ -x "$BIN_DIR/roo" ]; then
+    if [ -x "$BIN_DIR/zoo" ]; then
         info "Verifying installation..."
         # Just check if it runs without error
-        "$BIN_DIR/roo" --version >/dev/null 2>&1 || true
+        "$BIN_DIR/zoo" --version >/dev/null 2>&1 || true
     fi
 }
 
@@ -318,15 +323,15 @@ print_success() {
     printf "${GREEN}${BOLD}✓ Roo Code CLI installed successfully!${NC}\n"
     echo ""
     echo "  Installation: $INSTALL_DIR"
-    echo "  Binary: $BIN_DIR/roo"
+    echo "  Binary: $BIN_DIR/zoo"
     echo "  Version: $VERSION"
     echo ""
     echo "  ${BOLD}Get started:${NC}"
-    echo "    roo --help"
+    echo "    zoo --help"
     echo ""
     echo "  ${BOLD}Example:${NC}"
     echo "    export OPENROUTER_API_KEY=sk-or-v1-..."
-    echo "    cd ~/my-project && roo \"What is this project?\""
+    echo "    cd ~/my-project && zoo \"What is this project?\""
     echo ""
 }
 

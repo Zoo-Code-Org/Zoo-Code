@@ -188,7 +188,7 @@ create_tarball() {
 
     # Create the wrapper script
     info "Creating wrapper script..."
-    cat > "$RELEASE_DIR/bin/roo" << 'WRAPPER_EOF'
+    cat > "$RELEASE_DIR/bin/zoo" << 'WRAPPER_EOF'
 #!/usr/bin/env node
 
 import { fileURLToPath } from 'url';
@@ -210,7 +210,7 @@ if (existsSync(ripgrepPath)) {
 await import(join(__dirname, '..', 'lib', 'index.js'));
 WRAPPER_EOF
 
-    chmod +x "$RELEASE_DIR/bin/roo"
+    chmod +x "$RELEASE_DIR/bin/zoo"
 
     # Create empty .env file
     touch "$RELEASE_DIR/.env"
@@ -267,15 +267,21 @@ verify_local_install() {
         error "Installation verification failed!"
     }
 
+    # Ensure only the public executable is installed.
+    if [ -e "$VERIFY_BIN_DIR/roo" ]; then
+        rm -rf "$VERIFY_DIR"
+        error "Legacy roo executable was installed!"
+    fi
+
     # Test --help
-    if ! "$VERIFY_BIN_DIR/roo" --help > /dev/null 2>&1; then
+    if ! "$VERIFY_BIN_DIR/zoo" --help > /dev/null 2>&1; then
         rm -rf "$VERIFY_DIR"
         error "CLI --help check failed!"
     fi
     info "CLI --help check passed"
 
     # Test --version
-    if ! "$VERIFY_BIN_DIR/roo" --version > /dev/null 2>&1; then
+    if ! "$VERIFY_BIN_DIR/zoo" --version > /dev/null 2>&1; then
         rm -rf "$VERIFY_DIR"
         error "CLI --version check failed!"
     fi
@@ -317,11 +323,11 @@ print_summary() {
 
     if [ "$LOCAL_INSTALL" = true ]; then
         echo "  Installed to: ~/.roo/cli"
-        echo "  Binary: ~/.local/bin/roo"
+        echo "  Binary: ~/.local/bin/zoo"
         echo ""
         echo "  Test it out:"
-        echo "    roo --version"
-        echo "    roo --help"
+        echo "    zoo --version"
+        echo "    zoo --help"
     else
         echo "  To install manually:"
         echo "    ROO_LOCAL_TARBALL=$REPO_ROOT/$TARBALL ./apps/cli/install.sh"

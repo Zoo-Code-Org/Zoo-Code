@@ -133,7 +133,7 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 
 	if (isResumeRequested && prompt) {
 		console.error("[CLI] Error: cannot use prompt or --prompt-file with --session-id/--continue")
-		console.error("[CLI] Usage: roo [--session-id <session-id> | --continue] [options]")
+		console.error("[CLI] Usage: zoo [--session-id <session-id> | --continue] [options]")
 		exitValidation("cannot use prompt or --prompt-file with --session-id/--continue")
 	}
 
@@ -287,39 +287,39 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 	// Output format only works with --print mode
 	if (outputFormat !== "text" && !flagOptions.print && isTuiSupported) {
 		console.error("[CLI] Error: --output-format requires --print mode")
-		console.error("[CLI] Usage: roo --print --output-format json")
+		console.error("[CLI] Usage: zoo --print --output-format json")
 		exitValidation("--output-format requires --print mode")
 	}
 
 	if (flagOptions.stdinPromptStream && !flagOptions.print) {
 		console.error("[CLI] Error: --stdin-prompt-stream requires --print mode")
-		console.error("[CLI] Usage: roo --print --output-format stream-json --stdin-prompt-stream [options]")
+		console.error("[CLI] Usage: zoo --print --output-format stream-json --stdin-prompt-stream [options]")
 		exitValidation("--stdin-prompt-stream requires --print mode")
 	}
 
 	if (flagOptions.signalOnlyExit && !flagOptions.stdinPromptStream) {
 		console.error("[CLI] Error: --signal-only-exit requires --stdin-prompt-stream")
-		console.error("[CLI] Usage: roo --print --output-format stream-json --stdin-prompt-stream --signal-only-exit")
+		console.error("[CLI] Usage: zoo --print --output-format stream-json --stdin-prompt-stream --signal-only-exit")
 		exitValidation("--signal-only-exit requires --stdin-prompt-stream")
 	}
 
 	if (flagOptions.stdinPromptStream && outputFormat !== "stream-json") {
 		console.error("[CLI] Error: --stdin-prompt-stream requires --output-format=stream-json")
-		console.error("[CLI] Usage: roo --print --output-format stream-json --stdin-prompt-stream [options]")
+		console.error("[CLI] Usage: zoo --print --output-format stream-json --stdin-prompt-stream [options]")
 		exitValidation("--stdin-prompt-stream requires --output-format=stream-json")
 	}
 
 	if (flagOptions.stdinPromptStream && process.stdin.isTTY) {
 		console.error("[CLI] Error: --stdin-prompt-stream requires piped stdin")
 		console.error(
-			'[CLI] Example: printf \'{"command":"start","requestId":"1","prompt":"1+1=?"}\\n\' | roo --print --output-format stream-json --stdin-prompt-stream [options]',
+			'[CLI] Example: printf \'{"command":"start","requestId":"1","prompt":"1+1=?"}\\n\' | zoo --print --output-format stream-json --stdin-prompt-stream [options]',
 		)
 		exitValidation("--stdin-prompt-stream requires piped stdin")
 	}
 
 	if (flagOptions.stdinPromptStream && prompt) {
 		console.error("[CLI] Error: cannot use positional prompt or --prompt-file with --stdin-prompt-stream")
-		console.error("[CLI] Usage: roo --print --output-format stream-json --stdin-prompt-stream [options]")
+		console.error("[CLI] Usage: zoo --print --output-format stream-json --stdin-prompt-stream [options]")
 		exitValidation("cannot use a prompt with --stdin-prompt-stream")
 	}
 
@@ -347,13 +347,13 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		if (!prompt && !useStdinPromptStream && !isResumeRequested) {
 			if (flagOptions.print) {
 				console.error("[CLI] Error: no prompt provided")
-				console.error("[CLI] Usage: roo --print [options] <prompt>")
+				console.error("[CLI] Usage: zoo --print [options] <prompt>")
 				console.error(
-					"[CLI] For stdin control mode: roo --print --output-format stream-json --stdin-prompt-stream [options]",
+					"[CLI] For stdin control mode: zoo --print --output-format stream-json --stdin-prompt-stream [options]",
 				)
 			} else {
 				console.error("[CLI] Error: prompt is required in non-interactive mode")
-				console.error("[CLI] Usage: roo <prompt> [options]")
+				console.error("[CLI] Usage: zoo <prompt> [options]")
 				console.error("[CLI] Run without -p for interactive mode")
 			}
 

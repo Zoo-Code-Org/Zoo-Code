@@ -44,13 +44,13 @@ curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/i
 Or run:
 
 ```bash
-roo upgrade
+zoo upgrade
 ```
 
 ### Uninstalling
 
 ```bash
-rm -rf ~/.roo/cli ~/.local/bin/roo
+rm -rf ~/.roo/cli ~/.local/bin/zoo
 ```
 
 ### Development Installation
@@ -77,13 +77,13 @@ By default, the CLI auto-approves actions and runs in interactive TUI mode:
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-...
 
-roo "What is this project?" -w ~/Documents/my-project
+zoo "What is this project?" -w ~/Documents/my-project
 ```
 
 You can also run without a prompt and enter it interactively in TUI mode:
 
 ```bash
-roo -w ~/Documents/my-project
+zoo -w ~/Documents/my-project
 ```
 
 In interactive mode:
@@ -98,7 +98,7 @@ In interactive mode:
 If you want manual approval prompts, enable approval-required mode:
 
 ```bash
-roo "Refactor the utils.ts file" --require-approval -w ~/Documents/my-project
+zoo "Refactor the utils.ts file" --require-approval -w ~/Documents/my-project
 ```
 
 In approval-required mode:
@@ -112,10 +112,10 @@ Use `--print` for non-interactive execution and machine-readable output:
 
 ```bash
 # Prompt is required
-roo --print "Summarize this repository"
+zoo --print "Summarize this repository"
 
 # Create a new task with a specific session ID (UUID)
-roo --print --create-with-session-id 018f7fc8-7c96-7f7c-98aa-2ec4ff7f6d87 "Summarize this repository"
+zoo --print --create-with-session-id 018f7fc8-7c96-7f7c-98aa-2ec4ff7f6d87 "Summarize this repository"
 ```
 
 ### Autonomous Orchestrator Draft (`--autonomous`)
@@ -127,7 +127,7 @@ Every new autonomous root starts in the effective `orchestrator` mode. A project
 ```bash
 export OPENROUTER_API_KEY=sk-or-v1-...
 
-roo --autonomous --print \
+zoo --autonomous --print \
   --workspace /absolute/path/to/project \
   --timeout 3600 \
   --output-format stream-json \
@@ -186,10 +186,10 @@ For programmatic control (one process, multiple prompts), use `--stdin-prompt-st
 Send NDJSON commands via stdin:
 
 ```bash
-printf '{"command":"start","requestId":"1","prompt":"1+1=?"}\n' | roo --print --stdin-prompt-stream --output-format stream-json
+printf '{"command":"start","requestId":"1","prompt":"1+1=?"}\n' | zoo --print --stdin-prompt-stream --output-format stream-json
 
 # Optional: provide taskId per start command
-printf '{"command":"start","requestId":"1","taskId":"018f7fc8-7c96-7f7c-98aa-2ec4ff7f6d87","prompt":"1+1=?"}\n' | roo --print --stdin-prompt-stream --output-format stream-json
+printf '{"command":"start","requestId":"1","taskId":"018f7fc8-7c96-7f7c-98aa-2ec4ff7f6d87","prompt":"1+1=?"}\n' | zoo --print --stdin-prompt-stream --output-format stream-json
 ```
 
 ### Legacy Roo Auth Token Cleanup
@@ -200,10 +200,10 @@ Roo Code Router has been removed from the CLI. The remaining `auth` commands onl
 
 ```bash
 # Check whether a legacy Roo auth token is still stored
-roo auth status
+zoo auth status
 
 # Remove an old stored Roo auth token
-roo auth logout
+zoo auth logout
 ```
 
 If you never used Roo Code Router, you can ignore this section entirely.
@@ -239,8 +239,8 @@ If you never used Roo Code Router, you can ignore this section entirely.
 
 | Command           | Description                          |
 | ----------------- | ------------------------------------ |
-| `roo auth logout` | Clear a stored legacy Roo auth token |
-| `roo auth status` | Show legacy Roo token status         |
+| `zoo auth logout` | Clear a stored legacy Roo auth token |
+| `zoo auth status` | Show legacy Roo token status         |
 
 ## Environment Variables
 

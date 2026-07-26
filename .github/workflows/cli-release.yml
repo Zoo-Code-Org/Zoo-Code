@@ -148,9 +148,9 @@ jobs:
             '' \
             '// Import and run the actual CLI' \
             "await import(join(__dirname, '..', 'lib', 'index.js'));" \
-            > "$RELEASE_DIR/bin/roo"
+            > "$RELEASE_DIR/bin/zoo"
 
-          chmod +x "$RELEASE_DIR/bin/roo"
+          chmod +x "$RELEASE_DIR/bin/zoo"
 
           # Create empty .env file.
           touch "$RELEASE_DIR/.env"
@@ -189,7 +189,8 @@ jobs:
           ls -la "$VERIFY_DIR/roo-cli-${PLATFORM}/"
 
           # Check required files exist.
-          test -f "$VERIFY_DIR/roo-cli-${PLATFORM}/bin/roo" || { echo "Missing bin/roo"; exit 1; }
+          test -f "$VERIFY_DIR/roo-cli-${PLATFORM}/bin/zoo" || { echo "Missing bin/zoo"; exit 1; }
+          test ! -e "$VERIFY_DIR/roo-cli-${PLATFORM}/bin/roo" || { echo "Unexpected legacy bin/roo"; exit 1; }
           test -f "$VERIFY_DIR/roo-cli-${PLATFORM}/lib/index.js" || { echo "Missing lib/index.js"; exit 1; }
           test -f "$VERIFY_DIR/roo-cli-${PLATFORM}/package.json" || { echo "Missing package.json"; exit 1; }
           test -d "$VERIFY_DIR/roo-cli-${PLATFORM}/extension" || { echo "Missing extension directory"; exit 1; }
@@ -342,10 +343,10 @@ jobs:
           echo "" >> "$NOTES_FILE"
           echo '```bash' >> "$NOTES_FILE"
           echo "# Run a task" >> "$NOTES_FILE"
-          echo 'roo "What is this project?"' >> "$NOTES_FILE"
+          echo 'zoo "What is this project?"' >> "$NOTES_FILE"
           echo "" >> "$NOTES_FILE"
           echo "# See all options" >> "$NOTES_FILE"
-          echo "roo --help" >> "$NOTES_FILE"
+          echo "zoo --help" >> "$NOTES_FILE"
           echo '```' >> "$NOTES_FILE"
           echo "" >> "$NOTES_FILE"
           echo "## Platform Support" >> "$NOTES_FILE"
