@@ -32,6 +32,15 @@ export const mimoModels = {
 			outputPriceMultiplier: 2,
 			cacheReadsPriceMultiplier: 2,
 		},
+		// MiMo v2.5 Pro produces malformed parallel tool calls (nested cwd objects,
+		// empty-argument ghost calls). Xiaomi's own Zed integration declares
+		// parallel_tool_calls: false for this model. Treat as non-parallel-capable.
+		// parallelToolCallsRequestControl will be updated to "openai" in Sub-task 2
+		// after a provider canary confirms server-side enforcement.
+		toolCallCapabilities: {
+			supportsParallelToolCalls: false,
+			parallelToolCallsRequestControl: "none",
+		},
 		description:
 			"MiMo V2.5 Pro - Xiaomi's flagship reasoning model with 1M context, deep thinking, tool calling, and structured output.",
 	},
@@ -51,6 +60,11 @@ export const mimoModels = {
 			inputPriceMultiplier: 2,
 			outputPriceMultiplier: 2,
 			cacheReadsPriceMultiplier: 2,
+		},
+		// Same parallel tool-call limitation as v2.5-pro.
+		toolCallCapabilities: {
+			supportsParallelToolCalls: false,
+			parallelToolCallsRequestControl: "none",
 		},
 		description:
 			"MiMo V2.5 - Full-modal understanding model (text, image, audio, video) with 1M context, deep thinking, tool calling, and structured output.",
