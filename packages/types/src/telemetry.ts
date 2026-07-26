@@ -74,6 +74,8 @@ export enum TelemetryEventName {
 	TELEMETRY_SETTINGS_CHANGED = "Telemetry Settings Changed",
 	MODEL_CACHE_EMPTY_RESPONSE = "Model Cache Empty Response",
 	READ_FILE_LEGACY_FORMAT_USED = "Read File Legacy Format Used",
+	TOOL_CALL_POLICY_RESOLUTION = "Tool Call Policy Resolution",
+	TOOL_CALL_ENFORCEMENT = "Tool Call Enforcement",
 }
 
 /**
@@ -215,6 +217,35 @@ export const rooCodeTelemetryEventSchema = z.discriminatedUnion("type", [
 			...telemetryPropertiesSchema.shape,
 			previousSetting: telemetrySettingsSchema,
 			newSetting: telemetrySettingsSchema,
+		}),
+	}),
+	z.object({
+		type: z.literal(TelemetryEventName.TOOL_CALL_POLICY_RESOLUTION),
+		properties: z.object({
+			...telemetryPropertiesSchema.shape,
+			provider: z.string(),
+			model: z.string(),
+			policySource: z.string(),
+			maxCallsPerTurn: z.union([z.literal(1), z.literal("unbounded")]),
+			enforcement: z.string(),
+			parallelToolCallsRequested: z.boolean(),
+			parallelToolCallsSent: z.boolean().optional(),
+		}),
+	}),
+	z.object({
+		type: z.literal(TelemetryEventName.TOOL_CALL_ENFORCEMENT),
+		properties: z.object({
+			...telemetryPropertiesSchema.shape,
+			provider: z.string(),
+			model: z.string(),
+			policySource: z.string(),
+			maxCallsPerTurn: z.union([z.literal(1), z.literal("unbounded")]),
+			enforcement: z.string(),
+			callCount: z.number(),
+			ghostDroppedCount: z.number(),
+			errorResultCount: z.number(),
+			parallelToolCallsRequested: z.boolean(),
+			parallelToolCallsSent: z.boolean().optional(),
 		}),
 	}),
 	z.object({

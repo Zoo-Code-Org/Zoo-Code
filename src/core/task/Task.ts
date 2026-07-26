@@ -106,7 +106,11 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import { classifyStreamedCall, isProvablyEmptyGhost } from "../assistant-message/ToolCallRetentionPolicy"
+import {
+	classifyStreamedCall,
+	isProvablyEmptyGhost,
+	emitGhostDropTelemetry,
+} from "../assistant-message/ToolCallRetentionPolicy"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -2972,6 +2976,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											// Discard streaming state (finalizeStreamingToolCall
 											// would also delete it, but we bypass that path).
 											NativeToolCallParser.discardStreamingToolCall(event.id)
+											// Emit telemetry for the ghost drop. Only counts and
+											// metadata are sent — no call ID, tool name, or args.
+											const ghostPolicy1 = resolveToolCallPolicy(
+												this.api.getModel().info,
+												this.apiConfiguration.apiProvider,
+											)
+											emitGhostDropTelemetry({
+												taskId: this.taskId,
+												provider: this.apiConfiguration.apiProvider ?? "unknown",
+												model: this.api.getModel().id,
+												policySource: ghostPolicy1.source,
+												maxCallsPerTurn: ghostPolicy1.maxCallsPerTurn,
+												enforcement: ghostPolicy1.enforcement,
+												callCount: this.assistantMessageContent.filter(
+													(b: AssistantMessageContent): b is ToolUse => b.type === "tool_use",
+												).length,
+												ghostDroppedCount: 1,
+												errorResultCount: 0,
+												parallelToolCallsRequested: ghostPolicy1.generation === "parallel",
+											})
 											// Do NOT call presentAssistantMessageSafe — there is
 											// nothing to present for a ghost.
 											continue
@@ -3043,6 +3067,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								if (isProvablyEmptyGhost(legacyDisposition)) {
 									// Silently drop the ghost. Do not push to
 									// assistantMessageContent, do not present.
+									// Emit telemetry for the ghost drop. Only counts
+									// and metadata — no call ID, tool name, or args.
+									const ghostPolicy2 = resolveToolCallPolicy(
+										this.api.getModel().info,
+										this.apiConfiguration.apiProvider,
+									)
+									emitGhostDropTelemetry({
+										taskId: this.taskId,
+										provider: this.apiConfiguration.apiProvider ?? "unknown",
+										model: this.api.getModel().id,
+										policySource: ghostPolicy2.source,
+										maxCallsPerTurn: ghostPolicy2.maxCallsPerTurn,
+										enforcement: ghostPolicy2.enforcement,
+										callCount: this.assistantMessageContent.filter(
+											(b: AssistantMessageContent): b is ToolUse => b.type === "tool_use",
+										).length,
+										ghostDroppedCount: 1,
+										errorResultCount: 0,
+										parallelToolCallsRequested: ghostPolicy2.generation === "parallel",
+									})
 									break
 								}
 	
@@ -3424,6 +3468,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									this.streamingToolCallIndices.delete(event.id)
 								}
 								NativeToolCallParser.discardStreamingToolCall(event.id)
+								// Emit telemetry for the ghost drop. Only counts and
+								// metadata are sent — no call ID, tool name, or args.
+								const ghostPolicy3 = resolveToolCallPolicy(
+									this.api.getModel().info,
+									this.apiConfiguration.apiProvider,
+								)
+								emitGhostDropTelemetry({
+									taskId: this.taskId,
+									provider: this.apiConfiguration.apiProvider ?? "unknown",
+									model: this.api.getModel().id,
+									policySource: ghostPolicy3.source,
+									maxCallsPerTurn: ghostPolicy3.maxCallsPerTurn,
+									enforcement: ghostPolicy3.enforcement,
+									callCount: this.assistantMessageContent.filter(
+										(b: AssistantMessageContent): b is ToolUse => b.type === "tool_use",
+									).length,
+									ghostDroppedCount: 1,
+									errorResultCount: 0,
+									parallelToolCallsRequested: ghostPolicy3.generation === "parallel",
+								})
 								continue
 							}
 	
@@ -4421,6 +4485,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const abortSignal = this.currentRequestAbortController.signal
 
 		const toolCallPolicy = resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
+		const parallelToolCallsRequested = toolCallPolicy.generation === "parallel"
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode: mode,
 			taskId: this.taskId,
@@ -4431,13 +4496,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				? {
 						tools: allTools,
 						tool_choice: "auto",
-						parallelToolCalls: toolCallPolicy.generation === "parallel",
+						parallelToolCalls: parallelToolCallsRequested,
 						// When mode restricts tools, provide allowedFunctionNames so providers
 						// like Gemini can see all tools in history but only call allowed ones
 						...(allowedFunctionNames ? { allowedFunctionNames } : {}),
 					}
 				: {}),
 		}
+		// Emit telemetry for the policy resolution. Only metadata is sent —
+		// no raw commands, paths, file contents, tool arguments, or API keys.
+		TelemetryService.instance.captureToolCallPolicyResolution(this.taskId, {
+			provider: this.apiConfiguration.apiProvider ?? "unknown",
+			model: this.api.getModel().id,
+			policySource: toolCallPolicy.source,
+			maxCallsPerTurn: toolCallPolicy.maxCallsPerTurn,
+			enforcement: toolCallPolicy.enforcement,
+			parallelToolCallsRequested,
+			parallelToolCallsSent: shouldIncludeTools ? parallelToolCallsRequested : undefined,
+		})
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 

@@ -14,7 +14,7 @@ import type { ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../sha
 import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
 import { NativeToolCallParser, type NativeToolParseFailure } from "./NativeToolCallParser"
-import { selectExecutableCall } from "./ToolCallRetentionPolicy"
+import { selectExecutableCall, emitMaxOneEnforcementTelemetry } from "./ToolCallRetentionPolicy"
 import { resolveToolCallPolicy } from "../../api"
 
 import { listFilesTool } from "../tools/ListFilesTool"
@@ -491,7 +491,25 @@ export async function presentAssistantMessage(cline: Task) {
 							`This call was not executed to prevent ambiguous side-effect ordering. ` +
 							`Please resubmit only one tool call per turn. ` +
 							`[POLICY/max-one-enforcement/001]`
-
+	
+						// Emit telemetry for the max-one enforcement rejection.
+						// Only counts and metadata are sent — no call ID, tool
+						// name, argument values, or command strings.
+						emitMaxOneEnforcementTelemetry({
+							taskId: cline.taskId,
+							provider:
+								(cline as unknown as { apiConfiguration?: { apiProvider?: string } }).apiConfiguration
+									?.apiProvider ?? "unknown",
+							model: cline.api.getModel().id,
+							policySource: resolvedPolicy.source,
+							maxCallsPerTurn: resolvedPolicy.maxCallsPerTurn,
+							enforcement: resolvedPolicy.enforcement,
+							callCount: allCalls.length,
+							ghostDroppedCount: 0,
+							errorResultCount: selection.rejectedCallIds.length,
+							parallelToolCallsRequested: resolvedPolicy.generation === "parallel",
+						})
+	
 						cline.consecutiveMistakeCount++
 						try {
 							cline.recordToolError(block.name as ToolName, maxOneErrorMessage)
