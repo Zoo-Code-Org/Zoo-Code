@@ -74,10 +74,50 @@ describe("resolveToolCallPolicy", () => {
 		})
 	})
 
-	describe("Unknown models (no toolCallCapabilities)", () => {
-		it("resolves to conservative single generation", () => {
+	describe("Models without explicit toolCallCapabilities", () => {
+		it("OpenAI model without capabilities resolves to parallel (preserves existing behavior)", () => {
 			const modelInfo = makeModelInfo()
 			const policy = resolveToolCallPolicy(modelInfo, "openai")
+
+			expect(policy.generation).toBe("parallel")
+			expect(policy.maxCallsPerTurn).toBe("unbounded")
+			expect(policy.enforcement).toBe("provider")
+			expect(policy.source).toBe("provider-default")
+		})
+
+		it("Anthropic model without capabilities resolves to parallel (preserves existing behavior)", () => {
+			const modelInfo = makeModelInfo()
+			const policy = resolveToolCallPolicy(modelInfo, "anthropic")
+
+			expect(policy.generation).toBe("parallel")
+			expect(policy.maxCallsPerTurn).toBe("unbounded")
+			expect(policy.enforcement).toBe("provider")
+			expect(policy.source).toBe("provider-default")
+		})
+
+		it("Bedrock (Anthropic-family) model without capabilities resolves to parallel", () => {
+			const modelInfo = makeModelInfo()
+			const policy = resolveToolCallPolicy(modelInfo, "bedrock")
+
+			expect(policy.generation).toBe("parallel")
+			expect(policy.maxCallsPerTurn).toBe("unbounded")
+			expect(policy.enforcement).toBe("provider")
+			expect(policy.source).toBe("provider-default")
+		})
+
+		it("OpenRouter model without capabilities resolves to parallel", () => {
+			const modelInfo = makeModelInfo()
+			const policy = resolveToolCallPolicy(modelInfo, "openrouter")
+
+			expect(policy.generation).toBe("parallel")
+			expect(policy.maxCallsPerTurn).toBe("unbounded")
+			expect(policy.enforcement).toBe("provider")
+			expect(policy.source).toBe("provider-default")
+		})
+
+		it("Unknown provider (mimo) without capabilities resolves to conservative single", () => {
+			const modelInfo = makeModelInfo()
+			const policy = resolveToolCallPolicy(modelInfo, "mimo")
 
 			expect(policy.generation).toBe("single")
 			expect(policy.maxCallsPerTurn).toBe(1)
@@ -85,7 +125,17 @@ describe("resolveToolCallPolicy", () => {
 			expect(policy.source).toBe("provider-default")
 		})
 
-		it("resolves to conservative single when capabilities are 'unknown'", () => {
+		it("Unknown provider without capabilities resolves to conservative single", () => {
+			const modelInfo = makeModelInfo()
+			const policy = resolveToolCallPolicy(modelInfo, "some-unknown-provider")
+
+			expect(policy.generation).toBe("single")
+			expect(policy.maxCallsPerTurn).toBe(1)
+			expect(policy.enforcement).toBe("local")
+			expect(policy.source).toBe("provider-default")
+		})
+
+		it("resolves to parallel for OpenAI when capabilities are 'unknown' (provider fallback)", () => {
 			const modelInfo = makeModelInfo({
 				toolCallCapabilities: {
 					supportsParallelToolCalls: "unknown",
@@ -93,6 +143,31 @@ describe("resolveToolCallPolicy", () => {
 				},
 			})
 			const policy = resolveToolCallPolicy(modelInfo, "openai")
+
+			expect(policy.generation).toBe("parallel")
+			expect(policy.maxCallsPerTurn).toBe("unbounded")
+			expect(policy.enforcement).toBe("provider")
+			expect(policy.source).toBe("provider-default")
+		})
+
+		it("resolves to conservative single for unknown provider when capabilities are 'unknown'", () => {
+			const modelInfo = makeModelInfo({
+				toolCallCapabilities: {
+					supportsParallelToolCalls: "unknown",
+					parallelToolCallsRequestControl: "unknown",
+				},
+			})
+			const policy = resolveToolCallPolicy(modelInfo, "mimo")
+
+			expect(policy.generation).toBe("single")
+			expect(policy.maxCallsPerTurn).toBe(1)
+			expect(policy.enforcement).toBe("local")
+			expect(policy.source).toBe("provider-default")
+		})
+
+		it("resolves to conservative single when providerName is absent", () => {
+			const modelInfo = makeModelInfo()
+			const policy = resolveToolCallPolicy(modelInfo)
 
 			expect(policy.generation).toBe("single")
 			expect(policy.maxCallsPerTurn).toBe(1)
