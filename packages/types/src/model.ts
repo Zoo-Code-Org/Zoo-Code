@@ -96,6 +96,34 @@ export const isModelParameter = (value: string): value is ModelParameter =>
 	modelParameters.includes(value as ModelParameter)
 
 /**
+ * ModelToolCallCapabilities
+ */
+
+export const modelToolCallCapabilitiesSchema = z.object({
+	supportsParallelToolCalls: z.union([z.boolean(), z.literal("unknown")]),
+	parallelToolCallsRequestControl: z.enum(["openai", "anthropic", "none", "unknown"]),
+})
+
+export type ModelToolCallCapabilities = z.infer<typeof modelToolCallCapabilitiesSchema>
+
+/**
+ * ToolCallGenerationPolicy
+ */
+
+export type ToolCallGenerationPolicy = "parallel" | "single" | "provider-default"
+
+/**
+ * ResolvedToolCallPolicy
+ */
+
+export type ResolvedToolCallPolicy = {
+	generation: ToolCallGenerationPolicy
+	maxCallsPerTurn: 1 | "unbounded"
+	enforcement: "provider" | "local" | "provider-and-local"
+	source: "model-capability" | "provider-default" | "user-setting" | "adaptive-circuit"
+}
+
+/**
  * ModelInfo
  */
 
@@ -162,6 +190,9 @@ export const modelInfoSchema = z.object({
 	// These tools will be added if they belong to an allowed group in the current mode
 	// Cannot force-add tools from groups the mode doesn't allow
 	includedTools: z.array(z.string()).optional(),
+	// Tool-call capability metadata for parallel/single-call policy resolution.
+	// When absent, the resolver treats the model as "unknown" and applies a conservative default.
+	toolCallCapabilities: modelToolCallCapabilitiesSchema.optional(),
 	/**
 	 * Service tiers with pricing information.
 	 * Each tier can have a name (for OpenAI service tiers) and pricing overrides.

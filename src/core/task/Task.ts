@@ -60,7 +60,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
 
 // api
-import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
+import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler, resolveToolCallPolicy } from "../../api"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 
@@ -1613,6 +1613,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// Build metadata with tools and taskId for the condensing API call
+		const toolCallPolicy = resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
@@ -1625,7 +1626,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				? {
 						tools: allTools,
 						tool_choice: "auto",
-						parallelToolCalls: true,
+						parallelToolCalls: toolCallPolicy.generation === "parallel",
 					}
 				: {}),
 		}
@@ -3915,6 +3916,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// Build metadata with tools and taskId for the condensing API call
+		const toolCallPolicy = resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
@@ -3927,7 +3929,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				? {
 						tools: allTools,
 						tool_choice: "auto",
-						parallelToolCalls: true,
+						parallelToolCalls: toolCallPolicy.generation === "parallel",
 					}
 				: {}),
 		}
@@ -4153,7 +4155,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					? {
 							tools: contextMgmtTools,
 							tool_choice: "auto",
-							parallelToolCalls: true,
+							parallelToolCalls:
+								resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
+									.generation === "parallel",
 						}
 					: {}),
 			}
@@ -4316,6 +4320,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.currentRequestAbortController = new AbortController()
 		const abortSignal = this.currentRequestAbortController.signal
 
+		const toolCallPolicy = resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode: mode,
 			taskId: this.taskId,
@@ -4326,7 +4331,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				? {
 						tools: allTools,
 						tool_choice: "auto",
-						parallelToolCalls: true,
+						parallelToolCalls: toolCallPolicy.generation === "parallel",
 						// When mode restricts tools, provide allowedFunctionNames so providers
 						// like Gemini can see all tools in history but only call allowed ones
 						...(allowedFunctionNames ? { allowedFunctionNames } : {}),

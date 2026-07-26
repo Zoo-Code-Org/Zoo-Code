@@ -7,6 +7,8 @@ import {
 	retiredProviderIdentifiers,
 	type ProviderSettings,
 	type ModelInfo,
+	type ResolvedToolCallPolicy,
+	type ModelToolCallCapabilities,
 } from "@roo-code/types"
 
 import { getRouterRemovalMessage } from "../core/config/routerRemoval"
@@ -148,6 +150,67 @@ export interface ApiHandler {
 	 * @returns A promise resolving to the token count
 	 */
 	countTokens(content: Array<Anthropic.Messages.ContentBlockParam>): Promise<number>
+}
+
+/**
+ * Resolve the tool-call policy for a given model and provider.
+ *
+ * This is a pure function: given the model info and provider name, it returns
+ * a {@link ResolvedToolCallPolicy} that describes whether parallel tool calls
+ * should be enabled, the max calls per turn, and how enforcement is applied.
+ *
+ * Resolution logic:
+ * 1. If the model declares `toolCallCapabilities` with `supportsParallelToolCalls: false`,
+ *    the policy is "single" with local enforcement (and provider enforcement when
+ *    the request control is not "none").
+ * 2. If the model declares `supportsParallelToolCalls: true` with a known request
+ *    control ("openai" or "anthropic"), the policy is "parallel" with provider enforcement.
+ * 3. If capabilities are unknown or absent, the policy is conservative "single" with
+ *    local enforcement, preventing malformed parallel calls from unknown models.
+ *
+ * @param modelInfo - The ModelInfo for the active model.
+ * @param providerName - The provider identifier string (e.g. "mimo", "anthropic", "openai").
+ * @returns A resolved tool-call policy.
+ */
+export function resolveToolCallPolicy(modelInfo: ModelInfo, providerName?: string): ResolvedToolCallPolicy {
+	const capabilities: ModelToolCallCapabilities | undefined = modelInfo.toolCallCapabilities
+
+	// Case 1: Model explicitly declares it does NOT support parallel tool calls.
+	if (capabilities && capabilities.supportsParallelToolCalls === false) {
+		const enforcement = capabilities.parallelToolCallsRequestControl === "none" ? "local" : "provider-and-local"
+		return {
+			generation: "single",
+			maxCallsPerTurn: 1,
+			enforcement,
+			source: "model-capability",
+		}
+	}
+
+	// Case 2: Model explicitly declares it DOES support parallel tool calls
+	// and has a known request control mechanism.
+	if (
+		capabilities &&
+		capabilities.supportsParallelToolCalls === true &&
+		(capabilities.parallelToolCallsRequestControl === "openai" ||
+			capabilities.parallelToolCallsRequestControl === "anthropic")
+	) {
+		return {
+			generation: "parallel",
+			maxCallsPerTurn: "unbounded",
+			enforcement: "provider",
+			source: "model-capability",
+		}
+	}
+
+	// Case 3: Unknown or absent capabilities — apply a conservative default.
+	// This prevents malformed parallel calls from models whose capabilities
+	// have not been explicitly declared.
+	return {
+		generation: "single",
+		maxCallsPerTurn: 1,
+		enforcement: "local",
+		source: "provider-default",
+	}
 }
 
 export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
