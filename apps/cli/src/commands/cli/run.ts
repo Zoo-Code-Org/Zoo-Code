@@ -38,7 +38,7 @@ const SIGNAL_ONLY_EXIT_KEEPALIVE_MS = 60_000
 const STREAM_RESUME_WAIT_TIMEOUT_MS = 2_000
 
 async function bootstrapResumeForStdinStream(host: ExtensionHost, sessionId: string): Promise<void> {
-	host.sendToExtension({ type: "showTaskWithId", text: sessionId })
+	await host.sendToExtension({ type: "showTaskWithId", text: sessionId })
 
 	// Best-effort wait so early stdin "message" commands can target the resumed task.
 	await pWaitFor(() => host.client.hasActiveTask() || host.isWaitingForInput(), {

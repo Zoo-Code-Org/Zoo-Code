@@ -186,7 +186,7 @@ export function useExtensionHost({
 						setIsResumingTask(true)
 						setHasStartedTask(true)
 						setLoading(true)
-						host.sendToExtension({ type: "showTaskWithId", text: resolvedSessionId })
+						await host.sendToExtension({ type: "showTaskWithId", text: resolvedSessionId })
 						return
 					}
 				}
