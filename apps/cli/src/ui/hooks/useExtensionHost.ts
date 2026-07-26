@@ -157,8 +157,8 @@ export function useExtensionHost({
 
 				// Request initial state from extension (triggers
 				// postStateToWebview which includes taskHistory).
-				host.sendToExtension({ type: "requestCommands" })
-				host.sendToExtension({ type: "requestModes" })
+				await host.sendToExtension({ type: "requestCommands" })
+				await host.sendToExtension({ type: "requestModes" })
 
 				if (requestedSessionId || continueSession) {
 					await pWaitFor(() => hasReceivedTaskHistory, {

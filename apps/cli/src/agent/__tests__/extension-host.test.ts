@@ -294,35 +294,52 @@ describe("ExtensionHost", () => {
 	})
 
 	describe("sendToExtension", () => {
-		it("should throw error when extension not ready", () => {
+		it("should throw error when extension not ready", async () => {
 			const host = createTestHost()
 			const message: WebviewMessage = { type: "requestModes" }
 
-			expect(() => {
-				host.sendToExtension(message)
-			}).toThrow("You cannot send messages to the extension before it is ready")
+			await expect(host.sendToExtension(message)).rejects.toThrow(
+				"You cannot send messages to the extension before it is ready",
+			)
 		})
 
-		it("should emit webviewMessage event when webview is ready", () => {
+		it("should emit webviewMessage event when webview is ready", async () => {
 			const host = createTestHost()
 			const emitSpy = vi.spyOn(host, "emit")
 			const message: WebviewMessage = { type: "requestModes" }
 
 			host.markWebviewReady()
 			emitSpy.mockClear() // Clear the markWebviewReady calls
-			host.sendToExtension(message)
+			await host.sendToExtension(message)
 
 			expect(emitSpy).toHaveBeenCalledWith("webviewMessage", message)
 		})
 
-		it("should not throw when webview is ready", () => {
+		it("should not throw when webview is ready", async () => {
 			const host = createTestHost()
 
 			host.markWebviewReady()
 
-			expect(() => {
-				host.sendToExtension({ type: "requestModes" })
-			}).not.toThrow()
+			await expect(host.sendToExtension({ type: "requestModes" })).resolves.not.toThrow()
+		})
+
+		it("should await initialization before emitting message", async () => {
+			const host = createTestHost()
+			const emitSpy = vi.spyOn(host, "emit")
+			const message: WebviewMessage = { type: "requestModes" }
+
+			host.markWebviewReady()
+			emitSpy.mockClear()
+
+			// Send message immediately after marking ready
+			const promise = host.sendToExtension(message)
+
+			// Message should not be emitted yet if initialization is still pending
+			// In this test, initialization completes synchronously, so this is just
+			// ensuring the await happens
+			await promise
+
+			expect(emitSpy).toHaveBeenCalledWith("webviewMessage", message)
 		})
 	})
 
@@ -340,6 +357,49 @@ describe("ExtensionHost", () => {
 			// Message listener is set up in activate(), which we can't easily call in unit tests.
 			// But we can verify the client exists and has the handleMessage method.
 			expect(typeof client.handleMessage).toBe("function")
+		})
+	})
+
+	describe("initialization ordering", () => {
+		it("should ensure all messages await initialization promise", async () => {
+			const host = createTestHost()
+			let initializationResolved = false
+			let resolveInit: () => void
+
+			// Create a manually-resolved initialization promise
+			const initPromise = new Promise<void>((resolve) => {
+				resolveInit = () => {
+					initializationResolved = true
+					resolve()
+				}
+			})
+
+			// Override the initialization promise before marking ready
+			const privateHost = host as unknown as { initializationPromise: Promise<void>; isReady: boolean }
+			privateHost.isReady = true
+			privateHost.initializationPromise = initPromise
+
+			const emitSpy = vi.spyOn(host, "emit")
+
+			// Send a message - it should wait for initialization
+			const sendPromise = host.sendToExtension({ type: "requestModes" })
+
+			// Give it a tick to start processing
+			await new Promise((resolve) => setImmediate(resolve))
+
+			// Message should not be emitted yet because initialization hasn't resolved
+			expect(initializationResolved).toBe(false)
+			expect(emitSpy).not.toHaveBeenCalledWith("webviewMessage", { type: "requestModes" })
+
+			// Now resolve initialization
+			resolveInit!()
+
+			// Wait for the message to be sent
+			await sendPromise
+
+			// Now initialization should be complete and message emitted
+			expect(initializationResolved).toBe(true)
+			expect(emitSpy).toHaveBeenCalledWith("webviewMessage", { type: "requestModes" })
 		})
 	})
 
@@ -658,6 +718,8 @@ describe("ExtensionHost", () => {
 			const taskPromise = host.runTask("delegate this").then(() => {
 				settled = true
 			})
+			// Wait for newTask message to be emitted
+			await new Promise((resolve) => setImmediate(resolve))
 			const rootId = (messages.find((message) => message.type === "newTask") as { taskId: string }).taskId
 
 			api.emit(RooCodeEventName.TaskModeSwitched, rootId, "architect")

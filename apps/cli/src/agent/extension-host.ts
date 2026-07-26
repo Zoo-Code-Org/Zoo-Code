@@ -124,7 +124,7 @@ export interface ExtensionHostInterface extends IExtensionHost<ExtensionHostEven
 	runTask(prompt: string, taskId?: string, configuration?: RooCodeSettings, images?: string[]): Promise<void>
 	resumeTask(taskId: string): Promise<void>
 	cancelTask(): Promise<void>
-	sendToExtension(message: WebviewMessage): void
+	sendToExtension(message: WebviewMessage): Promise<void>
 	dispose(): Promise<void>
 }
 
@@ -213,7 +213,9 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 
 		// Initialize client - single source of truth for agent state (including mode).
 		this.client = new ExtensionClient({
-			sendMessage: (msg) => this.sendToExtension(msg),
+			sendMessage: (msg) => {
+				void this.sendToExtension(msg)
+			},
 			debug: options.debug, // Enable debug logging in the client.
 		})
 
@@ -230,7 +232,9 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		this.askDispatcher = new AskDispatcher({
 			outputManager: this.outputManager,
 			promptManager: this.promptManager,
-			sendMessage: (msg) => this.sendToExtension(msg),
+			sendMessage: (msg) => {
+				void this.sendToExtension(msg)
+			},
 			nonInteractive: options.autonomous || options.nonInteractive,
 			exitOnError: options.exitOnError,
 			disabled: options.disableAskHandling,
@@ -503,11 +507,12 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 	// Message Handling
 	// ==========================================================================
 
-	public sendToExtension(message: WebviewMessage): void {
+	public async sendToExtension(message: WebviewMessage): Promise<void> {
 		if (!this.isReady) {
 			throw new Error("You cannot send messages to the extension before it is ready")
 		}
 
+		await this.initializationPromise
 		this.emit("webviewMessage", message)
 	}
 
@@ -638,7 +643,7 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		const rootTaskId = taskId ?? (this.options.autonomous ? randomUUID() : "unknown")
 		this.rootTaskId = rootTaskId
 		const completion = this.waitForTaskCompletion(rootTaskId)
-		this.sendToExtension({
+		await this.sendToExtension({
 			type: "newTask",
 			text: prompt,
 			...(taskId || this.options.autonomous ? { taskId: rootTaskId } : {}),
@@ -651,7 +656,7 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 	public async resumeTask(taskId: string): Promise<void> {
 		this.rootTaskId = taskId
 		const completion = this.waitForTaskCompletion(taskId)
-		this.sendToExtension({ type: "showTaskWithId", text: taskId })
+		await this.sendToExtension({ type: "showTaskWithId", text: taskId })
 		this.lastTaskResult = await completion
 	}
 
