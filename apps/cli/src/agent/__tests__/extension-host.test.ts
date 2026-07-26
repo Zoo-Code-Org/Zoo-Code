@@ -937,4 +937,71 @@ describe("ExtensionHost", () => {
 			expect(getPrivate(host, "ephemeralStorageDir")).toBeNull()
 		})
 	})
+
+	describe("autonomous mode", () => {
+		it("should set ROO_CLI_AUTONOMOUS environment variable when autonomous is true", () => {
+			const originalValue = process.env.ROO_CLI_AUTONOMOUS
+
+			const host = createTestHost({ autonomous: true })
+
+			expect(process.env.ROO_CLI_AUTONOMOUS).toBe("1")
+
+			// Cleanup
+			if (originalValue === undefined) {
+				delete process.env.ROO_CLI_AUTONOMOUS
+			} else {
+				process.env.ROO_CLI_AUTONOMOUS = originalValue
+			}
+		})
+
+		it("should not set ROO_CLI_AUTONOMOUS when autonomous is false", () => {
+			const originalValue = process.env.ROO_CLI_AUTONOMOUS
+			delete process.env.ROO_CLI_AUTONOMOUS
+
+			const host = createTestHost({ autonomous: false })
+
+			expect(process.env.ROO_CLI_AUTONOMOUS).toBeUndefined()
+
+			// Cleanup
+			if (originalValue !== undefined) {
+				process.env.ROO_CLI_AUTONOMOUS = originalValue
+			}
+		})
+
+		it("should force orchestrator mode when autonomous is true", () => {
+			const host = createTestHost({ mode: "code", autonomous: true })
+			const initialSettings = getPrivate(host, "initialSettings")
+
+			expect(initialSettings.mode).toBe("orchestrator")
+		})
+
+		it("should enable auto-approval for autonomous mode", () => {
+			const host = createTestHost({ autonomous: true })
+			const initialSettings = getPrivate(host, "initialSettings")
+
+			expect(initialSettings.autoApprovalEnabled).toBe(true)
+			expect(initialSettings.alwaysAllowReadOnly).toBe(true)
+			expect(initialSettings.alwaysAllowWrite).toBe(true)
+			expect(initialSettings.alwaysAllowMcp).toBe(true)
+		})
+
+		it("should store last task result", () => {
+			const host = createTestHost()
+
+			expect(host.getLastTaskResult()).toBeUndefined()
+		})
+
+		it("should store root task ID", () => {
+			const host = createTestHost()
+
+			expect(host.getRootTaskId()).toBeUndefined()
+		})
+
+		it("should expose cancelTask method", async () => {
+			const host = createTestHost()
+
+			// Should not throw even if extension API is not ready
+			await expect(host.cancelTask()).resolves.toBeUndefined()
+		})
+	})
 })
