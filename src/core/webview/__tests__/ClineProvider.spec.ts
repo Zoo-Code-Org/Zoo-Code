@@ -577,6 +577,7 @@ describe("ClineProvider", () => {
 		})
 
 		expect(mockWebviewView.webview.html).toContain("<!DOCTYPE html>")
+		expect(mockWebviewView.webview.html).toContain("<title>Zoo Code</title>")
 	})
 
 	describe("logWebviewHiddenDiagnostics", () => {

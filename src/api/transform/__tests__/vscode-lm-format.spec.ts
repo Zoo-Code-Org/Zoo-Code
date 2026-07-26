@@ -154,6 +154,61 @@ describe("convertToVsCodeLmMessages", () => {
 		expect(toolCall.type).toBe("tool_call")
 	})
 
+	it("should handle tool_use with non-object non-string input", () => {
+		const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "tool_use",
+						id: "tool-num",
+						name: "numericTool",
+						input: 42 as any, // number is valid JSON
+					},
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+
+		expect(result).toHaveLength(1)
+		expect(result[0].role).toBe("assistant")
+		// asObjectSafe returns {} for non-object/non-string, no console.warn triggered
+		expect(consoleWarnSpy).not.toHaveBeenCalled()
+
+		consoleWarnSpy.mockRestore()
+	})
+
+	it("should log Zoo Code branded warning when asObjectSafe fails to parse invalid JSON string", () => {
+		const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "tool_use",
+						id: "tool-bad",
+						name: "badJsonTool",
+						input: "not-valid-json{{{",
+					},
+				],
+			},
+		]
+
+		const result = convertToVsCodeLmMessages(messages)
+
+		expect(result).toHaveLength(1)
+		expect(consoleWarnSpy).toHaveBeenCalledWith(
+			"Zoo Code <Language Model API>: Failed to parse object:",
+			expect.any(Error),
+		)
+
+		consoleWarnSpy.mockRestore()
+	})
+
 	it("should handle image blocks with appropriate placeholders", () => {
 		const messages: Anthropic.Messages.MessageParam[] = [
 			{
@@ -433,5 +488,37 @@ describe("extractTextCountFromMessage", () => {
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("result-id")
+	})
+
+	it("should log Zoo Code branded warning when tool call input stringify fails", () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		// Create an object with a circular reference that will throw on JSON.stringify
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const circularInput: any = { name: "circular" }
+		circularInput.self = circularInput
+
+		const mockToolCallPart = new (vitest.mocked(vscode).LanguageModelToolCallPart)(
+			"call-id",
+			"broken-tool",
+			circularInput,
+		)
+
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const message: any = {
+			role: vscode.LanguageModelChatMessageRole.Assistant,
+			content: [mockToolCallPart],
+		}
+
+		const result = extractTextCountFromMessage(message)
+
+		// Should still return the tool name and callId even when input stringify fails
+		expect(result).toBe("broken-toolcall-id")
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"Zoo Code <Language Model API>: Failed to stringify tool call input:",
+			expect.any(Error),
+		)
+
+		consoleErrorSpy.mockRestore()
 	})
 })

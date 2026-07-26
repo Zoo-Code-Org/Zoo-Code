@@ -289,11 +289,6 @@
 			"count": 5
 		}
 	},
-	"api/providers/__tests__/vscode-lm.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/xai.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -546,7 +541,7 @@
 	},
 	"api/transform/__tests__/vscode-lm-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 23
+			"count": 24
 		}
 	},
 	"api/transform/__tests__/zai-format.spec.ts": {
