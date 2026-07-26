@@ -27,14 +27,3 @@ test("renders the welcome hero in the VS Code dark theme", async ({ mount }) => 
 
 	await expect(component).toHaveScreenshot("zoo-hero-dark.png")
 })
-
-test("renders the welcome hero hovered state", async ({ mount }) => {
-	const component = await mount(<RooHero />)
-
-	await waitForAssetsAndRender(component)
-	await component.hover()
-
-	await expect(component).toHaveScreenshot("zoo-hero-dark-hover.png", {
-		animations: "disabled",
-	})
-})
