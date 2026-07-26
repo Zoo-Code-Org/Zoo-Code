@@ -212,6 +212,7 @@ export const PROVIDERS_WITH_CUSTOM_MODEL_UI: ProviderName[] = [
 	"lmstudio",
 	"vscode-lm",
 	"moonshot", // Moonshot has custom ModelPicker inside Moonshot.tsx
+	"friendli",
 ]
 
 /**

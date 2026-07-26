@@ -8,8 +8,12 @@ export type FriendliModelId =
 
 export const friendliDefaultModelId: FriendliModelId = "zai-org/GLM-5.2"
 
+// Static fallback for the Friendli provider. Used as a fallback when dynamic
+// models cannot be fetched (cold start, network errors, API lag), in tests,
+// and in the webview's MODELS_BY_PROVIDER fallback. The provider itself fetches
+// the live list from https://api.friendli.ai/serverless/v1/models at runtime.
 // Pricing sourced from https://friendli.ai/api/public/model-apis (per 1M tokens).
-export const friendliModels = {
+export const friendliModels: Record<string, ModelInfo> = {
 	"zai-org/GLM-5.2": {
 		maxTokens: 131_072,
 		contextWindow: 1_000_000,
@@ -64,4 +68,4 @@ export const friendliModels = {
 		description:
 			"MiniMax M2.5 is a high-performance language model with a 204.8K context window, optimized for long-context understanding and generation tasks, served via Friendli Model APIs.",
 	},
-} as const satisfies Record<string, ModelInfo>
+}

@@ -27,6 +27,10 @@ vi.mock("@src/components/common/VSCodeButtonLink", () => ({
 	),
 }))
 
+vi.mock("../../ModelPicker", () => ({
+	ModelPicker: () => <div data-testid="friendli-model-picker-mock" />,
+}))
+
 describe("Friendli provider settings", () => {
 	it("renders the 'Get Friendli API Key' link when no key is set", () => {
 		render(
