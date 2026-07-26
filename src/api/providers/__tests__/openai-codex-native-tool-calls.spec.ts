@@ -515,6 +515,22 @@ describe("OpenAiCodexHandler native tool calls", () => {
 
 		await expect(handler.completePrompt("Test prompt")).resolves.toBe("done")
 
+		const fetchOptions = mockFetch.mock.calls[0][1]
+		const body = JSON.parse(fetchOptions.body)
+		expect(body.input).toEqual([
+			{
+				role: "user",
+				content: [{ type: "input_text", text: "Test prompt" }],
+			},
+		])
+		expect(body).not.toHaveProperty("prompt_cache_key")
+		expect(body.reasoning?.context).toBeUndefined()
+		expect(body.input).not.toContainEqual(expect.objectContaining({ type: "additional_tools" }))
+		expect(body.input).not.toContainEqual(expect.objectContaining({ role: "developer" }))
+		expect(fetchOptions.headers).not.toHaveProperty("session-id")
+		expect(fetchOptions.headers).not.toHaveProperty("x-session-affinity")
+		expect(fetchOptions.headers).not.toHaveProperty("version")
+		expect(fetchOptions.headers).not.toHaveProperty("x-openai-internal-codex-responses-lite")
 		expect(mockFetch).toHaveBeenCalledWith(
 			expect.stringContaining("/responses"),
 			expect.objectContaining({

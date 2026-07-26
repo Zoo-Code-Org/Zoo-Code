@@ -36,15 +36,15 @@
 
 Pots trobar una guia ràpida per passar de Roo Code a Zoo Code a la [guia de migració Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Volem ajudar tant com puguem durant la transició, i per això tens el nostre [Reddit](https://www.reddit.com/r/ZooCode) i [Discord](https://discord.gg/VxfP4Vx3gX) per a aquest suport. Si tens problemes o algun dubte, entra i pregunta.
 
-## Novetats a la v3.70.0
+## Novetats a la v3.72.0
 
-- **Família OpenAI GPT-5.6** — `Sol`, `Terra` i `Luna` ja estan disponibles tant a OpenAI Codex com a OpenAI Native.
-- **Suport per a Grok 4.5** — el nou model insígnia de xAI, a més d'una correcció del format de l'esforç de raonament que també beneficia Grok 4 Mini.
-- **Suport per al proveïdor Kenari** — una passarel·la d'IA de primer nivell, compatible amb OpenAI, facturada en rupies, que cobreix Claude, GPT, DeepSeek, GLM, Kimi i més.
-- Mostra el botó de condensació de context i la barra de progrés de la finestra de context a la capçalera de tasca col·lapsada.
-- Correcció: pèrdua de sortida del terminal i finalització prematura de tasques en terminals freds.
-- Correcció: l'adjunció d'imatges per a Zoo Gateway i Vercel AI Gateway ara segueix les etiquetes de capacitat de visió en directe en lloc d'una llista blanca estàtica.
-- Actualitzacions de dependències i eines.
+- **Proveïdors Moonshot i Kimi Code** — descobreix dinàmicament els models de Moonshot o inicia la sessió a Kimi Code mitjançant el flux de dispositiu OAuth.
+- **Compatibilitat amb els models més recents** — utilitza Claude Opus 5 amb tots els proveïdors, a més de Kimi K3, Gemini 3.6 Flash i MiniMax-M3.
+- **Fluxos de subtasques millorats** — abandona subtasques interrompudes de manera neta, amb una invalidació més segura de l'historial de tasques i una millor cobertura de represa.
+- **Indexació de la base de codi ampliada** — indexa fitxers Dart i de text pla.
+- **Fiabilitat dels proveïdors** — correccions per a GPT-5.6 Luna amb ChatGPT OAuth, el contingut de raonament de LiteLLM i l'entrada d'imatges de DeepSeek V4.
+- **Configuració més fluida** — millores en l'inici de sessió de Zoo Gateway i en el canvi de mode.
+- Millores de l'API, els tipus de proveïdor, les dependències, la localització i la CI.
 
 ## Què pot fer Zoo Code per TU?
 

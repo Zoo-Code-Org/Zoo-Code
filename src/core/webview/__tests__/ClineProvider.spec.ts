@@ -1,6 +1,7 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
 import * as path from "path"
+import { TaskRegistry } from "../../task/TaskRegistry"
 
 import Anthropic from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
@@ -1516,7 +1517,7 @@ describe("ClineProvider", () => {
 
 		test("handles case when no current task exists", async () => {
 			// Clear the cline stack
-			;(provider as any).clineStack = []
+			;(provider as any).taskRegistry = new TaskRegistry()
 
 			// Trigger message deletion
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
@@ -3142,8 +3143,10 @@ describe("ClineProvider - Router Models", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -3194,8 +3197,10 @@ describe("ClineProvider - Router Models", () => {
 				litellm: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -3292,8 +3297,10 @@ describe("ClineProvider - Router Models", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})

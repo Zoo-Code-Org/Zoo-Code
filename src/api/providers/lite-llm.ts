@@ -9,6 +9,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
+import { convertToR1Format } from "../transform/r1-format"
 import { GEMINI_THOUGHT_SIGNATURE_BYPASS } from "../transform/gemini-format"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
@@ -117,9 +118,19 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	): ApiStream {
 		const { id: modelId, info } = await this.fetchModel()
 
-		const openAiMessages = convertToOpenAiMessages(messages, {
-			normalizeToolCallId: sanitizeOpenAiCallId,
-		})
+		// Models that require reasoning_content to be echoed back during tool-call
+		// continuations (see LITELLM_PRESERVE_REASONING_MODEL_IDS) need convertToR1Format:
+		// it merges consecutive same-role messages and, via mergeToolResultText, folds
+		// text following tool_results into the last tool message so a user message
+		// never gets inserted mid-turn and causes the model to drop prior reasoning_content.
+		const openAiMessages = info.preserveReasoning
+			? convertToR1Format(messages, {
+					normalizeToolCallId: sanitizeOpenAiCallId,
+					mergeToolResultText: true,
+				})
+			: convertToOpenAiMessages(messages, {
+					normalizeToolCallId: sanitizeOpenAiCallId,
+				})
 
 		// Prepare messages with cache control if enabled and supported
 		let systemMessage: OpenAI.Chat.ChatCompletionMessageParam

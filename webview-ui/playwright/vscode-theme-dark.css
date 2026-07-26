@@ -1,0 +1,89 @@
+:root {
+	color-scheme: dark;
+	--vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+	--vscode-font-size: 13px;
+	--vscode-font-weight: normal;
+	--vscode-editor-font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+	--vscode-editor-font-size: 12px;
+	--vscode-editor-line-height: 18px;
+	--vscode-foreground: #cccccc;
+	--vscode-disabledForeground: #808080;
+	--vscode-descriptionForeground: #9d9d9d;
+	--vscode-errorForeground: #f48771;
+	--vscode-focusBorder: #007fd4;
+	--vscode-editor-foreground: #d4d4d4;
+	--vscode-editor-background: #1e1e1e;
+	--vscode-editorGroup-border: #2b2b2b;
+	--vscode-editorWarning-foreground: #cca700;
+	--vscode-editorWarning-background: #352a05;
+	--vscode-button-foreground: #ffffff;
+	--vscode-button-background: #0e639c;
+	--vscode-button-hoverBackground: #1177bb;
+	--vscode-button-secondaryForeground: #cccccc;
+	--vscode-button-secondaryBackground: #3a3d41;
+	--vscode-dropdown-foreground: #f0f0f0;
+	--vscode-dropdown-background: #3c3c3c;
+	--vscode-dropdown-border: #3c3c3c;
+	--vscode-input-foreground: #cccccc;
+	--vscode-input-background: #3c3c3c;
+	--vscode-input-border: #3c3c3c;
+	--vscode-badge-foreground: #ffffff;
+	--vscode-badge-background: #4d4d4d;
+	--vscode-notifications-foreground: #cccccc;
+	--vscode-notifications-background: #252526;
+	--vscode-notifications-border: #303031;
+	--vscode-list-hoverForeground: #cccccc;
+	--vscode-list-hoverBackground: #2a2d2e;
+	--vscode-list-focusBackground: #04395e;
+	--vscode-list-activeSelectionBackground: #04395e;
+	--vscode-list-activeSelectionForeground: #ffffff;
+	--vscode-toolbar-hoverBackground: #2a2d2e;
+	--vscode-toolbar-hoverOutline: #00000000;
+	--vscode-panel-border: #2b2b2b;
+	--vscode-progressBar-background: #0e70c0;
+	--vscode-sideBar-foreground: #cccccc;
+	--vscode-sideBar-background: #252526;
+	--vscode-sideBar-border: #2b2b2b;
+	--vscode-sideBarSectionHeader-foreground: #cccccc;
+	--vscode-sideBarSectionHeader-background: #00000000;
+	--vscode-sideBarSectionHeader-border: #2b2b2b;
+	--vscode-titleBar-activeForeground: #cccccc;
+	--vscode-titleBar-inactiveForeground: #999999;
+	--vscode-charts-blue: #3794ff;
+	--vscode-charts-green: #89d185;
+	--vscode-charts-orange: #d18616;
+	--vscode-charts-red: #f14c4c;
+	--vscode-charts-yellow: #cca700;
+	--vscode-inputValidation-infoForeground: #d4d4d4;
+	--vscode-inputValidation-infoBackground: #063b49;
+	--vscode-inputValidation-infoBorder: #007acc;
+	--vscode-inputValidation-warningForeground: #d4d4d4;
+	--vscode-inputValidation-warningBackground: #352a05;
+	--vscode-inputValidation-warningBorder: #b89500;
+	--vscode-widget-border: #303031;
+	--vscode-widget-shadow: #0000005c;
+	--vscode-textLink-foreground: #3794ff;
+	--vscode-textCodeBlock-background: #2d2d2d;
+	--vscode-menu-foreground: #cccccc;
+	--vscode-menu-background: #252526;
+	--vscode-editorHoverWidget-foreground: #cccccc;
+	--vscode-editorHoverWidget-background: #252526;
+	--vscode-editorHoverWidget-border: #454545;
+	--vscode-banner-background: #04395e;
+	--vscode-banner-foreground: #ffffff;
+	--vscode-scrollbarSlider-background: #79797966;
+	--vscode-scrollbarSlider-hoverBackground: #646464b3;
+	--vscode-scrollbarSlider-activeBackground: #bfbfbf66;
+}
+
+body {
+	margin: 0;
+	background: var(--vscode-editor-background);
+	color: var(--vscode-editor-foreground);
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+}
+
+#root {
+	padding: 16px;
+}

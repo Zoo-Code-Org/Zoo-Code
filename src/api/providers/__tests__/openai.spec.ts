@@ -905,6 +905,12 @@ describe("OpenAiHandler", () => {
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error: API Error")
 		})
 
+		it("should preserve HTTP status when wrapping completion errors", async () => {
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("Unauthorized"), { status: 401 }))
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toMatchObject({ status: 401 })
+		})
+
 		it("should handle empty response", async () => {
 			mockCreate.mockImplementationOnce(() => ({
 				choices: [{ message: { content: "" } }],

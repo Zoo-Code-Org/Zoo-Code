@@ -8,6 +8,9 @@
 		"pretest": "turbo run bundle --cwd ..",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
+		"test:visual": "playwright test -c playwright-ct.config.ts",
+		"test:visual:docker": "node playwright/run-docker.mjs",
+		"test:visual:docker:update": "node playwright/run-docker.mjs --update",
 		"format": "prettier --write src",
 		"dev": "vite",
 		"build": "tsc -b && vite build",
@@ -83,6 +86,8 @@
 		"zod": "^3.25.61"
 	},
 	"devDependencies": {
+		"@playwright/experimental-ct-react": "1.60.0",
+		"@playwright/test": "1.60.0",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@testing-library/jest-dom": "6.9.1",
@@ -91,10 +96,9 @@
 		"@types/diff": "5.2.3",
 		"@types/jest": "29.5.14",
 		"@types/katex": "0.16.7",
-		"@types/node": "20.19.43",
+		"@types/node": "22.20.1",
 		"@types/react": "18.3.31",
 		"@types/react-dom": "18.3.7",
-		"@types/shell-quote": "1.7.5",
 		"@types/stacktrace-js": "2.0.3",
 		"@types/vscode-webview": "1.57.5",
 		"@vitejs/plugin-react": "5.2.0",
@@ -102,6 +106,7 @@
 		"@vitest/ui": "4.1.9",
 		"babel-plugin-react-compiler": "1.0.0",
 		"jsdom": "26.1.0",
+		"monocart-reporter": "^2.9.20",
 		"vite": "8.1.0",
 		"vitest": "4.1.9"
 	}

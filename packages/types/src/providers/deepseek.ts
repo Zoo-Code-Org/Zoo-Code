@@ -12,7 +12,7 @@ export const deepSeekModels = {
 	"deepseek-v4-flash": {
 		maxTokens: 384_000,
 		contextWindow: 1_000_000,
-		supportsImages: false,
+		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
 		preserveReasoning: true,
@@ -26,7 +26,7 @@ export const deepSeekModels = {
 	"deepseek-v4-pro": {
 		maxTokens: 384_000,
 		contextWindow: 1_000_000,
-		supportsImages: false,
+		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
 		preserveReasoning: true,

@@ -21,6 +21,7 @@ describe("opencode-go registry", () => {
 		"glm-5",
 		"glm-5.1",
 		"glm-5.2",
+		"kimi-k3",
 		"kimi-k2.5",
 		"kimi-k2.6",
 		"mimo-v2.5",
@@ -59,6 +60,23 @@ describe("opencode-go registry", () => {
 
 		it("returns undefined for an unknown model ID", () => {
 			expect(getOpencodeGoModelInfo("not-a-real-go-model")).toBeUndefined()
+		})
+
+		it("kimi-k3 exposes always-on reasoning with effort allow-list and reasoning preservation", () => {
+			const info = getOpencodeGoModelInfo("kimi-k3")
+			expect(info).toBeDefined()
+			expect(info?.maxTokens).toBe(131_072)
+			expect(info?.contextWindow).toBe(1_048_576)
+			expect(info?.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(info?.reasoningEffort).toBe("max")
+			expect(info?.preserveReasoning).toBe(true)
+			expect(info?.defaultTemperature).toBe(1.0)
+			expect(info?.supportsPromptCache).toBe(true)
+			expect(info?.supportsMaxTokens).toBe(true)
+			expect(info?.supportsImages).toBe(false)
+			expect(info?.inputPrice).toBe(3.0)
+			expect(info?.outputPrice).toBe(15.0)
+			expect(info?.cacheReadsPrice).toBe(0.3)
 		})
 	})
 

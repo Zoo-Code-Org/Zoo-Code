@@ -2,6 +2,7 @@
 
 import * as vscode from "vscode"
 import type { HistoryItem, ExtensionMessage } from "@roo-code/types"
+import { RooCodeEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ContextProxy } from "../../config/ContextProxy"
@@ -778,6 +779,72 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(item).toBeDefined()
 			// The second write (tokensIn: 222) should be the last one since writes are serialized
 			expect(item!.tokensIn).toBe(222)
+		})
+	})
+
+	describe("taskCreationCallback — onTaskCompleted listener", () => {
+		function makeFakeTask(taskId: string) {
+			const listeners: Record<string, ((...args: unknown[]) => unknown)[]> = {}
+			return {
+				taskId,
+				on: (event: string, fn: (...args: unknown[]) => unknown) => {
+					listeners[event] = listeners[event] ?? []
+					listeners[event].push(fn)
+				},
+				// Returns a promise that resolves when all async listeners have settled.
+				emit: async (event: string, ...args: unknown[]) => {
+					await Promise.all((listeners[event] ?? []).map((fn) => Promise.resolve(fn(...args))))
+				},
+			}
+		}
+
+		it("writes completed status when task is not already completed", async () => {
+			const existing = createHistoryItem({ id: "task-cb-1", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			const fakeTask = makeFakeTask("task-cb-1")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-1", {}, {})
+
+			const stored = provider.taskHistoryStore.get("task-cb-1")
+			expect(stored?.status).toBe("completed")
+		})
+
+		it("skips the write when task is already completed", async () => {
+			const existing = createHistoryItem({ id: "task-cb-2", task: "T", status: "completed" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			const updateSpy = vi.spyOn(provider, "updateTaskHistory")
+
+			const fakeTask = makeFakeTask("task-cb-2")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-2", {}, {})
+
+			// updateTaskHistory is called initially to store the item, but should NOT be
+			// called again by onTaskCompleted since it's already completed.
+			const onTaskCompletedCalls = updateSpy.mock.calls.filter((c) => {
+				const item = c[0] as HistoryItem
+				return item?.id === "task-cb-2" && item?.status === "completed"
+			})
+			// It was written with completed status already; the callback must not re-write.
+			expect(onTaskCompletedCalls.length).toBe(0)
+		})
+
+		it("logs and does not throw when updateTaskHistory rejects", async () => {
+			const existing = createHistoryItem({ id: "task-cb-3", task: "T" })
+			await provider.updateTaskHistory(existing, { broadcast: false })
+
+			vi.spyOn(provider, "updateTaskHistory").mockRejectedValueOnce(new Error("disk full"))
+			const logSpy = vi.spyOn(provider as any, "log")
+
+			const fakeTask = makeFakeTask("task-cb-3")
+			;(provider as any).taskCreationCallback(fakeTask)
+
+			await fakeTask.emit(RooCodeEventName.TaskCompleted, "task-cb-3", {}, {})
+
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
 		})
 	})
 })

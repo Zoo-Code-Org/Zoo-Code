@@ -26,6 +26,7 @@ import {
 	friendliModels,
 	basetenModels,
 	qwenCodeModels,
+	kimiCodeDefaultModelInfo,
 	litellmDefaultModelInfo,
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
@@ -103,7 +104,12 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 					lmStudioModels: (lmStudioModels.data || undefined) as ModelRecord | undefined,
 					ollamaModels: (ollamaModels.data || undefined) as ModelRecord | undefined,
 				})
-			: { id: getProviderDefaultModelId(activeProvider ?? "openrouter"), info: undefined }
+			: activeProvider === "kimi-code" && apiConfiguration
+				? {
+						id: apiConfiguration.apiModelId || getProviderDefaultModelId("kimi-code"),
+						info: kimiCodeDefaultModelInfo,
+					}
+				: { id: getProviderDefaultModelId(activeProvider ?? "openrouter"), info: undefined }
 
 	return {
 		provider,
@@ -253,9 +259,19 @@ function getSelectedModel({
 			return { id, info: routerInfo ?? staticInfo }
 		}
 		case "moonshot": {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = moonshotModels[id as keyof typeof moonshotModels]
-			return { id, info }
+			const availableModels = routerModels.moonshot
+				? { ...moonshotModels, ...routerModels.moonshot }
+				: moonshotModels
+			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
+			const routerInfo = routerModels.moonshot?.[id]
+			const staticInfo = moonshotModels[id as keyof typeof moonshotModels]
+			return { id, info: routerInfo ?? staticInfo }
+		}
+		case "kimi-code": {
+			const configuredId = apiConfiguration.apiModelId
+			const availableModels = routerModels["kimi-code"]
+			const id = configuredId || defaultModelId
+			return { id, info: availableModels?.[id] ?? kimiCodeDefaultModelInfo }
 		}
 		case "minimax": {
 			const id = apiConfiguration.apiModelId ?? defaultModelId

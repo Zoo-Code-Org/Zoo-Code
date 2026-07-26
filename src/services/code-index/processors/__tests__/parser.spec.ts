@@ -267,6 +267,31 @@ describe("CodeParser", () => {
 	})
 
 	describe("_chunkTextByLines", () => {
+		it("should not emit a chunk whose segment hash has already been seen", () => {
+			const lines = ["Fallback content long enough to produce a chunk without being filtered out."]
+			const seenSegmentHashes = new Set<string>()
+
+			const firstResult = parser["_chunkTextByLines"](
+				lines,
+				"manual.txt",
+				"hash",
+				"fallback_chunk",
+				seenSegmentHashes,
+			)
+			const duplicateResult = parser["_chunkTextByLines"](
+				lines,
+				"manual.txt",
+				"hash",
+				"fallback_chunk",
+				seenSegmentHashes,
+			)
+
+			expect(firstResult).toHaveLength(1)
+			expect(firstResult[0].segmentHash).toMatch(/^[a-f0-9]{64}$/)
+			expect(seenSegmentHashes).toEqual(new Set([firstResult[0].segmentHash]))
+			expect(duplicateResult).toEqual([])
+		})
+
 		it("should handle oversized lines by splitting them", async () => {
 			const longLine = "a".repeat(2000)
 			const lines = ["normal", longLine, "normal"]

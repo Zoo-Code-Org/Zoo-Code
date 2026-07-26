@@ -78,6 +78,20 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 0.3,
 				description: "Claude Sonnet 5",
 			},
+			"anthropic/claude-opus-5": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				supportsReasoningBinary: true,
+				supportsTemperature: false,
+				inputPrice: 5,
+				outputPrice: 25,
+				cacheWritesPrice: 6.25,
+				cacheReadsPrice: 0.5,
+				description: "Claude Opus 5",
+			},
 		})
 	}),
 }))
@@ -294,6 +308,39 @@ describe("RequestyHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "anthropic/claude-sonnet-5",
+					max_tokens: 32768,
+					thinking: { type: "adaptive" },
+					temperature: undefined,
+				}),
+			)
+		})
+
+		it("uses adaptive thinking for Claude Opus 5 when reasoning is enabled", async () => {
+			const handler = new RequestyHandler({
+				requestyApiKey: "test-key",
+				requestyModelId: "anthropic/claude-opus-5",
+				enableReasoningEffort: true,
+				modelMaxTokens: 32768,
+			})
+
+			const mockStream = {
+				async *[Symbol.asyncIterator]() {
+					yield {
+						id: "test-id",
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 10, completion_tokens: 20 },
+					}
+				},
+			}
+
+			mockCreate.mockResolvedValue(mockStream)
+
+			const generator = handler.createMessage("test system prompt", [{ role: "user" as const, content: "test" }])
+			await generator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-opus-5",
 					max_tokens: 32768,
 					thinking: { type: "adaptive" },
 					temperature: undefined,
@@ -581,6 +628,23 @@ describe("RequestyHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith({
 				model: "anthropic/claude-sonnet-5",
+				max_tokens: 8192,
+				messages: [{ role: "system", content: "test prompt" }],
+				temperature: undefined,
+			})
+		})
+
+		it("omits temperature for Claude Opus 5 in completePrompt", async () => {
+			const handler = new RequestyHandler({
+				requestyApiKey: "test-key",
+				requestyModelId: "anthropic/claude-opus-5",
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "test completion" } }] })
+
+			await handler.completePrompt("test prompt")
+
+			expect(mockCreate).toHaveBeenCalledWith({
+				model: "anthropic/claude-opus-5",
 				max_tokens: 8192,
 				messages: [{ role: "system", content: "test prompt" }],
 				temperature: undefined,

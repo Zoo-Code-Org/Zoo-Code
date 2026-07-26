@@ -34,15 +34,15 @@
 
 Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/VxfP4Vx3gX)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
 
-## v3.70.0의 새로운 기능
+## v3.72.0의 새로운 기능
 
-- **OpenAI GPT-5.6 패밀리** — `Sol`, `Terra`, `Luna`가 이제 OpenAI Codex와 OpenAI Native 프로바이더 경로 모두에서 사용 가능합니다.
-- **Grok 4.5 지원** — xAI의 새로운 플래그십 모델과, Grok 4 Mini에도 도움이 되는 reasoning-effort 형식 수정.
-- **Kenari 프로바이더 지원** — Claude, GPT, DeepSeek, GLM, Kimi 등을 지원하며 루피아로 청구되는 일류 OpenAI 호환 AI 게이트웨이.
-- 접힌 작업 헤더에 컨텍스트 압축 버튼과 컨텍스트 윈도우 진행률 표시줄을 표시합니다.
-- 수정: 콜드 터미널에서의 터미널 출력 손실 및 조기 작업 완료 문제.
-- 수정: Zoo Gateway 및 Vercel AI Gateway 모델의 이미지 첨부가 이제 정적 허용 목록 대신 실시간 vision 지원 태그를 따릅니다.
-- 의존성 및 툴링 업데이트.
+- **Moonshot 및 Kimi Code 프로바이더** — Moonshot 모델을 동적으로 검색하거나 OAuth 기기 흐름으로 Kimi Code에 로그인하세요.
+- **최신 모델 지원** — 여러 프로바이더에서 Claude Opus 5를 사용하고 Kimi K3, Gemini 3.6 Flash, MiniMax-M3도 이용하세요.
+- **개선된 하위 작업 워크플로우** — 더 안전한 작업 기록 무효화와 향상된 재개 테스트 범위로 중단된 하위 작업을 깔끔하게 포기하세요.
+- **확장된 코드베이스 인덱싱** — Dart 및 일반 텍스트 파일을 인덱싱하세요.
+- **프로바이더 안정성** — ChatGPT OAuth의 GPT-5.6 Luna, LiteLLM reasoning content, DeepSeek V4 이미지 입력 문제를 수정했습니다.
+- **더 원활한 설정** — Zoo Gateway 로그인과 모드 전환 동작을 개선했습니다.
+- API, 프로바이더 유형, 의존성, 현지화 및 CI 개선.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 

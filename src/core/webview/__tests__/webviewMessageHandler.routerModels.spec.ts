@@ -111,8 +111,11 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(routerModels).toHaveProperty("openrouter")
 		expect(routerModels).toHaveProperty("requesty")
 		expect(routerModels).toHaveProperty("deepseek")
+		expect(routerModels).toHaveProperty("moonshot")
 		expect(routerModels.deepseek).toEqual({})
+		expect(routerModels.moonshot).toEqual({})
 		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "deepseek" }))
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "moonshot" }))
 	})
 
 	it("fetches DeepSeek models when stored DeepSeek credentials exist", async () => {
@@ -291,5 +294,184 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			apiKey: "stored-api-key",
 			baseUrl: "http://stored:4000",
 		})
+	})
+
+	it("fetches Moonshot models when stored Moonshot credentials exist", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				moonshotApiKey: "stored-moonshot-key",
+				moonshotBaseUrl: "https://api.moonshot.ai/v1",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options: any) => {
+			if (options?.provider === "moonshot") {
+				return { "kimi-k2-0905-preview": { contextWindow: 262144, supportsPromptCache: true } }
+			}
+
+			switch (options?.provider) {
+				case "openrouter":
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case "requesty":
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "vercel-ai-gateway":
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "litellm":
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(
+			mockProvider as any,
+			{
+				type: "requestRouterModels",
+			} as any,
+		)
+
+		expect(getModelsMock).toHaveBeenCalledWith({
+			provider: "moonshot",
+			apiKey: "stored-moonshot-key",
+			baseUrl: "https://api.moonshot.ai/v1",
+		})
+
+		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
+			(c: any[]) => c[0]?.type === "routerModels",
+		)
+		expect(call).toBeTruthy()
+		expect(call[0].routerModels.moonshot).toEqual({
+			"kimi-k2-0905-preview": { contextWindow: 262144, supportsPromptCache: true },
+		})
+	})
+
+	it("flushes Moonshot cache when explicit apiKey provided via message values", async () => {
+		getModelsMock.mockResolvedValue({
+			"kimi-k2-0905-preview": { contextWindow: 262144, supportsPromptCache: true },
+		})
+
+		await webviewMessageHandler(
+			mockProvider as any,
+			{
+				type: "requestRouterModels",
+				values: {
+					moonshotApiKey: "new-moonshot-key",
+					moonshotBaseUrl: "https://api.moonshot.cn/v1",
+				},
+			} as any,
+		)
+
+		// flushModels should have been called for moonshot
+		const moonshotFlushCalls = flushModelsMock.mock.calls.filter((c: any[]) => c[0]?.provider === "moonshot")
+		expect(moonshotFlushCalls.length).toBe(1)
+		expect(moonshotFlushCalls[0][0]).toEqual({
+			provider: "moonshot",
+			apiKey: "new-moonshot-key",
+			baseUrl: "https://api.moonshot.cn/v1",
+		})
+
+		// getModels should use the provided credentials
+		const moonshotCalls = getModelsMock.mock.calls.filter((c: any[]) => c[0]?.provider === "moonshot")
+		expect(moonshotCalls.length).toBe(1)
+		expect(moonshotCalls[0][0]).toEqual({
+			provider: "moonshot",
+			apiKey: "new-moonshot-key",
+			baseUrl: "https://api.moonshot.cn/v1",
+		})
+	})
+
+	it("does not flush Moonshot cache when using stored credentials", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				moonshotApiKey: "stored-moonshot-key",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options: any) => {
+			if (options?.provider === "moonshot") {
+				return { "kimi-k2-0905-preview": { contextWindow: 262144, supportsPromptCache: true } }
+			}
+
+			switch (options?.provider) {
+				case "openrouter":
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case "requesty":
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "vercel-ai-gateway":
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "litellm":
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(
+			mockProvider as any,
+			{
+				type: "requestRouterModels",
+			} as any,
+		)
+
+		// flushModels should NOT have been called for moonshot
+		const moonshotFlushCalls = flushModelsMock.mock.calls.filter((c: any[]) => c[0]?.provider === "moonshot")
+		expect(moonshotFlushCalls.length).toBe(0)
+
+		// getModels should still have been called with stored credentials
+		const moonshotCalls = getModelsMock.mock.calls.filter((c: any[]) => c[0]?.provider === "moonshot")
+		expect(moonshotCalls.length).toBe(1)
+		expect(moonshotCalls[0][0]).toEqual({
+			provider: "moonshot",
+			apiKey: "stored-moonshot-key",
+			baseUrl: undefined,
+		})
+	})
+
+	it("posts a Moonshot provider error and keeps an empty aggregate entry when fetch fails", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				moonshotApiKey: "stored-moonshot-key",
+			},
+		})
+
+		getModelsMock.mockImplementation(async (options: any) => {
+			if (options?.provider === "moonshot") {
+				throw new Error("Moonshot API error")
+			}
+
+			switch (options?.provider) {
+				case "openrouter":
+					return { "openrouter/qwen2.5": { contextWindow: 32768, supportsPromptCache: false } }
+				case "requesty":
+					return { "requesty/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "vercel-ai-gateway":
+					return { "vercel/model": { contextWindow: 8192, supportsPromptCache: false } }
+				case "litellm":
+					return { "litellm/model": { contextWindow: 8192, supportsPromptCache: false } }
+				default:
+					return {}
+			}
+		})
+
+		await webviewMessageHandler(
+			mockProvider as any,
+			{
+				type: "requestRouterModels",
+			} as any,
+		)
+
+		// Should have posted an error for moonshot
+		const errorCall = (mockProvider.postMessageToWebview as any).mock.calls.find(
+			(c: any[]) => c[0]?.type === "singleRouterModelFetchResponse" && c[0]?.values?.provider === "moonshot",
+		)
+		expect(errorCall).toBeTruthy()
+		expect(errorCall[0].success).toBe(false)
+
+		// Aggregate entry should still be empty
+		const call = (mockProvider.postMessageToWebview as any).mock.calls.find(
+			(c: any[]) => c[0]?.type === "routerModels",
+		)
+		expect(call).toBeTruthy()
+		expect(call[0].routerModels.moonshot).toEqual({})
 	})
 })

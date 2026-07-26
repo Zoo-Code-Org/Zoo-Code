@@ -35,15 +35,15 @@
 
 Roo Code से Zoo Code में आने के लिए एक quick guide तुम्हें [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration) में मिल जाएगी। We plan to help users as much as possible during the transition, और उसी support के लिए हमारा [Reddit](https://www.reddit.com/r/ZooCode) और [Discord](https://discord.gg/VxfP4Vx3gX) है। अगर तुम्हें कोई problem हो या कोई question हो, आकर पूछो।
 
-## v3.70.0 में नया क्या है
+## v3.72.0 में नया क्या है
 
-- **OpenAI GPT-5.6 family** — `Sol`, `Terra`, और `Luna` अब OpenAI Codex और OpenAI Native दोनों provider paths पर उपलब्ध हैं।
-- **Grok 4.5 समर्थन** — xAI का नया flagship model, साथ ही एक reasoning-effort format fix जिसका फायदा Grok 4 Mini को भी मिलता है।
-- **Kenari provider समर्थन** — एक first-class, OpenAI-compatible AI gateway जो Rupiah में बिल होता है और Claude, GPT, DeepSeek, GLM, Kimi और अधिक को cover करता है।
-- Collapsed task header में context-compaction button और context window progress bar दिखाएं।
-- फिक्स: cold terminals पर terminal output loss और समय से पहले task completion।
-- फिक्स: Zoo Gateway और Vercel AI Gateway models के लिए image attach अब static allowlist के बजाय live vision-capability tags को follow करता है।
-- Dependency और tooling अपडेट्स।
+- **Moonshot और Kimi Code providers** — Moonshot models को dynamically खोजें या OAuth device flow से Kimi Code में sign in करें।
+- **नवीनतम model support** — providers पर Claude Opus 5 के साथ Kimi K3, Gemini 3.6 Flash और MiniMax-M3 का उपयोग करें।
+- **बेहतर subtask workflows** — interrupted subtasks को साफ़ तौर पर छोड़ें, अधिक सुरक्षित task-history invalidation और बेहतर resume coverage के साथ।
+- **विस्तारित codebase indexing** — Dart और plain-text files को index करें।
+- **Provider reliability** — ChatGPT OAuth के साथ GPT-5.6 Luna, LiteLLM reasoning content और DeepSeek V4 image input के लिए fixes।
+- **अधिक सहज setup और settings** — Zoo Gateway sign-in और mode-switch behavior में सुधार।
+- API, provider types, dependencies, localization और CI में सुधार।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

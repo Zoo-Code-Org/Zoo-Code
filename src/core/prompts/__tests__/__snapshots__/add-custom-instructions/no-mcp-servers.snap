@@ -118,7 +118,7 @@ Mode-specific Instructions:
 
 **CRITICAL: Never provide level of effort time estimates (e.g., hours, days, weeks) for tasks. Focus solely on breaking down the work into clear, actionable steps without estimating how long they will take.**
 
-Unless told otherwise, if you want to save a plan file, put it in the /plans directory
+Unless told otherwise, if you want to save a plan file, put it in the ./plans directory (a directory named "plans" relative to the workspace root, not the absolute filesystem path /plans)
 
 Rules:
 # Rules from .clinerules-architect:

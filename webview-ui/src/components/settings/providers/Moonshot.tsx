@@ -1,13 +1,22 @@
-import { useCallback } from "react"
+import { useCallback, useState, useEffect, useRef } from "react"
 import { VSCodeTextField, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
+import { useQueryClient } from "@tanstack/react-query"
 
-import type { ProviderSettings } from "@roo-code/types"
+import type { ProviderSettings, ExtensionMessage } from "@roo-code/types"
+import { moonshotDefaultModelId } from "@roo-code/types"
+
+import { RouterName } from "@roo/api"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
+import { vscode } from "@src/utils/vscode"
+import { Button } from "@src/components/ui"
+import { ModelPicker } from "../ModelPicker"
+import { handleModelChangeSideEffects } from "../utils/providerModelConfig"
+import type { ProviderName } from "@roo-code/types"
 
 import { inputEventTransform } from "../transforms"
-import { cn } from "@/lib/utils"
 
 type MoonshotProps = {
 	apiConfiguration: ProviderSettings
@@ -15,8 +24,39 @@ type MoonshotProps = {
 	simplifySettings?: boolean
 }
 
-export const Moonshot = ({ apiConfiguration, setApiConfigurationField }: MoonshotProps) => {
+export const Moonshot = ({ apiConfiguration, setApiConfigurationField, simplifySettings }: MoonshotProps) => {
 	const { t } = useAppTranslation()
+	const { routerModels } = useExtensionState()
+	const queryClient = useQueryClient()
+	const [refreshStatus, setRefreshStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
+	const [refreshError, setRefreshError] = useState<string | undefined>()
+	const moonshotErrorJustReceived = useRef(false)
+
+	useEffect(() => {
+		const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
+			const message = event.data
+			if (message.type === "singleRouterModelFetchResponse" && !message.success) {
+				const providerName = message.values?.provider as RouterName
+				if (providerName === "moonshot" && refreshStatus === "loading") {
+					moonshotErrorJustReceived.current = true
+					setRefreshStatus("error")
+					setRefreshError(message.error)
+				}
+			} else if (message.type === "routerModels") {
+				if (refreshStatus === "loading") {
+					if (!moonshotErrorJustReceived.current) {
+						setRefreshStatus("success")
+						queryClient.invalidateQueries({ queryKey: ["routerModels"] })
+					}
+				}
+			}
+		}
+
+		window.addEventListener("message", handleMessage)
+		return () => {
+			window.removeEventListener("message", handleMessage)
+		}
+	}, [refreshStatus, queryClient])
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -29,6 +69,25 @@ export const Moonshot = ({ apiConfiguration, setApiConfigurationField }: Moonsho
 		[setApiConfigurationField],
 	)
 
+	const handleRefreshModels = useCallback(() => {
+		moonshotErrorJustReceived.current = false
+		setRefreshStatus("loading")
+		setRefreshError(undefined)
+
+		const key = apiConfiguration.moonshotApiKey
+
+		if (!key) {
+			setRefreshStatus("error")
+			setRefreshError(t("settings:providers.refreshModels.missingConfig"))
+			return
+		}
+
+		vscode.postMessage({
+			type: "requestRouterModels",
+			values: { moonshotApiKey: key, moonshotBaseUrl: apiConfiguration.moonshotBaseUrl },
+		})
+	}, [apiConfiguration, t])
+
 	return (
 		<>
 			<div>
@@ -36,7 +95,7 @@ export const Moonshot = ({ apiConfiguration, setApiConfigurationField }: Moonsho
 				<VSCodeDropdown
 					value={apiConfiguration.moonshotBaseUrl}
 					onChange={handleInputChange("moonshotBaseUrl")}
-					className={cn("w-full")}>
+					className="w-full">
 					<VSCodeOption value="https://api.moonshot.ai/v1" className="p-2">
 						api.moonshot.ai
 					</VSCodeOption>
@@ -69,6 +128,45 @@ export const Moonshot = ({ apiConfiguration, setApiConfigurationField }: Moonsho
 					</VSCodeButtonLink>
 				)}
 			</div>
+			<ModelPicker
+				apiConfiguration={apiConfiguration}
+				setApiConfigurationField={setApiConfigurationField}
+				defaultModelId={moonshotDefaultModelId}
+				models={routerModels?.moonshot ?? {}}
+				modelIdKey="apiModelId"
+				serviceName="Moonshot"
+				serviceUrl="https://platform.moonshot.ai"
+				simplifySettings={simplifySettings}
+				onModelChange={(modelId) =>
+					handleModelChangeSideEffects("moonshot" as ProviderName, modelId, setApiConfigurationField)
+				}
+			/>
+			<Button
+				variant="outline"
+				onClick={handleRefreshModels}
+				disabled={refreshStatus === "loading" || !apiConfiguration.moonshotApiKey}>
+				<div className="flex items-center gap-2">
+					{refreshStatus === "loading" ? (
+						<span className="codicon codicon-loading codicon-modifier-spin" />
+					) : (
+						<span className="codicon codicon-refresh" />
+					)}
+					{t("settings:providers.refreshModels.label")}
+				</div>
+			</Button>
+			{refreshStatus === "loading" && (
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.refreshModels.loading")}
+				</div>
+			)}
+			{refreshStatus === "success" && (
+				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
+			)}
+			{refreshStatus === "error" && (
+				<div className="text-sm text-vscode-errorForeground">
+					{refreshError || t("settings:providers.refreshModels.error")}
+				</div>
+			)}
 		</>
 	)
 }

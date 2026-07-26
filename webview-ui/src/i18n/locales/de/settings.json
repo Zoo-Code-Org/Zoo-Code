@@ -459,6 +459,17 @@
 		"moonshotApiKey": "Moonshot API-Schlüssel",
 		"getMoonshotApiKey": "Moonshot API-Schlüssel erhalten",
 		"moonshotBaseUrl": "Moonshot-Einstiegspunkt",
+		"kimiCode": {
+			"authMethod": "Authentifizierungsmethode",
+			"oauth": "Kimi Code-Abonnement (OAuth)",
+			"apiKey": "Kimi Code-API-Schlüssel",
+			"apiKeyLabel": "Kimi Code-API-Schlüssel",
+			"signIn": "Bei Kimi Code anmelden",
+			"signOut": "Abmelden",
+			"authenticated": "Bei Kimi Code angemeldet",
+			"deviceCodeHelp": "Gib diesen Gerätecode auf der Kimi-Autorisierungsseite ein:",
+			"docs": "Kimi Code-Dokumentation"
+		},
 		"zaiApiKey": "Z AI API-Schlüssel",
 		"getZaiApiKey": "Z AI API-Schlüssel erhalten",
 		"zaiEntrypoint": "Z AI Einstiegspunkt",

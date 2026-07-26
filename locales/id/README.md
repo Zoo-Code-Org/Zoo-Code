@@ -35,15 +35,15 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.70.0
+## Yang Baru di v3.72.0
 
-- **Keluarga OpenAI GPT-5.6** — `Sol`, `Terra`, dan `Luna` kini tersedia lewat jalur provider OpenAI Codex maupun OpenAI Native.
-- **Dukungan Grok 4.5** — model unggulan baru dari xAI, plus perbaikan format reasoning-effort yang juga bermanfaat untuk Grok 4 Mini.
-- **Dukungan provider Kenari** — AI gateway kelas satu yang kompatibel dengan OpenAI, ditagih dalam Rupiah, mencakup Claude, GPT, DeepSeek, GLM, Kimi, dan lainnya.
-- Menampilkan tombol pemadatan konteks dan progress bar jendela konteks di header tugas yang diciutkan.
-- Perbaikan: hilangnya output terminal dan penyelesaian tugas prematur pada terminal yang dingin (cold terminal).
-- Perbaikan: attach gambar untuk model Zoo Gateway dan Vercel AI Gateway kini mengikuti tag kemampuan vision secara langsung, bukan allowlist statis.
-- Pembaruan dependensi dan tooling.
+- **Provider Moonshot dan Kimi Code** — temukan model Moonshot secara dinamis atau masuk ke Kimi Code melalui alur perangkat OAuth.
+- **Dukungan model terbaru** — gunakan Claude Opus 5 di berbagai provider, ditambah Kimi K3, Gemini 3.6 Flash, dan MiniMax-M3.
+- **Workflow subtask yang lebih baik** — tinggalkan subtask yang terinterupsi dengan bersih, dengan invalidasi riwayat tugas yang lebih aman dan cakupan resume yang lebih baik.
+- **Indexing codebase yang lebih luas** — indeks file Dart dan teks biasa.
+- **Keandalan provider** — perbaikan untuk GPT-5.6 Luna dengan ChatGPT OAuth, reasoning content LiteLLM, dan input gambar DeepSeek V4.
+- **Setup dan pengaturan lebih mulus** — peningkatan login Zoo Gateway dan perilaku pergantian mode.
+- Peningkatan API, tipe provider, dependensi, lokalisasi, dan CI.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 
