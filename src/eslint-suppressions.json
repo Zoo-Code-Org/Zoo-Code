@@ -876,7 +876,7 @@
 	},
 	"core/task/__tests__/Task.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 93
+			"count": 31
 		}
 	},
 	"core/task/__tests__/Task.sticky-profile-race.spec.ts": {
@@ -1106,7 +1106,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 199
+			"count": 198
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
@@ -1680,11 +1680,6 @@
 		}
 	},
 	"services/tree-sitter/__tests__/markdownParser.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"shared/__tests__/ProfileValidator.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
 		}
