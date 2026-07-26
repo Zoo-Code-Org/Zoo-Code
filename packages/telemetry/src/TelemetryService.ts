@@ -371,6 +371,71 @@ export class TelemetryService {
 	}
 
 	/**
+	 * Captures a tool-call policy resolution event.
+	 *
+	 * Emitted after the tool-call policy is resolved for an API request,
+	 * recording only metadata about the decision (provider, model, policy
+	 * source, enforcement mode, and what was requested/sent to the provider).
+	 *
+	 * **Privacy:** NEVER includes raw commands, file paths, file contents,
+	 * tool arguments, or API keys. Only policy metadata and boolean flags.
+	 *
+	 * @param taskId The task identifier
+	 * @param properties Policy resolution metadata (no raw user data)
+	 */
+	public captureToolCallPolicyResolution(
+		taskId: string,
+		properties: {
+			provider: string
+			model: string
+			policySource: string
+			maxCallsPerTurn: number | "unbounded"
+			enforcement: string
+			parallelToolCallsRequested: boolean
+			parallelToolCallsSent?: boolean
+		},
+	): void {
+		this.captureEvent(TelemetryEventName.TOOL_CALL_POLICY_RESOLUTION, {
+			taskId,
+			...properties,
+		})
+	}
+
+	/**
+	 * Captures a tool-call enforcement event.
+	 *
+	 * Emitted when local enforcement acts on tool calls in a turn — either
+	 * ghost quarantine drops or max-one enforcement rejections. Records only
+	 * counts and metadata, never raw call content.
+	 *
+	 * **Privacy:** NEVER includes raw commands, file paths, file contents,
+	 * tool arguments, or API keys. Only counts and policy metadata.
+	 *
+	 * @param taskId The task identifier
+	 * @param properties Enforcement metadata with counts (no raw user data)
+	 */
+	public captureToolCallEnforcement(
+		taskId: string,
+		properties: {
+			provider: string
+			model: string
+			policySource: string
+			maxCallsPerTurn: number | "unbounded"
+			enforcement: string
+			callCount: number
+			ghostDroppedCount: number
+			errorResultCount: number
+			parallelToolCallsRequested: boolean
+			parallelToolCallsSent?: boolean
+		},
+	): void {
+		this.captureEvent(TelemetryEventName.TOOL_CALL_ENFORCEMENT, {
+			taskId,
+			...properties,
+		})
+	}
+
+	/**
 	 * Checks if telemetry is currently enabled
 	 * @returns Whether telemetry is enabled
 	 */

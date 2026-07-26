@@ -1,3 +1,5 @@
+import { TelemetryService } from "@roo-code/telemetry"
+
 import type { NativeToolParseFailure } from "./NativeToolCallParser"
 
 /**
@@ -193,4 +195,116 @@ export function selectExecutableCall(input: SelectExecutableCallInput): SelectEx
 		rejectedCallIds: validCandidates.map((c) => c.callId),
 		reason: "multiple-valid-calls-under-single-policy",
 	}
+}
+
+/**
+	* Input for {@link emitGhostDropTelemetry}.
+	*/
+export interface GhostDropTelemetryInput {
+	/** The task identifier. */
+	taskId: string
+	/** The provider name (e.g. "mimo", "openai"). */
+	provider: string
+	/** The model ID. */
+	model: string
+	/** The resolved policy source. */
+	policySource: string
+	/** The resolved max-calls-per-turn limit. */
+	maxCallsPerTurn: 1 | "unbounded"
+	/** The resolved enforcement mode. */
+	enforcement: string
+	/** Total tool calls in the turn (including the ghost). */
+	callCount: number
+	/** How many ghosts were dropped so far in this turn. */
+	ghostDroppedCount: number
+	/** How many error results were emitted so far in this turn. */
+	errorResultCount: number
+	/** What the metadata requested for parallel tool calls. */
+	parallelToolCallsRequested: boolean
+	/** What was sent to the provider (if known). */
+	parallelToolCallsSent?: boolean
+}
+
+/**
+	* Emit a tool-call enforcement telemetry event for a ghost quarantine drop.
+	*
+	* **Privacy:** This function emits ONLY counts and metadata. It does NOT
+	* emit the call ID, tool name, argument bytes, command strings, file paths,
+	* or any raw user data. The ghost's identity is intentionally discarded.
+	*
+	* This is safe to call from the stream-processing hot path because
+	* `TelemetryService.captureEvent` is fire-and-forget (it returns void and
+	* queues internally).
+	*/
+export function emitGhostDropTelemetry(input: GhostDropTelemetryInput): void {
+	if (!TelemetryService.hasInstance()) {
+		return
+	}
+
+	TelemetryService.instance.captureToolCallEnforcement(input.taskId, {
+		provider: input.provider,
+		model: input.model,
+		policySource: input.policySource,
+		maxCallsPerTurn: input.maxCallsPerTurn,
+		enforcement: input.enforcement,
+		callCount: input.callCount,
+		ghostDroppedCount: input.ghostDroppedCount,
+		errorResultCount: input.errorResultCount,
+		parallelToolCallsRequested: input.parallelToolCallsRequested,
+		parallelToolCallsSent: input.parallelToolCallsSent,
+	})
+}
+
+/**
+	* Input for {@link emitMaxOneEnforcementTelemetry}.
+	*/
+export interface MaxOneEnforcementTelemetryInput {
+	/** The task identifier. */
+	taskId: string
+	/** The provider name. */
+	provider: string
+	/** The model ID. */
+	model: string
+	/** The resolved policy source. */
+	policySource: string
+	/** The resolved max-calls-per-turn limit. */
+	maxCallsPerTurn: 1 | "unbounded"
+	/** The resolved enforcement mode. */
+	enforcement: string
+	/** Total tool calls in the turn. */
+	callCount: number
+	/** How many ghosts were dropped in this turn. */
+	ghostDroppedCount: number
+	/** How many error results were emitted in this turn (including this one). */
+	errorResultCount: number
+	/** What the metadata requested for parallel tool calls. */
+	parallelToolCallsRequested: boolean
+	/** What was sent to the provider (if known). */
+	parallelToolCallsSent?: boolean
+}
+
+/**
+	* Emit a tool-call enforcement telemetry event for a max-one rejection.
+	*
+	* **Privacy:** This function emits ONLY counts and metadata. It does NOT
+	* emit the call ID, tool name, argument values, command strings, file paths,
+	* or any raw user data.
+	*/
+export function emitMaxOneEnforcementTelemetry(input: MaxOneEnforcementTelemetryInput): void {
+	if (!TelemetryService.hasInstance()) {
+		return
+	}
+
+	TelemetryService.instance.captureToolCallEnforcement(input.taskId, {
+		provider: input.provider,
+		model: input.model,
+		policySource: input.policySource,
+		maxCallsPerTurn: input.maxCallsPerTurn,
+		enforcement: input.enforcement,
+		callCount: input.callCount,
+		ghostDroppedCount: input.ghostDroppedCount,
+		errorResultCount: input.errorResultCount,
+		parallelToolCallsRequested: input.parallelToolCallsRequested,
+		parallelToolCallsSent: input.parallelToolCallsSent,
+	})
 }
