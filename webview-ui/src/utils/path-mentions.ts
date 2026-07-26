@@ -65,7 +65,7 @@ export function convertToMentionPath(path: string, cwd?: string): string {
 	const lowerPath = normalizedPath.toLowerCase()
 	const lowerCwd = normalizedCwd.toLowerCase()
 
-	if (lowerPath.startsWith(lowerCwd)) {
+	if (lowerPath === lowerCwd || lowerPath.startsWith(`${lowerCwd}/`)) {
 		let relativePath = normalizedPath.substring(normalizedCwd.length)
 		// Ensure there's a slash after the @ symbol when we create the mention path
 		relativePath = relativePath.startsWith("/") ? relativePath : "/" + relativePath

@@ -39,7 +39,7 @@
 			]
 		},
 		"webview-ui": {
-			"entry": ["src/index.tsx!"],
+			"entry": ["src/index.tsx!", "src/**/*.visual.tsx!"],
 			"project": [
 				"src/**/*.{ts,tsx}!",
 				"../src/shared/*.ts!",
