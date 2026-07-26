@@ -405,6 +405,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	didToolFailInCurrentTurn = false
 	didCompleteReadingStream = false
 	private _started = false
+	private _runPromise: Promise<void> | undefined
 	// No streaming parser is required.
 	assistantMessageParser?: undefined
 	private providerProfileChangeListener?: (config: { name: string; provider?: string }) => void
@@ -1873,6 +1874,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				console.error("[Task#start] startTask failed:", error)
 			})
 		}
+	}
+
+	/**
+	 * Like `start()`, but returns the underlying promise so callers (e.g.
+	 * `TaskScheduler`) can await task completion and gate concurrency.
+	 * Idempotent: subsequent calls return the same in-flight promise.
+	 */
+	public run(): Promise<void> {
+		if (this._runPromise !== undefined) {
+			return this._runPromise
+		}
+		if (this._started) {
+			// Already launched via constructor or start() — no promise to return.
+			return Promise.resolve()
+		}
+		this._started = true
+
+		const { task, images } = this.metadata
+
+		this._runPromise = task || images ? this.startTask(task ?? undefined, images ?? undefined) : Promise.resolve()
+		return this._runPromise
 	}
 
 	private async startTask(task?: string, images?: string[]): Promise<void> {
