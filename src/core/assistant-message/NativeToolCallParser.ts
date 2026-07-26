@@ -235,6 +235,48 @@ export class NativeToolCallParser {
 	}
 
 	/**
+	 * Retrieve the streaming state for a given tool call ID without removing it.
+	 * Used by the pre-retention ghost quarantine in Task.ts to inspect whether
+	 * a call has a resolved name and/or any accumulated argument bytes before
+	 * it is inserted into `assistantMessageContent` or conversation history.
+	 *
+	 * Returns a snapshot object or undefined if the ID is not being tracked.
+	 */
+	public static getStreamingToolCallState(id: string):
+		| {
+				id: string
+				name: string
+				argumentsAccumulator: string
+		  }
+		| undefined {
+		const entry = this.streamingToolCalls.get(id)
+		if (!entry) {
+			return undefined
+		}
+		return {
+			id: entry.id,
+			name: entry.name,
+			argumentsAccumulator: entry.argumentsAccumulator,
+		}
+	}
+
+	/**
+	 * Discard a streaming tool call's state without finalizing it.
+	 *
+	 * This is used by the ghost quarantine path: when a call is classified as
+	 * `drop-provably-empty` (no name, no arguments, stream ended), its
+	 * streaming state is removed so it never becomes a `tool_use` block in
+	 * `assistantMessageContent` and never receives a `tool_result`.
+	 *
+	 * This is the ONLY safe way to remove a call before history insertion.
+	 * Once a `tool_use` block is pushed into `assistantMessageContent`, it
+	 * MUST receive exactly one matching `tool_result`.
+	 */
+	public static discardStreamingToolCall(id: string): boolean {
+		return this.streamingToolCalls.delete(id)
+	}
+
+	/**
 	 * Check if there are any active streaming tool calls.
 	 * Useful for debugging and testing.
 	 */
