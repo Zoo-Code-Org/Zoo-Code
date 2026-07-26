@@ -1,6 +1,7 @@
 // npx vitest run core/assistant-message/__tests__/ToolCallRetentionPolicy-telemetry.spec.ts
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
+import type { Mock } from "vitest"
 
 // Mock TelemetryService before importing the module under test.
 vi.mock("@roo-code/telemetry", () => ({
@@ -18,6 +19,9 @@ import {
 	emitGhostDropTelemetry,
 	emitMaxOneEnforcementTelemetry,
 } from "../ToolCallRetentionPolicy"
+
+const mockCaptureToolCallEnforcement = TelemetryService.instance.captureToolCallEnforcement as unknown as Mock
+const mockHasInstance = TelemetryService.hasInstance as unknown as Mock
 
 describe("Tool-call policy telemetry helpers", () => {
 	beforeEach(() => {
@@ -40,7 +44,7 @@ describe("Tool-call policy telemetry helpers", () => {
 			})
 
 			expect(TelemetryService.instance.captureToolCallEnforcement).toHaveBeenCalledTimes(1)
-			const args = (TelemetryService.instance.captureToolCallEnforcement as any).mock.calls[0]
+			const args = mockCaptureToolCallEnforcement.mock.calls[0]
 			expect(args[0]).toBe("task-001")
 			expect(args[1]).toEqual({
 				provider: "mimo",
@@ -69,7 +73,7 @@ describe("Tool-call policy telemetry helpers", () => {
 				parallelToolCallsRequested: false,
 			})
 
-			const args = (TelemetryService.instance.captureToolCallEnforcement as any).mock.calls[0][1]
+			const args = mockCaptureToolCallEnforcement.mock.calls[0][1] as Record<string, unknown>
 			// Verify no raw data fields are present
 			expect(args).not.toHaveProperty("callId")
 			expect(args).not.toHaveProperty("toolName")
@@ -97,12 +101,12 @@ describe("Tool-call policy telemetry helpers", () => {
 				parallelToolCallsSent: true,
 			})
 
-			const args = (TelemetryService.instance.captureToolCallEnforcement as any).mock.calls[0][1]
+			const args = mockCaptureToolCallEnforcement.mock.calls[0][1] as Record<string, unknown>
 			expect(args.parallelToolCallsSent).toBe(true)
 		})
 
 		it("skips emission when TelemetryService has no instance", () => {
-			;(TelemetryService.hasInstance as any).mockReturnValueOnce(false)
+			mockHasInstance.mockReturnValueOnce(false)
 			emitGhostDropTelemetry({
 				taskId: "task-004",
 				provider: "mimo",
@@ -136,7 +140,7 @@ describe("Tool-call policy telemetry helpers", () => {
 			})
 
 			expect(TelemetryService.instance.captureToolCallEnforcement).toHaveBeenCalledTimes(1)
-			const args = (TelemetryService.instance.captureToolCallEnforcement as any).mock.calls[0]
+			const args = mockCaptureToolCallEnforcement.mock.calls[0]
 			expect(args[0]).toBe("task-005")
 			expect(args[1]).toEqual({
 				provider: "mimo",
@@ -165,7 +169,7 @@ describe("Tool-call policy telemetry helpers", () => {
 				parallelToolCallsRequested: false,
 			})
 
-			const args = (TelemetryService.instance.captureToolCallEnforcement as any).mock.calls[0][1]
+			const args = mockCaptureToolCallEnforcement.mock.calls[0][1] as Record<string, unknown>
 			expect(args).not.toHaveProperty("callId")
 			expect(args).not.toHaveProperty("toolName")
 			expect(args).not.toHaveProperty("arguments")
@@ -178,7 +182,7 @@ describe("Tool-call policy telemetry helpers", () => {
 		})
 
 		it("skips emission when TelemetryService has no instance", () => {
-			;(TelemetryService.hasInstance as any).mockReturnValueOnce(false)
+			mockHasInstance.mockReturnValueOnce(false)
 			emitMaxOneEnforcementTelemetry({
 				taskId: "task-007",
 				provider: "mimo",
@@ -225,7 +229,7 @@ describe("Tool-call policy telemetry helpers", () => {
 				parallelToolCallsRequested: false,
 			})
 
-			const args = (TelemetryService.instance.captureToolCallEnforcement as any).mock.calls[0][1]
+			const args = mockCaptureToolCallEnforcement.mock.calls[0][1] as Record<string, unknown>
 			for (const key of Object.keys(args)) {
 				expect(allowedKeys.has(key)).toBe(true)
 			}

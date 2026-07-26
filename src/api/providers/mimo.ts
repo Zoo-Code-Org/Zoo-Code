@@ -1,4 +1,5 @@
 import OpenAI from "openai"
+import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { mimoModels, mimoDefaultModelId, MIMO_DEFAULT_TEMPERATURE, type ModelInfo } from "@roo-code/types"
 
@@ -24,7 +25,7 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 function isParallelToolCallsRejected(error: unknown): boolean {
 	if (error instanceof Error) {
 		const message = error.message.toLowerCase()
-		const status = (error as any).status
+		const status = (error as { status?: number }).status
 		// OpenAI SDK APIError carries an HTTP status; some endpoints return 400
 		if (message.includes("parallel_tool_calls") || (status === 400 && message.includes("unrecognized"))) {
 			return true
@@ -33,8 +34,12 @@ function isParallelToolCallsRejected(error: unknown): boolean {
 	return false
 }
 
+type MiMoCompletionParams = OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
+	extra_body: { thinking: { type: string } }
+}
+
 /**
- * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
+	* MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
  *
  * CRITICAL: Per MiMo's official docs, reasoning_content MUST be passed back
  * in multi-turn conversations with tool calls. Without it, the API returns 400.
@@ -86,7 +91,7 @@ export class MimoHandler extends OpenAiHandler {
 	 */
 	override async *createMessage(
 		systemPrompt: string,
-		messages: any[],
+		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const { id: modelId, info: modelInfo } = this.getModel()
@@ -103,7 +108,7 @@ export class MimoHandler extends OpenAiHandler {
 		// https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
 		// Note: temperature is omitted because MiMo forces it to 1.0 when thinking mode
 		// is enabled, regardless of what is passed (see model-hyperparameters docs).
-		const params: Record<string, any> = {
+		const params: MiMoCompletionParams = {
 			model: modelId,
 			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
 			stream: true,
@@ -130,14 +135,16 @@ export class MimoHandler extends OpenAiHandler {
 
 		let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
 		try {
-			stream = (await this.client.chat.completions.create(params as any)) as any
+			stream = await this.client.chat.completions.create(params)
 		} catch (error) {
 			// Fallback: if the endpoint rejects the parallel_tool_calls field,
 			// retry once without it. Some OpenAI-compatible endpoints don't
 			// support this field and return a 400 Bad Request.
 			if (params.parallel_tool_calls !== undefined && isParallelToolCallsRejected(error)) {
 				const { parallel_tool_calls: _omit, ...paramsWithoutParallel } = params
-				stream = (await this.client.chat.completions.create(paramsWithoutParallel as any)) as any
+				stream = await this.client.chat.completions.create(
+					paramsWithoutParallel as MiMoCompletionParams,
+				)
 			} else {
 				throw handleProviderError(error, "MiMo")
 			}
@@ -181,7 +188,8 @@ export class MimoHandler extends OpenAiHandler {
 		if (lastUsage) {
 			const inputTokens = lastUsage?.prompt_tokens || 0
 			const outputTokens = lastUsage?.completion_tokens || 0
-			const cacheWriteTokens = (lastUsage?.prompt_tokens_details as any)?.cache_write_tokens || 0
+			const cacheWriteTokens =
+				(lastUsage?.prompt_tokens_details as { cache_write_tokens?: number } | undefined)?.cache_write_tokens || 0
 			const cacheReadTokens = lastUsage?.prompt_tokens_details?.cached_tokens || 0
 
 			const { totalCost } = calculateApiCostOpenAI(
