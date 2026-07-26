@@ -1,14 +1,33 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
-	"ignore": ["**/__tests__/**", "apps/vscode-e2e/**", "scripts/**", "apps/cli/scripts/**"],
+	"ignore": [
+		"apps/vscode-e2e/**",
+		"scripts/**",
+		"apps/cli/scripts/**",
+		"**/__tests__/**!",
+		"packages/core/src/custom-tools/__tests__/fixtures/**",
+		"packages/core/src/custom-tools/__tests__/fixtures-override/**",
+		"src/integrations/misc/__tests__/performance/**",
+		"src/integrations/terminal/__tests__/setupTerminalTests.ts",
+		"src/integrations/terminal/__tests__/streamUtils/index.ts",
+		"src/services/tree-sitter/__tests__/fixtures/sample-python.ts",
+		"src/services/tree-sitter/__tests__/helpers.ts"
+	],
 	"ignoreDependencies": ["lint-staged"],
 	"ignoreExportsUsedInFile": true,
 	"playwright": false,
 	"playwright-ct": false,
 	"workspaces": {
 		"src": {
-			"entry": ["extension.ts", "extension/api.ts", "workers/countTokens.ts"],
-			"project": ["**/*.ts", "!**/__tests__/**"],
+			"entry": ["extension.ts!", "extension/api.ts!", "workers/countTokens.ts!"],
+			"project": [
+				"**/*.ts!",
+				"!**/__tests__/**!",
+				"!vitest.setup.ts!",
+				"!utils/vitest-verbosity.ts!",
+				"!utils/TaskSemaphore.ts!",
+				"!utils/WorkspacePathResolver.ts!"
+			],
 			"ignoreDependencies": [
 				"@roo-code/config-typescript",
 				"@types/node-cache",
@@ -20,8 +39,13 @@
 			]
 		},
 		"webview-ui": {
-			"entry": ["src/index.tsx"],
-			"project": ["src/**/*.{ts,tsx}", "../src/shared/*.ts"],
+			"entry": ["src/index.tsx!"],
+			"project": [
+				"src/**/*.{ts,tsx}!",
+				"../src/shared/*.ts!",
+				"!src/utils/test-utils.tsx!",
+				"!src/vite-plugins/**!"
+			],
 			"ignoreDependencies": [
 				"@roo-code/config-typescript",
 				"@types/katex",
@@ -37,38 +61,38 @@
 		},
 		"apps/cli": {
 			"ignore": ["eslint.config.mjs", "scripts/**"],
-			"project": ["src/**/*.ts", "src/**/*.tsx"],
+			"project": ["src/**/*.ts!", "src/**/*.tsx!"],
 			"ignoreDependencies": ["@vscode/ripgrep"]
+		},
+		"apps/vscode-nightly": {
+			"ignore": ["esbuild.mjs"]
 		},
 		"packages/config-typescript": {
 			"ignoreUnresolved": ["vitest/globals"]
 		},
+		"packages/types": {
+			"project": ["src/**/*.ts!", "!src/roomodes-schema.ts!"]
+		},
 		"packages/core": {
-			"project": ["src/**/*.ts"],
+			"project": ["src/**/*.ts!"],
 			"ignoreDependencies": ["esbuild"]
 		},
 		"packages/vscode-shim": {
-			"project": ["src/**/*.ts"]
+			"project": ["src/**/*.ts!"]
 		},
 		"packages/cloud": {
-			"project": ["src/**/*.ts"],
+			"project": ["src/**/*.ts!"],
 			"ignoreDependencies": ["@types/vscode"]
 		},
 		"packages/telemetry": {
-			"project": ["src/**/*.ts"],
+			"project": ["src/**/*.ts!"],
 			"ignoreDependencies": ["@types/vscode"]
 		},
-		"packages/{build,ipc,types}": {
-			"project": ["src/**/*.ts"]
+		"packages/{build,ipc}": {
+			"project": ["src/**/*.ts!"]
 		}
 	},
 	"rules": {
-		"classMembers": "off",
-		"duplicates": "warn",
-		"enumMembers": "warn",
-		"exports": "warn",
-		"nsExports": "warn",
-		"types": "warn",
-		"nsTypes": "warn"
+		"classMembers": "off"
 	}
 }

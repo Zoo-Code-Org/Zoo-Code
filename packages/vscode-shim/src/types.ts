@@ -173,6 +173,8 @@ export type Event<T> = (listener: (e: T) => void, thisArgs?: unknown, disposable
 
 /**
  * File system file type enum
+ *
+ * @public
  */
 export enum FileType {
 	Unknown = 0,
@@ -214,6 +216,8 @@ export enum ViewColumn {
 
 /**
  * UI Kind enum
+ *
+ * @public
  */
 export enum UIKind {
 	Desktop = 1,
