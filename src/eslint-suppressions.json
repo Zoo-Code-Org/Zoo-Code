@@ -1061,12 +1061,17 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 16
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 34
+		}
+	},
+	"core/webview/__tests__/ClineProvider.parallelMode.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 141
 		}
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
@@ -1156,7 +1161,7 @@
 	},
 	"core/webview/__tests__/webviewMessageHandler.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 35
+			"count": 45
 		}
 	},
 	"core/webview/messageEnhancer.ts": {
@@ -1177,6 +1182,11 @@
 	"extension/__tests__/api-delete-queued-message.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
+		}
+	},
+	"extension/__tests__/api-set-configuration.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 2
 		}
 	},
 	"extension/__tests__/api-send-message.spec.ts": {
