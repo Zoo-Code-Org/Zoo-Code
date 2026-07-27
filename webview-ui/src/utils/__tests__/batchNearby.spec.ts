@@ -39,7 +39,8 @@ const isBoundary = (m: TestItem): boolean => {
 		m.say === "completion_result" ||
 		m.say === "checkpoint_saved" ||
 		m.say === "error" ||
-		m.say === "condense_context"
+		m.say === "condense_context" ||
+		m.say === "codebase_search_result"
 	)
 }
 
@@ -246,8 +247,32 @@ describe("batchNearby", () => {
 		expect(result[1].text).toBe("done")
 	})
 
-	test("non-ignorable non-target message stops batching", () => {
-		const messages = [msg("match-1", "ask"), msg("command_output", "say", "command_output"), msg("match-2", "ask")]
+	test("non-ignorable non-target message stops batching and restores pending ignorable messages", () => {
+		const messages = [
+			msg("match-1", "ask"),
+			msg("", "say", "api_req_started"),
+			msg("command_output", "say", "command_output"),
+			msg("match-2", "ask"),
+		]
+		const result = batchNearby(messages, {
+			isTarget: isMatch,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeBatch,
+		})
+		expect(result).toHaveLength(4)
+		expect(result[0].text).toBe("match-1")
+		expect(result[1].say).toBe("api_req_started")
+		expect(result[2].text).toBe("command_output")
+		expect(result[3].text).toBe("match-2")
+	})
+
+	test("codebase_search_result stops batching", () => {
+		const messages = [
+			msg("match-1", "ask"),
+			msg("search result", "say", "codebase_search_result"),
+			msg("match-2", "ask"),
+		]
 		const result = batchNearby(messages, {
 			isTarget: isMatch,
 			isIgnorableBetweenTargets,
@@ -256,7 +281,7 @@ describe("batchNearby", () => {
 		})
 		expect(result).toHaveLength(3)
 		expect(result[0].text).toBe("match-1")
-		expect(result[1].text).toBe("command_output")
+		expect(result[1].say).toBe("codebase_search_result")
 		expect(result[2].text).toBe("match-2")
 	})
 

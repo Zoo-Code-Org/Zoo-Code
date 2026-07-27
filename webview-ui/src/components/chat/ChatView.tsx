@@ -1281,17 +1281,12 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 		// Messages that can be safely skipped over when batching tool asks.
 		// These are low-information or invisible messages that don't affect semantics:
-		// - api_req_started / api_req_finished (API request metadata rows)
+		// - api_req_started (API request metadata row)
 		// - empty text rows (partial streaming with no visible content)
 		// - reasoning rows (hidden from user by default)
 		const isIgnorableBetweenTargets = (msg: ClineMessage): boolean => {
 			if (msg.type !== "say") return false
-			return (
-				msg.say === "api_req_started" ||
-				msg.say === "api_req_finished" ||
-				(msg.say === "text" && !msg.text?.trim()) ||
-				msg.say === "reasoning"
-			)
+			return msg.say === "api_req_started" || (msg.say === "text" && !msg.text?.trim()) || msg.say === "reasoning"
 		}
 
 		// Semantic boundaries that stop batching. When we hit one of these,
@@ -1316,8 +1311,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		}
 
 		// Consolidate tool asks into batches, allowing ignorable messages between targets.
-		// Unlike batchConsecutive which only merges truly adjacent items, batchNearby
-		// skips over api_req_started/finished, empty text rows, and reasoning rows that
+		// batchNearby skips over api_req_started, empty text rows, and reasoning rows that
 		// models like qwen insert between tool calls during streaming.
 		const readFileBatched = batchNearby(filtered, {
 			isTarget: isReadFileAsk,

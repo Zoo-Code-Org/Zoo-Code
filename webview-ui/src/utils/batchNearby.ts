@@ -1,9 +1,8 @@
 /**
  * Batch tool asks that are near each other, allowing ignorable messages in between.
  *
- * Unlike `batchConsecutive` which only merges truly adjacent items, this function
- * merges items of the same type even when separated by low-information or invisible
- * messages (e.g., api_req_started/finished, empty text rows, partial streaming).
+ * This function merges items of the same type even when separated by low-information
+ * or invisible messages (e.g., api_req_started, empty text rows, partial streaming).
  *
  * It stops merging when it hits a "semantic boundary": user feedback, visible assistant
  * text, completion result, different tool group, checkpoint, error, etc.
