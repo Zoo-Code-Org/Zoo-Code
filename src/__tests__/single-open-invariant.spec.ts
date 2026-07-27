@@ -67,13 +67,14 @@ describe("Single-open-task invariant", () => {
 
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const addClineToStack = vi.fn().mockResolvedValue(undefined)
+		const schedulespy = vi.fn().mockResolvedValue(undefined)
 
 		const existingTask = { taskId: "existing-1", abort: false, abandoned: false }
 		const registry = new TaskRegistry()
 		registry.push(existingTask as unknown as Task)
 		const provider = {
 			taskRegistry: registry,
-			taskScheduler: new TaskScheduler(),
+			taskScheduler: { schedule: schedulespy },
 			getCurrentTask: vi.fn(() => existingTask),
 			taskHistoryStore: { get: vi.fn(() => undefined) },
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
@@ -109,6 +110,7 @@ describe("Single-open-task invariant", () => {
 
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
 		expect(addClineToStack).toHaveBeenCalledTimes(1)
+		expect(schedulespy).toHaveBeenCalledTimes(1)
 	})
 
 	it("Subtask create: keeps existing task open when parentTask is provided", async () => {
@@ -158,6 +160,7 @@ describe("Single-open-task invariant", () => {
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const addClineToStack = vi.fn().mockResolvedValue(undefined)
 		const updateGlobalState = vi.fn().mockResolvedValue(undefined)
+		const schedulespy = vi.fn().mockResolvedValue(undefined)
 
 		const provider = {
 			getCurrentTask: vi.fn(() => undefined), // ensure not rehydrating
@@ -186,7 +189,7 @@ describe("Single-open-task invariant", () => {
 			// Methods used by createTaskWithHistoryItem for pending edit cleanup
 			getPendingEditOperation: vi.fn().mockReturnValue(undefined),
 			clearPendingEditOperation: vi.fn(),
-			taskScheduler: { schedule: vi.fn().mockResolvedValue(undefined) },
+			taskScheduler: { schedule: schedulespy },
 			context: { extension: { packageJSON: {} }, globalStorageUri: { fsPath: "/tmp" } },
 			contextProxy: {
 				extensionUri: {},
@@ -213,6 +216,82 @@ describe("Single-open-task invariant", () => {
 		expect(task).toBeTruthy()
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
 		expect(addClineToStack).toHaveBeenCalledTimes(1)
+		expect(schedulespy).toHaveBeenCalledTimes(1)
+	})
+
+	it("History resume path wires scheduler in rehydrating (in-place) case", async () => {
+		const schedulespy = vi.fn().mockResolvedValue(undefined)
+		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
+		const historyId = "hist-rehydrate-1"
+
+		const existingTask = {
+			taskId: historyId,
+			instanceId: "old-inst",
+			abort: false,
+			abandoned: false,
+			abortTask: vi.fn().mockResolvedValue(undefined),
+			emit: vi.fn(),
+		}
+
+		const registry = new TaskRegistry()
+		registry.push(existingTask as unknown as Task)
+
+		const provider = {
+			getCurrentTask: vi.fn(() => existingTask),
+			taskRegistry: registry,
+			taskHistoryStore: { get: vi.fn(() => undefined) },
+			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
+			get evictCurrentTask() {
+				return privateClineProvider.evictCurrentTask.bind(this)
+			},
+			removeClineFromStack,
+			addClineToStack: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			customModesManager: { getCustomModes: vi.fn().mockResolvedValue([]) },
+			providerSettingsManager: {
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				listConfig: vi.fn().mockResolvedValue([]),
+			},
+			getState: vi.fn().mockResolvedValue({
+				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				enableCheckpoints: true,
+				checkpointTimeout: 60,
+				experiments: {},
+				cloudUserInfo: null,
+				taskSyncEnabled: false,
+			}),
+			getPendingEditOperation: vi.fn().mockReturnValue(undefined),
+			clearPendingEditOperation: vi.fn(),
+			taskScheduler: { schedule: schedulespy },
+			taskEventListeners: new WeakMap(),
+			performPreparationTasks: vi.fn().mockResolvedValue(undefined),
+			context: { extension: { packageJSON: {} }, globalStorageUri: { fsPath: "/tmp" } },
+			contextProxy: {
+				extensionUri: {},
+				getValue: vi.fn(),
+				setValue: vi.fn(),
+				setProviderSettings: vi.fn(),
+				getProviderSettings: vi.fn(() => ({})),
+			},
+			postStateToWebview: vi.fn(),
+		} as unknown as ClineProvider
+
+		const historyItem = {
+			id: historyId,
+			number: 1,
+			ts: Date.now(),
+			task: "Task",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			workspace: "/tmp",
+		}
+
+		await privateClineProvider.createTaskWithHistoryItem.call(provider, historyItem)
+
+		expect(schedulespy).toHaveBeenCalledTimes(1)
+		// evictCurrentTask must NOT have been called — in-place replace, no stack pop
+		expect(removeClineFromStack).not.toHaveBeenCalled()
 	})
 
 	it("IPC StartNewTask path closes current before new task", async () => {

@@ -406,6 +406,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	didCompleteReadingStream = false
 	private _started = false
 	private _runPromise: Promise<void> | undefined
+	private readonly _isHistoryTask: boolean
 	// No streaming parser is required.
 	assistantMessageParser?: undefined
 	private providerProfileChangeListener?: (config: { name: string; provider?: string }) => void
@@ -488,6 +489,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			task: historyItem ? historyItem.task : task,
 			images: historyItem ? [] : images,
 		}
+		this._isHistoryTask = !!historyItem && !task && !images
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -1372,7 +1374,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Wait for askResponse to be set
 		await pWaitFor(
 			() => {
-				if (this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
 					return true
 				}
 
@@ -1396,6 +1398,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			},
 			{ interval: 100 },
 		)
+
+		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
+		if (this.abort) {
+			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
 
 		if (this.lastMessageTs !== askTs) {
 			// Could happen if we send multiple asks in a row i.e. with
@@ -1893,7 +1900,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const { task, images } = this.metadata
 
-		this._runPromise = task || images ? this.startTask(task ?? undefined, images ?? undefined) : Promise.resolve()
+		this._runPromise = this._isHistoryTask
+			? this.resumeTaskFromHistory()
+			: task || images
+				? this.startTask(task ?? undefined, images ?? undefined)
+				: Promise.resolve()
 		return this._runPromise
 	}
 
@@ -2020,7 +2031,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				.find((m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task")) // Could be multiple resume tasks.
 
 			let askType: ClineAsk
-			if (lastClineMessage?.ask === "completion_result") {
+			if (this.initialStatus === "completed" || lastClineMessage?.ask === "completion_result") {
 				askType = "resume_completed_task"
 			} else {
 				askType = "resume_task"

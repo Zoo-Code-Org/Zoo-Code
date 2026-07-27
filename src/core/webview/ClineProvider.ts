@@ -1227,6 +1227,14 @@ export class ClineProvider
 			this.log(
 				`[createTaskWithHistoryItem] rehydrated task ${task.taskId}.${task.instanceId} in-place (flicker-free)`,
 			)
+
+			if (options?.startTask !== false) {
+				void this.taskScheduler
+					.schedule(task, () => task.run())
+					.catch((error) => {
+						console.error("[createTaskWithHistoryItem] taskScheduler.schedule (rehydrate) failed:", error)
+					})
+			}
 		} else {
 			await this.addClineToStack(task)
 

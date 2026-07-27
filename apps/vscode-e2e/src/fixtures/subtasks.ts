@@ -48,6 +48,15 @@ export const SUBTASK_XPROFILE_SAME_CHILD_RESULT = "Same-profile child completed"
 export const SUBTASK_XPROFILE_DIFFERENT_CHILD_RESULT = "Different-profile child completed"
 export const SUBTASK_XPROFILE_PARENT_RESULT = "Sequential cross-profile parent resumed"
 
+// Scheduler regression tests — exercises TaskScheduler + run() dispatch post-CodeRabbit fix.
+// Separate markers to avoid collisions with the other subtask fixtures.
+const SCHED_STANDALONE_MARKER = "SCHED_STANDALONE_INTERRUPT_RESUME"
+const SCHED_COMPLETED_MARKER = "SCHED_COMPLETED_REOPEN"
+export const SCHED_STANDALONE_PROMPT = `${SCHED_STANDALONE_MARKER}: Ask the user exactly this follow-up question: What is the square root of 64? After the user answers, complete with only the answer.`
+export const SCHED_STANDALONE_FOLLOWUP_ANSWER = "8"
+export const SCHED_COMPLETED_PROMPT = `${SCHED_COMPLETED_MARKER}: Complete immediately with the exact result "Scheduler completed task".`
+export const SCHED_COMPLETED_RESULT = "Scheduler completed task"
+
 const apiHangChildMatch = new RegExp(SUBTASK_API_HANG_CHILD_MARKER)
 
 const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
@@ -391,6 +400,62 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 					name: "attempt_completion",
 					arguments: JSON.stringify({ result: SUBTASK_XPROFILE_PARENT_RESULT }),
 					id: "call_subtasks_xprofile_parent_completion_005",
+				},
+			],
+		},
+	})
+
+	// Scheduler regression fixtures: standalone interrupted task resume and completed task reopen.
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SCHED_STANDALONE_MARKER]) &&
+				!requestContains(req, ["call_sched_standalone_followup_001"]) &&
+				!requestContains(req, [`<user_message>\\n${SCHED_STANDALONE_FOLLOWUP_ANSWER}\\n</user_message>`]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "ask_followup_question",
+					arguments: JSON.stringify({
+						question: "What is the square root of 64?",
+						follow_up: [{ text: SCHED_STANDALONE_FOLLOWUP_ANSWER }],
+					}),
+					id: "call_sched_standalone_followup_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				toolResultContains(req, "call_sched_standalone_followup_001", [SCHED_STANDALONE_FOLLOWUP_ANSWER]) ||
+				requestContains(req, ["call_sched_standalone_followup_001", SCHED_STANDALONE_FOLLOWUP_ANSWER]) ||
+				requestContains(req, [
+					SCHED_STANDALONE_MARKER,
+					`<user_message>\\n${SCHED_STANDALONE_FOLLOWUP_ANSWER}\\n</user_message>`,
+				]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SCHED_STANDALONE_FOLLOWUP_ANSWER }),
+					id: "call_sched_standalone_completion_002",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: { userMessage: new RegExp(SCHED_COMPLETED_MARKER) },
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SCHED_COMPLETED_RESULT }),
+					id: "call_sched_completed_completion_001",
 				},
 			],
 		},
