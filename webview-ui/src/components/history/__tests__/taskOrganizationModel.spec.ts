@@ -580,12 +580,7 @@ describe("taskOrganizationModel", () => {
 				...createEmptyTaskOrganizationState(),
 				folders: [folder],
 			}
-			const projection = buildGroupedOrganizationProjection(
-				state,
-				[gOut],
-				[outWs],
-				"/workspace/project",
-			)
+			const projection = buildGroupedOrganizationProjection(state, [gOut], [outWs], "/workspace/project")
 			// Folder with only cross-workspace members should be skipped entirely.
 			expect(projection.folderProjections).toHaveLength(0)
 			expect(projection.unfiledGroups).toHaveLength(0)
@@ -605,12 +600,55 @@ describe("taskOrganizationModel", () => {
 				...createEmptyTaskOrganizationState(),
 				folders: [folder],
 			}
-			const projection = buildGroupedOrganizationProjection(
-				state,
-				[gLocal],
-				[local],
-				"/workspace/project",
-			)
+			const projection = buildGroupedOrganizationProjection(state, [gLocal], [local], "/workspace/project")
+			// Genuinely empty folder (zero taskIds) should still appear.
+			expect(projection.folderProjections).toHaveLength(1)
+			expect(projection.folderProjections[0].folderId).toBe("f-empty")
+			expect(projection.folderProjections[0].members).toHaveLength(0)
+		})
+
+		it("skips folders with cross-workspace members when cwd is empty string", () => {
+			// Simulates "no workspace open": cwd is "" and groups only contains
+			// tasks whose workspace is "" (filtered by useTaskSearch upstream).
+			// A folder whose taskIds reference tasks from another workspace
+			// should NOT leak into the no-workspace view.
+			const noWs = makeTask({ id: "no-ws", workspace: "" })
+			const gNoWs = makeGroup(noWs)
+			const outWs = makeTask({ id: "out", workspace: "/workspace/other" })
+			const gOut = makeGroup(outWs)
+			const folder = {
+				folderId: "f1",
+				name: "F",
+				taskIds: ["out"],
+				createdAt: 1,
+				updatedAt: 1,
+			}
+			const state: TaskOrganizationStateV1 = {
+				...createEmptyTaskOrganizationState(),
+				folders: [folder],
+			}
+			const projection = buildGroupedOrganizationProjection(state, [gNoWs, gOut], [noWs, outWs], "")
+			// Folder with only cross-workspace members should be skipped.
+			expect(projection.folderProjections).toHaveLength(0)
+			// The no-workspace task should appear as unfiled.
+			expect(projection.unfiledGroups).toEqual([gNoWs])
+		})
+
+		it("preserves genuinely empty folders when cwd is empty string", () => {
+			const noWs = makeTask({ id: "no-ws", workspace: "" })
+			const gNoWs = makeGroup(noWs)
+			const folder = {
+				folderId: "f-empty",
+				name: "Empty",
+				taskIds: [],
+				createdAt: 1,
+				updatedAt: 1,
+			}
+			const state: TaskOrganizationStateV1 = {
+				...createEmptyTaskOrganizationState(),
+				folders: [folder],
+			}
+			const projection = buildGroupedOrganizationProjection(state, [gNoWs], [noWs], "")
 			// Genuinely empty folder (zero taskIds) should still appear.
 			expect(projection.folderProjections).toHaveLength(1)
 			expect(projection.folderProjections[0].folderId).toBe("f-empty")

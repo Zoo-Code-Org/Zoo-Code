@@ -629,7 +629,10 @@ export function buildGroupedOrganizationProjection(
 	}
 
 	const isVisibleInWorkspace = (group: TaskGroup): boolean => {
-		if (!cwd) {
+		// cwd === undefined means "show all workspaces" (no filtering).
+		// cwd === "" means "no workspace open" — only tasks with an empty
+		// workspace field should be visible.
+		if (cwd === undefined) {
 			return true
 		}
 		const rootId = group.parent.id
@@ -671,10 +674,14 @@ export function buildGroupedOrganizationProjection(
 			members.push(group)
 		}
 
-		// When workspace filtering is active (cwd provided), skip folders
-		// whose members are all hidden (i.e., belong to other workspaces).
-		// Genuinely empty folders (zero taskIds) are still preserved.
-		if (cwd && members.length === 0 && folder.taskIds.length > 0) {
+		// Skip folders whose members are all hidden (i.e., belong to other
+		// workspaces). This applies whenever workspace filtering is active
+		// (cwd is defined, including empty string for "no workspace open"),
+		// preventing workspace-specific folders from leaking into the wrong
+		// view. When cwd is undefined ("show all workspaces"), folders with
+		// empty members due to deduplication are still preserved.
+		// Genuinely empty folders (zero taskIds) are always preserved.
+		if (cwd !== undefined && members.length === 0 && folder.taskIds.length > 0) {
 			continue
 		}
 		folderProjections.push({
