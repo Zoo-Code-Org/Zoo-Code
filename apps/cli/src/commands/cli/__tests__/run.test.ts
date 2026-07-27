@@ -389,6 +389,21 @@ describe("run command validation", () => {
 		})
 	})
 
+	describe("providerBaseUrl validation", () => {
+		it("should reject providerBaseUrl with non-openrouter provider in non-autonomous mode", async () => {
+			const flags = createFlagOptions({
+				providerBaseUrl: "https://custom-base-url.com",
+				provider: "anthropic",
+				print: true,
+			})
+
+			await expect(run("test", flags)).rejects.toThrow("process.exit: 1")
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("--provider-base-url is currently supported only with --provider openrouter"),
+			)
+		})
+	})
+
 	describe("prompt file validation", () => {
 		it("should reject non-existent prompt file", async () => {
 			const flags = createFlagOptions({
