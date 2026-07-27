@@ -671,6 +671,12 @@ export function buildGroupedOrganizationProjection(
 			members.push(group)
 		}
 
+		// When workspace filtering is active (cwd provided), skip folders
+		// whose members are all hidden (i.e., belong to other workspaces).
+		// Genuinely empty folders (zero taskIds) are still preserved.
+		if (cwd && members.length === 0 && folder.taskIds.length > 0) {
+			continue
+		}
 		folderProjections.push({
 			folderId: folder.folderId,
 			folderName: folder.name,

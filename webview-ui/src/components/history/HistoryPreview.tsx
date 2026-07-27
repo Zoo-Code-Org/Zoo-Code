@@ -3,6 +3,7 @@ import { useDroppable } from "@dnd-kit/core"
 
 import { vscode } from "@src/utils/vscode"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
+import { useExtensionState } from "@src/context/ExtensionStateContext"
 
 import { useTaskSearch } from "./useTaskSearch"
 import { useGroupedTasks } from "./useGroupedTasks"
@@ -68,6 +69,7 @@ const HistoryPreviewInner = memo(() => {
 	const { tasks, searchQuery } = useTaskSearch()
 	const { groups, toggleExpand } = useGroupedTasks(tasks, searchQuery)
 	const { t } = useAppTranslation()
+	const { cwd } = useExtensionState()
 
 	// Task organization context
 	const { organization, isPinned, canPin, togglePin, renameFolder, deleteFolder } = useTaskOrganization()
@@ -92,8 +94,8 @@ const HistoryPreviewInner = memo(() => {
 	}
 
 	const projection = useMemo(
-		() => buildGroupedOrganizationProjection(organization, groups, tasks, undefined),
-		[organization, groups, tasks],
+		() => buildGroupedOrganizationProjection(organization, groups, tasks, cwd),
+		[organization, groups, tasks, cwd],
 	)
 
 	// Resolve a human-readable label for the drag overlay.
