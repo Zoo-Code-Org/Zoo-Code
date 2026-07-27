@@ -198,7 +198,7 @@ vi.mock("vscode", () => ({
 		showErrorMessage: vi.fn(),
 		activeTextEditor: undefined,
 		onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
-		createTextEditorDecorationType: vi.fn().mockReturnValue({}),
+		createTextEditorDecorationType: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 		tabGroups: {
 			onDidChangeTabs: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 		},
@@ -691,13 +691,14 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			)
 			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
 
+			await (provider2 as any).saveViewState("mode", "debugger")
 			await (provider1 as any).saveViewState("mode", "architect")
 
 			const state1 = await provider1.getState()
 			const state2 = await provider2.getState()
 
 			expect(state1.mode).toBe("architect")
-			expect(state2.mode).toBe("code")
+			expect(state2.mode).toBe("debugger")
 
 			await provider1.dispose()
 			await provider2.dispose()
@@ -1064,6 +1065,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.apiConfiguration.apiProvider).toBe("bedrock")
 			expect(state.apiConfiguration.awsBedrockEndpoint).toBe("http://127.0.0.1:4567")
 			expect((provider as any).viewLocalState.apiConfiguration.apiProvider).toBe("bedrock")
+			expect((provider as any).viewLocalState.apiConfiguration).not.toHaveProperty("openRouterModelId")
 
 			await provider.dispose()
 		})
@@ -1092,6 +1094,72 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			})
 
 			await provider.dispose()
+		})
+
+		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await (provider as any).setViewStateId("tab panel/with.dots and spaces")
+			await provider.setValue("mode" as any, "architect" as any)
+
+			expect(provider.contextProxy.getValue("viewStates" as any)).toMatchObject({
+				tab_panel_with_dots_and_spaces: { mode: "architect" },
+			})
+			expect(provider.contextProxy.getValue("viewStates" as any)).not.toHaveProperty(
+				"tab panel/with.dots and spaces",
+			)
+
+			await provider.dispose()
+		})
+
+		it("should persist queued writes under the viewStateId active when the change was made", async () => {
+			let releaseFirstWrite!: () => void
+			const firstWriteStarted = new Promise<void>((resolve) => {
+				mockContext.globalState.update = vi
+					.fn()
+					.mockImplementationOnce((key: string, value: any) => {
+						mockContext.globalState.get = vi
+							.fn()
+							.mockImplementation((lookupKey: string) => (lookupKey === key ? value : undefined))
+						resolve()
+						return new Promise<void>((writeResolve) => {
+							releaseFirstWrite = writeResolve
+						})
+					})
+					.mockImplementation((key: string, value: any) => {
+						mockContext.globalState.get = vi
+							.fn()
+							.mockImplementation((lookupKey: string) => (lookupKey === key ? value : undefined))
+						return Promise.resolve()
+					})
+			})
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await (provider as any).setViewStateId("view-a")
+			const firstSave = (provider as any).saveViewState("mode", "architect")
+			await firstWriteStarted
+			await (provider as any).setViewStateId("view-b")
+			releaseFirstWrite()
+			await firstSave
+
+			expect(provider.contextProxy.getValue("viewStates" as any)).toMatchObject({
+				"view-a": { mode: "architect" },
+			})
+			expect(provider.contextProxy.getValue("viewStates" as any)).not.toHaveProperty("view-b")
+
+			await provider.dispose()
+		})
+
+		it("should clean up persisted viewStates entry when a tab provider is disposed", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
+
+			await (provider as any).setViewStateId("tab-to-dispose")
+			await (provider as any).saveViewState("mode", "architect")
+			expect(provider.contextProxy.getValue("viewStates" as any)).toHaveProperty("tab-to-dispose")
+
+			await provider.dispose()
+
+			expect(provider.contextProxy.getValue("viewStates" as any)).not.toHaveProperty("tab-to-dispose")
 		})
 	})
 
