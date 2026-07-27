@@ -1,0 +1,530 @@
+﻿
+ RUN  v4.1.9 C:/Users/k1yt/OneDrive/Projects/ZooCode/src
+      Coverage enabled with v8
+
+node.exe : 오후 10:24:08 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${absolutepath}/
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (오후 10:24:08 [vi...{absolutepath}/:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  Plugin: builtin:vite-resolve
+오후 10:24:08 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${cachedpath}/
+  Plugin: builtin:vite-resolve
+오후 10:24:08 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+오후 10:24:08 [vite] (ssr) warning: Invalid file URL: must not contain hostname file://${tempfile}/
+  Plugin: builtin:vite-resolve
+Warning: A vi.mock("fs/promises") call in "C:/Users/k1yt/OneDrive/Projects/ZooCode/src/services/tree-sitter/__tests__/h
+elpers.ts" is not at the top level of the module. Although it appears nested, it will be hoisted and executed before an
+y tests run. Move it to the top level to reflect its actual execution order. This will become an error in a future vers
+ion.
+See: https://vitest.dev/guide/mocking/modules#how-it-works
+··················x······xx····x·········································x·············x··x·····x···········x·························x·x··················x··x······································x··x·····x··x································································································································································································-··········{"t":191,"l":"info","m":"Creating project mode in .roomodes","d":{"slug":"project-mode","workspace":"C:\\mock\\workspace"}}
+········{"t":105,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"imported-mode","workspace":"C:\\mock\\workspace"}}
+{"t":6,"l":"info","m":"Removed existing project rules folder for mode imported-mode"}
+·{"t":29,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"imported-mode","workspace":"C:\\mock\\workspace"}}
+{"t":6,"l":"info","m":"Removed existing project rules folder for mode imported-mode"}
+{"t":0,"l":"info","m":"Detected old export format, stripping rules-imported-mode\\ from path"}
+{"t":1,"l":"info","m":"Detected old export format, stripping rules-imported-mode\\ from path"}
+{"t":22,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"mode1","workspace":"C:\\mock\\workspace"}}
+{"t":5,"l":"info","m":"Removed existing project rules folder for mode mode1"}
+{"t":5,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"mode2","workspace":"C:\\mock\\workspace"}}
+{"t":7,"l":"info","m":"Removed existing project rules folder for mode mode2"}
+{"t":1,"l":"info","m":"Detected old export format, stripping rules-mode2\\ from path"}
+········{"t":7,"l":"error","m":"Failed to import mode with rules","d":{"error":"Permission denied"}}
+{"t":6,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"test-mode","workspace":"C:\\mock\\workspace"}}
+{"t":3,"l":"info","m":"Removed existing project rules folder for mode test-mode"}
+{"t":1,"l":"error","m":"Invalid file path detected: ../../../etc/passwd"}
+{"t":0,"l":"error","m":"Invalid file path detected: rules-test-mode/../../../sensitive.txt"}
+{"t":1,"l":"error","m":"Invalid file path detected: /absolute/path/file.txt"}
+{"t":12,"l":"error","m":"Invalid mode configuration for test-mode","d":{"errors":[{"code":"too_small","minimum":1,"type":"string","inclusive":true,"exact":false,"message":"Name is required","path":["name"]},{"code":"too_small","minimum":1,"type":"string","inclusive":true,"exact":false,"message":"Role definition is required","path":["roleDefinition"]},{"code":"invalid_union","unionErrors":[{"issues":[{"received":"invalid-group","code":"invalid_enum_value","options":["read","edit","command","mcp","modes"],"path":["groups",0],"message":"Invalid enum value. Expected 'read' | 'edit' | 'command' | 'mcp' | 'modes', received 'invalid-group'"}],"name":"ZodError"},{"issues":[{"code":"invalid_type","expected":"array","received":"string","path":["groups",0],"message":"Expected array, received string"}],"name":"ZodError"}],"path":["groups",0],"message":"Invalid input"}]}}
+{"t":5,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"test-mode","workspace":"C:\\mock\\workspace"}}
+{"t":6,"l":"info","m":"Removed existing project rules folder for mode test-mode"}
+·{"t":7,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"test-mode","workspace":"C:\\mock\\workspace"}}
+{"t":4,"l":"info","m":"Removed existing project rules folder for mode test-mode"}
+{"t":1,"l":"info","m":"Detected old export format, stripping rules-test-mode\\ from path"}
+{"t":7,"l":"error","m":"Failed to check rules directory for mode","d":{"slug":"test-mode","error":"The \"path\" argument must be of type string. Received null"}}
+Warning: A vi.unmock("proper-lockfile") call in "C:/Users/k1yt/OneDrive/Projects/ZooCode/src/utils/__tests__/safeWriteJ
+son.test.ts" is not at the top level of the module. Although it appears nested, it will be hoisted and executed before 
+any tests run. Move it to the top level to reflect its actual execution order. This will become an error in a future ve
+rsion.
+See: https://vitest.dev/guide/mocking/modules#how-it-works
+························································································································································································································································································································································································································································································································································································································································································································································································································································································································································································{"t":378,"l":"info","m":"[ContextProxy] Migrating legacy Roo Code Router state to setup-needed fallback"}
+{"t":10,"l":"info","m":"[ContextProxy] Found invalid provider \"invalid-removed-provider\" in storage - clearing it"}
+{"t":7,"l":"info","m":"[ContextProxy] Found invalid provider \"invalid-removed-provider\" in storage - clearing it"}
+················{"t":14,"l":"info","m":"Clearing old v1 default condensing prompt from customSupportPrompts.CONDENSE - user will now get the improved v2 default"}
+{"t":2,"l":"info","m":"Clearing old v1 default condensing prompt from customSupportPrompts.CONDENSE - user will now get the improved v2 default"}
+··········································--·--··-·················································································································································································································································{"t":78,"l":"info","m":"Region mismatch: The region in your ARN (ap-northeast-3) does not match your selected region (us-east-1). This may cause access issues. The provider will use the region from the ARN.","c":"bedrock","d":{"selectedRegion":"us-east-1","arnRegion":"ap-northeast-3"}}
+···············································{"t":107,"l":"error","m":"Invalid ARN format","c":"bedrock","d":{"errorMessage":"Invalid ARN format. ARN should follow the Amazon Bedrock ARN pattern."}}
+{"t":2,"l":"error","m":"Invalid ARN format","c":"bedrock","d":{"errorMessage":"Invalid ARN format. ARN should follow the Amazon Bedrock ARN pattern."}}
+·······································{"t":35,"l":"info","m":"Service tier specified for Bedrock request","c":"bedrock","d":{"modelId":"amazon.nova-lite-v1:0","serviceTier":"PRIORITY"}}
+{"t":3,"l":"info","m":"Service tier specified for Bedrock request","c":"bedrock","d":{"modelId":"amazon.nova-lite-v1:0","serviceTier":"FLEX"}}
+{"t":36,"l":"error","m":"GENERIC error in createMessage","c":"bedrock","d":{"errorType":"GENERIC","errorMessage":"Bedrock API error","errorStack":"Error: Bedrock API error\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock.spec.ts:1272:37\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2955:64"}}
+·································{"t":12,"l":"error","m":"GENERIC error in completePrompt","c":"bedrock","d":{"errorType":"GENERIC","errorMessage":"Bedrock completion error","errorStack":"Error: Bedrock completion error\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock.spec.ts:1322:37\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2955:64"}}
+{"t":3,"l":"error","m":"GENERIC error in createMessage","c":"bedrock","d":{"errorType":"GENERIC","errorMessage":"Test error for throw verification","errorStack":"Error: Test error for throw verification\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock.spec.ts:1359:37\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2955:64"}}
+{"t":5,"l":"info","m":"Extended thinking enabled for Bedrock request","c":"bedrock","d":{"modelId":"anthropic.claude-opus-4-7","thinking":{"type":"adaptive","display":"summarized"}}}
+{"t":3,"l":"info","m":"Extended thinking enabled for Bedrock request","c":"bedrock","d":{"modelId":"anthropic.claude-opus-4-8","thinking":{"type":"adaptive","display":"summarized"}}}
+{"t":2,"l":"info","m":"Extended thinking enabled for Bedrock request","c":"bedrock","d":{"modelId":"anthropic.claude-sonnet-5","thinking":{"type":"adaptive","display":"summarized"}}}
+{"t":18,"l":"info","m":"Extended thinking enabled for Bedrock request","c":"bedrock","d":{"modelId":"anthropic.claude-opus-5","thinking":{"type":"adaptive","display":"summarized"}}}
+············{"t":16,"l":"info","m":"Extended thinking enabled for Bedrock request","c":"bedrock","d":{"modelId":"anthropic.claude-opus-4-6-v1","thinking":{"type":"enabled","budget_tokens":8192}}}
+{"t":4,"l":"info","m":"Extended thinking enabled for Bedrock request","c":"bedrock","d":{"modelId":"us.anthropic.claude-opus-4-8","thinking":{"type":"adaptive","display":"summarized"}}}
+·······································{"t":191,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"new-slug-name","workspace":"C:\\mock\\workspace"}}
+{"t":9,"l":"info","m":"Removed existing project rules folder for mode new-slug-name"}
+{"t":7,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"new-slug-name","workspace":"C:\\mock\\workspace"}}
+{"t":4,"l":"info","m":"Removed existing project rules folder for mode new-slug-name"}
+{"t":0,"l":"info","m":"Detected old export format, stripping rules-old-slug\\ from path"}
+{"t":1,"l":"info","m":"Detected old export format, stripping rules-old-slug\\ from path"}
+{"t":8,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"mixed-mode","workspace":"C:\\mock\\workspace"}}
+{"t":3,"l":"info","m":"Removed existing project rules folder for mode mixed-mode"}
+{"t":1,"l":"info","m":"Detected old export format, stripping rules-old-slug\\ from path"}
+{"t":0,"l":"info","m":"Detected old export format, stripping rules-another-old\\ from path"}
+{"t":48,"l":"info","m":"Updating project mode in .roomodes","d":{"slug":"renamed-mode","workspace":"C:\\mock\\workspace"}}
+{"t":7,"l":"info","m":"Removed existing project rules folder for mode renamed-mode"}
+·······························································································································································································································--··--························································································································{"t":55,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Request failed","errorStack":"Error: Request failed\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:74:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":9,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Request failed","errorStack":"Error: Request failed\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:90:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":3,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Request failed","errorStack":"ThrottlingException: Request failed\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:106:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Request failed","errorStack":"Error: Request failed\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:122:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":4,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Bedrock is unable to process your request","errorStack":"Error: Bedrock is unable to process your request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:138:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Request throttled","errorStack":"Error: Request throttled\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:164:27\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":1,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Rate limit exceeded","errorStack":"Error: Rate limit exceeded\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:164:27\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":2,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Too many requests","errorStack":"Error: Too many requests\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:164:27\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":1,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Service unavailable due to high demand","errorStack":"Error: Service unavailable due to high demand\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:164:27\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":1,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Server is overloaded","errorStack":"Error: Server is overloaded\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:164:27\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":2,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"System is busy","errorStack":"Error: System is busy\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:164:27\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":1,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Please wait and try again","errorStack":"Error: Please wait and try again\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:164:27\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":6,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Bedrock is unable to process your request","errorStack":"ThrottlingException: Bedrock is unable to process your request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:178:28\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"SERVICE_QUOTA_EXCEEDED error in completePrompt","c":"bedrock","d":{"errorType":"SERVICE_QUOTA_EXCEEDED","errorMessage":"Service quota exceeded for model requests","errorStack":"Error: Service quota exceeded for model requests\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:204:23\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"MODEL_NOT_READY error in completePrompt","c":"bedrock","d":{"errorType":"MODEL_NOT_READY","errorMessage":"Model is not ready, please try again later","errorStack":"Error: Model is not ready, please try again later\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:221:23\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":4,"l":"error","m":"INTERNAL_SERVER_ERROR error in completePrompt","c":"bedrock","d":{"errorType":"INTERNAL_SERVER_ERROR","errorMessage":"Internal server error occurred","errorStack":"Error: Internal server error occurred\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:238:24\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":3,"l":"error","m":"TOO_MANY_TOKENS error in completePrompt","c":"bedrock","d":{"errorType":"TOO_MANY_TOKENS","errorMessage":"Too many tokens in request","errorStack":"Error: Too many tokens in request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:263:24\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"TOO_MANY_TOKENS error in completePrompt","c":"bedrock","d":{"errorType":"TOO_MANY_TOKENS","errorMessage":"Token limit exceeded","errorStack":"Error: Token limit exceeded\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:263:24\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":1,"l":"error","m":"TOO_MANY_TOKENS error in completePrompt","c":"bedrock","d":{"errorType":"TOO_MANY_TOKENS","errorMessage":"Maximum context length reached","errorStack":"Error: Maximum context length reached\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:263:24\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":2,"l":"error","m":"TOO_MANY_TOKENS error in completePrompt","c":"bedrock","d":{"errorType":"TOO_MANY_TOKENS","errorMessage":"Context length exceeds limit","errorStack":"Error: Context length exceeds limit\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:263:24\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"}}
+{"t":10,"l":"error","m":"GENERIC error in createMessage","c":"bedrock","d":{"errorType":"GENERIC","errorMessage":"Some other error","errorStack":"Error: Some other error\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:309:25\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Some generic error message","errorStack":"Error: Some generic error message\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:347:23\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Some other error occurred","errorStack":"ThrottlingException: Some other error occurred\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:364:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+···············{"t":24,"l":"error","m":"GENERIC error in completePrompt","c":"bedrock","d":{"errorType":"GENERIC","errorMessage":"Something completely unexpected happened","errorStack":"Error: Something completely unexpected happened\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:382:25\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":3,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Too many tokens, rate limited","errorStack":"Error: Too many tokens, rate limited\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:399:28\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"TOO_MANY_TOKENS error in createMessage","c":"bedrock","d":{"errorType":"TOO_MANY_TOKENS","errorMessage":"Too many tokens in request","errorStack":"ValidationException: Too many tokens in request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:422:23\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":3,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Bedrock is unable to process your request","errorStack":"Error: Bedrock is unable to process your request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:462:28\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":1,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Bedrock is unable to process your request","errorStack":"Error: Bedrock is unable to process your request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:462:28\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":4,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Bedrock is unable to process your request","errorStack":"Error: Bedrock is unable to process your request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:462:28\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":1,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Bedrock is unable to process your request","errorStack":"Error: Bedrock is unable to process your request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:462:28\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":1,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"Bedrock is unable to process your request","errorStack":"Error: Bedrock is unable to process your request\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:462:28\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":2,"l":"error","m":"THROTTLING error in completePrompt","c":"bedrock","d":{"errorType":"THROTTLING","errorMessage":"ValidationException: Your input is invalid, but also rate limited","errorStack":"ValidationException: ValidationException: Your input is invalid, but also rate limited\n    at createMockError (C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:64:17)\n    at C:/Users/k1yt/OneDrive/Projects/ZooCode/src/api/providers/__tests__/bedrock-error-handling.spec.ts:486:23\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20\n    at new Promise (<anonymous>)\n    at runWithTimeout (file:///C:/Users/k1yt/OneDrive/Projects/ZooCode/node_modules/.pnpm/@vitest+runner@4.1.9/node_modules/@vitest/runner/dist/chunk-artifact.js:2272:10)"}}
+{"t":3,"l":"error","m":"GENERIC error in completePrompt","c":"bedrock","d":{"errorType":"GENERIC","errorMessage":"[object Object]"}}
+·······························································{"t":1923,"l":"info","m":"Combining cache points is not beneficial","c":"cache-strategy","d":{"newMessagesTokens":62,"smallestGap":77,"action":"keeping_existing_cache_points"}}
+····················{"t":9,"l":"info","m":"Combining cache points is not beneficial","c":"cache-strategy","d":{"newMessagesTokens":53,"smallestGap":77,"action":"keeping_existing_cache_points"}}
+{"t":3,"l":"info","m":"Combining cache points is not beneficial","c":"cache-strategy","d":{"newMessagesTokens":59,"smallestGap":77,"action":"keeping_existing_cache_points"}}
+-·································································································································································································································································································································································································································································································································································································································································································································································-····················································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································{"t":42,"l":"info","m":"Region mismatch: The region in your ARN (us-west-2) does not match your selected region (us-east-1). This may cause access issues. The provider will use the region from the ARN.","c":"bedrock","d":{"selectedRegion":"us-east-1","arnRegion":"us-west-2"}}
+{"t":26,"l":"error","m":"Error handling Bedrock invokedModelId","c":"bedrock","d":{"error":{}}}
+········································································································································································································································································································-·····································································································································································································································································································································································································································-·····························································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································································------------···-----------·················
+
+⎯⎯⎯⎯⎯⎯ Failed Tests 17 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  api/providers/__tests__/anthropic-vertex.spec.ts > VertexHandler > createMessage > should handle streaming respo
+nses correctly for Claude
+AssertionError: expected { Object (type, inputTokens, ...) } to deeply equal { Object (type, inputTokens, ...) }
+
+- Expected
++ Received
+
+  {
++   "cacheReadTokens": undefined,
++   "cacheWriteTokens": undefined,
+    "inputTokens": 10,
+    "outputTokens": 0,
+-   "totalCost": 0.00003,
+    "type": "usage",
+  }
+
+ ❯ api/providers/__tests__/anthropic-vertex.spec.ts:216:22
+    214|
+    215|    expect(chunks.length).toBe(4)
+    216|    expect(chunks[0]).toEqual({
+       |                      ^
+    217|     type: "usage",
+    218|     inputTokens: 10,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/17]⎯
+
+ FAIL  api/providers/__tests__/anthropic-vertex.spec.ts > VertexHandler > createMessage > should handle prompt caching 
+for supported models for Claude
+AssertionError: expected { Object (type, inputTokens, ...) } to deeply equal { Object (type, inputTokens, ...) }
+
+- Expected
++ Received
+
+  {
+    "cacheReadTokens": 2,
+    "cacheWriteTokens": 3,
+    "inputTokens": 10,
+    "outputTokens": 0,
+-   "totalCost": 0.00004185,
+    "type": "usage",
+  }
+
+ ❯ api/providers/__tests__/anthropic-vertex.spec.ts:429:27
+    427|    const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
+    428|    expect(usageChunks).toHaveLength(2)
+    429|    expect(usageChunks[0]).toEqual({
+       |                           ^
+    430|     type: "usage",
+    431|     inputTokens: 10,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/17]⎯
+
+ FAIL  api/providers/__tests__/kenari.spec.ts > KenariHandler > createMessage > streams text, reasoning, tool-call and 
+usage chunks
+AssertionError: expected [ …(4) ] to deep equally contain { Object (type, inputTokens, ...) }
+
+- Expected:
+{
+  "cacheReadTokens": 4,
+  "inputTokens": 12,
+  "outputTokens": 7,
+  "totalCost": 0,
+  "type": "usage",
+}
+
++ Received:
+[
+  {
+    "text": "Hello",
+    "type": "text",
+  },
+  {
+    "text": "thinking…",
+    "type": "reasoning",
+  },
+  {
+    "arguments": "{\"path\":",
+    "id": "call_1",
+    "index": 0,
+    "name": "read_file",
+    "type": "tool_call_partial",
+  },
+  {
+    "cacheReadTokens": 4,
+    "inputTokens": 12,
+    "outputTokens": 7,
+    "type": "usage",
+  },
+]
+
+ ❯ api/providers/__tests__/kenari.spec.ts:139:19
+    137|     arguments: '{"path":',
+    138|    })
+    139|    expect(chunks).toContainEqual({
+       |                   ^
+    140|     type: "usage",
+    141|     inputTokens: 12,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/17]⎯
+
+ FAIL  api/providers/__tests__/kenari.spec.ts > KenariHandler > createMessage > reports undefined cache reads when usag
+e has no prompt_tokens_details
+AssertionError: expected [ { type: 'usage', …(3) } ] to deeply equal [ { type: 'usage', …(4) } ]
+
+- Expected
++ Received
+
+  [
+    {
+      "cacheReadTokens": undefined,
+      "inputTokens": 3,
+      "outputTokens": 2,
+-     "totalCost": 0,
+      "type": "usage",
+    },
+  ]
+
+ ❯ api/providers/__tests__/kenari.spec.ts:208:19
+    206|    }
+    207|
+    208|    expect(chunks).toEqual([
+       |                   ^
+    209|     {
+    210|      type: "usage",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/17]⎯
+
+ FAIL  api/providers/__tests__/kenari.spec.ts > KenariHandler > createMessage > reports zero usage when the upstream co
+unts are zero
+AssertionError: expected [ { type: 'text', text: 'x' }, …(1) ] to deep equally contain { Object (type, inputTokens, ...
+) }
+
+- Expected:
+{
+  "cacheReadTokens": undefined,
+  "inputTokens": 0,
+  "outputTokens": 0,
+  "totalCost": 0,
+  "type": "usage",
+}
+
++ Received:
+[
+  {
+    "text": "x",
+    "type": "text",
+  },
+  {
+    "cacheReadTokens": undefined,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "type": "usage",
+  },
+]
+
+ ❯ api/providers/__tests__/kenari.spec.ts:318:19
+    316|    }
+    317|
+    318|    expect(chunks).toContainEqual({
+       |                   ^
+    319|     type: "usage",
+    320|     inputTokens: 0,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/17]⎯
+
+ FAIL  api/providers/__tests__/mistral.spec.ts > MistralHandler > createMessage > should yield usage chunk with totalCo
+st from stream
+AssertionError: expected undefined to be defined
+ ❯ api/providers/__tests__/mistral.spec.ts:193:37
+    191|    expect(usageChunks[0].inputTokens).toBe(100)
+    192|    expect(usageChunks[0].outputTokens).toBe(50)
+    193|    expect(usageChunks[0].totalCost).toBeDefined()
+       |                                     ^
+    194|    expect(typeof usageChunks[0].totalCost).toBe("number")
+    195|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/17]⎯
+
+ FAIL  api/providers/__tests__/moonshot.spec.ts > MoonshotHandler > createMessage > should include usage information
+AssertionError: expected undefined to be defined
+ ❯ api/providers/__tests__/moonshot.spec.ts:194:37
+    192|    expect(usageChunks[0].inputTokens).toBe(10)
+    193|    expect(usageChunks[0].outputTokens).toBe(5)
+    194|    expect(usageChunks[0].totalCost).toBeDefined()
+       |                                     ^
+    195|    expect(typeof usageChunks[0].totalCost).toBe("number")
+    196|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/17]⎯
+
+ FAIL  api/providers/__tests__/moonshot.spec.ts > MoonshotHandler > processUsageMetrics > should correctly process usag
+e metrics including cache information
+AssertionError: expected undefined to be defined
+ ❯ api/providers/__tests__/moonshot.spec.ts:272:29
+    270|    expect(result.cacheWriteTokens).toBe(0)
+    271|    expect(result.cacheReadTokens).toBe(20)
+    272|    expect(result.totalCost).toBeDefined()
+       |                             ^
+    273|    expect(typeof result.totalCost).toBe("number")
+    274|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/17]⎯
+
+ FAIL  api/providers/__tests__/openai-usage-tracking.spec.ts > OpenAiHandler with usage tracking fix > usage metrics wi
+th streaming > should only yield usage metrics once at the end of the stream
+AssertionError: expected { Object (type, inputTokens, ...) } to deeply equal { Object (type, inputTokens, ...) }
+
+- Expected
++ Received
+
+  {
++   "cacheReadTokens": undefined,
++   "cacheWriteTokens": undefined,
+    "inputTokens": 10,
+    "outputTokens": 5,
+-   "totalCost": 0,
+    "type": "usage",
+  }
+
+ ❯ api/providers/__tests__/openai-usage-tracking.spec.ts:137:27
+    135|    const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
+    136|    expect(usageChunks).toHaveLength(1)
+    137|    expect(usageChunks[0]).toEqual({
+       |                           ^
+    138|     type: "usage",
+    139|     inputTokens: 10,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/17]⎯
+
+ FAIL  api/providers/__tests__/openai-usage-tracking.spec.ts > OpenAiHandler with usage tracking fix > usage metrics wi
+th streaming > should handle case where usage is only in the final chunk
+AssertionError: expected { Object (type, inputTokens, ...) } to deeply equal { Object (type, inputTokens, ...) }
+
+- Expected
++ Received
+
+  {
++   "cacheReadTokens": undefined,
++   "cacheWriteTokens": undefined,
+    "inputTokens": 10,
+    "outputTokens": 5,
+-   "totalCost": 0,
+    "type": "usage",
+  }
+
+ ❯ api/providers/__tests__/openai-usage-tracking.spec.ts:198:27
+    196|    const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
+    197|    expect(usageChunks).toHaveLength(1)
+    198|    expect(usageChunks[0]).toEqual({
+       |                           ^
+    199|     type: "usage",
+    200|     inputTokens: 10,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/17]⎯
+
+ FAIL  api/providers/__tests__/openai.spec.ts > OpenAiHandler > createMessage > should handle non-streaming mode
+AssertionError: expected undefined to be defined
+ ❯ api/providers/__tests__/openai.spec.ts:166:34
+    164|    expect(usageChunk?.inputTokens).toBe(10)
+    165|    expect(usageChunk?.outputTokens).toBe(5)
+    166|    expect(usageChunk?.totalCost).toBeDefined()
+       |                                  ^
+    167|    expect(typeof usageChunk?.totalCost).toBe("number")
+    168|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/17]⎯
+
+ FAIL  api/providers/__tests__/openai.spec.ts > OpenAiHandler > Azure AI Inference Service > should handle non-streamin
+g responses with Azure AI Inference Service
+AssertionError: expected undefined to be defined
+ ❯ api/providers/__tests__/openai.spec.ts:1031:34
+    1029|    expect(usageChunk?.inputTokens).toBe(10)
+    1030|    expect(usageChunk?.outputTokens).toBe(5)
+    1031|    expect(usageChunk?.totalCost).toBeDefined()
+       |                                  ^
+    1032|    expect(typeof usageChunk?.totalCost).toBe("number")
+    1033|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/17]⎯
+
+ FAIL  core/task-persistence/__tests__/TaskOrganizationStore.spec.ts > TaskOrganizationStore > initialize() > loads an 
+empty state when no file exists
+AssertionError: expected { Object (schemaVersion, revision, ...) } to deeply equal { Object (schemaVersion, revision, .
+..) }
+
+- Expected
++ Received
+
+  {
+    "folders": [],
+    "pins": [],
+    "revision": 0,
+    "schemaVersion": 1,
+-   "updatedAt": 1785158650798,
++   "updatedAt": 1785158650797,
+  }
+
+ ❯ core/task-persistence/__tests__/TaskOrganizationStore.spec.ts:91:29
+     89|   it("loads an empty state when no file exists", async () => {
+     90|    await store.initialize()
+     91|    expect(store.getState()).toEqual(createEmptyTaskOrganizationState())
+       |                             ^
+     92|   })
+     93|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/17]⎯
+
+ FAIL  core/task-persistence/__tests__/TaskOrganizationStore.spec.ts > TaskOrganizationStore > initialize() > quarantin
+es and recovers from malformed JSON
+AssertionError: expected { Object (schemaVersion, revision, ...) } to deeply equal { Object (schemaVersion, revision, .
+..) }
+
+- Expected
++ Received
+
+  {
+    "folders": [],
+    "pins": [],
+    "revision": 0,
+    "schemaVersion": 1,
+-   "updatedAt": 1785158651222,
++   "updatedAt": 1785158651221,
+  }
+
+ ❯ core/task-persistence/__tests__/TaskOrganizationStore.spec.ts:121:29
+    119|    await store.initialize()
+    120|
+    121|    expect(store.getState()).toEqual(createEmptyTaskOrganizationState())
+       |                             ^
+    122|    const quarantineFiles = (await fs.readdir(tasksDir)).filter((name) …
+    123|     name.startsWith("_taskOrganization.json.corrupt_"),
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/17]⎯
+
+ FAIL  core/task-persistence/__tests__/TaskOrganizationStore.spec.ts > TaskOrganizationStore > initialize() > preserves
+ a future schema version without overwriting
+AssertionError: expected 1 to be 99 // Object.is equality
+
+- Expected
++ Received
+
+- 99
++ 1
+
+ ❯ core/task-persistence/__tests__/TaskOrganizationStore.spec.ts:139:43
+    137|    await store.initialize()
+    138|
+    139|    expect(store.getState().schemaVersion).toBe(99)
+       |                                           ^
+    140|    const result = await store.mutate(
+    141|     {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/17]⎯
+
+ FAIL  core/task-persistence/__tests__/TaskOrganizationStore.spec.ts > TaskOrganizationStore > automatic group resoluti
+on > resolves a child drag to its root group and moves all members
+AssertionError: expected [ 't1', 't2', 'child' ] to deeply equal [ 't1', 't2', 'parent', 'child' ]
+
+- Expected
++ Received
+
+  [
+    "t1",
+    "t2",
+-   "parent",
+    "child",
+  ]
+
+ ❯ core/task-persistence/__tests__/TaskOrganizationStore.spec.ts:634:48
+    632|    )
+    633|    expect(result.success).toBe(true)
+    634|    expect(store.getState().folders[0].taskIds).toEqual(["t1", "t2", "p…
+       |                                                ^
+    635|   })
+    636|  })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/17]⎯
+
+ FAIL  core/task-persistence/__tests__/TaskOrganizationStore.spec.ts > TaskOrganizationStore > concurrent mutations > s
+erializes concurrent mutations so revisions are sequential
+AssertionError: expected [ { requestId: '', …(2) }, …(4) ] to have a length of 1 but got 5
+
+- Expected
++ Received
+
+- 1
+
++ 5
+
+ ❯ core/task-persistence/__tests__/TaskOrganizationStore.spec.ts:689:23
+    687|    const successful = results.filter((r) => r.success)
+    688|    // Only the first mutation can succeed because each uses the previo…
+    689|    expect(successful).toHaveLength(1)
+       |                       ^
+    690|    expect(successful[0].committedRevision).toBe(1)
+    691|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/17]⎯
+
+ Test Files  7 failed | 425 passed | 3 skipped (435)
+      Tests  17 failed | 7163 passed | 37 skipped (7217)
+   Start at  22:24:05
+   Duration  231.05s (transform 58.58s, setup 207.42s, import 1771.84s, tests 336.80s, environment 123ms)
+
