@@ -1187,7 +1187,7 @@ export class ClineProvider
 			taskNumber: historyItem.number,
 			workspacePath: historyItem.workspace,
 			onCreated: this.taskCreationCallback,
-			startTask: options?.startTask ?? true,
+			startTask: false,
 			// Preserve the status from the history item to avoid overwriting it when the task saves messages
 			initialStatus: historyItem.status,
 			rateLimitClock: this.rateLimitClock,
@@ -1233,6 +1233,14 @@ export class ClineProvider
 			this.log(
 				`[createTaskWithHistoryItem] ${task.parentTask ? "child" : "parent"} task ${task.taskId}.${task.instanceId} instantiated`,
 			)
+
+			if (options?.startTask !== false) {
+				void this.taskScheduler
+					.schedule(task, () => task.run())
+					.catch((error) => {
+						console.error("[createTaskWithHistoryItem] taskScheduler.schedule failed:", error)
+					})
+			}
 		}
 
 		// Check if there's a pending edit after checkpoint restoration
