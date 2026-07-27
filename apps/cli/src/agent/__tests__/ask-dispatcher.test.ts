@@ -1,4 +1,4 @@
-import type { ClineMessage, ClineAsk } from "@roo-code/types"
+import type { ClineMessage, ClineAsk, WebviewMessage } from "@roo-code/types"
 import { AskDispatcher } from "../ask-dispatcher.js"
 import type { OutputManager } from "../output-manager.js"
 import type { PromptManager } from "../prompt-manager.js"
@@ -19,12 +19,12 @@ const createMockPromptManager = (): PromptManager =>
 describe("AskDispatcher", () => {
 	let mockOutputManager: OutputManager
 	let mockPromptManager: PromptManager
-	let sendMessageMock: ReturnType<typeof vi.fn>
+	let sendMessageMock: (message: WebviewMessage) => void
 
 	beforeEach(() => {
 		mockOutputManager = createMockOutputManager()
 		mockPromptManager = createMockPromptManager()
-		sendMessageMock = vi.fn()
+		sendMessageMock = vi.fn() as (message: WebviewMessage) => void
 	})
 
 	describe("handleAsk - disabled mode", () => {
