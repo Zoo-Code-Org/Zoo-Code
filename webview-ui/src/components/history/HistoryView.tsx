@@ -307,10 +307,26 @@ const HistoryViewInner = memo(({ onDone }: HistoryViewProps) => {
 
 	// Render the additive pinned section (shortcut cards) above the list.
 	const renderPinnedHeader = () => {
-		if (organization.pins.length === 0) return null
+		// When workspace filtering is active, exclude pins whose targets
+		// resolve to tasks that don't exist in the current workspace.
+		// Folder pins are kept — they are handled by the projection with
+		// workspace filtering.
+		const visiblePins = showAllWorkspaces
+			? organization.pins
+			: organization.pins.filter((pin) => {
+					const target = pin.target
+					if (target.kind === "folder") {
+						return true
+					}
+					const rootId =
+						target.kind === "task" ? buildCanonicalTarget(target.taskId, groups) : target.rootTaskId
+					return tasks.some((x) => x.id === rootId)
+				})
+
+		if (visiblePins.length === 0) return null
 		return (
 			<div className="flex flex-col gap-1 m-2" data-testid="pinned-section">
-				{organization.pins.map((pin) => {
+				{visiblePins.map((pin) => {
 					const target = pin.target
 					if (target.kind === "folder") {
 						const folder = organization.folders.find((f) => f.folderId === target.folderId)

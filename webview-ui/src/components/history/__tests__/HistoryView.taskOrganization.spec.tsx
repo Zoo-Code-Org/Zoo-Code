@@ -931,4 +931,102 @@ describe("HistoryView task organization integration", () => {
 			expect(screen.getByTestId("delete-folders-button")).not.toBeDisabled()
 		})
 	})
+
+	describe("workspace cross-contamination", () => {
+		it("hides pinned tasks from other workspaces when showAllWorkspaces is false", () => {
+			mockUseTaskOrganizationDnd.mockReturnValue({
+				sensors: [],
+				activeDrag: null,
+				targetMeta: { isOverTarget: false },
+				handleDragStart: vi.fn(),
+				handleDragOver: vi.fn(),
+				handleDragEnd: vi.fn(),
+				handleDragCancel: vi.fn(),
+				UNFILED_DROP_ZONE_ID,
+			})
+			const localTask = makeTask("t-local", { workspace: "/test/workspace" })
+			const otherTask = makeTask("t-other", { workspace: "/other/workspace" })
+
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: {
+					...createEmptyOrganizationState(),
+					pins: [
+						{ target: { kind: "task", taskId: "t-local" }, pinnedAt: 100 },
+						{ target: { kind: "task", taskId: "t-other" }, pinnedAt: 200 },
+					],
+				},
+				mutateTaskOrganization: vi.fn().mockResolvedValue({
+					requestId: "",
+					success: true,
+					committedRevision: 1,
+				}),
+				cwd: "/test/workspace",
+			})
+			mockUseTaskSearch.mockReturnValue({
+				...defaultSearchResult,
+				tasks: [localTask],
+			})
+			mockUseGroupedTasks.mockReturnValue({
+				groups: [makeGroup(localTask)],
+				flatTasks: null,
+				toggleExpand: vi.fn(),
+				isSearchMode: false,
+			})
+
+			render(<HistoryView onDone={vi.fn()} />)
+
+			// Local pin should be visible.
+			expect(screen.getByTestId("pinned-unit-t-local")).toBeInTheDocument()
+			// Pin from another workspace should NOT appear.
+			expect(screen.queryByTestId("pinned-unit-t-other")).not.toBeInTheDocument()
+		})
+
+		it("shows pinned tasks from other workspaces when showAllWorkspaces is true", () => {
+			mockUseTaskOrganizationDnd.mockReturnValue({
+				sensors: [],
+				activeDrag: null,
+				targetMeta: { isOverTarget: false },
+				handleDragStart: vi.fn(),
+				handleDragOver: vi.fn(),
+				handleDragEnd: vi.fn(),
+				handleDragCancel: vi.fn(),
+				UNFILED_DROP_ZONE_ID,
+			})
+			const localTask = makeTask("t-local", { workspace: "/test/workspace" })
+			const otherTask = makeTask("t-other", { workspace: "/other/workspace" })
+
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: {
+					...createEmptyOrganizationState(),
+					pins: [
+						{ target: { kind: "task", taskId: "t-local" }, pinnedAt: 100 },
+						{ target: { kind: "task", taskId: "t-other" }, pinnedAt: 200 },
+					],
+				},
+				mutateTaskOrganization: vi.fn().mockResolvedValue({
+					requestId: "",
+					success: true,
+					committedRevision: 1,
+				}),
+				cwd: "/test/workspace",
+			})
+			mockUseTaskSearch.mockReturnValue({
+				...defaultSearchResult,
+				tasks: [localTask, otherTask],
+				showAllWorkspaces: true,
+			})
+			mockUseGroupedTasks.mockReturnValue({
+				groups: [makeGroup(localTask), makeGroup(otherTask)],
+				flatTasks: null,
+				toggleExpand: vi.fn(),
+				isSearchMode: false,
+			})
+
+			render(<HistoryView onDone={vi.fn()} />)
+
+			// Both pins should be visible when showAllWorkspaces is true.
+			expect(screen.getByTestId("pinned-unit-t-local")).toBeInTheDocument()
+			expect(screen.getByTestId("pinned-unit-t-other")).toBeInTheDocument()
+		})
+	})
 })

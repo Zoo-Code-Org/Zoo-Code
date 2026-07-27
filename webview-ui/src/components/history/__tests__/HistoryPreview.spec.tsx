@@ -48,6 +48,7 @@ const mockTasks: HistoryItem[] = [
 		tokensIn: 100,
 		tokensOut: 50,
 		totalCost: 0.01,
+		workspace: "/test/workspace",
 	},
 	{
 		id: "task-2",
@@ -57,6 +58,7 @@ const mockTasks: HistoryItem[] = [
 		tokensIn: 200,
 		tokensOut: 100,
 		totalCost: 0.02,
+		workspace: "/test/workspace",
 	},
 	{
 		id: "task-3",
@@ -66,6 +68,7 @@ const mockTasks: HistoryItem[] = [
 		tokensIn: 150,
 		tokensOut: 75,
 		totalCost: 0.015,
+		workspace: "/test/workspace",
 	},
 	{
 		id: "task-4",
@@ -75,6 +78,7 @@ const mockTasks: HistoryItem[] = [
 		tokensIn: 300,
 		tokensOut: 150,
 		totalCost: 0.03,
+		workspace: "/test/workspace",
 	},
 	{
 		id: "task-5",
@@ -84,6 +88,7 @@ const mockTasks: HistoryItem[] = [
 		tokensIn: 250,
 		tokensOut: 125,
 		totalCost: 0.025,
+		workspace: "/test/workspace",
 	},
 	{
 		id: "task-6",
@@ -93,6 +98,7 @@ const mockTasks: HistoryItem[] = [
 		tokensIn: 400,
 		tokensOut: 200,
 		totalCost: 0.04,
+		workspace: "/test/workspace",
 	},
 ]
 

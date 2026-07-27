@@ -566,6 +566,57 @@ describe("taskOrganizationModel", () => {
 			expect(projection.unfiledGroups).toHaveLength(0)
 		})
 
+		it("skips folders whose members are all in another workspace when cwd is provided", () => {
+			const outWs = makeTask({ id: "out", workspace: "/workspace/other" })
+			const gOut = makeGroup(outWs)
+			const folder = {
+				folderId: "f1",
+				name: "F",
+				taskIds: ["out"],
+				createdAt: 1,
+				updatedAt: 1,
+			}
+			const state: TaskOrganizationStateV1 = {
+				...createEmptyTaskOrganizationState(),
+				folders: [folder],
+			}
+			const projection = buildGroupedOrganizationProjection(
+				state,
+				[gOut],
+				[outWs],
+				"/workspace/project",
+			)
+			// Folder with only cross-workspace members should be skipped entirely.
+			expect(projection.folderProjections).toHaveLength(0)
+			expect(projection.unfiledGroups).toHaveLength(0)
+		})
+
+		it("preserves genuinely empty folders even when cwd is provided", () => {
+			const local = makeTask({ id: "local", workspace: "/workspace/project" })
+			const gLocal = makeGroup(local)
+			const folder = {
+				folderId: "f-empty",
+				name: "Empty",
+				taskIds: [],
+				createdAt: 1,
+				updatedAt: 1,
+			}
+			const state: TaskOrganizationStateV1 = {
+				...createEmptyTaskOrganizationState(),
+				folders: [folder],
+			}
+			const projection = buildGroupedOrganizationProjection(
+				state,
+				[gLocal],
+				[local],
+				"/workspace/project",
+			)
+			// Genuinely empty folder (zero taskIds) should still appear.
+			expect(projection.folderProjections).toHaveLength(1)
+			expect(projection.folderProjections[0].folderId).toBe("f-empty")
+			expect(projection.folderProjections[0].members).toHaveLength(0)
+		})
+
 		it("treats automatic groups as indivisible when a child is placed in a folder", () => {
 			const parent = makeTask({ id: "parent-1" })
 			const child = makeTask({ id: "child-1", parentTaskId: "parent-1" })
