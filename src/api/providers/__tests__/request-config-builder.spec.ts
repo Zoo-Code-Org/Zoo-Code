@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import { RequestConfigBuilder } from "../config-builder/request-config-builder"
@@ -53,7 +53,7 @@ describe("RequestConfigBuilder", () => {
 			const builder = new RequestConfigBuilder({ initial: "value" })
 			builder.addAbortSignal(undefined)
 
-			const config = builder.build() as Record<string, any>
+			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal).toBeUndefined()
 		})
 
@@ -65,7 +65,7 @@ describe("RequestConfigBuilder", () => {
 			const builder = new RequestConfigBuilder({ initial: "value" })
 			builder.addAbortSignal(metadata)
 
-			const config = builder.build() as Record<string, any>
+			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal).toBeUndefined()
 		})
 
@@ -115,7 +115,7 @@ describe("RequestConfigBuilder", () => {
 			const result = builder.addHeaders()
 
 			expect(result).toBe(builder) // chainable
-			const config = builder.build() as Record<string, any>
+			const config = builder.build() as { headers?: Record<string, string> }
 			expect(config.headers).toBeUndefined()
 		})
 
@@ -124,7 +124,7 @@ describe("RequestConfigBuilder", () => {
 			const result = builder.addHeaders({})
 
 			expect(result).toBe(builder) // chainable
-			const config = builder.build() as Record<string, any>
+			const config = builder.build() as { headers?: Record<string, string> }
 			expect(config.headers).toBeUndefined()
 		})
 
@@ -173,9 +173,9 @@ describe("RequestConfigBuilder", () => {
 
 		test("should do nothing when value is undefined", () => {
 			const builder = new RequestConfigBuilder({ initial: "value" })
-			builder.setOption("initial", undefined as any)
+			builder.setOption("initial", undefined as unknown as string)
 
-			const config = builder.build() as Record<string, any>
+			const config = builder.build() as { initial?: string }
 			// When setOption receives undefined, it should NOT modify the existing value
 			expect(config.initial).toBe("value")
 		})
@@ -196,7 +196,12 @@ describe("RequestConfigBuilder", () => {
 			builder.setOption("booleanKey", true)
 			builder.setOption("objectKey", { nested: true })
 
-			const config = builder.build() as Record<string, any>
+			const config = builder.build() as {
+				stringKey?: string
+				numberKey?: number
+				booleanKey?: boolean
+				objectKey?: { nested: boolean }
+			}
 			expect(config.stringKey).toBe("stringValue")
 			expect(config.numberKey).toBe(42)
 			expect(config.booleanKey).toBe(true)
@@ -208,7 +213,7 @@ describe("RequestConfigBuilder", () => {
 			const result = builder.setOption("key1", "value1").setOption("key2", "value2")
 
 			expect(result).toBe(builder)
-			const config = builder.build() as Record<string, any>
+			const config = builder.build() as { key1?: string; key2?: string }
 			expect(config.key1).toBe("value1")
 			expect(config.key2).toBe("value2")
 		})
@@ -222,7 +227,7 @@ describe("RequestConfigBuilder", () => {
 
 		test("should return undefined for non-existent key", () => {
 			const builder = new RequestConfigBuilder()
-			expect(builder.getOption("nonExistent" as any)).toBeUndefined()
+			expect(builder.getOption("nonExistent")).toBeUndefined()
 		})
 	})
 
@@ -243,7 +248,7 @@ describe("RequestConfigBuilder", () => {
 
 		test("modifying build result should not affect internal state", () => {
 			const builder = new RequestConfigBuilder({ key: "value" })
-			const result = builder.build() as Record<string, any>
+			const result = builder.build() as { key: string }
 
 			result.key = "modified"
 			expect(builder.getOption("key")).toBe("value")
@@ -259,7 +264,11 @@ describe("RequestConfigBuilder", () => {
 			const builder = new RequestConfigBuilder()
 			builder.addAbortSignal(metadata).addHeaders({ "X-Custom": "value" }).setOption("modelId", "test-model")
 
-			const config = builder.build() as Record<string, any>
+			const config = builder.build() as {
+				signal?: AbortSignal
+				headers?: Record<string, string>
+				modelId?: string
+			}
 			expect(config.signal).toBe(controller.signal)
 			expect(config.headers).toEqual({ "X-Custom": "value" })
 			expect(config.modelId).toBe("test-model")
@@ -279,7 +288,7 @@ describe("RequestConfigBuilder", () => {
 				abortSignal: controller.signal,
 			}
 
-			const result = RequestConfigBuilder.fromMetadata(metadata) as Record<string, any>
+			const result = RequestConfigBuilder.fromMetadata(metadata) as { signal?: AbortSignal }
 			expect(result.signal).toBe(controller.signal)
 		})
 
@@ -291,7 +300,11 @@ describe("RequestConfigBuilder", () => {
 			}
 			const extraOptions = { modelId: "test-model", customKey: "customValue" }
 
-			const result = RequestConfigBuilder.fromMetadata(metadata, extraOptions) as Record<string, any>
+			const result = RequestConfigBuilder.fromMetadata(metadata, extraOptions) as {
+				signal?: AbortSignal
+				modelId?: string
+				customKey?: string
+			}
 			expect(result.signal).toBe(controller.signal)
 			expect(result.modelId).toBe("test-model")
 			expect(result.customKey).toBe("customValue")
@@ -299,7 +312,7 @@ describe("RequestConfigBuilder", () => {
 
 		test("should return only extraOptions when metadata is undefined", () => {
 			const extraOptions = { modelId: "test-model" }
-			const result = RequestConfigBuilder.fromMetadata(undefined, extraOptions) as Record<string, any>
+			const result = RequestConfigBuilder.fromMetadata(undefined, extraOptions) as { modelId?: string }
 			expect(result.modelId).toBe("test-model")
 		})
 
@@ -307,7 +320,10 @@ describe("RequestConfigBuilder", () => {
 			const metadata: ApiHandlerCreateMessageMetadata = { taskId: "test-task" }
 			const extraOptions = { modelId: "test-model" }
 
-			const result = RequestConfigBuilder.fromMetadata(metadata, extraOptions) as Record<string, any>
+			const result = RequestConfigBuilder.fromMetadata(metadata, extraOptions) as {
+				signal?: AbortSignal
+				modelId?: string
+			}
 			expect(result.signal).toBeUndefined()
 			expect(result.modelId).toBe("test-model")
 		})
@@ -345,23 +361,61 @@ describe("RequestConfigBuilder", () => {
 			expect(config.signal?.aborted).toBe(true)
 		})
 
-		test("should merge internal controller signal with timeout", async () => {
+		test("should clear timeout when cleanup runs before timeout fires", async () => {
 			vi.useFakeTimers()
+			try {
+				const internalController = new AbortController()
+				const builder = new RequestConfigBuilder()
+
+				builder.addMergedSignal(internalController, undefined, 100)
+
+				const config = builder.build() as { signal?: AbortSignal; _cleanup?: () => void }
+				expect(config.signal).not.toBe(internalController.signal)
+				expect(config).not.toHaveProperty("_cleanup")
+				expect(config.signal?.aborted).toBe(false)
+				expect(vi.getTimerCount()).toBe(1)
+
+				builder.getCleanup()()
+
+				expect(vi.getTimerCount()).toBe(0)
+				await vi.advanceTimersByTimeAsync(100)
+				expect(config.signal?.aborted).toBe(false)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("should cleanup timeouts from repeated addMergedSignal calls", () => {
+			vi.useFakeTimers()
+			try {
+				const internalController = new AbortController()
+				const builder = new RequestConfigBuilder()
+
+				builder.addMergedSignal(internalController, undefined, 100)
+				builder.addMergedSignal(internalController, undefined, 200)
+
+				expect(vi.getTimerCount()).toBe(2)
+				builder.getCleanup()()
+				expect(vi.getTimerCount()).toBe(0)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("should immediately abort when metadata signal is already aborted", () => {
 			const internalController = new AbortController()
+			const externalController = new AbortController()
+			externalController.abort()
 			const builder = new RequestConfigBuilder()
 
-			builder.addMergedSignal(internalController, undefined, 100)
+			builder.addMergedSignal(internalController, {
+				taskId: "test-task",
+				abortSignal: externalController.signal,
+			})
 
-			const config = builder.build() as { signal?: AbortSignal; _cleanup?: () => void }
-			expect(config.signal).not.toBe(internalController.signal)
-			expect(config).not.toHaveProperty("_cleanup")
-			expect(config.signal?.aborted).toBe(false)
-
-			await vi.advanceTimersByTimeAsync(100)
-
+			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal?.aborted).toBe(true)
-			builder.getCleanup()()
-			vi.useRealTimers()
+			expect(() => builder.getCleanup()()).not.toThrow()
 		})
 	})
 
@@ -393,7 +447,7 @@ describe("RequestConfigBuilder", () => {
 			expect(result.aborted).toBe(false)
 		})
 
-		test("should abort merged signal when primarySignal is aborted", async () => {
+		test("should abort merged signal when primarySignal is aborted", () => {
 			const primaryController = new AbortController()
 			const secondaryController = new AbortController()
 
@@ -413,12 +467,10 @@ describe("RequestConfigBuilder", () => {
 
 			primaryController.abort()
 
-			// Wait for event to propagate
-			await new Promise((resolve) => setTimeout(resolve, 10))
 			expect(aborted).toBe(true)
 		})
 
-		test("should abort merged signal when secondarySignal is aborted", async () => {
+		test("should abort merged signal when secondarySignal is aborted", () => {
 			const primaryController = new AbortController()
 			const secondaryController = new AbortController()
 
@@ -438,12 +490,10 @@ describe("RequestConfigBuilder", () => {
 
 			secondaryController.abort()
 
-			// Wait for event to propagate
-			await new Promise((resolve) => setTimeout(resolve, 10))
 			expect(aborted).toBe(true)
 		})
 
-		test("should not abort merged signal when neither signal is aborted", async () => {
+		test("should not abort merged signal when neither signal is aborted", () => {
 			const primaryController = new AbortController()
 			const secondaryController = new AbortController()
 
@@ -461,7 +511,6 @@ describe("RequestConfigBuilder", () => {
 				{ once: true },
 			)
 
-			await new Promise((resolve) => setTimeout(resolve, 10))
 			expect(aborted).toBe(false)
 		})
 
@@ -509,7 +558,7 @@ describe("RequestConfigBuilder", () => {
 		test("should handle empty builder through full lifecycle", () => {
 			const builder = new RequestConfigBuilder()
 			expect(builder.build()).toBeUndefined()
-			expect(builder.getOption("anyKey" as any)).toBeUndefined()
+			expect(builder.getOption("anyKey")).toBeUndefined()
 		})
 
 		test("should work with custom default options type", () => {

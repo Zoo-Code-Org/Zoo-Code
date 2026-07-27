@@ -11,12 +11,17 @@ import { mergeAbortSignalAndTimeout, mergeAbortSignals } from "../utils/abort-si
  * - Header merging
  * - Static factory methods
  */
-export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<string, any>> {
-	protected options: TOptions
+type RequestConfigOptions = {
+	headers?: Record<string, string>
+	signal?: AbortSignal
+} & Record<string, unknown>
+
+export class RequestConfigBuilder<TOptions extends RequestConfigOptions = RequestConfigOptions> {
+	protected options: Partial<TOptions>
 	private cleanupFn: () => void = () => {}
 
 	constructor(defaultOptions?: Partial<TOptions>) {
-		this.options = (defaultOptions ? { ...defaultOptions } : {}) as TOptions
+		this.options = defaultOptions ? { ...defaultOptions } : {}
 	}
 
 	/**
@@ -30,7 +35,7 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 			return this
 		}
 
-		this.options = { ...this.options, signal: metadata.abortSignal } as TOptions
+		this.options = { ...this.options, signal: metadata.abortSignal }
 		return this
 	}
 
@@ -45,8 +50,8 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 			return this
 		}
 
-		const existingHeaders = (this.options as any).headers ?? {}
-		this.options = { ...this.options, headers: { ...existingHeaders, ...headers } } as TOptions
+		const existingHeaders = this.options.headers ?? {}
+		this.options = { ...this.options, headers: { ...existingHeaders, ...headers } }
 		return this
 	}
 
@@ -69,8 +74,12 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 		const merged = mergeAbortSignalAndTimeout(metadata?.abortSignal, timeoutMs)
 		const signal = mergeAbortSignals(internalController.signal, merged.signal)
 
-		this.options = { ...this.options, signal } as TOptions
-		this.cleanupFn = merged.cleanup
+		this.options = { ...this.options, signal }
+		const previousCleanup = this.cleanupFn
+		this.cleanupFn = () => {
+			previousCleanup()
+			merged.cleanup()
+		}
 		return this
 	}
 
@@ -95,7 +104,7 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 			return this
 		}
 
-		this.options = { ...this.options, [key]: value } as TOptions
+		this.options = { ...this.options, [key]: value }
 		return this
 	}
 
@@ -133,7 +142,7 @@ export class RequestConfigBuilder<TOptions extends Record<string, any> = Record<
 	 * @param extraOptions - Additional options to merge
 	 * @returns The built configuration or undefined if empty
 	 */
-	static fromMetadata<TOptions extends Record<string, any> = Record<string, any>>(
+	static fromMetadata<TOptions extends RequestConfigOptions = RequestConfigOptions>(
 		metadata?: ApiHandlerCreateMessageMetadata,
 		extraOptions?: Partial<TOptions>,
 	): TOptions | undefined {
