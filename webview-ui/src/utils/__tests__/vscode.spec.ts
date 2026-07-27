@@ -61,9 +61,10 @@ describe("VSCodeAPIWrapper", () => {
 	})
 
 	it("falls back to in-memory state when browser storage access is restricted", () => {
+		const randomUUID = vi.fn().mockReturnValueOnce("memory-view").mockReturnValueOnce("new-memory-view")
 		Object.defineProperty(globalThis, "crypto", {
 			configurable: true,
-			value: { randomUUID: vi.fn(() => "memory-view") },
+			value: { randomUUID },
 		})
 		const storage = {
 			getItem: vi.fn(() => {
@@ -81,6 +82,7 @@ describe("VSCodeAPIWrapper", () => {
 
 		expect(wrapper.getViewStateId()).toBe("memory-view")
 		expect(wrapper.getViewStateId()).toBe("memory-view")
+		expect(randomUUID).toHaveBeenCalledTimes(1)
 		expect(storage.getItem).toHaveBeenCalled()
 		expect(storage.setItem).toHaveBeenCalled()
 	})

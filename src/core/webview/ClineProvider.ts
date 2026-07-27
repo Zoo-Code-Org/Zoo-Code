@@ -459,9 +459,10 @@ export class ClineProvider
 	}
 
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
+		const viewStateId = this.viewStateId
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
-			const current = states[this.viewStateId] ?? {}
+			const current = states[viewStateId] ?? {}
 			const next: PersistedViewState = { ...current }
 
 			if ("mode" in values) {
@@ -481,10 +482,10 @@ export class ClineProvider
 			}
 
 			if (!next.mode && !next.currentApiConfigName) {
-				delete states[this.viewStateId]
+				delete states[viewStateId]
 			} else {
 				next.updatedAt = values.updatedAt ?? Date.now()
-				states[this.viewStateId] = next
+				states[viewStateId] = next
 			}
 
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
@@ -565,16 +566,16 @@ export class ClineProvider
 	 * Save a single view-local state value. Only non-secret selections are persisted durably.
 	 */
 	private async saveViewState(key: keyof ExtensionState, value: any): Promise<void> {
-		if (value === undefined || value === null) {
-			delete this.viewLocalState[key]
-		} else {
-			this.viewLocalState[key] = value
-		}
-
 		if (key === "mode") {
 			await this.savePersistedViewState({ mode: value })
 		} else if (key === "currentApiConfigName") {
 			await this.savePersistedViewState({ currentApiConfigName: value })
+		}
+
+		if (value === undefined || value === null) {
+			delete this.viewLocalState[key]
+		} else {
+			this.viewLocalState[key] = value
 		}
 
 		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
@@ -906,6 +907,15 @@ export class ClineProvider
 		this.customModesManager?.dispose()
 		this.taskHistoryStore.dispose()
 		this.flushGlobalStateWriteThrough()
+		if (this.renderContext === "editor") {
+			try {
+				await this.clearPersistedViewState()
+			} catch (error) {
+				this.log(
+					`[dispose] Failed to clear persisted view state for ${this.viewStateId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
 
@@ -3150,10 +3160,13 @@ export class ClineProvider
 				return acc
 			}, {} as ProviderSettings)
 
-			this.viewLocalState.apiConfiguration = {
-				...(this.viewLocalState.apiConfiguration ?? {}),
-				...providerSettingsUpdate,
-			}
+			this.viewLocalState.apiConfiguration =
+				"apiProvider" in providerSettingsUpdate
+					? providerSettingsUpdate
+					: {
+							...(this.viewLocalState.apiConfiguration ?? {}),
+							...providerSettingsUpdate,
+						}
 		}
 	}
 
