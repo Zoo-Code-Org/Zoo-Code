@@ -31,6 +31,12 @@ describe("RequestConfigBuilder", () => {
 			expect(builder.getCleanup()).toBeTypeOf("function")
 			expect(() => builder.getCleanup()()).not.toThrow()
 		})
+
+		test("should ignore undefined values from defaultOptions", () => {
+			const builder = new RequestConfigBuilder({ modelId: undefined })
+
+			expect(builder.build()).toBeUndefined()
+		})
 	})
 
 	describe("addAbortSignal", () => {
@@ -316,6 +322,12 @@ describe("RequestConfigBuilder", () => {
 			expect(result.modelId).toBe("test-model")
 		})
 
+		test("should treat undefined extraOptions values as absent", () => {
+			const result = RequestConfigBuilder.fromMetadata(undefined, { signal: undefined })
+
+			expect(result).toBeUndefined()
+		})
+
 		test("should not set signal when metadata.abortSignal is undefined", () => {
 			const metadata: ApiHandlerCreateMessageMetadata = { taskId: "test-task" }
 			const extraOptions = { modelId: "test-model" }
@@ -576,6 +588,22 @@ describe("RequestConfigBuilder", () => {
 			expect(config.apiUrl).toBe("https://api.example.com")
 			expect(config.timeout).toBe(30000)
 			expect(config.retryCount).toBe(3)
+		})
+
+		test("should accept interface-based options without an index signature", () => {
+			interface SdkOptions {
+				modelId?: string
+				signal?: AbortSignal
+				headers?: Record<string, string>
+				maxTokens?: number
+			}
+
+			const builder = new RequestConfigBuilder<SdkOptions>({ modelId: "default-model" })
+			builder.setOption("maxTokens", 2000)
+
+			const config = builder.build() as SdkOptions
+			expect(config.modelId).toBe("default-model")
+			expect(config.maxTokens).toBe(2000)
 		})
 	})
 })

@@ -11,17 +11,23 @@ import { mergeAbortSignalAndTimeout, mergeAbortSignals } from "../utils/abort-si
  * - Header merging
  * - Static factory methods
  */
-type RequestConfigOptions = {
+type RequestConfigOptionsBase = object & {
 	headers?: Record<string, string>
 	signal?: AbortSignal
-} & Record<string, unknown>
+}
 
-export class RequestConfigBuilder<TOptions extends RequestConfigOptions = RequestConfigOptions> {
+type RequestConfigOptions = RequestConfigOptionsBase & Record<string, unknown>
+
+export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = RequestConfigOptions> {
 	protected options: Partial<TOptions>
 	private cleanupFn: () => void = () => {}
 
 	constructor(defaultOptions?: Partial<TOptions>) {
-		this.options = defaultOptions ? { ...defaultOptions } : {}
+		this.options = defaultOptions
+			? (Object.fromEntries(
+					Object.entries(defaultOptions).filter(([, value]) => value !== undefined),
+				) as Partial<TOptions>)
+			: {}
 	}
 
 	/**
@@ -142,7 +148,7 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptions = Reques
 	 * @param extraOptions - Additional options to merge
 	 * @returns The built configuration or undefined if empty
 	 */
-	static fromMetadata<TOptions extends RequestConfigOptions = RequestConfigOptions>(
+	static fromMetadata<TOptions extends RequestConfigOptionsBase = RequestConfigOptions>(
 		metadata?: ApiHandlerCreateMessageMetadata,
 		extraOptions?: Partial<TOptions>,
 	): TOptions | undefined {
