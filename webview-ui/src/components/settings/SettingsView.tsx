@@ -131,7 +131,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { t } = useAppTranslation()
 
 	const extensionState = useExtensionState()
-	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, mode } = extensionState
+	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt } = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	const [isChangeDetected, setChangeDetected] = useState(false)
@@ -151,7 +151,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const contentRef = useRef<HTMLDivElement | null>(null)
 
 	const prevApiConfigName = useRef(currentApiConfigName)
-	const prevMode = useRef(mode)
 	const handledSettingsImportedAt = useRef<number | undefined>(undefined)
 	const confirmDialogHandler = useRef<() => void>()
 
@@ -226,17 +225,16 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
 
 	useEffect(() => {
-		// Update when currentApiConfigName or mode changes.
-		// Expected to be triggered by loadApiConfiguration/upsertApiConfiguration or mode switch.
-		if (prevApiConfigName.current === currentApiConfigName && prevMode.current === mode) {
+		// Update only when currentApiConfigName is changed.
+		// Expected to be triggered by loadApiConfiguration/upsertApiConfiguration.
+		if (prevApiConfigName.current === currentApiConfigName) {
 			return
 		}
 
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
-		prevMode.current = mode
 		setChangeDetected(false)
-	}, [currentApiConfigName, mode, extensionState])
+	}, [currentApiConfigName, extensionState])
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
