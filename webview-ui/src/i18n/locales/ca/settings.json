@@ -847,21 +847,21 @@
 			"noProfiles": "(no s'han trobat perfils amb ruta a terminal.integrated.profiles)"
 		},
 		"inlineShell": {
-			"label": "Shell del terminal en línia",
-			"description": "Selecciona el shell utilitzat per a l'execució de comandes al terminal en línia. Auto segueix el teu perfil de terminal de VS Code de confiança. Els camins personalitzats són validats per l'amfitrió de l'extensió.",
-			"auto": "Auto (segueix el perfil de terminal de confiança)",
-			"customPath": "Tria un executable personalitzat",
-			"customPathPlaceholder": "Selecciona un executable de shell...",
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
 			"effectiveShell": {
-				"label": "Shell efectiu",
-				"family": "Família",
-				"source": "Font",
-				"fallback": "Comportament de reserva",
-				"fallbackDescription": "Si la integració del shell falla, les comandes es reintenten utilitzant la mateixa família de shell."
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
 			},
 			"error": {
-				"invalid": "El shell seleccionat no és compatible. Tria un perfil de confiança o un executable de shell vàlid.",
-				"unavailable": "Les opcions de shell no estan disponibles actualment. L'amfitrió de l'extensió encara pot estar inicialitzant-se."
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
 			}
 		}
 	},

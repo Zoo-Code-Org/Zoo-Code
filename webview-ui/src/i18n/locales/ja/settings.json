@@ -847,21 +847,21 @@
 			"noProfiles": "(terminal.integrated.profiles にパスベースのプロファイルが見つかりません)"
 		},
 		"inlineShell": {
-			"label": "インラインターミナル Shell",
-			"description": "インラインターミナルのコマンド実行に使用するShellを選択します。Autoは信頼できるVS Codeターミナルプロファイルに従います。カスタムパスは拡張機能ホストにより検証されます。",
-			"auto": "Auto（信頼できるターミナルプロファイルに従う）",
-			"customPath": "カスタム実行ファイルを選択",
-			"customPathPlaceholder": "Shell実行ファイルを選択...",
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
 			"effectiveShell": {
-				"label": "有効なShell",
-				"family": "ファミリ",
-				"source": "ソース",
-				"fallback": "フォールバック動作",
-				"fallbackDescription": "Shell統合が失敗した場合、同じShellファミリを使用してコマンドが再試行されます。"
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
 			},
 			"error": {
-				"invalid": "選択されたShellはサポートされていません。信頼できるプロファイルまたは有効なShell実行ファイルを選択してください。",
-				"unavailable": "Shellオプションは現在利用できません。拡張機能ホストがまだ初期化中の可能性があります。"
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
 			}
 		}
 	},

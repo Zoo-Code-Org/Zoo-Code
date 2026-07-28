@@ -847,21 +847,21 @@
 			"noProfiles": "(terminal.integrated.profiles'da yol tabanlı profil bulunamadı)"
 		},
 		"inlineShell": {
-			"label": "Satır içi terminal kabuğu",
-			"description": "Satır içi terminal komutları için kullanılan kabuğu seçin. Auto, güvenilir VS Code terminal profilinizi takip eder. Özel yollar, eklenti sunucusu tarafından doğrulanır.",
-			"auto": "Auto (güvenilir terminal profilini takip eder)",
-			"customPath": "Özel çalıştırılabilir dosya seç",
-			"customPathPlaceholder": "Bir kabuk çalıştırılabilir dosyası seçin...",
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
 			"effectiveShell": {
-				"label": "Etkin kabuk",
-				"family": "Aile",
-				"source": "Kaynak",
-				"fallback": "Geri çekilme davranışı",
-				"fallbackDescription": "Kabuk entegrasyonu başarısız olursa, komutlar aynı kabuk ailesi kullanılarak yeniden denenir."
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
 			},
 			"error": {
-				"invalid": "Seçilen kabuk desteklenmiyor. Güvenilir bir profil veya geçerli bir kabuk çalıştırılabilir dosyası seçin.",
-				"unavailable": "Kabuk seçenekleri şu anda kullanılamıyor. Eklenti sunucusu hâlâ başlatılıyor olabilir."
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
 			}
 		}
 	},

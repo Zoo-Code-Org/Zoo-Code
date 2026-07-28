@@ -847,21 +847,21 @@
 			"noProfiles": "(профили с путём в terminal.integrated.profiles не найдены)"
 		},
 		"inlineShell": {
-			"label": "Встроенный shell терминала",
-			"description": "Выберите shell для выполнения команд во встроенном терминале. Auto следует вашему доверенному профилю терминала VS Code. Пользовательские пути проверяются хостом расширения.",
-			"auto": "Auto (следует доверенному профилю терминала)",
-			"customPath": "Выбрать пользовательский исполняемый файл",
-			"customPathPlaceholder": "Выберите исполняемый файл shell...",
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
 			"effectiveShell": {
-				"label": "Активный shell",
-				"family": "Семейство",
-				"source": "Источник",
-				"fallback": "Поведение при отказе",
-				"fallbackDescription": "Если интеграция shell не удастся, команды будут повторены с использованием того же семейства shell."
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
 			},
 			"error": {
-				"invalid": "Выбранный shell не поддерживается. Выберите доверенный профиль или действительный исполняемый файл shell.",
-				"unavailable": "Параметры shell в настоящее время недоступны. Хост расширения всё ещё может инициализироваться."
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
 			}
 		}
 	},
