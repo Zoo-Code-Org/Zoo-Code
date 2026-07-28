@@ -849,6 +849,24 @@
 			"description": "Per defecte, Zoo Code utilitza la shell que VS Code té configurada. Seleccioneu un perfil de la llista per triar un perfil de shell amb ruta explícita exposat per VS Code. Els perfils de només font (p. ex., l'entrada integrada de PowerShell) no es poden llistar aquí. <0>Més informació</0>",
 			"configureButton": "Trieu el perfil predeterminat a VS Code",
 			"noProfiles": "(no s'han trobat perfils amb ruta a terminal.integrated.profiles)"
+		},
+		"inlineShell": {
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
+			"effectiveShell": {
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+			},
+			"error": {
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+			}
 		}
 	},
 	"advancedSettings": {

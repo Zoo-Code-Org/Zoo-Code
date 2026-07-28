@@ -849,6 +849,24 @@
 			"description": "기본적으로 Zoo Code는 VS Code에 구성된 쉘을 사용합니다. VS Code가 노출하는 경로 기반 쉘 프로필을 선택하려면 목록에서 셸 프로필을 선택하세요. 소스 전용 프로필(예: 내장 PowerShell 항목)은 여기에 나열할 수 없습니다. <0>자세히 알아보기</0>",
 			"configureButton": "VS Code에서 기본 프로필 선택",
 			"noProfiles": "(terminal.integrated.profiles에 경로 기반 프로필이 없습니다)"
+		},
+		"inlineShell": {
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
+			"effectiveShell": {
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+			},
+			"error": {
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+			}
 		}
 	},
 	"advancedSettings": {

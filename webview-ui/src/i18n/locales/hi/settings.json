@@ -849,6 +849,24 @@
 			"description": "डिफ़ॉल्ट रूप से Zoo Code VS Code में कॉन्फ़िगर की गई शेल का उपयोग करता है। VS Code द्वारा प्रदर्शित पथ-आधारित शेल प्रोफ़ाइल चुनने के लिए सूची से एक शेल प्रोफ़ाइल चुनें। केवल-स्रोत प्रोफ़ाइल (जैसे, अंतर्निर्मित PowerShell प्रविष्टि) यहाँ सूचीबद्ध नहीं किए जा सकते। <0>अधिक जानें</0>",
 			"configureButton": "VS Code में डिफ़ॉल्ट प्रोफ़ाइल चुनें",
 			"noProfiles": "(terminal.integrated.profiles में कोई पथ-आधारित प्रोफ़ाइल नहीं मिली)"
+		},
+		"inlineShell": {
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
+			"effectiveShell": {
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+			},
+			"error": {
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+			}
 		}
 	},
 	"advancedSettings": {
