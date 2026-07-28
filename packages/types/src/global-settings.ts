@@ -100,6 +100,25 @@ export const MAX_CHECKPOINT_TIMEOUT_SECONDS = 60
 export const DEFAULT_CHECKPOINT_TIMEOUT_SECONDS = 15
 
 /**
+ * TerminalShellSelection
+ *
+ * Discriminated union for the user-selected inline-terminal shell resolution
+ * mode. Absence of the field (undefined) means Auto mode.
+ *
+ * - `auto`: follow trusted VS Code default/global profile, then OS default,
+ *   then safe platform fallback.
+ * - `profile`: use a named trusted VS Code terminal profile.
+ * - `path`: use an explicit executable path validated by the extension host.
+ */
+export const terminalShellSelectionSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("auto") }),
+	z.object({ kind: z.literal("profile"), profileName: z.string() }),
+	z.object({ kind: z.literal("path"), path: z.string() }),
+])
+
+export type TerminalShellSelection = z.infer<typeof terminalShellSelectionSchema>
+
+/**
  * GlobalSettings
  */
 
@@ -209,7 +228,24 @@ export const globalSettingsSchema = z.object({
 	terminalZshP10k: z.boolean().optional(),
 	terminalZdotdir: z.boolean().optional(),
 	terminalProfile: z.string().optional(),
+	/**
+	 * @deprecated Use `terminalShellSelection` instead. Retained for migration
+	 * from pre-unified settings; treated as a `legacyOverride` when
+	 * `terminalShellSelection` is absent.
+	 */
 	execaShellPath: z.string().optional(),
+	/**
+	 * User-selected inline-terminal shell resolution mode.
+	 *
+	 * - `auto`: follow trusted VS Code default/global profile, then OS default,
+	 *   then safe platform fallback (default when absent).
+	 * - `profile`: use a named trusted VS Code terminal profile.
+	 * - `path`: use an explicit executable path validated by the extension host.
+	 *
+	 * Absence of this field means Auto mode, preserving backward compatibility
+	 * with settings persisted before the unified shell resolution feature.
+	 */
+	terminalShellSelection: terminalShellSelectionSchema.optional(),
 
 	diagnosticsEnabled: z.boolean().optional(),
 	autoCloseZooOpenedFiles: z.boolean().optional(),

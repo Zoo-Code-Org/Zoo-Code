@@ -24,6 +24,7 @@ export const commandExecutionStatusSchema = z.discriminatedUnion("status", [
 	z.object({
 		executionId: z.string(),
 		status: z.literal("fallback"),
+		reasonCode: z.string().optional(),
 	}),
 	z.object({
 		executionId: z.string(),
@@ -33,6 +34,16 @@ export const commandExecutionStatusSchema = z.discriminatedUnion("status", [
 		executionId: z.string(),
 		status: z.literal("error"),
 		message: z.string().optional(),
+		code: z.string().optional(),
+	}),
+	z.object({
+		executionId: z.string(),
+		status: z.literal("queued"),
+	}),
+	z.object({
+		executionId: z.string(),
+		status: z.literal("recovering"),
+		errorCode: z.string().optional(),
 	}),
 ])
 
