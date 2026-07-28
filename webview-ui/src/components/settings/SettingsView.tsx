@@ -35,6 +35,7 @@ import {
 	type ProviderSettings,
 	type ExperimentId,
 	type TelemetrySetting,
+	type TerminalShellSelection,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
@@ -130,11 +131,14 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const { t } = useAppTranslation()
 
 	const extensionState = useExtensionState()
-	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt, mode } = extensionState
+	const { currentApiConfigName, listApiConfigMeta, uriScheme, settingsImportedAt } = extensionState
 
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	const [isChangeDetected, setChangeDetected] = useState(false)
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
+	const [pendingTerminalShellSelection, setPendingTerminalShellSelection] = useState<
+		TerminalShellSelection | undefined
+	>(undefined)
 	const [activeTab, setActiveTab] = useState<SectionName>(
 		targetSection && sectionNames.includes(targetSection as SectionName)
 			? (targetSection as SectionName)
@@ -147,7 +151,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const contentRef = useRef<HTMLDivElement | null>(null)
 
 	const prevApiConfigName = useRef(currentApiConfigName)
-	const prevMode = useRef(mode)
 	const handledSettingsImportedAt = useRef<number | undefined>(undefined)
 	const confirmDialogHandler = useRef<() => void>()
 
@@ -191,6 +194,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		terminalZshP10k,
 		terminalZdotdir,
 		terminalProfile,
+		terminalShellSelection,
 		writeDelayMs,
 		diffFuzzyThreshold,
 		showRooIgnoredFiles,
@@ -221,17 +225,16 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
 
 	useEffect(() => {
-		// Update when currentApiConfigName or mode changes.
-		// Expected to be triggered by loadApiConfiguration/upsertApiConfiguration or mode switch.
-		if (prevApiConfigName.current === currentApiConfigName && prevMode.current === mode) {
+		// Update only when currentApiConfigName is changed.
+		// Expected to be triggered by loadApiConfiguration/upsertApiConfiguration.
+		if (prevApiConfigName.current === currentApiConfigName) {
 			return
 		}
 
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		prevApiConfigName.current = currentApiConfigName
-		prevMode.current = mode
 		setChangeDetected(false)
-	}, [currentApiConfigName, mode, extensionState])
+	}, [currentApiConfigName, extensionState])
 
 	// Bust the cache when settings are imported.
 	useEffect(() => {
@@ -455,6 +458,22 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
+			// Send pending terminal shell selection (uses a separate message
+			// type with validation that isn't part of the updateSettings flow).
+			// Note: Do NOT reset pendingTerminalShellSelection here. Resetting it
+			// immediately causes the prop to TerminalSettings to temporarily revert
+			// to the stale state_terminalShellSelection (before postStateToWebview
+			// arrives), which triggers the useEffect that overwrites the user's
+			// selection and makes the dropdown show "Auto". Instead, let the
+			// pending value persist until the extension host syncs the updated
+			// state back via postStateToWebview().
+			if (pendingTerminalShellSelection) {
+				vscode.postMessage({
+					type: "setTerminalShellSelection",
+					terminalShellSelection: pendingTerminalShellSelection,
+				})
+			}
+
 			setChangeDetected(false)
 		}
 	}
@@ -479,6 +498,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				// Discard changes: Reset state and flag
 				setCachedState(extensionState) // Revert to original state
 				setChangeDetected(false) // Reset change flag
+				setPendingTerminalShellSelection(undefined) // Revert pending shell selection
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}
 			// If confirm is false (Cancel), do nothing, dialog closes automatically
@@ -892,7 +912,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalZshP10k={terminalZshP10k}
 								terminalZdotdir={terminalZdotdir}
 								terminalProfile={terminalProfile}
+								terminalShellSelection={pendingTerminalShellSelection ?? terminalShellSelection}
 								onTerminalProfilePickerOpened={() => setChangeDetected(true)}
+								onShellSelectionChange={setPendingTerminalShellSelection}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}
