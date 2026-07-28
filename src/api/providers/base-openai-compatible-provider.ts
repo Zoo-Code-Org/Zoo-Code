@@ -95,7 +95,12 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			stream_options: { include_usage: true },
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			// Only send parallel_tool_calls when tools are present; some
+			// OpenAI-compatible providers (e.g. Upstage solar-open2) reject
+			// this field when no tools are supplied.
+			...(metadata?.tools && metadata.tools.length > 0
+				? { parallel_tool_calls: metadata?.parallelToolCalls ?? true }
+				: {}),
 		}
 
 		// Add thinking parameter if reasoning is enabled and model supports it

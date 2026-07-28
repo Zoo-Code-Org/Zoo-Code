@@ -165,9 +165,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				stream: true as const,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
 				...(reasoning && reasoning),
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, this.options.openAiToolStrictMode ?? false),
 				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				// Only send parallel_tool_calls when tools are present; some
+				// OpenAI-compatible providers (e.g. Upstage solar-open2) reject
+				// this field when no tools are supplied.
+				...(metadata?.tools && metadata.tools.length > 0
+					? { parallel_tool_calls: metadata?.parallelToolCalls ?? true }
+					: {}),
 			}
 
 			// Add max_tokens if needed
@@ -231,9 +236,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					? convertToR1Format([{ role: "user", content: systemPrompt }, ...messages])
 					: [systemMessage, ...convertToOpenAiMessages(messages)],
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, this.options.openAiToolStrictMode ?? false),
 				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				// Only send parallel_tool_calls when tools are present; some
+				// OpenAI-compatible providers (e.g. Upstage solar-open2) reject
+				// this field when no tools are supplied.
+				...(metadata?.tools && metadata.tools.length > 0
+					? { parallel_tool_calls: metadata?.parallelToolCalls ?? true }
+					: {}),
 			}
 
 			// Add max_tokens if needed
@@ -362,7 +372,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				reasoning_effort: modelInfo.reasoningEffort as "low" | "medium" | "high" | undefined,
 				temperature: undefined,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, this.options.openAiToolStrictMode ?? false),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
@@ -396,7 +406,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				reasoning_effort: modelInfo.reasoningEffort as "low" | "medium" | "high" | undefined,
 				temperature: undefined,
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
-				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tools: this.convertToolsForOpenAI(metadata?.tools, this.options.openAiToolStrictMode ?? false),
 				tool_choice: metadata?.tool_choice,
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}

@@ -28,8 +28,8 @@ class TestProvider extends BaseProvider {
 	}
 
 	// Expose protected method for testing
-	public testConvertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
-		return this.convertToolsForOpenAI(tools)
+	public testConvertToolsForOpenAI(tools: any[] | undefined, strictMode: boolean = false): any[] | undefined {
+		return this.convertToolsForOpenAI(tools, strictMode)
 	}
 }
 
@@ -184,89 +184,6 @@ describe("BaseProvider", () => {
 			expect(result).toBeUndefined()
 		})
 
-		it("should set strict: true for non-MCP tools", () => {
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "read_file",
-						description: "Read a file",
-						parameters: { type: "object", properties: {} },
-					},
-				},
-			]
-
-			const result = provider.testConvertToolsForOpenAI(tools)
-
-			expect(result?.[0].function.strict).toBe(true)
-		})
-
-		it("should set strict: false for MCP tools (mcp-- prefix)", () => {
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "mcp--github--get_me",
-						description: "Get current user",
-						parameters: { type: "object", properties: {} },
-					},
-				},
-			]
-
-			const result = provider.testConvertToolsForOpenAI(tools)
-
-			expect(result?.[0].function.strict).toBe(false)
-		})
-
-		it("should apply schema conversion to non-MCP tools", () => {
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "read_file",
-						description: "Read a file",
-						parameters: {
-							type: "object",
-							properties: {
-								path: { type: "string" },
-							},
-						},
-					},
-				},
-			]
-
-			const result = provider.testConvertToolsForOpenAI(tools)
-
-			expect(result?.[0].function.parameters.additionalProperties).toBe(false)
-			expect(result?.[0].function.parameters.required).toEqual(["path"])
-		})
-
-		it("should not apply schema conversion to MCP tools in base-provider", () => {
-			// Note: In base-provider, MCP tools are passed through unchanged
-			// The openai-native provider has its own handling for MCP tools
-			const tools = [
-				{
-					type: "function",
-					function: {
-						name: "mcp--github--get_me",
-						description: "Get current user",
-						parameters: {
-							type: "object",
-							properties: {
-								token: { type: "string" },
-							},
-							required: ["token"],
-						},
-					},
-				},
-			]
-
-			const result = provider.testConvertToolsForOpenAI(tools)
-
-			// MCP tools pass through original parameters in base-provider
-			expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
-		})
-
 		it("should preserve non-function tools unchanged", () => {
 			const tools = [
 				{
@@ -278,6 +195,219 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolsForOpenAI(tools)
 
 			expect(result?.[0]).toEqual(tools[0])
+		})
+
+		describe("strictMode = false (default)", () => {
+			it("should set strict: false for non-MCP tools", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "read_file",
+							description: "Read a file",
+							parameters: { type: "object", properties: {} },
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools)
+
+				expect(result?.[0].function.strict).toBe(false)
+			})
+
+			it("should preserve original best-effort schema for non-MCP tools (no hardening)", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "read_file",
+							description: "Read a file",
+							parameters: {
+								type: "object",
+								properties: {
+									path: { type: "string" },
+									encoding: { type: ["string", "null"] },
+								},
+								// Note: no required array, no additionalProperties
+							},
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools)
+
+				// Schema should NOT be hardened when strict is false
+				expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
+				expect(result?.[0].function.parameters.required).toBeUndefined()
+				// Nullable type should be preserved as-is
+				expect(result?.[0].function.parameters.properties.encoding.type).toEqual(["string", "null"])
+			})
+
+			it("should set strict: false for MCP tools", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "mcp--github--get_me",
+							description: "Get current user",
+							parameters: { type: "object", properties: {} },
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools)
+
+				expect(result?.[0].function.strict).toBe(false)
+			})
+
+			it("should preserve original schema for MCP tools (no hardening)", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "mcp--github--get_me",
+							description: "Get current user",
+							parameters: {
+								type: "object",
+								properties: {
+									token: { type: "string" },
+								},
+								required: ["token"],
+							},
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools)
+
+				expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
+				expect(result?.[0].function.parameters.required).toEqual(["token"])
+			})
+		})
+
+		describe("strictMode = true", () => {
+			it("should set strict: true for non-MCP tools", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "read_file",
+							description: "Read a file",
+							parameters: { type: "object", properties: {} },
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools, true)
+
+				expect(result?.[0].function.strict).toBe(true)
+			})
+
+			it("should apply schema hardening to non-MCP tools", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "read_file",
+							description: "Read a file",
+							parameters: {
+								type: "object",
+								properties: {
+									path: { type: "string" },
+								},
+							},
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools, true)
+
+				expect(result?.[0].function.parameters.additionalProperties).toBe(false)
+				expect(result?.[0].function.parameters.required).toEqual(["path"])
+			})
+
+			it("should harden nested objects and arrays in non-MCP tools", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "create_user",
+							description: "Create a user",
+							parameters: {
+								type: "object",
+								properties: {
+									user: {
+										type: "object",
+										properties: {
+											name: { type: "string" },
+										},
+									},
+									tags: {
+										type: "array",
+										items: {
+											type: "object",
+											properties: {
+												label: { type: "string" },
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools, true)
+
+				expect(result?.[0].function.parameters.additionalProperties).toBe(false)
+				expect(result?.[0].function.parameters.properties.user.additionalProperties).toBe(false)
+				expect(result?.[0].function.parameters.properties.tags.items.additionalProperties).toBe(false)
+			})
+
+			it("should ALWAYS set strict: false for MCP tools even when strictMode is true", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "mcp--github--get_me",
+							description: "Get current user",
+							parameters: { type: "object", properties: {} },
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools, true)
+
+				expect(result?.[0].function.strict).toBe(false)
+			})
+
+			it("should preserve original schema for MCP tools even when strictMode is true", () => {
+				const tools = [
+					{
+						type: "function",
+						function: {
+							name: "mcp--github--get_me",
+							description: "Get current user",
+							parameters: {
+								type: "object",
+								properties: {
+									token: { type: "string" },
+									optional_param: { type: ["string", "null"] },
+								},
+								required: ["token"],
+							},
+						},
+					},
+				]
+
+				const result = provider.testConvertToolsForOpenAI(tools, true)
+
+				// MCP schema should NOT be hardened
+				expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
+				expect(result?.[0].function.parameters.required).toEqual(["token"])
+				// Nullable type preserved
+				expect(result?.[0].function.parameters.properties.optional_param.type).toEqual(["string", "null"])
+			})
 		})
 	})
 })

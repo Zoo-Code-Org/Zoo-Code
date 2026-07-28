@@ -884,7 +884,6 @@ describe("OpenAiHandler", () => {
 					// No custom temperature set → `temperature` is omitted.
 					tools: undefined,
 					tool_choice: undefined,
-					parallel_tool_calls: true,
 				},
 				{ path: "/models/chat/completions" },
 			)
@@ -892,6 +891,7 @@ describe("OpenAiHandler", () => {
 			// Verify max_tokens is NOT included when not explicitly set
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs).not.toHaveProperty("max_completion_tokens")
+			expect(callArgs).not.toHaveProperty("parallel_tool_calls")
 		})
 
 		it("should handle non-streaming responses with Azure AI Inference Service", async () => {
@@ -930,7 +930,6 @@ describe("OpenAiHandler", () => {
 					],
 					tools: undefined,
 					tool_choice: undefined,
-					parallel_tool_calls: true,
 				},
 				{ path: "/models/chat/completions" },
 			)
@@ -938,6 +937,7 @@ describe("OpenAiHandler", () => {
 			// Verify max_tokens is NOT included when not explicitly set
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs).not.toHaveProperty("max_completion_tokens")
+			expect(callArgs).not.toHaveProperty("parallel_tool_calls")
 		})
 
 		it("should handle completePrompt with Azure AI Inference Service", async () => {
