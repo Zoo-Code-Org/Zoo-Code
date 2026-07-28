@@ -36,23 +36,29 @@ describe("Shell Detection Tests", () => {
 	 * how Terminal.getConfiguredDefaultProfileName and Terminal.getConfiguredProfiles
 	 * read config (globalValue only — workspace excluded per APPLICATION scope).
 	 */
-	function mockVsCodeConfig(_platformKey: string, defaultProfileName: string | null, profiles: Record<string, any>) {
+	function mockVsCodeConfig(platformKey: string, defaultProfileName: string | null, profiles: Record<string, any>) {
 		vscode.workspace.getConfiguration = (section?: string) => {
 			if (section === "terminal.integrated") {
 				return {
-					inspect: (_key: string) => ({
-						defaultValue: undefined,
-						globalValue: defaultProfileName ?? undefined,
-					}),
+					inspect: (key: string) => {
+						expect(key).toBe(`defaultProfile.${platformKey}`)
+						return {
+							defaultValue: undefined,
+							globalValue: defaultProfileName ?? undefined,
+						}
+					},
 					get: () => undefined,
 				} as any
 			}
 			if (section === "terminal.integrated.profiles") {
 				return {
-					inspect: (_key: string) => ({
-						defaultValue: undefined,
-						globalValue: profiles,
-					}),
+					inspect: (key: string) => {
+						expect(key).toBe(platformKey)
+						return {
+							defaultValue: undefined,
+							globalValue: profiles,
+						}
+					},
 					get: () => undefined,
 				} as any
 			}
@@ -450,7 +456,7 @@ describe("Shell Detection Tests", () => {
 			expect(getShell()).toBe("/bin/bash")
 		})
 
-		it("should validate array shell paths and use first allowlisted path", () => {
+		it("should resolve array shell paths and use first path", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
 			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {

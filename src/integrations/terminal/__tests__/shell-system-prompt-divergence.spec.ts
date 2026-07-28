@@ -1,14 +1,14 @@
 // Regression test for https://github.com/Zoo-Code-Org/Zoo-Code/issues/634
 //
-// When the user sets terminal.integrated.defaultProfile.windows in *workspace*
-// settings, getShell() (used for the system prompt) picks it up via config.get()
-// which merges all scopes, but Terminal.getConfiguredDefaultProfileName() only
-// reads inspect().globalValue ?? inspect().defaultValue — intentionally excluding
-// workspace for security.
+// Root cause: getShell() (system prompt) used config.get() which merges all scopes
+// including workspace, while Terminal.getConfiguredDefaultProfileName() used
+// inspect().globalValue — intentionally excluding workspace scope for security.
+// terminal.integrated.defaultProfile.* is APPLICATION-scoped; workspace values are
+// technically accepted by VS Code but ignored by the terminal itself.
 //
-// The result: the system prompt tells the model "you have PowerShell" but the
-// actual terminal VS Code opens defaults to cmd.exe (or whatever VS Code picks
-// when no global/default profile is set), so every PowerShell command fails.
+// Fix: getShell() now delegates to Terminal.getConfiguredDefaultProfileName() and
+// Terminal.getConfiguredProfiles(), so both paths read the same inspect()-based values
+// and can never disagree.
 //
 // Run: node_modules/.bin/vitest run integrations/terminal/__tests__/shell-system-prompt-divergence.spec.ts
 
@@ -44,12 +44,9 @@ describe("issue #634 — system prompt shell vs actual terminal shell divergence
 
 	/**
 	 * Stubs VS Code config to simulate a workspace-scoped default profile.
-	 *
-	 * getShell() (shell.ts) uses getConfiguration("terminal.integrated").get() which
-	 * returns the merged/effective value across all scopes — workspace value wins.
-	 *
-	 * Terminal.getConfiguredDefaultProfileName() uses inspect().globalValue ?? defaultValue,
-	 * intentionally excluding workspace scope for security. Both undefined here.
+	 * globalValue is undefined for both the profile name and profiles map,
+	 * so Terminal (which reads only globalValue ?? defaultValue) sees no profile.
+	 * The workspace-scoped value is present to verify it is correctly ignored.
 	 */
 	function stubWorkspaceScopedProfile(profileName: string, profilePath: string) {
 		const profiles = { [profileName]: { path: profilePath } }
@@ -148,22 +145,23 @@ describe("issue #634 — system prompt shell vs actual terminal shell divergence
 		expect(shellForSystemPrompt).toBe(profilePath)
 	})
 
-	it("divergence: getShell() reports PowerShell but Terminal sees no profile when set at workspace scope only", () => {
+	it("convergence: getShell() and Terminal both ignore a workspace-scoped-only profile (fix verification)", () => {
+		// beforeEach mocks existsSync to return true only for PS7 path.
+		// Here we want to test the no-profile fallback, so make existsSync return false.
+		mockedExistsSync.mockReturnValue(false)
 		stubWorkspaceScopedProfile("PowerShell", "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 
-		// getShell() uses config.get() → picks up workspace value → sees "PowerShell" name
-		// → name-match path returns pwsh.exe (since existsSync mocked true for it)
-		const shellForSystemPrompt = getShell()
-		expect(shellForSystemPrompt).toContain("PowerShell")
-
-		// Terminal.getConfiguredDefaultProfileName() uses inspect().globalValue → undefined
+		// Terminal reads only inspect().globalValue → no profile configured at global scope.
 		const terminalSeesProfileName = Terminal.getConfiguredDefaultProfileName("win32")
 		expect(terminalSeesProfileName).toBeUndefined()
 
-		// Terminal therefore can't identify the active shell as PowerShell
-		expect(Terminal.isActiveShellPowerShell("win32")).toBe(false)
+		// After the fix, getShell() delegates to Terminal's inspect()-based methods,
+		// so it also sees no profile. It falls back to the Windows no-profile default
+		// (PS legacy, since existsSync returns false for PS7 in this test).
+		const shellForSystemPrompt = getShell()
+		expect(shellForSystemPrompt).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
 
-		// Divergence: system prompt claims PowerShell, Terminal has no profile → falls
-		// through to VS Code's own autodetect which may open cmd.exe on this machine.
+		// Both paths agree: no profile resolved → no active shell identified as PowerShell.
+		expect(Terminal.isActiveShellPowerShell("win32")).toBe(false)
 	})
 })

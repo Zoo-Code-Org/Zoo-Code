@@ -127,6 +127,10 @@ const SHELL_PATHS = {
  *
  * Returns null when no profile is configured or the profile has no resolvable path.
  */
+function preferredWindowsPowerShell(): string {
+	return existsSync(SHELL_PATHS.POWERSHELL_7) ? SHELL_PATHS.POWERSHELL_7 : SHELL_PATHS.POWERSHELL_LEGACY
+}
+
 function getShellFromVSCode(): string | null {
 	try {
 		const profileName = Terminal.getConfiguredDefaultProfileName()
@@ -136,7 +140,7 @@ function getShellFromVSCode(): string | null {
 			// auto-detects and prefers PowerShell 7 when installed. Mirror that so
 			// the system prompt matches what VS Code will actually open. (issue #82)
 			if (process.platform === "win32") {
-				return existsSync(SHELL_PATHS.POWERSHELL_7) ? SHELL_PATHS.POWERSHELL_7 : SHELL_PATHS.POWERSHELL_LEGACY
+				return preferredWindowsPowerShell()
 			}
 			return null
 		}
@@ -156,7 +160,7 @@ function getShellFromVSCode(): string | null {
 		// source-only PowerShell profiles (e.g. { source: "PowerShell" }) have no
 		// path but we can still identify the shell type from the source field.
 		if (typeof profile.source === "string" && profile.source.toLowerCase().includes("powershell")) {
-			return existsSync(SHELL_PATHS.POWERSHELL_7) ? SHELL_PATHS.POWERSHELL_7 : SHELL_PATHS.POWERSHELL_LEGACY
+			return preferredWindowsPowerShell()
 		}
 
 		// source-only WSL profiles
