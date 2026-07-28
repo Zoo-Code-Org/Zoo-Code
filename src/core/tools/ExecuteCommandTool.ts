@@ -35,6 +35,15 @@ export function canRetryShellIntegrationError(error: unknown): error is ShellInt
 	return error instanceof ShellIntegrationError && !error.commandSubmitted
 }
 
+/**
+ * Grace period before a foreground command may trigger a `command_output` ask.
+ * Short commands that emit output and exit within this window never prompt the
+ * user; the ask only fires when the command is still running once the delay
+ * elapses, so users can still interrupt or provide feedback on long-running
+ * commands.
+ */
+export const COMMAND_OUTPUT_ASK_DELAY_MS = 5_000
+
 export function getTerminalProviderForExecution(terminalShellIntegrationDisabled: boolean): {
 	terminalProvider: RooTerminalProvider
 	isCmdExeFallback: boolean
@@ -340,6 +349,51 @@ export async function executeCommandInTerminal(
 		resolveOnCompleted = resolve
 	})
 
+	// Delay the `command_output` ask so short foreground commands that emit
+	// output and exit normally never prompt the user. The ask only fires if the
+	// command is still running once COMMAND_OUTPUT_ASK_DELAY_MS has elapsed
+	// since execution started, preserving the interrupt/feedback path for
+	// long-running commands.
+	let commandStartedAt = 0
+	let commandOutputAskTimer: NodeJS.Timeout | undefined
+
+	const askForCommandOutput = async (process: RooTerminalProcess): Promise<void> => {
+		if (runInBackground || hasAskedForCommandOutput || completed) {
+			return
+		}
+
+		// Mark that we've asked to prevent multiple concurrent asks
+		hasAskedForCommandOutput = true
+
+		try {
+			const { response, text, images } = await task.ask("command_output", "")
+			runInBackground = true
+
+			if (response === "messageResponse") {
+				message = { text, images }
+				process.continue()
+			}
+		} catch (_error) {
+			// Silently handle ask errors (e.g., "Current ask promise was ignored")
+		}
+	}
+
+	const scheduleCommandOutputAsk = (process: RooTerminalProcess): void => {
+		if (runInBackground || hasAskedForCommandOutput || completed || commandOutputAskTimer) {
+			return
+		}
+
+		const remainingDelay = COMMAND_OUTPUT_ASK_DELAY_MS - (Date.now() - commandStartedAt)
+
+		commandOutputAskTimer = setTimeout(
+			() => {
+				commandOutputAskTimer = undefined
+				void askForCommandOutput(process)
+			},
+			Math.max(remainingDelay, 0),
+		)
+	}
+
 	const callbacks: RooTerminalCallbacks = {
 		onLine: async (lines: string, process: RooTerminalProcess) => {
 			accumulatedOutput += lines
@@ -359,26 +413,12 @@ export async function executeCommandInTerminal(
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 			schedulePartialCommandOutputUpdate()
 
-			if (runInBackground || hasAskedForCommandOutput) {
-				return
-			}
-
-			// Mark that we've asked to prevent multiple concurrent asks
-			hasAskedForCommandOutput = true
-
-			try {
-				const { response, text, images } = await task.ask("command_output", "")
-				runInBackground = true
-
-				if (response === "messageResponse") {
-					message = { text, images }
-					process.continue()
-				}
-			} catch (_error) {
-				// Silently handle ask errors (e.g., "Current ask promise was ignored")
-			}
+			scheduleCommandOutputAsk(process)
 		},
 		onCompleted: async (output: string | undefined) => {
+			clearTimeout(commandOutputAskTimer)
+			commandOutputAskTimer = undefined
+
 			clearTimeout(pendingCommandOutputEmitTimer)
 			pendingCommandOutputEmitTimer = undefined
 
@@ -441,6 +481,7 @@ export async function executeCommandInTerminal(
 		workingDir = terminal.getCurrentWorkingDirectory()
 	}
 
+	commandStartedAt = Date.now()
 	const process = terminal.runCommand(command, callbacks)
 	task.terminalProcess = process
 
@@ -462,6 +503,8 @@ export async function executeCommandInTerminal(
 				new Promise<void>((resolve) => {
 					agentTimeoutId = setTimeout(() => {
 						runInBackground = true
+						clearTimeout(commandOutputAskTimer)
+						commandOutputAskTimer = undefined
 						process.continue()
 						task.supersedePendingAsk()
 						resolve()
@@ -501,6 +544,7 @@ export async function executeCommandInTerminal(
 	} finally {
 		clearTimeout(agentTimeoutId)
 		clearTimeout(userTimeoutId)
+		clearTimeout(commandOutputAskTimer)
 		clearTimeout(pendingCommandOutputEmitTimer)
 		task.terminalProcess = undefined
 	}
