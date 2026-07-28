@@ -14,6 +14,73 @@ import type { ToolParamName, ToolResponse, ToolUse, McpToolUse } from "../../sha
 import { AskIgnoredError } from "../task/AskIgnoredError"
 import { Task } from "../task/Task"
 
+/**
+ * Structured error presentation for LLM-guided error recovery.
+ * Provides WHAT/WHY/NEXT format wrapped in <error_details> XML tags.
+ */
+function formatStructuredError(
+	details: {
+		what: string
+		why: string
+		next: string[]
+		retryable?: boolean
+		pattern?: string
+		occurrence?: number
+		disposition?: string
+	},
+	byteLimit: number = 8000,
+): string {
+	const version = "1.0"
+	const status = "error"
+	const category = details.pattern ? (details.pattern.split("/")[1] ?? "unknown") : "unknown"
+	const type = details.pattern
+		? details.pattern.startsWith("EI/")
+			? details.pattern.replace("EI/", "guided_").toLowerCase().replace(/_/g, "_")
+			: details.pattern.toLowerCase().replace(/_/g, "_")
+		: "unclassified_error"
+	const what = details.what
+	const why = details.why
+	const next = details.next ?? []
+	const retryable = details.retryable ?? true
+	const occurrence = Math.max(1, details.occurrence ?? 1)
+	const patternId = details.pattern ?? "UNCLASSIFIED/000/000"
+	const recoveryDisposition = details.disposition ?? "correct_once"
+
+	const payload = {
+		version,
+		status,
+		type,
+		category,
+		what,
+		why,
+		next,
+		retryable,
+		occurrence,
+		pattern_id: patternId,
+		recovery_disposition: recoveryDisposition,
+	}
+
+	let json = JSON.stringify(payload, null, 2)
+
+	if (json.length > byteLimit && next.length > 0) {
+		// Trim Next items to fit within byte limit, preserving the first one
+		const firstItem = next[0]
+		next.length = 1
+		const trimmed = {
+			...payload,
+			next: [firstItem],
+		}
+		json = JSON.stringify(trimmed, null, 2)
+	}
+
+	if (json.length > byteLimit) {
+		// Last resort: truncate the JSON string
+		json = json.substring(0, byteLimit - 3) + "..."
+	}
+
+	return `<error_details>\n${json}\n</error_details>`
+}
+
 import { listFilesTool } from "../tools/ListFilesTool"
 import { readFileTool } from "../tools/ReadFileTool"
 import { readCommandOutputTool } from "../tools/ReadCommandOutputTool"
@@ -225,12 +292,28 @@ export async function presentAssistantMessage(cline: Task) {
 				if (error instanceof AskIgnoredError) {
 					return
 				}
-				const errorString = `Error ${action}: ${JSON.stringify(serializeError(error))}`
+
+				// Structured error presentation with WHAT/WHY/NEXT format
+				const serializedError = serializeError(error)
+				const structuredErrorContent = formatStructuredError({
+					what: `An error occurred during ${action}.`,
+					why: error.message || serializedError.message || "An unexpected error occurred.",
+					next: [
+						`Retry the ${action} operation with corrected parameters if applicable.`,
+						`If the error persists, report this issue to the development team with the error details below.`,
+					],
+					pattern: "TOOL_EXECUTION/ERROR_EXECUTION/001",
+					retryable: true,
+					occurrence: 1,
+					disposition: "correct_once",
+				})
+
+				pushToolResult(structuredErrorContent)
+
 				await cline.say(
 					"error",
-					`Error ${action}:\n${error.message ?? JSON.stringify(serializeError(error), null, 2)}`,
+					`[${action}] Error during execution:\n${error.message ?? JSON.stringify(serializedError, null, 2)}\n\n${structuredErrorContent}`,
 				)
-				pushToolResult(formatResponse.toolError(errorString))
 			}
 
 			if (!mcpBlock.partial) {
@@ -543,14 +626,28 @@ export async function presentAssistantMessage(cline: Task) {
 				if (error instanceof AskIgnoredError) {
 					return
 				}
-				const errorString = `Error ${action}: ${JSON.stringify(serializeError(error))}`
+
+				// Structured error presentation with WHAT/WHY/NEXT format
+				const serializedError = serializeError(error)
+				const structuredErrorContent = formatStructuredError({
+					what: `An error occurred during ${action}.`,
+					why: error.message || serializedError.message || "An unexpected error occurred.",
+					next: [
+						`Review the error details and retry the ${action} operation with corrected parameters.`,
+						`If the error persists, report this issue to the development team.`,
+					],
+					pattern: "TOOL_EXECUTION/ERROR_EXECUTION/002",
+					retryable: true,
+					occurrence: 1,
+					disposition: "correct_once",
+				})
+
+				pushToolResult(structuredErrorContent)
 
 				await cline.say(
 					"error",
-					`Error ${action}:\n${error.message ?? JSON.stringify(serializeError(error), null, 2)}`,
+					`[${action}] Error during execution:\n${error.message ?? JSON.stringify(serializedError, null, 2)}\n\n${structuredErrorContent}`,
 				)
-
-				pushToolResult(formatResponse.toolError(errorString))
 			}
 
 			if (!block.partial) {
