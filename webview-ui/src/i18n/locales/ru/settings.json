@@ -845,6 +845,24 @@
 			"description": "По умолчанию Zoo Code использует оболочку, настроенную в VS Code. Выберите профиль оболочки из списка, чтобы указать профиль оболочки с путём, предоставленный VS Code. Профили только с источником (например, встроенная запись PowerShell) не могут быть перечислены здесь. <0>Подробнее</0>",
 			"configureButton": "Выбрать профиль по умолчанию в VS Code",
 			"noProfiles": "(профили с путём в terminal.integrated.profiles не найдены)"
+		},
+		"inlineShell": {
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
+			"effectiveShell": {
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+			},
+			"error": {
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+			}
 		}
 	},
 	"advancedSettings": {

@@ -872,6 +872,24 @@
 			"description": "預設情況下，Zoo Code 使用 VS Code 設定的 Shell。從清單中選擇 VS Code 公開的路徑型 Shell 設定檔。僅含來源的設定檔（如內建的 PowerShell 項目）無法在此列出。 <0>了解更多</0>",
 			"configureButton": "在 VS Code 中選擇預設設定檔",
 			"noProfiles": "(在 terminal.integrated.profiles 中未找到路徑型設定檔)"
+		},
+		"inlineShell": {
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
+			"effectiveShell": {
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+			},
+			"error": {
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+			}
 		}
 	},
 	"advancedSettings": {

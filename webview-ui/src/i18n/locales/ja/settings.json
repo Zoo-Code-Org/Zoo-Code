@@ -845,6 +845,24 @@
 			"description": "デフォルトでは Zoo Code は VS Code に設定されたシェルを使用します。VS Code が公開するパスベースのシェルプロファイルを選択するには一覧からシェルプロファイルを選択してください。ソースのみのプロファイル（例：組み込みの PowerShell エントリ）はここに表示できません。 <0>詳細を見る</0>",
 			"configureButton": "VS Code でデフォルトプロファイルを選択",
 			"noProfiles": "(terminal.integrated.profiles にパスベースのプロファイルが見つかりません)"
+		},
+		"inlineShell": {
+			"label": "Inline Terminal Shell",
+			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
+			"auto": "Auto (follows trusted terminal profile)",
+			"customPath": "Choose custom executable",
+			"customPathPlaceholder": "Select a shell executable...",
+			"effectiveShell": {
+				"label": "Effective shell",
+				"family": "Family",
+				"source": "Source",
+				"fallback": "Fallback behavior",
+				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+			},
+			"error": {
+				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
+				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+			}
 		}
 	},
 	"advancedSettings": {
