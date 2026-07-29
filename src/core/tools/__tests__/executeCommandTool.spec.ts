@@ -606,6 +606,9 @@ describe("executeCommandTool", () => {
 		})
 
 		it("resolves before completion when the ask is answered without a message", async () => {
+			// Note: in production only messageResponse answers reach a
+			// command_output ask (Proceed/Kill route through terminalOperation);
+			// yesButtonClicked is synthetic here to pin the non-message branch.
 			vitest.useFakeTimers()
 			mockCline.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
 			const terminal = await setupControllableTerminal()
