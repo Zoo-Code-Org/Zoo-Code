@@ -6,13 +6,33 @@ coverage:
       default:
         target: auto      # never regress below current baseline
         threshold: 1%
+      webview:
+        target: auto      # webview project ratchet: never drop below current baseline
+        threshold: 0.5%
+        flags:
+          - webview-ui
+          - webview-ui-ct
     patch:
       default:
         target: 80%       # new lines must be 80% covered
         threshold: 0%
+      webview-patch:
+        target: 70%       # new lines in webview must be 70% covered
+        threshold: 0%
+        flags:
+          - webview-ui
+          - webview-ui-ct
 
 flag_management:
   individual_flags:
+    - name: webview-ui
+      paths:
+        - webview-ui/src/
+      carryforward: true
+    - name: webview-ui-ct
+      paths:
+        - webview-ui/src/
+      carryforward: true
     - name: core-unit
       paths:
         - packages/core/src/
@@ -22,6 +42,18 @@ flag_management:
         - packages/core/src/
       carryforward: true
 
+component_management:
+  individual_components:
+    - component_id: webview_components
+      name: "Webview UI Components"
+      paths:
+        - webview-ui/src/components/
+    - component_id: webview_state
+      name: "Webview State & Context"
+      paths:
+        - webview-ui/src/context/
+        - webview-ui/src/state/
+
 comment:
-  layout: "diff, flags"
+  layout: "diff, flags, components"
   behavior: default

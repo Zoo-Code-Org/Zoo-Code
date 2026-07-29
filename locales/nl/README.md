@@ -36,15 +36,15 @@
 
 Je vindt een korte handleiding voor de overstap van Roo Code naar Zoo Code in de [Roo→Zoo-migratiegids](https://docs.zoocode.dev/roo-to-zoo-migration). We willen gebruikers zo goed mogelijk helpen tijdens de overgang, en precies daarvoor zijn onze [Reddit](https://www.reddit.com/r/ZooCode) en [Discord](https://discord.gg/VxfP4Vx3gX) er. Als je ergens tegenaan loopt of vragen hebt, kom langs en vraag het.
 
-## Nieuw in v3.70.0
+## Nieuw in v3.72.0
 
-- **OpenAI GPT-5.6-familie** — `Sol`, `Terra` en `Luna` zijn nu beschikbaar via zowel OpenAI Codex als OpenAI Native.
-- **Grok 4.5-ondersteuning** — het nieuwe vlaggenschipmodel van xAI, plus een fix voor het reasoning-effort-formaat waar ook Grok 4 Mini baat bij heeft.
-- **Kenari-providerondersteuning** — een eersteklas, OpenAI-compatibele AI-gateway die in Roepia factureert en Claude, GPT, DeepSeek, GLM, Kimi en meer dekt.
-- Toon de contextcompressie-knop en de voortgangsbalk van het contextvenster in de ingeklapte taakheader.
-- Fix: verlies van terminaluitvoer en voortijdige taakvoltooiing bij koude terminals.
-- Fix: afbeeldingen bijvoegen voor Zoo Gateway- en Vercel AI Gateway-modellen volgt nu live vision-capaciteitstags in plaats van een statische allowlist.
-- Updates van dependencies en tooling.
+- **Moonshot- en Kimi Code-providers** — ontdek Moonshot-modellen dynamisch of meld je aan bij Kimi Code via de OAuth-apparaatstroom.
+- **Ondersteuning voor de nieuwste modellen** — gebruik Claude Opus 5 bij verschillende providers, plus Kimi K3, Gemini 3.6 Flash en MiniMax-M3.
+- **Verbeterde subtaakworkflows** — breek onderbroken subtaken netjes af, met veiligere invalidatie van taakgeschiedenis en betere hervattingsdekking.
+- **Uitgebreide codebase-indexering** — indexeer Dart- en plattetekstbestanden.
+- **Betrouwbaardere providers** — fixes voor GPT-5.6 Luna met ChatGPT OAuth, LiteLLM-reasoningcontent en DeepSeek V4-beeldinvoer.
+- **Soepelere installatie en instellingen** — verbeterde Zoo Gateway-aanmelding en moduswisseling.
+- Verbeteringen aan API, providertypen, dependencies, lokalisatie en CI.
 
 ## Wat kan Zoo Code voor JOU doen?
 

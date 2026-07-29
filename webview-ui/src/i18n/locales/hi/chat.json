@@ -187,7 +187,7 @@
 		"current": "वर्तमान"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo को वर्तमान कार्य में सहायता के लिए विस्तृत निर्देश प्राप्त करना है"
+		"wantsToFetch": "Zoo को वर्तमान कार्य में सहायता के लिए विस्तृत निर्देश प्राप्त करना है"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo इस फ़ाइल को पढ़ना चाहता है",
@@ -197,12 +197,12 @@
 		"wantsToEditOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर इस फ़ाइल को संपादित करना चाहता है",
 		"wantsToEditProtected": "Zoo एक सुरक्षित कॉन्फ़िगरेशन फ़ाइल को संपादित करना चाहता है",
 		"wantsToCreate": "Zoo एक नई फ़ाइल बनाना चाहता है",
-		"wantsToSearchReplace": "Roo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
-		"didSearchReplace": "Roo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
+		"wantsToSearchReplace": "Zoo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
+		"didSearchReplace": "Zoo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
 		"wantsToInsert": "Zoo इस फ़ाइल में सामग्री डालना चाहता है",
 		"wantsToInsertWithLineNumber": "Zoo इस फ़ाइल की {{lineNumber}} लाइन पर सामग्री डालना चाहता है",
 		"wantsToInsertAtEnd": "Zoo इस फ़ाइल के अंत में सामग्री जोड़ना चाहता है",
-		"wantsToReadAndXMore": "रू इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
+		"wantsToReadAndXMore": "Zoo इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
 		"wantsToReadMultiple": "Zoo कई फ़ाइलें पढ़ना चाहता है",
 		"wantsToApplyBatchChanges": "Zoo कई फ़ाइलों में परिवर्तन लागू करना चाहता है",
 		"wantsToGenerateImage": "Zoo एक छवि बनाना चाहता है",
@@ -246,7 +246,7 @@
 	"response": "प्रतिक्रिया",
 	"arguments": "आर्ग्युमेंट्स",
 	"text": {
-		"rooSaid": "रू ने कहा"
+		"rooSaid": "Zoo ने कहा"
 	},
 	"feedback": {
 		"youSaid": "आपने कहा"
@@ -343,9 +343,9 @@
 		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
 		"release": {
 			"heading": "नया क्या है:",
-			"highlight1": "OpenAI GPT-5.6 परिवार (Sol, Terra, Luna) — OpenAI Codex और OpenAI Native दोनों में उपलब्ध।",
-			"highlight2": "Grok 4.5 समर्थन — xAI का नया flagship model, साथ ही reasoning effort की एक फिक्स जिसका फायदा Grok 4 Mini को भी मिलता है।",
-			"highlight3": "Kenari provider — एक first-class OpenAI-compatible AI gateway जो Rupiah में बिल होता है और Claude, GPT, DeepSeek, GLM, Kimi और अधिक को cover करता है।"
+			"highlight1": "Moonshot और Kimi Code providers — live model discovery के साथ Moonshot models से कनेक्ट करें या OAuth device flow से Kimi Code में sign in करें।",
+			"highlight2": "नवीनतम model support — providers पर Claude Opus 5 के साथ Kimi K3, Gemini 3.6 Flash और MiniMax-M3 का उपयोग करें।",
+			"highlight3": "अधिक भरोसेमंद workflows — interrupted subtasks को साफ़ तौर पर छोड़ें और अपनी codebase में Dart व plain-text files को index करें।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",

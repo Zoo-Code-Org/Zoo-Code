@@ -54,6 +54,7 @@ import {
 	ConsecutiveMistakeError,
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
+	providerIdentifiers,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -405,6 +406,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	didToolFailInCurrentTurn = false
 	didCompleteReadingStream = false
 	private _started = false
+	private _runPromise: Promise<void> | undefined
+	private readonly _isHistoryTask: boolean
 	// No streaming parser is required.
 	assistantMessageParser?: undefined
 	private providerProfileChangeListener?: (config: { name: string; provider?: string }) => void
@@ -487,6 +490,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			task: historyItem ? historyItem.task : task,
 			images: historyItem ? [] : images,
 		}
+		this._isHistoryTask = !!historyItem && !task && !images
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -1371,7 +1375,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Wait for askResponse to be set
 		await pWaitFor(
 			() => {
-				if (this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
 					return true
 				}
 
@@ -1395,6 +1399,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			},
 			{ interval: 100 },
 		)
+
+		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
+		if (this.abort) {
+			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
 
 		if (this.lastMessageTs !== askTs) {
 			// Could happen if we send multiple asks in a row i.e. with
@@ -1811,9 +1820,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	async sayAndCreateMissingParamError(toolName: ToolName, paramName: string, relPath?: string) {
 		await this.say(
 			"error",
-			`Roo tried to use ${toolName}${
-				relPath ? ` for '${relPath.toPosix()}'` : ""
-			} without value for required parameter '${paramName}'. Retrying...`,
+			relPath
+				? t("tools:missingToolParameterWithPath", {
+						toolName,
+						relPath: relPath.toPosix(),
+						paramName,
+					})
+				: t("tools:missingToolParameter", { toolName, paramName }),
 		)
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
@@ -1873,6 +1886,31 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				console.error("[Task#start] startTask failed:", error)
 			})
 		}
+	}
+
+	/**
+	 * Like `start()`, but returns the underlying promise so callers (e.g.
+	 * `TaskScheduler`) can await task completion and gate concurrency.
+	 * Idempotent: subsequent calls return the same in-flight promise.
+	 */
+	public run(): Promise<void> {
+		if (this._runPromise !== undefined) {
+			return this._runPromise
+		}
+		if (this._started) {
+			// Already launched via constructor or start() — no promise to return.
+			return Promise.resolve()
+		}
+		this._started = true
+
+		const { task, images } = this.metadata
+
+		this._runPromise = this._isHistoryTask
+			? this.resumeTaskFromHistory()
+			: task || images
+				? this.startTask(task ?? undefined, images ?? undefined)
+				: Promise.resolve()
+		return this._runPromise
 	}
 
 	private async startTask(task?: string, images?: string[]): Promise<void> {
@@ -1998,7 +2036,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				.find((m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task")) // Could be multiple resume tasks.
 
 			let askType: ClineAsk
-			if (lastClineMessage?.ask === "completion_result") {
+			if (this.initialStatus === "completed" || lastClineMessage?.ask === "completion_result") {
 				askType = "resume_completed_task"
 			} else {
 				askType = "resume_task"
@@ -4220,7 +4258,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// but uses allowedFunctionNames to restrict which tools can be called.
 		// Other providers (Anthropic, OpenAI, etc.) don't support this feature yet,
 		// so they continue to receive only the filtered tools for the current mode.
-		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === "gemini"
+		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === providerIdentifiers.gemini
 
 		{
 			const provider = this.providerRef.deref()

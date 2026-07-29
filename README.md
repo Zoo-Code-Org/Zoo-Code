@@ -35,15 +35,15 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.70.0
+## What's New in v3.72.0
 
-- **OpenAI GPT-5.6 family** — `Sol`, `Terra`, and `Luna` are now available across both the OpenAI Codex and OpenAI Native provider paths.
-- **Grok 4.5 support** — xAI's new flagship model, plus a reasoning-effort format fix that also benefits Grok 4 Mini.
-- **Kenari provider support** — a first-class, OpenAI-compatible AI gateway billed in Rupiah covering Claude, GPT, DeepSeek, GLM, Kimi and more.
-- Surface the context-compaction button and context window progress bar in the collapsed task header.
-- Fix: terminal output loss and premature task completion on cold terminals.
-- Fix: image attach for Zoo Gateway and Vercel AI Gateway models now follows live vision-capability tags instead of a static allowlist.
-- Dependency and tooling updates.
+- **Moonshot and Kimi Code providers** — discover Moonshot models dynamically or sign in to Kimi Code through its OAuth device flow.
+- **Latest model support** — use Claude Opus 5 across providers, plus Kimi K3, Gemini 3.6 Flash, and MiniMax-M3.
+- **Improved subtask workflows** — abandon interrupted subtasks cleanly, with safer task-history invalidation and better resume coverage.
+- **Expanded codebase indexing** — index Dart and plain-text files.
+- **Provider reliability** — fixes for GPT-5.6 Luna with ChatGPT OAuth, LiteLLM reasoning content, and DeepSeek V4 image input.
+- **Smoother setup and settings** — improved Zoo Gateway sign-in and mode-switch behavior.
+- API, provider-type, dependency, localization, and CI improvements.
 
 <details>
   <summary>🌐 Available languages</summary>
@@ -66,8 +66,7 @@ for this exact support, so if you are having problems or if you have question, j
 - [Tiếng Việt](locales/vi/README.md)
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
-- ...
-    </details>
+</details>
 
 ---
 

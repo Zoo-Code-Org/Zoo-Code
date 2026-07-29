@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "Puoi configurare una scorciatoia globale per questa impostazione <SettingsLink>nelle preferenze del tuo IDE</SettingsLink>.",
-		"description": "Permetti a Roo di eseguire automaticamente operazioni senza richiedere approvazione. Abilita queste impostazioni solo se ti fidi completamente dell'IA e comprendi i rischi di sicurezza associati.",
+		"description": "Permetti a Zoo di eseguire automaticamente operazioni senza richiedere approvazione. Abilita queste impostazioni solo se ti fidi completamente dell'IA e comprendi i rischi di sicurezza associati.",
 		"enabled": "Auto-approvazione abilitata",
 		"toggleAriaLabel": "Attiva/disattiva approvazione automatica",
 		"disabledAriaLabel": "Approvazione automatica disabilitata - seleziona prima le opzioni",
@@ -459,6 +459,17 @@
 		"moonshotApiKey": "Chiave API Moonshot",
 		"getMoonshotApiKey": "Ottieni chiave API Moonshot",
 		"moonshotBaseUrl": "Punto di ingresso Moonshot",
+		"kimiCode": {
+			"authMethod": "Metodo di autenticazione",
+			"oauth": "Abbonamento Kimi Code (OAuth)",
+			"apiKey": "Chiave API Kimi Code",
+			"apiKeyLabel": "Chiave API Kimi Code",
+			"signIn": "Accedi a Kimi Code",
+			"signOut": "Esci",
+			"authenticated": "Accesso a Kimi Code effettuato",
+			"deviceCodeHelp": "Inserisci questo codice dispositivo nella pagina di autorizzazione Kimi:",
+			"docs": "Documentazione Kimi Code"
+		},
 		"zaiApiKey": "Chiave API Z AI",
 		"getZaiApiKey": "Ottieni chiave API Z AI",
 		"zaiEntrypoint": "Punto di ingresso Z AI",

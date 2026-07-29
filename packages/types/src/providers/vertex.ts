@@ -462,6 +462,20 @@ export const vertexModels = {
 			},
 		],
 	},
+	"claude-opus-5": {
+		maxTokens: 8192,
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 5.0, // $5 per million input tokens
+		outputPrice: 25.0, // $25 per million output tokens
+		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheReadsPrice: 0.5, // $0.50 per million tokens
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
+	},
 	"claude-fable-5": {
 		maxTokens: 8192,
 		contextWindow: 1_000_000,

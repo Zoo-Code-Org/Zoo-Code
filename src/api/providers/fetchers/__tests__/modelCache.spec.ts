@@ -58,7 +58,8 @@ vi.mock("../../../core/config/ContextProxy", () => ({
 }))
 
 // Then imports
-import type { Mock } from "vitest"
+import type { Mock, Mocked } from "vitest"
+import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
 import NodeCache from "node-cache"
 import { getModels, getModelsFromCache } from "../modelCache"
@@ -93,7 +94,7 @@ describe("getModels with new GetModelsOptions", () => {
 		mockGetLiteLLMModels.mockResolvedValue(mockModels)
 
 		const result = await getModels({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "test-api-key",
 			baseUrl: "http://localhost:4000",
 		})
@@ -113,7 +114,24 @@ describe("getModels with new GetModelsOptions", () => {
 		}
 		mockGetOpenRouterModels.mockResolvedValue(mockModels)
 
-		const result = await getModels({ provider: "openrouter" })
+		const result = await getModels({ provider: providerIdentifiers.openrouter })
+
+		expect(mockGetOpenRouterModels).toHaveBeenCalled()
+		expect(result).toEqual(mockModels)
+	})
+
+	it("dispatches OpenRouter through its canonical provider identifier", async () => {
+		const mockModels = {
+			"openrouter/canonical-model": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
+
+		mockGetOpenRouterModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({ provider: providerIdentifiers.openrouter })
 
 		expect(mockGetOpenRouterModels).toHaveBeenCalled()
 		expect(result).toEqual(mockModels)
@@ -130,9 +148,30 @@ describe("getModels with new GetModelsOptions", () => {
 		}
 		mockGetRequestyModels.mockResolvedValue(mockModels)
 
-		const result = await getModels({ provider: "requesty", apiKey: DUMMY_REQUESTY_KEY })
+		const result = await getModels({ provider: providerIdentifiers.requesty, apiKey: DUMMY_REQUESTY_KEY })
 
 		expect(mockGetRequestyModels).toHaveBeenCalledWith(undefined, DUMMY_REQUESTY_KEY)
+		expect(result).toEqual(mockModels)
+	})
+
+	it("dispatches credentialed fetchers through canonical provider identifiers", async () => {
+		const mockModels = {
+			"requesty/canonical-model": {
+				maxTokens: 4096,
+				contextWindow: 8192,
+				supportsPromptCache: false,
+			},
+		}
+
+		mockGetRequestyModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({
+			provider: providerIdentifiers.requesty,
+			apiKey: DUMMY_REQUESTY_KEY,
+			baseUrl: "https://router.requesty.ai/v1",
+		})
+
+		expect(mockGetRequestyModels).toHaveBeenCalledWith("https://router.requesty.ai/v1", DUMMY_REQUESTY_KEY)
 		expect(result).toEqual(mockModels)
 	})
 
@@ -147,7 +186,7 @@ describe("getModels with new GetModelsOptions", () => {
 		}
 		mockGetKenariModels.mockResolvedValue(mockModels)
 
-		const result = await getModels({ provider: "kenari", apiKey: "kenari-key-for-testing" })
+		const result = await getModels({ provider: providerIdentifiers.kenari, apiKey: "kenari-key-for-testing" })
 
 		expect(mockGetKenariModels).toHaveBeenCalledWith("kenari-key-for-testing")
 		expect(result).toEqual(mockModels)
@@ -159,7 +198,7 @@ describe("getModels with new GetModelsOptions", () => {
 
 		await expect(
 			getModels({
-				provider: "litellm",
+				provider: providerIdentifiers.litellm,
 				apiKey: "test-api-key",
 				baseUrl: "http://localhost:4000",
 			}),
@@ -178,7 +217,7 @@ describe("getModels with new GetModelsOptions", () => {
 		mockGetMoonshotModels.mockResolvedValue(mockModels)
 
 		const result = await getModels({
-			provider: "moonshot",
+			provider: providerIdentifiers.moonshot,
 			apiKey: "test-key",
 			baseUrl: "https://api.moonshot.ai/v1",
 		})
@@ -190,7 +229,7 @@ describe("getModels with new GetModelsOptions", () => {
 	it("validates exhaustive provider checking with unknown provider", async () => {
 		// This test ensures TypeScript catches unknown providers at compile time
 		// In practice, the discriminated union should prevent this at compile time
-		const unknownProvider = "unknown" as any
+		const unknownProvider = "unknown" as typeof providerIdentifiers.openrouter
 
 		await expect(
 			getModels({
@@ -201,13 +240,13 @@ describe("getModels with new GetModelsOptions", () => {
 })
 
 describe("getModelsFromCache disk fallback", () => {
-	let mockCache: any
+	let mockCache: Mocked<NodeCache>
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 		// Get the mock cache instance
 		const MockedNodeCache = vi.mocked(NodeCache)
-		mockCache = new MockedNodeCache()
+		mockCache = vi.mocked(new MockedNodeCache())
 		// Reset memory cache to always miss
 		mockCache.get.mockReturnValue(undefined)
 		// Reset fs mocks
@@ -218,7 +257,7 @@ describe("getModelsFromCache disk fallback", () => {
 	it("returns undefined when both memory and disk cache miss", () => {
 		vi.mocked(fsSync.existsSync).mockReturnValue(false)
 
-		const result = getModelsFromCache("openrouter")
+		const result = getModelsFromCache(providerIdentifiers.openrouter)
 
 		expect(result).toBeUndefined()
 	})
@@ -234,11 +273,28 @@ describe("getModelsFromCache disk fallback", () => {
 
 		mockCache.get.mockReturnValue(memoryModels)
 
-		const result = getModelsFromCache("openrouter")
+		const result = getModelsFromCache(providerIdentifiers.openrouter)
 
 		expect(result).toEqual(memoryModels)
 		// Disk should not be checked when memory cache hits
 		expect(fsSync.existsSync).not.toHaveBeenCalled()
+	})
+
+	it("isolates authenticated users through the canonical Zoo Gateway identifier", () => {
+		const previousUserModels = {
+			"previous-user/model": {
+				maxTokens: 4096,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
+
+		mockCache.get.mockReturnValue(previousUserModels)
+
+		const result = getModelsFromCache(providerIdentifiers.zooGateway)
+
+		expect(result).toBeUndefined()
+		expect(mockCache.get).not.toHaveBeenCalled()
 	})
 
 	it("returns disk cache data when memory cache misses and context is available", () => {
@@ -257,7 +313,7 @@ describe("getModelsFromCache disk fallback", () => {
 		vi.mocked(fsSync.existsSync).mockReturnValue(true)
 		vi.mocked(fsSync.readFileSync).mockReturnValue(JSON.stringify(diskModels))
 
-		const result = getModelsFromCache("openrouter")
+		const result = getModelsFromCache(providerIdentifiers.openrouter)
 
 		// In the test environment, ContextProxy.instance may not be fully initialized,
 		// so getCacheDirectoryPathSync returns undefined and disk cache is not attempted
@@ -272,7 +328,7 @@ describe("getModelsFromCache disk fallback", () => {
 
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
-		const result = getModelsFromCache("openrouter")
+		const result = getModelsFromCache(providerIdentifiers.openrouter)
 
 		expect(result).toBeUndefined()
 		expect(consoleErrorSpy).toHaveBeenCalled()
@@ -286,7 +342,7 @@ describe("getModelsFromCache disk fallback", () => {
 
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
 
-		const result = getModelsFromCache("openrouter")
+		const result = getModelsFromCache(providerIdentifiers.openrouter)
 
 		expect(result).toBeUndefined()
 		expect(consoleErrorSpy).toHaveBeenCalled()
@@ -296,15 +352,15 @@ describe("getModelsFromCache disk fallback", () => {
 })
 
 describe("empty cache protection", () => {
-	let mockCache: any
-	let mockGet: Mock
-	let mockSet: Mock
+	let mockCache: Mocked<NodeCache>
+	let mockGet: Mocked<NodeCache>["get"]
+	let mockSet: Mocked<NodeCache>["set"]
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 		// Get the mock cache instance
 		const MockedNodeCache = vi.mocked(NodeCache)
-		mockCache = new MockedNodeCache()
+		mockCache = vi.mocked(new MockedNodeCache())
 		mockGet = mockCache.get
 		mockSet = mockCache.set
 		// Reset memory cache to always miss by default
@@ -316,7 +372,7 @@ describe("empty cache protection", () => {
 			// API returns empty object (simulating failure)
 			mockGetOpenRouterModels.mockResolvedValue({})
 
-			const result = await getModels({ provider: "openrouter" })
+			const result = await getModels({ provider: providerIdentifiers.openrouter })
 
 			// Should return empty but NOT cache it
 			expect(result).toEqual({})
@@ -334,7 +390,7 @@ describe("empty cache protection", () => {
 			}
 			mockGetOpenRouterModels.mockResolvedValue(mockModels)
 
-			const result = await getModels({ provider: "openrouter" })
+			const result = await getModels({ provider: providerIdentifiers.openrouter })
 
 			expect(result).toEqual(mockModels)
 			expect(mockSet).toHaveBeenCalledWith("openrouter", mockModels)
@@ -358,7 +414,7 @@ describe("empty cache protection", () => {
 			mockGetOpenRouterModels.mockResolvedValue({})
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: "openrouter" })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
 
 			// Should return existing cache, not empty
 			expect(result).toEqual(existingModels)
@@ -388,7 +444,7 @@ describe("empty cache protection", () => {
 			mockGetOpenRouterModels.mockResolvedValue(newModels)
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: "openrouter" })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
 
 			// Should return new models
 			expect(result).toEqual(newModels)
@@ -410,7 +466,7 @@ describe("empty cache protection", () => {
 			mockGetOpenRouterModels.mockRejectedValue(new Error("API error"))
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: "openrouter" })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
 
 			// Should return existing cache on error
 			expect(result).toEqual(existingModels)
@@ -421,7 +477,7 @@ describe("empty cache protection", () => {
 			mockGetOpenRouterModels.mockRejectedValue(new Error("API error"))
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: "openrouter" })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
 
 			// Should return empty when no cache and API fails
 			expect(result).toEqual({})
@@ -434,7 +490,7 @@ describe("empty cache protection", () => {
 			mockGetOpenRouterModels.mockResolvedValue({})
 
 			const { refreshModels } = await import("../modelCache")
-			const result = await refreshModels({ provider: "openrouter" })
+			const result = await refreshModels({ provider: providerIdentifiers.openrouter })
 
 			// Should return empty but NOT cache it
 			expect(result).toEqual({})
@@ -462,8 +518,8 @@ describe("empty cache protection", () => {
 			const { refreshModels } = await import("../modelCache")
 
 			// Start two concurrent refresh calls
-			const promise1 = refreshModels({ provider: "openrouter" })
-			const promise2 = refreshModels({ provider: "openrouter" })
+			const promise1 = refreshModels({ provider: providerIdentifiers.openrouter })
+			const promise2 = refreshModels({ provider: providerIdentifiers.openrouter })
 
 			// API should only be called once (second call reuses in-flight request)
 			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
@@ -495,8 +551,8 @@ describe("empty cache protection", () => {
 
 			// Different keys -> separate compound keys -> two distinct fetches.
 			const [a, b] = await Promise.all([
-				refreshModels({ provider: "requesty", apiKey: "key-one" }),
-				refreshModels({ provider: "requesty", apiKey: "key-two" }),
+				refreshModels({ provider: providerIdentifiers.requesty, apiKey: "key-one" }),
+				refreshModels({ provider: providerIdentifiers.requesty, apiKey: "key-two" }),
 			])
 			expect(mockGetRequestyModels).toHaveBeenCalledTimes(2)
 			expect(a).toEqual(mockModels)
@@ -512,8 +568,8 @@ describe("empty cache protection", () => {
 				}),
 			)
 
-			const shared1 = refreshModels({ provider: "requesty", apiKey: "same-key" })
-			const shared2 = refreshModels({ provider: "requesty", apiKey: "same-key" })
+			const shared1 = refreshModels({ provider: providerIdentifiers.requesty, apiKey: "same-key" })
+			const shared2 = refreshModels({ provider: providerIdentifiers.requesty, apiKey: "same-key" })
 
 			expect(mockGetRequestyModels).toHaveBeenCalledTimes(1)
 
@@ -529,10 +585,10 @@ describe("key-scoped cache key derivation", () => {
 	// Exercises the per-API-key cache discriminator that all KEY_SCOPED_PROVIDERS share.
 	// Requesty is used only because it is a key-scoped provider with a mocked fetcher; the
 	// behavior under test is provider-agnostic.
-	const keyScopedProvider = "requesty" as const
+	const keyScopedProvider = providerIdentifiers.requesty
 
-	let mockCache: any
-	let mockSet: Mock
+	let mockCache: Mocked<NodeCache>
+	let mockSet: Mocked<NodeCache>["set"]
 
 	const mockModels = {
 		"key-scoped/model": {
@@ -546,7 +602,7 @@ describe("key-scoped cache key derivation", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		const MockedNodeCache = vi.mocked(NodeCache)
-		mockCache = new MockedNodeCache()
+		mockCache = vi.mocked(new MockedNodeCache())
 		mockCache.get.mockReturnValue(undefined)
 		mockSet = mockCache.set
 		mockGetRequestyModels.mockResolvedValue(mockModels)
@@ -627,7 +683,11 @@ describe("compound cache key derivation across scoping dimensions", () => {
 	}
 
 	it("includes both the server URL and the key discriminator for url+key-scoped providers", async () => {
-		await getModels({ provider: "litellm", apiKey: "compound-key", baseUrl: "http://host:4000" })
+		await getModels({
+			provider: providerIdentifiers.litellm,
+			apiKey: "compound-key",
+			baseUrl: "http://host:4000",
+		})
 		const cacheKey = writtenCacheKey()
 
 		// Expected shape: provider:url:keyDiscriminator
@@ -635,18 +695,26 @@ describe("compound cache key derivation across scoping dimensions", () => {
 	})
 
 	it("normalizes trailing slashes in the server URL so equivalent URLs share a cache key", async () => {
-		await getModels({ provider: "litellm", apiKey: "compound-key", baseUrl: "http://host:4000/" })
+		await getModels({
+			provider: providerIdentifiers.litellm,
+			apiKey: "compound-key",
+			baseUrl: "http://host:4000/",
+		})
 		const withSlash = writtenCacheKey()
 
 		mockSet.mockClear()
-		await getModels({ provider: "litellm", apiKey: "compound-key", baseUrl: "http://host:4000" })
+		await getModels({
+			provider: providerIdentifiers.litellm,
+			apiKey: "compound-key",
+			baseUrl: "http://host:4000",
+		})
 		const withoutSlash = writtenCacheKey()
 
 		expect(withSlash).toEqual(withoutSlash)
 	})
 
 	it("includes only the server URL when a url-scoped provider has no API key", async () => {
-		await getModels({ provider: "litellm", baseUrl: "http://host:4000" })
+		await getModels({ provider: providerIdentifiers.litellm, baseUrl: "http://host:4000" })
 		const cacheKey = writtenCacheKey()
 
 		// No trailing key discriminator when apiKey is absent.
@@ -654,7 +722,11 @@ describe("compound cache key derivation across scoping dimensions", () => {
 	})
 
 	it("falls back to the bare provider name for providers that are neither url- nor key-scoped", async () => {
-		await getModels({ provider: "openrouter", apiKey: "ignored-key", baseUrl: "http://ignored:4000" })
+		await getModels({
+			provider: providerIdentifiers.openrouter,
+			apiKey: "ignored-key",
+			baseUrl: "http://ignored:4000",
+		})
 		const cacheKey = writtenCacheKey()
 
 		expect(cacheKey).toBe("openrouter")

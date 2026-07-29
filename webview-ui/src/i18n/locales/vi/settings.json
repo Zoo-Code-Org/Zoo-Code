@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "Bạn có thể định cấu hình một phím tắt chung cho cài đặt này <SettingsLink>trong tùy chọn IDE của bạn</SettingsLink>.",
-		"description": "Cho phép Roo tự động thực hiện các hoạt động mà không cần phê duyệt. Chỉ bật những cài đặt này nếu bạn hoàn toàn tin tưởng AI và hiểu rõ các rủi ro bảo mật liên quan.",
+		"description": "Cho phép Zoo tự động thực hiện các hoạt động mà không cần phê duyệt. Chỉ bật những cài đặt này nếu bạn hoàn toàn tin tưởng AI và hiểu rõ các rủi ro bảo mật liên quan.",
 		"enabled": "Phê duyệt tự động đã bật",
 		"toggleAriaLabel": "Chuyển đổi tự động phê duyệt",
 		"disabledAriaLabel": "Tự động phê duyệt bị vô hiệu hóa - hãy chọn các tùy chọn trước",
@@ -459,6 +459,17 @@
 		"moonshotApiKey": "Khóa API Moonshot",
 		"getMoonshotApiKey": "Lấy khóa API Moonshot",
 		"moonshotBaseUrl": "Điểm vào Moonshot",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"zaiApiKey": "Khóa API Z AI",
 		"getZaiApiKey": "Lấy khóa API Z AI",
 		"zaiEntrypoint": "Điểm vào Z AI",

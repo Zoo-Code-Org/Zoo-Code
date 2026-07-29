@@ -187,7 +187,7 @@
 		"current": "Actual"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo quiere obtener instrucciones detalladas para ayudar con la tarea actual"
+		"wantsToFetch": "Zoo quiere obtener instrucciones detalladas para ayudar con la tarea actual"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo quiere leer este archivo",
@@ -197,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo quiere editar este archivo fuera del espacio de trabajo",
 		"wantsToEditProtected": "Zoo quiere editar un archivo de configuración protegido",
 		"wantsToCreate": "Zoo quiere crear un nuevo archivo",
-		"wantsToSearchReplace": "Roo quiere realizar búsqueda y reemplazo en este archivo",
-		"didSearchReplace": "Roo realizó búsqueda y reemplazo en este archivo",
+		"wantsToSearchReplace": "Zoo quiere realizar búsqueda y reemplazo en este archivo",
+		"didSearchReplace": "Zoo realizó búsqueda y reemplazo en este archivo",
 		"wantsToInsert": "Zoo quiere insertar contenido en este archivo",
 		"wantsToInsertWithLineNumber": "Zoo quiere insertar contenido en este archivo en la línea {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo quiere añadir contenido al final de este archivo",
@@ -343,9 +343,9 @@
 		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novedades:",
-			"highlight1": "Familia OpenAI GPT-5.6 (Sol, Terra, Luna) — disponible tanto en OpenAI Codex como en OpenAI Native.",
-			"highlight2": "Compatibilidad con Grok 4.5 — el nuevo modelo insignia de xAI, además de una corrección del reasoning effort que también beneficia a Grok 4 Mini.",
-			"highlight3": "Proveedor Kenari — un gateway de IA de primera línea compatible con OpenAI, facturado en rupias, que cubre Claude, GPT, DeepSeek, GLM, Kimi y más."
+			"highlight1": "Proveedores Moonshot y Kimi Code — conéctate a modelos de Moonshot con detección de modelos en tiempo real o inicia sesión en Kimi Code mediante su flujo de dispositivo OAuth.",
+			"highlight2": "Compatibilidad con los modelos más recientes — usa Claude Opus 5 con todos los proveedores, además de Kimi K3, Gemini 3.6 Flash y MiniMax-M3.",
+			"highlight3": "Flujos de trabajo más fiables — abandona subtareas interrumpidas de forma limpia e indexa archivos Dart y de texto sin formato en tu base de código."
 		},
 		"cloudAgents": {
 			"heading": "Novedades en la Nube:",

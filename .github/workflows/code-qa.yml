@@ -135,11 +135,11 @@ jobs:
             # lanes for behavioral confidence, but duplicating coverage uploads
             # there mostly adds Codecov overhead without changing pass/fail
             # behavior.
-            # Coverage is uploaded in three separate steps so each LCOV gets the
+            # Coverage is uploaded in separate steps so each LCOV gets the
             # correct flag set. Codecov double-counts overlapping lines when a
             # single upload carries multiple flags whose paths overlap, so the
-            # two core lanes (which both cover packages/core/src/**) must be
-            # uploaded individually with their own lane flag.
+            # core lanes and webview lane must be uploaded individually with
+            # their own flag.
             # See https://docs.codecov.com/docs/flags
             - name: Upload non-core coverage to Codecov
               if: matrix.upload-coverage
@@ -147,12 +147,19 @@ jobs:
               with:
                   files: >-
                       src/coverage/lcov.info,
-                      webview-ui/coverage/lcov.info,
                       packages/cloud/coverage/lcov.info,
                       packages/telemetry/coverage/lcov.info,
                       apps/cli/coverage/lcov.info
                   disable_search: true
                   flags: ${{ matrix.codecov-flag }}
+                  token: ${{ secrets.CODECOV_TOKEN }}
+            - name: Upload webview JSDOM coverage to Codecov
+              if: matrix.upload-coverage
+              uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+              with:
+                  files: webview-ui/coverage/lcov.info
+                  disable_search: true
+                  flags: webview-ui
                   token: ${{ secrets.CODECOV_TOKEN }}
             - name: Upload core unit coverage to Codecov
               if: matrix.upload-coverage

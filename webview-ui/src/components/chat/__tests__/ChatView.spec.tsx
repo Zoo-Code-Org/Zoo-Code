@@ -1134,6 +1134,69 @@ describe("ChatView - Message Queueing Tests", () => {
 			}),
 		)
 	})
+
+	it("clears the command_output controls when the final output arrives", async () => {
+		const { getByTestId, getByRole, queryByRole } = renderChatView()
+
+		// Hydrate state with a command_output ask (Proceed/Kill controls visible)
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 2000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "command_output",
+					ts: Date.now() - 1000,
+					text: "",
+					partial: false,
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(getByTestId("chat-textarea")).toBeInTheDocument()
+		})
+
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 50))
+		})
+
+		expect(getByRole("button", { name: "chat:proceedWhileRunning.title" })).toBeInTheDocument()
+
+		// The command completes: the final non-partial command_output say arrives.
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 2000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "command_output",
+					ts: Date.now() - 1000,
+					text: "",
+					partial: false,
+				},
+				{
+					type: "say",
+					say: "command_output",
+					ts: Date.now(),
+					text: "done\n",
+					partial: false,
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(queryByRole("button", { name: "chat:proceedWhileRunning.title" })).not.toBeInTheDocument()
+		})
+	})
 })
 
 describe("ChatView - Follow-up Suggestions", () => {

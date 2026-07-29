@@ -45,9 +45,100 @@ jobs:
                   VERSION=$(node -p 'require("./apps/vscode-e2e/package.json").devDependencies["@types/vscode"]')
                   echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-            - name: Cache VS Code test binary
+            - name: Restore VS Code test binary cache
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
-              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+              id: vscode-cache
+              uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+              with:
+                  path: |
+                      apps/vscode-e2e/.vscode-test/
+                  key: vscode-test-${{ runner.os }}-${{ steps.vscode-ver.outputs.version }}-v1
+                  # Fall back to the most recent stale binary so a version bump or cache
+                  # eviction doesn't force a download when the VS Code CDN is unreachable.
+                  restore-keys: |
+                      vscode-test-${{ runner.os }}-
+
+            - name: Probe VS Code download endpoints
+              if: (github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true') && steps.vscode-cache.outputs.cache-hit != 'true'
+              id: vscode-probe
+              # The version-resolution API and the archive CDN are different hosts. The
+              # archive URL 302-redirects to the CDN, so a HEAD probe that follows the
+              # redirect covers both. The fallback engages when either is unreachable.
+              run: |
+                  API_OK=false
+                  CDN_OK=false
+                  if curl -sf --max-time 10 https://update.code.visualstudio.com/api/releases/stable > /dev/null; then
+                      API_OK=true
+                  fi
+                  if curl -sfIL --max-time 20 -o /dev/null "https://update.code.visualstudio.com/${{ steps.vscode-ver.outputs.version }}/linux-x64/stable"; then
+                      CDN_OK=true
+                  fi
+                  if [ "$API_OK" = "true" ] && [ "$CDN_OK" = "true" ]; then
+                      echo "reachable=true" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "reachable=false" >> "$GITHUB_OUTPUT"
+                      echo "::warning::VS Code download endpoints unreachable (api=$API_OK, cdn=$CDN_OK); will try the stale cached binary"
+                  fi
+
+            # @vscode/test-electron only skips its live version-resolution request when the
+            # requested version already exists in .vscode-test/. On an exact-key miss it calls
+            # the update API before its download retry loop, so an unreachable CDN fails the
+            # job before any test runs. When the endpoints are down, point the runner at the
+            # stale binary restored above (runTest.ts honors VSCODE_VERSION) so the suite
+            # still runs.
+            - name: Fall back to stale VS Code binary when CDN is unreachable
+              if: (github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true') && steps.vscode-cache.outputs.cache-hit != 'true' && steps.vscode-probe.outputs.reachable == 'false'
+              id: vscode-fallback
+              run: |
+                  STALE=$(ls -d apps/vscode-e2e/.vscode-test/vscode-linux-x64-* 2>/dev/null | sort -V | tail -n 1 || true)
+                  if [ -n "$STALE" ]; then
+                      echo "VSCODE_VERSION=${STALE##*-}" >> "$GITHUB_ENV"
+                      echo "used=true" >> "$GITHUB_OUTPUT"
+                      echo "VS Code download endpoints are unreachable; falling back to cached VS Code ${STALE##*-}"
+                  else
+                      echo "::warning::VS Code download endpoints are unreachable and no cached binary is available; the download step will retry but may fail"
+                  fi
+
+            # Retry only the binary download: version resolution and the archive fetch are
+            # the network-fragile parts. Genuine test failures should fail fast, so the
+            # test step itself is deliberately not retried.
+            - name: Download VS Code test binary
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              id: vscode-download
+              run: |
+                  cd apps/vscode-e2e
+                  for attempt in 1 2 3; do
+                      if node -e "const { downloadAndUnzipVSCode } = require('@vscode/test-electron'); const version = process.env.VSCODE_VERSION || require('./package.json').devDependencies['@types/vscode']; downloadAndUnzipVSCode(version).catch((err) => { console.error(err); process.exit(1); });"; then
+                          exit 0
+                      fi
+                      echo "VS Code download attempt ${attempt} failed"
+                      if [ "$attempt" -lt 3 ]; then
+                          sleep 15
+                      fi
+                  done
+                  exit 1
+
+            # restore-keys can bring back older binaries alongside the one just
+            # downloaded; keep only the effective version so each saved cache entry
+            # stays at one binary instead of growing with every version bump.
+            - name: Prune stale VS Code binaries
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              run: |
+                  EFFECTIVE="${VSCODE_VERSION:-${{ steps.vscode-ver.outputs.version }}}"
+                  for dir in apps/vscode-e2e/.vscode-test/vscode-linux-x64-*; do
+                      [ -e "$dir" ] || continue
+                      if [ "$(basename "$dir")" != "vscode-linux-x64-$EFFECTIVE" ]; then
+                          echo "Pruning stale VS Code binary $(basename "$dir")"
+                          rm -rf "$dir"
+                      fi
+                  done
+
+            # Skip the save when the stale-binary fallback ran: the pinned-version key
+            # must not be populated with an older binary.
+            - name: Save VS Code test binary cache
+              if: (github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true') && steps.vscode-cache.outputs.cache-hit != 'true' && steps.vscode-fallback.outputs.used != 'true'
+              continue-on-error: true
+              uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
               with:
                   path: |
                       apps/vscode-e2e/.vscode-test/
@@ -59,12 +150,18 @@ jobs:
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
               run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:ci:mock
 
+            - name: Explain skipped mocked E2E pass marker
+              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success' && steps.vscode-fallback.outputs.used == 'true'
+              run: echo "Skipping mocked E2E pass marker because tests ran against a stale cached VS Code binary (VS Code download endpoints unreachable)."
+
             - name: Write mocked E2E pass marker
-              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success'
+              # Skip when the stale-binary fallback ran: a pass against an older VS Code
+              # must not mint a marker for the intended-version source hash.
+              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success' && steps.vscode-fallback.outputs.used != 'true'
               run: mkdir -p .cache/e2e-pass && date -u > .cache/e2e-pass/passed
 
             - name: Save mocked E2E pass marker
-              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success'
+              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success' && steps.vscode-fallback.outputs.used != 'true'
               continue-on-error: true
               uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
               with:

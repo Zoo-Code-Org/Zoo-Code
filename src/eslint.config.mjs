@@ -13,7 +13,8 @@ export default [
 			"no-empty": "off",
 
 			"@typescript-eslint/no-unused-vars": "off",
-			"@typescript-eslint/no-explicit-any": "off",
+			// Enforced; existing violations are suppressed in eslint-suppressions.json and cleaned up incrementally.
+			"@typescript-eslint/no-explicit-any": "error",
 			"@typescript-eslint/no-require-imports": "off",
 			"@typescript-eslint/ban-ts-comment": "off",
 		},
@@ -33,7 +34,7 @@ export default [
 	{
 		// Ratchet: enforce no-floating-promises directory by directory. Each
 		// directory is added here once its floating promises are resolved.
-		files: ["activate/**/*.ts", "core/task/**/*.ts"],
+		files: ["activate/**/*.ts", "core/task/**/*.ts", "core/webview/**/*.ts"],
 		languageOptions: {
 			parserOptions: {
 				project: true,

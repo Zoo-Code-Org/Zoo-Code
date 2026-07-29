@@ -56,6 +56,7 @@ import {
 	LiteLLM,
 	Mistral,
 	Moonshot,
+	KimiCode,
 	Ollama,
 	OpenAI,
 	OpenAICompatible,
@@ -116,7 +117,8 @@ const ApiOptions = ({
 	setErrorMessage,
 }: ApiOptionsProps) => {
 	const { t } = useAppTranslation()
-	const { organizationAllowList, openAiCodexIsAuthenticated } = useExtensionState()
+	const { organizationAllowList, openAiCodexIsAuthenticated, kimiCodeIsAuthenticated, kimiCodeOAuthState } =
+		useExtensionState()
 
 	const [customHeaders, setCustomHeaders] = useState<[string, string][]>(() => {
 		const headers = apiConfiguration?.openAiHeaders || {}
@@ -219,7 +221,13 @@ const ApiOptions = ({
 					},
 				})
 			} else if (selectedProvider === "ollama") {
-				vscode.postMessage({ type: "requestOllamaModels" })
+				vscode.postMessage({
+					type: "requestOllamaModels",
+					values: {
+						baseUrl: apiConfiguration?.ollamaBaseUrl,
+						apiKey: apiConfiguration?.ollamaApiKey,
+					},
+				})
 			} else if (selectedProvider === "lmstudio") {
 				requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl)
 			} else if (selectedProvider === "vscode-lm") {
@@ -243,6 +251,7 @@ const ApiOptions = ({
 			apiConfiguration?.openAiBaseUrl,
 			apiConfiguration?.openAiApiKey,
 			apiConfiguration?.ollamaBaseUrl,
+			apiConfiguration?.ollamaApiKey,
 			apiConfiguration?.lmStudioBaseUrl,
 			apiConfiguration?.litellmBaseUrl,
 			apiConfiguration?.litellmApiKey,
@@ -572,6 +581,15 @@ const ApiOptions = ({
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === "kimi-code" && (
+						<KimiCode
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							kimiCodeIsAuthenticated={kimiCodeIsAuthenticated}
+							kimiCodeOAuthState={kimiCodeOAuthState}
 						/>
 					)}
 

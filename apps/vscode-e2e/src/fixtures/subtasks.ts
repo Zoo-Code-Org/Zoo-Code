@@ -18,7 +18,8 @@ const SUBTASK_XPROFILE_DIFFERENT_CHILD_MARKER = "SUBTASK_CHILD_DIFFERENT_PROFILE
 const SUBTASK_CHILD_PROMPT = `${SUBTASK_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
 export const SUBTASK_PARENT_PROMPT = `${SUBTASK_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_CHILD_PROMPT}" Do not answer directly.`
 export const SUBTASK_CHILD_FOLLOWUP_ANSWER = "9"
-const SUBTASK_FAST_CHILD_PROMPT = `${SUBTASK_FAST_CHILD_MARKER}: Complete immediately with the exact result "Fast child completed".`
+export const SUBTASK_FAST_CHILD_RESULT = "Fast child completed"
+const SUBTASK_FAST_CHILD_PROMPT = `${SUBTASK_FAST_CHILD_MARKER}: Complete immediately with the exact result "${SUBTASK_FAST_CHILD_RESULT}".`
 export const SUBTASK_FAST_PARENT_PROMPT = `${SUBTASK_FAST_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${SUBTASK_FAST_CHILD_PROMPT}" Do not answer directly.`
 
 const SUBTASK_INTERRUPT_CHILD_PROMPT = `${SUBTASK_INTERRUPT_CHILD_MARKER}: Ask the user exactly this follow-up question: What is the square root of 81? After the user answers, complete with only the answer.`
@@ -47,6 +48,15 @@ export const SUBTASK_XPROFILE_SAME_CHILD_RESULT = "Same-profile child completed"
 export const SUBTASK_XPROFILE_DIFFERENT_CHILD_RESULT = "Different-profile child completed"
 export const SUBTASK_XPROFILE_PARENT_RESULT = "Sequential cross-profile parent resumed"
 
+// Scheduler regression tests — exercises TaskScheduler + run() dispatch post-CodeRabbit fix.
+// Separate markers to avoid collisions with the other subtask fixtures.
+const SCHED_STANDALONE_MARKER = "SCHED_STANDALONE_INTERRUPT_RESUME"
+const SCHED_COMPLETED_MARKER = "SCHED_COMPLETED_REOPEN"
+export const SCHED_STANDALONE_PROMPT = `${SCHED_STANDALONE_MARKER}: Ask the user exactly this follow-up question: What is the square root of 64? After the user answers, complete with only the answer.`
+export const SCHED_STANDALONE_FOLLOWUP_ANSWER = "8"
+export const SCHED_COMPLETED_PROMPT = `${SCHED_COMPLETED_MARKER}: Complete immediately with the exact result "Scheduler completed task".`
+export const SCHED_COMPLETED_RESULT = "Scheduler completed task"
+
 const apiHangChildMatch = new RegExp(SUBTASK_API_HANG_CHILD_MARKER)
 
 const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
@@ -54,6 +64,31 @@ const requestContains = (req: ChatCompletionRequest, expected: string[]) => {
 	return expected.every((text) => rawRequest.includes(text))
 }
 
+// aimock's `userMessage` matcher only inspects the LAST user message and joins only the
+// `type: "text"` content parts (see getTextContent in aimock's router). Fixtures that need
+// whole-request exclusions must replicate that scoping inside a predicate so they keep the
+// same matching semantics as the bare-regex fixtures they replace.
+const lastUserMessageContains = (req: ChatCompletionRequest, text: string) => {
+	const userMessages = req.messages?.filter((message) => message.role === "user") ?? []
+	const last = userMessages.at(-1)
+	if (!last) return false
+	const content =
+		typeof last.content === "string"
+			? last.content
+			: (last.content ?? [])
+					.filter((part): part is { type: "text"; text: string } => part?.type === "text")
+					.map((part) => part.text)
+					.join("")
+	return content.includes(text)
+}
+
+// reopenParentFromDelegation injects the child result into the resumed parent's history as
+// `Subtask <childId> completed.\n\nResult:\n<summary>`. Matching on this injected prefix (in
+// its JSON-serialized form) keeps parent-resume fixtures robust when
+// validateAndFixToolResultIds rewrites tool-use ids on resume — matching on the new_task
+// tool-call id directly proved flaky (the id can be rewritten, the fixture then misses, and
+// a looser child fixture wins and serves the child's response to the parent).
+const SUBTASK_RESULT_INJECTION = "completed.\\n\\nResult:"
 const completionAfterAnswer = (followupId: string, completionId: string) => ({
 	match: {
 		predicate: (req: ChatCompletionRequest) =>
@@ -100,25 +135,33 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// The parent prompt embeds SUBTASK_FAST_CHILD_MARKER verbatim, so parent-resume turns
+	// can also match a bare substring check (same collision class as #561). Exclude the
+	// parent marker so those turns fall through to the parent-resume fixture below.
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_FAST_CHILD_MARKER),
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, SUBTASK_FAST_CHILD_MARKER) &&
+				!requestContains(req, [SUBTASK_FAST_PARENT_MARKER]),
 		},
 		response: {
 			toolCalls: [
 				{
 					name: "attempt_completion",
-					arguments: JSON.stringify({ result: "Fast child completed" }),
+					arguments: JSON.stringify({ result: SUBTASK_FAST_CHILD_RESULT }),
 					id: "call_subtasks_fast_child_completion_002",
 				},
 			],
 		},
 	})
 
+	// Guard on SUBTASK_RESULT_INJECTION (not the child result text): the child result is
+	// embedded verbatim in SUBTASK_FAST_PARENT_PROMPT, so it cannot distinguish the parent's
+	// initial request from its resume turn.
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [SUBTASK_FAST_PARENT_MARKER, "call_subtasks_fast_parent_new_task_001"]),
+				requestContains(req, [SUBTASK_FAST_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
@@ -131,9 +174,15 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// This fixture is shared by several tests, so sequenceIndex cannot guard it. Exclude
+	// resume turns via the injected tool_result prefix instead: when the tool_result is
+	// serialized as role:"tool", the original parent prompt is the last user message again
+	// and would otherwise re-serve new_task on the parent's resume turn.
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_PARENT_MARKER),
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, SUBTASK_PARENT_MARKER) &&
+				!requestContains(req, [SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
@@ -149,9 +198,12 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// Same collision guard as the fast-child fixture above: SUBTASK_PARENT_PROMPT embeds
+	// SUBTASK_CHILD_MARKER verbatim, so parent-resume turns must not match this fixture.
 	mock.addFixture({
 		match: {
-			userMessage: new RegExp(SUBTASK_CHILD_MARKER),
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, SUBTASK_CHILD_MARKER) && !requestContains(req, [SUBTASK_PARENT_MARKER]),
 		},
 		response: {
 			toolCalls: [
@@ -172,7 +224,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [SUBTASK_PARENT_MARKER, "call_subtasks_parent_new_task_001"]),
+				requestContains(req, [SUBTASK_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
@@ -238,14 +290,12 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// Same as the fast parent-resume fixture: the child result is embedded verbatim in
+	// SUBTASK_API_HANG_PARENT_PROMPT, so guard on the injected tool_result prefix instead.
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [
-					SUBTASK_API_HANG_PARENT_MARKER,
-					"call_api_hang_parent_new_task_001",
-					SUBTASK_API_HANG_CHILD_RESULT,
-				]),
+				requestContains(req, [SUBTASK_API_HANG_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [
@@ -355,6 +405,62 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 
+	// Scheduler regression fixtures: standalone interrupted task resume and completed task reopen.
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [SCHED_STANDALONE_MARKER]) &&
+				!requestContains(req, ["call_sched_standalone_followup_001"]) &&
+				!requestContains(req, [`<user_message>\\n${SCHED_STANDALONE_FOLLOWUP_ANSWER}\\n</user_message>`]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "ask_followup_question",
+					arguments: JSON.stringify({
+						question: "What is the square root of 64?",
+						follow_up: [{ text: SCHED_STANDALONE_FOLLOWUP_ANSWER }],
+					}),
+					id: "call_sched_standalone_followup_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				toolResultContains(req, "call_sched_standalone_followup_001", [SCHED_STANDALONE_FOLLOWUP_ANSWER]) ||
+				requestContains(req, ["call_sched_standalone_followup_001", SCHED_STANDALONE_FOLLOWUP_ANSWER]) ||
+				requestContains(req, [
+					SCHED_STANDALONE_MARKER,
+					`<user_message>\\n${SCHED_STANDALONE_FOLLOWUP_ANSWER}\\n</user_message>`,
+				]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SCHED_STANDALONE_FOLLOWUP_ANSWER }),
+					id: "call_sched_standalone_completion_002",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: { userMessage: new RegExp(SCHED_COMPLETED_MARKER) },
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: SCHED_COMPLETED_RESULT }),
+					id: "call_sched_completed_completion_001",
+				},
+			],
+		},
+	})
+
 	// Interrupted-child-resumes-and-reports-back scenario (#560)
 	mock.addFixture({
 		match: {
@@ -433,7 +539,7 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 	mock.addFixture({
 		match: {
 			predicate: (req: ChatCompletionRequest) =>
-				requestContains(req, [SUBTASK_INTERRUPT_PARENT_MARKER, "call_interrupt_parent_new_task_001"]),
+				requestContains(req, [SUBTASK_INTERRUPT_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
 		},
 		response: {
 			toolCalls: [

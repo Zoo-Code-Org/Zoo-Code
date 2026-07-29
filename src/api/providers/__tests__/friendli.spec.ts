@@ -142,7 +142,16 @@ describe("FriendliHandler", () => {
 		},
 	])(
 		"should expose newly added model $modelId",
-		({ modelId, contextWindow, maxTokens, supportsMaxTokens, inputPrice, outputPrice, cacheWritesPrice, cacheReadsPrice }) => {
+		({
+			modelId,
+			contextWindow,
+			maxTokens,
+			supportsMaxTokens,
+			inputPrice,
+			outputPrice,
+			cacheWritesPrice,
+			cacheReadsPrice,
+		}) => {
 			expect(friendliModels[modelId]).toBeDefined()
 			const info = friendliModels[modelId] as import("@roo-code/types").ModelInfo
 			expect(info.maxTokens).toBe(maxTokens)
@@ -392,5 +401,219 @@ describe("Friendli model max output tokens (clamping behavior)", () => {
 		})
 		// supportsMaxTokens=true, user set 80k, model ceiling 131072 → min(80000, 131072) = 80000
 		expect(result).toBe(80_000)
+	})
+})
+
+describe("FriendliHandler — Friendli-specific reasoning params", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("should include reasoning_effort, chat_template_kwargs, parse_reasoning for GLM-5.2 with reasoning enabled", async () => {
+		const handler = new FriendliHandler({
+			apiModelId: "zai-org/GLM-5.2",
+			friendliApiKey: "test-key",
+			enableReasoningEffort: true,
+			reasoningEffort: "high",
+		})
+
+		mockCreate.mockImplementationOnce(() => ({
+			[Symbol.asyncIterator]: () => ({
+				async next() {
+					return { done: true }
+				},
+			}),
+		}))
+
+		await handler.createMessage("system", []).next()
+
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: "zai-org/GLM-5.2",
+				reasoning_effort: "high",
+				chat_template_kwargs: { enable_thinking: true },
+				parse_reasoning: true,
+				include_reasoning: true,
+			}),
+			undefined,
+		)
+	})
+
+	it("should send enable_thinking: false when enableReasoningEffort is false on controllable model", async () => {
+		const handler = new FriendliHandler({
+			apiModelId: "zai-org/GLM-5.2",
+			friendliApiKey: "test-...ey",
+			enableReasoningEffort: false,
+		})
+
+		mockCreate.mockImplementationOnce(() => ({
+			[Symbol.asyncIterator]: () => ({
+				async next() {
+					return { done: true }
+				},
+			}),
+		}))
+
+		await handler.createMessage("system", []).next()
+
+		const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+		expect(callArgs.reasoning_effort).toBeUndefined()
+		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: false })
+		expect(callArgs.parse_reasoning).toBeUndefined()
+		expect(callArgs.include_reasoning).toBeUndefined()
+	})
+
+	it("should send enable_thinking: false when reasoningEffort is none on controllable model", async () => {
+		const handler = new FriendliHandler({
+			apiModelId: "zai-org/GLM-5.2",
+			friendliApiKey: "test-...ey",
+			enableReasoningEffort: true,
+			reasoningEffort: "none",
+		})
+
+		mockCreate.mockImplementationOnce(() => ({
+			[Symbol.asyncIterator]: () => ({
+				async next() {
+					return { done: true }
+				},
+			}),
+		}))
+
+		await handler.createMessage("system", []).next()
+
+		const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+		expect(callArgs.reasoning_effort).toBeUndefined()
+		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: false })
+		expect(callArgs.parse_reasoning).toBeUndefined()
+		expect(callArgs.include_reasoning).toBeUndefined()
+	})
+
+	it("should send enable_thinking: false when reasoningEffort is disable on controllable model", async () => {
+		const handler = new FriendliHandler({
+			apiModelId: "zai-org/GLM-5.2",
+			friendliApiKey: "test-...ey",
+			enableReasoningEffort: true,
+			reasoningEffort: "disable",
+		})
+
+		mockCreate.mockImplementationOnce(() => ({
+			[Symbol.asyncIterator]: () => ({
+				async next() {
+					return { done: true }
+				},
+			}),
+		}))
+
+		await handler.createMessage("system", []).next()
+
+		const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+		expect(callArgs.reasoning_effort).toBeUndefined()
+		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: false })
+		expect(callArgs.parse_reasoning).toBeUndefined()
+		expect(callArgs.include_reasoning).toBeUndefined()
+	})
+
+	it("should use model default reasoningEffort when no explicit settings are provided", async () => {
+		const handler = new FriendliHandler({
+			apiModelId: "zai-org/GLM-5.2",
+			friendliApiKey: "test-...ey",
+			// No enableReasoningEffort or reasoningEffort — model default "high" kicks in
+		})
+
+		mockCreate.mockImplementationOnce(() => ({
+			[Symbol.asyncIterator]: () => ({
+				async next() {
+					return { done: true }
+				},
+			}),
+		}))
+
+		await handler.createMessage("system", []).next()
+
+		const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+		expect(callArgs.reasoning_effort).toBe("high")
+		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
+		expect(callArgs.parse_reasoning).toBe(true)
+		expect(callArgs.include_reasoning).toBe(true)
+	})
+
+	it("should not include any reasoning params for non-reasoning DeepSeek-V3.2", async () => {
+		const handler = new FriendliHandler({
+			apiModelId: "deepseek-ai/DeepSeek-V3.2",
+			friendliApiKey: "test-key",
+			enableReasoningEffort: true,
+			reasoningEffort: "high",
+		})
+
+		mockCreate.mockImplementationOnce(() => ({
+			[Symbol.asyncIterator]: () => ({
+				async next() {
+					return { done: true }
+				},
+			}),
+		}))
+
+		await handler.createMessage("system", []).next()
+
+		const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+		expect(callArgs.reasoning_effort).toBeUndefined()
+		expect(callArgs.chat_template_kwargs).toBeUndefined()
+		expect(callArgs.parse_reasoning).toBeUndefined()
+	})
+
+	it("should handle delta.reasoning_content from parse_reasoning=true stream", async () => {
+		const handler = new FriendliHandler({
+			apiModelId: "zai-org/GLM-5.2",
+			friendliApiKey: "test-key",
+			enableReasoningEffort: true,
+			reasoningEffort: "high",
+		})
+
+		mockCreate.mockImplementationOnce(async () => ({
+			[Symbol.asyncIterator]: async function* () {
+				yield {
+					choices: [{ delta: { reasoning_content: "Let me think..." } }],
+					usage: null,
+				}
+				yield {
+					choices: [{ delta: { content: "The answer is 42" } }],
+					usage: null,
+				}
+				yield {
+					choices: [{ delta: {} }],
+					usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+				}
+			},
+		}))
+
+		const stream = handler.createMessage("system", [])
+		const chunks = []
+		for await (const chunk of stream) {
+			chunks.push(chunk)
+		}
+
+		expect(chunks).toContainEqual({ type: "reasoning", text: "Let me think..." })
+		expect(chunks).toContainEqual({ type: "text", text: "The answer is 42" })
+	})
+
+	it("completePrompt should include reasoning params when enabled", async () => {
+		const handler = new FriendliHandler({
+			apiModelId: "zai-org/GLM-5.2",
+			friendliApiKey: "test-key",
+			enableReasoningEffort: true,
+			reasoningEffort: "medium",
+		})
+
+		mockCreate.mockResolvedValueOnce({
+			choices: [{ message: { content: "test result" } }],
+		})
+
+		await handler.completePrompt("test")
+
+		const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+		expect(callArgs.reasoning_effort).toBe("medium")
+		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
+		expect(callArgs.parse_reasoning).toBe(true)
+		expect(callArgs.include_reasoning).toBe(true)
 	})
 })

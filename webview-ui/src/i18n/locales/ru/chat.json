@@ -182,7 +182,7 @@
 		"current": "Текущая"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo хочет получить подробные инструкции для помощи с текущей задачей"
+		"wantsToFetch": "Zoo хочет получить подробные инструкции для помощи с текущей задачей"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo хочет прочитать этот файл",
@@ -192,8 +192,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo хочет отредактировать этот файл вне рабочей области",
 		"wantsToEditProtected": "Zoo хочет отредактировать защищённый файл конфигурации",
 		"wantsToCreate": "Zoo хочет создать новый файл",
-		"wantsToSearchReplace": "Roo хочет выполнить поиск и замену в этом файле",
-		"didSearchReplace": "Roo выполнил поиск и замену в этом файле",
+		"wantsToSearchReplace": "Zoo хочет выполнить поиск и замену в этом файле",
+		"didSearchReplace": "Zoo выполнил поиск и замену в этом файле",
 		"wantsToInsert": "Zoo хочет вставить содержимое в этот файл",
 		"wantsToInsertWithLineNumber": "Zoo хочет вставить содержимое в этот файл на строку {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo хочет добавить содержимое в конец этого файла",
@@ -242,7 +242,7 @@
 	"response": "Ответ",
 	"arguments": "Аргументы",
 	"text": {
-		"rooSaid": "Ру сказал"
+		"rooSaid": "Zoo сказал"
 	},
 	"feedback": {
 		"youSaid": "Вы сказали"
@@ -317,9 +317,9 @@
 		"support": "Поддержите Zoo Code, поставив нам звезду на <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Что нового:",
-			"highlight1": "Семейство OpenAI GPT-5.6 (Sol, Terra, Luna) — доступно как в OpenAI Codex, так и в OpenAI Native.",
-			"highlight2": "Поддержка Grok 4.5 — новая флагманская модель xAI, а также исправление reasoning effort, от которого выигрывает и Grok 4 Mini.",
-			"highlight3": "Провайдер Kenari — первоклассный AI-шлюз, совместимый с OpenAI, с выставлением счётов в рупиях, поддерживающий Claude, GPT, DeepSeek, GLM, Kimi и другие модели."
+			"highlight1": "Провайдеры Moonshot и Kimi Code — подключайтесь к моделям Moonshot с динамическим обнаружением моделей или входите в Kimi Code через OAuth-поток для устройств.",
+			"highlight2": "Поддержка новейших моделей — используйте Claude Opus 5 у разных провайдеров, а также Kimi K3, Gemini 3.6 Flash и MiniMax-M3.",
+			"highlight3": "Более надёжные рабочие процессы — безопасно завершайте прерванные подзадачи и индексируйте файлы Dart и обычные текстовые файлы в кодовой базе."
 		},
 		"cloudAgents": {
 			"heading": "Новое в облаке:",
@@ -382,7 +382,7 @@
 		"autoApprovedCostLimitReached": {
 			"title": "Достигнут лимит автоматически одобряемых расходов",
 			"button": "Сбросить и продолжить",
-			"description": "Ру достиг автоматически утвержденного лимита расходов в размере ${{count}}. Хотите сбросить расходы и продолжить выполнение задачи?"
+			"description": "Zoo достиг автоматически утвержденного лимита расходов в размере ${{count}}. Хотите сбросить расходы и продолжить выполнение задачи?"
 		}
 	},
 	"codebaseSearch": {
