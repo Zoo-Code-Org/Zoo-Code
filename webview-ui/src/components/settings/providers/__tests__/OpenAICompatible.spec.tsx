@@ -76,8 +76,13 @@ vi.mock("../../R1FormatSetting", () => ({
 	R1FormatSetting: () => <div data-testid="r1-format-setting">R1 Format Setting</div>,
 }))
 
+const { mockThinkingBudget } = vi.hoisted(() => ({ mockThinkingBudget: vi.fn() }))
+
 vi.mock("../../ThinkingBudget", () => ({
-	ThinkingBudget: () => <div data-testid="thinking-budget">Thinking Budget</div>,
+	ThinkingBudget: (props: any) => {
+		mockThinkingBudget(props)
+		return <div data-testid="thinking-budget">Thinking Budget</div>
+	},
 }))
 
 // Mock react-use
@@ -310,6 +315,41 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 			// Check that the description has the correct styling classes
 			const description = screen.getByText("settings:includeMaxOutputTokensDescription")
 			expect(description).toHaveClass("text-sm", "text-vscode-descriptionForeground", "ml-6")
+		})
+	})
+	describe("reasoning effort", () => {
+		it("should expose and persist the max reasoning-effort value", () => {
+			const apiConfiguration: Partial<ProviderSettings> = {
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+				},
+			}
+
+			render(
+				<OpenAICompatible
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
+			expect(thinkingBudgetProps.modelInfo.supportsReasoningEffort).toEqual([
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			])
+
+			thinkingBudgetProps.setApiConfigurationField("reasoningEffort", "max")
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiCustomModelInfo", {
+				...apiConfiguration.openAiCustomModelInfo,
+				reasoningEffort: "max",
+			})
 		})
 	})
 })
