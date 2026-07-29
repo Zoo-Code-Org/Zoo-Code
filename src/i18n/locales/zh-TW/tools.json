@@ -8,6 +8,8 @@
 	},
 	"toolRepetitionLimitReached": "Zoo 似乎陷入循環，反覆嘗試同一操作 ({{toolName}})。這可能表明目前策略存在問題。請考慮重新描述工作、提供更具體的指示或引導其嘗試不同的方法。",
 	"unknownToolError": "Zoo 嘗試使用未知工具：「{{toolName}}」。正在重試...",
+	"missingToolParameter": "Zoo 嘗試使用 {{toolName}} 但未提供必要參數 '{{paramName}}' 的值。正在重試...",
+	"missingToolParameterWithPath": "Zoo 嘗試對 '{{relPath}}' 使用 {{toolName}} 但未提供必要參數 '{{paramName}}' 的值。正在重試...",
 	"codebaseSearch": {
 		"approval": "正在搜尋程式碼庫中的「{{query}}」..."
 	},

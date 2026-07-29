@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "您可以<SettingsLink>在 IDE 首选项中</SettingsLink>为此设置配置全局快捷方式。",
-		"description": "允许 Roo 自动执行操作而无需批准。只有在您完全信任 AI 并了解相关安全风险的情况下才启用这些设置。",
+		"description": "允许 Zoo 自动执行操作而无需批准。只有在您完全信任 AI 并了解相关安全风险的情况下才启用这些设置。",
 		"enabled": "自动批准已启用",
 		"toggleAriaLabel": "切换自动批准",
 		"disabledAriaLabel": "自动批准已禁用 - 请先选择选项",
@@ -616,7 +616,7 @@
 		},
 		"consecutiveMistakeLimit": {
 			"label": "错误和重复限制",
-			"description": "在显示“Roo遇到问题”对话框前允许的连续错误或重复操作次数。设置为 0 可禁用此安全机制（它将永远不会触发）。",
+			"description": "在显示“Zoo遇到问题”对话框前允许的连续错误或重复操作次数。设置为 0 可禁用此安全机制（它将永远不会触发）。",
 			"unlimitedDescription": "已启用无限重试（自动继续）。对话框将永远不会出现。",
 			"warning": "⚠️ 设置为 0 允许无限重试，这可能会消耗大量 API 使用量"
 		},

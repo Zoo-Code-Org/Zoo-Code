@@ -194,8 +194,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo veut éditer ce fichier en dehors de l'espace de travail",
 		"wantsToEditProtected": "Zoo veut éditer un fichier de configuration protégé",
 		"wantsToCreate": "Zoo veut créer un nouveau fichier",
-		"wantsToSearchReplace": "Roo veut effectuer une recherche et remplacement sur ce fichier",
-		"didSearchReplace": "Roo a effectué une recherche et remplacement sur ce fichier",
+		"wantsToSearchReplace": "Zoo veut effectuer une recherche et remplacement sur ce fichier",
+		"didSearchReplace": "Zoo a effectué une recherche et remplacement sur ce fichier",
 		"wantsToInsert": "Zoo veut insérer du contenu dans ce fichier",
 		"wantsToInsertWithLineNumber": "Zoo veut insérer du contenu dans ce fichier à la ligne {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo veut ajouter du contenu à la fin de ce fichier",
@@ -208,7 +208,7 @@
 		"didGenerateImage": "Zoo a généré une image"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo veut récupérer des instructions détaillées pour aider à la tâche actuelle"
+		"wantsToFetch": "Zoo veut récupérer des instructions détaillées pour aider à la tâche actuelle"
 	},
 	"directoryOperations": {
 		"wantsToViewTopLevel": "Zoo veut voir les fichiers de premier niveau dans ce répertoire",

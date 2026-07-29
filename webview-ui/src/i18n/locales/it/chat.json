@@ -141,7 +141,7 @@
 	"forNextMode": "per la prossima modalità",
 	"forPreviousMode": "per la modalità precedente",
 	"instructions": {
-		"wantsToFetch": "Roo vuole recuperare istruzioni dettagliate per aiutare con l'attività corrente"
+		"wantsToFetch": "Zoo vuole recuperare istruzioni dettagliate per aiutare con l'attività corrente"
 	},
 	"error": "Errore",
 	"diffError": {
@@ -197,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo vuole modificare questo file al di fuori dell'area di lavoro",
 		"wantsToEditProtected": "Zoo vuole modificare un file di configurazione protetto",
 		"wantsToCreate": "Zoo vuole creare un nuovo file",
-		"wantsToSearchReplace": "Roo vuole eseguire ricerca e sostituzione in questo file",
-		"didSearchReplace": "Roo ha eseguito ricerca e sostituzione in questo file",
+		"wantsToSearchReplace": "Zoo vuole eseguire ricerca e sostituzione in questo file",
+		"didSearchReplace": "Zoo ha eseguito ricerca e sostituzione in questo file",
 		"wantsToInsert": "Zoo vuole inserire contenuto in questo file",
 		"wantsToInsertWithLineNumber": "Zoo vuole inserire contenuto in questo file alla riga {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo vuole aggiungere contenuto alla fine di questo file",

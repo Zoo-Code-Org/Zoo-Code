@@ -5,6 +5,10 @@ import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 import { setDefaultSuiteTimeout } from "./test-utils"
 import { sleep, waitFor, waitUntilCompleted } from "./utils"
 import {
+	SCHED_COMPLETED_PROMPT,
+	SCHED_COMPLETED_RESULT,
+	SCHED_STANDALONE_FOLLOWUP_ANSWER,
+	SCHED_STANDALONE_PROMPT,
 	SUBTASK_ABANDON_CHILD_FOLLOWUP_ANSWER,
 	SUBTASK_ABANDON_PARENT_PROMPT,
 	SUBTASK_API_HANG_CHILD_MARKER,
@@ -943,6 +947,141 @@ suite("Roo Code Subtasks", function () {
 				await api.clearCurrentTask()
 			}
 			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+		}
+	})
+
+	// TaskScheduler regression: resumeTask on a completed task must show resume_completed_task ask.
+	// Before the CodeRabbit fix, createTaskWithHistoryItem bypassed the scheduler and called
+	// Task.run() via the constructor's startTask: true default, causing run() to call startTask()
+	// (clearing history) instead of resumeTaskFromHistory().
+	test("resumeTask on a completed task presents resume_completed_task ask", async () => {
+		const api = globalThis.api
+		const asks: Record<string, ClineMessage[]> = {}
+		const says: Record<string, ClineMessage[]> = {}
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "ask") {
+				asks[taskId] = asks[taskId] || []
+				asks[taskId].push(message)
+			}
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		try {
+			// Run a task to completion.
+			const taskId = await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "ask",
+							autoApprovalEnabled: true,
+							enableCheckpoints: false,
+						},
+						text: SCHED_COMPLETED_PROMPT,
+					}),
+			})
+
+			assert.strictEqual(
+				says[taskId]?.find(({ say }) => say === "completion_result")?.text?.trim(),
+				SCHED_COMPLETED_RESULT,
+				"Task should complete with expected result",
+			)
+
+			// Re-open it via resumeTask — should hit resumeTaskFromHistory(), showing resume_completed_task.
+			await api.resumeTask(taskId)
+
+			await waitFor(
+				() => asks[taskId]?.some(({ type, ask }) => type === "ask" && ask === "resume_completed_task") ?? false,
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await sleep(500)
+		}
+	})
+
+	// TaskScheduler regression: resumeTask on an interrupted standalone task must show resume_task
+	// ask and allow the task to complete normally via the scheduler slot.
+	test("resumeTask on an interrupted standalone task presents resume_task ask and completes", async () => {
+		const api = globalThis.api
+		const asks: Record<string, ClineMessage[]> = {}
+		const says: Record<string, ClineMessage[]> = {}
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "ask") {
+				asks[taskId] = asks[taskId] || []
+				asks[taskId].push(message)
+			}
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		let taskId: string | undefined
+
+		try {
+			taskId = await api.startNewTask({
+				configuration: {
+					mode: "ask",
+					autoApprovalEnabled: true,
+					enableCheckpoints: false,
+				},
+				text: SCHED_STANDALONE_PROMPT,
+			})
+
+			// Wait until the task pauses at the follow-up question.
+			await waitFor(() => asks[taskId!]?.some(({ type, ask }) => type === "ask" && ask === "followup") ?? false)
+
+			// Cancel it — the task becomes interrupted.
+			await api.cancelCurrentTask()
+
+			await waitFor(
+				() => asks[taskId!]?.some(({ type, ask }) => type === "ask" && ask === "resume_task") ?? false,
+			)
+
+			// Resume via scheduler path (createTaskWithHistoryItem).
+			const askCountBeforeResume = asks[taskId!]?.length ?? 0
+			await api.resumeTask(taskId!)
+
+			await waitFor(() =>
+				(asks[taskId!] ?? [])
+					.slice(askCountBeforeResume)
+					.some(({ type, ask }) => type === "ask" && ask === "resume_task"),
+			)
+
+			// Sending the answer both acknowledges the resume_task ask and answers the pending
+			// follow-up question from the original task, completing the task.
+			const completedTaskId = await waitUntilCompleted({
+				api,
+				start: async () => {
+					await api.sendMessage(SCHED_STANDALONE_FOLLOWUP_ANSWER)
+					return taskId!
+				},
+			})
+
+			assert.strictEqual(completedTaskId, taskId, "The resumed standalone task should complete")
+			assert.strictEqual(
+				says[taskId!]?.find(({ say }) => say === "completion_result")?.text?.trim(),
+				SCHED_STANDALONE_FOLLOWUP_ANSWER,
+				"Task should complete with the follow-up answer as result",
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await sleep(500)
 		}
 	})
 })

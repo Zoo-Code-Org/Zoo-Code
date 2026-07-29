@@ -289,11 +289,6 @@
 			"count": 5
 		}
 	},
-	"api/providers/__tests__/vscode-lm.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/xai.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -479,11 +474,6 @@
 			"count": 7
 		}
 	},
-	"api/providers/vscode-lm.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/xai.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 7
@@ -544,11 +534,6 @@
 			"count": 5
 		}
 	},
-	"api/transform/__tests__/vscode-lm-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 23
-		}
-	},
 	"api/transform/__tests__/zai-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
@@ -597,11 +582,6 @@
 	"api/transform/responses-api-stream.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
-		}
-	},
-	"api/transform/vscode-lm-format.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"api/transform/zai-format.ts": {
@@ -866,7 +846,7 @@
 	},
 	"core/task/__tests__/Task.dispose.test.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 3
 		}
 	},
 	"core/task/__tests__/Task.persistence.spec.ts": {

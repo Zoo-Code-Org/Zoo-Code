@@ -54,6 +54,7 @@ import {
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
+import { TaskScheduler } from "../task/TaskScheduler"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
@@ -153,6 +154,12 @@ function runDelegationTransition<T>(
 	return current
 }
 
+function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): void {
+	void scheduler
+		.schedule(task, () => task.run())
+		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -167,6 +174,7 @@ export class ClineProvider
 	private webviewDisposables: vscode.Disposable[] = []
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
+	private taskScheduler = new TaskScheduler()
 	private delegationTransitionLocks?: Map<string, Promise<void>>
 	private cancelledDelegationChildIds = new Set<string>()
 	private codeIndexStatusSubscription?: vscode.Disposable
@@ -683,6 +691,10 @@ export class ClineProvider
 		this._disposed = true
 		this.log("Disposing ClineProvider...")
 
+		// Reject any tasks still waiting for a scheduler permit so they don't
+		// hold the event loop after the provider is torn down.
+		this.taskScheduler.cancelQueued()
+
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
 		// rather than being left persisted as "active" across the reload.
@@ -1182,7 +1194,7 @@ export class ClineProvider
 			taskNumber: historyItem.number,
 			workspacePath: historyItem.workspace,
 			onCreated: this.taskCreationCallback,
-			startTask: options?.startTask ?? true,
+			startTask: false,
 			// Preserve the status from the history item to avoid overwriting it when the task saves messages
 			initialStatus: historyItem.status,
 			rateLimitClock: this.rateLimitClock,
@@ -1222,12 +1234,20 @@ export class ClineProvider
 			this.log(
 				`[createTaskWithHistoryItem] rehydrated task ${task.taskId}.${task.instanceId} in-place (flicker-free)`,
 			)
+
+			if (options?.startTask !== false) {
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
+			}
 		} else {
 			await this.addClineToStack(task)
 
 			this.log(
 				`[createTaskWithHistoryItem] ${task.parentTask ? "child" : "parent"} task ${task.taskId}.${task.instanceId} instantiated`,
 			)
+
+			if (options?.startTask !== false) {
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
+			}
 		}
 
 		// Check if there's a pending edit after checkpoint restoration
@@ -1379,7 +1399,7 @@ export class ClineProvider
 						window.AUDIO_BASE_URI = "${audioUri}"
 						window.MATERIAL_ICONS_BASE_URI = "${materialIconsUri}"
 					</script>
-					<title>Roo Code</title>
+					<title>Zoo Code</title>
 				</head>
 				<body>
 					<div id="root"></div>
@@ -1458,7 +1478,7 @@ export class ClineProvider
 				window.AUDIO_BASE_URI = "${audioUri}"
 				window.MATERIAL_ICONS_BASE_URI = "${materialIconsUri}"
 			</script>
-            <title>Roo Code</title>
+            <title>Zoo Code</title>
           </head>
           <body>
             <noscript>You need to enable JavaScript to run this app.</noscript>
@@ -3186,7 +3206,7 @@ export class ClineProvider
 
 		await this.addClineToStack(task)
 		if (options.startTask !== false) {
-			task.start()
+			scheduleTask(this.taskScheduler, task, "createTask")
 		}
 
 		this.log(
@@ -3698,7 +3718,7 @@ export class ClineProvider
 		}
 
 		// 6) Start the child task now that parent metadata is safely persisted.
-		child.start()
+		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
 
 		// 7) Emit TaskDelegated (provider-level)
 		try {
