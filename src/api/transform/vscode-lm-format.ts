@@ -4,7 +4,7 @@ import * as vscode from "vscode"
 /**
  * Safely converts a value into a plain object.
  */
-function asObjectSafe(value: any): object {
+function asObjectSafe(value: unknown): object {
 	// Handle null/undefined
 	if (!value) {
 		return {}

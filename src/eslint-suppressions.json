@@ -474,11 +474,6 @@
 			"count": 7
 		}
 	},
-	"api/providers/vscode-lm.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/xai.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 7
@@ -539,11 +534,6 @@
 			"count": 5
 		}
 	},
-	"api/transform/__tests__/vscode-lm-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 24
-		}
-	},
 	"api/transform/__tests__/zai-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
@@ -592,11 +582,6 @@
 	"api/transform/responses-api-stream.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
-		}
-	},
-	"api/transform/vscode-lm-format.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"api/transform/zai-format.ts": {

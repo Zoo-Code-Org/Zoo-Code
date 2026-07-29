@@ -338,28 +338,34 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		return this.client
 	}
 
-	private cleanMessageContent(content: any): any {
-		if (!content) {
-			return content
+	private cleanMessageContent(
+		content: Anthropic.Messages.MessageParam["content"],
+	): Anthropic.Messages.MessageParam["content"] {
+		return this.deepClean(content) as Anthropic.Messages.MessageParam["content"]
+	}
+
+	private deepClean(value: unknown): unknown {
+		if (!value) {
+			return value
 		}
 
-		if (typeof content === "string") {
-			return content
+		if (typeof value === "string") {
+			return value
 		}
 
-		if (Array.isArray(content)) {
-			return content.map((item) => this.cleanMessageContent(item))
+		if (Array.isArray(value)) {
+			return value.map((item) => this.deepClean(item))
 		}
 
-		if (typeof content === "object") {
-			const cleaned: any = {}
-			for (const [key, value] of Object.entries(content)) {
-				cleaned[key] = this.cleanMessageContent(value)
+		if (typeof value === "object") {
+			const cleaned: Record<string, unknown> = {}
+			for (const [key, v] of Object.entries(value)) {
+				cleaned[key] = this.deepClean(v)
 			}
 			return cleaned
 		}
 
-		return content
+		return value
 	}
 
 	override async *createMessage(

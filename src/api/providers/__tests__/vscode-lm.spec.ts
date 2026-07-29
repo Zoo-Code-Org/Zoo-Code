@@ -12,16 +12,14 @@ vi.mock("vscode", () => {
 		constructor(
 			public callId: string,
 			public name: string,
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			public input: any,
+			public input: object,
 		) {}
 	}
 
 	return {
 		workspace: {
 			getConfiguration: vi.fn(() => ({
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				get: vi.fn((key: string, defaultValue: any) => defaultValue),
+				get: vi.fn((key: string, defaultValue: unknown) => defaultValue),
 			})),
 			onDidChangeConfiguration: vi.fn((_callback) => ({
 				dispose: vi.fn(),
@@ -503,8 +501,7 @@ describe("VsCodeLmHandler", () => {
 			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 				stream: (async function* () {
 					// Yield an unknown chunk type (not TextPart, not ToolCallPart)
-					// eslint-disable-next-line @typescript-eslint/no-explicit-any
-					yield { type: "unknown", foo: "bar" } as any
+					yield { type: "unknown", foo: "bar" } as unknown as vscode.LanguageModelTextPart
 					return
 				})(),
 				text: (async function* () {
@@ -533,8 +530,7 @@ describe("VsCodeLmHandler", () => {
 			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			// Create a TextPart with a non-string value (number)
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const badTextPart = new vscode.LanguageModelTextPart(42 as any)
+			const badTextPart = new vscode.LanguageModelTextPart(42 as unknown as string)
 			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 				stream: (async function* () {
 					yield badTextPart
@@ -566,8 +562,7 @@ describe("VsCodeLmHandler", () => {
 			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			// Create a ToolCallPart with a non-string callId
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const badToolCall = new vscode.LanguageModelToolCallPart(123 as any, "valid-name", {})
+			const badToolCall = new vscode.LanguageModelToolCallPart(123 as unknown as string, "valid-name", {})
 			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 				stream: (async function* () {
 					yield badToolCall
@@ -599,8 +594,11 @@ describe("VsCodeLmHandler", () => {
 			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			// Create a ToolCallPart with a string input (not an object)
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const badToolCall = new vscode.LanguageModelToolCallPart("call-1", "valid-name", "not-an-object" as any)
+			const badToolCall = new vscode.LanguageModelToolCallPart(
+				"call-1",
+				"valid-name",
+				"not-an-object" as unknown as object,
+			)
 			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
 				stream: (async function* () {
 					yield badToolCall
@@ -632,8 +630,7 @@ describe("VsCodeLmHandler", () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 			// Create a ToolCallPart with circular input that will throw on JSON.stringify
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const circularInput: any = { name: "circular" }
+			const circularInput: Record<string, unknown> = { name: "circular" }
 			circularInput.self = circularInput
 
 			const badToolCall = new vscode.LanguageModelToolCallPart("call-1", "valid-name", circularInput)
@@ -909,8 +906,7 @@ describe("VsCodeLmHandler", () => {
 				cancel: vi.fn(),
 				dispose: vi.fn(),
 			}
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			handler["currentRequestCancellation"] = mockCancellation as any
+			handler["currentRequestCancellation"] = mockCancellation as unknown as vscode.CancellationTokenSource
 
 			mockLanguageModelChat.countTokens.mockResolvedValueOnce(50)
 
@@ -970,8 +966,7 @@ describe("VsCodeLmHandler", () => {
 			handler["currentRequestCancellation"] = null
 			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			mockLanguageModelChat.countTokens.mockResolvedValueOnce("not-a-number" as any)
+			mockLanguageModelChat.countTokens.mockResolvedValueOnce("not-a-number" as unknown as number)
 
 			const content: Anthropic.Messages.ContentBlockParam[] = [{ type: "text", text: "test" }]
 			const result = await handler.countTokens(content)
@@ -1041,6 +1036,42 @@ describe("VsCodeLmHandler", () => {
 
 			const promise = handler.completePrompt("Test prompt")
 			await expect(promise).rejects.toThrow("VSCode LM completion error: Completion failed")
+		})
+	})
+
+	describe("cleanMessageContent / deepClean", () => {
+		it("passes through string content unchanged", () => {
+			const result = handler["cleanMessageContent"]("hello")
+			expect(result).toBe("hello")
+		})
+
+		it("returns falsy values as-is", () => {
+			expect(handler["cleanMessageContent"]("")).toBe("")
+		})
+
+		it("recursively cleans array content", () => {
+			const input: Anthropic.Messages.MessageParam["content"] = [{ type: "text", text: "hi" }]
+			const result = handler["cleanMessageContent"](input)
+			expect(result).toEqual([{ type: "text", text: "hi" }])
+		})
+
+		it("recursively cleans nested objects within array items", () => {
+			const input: Anthropic.Messages.MessageParam["content"] = [
+				{ type: "text", text: "hello" },
+				{ type: "text", text: "world" },
+			]
+			const result = handler["cleanMessageContent"](input)
+			expect(result).toEqual(input)
+		})
+
+		it("preserves primitive values other than strings inside objects", () => {
+			// deepClean hits the final `return value` branch for non-string primitives
+			// Exercise via a nested object whose property value is a number
+			const input = [
+				{ type: "text", text: "x", extra: 42 },
+			] as unknown as Anthropic.Messages.MessageParam["content"]
+			const result = handler["cleanMessageContent"](input) as unknown as Array<Record<string, unknown>>
+			expect(result[0].extra).toBe(42)
 		})
 	})
 })

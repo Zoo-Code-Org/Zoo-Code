@@ -16,11 +16,16 @@ interface MockLanguageModelTextPart {
 	value: string
 }
 
+type MockLanguageModelChatMessage = {
+	role: string
+	content: unknown
+}
+
 interface MockLanguageModelToolCallPart {
 	type: "tool_call"
 	callId: string
 	name: string
-	input: any
+	input: object
 }
 
 interface MockLanguageModelToolResultPart {
@@ -46,7 +51,7 @@ vitest.mock("vscode", () => {
 		constructor(
 			public callId: string,
 			public name: string,
-			public input: any,
+			public input: object,
 		) {}
 	}
 
@@ -165,7 +170,7 @@ describe("convertToVsCodeLmMessages", () => {
 						type: "tool_use",
 						id: "tool-num",
 						name: "numericTool",
-						input: 42 as any, // number is valid JSON
+						input: 42 as unknown as object, // number is valid JSON
 					},
 				],
 			},
@@ -241,7 +246,7 @@ describe("convertToVsCodeLmMessages", () => {
 				content: [
 					{
 						type: "image",
-						source: { type: "url", url: "https://example.com/img.png" } as any,
+						source: { type: "url", url: "https://example.com/img.png" },
 					},
 				],
 			},
@@ -263,7 +268,7 @@ describe("convertToVsCodeLmMessages", () => {
 						content: [
 							{
 								type: "image",
-								source: { type: "url", url: "https://example.com/img.png" } as any,
+								source: { type: "url", url: "https://example.com/img.png" },
 							},
 						],
 					},
@@ -272,7 +277,7 @@ describe("convertToVsCodeLmMessages", () => {
 		]
 
 		const result = convertToVsCodeLmMessages(messages)
-		const toolResult = result[0].content[0] as any
+		const toolResult = result[0].content[0] as MockLanguageModelToolResultPart
 		expect(toolResult.content[0].value).toContain("[Image (url): not supported by VSCode LM API]")
 	})
 
@@ -296,7 +301,7 @@ describe("convertToVsCodeLmMessages", () => {
 		]
 
 		const result = convertToVsCodeLmMessages(messages)
-		const toolResult = result[0].content[0] as any
+		const toolResult = result[0].content[0] as MockLanguageModelToolResultPart
 		expect(toolResult.content[0].value).toBe("[Image (base64): image/jpeg not supported by VSCode LM API]")
 	})
 
@@ -308,31 +313,31 @@ describe("convertToVsCodeLmMessages", () => {
 					{
 						type: "tool_result",
 						tool_use_id: "tool-1",
-						content: [{ type: "document" } as any],
+						content: [{ type: "document" } as unknown as Anthropic.Messages.DocumentBlockParam],
 					},
 				],
 			},
 		]
 
 		const result = convertToVsCodeLmMessages(messages)
-		const toolResult = result[0].content[0] as any
+		const toolResult = result[0].content[0] as MockLanguageModelToolResultPart
 		expect(toolResult.content[0].value).toBe("")
 	})
 })
 
 describe("convertToAnthropicRole", () => {
 	it("should convert assistant role correctly", () => {
-		const result = convertToAnthropicRole("assistant" as any)
+		const result = convertToAnthropicRole(vscode.LanguageModelChatMessageRole.Assistant)
 		expect(result).toBe("assistant")
 	})
 
 	it("should convert user role correctly", () => {
-		const result = convertToAnthropicRole("user" as any)
+		const result = convertToAnthropicRole(vscode.LanguageModelChatMessageRole.User)
 		expect(result).toBe("user")
 	})
 
 	it("should return null for unknown roles", () => {
-		const result = convertToAnthropicRole("unknown" as any)
+		const result = convertToAnthropicRole("unknown" as unknown as vscode.LanguageModelChatMessageRole)
 		expect(result).toBeNull()
 	})
 })
@@ -342,7 +347,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: "Hello world",
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("Hello world")
@@ -353,7 +358,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockTextPart],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("Text content")
@@ -365,7 +370,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockTextPart1, mockTextPart2],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("First partSecond part")
@@ -379,7 +384,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockToolResultPart],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("tool-result-idTool result content")
@@ -390,7 +395,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "assistant",
 			content: [mockToolCallPart],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("tool-namecall-id")
@@ -406,7 +411,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "assistant",
 			content: [mockToolCallPart],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe(`calculatorcall-id${JSON.stringify(mockInput)}`)
@@ -417,7 +422,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "assistant",
 			content: [mockToolCallPart],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("tool-namecall-id")
@@ -435,7 +440,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "assistant",
 			content: [mockTextPart, mockToolResultPart, mockToolCallPart],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe(`Text contentresult-idTool resulttoolcall-id${JSON.stringify(mockInput)}`)
@@ -445,7 +450,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("")
@@ -455,7 +460,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: undefined,
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("")
@@ -472,7 +477,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockToolResultPart],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("result-idPart 1Part 2")
@@ -484,7 +489,7 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockToolResultPart],
-		} as any
+		} satisfies MockLanguageModelChatMessage as unknown as vscode.LanguageModelChatMessage
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("result-id")
@@ -494,8 +499,7 @@ describe("extractTextCountFromMessage", () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 		// Create an object with a circular reference that will throw on JSON.stringify
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const circularInput: any = { name: "circular" }
+		const circularInput: Record<string, unknown> = { name: "circular" }
 		circularInput.self = circularInput
 
 		const mockToolCallPart = new (vitest.mocked(vscode).LanguageModelToolCallPart)(
@@ -504,13 +508,12 @@ describe("extractTextCountFromMessage", () => {
 			circularInput,
 		)
 
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const message: any = {
-			role: vscode.LanguageModelChatMessageRole.Assistant,
+		const message: MockLanguageModelChatMessage = {
+			role: "assistant",
 			content: [mockToolCallPart],
 		}
 
-		const result = extractTextCountFromMessage(message)
+		const result = extractTextCountFromMessage(message as unknown as vscode.LanguageModelChatMessage)
 
 		// Should still return the tool name and callId even when input stringify fails
 		expect(result).toBe("broken-toolcall-id")
