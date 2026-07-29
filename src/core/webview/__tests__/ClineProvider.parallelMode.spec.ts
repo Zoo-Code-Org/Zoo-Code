@@ -844,6 +844,24 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await provider.dispose()
 		})
+		it("should not update viewLocalState when durable view-state persistence fails", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const providerAccess = provider as unknown as {
+				setViewStateId: (viewStateId: string) => Promise<void>
+				saveViewState: (key: keyof ExtensionState, value: unknown) => Promise<void>
+				viewLocalState: Partial<ExtensionState>
+			}
+			vi.spyOn(provider.contextProxy, "setValue").mockRejectedValueOnce(new Error("persist failed"))
+
+			await providerAccess.setViewStateId("stable-sidebar-view")
+
+			await expect(providerAccess.saveViewState("mode", "architect")).rejects.toThrow("persist failed")
+			expect(providerAccess.viewLocalState).not.toHaveProperty("mode")
+			expect(provider.contextProxy.getValue("viewStates")).toBeUndefined()
+
+			await provider.dispose()
+		})
+
 		it("should merge concurrent persisted updates from separate provider instances without lost viewStates", async () => {
 			const provider1 = new ClineProvider(
 				mockContext,
@@ -1175,6 +1193,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([
 				{ id: "new-profile-id", name: "new-profile", apiProvider: "openrouter" },
 			] as any)
+			const saveViewStateSpy = vi.spyOn(provider as any, "saveViewState")
 			;(provider as any).viewLocalState = {
 				currentApiConfigName: "stale-profile",
 				apiConfiguration: { apiProvider: "anthropic" },
@@ -1183,6 +1202,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.activateProviderProfile({ name: "new-profile" })
 			const state = await provider.getState()
 
+			expect(saveViewStateSpy).not.toHaveBeenCalled()
 			expect(state.currentApiConfigName).toBe("new-profile")
 			expect(state.apiConfiguration).toMatchObject({
 				apiProvider: "openrouter",
@@ -1197,6 +1217,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "test-id", name: "saved-profile", apiProvider: "bedrock" },
 			] as any)
+			const saveViewStateSpy = vi.spyOn(provider as any, "saveViewState")
 			;(provider as any).viewLocalState = {
 				currentApiConfigName: "stale-profile",
 				apiConfiguration: { apiProvider: "anthropic" },
@@ -1208,6 +1229,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			} as any)
 			const state = await provider.getState()
 
+			expect(saveViewStateSpy).not.toHaveBeenCalled()
 			expect(state.currentApiConfigName).toBe("saved-profile")
 			expect(state.apiConfiguration).toMatchObject({
 				apiProvider: "bedrock",
