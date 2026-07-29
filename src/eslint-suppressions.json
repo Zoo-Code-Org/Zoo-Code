@@ -394,11 +394,6 @@
 			"count": 5
 		}
 	},
-	"api/providers/moonshot.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/native-ollama.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
