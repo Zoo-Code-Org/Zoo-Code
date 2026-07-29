@@ -368,9 +368,10 @@ describe("executeCommandTool", () => {
 			return state
 		}
 
-		const handleCommand = (command: string) => {
+		const handleCommand = (command: string, timeout?: number) => {
 			mockToolUse.params.command = command
-			mockToolUse.nativeArgs = { command }
+			mockToolUse.params.timeout = timeout === undefined ? undefined : String(timeout)
+			mockToolUse.nativeArgs = timeout === undefined ? { command } : { command, timeout }
 
 			return executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
 				askApproval: mockAskApproval as unknown as AskApproval,
@@ -389,6 +390,7 @@ describe("executeCommandTool", () => {
 			const callbacks = terminal.callbacks!
 			const proc = terminal.proc as unknown as RooTerminalProcess
 
+			callbacks.onShellExecutionStarted!(1234, proc)
 			await callbacks.onLine("hello\n", proc)
 			await callbacks.onCompleted!("hello\n", proc)
 			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
@@ -418,6 +420,7 @@ describe("executeCommandTool", () => {
 			const callbacks = terminal.callbacks!
 			const proc = terminal.proc as unknown as RooTerminalProcess
 
+			callbacks.onShellExecutionStarted!(1234, proc)
 			await callbacks.onLine("working...\n", proc)
 
 			// First output alone must not trigger the ask.
@@ -428,7 +431,160 @@ describe("executeCommandTool", () => {
 			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
 			expect(terminal.proc.continue).toHaveBeenCalled()
 
+			// Further output after the ask must not schedule another ask.
+			await callbacks.onLine("still working...\n", proc)
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+
 			// Let the command finish so the tool can resolve.
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+		})
+
+		it("anchors the ask delay to execution start so shell integration startup does not consume it", async () => {
+			vitest.useFakeTimers()
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("echo hello")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			// Simulate a cold terminal spending most of the grace period waiting
+			// for shell integration before the command actually starts.
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS - 2_000)
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("hello\n", proc)
+
+			// Past the pre-runCommand anchor deadline but well within the window
+			// measured from execution start: still no ask.
+			await vitest.advanceTimersByTimeAsync(2_500)
+			expect(mockCline.ask).not.toHaveBeenCalled()
+
+			await callbacks.onCompleted!("hello\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS + 1_000)
+
+			await handlePromise
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalled()
+		})
+
+		it("re-anchors a pending ask when execution start is reported after early output", async () => {
+			vitest.useFakeTimers()
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("echo hello")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			// Output arrives before the execution-started event (defensive case).
+			await callbacks.onLine("hello\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS - 2_000)
+			callbacks.onShellExecutionStarted!(1234, proc)
+
+			// The pending ask was rescheduled against the new anchor, so the old
+			// deadline passing must not fire it.
+			await vitest.advanceTimersByTimeAsync(2_500)
+			expect(mockCline.ask).not.toHaveBeenCalled()
+
+			await callbacks.onCompleted!("hello\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS + 1_000)
+
+			await handlePromise
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+		})
+
+		it("cancels a pending ask when the agent timeout moves the command to the background", async () => {
+			vitest.useFakeTimers()
+			mockCline.supersedePendingAsk = vitest.fn()
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("npm run dev", 2)
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("server starting...\n", proc)
+
+			// Agent timeout (2s) fires before the ask delay (5s).
+			await vitest.advanceTimersByTimeAsync(2_000)
+			expect(terminal.proc.continue).toHaveBeenCalled()
+			expect(mockCline.supersedePendingAsk).toHaveBeenCalled()
+
+			// Output after the background transition must never schedule an ask.
+			await callbacks.onLine("listening...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS + 1_000)
+			expect(mockCline.ask).not.toHaveBeenCalled()
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("still running")
+		})
+
+		it("swallows ask errors without failing the command", async () => {
+			vitest.useFakeTimers()
+			mockCline.ask.mockRejectedValue(new Error("Current ask promise was ignored"))
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("sleep 60")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("working...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS)
+
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
+			expect(terminal.proc.continue).not.toHaveBeenCalled()
+
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("Exit code: 0")
+		})
+
+		it("does not continue the process when the ask is answered without a message", async () => {
+			vitest.useFakeTimers()
+			mockCline.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("sleep 60")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("working...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS)
+
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
+			expect(terminal.proc.continue).not.toHaveBeenCalled()
+
 			await callbacks.onCompleted!("working...\n", proc)
 			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
 			terminal.resolveProcess()

@@ -353,7 +353,10 @@ export async function executeCommandInTerminal(
 	// output and exit normally never prompt the user. The ask only fires if the
 	// command is still running once COMMAND_OUTPUT_ASK_DELAY_MS has elapsed
 	// since execution started, preserving the interrupt/feedback path for
-	// long-running commands.
+	// long-running commands. The anchor is re-based to onShellExecutionStarted
+	// (falling back to the pre-runCommand timestamp when that event never
+	// fires) so shell-integration startup on cold terminals does not consume
+	// the grace period.
 	let commandStartedAt = 0
 	let commandOutputAskTimer: NodeJS.Timeout | undefined
 
@@ -452,9 +455,21 @@ export async function executeCommandInTerminal(
 					console.error("[ExecuteCommandTool] Failed to flush final command_output:", error)
 				})
 		},
-		onShellExecutionStarted: (pid: number | undefined) => {
+		onShellExecutionStarted: (pid: number | undefined, process: RooTerminalProcess) => {
 			const status: CommandExecutionStatus = { executionId, status: "started", pid, command }
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+
+			// Re-anchor the ask delay to actual execution start so the shell
+			// integration startup wait does not count against the grace period.
+			commandStartedAt = Date.now()
+
+			// Output should not precede this event, but if it did, reschedule
+			// the pending ask against the corrected anchor.
+			if (commandOutputAskTimer) {
+				clearTimeout(commandOutputAskTimer)
+				commandOutputAskTimer = undefined
+				scheduleCommandOutputAsk(process)
+			}
 		},
 		onShellExecutionComplete: (details: ExitCodeDetails) => {
 			const status: CommandExecutionStatus = { executionId, status: "exited", exitCode: details.exitCode }
@@ -481,6 +496,7 @@ export async function executeCommandInTerminal(
 		workingDir = terminal.getCurrentWorkingDirectory()
 	}
 
+	// Fallback anchor for providers that never fire onShellExecutionStarted.
 	commandStartedAt = Date.now()
 	const process = terminal.runCommand(command, callbacks)
 	task.terminalProcess = process
