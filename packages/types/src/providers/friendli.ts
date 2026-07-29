@@ -20,6 +20,8 @@ export const friendliModels = {
 		outputPrice: 4.4,
 		cacheWritesPrice: 0,
 		cacheReadsPrice: 0.26,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "high",
 		description:
 			"GLM-5.2 is Zhipu's flagship model with a 1M context window and 128k max output, served via Friendli Model APIs. It delivers top-tier long-context reasoning, coding, and agentic performance for extended engineering sessions.",
 	},
@@ -33,6 +35,8 @@ export const friendliModels = {
 		outputPrice: 4.4,
 		cacheWritesPrice: 0,
 		cacheReadsPrice: 0.26,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "high",
 		description:
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window and 128k max output, served via Friendli Model APIs. It delivers top-tier reasoning, coding, and agentic performance.",
 	},

@@ -187,7 +187,7 @@
 		"current": "Mevcut"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo mevcut göreve yardımcı olmak için ayrıntılı talimatlar almak istiyor"
+		"wantsToFetch": "Zoo mevcut göreve yardımcı olmak için ayrıntılı talimatlar almak istiyor"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo bu dosyayı okumak istiyor",
@@ -197,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo çalışma alanı dışındaki bu dosyayı düzenlemek istiyor",
 		"wantsToEditProtected": "Zoo korumalı bir yapılandırma dosyasını düzenlemek istiyor",
 		"wantsToCreate": "Zoo yeni bir dosya oluşturmak istiyor",
-		"wantsToSearchReplace": "Roo bu dosyada arama ve değiştirme yapmak istiyor",
-		"didSearchReplace": "Roo bu dosyada arama ve değiştirme yaptı",
+		"wantsToSearchReplace": "Zoo bu dosyada arama ve değiştirme yapmak istiyor",
+		"didSearchReplace": "Zoo bu dosyada arama ve değiştirme yaptı",
 		"wantsToInsert": "Zoo bu dosyaya içerik eklemek istiyor",
 		"wantsToInsertWithLineNumber": "Zoo bu dosyanın {{lineNumber}}. satırına içerik eklemek istiyor",
 		"wantsToInsertAtEnd": "Zoo bu dosyanın sonuna içerik eklemek istiyor",

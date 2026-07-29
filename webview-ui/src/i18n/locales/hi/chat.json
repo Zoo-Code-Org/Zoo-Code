@@ -187,7 +187,7 @@
 		"current": "वर्तमान"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo को वर्तमान कार्य में सहायता के लिए विस्तृत निर्देश प्राप्त करना है"
+		"wantsToFetch": "Zoo को वर्तमान कार्य में सहायता के लिए विस्तृत निर्देश प्राप्त करना है"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo इस फ़ाइल को पढ़ना चाहता है",
@@ -197,12 +197,12 @@
 		"wantsToEditOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर इस फ़ाइल को संपादित करना चाहता है",
 		"wantsToEditProtected": "Zoo एक सुरक्षित कॉन्फ़िगरेशन फ़ाइल को संपादित करना चाहता है",
 		"wantsToCreate": "Zoo एक नई फ़ाइल बनाना चाहता है",
-		"wantsToSearchReplace": "Roo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
-		"didSearchReplace": "Roo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
+		"wantsToSearchReplace": "Zoo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
+		"didSearchReplace": "Zoo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
 		"wantsToInsert": "Zoo इस फ़ाइल में सामग्री डालना चाहता है",
 		"wantsToInsertWithLineNumber": "Zoo इस फ़ाइल की {{lineNumber}} लाइन पर सामग्री डालना चाहता है",
 		"wantsToInsertAtEnd": "Zoo इस फ़ाइल के अंत में सामग्री जोड़ना चाहता है",
-		"wantsToReadAndXMore": "रू इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
+		"wantsToReadAndXMore": "Zoo इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
 		"wantsToReadMultiple": "Zoo कई फ़ाइलें पढ़ना चाहता है",
 		"wantsToApplyBatchChanges": "Zoo कई फ़ाइलों में परिवर्तन लागू करना चाहता है",
 		"wantsToGenerateImage": "Zoo एक छवि बनाना चाहता है",
@@ -246,7 +246,7 @@
 	"response": "प्रतिक्रिया",
 	"arguments": "आर्ग्युमेंट्स",
 	"text": {
-		"rooSaid": "रू ने कहा"
+		"rooSaid": "Zoo ने कहा"
 	},
 	"feedback": {
 		"youSaid": "आपने कहा"
