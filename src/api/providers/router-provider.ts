@@ -61,6 +61,12 @@ export abstract class RouterProvider extends BaseProvider {
 		return this.getModel()
 	}
 
+	async ensureModelFetched(): Promise<void> {
+		if (Object.keys(this.models).length === 0) {
+			await this.fetchModel()
+		}
+	}
+
 	override getModel(): { id: string; info: ModelInfo } {
 		// Use `||` (not `??`) so an empty-string modelId also falls back to the default,
 		// guaranteeing a non-empty id rather than forwarding "" to the API as an invalid

@@ -3842,6 +3842,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const { profileThresholds = {}, mode, apiConfiguration } = state ?? {}
 
 		const { contextTokens } = this.getTokenUsage()
+		await this.api.ensureModelFetched?.()
 		const modelInfo = this.api.getModel().info
 
 		const maxTokens = getModelMaxOutputTokens({
@@ -4042,6 +4043,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const { contextTokens } = this.getTokenUsage()
 
 		if (contextTokens) {
+			await this.api.ensureModelFetched?.()
 			const modelInfo = this.api.getModel().info
 
 			const maxTokens = getModelMaxOutputTokens({

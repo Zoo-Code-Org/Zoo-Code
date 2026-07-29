@@ -635,4 +635,51 @@ describe("ZooGatewayHandler", () => {
 			)
 		})
 	})
+
+	describe("ensureModelFetched", () => {
+		it("fetches models when instance models are empty", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+
+			expect(handler.getModel().info.contextWindow).toBe(200000)
+
+			await handler.ensureModelFetched()
+
+			expect(getModels).toHaveBeenCalled()
+		})
+
+		it("skips the fetch when models are already populated", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+
+			await handler.ensureModelFetched()
+			vitest.mocked(getModels).mockClear()
+
+			await handler.ensureModelFetched()
+			expect(getModels).not.toHaveBeenCalled()
+		})
+
+		it("makes getModel return the fetched context window instead of the default", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"google/gemini-2.5-pro": {
+					maxTokens: 65536,
+					contextWindow: 1048576,
+					supportsImages: true,
+					supportsPromptCache: false,
+				},
+			})
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "google/gemini-2.5-pro",
+			})
+
+			expect(handler.getModel().info.contextWindow).toBe(200000)
+
+			await handler.ensureModelFetched()
+
+			expect(handler.getModel().info.contextWindow).toBe(1048576)
+		})
+	})
 })

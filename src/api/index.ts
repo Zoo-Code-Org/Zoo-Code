@@ -126,6 +126,13 @@ export interface ApiHandler {
 	getModel(): { id: string; info: ModelInfo }
 
 	/**
+	 * Ensures model metadata has been fetched from the remote API so that getModel()
+	 * returns accurate info (context window, pricing, etc.) instead of hardcoded defaults.
+	 * Only router providers that discover models over the network implement this.
+	 */
+	ensureModelFetched?(): Promise<void>
+
+	/**
 	 * Optional context window for context-management / auto-condense when it must differ from
 	 * getModel().info.contextWindow. Only VS Code LM overrides it (static `maxInputTokens` vs its
 	 * inflated live window); others leave it undefined and callers fall back.
