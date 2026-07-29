@@ -154,6 +154,12 @@ function runDelegationTransition<T>(
 	return current
 }
 
+function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): void {
+	void scheduler
+		.schedule(task, () => task.run())
+		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -1230,7 +1236,7 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				this.scheduleTask(task, "createTaskWithHistoryItem")
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
 			}
 		} else {
 			await this.addClineToStack(task)
@@ -1240,7 +1246,7 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				this.scheduleTask(task, "createTaskWithHistoryItem")
+				scheduleTask(this.taskScheduler, task, "createTaskWithHistoryItem")
 			}
 		}
 
@@ -3200,7 +3206,7 @@ export class ClineProvider
 
 		await this.addClineToStack(task)
 		if (options.startTask !== false) {
-			this.scheduleTask(task, "createTask")
+			scheduleTask(this.taskScheduler, task, "createTask")
 		}
 
 		this.log(
@@ -3219,12 +3225,6 @@ export class ClineProvider
 
 		console.log(`[cancelTask] cancelling task ${task.taskId}.${task.instanceId}`)
 		await this.cancelTaskInternal(task)
-	}
-
-	private scheduleTask(task: Task, source: string): void {
-		void this.taskScheduler
-			.schedule(task, () => task.run())
-			.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
 	}
 
 	private async cancelTaskInternal(task: Task): Promise<void> {
@@ -3718,7 +3718,7 @@ export class ClineProvider
 		}
 
 		// 6) Start the child task now that parent metadata is safely persisted.
-		this.scheduleTask(child, "delegateParentAndOpenChild")
+		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
 
 		// 7) Emit TaskDelegated (provider-level)
 		try {
