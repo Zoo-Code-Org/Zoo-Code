@@ -2762,6 +2762,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				await this.diffViewProvider.reset()
 
+				await this.api.ensureModelFetched?.()
+
 				// Cache model info once per API request to avoid repeated calls during streaming
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()

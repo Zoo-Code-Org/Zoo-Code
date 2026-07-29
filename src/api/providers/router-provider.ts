@@ -61,9 +61,18 @@ export abstract class RouterProvider extends BaseProvider {
 		return this.getModel()
 	}
 
+	private modelFetchPromise?: Promise<void>
+
 	async ensureModelFetched(): Promise<void> {
 		if (Object.keys(this.models).length === 0) {
-			await this.fetchModel()
+			const fetchPromise = (this.modelFetchPromise ??= this.fetchModel().then(() => undefined))
+			try {
+				await fetchPromise
+			} finally {
+				if (this.modelFetchPromise === fetchPromise) {
+					this.modelFetchPromise = undefined
+				}
+			}
 		}
 	}
 

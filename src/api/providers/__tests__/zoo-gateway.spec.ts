@@ -659,6 +659,16 @@ describe("ZooGatewayHandler", () => {
 			expect(getModels).not.toHaveBeenCalled()
 		})
 
+		it("deduplicates concurrent calls into a single fetch", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockClear()
+
+			await Promise.all([handler.ensureModelFetched(), handler.ensureModelFetched()])
+
+			expect(getModels).toHaveBeenCalledTimes(1)
+		})
+
 		it("makes getModel return the fetched context window instead of the default", async () => {
 			const { getModels } = await import("../fetchers/modelCache")
 			vitest.mocked(getModels).mockResolvedValueOnce({
